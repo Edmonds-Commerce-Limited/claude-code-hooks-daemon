@@ -120,6 +120,105 @@ class TestContentGuard:
         assert "secret-ish payload" in seen[0]
 
 
+class TestOverwriteProtection:
+    """Issue #42 / Plan 00424: a second `add` of one URL must not silently
+    replace the first capture's body.
+
+    `write_capture` derives the same destination for the same URL every time
+    (`derive_relative_path` is deterministic), so a second capture landed on
+    the first one's file with no existence check at all: the earlier body was
+    gone, `fetched_at` and `source_sha256` moved, and the call returned
+    normally with no refusal and no report.
+    """
+
+    def test_a_second_write_without_force_refuses_and_writes_nothing(self, tmp_path: Path) -> None:
+        first = _seed(tmp_path)
+        before = first.read_text()
+
+        try:
+            write_capture(
+                tmp_path,
+                "https://example.com/docs/page",
+                fetch_fn=_fetch(b"# Upstream\n\nReplaced.\n"),
+                now=_LATER,
+            )
+        except CaptureError as exc:
+            assert str(first) in str(exc)
+        else:
+            raise AssertionError(
+                "a second capture onto an existing destination should refuse, "
+                "not silently replace the first body"
+            )
+
+        assert first.read_text() == before
+
+    def test_the_refusal_names_the_existing_captures_provenance(self, tmp_path: Path) -> None:
+        import hashlib
+
+        first = _seed(tmp_path)
+
+        try:
+            write_capture(
+                tmp_path,
+                "https://example.com/docs/page",
+                fetch_fn=_fetch(b"# Upstream\n\nReplaced.\n"),
+                now=_LATER,
+            )
+        except CaptureError as exc:
+            message = str(exc)
+            assert _NOW.isoformat() in message
+            assert hashlib.sha256(_BODY).hexdigest() in message
+        else:
+            raise AssertionError("expected a refusal naming the existing capture")
+
+        assert first.is_file()
+
+    def test_force_replaces_the_existing_capture(self, tmp_path: Path) -> None:
+        first = _seed(tmp_path)
+
+        written = write_capture(
+            tmp_path,
+            "https://example.com/docs/page",
+            fetch_fn=_fetch(b"# Upstream\n\nReplaced.\n"),
+            now=_LATER,
+            force=True,
+        )
+
+        assert written == first
+        assert "Replaced." in written.read_text()
+
+    def test_a_first_capture_of_a_new_url_is_unaffected(self, tmp_path: Path) -> None:
+        written = _seed(tmp_path)
+
+        assert written.is_file()
+        assert "Body." in written.read_text()
+
+    def test_the_refusal_is_decided_before_the_fetch(self, tmp_path: Path) -> None:
+        """A repeated `add` must cost no network round trip.
+
+        `derive_relative_path` needs no network access, so the existence
+        check can run before `fetch_fn` is ever called -- pinned here with a
+        fetcher that fails the test if it runs at all, rather than resting on
+        statement order in `write_capture` staying as written.
+        """
+        first = _seed(tmp_path)
+
+        def never_call(url: str) -> bytes:
+            raise AssertionError("fetch_fn must not run when the refusal already applies")
+
+        try:
+            write_capture(
+                tmp_path,
+                "https://example.com/docs/page",
+                fetch_fn=never_call,
+                now=_LATER,
+            )
+        except CaptureError as exc:
+            assert str(first) in str(exc)
+        else:
+            raise AssertionError("expected a refusal")
+
+
 class TestTheRefreshPathIsGuardedToo:
     """Plan 00412: the same guarantee, on the path that skipped it.
 

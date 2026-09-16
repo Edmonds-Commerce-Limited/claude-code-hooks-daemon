@@ -108,6 +108,41 @@ the recomputed window move.
 **Hand-editing a vendored document is blocked**, because rewording it silently
 falsifies its recorded `fidelity`.
 
+### `add` refuses an existing capture
+
+`derive_relative_path` is deterministic, so a second `add` of one URL lands on
+the same destination as the first. Without a check, that second call silently
+replaced the first capture's body, moving `fetched_at` and `source_sha256` —
+data loss, and a report or citation naming the earlier hash pointed at bytes
+that no longer existed.
+
+`add` now refuses when the destination already exists, naming the path, the
+existing capture's `fetched_at` and its recorded `source_sha256`, and writing
+nothing:
+
+```bash
+bin/hooks-daemon remote-docs add <url>
+# remote-docs add failed: refusing to overwrite the existing capture of
+# <url> at remote-docs/example.com/p.md (captured 2026-09-03T10:00:00+00:00,
+# source_sha256=...). Nothing was written. Run `refresh` to check for new
+# upstream content, or pass --force to re-derive frontmatter.
+```
+
+`add --force` replaces the capture anyway and prints both hashes. This is
+also the route for **licence drift**: `known_sources` is consulted only at
+capture time, so declaring or changing a domain's licence never reaches a
+file already vendored from it, and `refresh` compares the source hash — a
+content-identical refresh has no reason to re-stamp a licence, since that is
+a local judgement rather than something upstream served. Only `add --force`
+re-derives the frontmatter for an already-vendored file:
+
+```bash
+bin/hooks-daemon remote-docs add --force <url>       # re-derive frontmatter
+```
+
+A first capture of a URL not yet in the tree is unaffected — the refusal only
+fires when the destination already exists.
+
 ## The generated index
 
 `.claude/REMOTE-DOCS.md` lists every vendored document with its source URL and

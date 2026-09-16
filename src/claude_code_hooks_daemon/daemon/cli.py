@@ -6254,9 +6254,9 @@ def _resolve_remote_docs_fetcher(args: argparse.Namespace) -> Any:
 def _remote_docs_add(
     args: argparse.Namespace, tree: Path, fetcher: Any, now: Any, policy: Any
 ) -> int:
-    from claude_code_hooks_daemon.remote_docs.capture import CaptureError
+    from claude_code_hooks_daemon.remote_docs.capture import CaptureError, derive_relative_path
     from claude_code_hooks_daemon.remote_docs.provenance import UNREVIEWED
-    from claude_code_hooks_daemon.remote_docs.store import write_capture
+    from claude_code_hooks_daemon.remote_docs.store import read_document, write_capture
 
     if not args.url:
         print("remote-docs add: a URL is required", file=sys.stderr)
@@ -6270,8 +6270,17 @@ def _remote_docs_add(
         if args.stale_after_days is not None
         else policy.default_staleness_days
     )
+    force = bool(getattr(args, "force", False))
 
     try:
+        # Read BEFORE the write so a replacement can report both hashes --
+        # `write_capture` itself only ever knows the NEW one.
+        previous_sha256: str | None = None
+        if force:
+            existing = read_document(tree / derive_relative_path(args.url))
+            if existing.provenance is not None:
+                previous_sha256 = existing.provenance.source_sha256
+
         written = write_capture(
             tree,
             args.url,
@@ -6282,11 +6291,16 @@ def _remote_docs_add(
             licence=licence,
             stale_after_days=stale_after_days,
             content_guard=getattr(args, "content_guard", None) or _sensitive_content_guard(),
+            force=force,
         )
     except CaptureError as exc:
         print(f"remote-docs add failed: {exc}", file=sys.stderr)
         return 1
     print(f"captured {args.url} -> {written}")
+    if previous_sha256 is not None:
+        new_provenance = read_document(written).provenance
+        new_sha256 = new_provenance.source_sha256 if new_provenance is not None else "unknown"
+        print(f"  --force replaced an existing capture: sha256 {previous_sha256} -> {new_sha256}")
     if licence == UNREVIEWED:
         print(
             f"  licence recorded as `{UNREVIEWED}` — record it once for this source "
@@ -6340,6 +6354,8 @@ def _remote_docs_check(tree: Path, now: Any, known_sources: Mapping[str, str] | 
         # reaches what is already vendored (ledger 00413 N8). Re-capturing is
         # the only route that re-derives frontmatter, so it is named here --
         # `refresh` compares the source hash and would report `unchanged`.
+        # `add` refuses an existing destination outright (Plan 00424), so the
+        # remedy needs `--force` to actually replace the vendored file.
         print(
             "\nLicence disagrees with documentation.remote.known_sources "
             "(recorded at capture time, so a later declaration does not reach "
@@ -6349,7 +6365,10 @@ def _remote_docs_check(tree: Path, now: Any, known_sources: Mapping[str, str] | 
             print(
                 f"{drift.document.path}: recorded `{drift.recorded}`, declared `{drift.expected}`"
             )
-        print("  fix: bin/hooks-daemon remote-docs add <source_url>  (re-derives frontmatter)")
+        print(
+            "  fix: bin/hooks-daemon remote-docs add --force <source_url>  "
+            "(re-derives frontmatter)"
+        )
 
     print(f"\nremote-docs: {len(flagged) + len(drifted)} document(s) need attention")
     return 1
@@ -9129,6 +9148,15 @@ def main() -> int:
             "Store the raw response body instead of an extraction of it "
             "(records fidelity: verbatim). Use when the capture must be "
             "quotable exactly, e.g. a contract or specification"
+        ),
+    )
+    parser_remote_docs.add_argument(
+        "--force",
+        action="store_true",
+        help=(
+            "add: replace an existing capture of this URL, re-deriving "
+            "frontmatter (also the fix for licence drift, since "
+            "known_sources is only consulted at capture time)"
         ),
     )
     parser_remote_docs.add_argument(

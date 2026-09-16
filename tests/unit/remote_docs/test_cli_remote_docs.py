@@ -35,6 +35,7 @@ def _args(root: Path, action: str, **overrides: object) -> argparse.Namespace:
         "json_output": False,
         "fetch_fn": _fetch(),
         "now": _NOW,
+        "force": False,
     }
     base.update(overrides)
     return argparse.Namespace(**base)
@@ -71,6 +72,52 @@ class TestAdd:
         assert code == 1
 
 
+class TestAddOverwriteProtection:
+    """Issue #42 / Plan 00424: `add` onto an existing capture must refuse."""
+
+    def test_a_second_add_without_force_refuses(self, tmp_path: Path, capsys) -> None:
+        cmd_remote_docs(_args(tmp_path, "add", url="https://example.com/p"))
+
+        code = cmd_remote_docs(
+            _args(
+                tmp_path,
+                "add",
+                url="https://example.com/p",
+                fetch_fn=_fetch(b"# Upstream\n\nReplaced.\n"),
+            )
+        )
+
+        assert code == 1
+        assert "remote-docs add failed" in capsys.readouterr().err
+        content = (_tree(tmp_path) / "example.com" / "p.md").read_text()
+        assert "Replaced." not in content
+
+    def test_force_replaces_and_reports_both_hashes(self, tmp_path: Path, capsys) -> None:
+        cmd_remote_docs(_args(tmp_path, "add", url="https://example.com/p"))
+
+        code = cmd_remote_docs(
+            _args(
+                tmp_path,
+                "add",
+                url="https://example.com/p",
+                fetch_fn=_fetch(b"# Upstream\n\nReplaced.\n"),
+                force=True,
+            )
+        )
+
+        assert code == 0
+        content = (_tree(tmp_path) / "example.com" / "p.md").read_text()
+        assert "Replaced." in content
+        out = capsys.readouterr().out
+        assert "--force replaced an existing capture: sha256" in out
+
+    def test_force_on_a_new_url_is_a_plain_capture(self, tmp_path: Path) -> None:
+        code = cmd_remote_docs(_args(tmp_path, "add", url="https://example.com/p", force=True))
+
+        assert code == 0
+        assert (_tree(tmp_path) / "example.com" / "p.md").is_file()
+
+
 class TestListAndCheck:
     def test_list_of_an_empty_tree_succeeds(self, tmp_path: Path) -> None:
         assert cmd_remote_docs(_args(tmp_path, "list")) == 0
@@ -98,6 +145,28 @@ class TestListAndCheck:
         (bad / "hand-written.md").write_text("# no frontmatter\n")
 
         assert cmd_remote_docs(_args(tmp_path, "check")) == 1
+
+    def test_check_names_force_as_the_licence_drift_remedy(self, tmp_path: Path, capsys) -> None:
+        """Issue #42 / Plan 00424: `add` alone now refuses an existing capture,
+        so the remedy `check` prints for licence drift must actually work --
+        pinning the `--force` flag, not the whole sentence, so wording can
+        still change without this test lying about what it covers.
+        """
+        config_dir = tmp_path / ".claude"
+        config_dir.mkdir(parents=True, exist_ok=True)
+
+        cmd_remote_docs(_args(tmp_path, "add", url="https://example.com/p"))
+
+        (config_dir / "hooks-daemon.yaml").write_text(
+            "documentation:\n  remote:\n    known_sources:\n      example.com: CC-BY-4.0\n",
+            encoding="utf-8",
+        )
+
+        code = cmd_remote_docs(_args(tmp_path, "check"))
+
+        assert code == 1
+        out = capsys.readouterr().out
+        assert "remote-docs add --force <source_url>" in out
 
 
 class TestRefresh:

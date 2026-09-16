@@ -23,6 +23,7 @@ from claude_code_hooks_daemon.remote_docs.capture import (
     CaptureError,
     FetchFn,
     capture,
+    derive_relative_path,
 )
 from claude_code_hooks_daemon.remote_docs.provenance import (
     UNREVIEWED,
@@ -98,6 +99,32 @@ def list_documents(tree_root: Path) -> list[StoredDocument]:
     return [read_document(path) for path in iter_document_paths(tree_root)]
 
 
+def _existing_capture_refusal(destination: Path, url: str) -> str:
+    """Build the refusal message for a capture that would overwrite one.
+
+    Names the EXISTING capture's own provenance (when it has any) so the
+    refusal is actionable without a separate ``list`` call: a human deciding
+    between ``refresh`` and ``--force`` needs to know how stale the current
+    file already is before choosing.
+    """
+    existing = read_document(destination)
+    if existing.provenance is not None:
+        provenance = existing.provenance
+        return (
+            f"refusing to overwrite the existing capture of {url} at {destination} "
+            f"(captured {provenance.fetched_at.isoformat()}, "
+            f"source_sha256={provenance.source_sha256}). Nothing was written. "
+            "Run `refresh` to check for new upstream content, or pass --force "
+            "to re-derive frontmatter (e.g. after declaring "
+            "documentation.remote.known_sources)."
+        )
+    return (
+        f"refusing to overwrite the existing capture of {url} at {destination} "
+        "(its provenance could not be read). Nothing was written. Pass --force "
+        "to re-derive frontmatter."
+    )
+
+
 def write_capture(
     tree_root: Path,
     url: str,
@@ -109,6 +136,7 @@ def write_capture(
     content_guard: ContentGuard | None = None,
     fidelity: Fidelity = Fidelity.VERBATIM,
     fetch_method: str | None = None,
+    force: bool = False,
 ) -> Path:
     """Capture ``url`` and write it into ``tree_root``.
 
@@ -119,13 +147,29 @@ def write_capture(
     fetching an authenticated page would vendor its secrets unexamined
     (Task 2.5).
 
+    ``derive_relative_path`` is deterministic, so a second capture of the
+    same URL lands on the same destination as the first. Unless ``force`` is
+    set, an existing destination refuses rather than silently replacing the
+    earlier body -- the file's ``fetched_at`` and ``source_sha256`` are real
+    evidence, and anything citing the earlier hash would otherwise point at
+    bytes that no longer exist. The refusal is decided before the fetch runs,
+    so a repeated ``add`` costs no network round trip. ``force`` replaces the
+    capture anyway; it is also the route that re-derives frontmatter after
+    ``documentation.remote.known_sources`` changes for an already-vendored
+    domain, since that config is only consulted at capture time.
+
     Returns the written path.
 
     Raises:
-        CaptureError: propagated from :func:`capture`, a rejection from
+        CaptureError: an existing destination without ``force``, or
+            propagated from :func:`capture`, a rejection from
             ``content_guard``, or any write failure -- one exception type for
             the caller to report.
     """
+    destination = tree_root / derive_relative_path(url)
+    if destination.exists() and not force:
+        raise CaptureError(_existing_capture_refusal(destination, url))
+
     result = capture(
         url,
         fetch_fn=fetch_fn,
@@ -141,7 +185,6 @@ def write_capture(
             raise CaptureError(
                 f"refusing to vendor {url}: the fetched content {reason}. Nothing was written."
             )
-    destination = tree_root / result.relative_path
     try:
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_text(result.content, encoding="utf-8")
@@ -258,7 +301,8 @@ def check_licence_drift(tree_root: Path, known_sources: Mapping[str, str]) -> li
     denied, correctly, because this tree is captured rather than authored; and
     ``refresh`` compares the SOURCE HASH, so a content-identical refresh has no
     reason to re-stamp a licence, which is a local judgement rather than
-    something upstream served. Only re-running ``add`` re-derives it.
+    something upstream served. Only re-running ``add --force`` re-derives it --
+    a plain ``add`` now refuses an existing destination (Plan 00424).
 
     So the drift is REPORTED and the caller applies the fix. A report does not
     close the loop by itself, and is chosen deliberately over a silent

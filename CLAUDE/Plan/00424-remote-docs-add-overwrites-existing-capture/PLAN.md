@@ -1,6 +1,6 @@
 # Plan 00424: remote docs add overwrites existing capture
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-16
 **GitHub Issue**: #42
 **Owner**: dev
@@ -61,28 +61,28 @@ change.
 
 ### Phase 1: refuse, and make forcing visible
 
-- [ ] ⬜ **Task 1.1**: RED — a test proving a second `add` of the same URL
+- [x] ✅ **Task 1.1**: RED — a test proving a second `add` of the same URL
   replaces the first capture's body and returns success.
-- [ ] ⬜ **Task 1.2**: GREEN — `write_capture` refuses an existing destination
+- [x] ✅ **Task 1.2**: GREEN — `write_capture` refuses an existing destination
   unless forced, raising the error type the CLI already reports.
-- [ ] ⬜ **Task 1.3**: `--force` on the CLI, printing the old and new `sha256`.
-- [ ] ⬜ **Task 1.4**: `check`'s licence-drift remedy names the `--force` form.
+- [x] ✅ **Task 1.3**: `--force` on the CLI, printing the old and new `sha256`.
+- [x] ✅ **Task 1.4**: `check`'s licence-drift remedy names the `--force` form.
 
 ### Phase 2: documentation
 
-- [ ] ⬜ **Task 2.1**: `CLAUDE/RemoteDocs.md` records the refusal, the flag and
+- [x] ✅ **Task 2.1**: `CLAUDE/RemoteDocs.md` records the refusal, the flag and
   why `add` onto an existing path was previously the drift remedy.
-- [ ] ⬜ **Task 2.2**: a release note under
+- [x] ✅ **Task 2.2**: a release note under
   `CLAUDE/UPGRADES/UNRELEASED/release-notes/` — this is user-visible, and a
   client's own docs could assert the old behaviour.
 
 ## Success Criteria
 
-- [ ] The RED test from Task 1.1 fails before the fix and passes after.
-- [ ] A second `add` without `--force` refuses and writes nothing.
-- [ ] `--force` replaces the capture and prints both hashes.
-- [ ] A first capture of a new URL is unchanged.
-- [ ] `./scripts/qa/llm_qa.py all` is green in the worktree.
+- [x] ✅ The RED test from Task 1.1 fails before the fix and passes after.
+- [x] ✅ A second `add` without `--force` refuses and writes nothing.
+- [x] ✅ `--force` replaces the capture and prints both hashes.
+- [x] ✅ A first capture of a new URL is unchanged.
+- [ ] ⬜ `./scripts/qa/llm_qa.py all` is green in the worktree.
 
 ## Delivery & Milestones
 
