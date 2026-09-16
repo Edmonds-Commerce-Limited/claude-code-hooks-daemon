@@ -69,15 +69,25 @@ _RULE: Final[str] = "declared-invariant-pairs"
 #: Relations a row may declare. A typo must be rejected at load rather than
 #: silently skipped, or the row reads as one that passes.
 #:
-#: ``disjoint`` -- the two member sets must not overlap.
-#: ``superset``  -- every member of the RIGHT side must appear on the LEFT.
-#: ``reaches``   -- both sites must CALL the row's ``helper``.
-_RELATIONS: Final[frozenset[str]] = frozenset({"disjoint", "superset", "reaches"})
+#: ``disjoint``     -- the two member sets must not overlap.
+#: ``superset``     -- every member of the RIGHT side must appear on the LEFT.
+#: ``reaches``      -- both sites must CALL the row's ``helper``.
+#: ``interpolates`` -- both symbols must REFERENCE the row's ``helper``.
+_RELATIONS: Final[frozenset[str]] = frozenset({"disjoint", "superset", "reaches", "interpolates"})
 
 #: Relations whose sides name a FUNCTION and a helper rather than a symbol
 #: holding a member set. The class's instances split roughly evenly between the
 #: two shapes, and a constant-only registry could express only half of them.
 _CALL_PATH_RELATIONS: Final[frozenset[str]] = frozenset({"reaches"})
+
+#: Relations whose sides name a SYMBOL that must be built from a shared
+#: fragment. Needed because a shared regex fragment is a constant interpolated
+#: into a pattern, not a function called from a body, so `reaches` would read a
+#: correct fix as a violation.
+_FRAGMENT_RELATIONS: Final[frozenset[str]] = frozenset({"interpolates"})
+
+#: Relations that carry a `helper` naming what both sides must share.
+_HELPER_RELATIONS: Final[frozenset[str]] = _CALL_PATH_RELATIONS | _FRAGMENT_RELATIONS
 
 #: Ways of reading a member set out of a module-level symbol.
 _EXTRACTORS: Final[frozenset[str]] = frozenset(
@@ -175,6 +185,8 @@ class Violation:
         named = ", ".join(f"`{m}`" for m in self.members)
         if self.relation == "reaches":
             complaint = f"must both call `{self.helper}`, but {named} does not"
+        elif self.relation == "interpolates":
+            complaint = f"must both be built from `{self.helper}`, but {named} is not"
         elif self.relation == "disjoint":
             complaint = f"must be disjoint, but both carry {named}"
         else:
@@ -199,6 +211,13 @@ def _side(raw: object, row_id: str, relation: str) -> Side:
         if "function" not in raw:
             raise ValueError(f"row `{row_id}`: a `{relation}` side needs a `function`")
         return Side(file=str(raw["file"]), function=str(raw["function"]))
+
+    if relation in _FRAGMENT_RELATIONS:
+        # A symbol, but no extractor: the row asks what the symbol is BUILT
+        # FROM, not what members it holds.
+        if "symbol" not in raw:
+            raise ValueError(f"row `{row_id}`: an `{relation}` side needs a `symbol`")
+        return Side(file=str(raw["file"]), symbol=str(raw["symbol"]))
 
     for key in ("symbol", "extract"):
         if key not in raw:
@@ -248,7 +267,7 @@ def load_registry(path: Path) -> list[Row]:
         if not isinstance(allow, list):
             raise ValueError(f"row `{row_id}`: `allow` must be a list")
         helper = str(entry.get("helper", "")).strip()
-        if relation in _CALL_PATH_RELATIONS and not helper:
+        if relation in _HELPER_RELATIONS and not helper:
             raise ValueError(f"row `{row_id}`: a `{relation}` row needs a `helper`")
         rows.append(
             Row(
@@ -399,6 +418,46 @@ def reaches_helper(repo_root: Path, side: Side, helper: str) -> bool:
     return False
 
 
+def _print_violation(violation: Violation) -> None:
+    """One violation, rendered for a terminal.
+
+    Kept out of ``main`` because a relation has TWO renderers -- this one and
+    ``Violation.to_dict`` -- and a relation added to only one of them crashes
+    the Detector on the first real violation instead of reporting it.
+    """
+    labels = {
+        "disjoint": "shared",
+        "superset": "missing from left",
+        "reaches": f"does not call {violation.helper}",
+        "interpolates": f"not built from {violation.helper}",
+    }
+    print(f"  [{violation.row_id}] {violation.left}  vs  {violation.right}")
+    print(f"      {labels[violation.relation]}: {', '.join(violation.members)}")
+
+
+def interpolates_fragment(repo_root: Path, side: Side, helper: str) -> bool:
+    """Whether ``side``'s symbol is BUILT FROM ``helper``.
+
+    Referencing, not spelling. A pattern whose literal text happens to contain
+    the fragment's NAME is exactly as strict as it was before, so only an
+    ``ast.Name`` lookup counts -- the same distinction ``reaches_helper`` draws
+    between calling a helper and naming it.
+
+    Concatenation (``SUDO_INVOCATION + OPTIONAL_PATH + r"pip\\b"``) and
+    f-string interpolation (``rf"^{OPTIONAL_PATH}gh\\b"``) both count: this
+    repository spells the same sharing both ways, and a row is about whether
+    the fragment is in the pattern, not about which syntax put it there.
+    """
+    path = repo_root / side.file
+    if not path.is_file():
+        raise RegistryRotError(f"{side.file} does not exist")
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    value = _assigned_value(tree, side.symbol)
+    if value is None:
+        raise RegistryRotError(f"{side.symbol} is not assigned at module level in {side.file}")
+    return any(isinstance(node, ast.Name) and node.id == helper for node in ast.walk(value))
+
+
 def check_row(repo_root: Path, row: Row) -> list[Violation]:
     """Every way ``row``'s declared relation fails to hold.
 
@@ -406,14 +465,15 @@ def check_row(repo_root: Path, row: Row) -> list[Violation]:
     relation false", so the deny message reads the same whichever relation the
     row declared.
     """
-    if row.relation in _CALL_PATH_RELATIONS:
+    if row.relation in _HELPER_RELATIONS:
         # BOTH sides are checked. A row is a claim about the pair, so a
-        # reference site that stops reaching the helper has broken the relation
+        # reference site that stops sharing the helper has broken the relation
         # just as surely as the site the row was written about.
+        shares = reaches_helper if row.relation in _CALL_PATH_RELATIONS else interpolates_fragment
         missing = frozenset(
-            side.function
+            side.symbol or side.function
             for side in (row.left, row.right)
-            if not reaches_helper(repo_root, side, row.helper)
+            if not shares(repo_root, side, row.helper)
         )
         offending = missing - row.allow
         if not offending:
@@ -490,14 +550,7 @@ def main() -> int:
     if violations:
         print(f"Found {len(violations)} declared invariant pair(s) that do not hold:")
         for violation in violations:
-            labels = {
-                "disjoint": "shared",
-                "superset": "missing from left",
-                "reaches": f"does not call {violation.helper}",
-            }
-            label = labels[violation.relation]
-            print(f"  [{violation.row_id}] {violation.left}  vs  {violation.right}")
-            print(f"      {label}: {', '.join(violation.members)}")
+            _print_violation(violation)
         print(f"\n{_REMEDIATION}")
     else:
         print("Every declared invariant pair holds")

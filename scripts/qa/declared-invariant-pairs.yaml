@@ -89,6 +89,28 @@
     file: src/claude_code_hooks_daemon/remote_docs/store.py
     function: refresh_document
 
+# --- fragment rows: a shared regex fragment both patterns must be built from --
+
+- id: executable-anchors-interpolate-the-path-qualifier
+  relation: interpolates
+  helper: OPTIONAL_PATH
+  reason: >
+    both anchor an executable NAME inside a command string, so an anchor that
+    omits the shared path-qualifier fragment refuses to recognise the same
+    binary invoked by path — and on the `gh` side that is a publish nobody can
+    retract.
+  left:
+    file: src/claude_code_hooks_daemon/handlers/pre_tool_use/sensitive_content.py
+    symbol: _GH_BODY_PATTERN
+  # `sudo_pip` is the reference because it is a single symbol that already
+  # interpolates the fragment. The git surface in `sensitive_content` itself is
+  # deliberately NOT the sibling here: it hand-rolls `endswith("/git")`, which
+  # is correct, merely bespoke. A row demanding one idiom of both would assert
+  # style rather than protection.
+  right:
+    file: src/claude_code_hooks_daemon/handlers/pre_tool_use/sudo_pip.py
+    symbol: _SUDO_PIP_PATTERN
+
 - id: write-target-resolvers-reach-the-home-expander
   relation: reaches
   helper: expand_home

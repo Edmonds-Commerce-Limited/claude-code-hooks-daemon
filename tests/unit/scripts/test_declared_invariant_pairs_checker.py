@@ -33,6 +33,7 @@ import json
 import sys
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 
 import pytest
 
@@ -457,6 +458,150 @@ class TestTheViolation:
         assert payload["right"] == "b.py::WRAPPERS"
 
 
+_FRAGMENT_ROW = """
+- id: demo-fragment-row
+  relation: interpolates
+  helper: OPTIONAL_PATH
+  reason: >
+    both anchor an executable NAME inside a command string, so an anchor that
+    omits the shared path-qualifier fragment refuses to recognise the same
+    binary invoked by path.
+  left:
+    file: a.py
+    symbol: GH_PATTERN
+  right:
+    file: b.py
+    symbol: SUDO_PATTERN
+"""
+
+
+class TestTheFragmentRelation:
+    """`interpolates` — Plan 00412 D-PUB-4.
+
+    The third rule kind, and it exists because the first two could not express
+    a real instance. `reaches` asserts a CALL; a shared regex fragment such as
+    `OPTIONAL_PATH` is a module-level CONSTANT interpolated into a pattern, so
+    a correct fix would have left a `reaches` row false.
+
+    What earns this relation a row where the forwarder pair was refused one:
+    **it cannot be satisfied by a partial fix.** The fragment is either in the
+    pattern or it is not. A row that a half-fix turns green converts an open
+    defect into a closed one on paper, which is worse than having no row.
+    """
+
+    _WITH = 'GH_PATTERN = re.compile(r"(?:^|\\s)" + OPTIONAL_PATH + r"gh\\s+issue\\b")\n'
+    _SIBLING = 'SUDO_PATTERN = re.compile(SUDO_INVOCATION + OPTIONAL_PATH + r"pip\\b")\n'
+    _WITHOUT = 'GH_PATTERN = re.compile(r"(?:^|\\s)gh\\s+issue\\b")\n'
+
+    def _row(self, checker: ModuleType, tmp_path: Path, body: str = _FRAGMENT_ROW) -> Any:
+        return checker.load_registry(_registry(tmp_path, body))[0]
+
+    def test_a_fragment_row_names_a_symbol_and_needs_no_extractor(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        """The side carries a symbol, not a member set, so `extract` is absent."""
+        row = self._row(checker, tmp_path)
+        assert row.left.symbol == "GH_PATTERN"
+        assert row.left.extract == ""
+        assert row.helper == "OPTIONAL_PATH"
+
+    def test_a_concatenated_fragment_satisfies_the_row(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        _module(tmp_path, "a.py", self._WITH)
+        _module(tmp_path, "b.py", self._SIBLING)
+        assert checker.check_row(tmp_path, self._row(checker, tmp_path)) == []
+
+    def test_an_fstring_interpolated_fragment_satisfies_the_row(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        """`rf"^{OPTIONAL_PATH}gh\\b"` is how much of this repo spells it."""
+        _module(tmp_path, "a.py", 'GH_PATTERN = re.compile(rf"^{OPTIONAL_PATH}gh\\b")\n')
+        _module(tmp_path, "b.py", self._SIBLING)
+        assert checker.check_row(tmp_path, self._row(checker, tmp_path)) == []
+
+    def test_a_symbol_that_omits_the_fragment_is_the_violation(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        _module(tmp_path, "a.py", self._WITHOUT)
+        _module(tmp_path, "b.py", self._SIBLING)
+        violations = checker.check_row(tmp_path, self._row(checker, tmp_path))
+        assert violations[0].members == ("GH_PATTERN",)
+
+    def test_the_fragment_must_be_a_REFERENCE_not_the_name_as_text(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        """A pattern that merely mentions the name in a string is not using it.
+
+        The same distinction `reaches` draws between calling a helper and
+        naming it: a comment or a literal spelling `OPTIONAL_PATH` leaves the
+        anchor exactly as strict as it was.
+        """
+        _module(tmp_path, "a.py", 'GH_PATTERN = re.compile(r"OPTIONAL_PATH gh\\s+issue\\b")\n')
+        _module(tmp_path, "b.py", self._SIBLING)
+        violations = checker.check_row(tmp_path, self._row(checker, tmp_path))
+        assert violations[0].members == ("GH_PATTERN",)
+
+    def test_the_reference_side_is_checked_too(self, checker: ModuleType, tmp_path: Path) -> None:
+        """A row is a claim about the pair, so either side can break it."""
+        _module(tmp_path, "a.py", self._WITHOUT)
+        _module(tmp_path, "b.py", 'SUDO_PATTERN = re.compile(r"pip\\b")\n')
+        violations = checker.check_row(tmp_path, self._row(checker, tmp_path))
+        assert violations[0].members == ("GH_PATTERN", "SUDO_PATTERN")
+
+    def test_a_fragment_row_requires_a_helper(self, checker: ModuleType, tmp_path: Path) -> None:
+        body = _FRAGMENT_ROW.replace("  helper: OPTIONAL_PATH\n", "")
+        with pytest.raises(ValueError, match="helper"):
+            checker.load_registry(_registry(tmp_path, body))
+
+    def test_a_missing_symbol_is_registry_rot_not_a_pass(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        """A rename must not read as a relation that holds."""
+        _module(tmp_path, "a.py", "SOMETHING_ELSE = 1\n")
+        _module(tmp_path, "b.py", self._SIBLING)
+        with pytest.raises(checker.RegistryRotError, match="GH_PATTERN"):
+            checker.check_row(tmp_path, self._row(checker, tmp_path))
+
+    def test_the_message_names_the_fragment_and_the_site(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        _module(tmp_path, "a.py", self._WITHOUT)
+        _module(tmp_path, "b.py", self._SIBLING)
+        payload = checker.check_row(tmp_path, self._row(checker, tmp_path))[0].to_dict()
+        assert "OPTIONAL_PATH" in payload["message"]
+        assert "GH_PATTERN" in payload["message"]
+        assert "invoked by path" in payload["message"]
+
+    def test_every_relation_can_be_PRINTED_not_just_serialised(
+        self, checker: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Adding a relation touches TWO renderers, and this is how I learned it.
+
+        `to_dict` builds the JSON message; `main` keeps its own label map for
+        the terminal. Adding `interpolates` to the first left the second
+        raising `KeyError` on a real violation — a Detector that crashes
+        instead of reporting is a Detector that gets read as a broken script.
+        Asserting over the whole relation set means the next one cannot repeat
+        it.
+        """
+        _module(tmp_path, "a.py", self._WITHOUT)
+        _module(tmp_path, "b.py", self._SIBLING)
+        for relation in sorted(checker._RELATIONS):
+            violation = checker.Violation(
+                row_id="r",
+                relation=relation,
+                reason="because",
+                left="a.py::L",
+                right="b.py::R",
+                members=("L",),
+                helper="OPTIONAL_PATH",
+            )
+            assert violation.to_dict()["message"]
+            checker._print_violation(violation)
+        assert capsys.readouterr().out
+
+
 class TestTheLiveRegistry:
     """The shipped registry itself, which must not rot silently."""
 
@@ -484,6 +629,10 @@ class TestTheLiveRegistry:
                     # A call-path side names a FUNCTION; resolving it at all is
                     # the rot check, and `reaches_helper` raises if it is gone.
                     checker.reaches_helper(_REPO_ROOT, side, row.helper)
+                elif not side.extract:
+                    # A fragment side names a SYMBOL and no extractor; the
+                    # resolution itself is the rot check, as above.
+                    checker.interpolates_fragment(_REPO_ROOT, side, row.helper)
                 else:
                     assert checker.extract_members(_REPO_ROOT, side)
 
