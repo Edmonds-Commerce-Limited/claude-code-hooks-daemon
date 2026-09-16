@@ -1,6 +1,6 @@
 # Plan 00425: remote docs index goes stale on delete
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-16
 **Owner**: dev
 **Priority**: Medium
@@ -53,11 +53,11 @@ actionable.
 
 ### Phase 1: detect
 
-- [ ] ⬜ **Task 1.1**: RED — a test proving `check` stays silent and exits `0`
+- [x] ✅ **Task 1.1**: RED — a test proving `check` stays silent and exits `0`
   when the on-disk index disagrees with the tree. This is the reported defect;
   it must fail before anything is fixed.
 
-- [ ] ⬜ **Task 1.2**: Teach `_remote_docs_check` to compare `render_index(tree)`
+- [x] ✅ **Task 1.2**: Teach `_remote_docs_check` to compare `render_index(tree)`
   against the file at `<project_root>/.claude/REMOTE-DOCS.md`, report a
   disagreement as a finding, count it, and exit `1`. `render_index` is pure and
   path-ordered (`test_rewriting_is_idempotent` already pins this), so the
@@ -66,58 +66,95 @@ actionable.
   The signature has to widen: `_remote_docs_check` currently receives `tree`
   only, and the index lives beside the project root, not in the tree.
 
-- [ ] ⬜ **Task 1.3**: Pin the missing-file case. An index that was never
+- [x] ✅ **Task 1.3**: Pin the missing-file case. An index that was never
   generated is stale by the same test and takes the same remedy; it must not
   raise.
 
 ### Phase 2: repair
 
-- [ ] ⬜ **Task 2.1**: RED — a test that `remote-docs index` re-renders the file
+- [x] ✅ **Task 2.1**: RED — a test that `remote-docs index` re-renders the file
   and touches no network.
 
-- [ ] ⬜ **Task 2.2**: Add `index` to the action choices and dispatch it before
+- [x] ✅ **Task 2.2**: Add `index` to the action choices and dispatch it before
   the fetcher is resolved, so it never warns about a browser it was not going to
   use. The body is the existing `_regenerate_remote_docs_index` call.
 
-- [ ] ⬜ **Task 2.3**: Name `remote-docs index` as the fix in `check`'s output.
+- [x] ✅ **Task 2.3**: Name `remote-docs index` as the fix in `check`'s output.
   Issue #42 is the precedent: a `check` whose printed remedy cannot be run is a
   dead end, so the finding and its remedy ship together. Pin the remedy line in
   a test, in both directions.
 
 ### Phase 3: the documented truth
 
-- [ ] ⬜ **Task 3.1**: `CLAUDE/RemoteDocs.md` and `docs/guides/REMOTE_DOCS.md`
+- [x] ✅ **Task 3.1**: `CLAUDE/RemoteDocs.md` and `docs/guides/REMOTE_DOCS.md`
   both state the index is "regenerated on every capture and refresh". That stays
   true but becomes incomplete — document the new verb and the staleness finding.
 
-- [ ] ⬜ **Task 3.2**: The index's own generated header says it is "rewritten on
+- [x] ✅ **Task 3.2**: The index's own generated header says it is "rewritten on
   every capture and refresh". It is emitted by `index.py` into every generated
   file, so it is a documented truth with a copy in every client project.
 
-- [ ] ⬜ **Task 3.3**: Release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`
+- [x] ✅ **Task 3.3**: Release note in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`
   — `check` gaining a new finding can turn a previously-green CI run red, which
   is exactly what a client needs told.
 
 ## Success Criteria
 
-- [ ] ⬜ The reproduction from the issue no longer holds: after deleting a
-  capture, `check` reports the stale index and exits non-zero.
+- [x] ✅ The reproduction from the issue no longer holds. Re-run against merged
+  `main`: `check` exits `1`, prints `.claude/REMOTE-DOCS.md: out of date with the vendored tree` and names its fix. The index still names the deleted file after
+  `check` — correct, and the design: `check` reports, it does not repair.
 
-- [ ] ⬜ Every new behaviour is proven by a test that failed first, with the
-  failure output quoted in the sub-agent's report.
+- [x] ✅ Every new behaviour is proven by a test that failed first. The five
+  original RED failures are quoted in the sub-agent's report, including the
+  detail that the two `index`-action tests failed by falling through to
+  `refresh` (exit 2), which proves they exercised the missing action rather than
+  passing by accident.
 
-- [ ] ⬜ `check` names a remedy that actually repairs the index without touching
-  the network, and a test pins that line.
+  **One test needed a second look.** `test_check_stays_quiet_for_a_project_that_vendors_nothing`
+  was written during review and passed on its first run, because the fix was
+  already on disk by then — so it had never been observed failing. The guard was
+  deliberately reintroduced to confirm it fails (`assert 1 == 0`) before it was
+  trusted. A test written after its fix proves nothing until it is made to fail.
 
-- [ ] ⬜ Full QA green, read from the suite's own exit line rather than a chained
-  command's.
+- [x] ✅ `check` names `bin/hooks-daemon remote-docs index`, which re-renders
+  from the tree with no network access. A test pins the remedy line, and a second
+  pins the no-network guarantee with a fetcher that fails the test if called.
 
-- [ ] ⬜ Every release-bound consequence is in the pending-release holding area
-  (`CLAUDE/UPGRADES/UNRELEASED/`) before the status flips, or this criterion says
-  explicitly that the plan has none.
+- [x] ✅ Full QA green: `QA_EXIT=0`, 35/35, 24,917 tests passed, 0 failed, smoke
+  3/3, coverage 95.2%. Read from the log's own `QA_EXIT` line.
+
+  An earlier run reported `QA_EXIT=1` with 18 errored tests and smoke 0/3. That
+  was environmental and self-inflicted: the worktree daemon had been restarted
+  BEFORE the source changed, so every acceptance probe judged a stale
+  `source_fingerprint`. Restarting it cleared all 18. Recorded here because the
+  first number is the one an interrupted tick would have found.
+
+- [x] ✅ The release-bound consequence is in the holding area:
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/02-remote-docs-check-reports-a-stale-index.md`.
+  It calls out that `check` gaining a finding can turn a green CI red — including
+  once on upgrade with nothing deleted, because the generated header changed and
+  every existing index therefore compares unequal until `remote-docs index` runs.
 
 ## Delivery & Milestones
 
 - Filed from issue #43 after reproducing it on `main`. Named as independent
   follow-up work by Plan 00424, which fixed the adjacent `add`-overwrite defect
   and explicitly left this out of scope.
+
+- Plan and triage: `6cda21a3`. Implementation `edd91533`, review fixes
+  `aede82dd`, summary grammar plus review tests `4161864f`, formatting
+  `12bd40d0`, test consolidation `31380027`. Merged `9282c9ea`, CI green on that
+  head (run 35136177334). Issue #43 closed as completed.
+
+- **Two defects reached review that the test suite did not catch**, and both
+  came from Step 6's "does this match too WIDELY?" question rather than from a
+  failing test. The new finding fired for projects with no tree and no index at
+  all, which would have turned a green CI red for every project not using
+  remote-docs — worse than the defect being fixed. And the summary line counted
+  the index as a document, in a change whose whole subject is a command that
+  misreports corpus health.
+
+- **The issue's two suggested remedies turned out to be incompatible**, not
+  alternatives. Recorded as a Non-Goal with the reasoning, because the next
+  person to read the issue will meet the same fork: a `check` that regenerates
+  the index can never report it as stale.

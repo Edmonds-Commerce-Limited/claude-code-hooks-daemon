@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00381: niggles ledger three](00381-niggles-ledger-three/PLAN.md) - Complete + the archiving commit (one entry, graduated rather than fixed in place: a test class that could not pass alone turned out to be reporting a product defect, which became Plan 00383. The NEXT niggle opens ledger four; SOP in `CLAUDE/PlanWorkflow.md`)
+
 - [00380: worktree reap jammed by daemon own output](00380-worktree-reap-jammed-by-daemon-own-output/PLAN.md) - Complete at `83fe7bf7`…`30583859` + the archiving commit (five worktrees sat unreapable for days with zero commits unmerged to main; four were held by the daemon's OWN generated advisory reading as unsaved work, and the refusal text said "needs a human" when no hook ever blocked `git worktree remove --force`)
 
 - [00379: niggles ledger two](00379-niggles-ledger-two/PLAN.md) - Complete + the archiving commit (five entries, all found by verifying a claim rather than hitting a symptom; shipped two guards — `index-retention-window` at the plan-QA commit gate and `plan-stats-arithmetic` in repo hygiene — each proved by breaking real data, not just fixtures)
