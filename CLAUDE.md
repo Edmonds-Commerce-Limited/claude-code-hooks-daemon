@@ -606,10 +606,6 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - git_upstream_checker — additive fetch + pull/cleanup advice on session start
 
-<!-- handler: hook-registration-checker -->
-
-- hook_registration_checker — hooks configuration policy
-
 <!-- handler: model-fallback-detector -->
 
 - model_fallback_detector — silent model substitution is surfaced
@@ -626,29 +622,33 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - plan_workflow_asset_checker — plan tooling provisioning alert
 
-<!-- handler: project-handler-load-checker -->
-
-- project_handler_load_checker — project protection degraded alert
-
 <!-- handler: reference-repo-sweep -->
 
 - reference_repo_sweep — reference clones are made fresh before you read them
-
-<!-- handler: routine-qa-sweep -->
-
-- routine_qa_sweep — recurring work that has stopped recurring
 
 <!-- handler: secret-file-hygiene-checker -->
 
 - secret_file_hygiene_checker -- on-disk hygiene for protected paths
 
+<!-- handler: tool-disable-advisor -->
+
+- tool_disable_advisor — declared never-want tools are checked at session start
+
+<!-- handler: project-handler-load-checker -->
+
+- project_handler_load_checker — project protection degraded alert
+
+<!-- handler: hook-registration-checker -->
+
+- hook_registration_checker — hooks configuration policy
+
 <!-- handler: session-actions-directive -->
 
 - session_actions_directive — the must-do list is delivered as a turn
 
-<!-- handler: tool-disable-advisor -->
+<!-- handler: routine-qa-sweep -->
 
-- tool_disable_advisor — declared never-want tools are checked at session start
+- routine_qa_sweep — recurring work that has stopped recurring
 
 <!-- handler: idle-housekeeping-advisory -->
 
@@ -666,13 +666,13 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - cron_stop_enforcer — declared crons are verified, not just asked for
 
-<!-- handler: cron-subagent-stop-enforcer -->
-
-- cron_subagent_stop_enforcer — SubagentStop twin of `cron_stop_enforcer`
-
 <!-- handler: subagent-report-size-blocker -->
 
 - subagent_report_size_blocker — write large reports to a file
+
+<!-- handler: cron-subagent-stop-enforcer -->
+
+- cron_subagent_stop_enforcer — SubagentStop twin of `cron_stop_enforcer`
 
 <!-- handler: worktree-create -->
 
