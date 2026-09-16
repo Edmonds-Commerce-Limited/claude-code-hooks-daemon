@@ -28,6 +28,7 @@ before a line of it was written:
 from __future__ import annotations
 
 import importlib.util
+import sys
 from pathlib import Path
 from types import ModuleType
 
@@ -42,6 +43,10 @@ def checker() -> ModuleType:
     spec = importlib.util.spec_from_file_location("check_security_downgrade_flags", _CHECKER)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
+    # Registered BEFORE execution: `@dataclass` resolves this module's string
+    # annotations (PEP 563 is on) through `sys.modules`, and a module absent
+    # from it fails with a bare `'NoneType' has no attribute '__dict__'`.
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -74,9 +79,7 @@ class TestDowngradeFlag:
 
         assert checker.RULE_DOWNGRADE_FLAG in _rules_for(checker, tmp_path)
 
-    def test_verify_false_in_python_is_reported(
-        self, checker: ModuleType, tmp_path: Path
-    ) -> None:
+    def test_verify_false_in_python_is_reported(self, checker: ModuleType, tmp_path: Path) -> None:
         _write(tmp_path, "src/fetch.py", "import requests\nrequests.get(url, verify=False)\n")
 
         assert checker.RULE_DOWNGRADE_FLAG in _rules_for(checker, tmp_path)
@@ -304,6 +307,125 @@ class TestUnvalidatedUrlExpansion:
         assert checker.RULE_UNVALIDATED_URL_EXPANSION not in _rules_for(checker, tmp_path)
 
 
+class TestFalsePositivesTheFirstSweepFound:
+    """The four noise hits the first real-tree sweep produced, each pinned.
+
+    Found by running the Detector before trusting it: 13 hits, of which 4 were
+    not defects. They are kept as tests rather than fixed silently because each
+    is a DIFFERENT reason a line can look like a command without being one, and
+    a later pattern change can reintroduce any of them.
+    """
+
+    def test_a_multi_line_help_string_is_not_a_command(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        """`prerequisites.sh` tells a human how to install uv by hand.
+
+        The instruction sits inside a multi-line `fail_fast "…"` argument. It
+        is the same text as the real invocation four lines below it, which is
+        exactly why the difference has to be detected rather than assumed: one
+        is advice to a person, the other runs.
+        """
+        _write(
+            tmp_path,
+            "scripts/install/prerequisites.sh",
+            "#!/usr/bin/env bash\n"
+            'fail_fast "uv is not installed.\n'
+            "\n"
+            "Installation:\n"
+            '  curl -LsSf https://astral.sh/uv/install.sh | sh"\n',
+        )
+
+        assert checker.scan(tmp_path) == []
+
+    def test_a_real_command_after_a_closed_multi_line_string_is_still_judged(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        """The control for the rule above — the blanking must END at the quote.
+
+        `prerequisites.sh` carries the advice string AND the real install four
+        lines later. A stripper that never recovers from an opening quote would
+        silence the actual defect, turning a false-positive fix into a
+        false-negative one.
+        """
+        _write(
+            tmp_path,
+            "scripts/install/prerequisites.sh",
+            "#!/usr/bin/env bash\n"
+            'fail_fast "install it yourself:\n'
+            '  curl -LsSf https://astral.sh/uv/install.sh | sh"\n'
+            "curl -LsSf https://astral.sh/uv/install.sh | sh > /dev/null 2>&1\n",
+        )
+
+        violations = checker.scan(tmp_path)
+
+        assert {v.line for v in violations} == {4}
+
+    def test_a_fetch_whose_status_is_consumed_on_the_line_is_not_suppressed(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        """`install.sh` discards the OUTPUT and acts on the FAILURE.
+
+        `if ! git clone … >/dev/null 2>&1; then _fail …` is the correct shape:
+        quiet on success, loud on failure. Reporting it would tell the author
+        to make a working error path noisier, which is how a check teaches
+        people to ignore it.
+        """
+        _write(
+            tmp_path,
+            "install.sh",
+            "#!/usr/bin/env bash\n"
+            'if ! git clone --depth 1 "$REPO" "$DIR" >/dev/null 2>&1; then\n'
+            '    _fail "Failed to clone"\nfi\n',
+        )
+
+        assert checker.RULE_SUPPRESSED_FETCH not in _rules_for(checker, tmp_path)
+
+    def test_a_fetch_with_no_status_consumer_is_still_suppressed(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        """The control: `install.sh:101`'s legacy branch really does discard it.
+
+        The curl there is the FIRST statement of a `{ … }` block whose value is
+        its LAST command, so nothing ever reads the fetch's exit status.
+        """
+        _write(
+            tmp_path,
+            "install.sh",
+            "#!/usr/bin/env bash\ncurl -LsSf https://example.test/i.sh | sh >/dev/null 2>&1\n",
+        )
+
+        assert checker.RULE_SUPPRESSED_FETCH in _rules_for(checker, tmp_path)
+
+    def test_an_upgrade_manifest_describing_a_handler_is_not_scanned(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        """The first sweep flagged the manifest that DOCUMENTS `curl_pipe_shell`.
+
+        A config-changes manifest is documentation about configuration, not
+        configuration that runs. Only CI YAML executes, so only CI YAML is
+        scanned — the alternative is a check whose findings are mostly its own
+        project's descriptions of the same danger.
+        """
+        _write(
+            tmp_path,
+            "CLAUDE/UPGRADES/config-changes/v2.5.0.yaml",
+            'changes:\n  - description: "Blocks curl/wget piped to a shell (curl | bash)."\n',
+        )
+
+        assert checker.scan(tmp_path) == []
+
+    def test_ci_yaml_is_still_scanned(self, checker: ModuleType, tmp_path: Path) -> None:
+        """The control — CI YAML runs, so narrowing must not exempt it."""
+        _write(
+            tmp_path,
+            ".github/workflows/release.yml",
+            "jobs:\n  build:\n    steps:\n      - run: curl -fsSL $URL | sh\n",
+        )
+
+        assert checker.RULE_FETCH_PIPED_TO_SHELL in _rules_for(checker, tmp_path)
+
+
 class TestScope:
     def test_test_directories_are_excluded(self, checker: ModuleType, tmp_path: Path) -> None:
         """Fixtures legitimately contain the constructs this hunts.
@@ -328,9 +450,7 @@ class TestScope:
 
         assert checker.scan(tmp_path) == []
 
-    def test_a_violation_names_its_file_and_line(
-        self, checker: ModuleType, tmp_path: Path
-    ) -> None:
+    def test_a_violation_names_its_file_and_line(self, checker: ModuleType, tmp_path: Path) -> None:
         """A finding a reader cannot navigate to is a finding nobody acts on."""
         _write(
             tmp_path,
