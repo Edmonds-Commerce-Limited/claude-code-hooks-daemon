@@ -256,6 +256,22 @@ plan for a work area, not as the origin of every fix in it._
   deployed skill, so a client project sees no behaviour change from
   this.
 
+- **BREAKING: `header-body-coherence` moves its completion finding from the
+  edit gate to the commit gate (Plan 00419 N3).** Closing a plan needs two
+  changes to one `PLAN.md` — tick the last Success Criterion, flip the status
+  header — and `Edit` replaces one contiguous span, which those two never
+  share. Both orderings were denied, leaving a whole-file `Write` as the only
+  legal move, which is what `R-WRITE-CLOBBER` exists to discourage. A gate no
+  legal sequence of moves can satisfy is a defect, so the all-ticked-under-
+  `In Progress` state — the mandatory intermediate on the legal close path —
+  is now ADVISE at edit time. The `Not Started`-with-boxes-ticked branch is
+  unchanged and still blocks. **Net effect is a TIGHTENING**: the check had no
+  commit registration at all, so a plan committed in the violating state
+  reached history unchallenged and waited for the next session's sweep. It now
+  BLOCKS at the commit gate, scoped so a commit is blamed for incoherence it
+  introduces and never for incoherence it inherited. A project will see one
+  denial move from `Write`/`Edit` to `git commit`.
+
 ### Fixed
 
 - **`cron_stop_enforcer` no longer wedges every Stop (Plan 00416).**
@@ -320,6 +336,25 @@ plan for a work area, not as the origin of every fix in it._
 
 - **`scripts/debug_hooks.sh` runs in the repository that dogfoods it,
   and on macOS bash 3.2 (Plan 00419 N1).**
+
+- **A worktree seed entry may be declared `optional` (Plan 00419 N9).** Seeding
+  had one policy for an absent source — fatal — which is right for a typo and
+  wrong for a git-ignored file a project's own tooling treats as legitimately
+  missing. Every `WorktreeCreate` in this repository was failing because its
+  seed list named a secret word list that does not exist here, while the
+  comment beside that entry already said the file was optional. `optional`
+  defaults to `false`, so an unmarked entry keeps the fail-fast contract, and
+  it excuses ABSENCE ONLY: an optional entry that is absolute, traverses
+  upwards or resolves outside the repository is still fatal. A non-boolean
+  `optional:` is warned about and treated as REQUIRED.
+
+- **A failed `WorktreeCreate` now reports the daemon's own reason (Plan 00419
+  N10).** The forwarder turned a handler exception into "is the
+  `worktree_create` handler enabled?", naming the one cause that was provably
+  false while the real error sat unread in the response it was already
+  parsing. It now prints the `systemMessage` of a crashed handler or the
+  `reason` of a deliberate refusal, and when neither is present says so and
+  names the logs instead of guessing.
 
 ### Security
 
