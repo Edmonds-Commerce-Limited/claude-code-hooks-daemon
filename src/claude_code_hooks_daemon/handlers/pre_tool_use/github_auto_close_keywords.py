@@ -40,9 +40,7 @@ Message routes covered per segment:
 """
 
 import logging
-import os
 import re
-from pathlib import Path
 from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
@@ -52,7 +50,7 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.command_evasion import GIT_INVOCATION
-from claude_code_hooks_daemon.utils.path_predicates import path_is_file
+from claude_code_hooks_daemon.utils.message_files import read_message_files
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -63,15 +61,6 @@ _MODE_WARN: Final[str] = "warn"
 # Hook input field carrying the tool call's working directory, used to
 # resolve a relative -F path the way git itself would.
 _CWD_FIELD: Final[str] = "cwd"
-
-# Commit messages and PR bodies are small; a message file larger than this
-# is skipped rather than read (protects matches() from pathological files).
-_MAX_MESSAGE_FILE_BYTES: Final[int] = 65_536
-
-# A message file that is not valid UTF-8 (a binary blob passed to -F by
-# mistake) is decoded with replacement so scanning can never raise.
-_MESSAGE_FILE_ENCODING: Final[str] = "utf-8"
-_MESSAGE_FILE_DECODE_ERRORS: Final[str] = "replace"
 
 # The nine closing keywords GitHub documents. Case-insensitivity and the
 # optional trailing colon ("Closes: #10") are applied in the pattern.
@@ -123,14 +112,6 @@ _GH_PR_BODY_PATTERN: Final[re.Pattern[str]] = re.compile(r"\bgh\s+pr\s+(?:create
 # separators here, because a heredoc body legitimately follows the command
 # across newlines and must stay inside its segment.
 _SEGMENT_SEPARATOR_PATTERN: Final[re.Pattern[str]] = re.compile(r"&&|\|\||;")
-
-# git commit -F <file> / --file=<file>, and gh pr --body-file <file>. The
-# value may be bare, single- or double-quoted; "-" (stdin) is skipped — its
-# heredoc body is in the segment text, which is scanned anyway.
-_MESSAGE_FILE_PATTERN: Final[re.Pattern[str]] = re.compile(
-    r"(?:-F|--file|--body-file)(?:\s+|=)(?:\"([^\"]+)\"|'([^']+)'|(\S+))"
-)
-_STDIN_MESSAGE_FILE: Final[str] = "-"
 
 _REWRITE_EXAMPLES: Final[str] = (
     '"Addresses #123", "Refs #123" or "See #123" — GitHub links these but does not close'
@@ -229,34 +210,18 @@ class GithubAutoCloseKeywordsHandler(PreToolUseHandlerBase):
         return segments
 
     def _message_file_texts(self, segment: str, hook_input: dict[str, Any]) -> list[str]:
-        """Content of every readable message file named in ``segment``."""
-        texts: list[str] = []
-        for match in _MESSAGE_FILE_PATTERN.finditer(segment):
-            raw = next(group for group in match.groups() if group)
-            if raw == _STDIN_MESSAGE_FILE:
-                continue
-            path = Path(raw)
-            if not path.is_absolute():
-                cwd = hook_input.get(_CWD_FIELD)
-                if isinstance(cwd, str) and cwd:
-                    path = Path(cwd) / path
-            # `os.access` never raises, so it would have caught an unreadable
-            # file on its own -- but only by correcting a guess `is_file()` had
-            # already crashed on. Stating the answer here keeps the skip
-            # attributable to this line rather than to the next one.
-            if not path_is_file(path, unreadable_means=False) or not os.access(path, os.R_OK):
-                # Missing/unreadable file: the commit itself will fail, and
-                # that failure belongs to git, not to this guard. Checked
-                # up-front rather than caught, so no exception is swallowed.
-                _LOGGER.debug("Skipping unreadable message file %s", path)
-                continue
-            if path.stat().st_size > _MAX_MESSAGE_FILE_BYTES:
-                _LOGGER.debug("Skipping oversized message file %s", path)
-                continue
-            texts.append(
-                path.read_bytes().decode(_MESSAGE_FILE_ENCODING, errors=_MESSAGE_FILE_DECODE_ERRORS)
-            )
-        return texts
+        """Content of every readable message file named in ``segment``.
+
+        The reading lives in `utils.message_files` because `sensitive_content`
+        had its own copy of it, wired into one of that handler's two branches —
+        so a term in a git message file went unscanned there while the same
+        term inline was denied (Plan 00412, D-PUB-2).
+        """
+        cwd = hook_input.get(_CWD_FIELD)
+        return [
+            found.text
+            for found in read_message_files(segment, cwd if isinstance(cwd, str) else None)
+        ]
 
     def _compute_match(self, hook_input: dict[str, Any]) -> str | None:
         """First matched keyword+reference span across all message routes."""
