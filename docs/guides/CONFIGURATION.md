@@ -463,14 +463,21 @@ plugins:
   plugins:
     # Load a specific handler from a file
     - path: ".claude/hooks/handlers/pre_tool_use/my_handler.py"
+      event_type: pre_tool_use  # REQUIRED: which event this plugin handles
       handlers: ["MyHandler"]   # Specific class names to load
       enabled: true
 
     # Load all handlers from a directory
     - path: ".claude/hooks/handlers/post_tool_use/"
+      event_type: post_tool_use
       handlers: null            # null = load all Handler subclasses found
       enabled: true
 ```
+
+`event_type` is **required** and has no default — a plugin entry without it is
+rejected at config load. It must name an event the daemon actually dispatches;
+a catalogued-but-unwired event is refused, and the error lists the ones you can
+use.
 
 ### Writing a Custom Handler
 
@@ -520,6 +527,7 @@ plugins:
     - ".claude/hooks/lib"   # Add this to sys.path
   plugins:
     - path: ".claude/hooks/handlers/"
+      event_type: pre_tool_use
       handlers: null
       enabled: true
 ```
