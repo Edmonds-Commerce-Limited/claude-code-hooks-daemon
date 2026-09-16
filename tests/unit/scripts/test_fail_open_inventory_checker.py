@@ -355,6 +355,34 @@ class TestNonPythonSurfaces:
         assert len(violations) == 1
         assert violations[0].scope == "write_forwarder"
 
+    def test_a_shell_scope_ends_at_its_closing_brace(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        """A top-level suppression must not inherit the last function's name.
+
+        `init.sh` really is shaped this way: a suppression at line 612 sits
+        after `_exec_bit_selfheal` has both ended and been CALLED, and naming
+        that function as its scope would send the next reader to the wrong
+        place. A location an inventory reports wrongly is worse than one it
+        does not report, because it is the location a reader will trust.
+        """
+        _empty_surfaces(tmp_path)
+        _surface(
+            tmp_path,
+            _SHELL_SURFACE,
+            "#!/usr/bin/env bash\n"
+            "write_forwarder() {\n"
+            '  chmod +x "$f" 2>/dev/null\n'
+            "}\n"
+            "write_forwarder\n"
+            'discovered=$(cat "$f" 2>/dev/null)\n',
+        )
+        inventory = _inventory(tmp_path, "boundaries: []\n")
+
+        scopes = sorted(v.scope for v in checker.scan(tmp_path, inventory))
+
+        assert scopes == ["<toplevel>", "write_forwarder"]
+
     def test_plain_shell_is_not_a_boundary(self, checker: ModuleType, tmp_path: Path) -> None:
         _empty_surfaces(tmp_path)
         _surface(

@@ -51,6 +51,8 @@ from typing import Final
 
 import yaml
 
+from claude_code_hooks_daemon.utils.path_predicates import TextOrReason, read_text_or_reason
+
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 _QA_OUTPUT_DIR: Final[Path] = _REPO_ROOT / "untracked" / "qa"
 _OUTPUT_FILE: Final[Path] = _QA_OUTPUT_DIR / "fail_open_inventory.json"
@@ -72,13 +74,16 @@ _SHELL_SURFACES: Final[tuple[str, ...]] = ("init.sh",)
 #: A Rust fail funnel is spelled by its return type: `-> !` never returns, so
 #: every call site of one is an exit decision rather than an error to handle.
 _RUST_FUNNEL_RE: Final[re.Pattern[str]] = re.compile(r"^\s*fn\s+([A-Za-z0-9_]+)\s*\(.*->\s*!\s*\{")
-_RUST_FN_RE: Final[re.Pattern[str]] = re.compile(r"^\s*fn\s+([A-Za-z0-9_]+)\s*\(")
 
 #: Shell constructs that let a failing command pass. `2>/dev/null` is included
 #: because discarding a diagnostic is how a shell boundary leaves no trace,
 #: which is exactly column three.
 _SHELL_SUPPRESSIONS: Final[tuple[str, ...]] = ("2>/dev/null", "|| true", "|| :", "set +e")
 _SHELL_FN_RE: Final[re.Pattern[str]] = re.compile(r"^\s*(?:function\s+)?([A-Za-z0-9_.-]+)\s*\(\)")
+#: A closing brace in column zero ends a shell function body. `init.sh` holds
+#: twenty function headers and exactly twenty of these, so the pairing is the
+#: file's actual style rather than an assumption about shell in general.
+_SHELL_SCOPE_END_RE: Final[re.Pattern[str]] = re.compile(r"^\}")
 
 _TOPLEVEL: Final[str] = "<toplevel>"
 
@@ -204,6 +209,14 @@ def _rust_boundaries(surface: str, source: str) -> list[Boundary]:
 
 
 def _shell_boundaries(surface: str, source: str) -> list[Boundary]:
+    """Candidates in a shell surface, each attributed to the function it is in.
+
+    The scope ENDS at the function's closing brace. Carrying the last header
+    seen forwards would attribute every top-level suppression to whichever
+    function happened to be defined above it -- and a location the inventory
+    reports wrongly is worse than one it omits, because it is the location the
+    next reader will trust.
+    """
     seen: dict[tuple[str, str], int] = {}
     found: list[Boundary] = []
     scope = _TOPLEVEL
@@ -211,6 +224,8 @@ def _shell_boundaries(surface: str, source: str) -> list[Boundary]:
         function = _SHELL_FN_RE.match(line)
         if function is not None:
             scope = function.group(1)
+        elif _SHELL_SCOPE_END_RE.match(line):
+            scope = _TOPLEVEL
         for suppression in _SHELL_SUPPRESSIONS:
             if suppression not in line:
                 continue
@@ -220,18 +235,16 @@ def _shell_boundaries(surface: str, source: str) -> list[Boundary]:
     return found
 
 
-def _read_surface(repo_root: Path, surface: str) -> str | None:
-    """Source text, or None when the surface cannot be read.
+def _read_surface(repo_root: Path, surface: str) -> TextOrReason:
+    """Source text, or the reason it could not be read.
 
-    None is reported as a violation by the caller rather than skipped: a scope
-    that has quietly stopped being scanned reads exactly like a scope with
-    nothing in it, which is the failure this whole register is about.
+    Deliberately NOT `str | None`: an unreadable surface is reported as a
+    violation carrying the errno, never skipped. A scope that has quietly
+    stopped being scanned reads exactly like a scope with nothing in it, which
+    is the failure this whole register is about -- and a bare None would make
+    "missing" and "empty" indistinguishable inside this script too.
     """
-    try:
-        return (repo_root / surface).read_text(encoding="utf-8")
-    except OSError as exc:
-        print(f"{surface}: unreadable ({exc})", file=sys.stderr)
-        return None
+    return read_text_or_reason(repo_root / surface)
 
 
 def collect_boundaries(repo_root: Path) -> tuple[list[Boundary], list[Violation]]:
@@ -245,8 +258,8 @@ def collect_boundaries(repo_root: Path) -> tuple[list[Boundary], list[Violation]
     )
     for surfaces, extract in extractors:
         for surface in surfaces:
-            source = _read_surface(repo_root, surface)
-            if source is None:
+            read = _read_surface(repo_root, surface)
+            if read.text is None:
                 missing.append(
                     Violation(
                         surface=surface,
@@ -254,14 +267,14 @@ def collect_boundaries(repo_root: Path) -> tuple[list[Boundary], list[Violation]
                         construct="surface",
                         ordinal=0,
                         detail=(
-                            "declared enforcement surface is unreadable, so nothing in it "
-                            "was scanned -- fix the path or remove it from the scope "
-                            "deliberately"
+                            f"declared enforcement surface is unreadable ({read.reason}), so "
+                            "nothing in it was scanned -- fix the path or remove it from the "
+                            "scope deliberately"
                         ),
                     )
                 )
                 continue
-            boundaries.extend(extract(surface, source))
+            boundaries.extend(extract(surface, read.text))
     return boundaries, missing
 
 
@@ -272,11 +285,19 @@ def count_boundaries(repo_root: Path) -> int:
 
 
 def _row_key(row: dict[str, object]) -> tuple[str, str, str, int]:
+    """The identity a row claims, in the same shape a Boundary reports.
+
+    A non-integer `ordinal` reads as 0 rather than raising: the row then fails
+    to match the boundary it meant to cover and is reported as rotted, which
+    says "this row does not describe anything" -- the honest outcome for a
+    typo, and better than a traceback that names YAML instead of the row.
+    """
+    ordinal = row.get("ordinal", 0)
     return (
         str(row.get("surface", "")),
         str(row.get("scope", "")),
         str(row.get("construct", "")),
-        int(row.get("ordinal", 0) or 0),
+        ordinal if isinstance(ordinal, int) else 0,
     )
 
 

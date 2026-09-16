@@ -19,5 +19,373 @@
 #   verdict -- `fail-open` or `not-fail-open`.
 #   induced_by / caller_controlled / trace -- required of a `fail-open` row.
 #   reason -- required of a `not-fail-open` row.
+#
+# `caller_controlled: true` is the column that turns a robustness decision into
+# a security one: it says the party the guard constrains can bring the
+# condition about on purpose.
 
-boundaries: []
+boundaries:
+  # ---------------------------------------------------------------- chain.py
+  - surface: src/claude_code_hooks_daemon/core/chain.py
+    scope: execute
+    construct: "except Exception"
+    ordinal: 0
+    verdict: fail-open
+    induced_by: "any handler raising while judging the event"
+    caller_controlled: true
+    trace: >-
+      logger.exception, AND the exception text is appended to
+      accumulated_context, so it reaches the caller in the result's context.
+      In strict_mode this branch denies instead. Blast radius is one handler,
+      not the chain -- F-BYPS verified this one as correctly built.
+
+  - surface: src/claude_code_hooks_daemon/core/chain.py
+    scope: execute
+    construct: "except Exception"
+    ordinal: 1
+    verdict: fail-open
+    induced_by: "a handler raising in commit_side_effects, after the decision"
+    caller_controlled: true
+    trace: >-
+      logger.exception plus an entry appended to final_result.context. The
+      decision is already final here, so what fails open is the post-decision
+      commit (a rate limiter's rollback), not the verdict.
+
+  # ------------------------------------------------------ front_controller.py
+  - surface: src/claude_code_hooks_daemon/core/front_controller.py
+    scope: run
+    construct: "except json.JSONDecodeError"
+    ordinal: 0
+    verdict: fail-open
+    induced_by: "hook input that is not valid JSON"
+    caller_controlled: false
+    trace: >-
+      NONE. Prints `{}` and exits 0 -- no stderr line, no log entry, no
+      in-band signal. Every guard for that event is inert and nothing
+      anywhere records that it happened. This is the emptiest third column in
+      the inventory, and closing it is independent of the owner-gated
+      question of whether to fail closed.
+
+  - surface: src/claude_code_hooks_daemon/core/front_controller.py
+    scope: run
+    construct: "except Exception"
+    ordinal: 0
+    verdict: fail-open
+    induced_by: "any unhandled exception below the dispatch boundary"
+    caller_controlled: true
+    trace: >-
+      A full stack trace on stderr, a file under the error log, and
+      HookResult.error carrying error_details in-band. The operation is
+      allowed and the caller is told why.
+
+  - surface: src/claude_code_hooks_daemon/core/front_controller.py
+    scope: dispatch
+    construct: "except Exception"
+    ordinal: 0
+    verdict: fail-open
+    induced_by: "a handler raising during dispatch"
+    caller_controlled: true
+    trace: >-
+      log_error_to_file plus HookResult.error with the handler name and
+      exception type in-band.
+
+  - surface: src/claude_code_hooks_daemon/core/front_controller.py
+    scope: log_error_to_file
+    construct: "except Exception"
+    ordinal: 0
+    verdict: fail-open
+    induced_by: "the error log itself being unwritable"
+    caller_controlled: false
+    trace: >-
+      A single stderr WARNING. What fails open is the audit trail rather than
+      a verdict: the decision is unaffected, but the record of the crash that
+      produced it is lost.
+
+  - surface: src/claude_code_hooks_daemon/core/front_controller.py
+    scope: _inject_config_key_footer
+    construct: "except ValueError"
+    ordinal: 0
+    verdict: not-fail-open
+    reason: >-
+      The footer is presentation appended after the decision exists. An
+      unknown event type skips the injection; no verdict changes, and no
+      check is skipped.
+
+  # ------------------------------------------------------------ controller.py
+  - surface: src/claude_code_hooks_daemon/daemon/controller.py
+    scope: process_event
+    construct: "except Exception"
+    ordinal: 0
+    verdict: fail-open
+    induced_by: "any exception escaping chain execution for one event"
+    caller_controlled: true
+    trace: >-
+      logger.exception, an increment of the daemon's error counter (so it is
+      visible in status), and HookResult.error returned in-band.
+
+  - surface: src/claude_code_hooks_daemon/daemon/controller.py
+    scope: process_request
+    construct: "except Exception"
+    ordinal: 0
+    verdict: fail-open
+    induced_by: "a request whose data cannot be parsed into an event"
+    caller_controlled: true
+    trace: >-
+      logger.warning plus HookResult.error of type invalid_request in-band.
+      Note the level: a malformed request that defeats every guard for that
+      call is logged at WARNING, the level used for routine noise.
+
+  - surface: src/claude_code_hooks_daemon/daemon/controller.py
+    scope: _validate_config
+    construct: "except Exception"
+    ordinal: 0
+    verdict: fail-open
+    induced_by: "the config validator crashing, or an unreadable config file"
+    caller_controlled: false
+    trace: >-
+      logger.warning, and the daemon sets self._degraded with the error in
+      _config_errors, which status and the degraded-mode surface report. This
+      is F-BYPS-3, also class 2; what the degraded surface costs is recorded
+      in DECISION-degraded-mode-guard-surface.md.
+
+  - surface: src/claude_code_hooks_daemon/daemon/controller.py
+    scope: _register_pseudo_events
+    construct: "except ValueError"
+    ordinal: 0
+    verdict: fail-open
+    induced_by: "an invalid pseudo-event entry in the project config"
+    caller_controlled: false
+    trace: >-
+      logger.exception and the entry is skipped. Nothing in-band: handlers
+      bound to that pseudo-event simply never run, and a tool call they would
+      have judged proceeds unjudged with no signal at the call.
+
+  - surface: src/claude_code_hooks_daemon/daemon/controller.py
+    scope: _init_mode_manager
+    construct: "except ValueError"
+    ordinal: 0
+    verdict: fail-open
+    induced_by: "an unrecognised default_mode in the project config"
+    caller_controlled: false
+    trace: >-
+      logger.warning naming both the rejected value and the fallback. A
+      config that asked for a stricter mode than DEFAULT is not honoured, and
+      nothing at the call says so.
+
+  - surface: src/claude_code_hooks_daemon/daemon/controller.py
+    scope: _compute_startup_source_fingerprint
+    construct: "except OSError"
+    ordinal: 0
+    verdict: fail-open
+    induced_by: "the daemon's own source tree being unreadable at startup"
+    caller_controlled: false
+    trace: >-
+      logger.error and None is returned. Nothing in-band: with no fingerprint
+      the restart-staleness signal has no baseline, so a daemon running old
+      code reads the same as one running current code.
+
+  - surface: src/claude_code_hooks_daemon/daemon/controller.py
+    scope: _sync_agent_assets
+    construct: "except (OSError, ValueError, TypeError)"
+    ordinal: 0
+    verdict: fail-open
+    induced_by: "an unwritable .claude/agents/, or an invalid config, at startup"
+    caller_controlled: false
+    trace: >-
+      logger.error, deliberately at ERROR and never swallowed (the code says
+      so). Nothing in-band: agent definitions stay at whatever version is on
+      disk, and a caller cannot tell the sync did not happen.
+
+  - surface: src/claude_code_hooks_daemon/daemon/controller.py
+    scope: _sync_directory_role_rules
+    construct: "except (OSError, ValueError, TypeError)"
+    ordinal: 0
+    verdict: fail-open
+    induced_by: "an unwritable .claude/rules/, or an invalid config, at startup"
+    caller_controlled: false
+    trace: "logger.error; nothing in-band. Same contract as _sync_agent_assets."
+
+  - surface: src/claude_code_hooks_daemon/daemon/controller.py
+    scope: _persist_project_handler_health
+    construct: "except RuntimeError"
+    ordinal: 0
+    verdict: not-fail-open
+    reason: >-
+      Observability only, and the code says so: handler LOAD is unaffected by
+      whether the health state persists. No check is skipped and no verdict
+      changes.
+
+  - surface: src/claude_code_hooks_daemon/daemon/controller.py
+    scope: _record_verdicts
+    construct: "except RuntimeError"
+    ordinal: 0
+    verdict: not-fail-open
+    reason: >-
+      The verdict has already been reached and returned; this writes the audit
+      record. Losing the record is a real cost, but it is not this class --
+      the guard did reach a verdict and the guarded action was judged.
+
+  - surface: src/claude_code_hooks_daemon/daemon/controller.py
+    scope: _record_verdicts
+    construct: "except OSError"
+    ordinal: 0
+    verdict: not-fail-open
+    reason: >-
+      Same as the sibling above: the verdict log is written after the decision
+      is final.
+
+  # ----------------------------------------------------------- hooks_relay.rs
+  - surface: relay/hooks_relay.rs
+    scope: mid_exchange_fail
+    construct: "diverging fail funnel"
+    ordinal: 0
+    verdict: fail-open
+    induced_by: >-
+      the 30000 ms forwarder budget expiring, a socket IO error, or an
+      oversize response, once stdin has been (partly) consumed
+    caller_controlled: true
+    trace: >-
+      ONE stderr line, then `{}` on stdout and exit 0. Nothing in-band: Claude
+      Code receives valid JSON indistinguishable from a clean allow. This is
+      F-BYPS-5, and the timeout half is measurably reachable -- a commit
+      staging 16 MiB of added text judges in 17.8 s, 59.3% of the budget, and
+      the cost grows superlinearly in bytes (Plan 00412 journal, 2026-09-16).
+      The caller chooses that input.
+
+  - surface: relay/hooks_relay.rs
+    scope: connect_fail
+    construct: "diverging fail funnel"
+    ordinal: 0
+    verdict: fail-open
+    induced_by: "the daemon socket not accepting a connection"
+    caller_controlled: false
+    trace: >-
+      One stderr line. Materially better than the mid-exchange case: stdin is
+      untouched, so with --fallback the bash forwarder is exec'd and is a full
+      substitute -- no guard is lost. Only with no fallback configured does
+      the call go unjudged.
+
+  - surface: relay/hooks_relay.rs
+    scope: exec_fallback
+    construct: "diverging fail funnel"
+    ordinal: 0
+    verdict: fail-open
+    induced_by: "exec of the bash forwarder failing after a connect failure"
+    caller_controlled: false
+    trace: >-
+      One stderr line naming the script and the errno, then EXIT_CONNECT_FAIL.
+      A non-zero exit with no stdout is a non-blocking hook error to Claude
+      Code, so the call proceeds.
+
+  - surface: relay/hooks_relay.rs
+    scope: usage_fail
+    construct: "diverging fail funnel"
+    ordinal: 0
+    verdict: fail-open
+    induced_by: "the relay being invoked with missing or malformed argv"
+    caller_controlled: false
+    trace: >-
+      Two stderr lines (the detail and a usage line), then EXIT_USAGE. argv is
+      written by the installer into settings.json, not by the party the guard
+      constrains -- but a botched install therefore disables every hook, with
+      no signal anywhere except a stderr line nothing collects.
+
+  # ------------------------------------------------------------------ init.sh
+  - surface: init.sh
+    scope: is_hooks_daemon_repo
+    construct: "2>/dev/null"
+    ordinal: 0
+    verdict: not-fail-open
+    reason: >-
+      `git remote get-url origin` failing IS the answer -- a repo with no
+      origin is a normal state, and `|| echo ""` supplies the value the caller
+      branches on. Suppressing git's complaint discards nothing the script
+      does not already know.
+
+  - surface: init.sh
+    scope: _exec_bit_selfheal
+    construct: "2>/dev/null"
+    ordinal: 0
+    verdict: not-fail-open
+    reason: >-
+      `stat -c %Y` is the GNU spelling and the next line tries the BSD
+      `stat -f %m`. Exactly one of the pair must fail on any given platform,
+      so this suppresses a diagnostic that is expected by construction.
+
+  - surface: init.sh
+    scope: _exec_bit_selfheal
+    construct: "2>/dev/null"
+    ordinal: 1
+    verdict: not-fail-open
+    reason: "The BSD half of the stat pair above."
+
+  - surface: init.sh
+    scope: <toplevel>
+    construct: "2>/dev/null"
+    ordinal: 0
+    verdict: not-fail-open
+    reason: >-
+      Reading the socket-discovery file, whose absence is the ordinary case --
+      the next line tests the value for emptiness and for being a socket
+      before using it.
+
+  - surface: init.sh
+    scope: validate_venv
+    construct: "2>/dev/null"
+    ordinal: 0
+    verdict: not-fail-open
+    reason: >-
+      The import probe's exit status IS the function's answer; the traceback
+      it suppresses is the expected output of the negative case.
+
+  - surface: init.sh
+    scope: is_daemon_running
+    construct: "2>/dev/null"
+    ordinal: 0
+    verdict: not-fail-open
+    reason: >-
+      Reading a pidfile that legitimately may not exist; `|| echo ""` supplies
+      the value and the caller branches on it.
+
+  - surface: init.sh
+    scope: is_daemon_running
+    construct: "2>/dev/null"
+    ordinal: 1
+    verdict: not-fail-open
+    reason: >-
+      `kill -0` is a liveness probe: its failure is the answer the function
+      returns, not an error being hidden.
+
+  - surface: init.sh
+    scope: _passthrough_flag_path
+    construct: "2>/dev/null"
+    ordinal: 0
+    verdict: not-fail-open
+    reason: >-
+      The mkdir sits inside `if ! mkdir -p ...; then`, so the failure is
+      branched on explicitly. Only the message is suppressed, not the outcome.
+
+  - surface: init.sh
+    scope: ensure_daemon
+    construct: "2>/dev/null"
+    ordinal: 0
+    verdict: not-fail-open
+    reason: >-
+      `rm -f` of the passthrough flag, which may legitimately be absent; -f
+      already makes that non-failing.
+
+  - surface: init.sh
+    scope: ensure_daemon
+    construct: "2>/dev/null"
+    ordinal: 1
+    verdict: not-fail-open
+    reason: "The second `rm -f` of the passthrough flag; same reasoning."
+
+  - surface: init.sh
+    scope: ensure_daemon
+    construct: "2>/dev/null"
+    ordinal: 2
+    verdict: not-fail-open
+    reason: >-
+      The touch sits inside `if ! touch ...; then`, so an unwritable flag path
+      is handled rather than ignored.

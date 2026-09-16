@@ -354,6 +354,16 @@ else
 fi
 echo ""
 
+echo "27. Running Fail-Open-Inventory Check..."
+echo "----------------------------------------"
+if ! "${VENV_PYTHON}" "${SCRIPT_DIR}/check_fail_open_inventory.py" --json; then
+    OVERALL_EXIT_CODE=1
+    echo "❌ Fail-open-inventory check FAILED"
+else
+    echo "✅ Fail-open-inventory check PASSED"
+fi
+echo ""
+
 # Print overall summary
 echo "========================================"
 echo "QA Summary"
@@ -394,6 +404,7 @@ results = {
     "Input Contract": "untracked/qa/input_contract.json",
     "Authored Path Stat": "untracked/qa/authored_path_stat.json",
     "Declared Invariant Pairs": "untracked/qa/declared_invariant_pairs.json",
+    "Fail-Open Inventory": "untracked/qa/fail_open_inventory.json",
 }
 
 all_passed = True
