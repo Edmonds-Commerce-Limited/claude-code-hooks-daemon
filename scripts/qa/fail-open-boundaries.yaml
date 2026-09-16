@@ -1,0 +1,23 @@
+# Fail-open boundaries in the enforcement path.
+#
+# Defence for the `fail-open-when-the-check-cannot-run` class (Plan 00412).
+# Asserted by scripts/qa/check_fail_open_inventory.py: every candidate the
+# scanner finds in the enforcement path must have a row here, and every row
+# must name a boundary that still exists.
+#
+# A row is a JUDGEMENT, not an acceptance. Declaring a boundary records what
+# induces it, whether the party the guard constrains can induce it, and what
+# trace it leaves in-band -- the third column being the one that usually turns
+# out to be empty.
+#
+# Fields:
+#   surface / scope / construct / ordinal -- the boundary's identity, as the
+#     scanner spells it. `ordinal` tells apart two identical constructs in one
+#     scope; inserting a third between them shifts it and the row rots, which
+#     is deliberate: a change to the fail-open structure of a function should
+#     demand that someone look again.
+#   verdict -- `fail-open` or `not-fail-open`.
+#   induced_by / caller_controlled / trace -- required of a `fail-open` row.
+#   reason -- required of a `not-fail-open` row.
+
+boundaries: []
