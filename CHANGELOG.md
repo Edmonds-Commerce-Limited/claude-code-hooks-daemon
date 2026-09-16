@@ -7,6 +7,320 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_A guard-review release. Plan 00412 turns security review into a routine
+with its own append-only ledger (`CLAUDE/Routine/`, `run-routine`,
+`routine-qa`) and runs it against every existing guard, closing eleven
+bypasses and asymmetric-sibling defects and adding two handlers that watch
+the guard config itself — `guard_config_drift` and
+`guard_config_commit_gate`. Plans 00416 and 00417 give session start and
+session end teeth: a computed action tier, a declared cron that is
+verified rather than announced, a must-do list delivered as a turn, and an
+operator channel for reboot and shutdown warnings. Plans 00409 and 00413
+close the correctness tail: the v3.64.0 heredoc regression, a fresh clone
+that can actually start, an unattended-question gate, and `find-plan`.
+Sixteen things v3.64.0 allowed now deny — five new `destructive_git`
+rules, a widened `sensitive_content` publication surface, `~` write
+targets, `install`/`dd` worktree relocation, and more — with no single
+flagship rename this cycle; each BREAKING entry below names the exact
+command shape affected. Attribution below cites a plan as the TRACKING
+plan for a work area, not as the origin of every fix in it._
+
+### Added
+
+- **`host_hostname`, a new opt-in status-line segment (Plan 00411).** Shows
+  which MACHINE a session is on beside `environment_indicator`'s which
+  KIND, resolved from `CCY_HOST_HOSTNAME`, then
+  `HOOKS_DAEMON_HOST_HOSTNAME`, then `gethostname()` (host/LXC only), then
+  an `/etc/hosts` self-alias rendered as `@~name` to mark it INFERRED;
+  silent inside a container with no export.
+
+- **BREAKING: `cron_stop_enforcer` and `cron_subagent_stop_enforcer`, two
+  new handlers that give `persistent_crons` teeth (Plan 00416).** Enabled
+  by default, they compare declared jobs against the `session_crons` the
+  Stop/SubagentStop payload carries and block the stop naming the exact
+  `CronCreate` — id, schedule and full prompt — for anything missing; an
+  absent `session_crons` field means "no information" and never blocks. A
+  project that already declares `persistent_crons.jobs` will now see a
+  stop denied for a job Claude Code has not (yet) recreated.
+
+- **SessionStart messages now carry a computed action tier (Plan 00416).**
+  Every SessionStart message is rendered with `ACTION_REQUIRED`,
+  `ACTION_SUGGESTED` or `INFO`; `ACTION_REQUIRED` is earned only by
+  shipping a verifier that is currently failing, and a `declared_tier`
+  arriving from anywhere is clamped to `INFO` and logged at ERROR.
+
+- **`hooks-daemon session-actions` (Plan 00416).** Prints the current tier
+  for every SessionStart handler, with `--format json` for machine
+  reading, needing no running daemon.
+
+- **`project_handler_load_checker` and `hook_registration_checker` gained
+  real verifiers (Plan 00416).** Each computes `ACTION_REQUIRED` only when
+  the session is objectively mis-configured; `hook_registration_checker`
+  deliberately skips its own migrate/repair path so asking how urgent
+  something is never rewrites `settings.json`.
+
+- **`session_actions_directive`, a new opt-in SessionStart handler (Plan
+  00416).** When a session starts with one or more `ACTION_REQUIRED`
+  items it writes a `<session>.session-actions` signal and the ccy
+  supervisor types one short directive naming the count; the signal
+  carries a positive integer and nothing else.
+
+- **`hooks-daemon signal`, an operator channel for reboot and shutdown
+  warnings (Plan 00417).** `signal reboot-warning --minutes 10 --all-sessions`, `shutdown-warning` and `reboot-cancelled` — a closed
+  kind set with a bare positive-integer payload and no free text, because
+  it is the one channel writable from outside the container.
+
+- **`hooks-daemon find-plan <number|name|words>` (Plan 00413).** Searches
+  the whole plan tree including `Completed/`, printing each match's
+  number, status and path, and is now named in `plan_number_helper`'s deny
+  message — the affordance the folder-scan guard was missing.
+
+- **`CLAUDE/Routine/`, a tree for recurring work that never completes
+  (Plan 00412).** `mkroutine.bash` scaffolds a routine from a
+  git-anchored counter, `hooks-daemon run-routine` starts/finishes/lists
+  runs against an append-only two-row-per-run ledger, `hooks-daemon routine-qa` runs five drift checks (`routine-never-run`,
+  `routine-overdue`, `routine-run-gap`, `routine-ledger-unreadable`,
+  `routine-not-configured`), and run coverage is recorded as composable
+  intervals rather than a mutable "last reviewed" pointer.
+
+- **`routine_qa_sweep`, a new opt-in SessionStart advisory (Plan 00412).**
+  The dead-man's switch: a run that never happened writes no record, so
+  its absence has to be asserted from outside the records. Silent on a
+  clean tree, never raises, off by default.
+
+- **`guard_config_drift`, a new SessionStart advisory (Plan 00412).**
+  Compares the working-tree `hooks-daemon.yaml` against `git show HEAD:`
+  and names any uncommitted change that weakens a guard — a guard
+  disabled, a handler block removed while the handler still exists, an
+  exclusion widened. Priority 49, ahead of the whole advisory ladder,
+  because every other advisory's value is conditional on the guards being
+  live. Silent when the two agree.
+
+- **`guard_config_commit_gate`, a new PreToolUse handler (Plan 00412).**
+  Reports a commit whose `hooks-daemon.yaml` weakens a guard, at the
+  moment it enters history. It **reports and never denies** — two denial
+  designs were measured against this repository's own history and both
+  misfired on the majority of commits.
+
+- **`ask_user_question_blocker` gains `options.mode: unattended` (Plan
+  00413).** Claude Code's own "nobody is watching" mechanisms are
+  launcher flags and cannot reach a cron firing into a live interactive
+  session; with the mode set (opt-in), every question is refused and the
+  agent is told to choose the option it would have recommended and
+  continue. `get_rules()` is mode-aware, so the generated `CLAUDE.md`
+  table no longer advertises a prefix that cannot work.
+
+- **BREAKING: `destructive_git` gains five rules (Plan 00412).**
+  `R-GIT-CHECKOUT-FORCE`, `R-GIT-SWITCH-FORCE`, `R-GIT-REFLOG-EXPIRE`,
+  `R-GIT-GC-PRUNE-NOW` and `R-GIT-FILTER-HISTORY` — the handler already
+  denied `git checkout -- <file>` while `git checkout -f` reached the
+  same outcome untouched. Each is paired with a control a sloppier
+  pattern would fail (`git gc`, `--expire=90.days.ago`, `git checkout feature-fix`).
+
+- **BREAKING: `release-blocked-plan`, a new plan-QA check (Plan 00409).**
+  A plan is done when its deliverable is merged, never when a release
+  ships, so an unticked criterion waiting for a release to HAPPEN is now
+  a finding at edit, commit and sweep. Staging a release-bound
+  consequence into `UNRELEASED/` is exempt first and unconditionally.
+
+- **`remote-docs check` now reports licence drift against
+  `known_sources` (Plan 00413).** Recording a domain licence only
+  affects future captures, so everything already vendored kept its old
+  stamp while the advisory looked like it had worked; the drift is now
+  reported beside staleness, with re-capture named as the fix.
+  Re-stamping is reported rather than auto-applied, because a licence is
+  a legal assertion about someone else's work.
+
+- **`scripts/bootstrap-self-install.sh`, the supported fresh-clone route
+  for the daemon's own repository (Plan 00413).** Resolves the
+  fingerprint-keyed venv with `resolve_venv.sh --fallback-target`, `uv sync`s into it, writes `.claude/hooks-daemon.env` **after** the sync so
+  a failed sync cannot leave a checkout that claims to be configured,
+  then restarts.
+
+### Changed
+
+- **BREAKING: The sensitive-content publication surface widens to a
+  declared inventory (Plan 00412).** `gh release create/edit --notes`,
+  `gh gist create --desc`, `gh pr review --body` and `gh repo edit --description` are now scanned. The surfaces are a declared table with
+  a test asserting every row is covered, and the pattern now requires a
+  body-carrying flag so read-only verbs stay out by construction.
+
+- **BREAKING: A git or gh message FILE is now scanned like an inline
+  message (Plan 00412).** `-F` and `--file=` are read wherever git or gh
+  puts the text, via one shared reader; `github_auto_close_keywords`
+  gains a read-failure guard it never had.
+
+- **BREAKING: A path-qualified `gh` is still `gh` (Plan 00412).**
+  `/usr/bin/gh` and `./gh` are now recognised by the publication guard;
+  the left boundary is kept rather than relaxed, so `foo-gh` is still not
+  `gh`.
+
+- **BREAKING: `worktree_file_copy` covers every relocation verb (Plan
+  00412).** `install` and `dd` join `cp`/`mv`/`rsync`; a package-manager
+  invocation inside a worktree stays allowed, pinned by test.
+
+- **`gitignore_safety_checker` derives its required entries from the
+  protected globs (Plan 00412).** Two lists answered one question and
+  disagreed — a suffix-only gitignore line missed a `.bak` beside it, and
+  the vault-password and SSH-key shapes were absent outright. Advisory
+  only: more entries are listed until a project's `.gitignore` covers
+  them, no new refusal.
+
+- **The staged-content scan drops protected paths before reading them
+  (Plan 00412).** `git add -A` names no path, so `secret_file_guard` was
+  never on that route and `sensitive_content` quoted matched bytes in its
+  own deny reason — the guard was the thing disclosing them.
+  `check_sensitive_content` drops them from its scan set too.
+
+- **`remote-docs refresh` is guarded by the same sensitive-content scan
+  as `remote-docs add`, with a new `REFUSED` outcome (Plan 00412).** The
+  reasoning applies more strongly on refresh, where the new bytes have
+  had no review by anyone; the guard runs before the unchanged-hash
+  short-circuit so the short-circuit cannot become a way past it.
+
+- **BREAKING: An `Edit` in the remote-docs tree is refused plainly,
+  without inspecting content (Plan 00413).** The handler had validated an
+  Edit `new_string` fragment as a whole file, so every one-line change
+  was denied for "no frontmatter" — and a fragment that DID parse as
+  valid provenance passed, so following the stated reason corrupted the
+  file and was waved through. The reason now names the real objection
+  (hand editing falsifies `source_sha256` and `fidelity`) and the
+  re-capture route.
+
+- **`hooks-daemon explain-handler` resolves PROJECT handlers too (Plan
+  00413).** The generated `CLAUDE.md` lists a project's own handlers and
+  tells the reader to look them up with exactly that command, and the
+  FIRST entry answered "unknown handler". `explain-rule --list` is
+  unchanged and was always correct — project handlers declare no rules.
+
+- **The vendored Claude Code hooks contract is refreshed against
+  v2.1.272 (Plan 00413).** Event set unchanged at 33; seven events had
+  drifted. `WorktreeRemove` really can block (any non-zero exit, so a new
+  `nonzero-exit` token), `PostModelSwitch`'s `additionalContext` must be
+  NESTED under `hookSpecificOutput`, `PermissionDenied` ignores `retry: true` with no verdict, `PreToolUse` gains `scratchpad_dir`,
+  `PostToolUse` `tool_response` is `{filePath, type}`, and
+  `Elicitation`/`ElicitationResult` do not receive `permission_mode`.
+
+- **`install.py --force` now backs up the config it overwrites (Plan
+  00412).** `create_settings_json` backed up including under `--force`
+  and its comment said why; `create_daemon_config` still guarded its
+  backup with "and not force" — and what it destroyed was the client's
+  handlers, `exclude_paths`, `extra_whitelist` and plugins while the
+  console printed "Created". `_free_backup_path` now handles the
+  same-second collision, and the `force` parameter is removed rather than
+  ignored.
+
+- **The installer preserves a deployed skill it did not write (Plan
+  00412).** `_deploy_one_skill` called `rmtree` with no provenance test,
+  so a user's customisation of a deployed skill was lost silently on the
+  next upgrade. Provenance is established by comparing trees, and the
+  backup lives OUTSIDE `.claude/skills/` so it cannot register as a
+  second stale slash command. An unchanged skill leaves no backup.
+
+- **`harvest-background` describes the JOB on a TTL breach, not the
+  waiter (Plan 00412).** The tracked process is the wrapper, which
+  blocks in `wait`, so it reported a busy QA suite as `0% CPU` and
+  offered a `kill` naming only the idle wrapper's process group. The unit
+  of work is now the process TREE: the report shows the tree's CPU and
+  the kill command names every group the tree spans. A CPU breach is
+  untouched.
+
+- **Two unbounded spawns are now bounded (Plan 00412).** `ps` in the
+  background harvester gets 10s and `gh run list` gets 30s;
+  `TimeoutExpired` propagates rather than being caught.
+
+- **The fresh-clone first run gives a valid response and advice that can
+  work (Plan 00413).** `emit_hook_error()` embedded a literal `Unknown`
+  in `hookEventName`, which Claude Code validates against a closed enum —
+  so the remedy prose was discarded with the envelope; it now travels in
+  `systemMessage`. The message no longer says "restart the daemon" (a
+  restart cannot build a venv that was never built) and no longer says
+  `python install.py` (bare `python` is absent on modern Fedora/Debian
+  12+/Ubuntu) and no longer recommends `install.py` at all inside a clone
+  of this repository.
+
+- **`persistent_cron_assertor` now carries the tags its own manifest
+  claimed (Plan 00412).** It shipped with none, so it was invisible to
+  the config-optimisation review meant to surface it. The v3.64.0
+  config-change manifest also documented a declared job's key as `name`
+  where the schema says `id` with `extra="forbid"`, so a client pasting
+  the documented example got two validation errors and a daemon that
+  would not start; every `example_yaml` in all 50 manifests is now
+  parsed by a QA check.
+
+- **The `issue-sdlc` skill gates on an author whitelist (Plan 00384).**
+  An issue from anyone not on the four-login list gets nothing written
+  back to GitHub; the match is case-insensitive and applied client-side
+  at LIST time, since a `--search author:` qualifier would fail OPEN. The
+  list itself lives in this repository's own runbook, not in the
+  deployed skill, so a client project sees no behaviour change from
+  this.
+
+### Fixed
+
+- **`cron_stop_enforcer` no longer wedges every Stop (Plan 00416).**
+  Diagnosed from a real captured payload: the declared prompt is 576
+  characters with single newlines and the delivered one is 580, the same
+  words with blank lines inserted, because the prompt is re-rendered
+  through an advisory and retyped by an agent. Matching now compares the
+  words with layout normalised away; schedule stays exact. The match
+  could never succeed, so the block was permanent and any client project
+  declaring a cron would have hit it on first use.
+
+- **Declaring a `layout` no longer switches off the TDD per-language
+  exclusions (Plan 00419 N6).** `matches()` consulted
+  `layout.is_source_path()` first and returned True, so
+  `PythonTddStrategy`'s `__init__.py` exclusion was unreachable for any
+  project that declares its layout — writing a new package's
+  `__init__.py` was denied, demanding `test___init__.py`. `TddStrategy`
+  gains `is_excluded_source_file`, a file-level veto consulted ahead of
+  both location rules.
+
+- **`worktree_file_copy` no longer judges prose as a command (Plan
+  00412).** A commit message describing the handler was denied because
+  it quoted a `cp` example, and the deny rendered "🔥 WHY THIS IS
+  CATASTROPHIC". It now routes through `strip_inert_spans` like
+  `destructive_git`, `pipe_blocker`, `merge_to_main_approval` and
+  `daemon_location_guard` already did. `bash <<'EOF'` still has its body
+  judged.
+
+- **A commit message quoting a plan glob is not a discovery scan (Plan
+  00413 N7b).** `plan_number_helper` blocked the very commit recording
+  its own niggle. Anchored on the LAST mention, not the first, so a
+  message mentioning the plan directory cannot carry a real scan chained
+  after it.
+
+- **The acceptance playbook now describes the CONFIGURED handler, not
+  the default one (Plan 00413 N14).** `PlaybookGenerator` instantiated
+  every handler bare and read config only for `enabled`/`priority`, so
+  an option-switched handler declared the behaviour of a mode the daemon
+  was not running — and `test_playbook_harness.py` dispatches those
+  declarations live, so three probes "failed" against a correct handler.
+  `get_acceptance_tests()` is now mode-aware like `get_rules()` already
+  was.
+
+- **A `..` in an authored path is normalised before it is stat-ed (Plan
+  00412).** A `../` link to a real sibling produced a docs-QA finding
+  when the writing file's own directory did not exist yet; all seven
+  instances now route through `utils.authored_paths.authored_path_exists`.
+  Lexical normalisation is the faithful answer because a markdown
+  renderer resolves a link by text.
+
+- **A scoped QA scan no longer publishes its verdict as the repository's
+  own (Plan 00413 N13).** `check_sensitive_content.py --path <dir>`
+  overwrote the repository-wide artefact the QA suite hands to an agent,
+  so a plain test run could leave it reading `passed: false` against a
+  path under `/tmp` while the repository itself was clean.
+
+- **A hand-edited routine ledger row is reportable, not fatal (Plan
+  00412).** `read_events` raised on a row that could not become a
+  `RunEvent`, taking the whole QA sweep with it; it now skips and
+  `malformed_rows()` reports exactly those rows, so a run cannot vanish
+  from the coverage chain silently.
+
+- **`scripts/debug_hooks.sh` runs in the repository that dogfoods it,
+  and on macOS bash 3.2 (Plan 00419 N1).**
+
 ### Security
 
 - **A heredoc fed to an INTERPRETER is no longer treated as inert (Plan
@@ -56,6 +370,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   Release note 29 of v3.64.0 carries an inline correction, since it claimed
   nothing bash would actually run had been exempted.
+
+- **The ESLint runner no longer steers `PATH` into the guarded project's
+  `node_modules` (Plan 00412).** The handler prepended the reviewed
+  tree's `node_modules/.bin` and spawned a bare `tsx`, so any package
+  able to drop a `tsx` shim there got code execution in a daemon
+  subprocess on the next TypeScript write — and afterwards the daemon
+  could not say which file it had run. The workspace's own `tsx` is
+  still preferred, resolved outright rather than through a search order.
+
+- **`lint_on_edit` and `staged_lint_gate` build argv as a list (Plan
+  00412).** Both split a template string, so a path containing a space
+  became two arguments. `lint_on_edit`'s displayed command is rebuilt
+  with `shlex.join` — display only, never re-parsed.
+
+- **Remote-docs provenance is written as YAML, not interpolated into it
+  (Plan 00412).** `_render_frontmatter` built the document with a string
+  formatter, so a captured value could open a key and forge `fidelity: verbatim`; it now builds a dict and hands it to `yaml.safe_dump`, so
+  injected text is quoted INSIDE the value it was smuggled into.
+
+- **BREAKING: A leading `~` no longer escapes project containment (Plan
+  00412).** A live bypass of `R-WRITE-OUTSIDE-PROJECT-ROOT`: `curl -o ~/x.sh` was ALLOWED where `echo > ~/notes.txt` was denied — same
+  destination, opposite verdicts. `~` is a deterministic expansion of
+  `$HOME` so naming it is resolution, not fabrication; `project_containment`
+  now expands it before judging every write target. `$HOME`, globs and
+  backticks are still correctly declined.
+
+- **Generated forwarder paths are escaped (Plan 00412).** Three of five
+  interpolation sites in `build_relay_guard_block` are fixed; two sit
+  inside `${VAR:-default}` where a `}` terminates the expansion and the
+  existing escaper has no rule — recorded as PARTIALLY fixed with an
+  owner decision written up rather than closed on paper. Escaping is a
+  no-op for ordinary paths, so every existing install's forwarder is
+  byte-identical.
+
+- **The status-line hostname is validated against an allowlist and has
+  no config key (Plan 00411).** The value is printed to a terminal once
+  per second, so a name carrying `\033[` or an OSC sequence is a
+  terminal-injection vector; nine permitted characters, 64 chars, refuse
+  rather than strip, never log the rejected value, sanitise every rung.
+  The `options.host_name` rung was dropped outright because
+  `.claude/hooks-daemon.yaml` is tracked and often public.
+
+- **Three path oracles in the QA checks are closed (Plan 00412).**
+  `quote_drift` stat-ed AND READ `project_root / block.source_path` from
+  a marker inside a document, so `../../etc/passwd`, an absolute path or
+  an in-repo symlink resolved and was read — the check itself was the
+  read primitive, and `secret_file_guard` does not cover it because
+  nothing an agent typed names the file. `pointer_resolves` and
+  `plan_qa/checks/path_existence` leaked existence the same way.
+  `contained_authored_path(..., within=)` normalises, contains and
+  resolves symlinks; `authored_path` normalises only.
+
+### Removed
+
+- **BREAKING: `env` is no longer on the pipe-blocker universal
+  whitelist (Plan 00412).** It is not a cheap filter, it runs someone
+  else's command, so `env pytest tests/ | head -20` was attributed to
+  `env` and allowed. `printenv` is the non-wrapper spelling and stays
+  whitelisted.
 
 ## [3.64.0] - 2026-09-14
 

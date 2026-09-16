@@ -1,0 +1,31 @@
+# Drafted by the release agent for v3.65.0. The VERSION in the filename and
+# the `version:` key are a target, not a decision -- releases are human-gated
+# in this project, and the release agent confirms or renames this file. Only
+# the content is asserted here.
+version: "3.65.0"
+truth_changes:
+  - topic: handler-development
+    id: worktree-remove-can-block
+    was: >
+      A `WorktreeRemove` hook cannot block the removal. The vendored contract
+      (`contracts/claude-code-hooks/WorktreeRemove.json`) recorded
+      `block_mechanism: null` and `can_block: false`, and
+      `constants/events.py`'s `EventID.WORKTREE_REMOVE.can_block` was `False`
+      to match -- so a handler on this event was documented as report-only,
+      with nothing it returned able to stop the removal.
+    now: >
+      A `WorktreeRemove` hook CAN block the removal, via a new `nonzero-exit`
+      mechanism: any non-zero exit fails the removal, conditional on the
+      worktree directory still existing afterward (a non-zero exit that
+      nonetheless removed the directory is not a failure). This is not
+      exit-2-specific like most blocking events. Claude Code discards this
+      event's JSON output fields (`systemMessage`, `continue` and the rest),
+      so a refusal cannot be expressed on the wire -- only the process exit
+      code is read, and on failure the worktree stays on disk with the hook's
+      command and stderr going to the debug log. `constants/events.py`'s
+      `EventID.WORKTREE_REMOVE.can_block` is now `True` to match. This
+      corrects a claim table refreshed against the vendored Claude Code hooks
+      contract (Claude Code v2.1.272); the field has no runtime consumer
+      outside this project's own QA checker, so nothing in shipped handler
+      behaviour changed -- only what a handler AUTHOR should believe is
+      possible changed.

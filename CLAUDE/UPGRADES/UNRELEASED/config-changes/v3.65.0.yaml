@@ -4,7 +4,7 @@
 version: "3.65.0"
 date: "UNRELEASED"
 
-breaking: false
+breaking: true
 
 config_changes:
   added:
@@ -80,7 +80,7 @@ config_changes:
         session_start:
           session_actions_directive:
             enabled: true
-            priority: 72
+            priority: 73
       migration_note: >-
         Opt-in, because it types a line into your terminal. Useful only where
         an armed ccy supervisor is live to read the signal — without one the
@@ -88,6 +88,157 @@ config_changes:
         SessionStart handlers: it counts what is STILL ACTION_REQUIRED after
         every other handler has run, and `hook_registration_checker` self-heals
         inside its own handler.
+      recommended: false
+      dormant: true
+
+    - key: handlers.pre_tool_use.guard_config_commit_gate
+      description: >-
+        Names a guard weakening AT THE MOMENT it enters history. This is the
+        commit-time half of Plan 00412 class 2
+        (`guard-self-disablement-unwatched`): an action that changes what a
+        future session's guards will do, judged by no gate and recorded
+        nowhere. The SessionStart sibling
+        (`handlers.session_start.guard_config_drift`) reports a weakening
+        sitting in the working tree; this reports the same comparison at the
+        point a `git commit` records it, which is where a reviewer actually
+        looks. It reports and never denies — measured, not preferred: two
+        denial designs (requiring a literal `RULE CHANGE:` marker; requiring
+        the message to name the weakened handler) were tested against this
+        repository's own 3,903 commits, and both misfired on the majority of
+        genuine weakening commits, judging the message's spelling rather than
+        whether anyone reasoned. A gate with an 80% historical false-alarm
+        rate gets switched off, which is the finding eating itself, so the
+        RECORD is the whole deliverable. It reads the config content the
+        commit will actually record — the index for an ordinary `git commit`,
+        the working tree for `git commit -a` or a pathspec covering the
+        config file — so it cannot be fooled by a staged-vs-working-tree
+        mismatch.
+      example_yaml: |
+        pre_tool_use:
+          guard_config_commit_gate:
+            enabled: true
+            priority: 49
+      migration_note: >-
+        On by default; no action needed to adopt. Advisory only — it never
+        blocks a commit. If a reported weakening is deliberate, say why in the
+        commit message so the record is reviewable; if it is not, drop the
+        change from that commit. Disable with
+        handlers.pre_tool_use.guard_config_commit_gate.enabled: false.
+      recommended: true
+      dormant: false
+
+    - key: handlers.session_start.guard_config_drift
+      description: >-
+        Names an UNCOMMITTED config change that weakens this project's
+        guards, at the top of the next session. Plan 00412 class 2 probed
+        every route that switches a guard off — `Edit`, `Write`, a Bash
+        redirect, `cp`, `mv`, `chmod 000`, `config set ... enabled false`,
+        `stop`, `rm -rf` — across four files, and every result was NOTHING
+        DENIES; worse, every deny message the guard itself prints names the
+        exact config key that disables it, so the route is not merely open,
+        it is advertised. This handler does not close that route and is not
+        trying to: a PreToolUse deny on config writes is owner-gated AND
+        circular (an agent that can edit the config can edit the rule
+        guarding it). The non-circular remedies are a commit-time gate
+        (`guard_config_commit_gate`, above) and this drift report — a
+        weakening stops being SILENT, named before any advisory whose value
+        depends on the guards actually being live. Priority 49 puts it ahead
+        of the whole advisory ladder for exactly that reason. Silent when the
+        working-tree config matches its committed form (the common case), and
+        also silent — deliberately — when there is no committed config, when
+        either document cannot be read, or when either cannot be parsed: each
+        is a state this handler cannot interpret, and an advisory that fires
+        wrongly every session gets switched off, which would be the finding
+        eating itself.
+      example_yaml: |
+        session_start:
+          guard_config_drift:
+            enabled: true
+            priority: 49
+      migration_note: >-
+        On by default; no action needed to adopt. If the reported change is
+        intended, commit it so it is reviewable; if it is not, restore it
+        with `git checkout HEAD -- .claude/hooks-daemon.yaml`. Disable with
+        handlers.session_start.guard_config_drift.enabled: false.
+      recommended: true
+      dormant: false
+
+    - key: handlers.session_start.routine_qa_sweep
+      description: >-
+        The dead-man's switch for `CLAUDE/Routine/` (Plan 00412 Task 2.5), the
+        new tree for recurring work that never completes — a Plan finishes, a
+        Routine recurs. A run that never happened leaves no record at all, so
+        its absence is not observable from the records themselves, which is
+        exactly why "never ran" was kept out of the run-state vocabulary
+        rather than added to it. Something OUTSIDE the records has to know a
+        routine exists and assert that a run is overdue, and session start is
+        the one surface the daemon executes itself rather than one it can
+        only hope fired. Runs five checks: `routine-never-run` (declared
+        active, no record at all), `routine-overdue` (past its period plus
+        its grace, counting only a FINISHED run), `routine-run-gap` (commits
+        between two runs that neither covered), `routine-ledger-unreadable`
+        (a hand-edited row in `RUNS/`), and `routine-not-configured` (the
+        ROUTINE.md header does not declare a Status or Trigger the checks
+        recognise). Silent on a clean tree, and never raises — a sweep that
+        dies must report nothing, and so must a healthy tree, but those two
+        outcomes must never be confused with each other, so a read failure is
+        reported as "could not read", not silence.
+      example_yaml: |
+        session_start:
+          routine_qa_sweep:
+            enabled: true
+            priority: 72
+      migration_note: >-
+        Opt-in: most projects have no `CLAUDE/Routine/` tree, and a handler
+        that fires with nothing to say becomes scenery nobody reads. It also
+        needs no action beyond enabling — `matches()` fires only when
+        `CLAUDE/Routine/` actually declares at least one routine, so turning
+        it on in a project with none changes nothing. Keep `priority` ahead
+        of `handlers.session_start.session_actions_directive`'s 73, which
+        must stay last among SessionStart handlers. Re-check any reported
+        drift with `hooks-daemon routine-qa`.
+      recommended: false
+      dormant: true
+
+    - key: handlers.status_line.host_hostname
+      description: >-
+        A new opt-in status-line segment (Plan 00411) showing WHICH MACHINE
+        this session is on, alongside the sibling `environment_indicator`,
+        which shows only WHICH KIND (desktop, docker, podman, lxc). Resolved
+        once per daemon start, in order: `CCY_HOST_HOSTNAME` (set by the ccy
+        supervisor), then `HOOKS_DAEMON_HOST_HOSTNAME` (any other launcher),
+        then `gethostname()` (host or LXC only — inside podman/docker the
+        container's own hostname is the container ID, never the host's), then
+        an `/etc/hosts` self-alias hint rendered as `@~name` to mark it
+        INFERRED rather than read as fact (works on a Debian-family host,
+        which writes `127.0.1.1 <hostname>`, and finds nothing on Fedora).
+        Renders nothing when no name resolves — deliberately silent inside a
+        container with no export, rather than showing something confidently
+        wrong. The value is validated against an allowlist (letters, digits,
+        dot, underscore, hyphen; 64 chars max) and refused outright otherwise,
+        with the rejected value never logged: it is printed to a terminal
+        once per second, so an ANSI/OSC escape sequence in it would be a
+        terminal-injection vector, not a cosmetic defect. There is
+        deliberately NO config option for the name itself — a hostname is
+        per-machine and `.claude/hooks-daemon.yaml` is tracked in git and
+        routinely public, so an option would invite a machine name into a
+        committed file, a leak findable only by searching history that is
+        never rewritten. Per-machine values come from the environment only.
+      example_yaml: |
+        status_line:
+          host_hostname:
+            enabled: true
+            priority: 7
+      migration_note: >-
+        Opt-in: pure gain only if you work across more than one machine — a
+        single-machine user gains nothing and pays status-line width for it.
+        Inside a podman/docker container the UTS namespace genuinely hides
+        the real host name, so export `CCY_HOST_HOSTNAME` (if the ccy
+        supervisor starts the container) or `HOOKS_DAEMON_HOST_HOSTNAME`
+        (any other launcher) from whatever starts it; a desktop or LXC
+        session needs no export. Do not add a name option to the config —
+        none exists, by design. Disable (or leave off, the shipped default)
+        with handlers.status_line.host_hostname.enabled: false.
       recommended: false
       dormant: true
 
