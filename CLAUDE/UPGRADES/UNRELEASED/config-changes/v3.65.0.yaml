@@ -242,6 +242,49 @@ config_changes:
       recommended: false
       dormant: true
 
+    - key: handlers.worktree_create.worktree_create.options.seed.entries[].optional
+      summary: >-
+        Declare a worktree seed source as "seed this IF it exists" rather than
+        "seed this".
+      detail: >-
+        Seeding had a single policy for an absent source: abandon the whole
+        `WorktreeCreate` before the worktree exists. That is correct for a
+        typo'd path — silently handing back a worktree missing files its agent
+        cannot know are absent is the failure the feature exists to prevent —
+        and wrong for a source that is legitimately optional, such as a
+        git-ignored local file the rest of the daemon treats as absent without
+        complaint. The config had no way to tell the two intentions apart, so
+        the safe reading was applied to both and every worktree creation in
+        such a project failed.
+
+        `optional` is per ENTRY and defaults to `false`, so an unmarked entry
+        and every existing config behave exactly as before. It excuses ABSENCE
+        ONLY: an optional entry that is absolute, traverses upwards with `..`,
+        or resolves outside the repository through a symlinked component is
+        still fatal, because those are misconfigurations rather than missing
+        files. A non-boolean value (`optional: "false"`, which is truthy in
+        Python) is warned about and treated as REQUIRED — loose coercion could
+        only ever fail in the weakening direction.
+      example_yaml: |
+        handlers:
+          worktree_create:
+            worktree_create:
+              options:
+                seed:
+                  default_mode: symlink
+                  entries:
+                    - .claude/hooks-daemon.env
+                    - path: .claude/local-secrets
+                      optional: true
+      migration_note: >-
+        Nothing to do unless worktree creation is currently failing. If it is,
+        the daemon log names the offending entry (and, from this version, so
+        does the hook's own stderr). Mark any entry whose source may legitimately
+        be missing with `optional: true`; leave everything else alone, so a
+        genuine typo still fails fast.
+      recommended: false
+      dormant: false
+
   renamed: []
 
   removed: []
