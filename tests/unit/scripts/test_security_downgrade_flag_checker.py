@@ -426,6 +426,141 @@ class TestFalsePositivesTheFirstSweepFound:
         assert checker.RULE_FETCH_PIPED_TO_SHELL in _rules_for(checker, tmp_path)
 
 
+class TestInventory:
+    """Recorded instances, so the gate can block WITHOUT first rewriting the installer.
+
+    Eight real instances live in the tree. Wiring the check into QA with those
+    unrecorded would simply make QA red, and a permanently-red gate is one
+    nobody reads. The inventory is the same device classes 4 and 5 used: every
+    instance carries a row, so the gate is green on the known state and fails
+    the moment a NEW one appears.
+
+    The key is (path, rule) with an occurrence COUNT rather than a line number.
+    A line number drifts on the next unrelated edit, and an inventory that goes
+    stale on every edit is one people delete.
+    """
+
+    def _inventory(self, tmp_path: Path, body: str) -> Path:
+        path = tmp_path / "inventory.yaml"
+        path.write_text(body, encoding="utf-8")
+        return path
+
+    def test_a_recorded_instance_does_not_fail_the_gate(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        _write(
+            tmp_path,
+            "install.sh",
+            "#!/usr/bin/env bash\ncurl -LsSf https://example.test/i.sh | sh\n",
+        )
+        inventory = self._inventory(
+            tmp_path,
+            "rows:\n"
+            "  - path: install.sh\n"
+            "    rule: fetch-piped-to-shell\n"
+            "    occurrences: 1\n"
+            "    verdict: accepted\n"
+            '    note: "legacy fallback branch"\n',
+        )
+
+        assert checker.unrecorded(tmp_path, inventory) == []
+
+    def test_an_unrecorded_instance_fails_the_gate(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        _write(
+            tmp_path,
+            "install.sh",
+            "#!/usr/bin/env bash\ncurl -LsSf https://example.test/i.sh | sh\n",
+        )
+        inventory = self._inventory(tmp_path, "rows: []\n")
+
+        findings = checker.unrecorded(tmp_path, inventory)
+
+        assert len(findings) == 1
+        assert "install.sh" in findings[0].detail
+
+    def test_a_second_instance_in_an_already_recorded_file_fails(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        """The count is what makes a file's row stop being a blanket exemption.
+
+        Without it, one recorded `curl | sh` in `install.sh` would licence
+        every future one in the same file — which is how an inventory quietly
+        becomes an allowlist.
+        """
+        _write(
+            tmp_path,
+            "install.sh",
+            "#!/usr/bin/env bash\n"
+            "curl -LsSf https://example.test/a.sh | sh\n"
+            "curl -LsSf https://example.test/b.sh | sh\n",
+        )
+        inventory = self._inventory(
+            tmp_path,
+            "rows:\n"
+            "  - path: install.sh\n"
+            "    rule: fetch-piped-to-shell\n"
+            "    occurrences: 1\n"
+            "    verdict: accepted\n"
+            '    note: "legacy fallback branch"\n',
+        )
+
+        assert len(checker.unrecorded(tmp_path, inventory)) == 1
+
+    def test_a_row_for_an_instance_that_is_gone_fails_too(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        """Good news still has to be recorded.
+
+        A row claiming an accepted defect that no longer exists sends the next
+        reader at work already done, and quietly overstates how much of the
+        tree is still unfixed. Same rule the dangerous-invocation corpus holds
+        itself to, in the same plan.
+        """
+        _write(tmp_path, "install.sh", "#!/usr/bin/env bash\necho clean\n")
+        inventory = self._inventory(
+            tmp_path,
+            "rows:\n"
+            "  - path: install.sh\n"
+            "    rule: fetch-piped-to-shell\n"
+            "    occurrences: 1\n"
+            "    verdict: accepted\n"
+            '    note: "legacy fallback branch"\n',
+        )
+
+        findings = checker.unrecorded(tmp_path, inventory)
+
+        assert len(findings) == 1
+        assert "no longer" in findings[0].detail
+
+    def test_a_row_without_a_note_is_rejected(self, checker: ModuleType, tmp_path: Path) -> None:
+        """An unexplained exemption cannot be reviewed, so it is not one."""
+        _write(
+            tmp_path,
+            "install.sh",
+            "#!/usr/bin/env bash\ncurl -LsSf https://example.test/i.sh | sh\n",
+        )
+        inventory = self._inventory(
+            tmp_path,
+            "rows:\n"
+            "  - path: install.sh\n"
+            "    rule: fetch-piped-to-shell\n"
+            "    occurrences: 1\n"
+            "    verdict: accepted\n",
+        )
+
+        assert len(checker.unrecorded(tmp_path, inventory)) == 1
+
+    def test_the_shipped_inventory_matches_the_shipped_tree(self, checker: ModuleType) -> None:
+        """The real gate, asserted against the real tree.
+
+        This is the test that actually protects the repository; every other
+        test here protects this one from lying.
+        """
+        assert checker.unrecorded(_REPO_ROOT, checker.DEFAULT_INVENTORY) == []
+
+
 class TestScope:
     def test_test_directories_are_excluded(self, checker: ModuleType, tmp_path: Path) -> None:
         """Fixtures legitimately contain the constructs this hunts.

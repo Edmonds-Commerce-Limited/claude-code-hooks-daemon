@@ -1,0 +1,116 @@
+# Every place shipped code fetches unpinned, or turns a protection off.
+#
+# Defence for the `fetch-then-execute-unpinned` class (Plan 00412 class 14).
+# Asserted by scripts/qa/check_security_downgrade_flags.py, which scans the
+# tree and compares what it finds against these rows.
+#
+# THE CONTRACT IS TWO-WAY. A new instance in a recorded file FAILS -- the
+# `occurrences` count is what stops a row becoming a blanket exemption for its
+# file. A row whose instances have GONE fails too: a record claiming an
+# accepted defect that no longer exists sends the next reader at work already
+# done, and overstates how much of the tree is still unfixed.
+#
+# Keyed on (path, rule), never on a line number. A line drifts on the next
+# unrelated edit, and an inventory that goes stale on every edit is one people
+# delete.
+#
+# verdict:
+#   accepted -- reviewed, and the risk is understood and tolerated
+#   open     -- a real finding nobody has decided about yet
+#
+# THE LIMIT, stated here because it is the whole boundary of this Defence: the
+# Detector reads ONE FILE AT A TIME. It does not follow a downloaded path to
+# its execution and it does not check that a digest is verified, so a fetch in
+# one script executed by another is invisible to it. The `unvalidated-url-
+# expansion` rule exists because of that limit, not in ignorance of it.
+#
+# Fixes here are OWNER-GATED and deliberately not taken on the eve of a
+# release: every row below is on the install or upgrade path, which is the one
+# path a broken change cannot be recovered from by upgrading.
+
+rows:
+  # ------------------------------------------------- the install path
+  - path: install.sh
+    rule: fetch-piped-to-shell
+    occurrences: 1
+    verdict: open
+    note: >-
+      D-NET N7. `curl -LsSf https://astral.sh/uv/install.sh | sh` -- the exact
+      construct `R-CURL-PIPE-SHELL` denies agents, in the project that ships
+      that rule. Mitigated by sitting in the legacy fallback branch for older
+      tags without Layer 2, and sharpened by the same fact: a dead branch is
+      still a shipped branch. Remedy is to pin the installer to a released
+      version and verify a digest, or to drop the legacy branch entirely now
+      that Layer 2 is universal -- which is a scope question, not a patch.
+
+  - path: install.sh
+    rule: suppressed-fetch
+    occurrences: 1
+    verdict: open
+    note: >-
+      The same line discards BOTH streams (`>/dev/null 2>&1`), which is the
+      construct `error_hiding_blocker` denies in authored shell. The curl is
+      the first statement of a `{ … }` block whose value is its LAST command,
+      so nothing ever reads the fetch's exit status -- a failed download is
+      indistinguishable from a successful one until `command -v uv` fails
+      later with no explanation.
+
+  - path: scripts/install/prerequisites.sh
+    rule: fetch-piped-to-shell
+    occurrences: 1
+    verdict: open
+    note: >-
+      NOT in the security review -- found by this Detector's first sweep. A
+      second `curl … | sh` for the same uv installer, in the auto-install
+      branch. Two instances of one pattern in two files is the argument for a
+      check that reads code: the review found the shape, and it was fixed
+      where the review happened to look.
+
+  # ------------------------------------------------- the upgrade path
+  - path: scripts/upgrade.sh
+    rule: security-downgrade-flag
+    occurrences: 1
+    verdict: open
+    note: >-
+      D-NET N8. `protocol.file.allow=always` re-enables what the
+      CVE-2022-39253 fix disabled, on the command that produces the INSTALLED
+      DAEMON. The specific CVE chain is not directly reachable -- this clone
+      passes no `--recurse-submodules` -- so the finding is the weakening
+      itself and its placement: a flag that exists to make local-path test
+      fixtures work, set unconditionally on the production install path where
+      it buys nothing.
+
+  - path: scripts/upgrade.sh
+    rule: unvalidated-url-expansion
+    occurrences: 2
+    verdict: open
+    note: >-
+      D-NET N5 plus one the review did not name. `HOOKS_DAEMON_UPGRADE_BASE_URL`
+      (the fetched-then-sourced `python_discovery.sh`) and
+      `HOOKS_DAEMON_CLONE_URL` (the daemon clone itself) are both env-replaceable
+      with no scheme check, so `http://` is accepted on both. The ref also
+      defaults to the moving `main`, which is worth raising regardless of
+      attacker model: an upgrade to a PINNED release can source a script from an
+      unreviewed branch tip. Every Python fetch in this project enforces https;
+      this shell path, with strictly worse consequences, enforces nothing.
+
+  - path: .claude/skills/hooks-daemon/scripts/upgrade.sh
+    rule: unvalidated-url-expansion
+    occurrences: 1
+    verdict: open
+    note: >-
+      NOT in the security review. The DEPLOYED skill copy carries the same
+      unvalidated base URL. Deployed artefacts are the reason a fix has to be
+      applied to the template and redeployed rather than edited in place --
+      see the row below, which is that template.
+
+  - path: src/claude_code_hooks_daemon/skills/hooks-daemon/scripts/upgrade.sh
+    rule: unvalidated-url-expansion
+    occurrences: 1
+    verdict: open
+    note: >-
+      NOT in the security review. The TEMPLATE the deployed copy above comes
+      from. Fixing only one of the pair leaves the other to be restored by the
+      next deploy, which is the asymmetric-sibling shape this plan's class 1
+      Detector exists for -- here caught by a different check, in a file
+      neither of them was pointed at.

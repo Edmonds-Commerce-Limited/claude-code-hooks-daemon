@@ -67,13 +67,17 @@ import json
 import re
 import sys
 import tokenize
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+import yaml
+
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 _QA_OUTPUT_DIR: Final[Path] = _REPO_ROOT / "untracked" / "qa"
 _OUTPUT_FILE: Final[Path] = _QA_OUTPUT_DIR / "security_downgrade_flags.json"
+DEFAULT_INVENTORY: Final[Path] = _REPO_ROOT / "scripts" / "qa" / "security-downgrade-inventory.yaml"
 
 RULE_DOWNGRADE_FLAG: Final[str] = "security-downgrade-flag"
 RULE_FETCH_PIPED_TO_SHELL: Final[str] = "fetch-piped-to-shell"
@@ -386,6 +390,88 @@ def scan(root: Path) -> list[Violation]:
         violations.extend(_line_violations(relative, lines))
         violations.extend(_expansion_violations(relative, lines))
     return violations
+
+
+def _load_rows(inventory_path: Path) -> list[dict[str, object]]:
+    if not inventory_path.is_file():
+        return []
+    loaded = yaml.safe_load(inventory_path.read_text(encoding="utf-8")) or {}
+    rows = loaded.get("rows") or [] if isinstance(loaded, dict) else []
+    return [row for row in rows if isinstance(row, dict)]
+
+
+def _row_key(row: dict[str, object]) -> tuple[str, str]:
+    return str(row.get("path", "")), str(row.get("rule", ""))
+
+
+def unrecorded(root: Path, inventory_path: Path) -> list[Violation]:
+    """Every instance the inventory does not account for, in BOTH directions.
+
+    Keyed on ``(path, rule)`` with an occurrence COUNT, never on a line number:
+    a line drifts on the next unrelated edit, and an inventory that goes stale
+    on every edit is one people delete. The count is also what stops a row
+    becoming a blanket exemption for its file -- one recorded ``curl | sh``
+    must not licence the next one beside it.
+
+    A row for an instance that is GONE fails too. That is the same discipline
+    the dangerous-invocation corpus holds itself to: a record claiming an
+    accepted defect that no longer exists sends the next reader at work already
+    done, and overstates how much of the tree is still unfixed.
+    """
+    found = Counter(_row_key({"path": v.path, "rule": v.rule}) for v in scan(root))
+    rows = _load_rows(inventory_path)
+
+    findings: list[Violation] = []
+    recorded: Counter[tuple[str, str]] = Counter()
+    for row in rows:
+        key = _row_key(row)
+        # A missing note is reported, but the row still COUNTS. Skipping it
+        # would also trip the count comparison below, reporting one defect
+        # twice -- and a reader cannot tell a double-report from two problems.
+        if not str(row.get("note", "")).strip():
+            findings.append(
+                Violation(
+                    key[0],
+                    0,
+                    key[1],
+                    f"inventory row for {key[0]} [{key[1]}] has no note; "
+                    "an unexplained exemption cannot be reviewed",
+                )
+            )
+        try:
+            recorded[key] += int(str(row.get("occurrences", 0)))
+        except ValueError:
+            findings.append(
+                Violation(key[0], 0, key[1], "inventory row has a non-numeric `occurrences`")
+            )
+
+    for key in sorted(set(found) | set(recorded)):
+        path, rule = key
+        actual, expected = found[key], recorded[key]
+        if actual == expected:
+            continue
+        if actual > expected:
+            findings.append(
+                Violation(
+                    path,
+                    0,
+                    rule,
+                    f"{actual} instance(s) of [{rule}] in {path}, but the inventory "
+                    f"records {expected} -- record the new one with a verdict and a note",
+                )
+            )
+        else:
+            findings.append(
+                Violation(
+                    path,
+                    0,
+                    rule,
+                    f"the inventory records {expected} instance(s) of [{rule}] in {path} "
+                    f"but only {actual} remain -- the rest are no longer there, and the "
+                    "good news has to be recorded too",
+                )
+            )
+    return findings
 
 
 def main() -> int:
