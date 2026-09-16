@@ -1184,6 +1184,65 @@ class TestGhBodySurface:
         assert "alpha-term" not in result.model_dump_json()
         assert "entry 1 of 1" in (result.reason or "")
 
+    @pytest.mark.parametrize(
+        ("command", "surface"),
+        [
+            ('gh release create v1.2.3 --notes "alpha-term"', "release notes"),
+            ('gh release edit v1.2.3 --notes "alpha-term"', "edited release notes"),
+            ("gh gist create notes.md --desc 'alpha-term'", "a public gist"),
+            ('gh pr review 12 --approve --body "alpha-term"', "a review comment"),
+            ('gh repo edit --description "alpha-term"', "the repository description"),
+        ],
+    )
+    def test_every_irreversible_publication_surface_is_scanned(
+        self, tmp_path: Path, command: str, surface: str
+    ) -> None:
+        """Plan 00412 class 10: the inventory of what `gh` can PUBLISH.
+
+        The pattern was built from the issue/PR surface and stopped there, so
+        four more ways to publish an unretractable body walked past it. None is
+        an exotic invocation — `gh release create --notes` is how this project
+        would publish release notes, and it reaches the same public repository
+        the issue tracker does.
+
+        The defect is the INVENTORY, not any one regex. A surface list assembled
+        from the cases someone happened to think of has no way to report what it
+        omitted, which is why this is a declared table: adding a publishing verb
+        to `gh` means adding a row here, and a missing row fails loudly rather
+        than silently publishing.
+        """
+        handler = _wordlist(tmp_path, "alpha-term")
+
+        hook_input = _bash_input(command)
+        assert (
+            handler.matches(hook_input) is True
+        ), f"{surface} is published irreversibly and was not scanned: {command}"
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert "alpha-term" not in result.model_dump_json()
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "gh release list",
+            "gh release view v1.2.3",
+            "gh repo view --json name",
+            "gh pr review 12 --approve",
+        ],
+    )
+    def test_a_gh_command_that_publishes_no_body_is_not_scanned(
+        self, tmp_path: Path, command: str
+    ) -> None:
+        """Widening the inventory must not turn every `gh` call into a candidate.
+
+        Reading is never blocked, and `gh pr review --approve` with no body
+        publishes an approval rather than prose — treating it as a body surface
+        would deny a command that carries nothing to leak.
+        """
+        handler = _wordlist(tmp_path, "alpha-term")
+
+        assert handler.matches(_bash_input(command)) is False
+
     @pytest.mark.parametrize("flag", ["--body-file", "-F"])
     def test_term_in_gh_body_file_is_denied_naming_only_the_file(
         self, tmp_path: Path, flag: str
