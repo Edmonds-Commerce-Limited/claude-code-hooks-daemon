@@ -48,7 +48,7 @@ from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.utils import secret_redaction as sr
-from claude_code_hooks_daemon.utils.command_evasion import git_subcommand_index
+from claude_code_hooks_daemon.utils.command_evasion import OPTIONAL_PATH, git_subcommand_index
 from claude_code_hooks_daemon.utils.git_repo import GitRepo, run_git
 from claude_code_hooks_daemon.utils.path_exclusion import (
     handler_excludes_path,
@@ -246,8 +246,13 @@ _OCTAL_DIGITS: Final[str] = "01234567"
 # field, and a body there is one generic parameter among many), so it is
 # documented as uncovered rather than half-covered.
 _GH_EXECUTABLE: Final[str] = "gh"
+# `OPTIONAL_PATH` because `/usr/bin/gh issue create` publishes exactly what
+# `gh issue create` publishes, and this is the surface no history rewrite can
+# retract. The LEFT boundary is kept rather than relaxed to `\b`: `\b` matches
+# inside `foo-gh`, which would have the guard judging a command that is not
+# `gh`. Path-qualified, not loosely-anchored.
 _GH_BODY_PATTERN: Final[re.Pattern[str]] = re.compile(
-    r"(?:^|[\s;&|(])gh\s+(?:issue|pr)\s+(?:comment|create|edit)\b"
+    rf"(?:^|[\s;&|(]){OPTIONAL_PATH}gh\s+(?:issue|pr)\s+(?:comment|create|edit)\b"
 )
 # `--body-file <path>` / `--body-file=<path>` / `-F <path>`, bare or quoted.
 _GH_BODY_FILE_PATTERN: Final[re.Pattern[str]] = re.compile(

@@ -1291,6 +1291,56 @@ class TestGhBodySurface:
             assert handler.matches(_bash_input(command)) is True
 
 
+class TestAPathQualifiedGhIsStillGh:
+    """Plan 00412 D-PUB-4: the binary may be named by path.
+
+    `/usr/bin/gh issue create` publishes exactly what `gh issue create`
+    publishes. The guard anchored on a bare `gh`, so the same body was denied
+    or allowed according to how the command spelled the executable — on the one
+    surface where the mistake cannot be taken back.
+
+    The siblings had all settled this already: `git` is recognised here through
+    `endswith("/git")`, and `curl_pipe_shell`, `sudo_pip` and the pipe
+    whitelist each interpolate `OPTIONAL_PATH`. This surface was the single
+    holdout.
+    """
+
+    @pytest.mark.parametrize("prefix", ["gh", "/usr/bin/gh", "./gh", "../tools/gh"])
+    def test_a_term_is_denied_however_the_binary_is_named(
+        self, tmp_path: Path, prefix: str
+    ) -> None:
+        handler = _wordlist(tmp_path, "alpha-term")
+        command = f'{prefix} issue create --title t --body "alpha-term"'
+
+        assert handler.matches(_bash_input(command)) is True
+        result = handler.handle(_bash_input(command))
+        assert result.decision == Decision.DENY
+        assert "alpha-term" not in result.model_dump_json()
+
+    @pytest.mark.parametrize("prefix", ["git", "/usr/bin/git"])
+    def test_the_git_sibling_already_tolerated_a_path_and_still_does(
+        self, tmp_path: Path, prefix: str
+    ) -> None:
+        """The oracle. This asymmetry is what made the gh gap a defect."""
+        handler = _wordlist(tmp_path, "alpha-term")
+        command = f"{prefix} commit -m 'alpha-term'"
+
+        assert handler.matches(_bash_input(command)) is True
+        assert handler.handle(_bash_input(command)).decision == Decision.DENY
+
+    def test_the_left_boundary_is_kept_so_a_suffixed_name_is_not_gh(self, tmp_path: Path) -> None:
+        """Widening to `\\b` would have been the cheap fix, and wrong.
+
+        `\\b` matches inside `foo-gh`, so the guard would start judging a
+        command that is not `gh` at all. The path qualifier is added WITHOUT
+        giving up the boundary that keeps the anchor honest.
+        """
+        handler = _wordlist(tmp_path, "alpha-term")
+        command = 'foo-gh issue create --title t --body "alpha-term"'
+
+        assert handler.matches(_bash_input(command)) is False
+
+
 class TestPerDispatchHaystackCache:
     """The ``matches()``->``handle()`` bridge must never answer one call from another's text.
 
