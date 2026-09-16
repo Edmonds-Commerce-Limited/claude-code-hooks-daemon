@@ -240,6 +240,15 @@ DATA_SINKS: frozenset[str] = frozenset(
 #:      are often re-indented).
 #:   2. A single- or double-quoted string (may span literal newlines).
 #:   3. A bare word (e.g. `-F commit-msg.txt`) as a fallback.
+#:
+#: The bare-word alternative stops at a shell METACHARACTER rather than at the
+#: next space, and that boundary is load-bearing. It was `\S+`, and `\S` matches
+#: `&`, `;` and `|` -- so an unquoted value ran straight through the separator
+#: and ate the head word of the command after it: `git commit -m x&&git reset
+#: --hard` had `x&&git` blanked as prose, leaving every downstream guard looking
+#: at `reset --hard` with no `git` in front of it while bash ran both commands.
+#: Quoting the value was enough to avoid it, which is why the bypass survived
+#: the suite -- every test quoted.
 _MESSAGE_BODY_PATTERN = re.compile(
     r"(?P<flag>(?<![\w-])(?:-m|--message|-F|--file))"
     r"(?P<sep>=|\s+)"
@@ -247,7 +256,7 @@ _MESSAGE_BODY_PATTERN = re.compile(
     r"\"\$\(cat\s+<<-?\s*'?(?P<delim>\w+)'?\s*\n.*?\n[ \t]*(?P=delim)[ \t]*\n?\s*\)\""
     r"|'(?:[^'\\]|\\.)*'"
     r'|"(?:[^"\\]|\\.)*"'
-    r"|\S+"
+    r"|[^\s;&|<>()`]+"
     r")",
     re.DOTALL,
 )
@@ -541,11 +550,61 @@ def _receiver_is_data_sink(command: str, opener_start: int) -> bool:
     story: ``$(cat <<'EOF' … )`` really is fed to ``cat``, and bash then runs
     what ``cat`` emitted. See :data:`_SUBSTITUTION_OPENER_PATTERN`.
     """
+    if _inside_command_substitution(command, opener_start):
+        return False
     segment = _receiving_segment(command, opener_start)
     if _SUBSTITUTION_OPENER_PATTERN.match(segment.lstrip()):
         return False
     word = _segment_command_word(segment)
     return word is not None and word in DATA_SINKS
+
+
+def _inside_command_substitution(command: str, opener_start: int) -> bool:
+    """Is the heredoc opener at ``opener_start`` inside an OPEN substitution?
+
+    Asked of the RAW text before the opener, because the segment the anchored
+    :data:`_SUBSTITUTION_OPENER_PATTERN` sees has already been split on
+    ``&&``/``||``/``;``/``|``/``&`` with the LAST piece kept. Any separator
+    inside the substitution therefore moved the ``$(`` out of the segment and
+    the anchor stopped matching -- while bash went on substituting the output
+    and running it. ``$(true && cat <<'EOF' … )`` is the shape that got
+    through.
+
+    Quotes are tracked because they decide whether an opener is one: ``$(`` is
+    literal inside single quotes and live inside double quotes, and an
+    apostrophe inside double quotes (``"don't"``) is not a quote opener.
+
+    Over-reporting containment is the safe error -- it withholds the exemption
+    and the body is scanned, costing a false positive. Under-reporting hands a
+    live command to every caller as blanked prose.
+    """
+    depth = 0
+    in_single = False
+    in_double = False
+    in_backtick = False
+    index = 0
+
+    while index < opener_start:
+        char = command[index]
+        if char == "\\" and not in_single:
+            index += 2
+            continue
+        if char == "'" and not in_double and not in_backtick:
+            in_single = not in_single
+        elif char == '"' and not in_single:
+            in_double = not in_double
+        elif not in_single:
+            if char == "`":
+                in_backtick = not in_backtick
+            elif command.startswith("$(", index):
+                depth += 1
+                index += 2
+                continue
+            elif char == ")" and depth > 0:
+                depth -= 1
+        index += 1
+
+    return depth > 0 or in_backtick
 
 
 def _downstream_is_all_data_sinks(opener_tail: str) -> bool:

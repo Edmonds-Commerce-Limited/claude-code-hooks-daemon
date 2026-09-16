@@ -22,6 +22,7 @@ from claude_code_hooks_daemon.utils.shell_segmentation import (
 )
 
 _FORCE = "--" + "force"
+_HARD = "--" + "hard"
 
 
 class TestStripMessageBodies:
@@ -52,6 +53,29 @@ class TestStripMessageBodies:
     def test_a_command_with_no_message_is_returned_unchanged(self) -> None:
         command = "git status"
         assert strip_message_bodies(command) == command
+
+    def test_an_unquoted_value_does_not_swallow_the_next_command(self) -> None:
+        """An unquoted value ends at the separator, not at the next space.
+
+        The bare-word alternative used to be ``\\S+``, and ``\\S`` matches ``&``
+        and ``;`` -- so ``git commit -m x&&git reset --hard`` had ``x&&git``
+        blanked as though it were prose, handing every downstream guard a
+        ``reset --hard`` with no ``git`` in front of it while bash ran both
+        commands. The value must stop at the metacharacter that ends it.
+        """
+        blanked = strip_message_bodies(f"git commit -m x&&git reset {_HARD}")
+        assert f"git reset {_HARD}" in blanked
+
+    def test_an_unquoted_value_does_not_swallow_a_semicolon_separated_command(
+        self,
+    ) -> None:
+        blanked = strip_message_bodies("git commit -m x;git clean -fd")
+        assert "git clean -fd" in blanked
+
+    def test_an_unquoted_value_is_still_blanked(self) -> None:
+        """Narrowing the alternative must not stop it blanking a real value."""
+        blanked = strip_message_bodies("git commit -F commit-msg.txt")
+        assert "commit-msg.txt" not in blanked
 
 
 class TestStripInertSpans:

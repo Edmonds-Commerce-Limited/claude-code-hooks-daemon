@@ -23,6 +23,7 @@ import pytest
 
 from claude_code_hooks_daemon.utils import host_identity
 from claude_code_hooks_daemon.utils.host_identity import (
+    HOST_HOSTNAME_ENV_VARS,
     HostName,
     HostNameSource,
     host_name_from_hosts_file,
@@ -47,8 +48,20 @@ _DEBIAN_STYLE_HOSTS = """\
 
 @pytest.fixture(autouse=True)
 def _clear_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Never let the real environment leak into a resolution test."""
-    monkeypatch.delenv(_ENV_VAR, raising=False)
+    """Never let the real environment leak into a resolution test.
+
+    Every variable in the production ladder is cleared, not just the one these
+    tests set. Clearing only ``_ENV_VAR`` left ``CCY_HOST_HOSTNAME`` -- which
+    ranks ABOVE it -- to be read from the ambient environment, so a test that
+    set ``_ENV_VAR`` got the real host name back instead. It passed wherever
+    the variable happened to be unset (CI) and failed for anyone running under
+    ccy, which is this project's own dogfooding workflow.
+
+    Sourced from :data:`HOST_HOSTNAME_ENV_VARS` rather than relisted, so a rung
+    added to the ladder cannot silently reopen the gap.
+    """
+    for env_var in HOST_HOSTNAME_ENV_VARS:
+        monkeypatch.delenv(env_var, raising=False)
 
 
 def _force_runtime(monkeypatch: pytest.MonkeyPatch, runtime: str | None) -> None:

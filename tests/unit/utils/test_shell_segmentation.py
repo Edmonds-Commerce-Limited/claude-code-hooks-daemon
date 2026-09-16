@@ -397,6 +397,44 @@ class TestABodyIsOnlyInertIfItsRECEIVERTreatsItAsData:
         command = "`cat <<'EOF'\ngit reset --hard HEAD\nEOF`"
         assert "git reset --hard HEAD" in strip_quoted_heredoc_bodies(command)
 
+    def test_a_separator_inside_the_substitution_does_not_defeat_the_check(
+        self,
+    ) -> None:
+        """Containment is a property of the RAW text, not of the last segment.
+
+        The check used to be anchored at the start of the receiving segment,
+        and `_receiving_segment` splits on `&&`/`|`/`;` and keeps the LAST
+        piece -- so any separator inside the substitution moved the `$(` out of
+        the segment and the anchor stopped matching. Bash still substitutes the
+        output and still runs it.
+        """
+        command = "$(true && cat <<'EOF'\ngit reset --hard HEAD\nEOF\n)"
+        assert "git reset --hard HEAD" in strip_quoted_heredoc_bodies(command)
+
+    def test_a_pipe_inside_the_substitution_does_not_defeat_the_check(self) -> None:
+        command = "$(echo x | cat <<'EOF'\ngit reset --hard HEAD\nEOF\n)"
+        assert "git reset --hard HEAD" in strip_quoted_heredoc_bodies(command)
+
+    def test_a_separator_inside_the_backtick_spelling_is_covered_too(self) -> None:
+        command = "`true && cat <<'EOF'\ngit reset --hard HEAD\nEOF`"
+        assert "git reset --hard HEAD" in strip_quoted_heredoc_bodies(command)
+
+    def test_a_closed_substitution_earlier_in_the_command_still_blanks(self) -> None:
+        """Containment must END with the substitution, or prose stops blanking.
+
+        `$(date)` closes before the heredoc opens, so the sink is NOT inside a
+        substitution and an ordinary prose write keeps its exemption.
+        """
+        command = "echo $(date) && cat <<'EOF' > notes.md\ngit reset --hard HEAD\nEOF"
+        assert "git reset --hard HEAD" not in strip_quoted_heredoc_bodies(command)
+
+    def test_an_apostrophe_in_earlier_double_quoted_text_does_not_confuse_it(
+        self,
+    ) -> None:
+        """A `'` inside double quotes is literal, not a quote opener."""
+        command = 'echo "don\'t" && cat <<\'EOF\' > notes.md\ngit reset --hard HEAD\nEOF'
+        assert "git reset --hard HEAD" not in strip_quoted_heredoc_bodies(command)
+
     def test_a_plain_subshell_is_not_a_substitution_and_stays_blanked(self) -> None:
         """`( cat <<'EOF' ) > f` groups; it does not substitute.
 
