@@ -55,9 +55,7 @@ _RELOCATION_VERBS: tuple[str, ...] = ("cp", "mv", "rsync", "install", "dd")
 # its own command, so `cp` starting a line is in command position even though
 # nothing before it on that line is a separator character.
 _RELOCATION_VERB_RE = re.compile(
-    r"""(?:^|[;&|\n"']|\$\()\s*(?:sudo\s+)?(?:\S*/)?("""
-    + "|".join(_RELOCATION_VERBS)
-    + r")\b",
+    r"""(?:^|[;&|\n"']|\$\()\s*(?:sudo\s+)?(?:\S*/)?(""" + "|".join(_RELOCATION_VERBS) + r")\b",
     re.IGNORECASE,
 )
 
