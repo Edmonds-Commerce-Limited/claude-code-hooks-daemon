@@ -53,14 +53,15 @@ catch.
 Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here so the
 ledger's shape is readable without opening it:
 
-| #   | Verdict                                                               | Origin                                                             | Status                                                  |
-| --- | --------------------------------------------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------- |
-| N1  | the `Priority` constants are not the numbers a fresh install ships    | [00419 N8](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md)  | ⬜ Open — remedy recorded, owner-gated, unbuilt         |
-| N2  | the linter runs on gitignored scratch output                          | [00419 N11](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md) | ⬜ Open — remedy chosen and un-gated, nobody built it   |
-| N3  | a committed future-dated entry makes the journal uncorrectable        | [00419 N12](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md) | ⬜ Open — remedies recorded, none chosen; advisory live |
-| N4  | a cron cannot be both cancelled for a session and declared in config  | [00419 N13](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md) | ⬜ Open — remedy recorded, owner-gated, unbuilt         |
-| N5  | the v3.65.0 release reviews' NON-defects had no durable home          | the v3.65.0 release reviews                                        | ⬜ Open — evidence now tracked, twelve rows unworked    |
-| N6  | a worktree cannot run the acceptance gates, and says the wrong reason | Plan 00424                                                         | ⬜ Open — two faults measured, remedies 1-3 un-gated    |
+| #   | Verdict                                                                  | Origin                                                             | Status                                                  |
+| --- | ------------------------------------------------------------------------ | ------------------------------------------------------------------ | ------------------------------------------------------- |
+| N1  | the `Priority` constants are not the numbers a fresh install ships       | [00419 N8](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md)  | ⬜ Open — remedy recorded, owner-gated, unbuilt         |
+| N2  | the linter runs on gitignored scratch output                             | [00419 N11](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md) | ⬜ Open — remedy chosen and un-gated, nobody built it   |
+| N3  | a committed future-dated entry makes the journal uncorrectable           | [00419 N12](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md) | ⬜ Open — remedies recorded, none chosen; advisory live |
+| N4  | a cron cannot be both cancelled for a session and declared in config     | [00419 N13](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md) | ⬜ Open — remedy recorded, owner-gated, unbuilt         |
+| N5  | the v3.65.0 release reviews' NON-defects had no durable home             | the v3.65.0 release reviews                                        | ⬜ Open — evidence now tracked, twelve rows unworked    |
+| N6  | a worktree cannot run the acceptance gates, and says the wrong reason    | Plan 00424                                                         | ⬜ Open — two faults measured, remedies 1-3 un-gated    |
+| N7  | the supervisor's effort floor cannot see an effort set from the selector | owner report, in session                                           | ⬜ Open — mechanism confirmed, remedy owner-gated       |
 
 ## Tasks
 
@@ -105,6 +106,15 @@ ledger's shape is readable without opening it:
   dispatch should default to a TRACKED report destination, so a reviewer's
   evidence lands where git can see it without the coordinator remembering.
   `dispatch_declaration` currently recommends the gitignored path.
+
+### Phase 3: the owner-reported entry
+
+- [ ] ⬜ **Task 3.1**: N7 — put the owner question in front of the owner: should
+  an effort drop the supervisor did not itself inject be trusted as a human
+  choice and latched? The downgrade logic deliberately answers the mirror-image
+  question NO (an unattributed model change gets no restore), so answering YES
+  here is a real asymmetry to decide rather than an oversight to correct. The
+  mechanism is confirmed and needs no further investigation.
 
 ## Success Criteria
 

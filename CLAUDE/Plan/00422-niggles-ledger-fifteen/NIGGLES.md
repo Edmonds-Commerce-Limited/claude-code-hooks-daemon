@@ -358,3 +358,59 @@ agent that trusts the message restarts the daemon in a loop.
 
 Remedies 1–3 are un-gated. Fault 2 needs diagnosis before a remedy can be
 proposed, and this entry deliberately does not guess at one.
+
+### N7 — the supervisor's effort floor cannot see an effort set from the selector
+
+**Found**: reported by the owner in session, in their own words — "i just
+manualy set effort to medium and supervisor forced it back to high". Reproduced
+by reading `.claude/ccy/claude-supervise.py`, which is tracked in this
+repository.
+
+**The manual-effort latch works; the thing that feeds it has a blind spot.**
+`_manual_effort_active` is honoured exactly as designed — when it is set,
+`decide_once` picks `target = None`, so neither the per-model floor nor the
+downgrade `xhigh` floor fires (`claude-supervise.py:3991-3999`). The latch is
+set only by `note_manual_effort_command` (`:3816`), which is fed from
+`take_effort_submitted`, which is fed from `_buffer_command_arg(_EFFORT_COMMAND)`
+at `:769`.
+
+`_buffer_command_arg` (`:843-856`) returns `None` when the line is a bare
+`/effort` with no argument. Its own docstring says why: "a bare `/effort` with
+no level opens Claude Code's own selector and names nothing this class can
+read."
+
+So the two ways a human sets effort are not equivalent:
+
+| How the human sets it                    | Latch set? | Next tick                      |
+| ---------------------------------------- | ---------- | ------------------------------ |
+| `/effort medium` typed with the level    | yes        | honoured, sticky for the spell |
+| `/effort` then picking from the selector | **no**     | floor injects the level back   |
+
+The selector is the discoverable route — it is what `/effort` alone does — so
+the failing path is the one a human is most likely to take. The supervisor then
+looks like it is overriding a deliberate choice, because from its side no choice
+was ever made.
+
+**Why it is a niggle rather than a plan.** The mechanism is understood and the
+diagnosis needs no further work; what is missing is a decision about which
+signal to read, and that is the owner's to make.
+
+**Candidate remedies**, cheapest first:
+
+1. Treat an OBSERVED effort drop that the supervisor did not itself inject as a
+   manual set, and latch on it. This reads the outcome instead of the keystroke,
+   so it covers the selector, a config change and any future route at once. The
+   risk to check first is whether the sidecar's post-injection reporting lag
+   (`:1397`) could make the supervisor's own injection look human.
+2. Latch on the bare `/effort` submission itself — the recognizer can see the
+   command was submitted even when it cannot see the level — and read the level
+   from the next effort reading rather than from the line.
+3. Leave the behaviour and document it, so the floor is at least predictable:
+   "type the level, or the floor will put it back."
+
+Remedy 1 is the only one that closes the class rather than the instance.
+Remedies 1 and 2 both need the owner's call on whether an unexplained drop
+should be trusted as human, which is the same judgement the downgrade logic
+makes deliberately in the other direction at `:3975-3989` — there, an
+*unattributed* change is explicitly NOT acted on. That asymmetry is the decision,
+and this entry does not pre-empt it.
