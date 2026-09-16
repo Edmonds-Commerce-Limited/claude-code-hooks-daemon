@@ -307,6 +307,10 @@ class Priority:
     DISCLOSURE_RESET_SESSION_START = 15
 
     WEB_SEARCH_YEAR = 55
+    # Ahead of the whole SessionStart advisory ladder (Plan 00412 class 2): a
+    # report that the guards themselves were weakened is the one every other
+    # advisory's value depends on, so it is read first and cannot be buried.
+    GUARD_CONFIG_DRIFT = 49
     PROJECT_HANDLER_LOAD_CHECKER = 50
     HOOK_REGISTRATION_CHECKER = 51
     OPTIMAL_CONFIG_CHECKER = 52

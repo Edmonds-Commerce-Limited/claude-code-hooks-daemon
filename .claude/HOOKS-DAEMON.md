@@ -1,6 +1,6 @@
 # Hooks Daemon - Active Configuration
 
-> Generated on 2026-09-15 (v3.64.0) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
+> Generated on 2026-09-16 (v3.64.0) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
 
 ## Active Handlers
 
@@ -87,11 +87,12 @@
 | 34 | merge_qa_report | ADVISORY | Post-hoc plan/docs QA report over what a merge/pull/rebase just introduced |
 | 35 | daemon_sync_after_merge | ADVISORY | Advise a restart when a merge/pull/rebase changed daemon config or handlers |
 
-### SessionStart (27 handlers)
+### SessionStart (28 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
 | 15 | disclosure_reset_session_start | NON-TERMINAL | Reset DisclosureTracker state for the firing agent on SessionStart |
+| 49 | guard_config_drift | ADVISORY | Name any uncommitted change that weakens this project's guards |
 | 50 | project_handler_load_checker | ADVISORY | Loudly alert at session start when project handlers failed to load |
 | 51 | hook_registration_checker | ADVISORY | Validate hook registrations in Claude Code settings on session start |
 | 52 | optimal_config_checker | ADVISORY | Check Claude Code environment for optimal configuration on session start |
@@ -195,7 +196,7 @@
 |----------|---------|----------|-------------|
 | 2 | DogfoodingReminderHandler | ADVISORY | Reminds developers of dogfooding workflow and bug handling protocol |
 
-### Project (5 handlers)
+### Project (6 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -203,6 +204,7 @@
 | 24 | DaemonRestartVerifierHandler | ADVISORY | Advise verifying the daemon restarts before a commit, in this repo |
 | 41 | EnforceLlmQaHandler | BLOCKING | Block run_all.sh and direct LLM agents to llm_qa.py |
 | 51 | PlanDoneRequiresHoldingAreaHandler | BLOCKING | Deny a Complete flip whose Success Criteria never mention the holding area |
+| 52 | RuffFormatBlockerHandler | BLOCKING | Deny `ruff format`; point at the project's actual formatter |
 | 56 | OrchestratorSimulateHandler | ADVISORY | Record what orchestrator-only mode WOULD deny on the main thread; deny nothing |
 
 ### Pseudo Nitpick (2 handlers)

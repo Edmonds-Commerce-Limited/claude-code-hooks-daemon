@@ -729,6 +729,10 @@ handlers:
       enabled: true
       priority: 15
 
+    guard_config_drift:  # Report an uncommitted config change that weakens a guard (Plan 00412 class 2)
+      enabled: true
+      priority: 49
+
     project_handler_load_checker:  # Loud alert when project handlers failed to load (Plan 00143)
       enabled: true
       priority: 50

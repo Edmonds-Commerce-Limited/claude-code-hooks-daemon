@@ -760,6 +760,15 @@ class HandlerID:
         display_name="hook-registration-checker",
     )
 
+    # Guard config drift (SessionStart handler) — Plan 00412 class 2: report a
+    # working-tree hooks-daemon.yaml that weakens the guards relative to the
+    # committed one. Nothing judges such an edit and nothing records it.
+    GUARD_CONFIG_DRIFT = HandlerIDMeta(
+        class_name="GuardConfigDriftHandler",
+        config_key="guard_config_drift",
+        display_name="guard-config-drift",
+    )
+
     # Project handler load checker (SessionStart handler) — Plan 00143:
     # loudly alert when project handlers failed to load (protection degraded)
     PROJECT_HANDLER_LOAD_CHECKER = HandlerIDMeta(
