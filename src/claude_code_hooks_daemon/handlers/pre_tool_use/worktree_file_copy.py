@@ -33,22 +33,31 @@ _WORKTREE_RE = "(?:" + "|".join(re.escape(prefix) for prefix in _WORKTREE_PREFIX
 # by design.
 _RELOCATION_VERBS: tuple[str, ...] = ("cp", "mv", "rsync", "install", "dd")
 
-# Anchored to a command HEAD (start of string, after a separator, or a `$(`
-# substitution), optionally through `sudo` and a path prefix — the same
-# positions a shell actually treats as "the program being run". A bare
-# `\b(cp|mv|...)\b` search anywhere in the string treats "install" as a
-# relocation verb even when it names a package manager subcommand deep
-# inside an unrelated pipeline (`pip install`, `npm install`); "install" and
-# "dd" are common English/command words that a whole-command search cannot
-# tell apart from the coreutils `install`/`dd` this handler exists to catch.
-# Command-position matches `install -m 644 ...` (coreutils) and `dd if=...`
-# while missing `pip install ...` / `npm install ...`, because in both of
-# those the verb naming the program is `pip`/`npm`, not `install`. The
-# separator class includes the newline: a heredoc body runs each line as its
-# own command, so `cp` starting a line is at command position even though
-# nothing before it on the line is a separator character.
+# The verb must sit where a program NAME would: start of string, after a
+# separator, after a `$(`, or after an opening QUOTE — optionally through
+# `sudo` and a path prefix. A bare `\b(cp|mv|...)\b` search anywhere in the
+# string cannot tell the coreutils `install`/`dd` this handler exists to
+# catch from the same word used as another program's SUBCOMMAND, so
+# `pip install -r requirements.txt` inside a worktree earned a TERMINAL deny
+# announcing catastrophic data loss. In `pip install` the program is `pip`;
+# `install` is an argument, and argument position is what this excludes.
+#
+# The opening quote counts, and that is load-bearing rather than incidental.
+# Every acceptance probe in this project wraps its command in `echo "..."` so
+# that a guard under test can never destroy anything when it is the guard
+# that is broken, and the guards are TEXT scanners for exactly that reason.
+# Requiring true command position would make `echo "cp <worktree> src/"` stop
+# matching, which reads as a passing probe against a handler that has
+# silently stopped working — the failure this handler's own deny message
+# calls CATASTROPHIC.
+#
+# The separator class includes the newline: a heredoc body runs each line as
+# its own command, so `cp` starting a line is in command position even though
+# nothing before it on that line is a separator character.
 _RELOCATION_VERB_RE = re.compile(
-    r"(?:^|[;&|\n]|\$\()\s*(?:sudo\s+)?(?:\S*/)?(" + "|".join(_RELOCATION_VERBS) + r")\b",
+    r"""(?:^|[;&|\n"']|\$\()\s*(?:sudo\s+)?(?:\S*/)?("""
+    + "|".join(_RELOCATION_VERBS)
+    + r")\b",
     re.IGNORECASE,
 )
 

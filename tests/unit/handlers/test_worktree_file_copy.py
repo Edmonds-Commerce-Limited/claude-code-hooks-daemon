@@ -614,6 +614,31 @@ class TestEveryRelocationVerbIsCovered:
     @pytest.mark.parametrize(
         "command",
         [
+            'echo "cp untracked/worktrees/feature-branch/src/file.py src/"',
+            'echo "rsync -av untracked/worktrees/feature/src/ src/"',
+        ],
+    )
+    def test_an_echo_wrapped_relocation_is_still_denied(
+        self, handler: WorktreeFileCopyHandler, command: str
+    ) -> None:
+        """Every acceptance probe in this project is wrapped in `echo`.
+
+        That wrapper is what makes a probe safe to type: the guard under test
+        is the thing that might be broken, so the command must not be able to
+        relocate anything when it is. The guards are TEXT scanners to suit it,
+        and this handler's own declared probes are exactly these two strings.
+
+        Excluding argument position to fix the `pip install` false positive
+        must therefore keep an opening QUOTE as a verb position. Losing it
+        turns both declared probes green against a handler that has stopped
+        matching real copies — a passing test for a guard that no longer
+        guards, which is worse than the false positive it was fixing.
+        """
+        assert handler.matches(self._bash(command)) is True
+
+    @pytest.mark.parametrize(
+        "command",
+        [
             "cd untracked/worktrees/wt-a/src && pip install -r requirements.txt && pytest tests/",
             "cd untracked/worktrees/wt-a/app && npm install && npm run build -- --out src/",
         ],
