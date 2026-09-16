@@ -6,10 +6,12 @@ from unittest.mock import patch
 
 import pytest
 
+from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.handlers.session_start.gitignore_safety_checker import (
-    _REQUIRED_GITIGNORE_PATTERNS,
     GitignoreSafetyCheckerHandler,
+    _required_gitignore_patterns,
 )
+from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.secret_file_matching import DEFAULT_PROTECTED_PATTERNS
 
 
@@ -22,7 +24,7 @@ def _write_all_required(project_root: Path, *, omitting: str = "") -> None:
     """
     lines = [
         f"{root}\n"
-        for root, _, _ in _REQUIRED_GITIGNORE_PATTERNS
+        for root, _, _ in _required_gitignore_patterns()
         if not omitting or root != omitting
     ]
     (project_root / ".gitignore").write_text("".join(lines))
@@ -89,7 +91,7 @@ class TestFindMissingEntries:
         """All entries present in root .gitignore → no missing."""
         gitignore = tmp_path / ".gitignore"
         # Write all required root patterns
-        lines = [f"{root}\n" for root, _, _ in _REQUIRED_GITIGNORE_PATTERNS]
+        lines = [f"{root}\n" for root, _, _ in _required_gitignore_patterns()]
         gitignore.write_text("".join(lines))
         assert handler._find_missing_entries(tmp_path) == []
 
@@ -101,10 +103,12 @@ class TestFindMissingEntries:
         claude_dir = tmp_path / ".claude"
         claude_dir.mkdir()
         claude_gitignore = claude_dir / ".gitignore"
-        scoped_lines = [f"{scoped}\n" for _, scoped, _ in _REQUIRED_GITIGNORE_PATTERNS if scoped]
+        scoped_lines = [f"{scoped}\n" for _, scoped, _ in _required_gitignore_patterns() if scoped]
         claude_gitignore.write_text("".join(scoped_lines))
         # Patterns with empty scoped_pattern must be in root .gitignore
-        root_only = [f"{root}\n" for root, scoped, _ in _REQUIRED_GITIGNORE_PATTERNS if not scoped]
+        root_only = [
+            f"{root}\n" for root, scoped, _ in _required_gitignore_patterns() if not scoped
+        ]
         if root_only:
             (tmp_path / ".gitignore").write_text("".join(root_only))
         assert handler._find_missing_entries(tmp_path) == []
@@ -115,8 +119,8 @@ class TestFindMissingEntries:
         """Missing entries → returns list of descriptions."""
         # No gitignore files at all
         missing = handler._find_missing_entries(tmp_path)
-        assert len(missing) == len(_REQUIRED_GITIGNORE_PATTERNS)
-        for _, _, description in _REQUIRED_GITIGNORE_PATTERNS:
+        assert len(missing) == len(_required_gitignore_patterns())
+        for _, _, description in _required_gitignore_patterns():
             assert description in missing
 
     def test_pre_inject_pattern_is_required(
@@ -195,11 +199,11 @@ class TestFindMissingEntries:
     ) -> None:
         """Commented-out entries should not count as present."""
         gitignore = tmp_path / ".gitignore"
-        root_pattern = _REQUIRED_GITIGNORE_PATTERNS[0][0]
+        root_pattern = _required_gitignore_patterns()[0][0]
         gitignore.write_text(f"# {root_pattern}\n")
         missing = handler._find_missing_entries(tmp_path)
         # Still missing since it's a comment
-        assert any(_REQUIRED_GITIGNORE_PATTERNS[0][2] in m for m in missing)
+        assert any(_required_gitignore_patterns()[0][2] in m for m in missing)
 
     def test_handles_missing_gitignore_files_gracefully(
         self, handler: GitignoreSafetyCheckerHandler, tmp_path: Path
@@ -216,7 +220,7 @@ class TestFindMissingEntries:
         '!.claude/worktrees' un-ignores the path, so the requirement is unmet —
         substring matching wrongly treated it as satisfied.
         """
-        worktrees_desc = _REQUIRED_GITIGNORE_PATTERNS[0][2]
+        worktrees_desc = _required_gitignore_patterns()[0][2]
         gitignore = tmp_path / ".gitignore"
         gitignore.write_text(
             "!.claude/worktrees\n.CLAUDE.md.pre-inject\n.claude/scheduled_tasks.lock\n"
@@ -232,7 +236,7 @@ class TestFindMissingEntries:
         '.claude/worktrees-archive/' does not ignore '.claude/worktrees', so the
         worktrees requirement must still be reported missing.
         """
-        worktrees_desc = _REQUIRED_GITIGNORE_PATTERNS[0][2]
+        worktrees_desc = _required_gitignore_patterns()[0][2]
         gitignore = tmp_path / ".gitignore"
         gitignore.write_text(
             ".claude/worktrees-archive/\n.CLAUDE.md.pre-inject\n.claude/scheduled_tasks.lock\n"
@@ -248,11 +252,47 @@ class TestFindMissingEntries:
         '.claude/' ignores everything under .claude including the worktrees path,
         so the worktrees requirement is satisfied by the directory entry.
         """
-        worktrees_desc = _REQUIRED_GITIGNORE_PATTERNS[0][2]
+        worktrees_desc = _required_gitignore_patterns()[0][2]
         gitignore = tmp_path / ".gitignore"
         gitignore.write_text(".claude/\n.CLAUDE.md.pre-inject\n.claude/scheduled_tasks.lock\n")
         missing = handler._find_missing_entries(tmp_path)
         assert worktrees_desc not in missing
+
+
+class TestEffectiveProtectedPatternsDeterminesRequiredEntries:
+    """D1: the never-commit list must track the project's EFFECTIVE protected set.
+
+    `secret_file_guard.options.protected_paths` merges onto the shipped
+    defaults (additive is the default mode) -- a glob added there must show up
+    here too, or a file the guard refuses to READ stays perfectly committable.
+    """
+
+    def setup_method(self) -> None:
+        sfm.reset_configured_patterns_cache()
+
+    def teardown_method(self) -> None:
+        sfm.reset_configured_patterns_cache()
+
+    def test_a_project_configured_protected_glob_is_required(self, tmp_path: Path) -> None:
+        handler = GitignoreSafetyCheckerHandler()
+        config_path = tmp_path / "hooks-daemon.yaml"
+        config_path.write_text(
+            "version: '2.0'\n"
+            "handlers:\n"
+            "  pre_tool_use:\n"
+            "    secret_file_guard:\n"
+            "      options:\n"
+            "        protected_paths:\n"
+            "          - '*.creds'\n"
+        )
+
+        with (
+            patch.object(ProjectContext, "is_initialized", return_value=True),
+            patch.object(ProjectContext, "config_path", return_value=config_path),
+        ):
+            missing = handler._find_missing_entries(tmp_path)
+
+        assert any("*.creds" in entry for entry in missing)
 
 
 class TestComputeGitignoreHash:
@@ -374,7 +414,7 @@ class TestHandle:
         """No missing entries → ALLOW with no advisory context."""
         # Write all required root patterns to root .gitignore
         gitignore = tmp_path / ".gitignore"
-        lines = [f"{root}\n" for root, _, _ in _REQUIRED_GITIGNORE_PATTERNS]
+        lines = [f"{root}\n" for root, _, _ in _required_gitignore_patterns()]
         gitignore.write_text("".join(lines))
 
         with patch.object(handler, "_get_project_root", return_value=tmp_path):
@@ -399,14 +439,14 @@ class TestHandle:
         assert len(result.context) > 0
         context_text = "\n".join(result.context)
         # Should mention the missing entry
-        assert _REQUIRED_GITIGNORE_PATTERNS[0][2] in context_text
+        assert _required_gitignore_patterns()[0][2] in context_text
 
     def test_handle_uses_cache_on_second_call(
         self, handler: GitignoreSafetyCheckerHandler, tmp_path: Path
     ) -> None:
         """Second call with same gitignore → reads from cache, no re-scan."""
         gitignore = tmp_path / ".gitignore"
-        lines = [f"{root}\n" for root, _, _ in _REQUIRED_GITIGNORE_PATTERNS]
+        lines = [f"{root}\n" for root, _, _ in _required_gitignore_patterns()]
         gitignore.write_text("".join(lines))
         cache_file = tmp_path / "cache.json"
 
@@ -432,7 +472,7 @@ class TestHandle:
                 handler.handle({})  # first call, caches old hash
 
                 # Modify .gitignore
-                lines = [f"{root}\n" for root, _, _ in _REQUIRED_GITIGNORE_PATTERNS]
+                lines = [f"{root}\n" for root, _, _ in _required_gitignore_patterns()]
                 gitignore.write_text("untracked/\n" + "".join(lines))
 
                 with patch.object(
@@ -519,7 +559,7 @@ class TestExceptionPaths:
     ) -> None:
         """If cache hash matches but data is None (corrupt), falls through to re-scan."""
         gitignore = tmp_path / ".gitignore"
-        lines = [f"{root}\n" for root, _, _ in _REQUIRED_GITIGNORE_PATTERNS]
+        lines = [f"{root}\n" for root, _, _ in _required_gitignore_patterns()]
         gitignore.write_text("".join(lines))
         cache_file = tmp_path / "cache.json"
 
@@ -557,17 +597,17 @@ class TestBuildResult:
 
 
 class TestRequiredPatterns:
-    """Validate _REQUIRED_GITIGNORE_PATTERNS constant structure."""
+    """Validate _required_gitignore_patterns() constant structure."""
 
     def test_patterns_is_tuple(self) -> None:
-        assert isinstance(_REQUIRED_GITIGNORE_PATTERNS, tuple)
+        assert isinstance(_required_gitignore_patterns(), tuple)
 
     def test_each_entry_has_three_elements(self) -> None:
-        for entry in _REQUIRED_GITIGNORE_PATTERNS:
+        for entry in _required_gitignore_patterns():
             assert len(entry) == 3, f"Expected (root_pattern, scoped_pattern, description): {entry}"
 
     def test_contains_claude_worktrees_entry(self) -> None:
-        root_patterns = [root for root, _, _ in _REQUIRED_GITIGNORE_PATTERNS]
+        root_patterns = [root for root, _, _ in _required_gitignore_patterns()]
         assert any(".claude/worktrees" in p for p in root_patterns)
 
 
@@ -592,13 +632,13 @@ class TestEveryProtectedPatternIsAlsoGitignored:
     """
 
     def test_the_required_list_covers_every_protected_pattern(self) -> None:
-        required = {root for root, _, _ in _REQUIRED_GITIGNORE_PATTERNS}
+        required = {root for root, _, _ in _required_gitignore_patterns()}
 
         assert set(DEFAULT_PROTECTED_PATTERNS) <= required
 
     def test_each_derived_entry_carries_a_description(self) -> None:
         """The advisory names what it is asking for; a bare glob explains nothing."""
-        for root, _, description in _REQUIRED_GITIGNORE_PATTERNS:
+        for root, _, description in _required_gitignore_patterns():
             if root in set(DEFAULT_PROTECTED_PATTERNS):
                 assert description.strip(), root
 
@@ -608,11 +648,11 @@ class TestEveryProtectedPatternIsAlsoGitignored:
 
         missing = handler._find_missing_entries(tmp_path)
 
-        assert len(missing) == len(_REQUIRED_GITIGNORE_PATTERNS)
+        assert len(missing) == len(_required_gitignore_patterns())
 
     def test_the_static_daemon_artefacts_are_still_required(self) -> None:
         """Deriving the protected globs must not drop what was already there."""
-        required = {root for root, _, _ in _REQUIRED_GITIGNORE_PATTERNS}
+        required = {root for root, _, _ in _required_gitignore_patterns()}
 
         assert ".claude/worktrees" in required
         assert ".CLAUDE.md.pre-inject" in required

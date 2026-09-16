@@ -361,6 +361,30 @@ class TestPlanTreeScan:
         assert tree.has_completed_dir is False
         assert tree.has_cancelled_dir is False
 
+    def test_readme_as_a_directory_is_not_counted_as_present(self, tmp_path: Path) -> None:
+        """``has_readme`` answers "is there a README FILE", not "does the
+        name exist at all" — a directory named ``README.md`` is not a README.
+        """
+        root = tmp_path / "CLAUDE" / "Plan"
+        root.mkdir(parents=True)
+        (root / "Completed").mkdir()
+        (root / "README.md").mkdir()
+        tree = PlanTree.scan(root)
+        assert tree.has_readme is False
+
+    def test_completed_as_a_file_is_not_counted_as_the_archive_dir(self, tmp_path: Path) -> None:
+        """``has_completed_dir`` answers "is there a Completed DIRECTORY", not
+        "does the name exist at all" — a plain file named ``Completed`` is a
+        stray file, not the archive.
+        """
+        root = tmp_path / "CLAUDE" / "Plan"
+        root.mkdir(parents=True)
+        (root / "README.md").write_text("# Plans Index\n")
+        (root / "Completed").write_text("not a directory\n")
+        tree = PlanTree.scan(root)
+        assert tree.has_completed_dir is False
+        assert [p.name for p in tree.stray_files] == ["Completed"]
+
     def test_scans_root_plans_with_docs(self, plan_root: Path) -> None:
         _write_plan(plan_root, 1, "first", "In Progress")
         _write_plan(plan_root, 2, "second", "Not Started")

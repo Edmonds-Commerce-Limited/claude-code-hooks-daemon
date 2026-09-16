@@ -50,7 +50,6 @@ _HOLDING_AREA_RE: Final[re.Pattern[str]] = re.compile(
 #: EVENT the item depends on, not a release ARTEFACT the item produces.
 _WAITS_ON_RELEASE_RE: Final[re.Pattern[str]] = re.compile(
     r"blocked on (?:a )?(?:human )?(?:/)?release"
-    r"|blocked on human"
     r"|published version carries"
     r"|run `?/release"
     r"|at release time"

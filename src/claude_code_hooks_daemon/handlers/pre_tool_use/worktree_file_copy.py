@@ -33,7 +33,24 @@ _WORKTREE_RE = "(?:" + "|".join(re.escape(prefix) for prefix in _WORKTREE_PREFIX
 # by design.
 _RELOCATION_VERBS: tuple[str, ...] = ("cp", "mv", "rsync", "install", "dd")
 
-_RELOCATION_VERB_RE = re.compile(r"\b(" + "|".join(_RELOCATION_VERBS) + r")\b", re.IGNORECASE)
+# Anchored to a command HEAD (start of string, after a separator, or a `$(`
+# substitution), optionally through `sudo` and a path prefix — the same
+# positions a shell actually treats as "the program being run". A bare
+# `\b(cp|mv|...)\b` search anywhere in the string treats "install" as a
+# relocation verb even when it names a package manager subcommand deep
+# inside an unrelated pipeline (`pip install`, `npm install`); "install" and
+# "dd" are common English/command words that a whole-command search cannot
+# tell apart from the coreutils `install`/`dd` this handler exists to catch.
+# Command-position matches `install -m 644 ...` (coreutils) and `dd if=...`
+# while missing `pip install ...` / `npm install ...`, because in both of
+# those the verb naming the program is `pip`/`npm`, not `install`. The
+# separator class includes the newline: a heredoc body runs each line as its
+# own command, so `cp` starting a line is at command position even though
+# nothing before it on the line is a separator character.
+_RELOCATION_VERB_RE = re.compile(
+    r"(?:^|[;&|\n]|\$\()\s*(?:sudo\s+)?(?:\S*/)?(" + "|".join(_RELOCATION_VERBS) + r")\b",
+    re.IGNORECASE,
+)
 
 
 class WorktreeFileCopyHandler(PreToolUseHandlerBase):

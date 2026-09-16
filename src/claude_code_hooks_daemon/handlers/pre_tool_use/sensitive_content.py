@@ -250,8 +250,13 @@ _GH_PUBLISHING_SURFACES: Final[tuple[tuple[str, str], ...]] = (
 
 #: The flags that carry the published prose. A surface invoked with NONE of
 #: them publishes no text — `gh pr review --approve` records an approval, and
-#: denying it would refuse a command that has nothing to leak.
-_GH_BODY_FLAGS: Final[str] = r"--body|-b\b|--notes|--desc(?:ription)?|--body-file|-F\b|--notes-file"
+#: denying it would refuse a command that has nothing to leak. `--title`/`-t`
+#: is here because a title is prose on the same irretractable public page a
+#: body is (`gh issue create --title <term>` publishes it with no `--body`
+#: at all); `-d` is the short form of `--desc` (`gh gist create -d <term>`).
+_GH_BODY_FLAGS: Final[str] = (
+    r"--body|-b\b|--notes|--desc(?:ription)?|--title|-t\b|-d\b" r"|--body-file|-F\b|--notes-file"
+)
 
 _GH_SURFACE_ALTERNATION: Final[str] = "|".join(
     noun + r"\s+" + verb for noun, verb in _GH_PUBLISHING_SURFACES

@@ -85,9 +85,9 @@ def read_message_files(command: str, cwd: str | None) -> list[MessageFile]:
         # this line rather than to the next one.
         if not path_is_file(path, unreadable_means=False) or not os.access(path, os.R_OK):
             continue
-        if path.stat().st_size > MAX_MESSAGE_FILE_BYTES:
-            continue
         try:
+            if path.stat().st_size > MAX_MESSAGE_FILE_BYTES:
+                continue
             raw_bytes = path.read_bytes()
         except OSError as failure:
             # Statting a file is NOT reading it, and the gap raises. A file

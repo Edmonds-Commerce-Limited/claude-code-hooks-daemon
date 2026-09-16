@@ -610,3 +610,24 @@ class TestEveryRelocationVerbIsCovered:
         main-repo code directory — the verb alone never denies anything.
         """
         assert handler.matches(self._bash(command)) is False
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cd untracked/worktrees/wt-a/src && pip install -r requirements.txt && pytest tests/",
+            "cd untracked/worktrees/wt-a/app && npm install && npm run build -- --out src/",
+        ],
+    )
+    def test_a_package_install_that_later_names_a_code_dir_is_not_a_relocation(
+        self, handler: WorktreeFileCopyHandler, command: str
+    ) -> None:
+        """The verb test must be tied to the matched path pair, not the string.
+
+        These commands relocate nothing: the worktree path is a `cd` target
+        and the main-repo code dir is a `pytest`/`npm` argument unrelated to
+        `install`. A bare `re.search` for the verb over the WHOLE command
+        still fires here, because the command happens to name a worktree
+        path, contain the word "install", and later name a code dir — the
+        exact ordinary shape of "work inside a worktree, then test/build".
+        """
+        assert handler.matches(self._bash(command)) is False

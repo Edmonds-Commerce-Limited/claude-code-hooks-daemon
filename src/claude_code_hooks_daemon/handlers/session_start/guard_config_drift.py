@@ -206,6 +206,7 @@ def _render(report: DriftReport) -> list[str]:
 
     lines.append(
         "If the change is intended, commit it so it is reviewable. If it is not, "
-        f"restore it: git checkout HEAD -- {_CONFIG_RELATIVE_PATH}"
+        f"ask the user to restore {_CONFIG_RELATIVE_PATH} to its committed state — "
+        "this daemon's own destructive-git guard denies the LLM doing that directly."
     )
     return lines

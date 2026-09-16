@@ -35,14 +35,11 @@ CHECK_ID: Final[str] = "quote-source-stale"
 
 def _finding(rel_path: str, anchor: str, quoters: tuple[str, ...]) -> Finding:
     quoter_list = ", ".join(f"`{quoter}`" for quoter in quoters)
+    plural_suffix = "s" if len(quoters) == 1 else ""
     return Finding(
         check_id=CHECK_ID,
         severity=Severity.ADVISE,
-        message=(
-            f"`{rel_path}#{anchor}` changed, and {quoter_list} quote{{}} it.".format(
-                "s" if len(quoters) == 1 else ""
-            )
-        ),
+        message=f"`{rel_path}#{anchor}` changed, and {quoter_list} quote{plural_suffix} it.",
         remediation=(
             f"Re-check the ssot-quote block(s) in {quoter_list} against the "
             f"updated `{rel_path}#{anchor}` (or run the docs-qa sweep, which "

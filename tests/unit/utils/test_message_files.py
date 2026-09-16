@@ -129,6 +129,28 @@ class TestAReadThatFailsAfterTheCheck:
 
         assert str(body) in caplog.text
 
+    def test_a_stat_failure_after_the_existence_check_is_skipped_not_raised(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """The size-check ``stat()`` sits in the same race as the read that follows it.
+
+        A file can vanish between the existence check and this line just as
+        easily as between it and ``read_bytes`` -- both must be skipped, not
+        raised.
+        """
+        body = tmp_path / "msg.txt"
+        body.write_text("the payload\n")
+
+        with caplog.at_level(logging.DEBUG, logger=message_files.__name__):
+            with (
+                patch.object(Path, "is_file", return_value=True),
+                patch("os.access", return_value=True),
+                patch.object(Path, "stat", side_effect=FileNotFoundError(2, "no such file")),
+            ):
+                assert read_message_files(f"git commit -F {body}", None) == []
+
     def test_one_unreadable_file_does_not_hide_a_readable_one(self, tmp_path: Path) -> None:
         """The caller still needs every file it CAN judge."""
         readable = tmp_path / "ok.txt"

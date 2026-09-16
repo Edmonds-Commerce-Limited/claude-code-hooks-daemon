@@ -345,3 +345,26 @@ class TestAGitCommitMessageIsNotAScan:
         command = "git commit -m 'why ls CLAUDE/Plan/* is blocked' && ls CLAUDE/Plan/*"
 
         assert handler.matches(_bash(command)) is True
+
+    def test_a_real_scan_before_the_commit_is_not_excused_by_a_later_mention(
+        self, handler: PlanNumberHelperHandler
+    ) -> None:
+        """Anchoring on only the LAST mention still misses a mention BEFORE.
+
+        `ls CLAUDE/Plan/` really scans, and it sits before `git commit` here —
+        but the message that follows ALSO mentions the plan dir, in prose
+        describing the scan. Checking only the last occurrence finds that
+        in-message mention and calls the whole command text, without ever
+        checking whether the EARLIER, real scan is covered too.
+        """
+        command = "ls CLAUDE/Plan/* && git commit -m 'prose CLAUDE/Plan here'"
+
+        assert handler.matches(_bash(command)) is True
+
+    def test_a_real_find_before_the_commit_is_not_excused_by_a_later_mention(
+        self, handler: PlanNumberHelperHandler
+    ) -> None:
+        """Same hole, via `find` rather than `ls`, and a `;` separator."""
+        command = "find CLAUDE/Plan -name '0*'; git commit -m 'why CLAUDE/Plan scans fail'"
+
+        assert handler.matches(_bash(command)) is True

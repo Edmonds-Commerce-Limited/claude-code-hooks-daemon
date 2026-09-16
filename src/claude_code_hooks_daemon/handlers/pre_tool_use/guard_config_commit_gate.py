@@ -116,9 +116,17 @@ def _pathspec_covers(spec: str, config_path: str) -> bool:
     """Whether ``spec`` names the config, or a directory containing it.
 
     A directory pathspec commits everything beneath it, so ``git commit
-    .claude`` carries the config even though it never names the file.
+    .claude`` carries the config even though it never names the file. A
+    literal prefix comparison with no normalisation misses two spellings of
+    "the whole working tree" (``.``, ``./``) and a ``./``-prefixed config
+    path, all three of which git accepts and none of which compares equal to
+    or prefixes ``config_path`` unnormalised.
     """
     normalised = spec.rstrip("/")
+    if normalised.startswith("./"):
+        normalised = normalised[2:]
+    if normalised in ("", "."):
+        return True
     return config_path == normalised or config_path.startswith(f"{normalised}/")
 
 

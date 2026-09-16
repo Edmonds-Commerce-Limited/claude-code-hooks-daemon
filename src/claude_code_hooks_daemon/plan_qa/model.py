@@ -33,7 +33,6 @@ from typing import Final
 from claude_code_hooks_daemon.plan_qa.types import DEFAULT_JOURNAL_DIR_NAME
 from claude_code_hooks_daemon.utils.authored_paths import (
     authored_path,
-    authored_path_exists,
     contained_authored_path,
 )
 
@@ -494,11 +493,14 @@ class PlanTree:
             # Through the normalising helper like every other path resolution
             # in this tree: these three names are configured, not literal, and
             # the rule that keeps `..` out of a stat is a chokepoint rather
-            # than a judgement about which value can carry one.
-            has_readme=authored_path_exists(root, README_FILENAME),
-            has_completed_dir=authored_path_exists(root, completed_dir),
+            # than a judgement about which value can carry one. The predicate
+            # applied to the helper's result (not a bare `exists()`) is what
+            # tells a README file apart from a directory of the same name, and
+            # the archive directory apart from a stray file of the same name.
+            has_readme=authored_path(root, README_FILENAME).is_file(),
+            has_completed_dir=authored_path(root, completed_dir).is_dir(),
             has_cancelled_dir=(
-                cancelled_dir is not None and authored_path_exists(root, cancelled_dir)
+                cancelled_dir is not None and authored_path(root, cancelled_dir).is_dir()
             ),
         )
 

@@ -26,6 +26,7 @@ the same data.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -42,6 +43,9 @@ RUNS_DIRNAME: Final[str] = "RUNS"
 _COLUMNS: Final[tuple[str, ...]] = ("run", "at", "event", "from", "to", "note")
 _HEADER: Final[str] = "| " + " | ".join(_COLUMNS) + " |"
 _DIVIDER: Final[str] = "|" + "|".join(" --- " for _ in _COLUMNS) + "|"
+#: Splits on a column-separator ``|``, not one ``_escaped`` wrote as ``\|`` to
+#: keep a note's own pipe inside its column.
+_CELL_SPLIT: Final[re.Pattern[str]] = re.compile(r"(?<!\\)\|")
 #: Written for an absent value. A literal dash reads as "nothing here" in the
 #: rendered table, where an empty cell reads as an oversight.
 _EMPTY: Final[str] = "-"
@@ -335,14 +339,16 @@ def _split_row(line: str) -> list[str] | None:
 
     Padding is presentation: this project auto-aligns markdown tables on edit,
     so a ledger a human has opened comes back with different whitespace and
-    identical data.
+    identical data. The column count is deliberately NOT checked here — a row
+    with the wrong number of cells still looks like a data row (as opposed to
+    a header or divider) and must reach :func:`_parse_file`'s ValueError
+    handling so it is reported, not silently dropped alongside the rows this
+    function truly does not recognise.
     """
     stripped = line.strip()
     if not stripped.startswith("|") or not stripped.endswith("|"):
         return None
-    cells = [cell.strip() for cell in stripped[1:-1].split("|")]
-    if len(cells) != len(_COLUMNS):
-        return None
+    cells = [cell.strip() for cell in _CELL_SPLIT.split(stripped[1:-1])]
     if cells[0] == _COLUMNS[0] or set(cells[0]) <= {"-", ":"}:
         return None
     return cells
@@ -350,6 +356,8 @@ def _split_row(line: str) -> list[str] | None:
 
 def _event_from_cells(cells: list[str]) -> RunEvent:
     """Rebuild a :class:`RunEvent` from one parsed row."""
+    if len(cells) != len(_COLUMNS):
+        raise ValueError(f"expected {len(_COLUMNS)} cells, found {len(cells)}")
     run_id, at, event, from_ref, to_ref, note = (_unescaped(cell) for cell in cells)
     interval = (
         None

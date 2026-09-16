@@ -14,7 +14,7 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
-from claude_code_hooks_daemon.utils.secret_file_matching import DEFAULT_PROTECTED_PATTERNS
+from claude_code_hooks_daemon.utils.secret_file_matching import resolve_configured_patterns
 from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 
 logger = logging.getLogger(__name__)
@@ -43,10 +43,15 @@ _STATIC_GITIGNORE_PATTERNS: tuple[tuple[str, str, str], ...] = (
 
 
 def _protected_pattern_entries() -> tuple[tuple[str, str, str], ...]:
-    """One required gitignore entry per PROTECTED glob, derived not restated.
+    """One required gitignore entry per EFFECTIVE protected glob, derived not restated.
 
     A file whose contents may never be read into context certainly may never
-    enter git history, so the never-commit list must cover the never-read one.
+    enter git history, so the never-commit list must cover the never-read one
+    -- and "the never-read one" is `resolve_configured_patterns()`, not the
+    shipped defaults alone: a project's own `secret_file_guard.options.
+    protected_paths` merges onto the defaults (additive is the default mode),
+    and a glob added there must show up here too, or a file the guard refuses
+    to read stays perfectly committable.
 
     Derived rather than restated, because a hand-written approximation of a
     glob is not the glob (Plan 00412, F-HYG-1): a gitignore line matching only
@@ -66,11 +71,21 @@ def _protected_pattern_entries() -> tuple[tuple[str, str, str], ...]:
             f"{pattern} (a protected path — its contents may never be read, "
             "so it must never be committed)",
         )
-        for pattern in DEFAULT_PROTECTED_PATTERNS
+        for pattern in resolve_configured_patterns()
     )
 
 
-_REQUIRED_GITIGNORE_PATTERNS = _STATIC_GITIGNORE_PATTERNS + _protected_pattern_entries()
+def _required_gitignore_patterns() -> tuple[tuple[str, str, str], ...]:
+    """Static daemon-artefact patterns plus one entry per effective protected glob.
+
+    Computed at CALL time, not import time: `resolve_configured_patterns()`
+    reads the project's loaded config, which has not happened yet when this
+    module is first imported. Building the derived entries once at import
+    time froze the answer at the shipped defaults regardless of what a
+    project later configures.
+    """
+    return _STATIC_GITIGNORE_PATTERNS + _protected_pattern_entries()
+
 
 _GITIGNORE_FILE = ".gitignore"
 _CLAUDE_GITIGNORE_FILE = ".claude/.gitignore"
@@ -182,7 +197,7 @@ class GitignoreSafetyCheckerHandler(SessionStartHandlerBase):
         """Return descriptions of required patterns absent from any gitignore."""
         lines = self._read_gitignore_lines(project_root)
         missing: list[str] = []
-        for root_pattern, scoped_pattern, description in _REQUIRED_GITIGNORE_PATTERNS:
+        for root_pattern, scoped_pattern, description in _required_gitignore_patterns():
             covered = any(self._line_covers_pattern(line, root_pattern) for line in lines) or (
                 scoped_pattern != ""
                 and any(self._line_covers_pattern(line, scoped_pattern) for line in lines)
@@ -269,7 +284,7 @@ class GitignoreSafetyCheckerHandler(SessionStartHandlerBase):
             "Fix: add the missing entries to your root .gitignore, e.g.:",
             "",
         ]
-        for root_pattern, _, description in _REQUIRED_GITIGNORE_PATTERNS:
+        for root_pattern, _, description in _required_gitignore_patterns():
             if description in missing:
                 context.append(f"  {root_pattern}")
         context += [

@@ -1231,6 +1231,7 @@ class TestGhBodySurface:
             ('gh release create v1.2.3 --notes "alpha-term"', "release notes"),
             ('gh release edit v1.2.3 --notes "alpha-term"', "edited release notes"),
             ("gh gist create notes.md --desc 'alpha-term'", "a public gist"),
+            ("gh gist create notes.md -d 'alpha-term'", "a public gist (short flag)"),
             ('gh pr review 12 --approve --body "alpha-term"', "a review comment"),
             ('gh repo edit --description "alpha-term"', "the repository description"),
         ],
@@ -1258,6 +1259,30 @@ class TestGhBodySurface:
         assert (
             handler.matches(hook_input) is True
         ), f"{surface} is published irreversibly and was not scanned: {command}"
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert "alpha-term" not in result.model_dump_json()
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'gh issue create --title "alpha-term"',
+            'gh pr edit 12 --title "alpha-term"',
+        ],
+    )
+    def test_term_in_title_is_denied(self, tmp_path: Path, command: str) -> None:
+        """A title is published prose on the same page a body is.
+
+        `--title` was absent from the body-flag inventory, so a surface
+        already on the publishing-surfaces list (`issue create`, `pr edit`)
+        was invisible whenever the term sat in `--title` rather than
+        `--body` — the surface list narrowed correctly, but the flag list
+        did not grow to match it.
+        """
+        handler = _wordlist(tmp_path, "alpha-term")
+
+        hook_input = _bash_input(command)
+        assert handler.matches(hook_input) is True
         result = handler.handle(hook_input)
         assert result.decision == Decision.DENY
         assert "alpha-term" not in result.model_dump_json()

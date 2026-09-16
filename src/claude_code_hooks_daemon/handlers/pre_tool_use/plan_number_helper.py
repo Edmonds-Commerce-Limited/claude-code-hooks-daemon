@@ -290,7 +290,11 @@ class PlanNumberHelperHandler(PreToolUseHandlerBase):
         word is rare in prose; here the plan directory appears in exactly the
         messages this exemption exists to allow, so a first-match anchor would
         let `git commit -m '...<dir>...' && ls <dir>/*` through. Requiring the
-        last mention to be inside the message means EVERY mention is.
+        last mention to be inside the message means EVERY mention AFTER
+        `git commit` is -- but a mention BEFORE it is a different command
+        entirely, so the FIRST mention must also sit inside the message: a
+        real scan preceding `git commit`, followed by a message that merely
+        DESCRIBES the plan dir, must not be excused by the description.
 
         A separator between `git commit` and the mention means the mention
         belongs to a chained command, not to the message.
@@ -299,10 +303,11 @@ class PlanNumberHelperHandler(PreToolUseHandlerBase):
         if not git_match:
             return False
 
-        last_mention = command.rfind(plan_dir)
-        if last_mention < git_match.start():
+        first_mention = command.find(plan_dir)
+        if first_mention < git_match.start():
             return False
 
+        last_mention = command.rfind(plan_dir)
         text_between = command[git_match.start() : last_mention]
         return re.search(f"[{_COMMAND_SEPARATORS}]", text_between) is None
 

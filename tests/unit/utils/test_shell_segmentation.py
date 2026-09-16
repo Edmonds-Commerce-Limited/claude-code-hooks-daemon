@@ -432,7 +432,7 @@ class TestABodyIsOnlyInertIfItsRECEIVERTreatsItAsData:
         self,
     ) -> None:
         """A `'` inside double quotes is literal, not a quote opener."""
-        command = 'echo "don\'t" && cat <<\'EOF\' > notes.md\ngit reset --hard HEAD\nEOF'
+        command = "echo \"don't\" && cat <<'EOF' > notes.md\ngit reset --hard HEAD\nEOF"
         assert "git reset --hard HEAD" not in strip_quoted_heredoc_bodies(command)
 
     def test_a_plain_subshell_is_not_a_substitution_and_stays_blanked(self) -> None:

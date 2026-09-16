@@ -101,6 +101,33 @@ class TestUnnamedDriftIsSurfacedWithoutBeingCalledAWeakening:
         assert "disabled" not in rendered
 
 
+class TestTheRemediationDoesNotInstructADeniedCommand:
+    """D2: the fix-it line must not hand the agent a command this daemon denies.
+
+    `destructive_git` matches and DENIES `git checkout <ref> -- <path>` in any
+    Bash command it is handed -- including this advisory's own remediation
+    line, if an agent follows it literally. A turn spent hitting that deny is
+    a turn the drift this handler exists to surface goes unfixed.
+    """
+
+    def test_the_advisory_is_not_itself_a_denied_command(self) -> None:
+        from claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git import (
+            DestructiveGitHandler,
+        )
+
+        rendered = "\n".join(_handler(_CLEAN, _WEAKENED).handle(_session()).context)
+
+        destructive = DestructiveGitHandler()
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": rendered}}
+        assert destructive.matches(hook_input) is False
+
+    def test_it_still_hands_off_to_the_user_by_name(self) -> None:
+        """The fix must not just delete the ask -- a human still needs it."""
+        rendered = "\n".join(_handler(_CLEAN, _WEAKENED).handle(_session()).context)
+
+        assert "ask the user" in rendered.lower()
+
+
 class TestTheHandlerIsWiredCorrectly:
     """Registration facts that are easy to get wrong and silent when wrong."""
 

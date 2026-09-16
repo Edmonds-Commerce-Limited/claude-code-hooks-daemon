@@ -113,9 +113,19 @@ class TestWorkingTreeDestruction:
             "git switch main",
             "git switch -c feature-work",
             "git switch --create feature-fix",
+            "git switch --force-create foo",
         ],
     )
     def test_ordinary_switch_is_untouched(self, handler, command: str) -> None:
+        """`--force-create` is the long spelling of `-C`, not of `-f`.
+
+        It resets a branch ref and git itself refuses it when local changes
+        would be lost -- it cannot cause the working-tree loss this rule
+        exists to catch. The checkout sibling already guards `--force`
+        against exactly this shape of over-match (`--force-with-lease` stays
+        out via `--force(?!-)`); the switch pattern must hold the same
+        property.
+        """
         assert not _denied(handler, command)
 
 

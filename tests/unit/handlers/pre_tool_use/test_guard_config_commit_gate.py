@@ -94,6 +94,30 @@ class TestWhichVersionTheCommitRecords:
             RecordedSource.WORKING_TREE
         )
 
+    def test_a_dot_pathspec_records_the_whole_working_tree(self) -> None:
+        """`git commit .` commits everything below cwd, config included.
+
+        `_pathspec_covers` did a literal prefix comparison with no
+        normalisation, so `.` never equalled and never prefixed the config
+        path -- the gate read this as naming nothing and stayed silent about
+        a commit that in fact carries the config.
+        """
+        assert recorded_config_source("git commit . -m x", CONFIG_RELATIVE_PATH) is (
+            RecordedSource.WORKING_TREE
+        )
+
+    def test_a_slash_dot_pathspec_records_the_whole_working_tree(self) -> None:
+        assert recorded_config_source("git commit -m x ./", CONFIG_RELATIVE_PATH) is (
+            RecordedSource.WORKING_TREE
+        )
+
+    def test_a_dot_slash_prefixed_config_path_still_counts(self) -> None:
+        command = f"git commit -m x ./{CONFIG_RELATIVE_PATH}"
+
+        assert recorded_config_source(command, CONFIG_RELATIVE_PATH) is (
+            RecordedSource.WORKING_TREE
+        )
+
     def test_a_non_commit_command_is_not_judged(self) -> None:
         assert recorded_config_source("git status", CONFIG_RELATIVE_PATH) is None
 

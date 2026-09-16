@@ -123,6 +123,31 @@ class TestTerminalPlansAreNotFlagged:
         assert not findings, "a terminal plan is not waiting on a release by definition"
 
 
+class TestOwnerGatedItemsAreNotFlagged:
+    """A bare owner gate names no release event and must not be flagged.
+
+    ``_WAITS_ON_RELEASE_RE``'s docstring promises "each phrase names a release
+    EVENT the item depends on" — an owner ruling on an unrelated question is
+    not a release event, so this is the false positive the module's own
+    contract rules out.
+    """
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "- [ ] ⬜ **BLOCKED ON HUMAN** — the owner must choose between " "tier A and tier B.",
+            "- [ ] ⬜ BLOCKED ON HUMAN: waiting for a ruling on the priority table.",
+            "- [ ] ⬜ Ask the owner; blocked on human input until they reply.",
+        ],
+    )
+    def test_owner_gate_without_a_release_mention_is_not_flagged(
+        self, tmp_path: Path, line: str
+    ) -> None:
+        findings = _run_edit(_edit_context(tmp_path, _plan("In Progress", line)))
+
+        assert not findings, f"an owner-gated item with no release mention was flagged: {line!r}"
+
+
 class TestOrdinaryPlansAreUnaffected:
     def test_a_plan_that_never_mentions_a_release_is_clean(self, tmp_path: Path) -> None:
         line = "- [ ] ⬜ Full QA passes, the daemon restarts, CI green."

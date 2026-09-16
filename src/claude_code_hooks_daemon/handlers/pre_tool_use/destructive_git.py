@@ -176,7 +176,13 @@ _DESTRUCTIVE_PATTERN_REASONS: tuple[tuple[str, str], ...] = (
     ),
     (
         rf"{_GIT_INVOCATION}switch[ \t]+[^{_SUBCOMMAND_SEPARATOR_CHARS}]*?"
-        r"(?:(?<!\S)--(?:force|discard-changes)\b"
+        # `force(?!-)` mirrors the checkout sibling above: exact `--force`,
+        # never a prefix. Without the negative lookahead, `\b` matches
+        # mid-token and `--force-create` (the long spelling of `-C`, which
+        # resets a branch ref and cannot discard uncommitted changes — git
+        # refuses it when that would happen) was denied for a loss it cannot
+        # cause.
+        r"(?:(?<!\S)--(?:force(?!-)|discard-changes)\b"
         r"|(?<!\S)-(?!-)[A-Za-z0-9]*f[A-Za-z0-9]*\b)",
         "git switch -f/--discard-changes discards every uncommitted change — the "
         "`switch` spelling of the same loss `git checkout -f` causes",

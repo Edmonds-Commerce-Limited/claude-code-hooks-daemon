@@ -201,6 +201,27 @@ class TestReadEvents:
             "2027-001",
         ]
 
+    def test_round_trips_a_note_containing_a_pipe(self, routine_dir: Path) -> None:
+        """A pipe in a note must not shift the columns after it.
+
+        ``_escaped`` writes it as ``\\|`` precisely so the reader can tell it
+        apart from a column boundary; the reader has to honour that escape.
+        """
+        append_event(
+            routine_dir,
+            RunEvent(
+                run_id="2026-001",
+                event=LedgerEvent.FINDINGS,
+                at=_LATER,
+                interval=RunInterval(from_ref="abc123", to_ref="def456"),
+                note="see report A | B for detail",
+            ),
+        )
+
+        (event,) = read_events(routine_dir)
+        assert event.note == "see report A | B for detail"
+        assert malformed_rows(routine_dir) == []
+
     def test_tolerates_the_table_being_reformatted(self, routine_dir: Path) -> None:
         """Cell padding is not data.
 
@@ -283,6 +304,17 @@ class TestMalformedRows:
             routine_dir, "| 2026-001 | 2026-09-15T20:00:00+00:00 | finished | - | - | - |"
         )
 
+        assert len(malformed_rows(routine_dir)) == 1
+
+    def test_a_genuinely_short_row_is_reported_not_dropped(self, routine_dir: Path) -> None:
+        """Wrong cell count must not be mistaken for a header or divider row.
+
+        The same silent-drop shape that a mis-escaped pipe can trigger must
+        also not swallow a row that is short for an unrelated reason.
+        """
+        self._write_rows(routine_dir, "| 2026-001 | 2026-09-15T20:00:00+00:00 | clean |")
+
+        assert read_events(routine_dir) == []
         assert len(malformed_rows(routine_dir)) == 1
 
     def test_a_healthy_ledger_reports_nothing(self, routine_dir: Path) -> None:

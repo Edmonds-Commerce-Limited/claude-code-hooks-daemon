@@ -214,6 +214,41 @@ class TestEditOnSourceFile:
         assert "CLAUDE/QuoterA.md" in findings[0].message
         assert "CLAUDE/QuoterB.md" in findings[0].message
 
+    def test_braced_path_does_not_crash_the_message_format(self, tmp_path: Path) -> None:
+        """A literal brace in the SOURCE PATH must not be treated as a format field.
+
+        ``_finding`` interpolates ``rel_path`` and ``anchor`` into an f-string
+        and then calls ``.format()`` on the whole result — any ``{``/``}`` that
+        survives interpolation becomes a live placeholder and raises KeyError,
+        which propagates out of the entire EDIT stage (no per-check guard in
+        ``docs_qa/runner.py``). A filesystem permits a brace in a filename, and
+        ``ssot-quote``'s ``([^#]+)#`` path capture permits one in the marker.
+        """
+        policy = DocumentationPolicy()
+        (tmp_path / "CLAUDE").mkdir()
+        source = tmp_path / "CLAUDE" / "So{u}rce.md"
+        source.write_text(f"## Anchor\n\n{_LONG_SENTENCE}\n")
+        (tmp_path / "CLAUDE" / "Quoter.md").write_text(
+            f"<!-- ssot-quote: CLAUDE/So{{u}}rce.md#anchor -->\n{_LONG_SENTENCE}\n"
+            "<!-- /ssot-quote -->\n"
+        )
+        index_path = tmp_path / "untracked" / "docs-qa" / "index.json"
+        corpus = build_and_save_corpus(tmp_path, policy, index_path)
+        old_content = source.read_text()
+        new_content = "## Anchor\n\nThe section content has now genuinely changed.\n"
+        context = edit_context(
+            project_root=tmp_path,
+            policy=policy,
+            file_path=source,
+            file_content=new_content,
+            file_exists_before=True,
+            file_content_before=old_content,
+            corpus=corpus,
+        )
+        findings = _run_edit(context)
+        assert len(findings) == 1
+        assert "CLAUDE/Quoter.md" in findings[0].message
+
     def test_removed_anchor_with_known_quoter_advises(self, tmp_path: Path) -> None:
         policy = DocumentationPolicy()
         corpus = self._build_corpus_with_quoter(tmp_path, policy)
