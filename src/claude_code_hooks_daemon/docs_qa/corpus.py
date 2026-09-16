@@ -35,7 +35,6 @@ block it names, and hides a genuine duplicate against a file that gained one
 import json
 import logging
 import os
-import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from fnmatch import fnmatch
@@ -50,11 +49,11 @@ from claude_code_hooks_daemon.docs_qa.structured_blocks import (
     BlockLocation,
     extract_structured_block_locations,
 )
-from claude_code_hooks_daemon.plan_qa.model import lines_outside_fences
 from claude_code_hooks_daemon.utils.authored_paths import (
     authored_path,
     contained_authored_path,
 )
+from claude_code_hooks_daemon.utils.markdown_links import extract_link_targets
 from claude_code_hooks_daemon.utils.path_exclusion import is_path_excluded
 from claude_code_hooks_daemon.utils.vendor_paths import (
     VendorScope,
@@ -67,15 +66,8 @@ logger = logging.getLogger(__name__)
 _MARKDOWN_SUFFIX: Final[str] = ".md"
 _CHANGELOG_FILENAME: Final[str] = "CHANGELOG.md"
 _RELEASES_DIR_NAME: Final[str] = "RELEASES"
-_PLAN_SUBDIR_NAME: Final[str] = "Plan"
-_PLAN_COMPLETED_DIR_NAME: Final[str] = "Completed"
-_PLAN_CANCELLED_DIR_NAME: Final[str] = "Cancelled"
 _CLAUDE_DIR_NAME: Final[str] = ".claude"
 _SATELLITE_DIR_NAMES: Final[tuple[str, ...]] = ("rules", "skills", "agents")
-
-# ``[text](target "optional title")`` — target is any run of non-space,
-# non-')' characters (an optional quoted title may follow).
-_MD_LINK_RE: Final[re.Pattern[str]] = re.compile(r"\[[^\]]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
 
 _INDEX_TMP_SUFFIX: Final[str] = ".tmp"
 
@@ -166,18 +158,6 @@ def is_module_doc_path(rel_path: str, agent_tree: str) -> bool:
     if len(parts) == 2 and parts[0] == agent_tree_norm:
         return False  # {trees.agent}/CLAUDE.md
     return True
-
-
-def extract_link_targets(text: str) -> list[str]:
-    """Every plain markdown link target in ``text``, outside fenced code blocks.
-
-    Backticked prose paths (``\\`src/foo.py\\```) are not markdown link
-    syntax and are never matched — no special-casing needed.
-    """
-    targets: list[str] = []
-    for line in lines_outside_fences(text):
-        targets.extend(match.group(1) for match in _MD_LINK_RE.finditer(line))
-    return targets
 
 
 def _is_worktree_path(rel_parts: tuple[str, ...]) -> bool:
@@ -355,7 +335,13 @@ def _is_excluded(rel_parts: tuple[str, ...], policy: DocumentationPolicy) -> boo
     so testing it made a declared ``layout.vendor_dirs`` inert here — the
     config existed and could not reach the check. Scopes rather than one flat
     set (Plan 00332) so a monorepo sub-project's declaration governs its own
-    tree and no one else's."""
+    tree and no one else's.
+
+    The plan-archive test reads ``policy.plan_tree`` for the same reason
+    (Plan 00419 N2): the archive directory names and the plan directory itself
+    are ``plan_workflow`` config, and hardcoding ``CLAUDE/Plan/Completed`` here
+    meant a project that configured either one had its LIVE plans excluded and
+    its real archive indexed."""
     if len(rel_parts) == 1 and rel_parts[0] == _CHANGELOG_FILENAME:
         return True
     if rel_parts and rel_parts[0] == _RELEASES_DIR_NAME:
@@ -370,11 +356,7 @@ def _is_excluded(rel_parts: tuple[str, ...], policy: DocumentationPolicy) -> boo
         "/".join(rel_parts[:-1]), policy.vendor_scopes
     ):
         return True
-    plan_completed = (policy.trees.agent, _PLAN_SUBDIR_NAME, _PLAN_COMPLETED_DIR_NAME)
-    plan_cancelled = (policy.trees.agent, _PLAN_SUBDIR_NAME, _PLAN_CANCELLED_DIR_NAME)
-    if rel_parts[: len(plan_completed)] == plan_completed:
-        return True
-    if rel_parts[: len(plan_cancelled)] == plan_cancelled:
+    if policy.plan_tree.is_archived("/".join(rel_parts)):
         return True
     if matches_scope_exclude("/".join(rel_parts), policy.qa.scope_exclude_globs):
         return True

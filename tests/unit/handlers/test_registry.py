@@ -895,3 +895,44 @@ class TestProjectExcludePathsReachDocsPolicy:
             policy = getattr(h, "_documentation", None)
             assert policy is not None
             assert policy.exclude_paths == ("docs/fixtures/**",)
+
+
+class TestPlanTreeReachesDocsPolicy:
+    """Plan 00419 N2: the plan tree's shape travels WITH the docs policy.
+
+    Docs QA now resolves a plan link by NUMBER across the whole plan tree, and
+    it excludes the archive from its corpus — both need the CONFIGURED plan
+    directory and archive names. Wired here rather than left defaulted,
+    because a correctness fix nobody is wired to receive is the same failure
+    as a default-off flag.
+    """
+
+    def test_register_all_copies_the_plan_workflow_shape_into_the_docs_policy(self) -> None:
+        from claude_code_hooks_daemon.config.models import (
+            DocumentationConfig,
+            PlanWorkflowConfig,
+        )
+
+        registry = HandlerRegistry()
+        router = EventRouter()
+        plan_workflow = PlanWorkflowConfig(directory="docs/plans")
+        plan_workflow.qa.completed_dir = "Done"
+        plan_workflow.qa.cancelled_dir = None
+        registry.register_all(
+            router,
+            plan_workflow=plan_workflow,
+            documentation=DocumentationConfig(enabled=True),
+        )
+
+        documented = [
+            handler
+            for handlers in router.get_all_handlers().values()
+            for handler in handlers
+            if getattr(handler, "_documentation", None) is not None
+        ]
+        assert documented, "no documentation-tagged handler registered"
+        for h in documented:
+            policy = getattr(h, "_documentation", None)
+            assert policy is not None
+            assert policy.plan_tree.plan_dir == "docs/plans"
+            assert policy.plan_tree.archive_dirs == ("Done",)

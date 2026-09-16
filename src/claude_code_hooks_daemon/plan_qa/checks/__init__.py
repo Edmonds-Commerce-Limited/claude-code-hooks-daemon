@@ -35,6 +35,7 @@ from claude_code_hooks_daemon.plan_qa.checks import (
     no_new_collisions,
     path_existence,
     plan_doc_size,
+    plan_link_resolves,
     plan_ref_format,
     plan_shrink_without_journal,
     release_blocked_plan,
@@ -99,6 +100,9 @@ def all_checks() -> tuple[CheckSpec, ...]:
         journal_completion_entry.CHECK,
         plan_shrink_without_journal.CHECK,
         # Stage 3 — sweep-only checks
+        # plan-link-resolves is SWEEP-only by design (Plan 00419 N2): docs QA's
+        # `pointer-resolves` already blocks a NEW dead link at edit and commit.
+        *plan_link_resolves.CHECKS,
         staleness_nag.CHECK,
         dormant_honesty.CHECK,
         claim_spotcheck_queue.CHECK,

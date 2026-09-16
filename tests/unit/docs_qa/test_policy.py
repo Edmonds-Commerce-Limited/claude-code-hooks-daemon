@@ -166,3 +166,29 @@ class TestExcludePaths:
             _FakeDocumentationConfig(), exclude_paths=["fixtures/**", "docs/bad/*.md"]
         )
         assert policy.exclude_paths == ("fixtures/**", "docs/bad/*.md")
+
+
+class TestPlanTree:
+    """Plan 00419 N2: the plan tree's shape travels with the policy too.
+
+    Docs QA hardcoded ``Plan``/``Completed``/``Cancelled`` in
+    ``corpus._is_excluded``, so a project that configured
+    ``plan_workflow.directory`` or a renamed archive was judged against names
+    it does not use. Injecting it alongside the vendor truth is the same
+    lesson: docs QA's scope judgement reads the POLICY, so a value the handler
+    also holds could never reach it.
+    """
+
+    def test_defaults_to_the_config_defaults(self) -> None:
+        from claude_code_hooks_daemon.plan_links import PlanTreeLayout
+
+        assert DocumentationPolicy().plan_tree == PlanTreeLayout()
+        assert policy_from_config(_FakeDocumentationConfig()).plan_tree == PlanTreeLayout()
+
+    def test_a_supplied_layout_is_carried(self) -> None:
+        from claude_code_hooks_daemon.plan_links import PlanTreeLayout
+
+        layout = PlanTreeLayout(plan_dir="docs/plans", archive_dirs=("Done",))
+        policy = policy_from_config(_FakeDocumentationConfig(), plan_tree=layout)
+
+        assert policy.plan_tree is layout

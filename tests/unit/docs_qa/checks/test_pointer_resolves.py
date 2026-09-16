@@ -9,6 +9,7 @@ from claude_code_hooks_daemon.docs_qa.context import edit_context, staged_contex
 from claude_code_hooks_daemon.docs_qa.corpus import DocCorpus, DocRecord
 from claude_code_hooks_daemon.docs_qa.policy import DocumentationPolicy, DocumentationQaPolicy
 from claude_code_hooks_daemon.docs_qa.types import CheckContext, CheckStage, Finding, Severity
+from claude_code_hooks_daemon.plan_links import PlanTreeLayout
 
 
 def _run_edit(context: CheckContext) -> list[Finding]:
@@ -510,5 +511,199 @@ class TestSweepStage:
         )
         context = sweep_context(project_root=tmp_path, policy=policy, corpus=corpus)
         findings = _run_sweep(context)
+        assert len(findings) == 1
+        assert findings[0].severity is Severity.ADVISE
+
+
+def _plan_tree(root: Path) -> None:
+    """A live plan, an archived plan, and a journal day-file in the live one."""
+    plan_dir = root / "CLAUDE" / "Plan"
+    (plan_dir / "00419-live" / "JOURNAL").mkdir(parents=True)
+    (plan_dir / "00419-live" / "PLAN.md").write_text("# 419\n")
+    (plan_dir / "00419-live" / "NIGGLES.md").write_text("# n\n")
+    (plan_dir / "00419-live" / "JOURNAL" / "00419-Journal-26-09-16.md").write_text("# j\n")
+    (plan_dir / "Completed" / "00413-done").mkdir(parents=True)
+    (plan_dir / "Completed" / "00413-done" / "PLAN.md").write_text("# 413\n")
+
+
+class TestArchiveAwarePlanLinks:
+    """Plan 00419 N2: a link names a plan NUMBER, wherever the plan now lives.
+
+    Archiving moves a plan folder one level deeper, so every
+    ``](../00NNN-y/PLAN.md)`` it carries stops resolving on disk. The project
+    has already ruled that an archived record is not rewritten and that a
+    ``JOURNAL/`` day-file structurally cannot be, so a link that resolves only
+    through the archive is not a dead link.
+    """
+
+    def test_a_relocated_link_is_never_reported_as_dead(self, tmp_path: Path) -> None:
+        _plan_tree(tmp_path)
+        context = edit_context(
+            project_root=tmp_path,
+            policy=DocumentationPolicy(),
+            file_path=tmp_path / "CLAUDE" / "PlanWorkflow.md",
+            file_content="See [413](Plan/00413-done/PLAN.md).\n",
+            file_exists_before=False,
+        )
+
+        findings = _run_edit(context)
+
+        assert all("does not exist" not in f.message for f in findings)
+
+    def test_a_relocated_link_is_never_block(self, tmp_path: Path) -> None:
+        """The edit under judgement did not move the target."""
+        _plan_tree(tmp_path)
+        context = edit_context(
+            project_root=tmp_path,
+            policy=DocumentationPolicy(),
+            file_path=tmp_path / "CLAUDE" / "PlanWorkflow.md",
+            file_content="See [413](Plan/00413-done/PLAN.md).\n",
+            file_exists_before=False,
+        )
+
+        assert all(f.severity is Severity.ADVISE for f in _run_edit(context))
+
+    def test_a_relocated_link_from_an_ordinary_doc_advises_with_the_new_path(
+        self, tmp_path: Path
+    ) -> None:
+        _plan_tree(tmp_path)
+        context = edit_context(
+            project_root=tmp_path,
+            policy=DocumentationPolicy(),
+            file_path=tmp_path / "CLAUDE" / "PlanWorkflow.md",
+            file_content="See [413](Plan/00413-done/PLAN.md).\n",
+            file_exists_before=False,
+        )
+
+        findings = _run_edit(context)
+
+        assert len(findings) == 1
+        assert findings[0].severity is Severity.ADVISE
+        assert "CLAUDE/Plan/Completed/00413-done/PLAN.md" in findings[0].remediation
+
+    def test_an_archived_source_is_not_a_finding_at_all(self, tmp_path: Path) -> None:
+        """Truth is enforced on LIVE plans, never on the historical record."""
+        _plan_tree(tmp_path)
+        corpus = DocCorpus(
+            project_root=tmp_path,
+            documents={
+                "CLAUDE/Plan/Completed/00413-done/PLAN.md": DocRecord(
+                    rel_path="CLAUDE/Plan/Completed/00413-done/PLAN.md",
+                    mtime_ns=1,
+                    size=1,
+                    links=("../00419-live/PLAN.md",),
+                )
+            },
+        )
+        context = sweep_context(project_root=tmp_path, policy=DocumentationPolicy(), corpus=corpus)
+
+        assert _run_sweep(context) == []
+
+    def test_a_journal_dayfile_source_is_not_a_finding_at_all(self, tmp_path: Path) -> None:
+        """`journal-append-only` forbids the repoint a finding would demand."""
+        _plan_tree(tmp_path)
+        journal = tmp_path / "CLAUDE/Plan/00419-live/JOURNAL/00419-Journal-26-09-16.md"
+        context = edit_context(
+            project_root=tmp_path,
+            policy=DocumentationPolicy(),
+            file_path=journal,
+            file_content="Recorded [413](../../00413-done/PLAN.md).\n",
+            file_exists_before=True,
+            file_content_before="",
+        )
+
+        assert _run_edit(context) == []
+
+    def test_a_live_plan_document_yields_to_plan_qa(self, tmp_path: Path) -> None:
+        """`plan-link-resolves` reports this one, with a better remediation.
+
+        Reporting it here as well would put one fact on two session-start
+        advisories.
+        """
+        _plan_tree(tmp_path)
+        context = edit_context(
+            project_root=tmp_path,
+            policy=DocumentationPolicy(),
+            file_path=tmp_path / "CLAUDE/Plan/00419-live/PLAN.md",
+            file_content="See [413](../00413-done/PLAN.md).\n",
+            file_exists_before=True,
+            file_content_before="",
+        )
+
+        assert _run_edit(context) == []
+
+    def test_a_live_supporting_doc_is_still_reported_here(self, tmp_path: Path) -> None:
+        """plan-QA's sweep reads PLAN.md only, so this one would be lost."""
+        _plan_tree(tmp_path)
+        context = edit_context(
+            project_root=tmp_path,
+            policy=DocumentationPolicy(),
+            file_path=tmp_path / "CLAUDE/Plan/00419-live/NIGGLES.md",
+            file_content="See [413](../00413-done/PLAN.md).\n",
+            file_exists_before=True,
+            file_content_before="",
+        )
+
+        findings = _run_edit(context)
+
+        assert len(findings) == 1
+        assert findings[0].severity is Severity.ADVISE
+
+    def test_a_link_to_a_plan_that_never_existed_is_still_dead(self, tmp_path: Path) -> None:
+        _plan_tree(tmp_path)
+        context = edit_context(
+            project_root=tmp_path,
+            policy=DocumentationPolicy(),
+            file_path=tmp_path / "CLAUDE" / "PlanWorkflow.md",
+            file_content="See [gone](Plan/00999-never-was/PLAN.md).\n",
+            file_exists_before=False,
+        )
+
+        findings = _run_edit(context)
+
+        assert len(findings) == 1
+        assert findings[0].severity is Severity.BLOCK
+        assert "does not exist" in findings[0].message
+
+    def test_the_sweep_reports_a_relocated_link_at_advise(self, tmp_path: Path) -> None:
+        _plan_tree(tmp_path)
+        corpus = DocCorpus(
+            project_root=tmp_path,
+            documents={
+                "CLAUDE/PlanWorkflow.md": DocRecord(
+                    rel_path="CLAUDE/PlanWorkflow.md",
+                    mtime_ns=1,
+                    size=1,
+                    links=("Plan/00413-done/PLAN.md",),
+                )
+            },
+        )
+        context = sweep_context(project_root=tmp_path, policy=DocumentationPolicy(), corpus=corpus)
+
+        findings = _run_sweep(context)
+
+        assert len(findings) == 1
+        assert findings[0].severity is Severity.ADVISE
+        assert "CLAUDE/Plan/Completed/00413-done/PLAN.md" in findings[0].remediation
+
+    def test_a_renamed_archive_directory_is_honoured(self, tmp_path: Path) -> None:
+        """The archive names are CONFIG; a project using `Done` is not
+        silently held to `Completed`."""
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        (plan_dir / "Done" / "00413-done").mkdir(parents=True)
+        (plan_dir / "Done" / "00413-done" / "PLAN.md").write_text("# 413\n")
+        policy = DocumentationPolicy(
+            plan_tree=PlanTreeLayout(plan_dir="CLAUDE/Plan", archive_dirs=("Done",))
+        )
+        context = edit_context(
+            project_root=tmp_path,
+            policy=policy,
+            file_path=tmp_path / "CLAUDE" / "PlanWorkflow.md",
+            file_content="See [413](Plan/00413-done/PLAN.md).\n",
+            file_exists_before=False,
+        )
+
+        findings = _run_edit(context)
+
         assert len(findings) == 1
         assert findings[0].severity is Severity.ADVISE

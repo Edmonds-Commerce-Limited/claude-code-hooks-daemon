@@ -132,6 +132,7 @@ class TestRegistryCatalogue:
             "claim-spotcheck-queue",
             "journal-folder-present",
             "journal-freshness",
+            "plan-link-resolves",
         }
 
     def test_stage_counts(self) -> None:
@@ -157,7 +158,8 @@ class TestRegistryCatalogue:
         # + the journal-entry-ordering sweep twin (Plan 00377 N1)
         # + index-retention-window (Plan 00379 N1)
         # + release-blocked-plan (Plan 00419 N3)
-        assert len(by_stage[Stage.SWEEP]) == 21
+        # + plan-link-resolves (Plan 00419 N2; SWEEP only by design)
+        assert len(by_stage[Stage.SWEEP]) == 22
 
     def test_dual_stage_checks_share_run_function(self) -> None:
         from claude_code_hooks_daemon.plan_qa.checks import all_checks

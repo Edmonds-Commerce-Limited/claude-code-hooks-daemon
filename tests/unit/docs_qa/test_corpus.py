@@ -118,6 +118,22 @@ class TestIsInScope:
             tmp_path / "CLAUDE" / "Plan" / "Cancelled" / "GONE.md", tmp_path, policy
         )
 
+    def test_a_configured_plan_dir_and_archive_name_are_honoured(self, tmp_path: Path) -> None:
+        """Plan 00419 N2: the archive exclusion was hardcoded to
+        ``CLAUDE/Plan/Completed``, so a project that configured either name
+        had its live plans excluded and its real archive indexed."""
+        from claude_code_hooks_daemon.plan_links import PlanTreeLayout
+
+        _scaffold(tmp_path)
+        (tmp_path / "docs" / "plans" / "Done").mkdir(parents=True)
+        (tmp_path / "docs" / "plans" / "Done" / "OLD.md").write_text("# old\n")
+        policy = DocumentationPolicy(
+            plan_tree=PlanTreeLayout(plan_dir="docs/plans", archive_dirs=("Done",))
+        )
+
+        assert not is_in_scope(tmp_path / "docs" / "plans" / "Done" / "OLD.md", tmp_path, policy)
+        assert is_in_scope(tmp_path / "CLAUDE" / "Plan" / "Completed" / "OLD.md", tmp_path, policy)
+
     def test_vendored_build_dirs_inside_human_tree_are_excluded(self, tmp_path: Path) -> None:
         """F3 (Plan 00287): a client whose ``docs/`` is a site root
         (Docusaurus etc.) has its OWN node_modules/build/dist -- these must
