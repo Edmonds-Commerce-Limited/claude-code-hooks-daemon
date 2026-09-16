@@ -53,13 +53,14 @@ catch.
 Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here so the
 ledger's shape is readable without opening it:
 
-| #   | Verdict                                                              | Origin                                                             | Status                                                  |
-| --- | -------------------------------------------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------- |
-| N1  | the `Priority` constants are not the numbers a fresh install ships   | [00419 N8](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md)  | ⬜ Open — remedy recorded, owner-gated, unbuilt         |
-| N2  | the linter runs on gitignored scratch output                         | [00419 N11](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md) | ⬜ Open — remedy chosen and un-gated, nobody built it   |
-| N3  | a committed future-dated entry makes the journal uncorrectable       | [00419 N12](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md) | ⬜ Open — remedies recorded, none chosen; advisory live |
-| N4  | a cron cannot be both cancelled for a session and declared in config | [00419 N13](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md) | ⬜ Open — remedy recorded, owner-gated, unbuilt         |
-| N5  | the v3.65.0 release reviews' NON-defects had no durable home         | the v3.65.0 release reviews                                        | ⬜ Open — evidence now tracked, twelve rows unworked    |
+| #   | Verdict                                                               | Origin                                                             | Status                                                  |
+| --- | --------------------------------------------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------- |
+| N1  | the `Priority` constants are not the numbers a fresh install ships    | [00419 N8](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md)  | ⬜ Open — remedy recorded, owner-gated, unbuilt         |
+| N2  | the linter runs on gitignored scratch output                          | [00419 N11](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md) | ⬜ Open — remedy chosen and un-gated, nobody built it   |
+| N3  | a committed future-dated entry makes the journal uncorrectable        | [00419 N12](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md) | ⬜ Open — remedies recorded, none chosen; advisory live |
+| N4  | a cron cannot be both cancelled for a session and declared in config  | [00419 N13](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md) | ⬜ Open — remedy recorded, owner-gated, unbuilt         |
+| N5  | the v3.65.0 release reviews' NON-defects had no durable home          | the v3.65.0 release reviews                                        | ⬜ Open — evidence now tracked, twelve rows unworked    |
+| N6  | a worktree cannot run the acceptance gates, and says the wrong reason | Plan 00424                                                         | ⬜ Open — two faults measured, remedies 1-3 un-gated    |
 
 ## Tasks
 

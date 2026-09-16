@@ -301,3 +301,60 @@ a path nothing durable reads.
 
 Remedy (2) is owner-gated — it changes what `dispatch_declaration` recommends
 to every client project, not just this one.
+
+### N6 — a worktree cannot run the acceptance release gates, and says the wrong reason
+
+**Found**: during Plan 00424, running `llm_qa.py all` inside a worktree created
+by `scripts/setup_worktree.sh`. Ten tests ERRORED at setup — the five
+`test_playbook_harness.py` cases, three `test_stop_hook_hard_block.py` and two
+`test_tool_use_error_recovery.py` — alongside `smoke_test` reporting 0/3. Every
+one of them passes on `main`.
+
+**Two separate faults, and the first hides the second.**
+
+**Fault 1 — the socket path is one byte too long.** A Unix socket path is capped
+at 108 bytes. The worktree's default is 109:
+
+```
+/workspace/untracked/worktrees/worktree-issue-42-remote-docs-add-overwrite/untracked/daemon-<hash>.sock
+```
+
+The daemon notices, prints `Socket path too long ... Using /tmp for runtime files`, and starts successfully — in `/tmp`. The acceptance gates look for a
+live socket UNDER `untracked/`, find none, and report `Daemon not running — no live socket found under untracked/. Start it with: ./bin/hooks-daemon restart`.
+That instruction cannot work: restarting puts the socket back in `/tmp` for the
+same reason. The diagnosis names the symptom and hides the cause, and the
+remedy it prints is the one thing guaranteed not to help.
+
+Nothing warns at creation time. `setup_worktree.sh` ends with `=== Worktree Ready ===` and even suggests `./bin/hooks-daemon restart` as the verification
+step. The length depends on the branch name, so a short name works and a
+descriptive one silently does not — the failure is a property of what you
+called your branch.
+
+**Fault 2 — the playbook harness stalls in a worktree anyway.** With
+`CLAUDE_HOOKS_SOCKET_PATH` pointed at a 91-byte path under `untracked/`, the
+socket resolves and the tests start: four of the five playbook cases pass, then
+`test_every_executable_probe_matches_its_expected_decision_and_reason` hangs.
+Measured: 18 minutes with no progress, the daemon logging `Received empty request` every ~16 seconds and no probe traffic at all, so it is not slow — it
+is waiting. On `main` the same five cases pass in **14.3 seconds**.
+
+**Why it is a niggle.** Nothing is wrong with the shipped product; the cost is
+that the worktree workflow this project mandates for sub-agent work cannot
+verify its own blocking release gates, and the reason it gives is false. An
+agent that trusts the message restarts the daemon in a loop.
+
+**Candidate remedies**, cheapest first:
+
+1. Have `setup_worktree.sh` measure the resulting socket path and fail loudly at
+   creation time, naming the length and the cap, rather than letting a daemon
+   fall back silently hours later. It already knows the path it is about to
+   create.
+2. Have the gate's skip reason distinguish "no socket under `untracked/`" from
+   "a daemon is running but its socket is elsewhere, because the path is N bytes
+   over the cap" — it can read the daemon's own status.
+3. Shorten the default socket filename so the cap is reached only by genuinely
+   extreme paths. Cheapest of all, and it narrows rather than closes the class.
+4. Investigate fault 2 on its own; remedies 1–3 do not touch it, and it is the
+   one that makes the gates unrunnable even once the path is right.
+
+Remedies 1–3 are un-gated. Fault 2 needs diagnosis before a remedy can be
+proposed, and this entry deliberately does not guess at one.
