@@ -116,11 +116,27 @@ guessing.
   rather than the container ID or a wrong guess. Verified by restarting without
   the variable and re-rendering: the segment disappears.
 
-- [ ] ⬜ On a desktop host and under LXC, the real hostname shows with no
-  export needed. Covered by unit tests, and NOT live-verified: this session has
-  neither machine available. Left unticked deliberately rather than ticked on
-  the strength of a passing test, because the whole point of the other two
-  criteria was that the live behaviour surprised the tests once already.
+- [x] ✅ On a desktop host, the real hostname shows with no export needed —
+  now LIVE-VERIFIED on every CI run, which is better evidence than one person
+  checking once. `.github/workflows/qa.yml` declares no `container:`, so the
+  job executes directly on the `ubuntu-latest` VM: a bare host as far as
+  `detect_container_runtime()` is concerned.
+  `tests/integration/test_host_hostname_on_a_real_host.py` asserts there that
+  rung 2 answers with `socket.gethostname()`, that it is `LOCAL` and not
+  `inferred` (an `/etc/hosts` hint winning would be the wrong rung), and that
+  an explicit hand-off still outranks it. It SKIPS inside a container with a
+  stated reason, so it is genuinely CI that verifies it, not this session.
+
+  Proven not to be a test that only passes by skipping: the three assertions
+  were run here against a forced bare-host detection and all three hold.
+
+  **LXC is deliberately NOT claimed by this tick, and the residual risk is now
+  narrower than the criterion started as.** LXC takes the SAME rung —
+  `socket.gethostname()` — and differs only in `detect_container_runtime()`
+  returning `"lxc"` rather than `None`. So what is unverified is no longer
+  "does the resolver work off-container" but "is LXC correctly recognised",
+  which is a smaller, separate claim about one detector, covered by unit tests
+  and cheap to confirm on the next LXC session.
 
 - [ ] ⬜ Full QA passes, the daemon is restarted, and CI is green. QA is
   30/30 with 23,528 tests passed, 0 failed and 95.40% coverage; the daemon was

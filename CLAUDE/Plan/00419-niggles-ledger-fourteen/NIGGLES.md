@@ -529,3 +529,57 @@ when the reader is least interested in its style.
 
 Not owner-gated: this is a scope question about one project's own exclude list,
 and remedy (1) turns nothing off for any file that can reach history.
+
+### N12 — a committed future-dated entry makes the journal permanently uncorrectable
+
+Found by hitting it, minutes after N9 and N10, in this plan's own day-file.
+
+Three rules meet and cannot all hold at once once a future-dated entry is
+committed:
+
+- `journal-append-only` — a correction is a NEW entry at the BOTTOM, never a
+  rewrite.
+- `journal-entry-ordering` — times increase down the file.
+- `journal-entry-future-dated` — a timestamp ahead of the clock is wrong.
+
+Correcting a future-dated entry means appending an entry whose HONEST
+timestamp is numerically EARLIER than the wrong ones above it. So the
+correction is reported out of order:
+
+```
+[advise] journal-entry-ordering: entries are out of chronological order:
+`10:50` appears after `11:18`
+```
+
+The only ways to silence it are to move the correction out of the append
+position (violating append-only) or to stamp it later than the entry it
+corrects (perpetuating the false reading). **There is no legal move that
+satisfies all three** — the same shape as N3, where two correct gates left no
+satisfiable path, and the reason N3's remedy is the precedent here.
+
+**Both advisories are ADVISE, so nothing is blocked** — this costs a confusing
+report, not a wall. That is why it is a niggle and not a bug.
+
+**Candidate remedies**, cheapest first:
+
+1. Teach `journal-entry-ordering` that an entry which is out of order *only*
+   with respect to entries the file itself flags as future-dated is not a
+   finding. Narrow, and it fires exactly where the contradiction is real.
+2. Give a correction entry an explicit grammar (e.g. a `correction` category)
+   that `journal-entry-ordering` exempts. More honest to read, and it makes
+   the correction legible as a correction rather than as another entry.
+3. Nothing. The ordering advisory is noise in a rare case, and the day-file
+   still reads correctly to a human.
+
+Not owner-gated: (1) and (2) both narrow an advisory that is firing on a state
+the other two rules force into existence, and neither weakens any gate.
+
+**The upstream cause is worth separating from the remedy.** The entries only
+became uncorrectable because they were appended with a `cat >> … <<'EOF'`
+heredoc, which is not seen by the Write/Edit-time guards — CLAUDE.md states
+exactly this ("a Bash write that drew no complaint is NOT a write that passed
+those checks"). The identical mistake in plan 00411's journal went through
+`Write` and was caught and fixed *before it landed*, seconds apart, in the same
+session. `journal-entry-future-dated` is also deliberately EDIT-only (a batch
+scan meets the entry when the append-only rule forbids acting on it), so a
+heredoc append is not caught late either — it is caught never.
