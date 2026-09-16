@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
@@ -44,6 +45,29 @@ logger = logging.getLogger(__name__)
 
 _CONFIG_RELATIVE_PATH: Final[str] = ".claude/hooks-daemon.yaml"
 _HEAD_REF: Final[str] = f"HEAD:{_CONFIG_RELATIVE_PATH}"
+
+
+@dataclass(frozen=True)
+class _ReadAttempt:
+    """A file's text, or the reason there is none.
+
+    Two outcomes that both used to be a bare ``None``: the file is absent, and
+    the file is there but could not be read. Keeping the reason on the value
+    means a silent session is explainable afterwards, which a discarded
+    exception never is.
+    """
+
+    text: str | None = None
+    reason: str | None = None
+
+
+def _read_text_or_reason(path: Path) -> _ReadAttempt:
+    """Read ``path``, carrying any failure back as a reason rather than raising."""
+    try:
+        return _ReadAttempt(text=path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        logger.debug("guard_config_drift: %s unreadable: %s", path, exc)
+        return _ReadAttempt(reason=str(exc))
 
 
 class GuardConfigDriftHandler(SessionStartHandlerBase):
@@ -67,11 +91,17 @@ class GuardConfigDriftHandler(SessionStartHandlerBase):
 
     @staticmethod
     def _project_root() -> Path | None:
-        try:
-            return ProjectContext.project_root()
-        except RuntimeError:
-            logger.debug("guard_config_drift: ProjectContext unavailable")
+        """The project root, or None when the daemon has not initialised one.
+
+        ASKS rather than catches. ``project_root()`` raises when the context is
+        not set up, and catching that to return None makes an ordinary,
+        expected state look like a failure -- so the state is queried directly
+        and no exception is involved.
+        """
+        if not ProjectContext.is_initialized():
+            logger.debug("guard_config_drift: ProjectContext not initialised")
             return None
+        return ProjectContext.project_root()
 
     def _read_committed(self) -> str | None:
         """The config as git has it, or None when there is nothing to compare."""
@@ -88,14 +118,18 @@ class GuardConfigDriftHandler(SessionStartHandlerBase):
         return result.stdout
 
     def _read_working(self) -> str | None:
+        """The config the daemon loaded, or None when it cannot be read.
+
+        An unreadable config is reported as unavailable rather than raised: this
+        runs at session start, and a handler that throws there costs the whole
+        SessionStart response. The reason is carried on the returned value
+        instead of being discarded, so "absent" and "unreadable" stay distinct
+        to anyone debugging a silent session.
+        """
         root = self._project_root()
         if root is None:
             return None
-        try:
-            return (root / _CONFIG_RELATIVE_PATH).read_text(encoding="utf-8")
-        except OSError as exc:
-            logger.debug("guard_config_drift: working config unreadable: %s", exc)
-            return None
+        return _read_text_or_reason(root / _CONFIG_RELATIVE_PATH).text
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Every session start, including resumes.

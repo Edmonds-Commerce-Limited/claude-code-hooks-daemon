@@ -415,6 +415,15 @@ _EXEMPT_FROM_GUIDANCE: dict[str, str] = {
     "GlobalNpmAdvisorHandler": "T4 never denies; the fire-time note is the whole advice",
     "WebSearchYearHandler": "T4 message already carries the year, query and alternatives",
     "GitFilemodeCheckerHandler": "T4 fires once at session start with the full remedy",
+    "GuardConfigDriftHandler": (
+        "T4 fires once at session start naming each weakened guard and both "
+        "remedies. Deliberately NOT grouped with ProjectHandlerLoadCheckerHandler, "
+        "whose T3 'guardrails are OFF' must persist because the agent CANNOT clear "
+        "it and must work around degraded protection all session; this condition is "
+        "cleared by the agent in one command, so the fact need not be resident. The "
+        "preventive half -- stopping the weakening rather than reporting it -- is "
+        "Plan 00412 class 2(a)'s commit-time gate, not resident text here"
+    ),
     "GitignoreSafetyCheckerHandler": "T4 fires once at session start with the full remedy",
     "OptimalConfigCheckerHandler": "T4 fires once at session start with the full remedy",
     "SuggestStatusLineHandler": "T4 fires once at session start with the full remedy",

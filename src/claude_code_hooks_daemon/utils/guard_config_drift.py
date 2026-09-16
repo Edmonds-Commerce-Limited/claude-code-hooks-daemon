@@ -81,13 +81,30 @@ class DriftReport:
         return bool(self.guard_changes) or self.other_changes > 0
 
 
-def _load(document: str) -> dict[str, Any] | None:
+@dataclass(frozen=True)
+class _Parsed:
+    """A parsed config, or the reason it could not be parsed.
+
+    Returning a bare ``None`` conflated three different facts -- malformed YAML,
+    valid YAML that is not a mapping, and an empty document -- and the caller
+    could only ever report the vaguest of them. The reason is kept on the value
+    so a silent report stays explainable.
+    """
+
+    config: dict[str, Any] | None = None
+    reason: str | None = None
+
+
+def _load(document: str) -> _Parsed:
+    """Parse ``document``, carrying a failure back as a reason rather than raising."""
     try:
         loaded = yaml.safe_load(document)
     except yaml.YAMLError as exc:
         _LOGGER.debug("guard_config_drift: unparseable config document: %s", exc)
-        return None
-    return loaded if isinstance(loaded, dict) else None
+        return _Parsed(reason=f"unparseable YAML: {exc}")
+    if not isinstance(loaded, dict):
+        return _Parsed(reason=f"config is {type(loaded).__name__}, not a mapping")
+    return _Parsed(config=loaded)
 
 
 def _handlers(config: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -146,8 +163,10 @@ def compare_guard_config(committed: str, working: str) -> DriftReport:
     if not committed.strip():
         return DriftReport(no_baseline=True)
 
-    before = _load(committed)
-    after = _load(working)
+    parsed_before = _load(committed)
+    parsed_after = _load(working)
+    before = parsed_before.config
+    after = parsed_after.config
     if before is None or after is None:
         return DriftReport(parse_failed=True)
 

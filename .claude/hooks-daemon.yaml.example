@@ -500,6 +500,10 @@ handlers:
       enabled: true
       priority: 15
 
+    guard_config_drift:  # Report an uncommitted config change that weakens a guard (Plan 00412)
+      enabled: true      # Silent unless this file differs from its committed form
+      priority: 49       # Ahead of every other advisory: they are all conditional on the guards being live
+
     project_handler_load_checker:  # Loud alert when project handlers fail to load (Plan 00143)
       enabled: true                 # Silent unless a project handler was skipped at startup
       priority: 50
