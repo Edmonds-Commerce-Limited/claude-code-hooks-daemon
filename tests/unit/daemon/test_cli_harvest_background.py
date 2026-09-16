@@ -11,11 +11,11 @@ import json
 
 from claude_code_hooks_daemon.daemon import background_harvester, cli
 
-_CLEAN_PS = "PID PGID ELAPSED %CPU COMMAND\n1 1 99999 0.0 /sbin/init\n"
+_CLEAN_PS = "PID PPID PGID ELAPSED %CPU COMMAND\n1 0 1 99999 0.0 /sbin/init\n"
 _RUNAWAY_PS = (
-    "PID PGID ELAPSED %CPU COMMAND\n"
-    "295971 295967 6918 1116 ugrep -rl class /\n"
-    "1 1 99999 0.0 /sbin/init\n"
+    "PID PPID PGID ELAPSED %CPU COMMAND\n"
+    "295971 295967 295967 6918 1116 ugrep -rl class /\n"
+    "1 0 1 99999 0.0 /sbin/init\n"
 )
 
 
@@ -82,7 +82,7 @@ def test_tracked_command_over_ttl_is_surfaced(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(
         background_harvester,
         "run_ps",
-        lambda: "PID PGID ELAPSED %CPU COMMAND\n500 500 9999 0.2 node server\n",
+        lambda: "PID PPID PGID ELAPSED %CPU COMMAND\n500 65 500 9999 0.2 node server\n",
     )
     rc = cli.cmd_harvest_background(_args(tmp_path, state_file=str(state)))
     out = capsys.readouterr().out
@@ -104,7 +104,7 @@ def test_untracked_long_lived_process_is_not_surfaced(tmp_path, monkeypatch, cap
     monkeypatch.setattr(
         background_harvester,
         "run_ps",
-        lambda: "PID PGID ELAPSED %CPU COMMAND\n500 500 9999 0.2 node server\n",
+        lambda: "PID PPID PGID ELAPSED %CPU COMMAND\n500 65 500 9999 0.2 node server\n",
     )
 
     rc = cli.cmd_harvest_background(_args(tmp_path, state_file=str(state)))

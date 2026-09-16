@@ -45,7 +45,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess  # nosec B404 - used only to call the trusted system ``ps`` with fixed args
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
@@ -56,7 +56,13 @@ from typing import Any, Final
 _FLOAT_RE: Final[re.Pattern[str]] = re.compile(r"\d+(?:\.\d+)?")
 
 # ``ps`` column order the CLI requests; the harvester parses exactly these.
-PS_FORMAT: Final[str] = "pid,pgid,etimes,pcpu,args"
+#
+# ``ppid`` is here because a process GROUP is not the unit of work. A shell that
+# launches a background job is in its own group, and an interpreter it execs
+# starts a NEW group, so the group containing the tracked process can hold only
+# the idle waiter while every busy descendant sits in a sibling group. Linking
+# parent to child is the only way to see the whole job.
+PS_FORMAT: Final[str] = "pid,ppid,pgid,etimes,pcpu,args"
 
 
 @dataclass(frozen=True)
@@ -64,6 +70,7 @@ class ProcessRecord:
     """A single process as reported by ``ps``."""
 
     pid: int
+    ppid: int
     pgid: int
     etimes: int
     pcpu: float
@@ -72,24 +79,48 @@ class ProcessRecord:
 
 @dataclass(frozen=True)
 class Breach:
-    """A process that exceeded a resource budget — surfaced, never killed."""
+    """A process that exceeded a resource budget — surfaced, never killed.
+
+    Two fields describe the breaching process's whole DESCENDANT TREE rather
+    than the process itself, because on a wall-TTL breach the process itself is
+    the least informative thing in the job.
+
+    ``tree_pcpu`` — the record's own ``pcpu`` answers the wrong question. The
+    tracked process is the wrapper shell background work is launched through; it
+    blocks in ``wait`` and reads 0% however hard its children are working. An
+    agent deciding whether to run the suggested ``kill`` is asking whether the
+    JOB is doing anything, and `0%` reads as "hung, safe to reap".
+
+    ``tree_pgids`` — and it cannot be answered by summing the process GROUP
+    either. A shell is in its own group and an interpreter it execs starts a NEW
+    one, so the tracked process is routinely alone in its group while every busy
+    descendant sits in a sibling group. That also makes a single ``-<pgid>``
+    reap INCOMPLETE for exactly this shape: it signals the idle waiter and
+    leaves the real work running and orphaned.
+    """
 
     record: ProcessRecord
     reasons: tuple[str, ...]
+    tree_pcpu: float = 0.0
+    tree_pgids: tuple[int, ...] = ()
 
     @property
     def kill_command(self) -> str:
-        """The command the AGENT may run to reap the whole process group.
+        """The command the AGENT may run to reap the whole job.
 
-        Targets the process GROUP (``-<pgid>``), not just the pid, because the
+        Targets process GROUPS (``-<pgid>``), not bare pids, because the
         incident runaway was a ``bash -c`` parent with a ``ugrep`` child —
-        killing one leaks the other.
+        killing one leaks the other. Every group the descendant tree spans is
+        named, for the same reason one level up: a job that crosses a group
+        boundary is still one job, and reaping half of it is the failure this
+        command exists to prevent.
         """
-        return f"kill -- -{self.record.pgid}"
+        pgids = self.tree_pgids or (self.record.pgid,)
+        return "kill -- " + " ".join(f"-{pgid}" for pgid in pgids)
 
 
 def parse_ps_output(text: str) -> list[ProcessRecord]:
-    """Parse ``ps -eo pid,pgid,etimes,pcpu,args`` output into records.
+    """Parse ``ps -eo pid,ppid,pgid,etimes,pcpu,args`` output into records.
 
     The header line and any malformed/blank lines are skipped. ``args`` (the
     final column) may contain spaces and is preserved verbatim.
@@ -99,15 +130,16 @@ def parse_ps_output(text: str) -> list[ProcessRecord]:
         stripped = line.strip()
         if not stripped:
             continue
-        parts = stripped.split(maxsplit=4)
-        if len(parts) < 5:
+        parts = stripped.split(maxsplit=5)
+        if len(parts) < 6:
             continue
-        pid_s, pgid_s, etimes_s, pcpu_s, args = parts
+        pid_s, ppid_s, pgid_s, etimes_s, pcpu_s, args = parts
         # Validate the numeric columns up front so the header row
-        # ("PID PGID ELAPSED %CPU COMMAND") and any junk are skipped without
-        # relying on exception-driven control flow.
+        # ("PID PPID PGID ELAPSED %CPU COMMAND") and any junk are skipped
+        # without relying on exception-driven control flow.
         if not (
             pid_s.isdigit()
+            and ppid_s.isdigit()
             and pgid_s.isdigit()
             and etimes_s.isdigit()
             and _FLOAT_RE.fullmatch(pcpu_s)
@@ -116,6 +148,7 @@ def parse_ps_output(text: str) -> list[ProcessRecord]:
         records.append(
             ProcessRecord(
                 pid=int(pid_s),
+                ppid=int(ppid_s),
                 pgid=int(pgid_s),
                 etimes=int(etimes_s),
                 pcpu=float(pcpu_s),
@@ -162,8 +195,9 @@ def find_breaches(
     """
     tracked = list(tracked_commands)
     excluded = set(exclude_pgids)
+    sampled = list(records)
     breaches: list[Breach] = []
-    for record in records:
+    for record in sampled:
         if record.pgid in excluded:
             continue
         reasons: list[str] = []
@@ -175,8 +209,41 @@ def find_breaches(
         if record.etimes >= max_wall_seconds and _is_tracked(record.args, tracked):
             reasons.append(f"tracked process running {record.etimes}s (TTL {max_wall_seconds}s)")
         if reasons:
-            breaches.append(Breach(record=record, reasons=tuple(reasons)))
+            tree = _descendants(sampled, record.pid)
+            breaches.append(
+                Breach(
+                    record=record,
+                    reasons=tuple(reasons),
+                    tree_pcpu=sum(r.pcpu for r in tree),
+                    tree_pgids=tuple(sorted({r.pgid for r in tree})),
+                )
+            )
     return breaches
+
+
+def _descendants(records: Sequence[ProcessRecord], root_pid: int) -> list[ProcessRecord]:
+    """``root_pid``'s record and every process descended from it.
+
+    Walked breadth-first over ppid links with a seen-set, so a malformed sample
+    that reports a cycle (or a pid that is its own parent, as ``ps`` shows for
+    pid 1 on some systems) terminates instead of spinning.
+    """
+    children: dict[int, list[ProcessRecord]] = {}
+    for record in records:
+        children.setdefault(record.ppid, []).append(record)
+
+    found = [r for r in records if r.pid == root_pid]
+    seen = {r.pid for r in found}
+    queue = list(found)
+    while queue:
+        current = queue.pop()
+        for child in children.get(current.pid, ()):
+            if child.pid in seen:
+                continue
+            seen.add(child.pid)
+            found.append(child)
+            queue.append(child)
+    return found
 
 
 def read_tracked_commands(state_file: Path) -> list[str]:
@@ -234,6 +301,8 @@ def build_report(
             "pgid": b.record.pgid,
             "etimes": b.record.etimes,
             "pcpu": b.record.pcpu,
+            "tree_pcpu": b.tree_pcpu,
+            "tree_pgids": list(b.tree_pgids),
             "args": b.record.args,
             "reasons": list(b.reasons),
             "kill_command": b.kill_command,
@@ -252,7 +321,7 @@ def build_report(
         for b in breaches:
             lines.append(
                 f"  PID {b.record.pid} (PGID {b.record.pgid})  "
-                f"{b.record.pcpu:.0f}% CPU  {b.record.etimes}s"
+                f"{b.tree_pcpu:.0f}% CPU (whole tree)  {b.record.etimes}s"
             )
             lines.append(f"    cmd: {b.record.args}")
             for reason in b.reasons:

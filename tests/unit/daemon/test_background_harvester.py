@@ -21,10 +21,10 @@ from claude_code_hooks_daemon.daemon.background_harvester import (
 
 # The literal incident process: ugrep -rl … / at 1116% CPU for 6918s.
 _INCIDENT_PS = """\
-    PID    PGID  ELAPSED %CPU COMMAND
- 295971  295967     6918 1116 ugrep -G --ignore-files --hidden -I --exclude-dir=.git -rl class /
- 295967  295967     6918  0.0 /bin/bash -c grep -rl class / 2>/dev/null
-      1       1   100000  0.0 /sbin/init
+    PID    PPID    PGID  ELAPSED %CPU COMMAND
+ 295971  295967  295967     6918 1116 ugrep -G --ignore-files --hidden -I --exclude-dir=.git -rl class /
+ 295967      65  295967     6918  0.0 /bin/bash -c grep -rl class / 2>/dev/null
+      1       0       1   100000  0.0 /sbin/init
 """
 
 
@@ -45,7 +45,7 @@ class TestParsePsOutput:
         assert top.args.endswith("/")
 
     def test_ignores_blank_and_malformed_lines(self):
-        records = parse_ps_output("\n\nPID PGID ELAPSED %CPU COMMAND\ngarbage line\n")
+        records = parse_ps_output("\n\nPID PPID PGID ELAPSED %CPU COMMAND\ngarbage line\n")
         assert records == []
 
 
@@ -82,8 +82,8 @@ class TestFindBreaches:
 
     def test_wall_ttl_only_applies_to_tracked_commands(self):
         text = (
-            "PID PGID ELAPSED %CPU COMMAND\n"
-            "500 500 9999 0.1 node dev-server\n"  # long-lived, low CPU
+            "PID PPID PGID ELAPSED %CPU COMMAND\n"
+            "500 65 500 9999 0.1 node dev-server\n"  # long-lived, low CPU
         )
         records = parse_ps_output(text)
         # Not tracked → wall TTL must NOT flag a low-CPU long-lived process.
@@ -114,7 +114,9 @@ class TestFindBreaches:
         ``"" in args`` is True for every process, so a single empty ``command``
         field would turn the narrow wall TTL into a nag about ``init``.
         """
-        records = parse_ps_output("PID PGID ELAPSED %CPU COMMAND\n1 1 999999 0.0 /sbin/init\n")
+        records = parse_ps_output(
+            "PID PPID PGID ELAPSED %CPU COMMAND\n1 0 1 999999 0.0 /sbin/init\n"
+        )
 
         assert (
             find_breaches(
@@ -134,8 +136,8 @@ class TestFindBreaches:
         the recorded command, so the match is a substring one — not equality.
         """
         text = (
-            "PID PGID ELAPSED %CPU COMMAND\n"
-            "800 800 4000 0.1 /bin/bash -c eval 'npm run build' < /dev/null\n"
+            "PID PPID PGID ELAPSED %CPU COMMAND\n"
+            "800 65 800 4000 0.1 /bin/bash -c eval 'npm run build' < /dev/null\n"
         )
         breaches = find_breaches(
             parse_ps_output(text),
@@ -148,7 +150,7 @@ class TestFindBreaches:
         assert [b.record.pid for b in breaches] == [800]
 
     def test_cpu_breach_requires_min_runtime(self):
-        text = "PID PGID ELAPSED %CPU COMMAND\n700 700 5 900 some-burst\n"
+        text = "PID PPID PGID ELAPSED %CPU COMMAND\n700 65 700 5 900 some-burst\n"
         records = parse_ps_output(text)
         # 900% CPU but only 5s elapsed (< 60s window) → momentary spike, no breach.
         assert (
@@ -247,7 +249,7 @@ class TestBuildReport:
         assert "ugrep" in report["text"]
 
     def test_text_report_no_breaches_message(self):
-        records = parse_ps_output("PID PGID ELAPSED %CPU COMMAND\n1 1 999 0.0 /sbin/init\n")
+        records = parse_ps_output("PID PPID PGID ELAPSED %CPU COMMAND\n1 0 1 999 0.0 /sbin/init\n")
         report = build_report(
             records,
             max_wall_seconds=600,
@@ -281,3 +283,134 @@ class TestBuildReport:
             tracked_commands=(),
         )
         assert "killed" not in report["text"].lower()
+
+
+# A TTL breach on a HEALTHY long job, transcribed from a live `ps` during a QA
+# run. Two things about it drive the tests below, and both are structural rather
+# than incidental to this sample:
+#
+#   1. The TRACKED process is the wrapper shell background work is launched
+#      through. It only ever waits on its child, so its own %CPU is 0.0 however
+#      hard the job is working.
+#   2. `python3` starts its OWN process group (3262451), so the wrapper is alone
+#      in group 3262449 and every busy descendant is in a sibling group.
+_WRAPPER_TTL_PS = """\
+    PID    PPID    PGID  ELAPSED %CPU COMMAND
+3262449      65 3262449      707  0.0 /bin/bash -c eval './scripts/qa/llm_qa.py all > qa15.txt'
+3262451 3262449 3262451      707  0.0 python3 ./scripts/qa/llm_qa.py all
+3264365 3262451 3262451      668  0.0 run_tests.sh
+3264382 3264365 3262451      660 98.7 pytest tests/
+      1       0       1   100000  0.0 /sbin/init
+"""
+
+
+class TestATtlBreachDescribesTheWholeJobNotTheWaiter:
+    """A TTL breach line must describe the JOB, not the process that waits on it.
+
+    An agent reads this report to answer one question — is this hung, or is it
+    working? — and then runs or withholds the suggested `kill`. Both halves of
+    the answer it was given were about the wrong process.
+
+    **The %CPU.** The tracked process is the wrapper shell, blocked in `wait`, so
+    for EVERY TTL breach of this shape the report says `0% CPU`. That reads as
+    "hung, safe to reap" while the job is at full tilt. Not an unlucky sample —
+    structural, and it points at the destructive answer.
+
+    **The kill command.** Summing the process GROUP does not fix it either: an
+    interpreter exec'd by the wrapper starts a NEW group, so the wrapper is
+    alone in its own. That also made the suggested `kill -- -<pgid>` INCOMPLETE
+    for this shape — it would have signalled the idle wrapper and left the real
+    work running and orphaned, which is precisely the "killing one leaks the
+    other" failure `kill_command` was introduced to prevent.
+
+    Hit live: the report offered `kill -- -3262449` against a QA suite 79%
+    through 24,412 tests, with a child at `STAT R` and 4:40 of accumulated CPU.
+    Deciding correctly required going outside the tool entirely.
+
+    A CPU breach is unaffected — there the breaching record IS the busy process.
+    """
+
+    @pytest.fixture
+    def records(self):
+        return parse_ps_output(_WRAPPER_TTL_PS)
+
+    @staticmethod
+    def _report(records):
+        return build_report(
+            records,
+            max_wall_seconds=600,
+            max_cpu_percent=400,
+            min_cpu_runtime_seconds=60,
+            tracked_commands=("llm_qa.py all",),
+        )
+
+    def test_the_busy_descendant_is_visible_in_the_text(self, records):
+        """The reader must be able to see the job is working, from the report alone."""
+        report = self._report(records)
+
+        assert report["has_breaches"] is True
+        assert "99% CPU" in report["text"] or "98% CPU" in report["text"], (
+            "the report shows only the wrapper's 0% CPU, so it reads as hung "
+            f"while a descendant is at 98.7%:\n{report['text']}"
+        )
+
+    def test_the_tree_cpu_is_carried_in_the_json(self, records):
+        """Whoever consumes the JSON decides on the same facts as the text reader."""
+        report = self._report(records)
+
+        breach = next(b for b in report["breaches"] if b["pid"] == 3262449)
+        assert breach["tree_pcpu"] == pytest.approx(98.7)
+
+    def test_the_kill_covers_every_group_the_job_spans(self, records):
+        """Reaping only the wrapper's group orphans the work instead of stopping it."""
+        report = self._report(records)
+
+        breach = next(b for b in report["breaches"] if b["pid"] == 3262449)
+        assert breach["tree_pgids"] == [3262449, 3262451]
+        assert "-3262451" in breach["kill_command"], (
+            "the suggested reap misses the group holding every busy process: "
+            f"{breach['kill_command']}"
+        )
+
+    def test_a_genuinely_idle_job_still_reads_as_idle(self):
+        """The fix must not make every stalled job look busy.
+
+        Without this, 'report the tree's CPU' could be satisfied by printing a
+        constant, and a truly hung job — the case where reaping is CORRECT —
+        would be disguised exactly as badly in the other direction.
+        """
+        idle = parse_ps_output(
+            "PID PPID PGID ELAPSED %CPU COMMAND\n"
+            "555 65 555 700 0.0 /bin/bash -c eval 'llm_qa.py all'\n"
+            "556 555 556 700 0.0 python3 llm_qa.py all\n"
+        )
+
+        report = self._report(idle)
+
+        breach = next(b for b in report["breaches"] if b["pid"] == 555)
+        assert breach["tree_pcpu"] == pytest.approx(0.0)
+
+    def test_a_cpu_breach_still_reports_the_figure_that_tripped_it(self):
+        """The runaway case must keep naming the number that breached the ceiling."""
+        report = build_report(
+            parse_ps_output(_INCIDENT_PS),
+            max_wall_seconds=600,
+            max_cpu_percent=400,
+            min_cpu_runtime_seconds=60,
+            tracked_commands=(),
+        )
+
+        assert "1116% CPU sustained" in report["text"]
+
+    def test_a_self_parented_process_does_not_hang_the_walk(self):
+        """`ps` reports pid 1 as its own parent on some systems; a cycle must terminate."""
+        cyclic = parse_ps_output(
+            "PID PPID PGID ELAPSED %CPU COMMAND\n1 1 1 100000 0.0 /sbin/init\n"
+        )
+
+        assert (
+            find_breaches(
+                cyclic, max_wall_seconds=600, max_cpu_percent=400, min_cpu_runtime_seconds=60
+            )
+            == []
+        )

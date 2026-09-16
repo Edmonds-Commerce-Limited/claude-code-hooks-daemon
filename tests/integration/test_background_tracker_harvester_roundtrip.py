@@ -36,10 +36,10 @@ _BACKGROUNDED_COMMAND = "./scripts/qa/llm_qa.py all > untracked/qa.txt 2>&1"
 # Bash call as a wrapper shell that ``eval``s the command verbatim, so the
 # recorded text is present in the process's args.
 _PS_OUTPUT = (
-    "PID PGID ELAPSED %CPU COMMAND\n"
-    "667222 667222 4000 0.1 /bin/bash -c source /root/.claude/snapshot.sh && "
+    "PID PPID PGID ELAPSED %CPU COMMAND\n"
+    "667222 65 667222 4000 0.1 /bin/bash -c source /root/.claude/snapshot.sh && "
     f"eval '{_BACKGROUNDED_COMMAND}' < /dev/null\n"
-    "1 1 999999 0.0 /sbin/init\n"
+    "1 0 1 999999 0.0 /sbin/init\n"
 )
 
 
