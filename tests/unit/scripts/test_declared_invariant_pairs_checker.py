@@ -304,6 +304,49 @@ class TestTheNewExtractors:
         assert checker.extract_members(tmp_path, side) == frozenset({"cp", "mv"})
 
 
+class TestTheEnumMembersExtractor:
+    """Member sets spelled as enum references rather than as strings.
+
+    The three extractors above all read STRING literals, so a set built from an
+    enum — the shape this codebase reaches for whenever the members are a closed
+    vocabulary — cannot be declared at all. A relation that cannot be expressed
+    is a relation nobody writes down, and the class this registry defends against
+    is precisely the one where two such sets drift apart.
+    """
+
+    def test_it_reads_the_members_of_a_frozenset_of_enum_references(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        _module(tmp_path, "a.py", "COVERS = frozenset({Event.CLEAN, Event.FINDINGS})\n")
+        side = checker.Side(file="a.py", symbol="COVERS", extract="enum_members")
+        assert checker.extract_members(tmp_path, side) == frozenset({"CLEAN", "FINDINGS"})
+
+    def test_it_reads_a_bare_set_literal_too(self, checker: ModuleType, tmp_path: Path) -> None:
+        """The wrapping call is presentation; the members are the declaration."""
+        _module(tmp_path, "a.py", "COVERS = {Event.CLEAN, Event.FINDINGS}\n")
+        side = checker.Side(file="a.py", symbol="COVERS", extract="enum_members")
+        assert checker.extract_members(tmp_path, side) == frozenset({"CLEAN", "FINDINGS"})
+
+    def test_it_reads_an_annotated_assignment(self, checker: ModuleType, tmp_path: Path) -> None:
+        """Every such constant in this codebase carries a `Final` annotation."""
+        _module(
+            tmp_path,
+            "a.py",
+            "COVERS: Final[frozenset[Event]] = frozenset({Event.CLEAN})\n",
+        )
+        side = checker.Side(file="a.py", symbol="COVERS", extract="enum_members")
+        assert checker.extract_members(tmp_path, side) == frozenset({"CLEAN"})
+
+    def test_a_symbol_holding_no_enum_references_is_rot_not_an_empty_pass(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        """An empty set satisfies every relation, so it must never be returned."""
+        _module(tmp_path, "a.py", 'COVERS = frozenset({"clean"})\n')
+        side = checker.Side(file="a.py", symbol="COVERS", extract="enum_members")
+        with pytest.raises(checker.RegistryRotError):
+            checker.extract_members(tmp_path, side)
+
+
 _CALL_PATH_ROW = """
 - id: demo-call-path
   relation: reaches

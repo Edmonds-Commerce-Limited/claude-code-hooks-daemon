@@ -91,7 +91,7 @@ _HELPER_RELATIONS: Final[frozenset[str]] = _CALL_PATH_RELATIONS | _FRAGMENT_RELA
 
 #: Ways of reading a member set out of a module-level symbol.
 _EXTRACTORS: Final[frozenset[str]] = frozenset(
-    {"dict_keys", "regex_head_names", "str_tuple", "regex_alternation"}
+    {"dict_keys", "regex_head_names", "str_tuple", "regex_alternation", "enum_members"}
 )
 
 #: A `(?:a|b|c)` or `(a|b|c)` group inside a pattern literal.
@@ -353,6 +353,31 @@ def _regex_alternation(value: ast.expr, side: Side) -> frozenset[str]:
     return frozenset(members)
 
 
+def _enum_members(value: ast.expr, side: Side) -> frozenset[str]:
+    """Enum members named in a module-level set, tuple or list literal.
+
+    The other three extractors all read STRING literals, so a member set spelled
+    as enum references — the shape this codebase reaches for whenever the members
+    are a closed vocabulary — could not be declared at all. A relation that
+    cannot be expressed is one nobody writes down, and two such sets drifting
+    apart is exactly what this registry exists to catch.
+
+    The member is the ATTRIBUTE name, not the qualified reference: two sets can
+    legitimately reach the same vocabulary through different aliases, and a
+    comparison on `Event.CLEAN` vs `LedgerEvent.CLEAN` would report a divergence
+    that is only a spelling.
+
+    Reads through a wrapping call, so `frozenset({...})` and a bare `{...}` are
+    the same declaration. A non-attribute element is skipped rather than guessed
+    at; a symbol that yields nothing is rot, handled by the caller.
+    """
+    if isinstance(value, ast.Call) and value.args:
+        value = value.args[0]
+    if not isinstance(value, ast.Set | ast.Tuple | ast.List):
+        raise RegistryRotError(f"{side.label} is not a set, tuple or list literal")
+    return frozenset(element.attr for element in value.elts if isinstance(element, ast.Attribute))
+
+
 def extract_members(repo_root: Path, side: Side) -> frozenset[str]:
     """The member set ``side`` declares.
 
@@ -372,6 +397,7 @@ def extract_members(repo_root: Path, side: Side) -> frozenset[str]:
         "regex_head_names": _regex_head_names,
         "str_tuple": _str_tuple,
         "regex_alternation": _regex_alternation,
+        "enum_members": _enum_members,
     }
     members = extractors[side.extract](value, side)
     if not members:
