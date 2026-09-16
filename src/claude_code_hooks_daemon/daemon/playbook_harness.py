@@ -25,6 +25,10 @@ from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.daemon.synthetic_traffic import (
+    PLAYBOOK_PROBE,
+    SYNTHETIC_SOURCE_FIELD,
+)
 
 #: How long a probe dispatch may take before the harness gives up on the hook.
 #: It must outlast the SLOWEST thing a handler may legitimately do, or the
@@ -428,6 +432,15 @@ def build_event(probe: ExecutableProbe, run_id: str) -> dict[str, Any]:
         "tool_input": probe.tool_input,
         "session_id": f"playbook-probe-{run_id}-{probe.test_number}",
         "cwd": str(probe.project_root),
+        # The harness declares itself (Plan 00418). Its fires land in the same
+        # verdicts.jsonl as a real agent's and were half the record, with
+        # nothing on the line to separate them -- so every statistic drawn
+        # from that log blended a harness with a workflow. Recognising the
+        # session-id shape is the fallback for the already-written window;
+        # saying so outright is the truthful route, and it is also what lets a
+        # blocking handler decline to deny a probe instead of turning this
+        # very suite red.
+        SYNTHETIC_SOURCE_FIELD: PLAYBOOK_PROBE,
     }
     if probe.event_type == "PostToolUse":
         # Required by the schema, and its absence is rejected before any

@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.core.event import EventType
+from claude_code_hooks_daemon.daemon.synthetic_traffic import record_synthetic_source
 
 _WINDOW_CAVEAT = (
     "NOTE: these figures describe the RETAINED WINDOW of verdicts.jsonl "
@@ -71,6 +72,8 @@ def read_verdict_records(path: Path) -> list[dict[str, Any]]:
 def aggregate_verdicts(
     records: list[dict[str, Any]],
     all_handlers: list[str] | None = None,
+    *,
+    include_synthetic: bool = False,
 ) -> dict[str, Any]:
     """Aggregate parsed verdict records into report-ready statistics.
 
@@ -82,6 +85,11 @@ def aggregate_verdicts(
             ``None`` when the caller could not determine the full handler
             set (e.g. daemon not running) — ``never_fired`` is then ``None``
             rather than a misleadingly empty list.
+        include_synthetic: Count harness-fabricated records (acceptance
+            playbook probes, the socket integration test) in the behavioural
+            figures. Off by default — see below. Kept available because
+            debugging the HARNESS needs exactly the records the default view
+            sets aside.
 
     Returns:
         Dict with ``total_records``, ``handler_counts`` (excludes the
@@ -89,8 +97,27 @@ def aggregate_verdicts(
         ``handler: None``), ``handler_verdict_mix`` (per-handler breakdown),
         ``verdict_mix`` (overall, includes ``"override"``),
         ``override_count``, ``override_rate``, ``never_fired``,
-        ``behavioural_records``, ``legacy_status_records`` and
-        ``legacy_status_window``.
+        ``behavioural_records``, ``legacy_status_records``,
+        ``legacy_status_window``, ``synthetic_records`` and
+        ``synthetic_sources``.
+
+    Harness traffic is partitioned OUT of every behavioural figure by
+    default (Plan 00418), for the same reason and by the same mechanism as
+    the legacy Status renders below.
+
+    The acceptance playbook dispatches hundreds of fabricated events per run
+    and the forwarder's socket test dispatches more; on this project's own
+    log they were 2,717 of 5,396 retained records. Counting them was wrong
+    the way counting Status renders was wrong, and then some: it inflated
+    every per-handler count with fires nobody made, and it moved a real
+    conclusion — the probes are single-head Bash fixtures, so the measured
+    "compound command" share read 79% blended against 93% on real traffic.
+    A handler that fired ONLY in the harness now reads as never-fired, which
+    is the true statement: no agent exercised it in this window.
+
+    Partitioned, never discarded, and attributed by producer — a report that
+    silently dropped half its window would present the rest as freshly
+    collected.
 
     Status-line renders are partitioned OUT of every behavioural figure —
     the roster, the verdict mix and the override denominator — and reported
@@ -118,6 +145,7 @@ def aggregate_verdicts(
     override_count = 0
     behavioural_records = 0
     status_timestamps: list[str] = []
+    synthetic_sources: dict[str, int] = {}
 
     for record in records:
         if record.get("event") == status_event:
@@ -125,6 +153,12 @@ def aggregate_verdicts(
             if timestamp:
                 status_timestamps.append(str(timestamp))
             continue
+
+        synthetic = record_synthetic_source(record)
+        if synthetic is not None:
+            synthetic_sources[synthetic] = synthetic_sources.get(synthetic, 0) + 1
+            if not include_synthetic:
+                continue
 
         behavioural_records += 1
         verdict = str(record.get("verdict", "unknown"))
@@ -143,7 +177,11 @@ def aggregate_verdicts(
         per_handler[verdict] = per_handler.get(verdict, 0) + 1
 
     total_records = len(records)
-    legacy_status_records = total_records - behavioural_records
+    # Always the true count of harness records SEEN, so the figure never
+    # changes meaning with the flag. Only how many were SET ASIDE does.
+    synthetic_records = sum(synthetic_sources.values())
+    synthetic_excluded = 0 if include_synthetic else synthetic_records
+    legacy_status_records = total_records - behavioural_records - synthetic_excluded
     override_rate = (override_count / behavioural_records) if behavioural_records else 0.0
 
     legacy_status_window: tuple[str, str] | None = None
@@ -159,6 +197,9 @@ def aggregate_verdicts(
         "behavioural_records": behavioural_records,
         "legacy_status_records": legacy_status_records,
         "legacy_status_window": legacy_status_window,
+        "synthetic_records": synthetic_records,
+        "synthetic_sources": synthetic_sources,
+        "synthetic_included": include_synthetic,
         "handler_counts": handler_counts,
         "handler_verdict_mix": handler_verdict_mix,
         "verdict_mix": verdict_mix,
@@ -199,6 +240,34 @@ def format_report(aggregate: dict[str, Any]) -> str:
             "return 'allow', so it cannot carry an override, and the never-fired "
             "side already excludes status handlers. Dropping them silently would "
             "present the rest of the window as freshly collected."
+        )
+        lines.append("")
+
+    synthetic_records = aggregate.get("synthetic_records", 0)
+    if synthetic_records:
+        sources = aggregate.get("synthetic_sources", {})
+        attribution = ", ".join(
+            f"{source}={count}" for source, count in sorted(sources.items(), key=lambda kv: -kv[1])
+        )
+        if aggregate.get("synthetic_included"):
+            lines.append(
+                f"SYNTHETIC HARNESS RECORDS: {synthetic_records} of {total} retained "
+                f"records ({attribution}) were fabricated by a test harness, and are "
+                f"INCLUDED in every figure below because --include-synthetic was "
+                f"passed. Do not quote these numbers as agent behaviour."
+            )
+        else:
+            lines.append(
+                f"SYNTHETIC HARNESS RECORDS: {synthetic_records} of {total} retained "
+                f"records ({attribution}) were fabricated by a test harness — the "
+                f"acceptance playbook and the forwarder's socket test, not an agent. "
+                f"They are counted here and kept OUT of every figure below."
+            )
+        lines.append(
+            "  A handler exercised ONLY by the harness therefore reads as "
+            "never-fired, which is the accurate statement: no agent reached it "
+            "in this window. Pass --include-synthetic to fold them back in when "
+            "you are debugging the harness itself."
         )
         lines.append("")
 

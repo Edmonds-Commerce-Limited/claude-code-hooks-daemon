@@ -452,3 +452,59 @@ class TestAppendVerdicts:
             )
         size = (tmp_path / VERDICT_LOG_FILENAME).stat().st_size
         assert size <= 200
+
+
+class TestSyntheticProvenanceIsRecorded:
+    """Plan 00418 Task 2.2: a record that cannot say whether it came from a
+    real agent or from a test probe is a record of neither.
+
+    Half of this log was acceptance-playbook and socket-test traffic, and
+    nothing on the line said so — so every figure derived from it blended the
+    two, and passed review because nothing required them to be distinguished.
+    One field on every line fixes that at the source.
+    """
+
+    def _lines(self, hook_input: dict[str, object], session_id: str) -> list[dict[str, object]]:
+        return build_verdict_lines(
+            decisions=[
+                HandlerVerdict(handler="h1", decision=Decision.ALLOW, terminal=False),
+            ],
+            hook_input=hook_input,
+            event="PreToolUse",
+            tool_name="Bash",
+            session_id=session_id,
+        )
+
+    def test_a_real_session_line_carries_a_null_synthetic_field(self) -> None:
+        """Present-and-null, not absent: an absent key cannot be told apart
+        from a line written before the field existed."""
+        line = self._lines({}, "9679b063-1111")[0]
+        assert "synthetic" in line
+        assert line["synthetic"] is None
+
+    def test_a_marked_probe_line_names_its_source(self) -> None:
+        line = self._lines({"synthetic_source": "playbook-probe"}, "playbook-probe-r1-7")[0]
+        assert line["synthetic"] == "playbook-probe"
+
+    def test_an_unmarked_probe_session_is_still_recorded_as_synthetic(self) -> None:
+        line = self._lines({}, "playbook-probe-r1-7")[0]
+        assert line["synthetic"] == "playbook-probe"
+
+    def test_the_socket_stdin_test_session_is_recorded_as_synthetic(self) -> None:
+        line = self._lines({}, "socket-stdin-test")[0]
+        assert line["synthetic"] == "socket-stdin-test"
+
+    def test_the_escape_hatch_override_line_carries_it_too(self) -> None:
+        """Otherwise a probe's override would count against real traffic."""
+        lines = build_verdict_lines(
+            decisions=[],
+            hook_input={
+                "tool_name": "Bash",
+                "tool_input": {"command": 'MUST_STASH_BECAUSE="x"; git stash'},
+            },
+            event="PreToolUse",
+            tool_name="Bash",
+            session_id="playbook-probe-r1-7",
+        )
+        assert len(lines) == 1
+        assert lines[0]["synthetic"] == "playbook-probe"

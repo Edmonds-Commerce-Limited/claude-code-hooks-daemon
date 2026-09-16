@@ -79,12 +79,15 @@ Two deliberate constraints, and both are about earning the right to block:
   answer and this becomes redundant. That is a reason to keep the footprint
   small, not a reason to wait.
 
-## Open question for Phase 2
+## Open question for Phase 2 — ANSWERED
 
-Which tools count as "coordination". `Task`/`Agent`, `TodoWrite`, `Read` and the
-search tools obviously; `Edit`/`Write`/`Bash` obviously not. The awkward middle
-is `Bash` for read-only inspection, which is most of what a coordinator actually
-does. The simulated run exists to answer this from data rather than taste.
+Which tools count as "coordination". The awkward middle was `Bash` for
+read-only inspection, which is most of what a coordinator actually does, and
+the simulated run answered it from data rather than taste: **`Bash` cannot be
+a denial surface at all**, because on the real record 93% of calls run several
+commands at once and 22% straddle the boundary inside one invocation. The
+denial surface is `Write`/`Edit`/`NotebookEdit`; `Bash` stays record-only with
+its command-head label. See Task 2.1.
 
 ## Tasks
 
@@ -113,9 +116,12 @@ does. The simulated run exists to answer this from data rather than taste.
 
 ### Phase 2: Decide from the record
 
-- [ ] 🔄 **Task 2.1**: Review what it would have denied, and settle the
-  coordination-tool boundary from that evidence. **Review done; the record now
-  CAN classify Bash, and the boundary itself remains the owner's call.**
+- [x] ✅ **Task 2.1**: Review what it would have denied, and settle the
+  coordination-tool boundary from that evidence. **Settled: the boundary is
+  `Write`/`Edit`/`NotebookEdit` on the main thread; `Bash` is never denied;
+  the plan tree is the one path exemption.** Ruling and full derivation in
+  `fable-orchestrator-boundary-decision.md`; implemented in
+  `.claude/project-handlers/pre_tool_use/orchestrator_simulate.py`.
 
   437 would-be denials in the first session: Bash 277, Write 122, Edit 33,
   Artifact 4, CronList 1, ToolSearch 1, and `Read` zero. Reads are already
@@ -138,34 +144,108 @@ does. The simulated run exists to answer this from data rather than taste.
   calls need no interpretation at all. Building the classifier did not
   foreclose that — the second option is exactly as available as it was.
 
-  **Second sample, classifier live.** 1,385 would-be denials in one long
-  session: Bash 896, Write 250, Edit 205, everything else 34, `Read` zero
-  again. Of the 412 Bash calls recorded after the classifier landed (the 485
-  before it are pre-classifier history, verified by a clean timestamp cutover
-  at 19:52 with no overlap):
+  **The second sample was not a second session, and half of it was not
+  traffic.** Re-derived from the raw log: the "437" and "1,385" figures above
+  are the SAME real session read at two moments, and both are ALL-SESSIONS
+  totals that blend in acceptance-playbook probes (`playbook-probe-*`), the
+  forwarder's socket test, and records with no session id. At the 1,385
+  moment only 879 were real. 2,717 of 5,396 records (50%) were synthetic. The
+  recorded lesson: **a record that mixes synthetic probes with real traffic
+  is a record of neither, and it passes every check because nothing said the
+  two should be told apart.**
 
-  | Measure                        | Value              |
-  | ------------------------------ | ------------------ |
-  | Distinct command heads         | 171                |
-  | Compound (multi-command) calls | 325 (79%)          |
-  | Most common single head        | 9.5%               |
-  | Heads needed to cover 50%      | 21 of 171          |
-  | Heads seen exactly once        | 106 (62% of heads) |
+  **The conclusion survives on clean data and strengthens.** Real session
+  only, post-classifier Bash (432 calls):
+
+  | Measure                                       | Blended (as first read) | Real traffic only |
+  | --------------------------------------------- | ----------------------- | ----------------- |
+  | Distinct labels                               | 171                     | 197               |
+  | Compound (multi-command) calls                | 325 (79%)               | 399 (93%)         |
+  | Most common single label                      | 9.5%                    | 9.0%              |
+  | Labels needed to cover 50%                    | 21                      | 23                |
+  | Labels seen exactly once                      | 62%                     | 72%               |
+  | Labels mixing a read-only and a mutating head | not measured            | 95 (22%)          |
+
+  The synthetic fires are single-head fixtures (`echo`, `git commit`, `git status`), which is exactly what dragged the blended compound share DOWN.
 
   **This settles a sub-question, and it is not the owner's to decide because
-  it is arithmetic: the line cannot be drawn on Bash by command head.** Four
-  fifths of calls run several commands at once, the heads are a long tail with
-  no dominant member, and 62% occur once. Worse for the premise, compounds
-  straddle the boundary WITHIN a single call — `set+git add+git commit+…` is
-  coordination and mutation in the same invocation, so no per-call verdict can
-  be right about both halves.
+  it is arithmetic: the line cannot be drawn on Bash by command head.** Nine
+  calls in ten run several commands, the labels are a long tail with no
+  dominant member, 72% occur once, and one call in five straddles the
+  boundary WITHIN a single invocation — `set+git add+git commit+…` is
+  coordination and mutation at once, so no per-call verdict can be right
+  about both halves.
 
-  `Write`/`Edit` remain 455 calls needing no interpretation at all. The
-  boundary decision is still the owner's; what has changed is that one of the
-  two options is now known to be unbuildable as stated.
+  `Write`/`Edit` need no interpretation at all, and the transcript says what
+  they were: ~73% of the real session's main-thread edits were implementation
+  (`src/`, `tests/`, `scripts/`), which is precisely the work this plan
+  exists to push to sub-agents. **The boundary therefore falls on tool
+  identity.** The plan tree is exempt because `DirectoryRoles.md` gives
+  `PLAN.md`, supporting documents and `JOURNAL/` to the coordinator, and
+  denying them would buy no context hygiene while pushing the lead into
+  `cat >> JOURNAL` heredocs — the one route this project's CLAUDE.md says
+  bypasses every content guard. `untracked/scratch` is deliberately NOT
+  exempt; the blocking record will show whether that hurts.
 
-- [ ] ⬜ **Task 2.2**: Owner decision on promoting to blocking, and separately
-  on promoting to the shipped library. Either may be "no".
+  **The recording gap that produced the blend is now closed** (Task 2.2
+  precondition 1), so no future figure here can repeat it:
+  `daemon/synthetic_traffic.py` is the one predicate for "was this a
+  harness?", the playbook harness MARKS its own events, `verdicts.jsonl`
+  carries a `synthetic` field on every line, and `hooks-daemon verdicts`
+  excludes harness traffic by default (`--include-synthetic` restores the
+  blended view for debugging the harness). Session-shape recognition
+  classifies the window written before the marker existed, so the existing
+  log became readable rather than being thrown away. RED first, 32 tests.
+
+- [x] ✅ **Task 2.2**: Owner decision on promoting to blocking, and separately
+  on promoting to the shipped library. **Two separate answers: yes to
+  blocking as a project-handler opt-in; no to the library, and that one is
+  not even open yet.**
+
+  **2.2a — promote to blocking: YES, as an opt-in in the PROJECT handler,
+  shipped OFF.** The switch is `BLOCKING_ENABLED` in
+  `orchestrator_simulate.py`: a one-line edit to a tracked, reviewed file,
+  and deliberately NOT a config key, because a config key is a library
+  surface (docs, manifest, config-optimiser, a commitment to maintain it) and
+  Ruling 3 says nothing ships yet. Non-Goal "blocking by default, ever"
+  holds: the default is simulate and a wrong answer reverses in one line.
+
+  Both technical preconditions are met. Precondition 1 (a filterable record)
+  is the synthetic-traffic work above. Precondition 2 (blocking must not fire
+  on synthetic probes) is real rather than hypothetical — the playbook builds
+  events with no `agent_id`, so a naive blocking mode would deny every
+  `Write`/`Edit` probe AND, under most-restrictive-wins, turn other handlers'
+  expected ALLOWs into failures; the acceptance suite would have gone red on
+  the day blocking was enabled. Both discriminators are tested.
+
+  **2.2b — promote to the shipped library: NO, and the gate is not open.**
+  See "The one human-gated item" below.
+
+## The one human-gated item — NOT OPEN
+
+Every other decision on this plan was answerable from the repository, and was
+answered there. This one is not, and it is recorded rather than asked, because
+**asking it today would be asking for a judgement with the evidence missing**:
+
+> Do you commit every installing project to an opt-in orchestrator-only gate
+> that THIS repository's record supports, knowing that (a) the record comes
+> from one repository, one user and one workflow, (b) upstream delegate mode
+> may make the handler redundant, and (c) shipping it means maintaining it for
+> users indefinitely?
+
+That is a commitment to users and a risk appetite; nothing in the repository
+can answer it.
+
+**What would open it**: a BLOCKING record from this repository — filtered to
+real sessions, which is now possible — spanning several real sessions. Not the
+simulation record: a simulated denial says what a policy would have caught, a
+real one says what it cost. Until that exists the question has no evidence
+behind it, and the "not yet" is technical rather than a deferral.
+
+Deliberately NOT built under this plan, so that the gate cannot be quietly
+walked through: no library handler, no library config key, no docs entry, no
+config manifest row. The project switch is a module constant precisely because
+a config key would be the first of those.
 
 ## Success Criteria
 
@@ -175,27 +255,39 @@ does. The simulated run exists to answer this from data rather than taste.
 
 - [x] ✅ A simulated run over real sessions in this repository produces a record
   of would-be denials, and that record is what the boundary decision cites.
-  Two samples now: 437 in the first session, 1,385 in a second with the
-  classifier live. The record has already ruled one option out on arithmetic.
+  One real session (`9679b063…`), read at two moments — not two sessions, and
+  the correction matters more than the count did. On clean data the record
+  ruled one option out on arithmetic and pointed the other way on a 73%
+  implementation share.
 
-- [x] ✅ Nothing is blocked by this plan. Blocking is a later, separate
-  decision. Established three independent ways, because "it never blocked"
-  is the kind of claim that is easy to assert and easy to be wrong about:
+- [x] ✅ The record can tell a real session from a test probe, and does so by
+  default. Half of it could not, which is why the figures above needed
+  re-deriving; `daemon/synthetic_traffic.py` is now the single predicate, the
+  harness marks its own events, and `hooks-daemon verdicts` partitions rather
+  than blends.
 
-  1. **Structural** — the module contains zero `DENY` tokens, so there is no
-     blocking code path for a future edit to reach by forgetting a flag.
-  2. **By reading** — `handle()` has exactly one gating return, and it is
-     `Decision.ALLOW`.
-  3. **Empirically** — 1,787 live `orchestrator-simulate` records in
-     `verdicts.jsonl`, every one `allow`.
+- [x] ✅ Nothing is blocked by this plan BY DEFAULT, and blocking was a
+  separate, evidenced decision rather than a flag flip. Phase 1's structural
+  proof (zero `DENY` tokens in the module) is deliberately spent — Task 2.2a
+  built a deny path — so the claim now rests on what can still be checked:
 
-  The third is only worth anything because of its control: the same log
-  carries thousands of `deny` records from other handlers, so "all allow"
-  means this handler never denied, not that the log fails to record denials.
-  Without that check the evidence would have been indistinguishable from a
-  broken logger.
+  1. **By default** — a default-constructed handler returns `ALLOW` for every
+     tool shape, asserted across the whole surface rather than three
+     convenient ones.
+  2. **By declaration** — with blocking off, the handler declares no `Rule`
+     and carries no `blocking` tag, so it makes no promise CLAUDE.md or
+     `explain-rule` would have to keep.
+  3. **Empirically** — every live `orchestrator-simulate` record in
+     `verdicts.jsonl` is `allow`, against a control of thousands of `deny`
+     records from other handlers in the same log. Without that control the
+     evidence would be indistinguishable from a broken logger.
 
 - [ ] ⬜ Full QA passes, the daemon restarts, CI green.
+
+- [ ] ⬜ Every release-bound consequence is in the pending-release holding
+  area: `UNRELEASED/release-notes/08-verdicts-excludes-harness-traffic.md`
+  (the `verdicts` default change is operator-visible). The orchestrator gate
+  itself is a project handler and ships nothing, so it needs no entry.
 
 ## Delivery & Milestones
 

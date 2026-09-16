@@ -42,6 +42,7 @@ from claude_code_hooks_daemon.daemon.playbook_harness import (
     verdict,
     vet_probe_commands,
 )
+from claude_code_hooks_daemon.daemon.synthetic_traffic import PLAYBOOK_PROBE
 
 _ROOT = Path("/repo")
 
@@ -406,6 +407,19 @@ class TestBuildEvent:
         first = build_event(self._probe(test_number=1), run_id="r1")
         second = build_event(self._probe(test_number=1), run_id="r2")
         assert first["session_id"] != second["session_id"]
+
+    def test_the_event_declares_itself_synthetic(self) -> None:
+        """Plan 00418: the harness is the one party that KNOWS it is a harness.
+
+        Its fires land in the same `verdicts.jsonl` as a real agent's, where
+        they were half the record and indistinguishable from it. Recognising a
+        `playbook-probe-*` session id is the fallback for the already-written
+        window; marking the event is the truthful route, and it is also what
+        lets a blocking handler decline to deny a probe rather than turn the
+        acceptance suite red.
+        """
+        event = build_event(self._probe(), run_id="r1")
+        assert event["synthetic_source"] == PLAYBOOK_PROBE
 
 
 class TestThePreToolUseTargetMustNotExistYet:

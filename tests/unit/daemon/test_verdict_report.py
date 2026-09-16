@@ -298,3 +298,115 @@ class TestLegacyStatusRecordsInTheRetainedWindow:
         assert agg["legacy_status_records"] == 0
         assert agg["legacy_status_window"] is None
         assert "LEGACY STATUS RECORDS" not in text
+
+
+class TestSyntheticProbeRecordsArePartitioned:
+    """Plan 00418 Task 2.2 precondition 1: the report must be filterable to
+    real sessions before any figure from it is quoted.
+
+    Measured on this project's own log: 2,717 of 5,396 records (50%) were
+    acceptance-playbook probes and socket-test fires. `verdicts` had no way to
+    separate them, so Plan 00418's headline counts blended a harness with an
+    agent — and the blend also moved a real conclusion (compound Bash share
+    read 79% blended, 93% on real traffic alone), because the probes are
+    single-head fixtures.
+
+    Partitioned, never discarded — the same treatment as the legacy Status
+    renders directly above, and for the same reason: silently dropping half a
+    window presents the remainder as freshly collected.
+    """
+
+    def _real(self, handler: str, verdict: str, overridden: bool = False) -> dict[str, object]:
+        return {
+            "ts": "2026-09-15T18:48:04+00:00",
+            "session": "9679b063-1111",
+            "event": "PreToolUse",
+            "handler": handler,
+            "verdict": verdict,
+            "overridden": overridden,
+            "synthetic": None,
+        }
+
+    def _probe(self, handler: str, verdict: str) -> dict[str, object]:
+        return {
+            "ts": "2026-09-15T18:48:04+00:00",
+            "session": "playbook-probe-r1-7",
+            "event": "PreToolUse",
+            "handler": handler,
+            "verdict": verdict,
+            "overridden": False,
+            "synthetic": "playbook-probe",
+        }
+
+    def _mixed(self) -> list[dict[str, object]]:
+        return [
+            self._real("pipe-blocker", "deny"),
+            self._real("orchestrator-simulate", "allow"),
+            self._probe("pipe-blocker", "deny"),
+            self._probe("sed-blocker", "deny"),
+            self._probe("sed-blocker", "deny"),
+        ]
+
+    def test_synthetic_records_are_excluded_from_the_handler_roster_by_default(self) -> None:
+        agg = aggregate_verdicts(self._mixed())
+
+        assert agg["handler_counts"] == {"pipe-blocker": 1, "orchestrator-simulate": 1}
+
+    def test_synthetic_records_are_counted_and_attributed_not_discarded(self) -> None:
+        agg = aggregate_verdicts(self._mixed())
+
+        assert agg["total_records"] == 5
+        assert agg["synthetic_records"] == 3
+        assert agg["synthetic_sources"] == {"playbook-probe": 3}
+        assert agg["behavioural_records"] == 2
+
+    def test_a_pre_marker_record_is_classified_from_its_session_shape(self) -> None:
+        """The retained window predates the marker; it must still be readable."""
+        legacy_probe = {
+            "ts": "2026-09-15T18:00:00+00:00",
+            "session": "socket-stdin-test",
+            "event": "PreToolUse",
+            "handler": "pipe-blocker",
+            "verdict": "allow",
+            "overridden": False,
+        }
+        agg = aggregate_verdicts([self._real("pipe-blocker", "deny"), legacy_probe])
+
+        assert agg["synthetic_records"] == 1
+        assert agg["synthetic_sources"] == {"socket-stdin-test": 1}
+        assert agg["handler_counts"] == {"pipe-blocker": 1}
+
+    def test_include_synthetic_restores_the_blended_view(self) -> None:
+        """Kept available deliberately: debugging the HARNESS needs its fires."""
+        agg = aggregate_verdicts(self._mixed(), include_synthetic=True)
+
+        assert agg["handler_counts"] == {
+            "pipe-blocker": 2,
+            "orchestrator-simulate": 1,
+            "sed-blocker": 2,
+        }
+        assert agg["behavioural_records"] == 5
+
+    def test_the_report_names_what_it_set_aside_and_from_where(self) -> None:
+        text = format_report(aggregate_verdicts(self._mixed()))
+
+        assert "SYNTHETIC" in text
+        assert "playbook-probe" in text
+        assert "3" in text
+
+    def test_a_clean_window_says_nothing_about_synthetic_records(self) -> None:
+        agg = aggregate_verdicts([self._real("pipe-blocker", "deny")])
+        text = format_report(agg)
+
+        assert agg["synthetic_records"] == 0
+        assert agg["synthetic_sources"] == {}
+        assert "SYNTHETIC" not in text
+
+    def test_no_roster_line_names_a_handler_only_a_probe_exercised(self) -> None:
+        """The property: `sed-blocker` fired only in the harness, so the
+        real-traffic roster must not credit it with a fire."""
+        text = format_report(aggregate_verdicts(self._mixed()))
+        roster = text.split("Per-handler fire counts:")[1].split("Verdict mix")[0]
+
+        assert "sed-blocker" not in roster
+        assert "pipe-blocker" in roster
