@@ -267,6 +267,107 @@ class TestDeployMultipleSkills:
         assert not (temp_project / ".claude" / "skills" / "optimise").exists()
 
 
+class TestDeploymentDoesNotDestroyWhatItDidNotWrite:
+    """Plan 00412 F-DEPL-2: the sibling twenty lines below already knows this.
+
+    `_remove_retired_skills` refuses to delete a same-named directory that
+    does not look daemon-deployed, and its docstring gives the reason:
+    deleting it "would destroy project work with no backup, which is far worse
+    than leaving an orphan". `_deploy_one_skill` called `rmtree` on its target
+    with no provenance test at all.
+
+    The realistic loss is not a name collision — it is a user CUSTOMISING a
+    deployed skill and losing the edit silently on the next upgrade.
+
+    Provenance cannot come from a marker here: a deployed skill is a byte
+    copy of the shipped source, so there is nothing in it the daemon wrote and
+    a user did not. It comes from comparing the trees instead, which also
+    survives a version bump: identical means the daemon wrote it, different
+    means it may not have.
+    """
+
+    def test_a_customised_skill_is_preserved_rather_than_deleted(
+        self, temp_project: Path, daemon_source: Path
+    ) -> None:
+        deploy_skills(daemon_source, temp_project)
+        deployed = temp_project / ".claude" / "skills" / "hooks-daemon" / "SKILL.md"
+        deployed.write_text("# Hooks Daemon Skill\n\nMy own local notes.\n")
+
+        deploy_skills(daemon_source, temp_project)
+
+        backups = list((temp_project / ".claude" / "hooks-daemon-backups" / "skills").iterdir())
+        assert len(backups) == 1
+        assert "My own local notes." in (backups[0] / "SKILL.md").read_text()
+
+    def test_the_skill_itself_is_still_upgraded(
+        self, temp_project: Path, daemon_source: Path
+    ) -> None:
+        """Preserving the old copy must not mean declining the upgrade."""
+        deploy_skills(daemon_source, temp_project)
+        deployed = temp_project / ".claude" / "skills" / "hooks-daemon" / "SKILL.md"
+        deployed.write_text("stale local edit\n")
+
+        deploy_skills(daemon_source, temp_project)
+
+        assert deployed.read_text() == "# Hooks Daemon Skill\n"
+
+    def test_an_extra_file_the_user_added_is_preserved_too(
+        self, temp_project: Path, daemon_source: Path
+    ) -> None:
+        deploy_skills(daemon_source, temp_project)
+        extra = temp_project / ".claude" / "skills" / "hooks-daemon" / "my-notes.md"
+        extra.write_text("notes\n")
+
+        deploy_skills(daemon_source, temp_project)
+
+        backups = list((temp_project / ".claude" / "hooks-daemon-backups" / "skills").iterdir())
+        assert (backups[0] / "my-notes.md").read_text() == "notes\n"
+
+    def test_an_unchanged_skill_leaves_no_backup(
+        self, temp_project: Path, daemon_source: Path
+    ) -> None:
+        """An identical tree IS the daemon's own copy, so nothing is at risk.
+
+        Backing up on every upgrade regardless would bury the real warnings
+        under clutter, which is how a signal stops being read.
+        """
+        deploy_skills(daemon_source, temp_project)
+        deploy_skills(daemon_source, temp_project)
+
+        assert not (temp_project / ".claude" / "hooks-daemon-backups").exists()
+
+    def test_the_backup_lives_outside_the_skills_root(
+        self, temp_project: Path, daemon_source: Path
+    ) -> None:
+        """A backup inside `.claude/skills/` would register as a bogus skill.
+
+        Claude Code discovers skills by directory, so preserving the old copy
+        beside the new one would hand the user a duplicate slash command.
+        """
+        deploy_skills(daemon_source, temp_project)
+        (temp_project / ".claude" / "skills" / "hooks-daemon" / "SKILL.md").write_text("edited\n")
+
+        deploy_skills(daemon_source, temp_project)
+
+        skill_dirs = [p.name for p in (temp_project / ".claude" / "skills").iterdir()]
+        assert skill_dirs == ["hooks-daemon"]
+
+    def test_two_upgrades_do_not_collide_on_one_backup_name(
+        self, temp_project: Path, daemon_source: Path
+    ) -> None:
+        """The second rescue must not overwrite the first one."""
+        skill_md = temp_project / ".claude" / "skills" / "hooks-daemon" / "SKILL.md"
+        deploy_skills(daemon_source, temp_project)
+        skill_md.write_text("first edit\n")
+        deploy_skills(daemon_source, temp_project)
+        skill_md.write_text("second edit\n")
+        deploy_skills(daemon_source, temp_project)
+
+        backups = sorted((temp_project / ".claude" / "hooks-daemon-backups" / "skills").iterdir())
+        assert len(backups) == 2
+        assert {(b / "SKILL.md").read_text() for b in backups} == {"first edit\n", "second edit\n"}
+
+
 class TestRetiredSkillRemoval:
     """Plan 00322: a skill that stops shipping must stop being installed.
 

@@ -46,16 +46,82 @@ def _skills_source_root(daemon_source: Path) -> Path:
     return source_skills_root
 
 
+def _relative_files(root: Path) -> set[Path]:
+    """Every file under ``root``, as paths relative to it."""
+    return {p.relative_to(root) for p in root.rglob("*") if p.is_file()}
+
+
+def _trees_match(source: Path, target: Path) -> bool:
+    """Whether ``target`` is byte-for-byte the tree in ``source``.
+
+    This is the provenance test, and it is comparison rather than a marker
+    because a deployed skill is a plain copy of the shipped source -- there is
+    nothing in it the daemon wrote and a user did not. Comparison also
+    survives a version bump: a target matching the source we are about to
+    write IS our own copy, and a target that differs may not be.
+
+    Reading both trees costs a handful of small files, once per skill, at
+    install time only.
+    """
+    if _relative_files(source) != _relative_files(target):
+        return False
+    return all(
+        (source / rel).read_bytes() == (target / rel).read_bytes()
+        for rel in _relative_files(source)
+    )
+
+
+def _preserve_replaced_skill(target_skill_dir: Path, project_root: Path) -> None:
+    """Move a skill directory somewhere safe before it is replaced.
+
+    Kept OUTSIDE ``.claude/skills/``: Claude Code discovers skills by
+    directory, so a copy left beside the new one would register as a second,
+    stale slash command -- a rescue that creates a different problem.
+
+    The name carries a counter so a second upgrade cannot overwrite the copy
+    the first one rescued.
+    """
+    backups_root = project_root / ".claude" / "hooks-daemon-backups" / "skills"
+    backups_root.mkdir(parents=True, exist_ok=True)
+
+    destination = backups_root / target_skill_dir.name
+    suffix = 1
+    while destination.exists():
+        suffix += 1
+        destination = backups_root / f"{target_skill_dir.name}-{suffix}"
+
+    shutil.move(str(target_skill_dir), str(destination))
+    logger.warning(
+        "Skill directory %s differs from the version being deployed, so it was "
+        "preserved at %s rather than deleted. If those were your edits, reapply "
+        "them to the new copy; if not, the backup is safe to delete.",
+        target_skill_dir,
+        destination,
+    )
+
+
 def _deploy_one_skill(source_skill_dir: Path, project_root: Path) -> None:
     """Deploy one skill directory tree to ``.claude/skills/<name>/``."""
     target_skill_dir = project_root / ".claude" / "skills" / source_skill_dir.name
 
     logger.info("Deploying skill from %s to %s", source_skill_dir, target_skill_dir)
 
-    # Remove existing skill directory (for upgrade scenario)
+    # Replace any existing copy, preserving it first unless it is provably
+    # ours. `_remove_retired_skills` below already refuses to delete a
+    # directory that does not look daemon-deployed, for the reason its
+    # docstring gives: destroying project work with no backup is far worse
+    # than the alternative. This path owes the same duty (Plan 00412,
+    # F-DEPL-2) and the realistic loss is a user's customisation of a
+    # deployed skill, silently discarded on the next upgrade.
     if target_skill_dir.exists():
-        logger.debug("Removing existing skill directory: %s", target_skill_dir)
-        shutil.rmtree(target_skill_dir)
+        if _trees_match(source_skill_dir, target_skill_dir):
+            logger.debug("Removing existing skill directory: %s", target_skill_dir)
+            shutil.rmtree(target_skill_dir)
+        else:
+            # Moves the directory aside, which also clears the target path --
+            # deleting it afterwards would be deleting something that is no
+            # longer there.
+            _preserve_replaced_skill(target_skill_dir, project_root)
 
     # Copy entire skill directory tree
     shutil.copytree(source_skill_dir, target_skill_dir, dirs_exist_ok=False)
