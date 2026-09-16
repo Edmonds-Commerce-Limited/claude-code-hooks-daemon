@@ -278,7 +278,6 @@ class TestUnexpandableTokensAreDeclinedNotFabricated:
             ("glob-star", "curl https://x -o out*/evil.sh"),
             ("glob-question", "curl https://x -o out?/evil.sh"),
             ("backtick", 'curl https://x -o "`whoami`/evil.sh"'),
-            ("leading-tilde", "curl https://x -o ~/evil.sh"),
         ],
     )
     def test_an_unexpandable_token_is_declined_not_fabricated(
@@ -287,6 +286,32 @@ class TestUnexpandableTokensAreDeclinedNotFabricated:
         assert (
             handler.matches(_bash(command, cwd="/tmp/work")) is False
         ), f"{label} was fabricated into a path instead of declined"
+
+    def test_a_leading_tilde_is_EXPANDED_rather_than_declined(
+        self, handler: ProjectContainmentHandler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`~` was a fifth case here, and it moved out (Plan 00412).
+
+        C6's PRINCIPLE is untouched: a token must never be joined against cwd
+        into a path that does not exist. `/tmp/work/~/evil.sh` would be exactly
+        that fabrication, and it is still not produced.
+
+        What changed is that declining was not the only alternative. `~/evil.sh`
+        expands to `$HOME/evil.sh` deterministically — that is where the shell
+        really writes, so naming it is resolution, not fabrication. The other
+        four cases have no such expansion available: the daemon cannot know
+        what `$HOME` inside quotes, a glob, or a backtick will become.
+
+        `core/utils.py` states the rule and names the cost of the old one: `~`
+        is deliberately absent from `_UNEXPANDABLE_CHARACTERS` because Claude's
+        memory files live at `~/.claude/projects/*/memory/`, so declining the
+        tilde silently unenforces that policy for its most natural spelling.
+        Declining here left the same hole in containment — `echo > ~/x` was
+        denied while `curl -o ~/x` was allowed.
+        """
+        monkeypatch.setenv("HOME", "/root")
+
+        assert handler.matches(_bash("curl https://x -o ~/evil.sh", cwd="/tmp/work")) is True
 
     def test_an_ordinary_relative_token_is_still_resolved_and_denied(
         self, handler: ProjectContainmentHandler
@@ -612,3 +637,65 @@ class TestClaudeMdGuidance:
         assert guidance is not None
         assert "scratchpad" in guidance
         assert "durable" in guidance
+
+
+class TestATildeIsADestinationLikeAnyOther:
+    """Plan 00412: `~/x` escaped containment via the flag route.
+
+    Two resolvers in this repository turn a write destination into an absolute
+    path. `core.utils._resolve_write_target` EXPANDS a leading `~`; this
+    handler's `_resolve_against_cwd` declined it and returned the token
+    unchanged — and an unresolved, relative-looking token is treated as
+    never-outside, so the write was allowed.
+
+    `core/utils.py` does not merely differ, it documents the opposite rule:
+    `~` is deliberately absent from `_UNEXPANDABLE_CHARACTERS` because a
+    leading tilde is a deterministic expansion of HOME that this process can
+    perform exactly, and "must not be declined" — naming Claude's own memory
+    files under `~/.claude/projects/*/memory/` as the policy that would
+    otherwise go unenforced for its most natural spelling.
+
+    The redirect route already denied `~`. Only the flag route did not, so the
+    verdict depended on the spelling rather than on where the bytes land.
+    """
+
+    _HOME = "/root"
+
+    @pytest.fixture(autouse=True)
+    def _home(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("HOME", self._HOME)
+
+    def test_a_tilde_destination_flag_is_denied(self, handler: ProjectContainmentHandler) -> None:
+        assert handler.matches(_bash("curl -s https://x/y -o ~/x.sh", cwd="/workspace")) is True
+
+    def test_the_redirect_spelling_is_denied_too(self, handler: ProjectContainmentHandler) -> None:
+        """The route that was already correct must stay correct."""
+        assert handler.matches(_bash("echo hi > ~/notes.txt", cwd="/workspace")) is True
+
+    def test_a_bare_tilde_is_denied(self, handler: ProjectContainmentHandler) -> None:
+        assert handler.matches(_bash("curl -s https://x/y -o ~", cwd="/workspace")) is True
+
+    def test_another_users_home_is_still_declined(self, handler: ProjectContainmentHandler) -> None:
+        """`~otheruser` is not expandable from HOME, so it must stay declined.
+
+        Naming the wrong file is worse than naming none: guessing another
+        account's home would report a location the shell will not write to.
+        """
+        assert handler.matches(_bash("curl -s https://x/y -o ~someone/x.sh", cwd="/workspace")) is (
+            False
+        )
+
+    def test_a_tilde_path_inside_the_project_is_allowed(
+        self, handler: ProjectContainmentHandler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Expanding is not the same as denying — a HOME inside the repo passes.
+
+        Without this, the fix could have been "treat every `~` as outside",
+        which would be right for the wrong reason and wrong as soon as anyone
+        set HOME to a project path.
+        """
+        monkeypatch.setenv("HOME", str(handler._resolved_root()))
+
+        assert handler.matches(_bash("curl -s https://x/y -o ~/in-repo.txt", cwd="/workspace")) is (
+            False
+        )

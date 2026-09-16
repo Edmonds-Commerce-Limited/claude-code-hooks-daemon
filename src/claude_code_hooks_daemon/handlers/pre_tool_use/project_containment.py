@@ -63,6 +63,7 @@ from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 # same set rather than risk drifting from it.
 from claude_code_hooks_daemon.core.utils import (
     _UNEXPANDABLE_CHARACTERS,
+    expand_home,
     get_bash_command,
     get_bash_write_targets,
 )
@@ -311,15 +312,26 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
         marking trailing slash, which the containment test does not need -- it
         only asks where a path RESOLVES TO, not whether it names an existing
         file. The expansion decline it DOES need, and shares verbatim: a token
-        containing `_UNEXPANDABLE_CHARACTERS` (`$`, `*`, `?`, a backtick), or
-        starting with `~`, would otherwise be joined into an absolute path
-        that no shell will ever actually write to -- fabricating a location
-        rather than declining to name one (release review finding C6).
+        containing `_UNEXPANDABLE_CHARACTERS` (`$`, `*`, `?`, a backtick) would
+        otherwise be joined into an absolute path that no shell will ever
+        actually write to -- fabricating a location rather than declining to
+        name one (release review finding C6).
+
+        `~` is NOT in that set, and this resolver used to decline it anyway
+        (Plan 00412). That made the same destination allowed or denied by which
+        spelling the command used: `echo > ~/x` went through the shared
+        accessor, which expands, while `curl -o ~/x` came here and was returned
+        unexpanded -- and an unresolved, relative-looking token is treated as
+        never-outside. `core/utils.py` states the rule this now follows: a
+        leading tilde is a deterministic expansion of HOME that this process
+        can perform exactly, so it must be expanded rather than declined.
+        `~otheruser` is still declined, by `expand_home` itself.
         """
         if any(character in target for character in _UNEXPANDABLE_CHARACTERS):
             return target
         if target.startswith("~"):
-            return target
+            expanded = expand_home(target)
+            return expanded if expanded is not None else target
         if Path(target).is_absolute():
             return target
         if not isinstance(cwd, str) or not cwd:
