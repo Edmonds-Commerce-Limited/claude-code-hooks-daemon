@@ -103,7 +103,13 @@ class TestCmdCheckWorktreeSeed:
         payload = json.loads(capsys.readouterr().out)
         assert payload["has_drift"] is True
         assert payload["seed_key_configured"] is False
-        assert payload["unconfigured"] == [{"path": ".env.local", "mode": "symlink"}]
+        # `optional` is serialised because the payload is `asdict(entry)`, and
+        # it BELONGS here: whether an entry tolerates an absent source is the
+        # first thing an operator wants when a WorktreeCreate has failed
+        # (Plan 00419 N9). Additive, so no consumer of this JSON breaks.
+        assert payload["unconfigured"] == [
+            {"path": ".env.local", "mode": "symlink", "optional": False}
+        ]
         assert payload["missing"] == []
         assert payload["suggested_yaml"]
 
@@ -117,7 +123,9 @@ class TestCmdCheckWorktreeSeed:
 
         payload = json.loads(capsys.readouterr().out)
         assert payload["has_drift"] is False
-        assert payload["configured"] == [{"path": ".env.local", "mode": "symlink"}]
+        assert payload["configured"] == [
+            {"path": ".env.local", "mode": "symlink", "optional": False}
+        ]
 
     def test_absent_config_file_exits_two(
         self, repo: Path, capsys: pytest.CaptureFixture[str]
