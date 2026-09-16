@@ -2,7 +2,7 @@
 
 **Status**: Not Started
 **Created**: 2026-09-16
-**GitHub Issue**: #40
+**GitHub Issue**: #40 (and #41, triaged into decision 2)
 **Owner**: dev
 **Priority**: Medium
 **Recommended Executor**: Sonnet
@@ -57,6 +57,37 @@ They interact, so acting on one alone could be wrong. `teammate_reap_advisor`
 shipped in v3.65.0 and already reports unreaped background work at Stop, which
 addresses part of #41 — the cluster's baseline moved after both were filed and
 before either was triaged.
+
+#### What #41 asks for that already exists (verified at triage)
+
+#41 was triaged into this decision rather than into a plan of its own. Three of
+its five asks have already moved, which changes what the owner is ruling on:
+
+- **Worktree cleanup already ships, and is stricter than the ask.**
+  `worktree-reap` and `core/worktree_reaping.py` (Plans 00349, 00372, 00380)
+  refuse an unmerged branch, treat an unreadable merge listing as unmerged,
+  refuse a history-free worktree below a minimum age, detect a live process by
+  working directory, and surface the uncertain rather than removing it.
+- **An idle-agent census cannot be built from the Stop payload.**
+  `background_tasks` lists an idle teammate with `status: "running"`, so a
+  threshold counting "idle subagents" would in fact be counting registered
+  tasks. `ListAgents` holds the distinction; the daemon sees only payloads.
+- **The `hooks-daemon agents` verb name is already taken** by the
+  daemon-shipped agent-asset lifecycle (Plan 00279).
+
+The attribution work may also be smaller than #41 estimates: contracts already
+exist for `SubagentStart`, `TaskCreated`, `TaskCompleted` and `TeammateIdle`,
+none of which has a handler package yet. `TeammateIdle` is a first-class
+went-idle signal, which is what #41's ask 2 proposes to infer from a silence
+timer — whether it fires for Agent-tool subagents as well as named teammates is
+unverified.
+
+What remains in #41 is three new destructive or blocking controls: a hard cap
+that blocks the coordinator's stop, an `auto_reap` that stops agents, and
+automatic cron deletion. The last is the sharpest point for the owner: the harm
+#41 reports is an agent deleting a shared recovery cron on its own initiative,
+and its proposed remedy is cron deletion on the daemon's own initiative. Same
+operation, different actor.
 
 ### 3. Per-handler defaults are a safety decision, ~136 times over
 
