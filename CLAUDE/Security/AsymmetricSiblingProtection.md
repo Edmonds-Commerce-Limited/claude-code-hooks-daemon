@@ -139,6 +139,44 @@ the guard.
 - Defence: `5b6ac98b`, committed deliberately red.
 - Fix: `a6ce7bb7`.
 
+**The tilde that escaped containment** —
+`handlers/pre_tool_use/project_containment.py::_resolve_against_cwd` against
+`core/utils.py::_resolve_write_target`, on the helper `expand_home`. The most
+consequential instance so far: a live bypass of `R-WRITE-OUTSIDE-PROJECT-ROOT`.
+
+What it allowed: the same destination got opposite verdicts depending on how
+the command spelled the write.
+
+| command              | before    | after |
+| -------------------- | --------- | ----- |
+| `curl -o ~/x.sh`     | **ALLOW** | DENY  |
+| `echo > ~/notes.txt` | DENY      | DENY  |
+
+`_resolve_write_target` expands a leading `~`; `_resolve_against_cwd` declined
+it and handed back the token unresolved — and an unresolved, relative-looking
+token is treated as never-outside, so the write was allowed. `core/utils.py`
+had already written down the opposite rule, noting that declining the tilde
+"silently un-enforces" the memory-file policy for its most natural spelling.
+
+**The docstring was part of the camouflage.** `_resolve_against_cwd` claimed it
+shared the decline "verbatim" with the shared accessor. It shared the CONSTANT
+— which deliberately omits `~` — and then added a `~` decline on top. A reader
+checking the claim would have been reassured by it, which is worse than no
+claim at all.
+
+Fixing it **overturned release-review finding C6**, which listed `leading-tilde`
+beside `$HOME`, a glob and a backtick as "decline, do not fabricate". C6's
+principle is preserved and still enforced for the other three: `/tmp/work/~/evil.sh`
+is never produced. What C6 missed is that declining was not the only
+alternative — `~/x` expands deterministically to where the shell actually
+writes, so naming it is *resolution*, not fabrication. The other three have no
+such expansion available. Superseding a finding in the open, with the test that
+records why, is the point here: leaving a real bypass open to avoid touching an
+existing verdict would have been the worse error.
+
+- Defence: `b3f3614b`, committed deliberately red.
+- Fix: `f280153f`, verified by a full suite at 32/32.
+
 **The forwarder interpolations** — `install/forwarder_generator.py`,
 `build_relay_guard_block`, against `_escape_for_double_quotes` in the same
 module. **Partially fixed, and listed that way on purpose.**
@@ -210,7 +248,7 @@ and telling those apart is the reading a registry exists to capture.
 - **Only declared pairs.** This is the defining limitation and it is
   structural, not an oversight. A divergence with no row in
   `scripts/qa/declared-invariant-pairs.yaml` is invisible, and the registry
-  currently holds three rows against thirteen known instances. **Read a green
+  currently holds four rows against thirteen known instances. **Read a green
   run as "every declared pair holds", never as "the class is clear."**
 
   The third instance above proves the point from inside: it is a real member of
@@ -249,7 +287,7 @@ and telling those apart is the reading a registry exists to capture.
   name satisfies the row.
 
 - **Still only declared pairs.** Rows cover `pipe_blocker`/`process_probe`,
-  the worktree verbs, and the remote-docs writers.
+  the worktree verbs, the remote-docs writers, and the write-target resolvers.
 
 - **A proposed pair can be WRONG, and nothing mechanical says so.** The
   `path_is_protected` pair came from two independent checks and would have
