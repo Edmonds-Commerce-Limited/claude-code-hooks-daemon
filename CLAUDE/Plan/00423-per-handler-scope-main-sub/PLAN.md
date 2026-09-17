@@ -177,13 +177,21 @@ its decisions carry straight over, and the second one is a trap:
   A `scope: MAIN` handler inherits that failure mode exactly. `MAIN` cannot
   mean "no `agent_id`"; it has to mean "no `agent_id` AND not synthetic".
 
-- [ ] ⬜ **Task 3.1**: Implement the `scope: ALL|MAIN|SUB` key with the agreed
-  defaults (content guards `ALL`, nudge handlers `MAIN`), RED test first.
-  `MAIN` must exclude synthetic events per the note above, with a test that
-  fabricates one — a scope key that reddens the acceptance suite is not a
-  working scope key.
+- [x] ✅ **Task 3.1**: DONE — `scope: ALL|MAIN|SUB` ships as a config key,
+  refused at load on an event that cannot carry `agent_id`, gated in the chain
+  before `matches()`, keyed on `agent_id` presence alone. Synthetic events are
+  excluded from every restricting scope. Defaults: `auto-continue-stop`,
+  `cron-stop-enforcer` and `teammate-reap-advisor` are `MAIN`; everything else
+  `ALL`. The acceptance suite is unaffected — measured, not assumed: all five
+  probes for those handlers are already SKIPPED, because the harness cannot
+  drive a `Stop` event at all.
 
-- [ ] ⬜ **Task 3.2**: Coordinator-only failsafe-cron deletion.
+- [x] ✅ **Task 3.2**: DONE — `subagent_cron_delete_blocker` (PreToolUse,
+  `scope: SUB`, terminal, on by default) denies `CronDelete` inside a subagent.
+  Deliberately wider than "the failsafe cron": `session_crons` reaches `Stop`,
+  not `PreToolUse`, so at deletion time the daemon holds an opaque id and a
+  narrower rule would be guessing. The handler never reads `agent_id` itself —
+  the scope key is the whole role test.
 
 - [ ] ⬜ **Task 3.3**: The #41 reaping half, scoped to what is not already
   shipped — `teammate_reap_advisor` (v3.65.0) and the worktree half

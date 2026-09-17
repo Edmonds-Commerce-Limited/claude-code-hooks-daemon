@@ -801,3 +801,44 @@ would have caught N2 at config-edit time rather than a session later.
 
 Owner-gated for (1): it moves a path that ten strategies, the playbook harness
 and client-facing docs all name.
+
+### N12 — the supervisor asset has been red under its own lint gate since v3.65.0
+
+`tests/integration/test_client_owned_asset_lint.py::TestPythonAssetsAreCleanUnderRuffDefaults`
+fails on `.claude/ccy/claude-supervise.py`, reporting `ISC004` (unparenthesized
+implicit string concatenation in a collection, several sites) and `SIM103`
+(return the negated condition directly, `:3578`).
+
+Found incidentally while clearing Plan 00423 Task 3.2's own failures, and
+separated from them deliberately: the file is untouched by that work
+(`git diff HEAD` empty for it) and its last commit is
+`62019300 Release v3.65.0: version bump across the tree`. So this is not a
+regression introduced here — the gate has been red on `main` since that
+release.
+
+**Why it matters more than the findings themselves.** The findings are
+cosmetic. The fact is not: a test that has been failing on `main` across a
+release is a test nobody is reading, and the whole point of that gate is that a
+DAEMON-OWNED asset deployed into a CLIENT-owned path is clean under the
+client's default rule set — a client who runs ruff on their own `.claude/`
+tree currently gets our noise. A gate that is already red cannot report the
+next thing that breaks it, which is the same failure shape as N8 and as the
+three vacuous guards this session has already cost.
+
+**The question worth answering before fixing the lint**: why did a full-suite
+run go red at release time without stopping the release? Either the release
+pipeline does not run this suite, or it ran and the failure was accepted. The
+answer decides whether this is a five-minute lint fix or a hole in the release
+gates — and only the second one is worth a plan.
+
+**Candidate remedies:**
+
+1. Fix the six findings and leave the gate alone. Cheapest, and wrong on its
+   own — it restores the green without explaining the year the gate spent red.
+2. Fix them, then establish which release gate should have caught this and
+   confirm it now does, with the check named.
+3. Nothing, if the file is deliberately exempt — in which case the exemption
+   belongs in the test as a tracked entry with a reason, not as a standing
+   failure.
+
+Remedy (2). The lint fix is not the deliverable; knowing why nobody saw it is.

@@ -1,0 +1,96 @@
+# Drafted by Plan 00423. The VERSION in the filename and the `version:` key are
+# a target, not a decision — releases are human-gated in this project, and the
+# release agent confirms or renames this file. Only the content is asserted here.
+version: "3.66.0"
+date: "2026-09-17"
+
+breaking: false
+
+config_changes:
+  added:
+    - key: handlers.<event>.<handler>.scope
+      summary: >-
+        Declare WHERE a handler is active: `ALL` (the default), `MAIN` (the
+        coordinator only) or `SUB` (subagents only).
+      detail: >-
+        Issue #40 reported a finished subagent being told, on every failsafe
+        tick, to continue every In Progress plan in the COORDINATOR's goal
+        ledger — none of which was its assignment — and then deleting the
+        session's recovery cron on its own initiative to stop the nudges. The
+        handler doing the nudging contained no mention of subagents at all, so
+        it had no role-awareness to gate on.
+
+        `scope` supplies that gate once, in the chain, rather than per handler.
+        It is keyed on `agent_id` PRESENCE and nothing else: that field reaches
+        an event only inside a subagent call, measured across this project's own
+        captured payloads (present as a 17-character string in all five
+        SubagentStop payloads, absent on the main-thread Stop). `agent_type` was
+        measured and DISQUALIFIED — it was present but EMPTY in four of those
+        five, so a handler keying on it would misclassify four subagents in five
+        as main-thread, firing the nudges exactly where they were meant to be
+        suppressed.
+
+        Two properties are worth knowing before setting it. A restricting scope
+        is REFUSED at config load on an event that cannot carry `agent_id` —
+        only `PreToolUse`, `PostToolUse`, `Stop`, `SubagentStop` and
+        `SubagentStart` declare it, and a `MAIN` on anything else could not mean
+        anything, so it is a config error rather than a silent no-op. And a
+        SYNTHETIC event (the acceptance playbook's fabricated probes) is
+        admitted by `ALL` only: a fabricated event carries no `agent_id` and is
+        therefore indistinguishable from a main-thread one, so `MAIN` has to
+        mean "no agent_id AND not synthetic" or the acceptance suite goes red
+        the day a guard is scoped.
+      example_yaml: |
+        handlers:
+          stop:
+            auto_continue_stop:
+              scope: MAIN
+      migration_note: >-
+        Nothing to do. `ALL` is the default and is what every handler did
+        before, so an existing config behaves identically. Set `MAIN` on a
+        handler whose advice only the coordinator can act on (a goal ledger, a
+        session cron, a teammate roster); set `SUB` only on a handler whose
+        event BOTH roles reach — scoping a `SubagentStop` handler to `SUB` is
+        true but redundant, and a redundant restriction is a claim to maintain
+        for no behaviour gained. Getting one wrong in the restricting direction
+        switches a guard off for a whole class of session, and a handler that
+        stops firing looks exactly like one with nothing to report.
+      recommended: false
+      dormant: false
+
+    - key: handlers.pre_tool_use.subagent_cron_delete_blocker
+      description: >-
+        Denies `CronDelete` inside a subagent. This is issue #40's reported
+        incident directly: a finished subagent deleted the session's single
+        failsafe recovery cron on its own initiative to stop the failsafe ticks
+        waking it, leaving the coordinator's still-live session with no recovery
+        path — and the loss is silent until the next rate limit or API stall,
+        when nothing resumes it. The rule is deliberately WIDER than "the
+        failsafe cron" because the payload cannot be narrower: `session_crons`
+        reaches `Stop`, not `PreToolUse`, so at the moment a deletion is judged
+        the daemon holds an opaque cron id and nothing that maps it to a
+        schedule or a prompt. A handler claiming to protect one named cron would
+        be guessing at which one it had. `CronCreate` and `CronList` are never
+        matched, and the coordinator's own `CronDelete` is unaffected. The role
+        test is carried entirely by `scope: SUB`, so the handler never reads
+        `agent_id` itself — two copies of a safety rule drift apart in exactly
+        the direction nobody notices.
+      example_yaml: |
+        pre_tool_use:
+          subagent_cron_delete_blocker:
+            enabled: true
+            priority: 14
+      migration_note: >-
+        On by default; no action needed to adopt, and silent by construction in
+        any project that never runs subagents. A subagent that believes a cron
+        should go reports the id and its reasoning to its coordinator instead.
+        Disable with
+        handlers.pre_tool_use.subagent_cron_delete_blocker.enabled: false.
+      recommended: true
+      dormant: false
+
+  renamed: []
+
+  removed: []
+
+  changed: []

@@ -88,6 +88,13 @@ class Priority:
     # one scans a body for known terms, this one asks whether anything
     # checked the body at all.
     ISSUE_FILING_GATE = 14
+    # Plan 00423 Task 3.2: the same band, one premise removed -- this one
+    # guards the session's own recovery coverage rather than its content, but
+    # it shares the property that makes the band what it is: what it prevents
+    # cannot be undone afterwards. A deleted session cron is not recoverable
+    # from inside the session that lost it, which is precisely how issue #40's
+    # incident went unnoticed until the coordinator next stalled.
+    SUBAGENT_CRON_DELETE_BLOCKER = 14
 
     ROOT_RECURSION_GUARD = 16
     # Runs after the blocking safety handlers on purpose: a Read they DENY never

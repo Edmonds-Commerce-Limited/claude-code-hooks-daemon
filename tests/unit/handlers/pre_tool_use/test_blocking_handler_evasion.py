@@ -409,6 +409,16 @@ _MUST_NOT_MATCH: dict[str, tuple[str, ...]] = {
 # assumption that let the git bypasses survive.
 _NOT_COMMAND_ANCHORED: dict[str, str] = {
     "AbsolutePathHandler": "matches on the file_path parameter, not a command",
+    "SubagentCronDeleteBlockerHandler": (
+        "matches on tool_name == 'CronDelete', a Claude Code TOOL rather than a "
+        "shell command - there is no command string to respell, and `CronDelete` "
+        "is the only name the harness can put in that field. The role half of the "
+        "gate is not in this handler at all: `scope=SUB` is applied by the chain "
+        "before matches() runs, and it keys on `agent_id` PRESENCE, which a "
+        "subagent cannot unset for itself. Note the residual evasion is the "
+        "ordinary one for any per-tool deny - ask the COORDINATOR to delete the "
+        "cron - and that is not evasion but the documented remedy"
+    ),
     "ReferenceRepoFreshnessHandler": (
         "matches on a governed reference-repo PATH appearing in a tool's path "
         "field or anywhere in a Bash command's arguments, not on a command name - "

@@ -851,6 +851,17 @@ class HandlerID:
         config_key="cron_subagent_stop_enforcer",
         display_name="cron-subagent-stop-enforcer",
     )
+    # Subagent cron-delete blocker (PreToolUse handler) -- Plan 00423 Task 3.2,
+    # issue #40's reported incident: a finished subagent deleted the session's
+    # single failsafe recovery cron on its own initiative to stop the nudges,
+    # leaving the coordinator's still-live session with no recovery coverage.
+    # scope=SUB carries the role test, so the handler itself never reads
+    # agent_id.
+    SUBAGENT_CRON_DELETE_BLOCKER = HandlerIDMeta(
+        class_name="SubagentCronDeleteBlockerHandler",
+        config_key="subagent_cron_delete_blocker",
+        display_name="subagent-cron-delete-blocker",
+    )
     # Teammate reap advisor (Stop handler) -- Plan 00419 N5: Claude Code's own
     # /goal evaluator defers its judgement while any background work is
     # registered, and an in-process teammate that has finished and gone IDLE is

@@ -510,6 +510,13 @@ class RuleID:
     ARTIFACT_PUBLISH: str = "R-ARTIFACT-PUBLISH"
 
     # ------------------------------------------------------------------
+    # subagent_cron_delete_blocker handler
+    # ------------------------------------------------------------------
+
+    #: CronDelete inside a subagent — a session cron belongs to the coordinator.
+    SUBAGENT_CRON_DELETE: str = "R-SUBAGENT-CRON-DELETE"
+
+    # ------------------------------------------------------------------
     # quarantine_artefact_read_guard handler (ships disabled)
     # ------------------------------------------------------------------
 

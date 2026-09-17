@@ -78,6 +78,7 @@ _EARNS_GUIDANCE: dict[str, str] = {
     "DangerousPermissionsHandler": "T1 denies chmod 777 and friends",
     "DestructiveGitHandler": "T1 denies irreversible git commands",
     "ProjectContainmentHandler": "T1 denies a write named outside the repo root",
+    "SubagentCronDeleteBlockerHandler": "T1 denies CronDelete inside a subagent",
     "ErrorHidingBlockerHandler": "T1 denies error-suppression patterns",
     "GhIssueCommentsHandler": "T1 denies gh issue view without --comments",
     "GhPrCommentsHandler": "T1 denies gh pr view without --comments",

@@ -37,6 +37,7 @@ class ToolName:
         - Plan mode: EnterPlanMode, ExitPlanMode
         - Questions: AskUserQuestion
         - Notebook: NotebookEdit
+        - Session crons: CronDelete
     """
 
     # Command execution
@@ -84,6 +85,11 @@ class ToolName:
     # Publishing (renders a local file to a page hosted outside the project)
     ARTIFACT = "Artifact"
 
+    # Session crons. Only the DELETE name is carried here: it is the one a
+    # handler gates on, and it was confirmed to reach PreToolUse in this
+    # project's own verdict log rather than assumed from the tool's existence.
+    CRON_DELETE = "CronDelete"
+
 
 # Type alias for valid tool names (for type checking)
 ToolNameLiteral = Literal[
@@ -110,6 +116,7 @@ ToolNameLiteral = Literal[
     "NotebookEdit",
     "LSP",
     "Artifact",
+    "CronDelete",
 ]
 
 

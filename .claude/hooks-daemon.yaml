@@ -162,6 +162,16 @@ handlers:
     # an egress path this repository cannot audit or retract. Read-only
     # `action: "list"` stays allowed. There is deliberately no agent-side
     # escape hatch: lifting this is a human's config edit, visible in review.
+    # Plan 00423 Task 3.2, issue #40: a finished subagent deleted this
+    # session's failsafe recovery cron on its own initiative to stop the
+    # nudges waking it, leaving the coordinator live with no recovery path.
+    # Deliberately wider than "the failsafe cron" — `session_crons` reaches
+    # Stop, not PreToolUse, so the id here is opaque and a narrower rule
+    # would be guessing. The coordinator's own CronDelete is unaffected.
+    subagent_cron_delete_blocker:
+      enabled: true
+      priority: 14
+
     artifact_publish_blocker:
       enabled: true
       priority: 14

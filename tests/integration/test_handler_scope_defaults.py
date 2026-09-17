@@ -19,10 +19,19 @@ handler" is a description and not a property the code can check:
 - `teammate-reap-advisor` names the unreaped teammates a stop is waiting on.
   Only the coordinator has teammates.
 
+One handler ships scoped to SUB, and it is the only one that gains anything
+from it:
+
+- `subagent-cron-delete-blocker` (Plan 00423 Task 3.2) denies `CronDelete`
+  inside a subagent. `PreToolUse` fires for both roles, so SUB is doing real
+  work here — it is the whole role test, which is why that handler never reads
+  `agent_id` itself.
+
 Everything else stays ALL, including the SubagentStop handlers. Scoping
 `cron-subagent-stop-enforcer` to SUB would be true but redundant — its event
 only ever fires for subagents — and a redundant restriction is a claim to
-maintain for no behaviour gained.
+maintain for no behaviour gained. That is the line: SUB is for a handler on an
+event BOTH roles reach.
 
 An INTEGRATION test, not a unit one: the question is what the real registry
 builds from this repository's real config, which is the only place a shipped
@@ -49,6 +58,11 @@ from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
 _EXPECTED_MAIN: frozenset[str] = frozenset(
     {"auto-continue-stop", "cron-stop-enforcer", "teammate-reap-advisor"}
 )
+
+#: The handlers that must SHIP scoped to SUB. Exact, for the same reason.
+_EXPECTED_SUB: frozenset[str] = frozenset({"subagent-cron-delete-blocker"})
+
+_EXPECTED_SCOPED: frozenset[str] = _EXPECTED_MAIN | _EXPECTED_SUB
 
 
 def _repo_root() -> Path:
@@ -96,11 +110,11 @@ class TestTheFixtureActuallyLoadsHandlers:
     def test_a_realistic_number_of_handlers_is_registered(self, router: EventRouter) -> None:
         assert len(_registered(router)) > 100
 
-    def test_each_expected_main_handler_is_actually_registered(
+    def test_each_expected_scoped_handler_is_actually_registered(
         self, router: EventRouter
     ) -> None:
         names = {handler.name for _, handler in _registered(router)}
-        assert _EXPECTED_MAIN <= names, _EXPECTED_MAIN - names
+        assert _EXPECTED_SCOPED <= names, _EXPECTED_SCOPED - names
 
 
 class TestTheShippedDefaults:
@@ -108,13 +122,13 @@ class TestTheShippedDefaults:
         actual = {h.name for _, h in _registered(router) if h.scope is HandlerScope.MAIN}
         assert actual == set(_EXPECTED_MAIN)
 
-    def test_nothing_is_scoped_to_sub(self, router: EventRouter) -> None:
-        """No handler needs it: SubagentStop already implies it."""
-        assert not {h.name for _, h in _registered(router) if h.scope is HandlerScope.SUB}
+    def test_exactly_the_listed_handlers_are_scoped_to_sub(self, router: EventRouter) -> None:
+        actual = {h.name for _, h in _registered(router) if h.scope is HandlerScope.SUB}
+        assert actual == set(_EXPECTED_SUB)
 
     def test_every_other_handler_is_all(self, router: EventRouter) -> None:
         for _, handler in _registered(router):
-            if handler.name in _EXPECTED_MAIN:
+            if handler.name in _EXPECTED_SCOPED:
                 continue
             assert handler.scope is HandlerScope.ALL, handler.name
 
