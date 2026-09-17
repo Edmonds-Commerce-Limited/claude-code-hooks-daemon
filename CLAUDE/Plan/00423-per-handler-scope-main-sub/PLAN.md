@@ -157,8 +157,31 @@ defaults below are decoration.
 
 ### Phase 3: build
 
+**Prior art to copy, not rediscover.** `.claude/project-handlers/pre_tool_use/orchestrator_simulate.py`
+already discriminates on `agent_id` and has been live in simulate mode. Two of
+its decisions carry straight over, and the second one is a trap:
+
+- It keys on `hook_input.get("agent_id")` truthiness. Safe here — measured,
+  `agent_id` is a 17-character string whenever present, never empty — but the
+  property that makes it safe is worth stating rather than inheriting by
+  accident.
+
+- **A synthetic event has no `agent_id`, so it is indistinguishable from a
+  main-thread one.** The acceptance playbook fabricates events, and that
+  handler guards with `is_synthetic_event()`
+  (`daemon/synthetic_traffic.py`), recording in its own docstring that without
+  it the suite would go red "with hundreds of denied probes AND, under
+  most-restrictive-wins, other handlers' expected ALLOWs turned into failures —
+  on the day blocking was first enabled".
+
+  A `scope: MAIN` handler inherits that failure mode exactly. `MAIN` cannot
+  mean "no `agent_id`"; it has to mean "no `agent_id` AND not synthetic".
+
 - [ ] ⬜ **Task 3.1**: Implement the `scope: ALL|MAIN|SUB` key with the agreed
   defaults (content guards `ALL`, nudge handlers `MAIN`), RED test first.
+  `MAIN` must exclude synthetic events per the note above, with a test that
+  fabricates one — a scope key that reddens the acceptance suite is not a
+  working scope key.
 
 - [ ] ⬜ **Task 3.2**: Coordinator-only failsafe-cron deletion.
 
