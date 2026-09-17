@@ -26,7 +26,7 @@ entry has not landed, and fixing it costs one keystroke.
 """
 
 import re
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Final
 
 from claude_code_hooks_daemon.plan_qa.checks.common import (
@@ -45,6 +45,14 @@ CHECK_ID: Final[str] = "journal-entry-future-dated"
 #: this exists for was over an hour out, so a tight bound buys nothing but
 #: false positives.
 _TOLERANCE_MINUTES: Final[int] = 30
+
+#: The substring of `_JOURNAL_TEMPLATE_.md`'s preamble sentinel that states the
+#: file's zone (Plan 00427). Matched as a substring rather than a whole line so
+#: surrounding emphasis or punctuation in the template cannot silently unmatch
+#: it; `tests/unit/scripts/test_journal_sentinel_sync.py` pins it against every
+#: shipped copy, because a sentinel that stops matching fails SILENTLY — the
+#: check just goes back to the local clock.
+_UTC_SENTINEL: Final[str] = "timestamps in this file are UTC"
 
 #: An entry heading at the START of a line. Anchored with no leading whitespace
 #: because the preamble quotes the grammar inside a blockquote, which is
@@ -66,6 +74,26 @@ _REMEDIATION: Final[str] = (
 def _now() -> datetime:
     """Current local time, isolated so tests can pin it."""
     return datetime.now()
+
+
+def _utc_now() -> datetime:
+    """Current UTC time as a naive value, isolated so tests can pin it.
+
+    Naive on purpose: an entry's time is rebuilt naive from the day-file name,
+    and comparing an aware value against it raises rather than reports.
+    """
+    return datetime.now(UTC).replace(tzinfo=None)
+
+
+def _is_utc_dayfile(content: str) -> bool:
+    """Whether this day-file says the scaffolder wrote it, in UTC.
+
+    The sentinel is the only record of which clock a day-file's times were read
+    by, so it is also the only sound basis for choosing the clock to judge them
+    against. Its ABSENCE means legacy — local times, zone unrecorded — which is
+    why the old behaviour is the fallback rather than the other way round.
+    """
+    return _UTC_SENTINEL in content
 
 
 def _latest_entry(content: str) -> tuple[int, int, str] | None:
@@ -107,7 +135,7 @@ def _rule(context: CheckContext, target: JournalEditTarget, content: str) -> lis
         # drift one; reporting it here would put it under the wrong check.
         return []
 
-    now = _now()
+    now = _utc_now() if _is_utc_dayfile(content) else _now()
     ahead_minutes = (entry_at - now).total_seconds() / 60
     if ahead_minutes <= _TOLERANCE_MINUTES:
         return []

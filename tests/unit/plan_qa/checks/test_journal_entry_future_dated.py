@@ -122,6 +122,70 @@ class TestWhatIsNotADefect:
         assert _ids(_ctx(_PREAMBLE + "Prose with no headings.\n")) == []
 
 
+_SENTINEL = "_Scaffolded by `mkplan.bash`; timestamps in this file are UTC._\n"
+
+_SENTINELLED_PREAMBLE = (
+    "# Plan 00377 — Journal 26-09-11\n"
+    "\n"
+    f"{_SENTINEL}"
+    "\n"
+    "> **Append-only activity log**.\n"
+    ">\n"
+    "> ```\n"
+    "> ## HH:MM · category · REF   — optional short title\n"
+    "> ```\n"
+    "\n"
+)
+
+
+class TestSentinelledFilesAreJudgedInUtc:
+    """Plan 00427 Phase 3: the reader must use the same clock as the writer.
+
+    `mkplan.bash --journal` stamps entries in UTC and says so in the day-file's
+    preamble. This check read a naive LOCAL clock, so on a host west of UTC a
+    correct entry looked hours into the future — measured at one instant,
+    `America/New_York` +239 minutes and `America/Los_Angeles` +419, against a
+    30-minute tolerance. That is not the rare cross-zone case the check was
+    built for; it fires on correct data, deterministically, for a whole class of
+    hosts, which is the "permanently unfixable finding" failure its own
+    docstring says it was designed to avoid.
+
+    The sentinel already records which clock wrote the file, so it decides which
+    clock judges it. A file without one is legacy: its times really are local,
+    and nothing about it changes.
+    """
+
+    @pytest.fixture
+    def _zones(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A host four hours west of UTC — the `America/New_York` case."""
+        monkeypatch.setattr(check, "_now", lambda: datetime(2026, 9, 11, 10, 0))
+        monkeypatch.setattr(check, "_utc_now", lambda: datetime(2026, 9, 11, 14, 0))
+
+    @pytest.mark.usefixtures("_zones")
+    def test_a_utc_entry_on_a_western_host_is_silent(self) -> None:
+        """The regression: 239 minutes "ahead" of a clock it was never written by."""
+        assert _ids(_ctx(_SENTINELLED_PREAMBLE + _entry("13:59"))) == []
+
+    @pytest.mark.usefixtures("_zones")
+    def test_a_genuinely_future_utc_entry_is_still_reported(self) -> None:
+        """Switching clocks must not switch the check off."""
+        body = _SENTINELLED_PREAMBLE + _entry("14:45")
+        assert _ids(_ctx(body)) == ["journal-entry-future-dated"]
+
+    def test_a_legacy_file_is_still_judged_by_the_local_clock(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """No sentinel means the times are local, so the local clock governs.
+
+        Pinned so the two clocks disagree about the verdict: under UTC 20:00 a
+        16:44 entry is in the past and silent, under local 14:00 it is ahead and
+        reported. Reporting it is what proves the local clock was used.
+        """
+        monkeypatch.setattr(check, "_now", lambda: datetime(2026, 9, 11, 14, 0))
+        monkeypatch.setattr(check, "_utc_now", lambda: datetime(2026, 9, 11, 20, 0))
+        assert _ids(_ctx(_PREAMBLE + _entry("16:44"))) == ["journal-entry-future-dated"]
+
+
 class TestPolicy:
     def test_silent_when_journalling_is_disabled(self) -> None:
         body = _PREAMBLE + _entry("16:44")

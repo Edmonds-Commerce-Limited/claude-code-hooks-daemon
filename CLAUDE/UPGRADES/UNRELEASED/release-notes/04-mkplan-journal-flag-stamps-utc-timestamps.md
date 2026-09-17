@@ -5,9 +5,10 @@
 
 `mkplan.bash` now accepts `--journal <plan-number> <category> <body-file> [--ref R] [--title T]` to append a journal entry to an existing plan. The
 script reads the clock itself and normalises it to UTC, so the agent never
-types (or estimates) a timestamp -- closing the two failure modes measured on
-issue #45: an agent's guessed time drifting from real elapsed time, and a
-naive future-dated check misreading an entry written in a different zone.
+types (or estimates) a timestamp -- closing the first of the two failure modes
+measured on issue #45, an agent's guessed time drifting from real elapsed time.
+The second (a naive future-dated check misreading an entry written in a
+different zone) needed the reader to change too; see the next callout.
 
 A day-file the scaffolder creates carries one sentinel line in its preamble
 naming the writer and the zone; a day-file with no sentinel predates this

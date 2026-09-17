@@ -207,23 +207,72 @@ the "agents get this hand-performed step wrong" reason.
   and the grammar text stops saying a bare "local 24h". Stage a
   `truth-changes` entry: a client's own docs may assert the old rule.
 
-- [ ] ⬜ **Task 2.4**: Release note — this is user-visible.
+- [x] ✅ **Task 2.1**: SUPERSEDED by D6 — no sibling script was built; the
+  scaffolder is a flag on `mkplan.bash`. Its RED-first tests live in
+  `tests/unit/scripts/test_mkplan_journal.py` (20 passing), including the
+  two-clock regression and an append-only property proven by attempting a
+  violation.
+
+- [x] ✅ **Task 2.2**: `mkplan.bash` extended per D6, both copies byte-identical
+  (checked by hash before merge). D6a pinned by
+  `TestD6aCounterIsolation` — the counter is unchanged, an unset counter stays
+  unset, and no plan-dir lock is taken.
+
+- [x] ✅ **Task 2.3**: Both `_JOURNAL_TEMPLATE_.md` copies carry the sentinel and
+  the grammar no longer says a bare "local 24h"; the `truth-changes` entry is
+  staged as `CLAUDE/UPGRADES/UNRELEASED/truth-changes/v3.66.0.yaml`.
+
+- [x] ✅ **Task 2.4**: Release note staged —
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/04-mkplan-journal-flag-stamps-utc-timestamps.md`.
+
+### Phase 3: the reader must use the same clock as the writer
+
+Phase 2 shipped a correct writer and left the check that judges it reading a
+naive LOCAL clock, so a UTC-stamped entry looks hours into the future on any
+host west of UTC. Measured across six zones at one instant (see JOURNAL):
+`America/New_York` +239 minutes, `America/Los_Angeles` +419, against a
+30-minute tolerance. This is not the pre-existing rare cross-zone case — it is
+deterministic for a whole class of hosts, and it fires on correct data.
+
+- [x] ✅ **Task 3.1**: RED first — `TestSentinelledFilesAreJudgedInUtc` failed
+  with `AttributeError: ... has no attribute '_utc_now'`. Its three cases pin a
+  host four hours west of UTC: a sentinelled file is silent, a genuinely future
+  UTC entry is still reported, and a legacy file is still judged locally — that
+  last one with the two clocks pinned to DISAGREE about the verdict, so it
+  proves which clock was used rather than merely passing.
+
+- [x] ✅ **Task 3.2**: `journal_entry_future_dated` chooses its clock from the
+  day-file: sentinel present ⇒ UTC; sentinel absent ⇒ the existing local clock,
+  because a legacy file's times really are local. This is the sentinel earning
+  its keep rather than being merely informational, and it needs no migration.
+
+- [x] ✅ **Task 3.3**: Pin the sentinel across its copies —
+  `tests/unit/scripts/test_journal_sentinel_sync.py`. Drift here fails SILENTLY
+  (the check just reverts to the local clock), so the guard was shown firing on
+  three realistic drifts — a rewording, a zone swap, and a deleted line — with
+  the control passing.
+
+- [x] ✅ **Task 3.4**: Release note, and a correction to Task 2.4's note, which
+  claimed Phase 2 alone closed the cross-zone symptom.
 
 ## Success Criteria
 
 - [x] ✅ The canonical-clock question is answered by the owner, in writing —
   see THE RULING. No migration; sentinel marks what the new system wrote.
 
-- [ ] ⬜ A day-file the scaffolder created carries exactly ONE sentinel, in the
-  preamble, and an entry costs no extra lines — the "no bloat" condition,
-  checked by counting, not by opinion.
+- [x] ✅ A day-file the scaffolder created carries exactly ONE sentinel, in the
+  preamble, and an entry costs no extra lines — counted, not opined, by
+  `TestSentinel`: one on a fresh file, none added by a second append that day.
 
-- [ ] ⬜ An agent cannot supply a timestamp through the supported path, proven
-  by trying.
+- [x] ✅ An agent cannot supply a timestamp through the supported path, proven
+  by trying — `test_does_not_accept_a_time_argument_at_all`.
 
-- [ ] ⬜ Whatever is built is proven against a TWO-clock reproduction, and the
-  opposite-direction symptom (a correct-in-its-own-zone entry being reported)
-  is checked too, not just the silent direction.
+- [x] ✅ Whatever is built is proven against a TWO-clock reproduction
+  (`TestUtcCrossZoneRegression`, both offset directions), and the
+  opposite-direction symptom was checked too — which is what found the Phase 3
+  defect, so the criterion earned its place rather than being ticked off. It is
+  now pinned by `TestSentinelledFilesAreJudgedInUtc` from a host west of UTC,
+  the direction that had no coverage at all.
 
 - [x] ✅ The existing 2207 entries have a stated interpretation: they are
   legacy, untouched, and the ABSENCE of a sentinel is what says so.
