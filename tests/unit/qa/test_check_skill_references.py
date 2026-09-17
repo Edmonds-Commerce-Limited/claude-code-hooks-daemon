@@ -196,10 +196,9 @@ class TestExclusions:
         data = _run_checker("--path", str(tmp_path), "--include", CHECKER.name)
 
         assert data["summary"]["passed"]
-        assert data["summary"]["files_scanned"] == 0, (
-            "the checker scanned its own copy instead of excluding it; "
-            f"{data['violations']}"
-        )
+        assert (
+            data["summary"]["files_scanned"] == 0
+        ), f"the checker scanned its own copy instead of excluding it; {data['violations']}"
 
     def test_excludes_test_files(self, tmp_path: Path) -> None:
         """Test files should be excluded (they test the patterns)."""
