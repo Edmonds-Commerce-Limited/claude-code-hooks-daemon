@@ -198,6 +198,52 @@ report, not a wall. That is why it is a niggle and not a bug.
 Not owner-gated: (1) and (2) both narrow an advisory that is firing on a state
 the other two rules force into existence, and neither weakens any gate.
 
+**MEASURED, and it changes this entry's basis. The nominated regression file
+carries 11 ordering regressions, and only ONE is the future-dated case.** Run
+against `00419-Journal-26-09-16.md`:
+
+```
+entries=20 regressions=11
+  10:50 after 11:18   <- the future-dated correction this entry is about
+  10:53 after 11:18       the other ten are a different cause entirely
+  10:40 after 11:18
+  10:55 after 11:18
+  11:05 after 11:18
+  10:59 after 11:20
+  10:20 after 11:20
+  10:35 after 11:20
+  10:45 after 11:20
+  10:50 after 11:20
+  10:58 after 11:20
+```
+
+Three agents' streams were merged into one day-file, so the clock resets at
+each join. That is the dominant cause, and it is not what either remedy
+addresses.
+
+**So this entry's own closing criterion is unreachable.** It says "if the
+advisory still fires on that day-file afterwards, the remedy did not work" —
+but 10 of the 11 findings survive any future-dated exemption. The criterion
+must be restated as eliminating the SPECIFIC finding `10:50 after 11:18`, or
+this entry can never close.
+
+**Remedy (1) is additionally not implementable at SWEEP stage.** It asks the
+ordering check to ignore entries out of order only with respect to entries "the
+file itself flags as future-dated" — but nothing in the file carries a
+machine-readable flag (00419's correction is prose in a `finding` entry), and
+future-datedness cannot be recomputed retrospectively: every entry in a
+2026-09-16 file is in the past when a sweep reads it. The information needed
+existed only at the moment of writing, which is exactly why
+`journal-entry-future-dated` is EDIT-only.
+
+That leaves remedy (2) as the only implementable one — **and it is bigger than
+this entry assumed**. A `correction` category means editing the entry grammar
+in `_JOURNAL_TEMPLATE_.md`, which exists in two copies, one of them under
+`install/templates/` and therefore shipped to every client. Whether that
+reaches the "not owner-gated" bar is now a live question rather than a settled
+one, and it is the same shape as the template question Plan 00427 puts to the
+owner for issue #45.
+
 **The upstream cause is worth separating from the remedy.** The entries only
 became uncorrectable because they were appended with a `cat >> … <<'EOF'`
 heredoc, which is not seen by the Write/Edit-time guards — CLAUDE.md states
