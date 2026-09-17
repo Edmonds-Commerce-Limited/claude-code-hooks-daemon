@@ -6974,6 +6974,14 @@ def cmd_block_report(args: argparse.Namespace) -> int:
     config = Config.load_or_default(project_root / ".claude" / "hooks-daemon.yaml")
     promotion = config.claude_md.promotion
 
+    # Plan 00430: without this, handler discovery cannot construct the five
+    # handlers that read ProjectContext.project_root() in __init__, so their
+    # rule IDs are missing from the attribution index and their denies land
+    # in unattributed_denies. Degrades exactly as before (no config file
+    # found, or an invalid one) rather than erroring — see
+    # _init_project_context_for_cli's own docstring for the failure modes.
+    _init_project_context_for_cli(args)
+
     override = getattr(args, "transcripts_dir", None)
     transcripts_root = Path(override) if override else transcripts_root_for(project_root)
 
@@ -7017,17 +7025,19 @@ _EXPLAIN_UNKNOWN_HANDLER_HINT = (
 )
 
 
-def _find_config_file_for_explain(args: argparse.Namespace) -> Path | None:
-    """Best-effort ``hooks-daemon.yaml`` lookup for rule/handler enumeration.
+def _find_config_file_for_cli(args: argparse.Namespace) -> Path | None:
+    """Best-effort ``hooks-daemon.yaml`` lookup for CLI commands that must run
+    without a validated installation.
 
     Deliberately NOT ``get_project_path``/``resolve_tree_root``: both can
     print an error and ``sys.exit`` when no valid installation is found,
     which would break the Task 6.1 robustness requirement that
-    ``explain-rule``/``explain-handler`` work without a running daemon (and,
-    by extension, without a fully validated installation). This returns
-    ``None`` instead so the caller can degrade to enumeration without
-    ``ProjectContext`` — some handlers are then skipped, exactly as
-    ``DocsGenerator`` already tolerates.
+    ``explain-rule``/``explain-handler`` (and every other caller of this
+    helper — Plan 00430 widened it beyond enumeration to ``block-report``)
+    work without a running daemon (and, by extension, without a fully
+    validated installation). This returns ``None`` instead so the caller can
+    degrade to whatever it does without ``ProjectContext`` — some handlers
+    are then skipped, exactly as ``DocsGenerator`` already tolerates.
 
     Args:
         args: Parsed CLI arguments, optionally carrying ``project_root``.
@@ -7050,21 +7060,23 @@ def _find_config_file_for_explain(args: argparse.Namespace) -> Path | None:
     return None
 
 
-def _init_project_context_for_explain(args: argparse.Namespace) -> None:
-    """Initialise ``ProjectContext`` for rule/handler enumeration, if possible.
+def _init_project_context_for_cli(args: argparse.Namespace) -> None:
+    """Initialise ``ProjectContext`` for a CLI command, if possible.
 
     Handler constructors that read ``ProjectContext.project_root()`` (e.g.
     ``markdown_organization``, ``npm_command``) raise otherwise, and are
     silently skipped by ``collect_handler_rules`` — losing their rules from
-    ``explain-rule``. A no-op if already initialised (idempotent, safe to
-    call from both commands) or if no config file can be found.
+    ``explain-rule`` and their denies from ``block-report`` attribution
+    (Plan 00430). A no-op if already initialised (idempotent, safe to call
+    from every command below) or if no config file can be found — the
+    caller then runs exactly as degraded as it did before this call existed.
 
     Args:
         args: Parsed CLI arguments, optionally carrying ``project_root``.
     """
     if ProjectContext.is_initialized():
         return
-    config_file = _find_config_file_for_explain(args)
+    config_file = _find_config_file_for_cli(args)
     if config_file is None:
         return
     try:
@@ -7104,7 +7116,7 @@ def cmd_explain_rule(args: argparse.Namespace) -> int:
         near_rule_matches,
     )
 
-    _init_project_context_for_explain(args)
+    _init_project_context_for_cli(args)
     handlers = discover_handler_rules(include_project_handlers=True)
 
     if getattr(args, "list_rules", False):
@@ -7167,7 +7179,7 @@ def cmd_explain_handler(args: argparse.Namespace) -> int:
         near_handler_matches,
     )
 
-    _init_project_context_for_explain(args)
+    _init_project_context_for_cli(args)
     handlers = discover_handler_rules(include_project_handlers=True)
 
     if getattr(args, "list_handlers", False):
@@ -7423,12 +7435,12 @@ def cmd_status_line_explained(args: argparse.Namespace) -> int:
         reported inline, not treated as a command failure (mirrors
         ``collect_handler_rules``).
     """
-    _init_project_context_for_explain(args)
+    _init_project_context_for_cli(args)
 
     override = getattr(args, "project_root", None)
     project_root = Path(override).resolve() if override else None
     if project_root is None:
-        config_file = _find_config_file_for_explain(args)
+        config_file = _find_config_file_for_cli(args)
         project_root = config_file.parent.parent if config_file is not None else None
 
     entries = _collect_status_line_segment_entries(project_root)
@@ -7491,12 +7503,12 @@ def cmd_session_actions(args: argparse.Namespace) -> int:
         0 always — an individual handler that cannot be checked is excluded,
         not treated as a command failure (mirrors `status-line-explained`).
     """
-    _init_project_context_for_explain(args)
+    _init_project_context_for_cli(args)
 
     override = getattr(args, "project_root", None)
     project_root = Path(override).resolve() if override else None
     if project_root is None:
-        config_file = _find_config_file_for_explain(args)
+        config_file = _find_config_file_for_cli(args)
         project_root = config_file.parent.parent if config_file is not None else None
 
     entries = _collect_session_action_entries(project_root)
@@ -7515,11 +7527,11 @@ def _run_routine_project_root(args: argparse.Namespace) -> Path | None:
     Mirrors ``cmd_session_actions``: an explicit override wins, else the
     config file's grandparent, so the verb works without a running daemon.
     """
-    _init_project_context_for_explain(args)
+    _init_project_context_for_cli(args)
     override = getattr(args, "project_root", None)
     if override:
         return Path(override).resolve()
-    config_file = _find_config_file_for_explain(args)
+    config_file = _find_config_file_for_cli(args)
     return config_file.parent.parent if config_file is not None else None
 
 
