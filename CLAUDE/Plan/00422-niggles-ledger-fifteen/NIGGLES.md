@@ -843,6 +843,45 @@ gates — and only the second one is worth a plan.
 
 Remedy (2). The lint fix is not the deliverable; knowing why nobody saw it is.
 
+**Verified, and the entry above is wrong about the gate.** The question "why
+did a full-suite run go red at release time without stopping the release?" has
+an answer nobody expected: it did not go red. The gate is green, and re-running
+it is one command.
+
+- `tests/integration/test_client_owned_asset_lint.py` — 9 passed, exit 0, on
+  the tree the entry describes. Neither the asset nor the test has changed
+  since (`git log` for both stops at `62019300`), so it was green at the
+  release too.
+- `ruff check --isolated .claude/ccy/claude-supervise.py` — clean. The repo's
+  OWN config is clean on it as well; `SIM103` is in `pyproject.toml`'s ignore
+  list by name, as a readability preference.
+- One ruff on the machine (0.15.11, the single fingerprint-keyed venv), so this
+  is not a version disagreement.
+
+The two rule codes are real, and reachable by exactly one selection nobody
+runs: `ruff check --isolated --preview --select ISC,SIM` gives `ISC004` at
+`:2886` and `:3207` and `SIM103` at `:3578`. `ISC004` is PREVIEW-only — `ruff rule ISC004` says so — so it cannot fire under ruff's defaults at any version,
+which is the only thing that gate runs. The entry above reported the output of
+a hand-widened selection as the verdict of a named test.
+
+**Both `ISC004` sites are correct as written**, checked rather than assumed,
+because that rule exists to catch a MISSING COMMA and a missing comma there
+would be a live defect in the supervisor. Both are a deliberate two-line
+f-string message inside a returned tuple, split where black put the break.
+
+**Revised remedy: (3), and there is nothing to exempt.** No code change is
+owed: the deployed-asset contract is cleanliness under the language's DEFAULT
+rule set, and the test's own docstring says upstream cannot guarantee
+cleanliness under rules a client CHOOSES — a preview rule is as chosen as a
+rule gets. An `accepted_default_rules` entry would be worse than nothing, since
+`test_every_accepted_rule_still_fires` would fail it immediately for not
+tripping under the defaults.
+
+**What survives is the lesson, not the finding**, and it is N13's again
+from the other direction: N13 was a self-reported number nobody could check,
+this was a self-reported FAILURE nobody re-ran. A named test and an exit code
+are one command apart, and the entry quoted the name without the command.
+
 ### N13 — the plan-dedupe scout cleared a plan tree it never read
 
 Dispatched `hooks-daemon-plan-dedupe-scout` before filing Plan 00430. It
