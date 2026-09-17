@@ -23,6 +23,7 @@ from typing import Any
 
 import pytest
 
+from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.core.chain import HandlerChain
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.handler_scope import HandlerScope
@@ -37,7 +38,7 @@ class _Recorder(Handler):
     """Matches everything and records that it was asked."""
 
     def __init__(self, handler_id: str, scope: HandlerScope) -> None:
-        super().__init__(handler_id=handler_id, priority=50, terminal=False)
+        super().__init__(handler_id=handler_id, priority=Priority.DEFAULT, terminal=False)
         self.scope = scope
         self.matches_called = False
 

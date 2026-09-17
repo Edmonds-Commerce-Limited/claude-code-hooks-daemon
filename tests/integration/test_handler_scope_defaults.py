@@ -47,6 +47,7 @@ import pytest
 from claude_code_hooks_daemon.config.loader import ConfigLoader
 from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.core.event import EventType
+from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.handler_scope import AGENT_ID_EVENTS, HandlerScope
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.router import EventRouter
@@ -96,7 +97,7 @@ def router() -> EventRouter:
     return router
 
 
-def _registered(router: EventRouter) -> list[tuple[EventType, object]]:
+def _registered(router: EventRouter) -> list[tuple[EventType, Handler]]:
     return [(event, handler) for event in EventType for handler in router.get_chain(event).handlers]
 
 
