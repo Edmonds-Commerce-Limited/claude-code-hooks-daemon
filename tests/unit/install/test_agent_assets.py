@@ -393,7 +393,9 @@ def _declared_tools(text: str) -> frozenset[str]:
     """
     for line in text.splitlines():
         if line.startswith("tools:"):
-            return frozenset(part.strip() for part in line[len("tools:") :].split(",") if part.strip())
+            return frozenset(
+                part.strip() for part in line[len("tools:") :].split(",") if part.strip()
+            )
     return frozenset()
 
 

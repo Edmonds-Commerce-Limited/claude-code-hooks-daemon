@@ -157,6 +157,24 @@ filesystem_highest() {
     printf '%d' "$highest"
 }
 
+# Plan folders in the plan ROOT only -- the same set the dedupe scout is told
+# to enumerate, so the two numbers are comparable. Archived plans live one
+# level down under Completed/ and Cancelled/ and are deliberately not counted
+# (Plan 00434): the scout reports them separately, under its own heading.
+root_plan_folder_count() {
+    local plan_dir="$1"
+    local count=0 dir base
+    shopt -s nullglob
+    for dir in "$plan_dir"/*/; do
+        base="$(basename "$dir")"
+        if [[ "$base" =~ ^[0-9]{1,5}-[a-zA-Z] ]]; then
+            count=$((count + 1))
+        fi
+    done
+    shopt -u nullglob
+    printf '%d' "$count"
+}
+
 # Resolve the plan dir (override, else this script's own dir) into the global
 # `plan_dir`. Shared by the plan-creation path and --journal (Plan 00427 D6):
 # both need the same self-location logic, neither needs the counter lock.
@@ -569,6 +587,11 @@ git -C "$repo_root" config --local "$COUNTER_KEY" "$new_counter"
 # --- report ----------------------------------------------------------------
 
 rel_target="${target#"$repo_root"/}"
+# Stated for the dedupe dispatch below. The scout is asked to report how many
+# live plans it checked, and until now the only thing that number could be
+# reconciled against was the scout's own enumeration -- which is no check at
+# all when the enumeration is what went wrong (Plan 00434, ledger 00422 N13).
+root_plan_count="$(root_plan_folder_count "$plan_dir")"
 cat >&2 <<DONE
 mkplan: created plan $padded
   folder: $rel_target/
@@ -579,6 +602,11 @@ Next steps (not done automatically):
   - Check nothing already covers this, BEFORE you invest in filling it in.
     Dispatch the hooks-daemon-plan-dedupe-scout agent with what this plan is
     about; it reads the still-live plans and names any that already cover it.
+    TELL IT there are $root_plan_count plan folders in $plan_rel/ right now,
+    this one included. Its report must say 'Checked N live plans.' - when that
+    N is not $root_plan_count it read a different tree, so re-dispatch rather
+    than act on the verdict. The number is stated here because the agent
+    cannot audit its own count.
     Nothing is invested yet, so merging or superseding now costs one 'git rm -r'.
     Suggested, not required - it never blocks, and it can be wrong.
   - Fill in PLAN.md (overview, goals, tasks).

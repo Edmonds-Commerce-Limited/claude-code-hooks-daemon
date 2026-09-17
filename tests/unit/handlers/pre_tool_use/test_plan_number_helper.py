@@ -646,6 +646,23 @@ class TestPlanNumberHelperHandler:
         lower = guidance.lower()
         assert "fallback" in lower or "only need the number" in lower
 
+    def test_get_claude_md_states_how_to_check_the_scouts_count(self) -> None:
+        """The dedupe scout's count must be reconciled against the caller's.
+
+        Plan 00434, from ledger 00422 N13. The agent definition asks the scout
+        to check its own count against its own list, which the reader that
+        miscounted cannot do. The guidance therefore has to name both halves:
+        the sentence the report carries, and what to do when it disagrees.
+        """
+        handler = PlanNumberHelperHandler()
+
+        guidance = handler.get_claude_md()
+
+        assert guidance is not None
+        assert "Checked N live plans" in guidance
+        lower = guidance.lower()
+        assert "re-dispatch" in lower or "dispatch it again" in lower
+
     def test_reconciliation_scan_covering_archives_is_not_blocked(
         self, handler_enabled: PlanNumberHelperHandler
     ) -> None:
