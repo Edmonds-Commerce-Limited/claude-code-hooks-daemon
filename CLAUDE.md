@@ -367,6 +367,8 @@ Either form in your `STOPPING BECAUSE:` line records a marker that makes the dae
 
 <!-- handler: quarantine-artefact-read-guard -->
 
+<!-- handler: subagent-cron-delete-blocker -->
+
 <!-- handler: prevent-worktree-file-copying -->
 
 <!-- handler: root-recursion-guard -->
@@ -465,6 +467,7 @@ Either form in your `STOPPING BECAUSE:` line records a marker that makes the dae
 | R-FLAGGABLE-CONTENT-CHANNEL        | a content-revealing git/grep command shape over a flaggable path                                                                                     | It would reveal flaggable content inside routine command output, with no deliberate Read at all                                                                                                   | Delegate the WHOLE review to the quarantine subagent instead                                                             |
 | R-UPSTREAM-ISSUE-UNVERIFIED-BODY   | `gh issue create` against the hooks-daemon tracker with a body no generator produced                                                                 | that tracker is PUBLIC and an issue cannot be retracted -- a pasted config, log excerpt or absolute path costs the CLIENT permanently, while an over-redacted report costs one round trip         | Generate the body with `hooks-daemon issue-report` and file the file it writes                                           |
 | R-QUARANTINE-ARTEFACT-READ         | reading a quarantined `*-opus-security-DETAIL*` artefact into the coordinator                                                                        | A DETAIL artefact holds raw flaggable substance meant for a human or another quarantine agent only                                                                                                | Read the paired `*-opus-security-SUMMARY*` artefact instead                                                              |
+| R-SUBAGENT-CRON-DELETE             | `CronDelete` called from inside a subagent                                                                                                           | A session cron belongs to the coordinator's session, which is the session that loses coverage when it goes                                                                                        | Report the cron id and your reasoning to the coordinator and let it decide                                               |
 | R-WORKTREE-FILE-COPY               | `cp`/`mv`/`rsync` between a worktree and the main repo                                                                                               | Defeats worktree isolation, bypasses git tracking, and can nuke untracked work in the target directory                                                                                            | cd into the worktree, commit, then git merge back                                                                        |
 | R-ROOT-RECURSION-CATASTROPHIC      | `grep -r`/`find`/`rg`/... rooted at `/`, `/proc`, `/sys`, `/home`, `/root`, `~`, `$HOME`                                                             | Walks the entire filesystem and can pin every CPU core for hours                                                                                                                                  | Scope the search to the project (e.g. `rg -l "pattern" .`)                                                               |
 | R-CURL-PIPE-SHELL                  | \`curl                                                                                                                                               | wget ...                                                                                                                                                                                          | bash                                                                                                                     |
@@ -525,10 +528,6 @@ Either form in your `STOPPING BECAUSE:` line records a marker that makes the dae
 ## Advisories and other active handlers
 
 One line each; these fire with their own guidance when relevant. Full text: `bin/hooks-daemon explain-handler <name>`.
-
-<!-- handler: subagent-cron-delete-blocker -->
-
-- subagent_cron_delete_blocker — a subagent deletes no session cron
 
 <!-- handler: daemon-restart-verifier -->
 
