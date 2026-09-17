@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00423: per handler scope main sub](00423-per-handler-scope-main-sub/PLAN.md) - Not Started, BLOCKED ON THE OWNER (from issue #40: a per-handler `scope: ALL|MAIN|SUB` key so the goal ledger and failsafe cron stop nudging subagents; symptom verified, but three decisions are the owner's)
-
 - [00422: niggles ledger fifteen](00422-niggles-ledger-fifteen/PLAN.md) - Not Started, the OPEN ledger (opens with four entries inherited from 00419 — N8/N11/N12/N13 — because an unresolved entry left inside an archived ledger is indistinguishable from a resolved one; three of them are one class in three costumes: a guard right about the state it judges and wrong about the moment it judges it)
 
 - [00421: security detectors and ci enforcement](00421-security-detectors-and-ci-enforcement/PLAN.md) - Not Started (`qa.yml` runs no `scripts/qa/check_*.py` at all, so no Detector this project treats as binding has ever been enforced in CI. The single successor to 00412, carrying the four Fable rulings' unbuilt work: pin what makes a Detector binding, make the register state its own gaps, migrate the test-shaped Defences, then build the seven unwatched classes)
@@ -147,6 +145,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00423: per handler scope main sub](Completed/00423-per-handler-scope-main-sub/PLAN.md) - Complete at `93f2a1c0`…`48733f1b` + the archiving commit (from issues #40/#41: handlers declare `scope: ALL|MAIN|SUB`, keyed on `agent_id` presence because `agent_type` was measured empty in 4 of 5 subagent stops; #41's three destructive controls are scoped but deliberately not built)
+
 - [00427: journal timestamps agent authored and timezone naive](Completed/00427-journal-timestamps-agent-authored-and-timezone-naive/PLAN.md) - Complete at `c631d4dc`…`a208959e` + the archiving commit (from issue #45: a correct writer was not enough — `--journal` stamps UTC, but the future-dated check still read a naive LOCAL clock, so a correct entry looked 239 minutes ahead on `America/New_York`)
 
 - [00426: shipped plugins examples do not validate](Completed/00426-shipped-plugins-examples-do-not-validate/PLAN.md) - Complete at `904d63ed`…`fd414e5e` + the archiving commit (from issue #44, which asked which of two documented `plugins:` schemas is real: neither, because the required `event_type` appears in no example — and both YAML copies are commented out, so no config-loading test could ever have seen them)
@@ -205,8 +205,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00385: niggles ledger four](Completed/00385-niggles-ledger-four/PLAN.md) - Complete at `15300324`…`655fbfbf` + the archiving commit (two entries, both fixed: an untracked canonical home left two tracked docs dead in every fresh clone — a canonical home must be one the reader actually receives; and a plan filed FROM an issue that never named it, so a fix sat untold for three days)
 
-- [00384: daemon asserted cron and autonomous issue sdlc](Completed/00384-daemon-asserted-cron-and-autonomous-issue-sdlc/PLAN.md) - Complete at `43984e74`…`f6fc3d34` + the archiving commit (`CronCreate` cannot persist a job — `durable` has no effect — so the daemon declares crons in config and re-asserts them at SessionStart; the declared `issue-sdlc` tick carries ONE open issue from triage to merged-and-closed, with releases still human-gated)
-
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -260,15 +258,15 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 427 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 375 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 376 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 29 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 28 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
 - **Cancelled/Abandoned**: 13 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00108 superseded by 00117, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213, 00135 superseded by the supervisor workstream)
 
-- **Folder-to-number reconciliation**: 29 + 375 + 13 = **417 folders**, spanning
+- **Folder-to-number reconciliation**: 28 + 376 + 13 = **417 folders**, spanning
   **414 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names

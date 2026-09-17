@@ -1,6 +1,6 @@
 # Plan 00423: per handler scope main sub
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-16
 **GitHub Issue**: #40 (and #41, triaged into decision 2)
 **Owner**: dev
@@ -193,16 +193,37 @@ its decisions carry straight over, and the second one is a trap:
   narrower rule would be guessing. The handler never reads `agent_id` itself —
   the scope key is the whole role test.
 
-- [ ] ⬜ **Task 3.3**: The #41 reaping half, scoped to what is not already
-  shipped — `teammate_reap_advisor` (v3.65.0) and the worktree half
-  (00349/00372/00380) already cover part of it, and one ask cannot be built as
-  written because the Stop payload cannot distinguish idle from running.
+- [x] ✅ **Task 3.3**: DONE — scoped in
+  [ISSUE-41-SCOPE.md](ISSUE-41-SCOPE.md), ask by ask. The deliverable is the
+  scoping, not new controls: three of the five asks are destructive or blocking
+  and are NOT built here, for a reason recorded there.
+
+  Two protocol facts were checked rather than assumed, and one reverses an
+  assumption this plan was working from:
+
+  - **The daemon CAN stop a teammate.** `TeammateIdle`/`TaskCompleted` document
+    a `continue: false` block, implemented at `core/hook_result.py:94` and
+    `:870` and schema-valid at `core/response_schemas.py:379`, used by NO
+    shipped handler — there is no handler package for either event. So
+    `auto_reap` is buildable, from a first-class went-idle signal rather than a
+    silence timer.
+  - **The daemon CANNOT delete a cron.** No contract output field expresses it;
+    every response passes `_enforce_response_contract` against schemas that are
+    all `additionalProperties: false`. #41 ask 3 is not implementable as
+    written.
 
 ## Success Criteria
 
-- [ ] Each of the three decisions is recorded here with its reasoning.
-- [ ] #40 and #41 carry a comment pointing at the ruling, so neither is
+- [x] ✅ Every release-bound consequence is in the pending-release holding
+  area: `UNRELEASED/release-notes/06-handlers-can-declare-where-they-are-active.md`
+  and `UNRELEASED/config-changes/v3.66.0.yaml` (the `scope` key and the
+  `subagent_cron_delete_blocker` handler).
+- [x] ✅ Each of the three decisions is recorded here with its reasoning —
+  Phase 1, Tasks 1.1–1.3.
+- [x] ✅ #40 and #41 carry a comment pointing at the ruling, so neither is
   re-triaged from scratch by a later tick.
+  ([#40](https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/issues/40#issuecomment-5715251634),
+  [#41](https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/issues/41#issuecomment-5715252759))
 
 ## Separable second report in the same issue
 
