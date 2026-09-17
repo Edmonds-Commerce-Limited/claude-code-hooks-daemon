@@ -1,6 +1,6 @@
 # Plan 00429: format markdown crosses repo boundaries
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-17
 **GitHub Issue**: #47
 **Owner**: dev
@@ -109,16 +109,24 @@ a file the project does not own. One fix covers both modes.
 
 ### Phase 2: prove and ship
 
-- [ ] ⬜ **Task 2.1**: Full QA in the worktree; read `QA_EXIT` on its own line.
+- [x] ✅ **Task 2.1**: Full QA in the worktree; read `QA_EXIT` on its own line.
+  Worktree run: `QA_EXIT=1`, 31/35 — three failures were Plan 00423 fallout
+  fixed on main, and the ten test errors were acceptance fixtures skipping with
+  no daemon socket under the worktree, which the release-gate wrapper converts
+  to errors. Post-merge run on main: `QA_EXIT=0`, 35/35, 25082 tests passed.
 - [x] ✅ **Task 2.2**: Release note — this is user-visible behaviour a client
   will notice.
   `UNRELEASED/release-notes/07-format-markdown-respects-repository-and-exclusion-boundaries.md`.
 
 ## Success Criteria
 
-- [ ] The reproduction from the issue leaves the nested repo clean.
-- [ ] Every release-bound consequence is in the pending-release holding area.
-- [ ] #47 carries a closing comment saying what was wrong, what changed, how it
+- [x] The reproduction from the issue leaves the nested repo clean. Run against
+  the pre-fix and post-fix code in turn on the same fixture: before, two
+  `Reformatted:` lines and ` M docs/b.md` in the nested repo; after, one line
+  and a clean nested repo. `--check` likewise named the vendored file before
+  and does not after.
+- [x] Every release-bound consequence is in the pending-release holding area.
+- [x] #47 carries a closing comment saying what was wrong, what changed, how it
   was verified, and anything found that the reporter did not report.
 
 ## Delivery & Milestones

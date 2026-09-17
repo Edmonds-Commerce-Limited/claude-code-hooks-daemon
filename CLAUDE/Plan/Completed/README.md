@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00385: niggles ledger four](00385-niggles-ledger-four/PLAN.md) - Complete at `15300324`…`655fbfbf` + the archiving commit (two entries, both fixed: an untracked canonical home left two tracked docs dead in every fresh clone — a canonical home must be one the reader actually receives; and a plan filed FROM an issue that never named it, so a fix sat untold for three days)
+
 - [00384: daemon asserted cron and autonomous issue sdlc](00384-daemon-asserted-cron-and-autonomous-issue-sdlc/PLAN.md) - Complete at `43984e74`…`f6fc3d34` + the archiving commit (`CronCreate` cannot persist a job — `durable` has no effect — so the daemon declares crons in config and re-asserts them at SessionStart; the declared `issue-sdlc` tick carries ONE open issue from triage to merged-and-closed, with releases still human-gated)
 
 - [00383: transport toggle trusts config over deployed state](00383-transport-toggle-trusts-config-over-deployed-state/PLAN.md) - Complete at `3a58ce16`…`3292cd09` + the archiving commit (`transport on`/`off` decided "already — nothing to do" from the config alone and never read the deployed forwarders, so a project whose config said the relay was off while its forwarders still carried the hot path was told so, exit 0)
