@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00435: priority band table contradicts shipped handlers](00435-priority-band-table-contradicts-shipped-handlers/PLAN.md) - Not Started (from 00422 N5 rows (a) and (d): the documented `0-9` band says no built-in ships there while three Stop-family handlers must sit there to be reachable at all, the Advisory row reads 56-69 against an `ADVISORY_MAX` of 73, and nothing guards the table against the constants it declares as its source)
+
 - [00428: auto compact window audit check](00428-auto-compact-window-audit-check/PLAN.md) - Not Started, BLOCKED ON THE OWNER (from issue #46: a seventh `optimal_config_checker` check for `CLAUDE_CODE_AUTO_COMPACT_WINDOW`; the gap is real but the spec was retracted and replaced by one inferred from a compiled CLI, which triage could not verify)
 
 - [00422: niggles ledger fifteen](00422-niggles-ledger-fifteen/PLAN.md) - In Progress, the OPEN ledger (opens with four entries inherited from 00419 — N8/N11/N12/N13 — because an unresolved entry left inside an archived ledger is indistinguishable from a resolved one; three of them are one class in three costumes: a guard right about the state it judges and wrong about the moment it judges it)
@@ -258,27 +260,27 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 434 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 435 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 382 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 29 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 30 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
 - **Cancelled/Abandoned**: 13 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00108 superseded by 00117, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213, 00135 superseded by the supervisor workstream)
 
-- **Folder-to-number reconciliation**: 29 + 382 + 13 = **424 folders**, spanning
-  **421 distinct plan numbers** — three numbers carry two folders each, the
+- **Folder-to-number reconciliation**: 30 + 382 + 13 = **425 folders**, spanning
+  **422 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
   (`001-`, `002-`, `003-`), so they count as present. That leaves **13** of the
-  434 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
+  435 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
   00145, 00191, 00195, 00210, 00258, 00300, 00303, 00325 — abandoned drafts, numbers
   burned by transient probes (00195 during the v3.51.0 acceptance run, 00258
   during the v3.54.0 one), and one withdrawn duplicate (00210, scaffolded by a
   sub-agent that then found Plan 00208 already covered the work).
-  421 + 13 = 434. ✅
+  422 + 13 = 435. ✅
 
   Note on **00191**: it stays folderless deliberately. The number was claimed
   by a branch that renumbered itself and was never merged; Plan 00267
