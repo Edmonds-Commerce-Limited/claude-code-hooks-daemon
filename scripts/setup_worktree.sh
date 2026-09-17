@@ -121,28 +121,46 @@ preflight_socket_path() {
         self_install="true"
     fi
 
-    local py
-    if ! py="$(resolve_venv_python "${PROJECT_ROOT}")"; then
-        echo -e "${YELLOW}WARNING${NC}: could not resolve a Python to measure the socket path."
-        echo "  Skipping the length pre-flight; if the daemon later reports"
-        echo "  'Socket path too long', the branch name is why."
+    # Measured under the SYSTEM python3, with paths.py loaded by FILE rather
+    # than imported by package path. Both halves are load-bearing (Plan 00431):
+    #
+    #   - a venv is not required, so the check still runs in a worktree created
+    #     from inside another worktree, which has none yet and is exactly where
+    #     the path is long enough to matter;
+    #   - importing `claude_code_hooks_daemon.daemon.paths` would execute the
+    #     package `__init__`, which pulls in FrontController and therefore
+    #     pydantic. `paths.py` itself is stdlib-only, so loading the file skips
+    #     that and the limit still comes from the daemon's own constant — never
+    #     a second copy of 104 living in this script.
+    local paths_module="${PROJECT_ROOT}/src/claude_code_hooks_daemon/daemon/paths.py"
+    if [[ ! -f "${paths_module}" ]]; then
+        echo -e "${YELLOW}WARNING${NC}: could not find paths.py, so the socket path was not measured."
+        echo "  Looked for: ${paths_module}"
+        echo "  Proceeding anyway — a broken check must not block worktree creation."
+        return 0
+    fi
+    if ! command -v python3 >/dev/null; then
+        echo -e "${YELLOW}WARNING${NC}: could not find a python3 to measure the socket path."
+        echo "  Proceeding anyway — a broken check must not block worktree creation."
         return 0
     fi
 
     local report
-    if ! report="$("${py}" - "${worktree_dir}" "${self_install}" <<'PY'
+    if ! report="$(python3 - "${paths_module}" "${worktree_dir}" "${self_install}" <<'PY'
+import importlib.util
 import sys
 from pathlib import Path
 
-from claude_code_hooks_daemon.daemon.paths import (
-    _UNIX_SOCKET_PATH_LIMIT,
-    prospective_socket_path,
-    socket_path_overflow,
-)
+spec = importlib.util.spec_from_file_location("_hooks_daemon_paths", sys.argv[1])
+if spec is None or spec.loader is None:
+    sys.exit(f"cannot load {sys.argv[1]}")
+paths = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(paths)
 
-root = Path(sys.argv[1])
-path = prospective_socket_path(root, self_install=sys.argv[2] == "true")
-print(f"{socket_path_overflow(path)} {len(str(path))} {_UNIX_SOCKET_PATH_LIMIT} {path}")
+root = Path(sys.argv[2])
+path = paths.prospective_socket_path(root, self_install=sys.argv[3] == "true")
+overflow = paths.socket_path_overflow(path)
+print(f"{overflow} {len(str(path))} {paths._UNIX_SOCKET_PATH_LIMIT} {path}")
 PY
     )"; then
         echo -e "${YELLOW}WARNING${NC}: socket-path pre-flight could not run."

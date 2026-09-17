@@ -661,6 +661,19 @@ a venv at all, for arithmetic that is two path joins and a length comparison.
 Not owner-gated: it makes an existing guard work as documented and weakens
 nothing.
 
+**REMEDIED by Plan 00431**, via remedy (1) as written. The pre-flight now loads
+`daemon/paths.py` by file location under the system `python3`, so it needs no
+venv and still reads `_UNIX_SOCKET_PATH_LIMIT` from the daemon's own constant.
+Fail-open is kept for a missing `python3` or a missing `paths.py`, and each case
+now names itself instead of naming the venv.
+
+The RED was reproduced before the fix rather than assumed: the regression test
+extracts `preflight_socket_path` from the script and runs it with the venv
+resolver stubbed to fail, which is what a nested worktree actually presents.
+Against the old code it allowed a 165-byte path; against the new code the live
+script refuses one and creates nothing. The set includes the control that would
+have caught a guard which simply started refusing everything.
+
 **Cost of the miss, so the priority is honest**: a sub-agent spent a long run
 inside that worktree, its acceptance gates and smoke tests failed against a
 daemon relocated to `/tmp`, and it reported 4 red QA categories that were
