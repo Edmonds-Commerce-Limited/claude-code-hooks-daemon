@@ -142,6 +142,54 @@ The same lint-failing bytes that were denied under `R-LINT-FAILURE` twice were
 written again after the restart and drew no block. Confirmed still linted:
 `src/**`, `tests/**`, `CLAUDE/**`, and `sub/untracked/**`.
 
+**`/untracked/**` WAS ALSO WRONG, and the verification above is exactly why it
+looked right.** Every path I checked was a path I thought of. The one I did not
+think of is where this handler's OWN acceptance probes write their fixtures:
+`untracked/scratch/acceptance-test-lint-<lang>/` (`scratch_path(_FIXTURE_DIR, ...)` in all ten lint strategies, plus `playbook_harness._PROBE_SCRATCH`). The
+exclusion therefore switched `lint_on_edit` off for its eight declared DENY
+probes — `matches()` returned False for their own declared input — and the
+full test suite caught it:
+
+```
+library:PostToolUse/LintOnEditHandler::Python lint - invalid code blocked:
+  expected_decision=DENY but matches() returned False for its own declared input
+  ... (8 probes: Shell, Python, Go, Rust, Ruby, PHP, Dart, Bash-heredoc)
+```
+
+Nothing surfaced this for a whole session: plan QA and docs QA both reported 0
+findings over it, because neither runs the acceptance contract. A config change
+that disables a guard is invisible to every check except the one that drives
+the guard.
+
+**The shipped patterns are now depth-scoped**, measured against the real
+matcher before shipping this time:
+
+```
+                                                 /untracked/**   scratch/*
+untracked/scratch/rung.py            (N2 case)   EXCLUDED        EXCLUDED
+untracked/scratch/qa-out.txt                     EXCLUDED        EXCLUDED
+.../acceptance-test-lint-python/invalid.py       EXCLUDED        linted
+.../acceptance-test-lint-bash/authored.py        EXCLUDED        linted
+.../acceptance-test-eslint-bash/authored.ts      EXCLUDED        linted
+src/**, tests/**, sub/untracked/**               linted          linted
+```
+
+`- "/untracked/scratch/*"`, `- "/untracked/qa/**"`,
+`- "/untracked/worktrees/**"`. The boundary is DEPTH: a note written straight
+into the scratch directory is exempt, a fixture tree one level down is not,
+because a probe that cannot be denied proves nothing.
+
+**The glob dialect cannot express this any other way.** `path_exclusion` has no
+negation — `path_matches_globs` returns True on ANY pattern match and
+`merge_exclude_patterns` only unions — so "everything under `untracked/` except
+the probe fixtures" is not writable. Depth is the only available discriminator.
+
+**Residual, deliberately not fixed here** (see N11): the fixtures live in the
+sanctioned human scratch directory at all, which is what forces this coupling.
+A dedicated `untracked/acceptance/` root would separate them properly, but that
+is library code, ten strategies and every client's docs — a bigger act than the
+regression being repaired.
+
 ### N3 — a committed future-dated entry makes the journal permanently uncorrectable
 
 **Re-filed from [00419 N12](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md).**
@@ -658,3 +706,98 @@ and the nested tree's QA was graded against a daemon that had silently moved to
 
 Not owner-gated. Remedy (1) is a refusal added to a script, not a policy
 change.
+
+### N10 — a QA checker's own tests overwrite that checker's real QA artefact
+
+Found while reading the intermediate artefacts of a full `llm_qa all` run.
+Three checks showed a failure that the run's final report did not:
+
+```
+git_history          passed=false  total_violations=1  refs_scanned=2
+skill_references     passed=false  total_violations=1  files_scanned=1
+python_var_guidance  passed=false  total_violations=1  files_scanned=1
+```
+
+Two named their evidence outright — `/tmp/pytest-of-root/pytest-184/...`,
+pytest fixtures deliberately containing the violation their checker hunts. The
+third flagged a ref name with `refs_scanned: 2`; this repository has 152 refs
+(`git for-each-ref | wc -l`) and the finished run reported `git_history: 0 violations (2418 commits, 152 refs swept)`. A two-ref repository is a fixture.
+
+**Mechanism, confirmed in the code.** `scripts/qa/check_git_history.py:53`:
+
+```python
+_OUTPUT_FILE: Final[Path] = _QA_OUTPUT_DIR / "git_history.json"
+```
+
+An absolute path into the real checkout, resolved from `__file__`, written
+whenever `--json` is passed regardless of `--repo` (line 548). And
+`tests/unit/qa/test_check_git_history.py:108` runs the checker against a temp
+fixture repo, then reads `_JSON_OUTPUT` — the real repository's artefact. The
+test does not merely tolerate the clobber, it **depends** on it. Same shape in
+the `skill_references` and `python_var_guidance` test modules.
+
+**Why it is worse than a stale file.** `llm_qa` hands a reader the JSON path
+and a `jq` hint as each check's evidence surface (`llm_qa.py:433-437`). After a
+full run three of those describe a fixture. Both directions are wrong: a check
+that PASSED is left with a fixture FAILURE (what happened, and it cost a
+mid-run diagnosis), and a check that FAILED can be left with a fixture PASS,
+which **masks a real defect** and is the direction nobody would notice.
+Ordering decides which, and the ordering is incidental.
+
+**Candidate remedies:**
+
+1. Give each checker an `--output` argument defaulting to the current constant,
+   and have the three test modules pass `tmp_path`. Removes the shared mutable
+   global rather than working around it.
+2. Guard the guard: a test asserting the checker does NOT write the repo
+   artefact when `--output` is given.
+
+Do NOT "fix" this by reordering `llm_qa` so the checks run after the tests —
+that makes the corruption deterministic in the masking direction.
+
+**Scope check before building**: three modules are confirmed by measurement.
+Every `scripts/qa/check_*.py` with a module-level `_OUTPUT_FILE` and a test
+that shells out to it shares the shape; take the inventory as part of the fix
+rather than assuming it here.
+
+Not owner-gated: this is a test-isolation defect in this project's own QA
+tooling.
+
+### N11 — acceptance probe fixtures live in the sanctioned human scratch directory
+
+Surfaced by N2's second failure rather than found independently, and left
+unfixed there deliberately.
+
+Every lint strategy writes its acceptance fixtures to
+`untracked/scratch/acceptance-test-lint-<lang>/` via `scratch_path()`, and
+`playbook_harness._PROBE_SCRATCH` is `("untracked", "scratch")`. That is the
+same directory `project_containment` pushes working notes into and
+`pipe_blocker` names as the capture target — so the harness and the human share
+one namespace.
+
+The consequence is not hypothetical: any project-level exclusion written for
+the human half silently disables the handler's own acceptance coverage, which
+is exactly what N2 did. N2's repair works by DEPTH, which is a coincidence of
+layout rather than a boundary anyone declared, and nothing stops the next
+exclusion re-breaking it.
+
+Plan 00333 put the fixtures in-repo for a good reason —
+`project_containment` denies a Bash write named outside the repo root, so
+`/tmp` is unavailable. That argues for in-repo and gitignored, not for
+*scratch* specifically.
+
+**Candidate remedies:**
+
+1. A dedicated `untracked/acceptance/` root, distinct from `untracked/scratch/`.
+   In-repo, gitignored, and no longer colliding with the directory agents are
+   told to put working notes in.
+2. Declare the coupling instead: a test asserting no configured
+   `lint_on_edit` exclusion matches any declared probe's `tool_payload` path.
+   Cheaper, and it fails loudly the next time rather than silently.
+3. Nothing. N2's depth-scoped patterns hold today.
+
+Remedy (2) is worth doing even if (1) is chosen, because it is the guard that
+would have caught N2 at config-edit time rather than a session later.
+
+Owner-gated for (1): it moves a path that ten strategies, the playbook harness
+and client-facing docs all name.

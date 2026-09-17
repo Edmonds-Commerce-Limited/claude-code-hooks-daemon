@@ -674,13 +674,29 @@ handlers:
         # handler rather than daemon.exclude_paths, which would exempt the
         # directory from every guard including sensitive_content. Plan 00422 N2.
         #
-        # `/untracked/**`, NOT `untracked/`: these globs are FULL-matched, so a
-        # bare trailing-slash pattern matches the directory path itself and
-        # nothing inside it. Measured — `untracked/` does not exclude
-        # `untracked/scratch/x.py`. The leading `/` anchors to the repo root so
-        # a nested `untracked/` elsewhere is not silently exempted too.
+        # These globs are FULL-matched, so a bare trailing-slash `untracked/`
+        # matches the directory path itself and nothing inside it. Measured —
+        # it does not exclude `untracked/scratch/x.py`. The leading `/` anchors
+        # to the repo root so a nested `untracked/` elsewhere is not exempted.
+        #
+        # `/untracked/scratch/*` (one segment), NOT `/untracked/**`. The broad
+        # form ALSO excluded `untracked/scratch/acceptance-test-lint-*/`, where
+        # this handler's own acceptance probes write their fixtures
+        # (`scratch_path(_FIXTURE_DIR, ...)` in every lint strategy, and
+        # `playbook_harness._PROBE_SCRATCH`). That silently switched the
+        # handler off for its eight declared DENY probes: `matches()` returned
+        # False for their own declared input, and
+        # `test_acceptance_contract.py` is what caught it.
+        #
+        # So the boundary is DEPTH: a note written straight into the scratch
+        # directory — the N2 case, `untracked/scratch/rung.py` — is exempt; a
+        # fixture tree one level down is still linted, because a probe that
+        # cannot be denied proves nothing. Measured in both directions before
+        # shipping, which is what the first attempt skipped.
         exclude_paths:
-          - "/untracked/**"
+          - "/untracked/scratch/*"
+          - "/untracked/qa/**"
+          - "/untracked/worktrees/**"
 
     markdown_table_formatter:  # Auto-format markdown tables via mdformat + mdformat-gfm
       enabled: true

@@ -1,7 +1,7 @@
 # Callout: `journal-entry-future-dated` judges a day-file by the clock that wrote it
 
 **Plan**: 00427
-**Audience**: anyone whose host runs west of UTC
+**Audience**: everyone
 
 `journal-entry-future-dated` compared every journal entry against a naive local
 clock. Once `mkplan.bash --journal` began stamping entries in UTC, that made
