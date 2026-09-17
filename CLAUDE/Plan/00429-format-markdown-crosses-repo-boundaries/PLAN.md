@@ -89,17 +89,20 @@ a file the project does not own. One fix covers both modes.
 
 ### Phase 1: reproduce and fix
 
-- [ ] ⬜ **Task 1.1**: RED test first — a fixture with a nested git checkout
+- [x] ✅ **Task 1.1**: RED test first — a fixture with a nested git checkout
   below the walk root, asserting the nested repo is untouched and that
   `--check` does not report it either. It must fail before the fix, with the
   failure quoted.
-- [ ] ⬜ **Task 1.2**: Skip any directory below the walk root that is itself a
+- [x] ✅ **Task 1.2**: Skip any directory below the walk root that is itself a
   git repository. The walk root's own repo is not a boundary — only a NESTED
   one is — so a normal `format-markdown .` on an ordinary project is unchanged.
-- [ ] ⬜ **Task 1.3**: Honour `daemon.exclude_paths` via
+- [x] ✅ **Task 1.3**: Honour `daemon.exclude_paths` via
   `utils/path_exclusion`, matching how the docs-qa and plan-qa CLIs load and
   apply it. Exclusions resolve against the project root, as they do there.
-- [ ] ⬜ **Task 1.4**: Confirm the sibling behaviour is unchanged: a file
+  Review found the first implementation loading the config from the WALK root,
+  which made `format-markdown <subdir>` apply no exclusions at all; probed
+  live, fixed in `06bb8fee` with `_enclosing_project_root`.
+- [x] ✅ **Task 1.4**: Confirm the sibling behaviour is unchanged: a file
   argument (not a directory) is still formatted even if excluded, because the
   caller named it explicitly. Decide and pin this rather than leaving it
   implicit.
@@ -107,8 +110,8 @@ a file the project does not own. One fix covers both modes.
 ### Phase 2: prove and ship
 
 - [ ] ⬜ **Task 2.1**: Full QA in the worktree; read `QA_EXIT` on its own line.
-- [ ] ⬜ **Task 2.2**: Release note — this is user-visible behaviour a client
-  will notice.
+- [x] ✅ **Task 2.2**: Release note — this is user-visible behaviour a client
+  will notice. `UNRELEASED/release-notes/07-format-markdown-stays-inside-your-repository.md`.
 
 ## Success Criteria
 
