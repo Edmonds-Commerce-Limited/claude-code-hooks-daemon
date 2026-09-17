@@ -1,0 +1,19 @@
+version: "3.66.0"
+truth_changes:
+  - topic: plan-journalling
+    id: journal-entry-timestamp-zone
+    was: >
+      A journal entry's `## HH:MM · category · REF` heading records local
+      24-hour time; the zone it was written in is never recorded anywhere in
+      the file.
+    now: >
+      `mkplan.bash --journal <plan-number> <category> <body-file> [--ref R]
+      [--title T]` appends an entry with a timestamp the script reads itself
+      and normalises to UTC -- the caller never supplies a time. A day-file
+      the scaffolder created carries one sentinel line in its preamble
+      (`_Scaffolded by \`mkplan.bash\`; timestamps in this file are UTC._`)
+      recording this; a day-file with no such line predates this system and
+      its times remain local with the zone unrecorded (legacy, untouched, not
+      migrated). Hand-authored entries (Write/Edit/heredoc) are still
+      possible and still carry no zone -- only entries appended through
+      `--journal` are covered.
