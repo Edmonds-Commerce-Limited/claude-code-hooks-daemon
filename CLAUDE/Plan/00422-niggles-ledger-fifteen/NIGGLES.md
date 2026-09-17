@@ -441,15 +441,14 @@ the cap is 108 and the path "one byte too long". The limit this codebase
 enforces is `_UNIX_SOCKET_PATH_LIMIT = 104` — the macOS-safe value, not Linux's
 108 — so the reported path is **5** bytes over, not 1. Measured:
 
-```
-limit = 104
- 109 over=  5  worktree-issue-42-remote-docs-add-overwrite
- 100 over=  0  worktree-issue-44-plugins-examples
-  85 over=  0  worktree-plan-00028
-```
+The three-branch reading that establishes this lives in
+[JOURNAL/00422-Journal-26-09-17.md](JOURNAL/00422-Journal-26-09-17.md), in the
+`11:00` entry — not duplicated here. The journal is append-only, so it is the
+stable home for a measurement; this entry is what interprets it.
 
-The middle row is the sobering one: a branch used earlier the same day cleared
-the cap by four characters. The margin is far tighter than "extreme paths only".
+The row that matters: `worktree-issue-44-plugins-examples` measured 100 against
+the 104 cap. A branch used earlier the same day cleared it by four characters,
+so the margin is far tighter than "extreme paths only" implies.
 
 **Not reimplemented in bash.** The check calls the daemon's own
 `prospective_socket_path` / `socket_path_overflow`, which reuse
@@ -553,3 +552,94 @@ reading rather than a drop it inferred.
 Not verified: whether the supervisor process can see this payload at all, or
 whether a daemon-side handler would have to relay it. That is the next check
 before this becomes a candidate rather than an observation.
+
+### N8 — the socket-path guard fails open exactly where it is needed
+
+**Found** by watching it not fire, hours after shipping it. N6 fault 1's remedy
+adds a pre-flight to `setup_worktree.sh` that refuses an over-cap socket path
+at creation. A sub-agent then created a worktree whose socket path is **130
+bytes against the 104-byte limit — 26 over — and the guard allowed it.**
+
+**Why.** The guard resolves a Python to call the daemon's own measurement
+helpers, and deliberately fails OPEN if it cannot: "a broken checker must not
+block worktree creation". Measured in the failing environment:
+
+```
+resolve_venv: no usable venv found under <fresh worktree>/untracked/
+RESOLVE_FAILED -> guard fails open
+```
+
+A worktree created from the MAIN checkout resolves fine, because the main venv
+exists. A worktree created from INSIDE another worktree — which is where paths
+get long enough to matter — has no venv yet, so the measurement cannot run and
+the guard stands down. **It is inert in precisely the case that motivated it,
+and healthy everywhere else**, which is the worst possible distribution: it
+reports `✓ Socket path fits` on every short path anyone tests it against.
+
+**This is not an argument against failing open.** Blocking worktree creation
+because a checker is broken would be worse. The defect is that the check needs
+a venv at all, for arithmetic that is two path joins and a length comparison.
+
+**Candidate remedies**, cheapest first:
+
+1. Run the measurement under system `python3` with `<root>/src` on
+   `PYTHONPATH`. The two helpers (`prospective_socket_path`,
+   `socket_path_overflow`) import only stdlib, so no venv, no editable install
+   and no drift — the limit still comes from the daemon's own constant. Verify
+   that import claim before relying on it.
+2. Fall back to the MAIN checkout's resolved Python when the local one fails,
+   walking up from the worktree. Works, but couples worktree creation to the
+   parent tree's health.
+3. Reimplement the arithmetic in bash. Cheapest to write and the one to avoid:
+   it duplicates the limit constant, which is exactly the two-copies-one-truth
+   shape this session has now hit three times (issue #44, the journal category
+   array, and this).
+
+Not owner-gated: it makes an existing guard work as documented and weakens
+nothing.
+
+**Cost of the miss, so the priority is honest**: a sub-agent spent a long run
+inside that worktree, its acceptance gates and smoke tests failed against a
+daemon relocated to `/tmp`, and it reported 4 red QA categories that were
+environmental. The guard existing but not firing produced exactly the confusion
+it was built to prevent.
+
+### N9 — worktree isolation plus an explicit worktree instruction nests them
+
+**Found** by causing it. A sub-agent dispatched with `isolation: "worktree"`
+ALREADY has its own isolated checkout. The brief I wrote then also told it to
+run `./scripts/setup_worktree.sh`, so it created a SECOND worktree inside the
+first:
+
+```
+/workspace/.claude/worktrees/agent-<id>/untracked/worktrees/worktree-j427
+```
+
+95 bytes of directory before the socket filename is even appended — which is
+how N8's 130-byte path came about.
+
+**Nothing warns.** `isolation: "worktree"` and a worktree-creating instruction
+are independently reasonable and mutually invisible: the agent cannot tell that
+its cwd is already an isolation worktree rather than a normal checkout, and
+`setup_worktree.sh` does not know it is being run inside one.
+
+**Consequences beyond the path length**, all observed in the same run: the
+agent's committed work landed on a branch inside a tree the coordinator later
+reaped; a recovery attempt started re-porting that work into the outer root;
+and the nested tree's QA was graded against a daemon that had silently moved to
+`/tmp`.
+
+**Candidate remedies**, cheapest first:
+
+1. Have `setup_worktree.sh` DETECT that it is already inside a worktree
+   (`git rev-parse --git-common-dir` differs from `--git-dir`) and refuse, or
+   at minimum warn loudly and name the enclosing tree. It already knows enough
+   to tell.
+2. Fix the dispatch guidance so a brief that names `isolation: worktree` never
+   also instructs a worktree creation. Documentation only, and it relies on
+   whoever writes the next brief reading it — which is the failure mode here,
+   since I wrote this one having just shipped the guard.
+3. Nothing. It needs both conditions at once and is rare.
+
+Not owner-gated. Remedy (1) is a refusal added to a script, not a policy
+change.
