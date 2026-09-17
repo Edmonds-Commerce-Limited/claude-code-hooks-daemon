@@ -776,6 +776,25 @@ rather than assuming it here.
 Not owner-gated: this is a test-isolation defect in this project's own QA
 tooling.
 
+**REMEDIED by Plan 00432**, and the scope check earned its keep. The inventory
+this entry asked for found **seven** affected checkers, not three: the four it
+did not name are `check_github_urls.py`, `check_security_downgrade_flags.py`,
+`check_eacces_safe_predicates.py` and `check_authored_path_stat.py`. They go
+unnoticed for the ordinary reason — no test happens to point them elsewhere
+today, so the shape is latent rather than firing.
+
+The fix is not remedy (1). `check_sensitive_content.py` had already solved this
+for itself, with the reasoning written at its own write site, so the repository
+already had a convention: a scoped scan reports BESIDE what it scanned. Adding
+an `--output` flag would have been a second convention for one problem. Remedy
+(2)'s guard is there, generalised — one parametrised test over all seven,
+including the control that a checker which stopped honouring its own override
+flag would scan the repository and pass by accident.
+
+The 45 tests across four modules that READ the repository artefact now read the
+scoped one, which also makes their assertions about the fixture rather than
+about whatever ran last.
+
 ### N11 — acceptance probe fixtures live in the sanctioned human scratch directory
 
 Surfaced by N2's second failure rather than found independently, and left

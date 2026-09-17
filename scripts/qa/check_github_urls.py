@@ -38,7 +38,8 @@ from typing import Any, Final
 
 _PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 _QA_OUTPUT_DIR: Final[Path] = _PROJECT_ROOT / "untracked" / "qa"
-_OUTPUT_FILE: Final[Path] = _QA_OUTPUT_DIR / "github_urls.json"
+_ARTEFACT_NAME: Final[str] = "github_urls.json"
+_OUTPUT_FILE: Final[Path] = _QA_OUTPUT_DIR / _ARTEFACT_NAME
 
 #: The one organisation/repository pair that may appear.
 CANONICAL_REPO: Final[str] = "Edmonds-Commerce-Limited/claude-code-hooks-daemon"
@@ -183,12 +184,17 @@ def main() -> int:
     violations = find_violations(root, unreadable=unreadable)
 
     if args.json_output:
-        _QA_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        # A --path scan answers "is this DIRECTORY clean", which is not the
+        # question the repository artefact answers. llm_qa publishes that
+        # artefact as this check's evidence surface, so a scoped run reports
+        # beside what it scanned rather than overwriting it.
+        output_file = root / _ARTEFACT_NAME if root != _PROJECT_ROOT else _OUTPUT_FILE
+        output_file.parent.mkdir(parents=True, exist_ok=True)
         # `summary.passed` is what `llm_qa._is_passed` reads; a payload without
         # it is treated as a FAILURE regardless of the exit code, which reads
         # as "0 violations ... FAILED" and sends the reader hunting a finding
         # that does not exist.
-        _OUTPUT_FILE.write_text(
+        output_file.write_text(
             json.dumps(
                 {
                     "summary": {

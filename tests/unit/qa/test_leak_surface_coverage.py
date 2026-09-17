@@ -48,7 +48,9 @@ from claude_code_hooks_daemon.utils import secret_redaction as sr
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _TREE_CHECKER = _REPO_ROOT / "scripts" / "qa" / "check_sensitive_content.py"
 _HISTORY_CHECKER = _REPO_ROOT / "scripts" / "qa" / "check_git_history.py"
-_HISTORY_JSON = _REPO_ROOT / "untracked" / "qa" / "git_history.json"
+#: A ``--repo`` scan reports beside the repository it swept, for the same
+#: reason the ``--path`` scans above do (Plan 00432).
+_HISTORY_ARTEFACT = "git_history.json"
 
 _TERM = "zzqx-nonsense-term"
 
@@ -234,7 +236,14 @@ class TestBatchGuardCoversEverySurface:
         config = tmp_path / "hooks-daemon.yaml"
         _write_config(config)
 
-        data = _run(_HISTORY_CHECKER, _HISTORY_JSON, "--repo", str(repo), "--config", str(config))
+        data = _run(
+            _HISTORY_CHECKER,
+            repo / _HISTORY_ARTEFACT,
+            "--repo",
+            str(repo),
+            "--config",
+            str(config),
+        )
 
         assert expected in {
             v["surface"] for v in data["violations"]

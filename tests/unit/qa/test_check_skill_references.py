@@ -26,7 +26,17 @@ def _run_checker(*args: str) -> dict[str, Any]:
         text=True,
         check=False,
     )
-    qa_json = Path(__file__).resolve().parents[3] / "untracked" / "qa" / "skill_references.json"
+    # A scoped run reports beside what it scanned, never into this checkout's
+    # published artefact (Plan 00432). Reading the scoped file is also what
+    # makes these assertions about the FIXTURE rather than about whatever ran
+    # last.
+    repo_root = Path(__file__).resolve().parents[3]
+    scan_path = next(
+        (Path(args[i + 1]).resolve() for i, arg in enumerate(args) if arg == "--path"),
+        repo_root,
+    )
+    base = scan_path if scan_path != repo_root else repo_root / "untracked" / "qa"
+    qa_json = base / "skill_references.json"
     assert qa_json.exists(), f"Expected JSON output at {qa_json}"
     return json.loads(qa_json.read_text())
 
@@ -173,11 +183,23 @@ class TestMarkdownFiles:
 class TestExclusions:
     """Verify certain files/dirs are excluded from scanning."""
 
-    def test_excludes_checker_itself(self) -> None:
-        """The checker script itself should be excluded."""
-        # When scanning the real project, the checker shouldn't flag itself
-        data = _run_checker("--path", str(SCRIPT_DIR), "--include", "check_skill_references.py")
+    def test_excludes_checker_itself(self, tmp_path: Path) -> None:
+        """The checker script itself should be excluded.
+
+        Scanned as a COPY rather than in place. The exclusion is by basename, so
+        a copy tests the same rule — and a scoped scan writes its verdict beside
+        what it scanned (Plan 00432), which would drop an untracked artefact
+        into a tracked source directory.
+        """
+        (tmp_path / CHECKER.name).write_text(CHECKER.read_text(encoding="utf-8"), encoding="utf-8")
+
+        data = _run_checker("--path", str(tmp_path), "--include", CHECKER.name)
+
         assert data["summary"]["passed"]
+        assert data["summary"]["files_scanned"] == 0, (
+            "the checker scanned its own copy instead of excluding it; "
+            f"{data['violations']}"
+        )
 
     def test_excludes_test_files(self, tmp_path: Path) -> None:
         """Test files should be excluded (they test the patterns)."""

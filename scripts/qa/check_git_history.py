@@ -50,7 +50,8 @@ import yaml
 
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 _QA_OUTPUT_DIR: Final[Path] = _REPO_ROOT / "untracked" / "qa"
-_OUTPUT_FILE: Final[Path] = _QA_OUTPUT_DIR / "git_history.json"
+_ARTEFACT_NAME: Final[str] = "git_history.json"
+_OUTPUT_FILE: Final[Path] = _QA_OUTPUT_DIR / _ARTEFACT_NAME
 _DEFAULT_CONFIG: Final[Path] = _REPO_ROOT / ".claude" / "hooks-daemon.yaml"
 
 _TOOL_NAME: Final[str] = "git_history"
@@ -544,8 +545,15 @@ def main() -> int:
     }
 
     if json_mode:
-        _QA_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-        _OUTPUT_FILE.write_text(json.dumps(output, indent=2))
+        # A --repo scan answers "is THAT repository clean", which is not the
+        # question this repository's artefact answers. llm_qa publishes that
+        # artefact as this check's evidence surface, so writing a scoped verdict
+        # there states something the scan never established — and the masking
+        # direction (a real failure replaced by a fixture's pass) is the one
+        # nobody notices. A scoped run reports beside what it scanned.
+        output_file = repo / _ARTEFACT_NAME if repo != _REPO_ROOT else _OUTPUT_FILE
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.write_text(json.dumps(output, indent=2))
 
     if violations:
         print(f"Found {len(violations)} git-history violation(s):")

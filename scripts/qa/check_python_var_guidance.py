@@ -39,7 +39,8 @@ from typing import Final
 
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 _QA_OUTPUT_DIR: Final[Path] = _REPO_ROOT / "untracked" / "qa"
-_OUTPUT_FILE: Final[Path] = _QA_OUTPUT_DIR / "python_var_guidance.json"
+_ARTEFACT_NAME: Final[str] = "python_var_guidance.json"
+_OUTPUT_FILE: Final[Path] = _QA_OUTPUT_DIR / _ARTEFACT_NAME
 
 #: Trees whose contents reach an agent or a user as instructions. ``src`` builds
 #: guidance at runtime; ``CLAUDE``/``docs``/``examples`` are read directly and
@@ -304,10 +305,12 @@ def main() -> int:
     json_mode = "--json" in sys.argv
     scan_roots = _DEFAULT_SCAN_ROOTS
     scan_files = _DEFAULT_SCAN_FILES
+    scoped_target: Path | None = None
     args = sys.argv[1:]
     for index, arg in enumerate(args):
         if arg == "--path" and index + 1 < len(args):
-            scan_roots = (Path(args[index + 1]).resolve(),)
+            scoped_target = Path(args[index + 1]).resolve()
+            scan_roots = (scoped_target,)
             scan_files = ()
 
     violations: list[Violation] = []
@@ -333,8 +336,13 @@ def main() -> int:
     }
 
     if json_mode:
-        _QA_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-        _OUTPUT_FILE.write_text(json.dumps(output, indent=2))
+        # A --path scan answers "is this DIRECTORY clean", which is not the
+        # question the repository artefact answers. llm_qa publishes that
+        # artefact as this check's evidence surface, so a scoped run reports
+        # beside what it scanned rather than overwriting it.
+        output_file = scoped_target / _ARTEFACT_NAME if scoped_target else _OUTPUT_FILE
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.write_text(json.dumps(output, indent=2))
 
     if violations:
         print(f"Found {len(violations)} $PYTHON guidance violations:")

@@ -120,8 +120,13 @@ def _run_checker(repo: Path, config_path: Path) -> dict[str, Any]:
         text=True,
         check=False,
     )
-    assert _JSON_OUTPUT.exists(), f"Expected JSON output at {_JSON_OUTPUT}"
-    return json.loads(_JSON_OUTPUT.read_text())
+    # A scoped run reports beside what it scanned, never into this checkout's
+    # published artefact (Plan 00432). Reading the scoped file is also what
+    # makes these assertions about the FIXTURE rather than about whatever ran
+    # last.
+    scoped = repo / _JSON_OUTPUT.name
+    assert scoped.exists(), f"Expected JSON output at {scoped}"
+    return json.loads(scoped.read_text())
 
 
 class TestCleanHistory:

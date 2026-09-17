@@ -62,7 +62,8 @@ from typing import Final
 
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 _QA_OUTPUT_DIR: Final[Path] = _REPO_ROOT / "untracked" / "qa"
-_OUTPUT_FILE: Final[Path] = _QA_OUTPUT_DIR / "authored_path_stat.json"
+_ARTEFACT_NAME: Final[str] = "authored_path_stat.json"
+_OUTPUT_FILE: Final[Path] = _QA_OUTPUT_DIR / _ARTEFACT_NAME
 
 _DEFAULT_SCAN_ROOT: Final[Path] = _REPO_ROOT / "src" / "claude_code_hooks_daemon"
 
@@ -305,8 +306,15 @@ def main() -> int:
     }
 
     if json_mode:
-        _QA_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-        _OUTPUT_FILE.write_text(json.dumps(output, indent=2))
+        # A --path scan answers "is this DIRECTORY clean", which is not the
+        # question the repository artefact answers. llm_qa publishes that
+        # artefact as this check's evidence surface, so a scoped run reports
+        # beside what it scanned rather than overwriting it.
+        output_file = (
+            scan_root / _ARTEFACT_NAME if scan_root != _DEFAULT_SCAN_ROOT else _OUTPUT_FILE
+        )
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.write_text(json.dumps(output, indent=2))
 
     if violations:
         print(f"Found {len(violations)} authored path(s) resolved by stat-ing a join:")

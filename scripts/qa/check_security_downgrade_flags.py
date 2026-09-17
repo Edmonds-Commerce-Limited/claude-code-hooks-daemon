@@ -76,7 +76,8 @@ import yaml
 
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 _QA_OUTPUT_DIR: Final[Path] = _REPO_ROOT / "untracked" / "qa"
-_OUTPUT_FILE: Final[Path] = _QA_OUTPUT_DIR / "security_downgrade_flags.json"
+_ARTEFACT_NAME: Final[str] = "security_downgrade_flags.json"
+_OUTPUT_FILE: Final[Path] = _QA_OUTPUT_DIR / _ARTEFACT_NAME
 DEFAULT_INVENTORY: Final[Path] = _REPO_ROOT / "scripts" / "qa" / "security-downgrade-inventory.yaml"
 
 RULE_DOWNGRADE_FLAG: Final[str] = "security-downgrade-flag"
@@ -510,8 +511,13 @@ def main() -> int:
     }
 
     if "--json" in args:
-        _QA_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-        _OUTPUT_FILE.write_text(json.dumps(output, indent=2))
+        # A --root scan answers "is THAT tree clean", which is not the question
+        # the repository artefact answers. llm_qa publishes that artefact as
+        # this check's evidence surface, so a scoped run reports beside what it
+        # scanned rather than overwriting it.
+        output_file = root / _ARTEFACT_NAME if root != _REPO_ROOT else _OUTPUT_FILE
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.write_text(json.dumps(output, indent=2))
 
     if violations:
         print(f"Found {len(violations)} unrecorded finding(s) across {files_checked} files:")

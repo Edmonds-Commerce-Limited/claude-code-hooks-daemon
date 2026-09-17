@@ -26,7 +26,8 @@ from pathlib import Path
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _QA_OUTPUT_DIR = _PROJECT_ROOT / "untracked" / "qa"
-_OUTPUT_FILE = _QA_OUTPUT_DIR / "skill_references.json"
+_ARTEFACT_NAME = "skill_references.json"
+_OUTPUT_FILE = _QA_OUTPUT_DIR / _ARTEFACT_NAME
 
 # Files/directories to always exclude
 _EXCLUDED_DIRS = {
@@ -393,7 +394,7 @@ def main() -> int:
     i = 0
     while i < len(args):
         if args[i] == "--path" and i + 1 < len(args):
-            scan_path = Path(args[i + 1])
+            scan_path = Path(args[i + 1]).resolve()
             i += 2
         elif args[i] == "--include" and i + 1 < len(args):
             include_filter = args[i + 1]
@@ -422,8 +423,13 @@ def main() -> int:
     }
 
     if json_mode:
-        _QA_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-        _OUTPUT_FILE.write_text(json.dumps(output, indent=2))
+        # A --path scan answers "is this DIRECTORY clean", which is not the
+        # question the repository artefact answers. llm_qa publishes that
+        # artefact as this check's evidence surface, so a scoped run reports
+        # beside what it scanned rather than overwriting it.
+        output_file = scan_path / _ARTEFACT_NAME if scan_path != _PROJECT_ROOT else _OUTPUT_FILE
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.write_text(json.dumps(output, indent=2))
         if violations:
             print(f"Found {len(violations)} skill-reference violations")
             for v in violations:
