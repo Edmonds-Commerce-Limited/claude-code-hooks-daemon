@@ -582,14 +582,29 @@ a venv at all, for arithmetic that is two path joins and a length comparison.
 
 **Candidate remedies**, cheapest first:
 
-1. Run the measurement under system `python3` with `<root>/src` on
-   `PYTHONPATH`. The two helpers (`prospective_socket_path`,
-   `socket_path_overflow`) import only stdlib, so no venv, no editable install
-   and no drift — the limit still comes from the daemon's own constant. Verify
-   that import claim before relying on it.
+1. Run the measurement under system `python3`, loading `paths.py` DIRECTLY by
+   file path via `importlib.util.spec_from_file_location` — no venv, no
+   editable install, and the limit still read from the daemon's own constant.
+
+   **The obvious spelling of this remedy does not work, and the difference is
+   the whole point.** `PYTHONPATH=<root>/src python3 -c "from claude_code_hooks_daemon.daemon.paths import ..."` FAILS: importing the
+   module by package path executes
+   `claude_code_hooks_daemon/__init__.py`, which imports `FrontController` and
+   therefore pydantic:
+
+   ```
+   ModuleNotFoundError: No module named 'pydantic'
+   ```
+
+   `paths.py` itself is stdlib-only, so loading the FILE bypasses the package
+   `__init__` and succeeds under bare `python3`, returning `limit = 104` from
+   the real constant. Measured both ways before recording this — the first
+   version of this entry asserted the `PYTHONPATH` spelling and was wrong.
+
 2. Fall back to the MAIN checkout's resolved Python when the local one fails,
    walking up from the worktree. Works, but couples worktree creation to the
    parent tree's health.
+
 3. Reimplement the arithmetic in bash. Cheapest to write and the one to avoid:
    it duplicates the limit constant, which is exactly the two-copies-one-truth
    shape this session has now hit three times (issue #44, the journal category
