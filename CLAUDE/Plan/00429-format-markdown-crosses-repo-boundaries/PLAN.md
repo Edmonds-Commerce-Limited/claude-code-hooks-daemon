@@ -111,7 +111,8 @@ a file the project does not own. One fix covers both modes.
 
 - [ ] ⬜ **Task 2.1**: Full QA in the worktree; read `QA_EXIT` on its own line.
 - [x] ✅ **Task 2.2**: Release note — this is user-visible behaviour a client
-  will notice. `UNRELEASED/release-notes/07-format-markdown-stays-inside-your-repository.md`.
+  will notice.
+  `UNRELEASED/release-notes/07-format-markdown-respects-repository-and-exclusion-boundaries.md`.
 
 ## Success Criteria
 

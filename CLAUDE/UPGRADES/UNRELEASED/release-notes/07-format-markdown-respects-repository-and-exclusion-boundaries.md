@@ -11,3 +11,7 @@ git checkouts (the documented `format-markdown .` invocation) could rewrite
 and leave uncommitted changes inside a repository you do not own. A file you
 name directly is still formatted regardless of exclusions, because naming it
 is explicit consent — only the directory walk filters.
+
+Exclusions resolve against the enclosing PROJECT root rather than the directory
+you point the command at, so `format-markdown .` and `format-markdown docs/`
+exclude the same files.
