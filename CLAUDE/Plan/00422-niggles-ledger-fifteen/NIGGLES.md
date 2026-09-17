@@ -720,6 +720,24 @@ and the nested tree's QA was graded against a daemon that had silently moved to
 Not owner-gated. Remedy (1) is a refusal added to a script, not a policy
 change.
 
+**REMEDIED by Plan 00433**, via remedy (1), refusing rather than warning. A
+warning is read by whoever is watching, and the whole point of this entry is
+that nobody was. The refusal names the enclosing checkout and prints the command
+to run there, so it costs one step rather than an investigation.
+
+Remedy (2) was deliberately NOT taken as well. Fixing the dispatch guidance
+relies on the next brief's author reading it — and the brief that caused this
+was written immediately after shipping the guard it defeated.
+
+The detection is `git rev-parse --absolute-git-dir` against
+`--path-format=absolute --git-common-dir`; they are equal in a normal checkout
+and differ in a linked worktree. Both paths are normalised because
+`--git-common-dir` answers relatively from a main checkout and absolutely from a
+worktree, so an unnormalised comparison would fire everywhere.
+
+The documented CHILD worktree workflow is unaffected — a child is created from
+the main checkout — and that is pinned by a control test, not by reasoning.
+
 ### N10 — a QA checker's own tests overwrite that checker's real QA artefact
 
 Found while reading the intermediate artefacts of a full `llm_qa all` run.

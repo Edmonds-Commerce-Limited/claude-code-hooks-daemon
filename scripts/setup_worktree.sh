@@ -103,6 +103,63 @@ echo "  Base:      ${BASE_BRANCH:-<current branch>}"
 echo "  Directory: ${WORKTREE_DIR}"
 echo ""
 
+# Step 0a: a worktree must not be created from INSIDE a worktree.
+#
+# A worktree carries the whole tree, `scripts/` included, so running the copy
+# that is right there is the natural thing to do — and PROJECT_ROOT comes from
+# this script's own location, so the new worktree would land under the INNER
+# checkout. An agent dispatched with `isolation: worktree` already has one, and
+# cannot tell its cwd apart from a normal checkout.
+#
+# The path length is only the visible half, and Step 0 below now catches that.
+# The expensive half is that work committed in the nested tree lives on a branch
+# inside a tree the coordinator later reaps. Plan 00422 N9, Plan 00433.
+#
+# The documented CHILD worktree workflow is unaffected: a child is created from
+# the main checkout with a parent base branch, so this never fires for it.
+preflight_not_nested() {
+    local git_dir common_dir
+    if ! git_dir="$(git -C "${PROJECT_ROOT}" rev-parse --absolute-git-dir)"; then
+        echo -e "${YELLOW}WARNING${NC}: could not ask git whether this checkout is a worktree."
+        echo "  Proceeding anyway — a broken check must not block worktree creation."
+        return 0
+    fi
+    if ! common_dir="$(git -C "${PROJECT_ROOT}" rev-parse --path-format=absolute --git-common-dir)"
+    then
+        echo -e "${YELLOW}WARNING${NC}: could not resolve this repository's common git dir."
+        echo "  Proceeding anyway — a broken check must not block worktree creation."
+        return 0
+    fi
+
+    # Equal in a normal checkout; in a LINKED worktree the git dir is
+    # <common>/worktrees/<name> while the common dir stays the main one.
+    if [[ "${git_dir}" == "${common_dir}" ]]; then
+        return 0
+    fi
+
+    local enclosing
+    enclosing="$(dirname "${common_dir}")"
+    echo -e "${RED}ERROR${NC}: this checkout is itself a git worktree, so nothing was created."
+    echo "  Here:      ${PROJECT_ROOT}"
+    echo "  Enclosing: ${enclosing}"
+    echo ""
+    echo "  Creating a worktree from here nests it under this one. Its socket path"
+    echo "  grows by the length of this directory, its commits land on a branch"
+    echo "  inside a tree the coordinator may reap, and its QA is graded against"
+    echo "  whichever daemon that tree resolves."
+    echo ""
+    echo "  Run it in the enclosing checkout instead:"
+    echo "    cd ${enclosing} && ./scripts/setup_worktree.sh ${BRANCH_NAME} ${BASE_BRANCH:-}"
+    echo ""
+    echo "  If you were dispatched with isolation: worktree, you already have an"
+    echo "  isolated checkout — this one — and need no second."
+    return 1
+}
+
+if ! preflight_not_nested; then
+    exit 1
+fi
+
 # Step 0: the worktree's daemon socket path must fit under the AF_UNIX cap.
 #
 # Over the cap the daemon does NOT fail: it silently relocates its runtime

@@ -134,6 +134,116 @@ class TestThePreflightStillFailsOpenWhenItGenuinelyCannotMeasure:
         )
 
 
+_NESTING_FUNCTION_OPEN: Final[str] = "preflight_not_nested() {"
+
+
+def _nesting_function_source() -> str:
+    """The `preflight_not_nested` definition, lifted out the same way."""
+    lines = _SETUP_WORKTREE.read_text(encoding="utf-8").splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith(_NESTING_FUNCTION_OPEN))
+    end = next(i for i in range(start + 1, len(lines)) if lines[i] == _FUNCTION_CLOSE)
+    return "\n".join(lines[start : end + 1]) + "\n"
+
+
+def _run_nesting_guard(project_root: Path) -> subprocess.CompletedProcess[str]:
+    script = (
+        "set -uo pipefail\n"
+        "RED=''\nGREEN=''\nYELLOW=''\nNC=''\n"
+        f'PROJECT_ROOT="{project_root}"\n'
+        # Set the way the script itself sets them, well before this runs: the
+        # refusal quotes them back as the command to run in the outer checkout.
+        'BRANCH_NAME="worktree-probe"\n'
+        'BASE_BRANCH=""\n'
+        f"{_nesting_function_source()}"
+        "preflight_not_nested\n"
+    )
+    return subprocess.run(  # nosec B603 B607 - fixed argv, repo-internal script text
+        ["bash", "-c", script],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=_REPO_ROOT,
+    )
+
+
+def _git(*args: str, cwd: Path) -> None:
+    subprocess.run(  # nosec B603 B607 - fixed argv, no shell
+        ["git", *args], cwd=cwd, check=True, capture_output=True
+    )
+
+
+def _repo_with_a_linked_worktree(tmp_path: Path) -> tuple[Path, Path]:
+    """A throwaway repository and a worktree linked to it."""
+    main = tmp_path / "main"
+    main.mkdir()
+    _git("init", "--quiet", ".", cwd=main)
+    _git("config", "user.email", "test@example.com", cwd=main)
+    _git("config", "user.name", "test", cwd=main)
+    (main / "seed.txt").write_text("seed\n", encoding="utf-8")
+    _git("add", "seed.txt", cwd=main)
+    _git("commit", "--quiet", "-m", "seed", cwd=main)
+
+    linked = tmp_path / "linked"
+    _git("worktree", "add", "--detach", "--quiet", str(linked), "HEAD", cwd=main)
+    return main, linked
+
+
+class TestTheSetupScriptRefusesToNestAWorktreeInsideAWorktree:
+    """A worktree carries the whole tree, `scripts/` included.
+
+    So running the copy that is right there is the natural thing to do — and
+    `PROJECT_ROOT` comes from the script's own location, so the new worktree
+    lands under the INNER checkout. The path length is the visible half, and the
+    socket pre-flight above now catches that; the expensive half is work landing
+    on a branch inside a tree the coordinator later reaps (Plan 00422 N9).
+    """
+
+    def test_it_refuses_when_run_from_inside_a_linked_worktree(self, tmp_path: Path) -> None:
+        _main, linked = _repo_with_a_linked_worktree(tmp_path)
+
+        result = _run_nesting_guard(linked)
+
+        assert result.returncode == 1, (
+            "The setup script allowed itself to run from inside a linked "
+            "worktree, which nests the new one under the inner checkout.\n"
+            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
+
+    def test_the_refusal_names_the_enclosing_checkout(self, tmp_path: Path) -> None:
+        """'You are nested' is not actionable; the outer path is."""
+        main, linked = _repo_with_a_linked_worktree(tmp_path)
+
+        result = _run_nesting_guard(linked)
+
+        assert str(main.resolve()) in result.stdout, (
+            f"the refusal did not name {main}, so the reader still has to work "
+            f"out where to run it instead.\nstdout:\n{result.stdout}"
+        )
+
+    def test_a_normal_checkout_is_allowed_through(self, tmp_path: Path) -> None:
+        """Control: a guard that refused everywhere would pass the tests above.
+
+        This is also the documented child-worktree workflow's path — a child is
+        created from the MAIN checkout with a parent base branch.
+        """
+        main, _linked = _repo_with_a_linked_worktree(tmp_path)
+
+        result = _run_nesting_guard(main)
+
+        assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+
+    def test_a_directory_that_is_not_a_repository_fails_open(self, tmp_path: Path) -> None:
+        """A checker that cannot reach a verdict must not block creation.
+
+        The same judgement the socket pre-flight makes, for the same reason —
+        and it says so rather than passing silently.
+        """
+        result = _run_nesting_guard(tmp_path)
+
+        assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        assert "could not" in result.stdout.lower(), result.stdout
+
+
 class TestTheExtractionItself:
     def test_the_function_is_still_in_the_script(self) -> None:
         """Control: a rename must fail loudly, not quietly check nothing."""
