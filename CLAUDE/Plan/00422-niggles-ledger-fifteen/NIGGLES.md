@@ -880,3 +880,44 @@ distinguished "I looked and found nothing" from "I did not look."
 
 Remedy (3), then (1). Fixing the report shape without knowing why it saw an
 empty tree would just make the next silent failure noisier rather than rarer.
+
+**Remedy (3) done — and it moves the answer to (1).** Investigated in the same
+session.
+
+**It does not reproduce.** A second dispatch, same agent, same tree, a
+different subject, with three diagnostics demanded in the prompt: it enumerated
+`CLAUDE/Plan/*/PLAN.md` = 28, `Completed/*/PLAN.md` = 378,
+`Cancelled/*/PLAN.md` = 13, named five real folders verbatim, and ran the
+step-3b archive grep with no stopper. So the empty read was not a
+tool-permission failure, not a path-resolution failure, and not deployment
+drift — the deployed file is byte-identical to its template in `src/`. It was
+a one-off model failure.
+
+**But the successful run was ALSO wrong, by one.** It reported 28 live plans;
+the tree holds **29** folders and **29** `PLAN.md` files. Nothing in its output
+distinguished 28 from 29 — the number was plausible, internally consistent, and
+wrong. This is precisely the drift the agent definition already warns about
+("covered 34, then 32, then 17 of the same unchanged 34 plans"), and the
+definition's own countermeasure — "the number you report MUST equal the length
+of that list" — is self-reconciliation by the same reader that miscounted, so
+it cannot catch it.
+
+**That is the finding.** The interesting failure is not the dramatic zero; it
+is that a routine, believable answer was also unreliable. A caller cannot tell
+the two apart, which makes the scout's count worthless as evidence however
+reasonable it looks.
+
+**One defect found on the way, real but not the cause.** The definition
+declares `tools: Read, Glob, Grep` — no Bash — while step 3b instructs a
+`grep -ril ...` SHELL command and makes the `## Prior art` section compulsory
+("an omitted section is indistinguishable from a skipped check"). The Grep tool
+does the same job and the repro run mapped across fine, so this blocks nothing.
+It is still worth fixing: an instruction naming an idiom the agent cannot run
+invites either a dropped section or a `Grepped N archived plans.` line that was
+never measured.
+
+**Revised remedy: (1), and it must be EXTERNAL.** The count has to come from
+something other than the agent's own honesty — the caller enumerating the
+folders itself and comparing, or the dispatch carrying the expected count so a
+mismatch is loud. Asking a miscounting reader to check its own count is the
+vacuous guard one level up. Rewrite step 3b in tool terms while there.
