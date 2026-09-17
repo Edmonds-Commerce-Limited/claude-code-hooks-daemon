@@ -1189,6 +1189,30 @@ def get_untracked_dir(project_dir: Path | str) -> Path:
     return _get_untracked_dir(Path(project_dir).resolve())
 
 
+def prospective_socket_path(project_path: Path, *, self_install: bool) -> Path:
+    """The socket path a daemon WOULD use, for a directory that may not exist.
+
+    `get_socket_path` sniffs self-install mode off disk and creates the
+    directory as a side effect, so it cannot answer for a worktree that has not
+    been created yet. The caller states the mode instead — a worktree is a
+    checkout of the same repository, so it inherits the main checkout's layout.
+
+    Returns the NATURAL path, deliberately without `get_socket_path`'s
+    over-limit fallback: the point is to see the path that would overflow, not
+    the /tmp one that replaces it.
+    """
+    if self_install:
+        untracked_dir = project_path / "untracked"
+    else:
+        untracked_dir = project_path / ".claude" / "hooks-daemon" / "untracked"
+    return untracked_dir / f"daemon{_get_hostname_suffix()}.sock"
+
+
+def socket_path_overflow(path: Path) -> int:
+    """Bytes by which ``path`` exceeds the AF_UNIX limit; 0 when it fits."""
+    return max(0, len(str(path)) - _UNIX_SOCKET_PATH_LIMIT)
+
+
 def _get_untracked_dir(project_path: Path) -> Path:
     """
     Get the untracked directory for daemon runtime files.

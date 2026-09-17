@@ -432,6 +432,43 @@ agent that trusts the message restarts the daemon in a loop.
 Remedies 1–3 are un-gated. Fault 2 needs diagnosis before a remedy can be
 proposed, and this entry deliberately does not guess at one.
 
+**FAULT 1 RESOLVED by (1).** `setup_worktree.sh` now measures the socket path
+it is about to produce and refuses BEFORE creating anything, naming the length,
+the cap, the excess and how many characters to cut.
+
+**This entry's own arithmetic was wrong, and the correction matters.** It says
+the cap is 108 and the path "one byte too long". The limit this codebase
+enforces is `_UNIX_SOCKET_PATH_LIMIT = 104` — the macOS-safe value, not Linux's
+108 — so the reported path is **5** bytes over, not 1. Measured:
+
+```
+limit = 104
+ 109 over=  5  worktree-issue-42-remote-docs-add-overwrite
+ 100 over=  0  worktree-issue-44-plugins-examples
+  85 over=  0  worktree-plan-00028
+```
+
+The middle row is the sobering one: a branch used earlier the same day cleared
+the cap by four characters. The margin is far tighter than "extreme paths only".
+
+**Not reimplemented in bash.** The check calls the daemon's own
+`prospective_socket_path` / `socket_path_overflow`, which reuse
+`_UNIX_SOCKET_PATH_LIMIT`, so the guard cannot drift from the rule it enforces.
+`get_socket_path` could not be reused directly: it sniffs self-install mode off
+disk and creates the directory as a side effect, so it cannot answer for a
+worktree that does not exist yet.
+
+**Verified in both directions, end to end.** The over-limit branch is refused
+at 109/104 with nothing created (no directory, no branch); a short name prints
+`✓ Socket path fits (79/104 bytes)` and proceeds to `=== Worktree Ready ===`.
+
+**The guard fails OPEN**: if the Python cannot be resolved or the measurement
+cannot run, it warns and continues. A broken checker must not block worktree
+creation.
+
+**Fault 2 is untouched**, as this entry intended — remedies 1–3 never addressed
+it, and the playbook-harness stall still needs diagnosis.
+
 ### N7 — the supervisor's effort floor cannot see an effort set from the selector
 
 **Found**: reported by the owner in session, in their own words — "i just

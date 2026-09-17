@@ -103,6 +103,78 @@ echo "  Base:      ${BASE_BRANCH:-<current branch>}"
 echo "  Directory: ${WORKTREE_DIR}"
 echo ""
 
+# Step 0: the worktree's daemon socket path must fit under the AF_UNIX cap.
+#
+# Over the cap the daemon does NOT fail: it silently relocates its runtime
+# files to /tmp and starts fine. The acceptance gates then look for a socket
+# under untracked/, find none, and print "Start it with: ./bin/hooks-daemon
+# restart" — a remedy guaranteed not to work, because a restart lands in /tmp
+# for the same reason. That is hours later, in a worktree nobody is watching.
+#
+# The length is a property of the BRANCH NAME, so a short name works and a
+# descriptive one silently does not. Measured here, before anything is created,
+# so the cost is a rename rather than a debugging session. Plan 00422 N6.
+preflight_socket_path() {
+    local worktree_dir="$1"
+    local self_install="false"
+    if [[ -d "${PROJECT_ROOT}/src/claude_code_hooks_daemon" ]]; then
+        self_install="true"
+    fi
+
+    local py
+    if ! py="$(resolve_venv_python "${PROJECT_ROOT}")"; then
+        echo -e "${YELLOW}WARNING${NC}: could not resolve a Python to measure the socket path."
+        echo "  Skipping the length pre-flight; if the daemon later reports"
+        echo "  'Socket path too long', the branch name is why."
+        return 0
+    fi
+
+    local report
+    if ! report="$("${py}" - "${worktree_dir}" "${self_install}" <<'PY'
+import sys
+from pathlib import Path
+
+from claude_code_hooks_daemon.daemon.paths import (
+    _UNIX_SOCKET_PATH_LIMIT,
+    prospective_socket_path,
+    socket_path_overflow,
+)
+
+root = Path(sys.argv[1])
+path = prospective_socket_path(root, self_install=sys.argv[2] == "true")
+print(f"{socket_path_overflow(path)} {len(str(path))} {_UNIX_SOCKET_PATH_LIMIT} {path}")
+PY
+    )"; then
+        echo -e "${YELLOW}WARNING${NC}: socket-path pre-flight could not run."
+        echo "  Proceeding anyway — a broken check must not block worktree creation."
+        return 0
+    fi
+
+    local overflow length limit sock_path
+    read -r overflow length limit sock_path <<<"${report}"
+
+    if [[ "${overflow}" -gt 0 ]]; then
+        echo -e "${RED}ERROR${NC}: the daemon socket path for this branch is ${overflow} byte(s) over the limit."
+        echo "  Path:   ${sock_path}"
+        echo "  Length: ${length} bytes (AF_UNIX limit here: ${limit})"
+        echo ""
+        echo "  Nothing has been created. The daemon would still START, but it would"
+        echo "  put its socket in /tmp, and the acceptance gates would then report"
+        echo "  'no live socket found under untracked/' with a restart instruction"
+        echo "  that cannot fix it."
+        echo ""
+        echo "  Fix: shorten the branch name by at least ${overflow} character(s)."
+        return 1
+    fi
+
+    echo -e "${GREEN}✓${NC} Socket path fits (${length}/${limit} bytes)"
+    return 0
+}
+
+if ! preflight_socket_path "${WORKTREE_DIR}"; then
+    exit 1
+fi
+
 # Step 1: Ensure worktrees directory exists
 mkdir -p "${WORKTREES_DIR}"
 
