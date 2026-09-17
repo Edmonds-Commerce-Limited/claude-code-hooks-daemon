@@ -526,6 +526,10 @@ Either form in your `STOPPING BECAUSE:` line records a marker that makes the dae
 
 One line each; these fire with their own guidance when relevant. Full text: `bin/hooks-daemon explain-handler <name>`.
 
+<!-- handler: subagent-cron-delete-blocker -->
+
+- subagent_cron_delete_blocker — a subagent deletes no session cron
+
 <!-- handler: daemon-restart-verifier -->
 
 - daemon_restart_verifier — restart the daemon before committing
