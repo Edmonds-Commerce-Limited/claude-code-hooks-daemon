@@ -19,6 +19,7 @@ from pydantic import (
 )
 
 from claude_code_hooks_daemon.constants import EventKey, wired_event_metas
+from claude_code_hooks_daemon.core.handler_scope import HandlerScope
 from claude_code_hooks_daemon.utils.repo_relative_path import (
     normalise_repo_relative_path as _normalise_repo_relative_path,
 )
@@ -53,6 +54,9 @@ class HandlerConfig(BaseModel):
     Attributes:
         enabled: Whether the handler is enabled
         priority: Override priority (None uses handler default)
+        scope: Where the handler is active — ALL, MAIN or SUB (None uses the
+            handler default, which is ALL for everything not deliberately
+            scoped)
         options: Handler-specific options (e.g., track_plans_in_project, plan_workflow_docs)
     """
 
@@ -60,7 +64,24 @@ class HandlerConfig(BaseModel):
 
     enabled: bool = Field(default=True, description="Whether handler is enabled")
     priority: int | None = Field(default=None, description="Override priority")
+    scope: HandlerScope | None = Field(
+        default=None, description="Where the handler is active: ALL, MAIN or SUB"
+    )
     options: dict[str, Any] = Field(default_factory=dict, description="Handler-specific options")
+
+    @field_validator("scope", mode="before")
+    @classmethod
+    def normalise_scope(cls, v: object) -> object:
+        """Accept any casing, and keep a bare `scope:` meaning "the default".
+
+        Upper-casing here rather than at the enum keeps the stored value
+        canonical, so every later reader sees one spelling. A bare `scope:`
+        parses to None, which is the same "use the handler's own default" that
+        `priority:` already means -- not a validation error.
+        """
+        if isinstance(v, str):
+            return v.strip().upper()
+        return v
 
     @field_validator("options", mode="before")
     @classmethod

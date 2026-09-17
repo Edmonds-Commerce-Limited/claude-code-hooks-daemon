@@ -38,8 +38,6 @@ from collections.abc import Mapping
 from enum import StrEnum
 from typing import Any, Final
 
-from claude_code_hooks_daemon.daemon.synthetic_traffic import is_synthetic_event
-
 #: The ``handlers.<event>.<key>.scope`` config key.
 SCOPE_CONFIG_KEY: Final[str] = "scope"
 
@@ -62,6 +60,19 @@ class HandlerScope(StrEnum):
     SUB = "SUB"
 
 
+def _is_synthetic(hook_input: Mapping[str, Any]) -> bool:
+    """Whether a test harness fabricated this event.
+
+    Imported lazily because `config.models` reads :class:`HandlerScope`, and
+    `daemon.synthetic_traffic` sits under a package that imports `config` — a
+    module-level import here closes that loop and breaks daemon startup. Same
+    deferral, for the same reason, as `path_exclusion.resolve_project_root`.
+    """
+    from claude_code_hooks_daemon.daemon.synthetic_traffic import is_synthetic_event
+
+    return is_synthetic_event(hook_input)
+
+
 def in_subagent(hook_input: Mapping[str, Any]) -> bool:
     """Whether this event fired inside a subagent call.
 
@@ -82,7 +93,7 @@ def scope_admits(scope: HandlerScope, hook_input: Mapping[str, Any]) -> bool:
     """
     if scope is HandlerScope.ALL:
         return True
-    if is_synthetic_event(hook_input):
+    if _is_synthetic(hook_input):
         return False
     if scope is HandlerScope.MAIN:
         return not in_subagent(hook_input)

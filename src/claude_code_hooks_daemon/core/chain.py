@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from claude_code_hooks_daemon.constants import Priority
+from claude_code_hooks_daemon.core.handler_scope import scope_admits
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
 
 if TYPE_CHECKING:
@@ -406,6 +407,27 @@ class HandlerChain:
 
         for handler in self.handlers:
             try:
+                # Scope gate (Plan 00423), BEFORE matches(). A handler the
+                # scope refuses is skipped entirely — not matched, not
+                # executed, no context, no verdict — because a handler that ran
+                # and allowed is not the same as one that never ran: the chain
+                # aggregates the former under most-restrictive-wins and the
+                # verdict log records it.
+                #
+                # Here rather than in each handler's matches(): that would be
+                # 142 chances to forget one, and a handler that forgets is a
+                # handler still nudging subagents, which is the defect this
+                # exists to close. It is also the right seam — matches() is the
+                # handler's question about the PAYLOAD; whether to consult the
+                # handler at all is the registry's question about POLICY.
+                if not scope_admits(handler.scope, hook_input):
+                    logger.debug(
+                        "Handler %s skipped - scope %s excludes this event",
+                        handler.name,
+                        handler.scope,
+                    )
+                    continue
+
                 if handler.matches(hook_input):
                     handlers_matched.append(handler.name)
                     logger.debug("Handler %s matched event", handler.name)

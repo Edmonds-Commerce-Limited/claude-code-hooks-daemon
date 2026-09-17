@@ -17,6 +17,7 @@ from claude_code_hooks_daemon.constants.config import ConfigKey, resolve_priorit
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.handler import Handler
+from claude_code_hooks_daemon.core.handler_scope import resolve_scope
 from claude_code_hooks_daemon.utils.vendor_paths import VendorScope
 
 if TYPE_CHECKING:
@@ -558,6 +559,15 @@ class HandlerRegistry:
                             # model_dump() None is Plan 00282). One shared helper
                             # across dispatch + both doc generators.
                             instance.priority = resolve_priority(handler_config, instance.priority)
+
+                            # Where this handler is active (Plan 00423), same
+                            # shape as priority: config overrides the handler's
+                            # own default, a bare `scope:` (None) keeps it. An
+                            # unknown value raises out of resolve_scope rather
+                            # than falling back, because a typo that quietly
+                            # widened the scope would run a guard where its
+                            # author meant it not to.
+                            instance.scope = resolve_scope(handler_config, instance.scope)
 
                             # Apply options inheritance if handler shares options with parent
                             registry_key = f"{event_type.value}.{config_key}"

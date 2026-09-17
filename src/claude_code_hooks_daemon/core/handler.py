@@ -11,6 +11,7 @@ from abc import ABC, abstractmethod
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from claude_code_hooks_daemon.core.handler_scope import HandlerScope
 from claude_code_hooks_daemon.core.relevance import Relevance
 
 if TYPE_CHECKING:
@@ -94,6 +95,7 @@ class Handler(ABC):
         "handler_id",
         "name",
         "priority",
+        "scope",
         "shares_options_with",
         "tags",
         "terminal",
@@ -114,6 +116,7 @@ class Handler(ABC):
         tags: list[str] | None = None,
         shares_options_with: str | None = None,
         depends_on: list[str] | None = None,
+        scope: HandlerScope = HandlerScope.ALL,
     ) -> None:
         """Initialise handler.
 
@@ -151,6 +154,14 @@ class Handler(ABC):
             self.name = resolved_id
             self.config_key = resolved_id.replace("-", "_")
         self.priority = priority
+        # Where this handler is active (Plan 00423). ALL by default and
+        # deliberately so: a handler nobody has scoped must keep running
+        # exactly as before, because the failure mode of a wrong default is a
+        # guard silently switched off for a whole class of session — and a
+        # handler that stops firing looks identical to one with nothing to
+        # report. The registry overwrites this from config after construction,
+        # the same way it does `priority`.
+        self.scope: HandlerScope = scope
         self.terminal = terminal
         self.tags = tags if tags is not None else []
         self.shares_options_with = shares_options_with
