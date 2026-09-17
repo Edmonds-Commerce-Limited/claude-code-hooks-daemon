@@ -524,3 +524,32 @@ should be trusted as human, which is the same judgement the downgrade logic
 makes deliberately in the other direction at `:3975-3989` — there, an
 *unattributed* change is explicitly NOT acted on. That asymmetry is the decision,
 and this entry does not pre-empt it.
+
+**A REMEDY 4 THIS ENTRY MISSED — the hook payload already carries the level.**
+Found while measuring something else entirely (Plan 00423's MAIN/SUB
+dogfooding), from a captured `SubagentStop` payload:
+
+```
+"effort": {"level": "medium"}
+```
+
+Every `Stop`/`SubagentStop` the daemon receives carries the EFFECTIVE effort
+level, whatever route set it. That reframes the entry: all three remedies above
+are attempts to infer the level from the ACT of setting it — a keystroke the
+selector never produces — and the daemon is simply handed the RESULT.
+
+Reading the state instead of the act makes the selector path and the typed path
+indistinguishable, which is precisely what "closes the class rather than the
+instance" means here, and it does so without the risky inference remedy 1 needs.
+
+**It does not settle the owner's question, and should not be read as doing so.**
+The open judgement is whether an unexplained change counts as human, and the
+payload answers "what is the level now?", not "who set it?". But remedy 1's
+specific risk — the sidecar's post-injection reporting lag making the
+supervisor's own injection look human — is avoidable here, because the
+supervisor knows what it injected and can compare against an authoritative
+reading rather than a drop it inferred.
+
+Not verified: whether the supervisor process can see this payload at all, or
+whether a daemon-side handler would have to relay it. That is the next check
+before this becomes a candidate rather than an observation.
