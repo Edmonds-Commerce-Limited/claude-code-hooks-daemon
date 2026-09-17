@@ -42,6 +42,7 @@ from claude_code_hooks_daemon.constants import (
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import BlockingResult, Decision, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import StopHandlerBase
+from claude_code_hooks_daemon.core.handler_scope import HandlerScope
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.transcript_reader import (
@@ -569,6 +570,11 @@ class AutoContinueStopHandler(StopHandlerBase):
             handler_id=HandlerID.AUTO_CONTINUE_STOP,
             priority=Priority.AUTO_CONTINUE_STOP,
             terminal=True,
+            # Issue #40's reported harm verbatim: a finished SUBAGENT was told
+            # to continue every In Progress plan in the COORDINATOR's goal
+            # ledger, none of which was its assignment. The ledger is the
+            # coordinator's, so the nudge is too (Plan 00423).
+            scope=HandlerScope.MAIN,
             tags=[
                 HandlerTag.WORKFLOW,
                 HandlerTag.AUTOMATION,

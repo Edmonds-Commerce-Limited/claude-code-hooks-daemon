@@ -48,6 +48,7 @@ from claude_code_hooks_daemon.constants import (
 )
 from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import StopHandlerBase
+from claude_code_hooks_daemon.core.handler_scope import HandlerScope
 
 #: Advise on the first qualifying stop of a session, then every Nth. Public
 #: because the rate-limit test must assert against the real interval rather
@@ -111,6 +112,9 @@ class TeammateReapAdvisorHandler(StopHandlerBase):
             handler_id=HandlerID.TEAMMATE_REAP_ADVISOR,
             priority=Priority.TEAMMATE_REAP_ADVISOR,
             terminal=False,
+            # Only the coordinator has teammates to reap, so only the
+            # coordinator can act on this advice (Plan 00423).
+            scope=HandlerScope.MAIN,
             tags=[
                 HandlerTag.WORKFLOW,
                 HandlerTag.ADVISORY,

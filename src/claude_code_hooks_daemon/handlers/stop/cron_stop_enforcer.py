@@ -42,6 +42,7 @@ from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.core import BlockingResult, Decision, ProjectContext
 from claude_code_hooks_daemon.core.handler_bases import StopHandlerBase
+from claude_code_hooks_daemon.core.handler_scope import HandlerScope
 from claude_code_hooks_daemon.utils.cron_enforcement import (
     find_missing_crons,
     parse_session_crons,
@@ -70,6 +71,11 @@ class CronStopEnforcerHandler(StopHandlerBase):
             handler_id=HandlerID.CRON_STOP_ENFORCER,
             priority=Priority.CRON_STOP_ENFORCER,
             terminal=False,
+            # Session crons belong to the COORDINATOR's session. The incident
+            # behind issue #40 was a subagent deleting a shared recovery cron
+            # on its own initiative, so instructing a subagent to create or
+            # reconcile them is the same category of mistake (Plan 00423).
+            scope=HandlerScope.MAIN,
             tags=[
                 HandlerTag.WORKFLOW,
                 HandlerTag.SAFETY,
