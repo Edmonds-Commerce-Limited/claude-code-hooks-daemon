@@ -1,6 +1,6 @@
 # Plan 00423: per handler scope main sub
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-16
 **GitHub Issue**: #40 (and #41, triaged into decision 2)
 **Owner**: dev
@@ -116,14 +116,49 @@ by rule regardless of its merits.
 
 ## Tasks
 
-### Phase 1: Owner decisions (BLOCKING — nothing else starts)
+### Phase 1: Owner decisions (RULED — 2026-09-17)
 
-- [ ] ⬜ **Task 1.1**: Owner rules on whether a library-level `scope` config
-  key reverses Plan 00418's "nothing ships to the library yet" ruling.
-- [ ] ⬜ **Task 1.2**: Owner rules on the #40/#41 cluster — scope, reap, or
-  both, and in which order, given `teammate_reap_advisor` already ships.
-- [ ] ⬜ **Task 1.3**: Owner rules on whether failsafe-cron deletion becomes
-  coordinator-only, a permissions change to a safety control.
+**The owner approved #40 and #41 together, in session, with one binding
+condition**: the MAIN/SUB detectability assumption must be dogfooded and shown
+to work, not assumed. In their words — "make sure we carefully dog food this to
+confirm assumptions about detectability of MAIN and SUB scenarios are actually
+working".
+
+That condition is not a nicety. This whole plan rests on `agent_id`
+discriminating MAIN from SUB at the moments these handlers fire, and Plan 00418
+was built once and DELETED because hooks could not tell which agent fired an
+event. If the discrimination does not hold at Stop/SubagentStop time, the
+defaults below are decoration.
+
+- [x] ✅ **Task 1.1**: RULED — approved. A library-level `scope` key may ship;
+  this reverses Plan 00418's "nothing ships to the library yet" for this key.
+- [x] ✅ **Task 1.2**: RULED — approved as a cluster, both #40 and #41.
+- [x] ✅ **Task 1.3**: RULED — approved, including making failsafe-cron
+  deletion coordinator-only. Recorded explicitly because it is a permissions
+  change to a safety control, which this loop may not decide for itself.
+
+### Phase 2: prove the assumption BEFORE building on it
+
+- [ ] ⬜ **Task 2.1**: Dogfood the discrimination first. Capture real
+  Stop/SubagentStop payloads from a live sub-agent and from the main thread,
+  and show `agent_id` separates them at the moment each handler runs — measured
+  from captured payloads, not inferred from the field's presence in a schema.
+
+- [ ] ⬜ **Task 2.2**: If discrimination does NOT hold in some case, that is
+  the finding and the plan stops there rather than shipping defaults that
+  silently misclassify. Record which case failed.
+
+### Phase 3: build
+
+- [ ] ⬜ **Task 3.1**: Implement the `scope: ALL|MAIN|SUB` key with the agreed
+  defaults (content guards `ALL`, nudge handlers `MAIN`), RED test first.
+
+- [ ] ⬜ **Task 3.2**: Coordinator-only failsafe-cron deletion.
+
+- [ ] ⬜ **Task 3.3**: The #41 reaping half, scoped to what is not already
+  shipped — `teammate_reap_advisor` (v3.65.0) and the worktree half
+  (00349/00372/00380) already cover part of it, and one ask cannot be built as
+  written because the Stop payload cannot distinguish idle from running.
 
 ## Success Criteria
 

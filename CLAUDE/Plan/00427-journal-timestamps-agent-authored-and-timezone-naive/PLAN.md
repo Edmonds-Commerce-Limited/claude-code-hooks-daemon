@@ -1,6 +1,6 @@
 # Plan 00427: journal timestamps agent authored and timezone naive
 
-**Status**: Not Started, BLOCKED ON THE OWNER
+**Status**: In Progress
 **Created**: 2026-09-17
 **Owner**: dev
 **Priority**: Medium
@@ -42,7 +42,24 @@ a cross-zone pair satisfies it exactly. 2207 entry headings across 316
 day-files are already written under that grammar, none carrying a zone, and the
 journal is append-only.
 
-## The question for the owner
+## THE RULING (owner, in session, 2026-09-17)
+
+**No backward migration. A new system is established and used going forwards;
+historic data is what it is.** Entries written by the new system carry a clear
+sentinel so a reader can tell which ones it produced — deliberately minimal,
+"no bloat, but something".
+
+That answers the migration half outright and dissolves most of the
+canonical-clock problem: a reader no longer has to guess what an old timestamp
+meant, because the sentinel tells them which entries are trustworthy and the
+absence of one marks the rest as legacy. The 2207 existing entries are not
+touched, not reinterpreted, and not annotated.
+
+**What the sentinel must NOT become**: a per-entry banner. The requirement is
+one unambiguous marker, cheap to read and cheap to write. A design that adds a
+line to every entry fails the owner's "no bloat" condition.
+
+## The question this plan originally put to the owner
 
 Every workable remedy needs a decision this plan must not make for itself:
 
@@ -108,9 +125,9 @@ the "agents get this hand-performed step wrong" reason.
 
 ### Phase 1: the owner's decision
 
-- [ ] ⬜ **Task 1.1**: Owner picks among the options above (or another), and
-  answers the migration half explicitly — the 2207 existing entries either get
-  a stated interpretation or are declared unreconcilable.
+- [x] ✅ **Task 1.1**: RULED — see THE RULING above. No migration; new system
+  forwards; a minimal sentinel distinguishes entries it wrote. The 2207 legacy
+  entries stand as they are.
 
 ### Phase 2: build what was chosen
 
