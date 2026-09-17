@@ -85,8 +85,8 @@ every client. Both are product calls.
   surface.
 - **Migrating existing day-files.** The journal is append-only; any migration
   is its own decision with its own blast radius.
-- **Building the scaffolder on spec.** It is one candidate answer, not the
-  agreed one, and it is a hypothesis to verify rather than a patch to apply.
+- ~~**Building the scaffolder on spec.**~~ SUPERSEDED by the ruling: option 1
+  is chosen and is being built.
 - **Re-opening 00422 N3's three-rule deadlock.** Related (see below), but its
   remedies narrow an advisory; this is upstream prevention. They are
   orthogonal, confirmed by the dedupe scout.
@@ -107,6 +107,67 @@ every client. Both are product calls.
    plus every client's existing journals.
 4. **Nothing.** The cross-zone case needs two writers in two zones on one
    day-file. Real — it is what produced the report — but not frequent.
+
+## The design the ruling implies
+
+Option 1 is chosen. These decisions follow from the ruling and from the
+existing deployment architecture; they are the spec to build against.
+
+**D1 — the sentinel lives in the DAY-FILE PREAMBLE, one line per file.** Not
+per entry. The owner's condition is "no bloat, but something", and a per-entry
+marker fails it — it would add a line to every one of thousands of entries. One
+line at the top of a day-file states that the file's entries were written by
+the scaffolder, and in which zone.
+
+This also lands the "no migration" ruling for free, with no work: day-files are
+created fresh each day, so new files carry the marker and the 2207 legacy
+entries simply do not. **Absence of the sentinel IS the legacy marker.**
+Nothing old is touched, rewritten or annotated.
+
+**D2 — the script reads the clock; the agent never supplies a time.** This is
+the half that fixes estimation, which was observed twice in one session (69
+minutes out, then 12). An agent that cannot type a timestamp cannot guess one.
+
+**D3 — normalise to UTC, and record the zone in the sentinel.** A timestamp
+whose zone is written down is reconcilable by any later reader; that is the
+property the current grammar lacks, and it is what makes two writers in two
+zones safe rather than silently an hour apart.
+
+**D4 — append mechanically, never rewrite.** The append-only rule stops being
+a convention an agent must remember and becomes a property of the only
+supported write path.
+
+**D5 — validate the category and the ref before the entry lands.** The grammar
+already names the legal categories; a scaffolder that accepts anything makes
+the grammar advisory.
+
+**D6 — EXTEND `mkplan.bash` rather than adding a sibling script** (owner's
+suggestion, and the code agrees). Checked before adopting: `mkplan.bash`
+already owns every piece this needs — it reads the clock itself
+(`date +%H:%M`), holds `_JOURNAL_TEMPLATE_.md` and its `{{DATE}}`/`{{TIME}}`
+placeholders, creates `JOURNAL/`, and writes the first day-file. A new script
+would have duplicated all of it and added a second deployed asset to version
+and drift-check.
+
+Interface: an explicit flag, **not** a subcommand —
+`mkplan.bash --journal <plan-number> <category> <body-file> [--ref R] [--title T]`.
+A bare `mkplan.bash journal` would be ambiguous, because `journal` is a legal
+plan name under the existing kebab validation; a leading `-` never is.
+
+**D6a — the journal path must NOT touch the plan counter.** This is the hazard
+the merge introduces and the one thing to get right: `mkplan.bash` takes an
+exclusive lock on the plan dir and advances
+`hooksdaemon.latestPlanNumber`. A journal append happens many times a day and
+must do NEITHER. Two operations with different lifecycles now share a file, so
+the counter path and the journal path have to be provably separate — a journal
+append that advanced the counter would burn plan numbers silently, which is
+exactly the class `counter_sanity` exists to catch after the fact.
+
+**Explicitly NOT in this plan**: blocking hand-authored journal appends. That
+is a separate, larger decision — it would make the scaffolder mandatory rather
+than merely available, and the ruling did not ask for it. Worth noting so the
+gap is deliberate and visible: until such a gate exists, a `Write` or a heredoc
+can still append an unsentinelled entry to a sentinelled file.
 
 ## Prior art the owner should weigh
 
@@ -131,24 +192,41 @@ the "agents get this hand-performed step wrong" reason.
 
 ### Phase 2: build what was chosen
 
-- [ ] ⬜ **Task 2.1**: Implement the chosen option, RED test first. The
+- [ ] ⬜ **Task 2.1**: `journal-entry.bash` per D1–D5, RED test first. The
   regression case is the cross-zone pair, not a single-writer entry: a test
-  that pins one clock proves nothing about two.
+  that pins one clock proves nothing about two. Prove the append-only property
+  by trying to violate it, not by observing that one append worked.
 
-- [ ] ⬜ **Task 2.2**: If the grammar or template changes, update
-  `_JOURNAL_TEMPLATE_.md` (both copies — the deployed one under `install/` and
-  this project's own) and stage a `truth-changes` entry, since a client's docs
-  may assert the "local 24h" rule.
+- [ ] ⬜ **Task 2.2**: Extend `mkplan.bash` per D6 — both copies, the bundled
+  template under `install/templates/` and this project's deployed one, which
+  must stay byte-identical or the drift checker fires. Pin D6a with a test that
+  asserts a journal append leaves `hooksdaemon.latestPlanNumber` UNCHANGED.
+
+- [ ] ⬜ **Task 2.3**: `_JOURNAL_TEMPLATE_.md` (both copies — the bundled one
+  under `install/templates/` and this project's own) gains the sentinel line,
+  and the grammar text stops saying a bare "local 24h". Stage a
+  `truth-changes` entry: a client's own docs may assert the old rule.
+
+- [ ] ⬜ **Task 2.4**: Release note — this is user-visible.
 
 ## Success Criteria
 
-- [ ] ⬜ The canonical-clock question is answered by the owner, in writing.
+- [x] ✅ The canonical-clock question is answered by the owner, in writing —
+  see THE RULING. No migration; sentinel marks what the new system wrote.
+
+- [ ] ⬜ A day-file the scaffolder created carries exactly ONE sentinel, in the
+  preamble, and an entry costs no extra lines — the "no bloat" condition,
+  checked by counting, not by opinion.
+
+- [ ] ⬜ An agent cannot supply a timestamp through the supported path, proven
+  by trying.
 
 - [ ] ⬜ Whatever is built is proven against a TWO-clock reproduction, and the
   opposite-direction symptom (a correct-in-its-own-zone entry being reported)
   is checked too, not just the silent direction.
 
-- [ ] ⬜ The existing 2207 entries have a stated interpretation.
+- [x] ✅ The existing 2207 entries have a stated interpretation: they are
+  legacy, untouched, and the ABSENCE of a sentinel is what says so.
 
 ## Delivery & Milestones
 
