@@ -19,7 +19,11 @@ from pydantic import (
 )
 
 from claude_code_hooks_daemon.constants import EventKey, wired_event_metas
-from claude_code_hooks_daemon.core.handler_scope import HandlerScope
+from claude_code_hooks_daemon.core.handler_scope import (
+    SCOPE_CONFIG_KEY,
+    HandlerScope,
+    validate_scope_for_event,
+)
 from claude_code_hooks_daemon.utils.repo_relative_path import (
     normalise_repo_relative_path as _normalise_repo_relative_path,
 )
@@ -172,6 +176,42 @@ class HandlersConfig(BaseModel):
     post_compact: dict[str, Any] = Field(default_factory=dict)
     elicitation: dict[str, Any] = Field(default_factory=dict)
     elicitation_result: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_handler_scopes(self) -> Self:
+        """Refuse a restricting `scope` on an event that cannot discriminate.
+
+        `scope` keys on `agent_id`, which only some events deliver. On the
+        others `MAIN` would admit every event and `SUB` none, so the setting
+        would state a protection that cannot exist — and, being silent, would
+        be indistinguishable from one that works. Config load is the only
+        moment the author is present to be told (Plan 00423).
+
+        Cheap by construction: it walks only handler blocks that actually carry
+        the key, so a config that sets no scopes does no work.
+        """
+        for meta in wired_event_metas():
+            event_block = getattr(self, meta.config_key, None)
+            if not isinstance(event_block, dict):
+                continue
+            for handler_key, handler_block in event_block.items():
+                # BOTH shapes, and this is the whole bug risk here: by the time
+                # an `after` validator runs, a block may already be coerced to a
+                # HandlerConfig rather than the dict it was in YAML. An
+                # isinstance(dict) guard alone therefore skipped every block and
+                # the check passed vacuously — green unit tests, refusal never
+                # firing, found only by running a real config through the real
+                # loader. `test_models.py` now drives this through
+                # `model_validate` for that reason.
+                if isinstance(handler_block, HandlerConfig):
+                    scope = handler_block.scope
+                elif isinstance(handler_block, dict):
+                    raw_scope = handler_block.get(SCOPE_CONFIG_KEY)
+                    scope = None if raw_scope is None else HandlerScope(str(raw_scope).upper())
+                else:
+                    continue
+                validate_scope_for_event(meta.json_key, handler_key, scope)
+        return self
 
     @model_validator(mode="after")
     def validate_handler_dependencies(self) -> Self:

@@ -23,9 +23,12 @@ that without the guard the suite went red with hundreds of denied probes AND,
 under most-restrictive-wins, other handlers' expected ALLOWs turned into
 failures. So ``MAIN`` means "no ``agent_id`` AND not synthetic".
 
-**Scope only means anything on an event that can carry ``agent_id``.** Six
-contracts declare the field: ``PreToolUse``, ``PostToolUse``, ``Stop``,
-``SubagentStop``, ``SubagentStart`` and ``Elicitation``. On any other event
+**Scope only means anything on an event that can carry ``agent_id``.** Five
+contracts declare the field in their ``conditional_input_fields`` or
+``input_example``: ``PreToolUse``, ``PostToolUse``, ``Stop``, ``SubagentStop``
+and ``SubagentStart``. (``Elicitation`` only MENTIONS it, in a prose note about
+``PreToolUse``; a text search says six, which is why the set above is derived
+from the declared field lists instead.) On any other event
 ``MAIN`` would admit everything and ``SUB`` nothing — a declared protection
 that cannot exist. Rejecting the key there belongs at config validation, where
 the author is present to be told; this module answers only the per-event
@@ -43,6 +46,18 @@ SCOPE_CONFIG_KEY: Final[str] = "scope"
 
 #: The payload field that names the subagent a hook fired inside.
 AGENT_ID_FIELD: Final[str] = "agent_id"
+
+#: Events whose contract declares ``agent_id``, and therefore the only events on
+#: which a restricting scope means anything.
+#:
+#: A constant rather than a runtime read of ``contracts/``: those files are a
+#: repository-side reference and are not shipped with the package, so parsing
+#: them at import would work here and fail in every client. The cost of copying
+#: is drift, so ``tests/unit/config/test_scope_requires_agent_id_event.py``
+#: reads the real contracts and fails if this set stops matching them.
+AGENT_ID_EVENTS: Final[frozenset[str]] = frozenset(
+    {"PreToolUse", "PostToolUse", "Stop", "SubagentStop", "SubagentStart"}
+)
 
 
 class HandlerScope(StrEnum):
@@ -98,6 +113,46 @@ def scope_admits(scope: HandlerScope, hook_input: Mapping[str, Any]) -> bool:
     if scope is HandlerScope.MAIN:
         return not in_subagent(hook_input)
     return in_subagent(hook_input)
+
+
+def event_supports_scope(event_name: str) -> bool:
+    """Whether a restricting scope can mean anything on this event.
+
+    An UNKNOWN event answers False. Assuming support would accept a ``scope``
+    that silently does nothing, which is the failure this whole check exists to
+    prevent — and a newly-wired event that genuinely carries ``agent_id`` is a
+    deliberate addition to :data:`AGENT_ID_EVENTS`, not something to infer.
+    """
+    return event_name in AGENT_ID_EVENTS
+
+
+def validate_scope_for_event(
+    event_name: str, handler_key: str, scope: HandlerScope | None
+) -> None:
+    """Raise when ``scope`` restricts on an event that cannot discriminate.
+
+    ``ALL`` and an unset key are accepted everywhere: neither claims anything
+    about where the handler runs, so neither can be a false promise.
+
+    ``MAIN`` or ``SUB`` on an event with no ``agent_id`` would admit everything
+    or nothing respectively — a declared protection that cannot exist. Refused
+    here because config-validation time is the one moment the author is present
+    to be told; at dispatch time nobody is, and a setting that quietly does
+    nothing is indistinguishable from one that works.
+    """
+    if scope is None or scope is HandlerScope.ALL:
+        return
+    if event_supports_scope(event_name):
+        return
+    eligible = ", ".join(sorted(AGENT_ID_EVENTS))
+    raise ValueError(
+        f"handler `{handler_key}` on event `{event_name}` sets "
+        f"`{SCOPE_CONFIG_KEY}: {scope.value}`, but `{event_name}` payloads never "
+        f"carry `{AGENT_ID_FIELD}` — so MAIN would admit every event and SUB "
+        f"none, and the setting would state a protection that cannot exist. "
+        f"Use `{SCOPE_CONFIG_KEY}: {HandlerScope.ALL.value}` (or remove the "
+        f"key) here. A restricting scope works on: {eligible}."
+    )
 
 
 def resolve_scope(
