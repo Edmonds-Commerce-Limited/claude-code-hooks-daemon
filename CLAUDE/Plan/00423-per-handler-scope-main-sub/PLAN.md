@@ -139,14 +139,21 @@ defaults below are decoration.
 
 ### Phase 2: prove the assumption BEFORE building on it
 
-- [ ] ⬜ **Task 2.1**: Dogfood the discrimination first. Capture real
-  Stop/SubagentStop payloads from a live sub-agent and from the main thread,
-  and show `agent_id` separates them at the moment each handler runs — measured
-  from captured payloads, not inferred from the field's presence in a schema.
+- [x] ✅ **Task 2.1**: DONE — measured via `daemon.payload_capture`. `agent_id`
+  present in all 5 SubagentStop payloads (17-char string, never empty), absent
+  on the main-thread Stop. Its ABSENCE is a sound MAIN discriminator.
 
-- [ ] ⬜ **Task 2.2**: If discrimination does NOT hold in some case, that is
-  the finding and the plan stops there rather than shipping defaults that
-  silently misclassify. Record which case failed.
+- [x] ✅ **Task 2.2**: Discrimination HOLDS for `agent_id`. One case remains
+  unverified by direct observation and must not be assumed: a session started
+  with `--agent`, where the contract says `agent_type` appears on a main-thread
+  stop. It cannot be produced from inside this session.
+
+  **The measurement also disqualified `agent_type` outright**: present but
+  EMPTY in 4 of 5 subagent stops. It both over-reports (the contract's
+  `--agent` warning) and under-reports (measured here). A handler keying on it
+  would misclassify 4 of 5 subagents as main-thread — firing nudges exactly
+  where they were meant to be suppressed. Task 3.1 must key on `agent_id`
+  presence and nothing else.
 
 ### Phase 3: build
 
