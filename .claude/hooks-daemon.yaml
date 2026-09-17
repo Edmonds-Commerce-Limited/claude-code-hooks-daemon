@@ -665,6 +665,22 @@ handlers:
       # options:
       #   timeouts:
       #     PHP: 30
+      options:
+        # `untracked/` is this project's sanctioned scratch location:
+        # project_containment pushes working notes there and pipe_blocker names
+        # it as the supported capture target. Linting it made the guards
+        # disagree about what the directory is FOR — one directs you to it,
+        # another reports style in a gitignored throwaway probe. Scoped to this
+        # handler rather than daemon.exclude_paths, which would exempt the
+        # directory from every guard including sensitive_content. Plan 00422 N2.
+        #
+        # `/untracked/**`, NOT `untracked/`: these globs are FULL-matched, so a
+        # bare trailing-slash pattern matches the directory path itself and
+        # nothing inside it. Measured — `untracked/` does not exclude
+        # `untracked/scratch/x.py`. The leading `/` anchors to the repo root so
+        # a nested `untracked/` elsewhere is not silently exempted too.
+        exclude_paths:
+          - "/untracked/**"
 
     markdown_table_formatter:  # Auto-format markdown tables via mdformat + mdformat-gfm
       enabled: true

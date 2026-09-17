@@ -115,6 +115,33 @@ when the reader is least interested in its style.
 Not owner-gated: this is a scope question about one project's own exclude list,
 and remedy (1) turns nothing off for any file that can reach history.
 
+**RESOLVED by (1)**, scoped to `lint_on_edit.options.exclude_paths` rather than
+the project-wide `daemon.exclude_paths` — the latter would exempt the directory
+from every guard including `sensitive_content`, which is a far larger act than
+the noise being fixed.
+
+**Remedy (1) as WRITTEN above was a no-op, and shipping it verbatim would have
+looked like a fix.** These globs are FULL-matched (`_glob_to_regex` in
+`utils/path_exclusion.py`), so a bare `untracked/` compiles to
+`(?:.*/)?untracked/` and matches the directory path itself — never a file
+inside it. Measured against the real matcher:
+
+```
+'untracked/'       -> False
+'untracked/**'     -> True
+'/untracked/**'    -> True
+'untracked'        -> False
+```
+
+The shipped pattern is `/untracked/**`: the `**` reaches the files, and the
+leading `/` anchors to the repo root so a nested `sub/untracked/` elsewhere is
+not silently exempted as well.
+
+**Verified in both directions, by writing the file rather than by reasoning.**
+The same lint-failing bytes that were denied under `R-LINT-FAILURE` twice were
+written again after the restart and drew no block. Confirmed still linted:
+`src/**`, `tests/**`, `CLAUDE/**`, and `sub/untracked/**`.
+
 ### N3 — a committed future-dated entry makes the journal permanently uncorrectable
 
 **Re-filed from [00419 N12](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md).**
