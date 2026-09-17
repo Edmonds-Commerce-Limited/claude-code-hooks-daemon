@@ -1,6 +1,6 @@
 # Plan 00430: block report attributes before project context init
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-17
 **GitHub Issue**: #48
 **Owner**: dev
@@ -97,8 +97,12 @@ rules it cannot see — and reads as a complete answer.
   `Failed to inspect handler` lines and attributes strictly more denies than
   before, with both numbers recorded.
 - [x] Every release-bound consequence is in the pending-release holding area.
-- [ ] #48 carries a closing comment saying what was wrong, what changed, how it
-  was verified, and anything found that the reporter did not report.
+- [x] #48 carries a closing comment saying what was wrong, what changed, how it
+  was verified, and anything found that the reporter did not report. The two
+  unreported findings: the fix is MEASURED on one of the five handlers (the
+  other four never fired in this corpus), and 31 denies remain unattributed
+  from a different cause entirely — deny text predating the `get_rules()`
+  migration, or project-level handlers the library-only index does not carry.
 
 ## Delivery & Milestones
 
