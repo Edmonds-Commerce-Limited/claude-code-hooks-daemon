@@ -159,8 +159,11 @@ Each entry is a heading with a fixed grammar followed by a free markdown body:
 ## HH:MM · CATEGORY · REF   [— optional short title]
 ```
 
-- **`HH:MM`** — local 24-hour time (the date lives in the filename). Times run
-  monotonically down a file.
+- **`HH:MM`** — UTC 24-hour time when appended through `mkplan.bash --journal`
+  (the date lives in the filename, also UTC); a day-file whose preamble
+  carries no sentinel line predates this system and its times are local with
+  the zone unrecorded (legacy — never migrated). Times run monotonically down
+  a file.
 - **`CATEGORY`** — one of a small fixed core set:
   `action` · `finding` · `decision` · `thought` · `blocker` · `handoff`.
   (Clients may extend this set — that is *convention*, not enforced.)
@@ -218,13 +221,13 @@ journalling into a heartbeat.
 
 ## Lifecycle touchpoints
 
-| When                         | Do                                                                                |
-| ---------------------------- | --------------------------------------------------------------------------------- |
-| Plan created (`mkplan.bash`) | `JOURNAL/` + day-1 file scaffolded; add a `## HH:MM · action` entry               |
-| Work happens                 | Append `action`/`finding`/`decision`/`blocker` entries                            |
-| A day rolls over             | Start a new `NNNNN-Journal-YY-MM-DD.md` (naming check accepts today or yesterday) |
-| Session ends / context low   | Append a `handoff` entry naming next steps                                        |
-| Plan archived                | `JOURNAL/` moves with the folder automatically                                    |
+| When                         | Do                                                                                                                                                                                                                   |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Plan created (`mkplan.bash`) | `JOURNAL/` + day-1 file scaffolded; add a `## HH:MM · action` entry                                                                                                                                                  |
+| Work happens                 | Append `action`/`finding`/`decision`/`blocker` entries — prefer `mkplan.bash --journal <plan-number> <category> <body-file> [--ref R] [--title T]`, which reads and normalises the clock itself, over hand-authoring |
+| A day rolls over             | Start a new `NNNNN-Journal-YY-MM-DD.md` (naming check accepts today or yesterday)                                                                                                                                    |
+| Session ends / context low   | Append a `handoff` entry naming next steps                                                                                                                                                                           |
+| Plan archived                | `JOURNAL/` moves with the folder automatically                                                                                                                                                                       |
 
 ## Notes & Updates migration
 
