@@ -171,6 +171,7 @@ _DEDUPE_HISTORIC_VERSIONS: Final[tuple[tuple[str, str], ...]] = (
     # by the commit that shipped them so the claim stays checkable.
     ("shipped-daa73a3c", "0bff2001a0aa282b98c455db1a33ab0f"),
     ("shipped-06077503", "19551a26c2fdffc2f00bab3b56ecf7bf"),
+    ("1.1.0", "cf623ccc04ab29ba47886c73dded893e"),
 )
 
 #: Historic opus-security revisions. v1.0.0 enumerated its trigger vocabulary
@@ -200,14 +201,14 @@ _DOCS_QA_HISTORIC_VERSIONS: Final[tuple[tuple[str, str], ...]] = (
 #: Declared md5 of each CURRENT bundled template. Data, not a computation:
 #: deriving these from the files they guard is exactly the defect Plan 00378
 #: fixes. Update alongside any template edit — QA fails loudly otherwise.
-_DEDUPE_MD5: Final[str] = "cf623ccc04ab29ba47886c73dded893e"
+_DEDUPE_MD5: Final[str] = "3b732f40fe276a8d6ac65ebba2d3f615"
 _OPUS_SECURITY_MD5: Final[str] = "63f8d6aac7a46a6bbbf2fab643d9df6e"
 _DOCS_QA_MD5: Final[str] = "30a36b6ce0ce8bbe856dd3f4966a2b5d"
 
 SHIPPED_AGENTS: Final[tuple[AgentAssetSpec, ...]] = (
     AgentAssetSpec(
         name=DEDUPE_AGENT_NAME,
-        version="1.1.0",
+        version="1.2.0",
         md5=_DEDUPE_MD5,
         gating_config_key="plan_workflow.enabled",
         is_enabled=_plan_workflow_enabled,

@@ -384,5 +384,67 @@ class TestOpusSecurityContent:
             assert marker in spec_source_path(spec).read_text()
 
 
+def _declared_tools(text: str) -> frozenset[str]:
+    """The frontmatter ``tools:`` line, split into tool names.
+
+    Deliberately literal: the frontmatter is a fixed four-line header on every
+    shipped agent, and a YAML parse here would accept shapes Claude Code does
+    not.
+    """
+    for line in text.splitlines():
+        if line.startswith("tools:"):
+            return frozenset(part.strip() for part in line[len("tools:") :].split(",") if part.strip())
+    return frozenset()
+
+
+def _shell_fence_lines(text: str) -> tuple[int, ...]:
+    """1-indexed line numbers of every ```bash / ```sh fence opener."""
+    return tuple(
+        number
+        for number, line in enumerate(text.splitlines(), start=1)
+        if line.strip() in ("```bash", "```sh", "```shell")
+    )
+
+
+class TestInstructionsMatchDeclaredTools:
+    """An agent must not be told to run a command it has no tool to run.
+
+    Plan 00434, from ledger 00422 N13. The dedupe scout's step 3b instructed
+    `grep -ril ... Completed/*/PLAN.md` while its frontmatter declared
+    `tools: Read, Glob, Grep` — no Bash — and the section that idiom produces
+    is compulsory. An instruction the agent cannot follow is answered by
+    improvising or by silently dropping the section, and both are invisible in
+    the report.
+    """
+
+    def test_no_shell_fence_without_bash_declared(self) -> None:
+        offenders: list[str] = []
+        for spec in SHIPPED_AGENTS:
+            text = spec_source_path(spec).read_text()
+            if "Bash" in _declared_tools(text):
+                continue
+            for line_number in _shell_fence_lines(text):
+                offenders.append(f"{spec.name}:{line_number}")
+        assert not offenders, (
+            "shell fence in an agent whose frontmatter does not declare Bash: "
+            f"{offenders}. Write the instruction in terms of a tool it has."
+        )
+
+    def test_the_check_sees_a_fence_it_is_allowed_to_find(self) -> None:
+        """Control: an agent that DOES declare Bash and DOES carry a fence.
+
+        Without this, the check above passes just as happily when the fence
+        detector matches nothing at all.
+        """
+        text = spec_source_path(_spec(DOCS_QA_AGENT_NAME)).read_text()
+        assert "Bash" in _declared_tools(text)
+        assert _shell_fence_lines(text), "docs-qa no longer carries a shell fence"
+
+    def test_every_shipped_agent_declares_some_tools(self) -> None:
+        """Control: an empty `tools:` parse would exempt every agent silently."""
+        for spec in SHIPPED_AGENTS:
+            assert _declared_tools(spec_source_path(spec).read_text())
+
+
 def test_module_has_no_mutable_registry() -> None:
     assert isinstance(agent_assets.SHIPPED_AGENTS, tuple)
