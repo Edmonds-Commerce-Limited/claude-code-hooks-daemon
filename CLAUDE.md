@@ -199,6 +199,8 @@ Both were measured with ZERO false positives across this project's own ~1,080 so
 
 **Before creating one, check nothing already covers it.** Dispatch the `hooks-daemon-plan-dedupe-scout` agent with a sentence describing the intended work; it reads the still-live plans and names any that already cover it, so you can merge or supersede instead of filing alongside. This is a SUGGESTION — it never blocks, it is a judgement call rather than a rule, and it can be wrong. It is worth the few seconds because the alternative failure is expensive and silent: a duplicate plan is usually discovered only after an agent has spent a lot of context re-deriving conclusions that already existed on disk.
 
+**Check its count against one you did not get from it.** The report carries a `Checked N live plans.` line, and the agent can only reconcile that against its own enumeration — which is no check at all when the enumeration is what went wrong. Measured on this agent: 34, then 32, then 17 plans reported for the same unchanged tree of 34. So state the number of plan folders in the plan root when you dispatch it (`mkplan.bash` prints it for you), and when the report's N disagrees, re-dispatch rather than act on the verdict — a scout that read a different tree has not answered your question.
+
 **To create a new plan, run the deployed scaffolding script:**
 
 ```
