@@ -67,7 +67,7 @@ ledger's shape is readable without opening it:
 | N10 | a QA checker's own tests overwrite that checker's real QA artefact       | a full `llm_qa all` run's intermediate artefacts                   | ✅ Remedied by Plan 00432                               |
 | N11 | acceptance probe fixtures live in the sanctioned human scratch directory | surfaced by N2's second failure                                    | ⬜ Open — (2) already exists; (1) owner-gated           |
 | N12 | the supervisor asset has been red under its own lint gate since v3.65.0  | in session, after v3.65.0 shipped                                  | ✅ Corrected — the gate is green; no code change due    |
-| N13 | the plan-dedupe scout cleared a plan tree it never read                  | a dispatch before filing Plan 00430                                | ⬜ Open — revised remedy (1) un-gated, unbuilt          |
+| N13 | the plan-dedupe scout cleared a plan tree it never read                  | a dispatch before filing Plan 00430                                | ✅ Remedied by Plan 00434                               |
 
 ## Tasks
 
@@ -136,11 +136,11 @@ changing.
   `untracked/acceptance/` root? Remedy (2) already exists as
   `test_acceptance_contract.py`, so there is nothing to build for it.
 
-- [ ] ⬜ **Task 4.2**: N13 — build the revised remedy (1): the dedupe scout's
-  plan count must be checked against something OUTSIDE the agent's own report,
-  because a miscounting reader cannot audit its own count. Rewrite step 3b in
-  tool terms while there — it names a `grep -ril` shell idiom the agent has no
-  Bash tool to run.
+- [x] ✅ **Task 4.2**: N13 — remedied by Plan 00434. `mkplan.bash` states the
+  root plan-folder count for the dispatch to carry, the guidance says to
+  re-dispatch when the report's `Checked N live plans.` disagrees, and step 3b
+  is written in Grep-tool terms behind a general guard: a shell fence in any
+  shipped agent that does not declare `Bash` now fails.
 
 ## Success Criteria
 

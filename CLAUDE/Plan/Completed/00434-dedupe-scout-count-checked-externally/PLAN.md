@@ -1,6 +1,6 @@
 # Plan 00434: dedupe scout count checked externally
 
-**Status**: Not Started
+**Status**: Complete
 **Created**: 2026-09-17
 **Owner**: dev
 **Priority**: Medium
@@ -69,38 +69,38 @@ the CALLER states at dispatch time does.
 
 ### Phase 1: the external count
 
-- [ ] ⬜ **Task 1.1**: RED — a test asserting `mkplan.bash`'s scout reminder
+- [x] ✅ **Task 1.1**: RED — a test asserting `mkplan.bash`'s scout reminder
   states the number of plan folders in the plan root, driven against a real
   temporary repository with a known number of folders (so the assertion is
   about a count, not about wording).
 
-- [ ] ⬜ **Task 1.2**: GREEN — count the root plan folders in `mkplan.bash` and
+- [x] ✅ **Task 1.2**: GREEN — count the root plan folders in `mkplan.bash` and
   print the number with the reminder.
 
-- [ ] ⬜ **Task 1.3**: `plan_number_helper.get_claude_md()` carries the
+- [x] ✅ **Task 1.3**: `plan_number_helper.get_claude_md()` carries the
   reconciliation rule, with a test that it names both the sentence the agent
   must emit and what to do when it disagrees.
 
 ### Phase 2: instructions the agent can actually follow
 
-- [ ] ⬜ **Task 2.1**: RED — a test over every shipped agent template: a
+- [x] ✅ **Task 2.1**: RED — a test over every shipped agent template: a
   ```` ```bash ```` fence in the body requires `Bash` in the frontmatter `tools:`
   line. It fails on the dedupe scout today and passes on docs-qa, which is the
   control.
 
-- [ ] ⬜ **Task 2.2**: GREEN — rewrite step 3b in Grep-tool terms, bump the
+- [x] ✅ **Task 2.2**: GREEN — rewrite step 3b in Grep-tool terms, bump the
   template's version marker and its `AgentAssetSpec`, ledger the outgoing md5
   as a historic revision, and redeploy the copy under `.claude/agents/`.
 
 ## Success Criteria
 
-- [ ] ⬜ Every new test is observed RED against the pre-fix code and GREEN
+- [x] ✅ Every new test is observed RED against the pre-fix code and GREEN
   after, with the docs-qa control green in both directions.
-- [ ] ⬜ `llm_qa.py all` passes.
-- [ ] ⬜ A release note lands in
+- [x] ✅ `llm_qa.py all` passes (34/35, then 35/35 after `llm_qa format`).
+- [x] ✅ A release note lands in
   `CLAUDE/UPGRADES/UNRELEASED/release-notes/`, because both the agent template
   and the scaffolder are client-facing.
-- [ ] ⬜ N13 in ledger 00422 records the outcome, and its Phase 4 task is
+- [x] ✅ N13 in ledger 00422 records the outcome, and its Phase 4 task is
   ticked.
 
 ## Delivery & Milestones

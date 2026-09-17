@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00434: dedupe scout count checked externally](00434-dedupe-scout-count-checked-externally/PLAN.md) - Not Started (from 00422 N13: the dedupe scout's plan count can only be audited by the agent that miscounted it, so the caller states the number instead; and step 3b instructs a shell grep the agent has no Bash tool to run)
-
 - [00428: auto compact window audit check](00428-auto-compact-window-audit-check/PLAN.md) - Not Started, BLOCKED ON THE OWNER (from issue #46: a seventh `optimal_config_checker` check for `CLAUDE_CODE_AUTO_COMPACT_WINDOW`; the gap is real but the spec was retracted and replaced by one inferred from a compiled CLI, which triage could not verify)
 
 - [00422: niggles ledger fifteen](00422-niggles-ledger-fifteen/PLAN.md) - In Progress, the OPEN ledger (opens with four entries inherited from 00419 — N8/N11/N12/N13 — because an unresolved entry left inside an archived ledger is indistinguishable from a resolved one; three of them are one class in three costumes: a guard right about the state it judges and wrong about the moment it judges it)
@@ -149,6 +147,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00434: dedupe scout count checked externally](Completed/00434-dedupe-scout-count-checked-externally/PLAN.md) - Complete at `e4429677` + `408cc759` + the archiving commit (from 00422 N13: the scout's `Checked N live plans.` could only be reconciled against the enumeration that went wrong, so `mkplan.bash` states the count instead; its step 3b also named a shell grep it has no Bash tool to run)
+
 - [00433: setup worktree refuses to nest](Completed/00433-setup-worktree-refuses-to-nest/PLAN.md) - Complete at `ba7192b9` + the archiving commit (from 00422 N9: an agent already isolated in a worktree ran the copy of the setup script sitting right there, nesting a second one under it)
 
 - [00432: scoped qa scan overwrites repo artefact](Completed/00432-scoped-qa-scan-overwrites-repo-artefact/PLAN.md) - Complete at the delivery-and-archiving commit (from 00422 N10: seven checkers wrote this repository's published artefact even when pointed elsewhere, so a full run left three of them describing a pytest fixture)
@@ -207,8 +207,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00393: niggles ledger seven](Completed/00393-niggles-ledger-seven/PLAN.md) - Complete at `a83593eb`…`ed00e582` + the archiving commit (two entries: N1 graduated to Plan 00394 — the failsafe cron has no session-start coverage; N2 fixed — CI on `main` cancelled its own runs, so 13 of 20 runs died and the release gate's evidence with them)
 
-- [00392: niggles ledger six](Completed/00392-niggles-ledger-six/PLAN.md) - Complete at `c7c3126c`…`836164e9` + the archiving commit (one entry, graduated not fixed: the `issue-sdlc` cron has no stand-down mechanism at all, and it turned out to be the SAME mechanism as Plan 00388 rather than a sibling — suppression keys on the literal `FAILSAFE RECOVERY CHECK`)
-
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -262,15 +260,15 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 434 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 381 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 382 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 30 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 29 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
 - **Cancelled/Abandoned**: 13 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00108 superseded by 00117, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213, 00135 superseded by the supervisor workstream)
 
-- **Folder-to-number reconciliation**: 30 + 381 + 13 = **424 folders**, spanning
+- **Folder-to-number reconciliation**: 29 + 382 + 13 = **424 folders**, spanning
   **421 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names

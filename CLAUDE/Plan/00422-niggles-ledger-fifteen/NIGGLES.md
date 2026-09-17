@@ -1051,3 +1051,21 @@ something other than the agent's own honesty — the caller enumerating the
 folders itself and comparing, or the dispatch carrying the expected count so a
 mismatch is loud. Asking a miscounting reader to check its own count is the
 vacuous guard one level up. Rewrite step 3b in tool terms while there.
+
+**REMEDIED by Plan 00434**, and the dispatch that filed that plan demonstrated
+the defect a third time while the plan was being written. The scout reported
+`Checked 30 live plans.` — a number that was wrong at dispatch (29 folders) and
+right on arrival (30), because 00434's own folder was created mid-run. No
+reader of that report can tell those apart, which is the argument for a
+caller-stated number and against any amount of better self-auditing.
+
+`mkplan.bash` now prints the root plan-folder count beside the reminder to
+dispatch the scout, names the `Checked N live plans.` sentence to compare it
+with, and says to re-dispatch on a mismatch; `plan_number_helper`'s guidance
+carries the same rule for a caller who never runs the scaffolder. Step 3b is
+written in Grep-tool terms, and the agent is v1.2.0.
+
+**The step 3b fix shipped as a general guard rather than a one-file edit.** A
+shell fence in any shipped agent whose frontmatter does not declare `Bash` now
+fails a test — observed RED on the scout and green on `hooks-daemon-docs-qa`,
+which declares Bash and carries a fence, so the check is not passing vacuously.
