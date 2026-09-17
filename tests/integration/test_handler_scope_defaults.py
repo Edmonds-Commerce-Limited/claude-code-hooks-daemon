@@ -97,11 +97,7 @@ def router() -> EventRouter:
 
 
 def _registered(router: EventRouter) -> list[tuple[EventType, object]]:
-    return [
-        (event, handler)
-        for event in EventType
-        for handler in router.get_chain(event).handlers
-    ]
+    return [(event, handler) for event in EventType for handler in router.get_chain(event).handlers]
 
 
 class TestTheFixtureActuallyLoadsHandlers:
@@ -110,9 +106,7 @@ class TestTheFixtureActuallyLoadsHandlers:
     def test_a_realistic_number_of_handlers_is_registered(self, router: EventRouter) -> None:
         assert len(_registered(router)) > 100
 
-    def test_each_expected_scoped_handler_is_actually_registered(
-        self, router: EventRouter
-    ) -> None:
+    def test_each_expected_scoped_handler_is_actually_registered(self, router: EventRouter) -> None:
         names = {handler.name for _, handler in _registered(router)}
         assert _EXPECTED_SCOPED <= names, _EXPECTED_SCOPED - names
 
