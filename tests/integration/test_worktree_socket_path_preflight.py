@@ -23,6 +23,11 @@ no venv, that it still ACCEPTS a short one there (or a guard that merely always
 blocks would pass the first), that the limit it reports is the daemon's own
 constant, and that it still fails open when the measurement is genuinely
 unavailable.
+
+The second half of this module covers the script's OTHER pre-flight, which
+refuses to create a worktree from inside one (Plan 00422 N9, Plan 00433). The
+two live here together because they guard the same script against two halves of
+the same incident: the nesting is what made the path long enough to matter.
 """
 
 from __future__ import annotations
@@ -219,6 +224,19 @@ class TestTheSetupScriptRefusesToNestAWorktreeInsideAWorktree:
             f"the refusal did not name {main}, so the reader still has to work "
             f"out where to run it instead.\nstdout:\n{result.stdout}"
         )
+
+    def test_the_rerun_command_carries_no_empty_argument(self, tmp_path: Path) -> None:
+        """The line is meant to be copied, so it must be runnable as printed."""
+        _main, linked = _repo_with_a_linked_worktree(tmp_path)
+
+        result = _run_nesting_guard(linked)
+
+        rerun = next(
+            line
+            for line in result.stdout.splitlines()
+            if "setup_worktree.sh" in line and "cd " in line
+        )
+        assert rerun == rerun.rstrip(), f"trailing separator in the copyable line: {rerun!r}"
 
     def test_a_normal_checkout_is_allowed_through(self, tmp_path: Path) -> None:
         """Control: a guard that refused everywhere would pass the tests above.

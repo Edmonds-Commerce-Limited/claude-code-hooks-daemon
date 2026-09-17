@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00390: niggles ledger five](00390-niggles-ledger-five/PLAN.md) - Complete at `7e0756af`…`915f168b` + the archiving commit (two entries, both fixed: `normalize_path` let MARKER-LIST order pick a path's root instead of position, and the generated CLAUDE.md announced an inert handler's rule as project policy — which is what left 00386/00389 sitting open on a gate that was switched off)
+
 - [00389: git pull reconciles daemon config and version](00389-git-pull-reconciles-daemon-config-and-version/PLAN.md) - Complete at `263c18f2`…`fece90e2` + the archiving commit (a pull brought in daemon config, handler code or a new version and the running daemon never noticed; advisory only by owner ruling, and it sees an in-session pull only)
 
 - [00387: issue sdlc runbook refinements from the first backlog sweep](00387-issue-sdlc-runbook-refinements-from-the-first-backlog-sweep/PLAN.md) - Complete at `377456ac`…`f7fe8e7b` + the archiving commit (a whole-backlog sweep showed three of four untriaged issues were already fixed, so the loop's real output is a closed issue carrying evidence — two new triage checks, a concrete stale-`agent-working` recovery path, and reading a CI run rather than the watcher)

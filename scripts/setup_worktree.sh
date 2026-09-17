@@ -149,7 +149,14 @@ preflight_not_nested() {
     echo "  whichever daemon that tree resolves."
     echo ""
     echo "  Run it in the enclosing checkout instead:"
-    echo "    cd ${enclosing} && ./scripts/setup_worktree.sh ${BRANCH_NAME} ${BASE_BRANCH:-}"
+    # The base branch is appended only when there is one: this line is meant to
+    # be copied, and a trailing argument separator invites an empty second
+    # argument the script would then have to interpret.
+    local rerun="cd ${enclosing} && ./scripts/setup_worktree.sh ${BRANCH_NAME}"
+    if [[ -n "${BASE_BRANCH:-}" ]]; then
+        rerun="${rerun} ${BASE_BRANCH}"
+    fi
+    echo "    ${rerun}"
     echo ""
     echo "  If you were dispatched with isolation: worktree, you already have an"
     echo "  isolated checkout — this one — and need no second."
