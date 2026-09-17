@@ -52,7 +52,8 @@ import yaml
 
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 _QA_OUTPUT_DIR: Final[Path] = _REPO_ROOT / "untracked" / "qa"
-_OUTPUT_FILE: Final[Path] = _QA_OUTPUT_DIR / "dangerous_invocation_corpus.json"
+_ARTEFACT_NAME: Final[str] = "dangerous_invocation_corpus.json"
+_OUTPUT_FILE: Final[Path] = _QA_OUTPUT_DIR / _ARTEFACT_NAME
 _DEFAULT_CORPUS: Final[Path] = _REPO_ROOT / "scripts" / "qa" / "dangerous-invocation-corpus.yaml"
 
 _RULE: Final[str] = "dangerous-invocation-corpus"
@@ -282,8 +283,16 @@ def main() -> int:
     }
 
     if json_mode:
-        _QA_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-        _OUTPUT_FILE.write_text(json.dumps(output, indent=2))
+        # This check's verdict is ABOUT the corpus it was given, so a run
+        # against another corpus establishes nothing about the one the
+        # repository artefact is read as describing — and llm_qa publishes that
+        # artefact as this check's evidence. Report beside the corpus that was
+        # actually checked (Plan 00432).
+        output_file = (
+            corpus_path.parent / _ARTEFACT_NAME if corpus_path != _DEFAULT_CORPUS else _OUTPUT_FILE
+        )
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.write_text(json.dumps(output, indent=2))
 
     if violations:
         print(

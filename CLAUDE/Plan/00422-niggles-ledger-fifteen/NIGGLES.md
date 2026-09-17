@@ -776,12 +776,24 @@ rather than assuming it here.
 Not owner-gated: this is a test-isolation defect in this project's own QA
 tooling.
 
-**REMEDIED by Plan 00432**, and the scope check earned its keep. The inventory
-this entry asked for found **seven** affected checkers, not three: the four it
-did not name are `check_github_urls.py`, `check_security_downgrade_flags.py`,
+**REMEDIED by Plan 00432**, and the scope check earned its keep twice. The
+inventory this entry asked for found **ten** affected checkers, not three.
+
+Seven take a scan-target override; the four this entry did not name are
+`check_github_urls.py`, `check_security_downgrade_flags.py`,
 `check_eacces_safe_predicates.py` and `check_authored_path_stat.py`. They go
 unnoticed for the ordinary reason — no test happens to point them elsewhere
 today, so the shape is latent rather than firing.
+
+Three more take an override naming an INPUT FILE (`--inventory`, `--corpus`,
+`--registry`). I set those aside first as "no scanned directory to report
+beside", which was a statement about the FIX shape wearing the clothes of a
+statement about the defect. Two of the three still sweep this repository, so the
+override changes the DECLARATIONS the sweep is graded against — and "clean
+against our registry" is not the fact "clean against a substitute" establishes.
+They report beside the file they were pointed at. **The near-miss is the part
+worth keeping**: a scope boundary drawn from what was convenient to fix is
+indistinguishable, on the page, from one drawn from what is actually affected.
 
 The fix is not remedy (1). `check_sensitive_content.py` had already solved this
 for itself, with the reasoning written at its own write site, so the repository

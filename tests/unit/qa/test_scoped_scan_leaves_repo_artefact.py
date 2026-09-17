@@ -19,11 +19,16 @@ which is not the question the repository artefact answers, so it reports beside
 what it scanned. This module pins that boundary for every checker that takes a
 scan-target override (Plan 00422 N10, Plan 00432).
 
-The set below was taken by measurement, not from the original report, which
-named three. Four more share the shape. Checkers whose override names an INPUT
-file rather than a directory to scan (``--inventory``, ``--corpus``,
-``--registry``) are deliberately out: there is no scanned directory to report
-beside.
+The sets below were taken by measurement, not from the original report, which
+named three. Seven more share the shape, in two flavours.
+
+A checker whose override names an INPUT FILE (``--inventory``, ``--corpus``,
+``--registry``) has no scanned directory to report beside, but it has the same
+defect: two of the three still sweep this repository, so the override changes
+the DECLARATIONS it is graded against, and "clean against our registry" is not
+the fact "clean against someone else's" establishes. The third grades only the
+corpus it was handed. All three reported into the repository artefact anyway, so
+they report beside the file they were pointed at instead.
 """
 
 from __future__ import annotations
@@ -119,10 +124,91 @@ class TestAScopedScanReportsBesideWhatItScanned:
         assert json.loads(scoped.read_text(encoding="utf-8")), scoped.read_text(encoding="utf-8")
 
 
+@dataclass(frozen=True)
+class InputFileChecker:
+    """One checker whose override names a FILE it is graded against."""
+
+    script: str
+    flag: str
+    artefact: str
+    default_input: str
+
+
+_INPUT_FILE_CHECKERS: Final[tuple[InputFileChecker, ...]] = (
+    InputFileChecker(
+        "check_fail_open_inventory.py",
+        "--inventory",
+        "fail_open_inventory.json",
+        "fail-open-boundaries.yaml",
+    ),
+    InputFileChecker(
+        "check_dangerous_invocation_corpus.py",
+        "--corpus",
+        "dangerous_invocation_corpus.json",
+        "dangerous-invocation-corpus.yaml",
+    ),
+    InputFileChecker(
+        "check_declared_invariant_pairs.py",
+        "--registry",
+        "declared_invariant_pairs.json",
+        "declared-invariant-pairs.yaml",
+    ),
+)
+
+
+@pytest.mark.parametrize("checker", _INPUT_FILE_CHECKERS, ids=lambda c: c.script)
+class TestAnAlternativeInputFileReportsBesideThatFile:
+    def test_the_repository_artefact_is_untouched(
+        self, checker: InputFileChecker, tmp_path: Path
+    ) -> None:
+        repo_artefact = _ARTEFACT_DIR / checker.artefact
+        before = repo_artefact.read_bytes() if repo_artefact.exists() else None
+
+        substitute = tmp_path / checker.default_input
+        substitute.write_text(
+            (_QA_DIR / checker.default_input).read_text(encoding="utf-8"), encoding="utf-8"
+        )
+        result = subprocess.run(  # nosec B603 - fixed argv from a repo-internal table
+            [
+                sys.executable,
+                str(_QA_DIR / checker.script),
+                "--json",
+                checker.flag,
+                str(substitute),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            cwd=_REPO_ROOT,
+        )
+
+        after = repo_artefact.read_bytes() if repo_artefact.exists() else None
+        assert after == before, (
+            f"{checker.script} graded against {substitute} overwrote "
+            f"{repo_artefact}, which llm_qa publishes as this check's evidence "
+            f"for the declarations THIS repository ships.\n"
+            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
+        assert (tmp_path / checker.artefact).is_file(), (
+            f"no scoped artefact at {tmp_path / checker.artefact}; the caller "
+            f"passed --json and must be able to read its own result.\n"
+            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
+
+    def test_the_default_input_it_names_still_exists(self, checker: InputFileChecker) -> None:
+        """Control: the substitute above is a COPY of the real declarations.
+
+        A renamed default would make the copy step fail loudly rather than
+        quietly grade an empty file and pass.
+        """
+        assert (_QA_DIR / checker.default_input).is_file()
+
+
 class TestTheInventoryItself:
     def test_every_named_script_exists(self) -> None:
         """Control: a renamed checker would silently drop out of the sweep."""
-        missing = [c.script for c in _CHECKERS if not (_QA_DIR / c.script).is_file()]
+        named = [c.script for c in _CHECKERS] + [c.script for c in _INPUT_FILE_CHECKERS]
+        missing = [script for script in named if not (_QA_DIR / script).is_file()]
         assert not missing, f"named in this guard but absent from {_QA_DIR}: {missing}"
 
     def test_each_checker_still_accepts_its_override_flag(self) -> None:

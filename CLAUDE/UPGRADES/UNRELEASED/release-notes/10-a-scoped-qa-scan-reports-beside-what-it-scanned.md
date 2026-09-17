@@ -20,10 +20,19 @@ you got depended on the order things happened to run in.
 `check_python_var_guidance.py`, `check_github_urls.py`,
 `check_security_downgrade_flags.py`, `check_eacces_safe_predicates.py` and
 `check_authored_path_stat.py` now write their verdict beside what they scanned,
-exactly as `check_sensitive_content.py` already did. An unscoped run — which is
-every run `llm_qa` itself makes — is unchanged and still writes
-`untracked/qa/<check>.json`.
+exactly as `check_sensitive_content.py` already did.
 
-If you script one of these checkers with a scan-target override and read its
-JSON afterwards, read it from the scanned directory rather than from
-`untracked/qa/`.
+Three more take an override that names an input FILE rather than a directory —
+`check_fail_open_inventory.py` (`--inventory`),
+`check_dangerous_invocation_corpus.py` (`--corpus`) and
+`check_declared_invariant_pairs.py` (`--registry`). Two of those still sweep the
+repository, so the override changes the DECLARATIONS the sweep is graded
+against, and "clean against your registry" is not the fact "clean against a
+substitute" establishes. They report beside the file they were pointed at.
+
+An unscoped run — which is every run `llm_qa` itself makes — is unchanged and
+still writes `untracked/qa/<check>.json`.
+
+If you script any of these ten with an override and read its JSON afterwards,
+read it from the scanned directory (or the input file's directory) rather than
+from `untracked/qa/`.

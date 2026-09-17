@@ -34,9 +34,8 @@ rather than inventing a second convention for the same problem (Plan 00422 N10).
 
 ## Goals
 
-- A scoped run of `check_git_history.py` (`--repo`),
-  `check_skill_references.py` (`--path`) and `check_python_var_guidance.py`
-  (`--path`) leaves the repository artefact byte-identical.
+- A run of any checker given an override — a scan target or an input file it is
+  graded against — leaves the repository artefact byte-identical.
 - A scoped run still writes its verdict somewhere the caller can read — beside
   what was scanned, as `check_sensitive_content.py` does.
 - Each of the three carries the guard test that would catch the regression, so
@@ -90,13 +89,29 @@ directory-scoped answer, which is the confusion this plan exists to end.
   | `check_eacces_safe_predicates.py`   | `--path` |
   | `check_authored_path_stat.py`       | `--path` |
 
-  Not affected, and why: eight already resolve an `output_dir` from their
-  `--root` (`repo_hygiene`, `input_contract`, `project_handler_tests`,
-  `hook_contract`, `handler_reference`, `doc_truth`, `doc_snippets`,
-  `british_english`); `sensitive_content` is the precedent this plan follows;
-  and three take an override that names an INPUT FILE rather than a directory
-  to scan (`--inventory`, `--corpus`, `--registry`), so there is no scanned
-  directory to report beside.
+  Not affected: eight already resolve an `output_dir` from their `--root`
+  (`repo_hygiene`, `input_contract`, `project_handler_tests`, `hook_contract`,
+  `handler_reference`, `doc_truth`, `doc_snippets`, `british_english`), and
+  `sensitive_content` is the precedent this plan follows.
+
+- [x] ✅ **Task 1.2**: The three input-file overrides, first excluded and then
+  covered.
+
+  `check_fail_open_inventory.py` (`--inventory`),
+  `check_dangerous_invocation_corpus.py` (`--corpus`) and
+  `check_declared_invariant_pairs.py` (`--registry`) were first set aside as
+  "no scanned directory to report beside". That was a statement about the FIX
+  shape, not about the defect, and it was wrong to stop there: all three wrote
+  the repository artefact unconditionally, and two of them still sweep this
+  repository — so the override changes the DECLARATIONS the sweep is graded
+  against, and "clean against our registry" is not the fact "clean against a
+  substitute" establishes. The third grades only the corpus it was handed, so
+  its verdict is not about this repository at all.
+
+  All three now report beside the file they were pointed at. RED confirmed the
+  same way as the other seven: the pre-fix versions were restored in place and
+  the three behaviour tests failed against them, with their three controls
+  passing.
 
 ### Phase 2: RED
 

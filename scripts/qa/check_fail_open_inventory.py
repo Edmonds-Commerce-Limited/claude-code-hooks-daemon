@@ -55,7 +55,8 @@ from claude_code_hooks_daemon.utils.path_predicates import TextOrReason, read_te
 
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 _QA_OUTPUT_DIR: Final[Path] = _REPO_ROOT / "untracked" / "qa"
-_OUTPUT_FILE: Final[Path] = _QA_OUTPUT_DIR / "fail_open_inventory.json"
+_ARTEFACT_NAME: Final[str] = "fail_open_inventory.json"
+_OUTPUT_FILE: Final[Path] = _QA_OUTPUT_DIR / _ARTEFACT_NAME
 _DEFAULT_INVENTORY: Final[Path] = _REPO_ROOT / "scripts" / "qa" / "fail-open-boundaries.yaml"
 
 _RULE: Final[str] = "fail-open-inventory"
@@ -409,8 +410,18 @@ def main() -> int:
     }
 
     if json_mode:
-        _QA_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-        _OUTPUT_FILE.write_text(json.dumps(output, indent=2))
+        # Graded against a DIFFERENT inventory, the verdict is not the one the
+        # repository artefact claims to hold — "clean against our declarations"
+        # and "clean against someone else's" are different facts, and llm_qa
+        # publishes that artefact as this check's evidence. A run given another
+        # inventory reports beside THAT file (Plan 00432).
+        output_file = (
+            inventory_path.parent / _ARTEFACT_NAME
+            if inventory_path != _DEFAULT_INVENTORY
+            else _OUTPUT_FILE
+        )
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.write_text(json.dumps(output, indent=2))
 
     if violations:
         print(

@@ -61,7 +61,8 @@ import yaml
 
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 _QA_OUTPUT_DIR: Final[Path] = _REPO_ROOT / "untracked" / "qa"
-_OUTPUT_FILE: Final[Path] = _QA_OUTPUT_DIR / "declared_invariant_pairs.json"
+_ARTEFACT_NAME: Final[str] = "declared_invariant_pairs.json"
+_OUTPUT_FILE: Final[Path] = _QA_OUTPUT_DIR / _ARTEFACT_NAME
 _DEFAULT_REGISTRY: Final[Path] = _REPO_ROOT / "scripts" / "qa" / "declared-invariant-pairs.yaml"
 
 _RULE: Final[str] = "declared-invariant-pairs"
@@ -608,8 +609,18 @@ def main() -> int:
     }
 
     if json_mode:
-        _QA_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-        _OUTPUT_FILE.write_text(json.dumps(output, indent=2))
+        # Graded against a DIFFERENT registry, the verdict is not the one the
+        # repository artefact claims to hold — "clean against our declarations"
+        # and "clean against someone else's" are different facts, and llm_qa
+        # publishes that artefact as this check's evidence. A run given another
+        # registry reports beside THAT file (Plan 00432).
+        output_file = (
+            registry_path.parent / _ARTEFACT_NAME
+            if registry_path != _DEFAULT_REGISTRY
+            else _OUTPUT_FILE
+        )
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.write_text(json.dumps(output, indent=2))
 
     if violations:
         print(f"Found {len(violations)} declared invariant pair(s) that do not hold:")
