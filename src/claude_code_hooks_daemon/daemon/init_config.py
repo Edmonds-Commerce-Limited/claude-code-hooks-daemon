@@ -161,6 +161,10 @@ class ConfigTemplate:
             # `gh issue create` against THIS daemon's repo is judged -- a
             # project's own issues, and every comment/list/view, are untouched.
             "    issue_filing_gate: {enabled: true, priority: 14}  # Upstream issue bodies must come from the generator\n"
+            # Plan 00423: a session cron belongs to the session that declared it,
+            # and a subagent cannot know why it exists. SUB-scoped, so the main
+            # thread's own CronDelete is untouched.
+            "    subagent_cron_delete_blocker: {enabled: true, priority: 14}  # A subagent deletes no session cron\n"
             # Plan 00272: protected files (vault passwords, *.secret*, SSH keys)
             # must never have their CONTENTS read into context by any route.
             # Presence/metadata stay available via `hooks-daemon secret-meta`.
