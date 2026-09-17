@@ -5079,7 +5079,30 @@ def _is_nested_git_repo_root(directory: Path) -> bool:
     return git_marker.is_dir() or git_marker.is_file()
 
 
-def _iter_markdown_candidates(root: Path, exclude_paths: Sequence[str] | None) -> Iterator[Path]:
+def _enclosing_project_root(start: Path) -> Path:
+    """The nearest enclosing directory holding a daemon config, else ``start``.
+
+    ``daemon.exclude_paths`` are declared RELATIVE TO A PROJECT ROOT, so they
+    can only be applied against one. Reading the config at the walk root works
+    for ``format-markdown .`` and silently applies NO exclusions for
+    ``format-markdown <subdir>`` — a filter that quietly matches nothing, which
+    is the shape of the defect Plan 00429 exists to fix, reintroduced one level
+    down.
+
+    Walking UP is also what makes an arbitrary target correct rather than
+    merely tolerated: pointing this command at another project uses THAT
+    project's declaration, not the caller's. The sibling docs-qa and plan-qa
+    CLIs resolve a project root before loading config for the same reason.
+    """
+    for directory in (start, *start.parents):
+        if (directory / ".claude" / "hooks-daemon.yaml").is_file():
+            return directory
+    return start
+
+
+def _iter_markdown_candidates(
+    root: Path, exclude_paths: Sequence[str] | None, project_root: Path
+) -> Iterator[Path]:
     """Yield markdown files below ``root``, in directory-walk order.
 
     Two independent filters apply here (Plan 00429), and only to this
@@ -5091,11 +5114,14 @@ def _iter_markdown_candidates(root: Path, exclude_paths: Sequence[str] | None) -
       boundary, so ``format-markdown .`` on an ordinary project is
       unchanged.
     - ``daemon.exclude_paths`` is honoured per file, the same mechanism the
-      docs-qa and plan-qa CLIs already use via ``is_path_excluded``.
+      docs-qa and plan-qa CLIs already use via ``is_path_excluded``. Patterns
+      resolve against ``project_root``, NOT against ``root`` — they are
+      declared relative to the project, so a walk root below it must still
+      match them (see ``_enclosing_project_root``).
     """
     from claude_code_hooks_daemon.utils.path_exclusion import is_path_excluded
 
-    root_str = str(root)
+    project_root_str = str(project_root)
     for dirpath, dirnames, filenames in os.walk(root):
         current = Path(dirpath)
         dirnames[:] = sorted(
@@ -5105,7 +5131,7 @@ def _iter_markdown_candidates(root: Path, exclude_paths: Sequence[str] | None) -
             candidate = current / filename
             if not candidate.name.lower().endswith(_MARKDOWN_EXTENSIONS):
                 continue
-            if is_path_excluded(str(candidate), exclude_paths, project_root=root_str):
+            if is_path_excluded(str(candidate), exclude_paths, project_root=project_root_str):
                 continue
             yield candidate
 
@@ -5182,12 +5208,13 @@ def cmd_format_markdown(args: argparse.Namespace) -> int:
     # names directly, handled in the branch above.
     from claude_code_hooks_daemon.config.models import Config
 
-    config = Config.load_or_default(path / ".claude" / "hooks-daemon.yaml")
+    project_root = _enclosing_project_root(path)
+    config = Config.load_or_default(project_root / ".claude" / "hooks-daemon.yaml")
     exclude_paths = config.daemon.exclude_paths
 
     any_changed = False
     any_errored = False
-    for candidate in _iter_markdown_candidates(path, exclude_paths):
+    for candidate in _iter_markdown_candidates(path, exclude_paths, project_root):
         changed, errored = _format_single_markdown_file(candidate, check)
         if errored:
             any_errored = True

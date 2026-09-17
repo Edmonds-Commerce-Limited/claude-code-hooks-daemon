@@ -325,6 +325,40 @@ class TestCmdFormatMarkdownExcludePaths:
         assert result == 0
         assert _ALIGNED_MARKER not in excluded_file.read_text()
 
+    def test_exclusions_apply_when_the_walk_root_is_below_the_project_root(
+        self, tmp_path: Path
+    ) -> None:
+        """The config is the PROJECT's, not whatever sits at the walk root.
+
+        `format-markdown <subdir>` is an ordinary invocation, and the project's
+        declared exclusions still govern its own tree. Looking for the config
+        AT the walk root finds nothing there and silently applies no exclusions
+        at all — a filter that quietly matches nothing, which is the exact
+        shape of the defect this plan exists to fix.
+
+        The sibling CLIs (docs-qa, plan-qa) resolve a project root first and
+        load the config from there; this pins that this one agrees with them.
+        """
+        self._write_config(tmp_path, ["sub/skipme/**"])
+
+        sub = tmp_path / "sub"
+        skipme = sub / "skipme"
+        skipme.mkdir(parents=True)
+
+        # Vacuity guard: a reachable file under the SAME walk root is still
+        # formatted, so this cannot pass by the walk finding nothing.
+        reachable = sub / "keep.md"
+        reachable.write_text(_UNALIGNED_TABLE)
+        excluded_file = skipme / "x.md"
+        excluded_file.write_text(_UNALIGNED_TABLE)
+
+        args = argparse.Namespace(path=sub, check=False)
+        result = cmd_format_markdown(args)
+
+        assert result == 0
+        assert _ALIGNED_MARKER in reachable.read_text()
+        assert _ALIGNED_MARKER not in excluded_file.read_text()
+
     def test_file_argument_named_directly_is_formatted_even_if_excluded(
         self, tmp_path: Path
     ) -> None:
