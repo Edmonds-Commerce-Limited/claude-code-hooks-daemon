@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00383: transport toggle trusts config over deployed state](00383-transport-toggle-trusts-config-over-deployed-state/PLAN.md) - Complete at `3a58ce16`…`3292cd09` + the archiving commit (`transport on`/`off` decided "already — nothing to do" from the config alone and never read the deployed forwarders, so a project whose config said the relay was off while its forwarders still carried the hot path was told so, exit 0)
+
 - [00382: push force guard misreads flag boundaries](00382-push-force-guard-misreads-flag-boundaries/PLAN.md) - Complete at `0edece84` + the archiving commit (GitHub #37 reported a branch named `...-f-...` denied as a force push; reproducing it exposed the opposite defect the reporter could not see — grouped short flags `-uf`/`-fu`/`-nf` are real force pushes that no release ever blocked. Long and short options now get separate rules: 14 cases, 6 wrong before, 0 after)
 
 - [00381: niggles ledger three](00381-niggles-ledger-three/PLAN.md) - Complete + the archiving commit (one entry, graduated rather than fixed in place: a test class that could not pass alone turned out to be reporting a product defect, which became Plan 00383. The NEXT niggle opens ledger four; SOP in `CLAUDE/PlanWorkflow.md`)

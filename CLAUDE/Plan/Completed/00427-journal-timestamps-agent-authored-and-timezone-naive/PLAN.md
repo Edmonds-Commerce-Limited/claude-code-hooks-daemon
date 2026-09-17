@@ -1,6 +1,6 @@
 # Plan 00427: journal timestamps agent authored and timezone naive
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-17
 **Owner**: dev
 **Priority**: Medium
@@ -276,6 +276,12 @@ deterministic for a whole class of hosts, and it fires on correct data.
 
 - [x] ✅ The existing 2207 entries have a stated interpretation: they are
   legacy, untouched, and the ABSENCE of a sentinel is what says so.
+
+- [x] ✅ Every release-bound consequence is in the pending-release holding area:
+  `UNRELEASED/release-notes/04-mkplan-journal-flag-stamps-utc-timestamps.md`
+  (the scaffolder), `UNRELEASED/release-notes/05-journal-future-dated-check-follows-the-dayfile-clock.md`
+  (the Phase 3 clock change) and `UNRELEASED/truth-changes/v3.66.0.yaml` (the
+  grammar rule a client's own docs may still assert).
 
 ## Delivery & Milestones
 
