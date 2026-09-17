@@ -69,34 +69,34 @@ rules it cannot see — and reads as a complete answer.
 
 ### Phase 1: reproduce and fix
 
-- [ ] ⬜ **Task 1.1**: RED test first — assert that a `block-report` run
+- [x] ✅ **Task 1.1**: RED test first — assert that a `block-report` run
   attributes a deny whose rule belongs to a ProjectContext-reading handler. It
   must fail before the fix, with the failure quoted.
-- [ ] ⬜ **Task 1.2**: Initialise `ProjectContext` in `cmd_block_report` before
+- [x] ✅ **Task 1.2**: Initialise `ProjectContext` in `cmd_block_report` before
   analysis, reusing `_init_project_context_for_explain` rather than writing a
   second initialisation path. If its name no longer fits its callers, rename it
   in the same change.
-- [ ] ⬜ **Task 1.3**: Decide and pin what happens when no config file can be
+- [x] ✅ **Task 1.3**: Decide and pin what happens when no config file can be
   found. The helper returns quietly; `block-report` must still produce a
   report, degraded exactly as it does today rather than erroring. A test names
   this.
-- [ ] ⬜ **Task 1.4**: Confirm the index is not memoised in a partial state
+- [x] ✅ **Task 1.4**: Confirm the index is not memoised in a partial state
   earlier in the same process. `_rule_id_to_config_key` guards this by
   construction, but it is one `lru_cache` away from a wrong answer no test
   would notice, so assert it rather than reading it.
 
 ### Phase 2: prove and ship
 
-- [ ] ⬜ **Task 2.1**: Full QA in the worktree; read `QA_EXIT` on its own line.
-- [ ] ⬜ **Task 2.2**: Release note — a report that silently understated some
+- [x] ✅ **Task 2.1**: Full QA in the worktree; read `QA_EXIT` on its own line.
+- [x] ✅ **Task 2.2**: Release note — a report that silently understated some
   handlers is user-visible.
 
 ## Success Criteria
 
-- [ ] A `block-report` run on this repository emits zero
+- [x] A `block-report` run on this repository emits zero
   `Failed to inspect handler` lines and attributes strictly more denies than
   before, with both numbers recorded.
-- [ ] Every release-bound consequence is in the pending-release holding area.
+- [x] Every release-bound consequence is in the pending-release holding area.
 - [ ] #48 carries a closing comment saying what was wrong, what changed, how it
   was verified, and anything found that the reporter did not report.
 
