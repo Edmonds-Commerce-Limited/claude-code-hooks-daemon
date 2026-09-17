@@ -842,3 +842,41 @@ gates — and only the second one is worth a plan.
    failure.
 
 Remedy (2). The lint fix is not the deliverable; knowing why nobody saw it is.
+
+### N13 — the plan-dedupe scout cleared a plan tree it never read
+
+Dispatched `hooks-daemon-plan-dedupe-scout` before filing Plan 00430. It
+returned: "**Checked 0 live plans.** The plan directory contains no active plan
+folders — only templates and infrastructure files. There are no plans in
+`CLAUDE/Plan/` root and no archived plans in `Completed/` or `Cancelled/`… **No
+existing plan covers this.**"
+
+The tree it was pointed at holds **30** live plan folders, **377** in
+`Completed/` and **13** in `Cancelled/`.
+
+**Why this is worse than a wrong answer.** The verdict it reached — no existing
+plan covers this — happened to be correct, and I only found that out by
+re-running the search by hand. A scout that reads nothing returns "no duplicate
+found" every single time, and that answer is indistinguishable from a real
+clearance. This is the vacuous-guard shape again: N8, N12, the three guards
+this session has already paid for, and now an AGENT rather than a checker. The
+dedupe scout exists precisely because the failure it prevents is silent and
+expensive; one that always says "clear" adds latency and a false assurance.
+
+Note the counts it reported were not "unknown" or "error" — they were **zero**,
+stated with the same confidence as a real reading. Nothing in its report
+distinguished "I looked and found nothing" from "I did not look."
+
+**Candidate remedies:**
+
+1. Give the scout a vacuity guard of its own: it must report the number of plan
+   folders it enumerated, and a run that enumerates zero in a tree that is not
+   empty is an ERROR it reports as such, not a clearance.
+2. Have the caller verify the count before trusting the verdict — cheap, but it
+   makes the scout's answer worthless, since the caller has then done the read.
+3. Investigate why it read nothing first. A tool-permission or path-resolution
+   failure that surfaces as an empty result rather than an error would explain
+   it, and would be the real defect.
+
+Remedy (3), then (1). Fixing the report shape without knowing why it saw an
+empty tree would just make the next silent failure noisier rather than rarer.
