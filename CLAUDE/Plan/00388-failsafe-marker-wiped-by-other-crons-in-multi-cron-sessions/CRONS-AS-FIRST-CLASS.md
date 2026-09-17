@@ -12,7 +12,7 @@ from a measurement, and says what would settle it.
 It reconciles [PLAN.md](PLAN.md), the earlier
 [fable-cron-identity-decision.md](fable-cron-identity-decision.md),
 [00422 N4](../00422-niggles-ledger-fifteen/NIGGLES.md) and
-[00423](../00423-per-handler-scope-main-sub/PLAN.md). Where it disagrees with
+[00423](../Completed/00423-per-handler-scope-main-sub/PLAN.md). Where it disagrees with
 any of them it says so in [Disagreements](#disagreements-with-the-existing-framing).
 
 ## What was measured
