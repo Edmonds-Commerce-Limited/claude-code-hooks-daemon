@@ -1,6 +1,7 @@
 """Tests for the ``format-markdown`` CLI subcommand."""
 
 import argparse
+import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
@@ -18,6 +19,35 @@ _UNALIGNED_TABLE = (
 )
 
 _ALIGNED_MARKER = "| A         |"  # Unaligned source has `| A |`; aligned pads to 9
+
+
+def _git_init_with_commit(repo_root: Path, tracked_file: Path, content: str) -> None:
+    """Create a real nested git repo at ``repo_root`` with one committed file.
+
+    Mirrors the triage reproduction for Plan 00429: a plain ``git init`` plus
+    a commit is enough to make ``git status --short`` a trustworthy oracle for
+    "did format-markdown touch a file it does not own".
+    """
+    repo_root.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", str(repo_root)], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(repo_root), "config", "user.email", "test@example.com"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repo_root), "config", "user.name", "Test"],
+        check=True,
+        capture_output=True,
+    )
+    tracked_file.parent.mkdir(parents=True, exist_ok=True)
+    tracked_file.write_text(content)
+    subprocess.run(["git", "-C", str(repo_root), "add", "."], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(repo_root), "commit", "-m", "initial"],
+        check=True,
+        capture_output=True,
+    )
 
 
 class TestCmdFormatMarkdownSingleFile:
@@ -160,3 +190,190 @@ class TestCmdFormatMarkdownMdformatErrors:
         assert result == 1
         captured = capsys.readouterr()
         assert "kaboom" in captured.err
+
+
+class TestCmdFormatMarkdownRepositoryBoundary:
+    """Plan 00429: a nested git repository below the walk root is untouched."""
+
+    def test_write_mode_does_not_modify_nested_repo(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # Vacuity guard: the project's own file IS still formatted, so a walk
+        # that (wrongly) found nothing at all cannot pass this test silently.
+        own_file = tmp_path / "own.md"
+        own_file.write_text(_UNALIGNED_TABLE)
+
+        vendor_repo = tmp_path / "vendor" / "dep"
+        vendored_doc = vendor_repo / "docs" / "b.md"
+        _git_init_with_commit(vendor_repo, vendored_doc, _UNALIGNED_TABLE)
+
+        args = argparse.Namespace(path=tmp_path, check=False)
+        result = cmd_format_markdown(args)
+
+        assert result == 0
+        assert _ALIGNED_MARKER in own_file.read_text()
+
+        status = subprocess.run(
+            ["git", "-C", str(vendor_repo), "status", "--short"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        assert status.stdout.strip() == ""
+        assert _ALIGNED_MARKER not in vendored_doc.read_text()
+
+        captured = capsys.readouterr()
+        assert "b.md" not in captured.out
+
+    def test_check_mode_does_not_report_nested_repo(self, tmp_path: Path) -> None:
+        own_file = tmp_path / "own.md"
+        own_file.write_text(_UNALIGNED_TABLE)
+
+        vendor_repo = tmp_path / "vendor" / "dep"
+        vendored_doc = vendor_repo / "docs" / "b.md"
+        _git_init_with_commit(vendor_repo, vendored_doc, _UNALIGNED_TABLE)
+
+        args = argparse.Namespace(path=tmp_path, check=True)
+        result = cmd_format_markdown(args)
+
+        # Non-zero because own.md (which the caller DOES own) would change.
+        assert result == 1
+
+        status = subprocess.run(
+            ["git", "-C", str(vendor_repo), "status", "--short"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        assert status.stdout.strip() == ""
+
+    def test_walk_roots_own_repository_is_not_a_boundary(self, tmp_path: Path) -> None:
+        # The walk root's OWN repo must not be treated as a nested boundary --
+        # only a checkout BELOW the root is skipped.
+        subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
+        own_file = tmp_path / "own.md"
+        own_file.write_text(_UNALIGNED_TABLE)
+
+        args = argparse.Namespace(path=tmp_path, check=False)
+        result = cmd_format_markdown(args)
+
+        assert result == 0
+        assert _ALIGNED_MARKER in own_file.read_text()
+
+    def test_worktree_git_file_marks_a_boundary_too(self, tmp_path: Path) -> None:
+        # A worktree's .git is a FILE, not a directory -- must be recognised
+        # as a repository boundary too.
+        nested = tmp_path / "worktree-dep"
+        docs = nested / "docs"
+        docs.mkdir(parents=True)
+        (nested / ".git").write_text("gitdir: /somewhere/else/.git/worktrees/x\n")
+        vendored_doc = docs / "b.md"
+        vendored_doc.write_text(_UNALIGNED_TABLE)
+
+        own_file = tmp_path / "own.md"
+        own_file.write_text(_UNALIGNED_TABLE)
+
+        args = argparse.Namespace(path=tmp_path, check=False)
+        result = cmd_format_markdown(args)
+
+        assert result == 0
+        assert _ALIGNED_MARKER in own_file.read_text()
+        assert _ALIGNED_MARKER not in vendored_doc.read_text()
+
+
+class TestCmdFormatMarkdownExcludePaths:
+    """Plan 00429: the directory walk honours ``daemon.exclude_paths``."""
+
+    def _write_config(self, project_root: Path, exclude_paths: list[str]) -> None:
+        claude_dir = project_root / ".claude"
+        claude_dir.mkdir(parents=True, exist_ok=True)
+        patterns = "\n".join(f"      - '{p}'" for p in exclude_paths)
+        (claude_dir / "hooks-daemon.yaml").write_text(f"daemon:\n  exclude_paths:\n{patterns}\n")
+
+    def test_excluded_directory_is_skipped_in_write_mode(self, tmp_path: Path) -> None:
+        self._write_config(tmp_path, ["excluded/**"])
+
+        # Vacuity guard: a reachable file IS still formatted.
+        reachable = tmp_path / "reachable.md"
+        reachable.write_text(_UNALIGNED_TABLE)
+
+        excluded_dir = tmp_path / "excluded"
+        excluded_dir.mkdir()
+        excluded_file = excluded_dir / "e.md"
+        excluded_file.write_text(_UNALIGNED_TABLE)
+
+        args = argparse.Namespace(path=tmp_path, check=False)
+        result = cmd_format_markdown(args)
+
+        assert result == 0
+        assert _ALIGNED_MARKER in reachable.read_text()
+        assert _ALIGNED_MARKER not in excluded_file.read_text()
+
+    def test_excluded_directory_is_skipped_in_check_mode(self, tmp_path: Path) -> None:
+        self._write_config(tmp_path, ["excluded/**"])
+
+        excluded_dir = tmp_path / "excluded"
+        excluded_dir.mkdir()
+        excluded_file = excluded_dir / "e.md"
+        excluded_file.write_text(_UNALIGNED_TABLE)
+
+        args = argparse.Namespace(path=tmp_path, check=True)
+        result = cmd_format_markdown(args)
+
+        # Nothing else in the tree is dirty, and the excluded file must not
+        # be reported as needing a reformat.
+        assert result == 0
+        assert _ALIGNED_MARKER not in excluded_file.read_text()
+
+    def test_exclusions_apply_when_the_walk_root_is_below_the_project_root(
+        self, tmp_path: Path
+    ) -> None:
+        """The config is the PROJECT's, not whatever sits at the walk root.
+
+        `format-markdown <subdir>` is an ordinary invocation, and the project's
+        declared exclusions still govern its own tree. Looking for the config
+        AT the walk root finds nothing there and silently applies no exclusions
+        at all — a filter that quietly matches nothing, which is the exact
+        shape of the defect this plan exists to fix.
+
+        The sibling CLIs (docs-qa, plan-qa) resolve a project root first and
+        load the config from there; this pins that this one agrees with them.
+        """
+        self._write_config(tmp_path, ["sub/skipme/**"])
+
+        sub = tmp_path / "sub"
+        skipme = sub / "skipme"
+        skipme.mkdir(parents=True)
+
+        # Vacuity guard: a reachable file under the SAME walk root is still
+        # formatted, so this cannot pass by the walk finding nothing.
+        reachable = sub / "keep.md"
+        reachable.write_text(_UNALIGNED_TABLE)
+        excluded_file = skipme / "x.md"
+        excluded_file.write_text(_UNALIGNED_TABLE)
+
+        args = argparse.Namespace(path=sub, check=False)
+        result = cmd_format_markdown(args)
+
+        assert result == 0
+        assert _ALIGNED_MARKER in reachable.read_text()
+        assert _ALIGNED_MARKER not in excluded_file.read_text()
+
+    def test_file_argument_named_directly_is_formatted_even_if_excluded(
+        self, tmp_path: Path
+    ) -> None:
+        # Task 1.4: only the DIRECTORY walk filters. A file the caller names
+        # directly is formatted regardless of daemon.exclude_paths, because
+        # naming it is explicit consent.
+        self._write_config(tmp_path, ["excluded/**"])
+
+        excluded_dir = tmp_path / "excluded"
+        excluded_dir.mkdir()
+        excluded_file = excluded_dir / "e.md"
+        excluded_file.write_text(_UNALIGNED_TABLE)
+
+        args = argparse.Namespace(path=excluded_file, check=False)
+        result = cmd_format_markdown(args)
+
+        assert result == 0
+        assert _ALIGNED_MARKER in excluded_file.read_text()
