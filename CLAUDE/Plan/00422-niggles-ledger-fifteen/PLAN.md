@@ -1,6 +1,6 @@
 # Plan 00422: niggles ledger fifteen
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-16
 **Owner**: joseph
 **Priority**: Medium
@@ -56,12 +56,18 @@ ledger's shape is readable without opening it:
 | #   | Verdict                                                                  | Origin                                                             | Status                                                  |
 | --- | ------------------------------------------------------------------------ | ------------------------------------------------------------------ | ------------------------------------------------------- |
 | N1  | the `Priority` constants are not the numbers a fresh install ships       | [00419 N8](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md)  | ⬜ Open — remedy recorded, owner-gated, unbuilt         |
-| N2  | the linter runs on gitignored scratch output                             | [00419 N11](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md) | ⬜ Open — remedy chosen and un-gated, nobody built it   |
+| N2  | the linter runs on gitignored scratch output                             | [00419 N11](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md) | ✅ Resolved — depth-scoped exclusions shipped           |
 | N3  | a committed future-dated entry makes the journal uncorrectable           | [00419 N12](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md) | ⬜ Open — remedies recorded, none chosen; advisory live |
 | N4  | a cron cannot be both cancelled for a session and declared in config     | [00419 N13](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md) | ⬜ Open — remedy recorded, owner-gated, unbuilt         |
 | N5  | the v3.65.0 release reviews' NON-defects had no durable home             | the v3.65.0 release reviews                                        | ⬜ Open — evidence now tracked, twelve rows unworked    |
 | N6  | a worktree cannot run the acceptance gates, and says the wrong reason    | Plan 00424                                                         | ⬜ Open — two faults measured, remedies 1-3 un-gated    |
 | N7  | the supervisor's effort floor cannot see an effort set from the selector | owner report, in session                                           | ⬜ Open — mechanism confirmed, remedy owner-gated       |
+| N8  | the socket-path guard fails open exactly where it is needed              | in session, hours after N6 fault 1 shipped                         | ✅ Remedied by Plan 00431                               |
+| N9  | worktree isolation plus an explicit worktree instruction nests them      | in session, by causing it                                          | ✅ Remedied by Plan 00433                               |
+| N10 | a QA checker's own tests overwrite that checker's real QA artefact       | a full `llm_qa all` run's intermediate artefacts                   | ✅ Remedied by Plan 00432                               |
+| N11 | acceptance probe fixtures live in the sanctioned human scratch directory | surfaced by N2's second failure                                    | ⬜ Open — (2) already exists; (1) owner-gated           |
+| N12 | the supervisor asset has been red under its own lint gate since v3.65.0  | in session, after v3.65.0 shipped                                  | ✅ Corrected — the gate is green; no code change due    |
+| N13 | the plan-dedupe scout cleared a plan tree it never read                  | a dispatch before filing Plan 00430                                | ⬜ Open — revised remedy (1) un-gated, unbuilt          |
 
 ## Tasks
 
@@ -73,9 +79,11 @@ ledger's shape is readable without opening it:
   `status_line` block where the divergence was found? The divergence itself is
   established and needs no further investigation.
 
-- [ ] ⬜ **Task 1.2**: N2 — build remedy (1): exclude `untracked/` from
-  `lint_on_edit`, RED first, so a scratch probe stops being linted while every
-  file that can reach history still is. Un-gated; it has simply never been done.
+- [x] ✅ **Task 1.2**: N2 — remedy (1) shipped as three depth-scoped globs on
+  `lint_on_edit.options.exclude_paths` (`/untracked/scratch/*`,
+  `/untracked/qa/**`, `/untracked/worktrees/**`), so a scratch probe stops being
+  linted while every file that can reach history — and every acceptance fixture
+  one level down — still is.
 
 - [ ] ⬜ **Task 1.3**: N3 — choose between teaching `journal-entry-ordering`
   about entries the file itself flags as future-dated, and giving a correction
@@ -115,6 +123,24 @@ ledger's shape is readable without opening it:
   question NO (an unattributed model change gets no restore), so answering YES
   here is a real asymmetry to decide rather than an oversight to correct. The
   mechanism is confirmed and needs no further investigation.
+
+### Phase 4: the entries filed after this ledger opened
+
+N8, N9 and N10 were each remedied by their own numbered plan (00431, 00433,
+00432\) and carry no task here. N12 was corrected rather than remedied: the gate
+it reported as red is green, and the revised verdict is that nothing needs
+changing.
+
+- [ ] ⬜ **Task 4.1**: N11 — remedy (1) only, and it is owner-gated: may the
+  acceptance fixtures move out of the human scratch directory into a dedicated
+  `untracked/acceptance/` root? Remedy (2) already exists as
+  `test_acceptance_contract.py`, so there is nothing to build for it.
+
+- [ ] ⬜ **Task 4.2**: N13 — build the revised remedy (1): the dedupe scout's
+  plan count must be checked against something OUTSIDE the agent's own report,
+  because a miscounting reader cannot audit its own count. Rewrite step 3b in
+  tool terms while there — it names a `grep -ril` shell idiom the agent has no
+  Bash tool to run.
 
 ## Success Criteria
 
