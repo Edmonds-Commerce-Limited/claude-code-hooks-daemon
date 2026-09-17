@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00431: socket path preflight needs no venv](00431-socket-path-preflight-needs-no-venv/PLAN.md) - In Progress (from 00422 N8: the worktree socket-path pre-flight resolves a venv to run two path joins and a length comparison, and fails open when it cannot — so it stands down in a worktree created from inside another worktree, which is exactly where paths get long enough to matter)
-
 - [00428: auto compact window audit check](00428-auto-compact-window-audit-check/PLAN.md) - Not Started, BLOCKED ON THE OWNER (from issue #46: a seventh `optimal_config_checker` check for `CLAUDE_CODE_AUTO_COMPACT_WINDOW`; the gap is real but the spec was retracted and replaced by one inferred from a compiled CLI, which triage could not verify)
 
 - [00422: niggles ledger fifteen](00422-niggles-ledger-fifteen/PLAN.md) - Not Started, the OPEN ledger (opens with four entries inherited from 00419 — N8/N11/N12/N13 — because an unresolved entry left inside an archived ledger is indistinguishable from a resolved one; three of them are one class in three costumes: a guard right about the state it judges and wrong about the moment it judges it)
@@ -149,6 +147,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00431: socket path preflight needs no venv](Completed/00431-socket-path-preflight-needs-no-venv/PLAN.md) - Complete at `18a9b01b` + the archiving commit (from 00422 N8: the worktree socket-path pre-flight needed a venv to do arithmetic, so it stood down in a nested worktree — exactly where the path is long enough to matter)
+
 - [00430: block report attributes before project context init](Completed/00430-block-report-attributes-before-project-context-init/PLAN.md) - Complete at `08349246`…`47409996` + the archiving commit (from issue #48: five handlers could not be constructed during rule discovery, so their denies were unattributed; 2185 tracebacks to 0 and 44 unattributed to 31 on an identical corpus — the residual 31 are a different cause)
 
 - [00429: format markdown crosses repo boundaries](Completed/00429-format-markdown-crosses-repo-boundaries/PLAN.md) - Complete at `50c27581`…`cd15122c` + the archiving commit (from issue #47: the walk applied no exclusion at all, so `format-markdown .` rewrote markdown inside vendored nested checkouts; review caught the config being read from the WALK root, which made every exclusion match nothing below it)
@@ -207,8 +207,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00389: git pull reconciles daemon config and version](Completed/00389-git-pull-reconciles-daemon-config-and-version/PLAN.md) - Complete at `263c18f2`…`fece90e2` + the archiving commit (a pull brought in daemon config, handler code or a new version and the running daemon never noticed; advisory only by owner ruling, and it sees an in-session pull only)
 
-- [00387: issue sdlc runbook refinements from the first backlog sweep](Completed/00387-issue-sdlc-runbook-refinements-from-the-first-backlog-sweep/PLAN.md) - Complete at `377456ac`…`f7fe8e7b` + the archiving commit (a whole-backlog sweep showed three of four untriaged issues were already fixed, so the loop's real output is a closed issue carrying evidence — two new triage checks, a concrete stale-`agent-working` recovery path, and reading a CI run rather than the watcher)
-
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -262,15 +260,15 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 431 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 378 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 379 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 30 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 29 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
 - **Cancelled/Abandoned**: 13 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00108 superseded by 00117, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213, 00135 superseded by the supervisor workstream)
 
-- **Folder-to-number reconciliation**: 30 + 378 + 13 = **421 folders**, spanning
+- **Folder-to-number reconciliation**: 29 + 379 + 13 = **421 folders**, spanning
   **418 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names

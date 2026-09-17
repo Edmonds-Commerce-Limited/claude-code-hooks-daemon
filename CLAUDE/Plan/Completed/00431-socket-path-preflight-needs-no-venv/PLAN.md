@@ -1,6 +1,6 @@
 # Plan 00431: socket path preflight needs no venv
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-17
 **Owner**: dev
 **Priority**: Medium
@@ -90,3 +90,4 @@ with no venv, no editable install and no second copy of the limit.
      JOURNAL/00431-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
 - Plan filed from Plan 00422 niggle N8.
+- Delivered at `18a9b01b` + the archiving commit.

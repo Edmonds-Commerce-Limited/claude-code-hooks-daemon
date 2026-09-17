@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00387: issue sdlc runbook refinements from the first backlog sweep](00387-issue-sdlc-runbook-refinements-from-the-first-backlog-sweep/PLAN.md) - Complete at `377456ac`…`f7fe8e7b` + the archiving commit (a whole-backlog sweep showed three of four untriaged issues were already fixed, so the loop's real output is a closed issue carrying evidence — two new triage checks, a concrete stale-`agent-working` recovery path, and reading a CI run rather than the watcher)
+
 - [00386: startup reconciles stale clone against tracked deployed version](00386-startup-reconciles-stale-clone-against-tracked-deployed-version/PLAN.md) - Complete at `d47ef80a`…`df3670d0` + the archiving commit (GitHub #38: a stale gitignored clone met newer tracked assets and every safety handler was inactive for a whole session; owner ruled detect-and-advise, never self-update)
 
 - [00385: niggles ledger four](00385-niggles-ledger-four/PLAN.md) - Complete at `15300324`…`655fbfbf` + the archiving commit (two entries, both fixed: an untracked canonical home left two tracked docs dead in every fresh clone — a canonical home must be one the reader actually receives; and a plan filed FROM an issue that never named it, so a fix sat untold for three days)
