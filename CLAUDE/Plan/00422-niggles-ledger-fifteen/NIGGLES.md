@@ -864,6 +864,35 @@ would have caught N2 at config-edit time rather than a session later.
 Owner-gated for (1): it moves a path that ten strategies, the playbook harness
 and client-facing docs all name.
 
+**Remedy (2) ALREADY EXISTS, and this entry proposed building it a second
+time.** `tests/integration/test_acceptance_contract.py::TestEveryDeclaredInputProducesItsDeclaredVerdict`
+drives every declared BLOCKING probe against the real config-injected handler
+and fails when the declared verdict does not come back.
+
+Measured rather than read: restoring the N2-breaking `/untracked/**` pattern in
+this project's own config turns it red in **1.63 seconds**, naming each probe
+individually —
+
+```
+library:PostToolUse/LintOnEditHandler::Shell lint - invalid code blocked:
+  expected_decision=DENY but matches() returned False for its own declared input
+```
+
+— for eight strategies, then green again on restore. It is also strictly
+stronger than the proposed test: it is not scoped to `lint_on_edit` or to
+`exclude_paths`, so it covers any handler that stops matching its own declared
+input for any reason.
+
+The entry's framing is the drift worth keeping. "Cheaper, and it fails loudly
+the next time" describes a guard that was already there, already loud, and
+already the thing that caught N2 — which the entry SAYS two paragraphs earlier
+and then does not connect. A remedy proposed against a defence you have already
+cited is a duplicate, and the cost of building it is a second thing to keep in
+step with the first.
+
+**Revised: nothing to build here.** What remains is remedy (1), which is
+owner-gated, and the ledger is where it waits.
+
 ### N12 — the supervisor asset has been red under its own lint gate since v3.65.0
 
 `tests/integration/test_client_owned_asset_lint.py::TestPythonAssetsAreCleanUnderRuffDefaults`
