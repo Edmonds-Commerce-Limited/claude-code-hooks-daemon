@@ -72,7 +72,9 @@ class TestWhatItMatches:
         assert SubagentCronDeleteBlockerHandler().matches(_event("Bash")) is False
 
     def test_a_missing_tool_name_does_not_match(self) -> None:
-        assert SubagentCronDeleteBlockerHandler().matches({"hook_event_name": "PreToolUse"}) is False
+        assert (
+            SubagentCronDeleteBlockerHandler().matches({"hook_event_name": "PreToolUse"}) is False
+        )
 
 
 class TestTheDenial:

@@ -126,9 +126,7 @@ def event_supports_scope(event_name: str) -> bool:
     return event_name in AGENT_ID_EVENTS
 
 
-def validate_scope_for_event(
-    event_name: str, handler_key: str, scope: HandlerScope | None
-) -> None:
+def validate_scope_for_event(event_name: str, handler_key: str, scope: HandlerScope | None) -> None:
     """Raise when ``scope`` restricts on an event that cannot discriminate.
 
     ``ALL`` and an unset key are accepted everywhere: neither claims anything
@@ -155,9 +153,7 @@ def validate_scope_for_event(
     )
 
 
-def resolve_scope(
-    handler_config: Mapping[str, Any] | None, default: HandlerScope
-) -> HandlerScope:
+def resolve_scope(handler_config: Mapping[str, Any] | None, default: HandlerScope) -> HandlerScope:
     """The effective scope for a handler, from config or its own default.
 
     Mirrors ``resolve_priority``: an absent key and an explicit ``None`` both
