@@ -555,10 +555,6 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - flaggable_work_advisor — delegate flaggable work BEFORE reading it
 
-<!-- handler: background-process-tracker -->
-
-- background_process_tracker — backgrounded processes are tracked
-
 <!-- handler: budget-exhaustion-detector -->
 
 - budget_exhaustion_detector — hidden agent budgets are surfaced
@@ -594,6 +590,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 <!-- handler: recovery-cron-advisor -->
 
 - recovery_cron_advisor — failsafe recovery cron lifecycle advisory
+
+<!-- handler: background-process-tracker -->
+
+- background_process_tracker — backgrounded processes are tracked
 
 <!-- handler: ccy-supervisor-integrity -->
 
