@@ -1,6 +1,6 @@
 # Plan 00446: subagent report path claim is verified
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-18
 **Owner**: dev
 **Priority**: Medium
@@ -50,28 +50,42 @@ where the claim and the filesystem are both in reach.
 
 ### Phase 1: the claim detector
 
-- [ ] ⬜ **Task 1.1**: RED first — a claim-extraction helper with a corpus of
-  real message shapes, including a CONTROL set that must NOT match: a path an
-  agent says it read, a path it recommends the coordinator create, a path
-  inside a fenced code block, a bare path with no verb. False positives are
-  the whole risk here: this handler blocks a stop, so a message that mentions
-  a filename it did not write must sail through.
-- [ ] ⬜ **Task 1.2**: Resolve the claim against the project root and stat it.
-  Only paths INSIDE the project are judged — a claim about a path elsewhere is
-  not this repository's business and cannot be checked reliably.
+- [x] ✅ **Task 1.1**: RED first — `written_path_claims()`, observed failing on
+  `ModuleNotFoundError` before the module existed. The control set
+  (`TestAMentionIsNotAClaim`, 6 cases) passes unblocked: a path read, a path
+  recommended, a bare path with no verb, a path inside a fence, a summary with
+  no paths, an empty message. The verb set is past-tense/passive on purpose —
+  "you should write X" is advice, and blocking advice would fire on most
+  honest reports.
+- [x] ✅ **Task 1.2**: The claim is resolved against the project root and
+  stat'd. A path outside the root is never judged, and an unresolvable path
+  fails open — an OS error is not evidence of a false claim.
+  Root resolution follows `cron_subagent_stop_enforcer`'s resolver rather than
+  `Path.cwd()`: a worktree dispatch would otherwise resolve a relative claim
+  against the wrong checkout and report a written file as missing.
 
 ### Phase 2: the handler
 
-- [ ] ⬜ **Task 2.1**: `SubagentReportPathVerifierHandler` on SubagentStop,
-  modelled on `subagent_report_size_blocker`: terminal, `stop_hook_active`
-  loop guard, fails OPEN on a missing or unreadable `last_assistant_message`.
-  New `HandlerID` and `Priority` entries.
-- [ ] ⬜ **Task 2.2**: Deny reason that names the exact path that is missing
-  and gives two ways out — write the file, or reply without claiming a path —
-  because an agent that genuinely reported inline is not at fault and must not
-  be pushed into inventing a file to satisfy the guard.
-- [ ] ⬜ **Task 2.3**: `get_claude_md()` and `get_acceptance_tests()`, both of
-  which the `handler_reference` QA gate requires.
+- [x] ✅ **Task 2.1**: `SubagentReportPathVerifierHandler` on SubagentStop,
+  with new `HandlerID` and `Priority` entries, registered in the config.
+  **Non-terminal at priority 8, which is a correction to this plan's own
+  premise**: the plan said "modelled on the size blocker: terminal". That
+  would have been wrong twice over — the size blocker is terminal at 15 and
+  matches nearly every stop, so anything after it is shadowed (which
+  `test_stop_chain_terminal_shadowing.py` denies outright), and a terminal
+  handler here would shadow the size blocker in turn. 8 is free on THIS event:
+  the `release_blocker` holding 8 is a Stop handler. A report can be both
+  unwritten and oversized, and the agent should hear about both in one stop.
+- [x] ✅ **Task 2.2**: The deny names every missing path and gives two ways
+  out, with the second stated as equal: stopping WITHOUT a path claim is
+  legitimate when the report was genuinely short. It says outright not to
+  create an empty file to satisfy the check — an invented report is worse than
+  the claim it replaces, because it looks like evidence.
+- [x] ✅ **Task 2.3**: `get_claude_md()` and `get_acceptance_tests()`, the
+  latter rewritten after the invented signature I first used failed
+  `type_check` — `AcceptanceTest` takes `title`/`expected_decision`/
+  `expected_message_patterns`/`hook_input`, not `name`/`expected_outcome`.
+  `handler_reference` now checks 138 handlers.
 
 ### Phase 3: gate
 

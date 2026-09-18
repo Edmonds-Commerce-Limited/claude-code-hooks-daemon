@@ -523,6 +523,16 @@ class HandlerID:
         config_key="subagent_report_size_blocker",
         display_name="subagent-report-size-blocker",
     )
+    # SubagentStop report-path verifier -- Plan 00446 (ledger 00422 N15): an
+    # agent that CLAIMS to have written a report file must have written it.
+    # Sibling to the size blocker: same surface, opposite failure -- that one
+    # catches a report too big to survive the wire, this one catches a report
+    # that was never written at all.
+    SUBAGENT_REPORT_PATH_VERIFIER = HandlerIDMeta(
+        class_name="SubagentReportPathVerifierHandler",
+        config_key="subagent_report_path_verifier",
+        display_name="subagent-report-path-verifier",
+    )
     COMMAND_HINTS = HandlerIDMeta(
         class_name="CommandHintsHandler",
         config_key="command_hints",

@@ -932,6 +932,10 @@ handlers:
       enabled: true  # Silent unless persistent_crons.enabled and at least one job is declared
       priority: 7    # Below subagent_report_size_blocker's 15, non-terminal -- see test_stop_chain_terminal_shadowing.py
 
+    subagent_report_path_verifier:  # A report the agent SAYS it wrote must exist (Plan 00446, ledger 00422 N15)
+      enabled: true
+      priority: 8    # Below the terminal size blocker's 15; 8 is free on this event -- release_blocker is a Stop handler
+
   # UserPromptSubmit handlers (run when user submits prompt)
   user_prompt_submit:
     git_context_injector:  # Injects git context into user prompts

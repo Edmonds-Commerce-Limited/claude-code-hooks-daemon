@@ -133,6 +133,19 @@ class Priority:
     # before the terminal catch-all.
     TEAMMATE_REAP_ADVISOR = 9
 
+    # Plan 00446 (ledger 00422 N15): BELOW SUBAGENT_REPORT_PATH_VERIFIER's
+    # sibling SUBAGENT_REPORT_SIZE_BLOCKER (15), which is terminal and matches
+    # nearly every SubagentStop — anything registered after it is shadowed on
+    # the ordinary case, which `test_stop_chain_terminal_shadowing.py` denies
+    # outright. 8 is free on THIS event: the `release_blocker` project handler
+    # that holds 8 is registered under `project-handlers/stop/`, so it never
+    # reaches a SubagentStop chain. Deliberately `terminal=False` for the same
+    # reason `cron_subagent_stop_enforcer` is: running first with a DENY that
+    # still wins by most-restrictive-wins, without shadowing the size blocker
+    # in turn — a report can be both unwritten and oversized, and an agent
+    # should be told about both in one stop rather than one per round trip.
+    SUBAGENT_REPORT_PATH_VERIFIER = 8
+
     TDD_ENFORCEMENT = 15
     DANGEROUS_PERMISSIONS = 15
     AUTO_CONTINUE_STOP = 15
