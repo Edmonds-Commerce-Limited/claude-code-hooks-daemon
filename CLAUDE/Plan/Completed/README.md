@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00413: niggles ledger thirteen](00413-niggles-ledger-thirteen/PLAN.md) - Complete at `1861a5ec`…`c2e52bb5` + the archiving commit (seventeen entries, all terminal; opened by a new collaborator's fresh clone, the one environment this project structurally cannot dogfood. N3→00414, N17→00415, N6/N15→00416)
+
 - [00407: niggles ledger twelve](00407-niggles-ledger-twelve/PLAN.md) - Complete at `1eefc55b`…`a391132e` + the archiving commit (twelve entries, all terminal; N7 was a release REGRESSION disabling R-GIT-CHECKOUT-DISCARD, and N12 corrected this plan's own N2/N3 fixes, which blanked quoted literals and let `bash -c` walk past two guards)
 
 - [00406: newline is a command boundary in handler patterns](00406-newline-is-a-command-boundary-in-handler-patterns/PLAN.md) - Complete at `f9b78828` + the archiving commit (four blocking handlers judged the NEXT line as part of the command they matched; the `&&` control turned a hunch into an implementation fact)

@@ -1548,3 +1548,47 @@ plan folder whose PLAN.md cites evidence at a path that is empty.
 Remedy (1) is the obvious one and needs no decision. Whether (2) is worth
 building depends on how many dispatches declare a destination they never use,
 which nobody has measured.
+
+**CLOSED by Plan 00446 — but by neither remedy as written.**
+
+The delivered fix is a SubagentStop handler, `subagent_report_path_verifier`,
+which blocks the stop when the final message claims a write to a path that is
+not on disk. That is nearer remedy (2) than (1), and the entry's ordering was
+wrong about which is cheapest:
+
+- **Remedy (1) — the coordinator stats the path — is not actually cheap, because
+  it is not one place.** "The coordinator" is every dispatch site in every
+  session, and a check that has to be remembered at each of them is off wherever
+  it was forgotten. The entry costed it as one `Path.exists()` call, which is
+  true of the call and false of the coverage.
+- **Remedy (2) as written mis-stated the hook.** It proposed enforcing the
+  DECLARED destination from `dispatch_declaration`. That declaration is not
+  carried on the SubagentStop payload, so the handler cannot read it. What the
+  handler CAN read is the path the agent named in its own message — which is the
+  claim that was false, so nothing is lost. The measurement the entry said
+  nobody had taken (how many dispatches declare a destination they never use)
+  turned out not to be needed for this fix, though it would still be needed for
+  the declaration-based version.
+
+So the entry's diagnosis was sound and its remedy menu was not. Both options
+were costed against the wrong surface: one against a call rather than its
+coverage, the other against a field the event does not carry. This is the
+ledger's dominant theme again — **an entry's premise is narrower, wider, or
+staler than reality** — and it is now at eleven instances.
+
+**A measurement the plan took that the entry did not ask for.** The handler runs
+at priority 8, ahead of the terminal `subagent_report_size_blocker` at 15, so it
+sees the UNCAPPED message — the size blocker has not trimmed anything yet. That
+makes the claim regex's worst case load-bearing rather than incidental. Measured
+on a 109 KB message carrying 5000 claim-shaped paths: **0.12 s**. Acceptable,
+and worth having on record, because the reason it is safe is an ordering
+decision that a later re-prioritisation could silently undo.
+
+**What is NOT closed.** This covers a claim the agent states in prose. It does
+not verify that a declared destination was used, that the file's CONTENT is a
+report, or that the report answers the dispatch. Creating an empty file would
+satisfy the check, which is why the deny says outright not to — an invented
+report is worse than the claim it replaces, because it looks like evidence.
+That gap is real and is accepted, not overlooked: content quality is not
+checkable from here, and a guard that pretended otherwise would be the same
+false-assurance failure this ledger keeps recording.

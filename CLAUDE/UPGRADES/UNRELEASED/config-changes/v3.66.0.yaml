@@ -89,6 +89,39 @@ config_changes:
       recommended: true
       dormant: false
 
+    - key: handlers.subagent_stop.subagent_report_path_verifier
+      description: >-
+        Blocks a SubagentStop whose final message claims to have WRITTEN a file
+        that is not on disk, naming the missing path. The incident: a dedupe
+        scout ended its report with `Report written to:` and a path that was
+        well-formed, matched this project's filename convention exactly, and
+        named a file nobody ever created. A coordinator cannot catch that by
+        reading the message — a fabricated path looks exactly like a real one —
+        so the check runs at the one moment the claim and the filesystem are
+        both in reach, which is the same argument `subagent_report_size_blocker`
+        makes. It is built to under-fire: a claim is recognised only when a
+        past-tense or passive write verb governs the path, fenced blocks are
+        stripped first, only `.md` paths are judged, a path resolving outside
+        the project root is never judged, and an unreadable message fails open.
+        A path the agent merely READ, or recommends the coordinator create, is
+        not a claim. Non-terminal at priority 8 so it runs ahead of the terminal
+        size blocker at 15 — a report that is both unwritten and oversized
+        produces both messages in one stop.
+      example_yaml: |
+        subagent_stop:
+          subagent_report_path_verifier:
+            enabled: true
+            priority: 8
+      migration_note: >-
+        On by default; no action needed to adopt, and silent in any project
+        whose agents do not claim written paths. The deny offers two equal
+        routes — write the file at the named path, or stop without naming one —
+        and explicitly rules out creating an empty file to clear the check, an
+        invented report being worse than the claim it replaces. Disable with
+        handlers.subagent_stop.subagent_report_path_verifier.enabled: false.
+      recommended: true
+      dormant: false
+
   renamed: []
 
   removed: []

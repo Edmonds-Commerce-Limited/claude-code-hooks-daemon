@@ -1,6 +1,6 @@
 # Plan 00446: subagent report path claim is verified
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-18
 **Owner**: dev
 **Priority**: Medium
@@ -89,18 +89,35 @@ where the claim and the filesystem are both in reach.
 
 ### Phase 3: gate
 
-- [ ] ⬜ **Task 3.1**: `llm_qa format`, README index row and statistics, then
-  `llm_qa.py all` green with the daemon restarted after the last `src/` edit.
-- [ ] ⬜ **Task 3.2**: Record the outcome on Plan 00422's N15 entry; archive.
+- [x] ✅ **Task 3.1**: `llm_qa.py all` green. The first full run came back 33/35,
+  and both failures were one root cause that this plan **exposed but did not
+  cause**: `handler_reference` flagged `subagent_cron_delete_blocker` (shipped
+  by Plan 00423) as a PreToolUse blocking handler with no section in
+  `docs/guides/HANDLER_REFERENCE.md`, and the `tests` gate's single failure was
+  the integration test fronting that same check. Confirmed pre-existing against
+  a worktree at `1b8e2692`, then fixed in its own commit `5f492887`. It
+  surfaced now because the coverage rule reads the generated
+  `.claude/HOOKS-DAEMON.md` inventory, which this plan regenerated — a stale
+  inventory had been hiding the gap.
+- [x] ✅ **Task 3.2**: N15's outcome recorded on Plan 00422, noting that it was
+  closed by NEITHER remedy the entry listed, and why both were costed against
+  the wrong surface. Regex worst case measured and journalled (0.12 s on a
+  109 KB / 5000-claim message), because priority 8 means this handler sees the
+  message before the size blocker trims it.
 
 ## Success Criteria
 
-- [ ] The control corpus of Task 1.1 was observed passing through unblocked —
+- [x] The control corpus of Task 1.1 was observed passing through unblocked —
   a guard that blocks everything would satisfy the positive tests alone.
-- [ ] A SubagentStop carrying N15's actual message shape, with no such file on
+- [x] A SubagentStop carrying N15's actual message shape, with no such file on
   disk, is denied and names the path.
-- [ ] The same message, with the file present, is allowed.
-- [ ] `llm_qa.py all` green.
+- [x] The same message, with the file present, is allowed.
+- [x] `llm_qa.py all` green.
+- [x] Release-bound consequences recorded in the holding area:
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/20-a-claimed-report-path-must-exist.md`
+  (the callout — this ships a new user-visible handler, enabled by default) and
+  an `added` entry for `handlers.subagent_stop.subagent_report_path_verifier`
+  in `CLAUDE/UPGRADES/UNRELEASED/config-changes/v3.66.0.yaml`.
 
 ## Delivery & Milestones
 
@@ -108,4 +125,10 @@ where the claim and the filesystem are both in reach.
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00446-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- <!-- milestone or delivery commit hash -->
+- `10b6d6f7` — the handler: claim detector, root resolution, non-terminal at
+  priority 8, deny with two equal ways out.
+- `38eb3eaf` — declared across the seven surfaces a new handler requires, plus
+  the 0-9 priority-band rows and the regenerated `.claude/HOOKS-DAEMON.md`.
+- `5f492887` — pre-existing doc drift this plan's regeneration exposed
+  (`subagent_cron_delete_blocker`), fixed separately because it is not this
+  plan's work.
