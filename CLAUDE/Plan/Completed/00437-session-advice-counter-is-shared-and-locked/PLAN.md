@@ -1,6 +1,6 @@
 # Plan 00437: session advice counter is shared and locked
 
-**Status**: Not Started
+**Status**: Complete
 **Created**: 2026-09-18
 **Owner**: dev
 **Priority**: Medium
@@ -58,22 +58,22 @@ two unlocked copies, and a single shared, locked helper removes both at once.
 
 ### Phase 1: the shared counter
 
-- [ ] ⬜ **Task 1.1**: RED — a test driving the counter from several threads at
+- [x] ✅ **Task 1.1**: RED — a test driving the counter from several threads at
   once against a map already at its cap, asserting no exception escapes and the
   map stays bounded. It must fail against the current unlocked code.
 
-- [ ] ⬜ **Task 1.2**: GREEN — one `SessionAdviceCounter` with a lock around the
+- [x] ✅ **Task 1.2**: GREEN — one `SessionAdviceCounter` with a lock around the
   read-modify-write, in a shared module both handlers import.
 
-- [ ] ⬜ **Task 1.3**: Both handlers use it, and their existing rate-limit tests
+- [x] ✅ **Task 1.3**: Both handlers use it, and their existing rate-limit tests
   pass unchanged — that is the behaviour-preservation check.
 
 ## Success Criteria
 
-- [ ] ⬜ The concurrency test observed RED before the change and GREEN after.
-- [ ] ⬜ Neither handler carries its own copy of the counter or its constants.
-- [ ] ⬜ `llm_qa.py all` passes.
-- [ ] ⬜ N5 row (c) is marked done in ledger 00422, recording that the thread
+- [x] ✅ The concurrency test observed RED before the change and GREEN after.
+- [x] ✅ Neither handler carries its own copy of the counter or its constants.
+- [x] ✅ `llm_qa.py all` passes — 35/35.
+- [x] ✅ N5 row (c) is marked done in ledger 00422, recording that the thread
   pool was verified rather than assumed.
 
 ## Delivery & Milestones

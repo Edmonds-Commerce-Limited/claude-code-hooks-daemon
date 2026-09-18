@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00397: niggles ledger eight](00397-niggles-ledger-eight/PLAN.md) - Complete at `92b9bdb4`…`ff26a6ee` + the archiving commit (three entries: N2 resolved as NOT A DEFECT — auto-compaction is healthy and tmux sits outside the container; N1 graduated to Plan 00399; N3 graduated to Plan 00398 — the `not idle` gate suppresses compaction at CRITICAL too)
+
 - [00395: running daemon detects source changed underneath it](00395-running-daemon-detects-source-changed-underneath-it/PLAN.md) - Complete at `f912c15b`…`953f9bd6` + the archiving commit (a daemon upgraded by ANOTHER session kept serving what it loaded at startup; a UserPromptSubmit check re-resolves the venv and compares `.daemon-metadata.json` against the running `__version__`, silent when they match, dormant in self-install mode)
 
 - [00393: niggles ledger seven](00393-niggles-ledger-seven/PLAN.md) - Complete at `a83593eb`…`ed00e582` + the archiving commit (two entries: N1 graduated to Plan 00394 — the failsafe cron has no session-start coverage; N2 fixed — CI on `main` cancelled its own runs, so 13 of 20 runs died and the release gate's evidence with them)

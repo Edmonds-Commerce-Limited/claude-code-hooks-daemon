@@ -467,6 +467,23 @@ does, with the row-count control that stops a parser matching nothing from
 reading as agreement. Row (d)'s `priority 8` is 7, naming what holds 8, and the
 skill's paraphrase — which stated a third value, `56-65` — agrees now too.
 
+**Row (c) DONE by Plan 00437, and its mechanism held up under checking.** The
+thread pool is real: the daemon is asyncio and owns no pool of its own, but
+`server.py` dispatches through `run_in_executor(None, controller.dispatch, …)`
+and the default executor is a `ThreadPoolExecutor`, with handlers as
+daemon-lifetime singletons. Both copies of the counter now delegate to one
+locked `SessionAdviceCounter`, which removes the duplication and the race in
+the same move.
+
+**The test needed the same scepticism the finding did.** At CPython's default
+5ms switch interval the unlocked shape survived 16 threads of 200 calls with
+zero errors — a concurrency test written the obvious way would have passed
+against the defect and proved nothing. Driving the switch interval to its floor
+with 32 threads of 2000 calls produced 26 `KeyError`s, and the shipped test was
+then watched failing against a deliberately unlocked copy of the new class
+before it was restored. Worth remembering for the next concurrency finding in
+this repository: under the GIL, "it did not raise" is not evidence.
+
 **Row (g) DONE by Plan 00436.** Confirmed exactly as filed: a delivered prompt
 of nothing but a truncation marker strips to an empty string, is correctly
 identified as truncated, and every declaration on the schedule starts with it —
