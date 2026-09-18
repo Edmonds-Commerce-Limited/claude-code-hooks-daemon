@@ -733,6 +733,10 @@ handlers:
       enabled: true                 # Silent unless persistent_crons.enabled AND a job is declared
       priority: 7
 
+    subagent_report_path_verifier:  # Blocks a stop whose final message claims a report file that is not on disk
+      enabled: true                 # On by default (Plan 00446); set false to opt out
+      priority: 8                   # Below the terminal size blocker's 15, so it is not shadowed
+
     subagent_report_size_blocker:  # Blocks an oversized subagent final message
       enabled: true                 # On by default (Plan 00307 Task 4.3); set false to opt out
       priority: 15

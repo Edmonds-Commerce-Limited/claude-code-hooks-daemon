@@ -341,6 +341,11 @@ _DENY_WITHOUT_RULES_ALLOWLIST: dict[str, str] = {
         "Plan 00307: a single DENY branch (message over threshold) with no "
         "other concept to distinguish — not a disclosure-ladder table."
     ),
+    "SubagentReportPathVerifierHandler": (
+        "Plan 00446: a single DENY branch (the final message claims a project "
+        "file that is not on disk) with no other concept to distinguish — the "
+        "same shape as its sibling above, not a disclosure-ladder table."
+    ),
     "CronStopEnforcerHandler": (
         "Plan 00416: a single DENY branch (a declared persistent_crons job "
         "verified missing from session_crons) with no other concept to "

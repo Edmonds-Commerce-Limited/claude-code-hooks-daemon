@@ -1,10 +1,10 @@
 # Hooks Daemon - Active Configuration
 
-> Generated on 2026-09-16 (v3.65.0) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
+> Generated on 2026-09-18 (v3.65.0) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
 
 ## Active Handlers
 
-### PreToolUse (62 handlers)
+### PreToolUse (63 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -21,6 +21,7 @@
 | 14 | secret_file_guard | BLOCKING | Deny any tool call that would put a protected file's contents into context |
 | 14 | security_antipattern | BLOCKING | Block Write/Edit of files containing security antipatterns |
 | 14 | sensitive_content | BLOCKING | Block Write/Edit content matching configured public patterns or a secret word list |
+| 14 | subagent_cron_delete_blocker | BLOCKING | Deny ``CronDelete`` inside a subagent; the coordinator is unaffected |
 | 15 | root_recursion_guard | BLOCKING | Block recursive scanners (grep -r, find, fd, rg, ...) rooted at ``/``/home/etc |
 | 15 | worktree_file_copy | BLOCKING | Prevent copying files between worktrees and main repo |
 | 16 | curl_pipe_shell | TERMINAL | Block curl/wget piped to shell commands |
@@ -153,11 +154,12 @@
 | 9 | teammate_reap_advisor | ADVISORY | Report the Stop payload's ``background_tasks`` count and name ``TaskStop`` |
 | 10 | auto_continue_stop | TERMINAL | Intercept Stop events and enforce explicit stop reasons or auto-continue |
 
-### SubagentStop (2 handlers)
+### SubagentStop (3 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
 | 7 | cron_subagent_stop_enforcer | BLOCKING | Block a SubagentStop while a declared persistent cron is missing |
+| 8 | subagent_report_path_verifier | BLOCKING | Block a SubagentStop whose claimed report file does not exist |
 | 15 | subagent_report_size_blocker | TERMINAL | Block a SubagentStop whose ``last_assistant_message`` is oversized |
 
 ### Status (15 handlers)

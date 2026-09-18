@@ -27,6 +27,7 @@ else -- no message, a non-string message, no claim, a re-entry -- allows.
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 from typing import Any, Final
@@ -89,7 +90,7 @@ class SubagentReportPathVerifierHandler(SubagentStopHandlerBase):
             handler_id=HandlerID.SUBAGENT_REPORT_PATH_VERIFIER,
             priority=Priority.SUBAGENT_REPORT_PATH_VERIFIER,
             terminal=False,
-            tags=[HandlerTag.WORKFLOW],
+            tags=[HandlerTag.WORKFLOW, HandlerTag.BLOCKING],
         )
         # Overridable by a test; resolved lazily in production so the handler
         # is not pinned to whatever directory the daemon happened to start in.
@@ -113,25 +114,32 @@ class SubagentReportPathVerifierHandler(SubagentStopHandlerBase):
         """True for every SubagentStop except a re-entry (loop guard)."""
         return not bool(hook_input.get("stop_hook_active", False))
 
-    def _missing(self, claim: str) -> str | None:
-        """The claim, if it names a project path that is not on disk.
+    def _is_missing(self, claim: str) -> bool:
+        """True when the claim names a project path that is not on disk.
 
         A path outside the project root is never judged: it is not this
         repository's business, and an absolute path into someone else's tree
         cannot be checked meaningfully from here.
+
+        Normalised LEXICALLY (``os.path.normpath``) rather than with
+        ``Path.resolve()``. Two reasons, and the first is the one that
+        matters: ``resolve()`` touches the filesystem and raises ``OSError``
+        on a symlink loop, which would have to be caught — and a bare
+        ``except: return None`` here is genuinely error-hiding, not a
+        judgement, because it cannot distinguish "the claim is fine" from
+        "I could not tell". ``normpath`` is a pure string operation that
+        cannot fail, so there is no error to hide. Second, it resolves ``..``
+        the way a reader does, so a claim escaping the root via ``..`` lands
+        outside it and is correctly left unjudged.
         """
-        project_root = self._root()
-        candidate = Path(claim)
-        resolved = candidate if candidate.is_absolute() else project_root / candidate
-        try:
-            resolved = resolved.resolve()
-            root = project_root.resolve()
-        except OSError:
-            # Fail open: an unresolvable path is not evidence of a false claim.
-            return None
-        if not resolved.is_relative_to(root):
-            return None
-        return None if resolved.exists() else claim
+        root = Path(os.path.normpath(str(self._root())))
+        claimed = Path(claim)
+        target = claimed if claimed.is_absolute() else root / claimed
+        normalised = Path(os.path.normpath(str(target)))
+        if not normalised.is_relative_to(root):
+            return False
+        # The claim pattern admits no NUL byte, so this cannot raise ValueError.
+        return not normalised.exists()
 
     def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
         """DENY when the message claims a project file it did not write."""
@@ -140,9 +148,7 @@ class SubagentReportPathVerifierHandler(SubagentStopHandlerBase):
             # Fail open: no verdict without a readable report string.
             return BlockingResult(decision=Decision.ALLOW)
 
-        missing = [
-            claim for claim in written_path_claims(message) if self._missing(claim) is not None
-        ]
+        missing = [claim for claim in written_path_claims(message) if self._is_missing(claim)]
         if not missing:
             return BlockingResult(decision=Decision.ALLOW)
 

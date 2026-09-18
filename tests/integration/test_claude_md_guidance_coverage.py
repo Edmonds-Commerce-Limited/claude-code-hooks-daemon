@@ -180,6 +180,11 @@ _EARNS_GUIDANCE: dict[str, str] = {
     "AutoContinueStopHandler": "T1 denies a stop with no declared reason",
     "AutoApproveReadsHandler": "T1 decides a permission request outright",
     "SubagentReportSizeBlockerHandler": "T1 denies an oversized SubagentStop return",
+    "SubagentReportPathVerifierHandler": (
+        "T1 denies a SubagentStop whose final message claims a report file "
+        "that is not on disk, and the guidance is what stops an agent "
+        "satisfying it by creating an empty one"
+    ),
     "CronStopEnforcerHandler": (
         "T1 denies a stop while a declared persistent_crons job is verified "
         "missing, and the guidance carries what the deny reason alone cannot: "
