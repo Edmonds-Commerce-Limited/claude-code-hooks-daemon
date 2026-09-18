@@ -620,6 +620,44 @@ mutate it in `handle()`, then `rollback()` on a restrictive decision or
 reference implementations. Do not make a new decision in
 `commit_side_effects` — the decision is final by then.
 
+## Right about the state, wrong about the moment
+
+A guard can judge its state correctly and still be a defect, because the state
+it refuses is a legitimate STAGE of the workflow it is guarding. This project
+has now met that shape three times, in three unrelated subsystems, and it is
+worth recognising on sight rather than re-deriving:
+
+- **Two plan-close gates** (ledger 00419 N3) each demanded a condition the
+  other forbade at that instant — every task ticked, against a body that could
+  not yet be ticked.
+- **Three journal rules** (ledger 00419 N12, carried as 00422 N3) force a
+  future-dated entry into existence and then refuse the file that contains it,
+  so the correction cannot be written in the only file it belongs in.
+- **A declared cron cancelled for one session** (ledger 00422 N4): the Stop
+  enforcer refuses a session missing a job the project declares, which is
+  exactly its job — but "cancel it for now" then has no spelling at all, and
+  obeying the owner and satisfying the gate became mutually exclusive.
+
+**The separating test**: ask whether some legal sequence of moves reaches a
+state the guard allows. If every route is blocked, the guard is judging a
+legitimate intermediate or temporary state — the state is real, the moment is
+wrong.
+
+**Fix it by moving WHEN the check runs, not by weakening WHAT it checks.**
+00419 N3 is the only one of the three that is fixed, and that is what it did:
+the check moved to the stage where the state is settled, and kept its teeth. A
+relaxed check is a check that stops catching the thing it was written for; a
+re-staged check catches it at the point the answer is knowable. Choosing the
+event is therefore a correctness decision, not just a plumbing one — see
+"Subclass your event's base" above for what each event can see.
+
+**Where no re-staging exists, say so in the deny.** The cheapest honest
+outcome, when a state genuinely has no legal spelling yet, is a denial that
+names the knob that does exist and admits the gap — so the reader learns the
+wall is real instead of inferring it from two failed attempts.
+
+A fourth sighting belongs against this class, not filed as a fresh finding.
+
 ## Result Options
 
 The class you construct is your event's tier — `AdvisoryResult`,

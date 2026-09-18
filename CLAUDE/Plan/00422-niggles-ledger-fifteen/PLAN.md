@@ -97,11 +97,13 @@ ledger's shape is readable without opening it:
   expiring marker? Until that is answered, cancelling a declared cron for one
   session has no legal spelling.
 
-- [ ] ⬜ **Task 1.5**: The class, named once rather than three times. N4, and
-  00419's N3 and N12, are one shape: a guard right about the state and wrong
-  about the moment. Write it up where a handler author will meet it — the
-  candidate home is `CLAUDE/HANDLER_DEVELOPMENT.md`, beside the stage-selection
-  guidance, since 00419 N3's remedy was a stage move and not a relaxation.
+- [x] ✅ **Task 1.5**: The class, named once rather than three times, as
+  "Right about the state, wrong about the moment" in
+  `CLAUDE/HANDLER_DEVELOPMENT.md`: the three sightings, the separating test (is
+  there ANY legal sequence of moves that reaches an allowed state?), and the
+  remedy direction — move WHEN the check runs, never weaken WHAT it checks,
+  because 00419 N3's stage move is the only one of the three that is fixed. A
+  fourth sighting is filed against the class.
 
 ### Phase 2: the release-review carry-over
 
