@@ -161,7 +161,15 @@ def _prompts_match(declared: str, delivered: str) -> bool:
     delivered_norm = _normalise_whitespace(without_marker)
     declared_norm = _normalise_whitespace(declared)
     if _was_truncated(delivered, without_marker):
-        return declared_norm.startswith(delivered_norm)
+        # An EMPTY prefix is not a short prefix, it is no evidence at all:
+        # every declaration starts with it, so a delivery of nothing but a
+        # marker would assert any job sharing the schedule (ledger 00422 N5
+        # row (g)). That fails in the ALLOW direction -- a cron that was never
+        # created reported as live, leaving a session with no recovery net and
+        # nothing saying so -- which is the one outcome this module exists to
+        # prevent. The restriction above (prefix matching only for a real
+        # truncation) does not cover it, because such a delivery IS truncated.
+        return bool(delivered_norm) and declared_norm.startswith(delivered_norm)
     return declared_norm == delivered_norm
 
 

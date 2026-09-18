@@ -138,6 +138,54 @@ class TestCronIsAsserted:
         assert cron_is_asserted(declared, actual) is True
 
 
+class TestAnEmptyPrefixAssertsNothing:
+    """Plan 00436, from ledger 00422 N5 row (g).
+
+    Prefix matching is deliberately restricted to deliveries that were really
+    truncated, because every prompt starts with every prefix of itself. The
+    EMPTY prefix escapes that restriction: a delivered prompt of nothing but a
+    marker is correctly identified as truncated, and then every declaration on
+    the schedule starts with it.
+
+    This fails in the ALLOW direction, which is the expensive one — a cron that
+    was never created gets reported as live, and the session runs with no
+    recovery net and nothing saying so.
+    """
+
+    def test_a_marker_only_prompt_does_not_assert_a_declared_job(self) -> None:
+        actual = [SessionCron(id="c1", schedule="23 * * * *", prompt="... [+1200 chars]")]
+        assert cron_is_asserted(_SHORT_JOB, actual) is False
+
+    def test_a_unicode_marker_only_prompt_does_not_assert_either(self) -> None:
+        actual = [SessionCron(id="c1", schedule="23 * * * *", prompt="… [+1200 chars]")]
+        assert cron_is_asserted(_SHORT_JOB, actual) is False
+
+    def test_whitespace_around_the_marker_does_not_rescue_it(self) -> None:
+        actual = [SessionCron(id="c1", schedule="23 * * * *", prompt="  \n... [+9 chars]  \n")]
+        assert cron_is_asserted(_SHORT_JOB, actual) is False
+
+    def test_a_marker_only_prompt_does_not_assert_a_LONG_declared_job(self) -> None:
+        """The over-cap job is the one this module exists for; it is not exempt."""
+        declared = PersistentCronConfig(
+            id="issue-sdlc", schedule="23 * * * *", prompt=_long_prompt(2200)
+        )
+        actual = [SessionCron(id="c1", schedule="23 * * * *", prompt="... [+2200 chars]")]
+        assert cron_is_asserted(declared, actual) is False
+
+    def test_a_real_truncated_delivery_still_asserts(self) -> None:
+        """Control: the fix must not narrow the case the module was built for.
+
+        Without this, returning False unconditionally would pass every test
+        above.
+        """
+        long_prompt = _long_prompt(2200)
+        declared = PersistentCronConfig(id="issue-sdlc", schedule="23 * * * *", prompt=long_prompt)
+        delivered = long_prompt[:PROMPT_DELIVERY_CAP] + "... [+1200 chars]"
+        actual = [SessionCron(id="c1", schedule="23 * * * *", prompt=delivered)]
+
+        assert cron_is_asserted(declared, actual) is True
+
+
 class TestFindMissingCrons:
     def test_no_declared_jobs_reports_nothing_missing(self) -> None:
         assert find_missing_crons([], []) == []
