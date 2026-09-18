@@ -1,6 +1,6 @@
 # Plan 00438: kill suggestion can name the protected group
 
-**Status**: Not Started
+**Status**: Complete
 **Created**: 2026-09-18
 **Owner**: dev
 **Priority**: Medium
@@ -57,21 +57,21 @@ and not the reaping half.
 
 ### Phase 1
 
-- [ ] ⬜ **Task 1.1**: RED — a test building a breach whose descendant tree
+- [x] ✅ **Task 1.1**: RED — a test building a breach whose descendant tree
   spans an excluded group, asserting that group appears neither in
   `tree_pgids` nor in `kill_command`.
 
-- [ ] ⬜ **Task 1.2**: GREEN — filter `tree_pgids` against the same excluded
+- [x] ✅ **Task 1.2**: GREEN — filter `tree_pgids` against the same excluded
   set the flagging half uses.
 
-- [ ] ⬜ **Task 1.3**: A test for the all-excluded tree, so the fallback to the
+- [x] ✅ **Task 1.3**: A test for the all-excluded tree, so the fallback to the
   record's own group is asserted rather than assumed.
 
 ## Success Criteria
 
-- [ ] ⬜ Both new tests observed RED before the fix and GREEN after.
-- [ ] ⬜ `llm_qa.py all` passes.
-- [ ] ⬜ N5 row (i) is marked done in ledger 00422, with the reachability
+- [x] ✅ Both new tests observed RED before the fix and GREEN after.
+- [x] ✅ `llm_qa.py all` passes — 35/35 after a formatter pass on the new test module.
+- [x] ✅ N5 row (i) is marked done in ledger 00422, with the reachability
   stated as the conditional thing it is.
 
 ## Delivery & Milestones

@@ -233,9 +233,9 @@ class TestAnExcludedGroupIsNeverNamedInTheKill:
 
     def test_the_excluded_group_is_not_in_the_kill_command(self) -> None:
         command = self._breach().kill_command
-        assert f"-{_EXCLUDED_PGID}" not in command, (
-            f"the suggested command names the group the caller excluded: {command}"
-        )
+        assert (
+            f"-{_EXCLUDED_PGID}" not in command
+        ), f"the suggested command names the group the caller excluded: {command}"
 
     def test_the_groups_that_are_not_excluded_are_still_named(self) -> None:
         """Control: dropping every group would also pass the two tests above."""

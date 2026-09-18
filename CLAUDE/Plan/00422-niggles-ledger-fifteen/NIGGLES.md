@@ -467,6 +467,20 @@ does, with the row-count control that stops a parser matching nothing from
 reading as agreement. Row (d)'s `priority 8` is 7, naming what holds 8, and the
 skill's paraphrase — which stated a third value, `56-65` — agrees now too.
 
+**Row (i) DONE by Plan 00438.** Confirmed by measurement: with 7777 excluded,
+the report offered `kill -- -5000 -5001 -7777`. `exclude_pgids` was honoured
+when deciding what breaches and ignored when building the group list for the
+kill command, so the only shipped caller — which excludes the harvester's OWN
+group — could be told to kill the thing producing the report. Both halves now
+share the set.
+
+**Reachability stated as the conditional thing it is**: the breaching process
+needs a descendant sitting in the excluded group, which depends on process-group
+layout rather than on anything guaranteed. The CONTRACT is not conditional,
+which is why it was worth fixing: a group the caller declared off-limits should
+never appear in the output, and the tool's one destructive suggestion is the
+worst place for that to leak.
+
 **Row (c) DONE by Plan 00437, and its mechanism held up under checking.** The
 thread pool is real: the daemon is asyncio and owns no pool of its own, but
 `server.py` dispatches through `run_in_executor(None, controller.dispatch, …)`
