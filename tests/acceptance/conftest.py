@@ -106,6 +106,33 @@ def _discover_socket() -> Path | None:
     return None
 
 
+def wrapper_subprocess_env(socket_path: Path) -> dict[str, str]:
+    """The environment to spawn a production hook wrapper with (Plan 00445).
+
+    A wrapper resolves the daemon socket itself, from ``init.sh``, out of the
+    environment it inherits — so unless it is TOLD, the socket a test resolved
+    and the socket its subprocess talks to are two independent answers. They
+    part company whenever ``CLAUDE_HOOKS_SOCKET_PATH`` matters, because
+    ``tests/conftest.py``'s ``isolate_daemon_path_overrides`` deletes it for
+    every test and that unset is inherited by every subprocess. The wrapper
+    then resolves the DEFAULT path, finds nothing live, and lets
+    ``ensure_daemon`` spend ``DAEMON_STARTUP_TIMEOUT`` before giving up —
+    per dispatch, with no event ever sent (Plan 00422 N6 fault 2).
+
+    Passing the resolved path explicitly fixes that WITHOUT weakening the
+    isolation fixture, which is right and has to stay: an ambient override
+    makes the path tests assert against a path they never chose.
+
+    A COPY of ``os.environ`` rather than a fresh dict, and never a mutation of
+    it: the wrapper still needs ``PATH``, ``HOME`` and the hostname suffix, and
+    exporting the value here would put back for every later test in the process
+    exactly the ambient variable the isolation fixture exists to remove.
+    """
+    env = dict(os.environ)
+    env["CLAUDE_HOOKS_SOCKET_PATH"] = str(socket_path)
+    return env
+
+
 def _no_socket_reason() -> str:
     """Why the suite is skipping, distinguishing the two reasons it can be.
 

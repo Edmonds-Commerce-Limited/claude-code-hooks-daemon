@@ -32,6 +32,7 @@ import subprocess
 from pathlib import Path
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
+from tests.acceptance.conftest import wrapper_subprocess_env
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 STOP_HOOK = REPO_ROOT / ".claude" / "hooks" / "stop"
@@ -40,13 +41,21 @@ SUBAGENT_STOP_HOOK = REPO_ROOT / ".claude" / "hooks" / "subagent-stop"
 _EXIT_HARD_BLOCK = 2
 _EXIT_OK = 0
 
-#: `daemon_running` (socket discovery + Plan 00371 staleness check) lives in
+#: `daemon_socket` (socket discovery + Plan 00371 staleness check) lives in
 #: tests/acceptance/conftest.py, shared across every acceptance file that
 #: dispatches through the live daemon socket.
 
 
-def _invoke_hook(hook_path: Path, hook_input: dict) -> subprocess.CompletedProcess[str]:
-    """Invoke a bash hook wrapper as a subprocess and return the result."""
+def _invoke_hook(
+    hook_path: Path, hook_input: dict, socket_path: Path
+) -> subprocess.CompletedProcess[str]:
+    """Invoke a bash hook wrapper as a subprocess and return the result.
+
+    The daemon is named explicitly (Plan 00445): a wrapper resolves its own
+    socket from the inherited environment, and the root conftest strips the
+    override from every test, so inheritance alone points it at the DEFAULT
+    path rather than the one these fixtures just proved is alive.
+    """
     return subprocess.run(
         ["bash", str(hook_path)],
         input=json.dumps(hook_input),
@@ -55,10 +64,11 @@ def _invoke_hook(hook_path: Path, hook_input: dict) -> subprocess.CompletedProce
         cwd=str(REPO_ROOT),
         timeout=Timeout.DAEMON_RESTART_VERIFY_TIMEOUT_SEC,
         check=False,
+        env=wrapper_subprocess_env(socket_path),
     )
 
 
-def test_stop_hook_exits_2_on_block(daemon_running: None, tmp_path: Path) -> None:
+def test_stop_hook_exits_2_on_block(daemon_socket: Path, tmp_path: Path) -> None:
     """Daemon returns decision=block → wrapper exits 2 + reason on stderr.
 
     Reproduces the silent-stop scenario: empty transcript, stop_hook_active
@@ -84,7 +94,7 @@ def test_stop_hook_exits_2_on_block(daemon_running: None, tmp_path: Path) -> Non
         "cwd": str(tmp_path),
     }
 
-    result = _invoke_hook(STOP_HOOK, hook_input)
+    result = _invoke_hook(STOP_HOOK, hook_input, daemon_socket)
 
     assert result.returncode == _EXIT_HARD_BLOCK, (
         f"Stop wrapper must exit 2 when daemon returns decision=block. "
@@ -104,7 +114,7 @@ def test_stop_hook_exits_2_on_block(daemon_running: None, tmp_path: Path) -> Non
     )
 
 
-def test_subagent_stop_hook_exits_2_on_block(daemon_running: None, tmp_path: Path) -> None:
+def test_subagent_stop_hook_exits_2_on_block(daemon_socket: Path, tmp_path: Path) -> None:
     """SubagentStop wrapper mirrors the Stop contract on a block response."""
     transcript = tmp_path / "transcript.jsonl"
     transcript.write_text("", encoding="utf-8")
@@ -116,7 +126,7 @@ def test_subagent_stop_hook_exits_2_on_block(daemon_running: None, tmp_path: Pat
         "cwd": str(REPO_ROOT),
     }
 
-    result = _invoke_hook(SUBAGENT_STOP_HOOK, hook_input)
+    result = _invoke_hook(SUBAGENT_STOP_HOOK, hook_input, daemon_socket)
 
     # SubagentStop currently has no auto_continue handler — daemon returns
     # an allow/empty response. The wrapper contract is symmetric: exit 2
@@ -143,7 +153,7 @@ def test_subagent_stop_hook_exits_2_on_block(daemon_running: None, tmp_path: Pat
         )
 
 
-def test_stop_hook_exits_0_when_daemon_allows(daemon_running: None, tmp_path: Path) -> None:
+def test_stop_hook_exits_0_when_daemon_allows(daemon_socket: Path, tmp_path: Path) -> None:
     """Re-entry stop (stop_hook_active=true with prior block evidence absent)
     falls through to allow → wrapper must exit 0, no stderr.
 
@@ -163,7 +173,7 @@ def test_stop_hook_exits_0_when_daemon_allows(daemon_running: None, tmp_path: Pa
         "cwd": str(REPO_ROOT),
     }
 
-    result = _invoke_hook(STOP_HOOK, hook_input)
+    result = _invoke_hook(STOP_HOOK, hook_input, daemon_socket)
 
     payload = json.loads(result.stdout.strip() or "{}")
     if payload.get("decision") != "block":

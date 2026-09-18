@@ -1,6 +1,6 @@
 # Plan 00445: acceptance harness honours the socket override
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-18
 **Owner**: dev
 **Priority**: Medium
@@ -51,18 +51,24 @@ controls and the two remedies below are in that ledger's N14-adjacent N6 entry.
 
 ### Phase 1: the harness reaches the daemon it resolved
 
-- [ ] ⬜ **Task 1.1**: RED — a test that fails while the bug is present.
-  Spawn the wrapper the way `_dispatch` does, from a test, with the override
-  exported, and assert the child sees the resolved socket path. Confirm it
-  goes red BEFORE the fix: a guard nobody has watched fail proves nothing, and
-  this one is about an environment, which is exactly where a passing-by-luck
-  test hides.
-- [ ] ⬜ **Task 1.2**: `tests/acceptance/conftest.py` exposes the socket path
-  it already resolves for its skip logic as a fixture the dispatchers pass as
-  an explicit `env`, rather than relying on inheritance.
-- [ ] ⬜ **Task 1.3**: Repoint every acceptance dispatcher that spawns the
-  wrapper — `test_playbook_harness.py` and the `test_stop_hook_hard_block.py`
-  / `test_tool_use_error_recovery.py` files N6 recorded erroring alongside it.
+- [x] ✅ **Task 1.1**: RED — a test that fails while the bug is present.
+  `tests/acceptance/test_wrapper_subprocess_env.py`, observed failing on
+  `ImportError: cannot import name 'wrapper_subprocess_env'` before the fix.
+  It carries its own control: `test_plain_inheritance_does_not_carry_it`
+  pins the defect, so the file cannot pass by the leak it exists to replace.
+- [x] ✅ **Task 1.2**: `tests/acceptance/conftest.py` exposes the socket path
+  it already resolves for its skip logic as `wrapper_subprocess_env()`, a
+  COPY of `os.environ` plus the override — never a mutation of it, which
+  would put back for every later test exactly what the isolation fixture
+  removes.
+- [x] ✅ **Task 1.3**: Repointed `test_playbook_harness.py` (`_dispatch` and
+  `_run_probe` now take the env) and `test_stop_hook_hard_block.py`
+  (`_invoke_hook` takes the socket; its three tests moved from
+  `daemon_running` to `daemon_socket`).
+  `test_tool_use_error_recovery.py` needed NO change: it never spawns a
+  wrapper, it calls the socket directly with a path it is already handed.
+  N6 listed it only because it errored in the same run, which is a different
+  fact from sharing the cause.
 
 ### Phase 2: an unreachable daemon fails fast
 

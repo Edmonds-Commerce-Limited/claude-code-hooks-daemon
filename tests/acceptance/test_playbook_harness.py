@@ -42,6 +42,7 @@ from claude_code_hooks_daemon.daemon.playbook_harness import (
     split_playbook,
     verdict,
 )
+from tests.acceptance.conftest import wrapper_subprocess_env
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HOOKS_DIR = REPO_ROOT / ".claude" / "hooks"
@@ -120,12 +121,19 @@ def _response_decision(payload: dict) -> str:
     return str(hook_specific.get("permissionDecision") or payload.get("decision") or "")
 
 
-def _dispatch(probe: ExecutableProbe) -> tuple[str, str, str | None]:
+def _dispatch(probe: ExecutableProbe, env: dict[str, str]) -> tuple[str, str, str | None]:
     """Send one probe to the production wrapper; return (decision, text, error).
 
     Both the SUBPROCESS and the EVENT are rooted at the repository: the wrapper
     needs it to find the daemon socket, and the event needs it because `cwd` is
     part of a Bash probe's input rather than framing around it.
+
+    `env` names the daemon explicitly rather than letting the wrapper resolve
+    one of its own (Plan 00445). The wrapper reads `CLAUDE_HOOKS_SOCKET_PATH`,
+    and the root conftest deletes it for every test, so an inherited
+    environment sends the wrapper looking at the DEFAULT path — where, in a
+    checkout using an override, nothing is listening and `ensure_daemon`
+    burns `DAEMON_STARTUP_TIMEOUT` per probe with no event sent at all.
 
     An isolated temp directory for the event `cwd` measured as changing
     nothing, but that measurement only ever covered WRITE payloads, whose
@@ -142,6 +150,7 @@ def _dispatch(probe: ExecutableProbe) -> tuple[str, str, str | None]:
         cwd=str(REPO_ROOT),
         timeout=PROBE_DISPATCH_TIMEOUT_SECONDS,
         check=False,
+        env=env,
     )
     raw = (result.stdout or "").strip()
     if not raw:
@@ -195,7 +204,7 @@ def _perform(actions: list[FixtureAction]) -> None:
             raise AssertionError(f"unknown fixture action kind: {action.kind!r}")
 
 
-def _run_probe(probe: ExecutableProbe) -> str | None:
+def _run_probe(probe: ExecutableProbe, env: dict[str, str]) -> str | None:
     """Dispatch one probe, making the world match what its event claims."""
     created: Path | None = None
     target = Path(probe.file_path) if probe.file_path else None
@@ -213,7 +222,7 @@ def _run_probe(probe: ExecutableProbe) -> str | None:
             # clobber rather than the new write the event claims.
             target.unlink()
     try:
-        decision, text, error = _dispatch(probe)
+        decision, text, error = _dispatch(probe, env)
         if error is not None:
             return f"the daemon rejected the event, so no handler ran: {error}"
         return verdict(probe, decision, text)
@@ -272,6 +281,7 @@ class TestTheDeclaredProbesBehaveAsDeclared:
     def test_every_executable_probe_matches_its_expected_decision_and_reason(
         self,
         partitioned: tuple[list[ExecutableProbe], list[SkippedProbe]],
+        daemon_socket: Path,
     ) -> None:
         """The gate: dispatch all of them, report every mismatch at once.
 
@@ -282,9 +292,10 @@ class TestTheDeclaredProbesBehaveAsDeclared:
         have read as a real defect.
         """
         executable, _ = partitioned
+        env = wrapper_subprocess_env(daemon_socket)
         failures = []
         for probe in executable:
-            failure = _run_probe(probe)
+            failure = _run_probe(probe, env)
             if failure is not None:
                 failures.append(f"#{probe.test_number} {probe.handler_name}: {failure}")
 
