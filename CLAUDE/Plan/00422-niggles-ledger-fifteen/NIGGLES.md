@@ -611,6 +611,36 @@ still two findings, and a link resolving under neither rule is still reported.
 Three of this ledger's entries exist because a fix quietly widened past its
 target, so the controls are the point, not decoration.
 
+**Row (e) DONE by Plan 00442, and N5 is now CLOSED.** The row calls it
+"defensible, but the code and the docstring disagree". It is less defensible
+than that, because the disagreement is not with a docstring — it is with the
+module's own test suite.
+
+`test_a_refused_rung_does_not_stop_the_ladder` asserts exactly this principle,
+and `_silent_hosts`' docstring states it outright: "Refusing a hostile value
+never meant NOTHING resolves — only that the refused rung contributes nothing."
+But that test forces a `podman` runtime, so rung 2 never executes and its own
+case was never covered. Two statements of the rule, one rung away from the
+place it was broken.
+
+**The code moved, not the prose.** Rung 2's condition is about the RUNTIME —
+whether `gethostname` means anything here — not about the value it returned, so
+a refused value is a rung that did not hit, and "first hit wins" hands the
+question on. Rung 3 already describes itself as "a hint, marked as one, ranked
+below every route that cannot be wrong", which is precisely the standing a last
+resort should have. On a host whose `gethostname()` yields nothing, a
+`127.0.1.1` line in `/etc/hosts` genuinely names that host; returning nothing
+was discarding an answer the module already knows how to label.
+
+**One existing test had to be corrected, and it is the evidence.**
+`test_a_hostile_local_hostname_is_refused` asserted `None` without pinning
+`hosts_path` — the exact hazard `_silent_hosts` was written to prevent, and
+which its docstring describes in full. It passed only because rung 2
+short-circuited before the last rung could read the real `/etc/hosts`; on a
+Debian-style host with the fall-through in place it would have become
+distribution-dependent. A test silently leaning on the defect is the most
+reliable sign the defect was load-bearing.
+
 **A third error surfaced in passing**: `docs_qa/context.py` cited
 `docs_qa.corpus` as the module reusing `plan_qa.model.lines_outside_fences`. It
 is `docs_qa.checks.at_import_census`, and has been for as long as that sentence

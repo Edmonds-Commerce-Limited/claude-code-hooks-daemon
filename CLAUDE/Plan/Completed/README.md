@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00403: upstream issue reporting sop](00403-upstream-issue-reporting-sop/PLAN.md) - Complete at `6787874f`…`47f315cd` + the archiving commit (one procedure for reporting a daemon defect to this PUBLIC repo: a generator that never COLLECTS the hostname, remote, env file, config or logs, a gate refusing any body it did not build, issue forms mirroring its fields, and `--web` kept open as the hole that keeps the gate honest)
+
 - [00404: niggles ledger ten](00404-niggles-ledger-ten/PLAN.md) - Complete at `bd8fd27f` + the archiving commit (one entry, fixed: an unguarded `chmod` one line outside `_bind_event_sockets`' per-socket guard meant a single unsecurable socket aborted daemon startup and cost ALL 31 event sockets — found by reading a CI failure rather than hitting a symptom. The NEXT niggle opens ledger eleven)
 
 - [00401: reference repo freshness before read](00401-reference-repo-freshness-before-read/PLAN.md) - Complete at `9e399219`…`7a43abf6` + the archiving commit (one checker over `git_sync` feeds a SessionStart sweep, a cache-only PreToolUse gate and a CLI report, with a third verdict for a clone that is un-fetchable by design; four defects were found by using the finished thing, not by adding tests)

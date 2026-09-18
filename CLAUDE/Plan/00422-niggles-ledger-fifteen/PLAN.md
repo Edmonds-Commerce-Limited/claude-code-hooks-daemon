@@ -53,23 +53,23 @@ catch.
 Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here so the
 ledger's shape is readable without opening it:
 
-| #   | Verdict                                                                  | Origin                                                             | Status                                                  |
-| --- | ------------------------------------------------------------------------ | ------------------------------------------------------------------ | ------------------------------------------------------- |
-| N1  | the `Priority` constants are not the numbers a fresh install ships       | [00419 N8](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md)  | ⏸ Owner question 1 — stated, waiting                    |
-| N2  | the linter runs on gitignored scratch output                             | [00419 N11](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md) | ✅ Resolved — depth-scoped exclusions shipped           |
-| N3  | a committed future-dated entry makes the journal uncorrectable           | [00419 N12](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md) | 🔄 Remediation fixed; (2) owner-gated, advisory expired |
-| N4  | a cron cannot be both cancelled for a session and declared in config     | [00419 N13](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md) | ⏸ Owner question 2 — stated, waiting                    |
-| N5  | the v3.65.0 release reviews' NON-defects had no durable home             | the v3.65.0 release reviews                                        | 🔄 all but (e) done; (f) corrected; one row left        |
-| N6  | a worktree cannot run the acceptance gates, and says the wrong reason    | Plan 00424                                                         | ⬜ Open — two faults measured, remedies 1-3 un-gated    |
-| N7  | the supervisor's effort floor cannot see an effort set from the selector | owner report, in session                                           | ⏸ Owner question 3 — stated, waiting                    |
-| N8  | the socket-path guard fails open exactly where it is needed              | in session, hours after N6 fault 1 shipped                         | ✅ Remedied by Plan 00431                               |
-| N9  | worktree isolation plus an explicit worktree instruction nests them      | in session, by causing it                                          | ✅ Remedied by Plan 00433                               |
-| N10 | a QA checker's own tests overwrite that checker's real QA artefact       | a full `llm_qa all` run's intermediate artefacts                   | ✅ Remedied by Plan 00432                               |
-| N11 | acceptance probe fixtures live in the sanctioned human scratch directory | surfaced by N2's second failure                                    | ⏸ Owner question 4 — (2) already exists                 |
-| N12 | the supervisor asset has been red under its own lint gate since v3.65.0  | in session, after v3.65.0 shipped                                  | ✅ Corrected — the gate is green; no code change due    |
-| N13 | the plan-dedupe scout cleared a plan tree it never read                  | a dispatch before filing Plan 00430                                | ✅ Remedied by Plan 00434                               |
-| N14 | four more `utils`/`docs_qa` → `plan_qa` edges, found by N5 row (h)'s fix | the guard written for Plan 00439                                   | ⬜ Open — declared in a ratchet allowlist, not cleared  |
-| N15 | the dedupe scout reported a file path for a report it never wrote        | the dispatch before filing Plan 00441                              | ⬜ Open — Plan 00434 fixed the count, not this          |
+| #   | Verdict                                                                  | Origin                                                             | Status                                                         |
+| --- | ------------------------------------------------------------------------ | ------------------------------------------------------------------ | -------------------------------------------------------------- |
+| N1  | the `Priority` constants are not the numbers a fresh install ships       | [00419 N8](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md)  | ⏸ Owner question 1 — stated, waiting                           |
+| N2  | the linter runs on gitignored scratch output                             | [00419 N11](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md) | ✅ Resolved — depth-scoped exclusions shipped                  |
+| N3  | a committed future-dated entry makes the journal uncorrectable           | [00419 N12](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md) | 🔄 Remediation fixed; (2) owner-gated, advisory expired        |
+| N4  | a cron cannot be both cancelled for a session and declared in config     | [00419 N13](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md) | ⏸ Owner question 2 — stated, waiting                           |
+| N5  | the v3.65.0 release reviews' NON-defects had no durable home             | the v3.65.0 release reviews                                        | ✅ CLOSED — all twelve rows resolved; (f) corrected, not built |
+| N6  | a worktree cannot run the acceptance gates, and says the wrong reason    | Plan 00424                                                         | ⬜ Open — two faults measured, remedies 1-3 un-gated           |
+| N7  | the supervisor's effort floor cannot see an effort set from the selector | owner report, in session                                           | ⏸ Owner question 3 — stated, waiting                           |
+| N8  | the socket-path guard fails open exactly where it is needed              | in session, hours after N6 fault 1 shipped                         | ✅ Remedied by Plan 00431                                      |
+| N9  | worktree isolation plus an explicit worktree instruction nests them      | in session, by causing it                                          | ✅ Remedied by Plan 00433                                      |
+| N10 | a QA checker's own tests overwrite that checker's real QA artefact       | a full `llm_qa all` run's intermediate artefacts                   | ✅ Remedied by Plan 00432                                      |
+| N11 | acceptance probe fixtures live in the sanctioned human scratch directory | surfaced by N2's second failure                                    | ⏸ Owner question 4 — (2) already exists                        |
+| N12 | the supervisor asset has been red under its own lint gate since v3.65.0  | in session, after v3.65.0 shipped                                  | ✅ Corrected — the gate is green; no code change due           |
+| N13 | the plan-dedupe scout cleared a plan tree it never read                  | a dispatch before filing Plan 00430                                | ✅ Remedied by Plan 00434                                      |
+| N14 | four more `utils`/`docs_qa` → `plan_qa` edges, found by N5 row (h)'s fix | the guard written for Plan 00439                                   | ⬜ Open — declared in a ratchet allowlist, not cleared         |
+| N15 | the dedupe scout reported a file path for a report it never wrote        | the dispatch before filing Plan 00441                              | ⬜ Open — Plan 00434 fixed the count, not this                 |
 
 ## Questions waiting on the owner
 

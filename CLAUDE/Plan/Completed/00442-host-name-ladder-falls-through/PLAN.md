@@ -1,6 +1,6 @@
 # Plan 00442: host name ladder falls through
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-18
 **Owner**: dev
 **Priority**: Low
@@ -78,18 +78,27 @@ depending on the host distribution.
 
 ### Phase 2: gate
 
-- [ ] ⬜ **Task 2.1**: `llm_qa format`, then `llm_qa.py all` green with the
-  daemon restarted after the last `src/` edit.
-- [ ] ⬜ **Task 2.2**: Record row (e) on Plan 00422's `NIGGLES.md`; archive.
+- [x] ✅ **Task 2.1**: `llm_qa format`, then `llm_qa.py all` green with the
+  daemon restarted after the last `src/` edit. The run came back 34/35 on two
+  `plan_qa` advisories that were both mine and both correct — this plan had no
+  README index row and the `Active` statistic was one behind. Added, `plan_qa`
+  re-run clean.
+- [x] ✅ **Task 2.2**: Record row (e) on Plan 00422's `NIGGLES.md`; archive.
   No release note: the only consumer is a status-line segment, and the
-  change is "shows an inferred name where it previously showed nothing".
+  change is "shows an inferred, labelled name where it previously showed
+  nothing".
 
 ## Success Criteria
 
-- [ ] The documented ladder and `resolve_host_name` agree, checked by a test
+- [x] ✅ The documented ladder and `resolve_host_name` agree, checked by a test
   rather than by reading them side by side.
-- [ ] The two controls pass unchanged.
-- [ ] `llm_qa.py all` green.
+- [x] ✅ The two controls pass unchanged.
+- [x] ✅ `llm_qa.py all` green — 34/35 on the run, the one failure being two
+  correct `plan_qa` advisories about this plan's own index row; clean on
+  re-run.
+- [x] ✅ This plan has no release-bound consequences: the only consumer is a
+  status-line segment, and the change is "shows an inferred, labelled name
+  where it previously showed nothing".
 
 ## Delivery & Milestones
 
@@ -97,4 +106,6 @@ depending on the host distribution.
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00442-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- <!-- milestone or delivery commit hash -->
+- Delivered at `9acb1684` — the fall-through, its test, and the correction to
+  the existing test that was leaning on the short-circuit.
+- Archived in the following commit, with the README row and statistics.
