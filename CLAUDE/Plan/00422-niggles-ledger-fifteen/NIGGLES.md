@@ -292,6 +292,40 @@ reaches the "not owner-gated" bar is now a live question rather than a settled
 one, and it is the same shape as the template question Plan 00427 puts to the
 owner for issue #45.
 
+**THE LIVE ADVISORY IS GONE, and not because anything was remedied.** Measured
+rather than assumed: `plan_qa` now reports 0 findings over the whole tree, while
+the cited day-file still carries all 11 ordering regressions in its content.
+Both are true because `journal_entry_ordering._live_journal_targets` walks only
+plans in the plan ROOT, and 00419 is archived. The exclusion exists for exactly
+this entry's reason, stated in its own docstring: `archive-immutability` forbids
+editing an archived journal, so a finding there is one nobody is PERMITTED to
+act on, and "a permanently unfixable finding trains readers to ignore the
+check".
+
+So the entry's restated closing criterion — eliminate the specific finding
+`10:50 after 11:18` — was met by ARCHIVING, and every instance of this
+contradiction is self-limiting in the same way: it can only be reported while
+the plan is live. That is worth knowing before anyone builds a remedy for it,
+and it is the third premise in this ledger to expire before its entry did.
+
+**What remains real**: the contradiction still bites inside a LIVE plan's
+day-file, for as long as that plan is live.
+
+**Done, un-gated: the remediation no longer opens with the illegal move.** It
+began "move the out-of-order entry back to its chronological slot" — precisely
+what `journal-append-only` forbids once the entry is committed, offered as the
+FIRST instruction, with the legal move second. It now leads with the append,
+keeps moving as the narrower case it is (an entry that has not landed yet), and
+states plainly that a correction whose honest time is earlier will itself read
+as out of order and is still the right move. A reader who cannot act on the
+advice is a reader who learns to ignore the check — which is the same argument
+the archived-plan exclusion already makes.
+
+**Remedy (2) stays unbuilt and is owner-gated after all.** A `correction`
+category is a change to the entry grammar in `_JOURNAL_TEMPLATE_.md`, which
+ships to every client; that is a template decision of the same shape Plan 00427
+put to the owner, not a ledger fix.
+
 **The upstream cause is worth separating from the remedy.** The entries only
 became uncorrectable because they were appended with a `cat >> … <<'EOF'`
 heredoc, which is not seen by the Write/Edit-time guards — CLAUDE.md states

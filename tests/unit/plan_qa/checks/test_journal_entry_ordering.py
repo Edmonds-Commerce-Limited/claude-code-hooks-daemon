@@ -107,6 +107,41 @@ class TestOrdering:
         assert "13:00" in message
 
 
+class TestTheRemediationIsLegalUnderTheOtherJournalRules:
+    """Ledger 00422 N3: three journal rules meet and cannot all hold.
+
+    ``journal-append-only`` says a correction is a NEW entry at the bottom,
+    never a rewrite. This check's remediation opened by telling the reader to
+    move the offending entry back to its chronological slot — which is exactly
+    the move append-only forbids once the entry is committed, and it is the
+    FIRST thing the reader is told to do.
+
+    A reader who cannot act on the advice is a reader who learns to ignore the
+    check. The remediation must lead with the move that is always legal, and
+    name the case where moving is allowed as the narrower one it is.
+    """
+
+    def test_the_remediation_leads_with_appending_not_moving(self) -> None:
+        body = _PREAMBLE + _entry("13:00") + _entry("12:50")
+        remediation = _EDIT.run(_ctx(body))[0].remediation
+
+        append_at = remediation.lower().find("new entry")
+        move_at = remediation.lower().find("move")
+        assert append_at != -1, f"the remediation never mentions appending: {remediation}"
+        assert move_at == -1 or append_at < move_at, (
+            "the remediation tells the reader to MOVE the entry before it mentions "
+            f"appending a correction, which append-only forbids once committed: {remediation}"
+        )
+
+    def test_the_remediation_says_when_moving_is_legal(self) -> None:
+        """Moving IS right for an uncommitted entry, so the advice keeps it —
+        with the condition stated, rather than dropped for safety."""
+        body = _PREAMBLE + _entry("13:00") + _entry("12:50")
+        remediation = _EDIT.run(_ctx(body))[0].remediation.lower()
+
+        assert "append-only" in remediation or "committed" in remediation
+
+
 class TestWhatIsNotAnEntry:
     def test_a_heading_inside_a_fence_is_not_an_entry(self) -> None:
         """Journals embed fenced logs; a heading in one is quoted text."""

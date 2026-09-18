@@ -66,12 +66,21 @@ _ENTRY_HEADING: Final[re.Pattern[str]] = re.compile(r"^## (\d{2}):(\d{2})\b")
 #: is what stops a quoted heading being read as this file's own entry.
 _FENCE: Final[re.Pattern[str]] = re.compile(r"^\s*(```|~~~)")
 
+#: Leads with the append, not the move, because the move is the one that can be
+#: ILLEGAL: `journal-append-only` forbids rewriting an entry that is already
+#: committed, so a remediation opening with "move it" tells most readers to do
+#: the forbidden thing first (ledger 00422 N3). Moving is still named, because
+#: it is right for an entry that has not landed yet — with the condition
+#: stated rather than dropped.
 _REMEDIATION: Final[str] = (
-    "Journal entries run oldest-first: move the out-of-order entry back to its "
-    "chronological slot, keeping its text unchanged. If it records something "
-    "that happened later than its timestamp suggests, correct it with a NEW "
-    "entry at the bottom rather than restating the old one — journals are "
-    "append-only, so a correction is an addition."
+    "Journal entries run oldest-first. Correct the record with a NEW entry at "
+    "the bottom carrying an honest timestamp — journals are append-only, so a "
+    "correction is an addition, never a restatement. Only if the out-of-order "
+    "entry is NOT yet committed may you move it back to its chronological slot "
+    "instead, keeping its text unchanged. A correction whose honest time is "
+    "EARLIER than the entry it corrects will itself read as out of order: that "
+    "is the append-only rule and this one meeting, and the correction is still "
+    "the right move."
 )
 
 

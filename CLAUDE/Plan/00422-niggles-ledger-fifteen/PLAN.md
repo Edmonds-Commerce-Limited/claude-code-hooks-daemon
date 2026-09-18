@@ -57,7 +57,7 @@ ledger's shape is readable without opening it:
 | --- | ------------------------------------------------------------------------ | ------------------------------------------------------------------ | ------------------------------------------------------- |
 | N1  | the `Priority` constants are not the numbers a fresh install ships       | [00419 N8](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md)  | ⬜ Open — remedy recorded, owner-gated, unbuilt         |
 | N2  | the linter runs on gitignored scratch output                             | [00419 N11](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md) | ✅ Resolved — depth-scoped exclusions shipped           |
-| N3  | a committed future-dated entry makes the journal uncorrectable           | [00419 N12](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md) | ⬜ Open — remedies recorded, none chosen; advisory live |
+| N3  | a committed future-dated entry makes the journal uncorrectable           | [00419 N12](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md) | 🔄 Remediation fixed; (2) owner-gated, advisory expired |
 | N4  | a cron cannot be both cancelled for a session and declared in config     | [00419 N13](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md) | ⬜ Open — remedy recorded, owner-gated, unbuilt         |
 | N5  | the v3.65.0 release reviews' NON-defects had no durable home             | the v3.65.0 release reviews                                        | 🔄 (a)(d)(g) done, (f) corrected; eight rows unworked   |
 | N6  | a worktree cannot run the acceptance gates, and says the wrong reason    | Plan 00424                                                         | ⬜ Open — two faults measured, remedies 1-3 un-gated    |
@@ -85,12 +85,14 @@ ledger's shape is readable without opening it:
   linted while every file that can reach history — and every acceptance fixture
   one level down — still is.
 
-- [ ] ⬜ **Task 1.3**: N3 — choose between teaching `journal-entry-ordering`
-  about entries the file itself flags as future-dated, and giving a correction
-  entry its own grammar. Both narrow an advisory that fires on a state the other
-  two journal rules force into existence; neither weakens a gate. The existing
-  finding against 00419's day-file is the regression case, and it cannot be
-  cleared by editing that file.
+- [x] ✅ **Task 1.3**: N3 — chosen, and the choice is neither candidate.
+  Remedy (1) cannot be implemented at sweep stage (nothing in a file is a
+  machine-readable future-dated flag), and remedy (2) edits the entry grammar in
+  a template shipped to every client, so it is owner-gated after all. What was
+  buildable and un-gated: the check's remediation opened by telling the reader
+  to MOVE the entry, which `journal-append-only` forbids once it is committed.
+  It now leads with the append. The cited advisory is also gone — measured, and
+  by archiving rather than by any remedy.
 
 - [ ] ⬜ **Task 1.4**: N4 — put the owner question in front of the owner: may a
   session suppress a cron the project declared, and if so through what recorded,
