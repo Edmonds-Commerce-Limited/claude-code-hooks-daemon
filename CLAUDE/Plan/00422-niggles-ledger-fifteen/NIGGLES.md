@@ -736,8 +736,82 @@ at 109/104 with nothing created (no directory, no branch); a short name prints
 cannot run, it warns and continues. A broken checker must not block worktree
 creation.
 
-**Fault 2 is untouched**, as this entry intended — remedies 1–3 never addressed
-it, and the playbook-harness stall still needs diagnosis.
+**FAULT 2 DIAGNOSED — and it is not a worktree fault.** This entry's own heading
+says "the playbook harness stalls in a worktree anyway". It does not. The
+variable is the WORKAROUND, not the checkout, and the worktree only ever
+appeared in the repro because an over-limit socket path is what forces the
+workaround in the first place.
+
+Measured, in a worktree created by the now-guarded `setup_worktree.sh`:
+
+| Configuration                                                     | Result                             |
+| ----------------------------------------------------------------- | ---------------------------------- |
+| Worktree, natural (fitting) socket path, no override              | **5 passed in 13.91s**             |
+| Same worktree, `CLAUDE_HOOKS_SOCKET_PATH` at another fitting path | **hangs** — four dots, then killed |
+
+The second row is the reported shape exactly. Note what the first row settles:
+a worktree whose socket path fits runs the harness in essentially `main`'s
+14.3 seconds, so nothing about being a worktree is implicated.
+
+**The mechanism.** `tests/conftest.py` declares
+`isolate_daemon_path_overrides`, an `autouse=True` fixture that
+`monkeypatch.delenv`s `CLAUDE_HOOKS_SOCKET_PATH` (with `_PID_PATH`, `_LOG_PATH`
+and the venv pair) for EVERY test. It is right to exist and its reasoning is
+sound — an ambient override makes 17 path tests assert against a path they
+never chose, and it would be diagnosed as CI flake because it depends on who is
+running it. Its docstring even states the consequence: "The unset is inherited
+by every subprocess a test spawns."
+
+That consequence is the fault. The playbook harness dispatches each probe by
+spawning the PRODUCTION wrapper, which resolves the socket itself from
+`init.sh`. With the override stripped, the wrapper computes the DEFAULT path,
+finds no live socket there, and `ensure_daemon` tries to start one —
+`DAEMON_STARTUP_TIMEOUT=150` deciseconds, i.e. **15 seconds**, which is the
+"~16 seconds" this entry recorded. No event is ever sent, which is why the
+original observation was "no probe traffic at all": the wrapper never gets that
+far. Across 224 executable probes that is roughly an hour, and "18 minutes with
+no progress" was simply where the watching stopped.
+
+**Verified from outside, not inferred.** Three controls, because the obvious
+explanation was wrong twice before this one held:
+
+1. All 224 probes dispatched from a plain script under the same override, with
+   the harness's own `build_event` and fixture actions replicated: every one
+   completed, none slower than a second. So neither the dispatch nor the
+   fixtures stall.
+2. A single wrapper dispatch from the shell under the override: 0.2s.
+3. A throwaway test under `tests/acceptance/` printing what it and its
+   subprocess see: `IN_PROCESS=[<unset>] SUBPROC_SEES=[<unset>]`, with the
+   variable exported in the calling shell. That is the whole defect in one
+   line.
+
+**Why it is worth a remedy rather than a shrug.** The daemon's own fallback
+message (`daemon/paths.py`) tells the operator to "Set
+`CLAUDE_HOOKS_SOCKET_PATH` to override". Following that documented instruction
+fixes every surface EXCEPT the test suite, and the suite does not report the
+override as ignored — it hangs. Advice that works everywhere except where you
+were sent to verify it is worse than no advice.
+
+**Candidate remedies for fault 2**, cheapest first:
+
+1. Have the acceptance fixtures that dispatch through the wrapper pass an
+   explicit `env` carrying the resolved socket path, rather than relying on
+   inheritance. `tests/acceptance/conftest.py` already RESOLVES the socket for
+   its skip logic, so it knows the value the subprocess needs; the harness
+   spawns are the only place this matters, so this does not weaken
+   `isolate_daemon_path_overrides` for anyone else.
+2. Bound the wait. A probe dispatch that spends `DAEMON_STARTUP_TIMEOUT`
+   starting a daemon is never going to produce a verdict, and a harness that
+   reported "the wrapper could not reach a daemon" after the first one would
+   have cost seconds instead of an hour.
+3. Have the autouse fixture's own docstring name this consequence for
+   subprocess-spawning suites specifically — the cheapest of all, and the
+   weakest, since a docstring is not a worklist (which is the argument this
+   ledger keeps making).
+
+Remedy 1 is the real fix; 2 is worth doing regardless, because it converts a
+silent hour into a fast, legible failure and is not specific to this cause.
+None is gated on the owner.
 
 **REMEDY (2) DONE by Plan 00443.** The acceptance fixtures skipped with "Daemon
 not running — start with `./bin/hooks-daemon restart`" whenever no socket was
