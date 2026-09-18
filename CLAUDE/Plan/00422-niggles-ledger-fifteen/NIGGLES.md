@@ -423,6 +423,29 @@ a path nothing durable reads.
 Remedy (2) is owner-gated — it changes what `dispatch_declaration` recommends
 to every client project, not just this one.
 
+**Rows (a) and (d) DONE by Plan 00435, and the table was wrong in a third place
+neither row mentions.** The Advisory row read `56-69` against a
+`PriorityRange.ADVISORY_MAX` of 73, so four shipped handlers sat in no
+documented band at all. All three surfaces agreed with each other and all three
+were wrong, because `quote_drift` keeps the two `ssot-quote` copies faithful to
+the SSoT and nothing compared the SSoT to the code. There is now a test that
+does, with the row-count control that stops a parser matching nothing from
+reading as agreement. Row (d)'s `priority 8` is 7, naming what holds 8, and the
+skill's paraphrase — which stated a third value, `56-65` — agrees now too.
+
+**Row (f) is CORRECTED, not built.** The claim is accurate about the unit test:
+`CronStopEnforcerHandler().priority < Priority.AUTO_CONTINUE_STOP` compares
+against the SHIPPED 15 while this project overrides that handler to 10, so a
+Stop handler at 11-14 passes it while being shadowed here. But the CLASS is
+already guarded:
+`test_stop_chain_terminal_shadowing.py::TestThisProjectHasNotFallenIntoTheTrap`
+builds the router from this project's real config file, including
+`project_handlers_config`, and fails on anything registered after the handler
+that breaks the chain — which is precisely the effective-priority question the
+unit test cannot answer. The unit test is a wiring sanity check and its
+docstring already points at that module. Nothing to build; the row named the
+weaker of two tests as though it were the only one.
+
 ### N6 — a worktree cannot run the acceptance release gates, and says the wrong reason
 
 **Found**: during Plan 00424, running `llm_qa.py all` inside a worktree created

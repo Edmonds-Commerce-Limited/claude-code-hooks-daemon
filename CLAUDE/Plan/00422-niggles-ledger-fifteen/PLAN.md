@@ -59,7 +59,7 @@ ledger's shape is readable without opening it:
 | N2  | the linter runs on gitignored scratch output                             | [00419 N11](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md) | ✅ Resolved — depth-scoped exclusions shipped           |
 | N3  | a committed future-dated entry makes the journal uncorrectable           | [00419 N12](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md) | ⬜ Open — remedies recorded, none chosen; advisory live |
 | N4  | a cron cannot be both cancelled for a session and declared in config     | [00419 N13](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md) | ⬜ Open — remedy recorded, owner-gated, unbuilt         |
-| N5  | the v3.65.0 release reviews' NON-defects had no durable home             | the v3.65.0 release reviews                                        | ⬜ Open — evidence now tracked, twelve rows unworked    |
+| N5  | the v3.65.0 release reviews' NON-defects had no durable home             | the v3.65.0 release reviews                                        | 🔄 (a)(d) done, (f) corrected; nine rows unworked       |
 | N6  | a worktree cannot run the acceptance gates, and says the wrong reason    | Plan 00424                                                         | ⬜ Open — two faults measured, remedies 1-3 un-gated    |
 | N7  | the supervisor's effort floor cannot see an effort set from the selector | owner report, in session                                           | ⬜ Open — mechanism confirmed, remedy owner-gated       |
 | N8  | the socket-path guard fails open exactly where it is needed              | in session, hours after N6 fault 1 shipped                         | ✅ Remedied by Plan 00431                               |
@@ -105,10 +105,12 @@ ledger's shape is readable without opening it:
 
 ### Phase 2: the release-review carry-over
 
-- [ ] ⬜ **Task 2.1**: N5 — work the twelve-row table in
-  [NIGGLES.md](NIGGLES.md). Rows (a), (d) and (f) are documentation or test
-  corrections needing no decision; (a) first, because it is a live trap for the
-  next person to add a Stop handler.
+- [ ] 🔄 **Task 2.1**: N5 — work the twelve-row table in
+  [NIGGLES.md](NIGGLES.md). Rows (a) and (d) are done by Plan 00435, which also
+  found a third disagreement in the same table and left a test behind so it
+  cannot drift silently again. Row (f) is corrected rather than built: the class
+  it names is already guarded by the integration test that reads the real
+  config. Nine rows remain, (b), (c), (g) and (i) being the ones with teeth.
 
 - [ ] ⬜ **Task 2.2**: N5 remedy (2), owner-gated — decide whether a review
   dispatch should default to a TRACKED report destination, so a reviewer's

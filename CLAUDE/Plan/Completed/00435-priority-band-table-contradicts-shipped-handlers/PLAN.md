@@ -1,6 +1,6 @@
 # Plan 00435: priority band table contradicts shipped handlers
 
-**Status**: Not Started
+**Status**: Complete
 **Created**: 2026-09-17
 **Owner**: dev
 **Priority**: Medium
@@ -71,35 +71,35 @@ not covered by `quote_drift` because it paraphrases rather than quotes.
 
 ### Phase 1: the guard
 
-- [ ] ⬜ **Task 1.1**: RED — a test parsing the band table out of the SSoT
+- [x] ✅ **Task 1.1**: RED — a test parsing the band table out of the SSoT
   document and asserting each row's range against `PriorityRange`, plus a
   second asserting every shipped `Priority` handler constant falls inside a
   documented band. Both must fail today: the first on `56-69` vs
   `ADVISORY_MAX=73`, the second on the four handlers at 70-73.
 
-- [ ] ⬜ **Task 1.2**: A control that the parser is not matching nothing — the
+- [x] ✅ **Task 1.2**: A control that the parser is not matching nothing — the
   row count it extracts is asserted, so a table it silently failed to find
   cannot read as agreement.
 
 ### Phase 2: the corrections
 
-- [ ] ⬜ **Task 2.1**: Correct the SSoT table: the `0-9` row names the three
+- [x] ✅ **Task 2.1**: Correct the SSoT table: the `0-9` row names the three
   Stop-family handlers and the reason they are there, and the Advisory row
   reads `56-73`. Update both `ssot-quote` copies so `quote_drift` stays green.
 
-- [ ] ⬜ **Task 2.2**: `handlers/stop/__init__.py` — `priority 8` becomes 7,
+- [x] ✅ **Task 2.2**: `handlers/stop/__init__.py` — `priority 8` becomes 7,
   naming what holds 8.
 
-- [ ] ⬜ **Task 2.3**: The skill's `dev-handlers.md` (source and deployed copy)
+- [x] ✅ **Task 2.3**: The skill's `dev-handlers.md` (source and deployed copy)
   agrees with the SSoT.
 
 ## Success Criteria
 
-- [ ] ⬜ Every new test observed RED before the correction and GREEN after.
-- [ ] ⬜ `llm_qa.py all` passes.
-- [ ] ⬜ A release note lands in `CLAUDE/UPGRADES/UNRELEASED/release-notes/` —
+- [x] ✅ Every new test observed RED before the correction and GREEN after.
+- [x] ✅ `llm_qa.py all` passes — 35/35.
+- [x] ✅ A release note lands in `CLAUDE/UPGRADES/UNRELEASED/release-notes/` —
   the band table is guidance every client handler author follows.
-- [ ] ⬜ N5 rows (a) and (d) are marked done in ledger 00422, and row (f) is
+- [x] ✅ N5 rows (a) and (d) are marked done in ledger 00422, and row (f) is
   corrected there rather than built.
 
 ## Delivery & Milestones
