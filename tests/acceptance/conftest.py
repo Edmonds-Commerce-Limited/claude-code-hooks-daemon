@@ -56,6 +56,7 @@ import pytest
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.daemon.cli import send_daemon_request
+from claude_code_hooks_daemon.daemon.paths import socket_path_diagnosis
 from claude_code_hooks_daemon.daemon.source_fingerprint import (
     compute_current_project_fingerprint,
     describe_fingerprint_mismatch,
@@ -105,6 +106,25 @@ def _discover_socket() -> Path | None:
     return None
 
 
+def _no_socket_reason() -> str:
+    """Why the suite is skipping, distinguishing the two reasons it can be.
+
+    Usually the daemon is simply not running. But in a checkout whose natural
+    socket path is over the AF_UNIX limit, a perfectly healthy daemon keeps its
+    socket in /tmp and nothing appears under ``untracked/`` — where "restart the
+    daemon" is advice that reproduces the skip (Plan 00422 N6).
+    """
+    reason = "Daemon not running — no live socket found under untracked/."
+    # Self-install: this repo IS the daemon, so its socket lives at
+    # untracked/ rather than under .claude/hooks-daemon/ — the same test the
+    # daemon's own _get_untracked_dir makes, asked of this checkout.
+    self_install = (REPO_ROOT / "src" / "claude_code_hooks_daemon").is_dir()
+    diagnosis = socket_path_diagnosis(REPO_ROOT, self_install=self_install)
+    if diagnosis is not None:
+        return f"{reason} {diagnosis}"
+    return f"{reason} Start it with: ./bin/hooks-daemon restart"
+
+
 def assert_daemon_source_fresh(socket_path: Path) -> None:
     """Fail loudly, by name, if the daemon at ``socket_path`` looks stale (Plan 00371).
 
@@ -143,7 +163,7 @@ def daemon_running() -> None:
     """
     sock_path = _discover_socket()
     if sock_path is None:
-        pytest.skip("Daemon not running — start with: ./bin/hooks-daemon restart")
+        pytest.skip(_no_socket_reason())
     assert sock_path is not None  # pytest.skip() is not typed NoReturn; narrows for pyright
     assert_daemon_source_fresh(sock_path)
 
@@ -153,10 +173,7 @@ def daemon_socket() -> Path:
     """Same as ``daemon_running``, but returns the discovered socket path."""
     sock_path = _discover_socket()
     if sock_path is None:
-        pytest.skip(
-            "Daemon not running — no live socket found under untracked/. "
-            "Start it with: ./bin/hooks-daemon restart"
-        )
+        pytest.skip(_no_socket_reason())
     assert sock_path is not None  # pytest.skip() is not typed NoReturn; narrows for pyright
     assert_daemon_source_fresh(sock_path)
     return sock_path

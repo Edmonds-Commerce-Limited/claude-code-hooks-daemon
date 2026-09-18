@@ -8,10 +8,14 @@ cannot work, because a restart puts the socket straight back in /tmp
 (Plan 00422 N6, fault 1).
 
 The length is a property of the BRANCH NAME, so a short name works and a
-descriptive one silently does not. These two helpers let the creation path
-measure the path it is about to produce, for a directory that does not exist
-yet — which is why the mode cannot be sniffed from disk the way
-`_get_untracked_dir` does.
+descriptive one silently does not. These helpers let the creation path measure
+the path it is about to produce, for a directory that does not exist yet —
+which is why the mode cannot be sniffed from disk the way `_get_untracked_dir`
+does.
+
+`socket_path_diagnosis` closes the second half of that complaint (Plan 00443,
+N6 remedy 2): the acceptance fixtures now say which of the two situations they
+are in, so the remedy they print is one that can work.
 """
 
 from __future__ import annotations
@@ -21,6 +25,7 @@ from pathlib import Path
 from claude_code_hooks_daemon.daemon.paths import (
     _UNIX_SOCKET_PATH_LIMIT,
     prospective_socket_path,
+    socket_path_diagnosis,
     socket_path_overflow,
 )
 
@@ -70,3 +75,56 @@ class TestSocketPathOverflow:
         overflow = socket_path_overflow(prospective_socket_path(root, self_install=True))
 
         assert overflow > 0, "the branch name from N6 must still be reported as over the cap"
+
+
+class TestSocketPathDiagnosis:
+    """Plan 00443, N6 remedy (2).
+
+    The acceptance fixtures skip with "Daemon not running — start with
+    `./bin/hooks-daemon restart`" whenever no socket is found under
+    ``untracked/``. In an over-limit checkout that is false and costly: the
+    daemon IS running, and the restart puts its socket straight back in /tmp,
+    so the advice reproduces the skip. This turns the measurement the module
+    already does into a sentence a reader can act on.
+    """
+
+    _LONG_ROOT = Path("/workspace/untracked/worktrees/worktree-issue-42-remote-docs-add-overwrite")
+
+    def test_a_path_that_fits_has_nothing_to_explain(self) -> None:
+        """None, not an empty string: the caller branches on it."""
+        assert socket_path_diagnosis(Path("/w"), self_install=True) is None
+
+    def test_an_over_limit_path_is_explained(self) -> None:
+        diagnosis = socket_path_diagnosis(self._LONG_ROOT, self_install=True)
+
+        assert diagnosis is not None
+
+    def test_the_explanation_carries_the_measurement_and_the_cap(self) -> None:
+        path = prospective_socket_path(self._LONG_ROOT, self_install=True)
+        diagnosis = socket_path_diagnosis(self._LONG_ROOT, self_install=True)
+
+        assert diagnosis is not None
+        assert str(len(str(path))) in diagnosis
+        assert str(_UNIX_SOCKET_PATH_LIMIT) in diagnosis
+
+    def test_the_explanation_says_a_restart_will_not_help(self) -> None:
+        """The whole point: the standing advice is the wrong advice here."""
+        diagnosis = socket_path_diagnosis(self._LONG_ROOT, self_install=True)
+
+        assert diagnosis is not None
+        assert "restart" in diagnosis.lower()
+
+    def test_the_explanation_says_how_many_characters_to_cut(self) -> None:
+        overflow = socket_path_overflow(prospective_socket_path(self._LONG_ROOT, self_install=True))
+        diagnosis = socket_path_diagnosis(self._LONG_ROOT, self_install=True)
+
+        assert diagnosis is not None
+        assert str(overflow) in diagnosis
+
+    def test_the_installed_layout_is_measured_too(self) -> None:
+        """A client project nests deeper, so it overflows sooner, not later."""
+        installed = socket_path_diagnosis(self._LONG_ROOT, self_install=False)
+        self_installed = socket_path_diagnosis(self._LONG_ROOT, self_install=True)
+
+        assert installed is not None and self_installed is not None
+        assert installed != self_installed

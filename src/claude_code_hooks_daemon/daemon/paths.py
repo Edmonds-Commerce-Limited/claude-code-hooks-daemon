@@ -1213,6 +1213,32 @@ def socket_path_overflow(path: Path) -> int:
     return max(0, len(str(path)) - _UNIX_SOCKET_PATH_LIMIT)
 
 
+def socket_path_diagnosis(project_path: Path, *, self_install: bool) -> str | None:
+    """Why no socket can appear at the natural path, or ``None`` when one can.
+
+    A caller that has failed to FIND a socket under ``untracked/`` has two very
+    different situations to tell apart, and they want opposite advice. Usually
+    the daemon is simply not running, and starting it is right. But when the
+    natural path is over the AF_UNIX limit, the daemon may be running perfectly
+    well with its socket in ``/tmp`` — and "restart it" then reproduces the
+    same absence, which is the most expensive kind of wrong answer.
+
+    ``None`` rather than an empty string, so the caller branches on presence
+    instead of on truthiness of a message it did not build.
+    """
+    path = prospective_socket_path(project_path, self_install=self_install)
+    overflow = socket_path_overflow(path)
+    if overflow == 0:
+        return None
+    return (
+        f"The natural socket path is {len(str(path))} bytes, {overflow} over the "
+        f"{_UNIX_SOCKET_PATH_LIMIT}-byte AF_UNIX limit, so a running daemon places its "
+        f"socket under /tmp instead and nothing appears here. A restart will NOT change "
+        f"this. Shorten the path by at least {overflow} characters — in a worktree the "
+        f"branch name is the usual cause. Path: {path}"
+    )
+
+
 def _get_untracked_dir(project_path: Path) -> Path:
     """
     Get the untracked directory for daemon runtime files.
