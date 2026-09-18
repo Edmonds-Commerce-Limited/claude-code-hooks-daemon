@@ -69,6 +69,7 @@ ledger's shape is readable without opening it:
 | N12 | the supervisor asset has been red under its own lint gate since v3.65.0  | in session, after v3.65.0 shipped                                  | ✅ Corrected — the gate is green; no code change due         |
 | N13 | the plan-dedupe scout cleared a plan tree it never read                  | a dispatch before filing Plan 00430                                | ✅ Remedied by Plan 00434                                    |
 | N14 | four more `utils`/`docs_qa` → `plan_qa` edges, found by N5 row (h)'s fix | the guard written for Plan 00439                                   | ⬜ Open — declared in a ratchet allowlist, not cleared       |
+| N15 | the dedupe scout reported a file path for a report it never wrote        | the dispatch before filing Plan 00441                              | ⬜ Open — Plan 00434 fixed the count, not this               |
 
 ## Questions waiting on the owner
 

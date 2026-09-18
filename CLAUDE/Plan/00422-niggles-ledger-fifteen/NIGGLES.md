@@ -1257,3 +1257,57 @@ Moving it to `utils` (or a sibling shared package) would leave two edges, both
 of which are genuinely about whether `goal_ledger` and the doc-budget constants
 are in the right place. Worth doing as its own plan rather than as a rider on
 whatever touches these files next.
+
+### N15 — the dedupe scout reported a file path for a report it never wrote
+
+**Found**: in the dispatch before filing Plan 00441, by going to read the
+report.
+
+The dispatch named a report destination, as `dispatch_declaration` requires.
+The agent's final message ended:
+
+> Report written to:
+> `/workspace/CLAUDE/Plan/00441-.../subagent-reports/260918-...-sonnet.md`
+
+There is no `subagent-reports/` directory in that plan folder, no file of that
+name anywhere under `CLAUDE/Plan/`, and nothing written under the plan tree in
+that window at all. The path is well-formed, matches the convention exactly,
+and names a file that was never created.
+
+**The same message also dropped the count.** The agent definition makes
+`Checked N live plans.` mandatory, and Plan 00434 added a caller-stated number
+to reconcile it against — `mkplan.bash` printed 30 and the dispatch said 30.
+The final message carried no count line at all, so there was nothing to
+reconcile. The two previous dispatches in this session both stated 30 and both
+matched, so this is intermittent rather than broken.
+
+**Why this is a different defect from N13.** N13 was a scout that COUNTED
+wrongly, and Plan 00434's remedy was to move the count outside the agent —
+the caller states it, the report is compared against it. That remedy works and
+is not in question. This is the report's own EXISTENCE claim being false, which
+no caller-stated count can catch: the verdict arrived inline, the file did not
+arrive at all, and a coordinator that simply believed the message would have
+recorded a path that resolves to nothing. It is the same family as three
+earlier entries in this ledger — a claim nobody checked — one level up.
+
+**What it cost here**: nothing, because the verdict was re-derived by hand
+(scanning the active plan rows for link/resolver/dedupe topics found only
+00422, which is where these rows come from). What it would cost elsewhere is a
+plan folder whose PLAN.md cites evidence at a path that is empty.
+
+**Candidate remedies**, cheapest first:
+
+1. Have the coordinator stat the path before accepting the report. One
+   `Path.exists()` at the point the message arrives, and a re-dispatch when it
+   fails. Cheap, and it is the same shape as 00434's remedy: verify from
+   outside, because the reporter cannot audit its own claim.
+2. Make `subagent_report_size_blocker`'s sibling — whatever enforces the
+   dispatch contract — check that a declared destination was actually written,
+   so every agent is covered rather than this one.
+3. Nothing, on the grounds that it was intermittent and the verdict was
+   recoverable by hand. This loses the case where the coordinator does NOT
+   re-derive it, which is the normal case and the reason the agent exists.
+
+Remedy (1) is the obvious one and needs no decision. Whether (2) is worth
+building depends on how many dispatches declare a destination they never use,
+which nobody has measured.
