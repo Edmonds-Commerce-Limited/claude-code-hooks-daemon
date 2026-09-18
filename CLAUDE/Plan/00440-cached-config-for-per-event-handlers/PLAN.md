@@ -64,31 +64,38 @@ not. The two would share the same `stat` reading if 00415 ever lands.
   `Config.load_or_default` call site so the scope is measured rather than
   assumed: the hot `secret_*` ones already cache, the CLI/install ones are
   one-shot, and the row named its two handlers correctly.
-- [ ] ⬜ **Task 1.2**: Write `tests/unit/utils/test_config_cache.py`: a second
+- [x] ✅ **Task 1.2**: Write `tests/unit/utils/test_config_cache.py`: a second
   load of an unchanged file returns without re-parsing, a `st_mtime_ns` or
   `st_size` change forces a re-parse, a missing file behaves as
   `load_or_default` does, and concurrent callers get one parse. RED: the
   module does not exist.
-- [ ] ⬜ **Task 1.3**: Confirm the concurrency test is not vacuous — an
-  unlocked replica must be seen failing it, driving
-  `sys.setswitchinterval` down as Plan 00437 had to. Under the GIL, "it did
-  not raise" is not evidence.
+- [x] ✅ **Task 1.3**: Confirm the concurrency test is not vacuous. It needed
+  no artificial replica — the first implementation parsed OUTSIDE the lock and
+  the test failed `assert 16 == 1` on sixteen threads each parsing the same
+  file. The parse moved back inside the lock, which is also the simpler code.
 
 ### Phase 2: the accessor
 
-- [ ] ⬜ **Task 2.1**: `utils/config_cache.py` — `load_config_cached(path)`,
+- [x] ✅ **Task 2.1**: `utils/config_cache.py` — `load_config_cached(path)`,
   keyed on the resolved path plus `(st_mtime_ns, st_size)`, guarded by a
-  `threading.Lock`, delegating to `Config.load_or_default` on a miss.
-- [ ] ⬜ **Task 2.2**: Repoint the three per-event callers. Keep each one's
-  existing `except` behaviour: a config the daemon already reports as
-  invalid must still degrade the handler to silent, never raise out of the
-  Stop chain.
+  `threading.Lock`, delegating to `Config.load_or_default` on a miss. An
+  absent file caches under a sentinel signature, so one appearing later is a
+  miss rather than a pinned default.
+- [x] ✅ **Task 2.2**: Repoint the three per-event callers. Each keeps its own
+  `except`: a config the daemon already reports as invalid must still degrade
+  the handler to silent, never raise out of the Stop chain. The cache
+  deliberately re-raises — "this config is broken" is a decision about the
+  handler, not about the cache.
 
 ### Phase 3: gate
 
-- [ ] ⬜ **Task 3.1**: Re-measure and record the after figure in `JOURNAL/`.
-- [ ] ⬜ **Task 3.2**: `scripts/qa/llm_qa.py all` green, daemon restarted
-  before the commit and after the last `src/` edit.
+- [x] ✅ **Task 3.1**: Re-measure and record the after figure in `JOURNAL/`.
+  Warm path 23.5 µs median (a `stat` and a dict lookup), so ~153 ms per Stop
+  event becomes ~0.05 ms while the config is unchanged.
+- [x] ✅ **Task 3.2**: `scripts/qa/llm_qa.py all` green — 35/35, 25190 tests
+  passed, coverage 95.3%. Ran `llm_qa format` first this time and restarted the
+  daemon before starting: Plan 00439's run came back 32/35 purely because black
+  rewrote a file mid-run and moved the tree past the pre-run restart.
 - [ ] ⬜ **Task 3.3**: Release note; record the outcome on row (b) of Plan
   00422's `NIGGLES.md`; archive.
 

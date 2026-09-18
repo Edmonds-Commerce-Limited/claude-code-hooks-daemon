@@ -103,10 +103,10 @@ class RemoteDocsRoutingHandler(PreToolUseHandlerBase):
 
     def _config_reader(self) -> Any:
         """The project's loaded config, or None when it cannot be read."""
-        from claude_code_hooks_daemon.config.models import Config
+        from claude_code_hooks_daemon.utils.config_cache import load_config_cached
 
         try:
-            return Config.load_or_default(
+            return load_config_cached(
                 ProjectContext.project_root() / ".claude" / "hooks-daemon.yaml"
             )
         except (OSError, ValueError) as exc:

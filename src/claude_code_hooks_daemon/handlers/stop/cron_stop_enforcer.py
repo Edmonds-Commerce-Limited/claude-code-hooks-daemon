@@ -43,6 +43,7 @@ from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.core import BlockingResult, Decision, ProjectContext
 from claude_code_hooks_daemon.core.handler_bases import StopHandlerBase
 from claude_code_hooks_daemon.core.handler_scope import HandlerScope
+from claude_code_hooks_daemon.utils.config_cache import load_config_cached
 from claude_code_hooks_daemon.utils.cron_enforcement import (
     find_missing_crons,
     parse_session_crons,
@@ -106,7 +107,7 @@ class CronStopEnforcerHandler(StopHandlerBase):
         """
         config_path = self._project_root() / ".claude" / "hooks-daemon.yaml"
         try:
-            return Config.load_or_default(config_path)
+            return load_config_cached(config_path)
         except (ValidationError, OSError, ValueError) as exc:
             logger.debug("cron_stop_enforcer: cannot load %s: %s", config_path, exc)
             return Config()
