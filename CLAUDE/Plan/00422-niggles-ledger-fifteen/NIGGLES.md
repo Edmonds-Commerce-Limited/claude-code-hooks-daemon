@@ -548,6 +548,34 @@ without being struck off. Narrowing the guard to the fence splitter would have
 been the cheap move and would have deleted the finding along with the failure.
 Filed as **N14**.
 
+**Row (b) DONE by Plan 00440.** Confirmed as filed, and this time the row's
+scope was right — which is worth recording, because the previous three rows
+were not. Re-measured at 76.3 ms median over 15 warm loads (the row said 81.5;
+they agree within noise), and both call sites are real: `matches()` at line 119
+and `handle()` at line 129 each reach `_load_config()`, and `matches()` runs on
+every Stop event. The SubagentStop twin is the same shape.
+
+Before scoping, every `Config.load_or_default` call site was audited rather
+than trusted: `secret_file_matching` and `secret_redaction` run on every
+Write/Edit but already cache; the `daemon/cli.py` and `install/*` sites are
+one-shot per process; `remote_docs_routing` is per-event but only on `WebFetch`
+behind a directory gate. So the two cron enforcers really were the finding.
+
+`utils/config_cache.py` keys the parsed config on `(st_mtime_ns, st_size)`, so
+an operator's edit lands on the next event rather than the next restart. Warm
+path is 23.5 µs — a `stat` and a dict lookup — taking ~153 ms per Stop event
+down to ~0.05 ms.
+
+**The concurrency test found a defect in the first implementation, not in a
+replica.** That draft took the lock only to CHECK the cache and parsed outside
+it, on the reasoning that holding a global lock across a 76 ms parse would
+serialise every handler. Sixteen threads released at a barrier all missed, all
+parsed, and all got their own object: `assert 16 == 1`. The reasoning was
+wrong because holding the lock serialises only a MISS, and a caller waiting on
+someone else's parse waits no longer than the parse it would have done itself.
+Unlike Plan 00437, no artificial unlocked copy was needed to see the test RED —
+the honest first attempt supplied one.
+
 **A third error surfaced in passing**: `docs_qa/context.py` cited
 `docs_qa.corpus` as the module reusing `plan_qa.model.lines_outside_fences`. It
 is `docs_qa.checks.at_import_census`, and has been for as long as that sentence

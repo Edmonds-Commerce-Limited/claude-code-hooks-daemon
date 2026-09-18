@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00401: reference repo freshness before read](00401-reference-repo-freshness-before-read/PLAN.md) - Complete at `9e399219`…`7a43abf6` + the archiving commit (one checker over `git_sync` feeds a SessionStart sweep, a cache-only PreToolUse gate and a CLI report, with a third verdict for a clone that is un-fetchable by design; four defects were found by using the finished thing, not by adding tests)
+
 - [00400: niggles ledger nine](00400-niggles-ledger-nine/PLAN.md) - Complete at `35da2e85`…`397cdde3` (CI evidence at `6a8d01da`) + the archiving commit (six entries: N1–N4 found without hitting a symptom; N5 and N6 by refusing the first explanation — 18 acceptance errors read as tool contention were a STALE DAEMON, and the restart clearing them refreshes only one of two generated docs. N6's behaviour graduated to Plan 00402)
 
 - [00398: critical compaction blocked by the idle gate](00398-critical-compaction-blocked-by-the-idle-gate/PLAN.md) - Complete at `ec18062d` (CI evidence at `a7d0fb7b`) + the archiving commit (the input-box gate was UNBOUNDED, not over-sensitive: 20,755 ticks blocked by box-sitting against 281 by the 2s keystroke floor, the longest run ~10h ending at `[urgent]` still blocked; bounded on text STABILITY so a box unchanged for 120s is flushed and the session compacts)

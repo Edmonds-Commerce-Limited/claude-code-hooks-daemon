@@ -1,6 +1,6 @@
 # Plan 00440: cached config for per event handlers
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-18
 **Owner**: dev
 **Priority**: Medium
@@ -96,17 +96,22 @@ not. The two would share the same `stat` reading if 00415 ever lands.
   passed, coverage 95.3%. Ran `llm_qa format` first this time and restarted the
   daemon before starting: Plan 00439's run came back 32/35 purely because black
   rewrote a file mid-run and moved the tree past the pre-run restart.
-- [ ] ⬜ **Task 3.3**: Release note; record the outcome on row (b) of Plan
+- [x] ✅ **Task 3.3**: Release note; record the outcome on row (b) of Plan
   00422's `NIGGLES.md`; archive.
 
 ## Success Criteria
 
-- [ ] A Stop event parses the config at most once, and zero times when it has
-  not changed since the previous event.
-- [ ] Editing `.claude/hooks-daemon.yaml` changes the next event's behaviour
-  with no daemon restart — proved by a test, not by inspection.
-- [ ] The concurrency test was seen RED against an unlocked replica.
-- [ ] `llm_qa.py all` green.
+- [x] ✅ A Stop event parses the config at most once, and zero times when it
+  has not changed since the previous event. Measured: 23.5 µs warm.
+- [x] ✅ Editing `.claude/hooks-daemon.yaml` changes the next event's behaviour
+  with no daemon restart — proved by three tests, one per way the file can
+  change (mtime, size, appearing where there was none), each pinning the other
+  attribute so it cannot pass for the wrong reason.
+- [x] ✅ The concurrency test was seen RED — against the real first
+  implementation rather than a replica, which is stronger evidence.
+- [x] ✅ `llm_qa.py all` green, 35/35.
+- [x] ✅ Every release-bound consequence is in the pending-release holding
+  area: `UNRELEASED/release-notes/17-the-cron-enforcers-stop-reparsing-your-config.md`.
 
 ## Delivery & Milestones
 
@@ -114,4 +119,7 @@ not. The two would share the same `stat` reading if 00415 ever lands.
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00440-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- <!-- milestone or delivery commit hash -->
+- Plan and measured baseline at `3717b076`.
+- Delivered at `8d42b548` — the accessor, its tests, the three repointed
+  callers and the release note.
+- Archived in the following commit, with the README row and statistics.
