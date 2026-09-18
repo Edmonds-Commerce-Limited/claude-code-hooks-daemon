@@ -433,6 +433,19 @@ does, with the row-count control that stops a parser matching nothing from
 reading as agreement. Row (d)'s `priority 8` is 7, naming what holds 8, and the
 skill's paraphrase — which stated a third value, `56-65` — agrees now too.
 
+**Row (g) DONE by Plan 00436.** Confirmed exactly as filed: a delivered prompt
+of nothing but a truncation marker strips to an empty string, is correctly
+identified as truncated, and every declaration on the schedule starts with it —
+so any declared job matched, and a cron that was never created was reported as
+live. Prefix matching now requires a non-empty prefix.
+
+**Residual, recorded rather than implied**: a delivery whose surviving prefix is
+one or two characters is still matched by prefix, and is nearly as weak. It is
+left alone deliberately — a minimum LENGTH would be a policy invented here, and
+the delivery cap gives no basis for a floor above zero. The empty prefix is the
+case that carries no evidence at all; a short one is a different argument and
+should be made on its own evidence if it ever costs anything.
+
 **Row (f) is CORRECTED, not built.** The claim is accurate about the unit test:
 `CronStopEnforcerHandler().priority < Priority.AUTO_CONTINUE_STOP` compares
 against the SHIPPED 15 while this project overrides that handler to 10, so a

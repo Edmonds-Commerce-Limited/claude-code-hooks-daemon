@@ -1,6 +1,6 @@
 # Plan 00436: empty truncated cron prompt matches anything
 
-**Status**: Not Started
+**Status**: Complete
 **Created**: 2026-09-18
 **Owner**: dev
 **Priority**: Medium
@@ -51,24 +51,24 @@ whereas the reverse merely nags.
 
 ### Phase 1
 
-- [ ] ⬜ **Task 1.1**: RED — a test that a `session_crons` entry whose prompt is
+- [x] ✅ **Task 1.1**: RED — a test that a `session_crons` entry whose prompt is
   only a truncation marker does not assert a declared job on the same schedule,
   plus the whitespace-around-the-marker variant.
 
-- [ ] ⬜ **Task 1.2**: GREEN — prefix matching requires a non-empty normalised
+- [x] ✅ **Task 1.2**: GREEN — prefix matching requires a non-empty normalised
   prefix. The reason goes in the code, because the next reader has to
   understand why an empty prefix is a different case from a short one.
 
-- [ ] ⬜ **Task 1.3**: Confirm the existing truncation tests still pass
+- [x] ✅ **Task 1.3**: Confirm the existing truncation tests still pass
   unchanged — the fix must not narrow the case the module was built for.
 
 ## Success Criteria
 
-- [ ] ⬜ The new tests observed RED before the fix and GREEN after.
-- [ ] ⬜ `llm_qa.py all` passes.
-- [ ] ⬜ A release note lands in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`:
+- [x] ✅ The new tests observed RED before the fix and GREEN after.
+- [x] ✅ `llm_qa.py all` passes — 35/35.
+- [x] ✅ A release note lands in `CLAUDE/UPGRADES/UNRELEASED/release-notes/`:
   any client declaring `persistent_crons` is affected.
-- [ ] ⬜ N5 row (g) is marked done in ledger 00422, with the residual (a
+- [x] ✅ N5 row (g) is marked done in ledger 00422, with the residual (a
   one-character surviving prefix) recorded rather than implied.
 
 ## Delivery & Milestones
