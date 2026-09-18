@@ -8,7 +8,8 @@ on those stops — which is the common case, not the exception, so "still
 reachable on an allowed stop" is not good enough:
 ``tests/integration/test_stop_chain_terminal_shadowing.py`` denies that
 placement outright. Plan 00416's ``cron_stop_enforcer`` therefore sits BEFORE
-it (priority 8), and Plan 00237 removed three handlers that had been sitting
+it, at priority 7 — not 8, which the ``release_blocker`` project handler
+already occupies — and Plan 00237 removed three handlers that had been sitting
 after it silently (``task_completion_checker`` and the two language
 detectors, whose live twins run on the ``nitpick`` pseudo-event instead).
 Before adding a Stop handler, read that test module.

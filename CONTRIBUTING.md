@@ -242,14 +242,14 @@ convenience:
 
 <!-- ssot-quote: CLAUDE/HANDLER_DEVELOPMENT.md#priority-guide -->
 
-| Priority Range | Type         | Examples                                                                                           |
-| -------------- | ------------ | -------------------------------------------------------------------------------------------------- |
-| 0-9            | Test         | Reserved for purpose-built test fixtures (`Priority.TEST_HANDLER`); no built-in handlers ship here |
-| 10-20          | Safety       | `destructive_git`, `sed_blocker`, `secret_file_guard`                                              |
-| 25-35          | Code Quality | `qa_suppression`, `lint_on_edit`, `comment_changelog`                                              |
-| 36-55          | Workflow     | `lsp_enforcement`, `plan_qa_edit`, `npm_command`                                                   |
-| 56-69          | Advisory     | `british_english`, `flaggable_work_advisor`, `model_fallback_detector`                             |
-| 100+           | Logging      | Reserved for logging/metrics/cleanup; no built-in handlers ship here                               |
+| Priority Range | Type         | Examples                                                                                                                                                                                            |
+| -------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0-9            | Test         | Test fixtures (`Priority.TEST_HANDLER`), plus the Stop-family handlers that MUST run before a terminal Stop catch-all: `cron_stop_enforcer`, `cron_subagent_stop_enforcer`, `teammate_reap_advisor` |
+| 10-20          | Safety       | `destructive_git`, `sed_blocker`, `secret_file_guard`                                                                                                                                               |
+| 25-35          | Code Quality | `qa_suppression`, `lint_on_edit`, `comment_changelog`                                                                                                                                               |
+| 36-55          | Workflow     | `lsp_enforcement`, `plan_qa_edit`, `npm_command`                                                                                                                                                    |
+| 56-73          | Advisory     | `british_english`, `flaggable_work_advisor`, `model_fallback_detector`                                                                                                                              |
+| 100+           | Logging      | Reserved for logging/metrics/cleanup; no built-in handlers ship here                                                                                                                                |
 
 <!-- /ssot-quote -->
 
