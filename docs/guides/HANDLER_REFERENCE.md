@@ -885,6 +885,39 @@ handlers:
 
 ---
 
+#### subagent_cron_delete_blocker
+
+| Property       | Value                          |
+| -------------- | ------------------------------ |
+| **Config key** | `subagent_cron_delete_blocker` |
+| **Priority**   | 14                             |
+| **Type**       | Blocking (terminal)            |
+| **Event**      | PreToolUse                     |
+
+**Description:** Blocks `CronDelete` when the caller is a **subagent**. A session cron belongs to the coordinator's session — the session that created it, and the one left without coverage when it goes. The failsafe recovery cron is the case that motivated this: deleting it strands a still-live coordinator with no recovery path, and the loss is silent until the next stall.
+
+**What it matches:** `CronDelete`, and only inside a subagent. The role test is the handler's `scope`, not a check it performs itself, so reaching it at all already establishes the caller.
+
+**Always allowed:** `CronCreate` and `CronList` (creating is noisy at worst, listing is a read), and the coordinator's own `CronDelete` — which is untouched.
+
+**Deliberately wider than "the failsafe cron".** `session_crons` is delivered to `Stop`, not to `PreToolUse`, so at deletion time the daemon holds an opaque cron id and cannot tell which cron is meant. A rule naming one cron would be guessing at which it had.
+
+**Options:** none.
+
+**If you are a subagent and a cron looks wrong:** name the id and your reasoning in your report to the coordinator, and let it decide. If failsafe ticks are waking you with nothing to do, the tick is the thing to fix — say so — not the safety net.
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    subagent_cron_delete_blocker:
+      enabled: true   # default
+      priority: 14
+```
+
+---
+
 #### git_stash
 
 | Property       | Value                                        |
@@ -3970,6 +4003,7 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | `security_antipattern`         | PreToolUse        | 14       | Dangerous constructs (eval, shell exec, deserialization, XSS, creds)  |
 | `artifact_publish_blocker`     | PreToolUse        | 14       | Publishing an artefact (a claude.ai URL outside the project)          |
 | `issue_filing_gate`            | PreToolUse        | 14       | gh issue create against the daemon's tracker with a hand-written body |
+| `subagent_cron_delete_blocker` | PreToolUse        | 14       | CronDelete inside a subagent (the coordinator's own is unaffected)    |
 | `write_clobber_guard`          | PreToolUse        | 16       | Write to an existing file not read this session                       |
 | `worktree_file_copy`           | PreToolUse        | 15       | cp/mv/rsync between worktrees                                         |
 | `pipe_blocker`                 | PreToolUse        | 15       | Expensive commands piped to tail/head                                 |
