@@ -49,6 +49,9 @@ from claude_code_hooks_daemon.constants import (
 from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import StopHandlerBase
 from claude_code_hooks_daemon.core.handler_scope import HandlerScope
+from claude_code_hooks_daemon.handlers.utils.session_advice_counter import (
+    SessionAdviceCounter,
+)
 
 #: Advise on the first qualifying stop of a session, then every Nth. Public
 #: because the rate-limit test must assert against the real interval rather
@@ -56,8 +59,6 @@ from claude_code_hooks_daemon.core.handler_scope import HandlerScope
 #: ``background_process_tracker``'s interval on purpose: both are default-on
 #: advisories on a high-frequency event.
 ADVISE_INTERVAL: Final[int] = 10
-
-_COUNT_START: Final[int] = 1
 
 # Bound the per-session counter map on the daemon-lifetime singleton.
 _MAX_TRACKED_SESSIONS: Final[int] = 256
@@ -121,9 +122,13 @@ class TeammateReapAdvisorHandler(StopHandlerBase):
                 HandlerTag.NON_TERMINAL,
             ],
         )
-        # Per-session count of qualifying stops seen (insertion-ordered for
-        # bounded eviction), mirroring background_process_tracker.
-        self._session_counts: dict[str, int] = {}
+        # Shared with background_process_tracker rather than copied from it:
+        # the two copies of this bookkeeping each carried an unlocked eviction
+        # that could raise under the dispatch thread pool (ledger 00422 N5 row
+        # (c), Plan 00437).
+        self._advice_counter = SessionAdviceCounter(
+            interval=ADVISE_INTERVAL, max_sessions=_MAX_TRACKED_SESSIONS
+        )
 
     def get_default_enabled(self) -> bool:
         """Opt-OUT handler — ON by default.
@@ -140,15 +145,7 @@ class TeammateReapAdvisorHandler(StopHandlerBase):
 
     def _should_advise(self, session_id: str) -> bool:
         """Record a qualifying stop for ``session_id`` and say whether to speak."""
-        count = self._session_counts.get(session_id)
-        if count is None:
-            if len(self._session_counts) >= _MAX_TRACKED_SESSIONS:
-                del self._session_counts[next(iter(self._session_counts))]
-            count = _COUNT_START
-        else:
-            count += 1
-        self._session_counts[session_id] = count
-        return (count - _COUNT_START) % ADVISE_INTERVAL == 0
+        return self._advice_counter.should_advise(session_id)
 
     def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
         """Advise, or stay silent — never refuse."""

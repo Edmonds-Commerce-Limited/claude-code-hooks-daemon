@@ -32,6 +32,9 @@ from claude_code_hooks_daemon.constants import (
 from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_bash_command
+from claude_code_hooks_daemon.handlers.utils.session_advice_counter import (
+    SessionAdviceCounter,
+)
 from claude_code_hooks_daemon.utils.cli_command import (
     daemon_cli_command,
     daemon_cli_command_for_docs,
@@ -46,7 +49,6 @@ _MAX_STATE_LINES: Final[int] = 200
 # Advise on the 1st backgrounded command per session, then every Nth — keeps a
 # default-on advisory from spamming routine background work.
 _ADVISE_INTERVAL: Final[int] = 10
-_COUNT_START: Final[int] = 1
 
 # Bound the per-session counter map on the daemon-lifetime singleton.
 _MAX_TRACKED_SESSIONS: Final[int] = 256
@@ -221,9 +223,13 @@ class BackgroundProcessTrackerHandler(PostToolUseHandlerBase):
             terminal=False,
             tags=[HandlerTag.WORKFLOW, HandlerTag.ADVISORY, HandlerTag.NON_TERMINAL],
         )
-        # Per-session count of backgrounded commands seen (insertion-ordered for
-        # bounded eviction).
-        self._session_counts: dict[str, int] = {}
+        # Shared with teammate_reap_advisor rather than duplicated into it:
+        # both copies of this bookkeeping evicted without a lock, which can
+        # raise under the dispatch thread pool (ledger 00422 N5 row (c), Plan
+        # 00437).
+        self._advice_counter = SessionAdviceCounter(
+            interval=_ADVISE_INTERVAL, max_sessions=_MAX_TRACKED_SESSIONS
+        )
 
     def get_default_enabled(self) -> bool:
         """Opt-OUT handler — ON by default (Plan 00142 user decision).
@@ -258,15 +264,7 @@ class BackgroundProcessTrackerHandler(PostToolUseHandlerBase):
 
     def _should_advise(self, session_id: str) -> bool:
         """Record a detection for ``session_id`` and return whether to advise now."""
-        count = self._session_counts.get(session_id)
-        if count is None:
-            if len(self._session_counts) >= _MAX_TRACKED_SESSIONS:
-                del self._session_counts[next(iter(self._session_counts))]
-            count = _COUNT_START
-        else:
-            count += 1
-        self._session_counts[session_id] = count
-        return (count - _COUNT_START) % _ADVISE_INTERVAL == 0
+        return self._advice_counter.should_advise(session_id)
 
     def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
         command = get_bash_command(hook_input) or ""
