@@ -679,6 +679,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - cron_subagent_stop_enforcer — SubagentStop twin of `cron_stop_enforcer`
 
+<!-- handler: subagent-report-path-verifier -->
+
+- subagent_report_path_verifier — a claimed report path must exist
+
 <!-- handler: worktree-create -->
 
 - worktree_create — semantic worktree naming
