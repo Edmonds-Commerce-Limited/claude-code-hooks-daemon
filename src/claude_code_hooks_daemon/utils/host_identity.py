@@ -260,7 +260,12 @@ def resolve_host_name(*, hosts_path: Path | None = None) -> HostName | None:
         local = _clean_host_name(socket.gethostname())
         if local is not None:
             return HostName(name=local, source=HostNameSource.LOCAL)
-        return None
+        # Falls through rather than returning. This rung's condition is about
+        # the RUNTIME -- whether gethostname means anything here -- not about
+        # the value it produced, so a refused value is a rung that did not hit,
+        # and "first hit wins" hands the question to the next one. Rung 3 is
+        # already ranked below every route that cannot be wrong and labels
+        # itself a hint, which is exactly the standing it deserves here.
 
     inferred = host_name_from_hosts_file(_read_hosts_file(_etc_hosts_path(hosts_path)))
     if inferred is None:

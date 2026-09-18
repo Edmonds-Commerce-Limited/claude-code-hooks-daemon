@@ -329,6 +329,42 @@ class TestAResolvedNameIsNeverAllowedToBeAnythingButAHostName:
             name="build-box.example.invalid", source=HostNameSource.ETC_HOSTS_HINT
         )
 
+    def test_a_refused_LOCAL_rung_does_not_stop_the_ladder_either(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Plan 00442, from ledger 00422 N5 row (e).
+
+        The sibling above proves the ENV rung falls through, but it forces a
+        ``podman`` runtime, so rung 2 never runs and the case is untested. Rung
+        2's condition is about the RUNTIME — "is ``gethostname`` meaningful
+        here" — not about the value it returned, so a rung that produced
+        nothing usable is a rung that did not hit, and the documented ladder
+        says the next one gets its turn.
+        """
+        _force_runtime(monkeypatch, None)
+        monkeypatch.setattr(host_identity.socket, "gethostname", lambda: "host\033[31m")
+        hosts = tmp_path / "hosts"
+        hosts.write_text(_DEBIAN_STYLE_HOSTS)
+
+        resolved = resolve_host_name(hosts_path=hosts)
+
+        assert resolved == HostName(
+            name="build-box.example.invalid", source=HostNameSource.ETC_HOSTS_HINT
+        )
+
+    def test_a_usable_local_hostname_still_wins_before_the_hosts_file(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The control: falling through must not demote a rung that DID hit."""
+        _force_runtime(monkeypatch, None)
+        monkeypatch.setattr(host_identity.socket, "gethostname", lambda: "my-desktop")
+        hosts = tmp_path / "hosts"
+        hosts.write_text(_DEBIAN_STYLE_HOSTS)
+
+        resolved = resolve_host_name(hosts_path=hosts)
+
+        assert resolved == HostName(name="my-desktop", source=HostNameSource.LOCAL)
+
     def test_a_value_at_the_length_limit_is_still_accepted(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -391,12 +427,20 @@ class TestAResolvedNameIsNeverAllowedToBeAnythingButAHostName:
         """
         assert host_identity._clean_host_name("host\x00trailer") is None
 
-    def test_a_hostile_local_hostname_is_refused(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """gethostname() is only as trustworthy as whatever set it."""
+    def test_a_hostile_local_hostname_is_refused(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """gethostname() is only as trustworthy as whatever set it.
+
+        ``hosts_path`` is pinned for the reason :func:`_silent_hosts` gives:
+        this asserts that rung 2 CONTRIBUTES NOTHING, not that nothing
+        resolves, and leaving the last rung reading the real ``/etc/hosts``
+        would make the answer depend on the host distribution.
+        """
         _force_runtime(monkeypatch, None)
         monkeypatch.setattr(host_identity.socket, "gethostname", lambda: "host\033[31m")
 
-        assert resolve_host_name() is None
+        assert resolve_host_name(hosts_path=_silent_hosts(tmp_path)) is None
 
     def test_the_rejected_value_is_never_written_to_a_log(
         self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
