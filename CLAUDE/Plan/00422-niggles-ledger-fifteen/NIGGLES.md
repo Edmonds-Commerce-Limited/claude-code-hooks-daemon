@@ -813,6 +813,42 @@ Remedy 1 is the real fix; 2 is worth doing regardless, because it converts a
 silent hour into a fast, legible failure and is not specific to this cause.
 None is gated on the owner.
 
+**FAULT 2 CLOSED by Plan 00445, remedies (1) and (2).** `wrapper_subprocess_env()`
+in `tests/acceptance/conftest.py` hands the socket those fixtures already
+resolved to every wrapper they spawn — a COPY of `os.environ`, never a
+mutation, because exporting the value would put back for every later test in
+the process exactly the ambient variable `isolate_daemon_path_overrides`
+exists to remove. That fixture is untouched: weakening it to fix one suite
+re-exposes the path tests it was written for.
+
+Remedy (2) landed as `wrapper_unreachable_reason`, which reads the wrapper's
+OWN stderr channel (`HOOKS DAEMON ERROR [type]: detail`) rather than its stdout
+payload, where the same text arrives in `systemMessage` and is
+indistinguishable from a handler advisory. The first unreachable dispatch now
+aborts the loop naming the socket it was given. That deliberately inverts the
+harness's batching rule — mismatches are collected because their shape side by
+side IS the diagnosis, whereas an unreachable daemon repeated 224 times adds
+nothing to the first and costs a `DAEMON_STARTUP_TIMEOUT` each time.
+
+**Closed by measurement, not by argument**: 12 passed in **14.75s** in a
+throwaway worktree under the override, against a pre-fix run of the same
+configuration killed at 480s. QA 35/35.
+
+**Remedy (3) — documenting the consequence in the fixture's docstring — was
+not needed.** It was already there: "the unset is inherited by every subprocess
+a test spawns". The consequence was written down, accurately, by whoever wrote
+the fixture, and nothing acted on it for the same reason N6's own first half
+recorded — a docstring is not a worklist. That is the second time in this one
+entry, and it is the argument for this ledger existing.
+
+**One thing this entry got wrong twice, worth keeping.** It named
+`test_tool_use_error_recovery.py` among the files affected. That file needed no
+change at all: it never spawns a wrapper, it calls the socket directly with a
+path it is handed. It errored in the same run, which is a different fact from
+sharing a cause — and the heading's "in a worktree" was the same error one
+level up. Both were corrected only because the remedy was measured in
+configurations the entry did not predict.
+
 **REMEDY (2) DONE by Plan 00443.** The acceptance fixtures skipped with "Daemon
 not running — start with `./bin/hooks-daemon restart`" whenever no socket was
 found under `untracked/`, which in an over-limit checkout is false in the most

@@ -41,8 +41,20 @@ from claude_code_hooks_daemon.daemon.playbook_harness import (
     daemon_error,
     split_playbook,
     verdict,
+    wrapper_unreachable_reason,
 )
 from tests.acceptance.conftest import wrapper_subprocess_env
+
+
+class _DaemonUnreachable(Exception):
+    """A dispatch that never reached a daemon, so it judged no probe.
+
+    Raised rather than collected. The dispatch loop deliberately batches
+    probe MISMATCHES, because their shape side by side is the diagnosis —
+    but an unreachable daemon repeated 224 times says nothing the first one
+    did not, and each repetition costs a `DAEMON_STARTUP_TIMEOUT`.
+    """
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HOOKS_DIR = REPO_ROOT / ".claude" / "hooks"
@@ -152,6 +164,9 @@ def _dispatch(probe: ExecutableProbe, env: dict[str, str]) -> tuple[str, str, st
         check=False,
         env=env,
     )
+    unreachable = wrapper_unreachable_reason(result.stderr or "")
+    if unreachable is not None:
+        raise _DaemonUnreachable(unreachable)
     raw = (result.stdout or "").strip()
     if not raw:
         # No output at all is the shape a handler chain takes when nothing
@@ -295,7 +310,15 @@ class TestTheDeclaredProbesBehaveAsDeclared:
         env = wrapper_subprocess_env(daemon_socket)
         failures = []
         for probe in executable:
-            failure = _run_probe(probe, env)
+            try:
+                failure = _run_probe(probe, env)
+            except _DaemonUnreachable as unreachable:
+                pytest.fail(
+                    f"The wrapper could not reach a daemon, so probe "
+                    f"#{probe.test_number} judged nothing and neither would any "
+                    f"probe after it: {unreachable}. The socket these fixtures "
+                    f"resolved and passed to it was {daemon_socket}."
+                )
             if failure is not None:
                 failures.append(f"#{probe.test_number} {probe.handler_name}: {failure}")
 

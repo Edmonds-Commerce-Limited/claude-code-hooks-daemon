@@ -22,7 +22,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.daemon.synthetic_traffic import (
@@ -395,6 +395,42 @@ def daemon_error(payload: PlaybookBlock) -> str | None:
     details = payload.get("details") or []
     rendered = "; ".join(str(detail) for detail in details)
     return f"{error}: {rendered}" if rendered else str(error)
+
+
+#: The wrapper's own stderr marker for "I could not reach a daemon at all",
+#: emitted by ``init.sh``'s ``emit_hook_error``. Matched rather than the stdout
+#: payload because the JSON a failed wrapper returns carries its text in
+#: ``systemMessage``, where it is indistinguishable from a handler's advisory.
+_WRAPPER_ERROR_MARKER: Final[str] = "HOOKS DAEMON ERROR ["
+
+
+def wrapper_unreachable_reason(stderr: str) -> str | None:
+    """Report that a dispatch never reached a daemon, or ``None`` if it did.
+
+    This is NOT a verdict about a probe, and conflating the two is expensive.
+    A wrapper that cannot find a live socket spends ``DAEMON_STARTUP_TIMEOUT``
+    trying to start one before answering — per dispatch. Across a full
+    playbook that is about an hour of silence, and what finally surfaces reads
+    as a scatter of handler mismatches rather than the single connection
+    problem it is (Plan 00422 N6 fault 2).
+
+    So the caller aborts on the first one instead of collecting 224 of them.
+    That is the opposite of the batching rule the dispatch loop otherwise
+    follows — deliberately: probe mismatches are worth seeing side by side
+    because their SHAPE is the diagnosis, whereas repeating an unreachable
+    daemon 224 times adds no information to the first occurrence.
+    """
+    for line in stderr.splitlines():
+        marker = line.find(_WRAPPER_ERROR_MARKER)
+        if marker == -1:
+            continue
+        remainder = line[marker + len(_WRAPPER_ERROR_MARKER) :]
+        error_type, separator, details = remainder.partition("]")
+        if not separator:
+            continue
+        detail = details.lstrip(":").strip()
+        return f"{error_type}: {detail}" if detail else error_type
+    return None
 
 
 def build_event(probe: ExecutableProbe, run_id: str) -> dict[str, Any]:

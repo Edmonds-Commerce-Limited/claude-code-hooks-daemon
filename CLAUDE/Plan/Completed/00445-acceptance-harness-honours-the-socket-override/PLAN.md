@@ -1,6 +1,6 @@
 # Plan 00445: acceptance harness honours the socket override
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-18
 **Owner**: dev
 **Priority**: Medium
@@ -72,25 +72,37 @@ controls and the two remedies below are in that ledger's N14-adjacent N6 entry.
 
 ### Phase 2: an unreachable daemon fails fast
 
-- [ ] ⬜ **Task 2.1**: Bound the per-probe wait so the wrapper cannot spend a
-  daemon-start timeout per probe, and report the FIRST unreachable dispatch as
-  a failure naming the socket path it tried. Worth doing independently of the
-  cause: it converts a silent hour into a legible failure.
+- [x] ✅ **Task 2.1**: The FIRST unreachable dispatch now aborts the loop,
+  naming the socket the fixtures resolved and passed. `wrapper_unreachable_reason`
+  reads the wrapper's OWN stderr channel (`HOOKS DAEMON ERROR [type]: detail`)
+  rather than its stdout payload, where the same text lands in `systemMessage`
+  and is indistinguishable from a handler advisory.
+  This deliberately inverts the loop's batching rule: probe mismatches are
+  collected because their shape side by side is the diagnosis, whereas an
+  unreachable daemon repeated 224 times adds nothing to the first — and each
+  repetition costs a `DAEMON_STARTUP_TIMEOUT`. Five unit tests, including a
+  control that ordinary stderr is not read as unreachability.
 
 ### Phase 3: gate
 
-- [ ] ⬜ **Task 3.1**: `llm_qa format`, README index row and statistics, then
-  `llm_qa.py all` green with the daemon restarted after the last `src/` edit.
-- [ ] ⬜ **Task 3.2**: Record the outcome on Plan 00422's N6 entry; archive.
+- [x] ✅ **Task 3.1**: `llm_qa format`, README index row and statistics, then
+  `llm_qa.py all` green with the daemon restarted after the last `src/`
+  edit — 35/35.
+- [x] ✅ **Task 3.2**: Record the outcome on Plan 00422's N6 entry; archive.
 
 ## Success Criteria
 
-- [ ] The RED test of Task 1.1 was observed failing before the fix and passes
-  after it.
-- [ ] The playbook harness completes in seconds with `CLAUDE_HOOKS_SOCKET_PATH`
+- [x] The RED test of Task 1.1 was observed failing before the fix and passes
+  after it. Task 2.1's helper was RED first too, on the same shape.
+- [x] The playbook harness completes in seconds with `CLAUDE_HOOKS_SOCKET_PATH`
   exported to a non-default path, having previously hung — the measurement that
-  closes fault 2.
-- [ ] `llm_qa.py all` green.
+  closes fault 2. Verified in a throwaway worktree at the delivery commit:
+  **12 passed in 14.75s**, against a run killed at 480s before the fix.
+- [x] `llm_qa.py all` green — 35/35.
+- [x] This plan has no release-bound consequences: everything shipped is this
+  repository's own acceptance suite plus one helper it calls. No handler, no
+  config key, no wrapper and no installed artefact changes, so a client upgrade
+  sees nothing — the same reasoning Plan 00443 recorded for its skip reason.
 
 ## Delivery & Milestones
 
@@ -98,4 +110,8 @@ controls and the two remedies below are in that ledger's N14-adjacent N6 entry.
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00445-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- <!-- milestone or delivery commit hash -->
+- Phase 1 delivered at `c4eeebdf` — the dispatchers name their daemon.
+- Phase 2 and the archive ship in the following commit: the first unreachable
+  dispatch now aborts the loop instead of buying 224 daemon-start timeouts.
+- Fault 2 closed by measurement, not by argument: **12 passed in 14.75s** in a
+  throwaway worktree under the override, against a pre-fix run killed at 480s.

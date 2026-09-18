@@ -41,6 +41,7 @@ from claude_code_hooks_daemon.daemon.playbook_harness import (
     split_playbook,
     verdict,
     vet_probe_commands,
+    wrapper_unreachable_reason,
 )
 from claude_code_hooks_daemon.daemon.synthetic_traffic import PLAYBOOK_PROBE
 
@@ -562,3 +563,40 @@ class TestAProbeCarriesTheFixtureCommandsItNeeds:
         assert isinstance(probe, ExecutableProbe)
         assert probe.setup_actions == []
         assert probe.cleanup_actions == []
+
+
+class TestTheWrapperSaysWhenItCouldNotReachADaemon:
+    """A dispatch that never reached a daemon is not a verdict about a probe.
+
+    It is the harness's most expensive failure shape: the wrapper spends
+    `DAEMON_STARTUP_TIMEOUT` trying to start one, per probe, so 224 probes
+    cost about an hour of silence before anything is reported — and what is
+    finally reported reads as a scatter of handler mismatches rather than the
+    one connection problem it is (Plan 00422 N6 fault 2, Plan 00445).
+
+    The wrapper announces this on its own stderr channel, which `_dispatch`
+    used to discard.
+    """
+
+    def test_a_daemon_failure_on_stderr_is_reported(self) -> None:
+        stderr = "HOOKS DAEMON ERROR [daemon_startup_failed]: Failed to start hooks daemon\n"
+        assert wrapper_unreachable_reason(stderr) == (
+            "daemon_startup_failed: Failed to start hooks daemon"
+        )
+
+    def test_the_error_type_alone_is_enough(self) -> None:
+        """Details are optional; the bracketed type is what names the fault."""
+        assert wrapper_unreachable_reason("HOOKS DAEMON ERROR [socket_error]:") == "socket_error"
+
+    def test_ordinary_stderr_is_not_a_daemon_failure(self) -> None:
+        """The control. Wrappers write other things to stderr, and treating
+        any of them as unreachability would abort a healthy run."""
+        assert wrapper_unreachable_reason("some handler logged a warning") is None
+
+    def test_empty_stderr_is_not_a_daemon_failure(self) -> None:
+        assert wrapper_unreachable_reason("") is None
+
+    def test_the_line_is_found_among_others(self) -> None:
+        """Real stderr is multi-line; the marker is rarely first."""
+        stderr = "warming up\nHOOKS DAEMON ERROR [init_path_error]: no .claude found\ndone\n"
+        assert wrapper_unreachable_reason(stderr) == "init_path_error: no .claude found"
