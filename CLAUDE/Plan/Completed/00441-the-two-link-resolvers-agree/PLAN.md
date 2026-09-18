@@ -1,6 +1,6 @@
 # Plan 00441: the two link resolvers agree
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-18
 **Owner**: dev
 **Priority**: Medium
@@ -90,17 +90,21 @@ This is niggle N5 rows (j), (k) and (l) of the ledger in Plan 00422.
 
 - [x] ✅ **Task 4.1**: `llm_qa format`, then `llm_qa.py all` green with the
   daemon restarted after the last `src/` edit — 35/35, no failed gates.
-- [ ] ⬜ **Task 4.2**: Release note; record rows (j), (k) and (l) on Plan
+- [x] ✅ **Task 4.2**: Release note; record rows (j), (k) and (l) on Plan
   00422's `NIGGLES.md`; archive.
 
 ## Success Criteria
 
-- [ ] No finding asserts a plan is archived without having established it.
-- [ ] Each of the six stage functions across the two checks yields at most one
-  finding per distinct link per document.
-- [ ] A link that `pointer-resolves` accepts is not reported by
+- [x] ✅ No finding asserts a plan is archived without having established it,
+  via `PlanTreeLayout.is_archived` on the path the resolver actually returned.
+- [x] ✅ Each stage across the two checks yields at most one finding per
+  distinct link per document — proved at all three `pointer-resolves` stages,
+  each seen RED at `3 == 1`.
+- [x] ✅ A link that `pointer-resolves` accepts is not reported by
   `plan-link-resolves`, proved by a test that exercises both.
-- [ ] `llm_qa.py all` green.
+- [x] ✅ `llm_qa.py all` green, 35/35.
+- [x] ✅ Every release-bound consequence is in the pending-release holding
+  area: `UNRELEASED/release-notes/18-the-two-link-checks-now-agree.md`.
 
 ## Delivery & Milestones
 
@@ -108,4 +112,7 @@ This is niggle N5 rows (j), (k) and (l) of the ledger in Plan 00422.
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00441-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- <!-- milestone or delivery commit hash -->
+- Filed with the three rows verified at code level, at `0d452588`.
+- Delivered at `c607a6d6` — all three phases, the shared resolver and the
+  release note.
+- Archived in the following commit, with the README row and statistics.

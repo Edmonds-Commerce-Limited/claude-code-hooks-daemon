@@ -576,6 +576,41 @@ someone else's parse waits no longer than the parse it would have done itself.
 Unlike Plan 00437, no artificial unlocked copy was needed to see the test RED —
 the honest first attempt supplied one.
 
+**Rows (j), (k) and (l) DONE by Plan 00441, filed as ONE plan.** They read as
+three niggles and are one: two checks that answer the same question, disagreeing
+on shared mechanics, in two files. Splitting them into three plans would have
+meant three passes over the same pair of modules.
+
+**Row (k) was the one with teeth, and is sharper than the row says.** The row
+calls it "asserts archived for any number-resolved target". The reason it can
+happen is that `PlanLinkResolver._index_folders` searches the ACTIVE plan root
+before any archive and takes the first match — with a comment saying so, "the
+LIVE plan is the better answer to 'where is plan N'". So the resolver returns
+live plans on purpose, and the message contradicting it was never going to be
+caught by reading the resolver: it reads correctly. `PlanTreeLayout.is_archived`
+already existed and is exactly the right question; nothing was asking it.
+
+**Row (j) named the sweep; all three stages had it.** `_run_edit` and
+`_run_staged` iterate the extracted targets exactly as `_run_sweep` does, so a
+repeated dead link produced repeated entries in the report DENYING A WRITE, not
+just noise in a sweep. Deduped with `dict.fromkeys` rather than a set, so the
+findings still arrive in the order a reader meets the links in the file.
+
+**Row (l)'s fix deleted a copy rather than adding a branch.** The cheap fix was
+to give `plan_link_resolves` the missing repo-root-relative fallback. That would
+have made two copies of the rule agree TODAY, which is precisely how they came
+to disagree. The rule moved to `utils/link_resolution.py`, both checks delegate,
+and docs QA's `_exists_within`/`_strip_fragment` were removed rather than left
+beside it. It gained 13 direct tests on the way, two of them establishing that
+it is not an existence oracle for host paths — a property the old docstring
+claimed at length and nothing tested at the shared level.
+
+**Every fix shipped with a control that was green before and after**: a
+genuinely archived target is still called archived, two DIFFERENT dead links are
+still two findings, and a link resolving under neither rule is still reported.
+Three of this ledger's entries exist because a fix quietly widened past its
+target, so the controls are the point, not decoration.
+
 **A third error surfaced in passing**: `docs_qa/context.py` cited
 `docs_qa.corpus` as the module reusing `plan_qa.model.lines_outside_fences`. It
 is `docs_qa.checks.at_import_census`, and has been for as long as that sentence
