@@ -1,6 +1,6 @@
 # Plan 00439: fence splitter moves out of plan qa
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-18
 **Owner**: dev
 **Priority**: Medium
@@ -93,7 +93,7 @@ This is niggle N5 row (h) of the ledger in Plan 00422.
   smoke_test 3/3.
 - [x] ✅ **Task 3.2**: Release note under
   `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
-- [ ] ⬜ **Task 3.3**: Record the outcome on row (h) of Plan 00422's
+- [x] ✅ **Task 3.3**: Record the outcome on row (h) of Plan 00422's
   `NIGGLES.md`, then archive this plan. The wider finding is filed there as
   **N14**.
 
@@ -105,6 +105,10 @@ This is niggle N5 row (h) of the ledger in Plan 00422.
   edges declared in `_KNOWN_EDGES`, each with its reason.
 - [x] ✅ `llm_qa.py all` reports 35 gates passing (32 in one run, the other
   three re-run green after the stale-daemon restart).
+- [x] ✅ Every release-bound consequence is in the pending-release holding
+  area: `UNRELEASED/release-notes/16-the-fence-splitter-moves-into-utils.md`
+  (it names the removed import path, which is the only thing a client project
+  or handler author has to act on).
 
 ## Delivery & Milestones
 
@@ -112,4 +116,6 @@ This is niggle N5 row (h) of the ledger in Plan 00422.
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00439-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- <!-- milestone or delivery commit hash -->
+- Delivered at `712cbf2e` — the move, the five repointed callers, both new test
+  modules and the release note, in one commit.
+- Archived in the following commit, with the README row and statistics.

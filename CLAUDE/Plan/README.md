@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00439: fence splitter moves out of plan qa](00439-fence-splitter-moves-out-of-plan-qa/PLAN.md) - In Progress (from 00422 N5 row (h): `utils/markdown_links.py` says "it imports neither of them" six lines above an import of `plan_qa.model`; the fence splitter moves to `utils/markdown_fences.py` so the stated dependency direction becomes the real one)
-
 - [00428: auto compact window audit check](00428-auto-compact-window-audit-check/PLAN.md) - Not Started, BLOCKED ON THE OWNER (from issue #46: a seventh `optimal_config_checker` check for `CLAUDE_CODE_AUTO_COMPACT_WINDOW`; the gap is real but the spec was retracted and replaced by one inferred from a compiled CLI, which triage could not verify)
 
 - [00422: niggles ledger fifteen](00422-niggles-ledger-fifteen/PLAN.md) - In Progress, the OPEN ledger (opens with four entries inherited from 00419 — N8/N11/N12/N13 — because an unresolved entry left inside an archived ledger is indistinguishable from a resolved one; three of them are one class in three costumes: a guard right about the state it judges and wrong about the moment it judges it)
@@ -149,6 +147,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00439: fence splitter moves out of plan qa](Completed/00439-fence-splitter-moves-out-of-plan-qa/PLAN.md) - Complete at `712cbf2e` + the archiving commit (from 00422 N5 row (h): `utils/markdown_links.py` said "it imports neither of them" six lines above an import of `plan_qa.model`; the splitter moved to `utils/markdown_fences.py`, and the guard written to prove it found six such edges where the ledger named one — the other four are now a declared ratchet, filed as N14)
+
 - [00438: kill suggestion can name the protected group](Completed/00438-kill-suggestion-can-name-the-protected-group/PLAN.md) - Complete at `d9990531` + the archiving commit (from 00422 N5 row (i): `exclude_pgids` was honoured when deciding what breaches and ignored when building the `kill --` the report prints, so the harvester could recommend killing its own group)
 
 - [00437: session advice counter is shared and locked](Completed/00437-session-advice-counter-is-shared-and-locked/PLAN.md) - Complete at `2fbe655e` + the archiving commit (from 00422 N5 row (c): two handlers carried the same unlocked eviction on a daemon-lifetime singleton, and dispatch really is threaded — the test had to drive CPython's switch interval to its floor before the KeyError would appear at all)
@@ -207,8 +207,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00401: reference repo freshness before read](Completed/00401-reference-repo-freshness-before-read/PLAN.md) - Complete at `9e399219`…`7a43abf6` + the archiving commit (one checker over `git_sync` feeds a SessionStart sweep, a cache-only PreToolUse gate and a CLI report, with a third verdict for a clone that is un-fetchable by design; four defects were found by using the finished thing, not by adding tests)
 
-- [00400: niggles ledger nine](Completed/00400-niggles-ledger-nine/PLAN.md) - Complete at `35da2e85`…`397cdde3` (CI evidence at `6a8d01da`) + the archiving commit (six entries: N1–N4 found without hitting a symptom; N5 and N6 by refusing the first explanation — 18 acceptance errors read as tool contention were a STALE DAEMON, and the restart clearing them refreshes only one of two generated docs. N6's behaviour graduated to Plan 00402)
-
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -262,15 +260,15 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 439 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 386 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 387 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 30 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 29 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
 - **Cancelled/Abandoned**: 13 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00108 superseded by 00117, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213, 00135 superseded by the supervisor workstream)
 
-- **Folder-to-number reconciliation**: 30 + 386 + 13 = **429 folders**, spanning
+- **Folder-to-number reconciliation**: 29 + 387 + 13 = **429 folders**, spanning
   **426 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names

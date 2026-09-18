@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00400: niggles ledger nine](00400-niggles-ledger-nine/PLAN.md) - Complete at `35da2e85`…`397cdde3` (CI evidence at `6a8d01da`) + the archiving commit (six entries: N1–N4 found without hitting a symptom; N5 and N6 by refusing the first explanation — 18 acceptance errors read as tool contention were a STALE DAEMON, and the restart clearing them refreshes only one of two generated docs. N6's behaviour graduated to Plan 00402)
+
 - [00398: critical compaction blocked by the idle gate](00398-critical-compaction-blocked-by-the-idle-gate/PLAN.md) - Complete at `ec18062d` (CI evidence at `a7d0fb7b`) + the archiving commit (the input-box gate was UNBOUNDED, not over-sensitive: 20,755 ticks blocked by box-sitting against 281 by the 2s keystroke floor, the longest run ~10h ending at `[urgent]` still blocked; bounded on text STABILITY so a box unchanged for 120s is flushed and the session compacts)
 
 - [00397: niggles ledger eight](00397-niggles-ledger-eight/PLAN.md) - Complete at `92b9bdb4`…`ff26a6ee` + the archiving commit (three entries: N2 resolved as NOT A DEFECT — auto-compaction is healthy and tmux sits outside the container; N1 graduated to Plan 00399; N3 graduated to Plan 00398 — the `not idle` gate suppresses compaction at CRITICAL too)
