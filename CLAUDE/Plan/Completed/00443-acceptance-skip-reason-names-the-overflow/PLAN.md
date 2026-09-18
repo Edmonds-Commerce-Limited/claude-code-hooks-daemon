@@ -1,6 +1,6 @@
 # Plan 00443: acceptance skip reason names the overflow
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-18
 **Owner**: dev
 **Priority**: Medium
@@ -82,17 +82,22 @@ margin ever bites again.
 
 ### Phase 2: gate
 
-- [ ] ⬜ **Task 2.1**: `llm_qa format`, then `llm_qa.py all` green with the
-  daemon restarted after the last `src/` edit.
-- [ ] ⬜ **Task 2.2**: Record N6 remedy (2) and the remedy-(3) decision on Plan
+- [x] ✅ **Task 2.1**: `llm_qa format`, then `llm_qa.py all` green with the
+  daemon restarted after the last `src/` edit — 35/35, no failed gates. The
+  index row and statistics went in BEFORE the run this time; on Plan 00442
+  leaving them until after cost a gate on two correct `plan_qa` advisories.
+- [x] ✅ **Task 2.2**: Record N6 remedy (2) and the remedy-(3) decision on Plan
   00422's `NIGGLES.md`; archive.
 
 ## Success Criteria
 
-- [ ] The two skip reasons differ, proved by a test of each.
-- [ ] The measurement comes from the daemon's own helpers, so it cannot drift
-  from `_UNIX_SOCKET_PATH_LIMIT`.
-- [ ] `llm_qa.py all` green.
+- [x] ✅ The two skip reasons differ, proved by a test of each.
+- [x] ✅ The measurement comes from the daemon's own helpers, so it cannot
+  drift from `_UNIX_SOCKET_PATH_LIMIT`.
+- [x] ✅ `llm_qa.py all` green, 35/35.
+- [x] ✅ This plan has no release-bound consequences: the changed text is a
+  pytest skip reason in this repository's own acceptance suite, which no
+  client project runs.
 
 ## Delivery & Milestones
 
@@ -100,4 +105,6 @@ margin ever bites again.
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00443-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- <!-- milestone or delivery commit hash -->
+- Delivered at `0d84fb7e` — `socket_path_diagnosis`, its six tests, and both
+  fixtures sharing one reason builder.
+- Archived in the following commit, with the README row and statistics.

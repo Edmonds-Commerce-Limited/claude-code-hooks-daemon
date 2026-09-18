@@ -739,6 +739,39 @@ creation.
 **Fault 2 is untouched**, as this entry intended — remedies 1–3 never addressed
 it, and the playbook-harness stall still needs diagnosis.
 
+**REMEDY (2) DONE by Plan 00443.** The acceptance fixtures skipped with "Daemon
+not running — start with `./bin/hooks-daemon restart`" whenever no socket was
+found under `untracked/`, which in an over-limit checkout is false in the most
+expensive direction: the daemon is running, and the advice reproduces the skip.
+`socket_path_diagnosis` distinguishes the two, built from
+`prospective_socket_path` and `socket_path_overflow` so the measurement cannot
+drift from `_UNIX_SOCKET_PATH_LIMIT`. Both fixtures share one
+`_no_socket_reason()`.
+
+**The complaint was already written down where the fix belonged.**
+`tests/unit/daemon/test_socket_path_preflight.py`'s module docstring says, in
+so many words, that "the acceptance gates then report 'no live socket found
+under untracked/' with a remedy (restart the daemon) that cannot work". That
+file shipped with remedy (1) and named the second half of the problem in its
+own opening paragraph. Nothing acted on it, because a docstring is not a
+worklist — which is the argument for this ledger existing at all.
+
+**REMEDY (3) DECLINED, with reasoning, rather than deferred.** "Shorten the
+default socket filename" was listed as cheapest-of-all, and it was — at the
+time, when nothing caught the overflow at all. Remedy (1) has since shipped and
+makes worktree creation refuse loudly, naming the length, the cap and the
+characters to cut. Renaming `daemon-{hostname}.sock` buys roughly five bytes
+and changes a runtime path for every installation, in a project where a stale
+socket from a previous container is already a thing that happens. Against a
+measured margin of four characters that is not nothing — but it narrows a class
+that is now announced at the moment it would bite, and the blast radius is
+every client that resolves the path.
+
+Recorded as a decision, not an omission: the option stays open if the margin
+ever bites again, and the reasoning is here rather than having to be
+re-derived. A remedy list written before a sibling remedy shipped is a list
+whose cheapest entry may no longer be the cheapest.
+
 ### N7 — the supervisor's effort floor cannot see an effort set from the selector
 
 **Found**: reported by the owner in session, in their own words — "i just

@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00443: acceptance skip reason names the overflow](00443-acceptance-skip-reason-names-the-overflow/PLAN.md) - In Progress (from 00422 N6 remedy 2: the acceptance fixtures blamed a stopped daemon whenever no socket was under `untracked/`, so an over-limit checkout got advice — restart it — that reproduces the skip; remedy 3 is recorded as deliberately not done)
-
 - [00428: auto compact window audit check](00428-auto-compact-window-audit-check/PLAN.md) - Not Started, BLOCKED ON THE OWNER (from issue #46: a seventh `optimal_config_checker` check for `CLAUDE_CODE_AUTO_COMPACT_WINDOW`; the gap is real but the spec was retracted and replaced by one inferred from a compiled CLI, which triage could not verify)
 
 - [00422: niggles ledger fifteen](00422-niggles-ledger-fifteen/PLAN.md) - In Progress, the OPEN ledger (opens with four entries inherited from 00419 — N8/N11/N12/N13 — because an unresolved entry left inside an archived ledger is indistinguishable from a resolved one; three of them are one class in three costumes: a guard right about the state it judges and wrong about the moment it judges it)
@@ -149,6 +147,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00443: acceptance skip reason names the overflow](Completed/00443-acceptance-skip-reason-names-the-overflow/PLAN.md) - Complete at `0d84fb7e` + the archiving commit (from 00422 N6 remedy 2: the acceptance fixtures blamed a stopped daemon for an absent socket, so an over-limit checkout was told to restart — which reproduces the skip; remedy 3 declined with reasoning now that remedy 1 refuses loudly at creation time)
+
 - [00442: host name ladder falls through](Completed/00442-host-name-ladder-falls-through/PLAN.md) - Complete at `9acb1684` + the archiving commit (from 00422 N5 row (e): the documented "ladder, first hit wins" stopped at rung 2 when `gethostname()` cleaned to nothing — and the suite already asserted the fall-through principle for a rung where it could never be exercised)
 
 - [00441: the two link resolvers agree](Completed/00441-the-two-link-resolvers-agree/PLAN.md) - Complete at `c607a6d6` + the archiving commit (from 00422 N5 rows (j)(k)(l): one finding per link instead of per occurrence at all three stages, one shared literal-resolution rule instead of two copies, and a relocation message that no longer calls a plan archived when the resolver deliberately found it in the LIVE root)
@@ -207,8 +207,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00406: newline is a command boundary in handler patterns](Completed/00406-newline-is-a-command-boundary-in-handler-patterns/PLAN.md) - Complete at `f9b78828` + the archiving commit (four blocking handlers judged the NEXT line as part of the command they matched; the `&&` control turned a hunch into an implementation fact)
 
-- [00405: niggles ledger eleven](Completed/00405-niggles-ledger-eleven/PLAN.md) - Complete at `de143c9d`…`03610440` + the archiving commit (nine entries, all terminal. Chasing N6's newline-crossing regex outwards found N7: a word split across two lines evaded EVERY blocking guard, because the shell JOINS a continuation where the daemon substituted a space. N9 looked like a test-ordering quirk and was a "never raises" boundary that raised mid-route. N8 graduated to 00406)
-
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -262,15 +260,15 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 443 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 390 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 391 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 30 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 29 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
 - **Cancelled/Abandoned**: 13 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00108 superseded by 00117, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213, 00135 superseded by the supervisor workstream)
 
-- **Folder-to-number reconciliation**: 30 + 390 + 13 = **433 folders**, spanning
+- **Folder-to-number reconciliation**: 29 + 391 + 13 = **433 folders**, spanning
   **430 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
