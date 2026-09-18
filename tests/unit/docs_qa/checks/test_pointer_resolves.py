@@ -707,3 +707,82 @@ class TestArchiveAwarePlanLinks:
 
         assert len(findings) == 1
         assert findings[0].severity is Severity.ADVISE
+
+
+class TestOneFindingPerDistinctLink:
+    """Plan 00441, from ledger 00422 N5 row (j).
+
+    A document that names the same dead link twice has one problem, not two.
+    The plan-QA twin has always collapsed repeats; this check reported one
+    finding per OCCURRENCE, so a page with a link repeated five times printed
+    five identical findings — and at EDIT stage that is five identical entries
+    in the report that denies the write.
+
+    The row named only the sweep. All three stages share the shape.
+    """
+
+    def test_edit_stage_reports_a_repeated_dead_link_once(self, tmp_path: Path) -> None:
+        (tmp_path / "CLAUDE").mkdir()
+        context = edit_context(
+            project_root=tmp_path,
+            policy=DocumentationPolicy(),
+            file_path=tmp_path / "CLAUDE" / "New.md",
+            file_content="See [a](Nope.md) and again [b](Nope.md) and [c](Nope.md).\n",
+            file_exists_before=False,
+        )
+
+        assert len(_run_edit(context)) == 1
+
+    def test_sweep_stage_reports_a_repeated_dead_link_once(self, tmp_path: Path) -> None:
+        corpus = DocCorpus(
+            project_root=tmp_path,
+            documents={
+                "CLAUDE/Foo.md": DocRecord(
+                    rel_path="CLAUDE/Foo.md",
+                    mtime_ns=1,
+                    size=1,
+                    links=("Missing.md", "Missing.md", "Missing.md"),
+                )
+            },
+        )
+        (tmp_path / "CLAUDE").mkdir()
+        context = sweep_context(project_root=tmp_path, policy=DocumentationPolicy(), corpus=corpus)
+
+        assert len(_run_sweep(context)) == 1
+
+    def test_staged_stage_reports_a_repeated_dead_link_once(self, tmp_path: Path) -> None:
+        root = tmp_path / "repo"
+        _init_repo(root)
+        (root / "CLAUDE").mkdir()
+        (root / "CLAUDE" / "New.md").write_text("[a](Nope.md) [b](Nope.md) [c](Nope.md)\n")
+        _git(root, "add", "-A")
+
+        context = staged_context(project_root=root, policy=DocumentationPolicy())
+
+        assert len(_run_staged(context)) == 1
+
+    def test_two_different_dead_links_are_still_two_findings(self, tmp_path: Path) -> None:
+        """The control: deduping must collapse repeats, not distinct links."""
+        (tmp_path / "CLAUDE").mkdir()
+        context = edit_context(
+            project_root=tmp_path,
+            policy=DocumentationPolicy(),
+            file_path=tmp_path / "CLAUDE" / "New.md",
+            file_content="See [a](NopeOne.md) and [b](NopeTwo.md).\n",
+            file_exists_before=False,
+        )
+
+        assert len(_run_edit(context)) == 2
+
+    def test_the_surviving_finding_names_the_link(self, tmp_path: Path) -> None:
+        """A collapsed report that lost the target would be worse than repeats."""
+        (tmp_path / "CLAUDE").mkdir()
+        context = edit_context(
+            project_root=tmp_path,
+            policy=DocumentationPolicy(),
+            file_path=tmp_path / "CLAUDE" / "New.md",
+            file_content="See [a](Nope.md) and [b](Nope.md).\n",
+            file_exists_before=False,
+        )
+
+        assert "Nope.md" in _run_edit(context)[0].message

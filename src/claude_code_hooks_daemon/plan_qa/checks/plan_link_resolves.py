@@ -25,6 +25,7 @@ Plan 00408's day-file. ``tree_targets`` yields only ``PLAN.md``, so journals
 never reach this check in the first place; the archive test is explicit.
 """
 
+from dataclasses import dataclass, field
 from typing import Final
 
 from claude_code_hooks_daemon.plan_links import PlanLinkResolver, PlanTreeLayout
@@ -37,6 +38,7 @@ from claude_code_hooks_daemon.plan_qa.types import (
     Stage,
 )
 from claude_code_hooks_daemon.utils.authored_paths import contained_authored_path
+from claude_code_hooks_daemon.utils.link_resolution import link_resolves_literally
 from claude_code_hooks_daemon.utils.markdown_links import extract_link_targets
 
 CHECK_ID: Final[str] = "plan-link-resolves"
@@ -80,20 +82,18 @@ def _layout(context: CheckContext) -> PlanTreeLayout:
 
 
 def _resolves_literally(context: CheckContext, doc_dir_rel: str, target: str) -> bool:
-    """Whether ``target`` exists at the path it literally names.
+    """Whether ``target`` exists at a path it can reasonably be read as naming.
 
-    Contained, not merely joined: the target is AUTHORED, and a plain
-    existence answer over an escaping path is an oracle about the host
-    filesystem rather than about this repository.
+    Delegates to the same rule docs QA's ``pointer-resolves`` uses. This check
+    used to try only relative-to-the-document, so a repo-root-relative link —
+    which this project's docs write routinely, and which docs QA accepts —
+    was reported here as needing a repoint. Sharing the rule is the fix; a
+    second copy of it is what produced the divergence.
     """
-    file_target = target.split("#", 1)[0]
-    if not file_target:
-        return True
     source_dir = contained_authored_path(context.project_root, doc_dir_rel)
     if source_dir is None:
         return False
-    resolved = contained_authored_path(source_dir, file_target, within=context.project_root)
-    return resolved is not None and resolved.exists()
+    return link_resolves_literally(context.project_root, source_dir, target)
 
 
 def _run_sweep(context: CheckContext) -> list[Finding]:
@@ -103,17 +103,60 @@ def _run_sweep(context: CheckContext) -> list[Finding]:
     for target in tree_targets(context):
         if target.in_archive:
             continue
-        findings.extend(_document_findings(context, resolver, target))
+        findings.extend(_document_findings(context, resolver, layout, target))
     return findings
 
 
+@dataclass
+class _Bucket:
+    """Links that resolved the same way, with the repoint for each."""
+
+    links: list[str] = field(default_factory=list)
+    repoints: list[str] = field(default_factory=list)
+
+    def add(self, link: str, repoint: str) -> None:
+        if link in self.links:
+            return
+        self.links.append(link)
+        self.repoints.append(repoint)
+
+
+def _relocation_finding(bucket: _Bucket, rel_path: str, *, archived: bool) -> Finding:
+    """One finding for a bucket of links whose target moved.
+
+    The two cases read almost the same and mean something different. An
+    ARCHIVED target has moved for a reason the author could not have avoided,
+    and the repoint restores present truth. A target still in the live root has
+    not moved at all — the link is simply wrong — and telling that author the
+    plan "has been archived" sends them to look in a directory it is not in.
+    """
+    reported = ", ".join(bucket.links[:_MAX_REPORTED_LINKS])
+    repoints = "; ".join(bucket.repoints[:_MAX_REPORTED_LINKS])
+    if archived:
+        message = f"PLAN.md links to plan(s) that have been archived: {reported}"
+        why = ". The plan was archived, not deleted — a live plan should state present truth."
+    else:
+        message = f"PLAN.md link(s) name the wrong path for a plan that is still live: {reported}"
+        why = ". The plan has not moved; the link does not name where it is."
+    return Finding(
+        check_id=CHECK_ID,
+        level=Level.ADVISE,
+        message=message,
+        remediation="Repoint: " + repoints + why,
+        path=rel_path,
+    )
+
+
 def _document_findings(
-    context: CheckContext, resolver: PlanLinkResolver, target: DocumentTarget
+    context: CheckContext,
+    resolver: PlanLinkResolver,
+    layout: PlanTreeLayout,
+    target: DocumentTarget,
 ) -> list[Finding]:
     doc_dir_rel = target.rel_path.rsplit("/", 1)[0]
     source_dir = context.project_root / doc_dir_rel
-    moved: list[str] = []
-    repoints: list[str] = []
+    archived = _Bucket()
+    misrouted = _Bucket()
     dead: list[str] = []
     for link in extract_link_targets(target.text):
         if _is_skippable(link) or _resolves_literally(context, doc_dir_rel, link):
@@ -123,28 +166,18 @@ def _document_findings(
             if link not in dead:
                 dead.append(link)
             continue
-        if link in moved:
-            continue
-        moved.append(link)
-        repoints.append(f"`{link}` -> `{resolver.suggested_link(source_dir, relocated)}`")
+        repoint = f"`{link}` -> `{resolver.suggested_link(source_dir, relocated)}`"
+        # Where the target ACTUALLY is decides the wording. The resolver
+        # searches the live root before any archive and takes the first match,
+        # so "it resolved" never implied "it was archived".
+        bucket = archived if layout.is_archived(relocated.rel_path) else misrouted
+        bucket.add(link, repoint)
 
     findings: list[Finding] = []
-    if moved:
-        reported = ", ".join(moved[:_MAX_REPORTED_LINKS])
-        findings.append(
-            Finding(
-                check_id=CHECK_ID,
-                level=Level.ADVISE,
-                message=f"PLAN.md links to plan(s) that have been archived: {reported}",
-                remediation=(
-                    "Repoint: "
-                    + "; ".join(repoints[:_MAX_REPORTED_LINKS])
-                    + ". The plan was archived, not deleted — a live plan should state "
-                    "present truth."
-                ),
-                path=target.rel_path,
-            )
-        )
+    if archived.links:
+        findings.append(_relocation_finding(archived, target.rel_path, archived=True))
+    if misrouted.links:
+        findings.append(_relocation_finding(misrouted, target.rel_path, archived=False))
     if dead:
         reported = ", ".join(dead[:_MAX_REPORTED_LINKS])
         findings.append(

@@ -53,33 +53,43 @@ This is niggle N5 rows (j), (k) and (l) of the ledger in Plan 00422.
 
 ### Phase 1: the wrong word (row (k))
 
-- [ ] ⬜ **Task 1.1**: RED test — a PLAN.md linking to a LIVE plan by a wrong
-  path produces a finding that does not claim the target is archived.
-- [ ] ⬜ **Task 1.2**: Split the relocation bucket on where the resolved path
-  actually sits (active root versus an archive dir, both already known
-  from `PlanTreeLayout`) and word each message from that.
+- [x] ✅ **Task 1.1**: RED test — a PLAN.md linking to a LIVE plan by a wrong
+  path produces a finding that does not claim the target is archived. Shipped
+  with two controls that passed from the start: the remediation must still name
+  the live path, and a genuinely archived target must still be called archived.
+- [x] ✅ **Task 1.2**: Split the relocation bucket on where the resolved path
+  actually sits. `PlanTreeLayout.is_archived` already existed and is the right
+  question, so no new helper — the defect was that nothing asked it.
 
 ### Phase 2: duplicate findings (row (j))
 
-- [ ] ⬜ **Task 2.1**: RED test — a document repeating one dead link yields
+- [x] ✅ **Task 2.1**: RED test — a document repeating one dead link yields
   ONE finding, at each of `pointer-resolves`' three stages. The row named
   only the sweep; `_run_edit` and `_run_staged` have the same gap, so a
-  blocked write can list the same dead link several times.
-- [ ] ⬜ **Task 2.2**: Dedupe the extracted targets once per document,
+  blocked write can list the same dead link several times. All three were
+  observed RED at `3 == 1`, with two controls green throughout: two DIFFERENT
+  dead links still yield two findings, and the surviving finding still names
+  the link.
+- [x] ✅ **Task 2.2**: Dedupe the extracted targets once per document,
   preserving first-occurrence order so the reported order is stable.
+  `dict.fromkeys` rather than a set, for exactly that reason.
 
 ### Phase 3: the asymmetric fallback (row (l))
 
-- [ ] ⬜ **Task 3.1**: RED test — a repo-root-relative link written in a
-  PLAN.md resolves, as the same link does under `pointer-resolves`.
-- [ ] ⬜ **Task 3.2**: Give `_resolves_literally` the same fallback, via a
-  shared helper rather than a second copy of the rule — a copied resolver
-  is what produced this divergence in the first place.
+- [x] ✅ **Task 3.1**: RED test — a repo-root-relative link written in a
+  PLAN.md resolves, as the same link does under `pointer-resolves`. Two
+  controls green throughout: a relative-to-the-file link still resolves, and a
+  link resolving under neither is still reported.
+- [x] ✅ **Task 3.2**: `utils/link_resolution.py` holds the rule; both checks
+  delegate. Docs QA's copy was DELETED rather than left in place, so there is
+  no second definition to drift — `_exists_within` and `_strip_fragment` went
+  with it. 13 direct tests, including the two that prove it is not an
+  existence oracle for host paths.
 
 ### Phase 4: gate
 
-- [ ] ⬜ **Task 4.1**: `llm_qa format`, then `llm_qa.py all` green with the
-  daemon restarted after the last `src/` edit.
+- [x] ✅ **Task 4.1**: `llm_qa format`, then `llm_qa.py all` green with the
+  daemon restarted after the last `src/` edit — 35/35, no failed gates.
 - [ ] ⬜ **Task 4.2**: Release note; record rows (j), (k) and (l) on Plan
   00422's `NIGGLES.md`; archive.
 

@@ -44,27 +44,10 @@ from claude_code_hooks_daemon.docs_qa.types import (
     Severity,
 )
 from claude_code_hooks_daemon.plan_links import PlanLinkResolver, RelocatedPlanLink
-from claude_code_hooks_daemon.utils.authored_paths import contained_authored_path
+from claude_code_hooks_daemon.utils.link_resolution import link_resolves_literally
 from claude_code_hooks_daemon.utils.markdown_links import extract_link_targets
 
 CHECK_ID: Final[str] = "pointer-resolves"
-
-
-def _exists_within(base: Path, target: str, root: Path) -> bool:
-    """Whether ``target`` resolves from ``base`` AND lands inside ``root``.
-
-    Containment is the half `authored_path_exists` does not do, and the half
-    this check needs. A link target is AUTHORED, and a plain existence answer
-    over it is an ORACLE: `[x](/etc/passwd)` needs no `..` to escape, because
-    pathlib discards the base for an absolute right operand, and whether a
-    finding appears then tells the reader whether that host path exists.
-
-    `base` and `root` differ on purpose. A link resolves relative to its own
-    DOCUMENT, so `../sibling.md` legitimately leaves the document's directory
-    — it is leaving the REPOSITORY that is the hazard.
-    """
-    resolved = contained_authored_path(base, target, within=root)
-    return resolved is not None and resolved.exists()
 
 
 _EXTERNAL_SCHEME_RE: Final[re.Pattern[str]] = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*://")
@@ -87,55 +70,19 @@ def _is_skippable(target: str) -> bool:
     return any(token in target for token in _PLACEHOLDER_TOKENS)
 
 
-def _strip_fragment(target: str) -> str:
-    return target.split("#", 1)[0]
-
-
 def _resolves(project_root: Path, file_path: Path | None, target: str) -> bool:
     """Whether ``target`` (file-existence only; no anchor resolution) resolves.
 
-    A leading ``/`` is ambiguous between two conventions this project's docs
-    both use: (a) a fully-qualified absolute filesystem path — an author
-    wrote the project's own on-disk path, e.g. ``/workspace/CHANGELOG.md``
-    when ``project_root`` genuinely IS ``/workspace`` — and (b)
-    repo-root-relative shorthand (GitHub-style ``/CHANGELOG.md`` meaning
-    "from the repo root"). The literal path is tried FIRST: naively
-    stripping the leading ``/`` and joining under ``project_root`` for case
-    (a) DOUBLES the root segment (``/workspace/workspace/...``) and falsely
-    reports a real file as missing. Only when the literal path does not
-    exist does this fall back to the repo-root-relative join.
-
-    Otherwise relative-to-the-file is tried first, then relative-to-root as
-    a fallback (a plain link written without a leading ``/`` commonly means
-    "from the repo root" in this project's own docs).
-
-    Every branch goes through :func:`_exists_within`, which does TWO things
-    the plain stat did not.
-
-    It resolves ``..`` lexically before touching the filesystem. Stat-ing the
-    join walks ``..`` through the filesystem instead, so a link in the FIRST
-    document of a new directory read as dead while naming a real file — and
-    being new, it was graded BLOCK and denied a write that no retry could make
-    succeed.
-
-    It also CONTAINS the result to ``project_root``. Normalising alone left
-    this an existence oracle: a target may be absolute, and pathlib discards
-    the base for an absolute right operand, so ``[x](/etc/passwd)`` was stat-ed
-    as written and the presence or absence of a finding reported whether that
-    host path exists. Containment is why the leading-``/`` branch can stay —
-    the project's OWN fully-qualified path is inside ``project_root``, and a
-    path outside it is not a link any reader of this repository can follow.
+    The rule itself lives in :func:`utils.link_resolution.link_resolves_literally`,
+    because plan QA's ``plan-link-resolves`` asks the identical question and
+    used to answer it differently — it had no repo-root-relative fallback, so
+    the two subsystems disagreed about links this project's docs write
+    routinely. This wrapper exists to name what the check means by "resolves"
+    and to turn a file path into the directory the shared rule wants.
     """
-    file_target = _strip_fragment(target)
-    if not file_target:
-        return True
-    if file_target.startswith("/"):
-        if _exists_within(project_root, file_target, project_root):
-            return True
-        return _exists_within(project_root, file_target.lstrip("/"), project_root)
-    if file_path is not None and _exists_within(file_path.parent, file_target, project_root):
-        return True
-    return _exists_within(project_root, file_target, project_root)
+    return link_resolves_literally(
+        project_root, file_path.parent if file_path is not None else None, target
+    )
 
 
 def _matches_allowlist(rel_path: str, patterns: Sequence[str]) -> bool:
@@ -227,6 +174,16 @@ def _judge(
     return _finding(rel_path, target, dead_severity)
 
 
+def _distinct_targets(text: str) -> list[str]:
+    """Every link target in ``text``, once each, in first-occurrence order.
+
+    A document naming the same dead link three times has one problem, not
+    three. Order is preserved rather than sorted so a report reads in the order
+    the reader will meet the links in the file.
+    """
+    return list(dict.fromkeys(extract_link_targets(text)))
+
+
 def _resolver(context: CheckContext) -> PlanLinkResolver:
     return PlanLinkResolver(context.project_root, context.policy.plan_tree)
 
@@ -251,7 +208,7 @@ def _run_edit(context: CheckContext) -> list[Finding]:
 
     resolver = _resolver(context)
     findings: list[Finding] = []
-    for target in extract_link_targets(context.file_content):
+    for target in _distinct_targets(context.file_content):
         finding = _judge(
             context,
             resolver,
@@ -275,7 +232,7 @@ def _run_sweep(context: CheckContext) -> list[Finding]:
     findings: list[Finding] = []
     for rel_path, record in sorted(context.corpus.documents.items()):
         file_path = context.project_root / rel_path
-        for target in record.links:
+        for target in dict.fromkeys(record.links):
             finding = _judge(
                 context, resolver, rel_path, file_path, target, dead_severity=Severity.ADVISE
             )
@@ -302,7 +259,7 @@ def _run_staged(context: CheckContext) -> list[Finding]:
         head_content = context.gitfacts.head_file_text(rel_path)
         old_targets = set(extract_link_targets(head_content)) if head_content else set()
         file_path = context.project_root / rel_path
-        for target in extract_link_targets(content):
+        for target in _distinct_targets(content):
             finding = _judge(
                 context,
                 resolver,

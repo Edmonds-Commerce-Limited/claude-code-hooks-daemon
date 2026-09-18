@@ -190,3 +190,92 @@ class TestLinksThatAreFine:
 
     def test_a_clean_tree_produces_nothing(self, tmp_path: Path) -> None:
         assert _findings(_plan_tree(tmp_path)) == []
+
+
+_SECOND_ACTIVE = "# Plan 00420: also live\n\n**Status**: In Progress\n"
+
+
+def _with_a_second_live_plan(root: Path) -> Path:
+    """Add a second LIVE plan, so a wrong link can point at one."""
+    folder = root / "CLAUDE" / "Plan" / "00420-also-live"
+    folder.mkdir(parents=True)
+    (folder / "PLAN.md").write_text(_SECOND_ACTIVE)
+    return root
+
+
+class TestALinkToALivePlanIsNotCalledArchived:
+    """Plan 00441, from ledger 00422 N5 row (k).
+
+    ``PlanLinkResolver`` indexes the ACTIVE plan root before any archive and
+    takes the first match, deliberately — its own comment says the live plan is
+    the better answer to "where is plan N". So a wrong path to a plan that is
+    very much alive resolves to the live folder, and a message asserting the
+    target "has been archived" sends the reader to ``Completed/``, where it is
+    not.
+    """
+
+    def test_the_message_does_not_claim_the_target_was_archived(self, tmp_path: Path) -> None:
+        root = _with_a_second_live_plan(_plan_tree(tmp_path))
+        (root / "CLAUDE/Plan/00419-live/PLAN.md").write_text(
+            _ACTIVE + "\nSee [00420](../Completed/00420-also-live/PLAN.md).\n"
+        )
+
+        findings = _findings(root)
+
+        assert len(findings) == 1
+        assert "archived" not in findings[0].message.lower()
+
+    def test_the_remediation_still_names_the_live_path(self, tmp_path: Path) -> None:
+        """Being wrong about WHY must not cost the correct repoint."""
+        root = _with_a_second_live_plan(_plan_tree(tmp_path))
+        (root / "CLAUDE/Plan/00419-live/PLAN.md").write_text(
+            _ACTIVE + "\nSee [00420](../Completed/00420-also-live/PLAN.md).\n"
+        )
+
+        assert "../00420-also-live/PLAN.md" in _findings(root)[0].remediation
+
+    def test_a_genuinely_archived_target_is_still_called_archived(self, tmp_path: Path) -> None:
+        """The control: the word must survive where it is true."""
+        root = _with_a_second_live_plan(_plan_tree(tmp_path))
+        (root / "CLAUDE/Plan/00419-live/PLAN.md").write_text(
+            _ACTIVE + "\nSee [00413](../00413-done/PLAN.md).\n"
+        )
+
+        assert "archived" in _findings(root)[0].message.lower()
+
+
+class TestLiteralResolutionMatchesDocsQa:
+    """Plan 00441, from ledger 00422 N5 row (l).
+
+    ``pointer-resolves`` accepts a link written from the REPOSITORY ROOT as
+    well as one written relative to the file, because this project's docs use
+    both. This check tried only relative-to-the-file, so the two subsystems
+    answered the same link two different ways and plan QA reported a repoint
+    for a link docs QA was perfectly happy with.
+    """
+
+    def test_a_repo_root_relative_link_resolves(self, tmp_path: Path) -> None:
+        root = _plan_tree(tmp_path)
+        (root / "CLAUDE/Plan/00419-live/PLAN.md").write_text(
+            _ACTIVE + "\nSee [index](CLAUDE/Plan/README.md).\n"
+        )
+
+        assert _findings(root) == []
+
+    def test_a_relative_to_the_file_link_still_resolves(self, tmp_path: Path) -> None:
+        """The control: adding a fallback must not cost the primary rule."""
+        root = _plan_tree(tmp_path)
+        (root / "CLAUDE/Plan/00419-live/PLAN.md").write_text(
+            _ACTIVE + "\nSee [index](../README.md).\n"
+        )
+
+        assert _findings(root) == []
+
+    def test_a_link_resolving_under_neither_is_still_reported(self, tmp_path: Path) -> None:
+        """The control: the fallback must not swallow a genuinely dead link."""
+        root = _plan_tree(tmp_path)
+        (root / "CLAUDE/Plan/00419-live/PLAN.md").write_text(
+            _ACTIVE + "\nSee [gone](CLAUDE/Plan/NoSuchFile.md).\n"
+        )
+
+        assert len(_findings(root)) == 1
