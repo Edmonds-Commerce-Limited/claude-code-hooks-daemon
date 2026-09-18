@@ -27,3 +27,6 @@ that remain (`utils/goal_ledger.py` on `PlanDoc`, `module_doc_budget` on
 `plan_qa.types`' tier constants, and two on `plan_qa.gitfacts`) are declared in
 an allowlist with the reason each is still there. A new undeclared edge fails;
 so does clearing a declared one without striking it off the list.
+
+The two `plan_qa.gitfacts` edges were cleared later in this same bundle — see
+callout 19 — leaving two.

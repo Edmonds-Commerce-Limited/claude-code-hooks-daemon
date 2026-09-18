@@ -1356,6 +1356,35 @@ of which are genuinely about whether `goal_ledger` and the doc-budget constants
 are in the right place. Worth doing as its own plan rather than as a rider on
 whatever touches these files next.
 
+**Correction, and it changed the fix.** "Nothing about read-only git plumbing is
+plan-specific" is overstated, and this entry is the ninth in this ledger whose
+premise turned out narrower, wider or staler than reality — this time my own.
+`GitFacts` has eight members and seven are generic, but `plan_counter()` reads
+`hooksdaemon.latestPlanNumber` through `handlers.utils.plan_numbering`, and it is
+the whole reason the class sat in `plan_qa` to begin with. A relocation would
+have carried the plan counter into `utils` and simply moved the layering
+violation rather than removing it.
+
+So Plan 00444 did a SPLIT: the generic core became
+`utils/git_facts.py` (`GitFactsBase`, `StagedChange`), which acquired the direct
+tests it never had while it lived behind plan QA's suite;
+`plan_qa.gitfacts.GitFacts` subclasses it and adds `plan_counter()` alone,
+re-exporting `StagedChange` so not one plan-QA caller moved. `docs_qa` — which
+only ever used `staged_changes`, `staged_file_text` and `head_file_text` — now
+constructs the base directly.
+
+**Resolved: rows 3 and 4.** Both `gitfacts` edges are struck from
+`_KNOWN_EDGES`, which is down to two. The ratchet proved itself at both ends:
+striking the rows first turned `test_no_undeclared_module_imports_plan_qa` red on
+exactly those two and nothing else, and
+`test_every_declared_edge_still_exists` would have failed had they been left
+declared after the move.
+
+**Still open: rows 1 and 2**, unchanged and deliberately so. Whether a
+plan-shaped utility belongs in `utils` at all, and where the shared tier
+constants should live, are both design questions this plan did not answer and
+should not have answered as a rider.
+
 ### N15 — the dedupe scout reported a file path for a report it never wrote
 
 **Found**: in the dispatch before filing Plan 00441, by going to read the

@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00406: newline is a command boundary in handler patterns](00406-newline-is-a-command-boundary-in-handler-patterns/PLAN.md) - Complete at `f9b78828` + the archiving commit (four blocking handlers judged the NEXT line as part of the command they matched; the `&&` control turned a hunch into an implementation fact)
+
 - [00405: niggles ledger eleven](00405-niggles-ledger-eleven/PLAN.md) - Complete at `de143c9d`…`03610440` + the archiving commit (nine entries, all terminal. Chasing N6's newline-crossing regex outwards found N7: a word split across two lines evaded EVERY blocking guard, because the shell JOINS a continuation where the daemon substituted a space. N9 looked like a test-ordering quirk and was a "never raises" boundary that raised mid-route. N8 graduated to 00406)
 
 - [00403: upstream issue reporting sop](00403-upstream-issue-reporting-sop/PLAN.md) - Complete at `6787874f`…`47f315cd` + the archiving commit (one procedure for reporting a daemon defect to this PUBLIC repo: a generator that never COLLECTS the hostname, remote, env file, config or logs, a gate refusing any body it did not build, issue forms mirroring its fields, and `--web` kept open as the hole that keeps the gate honest)

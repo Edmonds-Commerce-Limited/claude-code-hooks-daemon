@@ -1,6 +1,6 @@
 # Plan 00444: gitfacts generic core moves to utils
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-18
 **Owner**: dev
 **Priority**: Medium
@@ -68,17 +68,23 @@ base and stops depending on `plan_qa` entirely.
 - [x] ✅ **Task 2.1**: `llm_qa format`, index row and statistics, then
   `llm_qa.py all` green with the daemon restarted after the last `src/`
   edit — 35/35.
-- [ ] ⬜ **Task 2.2**: Correct N14 on Plan 00422's `NIGGLES.md` — the entry
+- [x] ✅ **Task 2.2**: Correct N14 on Plan 00422's `NIGGLES.md` — the entry
   overstates how generic `GitFacts` is — and record the outcome; archive.
 
 ## Success Criteria
 
-- [ ] `_KNOWN_EDGES` has two entries, and
+- [x] `_KNOWN_EDGES` has two entries, and
   `test_every_declared_edge_still_exists` passes, so the two that went were
   struck off rather than left declared.
-- [ ] `plan_qa`'s own `GitFacts` tests pass unchanged — the public surface did
-  not move.
-- [ ] `llm_qa.py all` green.
+- [x] `plan_qa`'s own `GitFacts` tests pass unchanged — the public surface did
+  not move. The one test-file change is `tests/unit/plan_qa/conftest.py`'s
+  `run_git` monkeypatch, which follows the name it patches, not the surface.
+- [x] `llm_qa.py all` green — 35/35.
+- [x] Every release-bound consequence is in the pending-release holding area:
+  `UNRELEASED/release-notes/19-the-git-facts-core-moves-into-utils.md` — a
+  handler author who monkeypatches `run_git` has to repoint it at
+  `utils.git_facts`, and callout 16 promised these two edges by name, so it is
+  corrected to point here.
 
 ## Delivery & Milestones
 
@@ -86,4 +92,6 @@ base and stops depending on `plan_qa` entirely.
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00444-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- <!-- milestone or delivery commit hash -->
+- Delivered at `4db75ead` — the split, the ratchet down to two edges, QA 35/35.
+- Archived in the following commit, with callout 19 in the holding area and
+  N14 corrected on Plan 00422's ledger.
