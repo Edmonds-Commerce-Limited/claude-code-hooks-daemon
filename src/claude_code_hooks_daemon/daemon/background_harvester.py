@@ -217,7 +217,16 @@ def find_breaches(
                     record=record,
                     reasons=tuple(reasons),
                     tree_pcpu=sum(r.pcpu for r in tree),
-                    tree_pgids=tuple(sorted({r.pgid for r in tree})),
+                    # Filtered against the SAME excluded set the flagging half
+                    # uses (ledger 00422 N5 row (i)). Without it a group the
+                    # caller declared off-limits — the harvester's own, in the
+                    # only caller — could still be rendered into
+                    # `kill_command`, which is the one output of this tool that
+                    # does damage when followed. `tree_pcpu` above is
+                    # deliberately NOT filtered: it answers "is this job
+                    # doing anything", and work in an excluded group is still
+                    # work.
+                    tree_pgids=tuple(sorted({r.pgid for r in tree} - excluded)),
                 )
             )
     return breaches

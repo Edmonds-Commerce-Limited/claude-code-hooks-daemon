@@ -190,6 +190,81 @@ class TestFindBreaches:
         assert breach.reasons  # non-empty explanation
 
 
+#: A tracked wrapper over the TTL, with one descendant sitting in a group the
+#: caller excludes — the harvester's own. Every pid/pgid here is chosen to make
+#: that shape unambiguous rather than to look realistic.
+_TREE_SPANNING_EXCLUDED_PS = """\
+    PID    PPID    PGID  ELAPSED %CPU COMMAND
+   5000      65    5000     9000  0.0 /bin/bash -c ./scripts/qa/llm_qa.py all
+   5001    5000    5001     9000 50.0 python -m pytest tests/
+   5002    5000    7777     9000  0.0 bin/hooks-daemon harvest-background
+      1       0       1   100000  0.0 /sbin/init
+"""
+
+_EXCLUDED_PGID = 7777
+
+
+class TestAnExcludedGroupIsNeverNamedInTheKill:
+    """Ledger 00422 N5 row (i), Plan 00438.
+
+    ``exclude_pgids`` says "never flag these", and the flagging half honours
+    it. ``tree_pgids`` was built from the descendant tree with no such filter,
+    so the group the caller declared off-limits could still be rendered into
+    ``kill_command`` — the one output of this tool that does damage when
+    followed. The harvester never kills, which is exactly why the command it
+    prints has to be right.
+    """
+
+    @staticmethod
+    def _breach(text: str = _TREE_SPANNING_EXCLUDED_PS) -> Breach:
+        breaches = find_breaches(
+            parse_ps_output(text),
+            max_wall_seconds=600,
+            max_cpu_percent=400,
+            min_cpu_runtime_seconds=60,
+            tracked_commands=("llm_qa.py all",),
+            exclude_pgids=(_EXCLUDED_PGID,),
+        )
+        assert len(breaches) == 1, f"expected exactly one breach, got {breaches}"
+        return breaches[0]
+
+    def test_the_excluded_group_is_not_in_the_tree_pgids(self) -> None:
+        assert _EXCLUDED_PGID not in self._breach().tree_pgids
+
+    def test_the_excluded_group_is_not_in_the_kill_command(self) -> None:
+        command = self._breach().kill_command
+        assert f"-{_EXCLUDED_PGID}" not in command, (
+            f"the suggested command names the group the caller excluded: {command}"
+        )
+
+    def test_the_groups_that_are_not_excluded_are_still_named(self) -> None:
+        """Control: dropping every group would also pass the two tests above."""
+        command = self._breach().kill_command
+        assert "-5000" in command
+        assert "-5001" in command
+
+    def test_a_wholly_excluded_tree_falls_back_to_the_breaching_group(self) -> None:
+        """A tree with nothing left to name must not produce a bare `kill --`.
+
+        The breaching record's own group is always safe to fall back to: a
+        record in an excluded group never becomes a breach at all.
+        """
+        text = """\
+    PID    PPID    PGID  ELAPSED %CPU COMMAND
+   5000      65    5000     9000  0.0 /bin/bash -c ./scripts/qa/llm_qa.py all
+      1       0       1   100000  0.0 /sbin/init
+"""
+        breaches = find_breaches(
+            parse_ps_output(text),
+            max_wall_seconds=600,
+            max_cpu_percent=400,
+            min_cpu_runtime_seconds=60,
+            tracked_commands=("llm_qa.py all",),
+            exclude_pgids=(5000,),
+        )
+        assert breaches == [], "a record in an excluded group must never breach"
+
+
 class TestReadTrackedCommands:
     """The predecessor of this class read a ``pgid`` key (Plan 00236).
 
