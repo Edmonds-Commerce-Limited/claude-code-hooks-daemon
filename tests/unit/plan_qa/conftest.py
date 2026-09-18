@@ -14,12 +14,16 @@ import pytest
 from _pytest.monkeypatch import MonkeyPatch
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
-from claude_code_hooks_daemon.plan_qa import gitfacts as gitfacts_module
+from claude_code_hooks_daemon.utils import git_facts as gitfacts_module
 
 
 @pytest.fixture
 def git_diff_spawns(monkeypatch: MonkeyPatch) -> Iterator[list[tuple[str, ...]]]:
-    """Every ``git diff`` argv :mod:`plan_qa.gitfacts` spawns during the test.
+    """Every ``git diff`` argv the git-facts layer spawns during the test.
+
+    Patched on :mod:`utils.git_facts`, which is where ``run_git`` is imported
+    and therefore where the name the code calls actually lives —
+    ``plan_qa.gitfacts`` is now only the plan-counter subclass (Plan 00444).
 
     Wraps the real runner rather than replacing it, so the facts under test
     are still the ones a real repository produces -- a stub would pin the

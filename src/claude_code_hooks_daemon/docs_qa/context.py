@@ -8,8 +8,9 @@ Mirrors :mod:`claude_code_hooks_daemon.plan_qa.context`:
   (:func:`docs_qa.corpus.build_and_save_corpus`) — building the corpus is
   the caller's job, so this stays a pure constructor.
 - :func:`staged_context` (Task 3.1e) builds the staged-tree view via
-  :class:`~claude_code_hooks_daemon.plan_qa.gitfacts.GitFacts` — the SAME
-  read-only git plumbing plan_qa's commit gate uses (routed through
+  :class:`~claude_code_hooks_daemon.utils.git_facts.GitFactsBase` — the SAME
+  read-only git plumbing plan_qa's commit gate uses, since plan_qa's
+  ``GitFacts`` is that class plus the plan counter (routed through
   ``run_git``, never a raw subprocess spawn; reused directly rather than
   reimplemented, matching how ``docs_qa.checks.module_doc_budget`` already
   reuses ``plan_qa.types``' tier line-count constants).
@@ -27,8 +28,8 @@ from claude_code_hooks_daemon.docs_qa.corpus import (
 )
 from claude_code_hooks_daemon.docs_qa.policy import DocumentationPolicy
 from claude_code_hooks_daemon.docs_qa.types import CheckContext
-from claude_code_hooks_daemon.plan_qa.gitfacts import GitFacts
 from claude_code_hooks_daemon.utils.authored_paths import authored_path
+from claude_code_hooks_daemon.utils.git_facts import GitFactsBase
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.core.project_layout import ProjectLayout
@@ -129,7 +130,7 @@ def staged_context(
     no check consults it yet. A staged path under the project-wide
     ``daemon.exclude_paths`` (Plan 00362 Task 2.9) never enters the view.
     """
-    gitfacts = GitFacts(project_root, pathspecs=pathspecs)
+    gitfacts = GitFactsBase(project_root, pathspecs=pathspecs)
     staged_documents: dict[str, str] = {}
     for change in gitfacts.staged_changes():
         if change.status == _DELETE_STATUS:

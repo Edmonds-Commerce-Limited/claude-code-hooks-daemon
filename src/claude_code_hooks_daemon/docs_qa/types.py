@@ -4,7 +4,8 @@ A *check* is a pure function ``CheckContext -> list[Finding]`` registered
 declaratively as a :class:`CheckSpec` with an id and the stage it runs at.
 Handlers and the CLI never contain rule logic: they build a
 :class:`CheckContext`, call :func:`docs_qa.runner.run_stage`, and render
-the findings. Mirrors :mod:`claude_code_hooks_daemon.plan_qa.types`.
+the findings. Mirrors :mod:`claude_code_hooks_daemon.plan_qa.types` in shape,
+while importing nothing from it.
 """
 
 from collections.abc import Callable
@@ -18,7 +19,7 @@ from claude_code_hooks_daemon.docs_qa.policy import DocumentationPolicy
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.core.project_layout import ProjectLayout
     from claude_code_hooks_daemon.docs_qa.corpus import DocCorpus
-    from claude_code_hooks_daemon.plan_qa.gitfacts import GitFacts
+    from claude_code_hooks_daemon.utils.git_facts import GitFactsBase
 
 
 class CheckStage(StrEnum):
@@ -84,7 +85,7 @@ class CheckContext:
     staged_documents: dict[str, str] | None = None
     # Read-only git plumbing (staged/HEAD content, staged_changes) for
     # checks that need more than the flat staged_documents view.
-    gitfacts: "GitFacts | None" = None
+    gitfacts: "GitFactsBase | None" = None
     commit_message: str | None = None
 
     # The ProjectLayout facade (Plan 00288), when the calling surface has one

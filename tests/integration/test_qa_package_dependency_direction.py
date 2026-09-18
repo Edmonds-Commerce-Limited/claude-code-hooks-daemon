@@ -44,13 +44,6 @@ _KNOWN_EDGES: Final[dict[str, str]] = {
         "Deliberate reuse of plan_qa's own tier line-count constants, so the "
         "two budgets cannot drift apart. Moving them needs a shared home first."
     ),
-    "docs_qa/context.py -> claude_code_hooks_daemon.plan_qa.gitfacts": (
-        "GitFacts is the read-only git plumbing both commit gates use. It is "
-        "shared machinery living in one subsystem; relocating it is its own job."
-    ),
-    "docs_qa/types.py -> claude_code_hooks_daemon.plan_qa.gitfacts": (
-        "Type-checking-only import of the same GitFacts; it goes when GitFacts does."
-    ),
 }
 
 
