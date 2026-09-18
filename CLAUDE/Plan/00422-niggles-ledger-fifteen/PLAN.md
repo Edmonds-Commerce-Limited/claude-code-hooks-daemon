@@ -55,29 +55,86 @@ ledger's shape is readable without opening it:
 
 | #   | Verdict                                                                  | Origin                                                             | Status                                                  |
 | --- | ------------------------------------------------------------------------ | ------------------------------------------------------------------ | ------------------------------------------------------- |
-| N1  | the `Priority` constants are not the numbers a fresh install ships       | [00419 N8](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md)  | ⬜ Open — remedy recorded, owner-gated, unbuilt         |
+| N1  | the `Priority` constants are not the numbers a fresh install ships       | [00419 N8](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md)  | ⏸ Owner question 1 — stated, waiting                   |
 | N2  | the linter runs on gitignored scratch output                             | [00419 N11](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md) | ✅ Resolved — depth-scoped exclusions shipped           |
 | N3  | a committed future-dated entry makes the journal uncorrectable           | [00419 N12](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md) | 🔄 Remediation fixed; (2) owner-gated, advisory expired |
-| N4  | a cron cannot be both cancelled for a session and declared in config     | [00419 N13](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md) | ⬜ Open — remedy recorded, owner-gated, unbuilt         |
+| N4  | a cron cannot be both cancelled for a session and declared in config     | [00419 N13](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md) | ⏸ Owner question 2 — stated, waiting                   |
 | N5  | the v3.65.0 release reviews' NON-defects had no durable home             | the v3.65.0 release reviews                                        | 🔄 (a)(d)(g) done, (f) corrected; eight rows unworked   |
 | N6  | a worktree cannot run the acceptance gates, and says the wrong reason    | Plan 00424                                                         | ⬜ Open — two faults measured, remedies 1-3 un-gated    |
-| N7  | the supervisor's effort floor cannot see an effort set from the selector | owner report, in session                                           | ⬜ Open — mechanism confirmed, remedy owner-gated       |
+| N7  | the supervisor's effort floor cannot see an effort set from the selector | owner report, in session                                           | ⏸ Owner question 3 — stated, waiting                   |
 | N8  | the socket-path guard fails open exactly where it is needed              | in session, hours after N6 fault 1 shipped                         | ✅ Remedied by Plan 00431                               |
 | N9  | worktree isolation plus an explicit worktree instruction nests them      | in session, by causing it                                          | ✅ Remedied by Plan 00433                               |
 | N10 | a QA checker's own tests overwrite that checker's real QA artefact       | a full `llm_qa all` run's intermediate artefacts                   | ✅ Remedied by Plan 00432                               |
-| N11 | acceptance probe fixtures live in the sanctioned human scratch directory | surfaced by N2's second failure                                    | ⬜ Open — (2) already exists; (1) owner-gated           |
+| N11 | acceptance probe fixtures live in the sanctioned human scratch directory | surfaced by N2's second failure                                    | ⏸ Owner question 4 — (2) already exists                |
 | N12 | the supervisor asset has been red under its own lint gate since v3.65.0  | in session, after v3.65.0 shipped                                  | ✅ Corrected — the gate is green; no code change due    |
 | N13 | the plan-dedupe scout cleared a plan tree it never read                  | a dispatch before filing Plan 00430                                | ✅ Remedied by Plan 00434                               |
+
+## Questions waiting on the owner
+
+Six entries are blocked on a decision rather than on work. They are collected
+here so the whole set can be read in one sitting: each is ONE question, with
+what each answer costs and what happens while it goes unanswered. Nothing here
+needs investigation first — every one has been measured.
+
+1. **N1 — how loud may a template-versus-constants test be?** `priority.py` and
+   the `init_config.py` template disagree across the whole `status_line` block
+   and have for longer than the handler that surfaced it has existed; relative
+   order is preserved, so nothing misbehaves and no check can see it. A
+   consistency test would fix that permanently. **Does it get to fail across the
+   WHOLE template, or only across the `status_line` block?** Whole-template may
+   surface more than the divergence found, which is a scope call, not a bug fix.
+   Unanswered: the constants keep documenting a relationship a fresh install
+   cannot have.
+
+2. **N4 — may a session suppress a cron the project declared?** Obeying an
+   instruction to cancel `issue-sdlc` makes the next Stop block, because the
+   enforcer refuses a session missing a declared job — correctly. The only
+   existing knob (edit `persistent_crons`) stops the job for every session on
+   every branch. **Is there to be a session-scoped pause, recorded through an
+   expiring marker like the "blocked only on human input" one, or does
+   "cancelled for now" remain unspellable?** A pause hands a session the ability
+   to switch off a guard the project declared. Unanswered: the two moves stay
+   mutually exclusive and whoever hits it re-derives that from two failures.
+
+3. **N7 — is an unattributed effort drop a human choice?** A bare `/effort`
+   opens Claude Code's own selector, which names nothing the supervisor can
+   read, so the manual-effort latch never sets and the floor puts it back.
+   **Should an effort drop the supervisor did not itself inject be trusted as
+   manual and latched?** The downgrade logic deliberately answers the
+   mirror-image question NO — an unattributed model change gets no restore — so
+   answering YES here is a real asymmetry to accept, not an oversight to
+   correct. Unanswered: setting effort from the selector keeps getting undone.
+
+4. **N11 — may the acceptance fixtures leave the human scratch directory?** The
+   lint strategies write their probe fixtures under `untracked/scratch/`, the
+   same directory agents are told to use for working notes, which is what forced
+   the depth-scoped exclusion N2 shipped. A dedicated `untracked/acceptance/`
+   root separates them properly. **Is that move worth making?** It renames a
+   path ten strategies, the playbook harness and client-facing docs all name.
+   Unanswered: the coupling stays, and the next exclusion has to rediscover it.
+
+5. **N3 — may a `correction` category be added to the journal grammar?** It is
+   the only implementable remedy for the three-rule contradiction, and the
+   grammar lives in `_JOURNAL_TEMPLATE_.md`, which ships to every client. **Is
+   that a template change worth making?** Unanswered: nothing breaks — the
+   contradiction is self-limiting, since the ordering sweep only reads live
+   plans — but a correction stays illegible as a correction.
+
+6. **N5 — should a review dispatch default to a TRACKED report destination?**
+   `dispatch_declaration` currently recommends `untracked/agent-reports/`, which
+   is gitignored; that is how twenty release-review non-defects came within one
+   container restart of being lost. **Should the default move somewhere git can
+   see?** It changes what every client project is told, not just this one.
+   Unanswered: the next reviewer's evidence lands somewhere nothing durable
+   reads.
 
 ## Tasks
 
 ### Phase 1: the four inherited entries
 
-- [ ] ⬜ **Task 1.1**: N1 — put the owner question that gates it, and only that
-  question, in front of the owner: does a template-versus-constants consistency
-  test get to fail loudly across the WHOLE template, or only across the
-  `status_line` block where the divergence was found? The divergence itself is
-  established and needs no further investigation.
+- [x] ✅ **Task 1.1**: N1 — the question is stated as question 1 under
+  "Questions waiting on the owner" above, with what each answer costs. The
+  divergence itself is established and needs no further investigation.
 
 - [x] ✅ **Task 1.2**: N2 — remedy (1) shipped as three depth-scoped globs on
   `lint_on_edit.options.exclude_paths` (`/untracked/scratch/*`,
@@ -94,9 +151,8 @@ ledger's shape is readable without opening it:
   It now leads with the append. The cited advisory is also gone — measured, and
   by archiving rather than by any remedy.
 
-- [ ] ⬜ **Task 1.4**: N4 — put the owner question in front of the owner: may a
-  session suppress a cron the project declared, and if so through what recorded,
-  expiring marker? Until that is answered, cancelling a declared cron for one
+- [x] ✅ **Task 1.4**: N4 — stated as question 2 under "Questions waiting on
+  the owner" above. Until it is answered, cancelling a declared cron for one
   session has no legal spelling.
 
 - [x] ✅ **Task 1.5**: The class, named once rather than three times, as
@@ -124,12 +180,10 @@ ledger's shape is readable without opening it:
 
 ### Phase 3: the owner-reported entry
 
-- [ ] ⬜ **Task 3.1**: N7 — put the owner question in front of the owner: should
-  an effort drop the supervisor did not itself inject be trusted as a human
-  choice and latched? The downgrade logic deliberately answers the mirror-image
-  question NO (an unattributed model change gets no restore), so answering YES
-  here is a real asymmetry to decide rather than an oversight to correct. The
-  mechanism is confirmed and needs no further investigation.
+- [x] ✅ **Task 3.1**: N7 — stated as question 3 under "Questions waiting on the
+  owner" above, including the asymmetry that makes it a decision rather than an
+  oversight: the downgrade logic deliberately answers the mirror-image question
+  NO. The mechanism is confirmed and needs no further investigation.
 
 ### Phase 4: the entries filed after this ledger opened
 
