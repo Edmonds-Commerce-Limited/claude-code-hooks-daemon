@@ -35,6 +35,7 @@ from claude_code_hooks_daemon.utils.authored_paths import (
     authored_path,
     contained_authored_path,
 )
+from claude_code_hooks_daemon.utils.markdown_fences import lines_outside_fences
 
 
 class PlanStatus(StrEnum):
@@ -88,8 +89,6 @@ _DONE_MARKER_RE: Final[re.Pattern[str]] = re.compile(
     r"\ball\s+done\b|\ball\s+tasks?\s+complete\b",
     re.IGNORECASE,
 )
-
-_FENCE_RE: Final[re.Pattern[str]] = re.compile(r"^\s*(```|~~~)")
 
 
 @dataclass(frozen=True)
@@ -159,31 +158,6 @@ class PlanDoc:
             tasks=_count_tasks(lines),
             done_marker_count=_count_done_markers(lines),
         )
-
-
-def lines_outside_fences(text: str) -> list[str]:
-    """Split ``text`` into lines, dropping everything inside fenced blocks.
-
-    Fence delimiter lines themselves are also dropped. Unclosed fences swallow
-    the remainder of the document — the safe failure mode for counting.
-    """
-    result: list[str] = []
-    in_fence = False
-    fence_marker: str | None = None
-    for line in text.splitlines():
-        fence_match = _FENCE_RE.match(line)
-        if fence_match:
-            marker = fence_match.group(1)
-            if not in_fence:
-                in_fence = True
-                fence_marker = marker
-            elif marker == fence_marker:
-                in_fence = False
-                fence_marker = None
-            continue
-        if not in_fence:
-            result.append(line)
-    return result
 
 
 def _parse_title(lines: list[str]) -> tuple[int | None, str | None]:

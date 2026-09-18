@@ -7,13 +7,17 @@ this project keeps meeting (``Priority`` vs the shipped template, the
 vendored-dir sets before ``constants.layout``).
 
 It lives in ``utils`` rather than in either subsystem so the dependency runs
-one way: both QA packages import it, and it imports neither of them.
+one way: both QA packages import it, and it imports neither of them. That
+sentence was false for as long as it stood — the fence splitter it builds on
+was still in ``plan_qa.model``, six lines below this paragraph — so
+``tests/integration/test_qa_package_dependency_direction.py`` now checks it
+instead of taking the docstring's word for it.
 """
 
 import re
 from typing import Final
 
-from claude_code_hooks_daemon.plan_qa.model import lines_outside_fences
+from claude_code_hooks_daemon.utils.markdown_fences import lines_outside_fences
 
 MARKDOWN_LINK_RE: Final[re.Pattern[str]] = re.compile(r"\[[^\]]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
 

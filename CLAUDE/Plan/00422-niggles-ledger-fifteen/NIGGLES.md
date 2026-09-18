@@ -524,6 +524,35 @@ unit test cannot answer. The unit test is a wiring sanity check and its
 docstring already points at that module. Nothing to build; the row named the
 weaker of two tests as though it were the only one.
 
+**Row (h) DONE by Plan 00439, and the row understated it.** Confirmed as filed:
+`utils/markdown_links.py` says "both QA packages import it, and it imports
+neither of them" six lines above `from claude_code_hooks_daemon.plan_qa.model import lines_outside_fences`. The fence splitter and `_FENCE_RE` now live at
+`utils/markdown_fences.py`, with no re-export left behind, and have direct unit
+tests for the first time in their life — every caller had only ever exercised
+them incidentally.
+
+**The guard found six edges where the row described one.** Grepping for
+`outside_fences` found four callers; an AST walk over every module under
+`utils/` and `docs_qa/` found `utils/goal_ledger.py` on `PlanDoc`,
+`docs_qa/checks/module_doc_budget.py` on `plan_qa.types`' tier constants, and
+`docs_qa/context.py` and `docs_qa/types.py` both on `plan_qa.gitfacts`. The
+search term was the limit, not the tree — which is the same shape as N5 rows
+(a)/(d), where a table was wrong in three places and the entry named one.
+
+**The scope did not widen to match; the guard did not narrow to match either.**
+Clearing the other four is a real design question — `GitFacts` is shared
+machinery that happens to live in one subsystem, and the doc-budget constants
+are deliberate reuse with a documented rationale — so they are declared in
+`_KNOWN_EDGES` with a reason apiece, and a second test fails if one is cleared
+without being struck off. Narrowing the guard to the fence splitter would have
+been the cheap move and would have deleted the finding along with the failure.
+Filed as **N14**.
+
+**A third error surfaced in passing**: `docs_qa/context.py` cited
+`docs_qa.corpus` as the module reusing `plan_qa.model.lines_outside_fences`. It
+is `docs_qa.checks.at_import_census`, and has been for as long as that sentence
+has existed. Corrected while the sentence was being rewritten.
+
 ### N6 — a worktree cannot run the acceptance release gates, and says the wrong reason
 
 **Found**: during Plan 00424, running `llm_qa.py all` inside a worktree created
@@ -1170,3 +1199,33 @@ written in Grep-tool terms, and the agent is v1.2.0.
 shell fence in any shipped agent whose frontmatter does not declare `Bash` now
 fails a test — observed RED on the scout and green on `hooks-daemon-docs-qa`,
 which declares Bash and carries a fence, so the check is not passing vacuously.
+
+### N14 — four `utils`/`docs_qa` → `plan_qa` edges remain, declared but not cleared
+
+**Source**: the import-direction guard written for Plan 00439 (N5 row (h)).
+
+`utils` is the layer both QA subsystems share, so an import running from
+`utils` or `docs_qa` INTO `plan_qa` makes the other subsystem depend on a
+package it has no business loading. `utils/markdown_links.py` documents that
+direction in prose and, until Plan 00439, violated it. Four edges survive that
+plan:
+
+| Edge                                                    | Why it is still there                                                                                                                          |
+| ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `utils/goal_ledger.py` → `plan_qa.model`                | It reads plan status through `PlanDoc`. The open question is whether a plan-shaped utility belongs in `utils` at all, not whether to re-import |
+| `docs_qa/checks/module_doc_budget.py` → `plan_qa.types` | Deliberate reuse of plan QA's own tier line-count constants, so the two budgets cannot drift. Moving them needs a shared home chosen first     |
+| `docs_qa/context.py` → `plan_qa.gitfacts`               | `GitFacts` is the read-only git plumbing BOTH commit gates use — shared machinery that happens to live in one subsystem                        |
+| `docs_qa/types.py` → `plan_qa.gitfacts`                 | A type-checking-only import of the same class; it goes when `GitFacts` goes                                                                    |
+
+**These are declared, not hidden.** `_KNOWN_EDGES` in
+`tests/integration/test_qa_package_dependency_direction.py` holds them with the
+reasons above; an undeclared edge fails, and clearing a declared one without
+striking it off also fails. So the debt cannot grow quietly and cannot be paid
+off quietly either.
+
+**The remedy is one decision, not four.** `GitFacts` accounts for half the list
+and is the clearest case — nothing about read-only git plumbing is plan-specific.
+Moving it to `utils` (or a sibling shared package) would leave two edges, both
+of which are genuinely about whether `goal_ledger` and the doc-budget constants
+are in the right place. Worth doing as its own plan rather than as a rider on
+whatever touches these files next.

@@ -11,8 +11,8 @@ Mirrors :mod:`claude_code_hooks_daemon.plan_qa.context`:
   :class:`~claude_code_hooks_daemon.plan_qa.gitfacts.GitFacts` — the SAME
   read-only git plumbing plan_qa's commit gate uses (routed through
   ``run_git``, never a raw subprocess spawn; reused directly rather than
-  reimplemented, matching how ``docs_qa.corpus`` already reuses
-  ``plan_qa.model.lines_outside_fences``).
+  reimplemented, matching how ``docs_qa.checks.module_doc_budget`` already
+  reuses ``plan_qa.types``' tier line-count constants).
 """
 
 from collections.abc import Sequence

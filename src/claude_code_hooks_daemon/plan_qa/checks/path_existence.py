@@ -21,13 +21,14 @@ from claude_code_hooks_daemon.plan_qa.checks.common import (
     DocumentTarget,
     document_rule_checks,
 )
-from claude_code_hooks_daemon.plan_qa.model import PlanStatus, lines_outside_fences
+from claude_code_hooks_daemon.plan_qa.model import PlanStatus
 from claude_code_hooks_daemon.plan_qa.types import (
     CheckContext,
     Finding,
     Level,
 )
 from claude_code_hooks_daemon.utils.authored_paths import contained_authored_path
+from claude_code_hooks_daemon.utils.markdown_fences import lines_outside_fences
 
 CHECK_ID: Final[str] = "path-existence"
 

@@ -32,8 +32,8 @@ from claude_code_hooks_daemon.docs_qa.types import (
     Finding,
     Severity,
 )
-from claude_code_hooks_daemon.plan_qa.model import lines_outside_fences
 from claude_code_hooks_daemon.utils.authored_paths import authored_path
+from claude_code_hooks_daemon.utils.markdown_fences import lines_outside_fences
 
 logger = logging.getLogger(__name__)
 

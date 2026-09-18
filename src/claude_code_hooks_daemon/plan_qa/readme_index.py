@@ -13,7 +13,7 @@ covering BOTH real-world grammars (Plan 00144):
 
 Only TOP-LEVEL list items are rows: indented detail bullets under a row are
 prose, even when they contain plan links. Fenced code blocks are ignored via
-the shared :func:`plan_qa.model.lines_outside_fences` helper, and the parser
+the shared :func:`utils.markdown_fences.lines_outside_fences` helper, and the parser
 tolerates mdformat-gfm output (markdown_table_formatter compatibility).
 """
 
@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Final
 
-from claude_code_hooks_daemon.plan_qa.model import lines_outside_fences
+from claude_code_hooks_daemon.utils.markdown_fences import lines_outside_fences
 
 
 class ReadmeSection(StrEnum):
