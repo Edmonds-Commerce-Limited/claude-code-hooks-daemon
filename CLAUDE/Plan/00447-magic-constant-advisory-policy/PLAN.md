@@ -42,9 +42,49 @@ type of the variable. Strings extracted from a compiled bundle cannot establish
 parser behaviour. This is the identical wall Plan 00428 / issue #46 hit, and
 that precedent is what makes this a plan rather than a task.
 
+## Issue #50 — the worked example that CLEARS the Q2 bar
+
+Issue #50 proposes advising `subagentPromptCacheTtl: "1h"` in
+`~/.claude/settings.json`. It arrived after this plan was filed and belongs
+here rather than in its own plan, because it is the same request shape — and
+because it is the first candidate that answers Q2 in the affirmative.
+
+**Unlike #49 and #46, the semantics ARE establishable from here**, because the
+setting self-documents in the bundle's own schema rather than having to be
+inferred:
+
+- Accepted values are stated: `"5m"` or `"1h"`.
+- The reporter's premise is confirmed verbatim: *"Unset = automatic (5 minutes
+  unless `ENABLE_PROMPT_CACHING_1H=1`)"*. Subagents really do default to 5m.
+- The precedence chain is readable in full: `FORCE_PROMPT_CACHING_5M` →
+  `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL` → the setting → agent frontmatter
+  `experimental.cacheTtl` → `ENABLE_PROMPT_CACHING_1H`.
+- It is NOT a GrowthBook experiment gate, so Q1's objection does not apply.
+
+**The asymmetry is the actual finding**, and neither the reporter nor this
+project had noticed it: `promptCacheTtl` (main conversation) is documented as
+*"1 hour on a Claude subscription within its usage limits, 5 minutes on an API
+key, Bedrock, Vertex or Foundry"*, while `subagentPromptCacheTtl` is 5 minutes
+for everyone. A subscription user therefore gets 1h on the main thread and 5m
+on every subagent, by default and silently.
+
+**But it introduces a dimension the other two did not have: COST.** The same
+schema states that *"1-hour cache writes are billed at a higher rate"*, and the
+per-agent description adds that `"1h"` is *ignored while a Claude subscription
+is in overage*. So the advice is only net-positive on workloads that actually
+reuse the cache across gaps — which is precisely the qualifier in #50's own
+title ("if your agents regularly run long commands"). A blanket SessionStart
+advisory to set `1h` would cost money for users whose subagents are short and
+cache-cold.
+
+That is why this is still an owner decision even though it passes Q2: the
+blocker is no longer verifiability, it is whether this project should issue
+advice with a billing consequence that depends on a workload it cannot see.
+Call that **Q4**, below.
+
 ## The question for the owner
 
-Three decisions, in dependency order. None of them is answerable from inside
+Four decisions, in dependency order. None of them is answerable from inside
 this repository, which is why nothing has been built.
 
 **Q1 — Should the daemon advise on undocumented experiment flags at all?**
@@ -68,10 +108,18 @@ commitment rather than a one-off check — and issue #24 ("hooks intelligence
 process") is arguably where that belongs, which makes this a cluster question
 too.
 
+**Q4 — May this project issue advice that has a BILLING consequence, when the
+workload that decides whether it pays off is invisible from here?** Raised by
+issue #50, which passes Q2 but hits this instead. `1h` cache writes cost more;
+they only pay for themselves when the cache is reused across gaps. The honest
+options are a check that advises unconditionally, one that explains the
+trade-off without recommending, or none. This generalises past #50: any future
+performance setting will have the same shape.
+
 ## Goals
 
-- Get Q1–Q3 answered by the owner, and record the answers where both this plan
-  and Plan 00428 can act on them.
+- Get Q1–Q4 answered by the owner, and record the answers where this plan,
+  Plan 00428, and issue #50 can all act on them.
 
 ## Non-Goals
 
@@ -83,20 +131,23 @@ too.
 - No change to the existing six checks.
 - No advice to users about setting `CLAUDE_CODE_THRIFTY_SONIC`, in either
   direction, until its value semantics are established rather than inferred.
+- No `subagentPromptCacheTtl` check before Q4. The facts are established; what
+  is missing is permission to give costed advice, not evidence.
 
 ## Tasks
 
 ### Phase 1: blocked
 
-- [ ] ⬜ **Task 1.1**: Owner answers Q1, Q2, Q3.
-- [ ] ⬜ **Task 1.2**: Record the answers here and cross-reference Plan 00428,
-  whose blocker Q2 subsumes.
+- [ ] ⬜ **Task 1.1**: Owner answers Q1, Q2, Q3, Q4.
+- [ ] ⬜ **Task 1.2**: Record the answers here and cross-reference Plan 00428
+  (whose blocker Q2 subsumes) and issue #50 (which Q4 gates).
 
 ## Success Criteria
 
-- [ ] Q1–Q3 answered, or the plan is cancelled with the reasoning recorded.
+- [ ] Q1–Q4 answered, or the plan is cancelled with the reasoning recorded.
 - [ ] Plan 00428's blocker is either resolved by Q2's answer or explicitly
   re-stated as still open.
+- [ ] Issue #50 is either implemented under Q4's answer or closed with it.
 
 ## Delivery & Milestones
 
