@@ -128,6 +128,30 @@ class EventHandlersConfig(BaseModel):
         return HandlerConfig()
 
 
+def scope_from_raw_block(raw_scope: object) -> HandlerScope | None:
+    """The `scope:` of a handler block that is still a raw dict.
+
+    Normalises the same way `HandlerConfig.normalise_scope` and
+    `resolve_scope` (`handlers/handler_scope.py`) do, so all three paths
+    accept `" SUB "` alike rather than one of them raising a bare enum
+    `ValueError` that names neither the handler nor the config key.
+
+    A module-level function rather than a call to `normalise_scope`, because
+    that is a pydantic `field_validator`: the attribute is a descriptor proxy,
+    not a plain callable, so neither type checker can follow it and a test
+    cannot invoke it directly either.
+
+    **Defensive, not load-bearing.** Through the public loader this is
+    unreachable — `coerce_handler_configs` is a `mode="before"` validator, so
+    every block is already a `HandlerConfig` before any `mode="after"`
+    validator runs. It stays for a caller that builds the model another way;
+    `model_construct` bypasses both and is how the test reaches it.
+    """
+    if raw_scope is None:
+        return None
+    return HandlerScope(str(raw_scope).strip().upper())
+
+
 class HandlersConfig(BaseModel):
     """Configuration for all handler event types.
 
@@ -187,8 +211,10 @@ class HandlersConfig(BaseModel):
         be indistinguishable from one that works. Config load is the only
         moment the author is present to be told (Plan 00423).
 
-        Cheap by construction: it walks only handler blocks that actually carry
-        the key, so a config that sets no scopes does no work.
+        Walks every handler block in every wired event, not only ones that set
+        `scope` — `validate_scope_for_event` is a no-op for an absent/`None`
+        scope, so a config that sets no scopes still does the work but finds
+        nothing to refuse.
         """
         for meta in wired_event_metas():
             event_block = getattr(self, meta.config_key, None)
@@ -206,8 +232,7 @@ class HandlersConfig(BaseModel):
                 if isinstance(handler_block, HandlerConfig):
                     scope = handler_block.scope
                 elif isinstance(handler_block, dict):
-                    raw_scope = handler_block.get(SCOPE_CONFIG_KEY)
-                    scope = None if raw_scope is None else HandlerScope(str(raw_scope).upper())
+                    scope = scope_from_raw_block(handler_block.get(SCOPE_CONFIG_KEY))
                 else:
                     continue
                 validate_scope_for_event(meta.json_key, handler_key, scope)

@@ -39,13 +39,19 @@ class SessionAdviceCounter:
 
     Args:
         interval: Advise on the first qualifying event, then every ``interval``-th.
-        max_sessions: Cap on tracked sessions. On reaching it, an arbitrary
-            existing entry is evicted — the map is a rate-limit hint, not a
-            ledger, so WHICH entry goes does not matter, only that the map
-            stays bounded on a process that never restarts.
+        max_sessions: Cap on tracked sessions. On reaching it, the OLDEST
+            entry is evicted (FIFO) — WHICH entry goes matters: evicting the
+            newest instead makes the newest slot a revolving door, so a
+            session that arrives right after the cap is hit gets dropped on
+            every subsequent new session and re-advises from event 1 forever,
+            defeating the rate limit this class exists to enforce.
     """
 
     def __init__(self, *, interval: int, max_sessions: int) -> None:
+        if interval < 1:
+            raise ValueError(f"interval must be >= 1, got {interval}")
+        if max_sessions < 1:
+            raise ValueError(f"max_sessions must be >= 1, got {max_sessions}")
         self._interval = interval
         self._max_sessions = max_sessions
         self._counts: dict[str, int] = {}
@@ -62,11 +68,14 @@ class SessionAdviceCounter:
             count = self._counts.get(session_id)
             if count is None:
                 if len(self._counts) >= self._max_sessions:
-                    # popitem() rather than `del counts[next(iter(counts))]`:
-                    # one atomic operation instead of a select-then-delete pair,
-                    # so even a future caller that forgets the lock cannot hit
-                    # the KeyError this class exists to remove.
-                    self._counts.popitem()
+                    # pop(next(iter(...)), None) rather than
+                    # `del counts[next(iter(counts))]`: the `None` default
+                    # makes a missing key a no-op instead of a KeyError, so
+                    # this stays as unraisable as popitem() while still
+                    # evicting the OLDEST entry (FIFO) — insertion order is
+                    # dict iteration order, and popitem() evicts the NEWEST
+                    # (LIFO), which is the wrong end.
+                    self._counts.pop(next(iter(self._counts)), None)
                 count = _COUNT_START
             else:
                 count += 1

@@ -377,3 +377,41 @@ class TestCmdFormatMarkdownExcludePaths:
 
         assert result == 0
         assert _ALIGNED_MARKER in excluded_file.read_text()
+
+
+class TestCmdFormatMarkdownDanglingSymlink:
+    """A dangling `.md` symlink in the walk must be skipped, not errored.
+
+    Regression guard: the `os.walk` rewrite (Plan 00429) dropped the
+    `is_file()` guard that `path.rglob` + `candidate.is_file()` used to
+    provide. `os.walk` lists a broken symlink among `filenames`, so it
+    reached `_format_single_markdown_file`, whose `read_text` raised
+    `FileNotFoundError` -- reported as an error and failing the whole run.
+    """
+
+    def test_dangling_symlink_is_skipped_in_check_mode(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        (tmp_path / "good.md").write_text("# Title\n")
+        (tmp_path / "dangling.md").symlink_to(tmp_path / "nowhere.md")
+
+        args = argparse.Namespace(path=tmp_path, check=True)
+        result = cmd_format_markdown(args)
+
+        assert result == 0
+        captured = capsys.readouterr()
+        assert "dangling.md" not in captured.err
+
+    def test_dangling_symlink_is_skipped_in_write_mode(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        (tmp_path / "good.md").write_text(_UNALIGNED_TABLE)
+        (tmp_path / "dangling.md").symlink_to(tmp_path / "nowhere.md")
+
+        args = argparse.Namespace(path=tmp_path, check=False)
+        result = cmd_format_markdown(args)
+
+        assert result == 0
+        assert _ALIGNED_MARKER in (tmp_path / "good.md").read_text()
+        captured = capsys.readouterr()
+        assert "dangling.md" not in captured.err

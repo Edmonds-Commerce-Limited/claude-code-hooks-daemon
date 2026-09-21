@@ -205,6 +205,21 @@ class TestListAndCheck:
 
         assert cmd_remote_docs(_args(tmp_path, "check")) == 1
 
+    def test_check_reports_an_unreadable_index_as_stale_not_a_crash(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        """An index that exists but cannot be decoded must be a finding, not a traceback."""
+        from claude_code_hooks_daemon.remote_docs.index import INDEX_RELATIVE_PATH
+
+        cmd_remote_docs(_args(tmp_path, "add", url="https://example.com/a"))
+        (tmp_path / INDEX_RELATIVE_PATH).write_bytes(b"\xff\xfe\x00not-utf8")
+
+        code = cmd_remote_docs(_args(tmp_path, "check"))
+
+        assert code == 1
+        out = capsys.readouterr().out
+        assert "could not be read" in out
+
     def test_check_stays_quiet_for_a_project_that_vendors_nothing(
         self, tmp_path: Path, capsys
     ) -> None:

@@ -27,7 +27,7 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from claude_code_hooks_daemon.config.models import HandlersConfig
+from claude_code_hooks_daemon.config.models import HandlersConfig, scope_from_raw_block
 from claude_code_hooks_daemon.core.handler_scope import (
     AGENT_ID_EVENTS,
     HandlerScope,
@@ -167,6 +167,33 @@ class TestTheRefusalFiresThroughTheRealLoader:
 
     def test_a_lowercase_value_on_an_eligible_event_is_accepted(self) -> None:
         self._validate("stop:\n  auto_continue_stop:\n    scope: main\n")
+
+    def test_a_padded_value_through_model_validate_is_accepted(self) -> None:
+        """Via the public loader, `coerce_handler_configs` (a `field_validator("*",
+        mode="before")`) always coerces each handler block to `HandlerConfig`
+        before `validate_handler_scopes` (an `after` validator) ever runs, so a
+        padded value is normalised by `HandlerConfig.normalise_scope` before it
+        reaches this handler's own branch. This case was already accepted before
+        the fix below; it is here to pin that it stays accepted.
+        """
+        self._validate('pre_tool_use:\n  sed_blocker:\n    scope: " MAIN "\n')
+
+    def test_a_padded_value_reaching_the_raw_dict_branch_is_accepted(self) -> None:
+        """The raw-dict path must strip whitespace like its two siblings
+        (`HandlerConfig.normalise_scope` and `resolve_scope` in
+        `handler_scope.py`, both of which strip).
+
+        Exercised through `scope_from_raw_block` directly. That branch is
+        unreachable through the public `model_validate` loader — a block is
+        always already a `HandlerConfig` by the time any `mode="after"`
+        validator runs — so the function is where the behaviour lives and is
+        the honest thing to pin. Before the fix a padded value raised a bare
+        `ValueError: ' MAIN ' is not a valid HandlerScope`, naming neither the
+        handler nor the config key.
+        """
+        assert scope_from_raw_block(" MAIN ") is HandlerScope.MAIN
+        assert scope_from_raw_block("sub") is HandlerScope.SUB
+        assert scope_from_raw_block(None) is None
 
     def test_all_on_an_ineligible_event_is_accepted(self) -> None:
         """ALL claims nothing, so it can never be a false promise."""

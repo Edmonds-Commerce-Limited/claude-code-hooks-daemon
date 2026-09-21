@@ -45,6 +45,10 @@ _FENCE_RE: Final[re.Pattern[str]] = re.compile(r"```.*?```|~~~.*?~~~", re.DOTALL
 # The write verbs, in the shapes agents actually use. Deliberately PAST tense
 # or passive: "write X next" and "you should write X" are recommendations, and
 # blocking on those would fire on advice rather than on a claim.
+#
+# Only `.md` is judged — the `\.md` in the path group is what enforces that.
+# Every report convention in this project writes markdown, and widening it
+# would start judging incidental filenames.
 _CLAIM_RE: Final[re.Pattern[str]] = re.compile(
     r"\b(?:written|wrote|saved|created)\b"  # the verb
     r"(?:\s+\w+){0,3}?"  # "written to", "saved to", "wrote the full"
@@ -53,23 +57,53 @@ _CLAIM_RE: Final[re.Pattern[str]] = re.compile(
     re.IGNORECASE,
 )
 
-#: Only `.md` is judged. Every report convention in this project writes
-#: markdown, and widening it would start judging incidental filenames.
+# A negator governing the verb turns a claim into its denial: "No report was
+# written to X" and "Nothing was saved to X" both name a path under a write
+# verb and neither is a claim. Matched against the CURRENT SENTENCE only (see
+# ``_is_negated``) so a negator in an earlier sentence cannot suppress a real
+# claim later in the message.
+_NEGATION_RE: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:no|not|never|nothing|without)\b|n't\b", re.IGNORECASE
+)
+
+#: Sentence boundaries a negator search is bounded by.
+_SENTENCE_BOUNDARY_CHARS: Final[str] = ".\n!?"
+
+#: How many missing paths the deny message lists before truncating. A stop
+#: naming more than a handful is already unambiguous; the rest add length
+#: without adding information.
 _MAX_CLAIMS_REPORTED: Final[int] = 5
+
+
+def _is_negated(prose: str, verb_start: int) -> bool:
+    """True when a negator governs the write verb starting at ``verb_start``.
+
+    Bounded to the current sentence: the search window starts just after the
+    nearest sentence boundary (``.``, ``!``, ``?`` or a newline) before the
+    verb, not at the start of the message, so a negator two sentences earlier
+    cannot suppress a claim it has nothing to do with.
+    """
+    boundary = max(prose.rfind(char, 0, verb_start) for char in _SENTENCE_BOUNDARY_CHARS) + 1
+    window = prose[boundary:verb_start]
+    return bool(_NEGATION_RE.search(window))
 
 
 def written_path_claims(message: str) -> list[str]:
     """Paths the message claims to have WRITTEN, in order, de-duplicated.
 
-    A mention is not a claim. "I read X", "you should write X", and anything
-    inside a fenced block all return nothing -- see this module's docstring
-    for why that asymmetry is deliberate rather than conservative.
+    A mention is not a claim. "I read X", "you should write X", anything
+    inside a fenced block, and a NEGATED write ("No report was written to X")
+    all return nothing -- see this module's docstring for why the first
+    asymmetry is deliberate rather than conservative; negation is the same
+    reasoning applied to the verb itself.
     """
     if not message:
         return []
     prose = _FENCE_RE.sub(" ", message)
     claims: list[str] = []
     for match in _CLAIM_RE.finditer(prose):
+        if _is_negated(prose, match.start()):
+            continue
         path = match.group("path")
         if path not in claims:
             claims.append(path)
@@ -114,12 +148,33 @@ class SubagentReportPathVerifierHandler(SubagentStopHandlerBase):
         """True for every SubagentStop except a re-entry (loop guard)."""
         return not bool(hook_input.get("stop_hook_active", False))
 
-    def _is_missing(self, claim: str) -> bool:
+    def _resolution_base(self, hook_input: dict[str, Any], root: Path) -> Path:
+        """The directory a RELATIVE claim is joined against.
+
+        Prefers the event's own ``cwd`` — the only signal of where the
+        subagent actually ran, and strictly better information than the
+        daemon's startup root, since a worktree dispatch runs from
+        ``<root>/untracked/worktrees/<branch>``, not from ``root`` itself.
+        Used only when it resolves INSIDE the project root; a missing,
+        non-string, or out-of-root ``cwd`` falls back to ``root`` unchanged,
+        which is exactly today's behaviour.
+        """
+        cwd = hook_input.get("cwd")
+        if isinstance(cwd, str) and cwd:
+            candidate = Path(os.path.normpath(cwd))
+            if candidate.is_relative_to(root):
+                return candidate
+        return root
+
+    def _is_missing(self, claim: str, base: Path, root: Path) -> bool:
         """True when the claim names a project path that is not on disk.
 
         A path outside the project root is never judged: it is not this
         repository's business, and an absolute path into someone else's tree
-        cannot be checked meaningfully from here.
+        cannot be checked meaningfully from here. A RELATIVE claim is joined
+        against ``base`` (see ``_resolution_base``); containment is always
+        checked against ``root``, since ``base`` is itself guaranteed to lie
+        inside it.
 
         Normalised LEXICALLY (``os.path.normpath``) rather than with
         ``Path.resolve()``. Two reasons, and the first is the one that
@@ -132,9 +187,8 @@ class SubagentReportPathVerifierHandler(SubagentStopHandlerBase):
         the way a reader does, so a claim escaping the root via ``..`` lands
         outside it and is correctly left unjudged.
         """
-        root = Path(os.path.normpath(str(self._root())))
         claimed = Path(claim)
-        target = claimed if claimed.is_absolute() else root / claimed
+        target = claimed if claimed.is_absolute() else base / claimed
         normalised = Path(os.path.normpath(str(target)))
         if not normalised.is_relative_to(root):
             return False
@@ -148,7 +202,11 @@ class SubagentReportPathVerifierHandler(SubagentStopHandlerBase):
             # Fail open: no verdict without a readable report string.
             return BlockingResult(decision=Decision.ALLOW)
 
-        missing = [claim for claim in written_path_claims(message) if self._is_missing(claim)]
+        root = Path(os.path.normpath(str(self._root())))
+        base = self._resolution_base(hook_input, root)
+        missing = [
+            claim for claim in written_path_claims(message) if self._is_missing(claim, base, root)
+        ]
         if not missing:
             return BlockingResult(decision=Decision.ALLOW)
 

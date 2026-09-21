@@ -98,6 +98,20 @@ class TestAMentionIsNotAClaim:
     def test_an_empty_message(self) -> None:
         assert written_path_claims("") == []
 
+    def test_a_negated_written_to_claim(self) -> None:
+        message = (
+            "No report was written to untracked/agent-reports/x.md - the " "summary is inline."
+        )
+        assert written_path_claims(message) == []
+
+    def test_a_negated_saved_to_claim(self) -> None:
+        message = "Nothing was saved to untracked/agent-reports/x.md."
+        assert written_path_claims(message) == []
+
+    def test_a_present_tense_negated_write_claim(self) -> None:
+        message = "I did not write untracked/agent-reports/x.md; everything is above."
+        assert written_path_claims(message) == []
+
 
 class TestTheHandlerBlocksOnlyAMissingClaim:
     def test_a_claim_whose_file_exists_is_allowed(self, tmp_path: Path) -> None:
@@ -142,6 +156,45 @@ class TestTheHandlerBlocksOnlyAMissingClaim:
         handler._project_root = tmp_path
         result = handler.handle(_hook_input("Report written to `/etc/nope-report.md`"))
         assert result.decision == Decision.ALLOW
+
+    def test_a_relative_claim_resolves_against_the_events_cwd(self, tmp_path: Path) -> None:
+        """A worktree dispatch's relative claim must not be rebased onto the
+
+        daemon's startup root: the event's own ``cwd`` is the only signal of
+        where the subagent actually was, and is strictly better information
+        than ``ProjectContext.project_root()``. A worktree lives at
+        ``<root>/untracked/worktrees/<branch>``, inside the project root.
+        """
+        handler = SubagentReportPathVerifierHandler()
+        handler._project_root = tmp_path
+
+        worktree_dir = tmp_path / "untracked" / "worktrees" / "my-branch"
+        worktree_dir.mkdir(parents=True)
+        report = worktree_dir / "report.md"
+        report.write_text("findings", encoding="utf-8")
+
+        result = handler.handle(
+            _hook_input(f"Report written to `{report.name}`", cwd=str(worktree_dir))
+        )
+        assert result.decision == Decision.ALLOW
+
+    def test_a_cwd_outside_the_project_root_falls_back_to_the_root(self, tmp_path: Path) -> None:
+        """An event cwd that does not resolve inside the project root is not
+
+        trusted as a resolution base -- the daemon's own root is used, same
+        as before this fix.
+        """
+        handler = SubagentReportPathVerifierHandler()
+        handler._project_root = tmp_path / "root"
+        handler._project_root.mkdir()
+
+        outside = tmp_path / "elsewhere"
+        outside.mkdir()
+        report = outside / "report.md"
+        report.write_text("findings", encoding="utf-8")
+
+        result = handler.handle(_hook_input(f"Report written to `{report.name}`", cwd=str(outside)))
+        assert result.decision == Decision.DENY
 
 
 class TestTheHandlerFailsOpen:

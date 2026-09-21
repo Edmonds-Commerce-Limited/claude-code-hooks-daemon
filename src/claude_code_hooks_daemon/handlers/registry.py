@@ -562,11 +562,17 @@ class HandlerRegistry:
 
                             # Where this handler is active (Plan 00423), same
                             # shape as priority: config overrides the handler's
-                            # own default, a bare `scope:` (None) keeps it. An
-                            # unknown value raises out of resolve_scope rather
-                            # than falling back, because a typo that quietly
-                            # widened the scope would run a guard where its
-                            # author meant it not to.
+                            # own default, a bare `scope:` (None) keeps it.
+                            # resolve_scope still raises on an unknown value
+                            # rather than falling back, but that raise lands
+                            # inside this method's own `except Exception`
+                            # below, which logs a warning and skips the
+                            # handler — it does not, by itself, stop a typo
+                            # from quietly widening a scope. The real refusal
+                            # happens earlier, at config load: pydantic's
+                            # `HandlerConfig.scope` field (config/models.py)
+                            # rejects an unknown value there, before this
+                            # instantiation loop ever runs.
                             instance.scope = resolve_scope(handler_config, instance.scope)
 
                             # Apply options inheritance if handler shares options with parent

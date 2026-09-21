@@ -5131,6 +5131,11 @@ def _iter_markdown_candidates(
             candidate = current / filename
             if not candidate.name.lower().endswith(_MARKDOWN_EXTENSIONS):
                 continue
+            if not candidate.is_file():
+                # os.walk lists a dangling symlink among filenames; is_file()
+                # follows symlinks and reports False for a broken one, so
+                # this skips it rather than handing it to read_text() to fail.
+                continue
             if is_path_excluded(str(candidate), exclude_paths, project_root=project_root_str):
                 continue
             yield candidate
@@ -6434,9 +6439,20 @@ def _remote_docs_check(
     # rather than against a rendered-but-empty index nobody asked for.
     index_path = project_root / INDEX_RELATIVE_PATH
     index_exists = index_path.exists()
+    index_unreadable = False
     if index_exists or list_documents(tree):
-        current_index = index_path.read_text(encoding="utf-8") if index_exists else None
-        index_stale = current_index != render_index(tree)
+        if index_exists:
+            try:
+                current_index: str | None = index_path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                # Cannot be compared to the rendered index, so treat it the
+                # same as any other out-of-date index -- it genuinely cannot
+                # be confirmed fresh.
+                current_index = None
+                index_unreadable = True
+        else:
+            current_index = None
+        index_stale = index_unreadable or current_index != render_index(tree)
     else:
         index_stale = False
 
@@ -6471,7 +6487,10 @@ def _remote_docs_check(
             "(re-derives frontmatter)"
         )
 
-    if index_stale:
+    if index_unreadable:
+        print(f"\n{INDEX_RELATIVE_PATH}: could not be read, so freshness cannot be confirmed")
+        print("  fix: bin/hooks-daemon remote-docs index")
+    elif index_stale:
         print(f"\n{INDEX_RELATIVE_PATH}: out of date with the vendored tree")
         print("  fix: bin/hooks-daemon remote-docs index")
 

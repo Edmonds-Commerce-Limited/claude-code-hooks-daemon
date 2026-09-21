@@ -296,10 +296,15 @@ run_journal_mode() {
 
     # Locate the plan folder for this number: direct child, or one level
     # inside a non-numbered subdir (Completed/, archive/...). Read-only.
-    local matches=()
+    local matches=() nullglob_was_set=0
+    if shopt -q nullglob; then
+        nullglob_was_set=1
+    fi
     shopt -s nullglob
     matches=( "$plan_dir/$padded_number-"*/ "$plan_dir"/*/"$padded_number-"*/ )
-    shopt -u nullglob
+    if (( ! nullglob_was_set )); then
+        shopt -u nullglob
+    fi
     if [[ ${#matches[@]} -eq 0 ]]; then
         die "no plan folder found for number $padded_number under $plan_dir"
     fi
@@ -319,10 +324,15 @@ run_journal_mode() {
     mkdir -p "$journal_dir" || die "could not create journal folder: $journal_dir"
 
     # Read the clock ITSELF, normalised to UTC (D2, D3) -- the caller never
-    # supplies a time, so a two-writer cross-zone pair stays consistent.
-    local journal_day journal_time
-    journal_day="$(date -u +%y-%m-%d)"
-    journal_time="$(date -u +%H:%M)"
+    # supplies a time, so a two-writer cross-zone pair stays consistent. A
+    # SINGLE `date` call produces both fields so a midnight-UTC straddle can't
+    # pair a pre-boundary day with a post-boundary time (or vice versa) --
+    # two separate calls could otherwise write e.g. a "## 00:00" entry into
+    # the PREVIOUS day's file.
+    local journal_stamp journal_day journal_time
+    journal_stamp="$(date -u +%y-%m-%d' '%H:%M)"
+    journal_day="${journal_stamp%% *}"
+    journal_time="${journal_stamp##* }"
 
     local journal_file="$journal_dir/$padded_number-Journal-$journal_day.md"
 
@@ -557,8 +567,13 @@ if [[ -f "$journal_template_file" ]]; then
     fi
     # UTC, not local (Plan 00427 D3): every day-file's sentinel promises UTC
     # timestamps, including this scaffolder-written seed entry.
-    journal_day="$(date -u +%y-%m-%d)"
-    journal_time="$(date -u +%H:%M)"
+    # ONE invocation for both fields: two calls can straddle midnight UTC, and
+    # the day names the FILE while the time stamps the ENTRY — so a straddle
+    # writes a `## 00:00` entry into the previous day's file, which
+    # journal-entry-ordering and journal-entry-future-dated then flag.
+    journal_stamp="$(date -u +%y-%m-%d' '%H:%M)"
+    journal_day="${journal_stamp%% *}"
+    journal_time="${journal_stamp##* }"
     journal_file="$journal_dir/$padded-Journal-$journal_day.md"
     if ! journal_body="$(cat "$journal_template_file")"; then
         die "could not read journal template '$journal_template_file'"

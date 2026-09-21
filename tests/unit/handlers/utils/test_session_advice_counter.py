@@ -33,6 +33,26 @@ from claude_code_hooks_daemon.handlers.utils.session_advice_counter import (
 _INTERVAL: Final[int] = 10
 
 
+class TestConstructorValidation:
+    """Invalid arguments must fail fast at construction, not corrupt behaviour later."""
+
+    def test_zero_interval_raises_value_error(self) -> None:
+        with pytest.raises(ValueError, match="interval"):
+            SessionAdviceCounter(interval=0, max_sessions=256)
+
+    def test_negative_interval_raises_value_error(self) -> None:
+        with pytest.raises(ValueError, match="interval"):
+            SessionAdviceCounter(interval=-1, max_sessions=256)
+
+    def test_zero_max_sessions_raises_value_error(self) -> None:
+        with pytest.raises(ValueError, match="max_sessions"):
+            SessionAdviceCounter(interval=_INTERVAL, max_sessions=0)
+
+    def test_negative_max_sessions_raises_value_error(self) -> None:
+        with pytest.raises(ValueError, match="max_sessions"):
+            SessionAdviceCounter(interval=_INTERVAL, max_sessions=-1)
+
+
 class TestRateLimit:
     """The behaviour both handlers had before the extraction, unchanged."""
 
@@ -60,6 +80,28 @@ class TestBounding:
         for index in range(40):
             counter.should_advise(f"s{index}")
         assert counter.tracked_sessions() <= 4
+
+    def test_eviction_is_fifo_not_lifo(self) -> None:
+        """Filling the map past its cap must drop the OLDEST entry.
+
+        ``dict.popitem()`` evicts the NEWEST (LIFO), which turns the newest
+        slot into a revolving door: a session that arrives right after the
+        cap is hit gets evicted on the very next new session, and its counter
+        resets, so it re-advises from event 1 instead of staying silent.
+        """
+        counter = SessionAdviceCounter(interval=_INTERVAL, max_sessions=4)
+        for index in range(4):
+            counter.should_advise(f"s{index}")
+
+        # s0 is the oldest entry; a new session must evict it, not s3.
+        counter.should_advise("s4")
+
+        # s3 (most recently inserted before s4) must still be tracked, so its
+        # next event continues counting instead of restarting at 1.
+        assert counter.should_advise("s3") is False
+
+        # s0 was evicted, so it restarts at event 1 and advises again.
+        assert counter.should_advise("s0") is True
 
 
 #: Worker/call counts and the switch interval below are not arbitrary: at

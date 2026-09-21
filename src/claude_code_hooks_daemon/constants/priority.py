@@ -5,7 +5,10 @@ Lower priority values execute first.
 
 Priority Ranges (see the ``PriorityRange`` class below, the authoritative
 boundaries; documented in CLAUDE/HANDLER_DEVELOPMENT.md#priority-guide):
-- 0-9: Test handlers only (``Priority.TEST_HANDLER``)
+- 0-9: Test fixtures (``Priority.TEST_HANDLER``), plus the Stop-family handlers
+  that must run before a terminal Stop catch-all: ``cron_stop_enforcer``,
+  ``cron_subagent_stop_enforcer``, ``teammate_reap_advisor``,
+  ``subagent_report_path_verifier``
 - 10-20: Safety and critical handlers (destructive operations, auto-approval)
 - 25-35: Code quality and QA enforcement
 - 36-55: Workflow and process enforcement

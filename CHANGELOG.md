@@ -5,6 +5,137 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.66.0] - 2026-09-21
+
+_A niggles-ledger release. Plan 00423 gives handlers a `scope: ALL | MAIN | SUB` config key so a Stop-time nudge can be told it only applies to the
+coordinator, closing a reported case of a finished subagent being told to
+continue plans that were never its assignment, and adds
+`subagent_cron_delete_blocker` so a subagent can no longer delete the
+session's own recovery cron. Plan 00427 makes `mkplan.bash --journal` stamp
+journal timestamps in UTC and teaches the future-dated check to read a
+day-file's own clock. Plan 00446 ships `subagent_report_path_verifier`,
+blocking a subagent stop that claims to have written a file that is not on
+disk. The rest is a run of smaller correctness and layering fixes across
+`remote-docs`, `format-markdown`, `block-report`, the worktree pre-flight,
+scoped QA output, the harvester's kill suggestion, persistent-cron prompt
+matching, the two link-resolution checks, and a shared locked counter behind
+two advisory handlers. `breaking: false` — no config keys renamed or
+removed this cycle._
+
+### Added
+
+- **`scope: ALL | MAIN | SUB` on any handler config entry (Plan 00423).** Gates a
+  handler on whether the triggering event carries a subagent id, decided from
+  the payload rather than guesswork. `ALL` remains the default for handlers
+  generally, and a restricting scope is refused at config load on an event
+  that cannot carry `agent_id`. **Three shipped Stop handlers now declare
+  `scope: MAIN` themselves and therefore stop firing inside subagents on
+  upgrade:** `auto_continue_stop`, `cron_stop_enforcer` and
+  `teammate_reap_advisor`. That is the intended fix — each advises on state
+  only the coordinator owns — but it is a default-behaviour change, not an
+  opt-in. Set `scope: ALL` on any of the three to restore the old behaviour.
+- **`subagent_cron_delete_blocker` handler, enabled by default (Plan 00423).**
+  Denies `CronDelete` from inside a subagent — the incident behind it was a
+  finished subagent deleting the session's single recovery cron on its own
+  initiative, leaving the coordinator's still-live session with no recovery
+  path.
+- **`subagent_report_path_verifier` handler, enabled by default at priority 8
+  (Plan 00446).** Blocks a `SubagentStop` whose final message claims to have
+  written a file that is not on disk, naming the missing path. Built to
+  under-fire: only past-tense/passive write verbs governing a `.md` path
+  inside the project root are treated as a claim.
+- **`remote-docs index` command (Plan 00425).** Re-renders `.claude/REMOTE-DOCS.md`
+  from the vendored tree without touching the network, for clearing the new
+  stale-index finding `remote-docs check` now reports.
+- **`mkplan.bash --journal <plan-number> <category> <body-file> [--ref R] [--title T]` (Plan 00427).** Appends a plan journal entry with a timestamp
+  the script reads and normalises to UTC itself, so the caller never types or
+  estimates one.
+- **`scripts/setup_worktree.sh` refuses to nest a worktree inside a worktree
+  (Plan 00433).** Detects the enclosing checkout before creating anything and
+  prints the command to run there instead.
+
+### Changed
+
+- **`format-markdown` no longer crosses repository or exclusion boundaries
+  (Plan 00429).** The directory walk now skips any nested git repository and
+  honours `daemon.exclude_paths`; a file named directly is still formatted
+  regardless, since naming it is explicit consent. Exclusions resolve against
+  the enclosing project root rather than the directory passed on the command
+  line.
+- **Ten `llm_qa` checkers write their JSON verdict beside what they scanned,
+  not to a fixed repository path, when run with `--path`/`--root`/`--repo` or
+  a file override (Plan 00432).** An unscoped run is unchanged.
+- **`cron_stop_enforcer`, `cron_subagent_stop_enforcer` and
+  `remote_docs_routing` read config through a shared cache keyed on file
+  mtime and size (Plan 00440).** Cuts the per-event cost of an unchanged
+  config from roughly 150ms to about 0.05ms; editing the config still takes
+  effect on the next event.
+- **Priority band documentation corrected to match the shipped `PriorityRange`
+  constants (Plan 00435).** The `0-9` band is not empty (three Stop-family
+  handlers sit there deliberately, precisely because they are NOT terminal
+  and must run below the terminal handler that would otherwise end the
+  chain) and the Advisory band is `56-73`, not
+  `56-69`. A test now checks every shipped handler priority against the
+  documented bands.
+- **`hooks-daemon-plan-dedupe-scout` redeployed at v1.2.0 (Plan 00434).** A
+  count stated by the CALLER now cross-checks the scout's report. The agent's
+  own enumeration was previously the only check on itself, which is no check
+  at all when that enumeration is what went wrong; `mkplan.bash` prints the
+  filesystem count beside the dispatch reminder so the caller has a number to
+  state.
+- **The fenced-code-block splitter moved from `plan_qa.model` to
+  `claude_code_hooks_daemon.utils.markdown_fences` (Plan 00439).** No
+  re-export was left in `plan_qa.model` — repoint any import of
+  `lines_outside_fences`. A new test checks the QA-package dependency
+  direction against a declared allowlist.
+- **Read-only git plumbing split into `claude_code_hooks_daemon.utils.git_facts.GitFactsBase`
+  (Plan 00444).** `plan_qa.gitfacts.GitFacts` now subclasses it and adds only
+  `plan_counter()`. `GitFacts` and `StagedChange` are still importable FROM
+  `plan_qa.gitfacts` unchanged (`StagedChange` is re-exported there), so
+  existing imports keep working; a test monkeypatching `run_git` must patch
+  `utils.git_facts` now.
+- **Docs QA's `pointer-resolves` and plan QA's `plan-link-resolves` share one
+  rule in `utils/link_resolution.py` (Plan 00441).** A live plan is no longer
+  reported as archived, a link repeated in one document produces one finding
+  instead of one per occurrence, and a repo-root-relative link resolves in
+  plan documents the same way it already did in docs.
+
+### Fixed
+
+- **`remote-docs add <url>` refuses to overwrite an existing capture (Plan
+  00424).** Names the existing file's `fetched_at` and `source_sha256` and
+  points at `refresh` or `add --force` instead of silently clobbering it.
+- **`remote-docs check` detects a generated index that has gone stale (Plan
+  00425).** Deleting a vendored capture with `rm` never regenerated
+  `.claude/REMOTE-DOCS.md`; `check` now compares the index against the tree
+  and reports a disagreement as a finding with exit `1`.
+- **Every shipped `plugins:` config example now validates (Plan 00426).** The
+  config template and two documented examples were missing the required
+  `event_type` field or used a schema that predates the current one.
+- **`journal-entry-future-dated` now judges a day-file by the clock that wrote
+  it (Plan 00427).** Comparing a UTC-stamped entry against a naive local clock
+  produced false advisories on hosts west of UTC; the check now reads the
+  day-file's own zone sentinel.
+- **`block-report` initialises `ProjectContext` before scanning transcripts
+  (Plan 00430).** Five handlers whose constructors read `ProjectContext` could
+  not previously be discovered, so their denies were counted as unattributed.
+- **The worktree socket-path AF_UNIX pre-flight now works without a venv (Plan
+  00431).** It measures under the system `python3` by loading `daemon/paths.py`
+  directly, so the guard now actually runs in the nested-worktree case that
+  motivated it.
+- **`harvest-background`'s suggested `kill` command can no longer name an
+  excluded process group (Plan 00438).** The excluded-group set is now
+  honoured when building the kill command, not only when deciding what counts
+  as a breach.
+- **Persistent-cron prompt matching no longer accepts an empty prefix as a
+  match (Plan 00436).** A delivered prompt that truncates to nothing was
+  matching every declared job on the same schedule, reporting a cron as live
+  when it had never been created.
+- **`teammate_reap_advisor` and `background_process_tracker` share one locked
+  `SessionAdviceCounter` (Plan 00437).** Two unlocked copies of the same
+  rate-limit counter could raise `KeyError`/`RuntimeError` under concurrent
+  hook dispatch; behaviour and rate-limit intervals are unchanged.
+
 ## [3.65.0] - 2026-09-16
 
 _A guard-review release. Plan 00412 turns security review into a routine

@@ -53,6 +53,19 @@ def link_resolves_literally(project_root: Path, source_dir: Path | None, target:
     Otherwise relative-to-the-document is tried first, then relative-to-root
     as a fallback — a plain link written without a leading ``/`` commonly means
     "from the repo root" in this project's own docs.
+
+    **Known false-negative class, accepted deliberately.** That root fallback
+    is the MORE PERMISSIVE of the two rules this function unified, so adopting
+    it cost plan QA a finding it used to report: a link a markdown renderer
+    will show as dead is accepted here, because renderers resolve relative to
+    the DOCUMENT and never to the repo root. A plan at
+    ``CLAUDE/Plan/00427-x/PLAN.md`` writing ``[x](README.md)`` with no
+    ``README.md`` beside it resolves True against the root's, and 404s on
+    GitHub. Tightening instead would have changed docs QA's behaviour across
+    the whole corpus, which is the larger move; the cost is recorded here
+    rather than left for the next reader to rediscover, because it is
+    one-directional — every accepted link of this shape is a dead link that
+    NEITHER check now reports.
     """
     file_target = target.split("#", 1)[0]
     if not file_target:
