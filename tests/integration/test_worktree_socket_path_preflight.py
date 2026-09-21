@@ -33,6 +33,7 @@ the same incident: the nesting is what made the path long enough to matter.
 from __future__ import annotations
 
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Final
 
@@ -92,6 +93,36 @@ def _over_cap_worktree_dir() -> Path:
     return _REPO_ROOT / "untracked" / "worktrees" / ("worktree-" + "x" * _UNIX_SOCKET_PATH_LIMIT)
 
 
+def _within_cap_worktree_dir() -> Path:
+    """A worktree path whose prospective socket path fits, on ANY checkout root.
+
+    The obvious control is a worktree under `_REPO_ROOT`, and it is wrong: it
+    is short only because most checkouts are short. A checkout root of 63
+    characters puts the same path 29 bytes PAST the cap, so the control case
+    silently becomes an over-cap case and both accept tests fail for a reason
+    that has nothing to do with the guard — which is exactly how they went red
+    on a checkout deeper than the one they were written against.
+
+    So the control is anchored to a short absolute base and VERIFIED against
+    the real helpers, the same way `_over_cap_worktree_dir` is built from the
+    real limit rather than a literal. A guard that cannot find a short path to
+    test with must say so, not fail an assertion about socket arithmetic.
+    """
+    from claude_code_hooks_daemon.daemon.paths import (
+        prospective_socket_path,
+        socket_path_overflow,
+    )
+
+    candidate = Path(tempfile.gettempdir()) / "wt-a"
+    overflow = socket_path_overflow(prospective_socket_path(candidate, self_install=True))
+    assert overflow == 0, (
+        f"the accept-case control is itself {overflow} byte(s) over the cap, so "
+        f"there is no short path to test the guard's accept branch with here. "
+        f"Base: {candidate}"
+    )
+    return candidate
+
+
 class TestThePreflightMeasuresWithoutAVenv:
     def test_it_refuses_an_over_cap_path_when_no_venv_resolves(self) -> None:
         """The case the guard exists for, in the environment it is used in."""
@@ -109,7 +140,7 @@ class TestThePreflightMeasuresWithoutAVenv:
 
     def test_it_still_accepts_a_short_path_when_no_venv_resolves(self) -> None:
         """Control: a guard that always refused would pass the test above."""
-        result = _run_preflight(_REPO_ROOT, _REPO_ROOT / "untracked" / "worktrees" / "worktree-a")
+        result = _run_preflight(_REPO_ROOT, _within_cap_worktree_dir())
 
         assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         assert "Socket path fits" in result.stdout, result.stdout
@@ -118,9 +149,39 @@ class TestThePreflightMeasuresWithoutAVenv:
         """The reported limit is the real one, not a number copied into bash."""
         from claude_code_hooks_daemon.daemon.paths import _UNIX_SOCKET_PATH_LIMIT
 
-        result = _run_preflight(_REPO_ROOT, _REPO_ROOT / "untracked" / "worktrees" / "worktree-a")
+        result = _run_preflight(_REPO_ROOT, _within_cap_worktree_dir())
 
         assert f"/{_UNIX_SOCKET_PATH_LIMIT} bytes" in result.stdout, result.stdout
+
+    def test_the_accept_control_does_not_inherit_the_checkout_root_length(self) -> None:
+        """The two tests above must fail on the GUARD, never on the checkout.
+
+        A control anchored under the repository root carries that root's length
+        into the measurement, so the deeper the checkout the closer it sits to
+        the cap — and past a point it crosses it and the accept branch can no
+        longer be reached at all. Both halves are pinned here: that a
+        root-relative control really does go over on a deep checkout, and that
+        the control actually in use does not.
+        """
+        from claude_code_hooks_daemon.daemon.paths import (
+            prospective_socket_path,
+            socket_path_overflow,
+        )
+
+        deep_root = Path("/home/runner/work") / ("r" * 40)
+        root_relative = deep_root / "untracked" / "worktrees" / "worktree-a"
+
+        assert socket_path_overflow(prospective_socket_path(root_relative, self_install=True)) > 0, (
+            "a root-relative control no longer goes over the cap on a deep "
+            "checkout, so this test has stopped pinning anything — check "
+            "whether the socket path layout or the cap changed."
+        )
+        assert (
+            socket_path_overflow(
+                prospective_socket_path(_within_cap_worktree_dir(), self_install=True)
+            )
+            == 0
+        )
 
 
 class TestThePreflightStillFailsOpenWhenItGenuinelyCannotMeasure:
