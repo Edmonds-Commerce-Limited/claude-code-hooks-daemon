@@ -75,6 +75,10 @@ two unlocked copies, and a single shared, locked helper removes both at once.
 - [x] ✅ `llm_qa.py all` passes — 35/35.
 - [x] ✅ N5 row (c) is marked done in ledger 00422, recording that the thread
   pool was verified rather than assumed.
+- [x] ✅ Release-bound consequence recorded in the holding area:
+  `UNRELEASED/release-notes/21-the-session-advice-counter-is-shared-and-locked.md`
+  — added retroactively; this plan reached Complete without it, which is how
+  the gap in the gate's coverage was found.
 
 ## Delivery & Milestones
 
