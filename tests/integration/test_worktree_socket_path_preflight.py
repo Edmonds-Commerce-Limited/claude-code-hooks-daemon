@@ -171,7 +171,9 @@ class TestThePreflightMeasuresWithoutAVenv:
         deep_root = Path("/home/runner/work") / ("r" * 40)
         root_relative = deep_root / "untracked" / "worktrees" / "worktree-a"
 
-        assert socket_path_overflow(prospective_socket_path(root_relative, self_install=True)) > 0, (
+        assert (
+            socket_path_overflow(prospective_socket_path(root_relative, self_install=True)) > 0
+        ), (
             "a root-relative control no longer goes over the cap on a deep "
             "checkout, so this test has stopped pinning anything — check "
             "whether the socket path layout or the cap changed."
