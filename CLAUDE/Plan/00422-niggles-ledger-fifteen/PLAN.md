@@ -1,6 +1,6 @@
 # Plan 00422: niggles ledger fifteen
 
-**Status**: In Progress
+**Status**: Blocked
 **Created**: 2026-09-16
 **Owner**: joseph
 **Priority**: Medium
@@ -19,6 +19,15 @@ to everybody except the person who wrote it.
 So this ledger opens with four entries already in it, and collects the rest as
 they are found. Their diagnoses are not reopened — what is inherited is the
 unfinished remedy, not the finding.
+
+**Blocked, not in progress.** Eleven of the fifteen rows are terminal. Every
+one of the remaining four ⏸ rows is an owner question that has been stated and
+is waiting for an answer (N1 scope, N4 A/B/C, N7, N11), and both 🔄 rows have
+had their buildable half delivered — what is left in each is an open design
+question, not work. There is no row an executor could advance without an answer
+first, so the status says so: `In Progress` claimed work was moving and
+misreported this ledger as mid-work to the release slate check, which is the
+one reader that acts on the difference.
 
 **One of the four carries a class that now has three sightings**, and naming it
 is a goal of this plan rather than a footnote in it. 00419's N3 (the two
