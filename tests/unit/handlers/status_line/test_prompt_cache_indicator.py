@@ -14,18 +14,25 @@ NOTHING rather than a zero: older Claude Code versions do not send the field,
 and a segment reading "0%" on a healthy session is worse than an absent one.
 """
 
+import time
+
 import pytest
 
 from claude_code_hooks_daemon.handlers.status_line.prompt_cache_indicator import (
     PromptCacheIndicatorHandler,
 )
 
+_ONE_HOUR = 3600
+
+#: Expiries are relative to NOW on purpose. The classifier compares
+#: `expires_at` against the wall clock, so a hard-coded timestamp would drift
+#: into the past and silently turn every "warm" fixture into an expiring one.
 _WARM_PAYLOAD = {
     "prompt_cache": {
         "warm": True,
         "caching_observed": True,
         "ttl": "1h",
-        "expires_at": 1790079347,
+        "expires_at": int(time.time()) + _ONE_HOUR,
         "requests": 4610,
         "misses": 14,
         "hit_ratio": 0.9912764873518866,
@@ -114,6 +121,66 @@ class TestPromptCacheIndicatorHandler:
         """The warning matters more than the magnitude; never drop it for lack of a number."""
         payload = {"prompt_cache": {"caching_observed": True, "warm": False, "hit_ratio": 0.5}}
         assert "⚠" in handler.handle(payload).context[0]
+
+    # --- the expiring band and the invalidation flag (Tasks 1.6, 1.7) ---
+
+    def test_a_cache_inside_the_tail_of_its_ttl_is_flagged_as_expiring(self, handler):
+        """This is the band where acting is still CHEAP, so it has to be visible."""
+        payload = {
+            "prompt_cache": {
+                "caching_observed": True,
+                "warm": True,
+                "ttl": "1h",
+                "expires_at": int(time.time()) + 60,
+                "hit_ratio": 0.99,
+            }
+        }
+        assert "EXPIRING" in handler.handle(payload).context[0]
+
+    def test_an_expiring_cache_is_not_also_reported_as_cold(self, handler):
+        """Alive-but-nearly-expired and already-gone are different situations."""
+        payload = {
+            "prompt_cache": {
+                "caching_observed": True,
+                "warm": True,
+                "ttl": "1h",
+                "expires_at": int(time.time()) + 60,
+                "hit_ratio": 0.99,
+            }
+        }
+        assert "COLD" not in handler.handle(payload).context[0]
+
+    def test_a_recent_invalidation_is_flagged_with_its_cause(self, handler):
+        """The user's requirement: a visual warning when something invalidates the cache."""
+        payload = {
+            "prompt_cache": {
+                "caching_observed": True,
+                "warm": True,
+                "ttl": "1h",
+                "expires_at": int(time.time()) + _ONE_HOUR,
+                "hit_ratio": 0.99,
+                "last_miss_at": int(time.time()) - 5,
+                "last_miss_cause": {"causes": ["messages_rewritten"]},
+            }
+        }
+        segment = handler.handle(payload).context[0]
+        assert "INVALIDATED" in segment
+        assert "messages_rewritten" in segment
+
+    def test_an_old_invalidation_is_not_flagged(self, handler):
+        """Every long session has old misses; a permanent warning would be ignored."""
+        payload = {
+            "prompt_cache": {
+                "caching_observed": True,
+                "warm": True,
+                "ttl": "1h",
+                "expires_at": int(time.time()) + _ONE_HOUR,
+                "hit_ratio": 0.99,
+                "last_miss_at": int(time.time()) - 86_400,
+                "last_miss_cause": {"causes": ["messages_rewritten"]},
+            }
+        }
+        assert "INVALIDATED" not in handler.handle(payload).context[0]
 
     # --- the guard on the guard ---
 

@@ -97,13 +97,18 @@ original design. See the research document.
   files in that directory are not JSONL and a naive slurp exits non-zero.
   Parsed line by line; every test fixture carries such a line so the tolerance
   cannot silently regress.
-- [ ] ⬜ **Task 1.6**: Flag an invalidation visually when it happens, keyed on
-  `cache_creation_input_tokens > 0` in the newest record. The write IS the
-  signal, so this needs no list of suspected causes and cannot be wrong about
-  whether an invalidation occurred.
-- [ ] ⬜ **Task 1.7**: Put the cold/at-risk classification in ONE shared
+- [x] ✅ **Task 1.6**: Flag an invalidation visually when it happens. **Re-keyed
+  by the Task 1.1 discovery**: the original design read
+  `cache_creation_input_tokens > 0` from the newest transcript record, but the
+  payload already carries `last_miss_at` and `last_miss_cause` — the same fact,
+  pre-computed and attributed, with no transcript read at all. Renders
+  `⚠INVALIDATED <cause>`, and deliberately shows while the cache is WARM again:
+  the rebuild is the expensive event and it has already been paid for.
+- [x] ✅ **Task 1.7**: Put the cold/at-risk classification in ONE shared
   classifier, as Plan 00135 Decision J did for context tiers, so the segment and
-  any later supervisor logic cannot drift.
+  any later supervisor logic cannot drift. `prompt_cache_tiers.py` — pure, clock
+  injected, four tiers with UNKNOWN distinct from COLD, and the EXPIRING window
+  scaled to the TTL rather than fixed.
 
 ### Phase 2: Measure
 

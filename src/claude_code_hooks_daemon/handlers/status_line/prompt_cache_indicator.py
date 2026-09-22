@@ -35,6 +35,7 @@ peak — so the state alone does not tell an operator whether to care.
 `recache_tokens_if_cold` is that magnitude, already computed.
 """
 
+import time
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
@@ -42,6 +43,11 @@ from claude_code_hooks_daemon.core import AdvisoryResult
 from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
 from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
 from claude_code_hooks_daemon.core.segment_explanation import SegmentExplanation
+from claude_code_hooks_daemon.handlers.status_line.prompt_cache_tiers import (
+    PromptCacheState,
+    PromptCacheTier,
+    classify_prompt_cache,
+)
 from claude_code_hooks_daemon.handlers.subagent_stop.subagent_cache_aggregator import (
     read_subagent_cache_totals,
 )
@@ -51,6 +57,9 @@ _PROMPT_CACHE_KEY = "prompt_cache"
 
 #: Divisor for rendering a token count as a compact "384k".
 _TOKENS_PER_K = 1000
+
+#: Below this many seconds remaining, the countdown renders in seconds.
+_SECONDS_PER_MINUTE = 60
 
 
 def _as_ratio(raw: object) -> float | None:
@@ -72,6 +81,42 @@ def _compact_tokens(raw: object) -> str | None:
     return f"{int(raw) // _TOKENS_PER_K}k"
 
 
+def _compact_duration(seconds: int) -> str:
+    """A countdown as `4m` or `45s`, clamped at zero.
+
+    An expiry already in the past renders `0s` rather than a negative: the
+    cache is about to be rebuilt either way, and a minus sign on a status bar
+    reads as a bug rather than as urgency.
+    """
+    remaining = max(seconds, 0)
+    if remaining >= _SECONDS_PER_MINUTE:
+        return f"{remaining // _SECONDS_PER_MINUTE}m"
+    return f"{remaining}s"
+
+
+def _tier_warning(state: PromptCacheState) -> str:
+    """The COLD or EXPIRING marker, or empty when the cache is healthy.
+
+    COLD reports what the rebuild costs, not just that it is cold: the
+    seriousness of an invalidation scales with the prefix — measured in this
+    project, the same event cost 130k tokens early in a session and 509k at
+    its peak — so the state alone does not tell an operator whether to care.
+    The marker is emitted whether or not that magnitude is available, because
+    the warning matters more than the number.
+
+    EXPIRING reports the time left instead, because that is the band where
+    acting is still cheap and the only question is how long there is to act.
+    """
+    if state.tier is PromptCacheTier.COLD:
+        rebuild = _compact_tokens(state.rebuild_tokens)
+        return f"⚠COLD {rebuild}" if rebuild else "⚠COLD"
+    if state.tier is PromptCacheTier.EXPIRING:
+        if state.seconds_remaining is None:
+            return "⚠EXPIRING"
+        return f"⚠EXPIRING {_compact_duration(state.seconds_remaining)}"
+    return ""
+
+
 class PromptCacheIndicatorHandler(StatusLineHandlerBase):
     """Render prompt-cache hit ratio, TTL, and a warning when the cache is cold."""
 
@@ -90,32 +135,35 @@ class PromptCacheIndicatorHandler(StatusLineHandlerBase):
     def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         """Render the cache segment, or nothing when the payload cannot support it."""
         cache = hook_input.get(_PROMPT_CACHE_KEY)
-        if not isinstance(cache, dict):
-            return AdvisoryResult(context=[])
+        state = classify_prompt_cache(cache, now=time.time())
 
-        # A session that has not cached anything yet has no ratio to report.
-        # Rendering 0% there would invite action against a non-problem.
-        if not cache.get("caching_observed"):
+        # UNKNOWN covers both an absent payload and a session that has not
+        # cached anything yet. Rendering 0% there would invite action against a
+        # problem that does not exist.
+        if state.tier is PromptCacheTier.UNKNOWN:
             return AdvisoryResult(context=[])
 
         parts: list[str] = []
 
-        ratio = _as_ratio(cache.get("hit_ratio"))
-        if ratio is not None:
-            parts.append(f"{round(ratio * 100)}%")
+        if state.hit_ratio is not None:
+            parts.append(f"{round(state.hit_ratio * 100)}%")
 
-        ttl = cache.get("ttl")
+        ttl = cache.get("ttl") if isinstance(cache, dict) else None
         if isinstance(ttl, str) and ttl:
             parts.append(ttl)
 
-        if not cache.get("warm"):
-            # The warning is the point, so it is emitted whether or not the
-            # magnitude is available.
-            cold = "⚠COLD"
-            rebuild = _compact_tokens(cache.get("recache_tokens_if_cold"))
-            if rebuild:
-                cold = f"{cold} {rebuild}"
-            parts.append(cold)
+        warning = _tier_warning(state)
+        if warning:
+            parts.append(warning)
+
+        # Shown even while WARM: the cache being warm NOW says nothing about
+        # the rebuild having just been paid for, and that rebuild is the
+        # expensive event worth seeing. This is the visual invalidation warning.
+        if state.recent_miss:
+            flag = "⚠INVALIDATED"
+            if state.recent_miss_cause:
+                flag = f"{flag} {state.recent_miss_cause}"
+            parts.append(flag)
 
         sub = self._sub_agent_part(hook_input)
         if sub:
@@ -167,10 +215,16 @@ class PromptCacheIndicatorHandler(StatusLineHandlerBase):
             ),
             how_to_read=(
                 "`⚡ 99% 1h` is a healthy session reusing its cached prefix at about a tenth "
-                "of the input price. `⚠COLD` means the prefix was rebuilt, and the token "
-                "figure beside it is what that rebuild cost. Nothing is shown when Claude "
-                "Code does not report cache state, or before any caching has been observed — "
-                "no ratio is honest there, and 0% would not be."
+                "of the input price. `⚠COLD` means the prefix is gone, and the token figure "
+                "beside it is what the next request will pay to rebuild it. `⚠EXPIRING 4m` "
+                "means it is still alive but inside the tail of its TTL — the band where "
+                "acting is still cheap. `⚠INVALIDATED <cause>` means something rebuilt the "
+                "cache within the last few minutes, and names what Claude Code attributed it "
+                "to; it is shown even while the cache is warm again, because the rebuild has "
+                "already been paid for. `sub NN%` is the sub-agent half, which has no status "
+                "line of its own. Nothing is shown when Claude Code does not report cache "
+                "state, or before any caching has been observed — no ratio is honest there, "
+                "and 0% would not be."
             ),
             current_value=(
                 "Rendered per session from the live payload; there is no value outside a "
