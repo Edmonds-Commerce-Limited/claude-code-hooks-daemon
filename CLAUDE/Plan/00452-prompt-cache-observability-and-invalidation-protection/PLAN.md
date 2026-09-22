@@ -45,6 +45,42 @@ output and as the shape of the always-on end of the spectrum.
 The interesting case is the opposite end, and this project has no measurement
 of it at all.
 
+### The main-thread figure hides the expensive half
+
+Every one of those 7,634 records is `isSidechain: false` — **the 98.87% is main
+thread only**. Sub-agent usage is not in that transcript at all; it lives in
+the harness task directory, one file per agent, mixed in with plain-text bash
+outputs that are not JSONL.
+
+Measured from two sub-agents of the same session:
+
+|             | records | read          | write      | hit    | TTL      | effective |
+| ----------- | ------- | ------------- | ---------- | ------ | -------- | --------- |
+| main thread | 7,634   | 1,849,355,510 | 20,993,274 | 98.87% | 1-hour   | 0.113x    |
+| scout agent | 74      | 3,739,621     | 227,136    | 94.27% | 5-minute | 0.166x    |
+| guide agent | 12      | 302,080       | 183,790    | 62.17% | 5-minute | 0.535x    |
+
+Three things fall out, and they drive the design below.
+
+**Sub-agents run on the 5-minute TTL while the main thread runs on the
+1-hour.** Measured, not assumed — 100% of every sub-agent write was
+`ephemeral_5m`, 100% of every main-thread write was `ephemeral_1h`.
+
+**A dispatch has a floor cost.** The write is mandatory and paid once per
+agent, so a SHORT agent never amortises it: the 12-record agent spent 38% of
+its input on writes and came out 4.7x less cache-efficient per token than the
+main thread. Delegating a small task to a sub-agent is not free — the main
+thread's prefix is already cached at 0.1x, and a new agent starts cold at the
+write rate. This project carries a standing authorisation to delegate freely,
+and the cache cost of doing so has never been quantified. (The counterweight is
+real and should be measured too: a sub-agent keeps work OUT of the main
+prefix, which slows its growth. This is a trade-off to quantify, not a reason
+to stop delegating.)
+
+**A status line showing only the main thread would report 98.87% while the
+expensive half is invisible.** That is the argument for three values rather
+than one.
+
 ## The decision the supervisor actually has to make
 
 Warming is a cache READ, so covering an idle gap `G` on TTL `T` costs
@@ -114,10 +150,27 @@ Ships first and stands alone. Everything after this is optional; this is not.
   re-renders constantly; a whole-file parse per render is not viable. Reuse
   the package's existing `mtime_cache` so an unchanged transcript costs
   nothing.
-- [ ] ⬜ **Task 1.0c**: Render compactly — hit ratio, prefix size, and which
-  TTL is in force (the `cache_creation` sub-object distinguishes
-  `ephemeral_5m` from `ephemeral_1h`). Colour on a poor ratio, following the
-  existing `context_tiers` pattern.
+- [ ] ⬜ **Task 1.0c**: Render **three** values — MAIN, SUB and TOTAL. There is
+  only one status line and sub-agents do not get their own, so the single bar is
+  the only place sub-agent cost can ever surface. A main-only segment would have
+  read 98.87% while a sub-agent sat at 62%.
+- [ ] ⬜ **Task 1.0c-ii**: Show which TTL is in force, PER SIDE. The two differ
+  (5-minute for sub-agents, 1-hour for main), so a single TTL indicator would be
+  wrong for one of them. Colour on a poor ratio, following the existing
+  `context_tiers` pattern.
+- [ ] ⬜ **Task 1.0c-iii**: Do NOT scan the task directory from the status line.
+  It held 127 files, most of them not JSONL, and the line re-renders constantly.
+  Aggregate at `SubagentStop`: one handler reads the finishing agent's totals
+  once and updates a small sidecar; the status line reads that sidecar plus the
+  main transcript tail. Same sensor/actuator split as `context_sidecar`.
+- [ ] ⬜ **Task 1.0c-iv**: Tolerate unparseable lines when reading an agent
+  transcript. A naive `jq -s` over that directory exits 4 on the first
+  plain-text file, which would take the whole segment down.
+- [ ] ⬜ **Task 1.0c-v**: Flag an invalidation VISUALLY when it happens. The
+  cache write IS the ground-truth signal — `cache_creation_input_tokens > 0` on
+  the newest record means the prefix was just rebuilt, and its size is the cost.
+  This needs no list of suspected causes and cannot be wrong about whether an
+  invalidation occurred, unlike a predictive advisory.
 - [ ] ⬜ **Task 1.0d**: Put the cold/at-risk classification in ONE shared
   classifier, as Plan 00135 Decision J did for context tiers, so the status
   segment and any later supervisor logic cannot drift apart.
