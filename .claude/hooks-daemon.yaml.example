@@ -737,6 +737,10 @@ handlers:
       enabled: true                 # On by default (Plan 00446); set false to opt out
       priority: 8                   # Below the terminal size blocker's 15, so it is not shadowed
 
+    subagent_cache_aggregator:      # Records each sub-agent's prompt-cache cost for the status line
+      enabled: true                 # Sensor only (Plan 00452): renders nothing, never blocks a stop
+      priority: 9                   # Ahead of the terminal size blocker, so a rejected report still counts
+
     subagent_report_size_blocker:  # Blocks an oversized subagent final message
       enabled: true                 # On by default (Plan 00307 Task 4.3); set false to opt out
       priority: 15

@@ -194,6 +194,11 @@ class HandlerID:
         config_key="prompt_cache_indicator",
         display_name="status-prompt-cache-indicator",
     )
+    SUBAGENT_CACHE_AGGREGATOR = HandlerIDMeta(
+        class_name="SubagentCacheAggregatorHandler",
+        config_key="subagent_cache_aggregator",
+        display_name="subagent-cache-aggregator",
+    )
     MULTITHREAD_INDICATOR = HandlerIDMeta(
         class_name="MultithreadIndicatorHandler",
         config_key="multithread_indicator",

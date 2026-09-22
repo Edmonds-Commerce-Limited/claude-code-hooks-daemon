@@ -936,6 +936,10 @@ handlers:
       enabled: true
       priority: 8    # Below the terminal size blocker's 15; 8 is free on this event -- release_blocker is a Stop handler
 
+    subagent_cache_aggregator:      # Sub-agent prompt-cache cost, for the status line's SUB figure (Plan 00452)
+      enabled: true
+      priority: 9    # Ahead of the terminal size blocker (15), so a rejected report still gets counted
+
   # UserPromptSubmit handlers (run when user submits prompt)
   user_prompt_submit:
     git_context_injector:  # Injects git context into user prompts

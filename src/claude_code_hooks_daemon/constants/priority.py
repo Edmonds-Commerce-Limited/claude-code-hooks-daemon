@@ -148,6 +148,10 @@ class Priority:
     # in turn — a report can be both unwritten and oversized, and an agent
     # should be told about both in one stop rather than one per round trip.
     SUBAGENT_REPORT_PATH_VERIFIER = 8
+    # Plan 00452: runs ahead of the terminal size blocker (15) so a sub-agent
+    # whose report is rejected still has its cache cost counted — the figure
+    # describes the agent's whole run, not the fate of its final message.
+    SUBAGENT_CACHE_AGGREGATOR = 9
 
     TDD_ENFORCEMENT = 15
     DANGEROUS_PERMISSIONS = 15

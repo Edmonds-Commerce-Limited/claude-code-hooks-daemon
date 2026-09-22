@@ -1199,6 +1199,18 @@
       "function": "_child_directories",
       "rule": "silent-continue",
       "reason": "Plan 00401: discovery is a best-effort WALK, and a freshness report that aborts on the first unreadable directory reports on nothing -- strictly worse than reporting on the rest. The per-entry catch is genuinely per-entry (an is_dir probe on an entry that vanished mid-walk, or a directory the daemon user cannot stat), so one bad entry costs one entry. Logging is not the escape here: log-and-continue is itself an audited rule, and a debug line per unreadable entry inside a recursive walk is noise that would bury the report this package exists to produce. The undiscovered-repo risk is bounded by the fact that a governed root is a directory the user configured in their own project. Covered by test_an_unreadable_subtree_does_not_abort_the_whole_sweep, which monkeypatches os.scandir because this container runs as root and chmod 0o000 denies it nothing."
+    },
+    {
+      "file": "handlers/subagent_stop/subagent_cache_aggregator.py",
+      "function": "totals_for",
+      "rule": "silent-continue",
+      "reason": "Plan 00452: the loop is a FILTER over external data, and an unparseable line is not an error -- it is a line that is not a usage record, which is the overwhelmingly common case. The agent task directory interleaves JSONL transcripts with plain-text process output, and Claude Code appends to these files live, so a torn final line mid-flush is routine. The catch is per-line and narrowed to json.JSONDecodeError, so one such line costs one line and every real usage record in the same file is still counted; raising would let a single interleaved log line zero out the whole agent's figures. Logging is not the escape: log-and-continue is itself an audited rule, and a debug line per non-JSON line would emit thousands per stop for a condition that is normal. Covered by test_it_survives_a_non_json_line, and every fixture in that file carries such a line so the tolerance cannot silently regress."
+    },
+    {
+      "file": "handlers/subagent_stop/subagent_cache_aggregator.py",
+      "function": "record",
+      "rule": "log-and-continue",
+      "reason": "Plan 00452: this is a SENSOR on a blocking event. The sidecar write is the last thing that happens before a sub-agent stops, and the only two failures reachable here are a daemon with no ProjectContext (RuntimeError, a standalone entry point or a unit test) and an unwritable untracked directory (OSError) -- neither of which is a reason to strand a stopping agent, which is what propagating would risk. The figure is advisory, purely cosmetic (a `sub NN%` fragment on the status line), and the next agent's stop records again, so nothing is lost permanently. Both branches log at WARNING, so the failure is visible rather than concealed. The write itself is atomic (tmp + Path.replace), so a failure can never leave a half-written document for the status-line reader. Covered by test_a_missing_project_context_does_not_raise and test_an_unwritable_root_does_not_raise."
     }
   ]
 }

@@ -85,14 +85,18 @@ original design. See the research document.
 - [x] ✅ **Task 1.1**: Establish what the Status event delivers. Done by
   enabling `daemon.payload_capture` (already scoped to `[Status]`) for a few
   renders. `transcript_path` IS present but is not needed for the main thread.
-- [ ] ⬜ **Task 1.2**: Render MAIN, SUB and TOTAL with the TTL per side. Main
+- [x] ✅ **Task 1.2**: Render MAIN, SUB and TOTAL with the TTL per side. Main
   reads straight from `prompt_cache`; only SUB needs aggregation.
-- [ ] ⬜ **Task 1.4**: Aggregate sub-agent totals at `SubagentStop` into a small
+  `prompt_cache_indicator` renders `| ⚡ 99% 1h sub 62%`.
+- [x] ✅ **Task 1.4**: Aggregate sub-agent totals at `SubagentStop` into a small
   sidecar rather than scanning the task directory from the status line (127
   files, re-rendered constantly). Same sensor/actuator split as
-  `context_sidecar`.
-- [ ] ⬜ **Task 1.5**: Tolerate unparseable lines in an agent transcript — most
+  `context_sidecar`. One file per agent, so concurrent writers cannot clobber
+  each other and there is no lock to get wrong (the Plan 00449 race class).
+- [x] ✅ **Task 1.5**: Tolerate unparseable lines in an agent transcript — most
   files in that directory are not JSONL and a naive slurp exits non-zero.
+  Parsed line by line; every test fixture carries such a line so the tolerance
+  cannot silently regress.
 - [ ] ⬜ **Task 1.6**: Flag an invalidation visually when it happens, keyed on
   `cache_creation_input_tokens > 0` in the newest record. The write IS the
   signal, so this needs no list of suspected causes and cannot be wrong about

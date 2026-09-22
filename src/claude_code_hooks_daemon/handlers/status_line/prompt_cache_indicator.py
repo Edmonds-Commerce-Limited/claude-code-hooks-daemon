@@ -42,6 +42,9 @@ from claude_code_hooks_daemon.core import AdvisoryResult
 from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
 from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
 from claude_code_hooks_daemon.core.segment_explanation import SegmentExplanation
+from claude_code_hooks_daemon.handlers.subagent_stop.subagent_cache_aggregator import (
+    read_subagent_cache_totals,
+)
 
 #: Payload key carrying the harness-computed cache state.
 _PROMPT_CACHE_KEY = "prompt_cache"
@@ -114,10 +117,44 @@ class PromptCacheIndicatorHandler(StatusLineHandlerBase):
                 cold = f"{cold} {rebuild}"
             parts.append(cold)
 
+        sub = self._sub_agent_part(hook_input)
+        if sub:
+            parts.append(sub)
+
         if not parts:
             return AdvisoryResult(context=[])
 
         return AdvisoryResult(context=[f"| ⚡ {' '.join(parts)}"])
+
+    def _sub_agent_part(self, hook_input: dict[str, Any]) -> str:
+        """The `sub NN%` fragment, or empty when this session spawned no agents.
+
+        `prompt_cache` describes the MAIN thread only, and sub-agents get no
+        status line of their own — so without this the bar would report the
+        healthy half of a session and hide the expensive one. Measured here:
+        98.87% main against 62.17% on a short sub-agent.
+
+        Nothing is rendered when no agent has run. A session that spawned none
+        has no sub-agent ratio, and `sub 0%` would read as a catastrophe rather
+        than an absence.
+
+        Fails silent: the MAIN figure is the load-bearing one and must survive
+        anything the sub-agent sidecar does.
+        """
+        try:
+            totals = read_subagent_cache_totals(str(hook_input.get("session_id") or ""))
+        except (OSError, RuntimeError, ValueError):
+            return ""
+
+        if not totals.get("agents_seen"):
+            return ""
+
+        read = _as_ratio(totals.get("cache_read_tokens")) or 0.0
+        written = _as_ratio(totals.get("cache_write_tokens")) or 0.0
+        total = read + written
+        if total <= 0:
+            return ""
+        return f"sub {round(read / total * 100)}%"
 
     def explain_segment(self) -> SegmentExplanation:
         """Describe this segment (read-only, no I/O)."""

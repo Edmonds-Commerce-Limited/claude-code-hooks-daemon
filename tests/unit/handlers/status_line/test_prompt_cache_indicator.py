@@ -131,3 +131,59 @@ class TestPromptCacheIndicatorHandler:
         explanation = handler.explain_segment()
         assert explanation.name
         assert explanation.current_value
+
+
+class TestTheSubAgentHalf:
+    """Sub-agents have no status line, so this bar is the only place they show.
+
+    Measured in this project, the two halves diverge sharply — 98.87% main
+    against 62.17% on a short sub-agent — so a MAIN-only segment reports a
+    healthy session while the expensive half stays invisible.
+    """
+
+    @pytest.fixture
+    def handler(self):
+        return PromptCacheIndicatorHandler()
+
+    def test_sub_totals_are_rendered_when_agents_have_run(self, handler, tmp_path, monkeypatch):
+        from claude_code_hooks_daemon.handlers.status_line import prompt_cache_indicator
+
+        monkeypatch.setattr(
+            prompt_cache_indicator,
+            "read_subagent_cache_totals",
+            lambda session_id, root=None: {
+                "agents_seen": 3,
+                "cache_read_tokens": 900,
+                "cache_write_tokens": 100,
+            },
+        )
+        segment = handler.handle({**_WARM_PAYLOAD, "session_id": "s"}).context[0]
+        assert "sub" in segment.lower()
+        assert "90%" in segment
+
+    def test_no_sub_agents_adds_nothing(self, handler, monkeypatch):
+        """A session that spawned none must not carry an empty or 0% sub figure."""
+        from claude_code_hooks_daemon.handlers.status_line import prompt_cache_indicator
+
+        monkeypatch.setattr(
+            prompt_cache_indicator,
+            "read_subagent_cache_totals",
+            lambda session_id, root=None: {
+                "agents_seen": 0,
+                "cache_read_tokens": 0,
+                "cache_write_tokens": 0,
+            },
+        )
+        segment = handler.handle({**_WARM_PAYLOAD, "session_id": "s"}).context[0]
+        assert "sub" not in segment.lower()
+
+    def test_a_failing_sub_read_does_not_break_the_main_figure(self, handler, monkeypatch):
+        """The MAIN half must survive anything the sub-agent sidecar does."""
+        from claude_code_hooks_daemon.handlers.status_line import prompt_cache_indicator
+
+        def _boom(session_id, root=None):
+            raise OSError("sidecar unreadable")
+
+        monkeypatch.setattr(prompt_cache_indicator, "read_subagent_cache_totals", _boom)
+        segment = handler.handle({**_WARM_PAYLOAD, "session_id": "s"}).context[0]
+        assert "99%" in segment

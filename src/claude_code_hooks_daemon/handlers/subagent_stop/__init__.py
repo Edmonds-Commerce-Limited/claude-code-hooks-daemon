@@ -14,11 +14,13 @@ agent said it wrote and did not.
 """
 
 from .cron_subagent_stop_enforcer import CronSubagentStopEnforcerHandler
+from .subagent_cache_aggregator import SubagentCacheAggregatorHandler
 from .subagent_report_path_verifier import SubagentReportPathVerifierHandler
 from .subagent_report_size_blocker import SubagentReportSizeBlockerHandler
 
 __all__: list[str] = [
     "CronSubagentStopEnforcerHandler",
+    "SubagentCacheAggregatorHandler",
     "SubagentReportPathVerifierHandler",
     "SubagentReportSizeBlockerHandler",
 ]
