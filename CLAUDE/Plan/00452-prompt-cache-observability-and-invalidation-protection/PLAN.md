@@ -105,6 +105,102 @@ those apart. A supervisor, which can see whether work is mid-flight, is exactly
 the component that can — that is the real argument for putting this in the
 supervisor rather than in a cron.
 
+## Context size: not in the decision, but all over the stakes
+
+`N` (the cached prefix, which is essentially context usage) **cancels out of
+the inequality above** — warming costs `(G/0.9T) x 0.1 x N` and rebuilding
+costs `P x W x N`, so `N` divides out of both sides. Whether to warm is
+therefore size-independent, and that is correct rather than an oversight.
+
+What `N` governs is **how much the answer matters**. The cost of one
+invalidation is `W x N`, and in the measured session `N` ran from 130,550
+early to 509,560 at peak — a **3.9x swing in the price of being wrong, inside
+a single session**. So `N` belongs in the WARNING severity and in
+prioritisation, not in the choice itself. A cold cache at 10% context is
+trivia; the same event at 90% is expensive.
+
+`N` then re-enters the decision through three second-order channels, none of
+which the bare inequality captures:
+
+1. **A fixed per-ping overhead sets a floor.** A ping really costs
+   `0.1N + C`, where `C` is the ping's own output tokens and per-request
+   overhead and does NOT scale with `N`. At `N` ~ 10k, `0.1N` is about 1,000
+   tokens and `C` is the same order, so overhead dominates and warming loses
+   regardless of the gap. By `N` ~ 200k, `C` is noise. **There is a prefix size
+   below which warming is never worth it** — find it, and gate on it.
+2. **Pings grow the context they are protecting.** Every ping appends to the
+   conversation, so `N` becomes `N + k x delta` permanently and every
+   subsequent request pays the larger figure. That growth accelerates the
+   arrival of compaction — **warming can cause the very invalidation it
+   exists to prevent.** A warm ping must therefore be minimal: no tool calls,
+   shortest possible reply.
+3. **Proximity to compaction voids the whole thing.** A session about to
+   compact is about to be invalidated anyway, so warming it is pure waste. This
+   project already computes that signal: `context_sidecar` emits `red`,
+   `critical` and `compact_urgent` from the shared `context_tiers` classifier.
+   The warming decision should consume `compact_urgent` directly and never
+   re-threshold a raw percentage — Plan 00135 Decision J, applied again.
+
+## One JSON object, so the supervisor does arithmetic rather than guesswork
+
+The supervisor should never parse a transcript or re-derive a threshold. It
+reads ONE sidecar carrying raw counters, the constants, and the already-shared
+classifications, and computes the decision deterministically.
+
+Raw counters rather than verdicts alone, so a future question can be answered
+without shipping a new sensor; and the multipliers live IN the file, so when
+the 1-hour write rate is finally confirmed it is a data change, not a code
+change.
+
+```json
+{
+  "schema_version": 1,
+  "captured_at": "2026-09-22T09:14:03Z",
+  "session_id": "e5e72775",
+  "main": {
+    "requests": 7634,
+    "cache_read_tokens": 1849355510,
+    "cache_write_tokens": 20993274,
+    "uncached_input_tokens": 15120,
+    "output_tokens": 3777920,
+    "ttl_5m_write_tokens": 0,
+    "ttl_1h_write_tokens": 20993274,
+    "prefix_tokens_latest": 195654,
+    "prefix_tokens_peak": 509560,
+    "last_request_at": "2026-09-22T09:13:21Z",
+    "last_write_at": "2026-09-22T08:02:11Z"
+  },
+  "sub": {
+    "agents_seen": 11,
+    "requests": 86,
+    "cache_read_tokens": 4041701,
+    "cache_write_tokens": 410926,
+    "ttl_5m_write_tokens": 410926,
+    "ttl_1h_write_tokens": 0,
+    "worst_agent_hit_ratio": 0.6217
+  },
+  "context": {
+    "used_pct": 61.2,
+    "window_size": 200000,
+    "tier": "orange",
+    "red": false,
+    "compact_urgent": false
+  },
+  "constants": {
+    "read_multiplier": 0.1,
+    "write_multiplier_5m": 1.25,
+    "write_multiplier_1h": null,
+    "ping_overhead_tokens": 250,
+    "min_prefix_tokens_to_warm": 50000
+  }
+}
+```
+
+`write_multiplier_1h` is `null` on purpose: it is not confirmed, and a null
+that forces the supervisor to abstain is safer than a plausible number that
+silently biases every decision. `last_request_at` is what lets the supervisor
+compute `G` itself; `compact_urgent` is gate 3 above, already classified.
+
 ## Goals
 
 - **A cache segment in the status line — the first deliverable.** It is the one
