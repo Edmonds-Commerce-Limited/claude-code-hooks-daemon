@@ -325,3 +325,38 @@ every decision. `last_request_at` lets the supervisor compute `G` itself.
 `context` mirrors `context_sidecar`'s existing classifications rather than
 re-thresholding a raw percentage — Plan 00135 Decision J, so the status
 segment and the supervisor cannot drift.
+
+## The measured gap profile, and why it proves the circularity
+
+`hooks-daemon cache-gaps` over this session's own transcript:
+
+| Gap bucket | Count |
+| ---------- | ----- |
+| `<1m`      | 7,696 |
+| `1-5m`     | 66    |
+| `5-15m`    | 88    |
+| `15-60m`   | 233   |
+| `>60m`     | **0** |
+
+8,083 gaps. **321 cross a 5-minute TTL. ZERO cross the 1-hour TTL. The largest
+gap in the entire session is 3,598 seconds — two seconds under 3,600.**
+
+That figure is not a coincidence and it is not a healthy session found in the
+wild. This project runs hourly crons, and they are holding the idle gap
+underneath the TTL by a margin of two seconds. The session is warm *because
+something is warming it*.
+
+So the 98.87% hit ratio measured here **cannot be used to argue that warming
+is unnecessary** — it is a measurement of a warmed session, and the warming is
+the cron. Reasoning from it to projects in general is circular, and this table
+is the evidence of the circularity rather than an answer to the question.
+
+The genuinely transferable finding is the SPLIT: the same gap profile that
+never crosses the 1-hour TTL crosses the 5-minute one 321 times. A project's
+sub-agents can therefore be going cold repeatedly while its main thread never
+does — which is exactly the half the status bar could not previously see.
+
+**Task 2.4 remains open and cannot be closed from inside this repository.** The
+tool now exists and any project can run it; what is missing is a transcript
+from a HUMAN-PACED project, where the gaps are set by a person's attention
+rather than by a scheduler.

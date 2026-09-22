@@ -3655,6 +3655,107 @@ def cmd_check_truth_changes(args: argparse.Namespace) -> int:
     return 1 if result["has_changes"] else 0
 
 
+def _resolve_transcript(args: argparse.Namespace) -> Path | None:
+    """The transcript to analyse: the one named, else the project's newest.
+
+    Auto-discovery is a convenience, never a guess made silently — the caller
+    prints which file was chosen, because analysing the wrong session produces
+    a perfectly plausible report about somebody else's work.
+    """
+    named = getattr(args, "transcript", None)
+    if named:
+        candidate = Path(named)
+        return candidate if candidate.is_file() else None
+
+    project_path = get_project_path(getattr(args, "project_root", None))
+    slug = str(project_path).replace("/", "-")
+    session_dir = Path.home() / ".claude" / "projects" / slug
+    try:
+        transcripts = sorted(
+            session_dir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True
+        )
+    except OSError:
+        return None
+    return transcripts[0] if transcripts else None
+
+
+def cmd_cache_gaps(args: argparse.Namespace) -> int:
+    """Report the idle-gap profile and cache cost of a session (Plan 00452).
+
+    Answers whether warming this project's cache would PAY, which turns on the
+    shape of its idle gaps rather than on any figure a single render can show.
+
+    Returns:
+        0 on success, 2 when no transcript could be resolved or read.
+    """
+    from claude_code_hooks_daemon.daemon.cache_gap_analysis import analyse_transcript
+
+    transcript = _resolve_transcript(args)
+    if transcript is None:
+        print(
+            "ERROR: no transcript found. Pass --transcript PATH explicitly.",
+            file=sys.stderr,
+        )
+        return 2
+
+    try:
+        with transcript.open(encoding="utf-8", errors="replace") as handle:
+            report = analyse_transcript(handle)
+    except OSError as e:
+        print(f"ERROR: could not read {transcript}: {e}", file=sys.stderr)
+        return 2
+
+    report["transcript"] = str(transcript)
+
+    if getattr(args, "format", "text") == "json":
+        print(json.dumps(report, indent=2))
+        return 0
+
+    _print_cache_gap_report(report)
+    return 0
+
+
+#: Character width of the tallest bar in the idle-gap histogram.
+_HISTOGRAM_WIDTH = 40
+
+
+def _print_cache_gap_report(report: dict[str, Any]) -> None:
+    """Render the cache-gap report for a human reader."""
+    gaps = report["gaps"]
+    tokens = report["tokens"]
+    ratio = report["hit_ratio"]
+
+    print(f"Transcript: {report['transcript']}")
+    print(f"Requests:   {report['requests']} main, {report['sidechain_requests']} sub-agent")
+    print(f"Hit ratio:  {f'{ratio:.2%}' if ratio is not None else 'n/a (nothing cacheable)'}")
+    print(
+        f"Tokens:     {tokens['cache_read']:,} read, {tokens['cache_write']:,} written "
+        f"({tokens['ttl_5m_write']:,} on 5m, {tokens['ttl_1h_write']:,} on 1h)"
+    )
+    # NOT "rebuilt the prefix": a cache write happens on nearly every turn as
+    # the conversation grows, and is incremental. An INVALIDATION is a
+    # different event, and the payload's `misses` is what counts those.
+    print(f"Writes:     {report['writing_requests']} requests wrote to the cache (incremental)")
+    print()
+    print("Idle gaps between requests:")
+    widest = max(gaps["histogram"].values(), default=0)
+    for label, count in gaps["histogram"].items():
+        # Scaled to the tallest bucket. A bar clamped at a fixed ceiling makes
+        # 66 and 7,691 look identical, which is the opposite of a histogram.
+        bar = "#" * round(count / widest * _HISTOGRAM_WIDTH) if widest else ""
+        print(f"  {label:>8}  {bar:<{_HISTOGRAM_WIDTH}} {count}")
+    print()
+    print(f"  crossing a 5m TTL: {gaps['exceeding_5m']} of {gaps['count']}")
+    print(f"  crossing a 1h TTL: {gaps['exceeding_1h']} of {gaps['count']}")
+    print(f"  median {gaps['median_seconds']:.0f}s, max {gaps['max_seconds']:.0f}s")
+    print()
+    print(
+        "A project whose gaps cluster BELOW its TTL is already warm and gains "
+        "nothing from warming.\nThe gaps that cross it are the ones a warm ping "
+        "would have paid for."
+    )
+
+
 def cmd_harvest_background(args: argparse.Namespace) -> int:
     """Surface runaway background processes (Plan 00142, Layer B) — never kills.
 
@@ -9447,6 +9548,26 @@ def main() -> int:
         help="Also delete agent branches that have no worktree, if fully merged",
     )
     parser_worktree_reap.set_defaults(func=cmd_worktree_reap)
+
+    # cache-gaps command (Plan 00452 Phase 2) — does warming pay for THIS project?
+    parser_cache_gaps = subparsers.add_parser(
+        "cache-gaps",
+        help="Report a session's idle-gap profile and prompt-cache cost",
+    )
+    parser_cache_gaps.add_argument(
+        "--transcript",
+        dest="transcript",
+        metavar="PATH",
+        default=None,
+        help="Session transcript to analyse (default: the project's most recent)",
+    )
+    parser_cache_gaps.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        help="Output format: text (default) or json",
+    )
+    parser_cache_gaps.set_defaults(func=cmd_cache_gaps)
 
     # harvest-background command (Plan 00142, Layer B) — detect & surface, never kill
     parser_harvest = subparsers.add_parser(

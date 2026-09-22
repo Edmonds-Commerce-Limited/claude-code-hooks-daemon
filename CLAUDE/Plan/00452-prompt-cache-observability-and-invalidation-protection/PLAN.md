@@ -112,15 +112,22 @@ original design. See the research document.
 
 ### Phase 2: Measure
 
-- [ ] ⬜ **Task 2.1**: Transcript analyser emitting the metrics above.
-- [ ] ⬜ **Task 2.2**: Guard the guard — a fixture transcript with known writes,
+- [x] ✅ **Task 2.1**: Transcript analyser emitting the metrics above.
+  `cache_gap_analysis.py`, pure and I/O-free, surfaced as
+  `hooks-daemon cache-gaps` so ANY project can run it against its own
+  transcript — which is the only way Task 2.4 can ever be answered.
+- [x] ✅ **Task 2.2**: Guard the guard — a fixture transcript with known writes,
   asserting the detector finds them. A detector matching nothing would report a
   perfect score on a broken session.
-- [ ] ⬜ **Task 2.3**: Idle-gap histogram from request timestamps, bucketed
-  against the session's observed TTL.
+- [x] ✅ **Task 2.3**: Idle-gap histogram from request timestamps, bucketed
+  against the session's observed TTL. Bucket edges fall on BOTH the 5m and 1h
+  boundaries, so one histogram reads against either.
 - [ ] ⬜ **Task 2.4**: Gather gap profiles from a HUMAN-PACED project. This
   repository's cron-driven session cannot answer the question it is most needed
-  for.
+  for. **Now measured and confirmed**: 8,083 gaps, ZERO crossing the 1h TTL,
+  largest gap 3,598s — two seconds under the boundary, because the hourly crons
+  hold it there. The tool exists; what is missing is a transcript from a
+  project paced by a person. See the research document.
 
 ### Phase 3: Establish what actually invalidates
 
