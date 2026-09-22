@@ -326,6 +326,42 @@ every decision. `last_request_at` lets the supervisor compute `G` itself.
 re-thresholding a raw percentage — Plan 00135 Decision J, so the status
 segment and the supervisor cannot drift.
 
+## Hook denials do NOT invalidate the cache — measured, not inferred
+
+Task 3.2 flagged this as the question that could outrank the whole plan: this
+project's PreToolUse deny rules fire constantly, so if a denial invalidated
+the prefix, nothing else in this plan would matter. **The answer is negative.**
+
+Run as a direct experiment with `daemon.payload_capture` scoped to `[Status]`:
+
+| Reading                         | `misses` | `requests` | `warm` |
+| ------------------------------- | -------- | ---------- | ------ |
+| baseline                        | 15       | 4,863      | true   |
+| after `R-SED-FILE-MODIFICATION` | 15       | 4,865      | true   |
+| after `R-GIT-STASH-PUSH`        | 15       | —          | true   |
+| after `R-CHMOD-WORLD-WRITABLE`  | 15       | 4,869      | true   |
+
+Three denials from three different handlers. Six requests flowed across them —
+so this is not a case of nothing having happened — and `misses` never moved,
+the attributed cause map never changed, and the cache stayed warm throughout.
+Across 37 captured renders only ONE distinct miss count was ever observed.
+
+**Why the experiment was necessary rather than reading `miss_causes` alone.**
+The observational evidence (15 misses, all attributed to `effort_changed` and
+`messages_rewritten`, none to a denial) is suggestive but cannot settle it:
+absence of a "hook denial" category is equally consistent with the taxonomy
+simply not having one and denials being filed under `messages_rewritten`. Only
+moving the counter — or failing to — distinguishes those.
+
+**Consequence**: the plan's "if positive, re-cut the scope around it" branch
+does not fire. Deny-heavy projects carry no prompt-cache penalty for it, and
+the invalidation-protection half of this plan can stay focused on what the
+data DOES implicate — `messages_rewritten`, which is 13 of the 15.
+
+Caveat worth keeping: this is one session, one model, three handlers. It is
+strong evidence about PreToolUse denials, not a general claim about every hook
+outcome.
+
 ## The measured gap profile, and why it proves the circularity
 
 `hooks-daemon cache-gaps` over this session's own transcript:

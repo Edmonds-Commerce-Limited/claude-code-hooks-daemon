@@ -131,12 +131,18 @@ original design. See the research document.
 
 ### Phase 3: Establish what actually invalidates
 
-- [ ] ⬜ **Task 3.1**: Correlate each cache write with the preceding turn.
-  Classify: hook denial, prefix-file edit, MCP change, model/effort switch,
-  compaction, unexplained.
-- [ ] ⬜ **Task 3.2**: Settle the hook-denial question. Undocumented, and this
-  project's deny rules fire constantly. If positive, it outranks the rest of
-  this plan and the scope should be re-cut around it.
+- [x] ✅ **Task 3.1**: Correlate each cache write with the preceding turn.
+  **Re-framed by measurement**: a cache WRITE is not the event worth
+  correlating — 8,057 of 8,084 requests write, because writes are incremental
+  as the conversation grows. The event is a MISS, and the payload already
+  classifies every one: 15 misses, `messages_rewritten` 13, `effort_changed` 2.
+- [x] ✅ **Task 3.2**: Settle the hook-denial question. **Answered NEGATIVE by
+  direct experiment**, so the "re-cut the scope around it" branch does not
+  fire. Three denials from three different handlers, six requests across them,
+  `misses` never moved and the cache stayed warm. Crucially this was measured
+  rather than inferred from `miss_causes`: an absent category is equally
+  consistent with denials being filed under `messages_rewritten`. See the
+  research document.
 - [ ] ⬜ **Task 3.3**: Settle whether sub-agents compact, by driving one to its
   ceiling and observing what the coordinator receives.
 
