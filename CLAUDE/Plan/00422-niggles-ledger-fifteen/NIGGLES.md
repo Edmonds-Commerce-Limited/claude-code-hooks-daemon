@@ -1592,3 +1592,66 @@ report is worse than the claim it replaces, because it looks like evidence.
 That gap is real and is accepted, not overlooked: content quality is not
 checkable from here, and a guard that pretended otherwise would be the same
 false-assurance failure this ledger keeps recording.
+
+### N16 — the failsafe cron has two zero-token defences; the issue-sdlc cron has neither
+
+**Found**: in session, by being on the receiving end of three consecutive
+no-op ticks.
+
+This project declares two hourly crons. One of them is protected against
+pointless ticks twice over; the other is not protected at all, and nothing
+records that as a decision.
+
+**What the failsafe cron gets.** `failsafe_cron_blockage_suppressor` recognises
+a delivered tick by `CANONICAL_CRON_PROMPT_MARKER` in the prompt, and can drop
+it before it ever reaches the model:
+
+- `R-FAILSAFE-CRON-SUPPRESSED` — a `[awaiting-human]` marker is live, so the
+  tick is a guaranteed no-op.
+- `R-FAILSAFE-CRON-BACKED-OFF` — the session is producing nothing and owes no
+  ledgered work, so ticks continue at a reduced cadence. State lives in
+  `failsafe-cron-cadence.json` (`utils/cron_cadence.py`).
+
+**What the issue-sdlc cron gets.** Nothing. Grepping `src/` for the issue-sdlc
+tick prompt finds two hits and neither is suppression: `issue_filing_gate.py`
+(a mention in a deny reason) and `cron_enforcement.py` (declared-vs-delivered
+reconciliation). Every tick costs a full model turn regardless of whether
+anything is eligible.
+
+**The observation that prompted it.** Three ticks in this session each ran the
+preconditions and all three selection rules and concluded *no eligible issue*.
+The backlog is 10 open, whitelist skipped 0, and **all ten carry
+`agent-needs-human`** — so the loop is saturated by construction: it cannot
+select anything until a human clears the gate, and it will re-derive that
+every hour indefinitely.
+
+**Why the remedy is NOT symmetric with the failsafe one, which is the whole
+point of the entry.** The failsafe backoff reads purely LOCAL state — is this
+session producing, does it owe ledgered work — so it can decide at
+`UserPromptSubmit` for zero tokens and zero latency. Issue eligibility lives on
+GitHub. A handler that decided suppression by querying the API would put a
+network round trip on the prompt path, which is a different and worse trade
+than the one `cron_cadence` makes. Costing this remedy against the failsafe
+implementation would repeat exactly the mistake N15's remedies made — costed
+against the wrong surface.
+
+**Candidate remedies**, cheapest first:
+
+1. Let the AGENT record the no-op, the way `[awaiting-human]` already works.
+   The tick that concludes "no eligible issue" knows it; a marker written at
+   that moment, with a consecutive-no-op count, lets the suppressor back off on
+   local state alone. This reuses the marker mechanism rather than inventing
+   one, and never touches the network.
+2. Cache the last tick's verdict with a TTL. Cheap, but it trades freshness: an
+   issue filed just after a suppressed tick waits out the TTL. Bounded, and the
+   bound is the thing to argue about.
+3. Accept the cost and write that down. One turn an hour is not nothing, but a
+   promptly-triaged issue may be worth it. **This is a legitimate outcome** —
+   what is not legitimate is the current state, where the asymmetry exists by
+   omission rather than by decision.
+
+**What this is NOT.** Not an argument to delete or slow the cron — the runbook
+is explicit that a tick finding nothing is a *successful* tick, and the
+failsafe cron's own guidance says not to remove it for the same reason. The
+defect is that two crons with the same failure mode got different treatment,
+and only one of them has the reasoning recorded.

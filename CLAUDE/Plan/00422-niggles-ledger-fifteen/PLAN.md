@@ -79,6 +79,7 @@ ledger's shape is readable without opening it:
 | N13 | the plan-dedupe scout cleared a plan tree it never read                  | a dispatch before filing Plan 00430                                | ✅ Remedied by Plan 00434                                                                                                                                                                                                                                              |
 | N14 | four more `utils`/`docs_qa` → `plan_qa` edges, found by N5 row (h)'s fix | the guard written for Plan 00439                                   | 🔄 Both `gitfacts` edges cleared by Plan 00444 (a split, not the move this entry assumed — `plan_counter()` IS plan-specific); two design questions remain open                                                                                                        |
 | N15 | the dedupe scout reported a file path for a report it never wrote        | the dispatch before filing Plan 00441                              | ✅ CLOSED by Plan 00446 — a SubagentStop handler blocks a stop claiming a path that is not on disk; neither listed remedy as written (both were costed against the wrong surface)                                                                                      |
+| N16 | the failsafe cron has two zero-token defences; `issue-sdlc` has neither  | in session, on the receiving end of three consecutive no-op ticks  | ⬜ Open — the asymmetry exists by omission, not decision; the remedy is NOT symmetric because issue eligibility is remote state and the failsafe's is local                                                                                                            |
 
 ## Questions waiting on the owner
 
@@ -214,6 +215,14 @@ changing.
   re-dispatch when the report's `Checked N live plans.` disagrees, and step 3b
   is written in Grep-tool terms behind a general guard: a shell fence in any
   shipped agent that does not declare `Bash` now fails.
+
+- [ ] ⬜ **Task 4.3**: N16 — decide whether the `issue-sdlc` cron should get a
+  no-op backoff, and record the answer either way. **Owner-gated on the
+  freshness trade, not on the code**: remedy (1) has the agent write a
+  consecutive-no-op marker so the suppressor can decide on local state, which
+  is buildable; what needs a ruling is how long a newly-filed issue may wait
+  before its first tick. Accepting the current cost is a valid answer — the
+  defect is that it is currently uncosted, not that it is wrong.
 
 ## Success Criteria
 
