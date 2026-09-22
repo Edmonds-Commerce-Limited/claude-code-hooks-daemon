@@ -101,10 +101,11 @@ class TestJsonOutput:
         assert exit_code == 0
         payload = json.loads(captured.getvalue())
         assert isinstance(payload, list)
-        assert len(payload) == 15
+        assert len(payload) == 16
         names = {entry["name"] for entry in payload}
         assert "Current Time" in names
         assert "Host Hostname" in names
+        assert "Prompt Cache" in names
 
     def test_every_json_entry_has_the_expected_shape(self) -> None:
         import io

@@ -447,6 +447,10 @@ class Priority:
     CONTEXT_SIDECAR = 12  # Observe-only context sidecar for the PTY supervisor (opt-in)
     SUPERVISOR_INDICATOR = 13  # ccy PTY supervisor armed/dryrun/inactive shield (opt-in)
     CURRENT_TIME = 14
+    # Plan 00452: the cache figure qualifies the context figure (how much of
+    # this prefix is being re-read cheaply), so it renders in the same cluster
+    # rather than out by the working directory.
+    PROMPT_CACHE_INDICATOR = 15
     WORKING_DIRECTORY = 25
     STARTUP_CLEANUP = 28  # Between working_directory (25) and daemon_stats (30)
 

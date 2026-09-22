@@ -26,6 +26,9 @@ from claude_code_hooks_daemon.handlers.status_line.model_context import ModelCon
 from claude_code_hooks_daemon.handlers.status_line.multithread_indicator import (
     MultithreadIndicatorHandler,
 )
+from claude_code_hooks_daemon.handlers.status_line.prompt_cache_indicator import (
+    PromptCacheIndicatorHandler,
+)
 from claude_code_hooks_daemon.handlers.status_line.supervisor_indicator import (
     SupervisorIndicatorHandler,
 )
@@ -48,6 +51,7 @@ __all__ = [
     "HostHostnameHandler",
     "ModelContextHandler",
     "MultithreadIndicatorHandler",
+    "PromptCacheIndicatorHandler",
     "SupervisorIndicatorHandler",
     "UpgradeNotifierHandler",
     "WorkingDirectoryHandler",

@@ -189,6 +189,11 @@ class HandlerID:
         config_key="current_time",
         display_name="status-current-time",
     )
+    PROMPT_CACHE_INDICATOR = HandlerIDMeta(
+        class_name="PromptCacheIndicatorHandler",
+        config_key="prompt_cache_indicator",
+        display_name="status-prompt-cache-indicator",
+    )
     MULTITHREAD_INDICATOR = HandlerIDMeta(
         class_name="MultithreadIndicatorHandler",
         config_key="multithread_indicator",

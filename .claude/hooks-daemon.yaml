@@ -1119,6 +1119,10 @@ handlers:
       enabled: true
       priority: 14
 
+    prompt_cache_indicator:   # Prompt-cache hit ratio, TTL, and a cold-cache warning
+      enabled: true
+      priority: 15
+
   worktree_create:  # WorktreeCreate event (isolation:worktree agents / --worktree sessions)
     worktree_create:  # Creates the git worktree at a semantic path and echoes it
       enabled: true
