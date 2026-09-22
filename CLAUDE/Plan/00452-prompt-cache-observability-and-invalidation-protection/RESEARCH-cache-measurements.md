@@ -1,5 +1,82 @@
 # Cache measurements and the warming arithmetic
 
+## The harness already computes all of this — read `prompt_cache`
+
+**Read this section before any of the rest.** Most of the transcript analysis
+below turned out to be unnecessary: the `Status` event payload already carries
+a fully-formed `prompt_cache` object, captured verbatim here from this
+repository by enabling `daemon.payload_capture` (already scoped to `[Status]`)
+for a few renders:
+
+```json
+{
+  "warm": true,
+  "caching_observed": true,
+  "ttl": "1h",
+  "expires_at": 1790079347,
+  "requests": 4610,
+  "misses": 14,
+  "expected_rebuilds": 14,
+  "hit_ratio": 0.9912764873518866,
+  "cache_write_tokens": 10122957,
+  "miss_recache_tokens": 4301557,
+  "last_miss_at": 1789970486,
+  "last_miss_cause": { "causes": ["messages_rewritten"] },
+  "miss_causes": { "effort_changed": 2, "messages_rewritten": 12 },
+  "recache_tokens_if_cold": 383761
+}
+```
+
+Every input the warming decision needs is in there, already derived:
+
+| need                        | field                            |
+| --------------------------- | -------------------------------- |
+| is the cache alive now      | `warm`                           |
+| which TTL is in force       | `ttl`                            |
+| exactly when it dies        | `expires_at` (unix seconds)      |
+| `N`, the cost of going cold | `recache_tokens_if_cold`         |
+| hit ratio                   | `hit_ratio`                      |
+| **what invalidated it**     | `miss_causes`, `last_miss_cause` |
+
+`expires_at` is the important one: the supervisor does not have to ESTIMATE
+the gap or the TTL, it has a deadline. And `recache_tokens_if_cold` is `N`
+measured rather than inferred from a transcript tail.
+
+The same payload also carries `context_window` (with `context_window_size`,
+here 1,000,000, and a `current_usage` breakdown) and `cost`
+(`total_cost_usd`). So the status-line segment needs **no transcript reading at
+all** for main-thread figures — no 68 MB tail-read, no `mtime_cache`, none of
+the performance problem that shaped the original design.
+
+### `miss_causes` is the invalidation answer, per session, already classified
+
+This session: **14 misses in 4,614 requests**, attributed entirely to
+`effort_changed` (2) and `messages_rewritten` (12).
+
+That is direct evidence on the open question about hook denials. This session
+issued many `PreToolUse` denials — `sed`, pipe-to-tail, LSP-symbol, write-clobber,
+QA-suppression, self-matching-pgrep — and **not one appears as a miss cause**.
+Every miss is accounted for by effort changes and message rewrites
+(compaction). Consistent with the documented behaviour that scoped, call-time
+checks leave the prefix intact.
+
+Not proof — a cause the harness does not model could be folded into another
+bucket — but it moves hook denials from "unknown, possibly dominant" to
+"no evidence of any cost", and it removes the argument for re-cutting the plan
+around them.
+
+### What still needs the transcript
+
+Only sub-agent figures. `prompt_cache` describes the main thread, so the
+`SubagentStop` aggregation stays as designed.
+
+---
+
+## Original transcript-based analysis
+
+Retained because it is how the sub-agent numbers were obtained, and because the
+arithmetic is unchanged.
+
 Evidence behind [PLAN.md](PLAN.md). Everything here was measured from this
 repository's own session transcripts or verified against the Claude Code
 documentation; where a figure is unconfirmed it says so.

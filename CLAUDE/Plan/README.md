@@ -4,7 +4,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00452: prompt cache observability and invalidation protection](00452-prompt-cache-observability-and-invalidation-protection/PLAN.md) - Not Started (no project can see its own cache hit ratio, so none knows whether it has a problem; status-line segment first, then measurement, then a supervisor decision function validated by replay)
+- [00452: prompt cache observability and invalidation protection](00452-prompt-cache-observability-and-invalidation-protection/PLAN.md) - In Progress (the Status payload already carries a `prompt_cache` object — `warm`, `ttl`, `expires_at`, `hit_ratio`, `miss_causes`, `recache_tokens_if_cold` — so the main-thread segment needs no transcript reading at all; surfacing it is the deliverable)
 
 - [00451: version bump completeness and dependency gate stale verdict](00451-version-bump-completeness-and-dependency-gate-stale-verdict/PLAN.md) - Not Started (three of six version-carrying files are found only when a gate goes red, and the `dependencies` gate leaves a stale `passed: true` on disk when `uv lock --check` aborts it)
 

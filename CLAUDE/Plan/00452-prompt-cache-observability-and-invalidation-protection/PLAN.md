@@ -1,6 +1,6 @@
 # Plan 00452: prompt cache observability and invalidation protection
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-22
 **Owner**: dev
 **Priority**: Medium
@@ -74,14 +74,19 @@ Summarised; the numbers and their caveats live in the research document.
 
 Ships first and stands alone. Everything after this is optional; this is not.
 
-- [ ] ⬜ **Task 1.1**: Confirm the Status event delivers `transcript_path`. The
-  payload carries `context_window` but NO cache fields, so the segment must read
-  the transcript itself. If it is absent, that is the blocker and the approach
-  needs re-cutting — establish it first.
-- [ ] ⬜ **Task 1.2**: Tail-read the last complete JSONL record rather than
-  parsing the file (68 MB in the measured session), reusing the package's
-  `mtime_cache` so an unchanged transcript costs nothing.
-- [ ] ⬜ **Task 1.3**: Render MAIN, SUB and TOTAL, with the TTL shown per side.
+**Task 1.1 is answered, and it collapses most of this plan.** The Status
+payload already carries a `prompt_cache` object with `warm`, `ttl`,
+`expires_at`, `hit_ratio`, `misses`, `miss_causes` and
+`recache_tokens_if_cold`, plus `context_window` and `cost`. Main-thread
+figures need NO transcript reading — which deletes the tail-read, the
+`mtime_cache` dependency and the entire performance problem that shaped the
+original design. See the research document.
+
+- [x] ✅ **Task 1.1**: Establish what the Status event delivers. Done by
+  enabling `daemon.payload_capture` (already scoped to `[Status]`) for a few
+  renders. `transcript_path` IS present but is not needed for the main thread.
+- [ ] ⬜ **Task 1.2**: Render MAIN, SUB and TOTAL with the TTL per side. Main
+  reads straight from `prompt_cache`; only SUB needs aggregation.
 - [ ] ⬜ **Task 1.4**: Aggregate sub-agent totals at `SubagentStop` into a small
   sidecar rather than scanning the task directory from the status line (127
   files, re-rendered constantly). Same sensor/actuator split as
