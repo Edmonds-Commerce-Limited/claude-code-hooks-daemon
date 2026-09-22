@@ -75,6 +75,15 @@ _ARCHIVE_PREFIXES: Final[tuple[str, ...]] = (
 )
 _ARCHIVE_BASENAMES: Final[frozenset[str]] = frozenset({"CHANGELOG.md"})
 
+# Third-party prose held VERBATIM, which is a different category from an
+# archive: an archive is our own writing that has merely aged, whereas a
+# vendored doc was never ours to restyle. `remote-docs/` copies are captured
+# with provenance so they can be refreshed and diffed against their source, so
+# anglicising one would corrupt the copy, make every later refresh show a
+# spurious diff, and silently misquote the upstream project. The fidelity rule
+# outranks the house style here.
+_VENDORED_PREFIXES: Final[tuple[str, ...]] = ("remote-docs/",)
+
 # Directory names holding deliberate specimens of the thing being checked.
 _FIXTURE_DIRNAMES: Final[frozenset[str]] = frozenset({"fixtures", "test-files", "__fixtures__"})
 
@@ -201,8 +210,10 @@ def tracked_files(root: Path) -> tuple[str, ...]:
 
 
 def _is_exempt(rel_path: str) -> bool:
-    """True when ``rel_path`` is a historical record or a deliberate fixture."""
+    """True when ``rel_path`` is a historical record, vendored, or a fixture."""
     if rel_path.startswith(_ARCHIVE_PREFIXES):
+        return True
+    if rel_path.startswith(_VENDORED_PREFIXES):
         return True
     if rel_path in _ARCHIVE_BASENAMES:
         return True

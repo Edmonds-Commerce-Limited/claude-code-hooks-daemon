@@ -167,6 +167,28 @@ def test_does_not_flag_deliberate_fixtures(tmp_path: Path) -> None:
     assert exit_code == 0, f"fixture flagged: {report['violations']}"
 
 
+def test_does_not_flag_vendored_upstream_documentation(tmp_path: Path) -> None:
+    """NEGATIVE CONTROL -- a vendored doc is someone else's prose, held verbatim.
+
+    `remote-docs/` holds third-party documentation captured with provenance so
+    it can be refreshed and diffed against its source. Anglicising it would
+    corrupt the copy, make every future refresh show a spurious diff, and
+    silently misquote the upstream project. The fidelity rule outranks the
+    house style here, and this is a DIFFERENT category from the historical
+    records above: an archive is our own prose that has merely aged.
+    """
+    repo = _make_repo(
+        tmp_path,
+        {
+            "remote-docs/example.com/docs/caching.md": "Claude Code manages this behavior.\n",
+        },
+    )
+
+    exit_code, report = _run_checker(repo)
+
+    assert exit_code == 0, f"vendored doc flagged: {report['violations']}"
+
+
 def test_word_list_is_imported_from_the_handler_not_copied() -> None:
     """The rule has ONE definition. A copy would drift the day either changed."""
     checker = _load_checker_module()

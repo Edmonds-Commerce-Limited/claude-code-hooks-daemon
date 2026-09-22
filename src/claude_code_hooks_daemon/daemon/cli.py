@@ -3679,6 +3679,36 @@ def _resolve_transcript(args: argparse.Namespace) -> Path | None:
     return transcripts[0] if transcripts else None
 
 
+def _resolve_ttl_config() -> dict[str, Any]:
+    """Which TTL each request bucket gets, and whether anyone CHOSE it.
+
+    Reported alongside the gap profile because the two only mean something
+    together: a gap that would cross a five-minute TTL is harmless under a
+    one-hour one, and sub-agents sit in the five-minute bucket by default even
+    on a subscription.
+    """
+    from claude_code_hooks_daemon.handlers.status_line.settings_reader import (
+        read_claude_settings,
+    )
+    from claude_code_hooks_daemon.utils.prompt_cache_ttl import (
+        BUCKET_MAIN,
+        BUCKET_SUBAGENT,
+        resolve_ttl,
+    )
+
+    settings = read_claude_settings()
+    env = dict(os.environ)
+    return {
+        bucket: {
+            "ttl": (r := resolve_ttl(bucket, settings, env)).ttl,
+            "source": r.source,
+            "explicit": r.explicit,
+            "ignored": [{"control": c, "value": v} for c, v in r.ignored],
+        }
+        for bucket in (BUCKET_MAIN, BUCKET_SUBAGENT)
+    }
+
+
 def cmd_cache_gaps(args: argparse.Namespace) -> int:
     """Report the idle-gap profile and cache cost of a session (Plan 00452).
 
@@ -3706,6 +3736,7 @@ def cmd_cache_gaps(args: argparse.Namespace) -> int:
         return 2
 
     report["transcript"] = str(transcript)
+    report["ttl_config"] = _resolve_ttl_config()
 
     if getattr(args, "format", "text") == "json":
         print(json.dumps(report, indent=2))
@@ -3749,11 +3780,45 @@ def _print_cache_gap_report(report: dict[str, Any]) -> None:
     print(f"  crossing a 1h TTL: {gaps['exceeding_1h']} of {gaps['count']}")
     print(f"  median {gaps['median_seconds']:.0f}s, max {gaps['max_seconds']:.0f}s")
     print()
+    _print_ttl_config(report.get("ttl_config") or {})
     print(
         "A project whose gaps cluster BELOW its TTL is already warm and gains "
         "nothing from warming.\nThe gaps that cross it are the ones a warm ping "
         "would have paid for."
     )
+
+
+def _print_ttl_config(config: dict[str, Any]) -> None:
+    """Report the configured TTL per bucket, and flag ignored values.
+
+    Which row matters depends on the histogram above it: a gap that crosses a
+    five-minute TTL costs nothing under a one-hour one.
+    """
+    if not config:
+        return
+
+    labels = {"main": "main conversation", "subagent": "sub-agents etc"}
+    print("Configured TTL:")
+    for bucket, detail in config.items():
+        ttl = detail.get("ttl") or "billing-dependent (1h on subscription, else 5m)"
+        chosen = "explicit" if detail.get("explicit") else "DEFAULT, nobody chose it"
+        print(f"  {labels.get(bucket, bucket):>18}: {ttl}  [{detail.get('source')} — {chosen}]")
+        for entry in detail.get("ignored") or []:
+            # An invalid value is worse than no value: the project believes it
+            # configured a TTL, and Claude Code silently ignored it.
+            print(
+                f"  {'':>18}  ⚠ {entry['control']}={entry['value']!r} IGNORED "
+                "— only '5m' and '1h' are honoured"
+            )
+
+    sub = config.get("subagent") or {}
+    if not sub.get("explicit"):
+        print(
+            "\n  Sub-agents get 5m even on a subscription until you set\n"
+            "  `subagentPromptCacheTtl` (or CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL).\n"
+            "  That is the half a short agent never amortises."
+        )
+    print()
 
 
 def cmd_harvest_background(args: argparse.Namespace) -> int:

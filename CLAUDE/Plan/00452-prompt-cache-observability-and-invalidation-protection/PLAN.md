@@ -189,12 +189,18 @@ success criteria explicitly forbid.
 
 Three levers the plan did not know about when it was written. None is blocked.
 
-- [ ] ⬜ **Task 5.1**: Surface `subagentPromptCacheTtl` (and its env-var and
+- [x] ✅ **Task 5.1**: Surface `subagentPromptCacheTtl` (and its env-var and
   per-agent `experimental.cacheTtl` forms) as a configurable, VISIBLE setting.
-  This is the direct answer to "can we enforce that TTLs are explicitly
-  configured so we have visibility?" — sub-agents get 5m even on a
-  subscription until a project chooses otherwise, which is exactly the
-  expensive half the status bar now exposes.
+  `utils/prompt_cache_ttl.py` implements the documented precedence once —
+  `FORCE_PROMPT_CACHING_5M` > bucket env var > bucket setting >
+  `ENABLE_PROMPT_CACHING_1H` > bucket default — and reports per bucket whether
+  anyone CHOSE the value or it is drifting on the default. An invalid value is
+  reported as IGNORED rather than honoured: Claude Code accepts only `5m` and
+  `1h`, so a project setting `3600` believes it configured a TTL and has not.
+  Rendered by `hooks-daemon cache-gaps`, beside the gap histogram, because the
+  two only mean something together. Measured on this repository: **neither
+  bucket is explicitly configured**, so sub-agents sit on 5m while 331 gaps
+  cross it.
 - [ ] ⬜ **Task 5.2**: Worktree agents each start COLD. The cache is scoped to
   one machine AND directory, worktrees included, and this project dispatches
   into isolated worktrees routinely. Quantify what that costs before deciding
