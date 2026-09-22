@@ -204,10 +204,19 @@ Three levers the plan did not know about when it was written. None is blocked.
 - [ ] ⬜ **Task 5.2**: Worktree agents each start COLD. The cache is scoped to
   one machine AND directory, worktrees included, and this project dispatches
   into isolated worktrees routinely. Quantify what that costs before deciding
-  whether it is worth changing.
-- [ ] ⬜ **Task 5.3**: Prefer `/rewind` over `/compact` where the intent is to
-  abandon a path: rewind truncates to a prefix that is ALREADY cached, whereas
-  compaction builds a new one.
+  whether it is worth changing. **Blocked on the same class of thing as 2.4**:
+  a session has to have actually RUN in a worktree to leave a transcript, and
+  this container holds exactly one project directory. The cost is real and
+  documented; the magnitude cannot be measured from here.
+- [x] ❌ **Task 5.3**: Prefer `/rewind` over `/compact` where the intent is to
+  abandon a path. **Recorded as documentation, deliberately NOT built as an
+  advisory.** The fact is sound — rewind truncates to an already-cached prefix
+  while compaction builds a new one — but there is no honest trigger for it. A
+  compaction is overwhelmingly driven by context pressure rather than by an
+  intent to abandon a path, and auto-compaction cannot be redirected at all, so
+  a `PreCompact` advisory would fire almost entirely on cases where `/rewind`
+  is not the right answer. An advisory that is usually wrong trains people to
+  ignore the one time it is right.
 
 ## Success Criteria
 
