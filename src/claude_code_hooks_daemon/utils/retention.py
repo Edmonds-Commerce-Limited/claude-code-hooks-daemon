@@ -10,6 +10,10 @@ live here so every writer bounds itself identically:
 * :func:`prune_directory` -- bound a directory to a max count and/or max age
   (newest kept), never touching a protected path (e.g. the current session's
   own file).
+* :func:`prune_subdirectories` -- the same, for writers that keep one
+  DIRECTORY per session rather than one file. Separate because
+  ``prune_directory`` filters on ``is_file()``, so listing a nested writer in
+  a retention list without this would look like a fix and prune nothing.
 
 Both are **best-effort housekeeping**: a missing file/dir is a no-op, and an IO
 error on an individual entry is logged and skipped -- retention must never raise
@@ -127,6 +131,75 @@ def prune_directory(
             continue
         try:
             entry.unlink()
+        except OSError as exc:
+            logger.warning("retention: cannot delete %s: %s", entry, exc)
+            continue
+        deleted.append(entry)
+    return deleted
+
+
+def prune_subdirectories(
+    directory: Path,
+    *,
+    pattern: str = "*",
+    max_count: int | None = None,
+    max_age_seconds: float | None = None,
+    now: float,
+    protect: Collection[Path] = (),
+) -> list[Path]:
+    """Delete whole SUBDIRECTORIES of ``directory`` that exceed the budget.
+
+    The directory twin of :func:`prune_directory`, with the same contract:
+    excess by ANY configured criterion, protected paths untouched, a missing
+    directory a no-op, per-entry IO errors logged and skipped.
+
+    **It exists because naming a nested writer in a retention list is otherwise
+    a silent no-op.** ``prune_directory`` filters on ``is_file()`` and calls
+    ``unlink()``, so a writer that keeps one directory per session — rather
+    than one file — is invisible to it. A fix that added such a writer to a
+    retention list would look correct, pass review, and prune nothing. That is
+    the shape of the defect that let an archive directory reach 14 GB
+    unnoticed (issue #52).
+
+    A session directory's mtime tracks its last write, because adding or
+    replacing a file in it updates the directory's own mtime — so age here
+    means "nothing has written to this session since", which is the intended
+    meaning.
+
+    Removal is recursive (``shutil.rmtree``): the unit being aged out is the
+    session, not an individual file within it.
+    """
+    if max_count is None and max_age_seconds is None:
+        return []
+    try:
+        entries = [p for p in directory.glob(pattern) if p.is_dir()]
+    except OSError as exc:
+        logger.warning("retention: cannot list %s: %s", directory, exc)
+        return []
+
+    protected = {_resolve(p) for p in protect}
+    dated: list[tuple[float, Path]] = []
+    for entry in entries:
+        try:
+            mtime = entry.stat().st_mtime
+        except OSError as exc:
+            logger.warning("retention: cannot stat %s: %s", entry, exc)
+            continue
+        dated.append((mtime, entry))
+
+    # Newest first, so index >= max_count marks the count-excess tail.
+    dated.sort(key=lambda item: item[0], reverse=True)
+
+    deleted: list[Path] = []
+    for index, (mtime, entry) in enumerate(dated):
+        if _resolve(entry) in protected:
+            continue
+        count_excess = max_count is not None and index >= max_count
+        age_excess = max_age_seconds is not None and (now - mtime) > max_age_seconds
+        if not (count_excess or age_excess):
+            continue
+        try:
+            shutil.rmtree(entry)
         except OSError as exc:
             logger.warning("retention: cannot delete %s: %s", entry, exc)
             continue

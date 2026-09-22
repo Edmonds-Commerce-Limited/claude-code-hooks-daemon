@@ -1859,6 +1859,12 @@ _SESSION_RUNTIME_SUBDIRS = (
     "downgrade-indicator",
 )
 
+# Writers that keep one DIRECTORY per session rather than one file. They need
+# the directory-aware primitive: prune_directory filters on is_file(), so
+# listing a nested writer above would look like retention and prune nothing
+# (Plan 00452, and the defect class behind issue #52).
+_SESSION_RUNTIME_DIR_SUBDIRS = ("cache-sidecar",)
+
 
 def cleanup_stale_session_dirs(
     project_dir: Path | str, max_age_days: int = 7, now: float | None = None
@@ -1889,7 +1895,10 @@ def cleanup_stale_session_dirs(
     # creating an import-order-sensitive partial-initialisation failure under
     # coverage's eager full-import. Importing here (call time) keeps module
     # load light and the full package graph is always initialised by then.
-    from claude_code_hooks_daemon.utils.retention import prune_directory
+    from claude_code_hooks_daemon.utils.retention import (
+        prune_directory,
+        prune_subdirectories,
+    )
 
     project_path = Path(project_dir).resolve()
     untracked_dir = _get_untracked_dir(project_path)
@@ -1903,6 +1912,10 @@ def cleanup_stale_session_dirs(
     for subdir_name in _SESSION_RUNTIME_SUBDIRS:
         subdir = untracked_dir / subdir_name
         removed += len(prune_directory(subdir, max_age_seconds=max_age_seconds, now=current))
+
+    for subdir_name in _SESSION_RUNTIME_DIR_SUBDIRS:
+        subdir = untracked_dir / subdir_name
+        removed += len(prune_subdirectories(subdir, max_age_seconds=max_age_seconds, now=current))
 
     if removed:
         logger.info(

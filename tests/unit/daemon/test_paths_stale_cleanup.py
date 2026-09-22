@@ -321,6 +321,46 @@ class TestCleanupStaleSessionDirs:
 
     _SUBDIRS = ("thread-registry", "context-sidecar", "payload-capture", "downgrade-indicator")
 
+    def test_a_stale_cache_sidecar_session_directory_is_reaped(self, tmp_path: Path) -> None:
+        """REGRESSION (Plan 00452): cache-sidecar nests a DIRECTORY per session.
+
+        It was shipped with no pruner at all. Adding it to the file-based
+        retention tuple would have been a silent no-op, because
+        `prune_directory` filters on `is_file()` — so this asserts the
+        directory and its contents actually go, not merely that the name
+        appears in a list somewhere.
+        """
+        session = tmp_path / "cache-sidecar" / "dead-session"
+        session.mkdir(parents=True)
+        agent_file = session / "agent-1.json"
+        agent_file.write_text("{}")
+        _make_old(agent_file)
+        _make_old(session)
+
+        with patch(
+            "claude_code_hooks_daemon.daemon.paths._get_untracked_dir",
+            return_value=tmp_path,
+        ):
+            removed = cleanup_stale_session_dirs(tmp_path, max_age_days=7)
+
+        assert removed == 1
+        assert not session.exists()
+
+    def test_a_live_cache_sidecar_session_directory_survives(self, tmp_path: Path) -> None:
+        """The running session's own sidecar must not be reaped underneath it."""
+        session = tmp_path / "cache-sidecar" / "live-session"
+        session.mkdir(parents=True)
+        (session / "agent-1.json").write_text("{}")
+
+        with patch(
+            "claude_code_hooks_daemon.daemon.paths._get_untracked_dir",
+            return_value=tmp_path,
+        ):
+            removed = cleanup_stale_session_dirs(tmp_path, max_age_days=7)
+
+        assert removed == 0
+        assert (session / "agent-1.json").exists()
+
     def test_returns_zero_when_untracked_dir_missing(self, tmp_path: Path) -> None:
         nonexistent = tmp_path / "nonexistent"
         with patch(

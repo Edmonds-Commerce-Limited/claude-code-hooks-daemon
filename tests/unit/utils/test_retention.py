@@ -14,7 +14,11 @@ import os
 import stat
 from pathlib import Path
 
-from claude_code_hooks_daemon.utils.retention import cap_log_file, prune_directory
+from claude_code_hooks_daemon.utils.retention import (
+    cap_log_file,
+    prune_directory,
+    prune_subdirectories,
+)
 
 
 def _write(path: Path, text: str, *, mtime: float | None = None) -> Path:
@@ -22,6 +26,68 @@ def _write(path: Path, text: str, *, mtime: float | None = None) -> Path:
     if mtime is not None:
         os.utime(path, (mtime, mtime))
     return path
+
+
+def _session_dir(parent: Path, name: str, *, mtime: float) -> Path:
+    """A per-session directory holding one file, aged to ``mtime``."""
+    directory = parent / name
+    directory.mkdir(parents=True)
+    _write(directory / "agent.json", "{}", mtime=mtime)
+    os.utime(directory, (mtime, mtime))
+    return directory
+
+
+class TestPruneSubdirectories:
+    """The DIRECTORY twin of prune_directory (Plan 00452).
+
+    `prune_directory` filters on `is_file()` and calls `unlink()`, so a writer
+    that nests one directory per session is invisible to it. Naming such a
+    directory in a retention list without this function would look like a fix
+    and prune nothing — which is exactly how `untracked/transcripts/` reached
+    14 GB unnoticed (issue #52).
+    """
+
+    def test_a_stale_session_directory_is_removed_with_its_contents(self, tmp_path: Path) -> None:
+        _session_dir(tmp_path, "old-session", mtime=1000.0)
+        removed = prune_subdirectories(tmp_path, max_age_seconds=100.0, now=2000.0)
+        assert [p.name for p in removed] == ["old-session"]
+        assert not (tmp_path / "old-session").exists()
+
+    def test_a_fresh_session_directory_is_kept(self, tmp_path: Path) -> None:
+        _session_dir(tmp_path, "live-session", mtime=1950.0)
+        assert prune_subdirectories(tmp_path, max_age_seconds=100.0, now=2000.0) == []
+        assert (tmp_path / "live-session" / "agent.json").exists()
+
+    def test_loose_files_beside_the_directories_are_never_touched(self, tmp_path: Path) -> None:
+        """This function owns directories only; files are prune_directory's job."""
+        _write(tmp_path / "loose.json", "{}", mtime=1000.0)
+        _session_dir(tmp_path, "old-session", mtime=1000.0)
+        removed = prune_subdirectories(tmp_path, max_age_seconds=100.0, now=2000.0)
+        assert [p.name for p in removed] == ["old-session"]
+        assert (tmp_path / "loose.json").exists()
+
+    def test_a_missing_directory_is_a_no_op(self, tmp_path: Path) -> None:
+        assert prune_subdirectories(tmp_path / "nope", max_age_seconds=1.0, now=2.0) == []
+
+    def test_no_criterion_deletes_nothing(self, tmp_path: Path) -> None:
+        """Mirrors prune_directory: an unconfigured budget must never delete."""
+        _session_dir(tmp_path, "old-session", mtime=1000.0)
+        assert prune_subdirectories(tmp_path, now=9999.0) == []
+        assert (tmp_path / "old-session").exists()
+
+    def test_a_protected_directory_survives_its_own_staleness(self, tmp_path: Path) -> None:
+        """The live session's own directory must never be reaped mid-session."""
+        live = _session_dir(tmp_path, "live-session", mtime=1000.0)
+        _session_dir(tmp_path, "dead-session", mtime=1000.0)
+        removed = prune_subdirectories(tmp_path, max_age_seconds=100.0, now=2000.0, protect=[live])
+        assert [p.name for p in removed] == ["dead-session"]
+        assert live.exists()
+
+    def test_max_count_keeps_the_newest(self, tmp_path: Path) -> None:
+        for index in range(4):
+            _session_dir(tmp_path, f"s{index}", mtime=1000.0 + index * 10)
+        removed = prune_subdirectories(tmp_path, max_count=2, now=2000.0)
+        assert {p.name for p in removed} == {"s0", "s1"}
 
 
 # ── cap_log_file ─────────────────────────────────────────────────────────────
