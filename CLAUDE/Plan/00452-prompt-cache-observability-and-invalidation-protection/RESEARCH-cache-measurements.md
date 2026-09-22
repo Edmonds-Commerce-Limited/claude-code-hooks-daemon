@@ -326,6 +326,59 @@ every decision. `last_request_at` lets the supervisor compute `G` itself.
 re-thresholding a raw percentage — Plan 00135 Decision J, so the status
 segment and the supervisor cannot drift.
 
+## The upstream documentation, vendored — what it CONFIRMS and what it OVERTURNS
+
+`remote-docs/code.claude.com/docs/en/prompt-caching.md` (captured with
+provenance). Read AFTER the measurements below were taken, which makes it a
+check on them rather than their source.
+
+**Confirms the hook-denial experiment.** Only a BARE tool-name deny rule can
+invalidate, and only when tool search is unavailable or disabled: *"Scoped deny
+rules like `Bash(rm *)`, and all allow and ask rules, don't change which tools
+Claude sees. Claude Code checks them when Claude attempts a call, leaving the
+prefix intact."* Every rule this daemon ships is of that second kind.
+
+**Overturns Task 4.4's premise outright**, and the doc files it under *Actions
+that KEEP the cache*: *"Your project-root and user-level CLAUDE.md files are
+read once at session start and held in memory. Editing them mid-session does
+not invalidate the cache, but the edit also doesn't apply."* So the planned
+"editing a prefix-resident file is expensive" advisory would have warned about
+a cost that does not exist. The measurement had already put the premise in
+doubt; this settles it. **Nested CLAUDE.md files and `paths:`-scoped rules are
+the exception** — they load lazily, so an edit BEFORE first load does take
+effect.
+
+**Confirms the measured TTL split, and names the lever.** Sub-agents *"fall
+outside the main-conversation TTL bucket, so they get five minutes even on a
+subscription"*. The controls are `promptCacheTtl` /
+`CLAUDE_CODE_PROMPT_CACHE_TTL` for the main conversation and
+**`subagentPromptCacheTtl` / `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL`** for
+everything else; both take `5m` or `1h` and need Claude Code v2.1.242+. A
+sub-agent's own `experimental.cacheTtl` frontmatter is a further override
+(v2.1.248+). `FORCE_PROMPT_CACHING_5M=1` beats all of them.
+
+This is the concrete answer to "can we enforce that TTLs are explicitly
+configured so we have visibility?" — the knob exists and is per-bucket.
+
+**Confirms the overage caveat**: the one-hour TTL applies only *"on a Claude
+subscription within your plan's included usage"*; past the limit the main
+conversation drops to five minutes.
+
+**Two findings this project should act on that the plan had not considered:**
+
+1. **Worktrees each build their OWN cache.** *"the cache is effectively scoped
+   to one machine and directory … That includes worktrees of the same
+   repository."* This project dispatches agents into isolated worktrees as a
+   matter of course, and every one of them starts cold.
+2. **`/rewind` is cheaper than `/compact`.** Rewind *"truncates back to a
+   prefix that is already cached, rather than building a new one as compaction
+   does."*
+
+**Corrects one thing in this document.** There is no `/cost` command; the
+per-session summary is `/usage`, which carries a `Prompt cache (main)` line
+(v2.1.251+) with hit ratio, miss count and warm state — the same figures the
+`prompt_cache` status-line object exposes.
+
 ## Hook denials do NOT invalidate the cache — measured, not inferred
 
 Task 3.2 flagged this as the question that could outrank the whole plan: this
