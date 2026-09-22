@@ -1595,6 +1595,25 @@ false-assurance failure this ledger keeps recording.
 
 ### N16 — the failsafe cron has two zero-token defences; the issue-sdlc cron has neither
 
+> **SUPERSEDED, an hour after filing — this was already recorded.**
+> [Plan 00388](../00388-failsafe-marker-wiped-by-other-crons-in-multi-cron-sessions/PLAN.md)
+> absorbed this finding as graduated Plan 00392 N1 and carries it as **Task
+> 2.4**. Keep this entry for the trail, but 00388 is the live home; do not work
+> it from here.
+>
+> **00388 makes a stronger claim that this entry missed.** N16 treated the
+> missing backoff as an independent gap. It is not: suppressing the issue-sdlc
+> tick needs the handler to recognise that tick as automated, which is the
+> single ruling 00388 is blocked on — and it could not work anyway, because the
+> marker is wiped by that very cron before anything can read it. Neither half
+> ships without the other.
+>
+> **Why it was filed twice.** A dedupe check was run before filing Plan 00453
+> and NOT before filing this niggle. The failure is the same one N13 and N15
+> record one level up — acting on an enumeration nobody checked — and it cost a
+> duplicate entry plus a re-derivation of analysis 00388 had already done
+> better.
+
 **Found**: in session, by being on the receiving end of three consecutive
 no-op ticks.
 
