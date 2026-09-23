@@ -1593,6 +1593,67 @@ That gap is real and is accepted, not overlooked: content quality is not
 checkable from here, and a guard that pretended otherwise would be the same
 false-assurance failure this ledger keeps recording.
 
+### N18 — LSP.md relies on an `untracked/venv` symlink that nothing creates and the code calls legacy
+
+**Found**: chasing a Pyright `Import "pytest" could not be resolved` on a new
+test file during issue #53, while checking my own unverified explanation of it.
+
+`CLAUDE/development/LSP.md` makes the symlink load-bearing:
+
+- lines 14-18: `pyrightconfig.json`'s `venvPath: untracked` + `venv: venv`
+  "resolves through the stable `untracked/venv` symlink, which points at the
+  current fingerprint-keyed venv … the symlink is maintained to track it."
+- lines 34-35: that symlink "exists only in the main checkout".
+
+**All three claims checked against the main checkout, and all three fail:**
+
+- `untracked/venv` does not exist here. The only venv is
+  `untracked/venv-workspace-py311-81c29529`.
+- Nothing creates it. Searched `scripts/`, `src/`, `init.sh`, `install.sh` for
+  `ln -s`, `symlink_to` and `os.symlink`: the only `symlink_to` is the generic
+  worktree-seeding `_place` helper, and the only `ln -s` installs slash
+  commands.
+- The code treats that path as **legacy**, not as a maintained link:
+  `install_version.sh:371` and `upgrade_version.sh:358/930` bind it to
+  `LEGACY_VENV`, `paths.py:1087` to `legacy_dir`, `llm_qa.py:40` to
+  `_LEGACY_VENV_PYTHON`. It is the retired pre-v3.7.0 bare venv path.
+
+**Consequence**: in the main checkout, the live language server's configured
+environment has no target, so its third-party import resolution has nothing
+to resolve against. That is the noise Plan 00368 ("LSP is signal, not noise")
+existed to remove. The QA `pyright` gate is unaffected — it passes the QA
+interpreter explicitly as `--pythonpath`, which is why the gate is green while
+this stays invisible.
+
+**Not verified, so not claimed**: whether an upgrade actively DELETES
+something placed at `untracked/venv`. The `LEGACY_VENV` naming suggests a
+cleanup targets it, which would make a hand-made symlink short-lived, but the
+removal code was not read.
+
+**The flagged diagnostic itself was benign.** It came from a file in a
+worktree, and LSP.md is right that a worktree has no symlink and reports every
+third-party import missing. The defect is only in the main-checkout claim.
+
+**Same class as N17**, and the second instance in one day: documentation
+stating a mechanism the code does not implement. N17's cost was a wrong
+verdict; this one's is a diagnostics stream nobody can trust, which is worse
+because the damage is diffuse and never surfaces as a failure.
+
+**Candidate remedies**, cheapest first:
+
+1. Correct LSP.md to describe what actually happens, and have the main checkout
+   pass the interpreter the way the QA gate already does.
+2. Actually create and maintain the symlink — in `ensure_venv`, since it
+   already knows the current fingerprint-keyed path — and exempt it from the
+   legacy cleanup. That makes the doc true, but it collides with the
+   `LEGACY_VENV` meaning of the same path, so the collision has to be resolved
+   deliberately rather than by accident.
+
+Deduped before filing: no plan in the tree matches `pyright`, `pyrightconfig`
+or `language server`; the two `LSP` matches (00075, 00368) are Complete; the
+ledger has no entry. Plan 00368 is the likely origin of the symlink design and
+is where to look first.
+
 ### N17 — a stale docstring in `paths.py` produced a confident wrong verdict in a live investigation
 
 **Found**: triaging issue #53, by checking a sub-agent's finding before acting
