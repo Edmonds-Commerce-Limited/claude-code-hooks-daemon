@@ -86,8 +86,12 @@ original design. See the research document.
   enabling `daemon.payload_capture` (already scoped to `[Status]`) for a few
   renders. `transcript_path` IS present but is not needed for the main thread.
 - [x] ✅ **Task 1.2**: Render MAIN, SUB and TOTAL with the TTL per side. Main
-  reads straight from `prompt_cache`; only SUB needs aggregation.
-  `prompt_cache_indicator` renders `| ⚡ 99% 1h sub 62%`.
+  reads straight from `prompt_cache`; only SUB needs aggregation. **First
+  ticked with only MAIN and SUB, and no sub-side TTL.** Completed later:
+  `| ⚡ 99% 1h sub 96% 5m total 99%`. TOTAL is token-weighted, which works
+  because the payload's `hit_ratio` is itself token-weighted (checked against
+  the transcript), so main reads are recoverable from it and
+  `cache_write_tokens`.
 - [x] ✅ **Task 1.4**: Aggregate sub-agent totals at `SubagentStop` into a small
   sidecar rather than scanning the task directory from the status line (127
   files, re-rendered constantly). Same sensor/actuator split as
@@ -109,6 +113,11 @@ original design. See the research document.
   any later supervisor logic cannot drift. `prompt_cache_tiers.py` — pure, clock
   injected, four tiers with UNKNOWN distinct from COLD, and the EXPIRING window
   scaled to the TTL rather than fixed.
+- [x] ✅ **Task 1.8**: Count sub-agent usage per API REQUEST, not per record.
+  Claude Code writes one record per content block, each carrying the whole
+  request's usage, so the sensor counted every request about twice (4,276
+  records for 2,119 requests). Sub-agent writes were inflated 1.5–2.3x.
+  Deduped on message id; a record with no id is still counted.
 
 ### Phase 2: Measure
 
@@ -222,8 +231,11 @@ Three levers the plan did not know about when it was written. None is blocked.
 ## Success Criteria
 
 - [ ] Hit ratio reconciles with `/usage` for the same session.
-- [ ] The status segment shows all three values and is correct on a session
-  with zero sub-agents as well as one with many.
+- [x] The status segment shows all three values and is correct on a session
+  with zero sub-agents as well as one with many. Many: rendered from this
+  session's captured payload and 50 real sub-agent transcripts, and matched
+  an independent per-request sum exactly. Zero: pinned by unit test (main
+  figure only, no `sub`, no `total`).
 - [ ] A gap histogram exists for at least one human-paced project.
 - [ ] The decision function is validated by REPLAY, not by argument.
 - [ ] Every advisory rule traces to a Phase 3 observation, not to a doc.

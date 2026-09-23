@@ -152,6 +152,13 @@ class SubagentCacheAggregatorHandler(SubagentStopHandlerBase):
         interleaves agent transcripts with plain-text process output, so a
         strict whole-file parse fails on the first non-JSON line; here such a
         line is simply not a usage record.
+
+        **Counted per API request, not per record.** Claude Code writes one
+        record per content block, and each carries the whole request's usage,
+        so summing records counted every request about twice (measured: 4,276
+        records for 2,119 requests). A request is identified by its message
+        id. A record without an id cannot be matched against anything and is
+        counted on its own, since dropping it would lose real usage.
         """
         totals = dict(_EMPTY_TOTALS)
         try:
@@ -160,6 +167,7 @@ class SubagentCacheAggregatorHandler(SubagentStopHandlerBase):
             logger.debug("No readable agent transcript at %s: %s", transcript, exc)
             return totals
 
+        seen_message_ids: set[str] = set()
         for line in text.splitlines():
             line = line.strip()
             if not line:
@@ -170,9 +178,18 @@ class SubagentCacheAggregatorHandler(SubagentStopHandlerBase):
                 continue
             if not isinstance(record, dict):
                 continue
-            usage = (record.get("message") or {}).get("usage")
+            message = record.get("message") or {}
+            if not isinstance(message, dict):
+                continue
+            usage = message.get("usage")
             if not isinstance(usage, dict):
                 continue
+
+            message_id = message.get("id")
+            if isinstance(message_id, str) and message_id:
+                if message_id in seen_message_ids:
+                    continue
+                seen_message_ids.add(message_id)
 
             totals["requests"] += 1
             totals["cache_read_tokens"] += _as_int(usage.get("cache_read_input_tokens"))

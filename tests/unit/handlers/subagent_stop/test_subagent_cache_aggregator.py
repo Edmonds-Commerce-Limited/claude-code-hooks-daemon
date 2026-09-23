@@ -96,6 +96,67 @@ class TestSubagentCacheAggregatorHandler:
         assert totals["ttl_5m_write_tokens"] == 10
         assert totals["ttl_1h_write_tokens"] == 0
 
+    # --- one API request, several transcript records ---
+    #
+    # Claude Code writes one transcript record per CONTENT BLOCK (thinking,
+    # text, each tool_use), and every one of them carries the whole request's
+    # usage. Measured over this project's sub-agents: 4,276 usage records for
+    # 2,119 requests, every duplicate byte-identical. Summing records therefore
+    # counted each request about twice, inflating writes 1.5-2.3x per agent.
+
+    def test_records_sharing_a_message_id_are_one_request(self, handler, tmp_path):
+        usage = {"cache_read_input_tokens": 100, "cache_creation_input_tokens": 40}
+        target = tmp_path / "agent.jsonl"
+        _write_agent_transcript(
+            target,
+            [
+                {"message": {"id": "msg_1", "usage": usage}},
+                {"message": {"id": "msg_1", "usage": usage}},
+                {"message": {"id": "msg_1", "usage": usage}},
+            ],
+        )
+        totals = handler.totals_for(target)
+        assert totals["requests"] == 1
+        assert totals["cache_read_tokens"] == 100
+        assert totals["cache_write_tokens"] == 40
+
+    def test_distinct_message_ids_are_all_counted(self, handler, tmp_path):
+        target = tmp_path / "agent.jsonl"
+        _write_agent_transcript(
+            target,
+            [
+                {"message": {"id": "msg_1", "usage": {"cache_read_input_tokens": 100}}},
+                {"message": {"id": "msg_1", "usage": {"cache_read_input_tokens": 100}}},
+                {"message": {"id": "msg_2", "usage": {"cache_read_input_tokens": 7}}},
+            ],
+        )
+        totals = handler.totals_for(target)
+        assert totals["requests"] == 2
+        assert totals["cache_read_tokens"] == 107
+
+    def test_the_ttl_buckets_are_not_double_counted_either(self, handler, tmp_path):
+        usage = {
+            "cache_creation_input_tokens": 30,
+            "cache_creation": {"ephemeral_5m_input_tokens": 30, "ephemeral_1h_input_tokens": 0},
+        }
+        target = tmp_path / "agent.jsonl"
+        _write_agent_transcript(
+            target,
+            [
+                {"message": {"id": "msg_1", "usage": usage}},
+                {"message": {"id": "msg_1", "usage": usage}},
+            ],
+        )
+        assert handler.totals_for(target)["ttl_5m_write_tokens"] == 30
+
+    def test_a_record_without_a_message_id_is_still_counted(self, handler, transcript):
+        """With no id there is nothing to dedupe on; dropping it would lose real usage.
+
+        The shared fixture carries no ids, so this is also what keeps every
+        older assertion in this file meaningful.
+        """
+        assert handler.totals_for(transcript)["requests"] == 2
+
     def test_a_missing_transcript_yields_zeroes_not_an_exception(self, handler, tmp_path):
         totals = handler.totals_for(tmp_path / "does-not-exist.jsonl")
         assert totals["requests"] == 0

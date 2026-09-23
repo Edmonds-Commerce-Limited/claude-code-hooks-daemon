@@ -110,6 +110,15 @@ Measured over one long dogfood session.
 | scout agent | 74      | 3,739,621     | 227,136      | 94.27% | 5-minute | 0.166x    |
 | guide agent | 12      | 302,080       | 183,790      | 62.17% | 5-minute | 0.535x    |
 
+**Caveat, found later (Task 1.8):** these rows count transcript RECORDS, and
+a request is written as one record per content block, each carrying the
+whole request's usage. The ratios are therefore weighted by block count
+rather than by request. Recounted per request, the twelve largest of this
+session's sub-agents moved by up to 1.8 points (smaller agents were not
+checked individually). The direction of
+the finding stands (main ~99% on 1h, short sub-agents far lower on 5m), but
+the exact figures above are not per-request figures.
+
 "Effective" is the blended input multiplier,
 `(0.1 x read + W x write + 1.0 x uncached) / total_input`, against a floor of
 0.10x.
