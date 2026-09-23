@@ -201,13 +201,14 @@ Three levers the plan did not know about when it was written. None is blocked.
   two only mean something together. Measured on this repository: **neither
   bucket is explicitly configured**, so sub-agents sit on 5m while 331 gaps
   cross it.
-- [ ] ⬜ **Task 5.2**: Worktree agents each start COLD. The cache is scoped to
-  one machine AND directory, worktrees included, and this project dispatches
-  into isolated worktrees routinely. Quantify what that costs before deciding
-  whether it is worth changing. **Blocked on the same class of thing as 2.4**:
-  a session has to have actually RUN in a worktree to leave a transcript, and
-  this container holds exactly one project directory. The cost is real and
-  documented; the magnitude cannot be measured from here.
+- [x] ✅ **Task 5.2**: Worktree agents each start COLD. Quantify what that
+  costs before deciding whether it is worth changing. **Measured by a
+  controlled probe, and not worth changing.** A worktree sibling shares 8,306
+  first-request tokens against 9,717 for a same-directory sibling: ~1.4k
+  tokens, first request only. The bigger finding is that ceiling. Even
+  same-directory siblings with identical prompts share only 9,717 of ~29k, so
+  ~19.4k is written fresh on every dispatch, and nothing the dispatcher
+  controls moves it. See the research document.
 - [x] ❌ **Task 5.3**: Prefer `/rewind` over `/compact` where the intent is to
   abandon a path. **Recorded as documentation, deliberately NOT built as an
   advisory.** The fact is sound — rewind truncates to an already-cached prefix

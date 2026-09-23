@@ -449,3 +449,49 @@ does — which is exactly the half the status bar could not previously see.
 tool now exists and any project can run it; what is missing is a transcript
 from a HUMAN-PACED project, where the gaps are set by a person's attention
 rather than by a scheduler.
+
+## Worktree agents, and how much of a sub-agent's first request is shareable
+
+Task 5.2 asked what worktree isolation costs, since the cache is scoped to
+the directory. The session's history could not answer it: all three
+worktree agents on record were dispatched alone, and all three read nothing
+on their first request. Of the session's 54 sub-agent first requests, 11
+read a non-zero amount. Ten of those followed another dispatch of the same
+model within the 5-minute TTL. The exception is one Sonnet agent that read
+8,689 tokens with no same-model dispatch in the five minutes before it.
+Whether it read from a still-running agent's later requests was not
+checked. Two first requests read zero despite having such a predecessor.
+So in practice, sharing comes from siblings, the question only matters for
+siblings, and it needed a controlled experiment.
+
+**The probe.** Pairs of trivial Haiku `general-purpose` agents with the same
+prompt, the second dispatched as soon as the first had answered, well inside
+the 5-minute TTL. Numbers are first-request tokens.
+
+| pair                      | directory                | A read | B read    | B written |
+| ------------------------- | ------------------------ | ------ | --------- | --------- |
+| control                   | `/workspace`, both       | 0      | **9,717** | ~19.4k    |
+| worktree                  | a separate worktree each | 7,712  | **8,306** | 19,625    |
+| control, same description | `/workspace`, both       | 9,717  | **9,717** | 19,426    |
+
+(Worktree A was not cold: it read 7,712 tokens from the control pair two
+minutes earlier, so that much of the prefix is independent of the directory.)
+
+**Task 5.2's answer: the worktree penalty is ~1.4k tokens per sibling, on
+the first request only.** 9,717 against 8,306 is about 5% of a ~28k first
+request. Not worth changing.
+
+**The larger finding is the ceiling itself.** Siblings in the SAME directory
+with identical prompts share exactly 9,717 tokens and no more. The other
+~19.4k of every sub-agent's first request is written fresh every time, which
+is the concrete size of the "dispatch floor cost" above.
+
+**What sets the boundary is narrowed, not proven.** The harness wraps each
+prompt as `<teammate-message summary="<description>">`, so differing
+descriptions looked like the cause. The third pair ruled that out: same
+description, same 9,717. The first `user` record's other variable is the
+harness's per-dispatch roster reminder ("Other agents active in this
+session: …"), which changes with every dispatch. It also keeps listing
+agents that finished or were reaped long before. The coordinator cannot hold
+the roster constant, so it cannot be isolated from here. Nothing a dispatcher
+controls (prompt, description, directory) moves the ceiling.
