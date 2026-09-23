@@ -1593,6 +1593,54 @@ That gap is real and is accepted, not overlooked: content quality is not
 checkable from here, and a guard that pretended otherwise would be the same
 false-assurance failure this ledger keeps recording.
 
+### N17 — a stale docstring in `paths.py` produced a confident wrong verdict in a live investigation
+
+**Found**: triaging issue #53, by checking a sub-agent's finding before acting
+on it.
+
+`resolve_existing_venv_python_with_diagnostics`'s docstring enumerates the
+five-step venv precedence in detail. **It never mentions slug eligibility**,
+which Plan 00313 added and which `_venv_slug_eligible` applies at three of
+those steps — including the step 4 scan fallback (`paths.py:1037`), where an
+ineligible candidate is skipped before an interpreter is even picked.
+
+**The drift was not inert.** A verification sub-agent dispatched to check
+issue #53's claims read the docstring, concluded step 4 is *not* slug-keyed,
+and reported that the real failure was a dead interpreter symlink rather than
+slug exclusion — flagging it as a finding that "changes the fix". It cited
+`paths.py:871-872`, which are docstring lines, as evidence about runtime
+behaviour. Acting on it would have sent a fix at the wrong mechanism and
+contradicted the (correct) reading of Plan 00313's history.
+
+**Why this is worth an entry when N5 row (e) already recorded the class.**
+That row — `utils/host_identity.py`, "the code and the docstring disagree" —
+is closed, and judged the drift "defensible". This is the same class with
+evidence the earlier instance lacked: the disagreement actually misled a
+capable reader into a confident, specific, wrong conclusion in the middle of
+real work. The class is therefore more expensive than the closed row assumed,
+which is the ledger's dominant theme once more — **an entry's premise is
+narrower than reality**.
+
+**What makes this one dangerous rather than untidy**: the docstring is
+thorough. A short or absent docstring invites a reader to check the code; a
+detailed five-step enumeration reads as authoritative and stops the reader
+looking further. Completeness is what made it convincing.
+
+**Candidate remedies**, cheapest first:
+
+1. Add the slug-eligibility step to the docstring's precedence list, naming
+   which steps apply it. One edit, and the drift is gone.
+2. Pin it with a test asserting the docstring names every filter the function
+   applies. Cheap to write, but it pins prose shape rather than truth, and a
+   future filter added without the test noticing is the same defect again.
+3. Nothing — accept that docstrings drift and require readers to verify
+   against code. Honest, but it is the status quo that just cost a wrong
+   verdict.
+
+**Not filed as a plan.** Checked first this time: no plan in the tree
+(archives included) matches `docstring`, `stale doc` or `comment drift`, and
+the ledger's only related entry is the closed N5 row (e).
+
 ### N16 — the failsafe cron has two zero-token defences; the issue-sdlc cron has neither
 
 > **SUPERSEDED, an hour after filing — this was already recorded.**
