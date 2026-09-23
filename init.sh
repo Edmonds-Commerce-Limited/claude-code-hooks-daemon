@@ -45,6 +45,22 @@ _HOOKS_DAEMON_TRACKED_VERSION=""
 # no context at all.
 _HOOKS_DAEMON_REPO_UNCONFIGURED=false
 
+# Set by ensure_daemon when a REAL daemon clone is present (see
+# _daemon_clone_present — bare directory presence does not qualify) but no
+# venv interpreter resolves for THIS project path (GitHub issue #53).
+# Distinct from NOT_INSTALLED, whose remedy — the skill's install path — runs
+# `rm -rf` on the whole daemon directory when its health probe cannot pass,
+# which is exactly what happens here: the clone exists but the wrong venv is
+# inside it (or none at all), most commonly the second of two bind-mounted
+# views (host vs container) sharing one clone but not its per-path venv
+# (Plan 00099). The safe remedy is a same-version upgrade instead — see the
+# message below.
+# _HOOKS_DAEMON_VENV_MISSING_VERSION holds the clone's own version when
+# readable; empty when the clone itself looks damaged (version.py missing or
+# unparseable), which the message must also account for.
+_HOOKS_DAEMON_VENV_MISSING=false
+_HOOKS_DAEMON_VENV_MISSING_VERSION=""
+
 #
 # emit_hook_error() - Output a valid hook error response to stdout
 #
@@ -128,6 +144,56 @@ emit_hook_error() {
             "installer: it OVERWRITES this repository's own tracked" \
             ".claude/hooks-daemon.yaml and .claude/settings.json with default" \
             "templates (--force only decides whether a .bak is kept first).")
+    elif [[ "$_HOOKS_DAEMON_VENV_MISSING" == "true" ]]; then
+        # VENV MISSING FOR THIS PATH: the clone directory is present, but no
+        # venv interpreter resolves here (GitHub issue #53).
+        #
+        # The standard NOT_INSTALLED message below is the wrong answer: its
+        # remedy is the install skill, and when the health probe it runs
+        # cannot pass — which it cannot, since the wrong venv (or none) is in
+        # this directory — the skill escalates to `--force` on its own, whose
+        # `rm -rf` deletes $HOOKS_DAEMON_ROOT_DIR outright. That destroys
+        # whatever venv IS in there, which most often belongs to a second
+        # view of the same bind-mounted project (host vs container) sharing
+        # this clone but not its per-path venv. So this branch says outright
+        # not to install, same reasoning as REPO_UNCONFIGURED and
+        # VERSION_MISMATCH above: when the usual advice cannot succeed safely,
+        # say so rather than offering it anyway.
+        #
+        # The safe fix is a same-version upgrade: scripts/upgrade_version.sh's
+        # idempotent path starts with ensure_venv (Plan 00099/00104) and
+        # deletes nothing. Pinning it to the clone's OWN version (read by
+        # _clone_version, which needs no working venv) keeps it on that path.
+        local _hd_venv_missing_remedy
+        if [[ -n "$_HOOKS_DAEMON_VENV_MISSING_VERSION" ]]; then
+            _hd_venv_missing_remedy="TO FIX — build the missing venv with a same-version upgrade:
+  Use the hooks-daemon skill to upgrade (Skill tool: skill=hooks-daemon, args=upgrade $_HOOKS_DAEMON_VENV_MISSING_VERSION)"
+        else
+            _hd_venv_missing_remedy="The clone's own version could not be determined (version.py is missing or
+unparseable at $HOOKS_DAEMON_ROOT_DIR) — this checkout's clone looks damaged
+or partial. Do not run the install skill on it (see below). Ask a human to
+inspect $HOOKS_DAEMON_ROOT_DIR directly, or remove it and reinstall only once
+you are certain no other environment's venv lives there."
+        fi
+
+        context_msg=$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s' \
+            "HOOKS DAEMON: clone present, venv missing for this project path" \
+            "" \
+            "The daemon clone already exists under $HOOKS_DAEMON_ROOT_DIR, but no" \
+            "venv interpreter resolves for this checkout. This is the normal state" \
+            "the first time a bind-mounted project is opened from a second view" \
+            "(host vs container) — the venv is keyed per project path (Plan 00099)," \
+            "so the other view's venv correctly does not resolve here." \
+            "Checkout: $_hooks_daemon_checkout" \
+            "" \
+            "ALL safety handlers, code quality checks, and workflow enforcement are INACTIVE." \
+            "" \
+            "Do NOT use install/force here — it deletes the ENTIRE daemon directory
+($HOOKS_DAEMON_ROOT_DIR) with rm -rf, including any other environment's venv
+that lives inside it. The install skill escalates to --force automatically
+when its health probe fails, which it will here.
+
+$_hd_venv_missing_remedy")
     elif [[ "$_HOOKS_DAEMON_NOT_INSTALLED" == "true" ]]; then
         # NOT INSTALLED: Guide to install guide — project was cloned but daemon never set up
         #
@@ -236,6 +302,20 @@ emit_hook_error() {
                 jq -n --arg event "$event_name" --arg context "$context_msg" \
                     '{"hookSpecificOutput": {"hookEventName": $event, "additionalContext": $context}}'
             fi
+        elif [[ "$_HOOKS_DAEMON_VENV_MISSING" == "true" ]]; then
+            # Venv missing for this path: Stop/SubagentStop block, others
+            # fail-open with the upgrade-not-install guidance. The block
+            # reason must not read as the plain NOT_INSTALLED block — a
+            # reader who sees "venv" here knows install would be the wrong
+            # fix, where a bare "not installed" would point them at it.
+            if [[ "$event_name" == "Stop" || "$event_name" == "SubagentStop" ]]; then
+                jq -n --arg reason \
+                    "Hooks daemon clone present but venv missing for this project path ($_hooks_daemon_checkout) - do not install/force, see additionalContext - protection not active" \
+                    '{"decision": "block", "reason": $reason}'
+            else
+                jq -n --arg event "$event_name" --arg context "$context_msg" \
+                    '{"hookSpecificOutput": {"hookEventName": $event, "additionalContext": $context}}'
+            fi
         elif [[ "$_HOOKS_DAEMON_NOT_INSTALLED" == "true" ]]; then
             # Not installed: Stop/SubagentStop block, others fail-open with install guidance.
             # The block reason names the checkout: this response is shaped
@@ -272,7 +352,7 @@ emit_hook_error() {
 import json
 import sys
 
-event_name, context_msg, ci_enforced, not_installed, checkout = sys.argv[1:6]
+event_name, context_msg, ci_enforced, not_installed, checkout, venv_missing = sys.argv[1:7]
 stop_events = ("Stop", "SubagentStop")
 
 if not event_name:
@@ -286,6 +366,21 @@ elif ci_enforced == "true":
         resp = {"decision": "deny", "reason": context_msg}
     elif event_name in stop_events:
         resp = {"decision": "block", "reason": "Hooks daemon REQUIRED (ci_enabled: true) but not installed"}
+    else:
+        resp = {"hookSpecificOutput": {"hookEventName": event_name, "additionalContext": context_msg}}
+elif venv_missing == "true":
+    # Clone present, venv missing for this path: same reasoning as the jq
+    # branch above -- the block reason must not read as plain NOT_INSTALLED,
+    # since the remedy that answer names (install/force) is destructive here.
+    if event_name in stop_events:
+        resp = {
+            "decision": "block",
+            "reason": (
+                f"Hooks daemon clone present but venv missing for this project path "
+                f"({checkout}) - do not install/force, see additionalContext - "
+                f"protection not active"
+            ),
+        }
     else:
         resp = {"hookSpecificOutput": {"hookEventName": event_name, "additionalContext": context_msg}}
 elif not_installed == "true":
@@ -304,7 +399,7 @@ else:
 
 print(json.dumps(resp))
 ' "$event_name" "$context_msg" "$_HOOKS_DAEMON_CI_ENFORCED" "$_HOOKS_DAEMON_NOT_INSTALLED" \
-            "$_hooks_daemon_checkout"
+            "$_hooks_daemon_checkout" "$_HOOKS_DAEMON_VENV_MISSING"
     fi
 }
 
@@ -847,6 +942,31 @@ _is_daemon_installed() {
 }
 
 #
+# _daemon_clone_present() - Is there a REAL clone under HOOKS_DAEMON_ROOT_DIR?
+#
+# NOT the same question as `[[ -d "$HOOKS_DAEMON_ROOT_DIR" ]]`: this directory
+# always exists after init.sh has been sourced once, even on a genuinely fresh
+# checkout, because the untracked-dir setup a little further down this file
+# unconditionally does `mkdir -p "${HOOKS_DAEMON_ROOT_DIR}/untracked"` on
+# every source. Bare directory presence therefore cannot tell a fresh
+# checkout from a real clone with a missing venv (GitHub issue #53) — it is
+# true in both.
+#
+# scripts/lib/resolve_venv.sh is a real signal: it ships with the clone (it
+# is the canonical library `_resolve_python_cmd()` delegates to, and that
+# function's own failure message already names this exact path), and nothing
+# else creates it. Its presence means a clone was genuinely installed here,
+# whatever state its venv is in.
+#
+# Returns:
+#   0 if a real clone is present (its venv may still be missing/broken)
+#   1 if this is a genuinely fresh checkout — no clone at all
+#
+_daemon_clone_present() {
+    [[ -f "$HOOKS_DAEMON_ROOT_DIR/scripts/lib/resolve_venv.sh" ]]
+}
+
+#
 # _clone_version() - Version of the INSTALLED (gitignored) daemon clone
 #
 # Read with grep from version.py rather than by importing the package: the
@@ -1092,7 +1212,7 @@ ensure_daemon() {
     fi
 
     # Non-CI environment: fail with error so agent sees it and can act.
-    # Three diagnoses, MOST SPECIFIC FIRST (Plan 00386).
+    # Four diagnoses, MOST SPECIFIC FIRST (Plan 00386, Plan 00454).
     #
     # The version mismatch is tested before _is_daemon_installed deliberately.
     # That check requires a RESOLVED venv interpreter, and a clone stale enough
@@ -1101,10 +1221,25 @@ ensure_daemon() {
     # the versions and sends the reader to install rather than upgrade. Reversing
     # the order costs nothing: _detect_stale_clone reads the clone's own
     # version.py, so it CANNOT fire unless a clone is really present on disk.
+    #
+    # VENV_MISSING sits between the two: a real clone is present (so this is
+    # NOT a fresh checkout — see _daemon_clone_present) but _is_daemon_installed
+    # still failed, meaning no venv interpreter resolved for this project
+    # path. The discriminator is `_daemon_clone_present`, NOT whether the
+    # clone's version is readable — the danger this state exists to avoid is
+    # the install skill's `rm -rf` of the whole directory, which is just as
+    # destructive against a damaged/partial clone as against a healthy one.
     if _detect_stale_clone; then
         _HOOKS_DAEMON_VERSION_MISMATCH=true
     elif ! _is_daemon_installed; then
-        _HOOKS_DAEMON_NOT_INSTALLED=true
+        if _daemon_clone_present; then
+            _HOOKS_DAEMON_VENV_MISSING=true
+            if ! _HOOKS_DAEMON_VENV_MISSING_VERSION="$(_clone_version)"; then
+                _HOOKS_DAEMON_VENV_MISSING_VERSION=""
+            fi
+        else
+            _HOOKS_DAEMON_NOT_INSTALLED=true
+        fi
     fi
     return 1
 }

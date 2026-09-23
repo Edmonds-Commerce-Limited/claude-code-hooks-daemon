@@ -62,20 +62,20 @@ missing venv and changes nothing else.
 
 ### Phase 1: TDD in a worktree
 
-- [ ] ⬜ **Task 1.1**: RED — integration tests, modelled on
+- [x] ✅ **Task 1.1**: RED — integration tests, modelled on
   `tests/integration/test_init_sh_stale_clone_version.py`, driving `init.sh`
   with (a) a clone directory present and no venv, (b) no clone at all. Assert
   (a) gets the new message and NOT `Not installed`; (b) still gets
   `Not installed` unchanged. Quote the failure output.
-- [ ] ⬜ **Task 1.2**: GREEN — add the state to the diagnosis ladder between
+- [x] ✅ **Task 1.2**: GREEN — add the state to the diagnosis ladder between
   `_detect_stale_clone` and `_is_daemon_installed`, and its branch in
   `emit_hook_error`, following the existing `REPO_UNCONFIGURED` /
   `VERSION_MISMATCH` pattern. Version from `_clone_version()`, which needs no
   venv.
-- [ ] ⬜ **Task 1.3**: Cover the version-unreadable case — a clone whose
+- [x] ✅ **Task 1.3**: Cover the version-unreadable case — a clone whose
   `version.py` cannot be parsed must still get a safe message, never a blank
   version or a fall-through to the install advice.
-- [ ] ⬜ **Task 1.4**: Full QA green; release note in
+- [x] ✅ **Task 1.4**: Full QA green; release note in
   `CLAUDE/UPGRADES/UNRELEASED/release-notes/`.
 
 ### Phase 2: Deliver
