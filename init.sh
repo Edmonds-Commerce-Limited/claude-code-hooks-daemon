@@ -45,19 +45,20 @@ _HOOKS_DAEMON_TRACKED_VERSION=""
 # no context at all.
 _HOOKS_DAEMON_REPO_UNCONFIGURED=false
 
-# Set by ensure_daemon when a REAL daemon clone is present (see
-# _daemon_clone_present — bare directory presence does not qualify) but no
-# venv interpreter resolves for THIS project path (GitHub issue #53).
-# Distinct from NOT_INSTALLED, whose remedy — the skill's install path — runs
-# `rm -rf` on the whole daemon directory when its health probe cannot pass,
-# which is exactly what happens here: the clone exists but the wrong venv is
-# inside it (or none at all), most commonly the second of two bind-mounted
-# views (host vs container) sharing one clone but not its per-path venv
-# (Plan 00099). The safe remedy is a same-version upgrade instead — see the
-# message below.
-# _HOOKS_DAEMON_VENV_MISSING_VERSION holds the clone's own version when
-# readable; empty when the clone itself looks damaged (version.py missing or
-# unparseable), which the message must also account for.
+# Set by ensure_daemon when either a REAL daemon clone is present (see
+# _daemon_clone_present — bare directory presence does not qualify) or a
+# leftover venv is (see _daemon_orphan_venv_present), but no venv interpreter
+# resolves for THIS project path (GitHub issue #53). Distinct from
+# NOT_INSTALLED, whose remedy — the skill's install path — runs `rm -rf` on
+# the whole daemon directory when its health probe cannot pass, which is
+# exactly what happens here: the clone exists but the wrong venv is inside it
+# (or none at all), most commonly the second of two bind-mounted views (host
+# vs container) sharing one clone but not its per-path venv (Plan 00099). The
+# safe remedy is a same-version upgrade instead — see the message below.
+# _HOOKS_DAEMON_VENV_MISSING_VERSION holds the clone's own version when a
+# real clone was confirmed present AND it is readable; empty otherwise (a
+# leftover venv with no confirmed clone, or a confirmed clone whose version
+# is unreadable), which the message must also account for.
 _HOOKS_DAEMON_VENV_MISSING=false
 _HOOKS_DAEMON_VENV_MISSING_VERSION=""
 
@@ -145,8 +146,10 @@ emit_hook_error() {
             ".claude/hooks-daemon.yaml and .claude/settings.json with default" \
             "templates (--force only decides whether a .bak is kept first).")
     elif [[ "$_HOOKS_DAEMON_VENV_MISSING" == "true" ]]; then
-        # VENV MISSING FOR THIS PATH: the clone directory is present, but no
-        # venv interpreter resolves here (GitHub issue #53).
+        # VENV MISSING FOR THIS PATH: a real clone, a leftover venv, or both
+        # is present under $HOOKS_DAEMON_ROOT_DIR, but no venv interpreter
+        # resolves here (GitHub issue #53) — see _HOOKS_DAEMON_VENV_MISSING's
+        # declaration for which of the two ensure_daemon found.
         #
         # The standard NOT_INSTALLED message below is the wrong answer: its
         # remedy is the install skill, and when the health probe it runs
@@ -169,11 +172,13 @@ emit_hook_error() {
             _hd_venv_missing_remedy="TO FIX — build the missing venv with a same-version upgrade:
   Use the hooks-daemon skill to upgrade (Skill tool: skill=hooks-daemon, args=upgrade $_HOOKS_DAEMON_VENV_MISSING_VERSION)"
         else
-            _hd_venv_missing_remedy="The clone's own version could not be determined (version.py is missing or
-unparseable at $HOOKS_DAEMON_ROOT_DIR) — this checkout's clone looks damaged
-or partial. Do not run the install skill on it (see below). Ask a human to
-inspect $HOOKS_DAEMON_ROOT_DIR directly, or remove it and reinstall only once
-you are certain no other environment's venv lives there."
+            _hd_venv_missing_remedy="The clone's own version could not be read with confidence — either
+version.py is missing or unparseable, or scripts/lib/resolve_venv.sh itself
+is gone, which means $HOOKS_DAEMON_ROOT_DIR is not trusted enough to name an
+upgrade target from. This checkout's clone looks damaged or partial. Do not
+run the install skill on it (see below). Ask a human to inspect
+$HOOKS_DAEMON_ROOT_DIR directly, or remove it and reinstall only once you are
+certain no other environment's venv lives there."
         fi
 
         context_msg=$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s' \
@@ -967,6 +972,47 @@ _daemon_clone_present() {
 }
 
 #
+# _daemon_orphan_venv_present() - Is there a leftover venv under untracked/?
+#
+# A second signal for the same question `_daemon_clone_present` answers, and
+# needed for a case it cannot see (review finding on Plan 00454): a clone
+# that has LOST `scripts/lib/resolve_venv.sh` — damaged, partially deleted,
+# mid-reinstall — but still holds another environment's venv under
+# `untracked/venv-*` (Plan 00099's fingerprint-keyed layout,
+# `${HOOKS_DAEMON_ROOT_DIR}/untracked/venv-*/bin/python`). That venv is
+# exactly what install/force's `rm -rf` would destroy, so its mere presence
+# must block the NOT_INSTALLED fallback just as surely as a healthy clone
+# does — regardless of whether `resolve_venv.sh` survived.
+#
+# Safe against the same false-positive `_daemon_clone_present`'s own docstring
+# warns about: `mkdir -p "${HOOKS_DAEMON_ROOT_DIR}/untracked"` (a few hundred
+# lines down) creates an EMPTY directory, so a genuinely fresh checkout never
+# has a `venv-*` entry under it. The glob is nullglob-independent — a
+# no-match keeps `venv_dir` as the literal pattern string, which
+# `[[ -d ]]` then rejects like any other nonexistent path.
+#
+# Returns:
+#   0 if at least one untracked/venv-* directory exists
+#   1 if none does (fresh checkout, or a healthy clone with a resolved venv
+#     already handled by _is_daemon_installed elsewhere)
+#
+_daemon_orphan_venv_present() {
+    # canonical-resolver-exempt: this asks a different question from
+    # resolve_venv_python() (scripts/lib/resolve_venv.sh) — PRESENCE of a
+    # venv-* directory at all, not whether it resolves to a WORKING
+    # interpreter. A venv-* directory that resolve_venv_python() would
+    # reject (missing bin/python, mid-write, otherwise broken) still holds
+    # bytes that install/force's rm -rf would destroy, so delegating to the
+    # resolver here would under-detect exactly the case this function exists
+    # to catch.
+    local venv_dir
+    for venv_dir in "$HOOKS_DAEMON_ROOT_DIR"/untracked/venv-*; do
+        [[ -d "$venv_dir" ]] && return 0
+    done
+    return 1
+}
+
+#
 # _clone_version() - Version of the INSTALLED (gitignored) daemon clone
 #
 # Read with grep from version.py rather than by importing the package: the
@@ -1222,13 +1268,26 @@ ensure_daemon() {
     # the order costs nothing: _detect_stale_clone reads the clone's own
     # version.py, so it CANNOT fire unless a clone is really present on disk.
     #
-    # VENV_MISSING sits between the two: a real clone is present (so this is
-    # NOT a fresh checkout — see _daemon_clone_present) but _is_daemon_installed
-    # still failed, meaning no venv interpreter resolved for this project
-    # path. The discriminator is `_daemon_clone_present`, NOT whether the
-    # clone's version is readable — the danger this state exists to avoid is
-    # the install skill's `rm -rf` of the whole directory, which is just as
-    # destructive against a damaged/partial clone as against a healthy one.
+    # VENV_MISSING sits between the two: something real is present under
+    # HOOKS_DAEMON_ROOT_DIR (so this is NOT a fresh checkout) but
+    # _is_daemon_installed still failed, meaning no venv interpreter resolved
+    # for this project path. "Something real" is TWO discriminators, not one
+    # — neither is bare directory presence, and NEITHER is whether the
+    # clone's version is readable:
+    #   - _daemon_clone_present: a real clone (scripts/lib/resolve_venv.sh)
+    #     is here, whatever state its venv is in. When true, _clone_version
+    #     is trusted enough to name a version-pinned upgrade.
+    #   - _daemon_orphan_venv_present: EVEN WITHOUT a real clone marker, a
+    #     leftover untracked/venv-* directory is exactly what install/force's
+    #     rm -rf would destroy — reviewed in Plan 00454 and missed by the
+    #     first version of this fix, which read a clone that had lost
+    #     resolve_venv.sh but still held another view's venv as NOT_INSTALLED
+    #     and recommended install anyway. When ONLY this signal fires, the
+    #     clone is not trusted enough to read _clone_version from — a
+    #     partially damaged clone can have some files intact and others gone,
+    #     and guessing which half to trust is the mistake this branch exists
+    #     to avoid — so the version stays empty and the message says the
+    #     clone looks damaged rather than naming an upgrade target.
     if _detect_stale_clone; then
         _HOOKS_DAEMON_VERSION_MISMATCH=true
     elif ! _is_daemon_installed; then
@@ -1237,6 +1296,9 @@ ensure_daemon() {
             if ! _HOOKS_DAEMON_VENV_MISSING_VERSION="$(_clone_version)"; then
                 _HOOKS_DAEMON_VENV_MISSING_VERSION=""
             fi
+        elif _daemon_orphan_venv_present; then
+            _HOOKS_DAEMON_VENV_MISSING=true
+            _HOOKS_DAEMON_VENV_MISSING_VERSION=""
         else
             _HOOKS_DAEMON_NOT_INSTALLED=true
         fi

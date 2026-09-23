@@ -171,3 +171,133 @@ QA_EXIT=0
    encoders, Stop/SubagentStop handling, the flag-init-under-`set -u`
    warning, not touching install.sh/upgrade scripts) held up as written —
    no other deviations.
+
+## Follow-up round: review finding + two cleanups (commit after c58cca62)
+
+Team lead's review confirmed the mkdir claim independently and agreed the
+deviation was right, then found `_daemon_clone_present()` alone still left
+the harm reachable: a clone that lost `scripts/lib/resolve_venv.sh` but still
+holds another view's venv under `untracked/venv-*` reads as no-clone, falls
+to NOT_INSTALLED, and gets the install advice — install's `rm -rf` deletes
+that venv.
+
+### What changed
+
+- `init.sh`
+  - New helper `_daemon_orphan_venv_present()` — checks for any
+    `untracked/venv-*` directory (Plan 00099's fingerprint-keyed layout),
+    independent of `_daemon_clone_present`. Safe against the same mkdir side
+    effect: `mkdir -p untracked/` creates an EMPTY directory, so a fresh
+    checkout never has a `venv-*` entry.
+  - `ensure_daemon`'s ladder: `elif _daemon_orphan_venv_present` added after
+    the `_daemon_clone_present` branch, before the `NOT_INSTALLED` fallback.
+    When only the orphan-venv signal fires (no confirmed real clone),
+    `_HOOKS_DAEMON_VENV_MISSING_VERSION` is set to `""` unconditionally —
+    `_clone_version` is never even attempted. This was a deliberate choice,
+    not a default: without `resolve_venv.sh`, the clone is not trusted
+    enough to say which of its other files are intact, so the message always
+    reads as "damaged clone" rather than risking a version-pinned upgrade
+    command built from a file that happened to survive. Matches the lead's
+    stated lean, taken as the decision rather than left as a coin flip.
+  - The `VENV_MISSING` branch's "version could not be determined" remedy
+    text was widened to name BOTH root causes (`version.py` unreadable, OR
+    `resolve_venv.sh` itself missing) — the old wording named only the
+    first, which would have been an overclaim in the new orphan-venv-only
+    path (exactly the paths.py N17 mistake the lead flagged not to repeat).
+  - Comments updated throughout (flag declaration, ladder, message branch)
+    to describe both discriminators instead of one.
+  - New comment on `_daemon_orphan_venv_present`'s glob loop:
+    `# canonical-resolver-exempt: ...` — unplanned, found by QA (below), not
+    by the review. `scripts/qa/check_canonical_callers.sh` (Plan 00104 Phase
+    6\) statically forbids any `for x in .../untracked/venv-*` loop outside
+    `scripts/lib/resolve_venv.sh` unless it delegates to
+    `resolve_venv_python()` or carries this marker. Delegating doesn't fit:
+    `resolve_venv_python()` answers "is there a WORKING interpreter",
+    whereas this function deliberately answers "does ANY venv-\* directory
+    exist" — a broken/partial venv-\* that `resolve_venv_python()` would
+    reject still holds bytes `rm -rf` would destroy, so delegating would
+    under-detect the exact case the function exists to catch. Documented
+    inline with that reasoning rather than just silencing the check.
+- `tests/integration/test_init_sh_venv_missing_message.py`
+  - Cleanup 2: removed the dead `_rc()` helper (copied from
+    `test_init_sh_stale_clone_version.py`, never called here).
+  - Cleanup 3: `test_both_encoders_produce_the_same_pretooluse_answer`'s
+    function-local `import pytest` + manual skip replaced with a top-level
+    `import pytest` and `@pytest.mark.skipif(shutil.which("jq") is None, ...)`.
+  - New fixture `_project_with_orphan_venv()` — a clone dir with an
+    `untracked/venv-other-view/bin/python` placeholder and deliberately NO
+    `scripts/lib/resolve_venv.sh`, optionally with a readable `version.py`.
+  - 4 new tests: ladder wiring for the orphan-venv case, a companion control
+    (fresh checkout has no `venv-*` either), and two message tests — one
+    pinning "never recommends install" with a stronger assertion than the
+    existing ones (see RED evidence below for why), one pinning "gets the
+    damaged-clone message even when a version happens to read".
+
+### RED evidence
+
+`pytest tests/integration/test_init_sh_venv_missing_message.py -q`, new tests
+added, `init.sh` unchanged from c58cca62:
+
+```
+FAILED ...test_an_orphaned_venv_with_no_resolve_venv_sh_still_sets_the_new_flag
+  assert 'venv_missing=true not_installed=false' in 'venv_missing=false not_installed=true\n'
+FAILED ...test_an_orphaned_venv_never_gets_the_install_advice
+  assert 'args=install' not in '{...}'
+  'args=install' is contained here:
+    s-daemon, args=install)\n\nafter installing, restart your claude session for hooks to activate."
+2 failed, 18 passed in 1.05s
+```
+
+Worth noting: my first draft of `test_an_orphaned_venv_never_gets_the_install_advice`
+used the same weak `"do not" in context` pattern as the earlier round's
+tests, and it PASSED on the buggy code — because NOT_INSTALLED's own message
+contains the phrase "do not improvise" while still recommending install. That
+would have been a false-green RED phase. Caught before running by re-reading
+the existing message text, tightened to assert `"args=install" not in context` (the actual thing that must never appear) before running the
+checker at all — so the failure output above is from the corrected version.
+
+### GREEN result
+
+```
+tests/integration/test_init_sh_venv_missing_message.py: 20 passed in 1.01s
+tests/integration/test_canonical_callers_static_check.py: 3 passed
+```
+
+Plus the same regression sweep as the first round, all still green:
+`test_init_sh_stale_clone_version.py`, `test_not_installed_fallback_names_the_checkout.py`,
+`test_ci_passthrough.py`, `test_relay_guard_fail_open.py`,
+`test_relay_guard_foreign_checkout.py`, `test_forwarder_jq_free.py`,
+`test_forwarder_generator_raw_stdout.py` — 124 passed, 3 skipped (relay
+binary not built on this machine, pre-existing and unrelated).
+
+`bash -n init.sh`, `shellcheck init.sh`, `black --check` on the test file:
+all clean.
+
+### QA_EXIT
+
+Ran full QA three times this round, daemon restarted before each:
+
+1. `QA_EXIT=1`, 33/35 — `canonical_callers: 1 violation` (`init.sh`, my new
+   glob loop, described above) plus its two static-check tests failing as a
+   consequence. Fixed with the exempt-marker comment.
+2. `QA_EXIT=0`, 35/35, after the fix — confirmed clean, daemon running
+   throughout, no daemon-not-running flake this time (unlike the first
+   round's transient one).
+3. `QA_EXIT=0`, 35/35, repeated once more after a final daemon restart
+   immediately before committing, per the daemon-restart-before-commit
+   convention.
+
+```
+QA: 35/35 PASSED
+QA_EXIT=0
+```
+
+### Disagreement check for this round
+
+None — the review finding was correct and reproducible (confirmed by
+re-deriving the mkdir-side-effect argument myself before touching code), and
+the "always show the damaged message when resolve_venv.sh is missing" lean
+was adopted as-is rather than the alternative (attempt `_clone_version`
+regardless) because it removes a genuine ambiguity at no real cost: the
+version-pinned-upgrade command is only ever safe to hand out when the clone
+that would run it is already trusted.

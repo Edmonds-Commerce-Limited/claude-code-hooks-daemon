@@ -37,6 +37,8 @@ import subprocess
 from pathlib import Path
 from typing import Final
 
+import pytest
+
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 _INIT_SH: Final[Path] = _REPO_ROOT / ".claude" / "init.sh"
 _TIMEOUT_SECONDS: Final[int] = 30
@@ -113,6 +115,37 @@ def _project(tmp_path: Path, *, version_readable: bool = True) -> Path:
     return project
 
 
+def _project_with_orphan_venv(tmp_path: Path, *, version_readable: bool = False) -> Path:
+    """A clone that has LOST `scripts/lib/resolve_venv.sh` but still holds
+    another environment's venv under `untracked/venv-*` — the case
+    `_daemon_clone_present()` alone cannot see (review finding 1). Deleting
+    this directory via install/force would destroy that venv exactly as
+    surely as deleting a healthy clone would, so this must not read as a
+    fresh checkout either.
+    """
+    project = tmp_path / "project"
+    claude = project / ".claude"
+    claude.mkdir(parents=True)
+    (claude / "init.sh").write_text(_INIT_SH.read_text(encoding="utf-8"), encoding="utf-8")
+
+    clone_dir = claude / "hooks-daemon"
+
+    # Deliberately NO scripts/lib/resolve_venv.sh — that is the point.
+    orphan_venv = clone_dir / "untracked" / "venv-other-view" / "bin"
+    orphan_venv.mkdir(parents=True)
+    (orphan_venv / "python").write_text("#!/bin/bash\n", encoding="utf-8")
+
+    if version_readable:
+        version_py = clone_dir / "src" / "claude_code_hooks_daemon" / "version.py"
+        version_py.parent.mkdir(parents=True)
+        version_py.write_text(
+            f'"""Version information."""\n\n__version__ = "{_CLONE_VERSION}"\n',
+            encoding="utf-8",
+        )
+
+    return project
+
+
 def _curated_bin(tmp_path: Path, *, with_jq: bool) -> Path:
     bindir = tmp_path / ("bin-with-jq" if with_jq else "bin-without-jq")
     bindir.mkdir(exist_ok=True)
@@ -144,13 +177,6 @@ def _run(
     )
 
 
-def _rc(call: str) -> str:
-    """Report `call`'s status without tripping init.sh's `set -e` — see the
-    identical helper in test_init_sh_stale_clone_version.py for why an `if`
-    condition (not a bare call) is required and matches production usage."""
-    return f'if {call}; then echo "rc=0"; else echo "rc=1"; fi'
-
-
 #: The forwarders' own shape: `if ! ensure_daemon; then emit_hook_error ...`
 #: with is_daemon_running/start_daemon/_is_ci_* stubbed so the failure path is
 #: reached deterministically regardless of the host's real daemon state.
@@ -163,7 +189,9 @@ _FORCE_FAILED_START = (
 
 
 class TestEnsureDaemonWiresItUp:
-    """The discriminator is directory presence, not version readability."""
+    """The discriminator is a real-clone marker OR a leftover venv under
+    `untracked/venv-*` — never version readability, and never bare directory
+    presence (`HOOKS_DAEMON_ROOT_DIR` always exists post-source, see below)."""
 
     def test_clone_dir_present_no_venv_sets_the_new_flag_not_not_installed(
         self, tmp_path: Path
@@ -223,6 +251,38 @@ class TestEnsureDaemonWiresItUp:
         )
         assert "mismatch=true venv_missing=false" in result.stdout, result.stderr
 
+    def test_an_orphaned_venv_with_no_resolve_venv_sh_still_sets_the_new_flag(
+        self, tmp_path: Path
+    ) -> None:
+        """Review finding 1: `_daemon_clone_present()` alone is blind to a
+        clone that lost `scripts/lib/resolve_venv.sh` but still holds
+        another view's venv. That venv is exactly what install/force would
+        destroy, so this case must not fall through to NOT_INSTALLED."""
+        result = _run(
+            _project_with_orphan_venv(tmp_path),
+            _FORCE_FAILED_START + "if ! ensure_daemon; then :; fi\n"
+            'echo "venv_missing=$_HOOKS_DAEMON_VENV_MISSING '
+            'not_installed=$_HOOKS_DAEMON_NOT_INSTALLED"',
+        )
+        assert "venv_missing=true not_installed=false" in result.stdout, result.stderr
+
+    def test_a_fresh_checkout_has_no_orphan_venv_either(self, tmp_path: Path) -> None:
+        """Companion control: `mkdir -p untracked/` creates an EMPTY
+        directory, so a genuinely fresh checkout never has a `venv-*` under
+        it — the venv-* signal does not misfire on the common case."""
+        project = tmp_path / "project"
+        claude = project / ".claude"
+        claude.mkdir(parents=True)
+        (claude / "init.sh").write_text(_INIT_SH.read_text(encoding="utf-8"), encoding="utf-8")
+
+        result = _run(
+            project,
+            _FORCE_FAILED_START + "if ! ensure_daemon; then :; fi\n"
+            'echo "venv_missing=$_HOOKS_DAEMON_VENV_MISSING '
+            'not_installed=$_HOOKS_DAEMON_NOT_INSTALLED"',
+        )
+        assert "venv_missing=false not_installed=true" in result.stdout, result.stderr
+
 
 class TestTheMessage:
     """What the reporter would actually have read."""
@@ -280,6 +340,38 @@ class TestTheMessage:
         payload = json.loads(raw)
         assert payload["hookSpecificOutput"]["hookEventName"] == "PreToolUse"
         assert "upgrade" in payload["hookSpecificOutput"]["additionalContext"].lower()
+
+    def _orphan_context(self, tmp_path: Path, *, version_readable: bool = False) -> str:
+        project = _project_with_orphan_venv(tmp_path, version_readable=version_readable)
+        result = _run(
+            project,
+            _FORCE_FAILED_START + "if ! ensure_daemon; then :; fi\n"
+            'emit_hook_error "PreToolUse" "daemon_startup_failed" "Failed to start"',
+        )
+        assert result.returncode == _FAIL_OPEN_EXIT, result.stderr
+        return result.stdout
+
+    def test_an_orphaned_venv_never_gets_the_install_advice(self, tmp_path: Path) -> None:
+        """`args=install` must never appear — a substring match on bare "do
+        not" is too weak here: NOT_INSTALLED's own message says "do not
+        improvise" while still recommending install, so a fix that merely
+        fell through to NOT_INSTALLED would pass a weaker assertion."""
+        context = self._orphan_context(tmp_path).lower()
+        assert "args=install" not in context
+        assert "install/force" in context
+
+    def test_an_orphaned_venv_gets_the_damaged_clone_message_even_when_a_version_reads(
+        self, tmp_path: Path
+    ) -> None:
+        """Without `scripts/lib/resolve_venv.sh`, the clone is not trusted
+        enough to hand out a version-pinned upgrade command, even if
+        `version.py` happens to still parse — a partially-damaged clone can
+        have some files intact and others gone, and guessing which half to
+        trust is exactly the mistake this branch exists to avoid."""
+        context = self._orphan_context(tmp_path, version_readable=True).lower()
+        assert "args=upgrade" not in context
+        assert "do not" in context or "not use" in context or "never" in context
+        assert "install" in context
 
 
 class TestTheStopFamilysBlock:
@@ -342,11 +434,8 @@ class TestTheEncodersAgree:
         assert parsed["decision"] == "block"
         assert "venv" in str(parsed["reason"]).lower()
 
+    @pytest.mark.skipif(shutil.which("jq") is None, reason="jq is not installed on this machine")
     def test_both_encoders_produce_the_same_pretooluse_answer(self, tmp_path: Path) -> None:
-        if shutil.which("jq") is None:
-            import pytest
-
-            pytest.skip("jq is not installed on this machine")
         project = _project(tmp_path)
         with_jq = _run(
             project,
