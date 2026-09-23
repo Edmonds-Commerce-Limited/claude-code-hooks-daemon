@@ -1,6 +1,6 @@
 # Plan 00454: not installed message steers to destructive reinstall
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-23
 **Owner**: dev
 **GitHub Issue**: #53
@@ -80,19 +80,21 @@ missing venv and changes nothing else.
 
 ### Phase 2: Deliver
 
-- [ ] ⬜ **Task 2.1**: Merge `--no-ff`, verify ancestry and CI.
-- [ ] ⬜ **Task 2.2**: Comment on #53 with what shipped; leave it OPEN — the
+- [x] ✅ **Task 2.1**: Merge `--no-ff`, verify ancestry and CI.
+- [x] ✅ **Task 2.2**: Comment on #53 with what shipped; leave it OPEN — the
   `repair` gate and auto-bootstrap remain.
 
 ## Success Criteria
 
-- [ ] A clone-present-venv-missing checkout never shows `Not installed` and
+- [x] A clone-present-venv-missing checkout never shows `Not installed` and
   never names the install skill as its fix.
-- [ ] Its message names the version-pinned upgrade and says why install is
+- [x] Its message names the version-pinned upgrade and says why install is
   unsafe here.
-- [ ] A genuinely absent clone is unchanged.
-- [ ] An unreadable clone version still yields a safe message.
-- [ ] Full QA passes and CI is green.
+- [x] A genuinely absent clone is unchanged.
+- [x] An unreadable clone version still yields a safe message.
+- [x] Full QA passes and CI is green.
+- [x] Every release-bound consequence is in the pending-release holding
+  area: `UNRELEASED/release-notes/01-the-not-installed-message-no-longer-points-at-rm-rf-when-a-clone-shares-a-mount.md`
 
 ## Delivery & Milestones
 
@@ -100,4 +102,7 @@ missing venv and changes nothing else.
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00454-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- Not yet delivered.
+- **Delivered**: merge `f299681f` (branch `c58cca62` → `a951f210` →
+  `8c101380`), CI run 35920960803 green on all five jobs.
+- **Follow-ups, still on #53**: the `repair` gate; auto-bootstrap (Plan 00100
+  residue, owner's scheduling call); making the skill's force escalation safe.

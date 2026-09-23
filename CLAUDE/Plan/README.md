@@ -4,8 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00454: not installed message steers to destructive reinstall](00454-not-installed-message-steers-to-destructive-reinstall/PLAN.md) - In Progress (from issue #53: a clone present with no venv for this project path reports "Not installed" and points at the skill install, whose failed health probe escalates to `--force` by itself and runs `rm -rf` on the daemon dir — deleting the OTHER view's venv. The safe fix is a same-version upgrade, which already exists and was built for exactly this)
-
 - [00453: supervisor modal overlay](00453-supervisor-modal-overlay/PLAN.md) - Not Started (the status-line banner from Plan 00173/00318 is a one-line TTL notification and structurally cannot hold history; this adds a hotkey-summoned inspection surface costing no model turn, no transcript entry and no status-line space — gated on the owner choosing a hotkey, F12 and F3 already rejected)
 
 - [00452: prompt cache observability and invalidation protection](00452-prompt-cache-observability-and-invalidation-protection/PLAN.md) - In Progress (the Status payload already carries a `prompt_cache` object — `warm`, `ttl`, `expires_at`, `hit_ratio`, `miss_causes`, `recache_tokens_if_cold` — so the main-thread segment needs no transcript reading at all; surfacing it is the deliverable)
@@ -163,6 +161,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00454: not installed message steers to destructive reinstall](Completed/00454-not-installed-message-steers-to-destructive-reinstall/PLAN.md) - Complete at `f299681f` + the archiving commit (first slice of #53: a clone with no venv for this path now gets its own diagnosis naming a version-pinned upgrade, not the install advice that `rm -rf`s the other view's venv; #53 stays open)
+
 - [00446: subagent report path claim is verified](Completed/00446-subagent-report-path-claim-is-verified/PLAN.md) - Complete at `10b6d6f7` + the archiving commit (from 00422 N15: a false `Report written to:` path — closed by neither remedy the entry listed, since one was costed against a call rather than its coverage and the other named a field SubagentStop does not carry)
 
 - [00445: acceptance harness honours the socket override](Completed/00445-acceptance-harness-honours-the-socket-override/PLAN.md) - Complete at `c4eeebdf` + the archiving commit (from 00422 N6 fault 2, which was not the worktree fault that entry assumed: the autouse env-isolation fixture strips the documented `CLAUDE_HOOKS_SOCKET_PATH` workaround from every wrapper subprocess)
@@ -221,8 +221,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00417: supervisor operator signals](Completed/00417-supervisor-operator-signals/PLAN.md) - Complete at `5237f62a`…`3edc1ba4` + the archiving commit (a closed channel letting a host warn every session that the machine reboots in N minutes; fixed kinds, integer payload, no free text, because a channel from outside the container is a prompt-injection surface by default. From issue #39)
 
-- [00409: interpreter heredoc defeats the guards](Completed/00409-interpreter-heredoc-defeats-the-guards/PLAN.md) - Complete at `60778567` + the archiving commit (a v3.64.0 regression: `bash <<'EOF'` executes its body, so five destructive-git spellings v3.63.0 denied were allowed; the exemption now keys on whether anything can EXECUTE the body, not on the delimiter's quoting)
-
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -276,25 +274,25 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 454 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 394 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 395 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 37 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 36 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
 - **Cancelled/Abandoned**: 13 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00108 superseded by 00117, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213, 00135 superseded by the supervisor workstream)
 
-- **Folder-to-number reconciliation**: 35 + 394 + 13 = **442 folders**, spanning
-  **439 distinct plan numbers** — three numbers carry two folders each, the
+- **Folder-to-number reconciliation**: 36 + 395 + 13 = **444 folders**, spanning
+  **441 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
   (`001-`, `002-`, `003-`), so they count as present. That leaves **13** of the
-  452 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
+  454 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
   00145, 00191, 00195, 00210, 00258, 00300, 00303, 00325 — abandoned drafts, numbers
   burned by transient probes (00195 during the v3.51.0 acceptance run, 00258
   during the v3.54.0 one), and one withdrawn duplicate (00210, scaffolded by a
   sub-agent that then found Plan 00208 already covered the work).
-  439 + 13 = 452. ✅
+  441 + 13 = 454. ✅
 
   Note on **00191**: it stays folderless deliberately. The number was claimed
   by a branch that renumbered itself and was never merged; Plan 00267
