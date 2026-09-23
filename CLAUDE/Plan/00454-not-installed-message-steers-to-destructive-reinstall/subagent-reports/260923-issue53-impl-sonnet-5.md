@@ -301,3 +301,95 @@ was adopted as-is rather than the alternative (attempt `_clone_version`
 regardless) because it removes a genuine ambiguity at no real cost: the
 version-pinned-upgrade command is only ever safe to hand out when the clone
 that would run it is already trusted.
+
+## Round 3: pin the headline case with a strong assertion, prove it discriminates
+
+Team lead's third review confirmed the code from round 2 (the orphan-venv
+glob, the errexit-safety, the canonical-resolver-exempt marker against
+`install.sh:116`'s precedent, the printf arg count) and found one remaining
+gap — in the tests, on the case #53 is actually about.
+
+### The gap
+
+`test_it_explicitly_warns_against_install` (the PRIMARY case: a real clone,
+a readable version — the everyday second-bind-mounted-view scenario) asserted
+only `"do not" in context or "not use" in context or "never" in context`. That
+is satisfied by NOT_INSTALLED's own message ("do not improvise") even while
+NOT_INSTALLED recommends installing — so a regression that put `args=install`
+back into the readable-version VENV_MISSING remedy would pass the WHOLE
+suite, including the test whose name claims it guards against exactly that.
+Two more tests (`test_an_unreadable_version_still_gets_a_safe_message_not_a_blank`,
+`test_an_orphaned_venv_gets_the_damaged_clone_message_even_when_a_version_reads`)
+carried the same weak shape.
+
+### What changed
+
+- `tests/integration/test_init_sh_venv_missing_message.py` — added
+  `assert "args=install" not in context` to all three tests above, alongside
+  the existing weaker checks (kept for readability, per the request). No
+  `init.sh` change — the review found a test gap, not a code gap.
+
+### Proof the strengthened assertions discriminate
+
+Per the request, this was proved by TEMPORARILY regressing `init.sh` rather
+than trusting the assertion by inspection.
+
+1. Confirmed GREEN on current code first (the strengthened assertions do
+   not themselves break anything):
+
+   ```
+   tests/integration/test_init_sh_venv_missing_message.py: 20 passed in 0.86s
+   ```
+
+2. Added a one-line `args=install` probe to BOTH branches of the
+   `_hd_venv_missing_remedy` selection in `init.sh` (the readable-version
+   branch and the damaged-clone branch — the orphan-venv test always takes
+   the damaged-clone branch by construction, so both needed the probe to
+   exercise all three tests). Ran the three targeted tests and got RED:
+
+   ```
+   FAILED ...test_it_explicitly_warns_against_install
+     assert 'args=install' not in '{\n  "hooks...l"\n  }\n}\n'
+     'args=install' is contained here:
+       s-daemon, args=install"
+   FAILED ...test_an_unreadable_version_still_gets_a_safe_message_not_a_blank
+     assert 'args=install' not in '{\n  "hooks...l"\n  }\n}\n'
+     'args=install' is contained here:
+       s-daemon, args=install"
+   FAILED ...test_an_orphaned_venv_gets_the_damaged_clone_message_even_when_a_version_reads
+     assert 'args=install' not in '{\n  "hooks...l"\n  }\n}\n'
+     'args=install' is contained here:
+       s-daemon, args=install"
+   3 failed, 17 deselected in 0.30s
+   ```
+
+   All three failed on exactly the injected line, confirming the strong
+   assertion is what catches the regression the weak one missed.
+
+3. Reverted the temporary `init.sh` change. `git diff init.sh` showed zero
+   lines — byte-identical to the a951f210 commit, so nothing temporary was
+   left in the tree. Re-ran the full file:
+
+   ```
+   tests/integration/test_init_sh_venv_missing_message.py: 20 passed in 0.84s
+   ```
+
+`bash -n init.sh`: clean throughout (checked before and after the temporary
+edit and after the revert).
+
+### QA_EXIT
+
+Full QA run, daemon restarted immediately before:
+
+```
+QA: 35/35 PASSED
+QA_EXIT=0
+```
+
+Daemon restarted again immediately before this round's commit.
+
+### Disagreement check for this round
+
+None — the gap was real and the fix the lead asked for (strengthen the
+assertion in place, prove it with a temporary regression, revert) is exactly
+what a test whose name makes a safety claim needs to actually make it.

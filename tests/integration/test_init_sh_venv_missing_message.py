@@ -308,7 +308,14 @@ class TestTheMessage:
         assert _CLONE_VERSION in context
 
     def test_it_explicitly_warns_against_install(self, tmp_path: Path) -> None:
+        """The PRIMARY #53 case: a real clone, a readable version. The bare
+        substring check below is too weak on its own — NOT_INSTALLED's own
+        message contains "do not improvise" while still recommending
+        install, so a regression that put `args=install` back into this
+        remedy would pass it. `args=install` must never appear here; that is
+        the one property #53 exists to guarantee."""
         context = self._context(tmp_path).lower()
+        assert "args=install" not in context
         assert "do not" in context or "not use" in context or "never" in context
         assert "install" in context
 
@@ -328,6 +335,7 @@ class TestTheMessage:
     ) -> None:
         context = self._context(tmp_path, version_readable=False).lower()
         assert "install" in context
+        assert "args=install" not in context
         assert "do not" in context or "not use" in context or "never" in context
         # No blank/placeholder version rendered into the message.
         assert 'v"' not in context
@@ -370,6 +378,7 @@ class TestTheMessage:
         trust is exactly the mistake this branch exists to avoid."""
         context = self._orphan_context(tmp_path, version_readable=True).lower()
         assert "args=upgrade" not in context
+        assert "args=install" not in context
         assert "do not" in context or "not use" in context or "never" in context
         assert "install" in context
 
