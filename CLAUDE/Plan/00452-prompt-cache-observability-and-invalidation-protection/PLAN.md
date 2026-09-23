@@ -1,6 +1,6 @@
 # Plan 00452: prompt cache observability and invalidation protection
 
-**Status**: In Progress
+**Status**: Blocked
 **Created**: 2026-09-22
 **Owner**: dev
 **Priority**: Medium
