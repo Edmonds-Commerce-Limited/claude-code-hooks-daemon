@@ -239,7 +239,9 @@ Three levers the plan did not know about when it was written. None is blocked.
 - [ ] A gap histogram exists for at least one human-paced project.
 - [ ] The decision function is validated by REPLAY, not by argument.
 - [ ] Every advisory rule traces to a Phase 3 observation, not to a doc.
-- [ ] Full QA green.
+- [x] Full QA green (for everything shipped so far: CI run 35925979259 on
+  `1a7a8a0a`, all five jobs). Phase 4 work, if it is ever built, re-opens
+  this.
 
 ## Delivery & Milestones
 
