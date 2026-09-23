@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00454: not installed message steers to destructive reinstall](00454-not-installed-message-steers-to-destructive-reinstall/PLAN.md) - In Progress (from issue #53: a clone present with no venv for this project path reports "Not installed" and points at the skill install, whose failed health probe escalates to `--force` by itself and runs `rm -rf` on the daemon dir — deleting the OTHER view's venv. The safe fix is a same-version upgrade, which already exists and was built for exactly this)
+
 - [00453: supervisor modal overlay](00453-supervisor-modal-overlay/PLAN.md) - Not Started (the status-line banner from Plan 00173/00318 is a one-line TTL notification and structurally cannot hold history; this adds a hotkey-summoned inspection surface costing no model turn, no transcript entry and no status-line space — gated on the owner choosing a hotkey, F12 and F3 already rejected)
 
 - [00452: prompt cache observability and invalidation protection](00452-prompt-cache-observability-and-invalidation-protection/PLAN.md) - In Progress (the Status payload already carries a `prompt_cache` object — `warm`, `ttl`, `expires_at`, `hit_ratio`, `miss_causes`, `recache_tokens_if_cold` — so the main-thread segment needs no transcript reading at all; surfacing it is the deliverable)
@@ -272,11 +274,11 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 453 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 454 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 394 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 36 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 37 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
