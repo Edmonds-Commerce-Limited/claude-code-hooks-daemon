@@ -805,6 +805,15 @@ def resolve_existing_venv_python(daemon_dir: Path | str) -> Path:
     installer's chosen base interpreter, so the scanned venv is fully
     usable regardless of the resolver's current PATH.
 
+    The scan first refuses any candidate whose embedded project-path slug
+    does not match :func:`project_path_slug` of the current root, via
+    :func:`_venv_slug_eligible` (Plan 00313) — so "fully usable" above means
+    usable for THIS view of the project, not any venv found under
+    ``untracked/``. A host view and a container view of one bind-mounted
+    project therefore never reuse each other's venv. Steps 1, 2 and 4 do not
+    check the slug: an explicit override, an exact fingerprint-keyed path,
+    and the legacy un-slugged directory respectively.
+
     Step 4 is returned without an existence check so callers can produce
     a useful "venv missing" error message that still mentions the legacy
     path (relevant for brand-new installs where nothing has been
@@ -871,6 +880,19 @@ def resolve_existing_venv_python_with_diagnostics(
     4. First executable ``{daemon_dir}/untracked/venv-*/bin/python(3)`` —
        scan fallback (legacy)
     5. ``{daemon_dir}/untracked/venv/bin/python(3)`` — legacy (pre-v3.7.0)
+
+    Steps 2 and 4 — the two that glob ``venv-*`` candidates rather than
+    naming one path — additionally refuse any candidate whose embedded
+    project-path slug does not match :func:`project_path_slug` of the
+    current root, via :func:`_venv_slug_eligible` (Plan 00313). That is what
+    keeps a host view and a container view of one bind-mounted project on
+    separate venvs. Steps 1, 3 and 5 do not check it: step 1 is an explicit
+    override, step 3 names an exact fingerprint-keyed path, and step 5 is
+    the legacy un-slugged ``venv`` directory, which has no slug to compare.
+
+    Omitting this from the list was not harmless: a reader who took the five
+    steps above as complete concluded the scan fallback ignores the slug, and
+    reported that as a finding (Plan 00422 N17).
 
     Steps 3, 4 and 5 refuse any venv that carries the Plan-00099-era
     ``.daemon-version`` stamp without the new ``.daemon-metadata.json``
