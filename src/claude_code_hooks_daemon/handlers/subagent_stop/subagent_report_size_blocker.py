@@ -25,6 +25,12 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import SubagentStopHandlerBase
 from claude_code_hooks_daemon.utils.option_coercion import coerce_int_option
+from claude_code_hooks_daemon.utils.subagent_report_paths import (
+    DEFAULT_REPORT_DIR as _DEFAULT_PERSISTED_REPORT_DIR,
+)
+from claude_code_hooks_daemon.utils.subagent_report_paths import (
+    find_persisted_report,
+)
 from claude_code_hooks_daemon.utils.subagent_tool_resolution import (
     resolve_agent_can_write,
     resolve_lookup_root,
@@ -82,6 +88,11 @@ class SubagentReportSizeBlockerHandler(SubagentStopHandlerBase):
         # `_min_statements: Any` for the identical reason).
         self._threshold_chars: Any = _DEFAULT_THRESHOLD_CHARS
         self._fallback_report_dir: str = _DEFAULT_FALLBACK_REPORT_DIR
+        # Plan 00460 Task 1.6: where subagent_report_persistence saves every
+        # reply. Separately configurable from `_fallback_report_dir` above
+        # (still used for the never-persisted fallback message), but shares
+        # the same default -- change both together if you reconfigure either.
+        self._persisted_report_dir: str = _DEFAULT_PERSISTED_REPORT_DIR
         # Test-only override (mirrors subagent_report_path_verifier's
         # `_project_root`): production resolves lazily via `_root()` so the
         # handler is never pinned to whatever directory the daemon happened
@@ -122,6 +133,60 @@ class SubagentReportSizeBlockerHandler(SubagentStopHandlerBase):
         agent_type = hook_input.get("agent_type")
         root = resolve_lookup_root(self._project_root, getattr(self, "_workspace_root", None))
         return resolve_agent_can_write(agent_type if isinstance(agent_type, str) else None, root)
+
+    def _find_persisted_report(self, hook_input: dict[str, Any]) -> Path | None:
+        """Plan 00460 Task 1.6: what `subagent_report_persistence` already saved.
+
+        Globs by agent type/id (:func:`find_persisted_report`) rather than
+        reconstructing an exact filename -- this handler and the persister
+        each compute their own timestamp within the same dispatch, which can
+        straddle a second boundary, and a collision-suffixed filename would
+        not match an exact reconstruction either. No in-memory hand-off
+        between the two handlers: only this lookup, run after the persister
+        by priority ordering (10 before 15).
+        """
+        agent_id = hook_input.get("agent_id")
+        if not isinstance(agent_id, str) or not agent_id:
+            return None
+        agent_type = hook_input.get("agent_type")
+        root = resolve_lookup_root(self._project_root, getattr(self, "_workspace_root", None))
+        target_dir = root / self._persisted_report_dir
+        return find_persisted_report(
+            target_dir, agent_type if isinstance(agent_type, str) else "", agent_id
+        )
+
+    @staticmethod
+    def _deny_saved(
+        path: Path, length: int, threshold: int, *, warn_against_bash_write: bool
+    ) -> BlockingResult:
+        """Plan 00460 Task 1.6: the reply is already saved -- point at it.
+
+        Applies to EVERY agent, read-only or writable: neither needs to
+        write anything itself any more. ``warn_against_bash_write`` adds the
+        Bash-workaround warning for a read-only agent (Task 1.3's own
+        concern is unrelated to WHO saved the file, only to what a
+        Write-less agent might try instead).
+        """
+        bash_warning = (
+            "\n\nDo NOT write your own copy via a Bash heredoc/redirect/`tee` "
+            "— the file above is already saved through the content-safe "
+            "daemon path; writing your own bypasses the guards a real "
+            "`Write` call would get."
+            if warn_against_bash_write
+            else ""
+        )
+        return BlockingResult(
+            decision=Decision.DENY,
+            reason=(
+                "📦 REPORT TOO LARGE (Plan 00307/00460): your final message is "
+                f"{length} characters, over the {threshold}-character "
+                "threshold. The full text is already saved at:\n\n"
+                f"  {path}\n\n"
+                "Reply now with that path and a short completion summary, "
+                f"together under {threshold} characters — do not repeat the "
+                f"full report inline.{bash_warning}"
+            ),
+        )
 
     @staticmethod
     def _deny_read_only(agent_type: str, length: int, threshold: int) -> BlockingResult:
@@ -179,7 +244,15 @@ class SubagentReportSizeBlockerHandler(SubagentStopHandlerBase):
         if len(message) <= threshold:
             return BlockingResult(decision=Decision.ALLOW)
 
-        if self._agent_can_write(hook_input) is False:
+        can_write = self._agent_can_write(hook_input)
+
+        persisted = self._find_persisted_report(hook_input)
+        if persisted is not None:
+            return self._deny_saved(
+                persisted, len(message), threshold, warn_against_bash_write=can_write is False
+            )
+
+        if can_write is False:
             agent_type = hook_input.get("agent_type")
             return self._deny_read_only(
                 agent_type if isinstance(agent_type, str) else _AGENT_NAME_PLACEHOLDER,
@@ -222,7 +295,15 @@ class SubagentReportSizeBlockerHandler(SubagentStopHandlerBase):
             "oversized inline report in the MIDDLE — the coordinator can "
             "receive what looks like a complete report while content is "
             "missing.\n\n"
-            "**Fix (agent has a `Write` tool)**: write the full report to a "
+            "**Fix (usual case, Plan 00460 Task 1.6)**: `subagent_report_"
+            "persistence` already saved this stop's full reply to a "
+            f"gitignored file (default `{_DEFAULT_PERSISTED_REPORT_DIR}`) "
+            "before this handler runs — the deny message names that exact "
+            "path. Reply with the path plus a short completion summary; "
+            "nothing needs to be written by the agent itself, whether or "
+            "not it has a `Write` tool.\n\n"
+            "**Fix (fallback — persistence unavailable or failed, agent has "
+            "a `Write` tool)**: write the full report to a "
             "file under the declared plan folder's "
             "`subagent-reports/{yymmdd}-{agent-name}-{model}.md` — or, for "
             "non-plan work, the configured fallback directory (default "
@@ -232,8 +313,9 @@ class SubagentReportSizeBlockerHandler(SubagentStopHandlerBase):
             "carries it, `{model}` as a literal placeholder — no model field "
             "exists at this surface), then reply with a short completion "
             "summary plus the file path.\n\n"
-            "**Fix (agent has no `Write` tool, e.g. `Explore`/`Plan`, or a "
-            "project agent whose frontmatter omits `Write`)**: condense the "
+            "**Fix (fallback — persistence unavailable or failed, agent has "
+            "no `Write` tool, e.g. `Explore`/`Plan`, or a project agent "
+            "whose frontmatter omits `Write`)**: condense the "
             "reply to a short summary under the threshold instead — never "
             "write the file another way. A Bash heredoc/redirect/`tee` "
             "reaches disk WITHOUT the content guards (sensitive-content, "
