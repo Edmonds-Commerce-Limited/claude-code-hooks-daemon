@@ -1,6 +1,6 @@
 # Plan 00459: encrypted vault files are tracked not hidden
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-24
 **Owner**: dev
 **Priority**: High
@@ -96,11 +96,13 @@ protection must return on the very next check.
 
 ### Phase 2: Deliver
 
-- [ ] ⬜ **Task 2.1**: Merge `--no-ff`, verify ancestry and CI, and restart
+- [x] ✅ **Task 2.1**: Merge `--no-ff`, verify ancestry and CI, and restart
   the daemon.
-- [ ] ⬜ **Task 2.2**: Tell the owner what the client project must do after
-  upgrading. Its hygiene warning will simply stop, and nothing it tracked
-  needs to change.
+- [x] ✅ **Task 2.2**: Tell the owner what the client project must do after
+  upgrading. Its hygiene warning stops for encrypted files. A project that
+  followed the OLD untrack advice must track its vault files again: remove
+  the ignore rule or add `!/<path>`, then `git add`. The hygiene checker
+  now gives exactly that advice.
 
 ## Success Criteria
 
@@ -109,7 +111,13 @@ protection must return on the very next check.
 - [x] Test: the same path decrypted in place is denied on Read and on a Bash
   mention, and gets the hygiene advice.
 - [x] Test: a plaintext `.vault_pass` is protected exactly as before.
-- [ ] Full QA passes and CI is green.
+- [x] Full QA passes and CI is green. The worktree's QA passed 35/35 at
+  `8afaffd8`. CI on main is green at `aeca4c04` (run 36007636154),
+  which contains the merge.
+- [x] Every release-bound consequence is in the pending-release holding
+  area:
+  `UNRELEASED/release-notes/09-encrypted-ansible-vault-files-are-no-longer-treated-as-secrets.md`
+  and `UNRELEASED/truth-changes/v3.67.0.yaml`.
 
 ## Delivery & Milestones
 
@@ -117,4 +125,4 @@ protection must return on the very next check.
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00459-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- Not yet delivered.
+- Merged to main at `2a6a9b84` (`--no-ff`, from `8afaffd8`).

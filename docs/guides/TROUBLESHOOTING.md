@@ -115,7 +115,30 @@ If the venv is corrupted (e.g., after a Python upgrade):
 .claude/hooks-daemon/bin/hooks-daemon repair
 ```
 
-This runs `uv sync` to rebuild the virtual environment.
+This runs `uv sync` to rebuild the virtual environment. It works even when no
+venv exists yet for this project path: it builds one first, then repairs.
+
+### Symptom: "clone present, venv missing for this project path"
+
+The daemon clone is there, but no venv serves this checkout's path. The usual
+cause is opening a bind-mounted project from a second view (host vs
+container): the views share the clone, and each needs its own venv.
+
+The hook message says what the daemon did about it:
+
+| The message says                                                 | What it means                                                                | What to do                                                                                                                 |
+| ---------------------------------------------------------------- | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| A BUILD HAS STARTED / ALREADY RUNNING                            | This path's venv is being built in the background; its log and pid are named | Nothing. The next hook after it finishes starts the daemon. A build past its bound (15 min) is stopped and reported failed |
+| THE LAST AUTOMATIC BUILD FAILED                                  | The build failed or timed out. It is not retried until its inputs change     | Read the named log, fix the cause, then run `.claude/hooks-daemon/bin/hooks-daemon repair`                                 |
+| NOT built automatically, with a list of conditions               | A condition for a safe build does not hold. Nothing was changed              | Fix each listed condition (for example, install `uv`). The next hook builds the venv, or run `repair`                      |
+| switched off (`HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP=1` or `CI=true`) | Automatic builds are disabled here by the named setting                      | Run `repair`: an explicit repair builds regardless                                                                         |
+
+The detail (the build's bound, lock and retry rules) is in
+[CLAUDE/SELF_INSTALL.md](../../CLAUDE/SELF_INSTALL.md), "What rebuilds a venv,
+and when".
+
+Do not use `install --force` for this state. It re-clones the whole daemon
+directory, which is not needed here.
 
 ### Symptom: status says NOT RUNNING, but hooks are clearly working
 

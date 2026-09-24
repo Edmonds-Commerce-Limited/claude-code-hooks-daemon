@@ -1604,6 +1604,77 @@ That gap is real and is accepted, not overlooked: content quality is not
 checkable from here, and a guard that pretended otherwise would be the same
 false-assurance failure this ledger keeps recording.
 
+### N23 — a worktree commit is judged against the main checkout's staged tree
+
+**Found**: Plan 00462's agent ran `git commit` in its worktree and was
+denied by `R-PLAN-QA-COMMIT` for a README link to
+`Completed/00456-…/PLAN.md`. That path did not exist in the worktree:
+not tracked, not on disk. It existed only in the MAIN checkout's index,
+where the coordinator was archiving 00456 at that moment. An identical
+retry passed after the coordinator committed.
+
+**Why it happens.** The daemon's DEBUG payload log shows an in-process
+teammate's PreToolUse payload carrying `"cwd": "/workspace"`, the main
+checkout, while it works in its worktree. `plan_qa_commit_gate` decides the
+repository to judge from that field (`_is_foreign_repo` →
+`GitRepo.resolve_for(cwd)` against `ProjectContext.project_root()`) and
+never reads the `cd` at the front of the command. `docs_qa_commit_gate`,
+`staged_lint_gate` and `sensitive_content`'s commit scan also key on
+`cwd`. So every worktree commit is judged against main's staged tree. It
+is denied for main's state, and its own content is never examined. That
+includes the secret-term scan, whose documented contract is that the
+commit is the gate. `git merge` does not pass through those gates, so a
+term committed in a worktree reaches `main` unscanned.
+
+**Graduated to Plan 00464** (a class defect across several gates, with a
+fail-open security direction).
+
+### N22 — the local "full QA" never runs shellcheck
+
+**Found**: Plan 00456's final QA was checked before merge. Every
+`untracked/qa/*.json` in the worktree was written between 13:23 and 13:41,
+after the last code commit, except `shell_check.json`, which was dated
+10:16. That is hours before the N7–N9 fixes that rewrote
+`scripts/venv_bootstrap.sh`, `scripts/install/venv.sh` and both copies of
+the skill's `install.sh`. Re-running `scripts/qa/run_shell_check.sh` by hand
+passed (67 files, 0 issues), so nothing was hidden this time.
+
+**Why it happens.** `scripts/qa/llm_qa.py`'s `TOOL_REGISTRY` has no
+shellcheck entry. `run_all.sh` calls `run_shell_check.sh`, but
+`enforce_llm_qa` denies `run_all.sh` and points at `llm_qa.py all`. So the
+QA every agent is told to run, and reports as "full QA N/N", never runs
+shellcheck. CI's `shellcheck` step (`.github/workflows/qa.yml`) is the only
+place it runs. A shell defect therefore reaches `main` and is caught only
+after the merge, when fixing it costs a second commit on `main`. The stale
+`shell_check.json` left in the tree also reads like a result for the
+current code.
+
+**Candidate remedies:**
+
+1. Add a `shell_check` tool to `llm_qa.py`'s registry, wrapping
+   `run_shell_check.sh` like the other script tools, with a wiring test
+   that every check `run_all.sh` runs is also in the registry. That class
+   test catches the next divergence too.
+2. Until then, briefs that say "full QA" add `run_shell_check.sh` whenever
+   a shell file changed.
+
+**Remedied**: remedy (1). `TOOL_REGISTRY` gained a `shell_check` entry
+wrapping `run_shell_check.sh`, in run_all.sh's step-8 position, with a
+summariser reporting the issue count and files checked. The nested
+`summary.error` shape `run_shell_check.sh` writes when shellcheck is not
+installed was already handled generically by `_report_error` (it names both
+JSON shapes shipped scripts use), so a missing binary still fails the tool
+visibly rather than passing — verified by temporarily hiding shellcheck from
+`PATH` and re-running the tool in isolation.
+
+`tests/unit/qa/test_llm_qa_run_all_wiring.py` is the class test: it parses
+every `"${SCRIPT_DIR}/<script>"` invocation out of `run_all.sh` and asserts
+each has a `TOOL_REGISTRY` entry running that same script, or is named with a
+reason in a `_KNOWN_GAPS` map (empty today — every invoked script is now
+registered). It failed on exactly `run_shell_check.sh` before the fix and
+passes after. `CLAUDE/QA.md` already states no check count, so it needed no
+edit.
+
 ### N21 — nothing points a journal append at the tool that stamps the time
 
 **Found**: the owner asked whether "the journal command that enforces proper
@@ -1701,6 +1772,15 @@ lives under a directory named exactly `venv` or `build`, so the match must
 be made against the path relative to the project root. The mechanism
 suspected above (`core/worktree_paths.py`) is not involved. Candidate
 remedies 1-3 above are withdrawn. Graduated to its own plan.
+
+**Remedied by Plan 00458.** All six sites (and `matches_directory`) use
+`utils/path_segments.py::matches_path_segment`. It matches whole segments
+of the project-relative path and returns False for a path outside the
+root, so a blocking guard fails closed. `scripts/qa/check_skip_list_substring.py`
+flags the class, including through derived loop variables. It is recorded
+in `CLAUDE/Security/AsymmetricSiblingProtection.md`. Plan 00456's final
+QA passed with 0 failures in `worktree-issue-53-venv`, the worktree
+where this was found.
 
 ### N19 — the Python nested-install check can never fire in a real client
 

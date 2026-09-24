@@ -58,6 +58,15 @@
 #    commands like `plan-qa --lint` and fails closed in offline containers.
 # 3. It fails loudly. A wrapper that silently degrades would recreate the exact
 #    confusion this script exists to eliminate.
+# 4. `repair` works with NO venv for this project path (Plan 00456, GitHub
+#    issue #53). Every other verb needs the interpreter resolved below, so
+#    without a venv each of them exits 5 — and so did `repair`, the one verb
+#    whose job is fixing that. It is caught before the refusal: the clone's
+#    own scripts/venv_bootstrap.sh builds the venv in the foreground, under the
+#    same lock as every other builder, and the normal Python repair then runs.
+#    With a venv present, `repair` is untouched. Plan 00431 is the precedent
+#    for moving a check ahead of venv resolution. `_run_venv_free_verb` is the
+#    one place such verbs are listed, so `signal` (Plan 00457) is one more arm.
 
 set -euo pipefail
 
@@ -90,10 +99,78 @@ fi
 # shellcheck disable=SC1090  # path is computed at runtime from DAEMON_DIR
 source "$RESOLVE_LIB"
 
+BOOTSTRAP="$DAEMON_DIR/scripts/venv_bootstrap.sh"
+
+# _subcommand_of() - The subcommand in "$@": the first word that is neither a
+# global option nor the value of one (the CLI's --project-root, --pid-file and
+# --socket each take one). Returns 1 when there is none.
+_subcommand_of() {
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --project-root | --pid-file | --socket)
+                [ "$#" -ge 2 ] || return 1
+                shift 2
+                ;;
+            -*)
+                shift
+                ;;
+            *)
+                printf '%s' "$1"
+                return 0
+                ;;
+        esac
+    done
+    return 1
+}
+
+# The verbs that run when NO venv resolves (design note 4), one case arm each,
+# keyed on the subcommand wherever it sits among the global options. An arm
+# either makes a venv resolve, sets PYTHON and returns 0 so the normal path
+# below runs, or execs a venv-free implementation itself. Any other verb
+# returns 1 and gets the exit-5 refusal. A new venv-free verb is a new arm.
+_run_venv_free_verb() {
+    local verb arg
+    verb="$(_subcommand_of "$@")" || return 1
+    case "$verb" in
+        repair)
+            for arg in "$@"; do
+                if [ "$arg" = "-h" ] || [ "$arg" = "--help" ]; then
+                    echo "usage: hooks-daemon repair"
+                    echo "  Builds the venv for this project path (none resolves yet), under the"
+                    echo "  venv build lock and touching no other environment's venv, then runs the"
+                    echo "  full repair. The full --help needs a venv, so it works once one exists."
+                    exit 0
+                fi
+            done
+            if [ ! -f "$BOOTSTRAP" ]; then
+                echo "❌ hooks-daemon repair: no venv resolves for this project path, and this clone has no" >&2
+                echo "   scripts/venv_bootstrap.sh to build one with ($BOOTSTRAP is missing)." >&2
+                echo "   The clone is incomplete. Ask a human to inspect $DAEMON_DIR; a same-version" >&2
+                echo "   upgrade (hooks-daemon skill: upgrade) restores its tracked files." >&2
+                exit 5
+            fi
+            echo "hooks-daemon repair: no venv resolves for this project path, so one is built first." >&2
+            if ! bash "$BOOTSTRAP" repair "$DAEMON_DIR"; then
+                echo "❌ hooks-daemon repair: the venv for this project path could not be built (see above)." >&2
+                exit 1
+            fi
+            if ! PYTHON="$(resolve_venv_python "$DAEMON_DIR")"; then
+                echo "❌ hooks-daemon repair: a venv was built but still does not resolve under $DAEMON_DIR" >&2
+                exit 1
+            fi
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
 if ! PYTHON="$(resolve_venv_python "$DAEMON_DIR")"; then
-    echo "❌ hooks-daemon: could not resolve a usable venv under $DAEMON_DIR" >&2
-    echo "   Run the installer/upgrade to rebuild it." >&2
-    exit 5
+    if ! _run_venv_free_verb "$@"; then
+        echo "❌ hooks-daemon: could not resolve a usable venv under $DAEMON_DIR" >&2
+        echo "   Build the venv for this project path: $BIN_DIR/hooks-daemon repair" >&2
+        exit 5
+    fi
 fi
 
 if [ ! -x "$PYTHON" ]; then

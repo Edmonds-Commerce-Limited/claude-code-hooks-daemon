@@ -3,7 +3,7 @@
 Covers:
 - ``cmd_list_venvs``: enumerate ``venv-*/`` under untracked/, with current-env marker
 - ``cmd_prune_venvs``: delete stale venvs with --dry-run/--legacy/--all-except-current
-- ``cmd_repair`` migration to ``get_venv_path()`` (fingerprint-keyed)
+- ``cmd_repair`` migration to the fingerprint-keyed venv under the daemon dir
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from claude_code_hooks_daemon.daemon import cli
-from claude_code_hooks_daemon.daemon.paths import get_venv_path, python_venv_fingerprint
+from claude_code_hooks_daemon.daemon.paths import python_venv_fingerprint
 
 
 def _make_venv(path: Path, stamp_version: str | None = None) -> None:
@@ -345,10 +345,16 @@ class TestEnumerateVenvsInstallModes:
 
 class TestRepairUsesFingerprintKeyedPath:
     def test_repair_targets_fingerprint_keyed_venv(self, tmp_path: Path) -> None:
-        """cmd_repair must provision the venv at get_venv_path(), not untracked/venv."""
+        """cmd_repair must provision the fingerprint-keyed venv, not untracked/venv.
+
+        tmp_path is a CLIENT layout, so the venv is keyed on the daemon dir
+        beneath it, as bash ensure_venv and the resolver key it (Plan 00456).
+        """
         args = argparse.Namespace(project_root=tmp_path)
 
-        expected_venv = get_venv_path(tmp_path)
+        daemon_dir = tmp_path / ".claude" / "hooks-daemon"
+        expected_venv = daemon_dir / "untracked" / f"venv-{python_venv_fingerprint(daemon_dir)}"
+        assert expected_venv.name != "venv"
 
         sync_call: dict[str, str] = {}
 
