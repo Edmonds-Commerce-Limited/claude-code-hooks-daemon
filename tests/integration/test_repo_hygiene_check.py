@@ -941,8 +941,19 @@ def test_an_index_without_the_reconciliation_bullet_is_clean(tmp_path: Path) -> 
 
 
 def test_a_repo_without_a_plan_index_is_clean(tmp_path: Path) -> None:
-    repo = _make_repo(tmp_path, {})
+    repo = _make_repo(tmp_path, {"README.md": "# fixture\n"})
 
     exit_code, report = _run_checker(repo)
 
     assert exit_code == 0, f"a repo with no plan index was flagged: {report['violations']}"
+
+
+def test_a_repo_with_nothing_tracked_is_not_a_pass(tmp_path: Path) -> None:
+    """Checking 0 paths verified nothing (00466 N26's empty-root case)."""
+    repo = _make_repo(tmp_path, {})
+
+    exit_code, report = _run_checker(repo)
+
+    assert exit_code == 1
+    assert report["summary"]["passed"] is False
+    assert "found no tracked paths" in report["summary"]["vacuous_scan"]

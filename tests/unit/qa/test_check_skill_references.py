@@ -121,11 +121,12 @@ class TestCorrectPatterns:
         data = _run_checker("--path", str(tmp_path))
         assert data["summary"]["passed"]
 
-    def test_no_python_files_passes(self, tmp_path: Path) -> None:
-        """Directory with no Python files should pass."""
+    def test_a_directory_with_nothing_to_scan_is_not_a_pass(self, tmp_path: Path) -> None:
+        """Examining 0 files verified nothing (00466 N26's empty-root case)."""
         (tmp_path / "readme.txt").write_text("hello")
         data = _run_checker("--path", str(tmp_path))
-        assert data["summary"]["passed"]
+        assert not data["summary"]["passed"]
+        assert "found no files" in data["summary"]["vacuous_scan"]
 
 
 class TestBashScripts:

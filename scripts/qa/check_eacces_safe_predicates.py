@@ -34,7 +34,7 @@ Usage:
 
 Exit codes:
     0 -- no violations
-    1 -- at least one violation
+    1 -- at least one violation, or no Python file was examined
 """
 
 from __future__ import annotations
@@ -45,6 +45,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
+
+from claude_code_hooks_daemon.utils.scan_scope import vacuous_scan_failure
 
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 _QA_OUTPUT_DIR: Final[Path] = _REPO_ROOT / "untracked" / "qa"
@@ -198,11 +200,13 @@ def main() -> int:
 
     files_scanned = len(list(scan_root.rglob("*.py"))) if scan_root.is_dir() else 0
     violations = scan_tree(scan_root) if scan_root.is_dir() else []
+    vacuous = vacuous_scan_failure(examined=files_scanned, noun="Python files", root=scan_root)
 
     output = {
         "tool": "eacces_safe",
         "summary": {
-            "passed": len(violations) == 0,
+            "passed": len(violations) == 0 and vacuous is None,
+            "vacuous_scan": vacuous,
             "total_violations": len(violations),
             "files_scanned": files_scanned,
         },
@@ -220,7 +224,9 @@ def main() -> int:
         output_file.parent.mkdir(parents=True, exist_ok=True)
         output_file.write_text(json.dumps(output, indent=2))
 
-    if violations:
+    if vacuous is not None:
+        print(f"FAILED: {vacuous}")
+    elif violations:
         print(f"Found {len(violations)} raw stat predicate(s) on unvouched paths:")
         for violation in violations:
             print(f"  {violation.file}:{violation.line}  .{violation.predicate}()")
@@ -231,7 +237,7 @@ def main() -> int:
             f"({files_scanned} files scanned)"
         )
 
-    return 1 if violations else 0
+    return 1 if violations or vacuous is not None else 0
 
 
 if __name__ == "__main__":

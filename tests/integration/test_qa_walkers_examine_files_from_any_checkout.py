@@ -10,6 +10,10 @@ This runs each walker from a copy of the tracked tree placed under a directory
 path made of every name a walker is known to exclude, and requires a non-zero
 examined count. ``test_every_check_is_classified`` makes a new check declare
 which kind it is, so the class stays pinned.
+
+The same gap has a second shape: 0 of 0 examined because the scan root is
+missing or empty. The gutted-checkout and missing-or-empty-root tests below
+require each walker to fail rather than pass on nothing.
 """
 
 from __future__ import annotations
@@ -175,6 +179,138 @@ def test_a_self_guarded_walker_collects_files_from_a_hostile_location(
     assert (
         artefact.is_file()
     ), f"{script} collected nothing from {hostile_checkout}: {result.stderr}"
+
+
+#: Suffixes kept out of the gutted checkout, so no shell script is left to audit.
+_SHELL_SUFFIXES = frozenset({".sh", ".bash"})
+
+
+@pytest.fixture(scope="module")
+def gutted_checkout(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A git repo holding only the QA scripts: every walker's scan root is absent or empty."""
+    root = tmp_path_factory.mktemp("gutted")
+    tracked = _git("ls-files", "-z", "scripts/qa", cwd=REPO_ROOT).split("\0")
+    for relative in filter(None, tracked):
+        source = REPO_ROOT / relative
+        if not source.is_file() or source.is_symlink() or source.suffix in _SHELL_SUFFIXES:
+            continue
+        target = root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+    _git("init", "-q", cwd=root)
+    _git("add", "-A", cwd=root)
+    _git(
+        "-c",
+        "user.name=n26",
+        "-c",
+        "user.email=n26@example.invalid",
+        "-c",
+        "core.hooksPath=/dev/null",
+        "commit",
+        "-q",
+        "--no-verify",
+        "-m",
+        "fixture",
+        cwd=root,
+    )
+    return root
+
+
+@pytest.mark.integration
+@pytest.mark.slow
+@pytest.mark.parametrize("script", sorted(WALKERS))
+def test_a_walker_never_passes_having_examined_nothing(
+    script: str, gutted_checkout: Path, tmp_path: Path
+) -> None:
+    """A missing or empty scan root is a failure, not a clean tree of 0 files."""
+    artefact_name, key = WALKERS[script]
+    artefact = gutted_checkout / "untracked" / "qa" / artefact_name
+    artefact.unlink(missing_ok=True)
+    env = {**os.environ, "CLAUDE_CONFIG_DIR": str(tmp_path / "claude-config")}
+    result = subprocess.run(
+        [sys.executable, str(gutted_checkout / "scripts" / "qa" / script), "--json"],
+        cwd=gutted_checkout,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=_RUN_TIMEOUT_SECONDS,
+    )
+    if result.returncode != 0:
+        return
+    assert artefact.is_file(), f"{script} passed and wrote no {artefact_name}: {result.stdout}"
+    summary = json.loads(artefact.read_text())["summary"]
+    assert summary[key] > 0, f"{script} passed having examined nothing: {summary}"
+
+
+@pytest.mark.integration
+@pytest.mark.slow
+@pytest.mark.parametrize("script", sorted(SELF_GUARDED_WALKERS))
+def test_a_self_guarded_walker_never_passes_having_collected_nothing(
+    script: str, gutted_checkout: Path
+) -> None:
+    artefact = gutted_checkout / "untracked" / "qa" / _SELF_GUARDED_ARTEFACTS[script]
+    artefact.unlink(missing_ok=True)
+    result = subprocess.run(
+        [sys.executable, str(gutted_checkout / "scripts" / "qa" / script), "--json"],
+        cwd=gutted_checkout,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=_RUN_TIMEOUT_SECONDS,
+    )
+    assert (
+        result.returncode != 0 or artefact.is_file()
+    ), f"{script} passed with no artefact from {gutted_checkout}: {result.stdout}"
+
+
+#: The option each walker takes to name its scan root. check_magic_values has
+#: none; the gutted checkout above is its missing-root case.
+ROOT_OPTIONS: dict[str, str] = {
+    "audit_capture_corruption.py": "--scan-dir",
+    "audit_shell.py": "--scan-dir",
+    "check_authored_path_stat.py": "--path",
+    "check_british_english.py": "--root",
+    "check_doc_snippets.py": "--root",
+    "check_doc_truth.py": "--root",
+    "check_eacces_safe_predicates.py": "--path",
+    "check_git_history.py": "--repo",
+    "check_github_urls.py": "--path",
+    "check_python_var_guidance.py": "--path",
+    "check_repo_hygiene.py": "--root",
+    "check_security_downgrade_flags.py": "--root",
+    "check_sensitive_content.py": "--path",
+    "check_skill_references.py": "--path",
+    "check_skip_list_substring.py": "--path",
+    "check_unreachable_handle_branch.py": "--path",
+}
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("state", ["missing", "empty"])
+@pytest.mark.parametrize("script", sorted(ROOT_OPTIONS))
+def test_a_walker_pointed_at_a_missing_or_empty_root_fails(
+    script: str, state: str, tmp_path: Path
+) -> None:
+    root = tmp_path / "scan-root"
+    if state == "empty":
+        root.mkdir()
+    env = {**os.environ, "CLAUDE_CONFIG_DIR": str(tmp_path / "claude-config")}
+    result = subprocess.run(
+        [sys.executable, str(QA_DIR / script), ROOT_OPTIONS[script], str(root)],
+        cwd=tmp_path,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=_RUN_TIMEOUT_SECONDS,
+    )
+    assert result.returncode != 0, f"{script} passed on a {state} root: {result.stdout}"
+
+
+def test_every_walker_names_its_root_option() -> None:
+    walkers = set(WALKERS) | SELF_GUARDED_WALKERS
+    assert set(ROOT_OPTIONS) == walkers - {"check_magic_values.py", "audit_error_hiding.py"}
 
 
 def test_every_check_is_classified() -> None:

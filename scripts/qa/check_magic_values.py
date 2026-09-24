@@ -631,6 +631,7 @@ def main() -> int:
         examined=files_scanned,
         candidates=sum(1 for _ in src_dir.rglob("*.py")),
         noun="source files",
+        root=src_dir,
     )
 
     if json_output:

@@ -323,11 +323,25 @@ class TestExcludePaths:
         excluded_dir = tmp_path / "fixtures"
         excluded_dir.mkdir()
         (excluded_dir / "sample.txt").write_text("alpha appears here\n")
+        # Something left to scan, or the run fails as an empty scan (00466 N26).
+        (tmp_path / "clean.txt").write_text("nothing to report\n")
 
         data = _run_checker(tmp_path, config)
 
         assert data["summary"]["passed"] is True
         assert data["summary"]["total_violations"] == 0
+
+    def test_excluding_every_file_is_not_a_pass(self, tmp_path: Path) -> None:
+        config = tmp_path / "hooks-daemon.yaml"
+        _write_config(config, exclude_paths=["fixtures/**"])
+        excluded_dir = tmp_path / "fixtures"
+        excluded_dir.mkdir()
+        (excluded_dir / "sample.txt").write_text("clean\n")
+
+        data = _run_checker(tmp_path, config)
+
+        assert data["summary"]["passed"] is False
+        assert "examined 0 of" in data["summary"]["vacuous_scan"]
 
     def test_non_excluded_path_still_scanned(self, tmp_path: Path) -> None:
         config = tmp_path / "hooks-daemon.yaml"

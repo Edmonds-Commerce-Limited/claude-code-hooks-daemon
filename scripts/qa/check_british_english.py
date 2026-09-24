@@ -38,7 +38,7 @@ Usage:
 
 Exit codes:
     0 - No violations found
-    1 - Violations found
+    1 - Violations found, or no tracked document was examined
     2 - Operational failure (not a git repository, git unavailable)
 """
 
@@ -134,16 +134,18 @@ class Report:
 
     violations: list[Violation] = field(default_factory=list)
     files_scanned: int = 0
+    vacuous: str | None = None
 
     @property
     def passed(self) -> bool:
-        return not self.violations
+        return not self.violations and self.vacuous is None
 
     def to_dict(self) -> dict[str, object]:
         return {
             "tool": _TOOL_NAME,
             "summary": {
                 "passed": self.passed,
+                "vacuous_scan": self.vacuous,
                 "total_violations": len(self.violations),
                 "files_scanned": self.files_scanned,
             },
@@ -164,15 +166,28 @@ def _handler_class() -> Any:
             spelling check that could not read the word list would report
             "clean" while verifying nothing.
     """
-    entry = str(_PROJECT_ROOT / _SRC_DIR_NAME)
-    if entry not in sys.path:
-        sys.path.insert(0, entry)
+    _prime_src_path()
 
     from claude_code_hooks_daemon.handlers.pre_tool_use.british_english import (
         BritishEnglishHandler,
     )
 
     return BritishEnglishHandler
+
+
+def _prime_src_path() -> None:
+    entry = str(_PROJECT_ROOT / _SRC_DIR_NAME)
+    if entry not in sys.path:
+        sys.path.insert(0, entry)
+
+
+def _vacuous_scan_failure(files_scanned: int, root: Path) -> str | None:
+    """Why a scan that examined no document is not a pass (00466 N26), else None."""
+    _prime_src_path()
+
+    from claude_code_hooks_daemon.utils.scan_scope import vacuous_scan_failure
+
+    return vacuous_scan_failure(examined=files_scanned, noun="tracked documents", root=root)
 
 
 def spelling_checks() -> dict[str, str]:
@@ -267,6 +282,7 @@ def scan(root: Path) -> Report:
             continue
         report.files_scanned += 1
         report.violations.extend(scan_content(rel_path, target.read_text(encoding="utf-8")))
+    report.vacuous = _vacuous_scan_failure(report.files_scanned, root)
     return report
 
 
@@ -299,6 +315,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.report_stdout:
         print(json.dumps(payload, indent=2))
+    elif report.vacuous is not None:
+        print(f"FAILED: {report.vacuous}")
     elif report.violations:
         print(f"Found {len(report.violations)} American spelling(s):")
         for violation in report.violations:
@@ -310,7 +328,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print(f"No American spellings found ({report.files_scanned} files scanned)")
 
-    return 1 if report.violations else 0
+    return 0 if report.passed else 1
 
 
 if __name__ == "__main__":

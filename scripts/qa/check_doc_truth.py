@@ -643,6 +643,7 @@ def main(argv: list[str] | None = None) -> int:
         examined=docs_scanned,
         candidates=sum(1 for _ in root.rglob(_MARKDOWN_GLOB)),
         noun="markdown files",
+        root=root,
     )
 
     payload: dict[str, object] = {

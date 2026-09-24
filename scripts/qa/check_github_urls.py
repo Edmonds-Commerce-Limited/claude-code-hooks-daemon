@@ -195,7 +195,9 @@ def main() -> int:
     root = Path(args.path).resolve()
     candidate_files, entries_seen = _walk(root)
     files_scanned = len(candidate_files)
-    vacuous = vacuous_scan_failure(examined=files_scanned, candidates=entries_seen, noun="entries")
+    vacuous = vacuous_scan_failure(
+        examined=files_scanned, candidates=entries_seen, noun="entries", root=root
+    )
     unreadable: list[str] = []
     violations = find_violations(root, unreadable=unreadable)
 

@@ -53,7 +53,7 @@ Usage:
 
 Exit codes:
     0 - No violations found
-    1 - Violations found
+    1 - Violations found, or no document was examined
 """
 
 from __future__ import annotations
@@ -428,6 +428,10 @@ def main(argv: list[str] | None = None) -> int:
     root = args.root.resolve()
     violations = scan(root)
     documents_scanned = len(_documents(root))
+    _ensure_src_on_path()
+    from claude_code_hooks_daemon.utils.scan_scope import vacuous_scan_failure
+
+    vacuous = vacuous_scan_failure(examined=documents_scanned, noun="documents", root=root)
 
     if args.json:
         out_dir = root.joinpath(*_QA_OUTPUT_DIR_PARTS)
@@ -448,7 +452,8 @@ def main(argv: list[str] | None = None) -> int:
             # False, so a report that omits it is shown as a failure with
             # zero violations.
             "summary": {
-                "passed": not violations,
+                "passed": not violations and vacuous is None,
+                "vacuous_scan": vacuous,
                 "total_violations": len(violations),
                 "by_rule": by_rule,
                 "documents_scanned": documents_scanned,
@@ -456,6 +461,10 @@ def main(argv: list[str] | None = None) -> int:
             "violations": [v.to_dict() for v in violations],
         }
         (out_dir / _OUTPUT_FILENAME).write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    if vacuous is not None:
+        print(f"❌ Documented snippets: {vacuous}")
+        return 1
 
     if not violations:
         print(

@@ -53,5 +53,23 @@ class TestVacuousScanFailure:
     def test_examining_something_is_not_vacuous(self) -> None:
         assert vacuous_scan_failure(examined=3, candidates=12, noun="files") is None
 
-    def test_an_empty_tree_is_genuinely_clean(self) -> None:
-        assert vacuous_scan_failure(examined=0, candidates=0, noun="files") is None
+    def test_an_empty_scan_root_fails(self) -> None:
+        message = vacuous_scan_failure(examined=0, candidates=0, noun="files")
+        assert message is not None
+        assert "found no files" in message
+
+    def test_the_failure_names_the_scan_root(self, tmp_path: Path) -> None:
+        root = tmp_path / "absent"
+        message = vacuous_scan_failure(examined=0, candidates=0, noun="files", root=root)
+        assert message is not None
+        assert str(root) in message
+        assert "does not exist" in message
+
+    def test_an_existing_empty_root_is_named_as_empty(self, tmp_path: Path) -> None:
+        message = vacuous_scan_failure(examined=0, candidates=0, noun="files", root=tmp_path)
+        assert message is not None
+        assert f"found no files under {tmp_path}" in message
+
+    def test_candidates_default_to_what_was_examined(self) -> None:
+        assert vacuous_scan_failure(examined=4, noun="files") is None
+        assert vacuous_scan_failure(examined=0, noun="files") is not None

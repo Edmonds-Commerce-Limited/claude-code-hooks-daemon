@@ -25,7 +25,7 @@ Usage:
 
 Exit codes:
     0 — no violations
-    1 — at least one violation
+    1 — at least one violation, a scan target is missing, or nothing was examined
 """
 
 from __future__ import annotations
@@ -36,6 +36,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
+
+from claude_code_hooks_daemon.utils.scan_scope import vacuous_scan_failure
 
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 _QA_OUTPUT_DIR: Final[Path] = _REPO_ROOT / "untracked" / "qa"
@@ -324,11 +326,20 @@ def main() -> int:
         if path.is_file():
             violations.extend(scan_file(path))
             files_scanned += 1
+    # A declared target that is gone stops being covered without a word
+    # (00466 N26's missing-root case), so it fails like an empty scan.
+    missing = [str(target) for target in (*scan_roots, *scan_files) if not target.exists()]
+    vacuous = (
+        f"scan target(s) missing: {', '.join(missing)}, so this is not a pass"
+        if missing
+        else vacuous_scan_failure(examined=files_scanned, noun="files", root=scoped_target)
+    )
 
     output = {
         "tool": "python_var_guidance",
         "summary": {
-            "passed": len(violations) == 0,
+            "passed": len(violations) == 0 and vacuous is None,
+            "vacuous_scan": vacuous,
             "total_violations": len(violations),
             "files_scanned": files_scanned,
         },
@@ -344,7 +355,9 @@ def main() -> int:
         output_file.parent.mkdir(parents=True, exist_ok=True)
         output_file.write_text(json.dumps(output, indent=2))
 
-    if violations:
+    if vacuous is not None:
+        print(f"FAILED: {vacuous}")
+    elif violations:
         print(f"Found {len(violations)} $PYTHON guidance violations:")
         for violation in violations:
             print(f"  {violation.file}:{violation.line}")
@@ -352,7 +365,7 @@ def main() -> int:
     else:
         print(f"No $PYTHON guidance violations found ({files_scanned} files scanned)")
 
-    return 1 if violations else 0
+    return 1 if violations or vacuous is not None else 0
 
 
 if __name__ == "__main__":

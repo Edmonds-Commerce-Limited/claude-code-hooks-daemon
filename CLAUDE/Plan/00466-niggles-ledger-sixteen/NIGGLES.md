@@ -267,6 +267,39 @@ test rather than given their own zero guard.
   `relative_to`. B2's new `check_unreachable_handle_branch.py` is classified in
   the pin as a counted walker.
 
+- **The missing-root variant.** A walker could also examine 0 of 0, and pass,
+  when its scan root was absent or empty. `check_unreachable_handle_branch`
+  was the first one found. `vacuous_scan_failure` now fails on 0 examined in
+  every case, and names the root as missing or empty. Every walker applies it
+  now:
+
+  - the five that already used it get the stricter rule;
+  - it is added to `check_authored_path_stat`, `check_british_english`,
+    `check_doc_snippets`, `check_eacces_safe_predicates`,
+    `check_python_var_guidance`, `check_repo_hygiene`,
+    `check_security_downgrade_flags`, `check_sensitive_content`,
+    `check_skip_list_substring` and `check_unreachable_handle_branch`;
+  - `check_git_history` fails on a `--repo` that is not a git repository. It
+    no longer passes as "inert". 0 commits in a real repository still passes:
+    a baseline at HEAD leaves nothing new to sweep.
+  - `check_python_var_guidance` also fails when one of its declared default
+    roots or files is gone, rather than skipping it.
+
+  Pins in the same integration test:
+
+  - every walker, run from a checkout that holds only `scripts/qa/` minus its
+    shell scripts, fails or examines something. RED: 6 walkers passed on 0.
+  - every walker pointed at a missing root, and at an empty one, through its
+    own root option, exits non-zero. RED: 3 more (`check_git_history`,
+    `check_python_var_guidance`, `check_sensitive_content`), then
+    `check_repo_hygiene` on an empty git repository.
+  - `ROOT_OPTIONS` must name every walker's root option except
+    `check_magic_values`, which has none (the gutted checkout covers it), and
+    `audit_error_hiding`.
+
+  Tests that asserted a pass over a tree with nothing to scan now add a clean
+  scanned file, or assert the failure. Release note 37.
+
 ### N25 — a slow handler runs out the client's 30 s budget, and a timeout is an ALLOW for the whole PreToolUse chain
 
 **Found by the guard-defects security review 2**

@@ -78,7 +78,7 @@ Usage:
 
 Exit codes:
     0 - No violations found
-    1 - Violations found
+    1 - Violations found, or nothing is tracked
     2 - Operational failure (not a git repository, git unavailable)
 """
 
@@ -99,6 +99,7 @@ from typing import Final
 # green while it saw nothing — the precise failure it exists to prevent.
 from claude_code_hooks_daemon.constants import HandlerID
 from claude_code_hooks_daemon.core.claude_md_injector import handler_names_in_guidance
+from claude_code_hooks_daemon.utils.scan_scope import vacuous_scan_failure
 
 _PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 _QA_OUTPUT_DIR_PARTS: Final[tuple[str, str]] = ("untracked", "qa")
@@ -417,10 +418,17 @@ class Report:
 
     violations: list[Violation] = field(default_factory=list)
     paths_checked: int = 0
+    root: Path | None = None
+
+    @property
+    def vacuous(self) -> str | None:
+        return vacuous_scan_failure(
+            examined=self.paths_checked, noun="tracked paths", root=self.root
+        )
 
     @property
     def passed(self) -> bool:
-        return not self.violations
+        return not self.violations and self.vacuous is None
 
     def to_dict(self) -> dict[str, object]:
         by_rule = {rule: sum(1 for v in self.violations if v.rule == rule) for rule in _ALL_RULES}
@@ -428,6 +436,7 @@ class Report:
             "tool": _TOOL_NAME,
             "summary": {
                 "passed": self.passed,
+                "vacuous_scan": self.vacuous,
                 "total_violations": len(self.violations),
                 "by_rule": by_rule,
                 "paths_checked": self.paths_checked,
@@ -870,7 +879,7 @@ def _unreleased_manifest_date(root: Path, rel_path: str) -> str | None:
 def scan(root: Path) -> Report:
     """Check every tracked path in ``root`` against every rule family."""
     tracked = tracked_files(root)
-    report = Report(paths_checked=len(tracked))
+    report = Report(paths_checked=len(tracked), root=root)
     for rel_path in tracked:
         reason = _is_build_artifact(rel_path)
         if reason is not None:
@@ -999,6 +1008,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.report_stdout:
         print(json.dumps(payload, indent=2))
+    elif report.vacuous is not None:
+        print(f"FAILED: {report.vacuous}")
     elif report.violations:
         print(f"Found {len(report.violations)} repo-hygiene violation(s):")
         for violation in report.violations:
@@ -1007,7 +1018,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print(f"No repo-hygiene violations found ({report.paths_checked} paths checked)")
 
-    return 1 if report.violations else 0
+    return 0 if report.passed else 1
 
 
 if __name__ == "__main__":

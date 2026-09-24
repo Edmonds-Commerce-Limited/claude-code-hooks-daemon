@@ -427,7 +427,9 @@ def main() -> int:
             i += 1
 
     violations, files_scanned, candidates = scan_directory(scan_path, include_filter)
-    vacuous = vacuous_scan_failure(examined=files_scanned, candidates=candidates, noun="files")
+    vacuous = vacuous_scan_failure(
+        examined=files_scanned, candidates=candidates, noun="files", root=scan_path
+    )
 
     output = {
         "tool": "skill_references",
