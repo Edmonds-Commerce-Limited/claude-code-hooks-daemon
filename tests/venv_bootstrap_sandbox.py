@@ -63,6 +63,7 @@ _TOOLS: Final[tuple[str, ...]] = (
     "dirname",
     "basename",
     "mkdir",
+    "rmdir",
     "rm",
     "mv",
     "cp",
@@ -247,7 +248,12 @@ class Sandbox:
     def resolves(self) -> bool:
         """Does a venv now resolve for this clone, by the canonical resolver?"""
         result = self.run(
-            [BASH, str(self.clone / "scripts" / "lib" / "resolve_venv.sh"), "python", str(self.clone)]
+            [
+                BASH,
+                str(self.clone / "scripts" / "lib" / "resolve_venv.sh"),
+                "python",
+                str(self.clone),
+            ]
         )
         return result.returncode == 0 and result.stdout.strip() != ""
 

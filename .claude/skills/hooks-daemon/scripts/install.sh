@@ -64,7 +64,61 @@ echo ""
 # that may not exist — the host-a trap that Plan 00110 closes).
 PYPROJECT_TMP="/tmp/hooks-daemon-precheck-pyproject.toml.$$"
 DISCOVERY_TMP="/tmp/hooks-daemon-precheck-python-discovery.sh.$$"
-trap 'rm -f "$PYPROJECT_TMP" "$DISCOVERY_TMP"' EXIT
+
+# Plan 00456 (GitHub issue #53): an explicit --force reinstall deletes the whole
+# daemon directory, and every environment's venv lives inside it — a host view
+# and a container view of one bind-mounted project share the clone but each
+# has its own untracked/venv-*. So before the installer runs, every venv-* is
+# moved aside (same filesystem, so a rename: byte-for-byte, symlinks and all)
+# and afterwards moved back to the SAME path, which its absolute paths need.
+# A name the fresh install rebuilt is this environment's own venv: the new
+# one wins. Restoring runs from the EXIT trap, so a failed install restores too.
+KEPT_VENVS_DIR=""
+
+_keep_venvs_aside() {
+    local daemon_dir="$1" venv
+    for venv in "$daemon_dir"/untracked/venv-*; do
+        [ -d "$venv" ] || continue
+        if [ -z "$KEPT_VENVS_DIR" ]; then
+            KEPT_VENVS_DIR="$(mktemp -d "$PROJECT_ROOT/.claude/.hooks-daemon-venvs.XXXXXX")"
+            echo "Keeping every environment's venv aside in $KEPT_VENVS_DIR during the reinstall:"
+        fi
+        mv "$venv" "$KEPT_VENVS_DIR/"
+        echo "  kept: ${venv##*/}"
+    done
+}
+
+_restore_venvs() {
+    [ -n "$KEPT_VENVS_DIR" ] || return 0
+    local target="$DAEMON_DIR/untracked" venv name
+    mkdir -p "$target"
+    echo "Restoring the kept venvs into $target:"
+    for venv in "$KEPT_VENVS_DIR"/venv-*; do
+        [ -d "$venv" ] || continue
+        name="${venv##*/}"
+        if [ -e "$target/$name" ]; then
+            echo "  $name: rebuilt by this install for this environment; its old copy is discarded"
+            rm -rf "$venv"
+        else
+            mv "$venv" "$target/"
+            echo "  restored: $name"
+        fi
+    done
+    # rmdir, never rm -rf: anything still in here is a venv that did not move
+    # back, and it must be kept for a human rather than deleted.
+    if ! rmdir "$KEPT_VENVS_DIR"; then
+        echo "WARNING: $KEPT_VENVS_DIR is not empty; what is left in it was kept for you to inspect." >&2
+        KEPT_VENVS_DIR=""
+        return 1
+    fi
+    KEPT_VENVS_DIR=""
+}
+
+_on_exit() {
+    _restore_venvs
+    rm -f "$PYPROJECT_TMP" "$DISCOVERY_TMP"
+}
+trap _on_exit EXIT
 
 if ! curl -sSL "$PYPROJECT_URL" -o "$PYPROJECT_TMP" || [ ! -s "$PYPROJECT_TMP" ]; then
     echo "Error: Failed to fetch pyproject.toml from $PYPROJECT_URL"
@@ -130,7 +184,52 @@ _installation_is_healthy() {
     return 1
 }
 
-# Check if already installed
+# _trusted_clone_version() - The clone's version, when the clone is whole enough
+# to repair itself: the same real-clone marker init.sh uses
+# (scripts/lib/resolve_venv.sh), the wrapper that runs the repair, and a
+# version.py that reads. Echoes the version; returns 1 otherwise.
+_trusted_clone_version() {
+    local dir="$1" version
+    local version_file="$dir/src/claude_code_hooks_daemon/version.py"
+    [ -f "$dir/scripts/lib/resolve_venv.sh" ] || return 1
+    [ -f "$dir/bin/hooks-daemon" ] || return 1
+    [ -f "$version_file" ] || return 1
+    version="$(awk -F'"' '/^__version__[[:space:]]*=/ { print $2; exit }' "$version_file")"
+    [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+    echo "$version"
+}
+
+# _holds_nothing_to_keep() - Is dir only the runtime shell hooks create?
+#
+# init.sh runs `mkdir -p .claude/hooks-daemon/untracked` on every hook, so a
+# checkout that never had a clone still has this directory. Nothing but that
+# untracked/ may be present, and no venv inside it.
+_holds_nothing_to_keep() {
+    local dir="$1" entry
+    for entry in "$dir"/* "$dir"/.[!.]* "$dir"/..?*; do
+        [ -e "$entry" ] || [ -L "$entry" ] || continue
+        [ "$entry" = "$dir/untracked" ] && continue
+        return 1
+    done
+    for entry in "$dir"/untracked/venv*; do
+        [ -e "$entry" ] || [ -L "$entry" ] || continue
+        return 1
+    done
+    return 0
+}
+
+# Check if already installed.
+#
+# Plan 00456 (GitHub issue #53): this script NEVER escalates to --force on its
+# own. It used to, whenever the health probe failed, and the force path's
+# rm -rf took every other environment's venv with the clone. In the #53 state
+# (one clone, two views of a bind-mounted project) the probe cannot pass, so
+# each view deleted the other's venv on every switch. Now:
+#   - healthy                       -> nothing to do
+#   - only the hooks' runtime shell -> nothing to keep: removed, fresh install
+#   - a whole clone                 -> its own `bin/hooks-daemon repair` builds
+#                                      THIS path's venv in place, then re-probe
+#   - anything else                 -> stop, change nothing, explain
 if [ -d "$DAEMON_DIR" ] && [ "$FORCE_FLAG" != "--force" ]; then
     if _installation_is_healthy "$DAEMON_DIR"; then
         echo "Daemon is already installed at: $DAEMON_DIR"
@@ -142,11 +241,37 @@ if [ -d "$DAEMON_DIR" ] && [ "$FORCE_FLAG" != "--force" ]; then
         echo "  /hooks-daemon install --force"
         exit 0
     fi
-    echo "Daemon directory exists at: $DAEMON_DIR"
-    echo "but the installation looks broken (venv missing or package not importable)."
-    echo "Repairing now (equivalent to --force)..."
-    echo ""
-    FORCE_FLAG="--force"
+    if _holds_nothing_to_keep "$DAEMON_DIR"; then
+        echo "$DAEMON_DIR holds only the runtime directory hooks create (no clone, no venv)."
+        echo "Removing it and installing fresh."
+        echo ""
+        rm -rf "$DAEMON_DIR"
+    elif CLONE_VERSION="$(_trusted_clone_version "$DAEMON_DIR")"; then
+        echo "The daemon clone (v$CLONE_VERSION) is present at $DAEMON_DIR, but no working"
+        echo "venv serves this project path. Repairing it IN PLACE: only this path's venv is"
+        echo "built, and nothing is deleted."
+        echo ""
+        if bash "$DAEMON_DIR/bin/hooks-daemon" repair && _installation_is_healthy "$DAEMON_DIR"; then
+            echo ""
+            echo "Repaired. The next hook starts the daemon (restart your Claude session if hooks stay inactive)."
+            exit 0
+        fi
+        echo ""
+        echo "The in-place repair did not leave a working venv for this project path (its output is above)."
+        echo "Nothing was deleted. Next steps, in order:"
+        echo "  1. Fix what the repair reported, then run: $DAEMON_DIR/bin/hooks-daemon repair"
+        echo "  2. Or run the same-version upgrade: /hooks-daemon upgrade $CLONE_VERSION"
+        echo "  3. Only if both fail: /hooks-daemon install --force"
+        echo "     (re-clones the daemon; every venv-* under untracked/ is kept and restored)"
+        exit 1
+    else
+        echo "The daemon directory exists at $DAEMON_DIR, but it is not a complete clone"
+        echo "(scripts/lib/resolve_venv.sh, bin/hooks-daemon or a readable version.py is missing),"
+        echo "and it holds files this script will not delete on its own. Nothing was changed."
+        echo "Ask a human to inspect it. To reinstall over it deliberately:"
+        echo "  /hooks-daemon install --force   (every venv-* under untracked/ is kept and restored)"
+        exit 1
+    fi
 fi
 
 # Download installer to temp file (never pipe curl to shell — we block that pattern)
@@ -172,6 +297,9 @@ echo ""
 cd "$PROJECT_ROOT"
 
 if [ "$FORCE_FLAG" = "--force" ]; then
+    if [ -d "$DAEMON_DIR" ]; then
+        _keep_venvs_aside "$DAEMON_DIR"
+    fi
     FORCE=true bash "$INSTALLER"
 else
     bash "$INSTALLER"
