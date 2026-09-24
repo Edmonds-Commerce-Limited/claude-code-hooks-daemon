@@ -287,15 +287,20 @@
     file: src/claude_code_hooks_daemon/handlers/pre_tool_use/worktree_file_copy.py
     symbol: _RELOCATION_VERB_RE
 
-- id: set-statement-interpolates-the-reserved-word-prefix
+- id: command-name-anchors-interpolate-the-command-position
   relation: interpolates
-  helper: RESERVED_WORD_PREFIX
+  helper: COMMAND_POSITION
   reason: >
-    both recognise a command at a statement start, so `{ set -euo pipefail; …; }`
-    reads as no safety prelude at all.
+    both anchor a command name at a span start, so an anchor without the
+    reserved-word prefix lets `then gh issue create` and `do git push` through.
   left:
-    file: src/claude_code_hooks_daemon/utils/bash_flags.py
-    symbol: _SET_STATEMENT
+    file: src/claude_code_hooks_daemon/utils/command_evasion.py
+    symbol: _NAMED_COMMAND_HEAD
   right:
-    file: src/claude_code_hooks_daemon/handlers/pre_tool_use/sed_blocker.py
-    symbol: _SED_AS_COMMAND_HEAD
+    file: src/claude_code_hooks_daemon/handlers/pre_tool_use/verification_result_gate.py
+    symbol: _GIT_SPAN_HEAD
+
+# `bash_flags._SET_STATEMENT` has no row on purpose. It asks whether a `set`
+# still applies to the statements AFTER it, not which command a segment runs,
+# so only `{`, `!` and `time` count there: a `set` behind `then`/`do`/`else`
+# may never run.

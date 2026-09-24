@@ -196,15 +196,25 @@ class TestExemptionsAreNotWithheld:
 
     @pytest.mark.parametrize(
         "command",
-        ["{ set -euo pipefail; a; b; }", "if true; then set -euo pipefail; fi; a"],
+        ["{ set -euo pipefail; a; b; }", "time set -euo pipefail; a", "! set -euo pipefail; a"],
     )
-    def test_bash_flags_reads_a_set_behind_a_reserved_word(self, command: str) -> None:
+    def test_bash_flags_reads_an_unconditional_set(self, command: str) -> None:
         flags = detect_safe_mode_flags(split_statements(command))
         assert {"errexit", "pipefail", "nounset"} <= flags
 
-    def test_a_subshell_set_still_does_not_count(self) -> None:
-        """`( set -e )` sets nothing for the statements after it, so `(` stays opaque."""
-        assert detect_safe_mode_flags(split_statements("( set -e ); a")) == frozenset()
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "( set -e ); a",
+            "if false; then set -e; fi; a",
+            "for i in; do set -e; done; a",
+            "if true; then :; else set -e; fi; a",
+        ],
+    )
+    def test_a_conditional_or_subshell_set_does_not_count(self, command: str) -> None:
+        """A subshell's `set` ends with it, and one behind `then`/`do`/`else` may
+        never run, so crediting either would stand the safety checks down."""
+        assert detect_safe_mode_flags(split_statements(command)) == frozenset()
 
     @pytest.mark.parametrize("command", ["time cat f", "! cat f"])
     def test_budget_exhaustion_passthrough_is_recognised(self, command: str) -> None:

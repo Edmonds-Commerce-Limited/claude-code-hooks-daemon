@@ -137,6 +137,9 @@ RESERVED_WORD_PREFIX = (
 # invocation of X?" starts here.
 COMMAND_POSITION = rf"^\s*{RESERVED_WORD_PREFIX}{ENV_PREFIX}"
 
+# What `compile_command_name_pattern` puts in front of the name it is given.
+_NAMED_COMMAND_HEAD = rf"{COMMAND_POSITION}{OPTIONAL_PATH}"
+
 _RESERVED_WORD_HEAD: Final[re.Pattern[str]] = re.compile(rf"^\s*{RESERVED_WORD_PREFIX}")
 
 
@@ -150,6 +153,7 @@ def strip_reserved_word_prefix(segment: str) -> str:
     (``done``, ``fi``) is returned unchanged: it runs no command of its own.
     """
     return _RESERVED_WORD_HEAD.sub("", segment, count=1)
+
 
 # Git global options that take their value as a SEPARATE token. Everything else
 # is either self-contained (`--git-dir=<path>`) or valueless (`--no-pager`), so
@@ -224,8 +228,9 @@ def compile_command_name_pattern(name: str) -> re.Pattern[str]:
     it. The caller supplies one segment from
     :func:`~claude_code_hooks_daemon.utils.shell_segmentation.split_unquoted`.
 
-    Recognises the respellings this module exists for: an optional ``env``
-    prefix, any run of ``VAR=value`` assignments, and a path qualifier.
+    Recognises the respellings this module exists for: leading shell reserved
+    words (``do``, ``then``, ``!``, ``time`` ...), an optional ``env`` prefix,
+    any run of ``VAR=value`` assignments, and a path qualifier.
 
     ``name`` may be several words (``go vet``, ``npm test``); the gap between
     them matches any run of whitespace, since the shell does not care.
@@ -244,7 +249,7 @@ def compile_command_name_pattern(name: str) -> re.Pattern[str]:
         A compiled pattern to ``search`` against one stripped segment.
     """
     literal = r"\s+".join(re.escape(word) for word in name.split())
-    return re.compile(rf"^\s*{ENV_PREFIX}{OPTIONAL_PATH}{literal}(?=\s|$)")
+    return re.compile(rf"{_NAMED_COMMAND_HEAD}{literal}(?=\s|$)")
 
 
 def git_subcommand_index(tokens: Sequence[str], git_index: int) -> int | None:

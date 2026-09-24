@@ -82,7 +82,10 @@ class TestEveryReservedWordIsSkipped:
         assert "Piping pytest to tail/head" in reason
 
     def test_stacked_reserved_words_are_all_skipped(self, handler: PipeBlockerHandler) -> None:
-        assert handler.matches(_bash("while true; do if ! grep -q x f | head; then :; fi; done")) is False
+        assert (
+            handler.matches(_bash("while true; do if ! grep -q x f | head; then :; fi; done"))
+            is False
+        )
 
     def test_time_with_its_posix_flag_is_skipped(self, handler: PipeBlockerHandler) -> None:
         assert handler.matches(_bash("time -p grep x f | head")) is False

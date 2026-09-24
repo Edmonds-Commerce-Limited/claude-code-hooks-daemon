@@ -34,6 +34,10 @@ from claude_code_hooks_daemon.utils.cli_command import (
     echd_capture_path,
     echd_capture_path_for_docs,
 )
+from claude_code_hooks_daemon.utils.command_evasion import (
+    SHELL_RESERVED_COMMAND_PREFIXES,
+    strip_reserved_word_prefix,
+)
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     split_unquoted,
     strip_inert_spans,
@@ -240,6 +244,15 @@ _BACKSLASH = "\\"
 # Returned when the pipe is not inside any substitution: scan from the start
 # of the command, which is the pre-existing top-level behaviour.
 _TOP_LEVEL_CONTENT_START = 0
+
+# Shell words a producer can still start with once leading reserved words are
+# stripped (Plan 00422 N25): the words that CLOSE a compound command, as in
+# `for ...; done | tail`, plus the reserved words themselves as a backstop. None
+# is a program, so none may ever be offered as a whitelist pattern.
+_COMPOUND_CLOSERS: tuple[str, ...] = ("done", "fi", "esac", "}")
+_SHELL_WORDS_THAT_ARE_NOT_PRODUCERS: frozenset[str] = frozenset(
+    _COMPOUND_CLOSERS + SHELL_RESERVED_COMMAND_PREFIXES
+)
 
 
 # Single generic teaching paragraph shared by both rules below (Plan 00116):
@@ -541,7 +554,10 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
             # like grep -E "15:56|15:57" where | is a regex alternation, not a pipe.
             before_pipe = split_unquoted(before_pipe, _PIPE_SEPARATORS)[-1]
 
-            return before_pipe.strip()
+            # `do grep x | head` is fed by grep. Reading `do` as the producer
+            # denied a whitelisted command and suggested whitelisting `^do\b`
+            # (Plan 00422 N25).
+            return strip_reserved_word_prefix(before_pipe).strip()
 
         except Exception:  # nosec B110 - fail-safe: extraction error → empty string (unknown)
             return ""
@@ -904,6 +920,51 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
             return words[2]
         return words[0]
 
+    @staticmethod
+    def _compound_closer(source_segment: str) -> str | None:
+        """The shell word the producer starts with, when it is not a program.
+
+        After reserved words are stripped from the front of a producer, the
+        only way it can still start with one is that a compound command ends
+        right before the pipe: `...; done | tail` leaves `done`.
+        """
+        words = source_segment.split()
+        if words and words[0] in _SHELL_WORDS_THAT_ARE_NOT_PRODUCERS:
+            return words[0]
+        return None
+
+    def _compound_reason(self, rule_id: str, closer: str, command: str, verbose: bool) -> str:
+        """Block message for a pipe fed by a whole compound command."""
+        helper = self._capture_helper_invocation()
+        capture = (
+            f"<the whole compound command> 2>&1 | {helper} {_ECHD_CAPTURE_DEFAULT_LINES}"
+            if helper is not None
+            else f'<the whole compound command> > "{ProjectPath.SCRATCH_DIR}/output_$$.txt" 2>&1'
+        )
+        if not verbose:
+            return (
+                f"BLOCKED [{rule_id}]: Pipe to tail/head — fed by a compound command "
+                f"ending in `{closer}`\n\n"
+                f"COMMAND: {self._truncate_command(command)}\n\n"
+                f"Move the pipe inside the body, or capture: {capture}\n"
+            )
+        return (
+            f"BLOCKED [{rule_id}]: Pipe to tail/head detected\n\n"
+            f"COMMAND: {self._truncate_command(command)}\n\n"
+            f"WHY BLOCKED:\n"
+            f"  • The pipe is fed by a compound command (the loop, `if`, `case` or\n"
+            f"    `{{ }}` group that `{closer}` closes). Its output is everything the\n"
+            f"    body runs, so it cannot be judged as one program, and no\n"
+            f"    configuration entry can name it as a cheap one\n\n"
+            f"✅ DO INSTEAD (either):\n"
+            f"  • Move the pipe inside the body, onto the command whose output you\n"
+            f'    want to truncate: `for f in a b; do grep x "$f" | head; done` is\n'
+            f"    judged on `grep`\n"
+            f"  • Capture the compound's full output and read a slice of it:\n\n"
+            f"      set -o pipefail\n"
+            f"      {capture}"
+        )
+
     def _blacklisted_reason(self, rule_id: str, source_segment: str, command: str) -> str:
         """Return verbose block message for known-expensive commands (blacklisted)."""
         label = self._producer_label(source_segment)
@@ -1013,6 +1074,16 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
         # one (Plan 00209 §1).
         if self._looks_like_prose(source_segment):
             return GatingResult(decision=Decision.DENY, reason=self._prose_reason(rule_id))
+
+        # A pipe fed by a whole loop/if/case/group has no one producer, so no
+        # whitelist line can name it; the unknown-command template would
+        # suggest whitelisting `^done\b` (Plan 00422 N25).
+        closer = self._compound_closer(source_segment)
+        if closer is not None:
+            return GatingResult(
+                decision=Decision.DENY,
+                reason=self._compound_reason(rule_id, closer, command, verbose=first_fire),
+            )
 
         # Differentiate: known expensive vs unrecognized, verbose vs terse
         if self._matches_blacklist(source_segment):

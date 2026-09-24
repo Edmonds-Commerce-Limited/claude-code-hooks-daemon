@@ -15,6 +15,7 @@ from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command, get_file_content, get_file_path
+from claude_code_hooks_daemon.utils.command_evasion import RESERVED_WORD_PREFIX
 from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 
 #: Scratch subdirectory for this handler's acceptance-test fixtures.
@@ -67,11 +68,12 @@ class SedBlockingMode:
 _SEPARATOR_BEFORE_NEW_COMMAND = ";|&&|\\|\\|"
 
 # Detects sed being EXECUTED as a command head: at the very start of the command, or
-# immediately after a command separator (;, &&, ||). This is sed running as its own
-# command (e.g. "grep x f; sed -i s/a/b/ f") rather than as a stdout-transforming
-# pipe stage, so it can modify files and must be blocked.
+# immediately after a command separator (;, &&, ||), past any shell reserved words
+# (`then sed`, `do sed`). This is sed running as its own command (e.g.
+# "grep x f; sed -i s/a/b/ f") rather than as a stdout-transforming pipe stage, so
+# it can modify files and must be blocked.
 _SED_AS_COMMAND_HEAD = re.compile(
-    rf"(?:^|{_SEPARATOR_BEFORE_NEW_COMMAND})\s*sed\b",
+    rf"(?:^|{_SEPARATOR_BEFORE_NEW_COMMAND})\s*{RESERVED_WORD_PREFIX}sed\b",
     re.IGNORECASE,
 )
 

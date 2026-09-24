@@ -67,6 +67,7 @@ from claude_code_hooks_daemon.core.utils import (
     get_bash_command,
     get_bash_write_targets,
 )
+from claude_code_hooks_daemon.utils.command_evasion import strip_reserved_word_prefix
 from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
 
@@ -353,7 +354,8 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
         targets: list[str] = []
 
         for segment in split_unquoted(command, _SEGMENT_SEPARATORS):
-            tokens = self._tokenise(segment)
+            # `then mkdir /opt/x` runs mkdir: the reserved word is not the command.
+            tokens = self._tokenise(strip_reserved_word_prefix(segment))
             if not tokens:
                 continue
 

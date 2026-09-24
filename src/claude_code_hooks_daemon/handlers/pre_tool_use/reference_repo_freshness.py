@@ -52,6 +52,7 @@ from claude_code_hooks_daemon.reference_repos.report import (
     unconfirmed_note,
 )
 from claude_code_hooks_daemon.reference_repos.sweep import governed_roots
+from claude_code_hooks_daemon.utils.command_evasion import strip_reserved_word_prefix
 from claude_code_hooks_daemon.utils.path_predicates import path_exists
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     command_word,
@@ -313,7 +314,8 @@ class ReferenceRepoFreshnessHandler(PreToolUseHandlerBase):
         cwd: Path | None = None
         for chain in split_unquoted(command, _CHAIN_SEPARATORS):
             for stage_index, stage in enumerate(split_unquoted(chain, _PIPE_SEPARATORS)):
-                words = _tokenise(stage)
+                # `then rg x` runs rg: judge the command, not the reserved word.
+                words = _tokenise(strip_reserved_word_prefix(stage))
                 if not words:
                     continue
                 head = command_word(words[0])
