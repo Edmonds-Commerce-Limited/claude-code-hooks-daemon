@@ -1604,6 +1604,48 @@ That gap is real and is accepted, not overlooked: content quality is not
 checkable from here, and a guard that pretended otherwise would be the same
 false-assurance failure this ledger keeps recording.
 
+### N20 — the acceptance probes cannot pass in a worktree whose daemon is running
+
+**Found**: Plan 00456's final QA in `untracked/worktrees/worktree-issue-53-venv`
+scored 34/35. Both failing tests are the acceptance-probe checks
+(`test_playbook_harness.py::TestTheDeclaredProbesBehaveAsDeclared` and
+`test_acceptance_contract.py::TestEveryDeclaredInputProducesItsDeclaredVerdict`).
+Fourteen DENY probes got no decision at all: `QaSuppressionHandler` and
+`CommentChangelogHandler` writes to `<worktree>/untracked/scratch/acceptance-test-*/`.
+
+**Evidence so far.** From the implementation agent: an A/B that changes only
+the path flips `QaSuppressionHandler.matches()` from False (this worktree's
+path) to True (`/tmp/elsewhere-project/`). The same 14 probes fail at the
+merge base `46f5c5b1` in that worktree, and the branch diff over the
+handlers, core and project config is empty. Checked by the coordinator: the
+same two tests pass on `main` in the main checkout (2 passed, 16.4s), and
+fail in the worktree with the same 14 probes.
+
+**Suspected mechanism, not yet confirmed.** A path exclusion for
+`untracked/worktrees/` (`core/worktree_paths.py` holds that prefix) is
+applied to the ABSOLUTE path, or to the path relative to the MAIN checkout.
+In a worktree, every probe fixture is under that prefix, so the handlers
+stand down. This would also explain why other worktrees passed today:
+where no worktree daemon was running, these tests skip rather than run
+(Plan 00443's skip reason), so a green worktree QA may simply never have
+run them.
+
+**Why it matters.** A worktree is where every plan in this project is
+built and gated. Its QA is either silently not running the acceptance
+probes, or failing them for a reason unrelated to the change, and the second
+case trains agents to wave a red gate through as "pre-existing". Related:
+N6 (a worktree could not run the gates at all; closed by 00431/00443/00445)
+and N11 (the probe fixtures live in the sanctioned scratch directory).
+
+**Candidate remedies:**
+
+1. Make the exclusion relative to the checkout being judged (the daemon's
+   own project root), so a worktree's own `untracked/scratch/` is judged
+   like the main checkout's. Test it from a worktree path.
+2. Move the probe fixtures out of any excluded prefix (overlaps N11).
+3. At minimum, make the worktree QA say that these probes were not
+   meaningfully run, rather than going green or failing unexplained.
+
 ### N19 — the Python nested-install check can never fire in a real client
 
 **Found**: reviewing Plan 00455 (issue #54). Its implementation agent copied
