@@ -24,4 +24,3 @@ Re-render the index: `bin/hooks-daemon remote-docs index`
 | `defence-before-fix.github.io/raw/TOOLING-SPEC.md` | https://defence-before-fix.github.io/raw/TOOLING-SPEC.md | 2026-09-15 | 2026-12-14 |
 | `docs.ansible.com/projects/ansible/latest/vault_guide/vault_using_encrypted_content.md` | https://docs.ansible.com/projects/ansible/latest/vault_guide/vault_using_encrypted_content.html | 2026-09-24 | 2026-12-23 |
 | `raw.githubusercontent.com/ansible/ansible/devel/lib/ansible/parsing/vault/__init__.py.md` | https://raw.githubusercontent.com/ansible/ansible/devel/lib/ansible/parsing/vault/__init__.py | 2026-09-24 | 2026-12-23 |
-| `raw.githubusercontent.com/getsops/docs/main/content/en/docs/reference/_index.md` | https://raw.githubusercontent.com/getsops/docs/main/content/en/docs/reference/_index.md | 2026-09-24 | 2026-12-23 |
