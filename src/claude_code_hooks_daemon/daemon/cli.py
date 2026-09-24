@@ -49,7 +49,7 @@ from pydantic import ValidationError as PydanticValidationError
 
 from claude_code_hooks_daemon.config.loader import ConfigLoader
 from claude_code_hooks_daemon.config.models import Config
-from claude_code_hooks_daemon.constants import Timeout
+from claude_code_hooks_daemon.constants import HandlerID, Timeout
 from claude_code_hooks_daemon.constants.modes import DaemonMode
 from claude_code_hooks_daemon.constants.permissions import FileMode
 from claude_code_hooks_daemon.core.event import EventType
@@ -97,6 +97,7 @@ from claude_code_hooks_daemon.install.install_stamp import read_install_stamp
 from claude_code_hooks_daemon.install.release_notes import load_release_notes_between
 from claude_code_hooks_daemon.issue_report.build import build_report
 from claude_code_hooks_daemon.issue_report.upstream import filing_command
+from claude_code_hooks_daemon.utils.claude_plugins import resolve_enabled_plugins
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
 from claude_code_hooks_daemon.utils.git_repo import run_git
 from claude_code_hooks_daemon.utils.hook_registration import (
@@ -108,6 +109,7 @@ from claude_code_hooks_daemon.utils.hook_registration import (
     validate_settings_hooks,
 )
 from claude_code_hooks_daemon.utils.markdown_format import format_markdown_text
+from claude_code_hooks_daemon.utils.plugin_hooks import ACKNOWLEDGED_PLUGINS_OPTION, health_lines
 from claude_code_hooks_daemon.utils.report_scrubbing import scrub_report
 from claude_code_hooks_daemon.utils.secret_redaction import get_active_secret_terms
 from claude_code_hooks_daemon.utils.session_action_items import (
@@ -1119,6 +1121,25 @@ def check_hook_registration_warnings(project_path: Path) -> list[str]:
     return warnings
 
 
+def _acknowledged_plugins(project_path: Path) -> list[str]:
+    """The plugin ids ``plugin_hooks_advisor`` is told to leave out.
+
+    An unreadable config acknowledges nothing, so every plugin is shown
+    without the mark; the reason is logged.
+    """
+    config_path = project_path / ".claude" / "hooks-daemon.yaml"
+    try:
+        config = Config.load_or_default(config_path)
+    except (ValueError, OSError) as exc:
+        logger.warning("health: cannot read %s, no plugin acknowledged: %s", config_path, exc)
+        return []
+    options = config.get_handler_config(
+        "session_start", HandlerID.PLUGIN_HOOKS_ADVISOR.config_key
+    ).options
+    value = options.get(ACKNOWLEDGED_PLUGINS_OPTION)
+    return [item for item in value if isinstance(item, str)] if isinstance(value, list) else []
+
+
 def cmd_health(args: argparse.Namespace) -> int:
     """Check daemon health status.
 
@@ -1187,6 +1208,13 @@ def cmd_health(args: argparse.Namespace) -> int:
             "Port legacy-style scripts to project-level handlers via "
             "`init-project-handlers`."
         )
+
+    # Plan 00468 G1: advisory, never changes the exit code.
+    print("\nClaude Code plugin hooks:")
+    for line in health_lines(
+        resolve_enabled_plugins(project_path), _acknowledged_plugins(project_path)
+    ):
+        print(line)
 
     # Project-handler protection signal (Plan 00143). Unlike hook-registration
     # drift, this DOES drive the exit code: a skipped project handler is a

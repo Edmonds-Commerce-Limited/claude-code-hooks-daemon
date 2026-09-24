@@ -91,7 +91,7 @@
 | 34 | merge_qa_report | ADVISORY | Post-hoc plan/docs QA report over what a merge/pull/rebase just introduced |
 | 35 | daemon_sync_after_merge | ADVISORY | Advise a restart when a merge/pull/rebase changed daemon config or handlers |
 
-### SessionStart (28 handlers)
+### SessionStart (29 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -99,6 +99,7 @@
 | 49 | guard_config_drift | ADVISORY | Name any uncommitted change that weakens this project's guards |
 | 50 | project_handler_load_checker | ADVISORY | Loudly alert at session start when project handlers failed to load |
 | 51 | hook_registration_checker | ADVISORY | Validate hook registrations in Claude Code settings on session start |
+| 51 | plugin_hooks_advisor | ADVISORY | Name the enabled plugins whose hooks run beside the daemon's |
 | 52 | optimal_config_checker | ADVISORY | Check Claude Code environment for optimal configuration on session start |
 | 53 | git_filemode_checker | ADVISORY | Warn when git core.fileMode=false is detected |
 | 54 | gitignore_safety_checker | ADVISORY | Warn when required .claude/ paths are absent from .gitignore |

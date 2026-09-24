@@ -318,6 +318,7 @@ class ConfigTemplate:
             "    disclosure_reset_session_start: {enabled: true, priority: 15}  # Reset per-agent rule-disclosure state on every SessionStart\n"
             "    project_handler_load_checker: {enabled: true, priority: 50}  # Loud alert when project handlers fail to load\n"
             "    hook_registration_checker: {enabled: true, priority: 51}  # Validate hook registrations in settings.json\n"
+            "    plugin_hooks_advisor: {enabled: true, priority: 51}  # Name enabled Claude Code plugins that ship hooks (non-blocking)\n"
             "    optimal_config_checker: {enabled: true, priority: 52}  # Check Claude Code env for optimal settings\n"
             "    git_filemode_checker: {enabled: true, priority: 53}  # Warn when git core.fileMode=false\n"
             "    gitignore_safety_checker: {enabled: true, priority: 54}  # Warn when required .claude/ paths are not gitignored\n"

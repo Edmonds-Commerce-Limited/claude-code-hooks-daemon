@@ -371,6 +371,10 @@ class Priority:
     GUARD_CONFIG_DRIFT = 49
     PROJECT_HANDLER_LOAD_CHECKER = 50
     HOOK_REGISTRATION_CHECKER = 51
+    # Plan 00468 G1: same slot as hook_registration_checker. That one reports
+    # hooks registered outside the daemon in settings; this one reports hooks a
+    # plugin brings. Both are hooks the daemon never sees.
+    PLUGIN_HOOKS_ADVISOR = 51
     OPTIMAL_CONFIG_CHECKER = 52
     GIT_FILEMODE_CHECKER = 53
     GITIGNORE_SAFETY_CHECKER = 54

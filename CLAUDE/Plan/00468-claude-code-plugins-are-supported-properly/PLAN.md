@@ -101,10 +101,16 @@ first, and the other fixes build on it.
 
 ### Phase 4: plugin hooks and LSP plugins (G1, G2, G7, G9, P5)
 
-- [ ] ⬜ **Task 4.1**: A SessionStart advisory, and a `health` line, name
+- [x] ✅ **Task 4.1**: A SessionStart advisory, and a `health` line, name
   each enabled plugin that ships hooks, singling out PreToolUse hooks and
   their `updatedInput` power, with a per-plugin acknowledgement (G1, G2).
-  Document the limit in the security docs.
+  Document the limit in the security docs. **Decided (unattended,
+  2026-09-24)**: the security note is in `CLAUDE/ARCHITECTURE.md` § Security
+  Considerations, since `CLAUDE/Security/` registers defect classes with a
+  Detector, not limits. The optional PostToolUse input comparison (G2) is
+  not built: the daemon cannot see a plugin hook's output, and the tool's
+  own PostToolUse input would have to be matched to the judged input by
+  `tool_use_id` across events.
 - [ ] ⬜ **Task 4.2**: `settings_repair` re-reads before it replaces, and the
   writer count is corrected (G7). `daemon_sync_after_merge` and
   `merge_qa_report` judge the repository the command ran in, using 00464's

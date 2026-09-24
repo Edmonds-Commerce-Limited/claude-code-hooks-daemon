@@ -801,6 +801,13 @@ handlers:
         # opt out (e.g. if your team manages settings.json by hand).
         auto_migrate_settings: true
 
+    plugin_hooks_advisor:  # Names enabled Claude Code plugins that ship hooks (Plan 00468 G1, G2)
+      enabled: true
+      priority: 51
+      options:
+        # Plugin ids (name@marketplace) whose hooks the user has accepted.
+        acknowledged_plugins: []
+
     optimal_config_checker:  # Checks Claude Code env for optimal settings
       enabled: true
       priority: 52

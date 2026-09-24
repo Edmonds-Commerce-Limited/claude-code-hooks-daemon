@@ -65,6 +65,30 @@ config_changes:
       recommended: true
       dormant: false
 
+    - key: handlers.session_start.plugin_hooks_advisor
+      description: >-
+        At the start of a new session, names each enabled Claude Code plugin
+        that ships hooks and the events they cover. The daemon never sees a
+        plugin hook, so none of its guards applies to one. A plugin with a
+        PreToolUse hook is singled out: it can return updatedInput, which
+        replaces a call's input after the daemon allowed the original. Never
+        blocks. `hooks-daemon health` lists the same plugins.
+      example_yaml: |
+        handlers:
+          session_start:
+            plugin_hooks_advisor:
+              enabled: true
+              priority: 51
+              options:
+                acknowledged_plugins: []
+      migration_note: >-
+        On by default and silent when no enabled plugin ships hooks. To stop
+        the advisory for a plugin you have reviewed and trust, add its id
+        (name@marketplace) to options.acknowledged_plugins; health still
+        lists it, marked acknowledged.
+      recommended: true
+      dormant: false
+
   renamed: []
 
   removed: []

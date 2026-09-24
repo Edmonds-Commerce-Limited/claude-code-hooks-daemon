@@ -803,6 +803,15 @@ class HandlerID:
         display_name="hook-registration-checker",
     )
 
+    # Plugin hooks advisor (SessionStart handler) — Plan 00468 G1, G2: name
+    # each enabled Claude Code plugin that ships hooks, singling out
+    # PreToolUse. Never blocks.
+    PLUGIN_HOOKS_ADVISOR = HandlerIDMeta(
+        class_name="PluginHooksAdvisorHandler",
+        config_key="plugin_hooks_advisor",
+        display_name="plugin-hooks-advisor",
+    )
+
     # Guard config drift (SessionStart handler) — Plan 00412 class 2: report a
     # working-tree hooks-daemon.yaml that weakens the guards relative to the
     # committed one. Nothing judges such an edit and nothing records it.

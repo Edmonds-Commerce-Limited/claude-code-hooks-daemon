@@ -528,6 +528,12 @@ handlers:
       enabled: true             # Alerts when expected hooks are missing or misconfigured
       priority: 51
 
+    plugin_hooks_advisor:  # Names enabled Claude Code plugins that ship hooks
+      enabled: true        # Never blocks; singles out PreToolUse hooks
+      priority: 51
+      options:
+        acknowledged_plugins: []  # Plugin ids (name@marketplace) the user has accepted
+
     optimal_config_checker:  # Checks Claude Code env for optimal settings
       enabled: true
       priority: 52

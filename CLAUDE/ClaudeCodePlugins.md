@@ -193,6 +193,13 @@ What uses it:
 - `tool-report` shows each enabled plugin's always-on listing cost.
 - `lsp_noise_checker` asks for the config dir's `plugins/` tree to be excluded
   when that dir is inside the project.
+- `plugin_hooks_advisor` names each enabled plugin that ships hooks at the
+  start of a new session, and singles out a `PreToolUse` hook (see
+  [above](#a-plugin-pretooluse-hook-can-replace-input-the-daemon-judged)). A
+  plugin id listed in its `acknowledged_plugins` option is left out.
+  `hooks-daemon health` lists every one, marking the acknowledged.
+- `installed_plugin_edit_advisor` advises when a write lands in an installed
+  plugin's files, which the next plugin update replaces.
 
 Remaining work is tracked in
 [Plan 00468](Plan/00468-claude-code-plugins-are-supported-properly/PLAN.md).
