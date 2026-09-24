@@ -336,6 +336,17 @@ session. `journal-entry-future-dated` is also deliberately EDIT-only (a batch
 scan meets the entry when the append-only rule forbids acting on it), so a
 heredoc append is not caught late either — it is caught never.
 
+**It recurred on 2026-09-24, by the same route.** The closing entry of Plan
+00455's journal was appended with a heredoc and stamped `09:50` when the
+clock read `09:11`. It was committed in the archiving commit `44d18e30`
+before anything noticed. The only reason it was caught was a manual
+`date -u` afterwards. The fix is the one this entry already implies: append
+to a journal with `Edit`, never a heredoc. The legal correction is an entry
+whose honest time is at or after the wrong one, so it has to wait until the
+clock passes `09:50`. That wait costs a follow-up. It is the cheapest case
+of N3 there is, and it still needed the clock to move before it could be
+fixed.
+
 ### N4 — a cron cannot be both cancelled for a session and declared in config
 
 **Re-filed from [00419 N13](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md).**
