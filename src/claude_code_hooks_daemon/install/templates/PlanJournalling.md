@@ -165,9 +165,12 @@ Each entry is a heading with a fixed grammar followed by a free markdown body:
   the zone unrecorded (legacy — never migrated). Times run monotonically down
   a file.
 - **`CATEGORY`** — one of a small fixed core set:
-  `action` · `finding` · `decision` · `thought` · `blocker` · `handoff`.
-  `mkplan.bash --journal` accepts exactly these six and rejects any other.
+  `action` · `finding` · `decision` · `thought` · `blocker` · `handoff` ·
+  `correction`. `mkplan.bash --journal` accepts exactly these seven and
+  rejects any other.
 - **`REF`** — optional task/phase reference (`T2.1`, `P2`, or `—` for none).
+  For a `correction` it is required and names the corrected entry instead:
+  see [Append-only discipline](#append-only-discipline).
 - Separator is the middot `·` (U+00B7).
 
 Bodies may embed fenced logs, diffs, or code snippets — put a one-line takeaway
@@ -196,8 +199,8 @@ In a worktree, run that worktree's own `CLAUDE/Plan/mkplan.bash`.
 **Why it is enforced.** In one session a coordinator and five sub-agents
 appended every entry by hand. One heredoc entry was stamped `09:50` when the
 clock read `09:11`. A journal is append-only, so a wrong stamp can only be
-corrected by a later entry, and only once the clock has passed the wrong time.
-The `plan_journal_guard` handler therefore DENIES a hand-written entry and
+corrected by a later `correction` entry that names it, and the file then
+carries both readings for good. The `plan_journal_guard` handler therefore DENIES a hand-written entry and
 prints the exact `--journal` command for that plan, with absolute paths into
 the checkout the day-file belongs to. It covers every checkout, worktrees
 included, and archived plans. It denies:
@@ -227,10 +230,26 @@ sub-agent to journal puts the two-step pattern above in the brief.
 
 A journal is **append-only**. New entries go at the **bottom**; earlier entries
 are never edited. **Corrections are new entries**, not rewrites — if you got
-something wrong at 09:00, append a `finding` entry with `--journal` that
-corrects it. This
-keeps the log an honest record of what was believed when, and lets the daemon's
-`journal-append-only` check confirm each edit only adds.
+something wrong at 09:00, append a `correction` entry whose `--ref` names it.
+This keeps the log an honest record of what was believed when, and lets the
+daemon's `journal-append-only` check confirm each edit only adds.
+
+```bash
+CLAUDE/Plan/mkplan.bash --journal 190 correction untracked/scratch/journal-190-fix.md --ref 09:00
+```
+
+The `--ref` is `HH:MM` for an entry in today's day-file, or `YY-MM-DD/HH:MM`
+for one in an earlier day-file of the same plan. The script refuses a
+correction whose named entry does not exist, and writes nothing.
+
+**A correction is also how a wrong clock reading is fixed.** If an entry was
+stamped `09:50` when the clock read `09:11`, the correction's honest time is
+earlier than the entry it corrects. Appending it still breaks "times increase
+down the file", and moving it would break append-only. So an entry that a
+correction in the same day-file names no longer counts for
+`journal-entry-ordering`. It stays where it is, with its text unchanged, and
+the entries around it are judged without it. Only a `correction` has this
+effect. A `--ref` on any other category is a task reference.
 
 ### Hand-off convention
 
