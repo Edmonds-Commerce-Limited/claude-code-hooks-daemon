@@ -91,7 +91,7 @@
 | 34 | merge_qa_report | ADVISORY | Post-hoc plan/docs QA report over what a merge/pull/rebase just introduced |
 | 35 | daemon_sync_after_merge | ADVISORY | Advise a restart when a merge/pull/rebase changed daemon config or handlers |
 
-### SessionStart (29 handlers)
+### SessionStart (30 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|

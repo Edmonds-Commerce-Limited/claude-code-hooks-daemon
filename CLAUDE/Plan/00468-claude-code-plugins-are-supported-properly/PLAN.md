@@ -134,9 +134,15 @@ first, and the other fixes build on it.
   home is `CLAUDE/ClaudeCodePlugins.md`, with a human summary at
   `docs/guides/CLAUDE_CODE_PLUGINS.md`. Task 4.1's security-docs note should
   link to it rather than restate the `updatedInput` limit.
-- [ ] ⬜ **Task 5.2**: P8 is 00422 N24 (the orchestrator simulation says
+- [x] ✅ **Task 5.2**: P8 is 00422 N24 (the orchestrator simulation says
   "would have been denied" for Bash). Confirm Plan 00463's fix covers it, or
-  fix it here.
+  fix it here. **Confirmed (unattended)**: Plan 00463's `e467a5cc` covers it.
+  Its `TestTheSimulatedRecordTellsTheTruth` checks that "would have been
+  denied" appears exactly when the armed handler denies, across Bash, Write
+  (plan and non-plan), Edit, NotebookEdit and an unknown tool. That class
+  passed at 00463's `01f9ef51`. The fix is not ported here, since both
+  branches would edit the same lines. It reaches main only with Plan 00463, so
+  00468 must not archive before 00463 lands.
 
 ## Success Criteria
 
