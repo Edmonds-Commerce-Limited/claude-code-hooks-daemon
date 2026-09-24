@@ -559,14 +559,6 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - flaggable_work_advisor — delegate flaggable work BEFORE reading it
 
-<!-- handler: budget-exhaustion-detector -->
-
-- budget_exhaustion_detector — hidden agent budgets are surfaced
-
-<!-- handler: command-hints -->
-
-- command_hints — advisory reminders after specific commands
-
 <!-- handler: daemon-sync-after-merge -->
 
 - daemon_sync_after_merge — a pull can leave the daemon stale
@@ -575,9 +567,9 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - git_hooks_executable_fixer — auto-fixes non-executable git hooks
 
-<!-- handler: goal-injection -->
+<!-- handler: markdown-table-formatter -->
 
-- goal_injection — plan-start goal signal for the ccy supervisor
+- markdown_table_formatter — markdown tables are auto-aligned
 
 <!-- handler: merge-qa-report -->
 
@@ -587,13 +579,21 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - model_downgrade_recorder — the automatic model downgrade is written down
 
+<!-- handler: budget-exhaustion-detector -->
+
+- budget_exhaustion_detector — hidden agent budgets are surfaced
+
+<!-- handler: command-hints -->
+
+- command_hints — advisory reminders after specific commands
+
+<!-- handler: goal-injection -->
+
+- goal_injection — plan-start goal signal for the ccy supervisor
+
 <!-- handler: background-process-tracker -->
 
 - background_process_tracker — backgrounded processes are tracked
-
-<!-- handler: markdown-table-formatter -->
-
-- markdown_table_formatter — markdown tables are auto-aligned
 
 <!-- handler: recovery-cron-advisor -->
 
@@ -618,10 +618,6 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 <!-- handler: hook-registration-checker -->
 
 - hook_registration_checker — hooks configuration policy
-
-<!-- handler: model-fallback-detector -->
-
-- model_fallback_detector — silent model substitution is surfaced
 
 <!-- handler: plan-qa-sweep -->
 
@@ -655,21 +651,25 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - tool_disable_advisor — declared never-want tools are checked at session start
 
-<!-- handler: persistent-cron-assertor -->
+<!-- handler: model-fallback-detector -->
 
-- persistent_cron_assertor — declared crons are re-established each session
+- model_fallback_detector — silent model substitution is surfaced
 
 <!-- handler: failsafe-cron-session-advisor -->
 
 - failsafe_cron_session_advisor — the failsafe cron from session start
 
-<!-- handler: standing-authorisations -->
+<!-- handler: persistent-cron-assertor -->
 
-- standing_authorisations — a project can record a standing request
+- persistent_cron_assertor — declared crons are re-established each session
 
 <!-- handler: idle-housekeeping-advisory -->
 
 - idle_housekeeping_advisory — report-first idle housekeeping (beta, opt-in)
+
+<!-- handler: standing-authorisations -->
+
+- standing_authorisations — a project can record a standing request
 
 <!-- handler: auto-approve-reads -->
 
@@ -678,10 +678,6 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 <!-- handler: cron-stop-enforcer -->
 
 - cron_stop_enforcer — declared crons are verified, not just asked for
-
-<!-- handler: cron-subagent-stop-enforcer -->
-
-- cron_subagent_stop_enforcer — SubagentStop twin of `cron_stop_enforcer`
 
 <!-- handler: subagent-report-path-verifier -->
 
@@ -694,6 +690,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 <!-- handler: subagent-report-size-blocker -->
 
 - subagent_report_size_blocker — write large reports to a file
+
+<!-- handler: cron-subagent-stop-enforcer -->
+
+- cron_subagent_stop_enforcer — SubagentStop twin of `cron_stop_enforcer`
 
 <!-- handler: worktree-create -->
 
