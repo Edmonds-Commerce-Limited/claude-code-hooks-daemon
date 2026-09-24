@@ -670,6 +670,25 @@ class ClaudeMdInjector:
             elif content is not None:
                 fallback.append((handler.name, content))
 
+        # Deterministic total order depending ONLY on the handler set
+        # (ledger 00466 N7): self._handlers is whatever order the caller
+        # passed in, and that caller chain ultimately bottoms out at
+        # HandlerRegistry.discover()'s pkgutil.walk_packages() filesystem
+        # scan, whose directory-entry order is not guaranteed stable
+        # across processes or machines. Two daemons over the identical
+        # handler set could therefore emit a differently-ordered
+        # <hooksdaemon> block, causing a spurious restart commit and
+        # cross-branch merge conflicts on pure reordering. Handler name
+        # alone is sufficient: within one CLAUDE.md tier, name IS a
+        # unique key (two active handlers never share a name), so it is
+        # already a complete total order — priority is not consulted
+        # here because handlers from different event chains are mixed
+        # into one flat tier and priority carries no meaningful ordering
+        # across event types.
+        promoted.sort(key=lambda item: item[0])
+        progressive.sort(key=lambda item: item[0])
+        fallback.sort(key=lambda item: item[0])
+
         return _CollectedTiers(promoted=promoted, progressive=progressive, fallback=fallback)
 
     @staticmethod

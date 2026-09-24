@@ -84,7 +84,7 @@
 | 28 | background_process_tracker | ADVISORY | Track backgrounded Bash processes and advise on watchdog/harvest (never kills) |
 | 29 | command_hints | ADVISORY | Inject a rate-limited advisory HINT when a configured command is detected |
 | 30 | recovery_cron_advisor | ADVISORY | Advisory handler that manages failsafe recovery cron across plan lifecycle |
-| 31 | goal_injection | ADVISORY | Write a goal-intent signal when a plan flips to In Progress |
+| 31 | goal_injection | ADVISORY | Write a goal-intent signal when a plan TRANSITIONS to In Progress |
 | 32 | budget_exhaustion_detector | ADVISORY | Advisory PostToolUse handler that flags budget/quota-exhaustion messaging |
 | 33 | model_downgrade_recorder | ADVISORY | Publish Claude Code's own automatic model-downgrade record, silently |
 | 34 | merge_qa_report | ADVISORY | Post-hoc plan/docs QA report over what a merge/pull/rebase just introduced |

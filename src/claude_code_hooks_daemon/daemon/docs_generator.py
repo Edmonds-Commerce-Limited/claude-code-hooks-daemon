@@ -199,7 +199,14 @@ class DocsGenerator:
             heading: Section heading (e.g., "PreToolUse")
             handlers: Handler info tuples for this section
         """
-        handlers.sort(key=lambda h: h[3])
+        # Ledger 00466 N7 sibling: priority alone is not a total order --
+        # same-priority handlers otherwise keep whatever order
+        # HandlerRegistry.list_handlers() handed back, which is driven by
+        # pkgutil.walk_packages()'s unordered filesystem scan. Break ties
+        # on config_key (h[1], the value actually rendered in the
+        # "Handler" column) so the table is a pure function of the
+        # handler set.
+        handlers.sort(key=lambda h: (h[3], h[1]))
         count = len(handlers)
         count_label = f"{count} handler{'s' if count != 1 else ''}"
         lines.append(f"\n### {heading} ({count_label})\n")

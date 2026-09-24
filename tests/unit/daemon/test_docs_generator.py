@@ -245,6 +245,42 @@ class TestDocsGeneratorHandlerCollection:
         pos_50 = output.index("| 50 ")
         assert pos_10 < pos_50
 
+    def test_same_priority_handlers_are_order_independent(self) -> None:
+        """Ledger 00466 N7 sibling: _render_handler_table() sorted only by
+        priority (`key=lambda h: h[3]`), with no tiebreaker. Two handlers
+        sharing a priority then kept whatever order
+        HandlerRegistry.list_handlers() happened to hand back -- itself
+        driven by pkgutil.walk_packages()'s unordered filesystem scan -- so
+        two daemons over the identical handler set could render a
+        differently-ordered table row pair."""
+        from claude_code_hooks_daemon.daemon.docs_generator import DocsGenerator
+
+        handler_zzz = _make_handler_class(
+            name="zzz-handler",
+            priority=30,
+            tags=["advisory"],
+            docstring="Zzz handler.",
+            module_name="claude_code_hooks_daemon.handlers.pre_tool_use.zzz_handler",
+        )
+        handler_aaa = _make_handler_class(
+            name="aaa-handler",
+            priority=30,
+            tags=["advisory"],
+            docstring="Aaa handler.",
+            module_name="claude_code_hooks_daemon.handlers.pre_tool_use.aaa_handler",
+        )
+        config = _make_config("pre_tool_use", {})
+
+        forward_registry = _make_registry(handler_zzz, handler_aaa)
+        forward_gen = DocsGenerator(config=config, registry=forward_registry)
+        forward_output = forward_gen.generate_markdown()
+
+        reverse_registry = _make_registry(handler_aaa, handler_zzz)
+        reverse_gen = DocsGenerator(config=config, registry=reverse_registry)
+        reverse_output = reverse_gen.generate_markdown()
+
+        assert forward_output == reverse_output
+
     def test_disabled_handlers_excluded_by_default(self) -> None:
         """Disabled handlers should not appear in output by default."""
         from claude_code_hooks_daemon.daemon.docs_generator import DocsGenerator
