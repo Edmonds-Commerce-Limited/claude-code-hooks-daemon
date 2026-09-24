@@ -1604,6 +1604,34 @@ That gap is real and is accepted, not overlooked: content quality is not
 checkable from here, and a guard that pretended otherwise would be the same
 false-assurance failure this ledger keeps recording.
 
+### N21 — nothing points a journal append at the tool that stamps the time
+
+**Found**: the owner asked whether "the journal command that enforces proper
+timestamp" had been released. It had: `mkplan.bash --journal <plan> <category> <body>` shipped in v3.66.0 (release note
+`v3.65.0-to-v3.66.0/release-notes/04-…`). Yet in one session the coordinator
+and five sub-agents appended every journal entry by hand. One entry was
+appended with a heredoc and stamped `09:50` at `09:11` (00422 N3's
+recurrence). All the others were Edit plus a manual `date -u`, because the
+coordinator's briefs prescribed exactly that.
+
+**Why it happens.** `CLAUDE/PlanJournalling.md` says to prefer
+`--journal`, but that sentence is only read by someone already reading the
+journal docs. At the moment of appending, nothing speaks up: an `Edit` or
+`Write` to a `JOURNAL/*.md` file, and a Bash redirect into one, draw no
+advisory that names the tool. The one guard that checks timestamps,
+`journal-entry-future-dated`, is Edit-only by design (see N3), so a heredoc
+append is never checked at all.
+
+**Candidate remedies:**
+
+1. A PreToolUse advisory, never a deny, on an `Edit`/`Write` that appends
+   a new `## HH:MM` entry to a plan `JOURNAL/` day-file, naming
+   `mkplan.bash --journal` and the exact command for that plan.
+2. The same advisory on a Bash command that redirects into a `JOURNAL/`
+   day-file, since that path is otherwise invisible (N3).
+3. The plan-workflow guidance that the coordinator copies into dispatch
+   briefs names `--journal` as THE way to append.
+
 ### N20 — the acceptance probes cannot pass in a worktree whose daemon is running
 
 **Found**: Plan 00456's final QA in `untracked/worktrees/worktree-issue-53-venv`
