@@ -77,7 +77,7 @@ _PATH_NAME_PATTERN: Final[re.Pattern[str]] = re.compile(r"(?i)(^|_)(file_)?path$
 
 _REMEDIATION: Final[str] = (
     "Each site above compares a skip/exclude-list entry against a path with a\n"
-    "bare `in` test, which is SUBSTRING containment: `\"venv/\" in file_path` is\n"
+    'bare `in` test, which is SUBSTRING containment: `"venv/" in file_path` is\n'
     "also true for `.../worktree-issue-53-venv/...`, so the guard silently\n"
     "stands down for any path that merely ENDS in the skipped name.\n"
     "\n"

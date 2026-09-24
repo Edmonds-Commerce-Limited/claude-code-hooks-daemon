@@ -32,9 +32,7 @@ from __future__ import annotations
 import os
 
 
-def _project_relative_or_none(
-    file_path: str, project_root: str | os.PathLike[str]
-) -> str | None:
+def _project_relative_or_none(file_path: str, project_root: str | os.PathLike[str]) -> str | None:
     """``file_path`` relative to ``project_root``, or ``None`` if it escapes it.
 
     ``None`` covers both "outside the project" (``..``-prefixed) and the

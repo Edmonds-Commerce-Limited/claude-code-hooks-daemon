@@ -1,5 +1,7 @@
 """Tests for security strategy common utilities."""
 
+import pytest
+
 from claude_code_hooks_daemon.strategies.security.common import (
     SKIP_PATTERNS,
     UNIVERSAL_EXTENSION,
@@ -42,6 +44,62 @@ class TestShouldSkip:
 
     def test_allows_root_file(self):
         assert should_skip("/workspace/app.php") is False
+
+    def test_a_directory_merely_ending_in_vendor_is_not_skipped(self):
+        """``myvendor/`` merely ends in ``vendor/`` -- not a skip match."""
+        assert should_skip("/workspace/myvendor/lib/x.py") is False
+
+    def test_a_directory_merely_ending_in_docs_is_not_skipped(self):
+        """``autodocs/`` merely ends in ``docs/`` -- not a skip match."""
+        assert should_skip("/workspace/autodocs/x.py") is False
+
+    def test_worktree_named_with_a_vendor_suffix_is_not_skipped(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """00422 N20's reproduction, for security_antipattern's own list."""
+        from pathlib import Path
+
+        from claude_code_hooks_daemon.core import project_context as pc
+
+        root = "/workspace/untracked/worktrees/worktree-issue-53-vendor"
+        monkeypatch.setattr(pc.ProjectContext, "_initialized", True, raising=False)
+        monkeypatch.setattr(
+            pc.ProjectContext, "project_root", classmethod(lambda cls: Path(root)), raising=False
+        )
+
+        assert should_skip(f"{root}/src/app.py") is False
+
+    def test_vendor_directly_under_the_project_root_is_still_skipped(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from pathlib import Path
+
+        from claude_code_hooks_daemon.core import project_context as pc
+
+        monkeypatch.setattr(pc.ProjectContext, "_initialized", True, raising=False)
+        monkeypatch.setattr(
+            pc.ProjectContext,
+            "project_root",
+            classmethod(lambda cls: Path("/workspace")),
+            raising=False,
+        )
+
+        assert should_skip("/workspace/vendor/lib/auth.php") is True
+
+    def test_a_project_living_under_a_directory_named_vendor_is_still_guarded(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from pathlib import Path
+
+        from claude_code_hooks_daemon.core import project_context as pc
+
+        root = "/home/dev/vendor/proj"
+        monkeypatch.setattr(pc.ProjectContext, "_initialized", True, raising=False)
+        monkeypatch.setattr(
+            pc.ProjectContext, "project_root", classmethod(lambda cls: Path(root)), raising=False
+        )
+
+        assert should_skip(f"{root}/src/app.py") is False
 
 
 class TestConstants:

@@ -53,12 +53,7 @@ class TestProjectRelative:
     """With a ``project_root``, matching is against the path RELATIVE to it."""
 
     def test_a_skip_dir_directly_under_the_project_root_matches(self) -> None:
-        assert (
-            matches_path_segment(
-                "/proj/venv/lib/x.py", ("venv/",), project_root="/proj"
-            )
-            is True
-        )
+        assert matches_path_segment("/proj/venv/lib/x.py", ("venv/",), project_root="/proj") is True
 
     def test_a_project_living_under_a_directory_named_venv_is_still_guarded(self) -> None:
         """The absolute path contains ``venv/`` as an ANCESTOR of the project,
@@ -84,10 +79,7 @@ class TestProjectRelative:
         guard the safe default on an unresolvable relative path is "not
         skipped" -- skipping would fail open."""
         assert (
-            matches_path_segment(
-                "/elsewhere/venv/x.py", ("venv/",), project_root="/proj"
-            )
-            is False
+            matches_path_segment("/elsewhere/venv/x.py", ("venv/",), project_root="/proj") is False
         )
 
     def test_project_root_itself_as_the_file_path_is_not_skipped(self) -> None:
@@ -104,8 +96,5 @@ class TestPathLibCompatible:
         from pathlib import Path
 
         assert (
-            matches_path_segment(
-                "/proj/venv/x.py", ("venv/",), project_root=Path("/proj")
-            )
-            is True
+            matches_path_segment("/proj/venv/x.py", ("venv/",), project_root=Path("/proj")) is True
         )

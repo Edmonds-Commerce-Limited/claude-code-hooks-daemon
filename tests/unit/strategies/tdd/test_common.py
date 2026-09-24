@@ -1,5 +1,7 @@
 """Tests for TDD common utilities."""
 
+import pytest
+
 from claude_code_hooks_daemon.strategies.tdd.common import (
     COMMON_TEST_DIRECTORIES,
     is_in_common_test_directory,
@@ -13,11 +15,16 @@ def test_common_test_directories_is_tuple() -> None:
 
 
 def test_common_test_directories_has_expected_entries() -> None:
-    """COMMON_TEST_DIRECTORIES should contain expected test directory patterns."""
-    assert "/tests/" in COMMON_TEST_DIRECTORIES
-    assert "/test/" in COMMON_TEST_DIRECTORIES
-    assert "/__tests__/" in COMMON_TEST_DIRECTORIES
-    assert "/spec/" in COMMON_TEST_DIRECTORIES
+    """COMMON_TEST_DIRECTORIES should contain expected test directory patterns.
+
+    No leading slash (Plan 00458): matched project-relative via
+    matches_path_segment, and a leading slash would never land at the start
+    of a relative path's first segment.
+    """
+    assert "tests/" in COMMON_TEST_DIRECTORIES
+    assert "test/" in COMMON_TEST_DIRECTORIES
+    assert "__tests__/" in COMMON_TEST_DIRECTORIES
+    assert "spec/" in COMMON_TEST_DIRECTORIES
 
 
 def test_is_in_common_test_directory_positive_cases() -> None:
@@ -33,6 +40,30 @@ def test_is_in_common_test_directory_negative_cases() -> None:
     assert is_in_common_test_directory("/workspace/src/module.py") is False
     assert is_in_common_test_directory("/workspace/lib/helper.js") is False
     assert is_in_common_test_directory("/workspace/app/controller.php") is False
+
+
+def test_a_directory_merely_ending_in_test_is_not_a_match() -> None:
+    """``latest/`` merely ends in ``test/`` -- not a match (Plan 00458)."""
+    assert is_in_common_test_directory("/workspace/latest/build.py") is False
+
+
+def test_a_project_living_under_a_directory_named_tests_is_still_guarded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Project-relative matching must not be fooled by an ANCESTOR directory
+    named ``tests`` -- only a ``tests/`` segment INSIDE the project should
+    classify a file as already-a-test."""
+    from pathlib import Path
+
+    from claude_code_hooks_daemon.core import project_context as pc
+
+    root = "/home/dev/tests/proj"
+    monkeypatch.setattr(pc.ProjectContext, "_initialized", True, raising=False)
+    monkeypatch.setattr(
+        pc.ProjectContext, "project_root", classmethod(lambda cls: Path(root)), raising=False
+    )
+
+    assert is_in_common_test_directory(f"{root}/src/main.py") is False
 
 
 def test_matches_directory_with_leading_slash() -> None:

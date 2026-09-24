@@ -31,7 +31,9 @@ from claude_code_hooks_daemon.strategies.qa_suppression.protocol import (
 )
 from claude_code_hooks_daemon.utils.path_exclusion import (
     handler_excludes_path,
+    resolve_project_root,
 )
+from claude_code_hooks_daemon.utils.path_segments import matches_path_segment
 
 # Maximum number of issues to show in error message
 _MAX_ISSUES_SHOWN = 5
@@ -158,8 +160,14 @@ class QaSuppressionHandler(PreToolUseHandlerBase):
         if strategy is None:
             return False  # Unknown language - allow through
 
-        # Skip configured directories (vendor, build, node_modules, etc.)
-        if any(skip_dir in file_path for skip_dir in strategy.skip_directories):
+        # Skip configured directories (vendor, build, node_modules, etc.),
+        # segment-bounded against the path relative to the project root
+        # (Plan 00458 / 00422 N20): a bare substring test also matched a
+        # worktree merely named "...-venv/", silently standing this guard
+        # down for everything beneath it.
+        if matches_path_segment(
+            file_path, strategy.skip_directories, project_root=resolve_project_root()
+        ):
             return False
 
         # Skip client-configured / project-level exclude globs (Plan 00150).
