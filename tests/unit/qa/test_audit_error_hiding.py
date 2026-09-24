@@ -169,6 +169,16 @@ def _visit(source: str) -> list[str]:
     return _rules(visitor.violations)
 
 
+def test_a_single_part_relative_path_is_audited_not_crashed() -> None:
+    """``install.py`` under a relative root has one path part; indexing the
+    second-to-last part raised IndexError and ended the whole audit."""
+    visitor = ErrorHidingVisitor(Path("install.py"))
+    visitor.visit(
+        ast.parse("def f():\n    try:\n        g()\n    except ValueError:\n        pass\n")
+    )
+    assert "silent-pass" in _rules(visitor.violations)
+
+
 class TestReturnNoneThroughALocal:
     """00466 N29: the return-None finding is judged on the flow, not the token.
 
@@ -299,6 +309,145 @@ class TestReturnNoneThroughALocal:
     def test_returning_none_when_the_local_is_none_is_the_same_flow(self) -> None:
         source = self._EVASION.replace(
             "    return value\n", "    if value is None:\n        return None\n    return 1\n"
+        )
+        assert "return-none-via-local" in _visit(source)
+
+    def test_a_tuple_unpack_binding_is_flagged(self) -> None:
+        source = (
+            "def f():\n"
+            "    try:\n"
+            "        value, extra = risky()\n"
+            "    except ValueError:\n"
+            "        note = 'x'\n"
+            "        value, extra = None, []\n"
+            "    return value\n"
+        )
+        assert "return-none-via-local" in _visit(source)
+
+    def test_a_binding_under_a_condition_in_the_handler_is_flagged(self) -> None:
+        source = self._EVASION.replace(
+            "        value = None\n", "        if note:\n            value = None\n"
+        )
+        assert "return-none-via-local" in _visit(source)
+
+    def test_a_tuple_unpack_of_real_values_is_not_flagged(self) -> None:
+        source = self._EVASION.replace("value = None", "value, extra = compute(), None").replace(
+            "return value", "return value"
+        )
+        assert "return-none-via-local" not in _visit(source)
+
+    def test_an_augmented_assign_after_the_try_does_not_clear_the_fallback(self) -> None:
+        """``rows += more`` builds on the empty default; the failure still
+        cannot be told from "nothing found"."""
+        source = (
+            "def f():\n"
+            "    try:\n"
+            "        rows = risky()\n"
+            "    except ValueError:\n"
+            "        note = 'x'\n"
+            "        rows = []\n"
+            "    rows += extra()\n"
+            "    return rows\n"
+        )
+        assert "return-none-via-local" in _visit(source)
+
+    def test_a_return_in_the_trys_finally_is_flagged(self) -> None:
+        source = (
+            "def f():\n"
+            "    try:\n"
+            "        value = risky()\n"
+            "    except ValueError:\n"
+            "        note = 'x'\n"
+            "        value = None\n"
+            "    finally:\n"
+            "        cleanup()\n"
+            "        return value\n"
+        )
+        assert "return-none-via-local" in _visit(source)
+
+    def test_a_return_later_in_the_same_handler_is_flagged(self) -> None:
+        source = (
+            "def f():\n"
+            "    try:\n"
+            "        return risky()\n"
+            "    except ValueError:\n"
+            "        value = None\n"
+            "        return value\n"
+        )
+        assert "return-none-via-local" in _visit(source)
+
+    def test_a_return_in_an_enclosing_trys_else_is_flagged(self) -> None:
+        """The outer ``else:`` runs after the inner handler swallowed."""
+        source = (
+            "def f():\n"
+            "    try:\n"
+            "        try:\n"
+            "            value = risky()\n"
+            "        except ValueError:\n"
+            "            note = 'x'\n"
+            "            value = None\n"
+            "    except OSError:\n"
+            "        raise\n"
+            "    else:\n"
+            "        return value\n"
+        )
+        assert "return-none-via-local" in _visit(source)
+
+    def test_a_return_in_the_same_trys_else_is_not_reached_from_the_handler(self) -> None:
+        """``else:`` runs only when the body raised nothing, so the handler's
+        fallback can never reach a return there."""
+        source = (
+            "def f():\n"
+            "    value = None\n"
+            "    try:\n"
+            "        value = risky()\n"
+            "    except ValueError:\n"
+            "        note = 'x'\n"
+            "        value = None\n"
+            "    else:\n"
+            "        return value\n"
+            "    raise RuntimeError('unreachable in practice')\n"
+        )
+        assert "return-none-via-local" not in _visit(source)
+
+    _PROBLEMS = (
+        "def f(problems):\n"
+        "    found = []\n"
+        "    try:\n"
+        "        value = risky()\n"
+        "    except ValueError as exc:\n"
+        "        found.append(str(exc))\n"
+        "        value = None\n"
+        "    {tail}\n"
+    )
+
+    def test_appending_to_a_list_that_is_returned_is_surfacing(self) -> None:
+        for tail in (
+            "if found:\n        return found\n    return value",
+            "if found:\n        return Report(problems=found)\n    return value",
+        ):
+            source = self._PROBLEMS.format(tail=tail)
+            assert "return-none-via-local" not in _visit(source), tail
+
+    def test_appending_to_a_list_that_is_raised_is_surfacing(self) -> None:
+        source = self._PROBLEMS.format(
+            tail="if found:\n        raise RuntimeError(found)\n    return value"
+        )
+        assert "return-none-via-local" not in _visit(source)
+
+    def test_appending_to_a_list_that_is_logged_or_reported_is_surfacing(self) -> None:
+        for call in ("logger.warning('%s', found)", "report_problems(found)", "print(found)"):
+            source = self._PROBLEMS.format(tail=f"{call}\n    return value")
+            assert "return-none-via-local" not in _visit(source), call
+
+    def test_appending_to_a_list_nobody_surfaces_is_flagged(self) -> None:
+        source = self._PROBLEMS.format(tail="return value")
+        assert "return-none-via-local" in _visit(source)
+
+    def test_appending_to_a_callers_list_is_not_surfacing_here(self) -> None:
+        """The brief: surfacing must be visible in the same function."""
+        source = self._PROBLEMS.replace("found.append", "problems.append").format(
+            tail="return value"
         )
         assert "return-none-via-local" in _visit(source)
 

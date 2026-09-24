@@ -139,6 +139,12 @@ _SURFACING_LOG_LEVELS: frozenset[str] = frozenset(
     {"warning", "warn", "error", "exception", "critical", "fatal"}
 )
 
+# Methods that record a problem on a list, set or similar collection.
+_LIST_RECORDING_METHODS: frozenset[str] = frozenset({"append", "extend", "add", "insert"})
+
+# A callee whose name contains one of these hands its arguments to a reader.
+_REPORTING_CALL_WORDS: tuple[str, ...] = ("report", "render", "emit")
+
 # Empty constructors a handler substitutes for a result it could not compute.
 _EMPTY_DEFAULT_CALLS: frozenset[str] = frozenset({"list", "dict", "tuple", "set", "frozenset"})
 
@@ -174,31 +180,93 @@ def _walk_own_scope(node: ast.AST) -> Iterator[ast.AST]:
             yield from _walk_own_scope(child)
 
 
-def _handler_surfaces_the_error(handler: ast.ExceptHandler) -> bool:
+def _handler_surfaces_the_error(handler: ast.ExceptHandler, surfaced_lists: set[str]) -> bool:
+    """Does the handler re-raise, log at warning or above, or record a
+    problem on a list that its function returns, raises, logs or reports?"""
     for child in _walk_own_scope(handler):
         if isinstance(child, ast.Raise):
             return True
-        if (
-            isinstance(child, ast.Call)
-            and isinstance(child.func, ast.Attribute)
-            and child.func.attr in _SURFACING_LOG_LEVELS
-        ):
-            return True
+        if isinstance(child, ast.Call) and isinstance(child.func, ast.Attribute):
+            if child.func.attr in _SURFACING_LOG_LEVELS:
+                return True
+            if (
+                child.func.attr in _LIST_RECORDING_METHODS
+                and ast.unparse(child.func.value) in surfaced_lists
+            ):
+                return True
     return False
 
 
-def _names_bound_to_a_fallback(handler: ast.ExceptHandler) -> set[str]:
-    names: set[str] = set()
-    for stmt in handler.body:
-        if isinstance(stmt, ast.Assign) and _is_fallback_value(stmt.value):
-            names.update(t.id for t in stmt.targets if isinstance(t, ast.Name))
-        elif (
-            isinstance(stmt, ast.AnnAssign)
-            and isinstance(stmt.target, ast.Name)
-            and stmt.value is not None
-            and _is_fallback_value(stmt.value)
-        ):
-            names.add(stmt.target.id)
+def _lists_surfaced_in(scope: list[ast.AST]) -> set[str]:
+    """Every name or attribute path that is returned, raised, or passed to a
+    logging or reporting call somewhere in the function."""
+    carriers: list[ast.AST] = []
+    for node in scope:
+        if isinstance(node, ast.Return) and node.value is not None:
+            carriers.append(node.value)
+        elif isinstance(node, ast.Raise):
+            carriers.extend(part for part in (node.exc, node.cause) if part is not None)
+        elif isinstance(node, ast.Call) and _is_reporting_call(node):
+            carriers.extend(node.args)
+            carriers.extend(keyword.value for keyword in node.keywords)
+    return {
+        ast.unparse(expr)
+        for carrier in carriers
+        for expr in ast.walk(carrier)
+        if isinstance(expr, ast.Name | ast.Attribute)
+    }
+
+
+def _is_reporting_call(call: ast.Call) -> bool:
+    func = call.func
+    if isinstance(func, ast.Attribute):
+        if func.attr in _SURFACING_LOG_LEVELS:
+            return True
+        if func.attr == "write" and ast.unparse(func.value) == "sys.stderr":
+            return True
+        name = func.attr
+    elif isinstance(func, ast.Name):
+        name = func.id
+    else:
+        return False
+    lowered = name.lower()
+    return lowered == "print" or any(word in lowered for word in _REPORTING_CALL_WORDS)
+
+
+def _fallback_bindings(stmt: ast.stmt) -> Iterator[ast.Name]:
+    """The names ``stmt`` binds to a fallback value, tuple unpacking included."""
+    if isinstance(stmt, ast.Assign):
+        for target in stmt.targets:
+            yield from _paired_fallback_names(target, stmt.value)
+    elif (
+        isinstance(stmt, ast.AnnAssign)
+        and isinstance(stmt.target, ast.Name)
+        and stmt.value is not None
+        and _is_fallback_value(stmt.value)
+    ):
+        yield stmt.target
+
+
+def _paired_fallback_names(target: ast.expr, value: ast.expr) -> Iterator[ast.Name]:
+    if isinstance(target, ast.Name):
+        if _is_fallback_value(value):
+            yield target
+    elif (
+        isinstance(target, ast.Tuple | ast.List)
+        and isinstance(value, ast.Tuple | ast.List)
+        and len(target.elts) == len(value.elts)
+    ):
+        for sub_target, sub_value in zip(target.elts, value.elts, strict=True):
+            yield from _paired_fallback_names(sub_target, sub_value)
+
+
+def _names_bound_to_a_fallback(handler: ast.ExceptHandler) -> dict[str, int]:
+    """Each name the handler binds to a fallback, with the line of the last binding."""
+    names: dict[str, int] = {}
+    for stmt in _walk_own_scope(handler):
+        if isinstance(stmt, ast.stmt):
+            for target in _fallback_bindings(stmt):
+                names[target.id] = max(names.get(target.id, 0), stmt.lineno)
     return names
 
 
@@ -242,18 +310,38 @@ def _name_tested_for_emptiness(test: ast.expr) -> str | None:
     return None
 
 
+def _flow_start(
+    try_node: ast.Try, handler: ast.ExceptHandler, bound_line: int, return_line: int
+) -> int | None:
+    """The line after which a rebinding would stop the handler's fallback
+    reaching ``return_line``, or None when it cannot reach it at all."""
+    try_end: int = try_node.end_lineno or try_node.lineno
+    if return_line > try_end:
+        return try_end
+    if try_node.finalbody:
+        finally_start = try_node.finalbody[0].lineno
+        if finally_start <= return_line <= try_end:
+            return finally_start - 1
+    handler_end: int = handler.end_lineno or handler.lineno
+    if bound_line < return_line <= handler_end:
+        return bound_line
+    return None
+
+
 def _is_rebound_between(scope: list[ast.AST], name: str, after: int, before: int) -> bool:
     """Is ``name`` given a real value on a line strictly between the two?
 
     Binding the same kind of fallback again (an outer handler's ``x = None``)
-    is not a rebinding: the value still means "the call failed".
+    is not a rebinding: the value still means "the call failed". Nor is an
+    augmented assignment, which builds on the fallback rather than replacing it.
     """
     fallback_targets = {
         id(target)
         for node in scope
-        if isinstance(node, ast.Assign | ast.AnnAssign) and _is_fallback_value(node.value)
-        for target in (node.targets if isinstance(node, ast.Assign) else [node.target])
+        if isinstance(node, ast.stmt)
+        for target in _fallback_bindings(node)
     }
+    fallback_targets.update(id(node.target) for node in scope if isinstance(node, ast.AugAssign))
     return any(
         isinstance(node, ast.Name)
         and node.id == name
@@ -271,7 +359,7 @@ class ErrorHidingVisitor(ast.NodeVisitor):
         self.filepath = filepath
         self.violations: list[dict[str, Any]] = []
         self._seen: set[tuple[str, int, str]] = set()
-        self.in_test_file = "test_" in filepath.name or filepath.parts[-2] == "tests"
+        self.in_test_file = "test_" in filepath.name or filepath.parent.name == "tests"
         self._function_stack: list[str] = []
 
     def visit_Try(self, node: ast.Try) -> None:
@@ -361,29 +449,33 @@ class ErrorHidingVisitor(ast.NodeVisitor):
         """00466 N29: judge the flow, not the ``return None`` token.
 
         A handler that binds None (or an empty default) to a local, which the
-        function then returns after the ``try`` with nothing rebinding it,
-        behaves exactly like ``return None`` in the handler. It is not hiding
-        when the handler re-raises or says so at warning level or above.
+        function then returns with nothing rebinding it, behaves exactly like
+        ``return None`` in the handler. The return may come later in the same
+        handler, in the ``try``'s ``finally:``, or anywhere after the ``try``;
+        the ``try``'s own ``else:`` never runs after a handler. It is not
+        hiding when the handler re-raises, logs at warning or above, or records
+        the problem on a list the function surfaces.
         """
         scope = list(_walk_own_scope(node))
         returns = _returns_of_a_local(scope)
+        surfaced_lists = _lists_surfaced_in(scope)
         for try_node in (stmt for stmt in scope if isinstance(stmt, ast.Try)):
-            try_end: int = try_node.end_lineno or try_node.lineno
             for handler in try_node.handlers:
-                if _handler_surfaces_the_error(handler):
+                if _handler_surfaces_the_error(handler, surfaced_lists):
                     continue
-                for name in _names_bound_to_a_fallback(handler):
+                for name, bound_line in _names_bound_to_a_fallback(handler).items():
                     if any(
                         returned == name
-                        and line > try_end
-                        and not _is_rebound_between(scope, name, try_end, line)
+                        and (start := _flow_start(try_node, handler, bound_line, line)) is not None
+                        and not _is_rebound_between(scope, name, start, line)
                         for returned, line in returns
                     ):
                         self._add_violation(
                             handler,
                             "return-none-via-local",
-                            f"Handler binds a fallback to '{name}', returned after "
-                            "the try with no warning-or-above log and no re-raise",
+                            f"Handler binds a fallback to '{name}' that is returned "
+                            "with no warning-or-above log, no re-raise and no "
+                            "surfaced problem",
                         )
 
     def _is_log_and_continue(self, handler: ast.ExceptHandler) -> bool:

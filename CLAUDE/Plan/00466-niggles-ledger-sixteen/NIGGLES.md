@@ -115,6 +115,23 @@ unchanged, and it now runs on `async def` too, which it silently skipped
 before. Tests: `TestReturnNoneThroughALocal` in
 `tests/unit/qa/test_audit_error_hiding.py`.
 
+The flow now also follows these variants, each pinned by a RED-first test:
+
+- a tuple-unpacked binding (`value, extra = None, []`);
+- a binding under a condition inside the handler;
+- an augmented assignment after the `try` (`rows += more`), which builds on
+  the fallback and so does not clear it;
+- a return in the `try`'s own `finally:`, later in the same handler, or in an
+  enclosing `try`'s `else:`.
+
+The same `try`'s `else:` is not flagged, because it never runs after a
+handler. Appending to a list counts as surfacing only when the function
+returns that list, raises it, or passes it to a logging call at warning or
+above, `print`, `sys.stderr.write`, or a callee named for reporting
+(`report`, `render`, `emit`). A caller-owned list does not count. The re-sweep
+found no new instance. It also fixed an `IndexError` that ended the whole
+audit on a single-part relative path such as `install.py`.
+
 The sweep found 8 sites, and each was fixed with no exclusion. Two fixes
 removed now-stale `silent-fallback` exclusions:
 `sensitive_content._compiled_public_pattern` and

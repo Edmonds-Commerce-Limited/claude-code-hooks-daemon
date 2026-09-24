@@ -99,6 +99,31 @@ the new tests failed before the change (the rest are negative cases), then 2
 more for the nested and `if` shapes. All pass now
 (`TestReturnNoneThroughALocal`, 18 test cases).
 
+**Variant round** (team-lead: "known detector gaps are defects"). The flow
+now also follows:
+
+- tuple unpacking;
+- a binding under a condition inside the handler;
+- an augmented assignment after the `try`, which no longer counts as a
+  rebinding;
+- a return in the `try`'s `finally:`, later in the same handler, or in an
+  enclosing `try`'s `else:`.
+
+The same `try`'s `else:` is deliberately not flagged, because it never runs
+after a handler, and a test pins that. Appending to a list surfaces the error
+only when the function returns that list, raises it, or passes it to a
+logging call at warning or above, `print`, `sys.stderr.write`, or a callee
+named `*report*`/`*render*`/`*emit*`. A caller-owned list does not count, as
+briefed. Seven of the new tests were RED first. The conditional-binding test
+was written with its fix, and it cannot pass against the old top-level-only
+scan. The whole class is now 31 cases.
+
+The re-sweep found no new instance: 0 raw `return-none-via-local` findings
+before exclusions. Running that sweep from a relative root exposed a crash:
+`ErrorHidingVisitor` indexed `filepath.parts[-2]`, which raises `IndexError`
+on a one-part path such as `install.py` and ends the whole audit. It is fixed
+with a RED test.
+
 **Sweep: 8 sites, all fixed, none excluded.**
 
 | Site                                                      | What it hid                                                                                                                                                                                        | Fix                                                                                                                                                                                                                 |
