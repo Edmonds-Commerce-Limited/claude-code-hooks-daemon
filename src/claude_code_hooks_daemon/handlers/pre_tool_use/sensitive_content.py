@@ -1228,7 +1228,9 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
             "If a compound command is denied because an unrelated part of it carries "
             "a term (`grep <term> f && git commit -m 'clean'`), split it into two "
             "calls rather than trying to disguise the term.\n\n"
-            "Missing/empty/comments-only secret file = this source is silently inert."
+            "Missing/empty/comments-only secret file = this source is inert. A list "
+            "the config names but which is missing is reported once at SessionStart "
+            "by `secret_file_hygiene_checker`."
         )
 
     def get_acceptance_tests(self) -> list[Any]:

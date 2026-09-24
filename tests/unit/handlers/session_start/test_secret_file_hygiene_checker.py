@@ -8,6 +8,8 @@ never read.
 
 from __future__ import annotations
 
+import io
+import os
 import stat
 import subprocess
 from pathlib import Path
@@ -17,6 +19,7 @@ from unittest.mock import patch
 import pytest
 from tests.vault_payloads import inline_vault_yaml, vault_file_bytes
 
+from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.constants import HandlerID, Priority
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core import Decision
@@ -42,6 +45,20 @@ def _patched_root(root: Path) -> Any:
 
 def _patched_patterns(patterns: tuple[str, ...] = _PATTERNS) -> Any:
     return patch.object(hygiene_module.sfm, "resolve_configured_patterns", return_value=patterns)
+
+
+@pytest.fixture(autouse=True)
+def _no_project_config() -> Any:
+    """Keep every test off the real project config and the real absence cache.
+
+    The declared-absent check (Plan 00414) reads config through
+    ``ProjectContext``, which another test may have initialised against this
+    repository. Tests of that check patch ``_load_config`` themselves.
+    """
+    with patch.object(
+        hygiene_module.SecretFileHygieneCheckerHandler, "_load_config", return_value=None
+    ):
+        yield
 
 
 @pytest.fixture()
@@ -432,3 +449,235 @@ class TestGitNativeEnumeration:
         rendered = " ".join(result.context)
         assert "fixture.dummy-fixture-glob" in rendered
         assert "gitignore" in rendered.lower()
+
+
+# ── Plan 00414: a protected path the config names, but which is absent ─────
+
+_WORD_LIST = ".claude/word-list.dummy-fixture-glob"
+_GUARDED = "keys/deploy.dummy-fixture-glob"
+
+
+def _config(
+    *,
+    word_list: str | None = None,
+    word_list_enabled: bool = True,
+    protected_paths: list[str] | None = None,
+    guard_enabled: bool = True,
+) -> Config:
+    pre_tool_use: dict[str, Any] = {}
+    if word_list is not None:
+        pre_tool_use["sensitive_content"] = {
+            "enabled": word_list_enabled,
+            "options": {"secret_word_list_path": word_list},
+        }
+    if protected_paths is not None:
+        pre_tool_use["secret_file_guard"] = {
+            "enabled": guard_enabled,
+            "options": {"protected_paths": protected_paths},
+        }
+    return Config.model_validate({"handlers": {"pre_tool_use": pre_tool_use}})
+
+
+class TestAbsentDeclaredPath:
+    """A declared-but-absent protected path is told once; health stays silent."""
+
+    @pytest.fixture()
+    def cache_file(self, tmp_path: Path) -> Path:
+        return tmp_path / "daemon-untracked" / "absence-cache.json"
+
+    def _run(self, handler: Any, root: Path, config: Config | None, cache_file: Path) -> list[str]:
+        cls = hygiene_module.SecretFileHygieneCheckerHandler
+        with (
+            _patched_root(root),
+            _patched_patterns(),
+            patch.object(cls, "_load_config", return_value=config),
+            patch.object(cls, "_absence_cache_file", return_value=cache_file),
+        ):
+            result = handler.handle({"source": "startup"})
+        assert result.decision == Decision.ALLOW
+        return list(result.context)
+
+    def _healthy(self, repo: Path, relpath: str) -> None:
+        target = repo / relpath
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("x")
+        target.chmod(0o600)
+        (repo / ".gitignore").write_text("*.dummy-fixture-glob\n")
+        _git(repo, "add", ".gitignore")
+        _git(repo, "commit", "-m", "ignore")
+
+    def test_declared_word_list_absent_is_reported_naming_the_inert_guard(
+        self, handler: Any, repo: Path, cache_file: Path
+    ) -> None:
+        rendered = " ".join(self._run(handler, repo, _config(word_list=_WORD_LIST), cache_file))
+
+        assert _WORD_LIST in rendered
+        assert "ABSENT" in rendered
+        assert "sensitive_content" in rendered
+        assert "inert" in rendered.lower()
+
+    def test_declared_word_list_present_and_healthy_is_silent(
+        self, handler: Any, repo: Path, cache_file: Path
+    ) -> None:
+        self._healthy(repo, _WORD_LIST)
+
+        assert self._run(handler, repo, _config(word_list=_WORD_LIST), cache_file) == []
+
+    def test_undeclared_default_word_list_absent_is_silent(
+        self, handler: Any, repo: Path, cache_file: Path
+    ) -> None:
+        """No declaration, no gap: a project that never configured a list is not told."""
+        assert self._run(handler, repo, _config(), cache_file) == []
+
+    def test_disabled_guard_is_not_reported_as_inert(
+        self, handler: Any, repo: Path, cache_file: Path
+    ) -> None:
+        config = _config(word_list=_WORD_LIST, word_list_enabled=False)
+
+        assert self._run(handler, repo, config, cache_file) == []
+
+    def test_no_loadable_config_is_silent(self, handler: Any, repo: Path, cache_file: Path) -> None:
+        assert self._run(handler, repo, None, cache_file) == []
+
+    def test_literal_guarded_path_absent_is_reported(
+        self, handler: Any, repo: Path, cache_file: Path
+    ) -> None:
+        config = _config(protected_paths=[_GUARDED])
+
+        rendered = " ".join(self._run(handler, repo, config, cache_file))
+
+        assert _GUARDED in rendered
+        assert "secret_file_guard" in rendered
+
+    def test_glob_and_bare_name_entries_are_patterns_not_declared_paths(
+        self, handler: Any, repo: Path, cache_file: Path
+    ) -> None:
+        """A glob or a bare basename matches anywhere; it names no one path."""
+        config = _config(protected_paths=["keys/*.dummy-fixture-glob", "deploy.dummy-fixture-glob"])
+
+        assert self._run(handler, repo, config, cache_file) == []
+
+    def test_disabled_secret_file_guard_is_not_reported(
+        self, handler: Any, repo: Path, cache_file: Path
+    ) -> None:
+        config = _config(protected_paths=[_GUARDED], guard_enabled=False)
+
+        assert self._run(handler, repo, config, cache_file) == []
+
+    def test_dangling_symlink_counts_as_absent(
+        self, handler: Any, repo: Path, cache_file: Path
+    ) -> None:
+        """A worktree seeds the list as a symlink; a dead one leaves the guard inert."""
+        link = repo / _WORD_LIST
+        link.parent.mkdir(parents=True)
+        link.symlink_to(repo / "gone.dummy-fixture-glob")
+
+        rendered = " ".join(self._run(handler, repo, _config(word_list=_WORD_LIST), cache_file))
+
+        assert _WORD_LIST in rendered
+
+    def test_reported_once_not_every_session(
+        self, handler: Any, repo: Path, cache_file: Path
+    ) -> None:
+        config = _config(word_list=_WORD_LIST)
+
+        assert self._run(handler, repo, config, cache_file) != []
+        assert self._run(handler, repo, config, cache_file) == []
+        assert self._run(handler, repo, config, cache_file) == []
+
+    def test_a_config_change_reports_again(
+        self, handler: Any, repo: Path, cache_file: Path
+    ) -> None:
+        assert self._run(handler, repo, _config(word_list=_WORD_LIST), cache_file) != []
+
+        moved = ".claude/other-list.dummy-fixture-glob"
+        rendered = " ".join(self._run(handler, repo, _config(word_list=moved), cache_file))
+
+        assert moved in rendered
+
+    def test_a_presence_change_reports_again(
+        self, handler: Any, repo: Path, cache_file: Path
+    ) -> None:
+        """Created (silent), then lost again (told again)."""
+        config = _config(word_list=_WORD_LIST)
+        assert self._run(handler, repo, config, cache_file) != []
+
+        self._healthy(repo, _WORD_LIST)
+        assert self._run(handler, repo, config, cache_file) == []
+
+        (repo / _WORD_LIST).unlink()
+        assert _WORD_LIST in " ".join(self._run(handler, repo, config, cache_file))
+
+    def test_unwritable_cache_still_reports_and_never_raises(
+        self, handler: Any, repo: Path, tmp_path: Path
+    ) -> None:
+        blocker = tmp_path / "not-a-dir"
+        blocker.write_text("x")
+        cache_file = blocker / "absence-cache.json"
+
+        rendered = " ".join(self._run(handler, repo, _config(word_list=_WORD_LIST), cache_file))
+
+        assert _WORD_LIST in rendered
+
+    def test_existing_findings_and_absence_are_both_reported(
+        self, handler: Any, repo: Path, cache_file: Path
+    ) -> None:
+        loose = repo / "fixture.dummy-fixture-glob"
+        loose.write_text("x")
+        loose.chmod(0o600)
+
+        rendered = " ".join(self._run(handler, repo, _config(word_list=_WORD_LIST), cache_file))
+
+        assert "fixture.dummy-fixture-glob" in rendered
+        assert hygiene_module._ISSUE_NOT_GITIGNORED in rendered
+        assert _WORD_LIST in rendered
+
+    def test_absence_is_reported_outside_a_git_repository(
+        self, handler: Any, tmp_path: Path, cache_file: Path
+    ) -> None:
+        not_a_repo = tmp_path / "plain-dir"
+        not_a_repo.mkdir()
+
+        rendered = " ".join(
+            self._run(handler, not_a_repo, _config(word_list=_WORD_LIST), cache_file)
+        )
+
+        assert "not a git repository" in rendered
+        assert _WORD_LIST in rendered
+
+    def test_no_code_path_opens_a_protected_file(
+        self, handler: Any, repo: Path, cache_file: Path
+    ) -> None:
+        """Metadata only: the absence check stats paths and opens none of them.
+
+        One declared path is present (healthy), one absent, so both branches
+        run. ``classify_at_rest`` is the pre-existing, sanctioned in-daemon
+        format check (Plan 00459) and is stubbed so that any remaining open
+        of a protected path could only come from new code.
+        """
+        self._healthy(repo, _GUARDED)
+        config = _config(word_list=_WORD_LIST, protected_paths=[_GUARDED])
+        opened: list[str] = []
+        real_open = io.open
+        real_os_open = os.open
+
+        def recording_open(file: Any, *args: Any, **kwargs: Any) -> Any:
+            opened.append(str(file))
+            return real_open(file, *args, **kwargs)
+
+        def recording_os_open(path: Any, *args: Any, **kwargs: Any) -> Any:
+            opened.append(str(path))
+            return real_os_open(path, *args, **kwargs)
+
+        with (
+            patch.object(hygiene_module, "classify_at_rest", return_value=None),
+            patch("builtins.open", recording_open),
+            patch("io.open", recording_open),
+            patch("os.open", recording_os_open),
+        ):
+            rendered = " ".join(self._run(handler, repo, config, cache_file))
+
+        assert _WORD_LIST in rendered
+        touched = {Path(p).resolve() for p in opened}
+        assert (repo / _GUARDED).resolve() not in touched
+        assert (repo / _WORD_LIST).resolve() not in touched

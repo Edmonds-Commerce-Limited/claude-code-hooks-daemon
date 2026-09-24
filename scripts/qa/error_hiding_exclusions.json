@@ -429,6 +429,24 @@
       "reason": "Cache writer: log-and-continue on OSError writing cache file. Cache writing is best-effort — failure means the next session re-scans instead of using cache. Advisory handler must not crash session start. Already logged at debug level."
     },
     {
+      "file": "handlers/session_start/secret_file_hygiene_checker.py",
+      "function": "_load_config",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00414: the declared-absent check reads the on-disk config at SessionStart. A config edited into an unloadable state after the daemon started (OSError, or ValueError covering YAML syntax and pydantic's ValidationError) leaves no declaration this advisory can trust, so it judges none: the caller treats None as 'skip the absence check' and the existing hygiene report still runs. Raising would take the whole SessionStart advisory down over a config that config-validate and check-source-fresh already report. Logged at WARNING, not debug. Covered by test_no_loadable_config_is_silent."
+    },
+    {
+      "file": "handlers/session_start/secret_file_hygiene_checker.py",
+      "function": "_read_absence_hash",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00414: same tolerant cache-read contract as gitignore_safety_checker._get_cached_missing_entries. An unreadable or unparseable once-only cache means 'nothing told yet', so the caller re-tells any declared-absent path -- the safe direction for a notice that must not be lost. Advisory handler must not crash session start. Logged at debug."
+    },
+    {
+      "file": "handlers/session_start/secret_file_hygiene_checker.py",
+      "function": "_write_absence_hash",
+      "rule": "log-and-continue",
+      "reason": "Plan 00414: same best-effort contract as gitignore_safety_checker._write_cache. A failed write of the once-only key means the absent path is told again next session, which is strictly the safe direction; the finding itself is still returned this session. Advisory handler must not crash session start. Logged at debug. Covered by test_unwritable_cache_still_reports_and_never_raises."
+    },
+    {
       "file": "handlers/session_start/suggest_statusline.py",
       "function": "_state_file",
       "rule": "return-none-on-error",

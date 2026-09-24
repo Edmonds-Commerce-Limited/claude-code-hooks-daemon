@@ -1150,9 +1150,9 @@ handlers:
           default_mode: symlink
           entries:
             # The secret word list. Gitignored, so a worktree lacks it — and
-            # sensitive_content does not fail without it, it goes silently
-            # INERT. Symlinked so an update to the list reaches every worktree
-            # at once; nothing writes to it.
+            # sensitive_content does not fail without it, it goes INERT (the
+            # hygiene advisory reports that once). Symlinked so an update to
+            # the list reaches every worktree at once; nothing writes to it.
             #
             # `optional` because a checkout that never configured a word list
             # legitimately has no such file, and seeding used to treat that as
