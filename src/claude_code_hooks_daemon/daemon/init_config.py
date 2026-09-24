@@ -143,7 +143,7 @@ class ConfigTemplate:
             "# Block AskUserQuestion unless every question is `ASKING BECAUSE:`-prefixed\n"
             "    absolute_path: {enabled: true, priority: 12}     # Require absolute paths\n"
             "    error_hiding_blocker: {enabled: true, priority: 13}  # Block error-hiding patterns (|| true, except: pass, catch(e){})\n"
-            "    security_antipattern: {enabled: true, priority: 15}  # Block hardcoded secrets and injection patterns\n"
+            "    security_antipattern: {enabled: true, priority: 14}  # Block hardcoded secrets and injection patterns\n"
             # Inert until configured: public_patterns defaults to empty and the
             # secret word list defaults to a gitignored path that does not exist
             # in a fresh project. Registered enabled anyway so that adding terms
@@ -374,9 +374,9 @@ class ConfigTemplate:
             "\n"
             "  # Status - Status line generation\n"
             "  status_line:\n"
-            "    git_repo_name: {enabled: true, priority: 5}      # Git repository name\n"
-            "    account_display: {enabled: true, priority: 6}    # Account information\n"
-            "    host_hostname: {enabled: false, priority: 7}    # Which MACHINE this session is on (opt-in)\n"
+            "    git_repo_name: {enabled: true, priority: 3}      # Git repository name\n"
+            "    account_display: {enabled: true, priority: 5}    # Account information\n"
+            "    host_hostname: {enabled: false, priority: 6}    # Which MACHINE this session is on (opt-in)\n"
             "    model_context: {enabled: true, priority: 10}    # Model name and context %\n"
             "    downgrade_indicator: {enabled: true, priority: 11}  # Warn on a silent model-family downgrade\n"
             "    context_sidecar: {enabled: false, priority: 12}  # Observe-only context sidecar for PTY supervisor (opt-in)\n"

@@ -45,4 +45,31 @@ config_changes:
 
   removed: []
 
-  changed: []
+  changed:
+    # Ledger 00422 N1: the init template now ships each handler's Priority
+    # constant. Documentation-only (no recommended_value): a project that set
+    # its own priority chose it, and must not be told to change it.
+    - key: handlers.status_line.git_repo_name.priority
+      description: >-
+        The init template now ships 3 (was 5), matching Priority.GIT_REPO_NAME.
+        At 5 the unlisted environment_indicator (4) rendered before the
+        repository name instead of after it.
+      migration_note: >-
+        Set 3 if your config still holds the old shipped value of 5 and you
+        want the environment indicator after the repository name.
+    - key: handlers.status_line.account_display.priority
+      description: >-
+        The init template now ships 5 (was 6), matching
+        Priority.ACCOUNT_DISPLAY. Relative order is unchanged.
+    - key: handlers.status_line.host_hostname.priority
+      description: >-
+        The init template now ships 6 (was 7), matching Priority.HOST_HOSTNAME.
+        Relative order is unchanged.
+    - key: handlers.pre_tool_use.security_antipattern.priority
+      description: >-
+        The init template now ships 14 (was 15), matching
+        Priority.SECURITY_ANTIPATTERN and the band shared by sensitive_content,
+        secret_file_guard and project_containment. It now runs before
+        tdd_enforcement and pipe_blocker (15), so when one tool call trips
+        both and the chain stops at the first deny, the security deny is the
+        one reported.

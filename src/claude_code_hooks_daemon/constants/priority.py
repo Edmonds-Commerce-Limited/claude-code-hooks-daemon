@@ -455,8 +455,9 @@ class Priority:
     GIT_REPO_NAME = 3
     ENVIRONMENT_INDICATOR = 4  # After repo name, before account display
     ACCOUNT_DISPLAY = 5
-    # Plan 00411: beside the environment indicator, which says WHAT kind of
-    # environment this is — this says WHICH machine it is on (opt-in).
+    # Plan 00411: in the environment cluster after the environment indicator,
+    # which says WHAT kind of environment this is — this says WHICH machine it
+    # is on (opt-in).
     HOST_HOSTNAME = 6
     MODEL_CONTEXT = 10
     # Plan 00278: sits immediately after model_context so the downgrade marker
