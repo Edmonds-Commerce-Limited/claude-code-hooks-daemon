@@ -28,6 +28,8 @@ RESEARCH-read-routes.md for the class-(b)/(c)/(d) route classification.
 """
 
 import logging
+import time
+from dataclasses import dataclass
 from typing import Any, ClassVar, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
@@ -206,6 +208,20 @@ _PROBE_VAULT_PRINTF: Final[str] = (
 )
 
 
+@dataclass(frozen=True)
+class _DispatchKey:
+    """Identifies one dispatch by everything ``_evaluate`` reads (m2, Plan
+    00466 review 2) -- NOT by where the call lives, the same discriminator
+    ``sensitive_content``'s own one-shot bridge uses.
+    """
+
+    tool_name: str
+    path: str
+    command: str
+    content: str
+    cwd: str
+
+
 class SecretFileGuardHandler(PreToolUseHandlerBase):
     """Deny any tool call that would put a protected file's contents into context.
 
@@ -243,6 +259,10 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         self._mode: str | None = None
         self._allowed_consumers: list[dict[str, Any]] | None = None
         self._exclude_paths: list[str] | None = None
+        # m2 (Plan 00466 review 2): a one-shot bridge from matches() to
+        # handle() for a SINGLE dispatch -- see _compute_and_cache_matched's
+        # docstring for the bug this closes.
+        self._cached_dispatch: tuple[_DispatchKey, tuple[str, str, str] | None] | None = None
 
     def _patterns(self) -> tuple[str, ...]:
         return sfm.resolve_protected_patterns(self._mode, self._protected_paths)
@@ -250,10 +270,47 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
     def _consumers(self) -> tuple[sfm.ConsumerSpec, ...]:
         return sfm.merge_allowed_consumers(self._allowed_consumers)
 
-    def _matched_pattern(self, hook_input: dict[str, Any]) -> str | None:
-        """The protected glob this tool call trips, or ``None``."""
+    def _dispatch_key(self, hook_input: dict[str, Any]) -> _DispatchKey:
+        tool_name = str(hook_input.get(HookInputField.TOOL_NAME, ""))
+        tool_input: dict[str, Any] = hook_input.get(HookInputField.TOOL_INPUT, {})
+        path_field = _PATH_FIELD_BY_TOOL.get(tool_name)
+        path = str(tool_input.get(path_field, "")) if path_field else ""
+        command = str(tool_input.get(_FIELD_COMMAND, ""))
+        content = str(tool_input.get(_FIELD_CONTENT, "") or tool_input.get(_FIELD_NEW_STRING, ""))
+        cwd = str(hook_input.get(HookInputField.CWD, ""))
+        return _DispatchKey(
+            tool_name=tool_name, path=path, command=command, content=content, cwd=cwd
+        )
+
+    def _compute_and_cache_matched(self, hook_input: dict[str, Any]) -> tuple[str, str, str] | None:
+        """Evaluate ONCE and leave the result for this same dispatch's
+        ``handle()`` (m2, Plan 00466 review 2).
+
+        ``matches()`` and ``handle()`` used to call
+        ``_matched_pattern_and_route`` independently, so a raise
+        ``matches()`` correctly turned into a DENY (via ``_ERROR_ROUTE``)
+        could be silently overwritten by a CLEAN re-evaluation inside
+        ``handle()`` if the underlying fault was transient -- exactly the
+        gap the fail-closed wrapper (N11) exists to close, reopened one
+        layer up.
+        """
         matched = self._matched_pattern_and_route(hook_input)
-        return None if matched is None else matched[0]
+        self._cached_dispatch = (self._dispatch_key(hook_input), matched)
+        return matched
+
+    def _take_cached_matched(self, hook_input: dict[str, Any]) -> tuple[str, str, str] | None:
+        """The result ``matches()`` computed for THIS call, else a fresh one.
+
+        Reading the entry consumes it, so a later dispatch never inherits a
+        stale verdict; the key check guards the case ``handle()`` is called
+        without a prior ``matches()`` for the SAME input (defensive, not
+        expected in the real chain).
+        """
+        cached = self._cached_dispatch
+        if cached is not None and cached[0] == self._dispatch_key(hook_input):
+            self._cached_dispatch = None
+            return cached[1]
+        return self._matched_pattern_and_route(hook_input)
 
     def _matched_pattern_and_route(self, hook_input: dict[str, Any]) -> tuple[str, str, str] | None:
         """``(pattern, token, route)`` for this tool call, or ``None``.
@@ -275,10 +332,14 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         except Exception as exc:
             # Deliberately broad: ANY exception during evaluation must deny,
             # never propagate (Plan 00466 N11) -- see the docstring above.
+            # n1 (Plan 00466 review 2): only the exception TYPE goes into the
+            # deny reason -- the full message (which could carry a filename
+            # discovered by a directory walk, Plan 00356) is logged here and
+            # never echoed back to the caller.
             logger.exception(
                 "secret_file_guard: evaluation raised; denying for safety (Plan 00466 N11)"
             )
-            return ("<internal-error>", f"{type(exc).__name__}: {exc}", _ERROR_ROUTE)
+            return ("<internal-error>", type(exc).__name__, _ERROR_ROUTE)
 
     def _evaluate(self, hook_input: dict[str, Any]) -> tuple[str, str, str] | None:
         """The real evaluation ``_matched_pattern_and_route`` wraps.
@@ -303,7 +364,12 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
 
         if tool_name == ToolName.BASH:
             command = str(tool_input.get(_FIELD_COMMAND, ""))
-            mention = sfm.find_protected_mention_detail(command, patterns)
+            mention = sfm.find_protected_mention_detail(
+                command,
+                patterns,
+                deadline=time.monotonic() + sfm.SCAN_DEADLINE_SECONDS,
+                cwd=cwd,
+            )
             if mention is None:
                 return None
             # The EFFECTIVE patterns are passed through (review finding 1):
@@ -346,7 +412,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             return (directory_mention, path, "read")
 
         if tool_name in (ToolName.WRITE, ToolName.EDIT):
-            script_mention = self._script_content_mention(path, tool_input, patterns)
+            script_mention = self._script_content_mention(path, tool_input, patterns, cwd)
             if script_mention is None:
                 return None
             return (script_mention[0], script_mention[1], "script")
@@ -361,7 +427,11 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         return encrypted_at_rest.is_encrypted_at_rest(absolute_path, resolve_project_root())
 
     def _script_content_mention(
-        self, path: str, tool_input: dict[str, Any], patterns: tuple[str, ...]
+        self,
+        path: str,
+        tool_input: dict[str, Any],
+        patterns: tuple[str, ...],
+        cwd: str | None,
     ) -> tuple[str, str] | None:
         """Protected mention inside authored SCRIPT content (Task 4.3), or None.
 
@@ -387,10 +457,12 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         ):
             return None
         content = str(tool_input.get(_FIELD_CONTENT, "") or tool_input.get(_FIELD_NEW_STRING, ""))
-        return sfm.find_protected_mention_detail(content, patterns)
+        return sfm.find_protected_mention_detail(
+            content, patterns, deadline=time.monotonic() + sfm.SCAN_DEADLINE_SECONDS, cwd=cwd
+        )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        return self._matched_pattern(hook_input) is not None
+        return self._compute_and_cache_matched(hook_input) is not None
 
     def get_rules(self) -> list[Rule]:
         """Return the 4 Rule objects backing this handler's blocking behaviour."""
@@ -403,10 +475,40 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         DisclosureTracker (Plan 00116, Decision G). The matched glob is
         appended on every fire — it changes per invocation, so it is not
         part of the static teaching content.
+
+        The whole body after a real match is wrapped in its own fail-closed
+        net (m1, Plan 00466 review 2): ``_matched_pattern_and_route`` only
+        guarantees reaching a VERDICT, not that everything downstream of a
+        real match (the disclosure tracker, ``RuleFormatter``, string
+        building) can never raise -- and an exception escaping `handle()`
+        unwrapped is exactly what a non-strict chain treats as "no match"
+        for a call that had a genuine protected mention.
         """
-        matched = self._matched_pattern_and_route(hook_input)
+        matched = self._take_cached_matched(hook_input)
         if matched is None:
             return GatingResult(decision=Decision.ALLOW)
+        try:
+            return self._build_deny_result(hook_input, matched)
+        except Exception as exc:
+            logger.exception(
+                "secret_file_guard: handle() raised after a real match; "
+                "denying for safety (Plan 00466 m1)"
+            )
+            # n1 (Plan 00466 review 2): only the exception TYPE goes into the
+            # deny reason -- the message is logged above, never echoed back.
+            return GatingResult(
+                decision=Decision.DENY,
+                reason=(
+                    f"BLOCKED [{RuleID.SECRET_EVALUATION_ERROR}]: secret_file_guard matched a "
+                    f"protected path but could not build its explanation: "
+                    f"{type(exc).__name__}\n\nDenying for safety."
+                ),
+            )
+
+    def _build_deny_result(
+        self, hook_input: dict[str, Any], matched: tuple[str, str, str]
+    ) -> GatingResult:
+        """The real ``handle()`` body, run inside its caller's try/except."""
         pattern, token, route = matched
         if route == _ERROR_ROUTE:
             return self._deny_for_evaluation_error(hook_input, token)

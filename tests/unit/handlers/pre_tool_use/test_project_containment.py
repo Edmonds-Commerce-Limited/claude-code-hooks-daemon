@@ -22,6 +22,7 @@ import pytest
 
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.core.chain import HandlerChain
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
 from claude_code_hooks_daemon.handlers.pre_tool_use.project_containment import (
     ProjectContainmentHandler,
@@ -493,6 +494,127 @@ class TestFailsClosedOnEvaluationError:
     ) -> None:
         rule_ids = {rule.rule_id for rule in handler.get_rules()}
         assert RuleID.PROJECT_CONTAINMENT_EVALUATION_ERROR in rule_ids
+
+
+class TestMatchesAndHandleShareOneEvaluation:
+    """m2 (Plan 00466 guard-defects review 2): ``matches()`` and ``handle()``
+    each independently called ``_offending_targets_or_error`` -- so a
+    TRANSIENT raise seen by ``matches()`` (denied, correctly, via the error
+    route) could be silently overwritten by a clean re-evaluation inside
+    ``handle()``, turning a correct DENY into an ALLOW for a call
+    ``matches()`` itself already flagged.
+    """
+
+    def test_a_transient_raise_seen_by_matches_is_not_erased_by_handle(
+        self, handler: ProjectContainmentHandler
+    ) -> None:
+        calls = {"count": 0}
+
+        def _flaky() -> Path:
+            calls["count"] += 1
+            if calls["count"] == 1:
+                raise RuntimeError("transient failure, first call only")
+            return _ROOT
+
+        with patch.object(ProjectContainmentHandler, "_resolved_root", staticmethod(_flaky)):
+            hook_input = _write("/tmp/notes.md")
+            assert handler.matches(hook_input) is True  # error route
+            result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "RuntimeError" in result.reason
+
+
+class TestChainLevelFailClosedBehaviour:
+    """n4 (Plan 00466 guard-defects review 2): every prior N11/m1/m2 test in
+    this file calls ``matches()``/``handle()`` directly, not through
+    ``HandlerChain.execute(..., strict_mode=False)`` -- the property
+    actually claimed.
+    """
+
+    def test_a_handle_tail_exception_still_denies_through_the_chain(
+        self, handler: ProjectContainmentHandler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _raise(self: object, *_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("synthetic chain-level failure")
+
+        monkeypatch.setattr("claude_code_hooks_daemon.core.rule.RuleFormatter.verbose", _raise)
+        chain = HandlerChain()
+        chain.add(handler)
+        hook_input = _write("/tmp/notes.md")
+
+        result = chain.execute(hook_input, strict_mode=False)
+        assert result.result.decision == Decision.DENY
+
+    def test_an_evaluation_exception_still_denies_through_the_chain(
+        self, handler: ProjectContainmentHandler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _raise() -> Path:
+            raise RuntimeError("synthetic chain-level evaluation failure")
+
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.core.project_context.ProjectContext.project_root",
+            classmethod(lambda cls: _raise()),
+        )
+        chain = HandlerChain()
+        chain.add(handler)
+        hook_input = _write("/tmp/notes.md")
+
+        result = chain.execute(hook_input, strict_mode=False)
+        assert result.result.decision == Decision.DENY
+
+
+class TestHandleTailFailsClosed:
+    """m1 (Plan 00466 guard-defects review 2): ``_offending_targets_or_error``
+    only guarantees reaching a VERDICT. Once ``handle()`` has a real match it
+    does further work UNWRAPPED -- the disclosure tracker, ``RuleFormatter``,
+    string building -- and an exception there used to propagate straight out
+    of ``handle()``, which a non-strict chain treats as "no match": ALLOW,
+    for a call that had a genuine out-of-root write target.
+    """
+
+    def test_data_layer_lookup_exception_still_denies(
+        self, handler: ProjectContainmentHandler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _raise() -> None:
+            raise RuntimeError("synthetic get_data_layer failure")
+
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.project_containment.get_data_layer",
+            _raise,
+        )
+        hook_input = _write("/tmp/notes.md")
+
+        assert handler.matches(hook_input) is True
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "RuntimeError" in result.reason
+
+    def test_rule_formatter_exception_still_denies(
+        self, handler: ProjectContainmentHandler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _raise(self: object, *_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("synthetic RuleFormatter.verbose failure")
+
+        monkeypatch.setattr("claude_code_hooks_daemon.core.rule.RuleFormatter.verbose", _raise)
+        hook_input = _write("/tmp/notes.md")
+
+        assert handler.matches(hook_input) is True
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "RuntimeError" in result.reason
+
+    def test_unhashable_transcript_path_still_denies(
+        self, handler: ProjectContainmentHandler
+    ) -> None:
+        hook_input = _write("/tmp/notes.md")
+        hook_input["transcript_path"] = ["not", "a", "string"]
+
+        assert handler.matches(hook_input) is True
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
 
 
 class TestTheAllowlist:

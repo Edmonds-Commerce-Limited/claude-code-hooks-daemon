@@ -11,5 +11,10 @@ coincidentally overlapped the tail of "pass-**word**". The leading-wildcard
 truncation heuristic now only accepts that kind of partial overlap when the
 protected glob itself has a trailing wildcard too (the shape it was designed
 for); a glob anchored at the end, like the shipped `*.vault-password`, now
-requires the whole token to be a genuine suffix of the protected name. A real
-truncation of any protected file is still denied exactly as before.
+requires the whole token to be a genuine suffix of the protected name.
+
+Correction: an earlier version of this note claimed "a real truncation of any
+protected file is still denied exactly as before". That was never true for an
+INTERIOR wildcard (`cat .vault-pas?word`) — see the "secret_file_guard denies
+an interior-wildcard, brace or bracket-class spelling of a protected name"
+release note for the fix.

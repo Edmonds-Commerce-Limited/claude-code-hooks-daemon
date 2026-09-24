@@ -109,7 +109,7 @@ N16 is filed on the unmerged `worktree-n466-guard-defects` branch; it joins this
 
 ### N11 — any exception in `secret_file_guard.matches()` lets the call through unless `strict_mode` is on
 
-**Found by the 00466 review** (major M4, `subagent-reports/260924-n466-review-opus-5-5.md`). N5's crash was the second time an exception in this guard's `matches()` skipped the guard entirely; Plan 00357 was the first. Under the default `strict_mode: false` the chain logs the exception and allows the call. This repository runs `strict_mode: true`, so here the crash denied, but a client on the defaults fails open. One raise path is still live after N5, though it isn't exploitable: a file path containing a NUL byte.
+**Found by the 00466 review** (major M4, `subagent-reports/260924-n466-review-opus-5-5.md`). N5's crash was the second time an exception in this guard's `matches()` skipped the guard entirely; Plan 00357 was the first. Under the default `strict_mode: false` the chain logs the exception and allows the call. This entry originally claimed the repository's own `strict_mode: true` made the crash deny here, with only a client on the defaults failing open. **That is false — corrected by N24**: `daemon.strict_mode` is inert in every install, this one included, so the crash was a fail-open everywhere, not just on a client left on the default `false`. One raise path is still live after N5, though it isn't exploitable: a file path containing a NUL byte.
 
 **Candidate remedy:** make the guard structurally fail closed. A raise anywhere in its match or route computation becomes a deny naming the internal error, whatever the global `strict_mode`, because a protected-read guard that fails open is worse than a false deny. Pin it with a test that injects an exception at each stage. Then audit the other security guards that should behave the same (`sensitive_content`, `project_containment`, the destructive-git rules) and decide each one explicitly.
 
@@ -128,6 +128,29 @@ N16 is filed on the unmerged `worktree-n466-guard-defects` branch; it joins this
 **Candidate remedy:** treat any shell-glob token as a pattern, and deny when the pattern could match a protected name. Compare against the protected basenames and stems, or expand it against the directory when that exists. Keep it no looser than the N4 rule. RED tests: interior `?`, `*` and bracket globs of each shipped protected pattern are denied, while unrelated globs such as `*.py` and `src/*.md` are allowed.
 
 **Remedy (implemented):** `secret_file_matching.py` gained `_globs_can_intersect(a, b)`, a real two-glob language-intersection test (standard sequence-alignment DP over `*`/`?`, O(len(a) · len(b))) — not another edge heuristic, because an interior wildcard has no edge for the existing leading/trailing overlap check to key on. A new `_interior_wildcard_mention` runs it for every token whose raw spelling carries glob syntax (`_is_glob_shaped(raw_form)`), over each of its bracket-expanded forms — so a finite bracket class (`.vault-pa[sz]word`) is covered too, even after expansion strips its wildcard-ness down to a plain literal, since the intersection test degenerates correctly to exact-match in that case. Scoped narrowly to keep N4 intact: only a token with NEITHER a leading NOR a trailing wildcard reaches it (an open-edge token is already handled by the pre-existing checks, N4/m1 fixes and all), and a pattern with wildcards on BOTH edges (`*.secret*`, `*vault_pass*`) is excluded — full intersection against a "contains this text anywhere" pattern is satisfiable by nearly any token carrying its own wildcard (`report-[0-9]*.txt` and `secret*.py` genuinely glob-intersect with `*.secret*`, live-verified as new false positives during implementation, neither is evidence of a protected file), the same over-promiscuity `_both_edges_residue_is_near_total_stem_match` already exists to guard against elsewhere in this module. RED tests (confirmed failing pre-fix, passing after) in `TestBashMentionsProtectedPath`: `test_interior_question_mark_truncation_is_matched`, `test_interior_star_with_unrelated_prefix_is_matched`, `test_interior_bracket_expression_truncation_is_matched`, plus `test_unrelated_interior_wildcard_tokens_are_not_matched` and `test_splat_false_positive_from_n4_still_allowed` pinning the N4 fix stays intact. Full `test_secret_file_matching.py` (203 tests) and `test_secret_file_guard.py` (82 tests) pass.
+
+**Correction (M2, guard-defects review 2)**: this entry's acceptance criterion
+("interior `?`, `*` and bracket globs of each shipped protected pattern are
+denied") was not met for 2 of the 6 shipped patterns — `*.secret*` and
+`*vault_pass*` (both-edges patterns, deliberately excluded from
+`_interior_wildcard_mention` above) stayed fully open to every interior
+spelling, an edge-plus-interior combination on any pattern escaped every
+check, and an unenumerable bracket class (`[!x]`, `[^x]`, `[[:alpha:]]`, an
+over-cap range) reached the DP with its brackets read as LITERAL characters
+instead of a wildcard, so it failed OPEN rather than closed. Brace expansion
+(`.vault-pas{s,}word`) was also uncovered for every pattern. Fixed on the
+guard-defects-review-2 branch: the DP now runs for edge-open tokens too
+(against every pattern that is not both-edges, gated by a new degenerate-
+orientation check so a leading-wildcard token is never blindly tested
+against a trailing-wildcard pattern — that combination is satisfiable by
+ANY literal on either side, which is not evidence of anything); an
+unexpanded bracket expression is substituted with `?` before the DP runs (a
+safe superset); both-edges patterns get a filesystem-truth route instead
+(`_both_edges_glob_mention`, gated by a cheap literal-overlap pre-filter so
+it never pays for a real directory listing on an unrelated token); and
+brace groups are expanded against the raw command text before tokenising,
+the same conflict `enforce_llm_qa`'s own M1 fix resolves. Pinned with 4 new
+test classes (16 tests) in `tests/unit/utils/test_secret_file_matching.py`.
 
 ### N9 — `docs_qa` judges gitignored markdown, so installing a Claude Code plugin fails local full QA
 
@@ -232,6 +255,20 @@ fix too, and `test_does_not_match_a_prose_mention_in_a_gh_body` was never RED.
 All 45 tests in that file pass, and all project-handler tests pass
 (`bin/hooks-daemon test-project-handlers --verbose`).
 
+**Correction (M1, guard-defects review 2)**: this entry's "restoring
+deny-by-default" and "Only the WORD SPLITTING changed" overstated the fix —
+19 further regressions were still ALLOW on this branch where main denied: a
+string-executor argument (`bash -c`/`eval`/`ssh`/`watch`/`su -c`/`timeout … sh -c`/`python -c`) where the script is not the LAST thing in the string, a
+glued redirection with no whitespace before `<`/`>`, and a glob/brace word
+that could expand to the script. Fixed on the guard-defects-review-2 branch:
+string-executor arguments are re-parsed recursively (extended `-c`/`-lc`,
+`eval`, `ssh <host>`, `watch`, `su -c`, `timeout … <shell> -c`, and a
+substring test for `python* -c`), `_PUNCTUATION_CHARS` gained `<`/`>` so a
+glued redirect splits into its own token, and a word that could glob- or
+brace-expand to the script is now checked the same as an exact spelling.
+Pinned with 8 new test methods covering all 19 regressions plus the M1
+brace/glob cases, in `.claude/project-handlers/pre_tool_use/test_enforce_llm_qa.py`.
+
 ### N5 — SECURITY FAIL-OPEN: an empty path-mention token crashes `secret_file_guard.matches()`, skipping the whole guard for that write
 
 **Found by 00463's agent** live, reported to the coordinator; reproduced here
@@ -266,10 +303,14 @@ the default `false` it logs the exception as context and moves on to the NEXT
 handler, treating this one as "did not match", so a Write/Edit whose content
 contains an empty-yielding token SKIPS `secret_file_guard` ENTIRELY for that
 call — including any genuine protected-path mention elsewhere in the same
-content. This repository runs `strict_mode: true`
-(`.claude/hooks-daemon.yaml:8`), so here the crash was a fail-CLOSED SYSTEM
-ERROR deny, not a bypass; the fail-open applies to a client install left on
-the default `false`. The trigger was a bare `~/` only — `$` is a tokeniser
+content. This entry originally claimed `.claude/hooks-daemon.yaml:8`'s
+`strict_mode: true` made the crash a fail-CLOSED SYSTEM ERROR deny in THIS
+repository, with the fail-open applying only to a client install left on the
+default `false`. **That is false — corrected by N24.** `daemon.strict_mode`
+never reaches the live daemon at all (`daemon/controller.py:959` reads a
+`config` parameter the real startup path never populates), so the crash was
+a fail-open here too, live-verified against this repository's own running
+daemon. The trigger was a bare `~/` only — `$` is a tokeniser
 delimiter (`_TOKEN_DELIMITERS`), so `"$PWD/"`/`"${PWD}/"` never reach the
 prefix-stripping branch at all (they tokenise to `PWD/`/`{PWD}/`, neither of
 which equals a configured prefix). Both surfaces were affected: the

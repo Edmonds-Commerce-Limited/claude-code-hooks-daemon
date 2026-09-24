@@ -5,6 +5,7 @@ produces ~16 lines instead of 200+. LLM agents should never run the
 verbose run_all.sh directly.
 """
 
+import fnmatch
 import re
 import shlex
 from typing import Any
@@ -58,6 +59,45 @@ _INSPECTION_COMMANDS = (
 _VCS_COMMANDS = ("git", "gh")
 _DATA_CONSUMERS = _INSPECTION_COMMANDS + _VCS_COMMANDS
 
+
+#: n3 (Plan 00466 guard-defects review 2): a `git`/`rg` HEAD is a trusted
+#: data consumer in general, but these specific subcommand/flag shapes
+#: EXECUTE an argument as a command rather than merely reading one --
+#: `git bisect run <cmd>`, `git rebase -x/--exec <cmd>`, `git -c
+#: alias.NAME=!<cmd>` (defines an alias that shells out when later
+#: invoked), `rg --pre <cmd>` (a preprocessor command). The exemption is
+#: VOIDED for these, falling through to the ordinary word-name/string-
+#: executor checks below instead of returning early.
+def _data_consumer_exemption_voided(head_name: str, command_tokens: list[str]) -> bool:
+    """True when this ``head_name`` data consumer's own arguments execute."""
+    rest = command_tokens[1:]
+    if head_name == "git":
+        if rest[:2] == ["bisect", "run"]:
+            return True
+        if rest[:1] == ["rebase"] and any(
+            token in ("-x", "--exec") or token.startswith("--exec=") for token in rest[1:]
+        ):
+            return True
+        if (
+            rest[:1] == ["-c"]
+            and len(rest) >= 2
+            and rest[1].startswith("alias.")
+            and "=" in rest[1]
+        ):
+            value = rest[1].split("=", 1)[1]
+            # `!` is a `_PUNCTUATION_CHARS` entry, so an UNQUOTED
+            # `alias.q=!cmd` tokenises as `alias.q=` then a SEPARATE `!`
+            # token -- both spellings (the bang glued to the value, or
+            # split off as its own next token) are checked.
+            following = rest[2] if len(rest) >= 3 else ""
+            if value.startswith("!") or following == "!":
+                return True
+        return False
+    if head_name == "rg":
+        return any(token == "--pre" or token.startswith("--pre=") for token in rest)
+    return False
+
+
 # `$(...)` and `` `...` `` both run their inner text as a command before the
 # rest of the line runs (Plan 00466 N6, `test_still_matches_a_bare_command_substitution`
 # and the pre-existing UNQUOTED-heredoc regression). Matched non-greedily and
@@ -70,7 +110,10 @@ _SUBSTITUTION_PATTERN = re.compile(r"\$\(([^()]*(?:\([^()]*\)[^()]*)*)\)|`([^`]*
 # hand back one token `(./run_all.sh)` that names no real path (Plan 00466
 # review M1). shlex's `punctuation_chars` support does exactly this, and
 # also protects `~-./*?=` as wordchars so a path is never split mid-token.
-_PUNCTUATION_CHARS = "(){}!"
+# `<`/`>` join the set for the same reason (review 2, M1): a GLUED
+# redirection (`run_all.sh>out.txt`, no whitespace) otherwise hands back one
+# token whose suffix is `>out.txt`, not `/run_all.sh`.
+_PUNCTUATION_CHARS = "(){}!<>"
 
 # A leading `VAR=value` assignment before the real command (`CI=1 ./run_all.sh`)
 # is not itself a command word, and must be skipped when resolving the
@@ -127,15 +170,23 @@ def _tokenise(segment: str) -> list[str] | None:
         return None
 
 
-def _segment_head(tokens: list[str]) -> str | None:
-    """The first real command word: skips punctuation tokens and ``VAR=value``
-    assignments (Plan 00466 review M1) so ``CI=1 cat run_all.sh`` still
-    resolves its head to ``cat``, not to the assignment."""
-    for token in tokens:
+def _segment_head_index(tokens: list[str]) -> int | None:
+    """Index of the first real command word: skips punctuation tokens and
+    ``VAR=value`` assignments (Plan 00466 review M1) so ``CI=1 cat run_all.sh``
+    still resolves its head to ``cat``, not to the assignment. ``None`` when
+    the segment is nothing but punctuation/assignments.
+    """
+    for index, token in enumerate(tokens):
         if token in _PUNCTUATION_CHARS or _ASSIGNMENT_RE.match(token):
             continue
-        return token
+        return index
     return None
+
+
+def _segment_head(tokens: list[str]) -> str | None:
+    """The first real command word — see ``_segment_head_index``."""
+    index = _segment_head_index(tokens)
+    return tokens[index] if index is not None else None
 
 
 def _word_names_the_script(word: str) -> bool:
@@ -149,6 +200,139 @@ def _word_names_the_script(word: str) -> bool:
     naming the script in an otherwise-unrelated argument does not match here.
     """
     return word == _BLOCKED_SCRIPT or word.endswith("/" + _BLOCKED_SCRIPT)
+
+
+#: One-level ``{a,b,c}`` brace group -- the shapes review 2 raised
+#: (``{run_all.sh,}``, ``scripts/qa/{run_all.sh,x}``) need no nesting.
+_BRACE_GROUP_RE = re.compile(r"\{([^{}]*)\}")
+
+
+def _expand_braces(word: str) -> list[str]:
+    """Concrete spellings of ``word`` for each ``{a,b,c}`` group in it, or
+    ``[word]`` unchanged when it has none (review 2, M1)."""
+    match = _BRACE_GROUP_RE.search(word)
+    if match is None:
+        return [word]
+    prefix, suffix = word[: match.start()], word[match.end() :]
+    expansions = [prefix + alternative + suffix for alternative in match.group(1).split(",")]
+    return [spelling for expansion in expansions for spelling in _expand_braces(expansion)]
+
+
+#: A raw `{...}` brace-expansion WORD, matched directly against the segment
+#: TEXT rather than a shlex token (review 2, M1): `{`/`}` are in
+#: `_PUNCTUATION_CHARS` (needed for the `{ group; }` syntax), so shlex
+#: splits a real brace expansion (`{run_all.sh,}`, no internal whitespace)
+#: into three separate tokens (`{`, the comma-joined body, `}`) before
+#: `_word_could_name_the_script` ever sees it whole.
+_BRACE_WORD_RE = re.compile(r"\S*\{[^{}]*\}\S*")
+
+
+def _brace_words_in_segment(segment: str) -> list[str]:
+    """Every raw brace-expansion word in ``segment``'s own text."""
+    return _BRACE_WORD_RE.findall(segment)
+
+
+def _word_could_name_the_script(word: str) -> bool:
+    """True when ``word`` IS the script (``_word_names_the_script``), or is a
+    shell glob/brace expression the shell could expand TO it (review 2, M1):
+    a token such as ``run_all.sh*`` or ``{run_all.sh,}`` is not literally
+    equal to the script's own path, but names it just as directly as an
+    exact word does the moment the shell expands it.
+    """
+    for candidate in _expand_braces(word):
+        if _word_names_the_script(candidate):
+            return True
+        basename = candidate.rsplit("/", 1)[-1]
+        if any(char in basename for char in "*?[") and fnmatch.fnmatch(_BLOCKED_SCRIPT, basename):
+            return True
+    return False
+
+
+#: Shells whose ``-c``/``-lc`` argument is executed as a NEW shell command
+#: line, not a filesystem path (review 2, M1) -- matched by basename so
+#: ``/bin/bash``, ``bash`` and a version-suffixed ``zsh5`` all count.
+_STRING_EXEC_SHELLS = ("bash", "sh", "zsh", "dash", "ksh", "ash")
+_STRING_EXEC_C_FLAG_RE = re.compile(r"^-[A-Za-z]*c[A-Za-z]*$")
+
+
+def _tokens_before_first_punctuation(tokens: list[str]) -> list[str]:
+    """``tokens`` up to (not including) the first punctuation marker.
+
+    Stops a trailing redirection glued onto a string-executor invocation
+    (``ssh host 'cmd' > out.txt``) from being read as part of the remote
+    command -- the punctuation marker is exactly where the OUTER command
+    resumes.
+    """
+    result: list[str] = []
+    for token in tokens:
+        if token in _PUNCTUATION_CHARS:
+            break
+        result.append(token)
+    return result
+
+
+def _string_executor_argument(head_name: str, tokens: list[str]) -> str | None:
+    """The nested SHELL TEXT argument of a string-executor invocation, or
+    ``None`` (review 2, M1).
+
+    ``_word_names_the_script`` only matches a ``-c`` argument when the
+    invocation is the LAST thing in it -- a trailing flag, redirection or a
+    second command after ``;``/``|`` inside the string defeated that. These
+    heads get their string argument re-parsed as its own command line
+    instead, through the caller's recursive ``_has_real_invocation`` call.
+    """
+    rest = _tokens_before_first_punctuation(tokens[1:])
+    if head_name in _STRING_EXEC_SHELLS or head_name == "su":
+        for index, token in enumerate(tokens[1:], start=1):
+            if _STRING_EXEC_C_FLAG_RE.match(token) and index + 1 < len(tokens):
+                return tokens[index + 1]
+        return None
+    if head_name == "eval":
+        return " ".join(rest) if rest else None
+    if head_name in ("ssh", "watch"):
+        # `ssh [options] host command...` / `watch [options] command...` --
+        # the LAST token before any redirection is the remote/watched
+        # command, when there is more than just the host (ssh) or nothing
+        # but flags (watch).
+        return rest[-1] if len(rest) >= (2 if head_name == "ssh" else 1) else None
+    return None
+
+
+#: `python`/`python3`/a version-suffixed `python3.11` -- matched by
+#: basename, mirroring `_STRING_EXEC_SHELLS`.
+_PYTHON_HEAD_RE = re.compile(r"^python[23]?(\.\d+)?$")
+
+
+def _python_dash_c_argument(head_name: str, tokens: list[str]) -> str | None:
+    """The Python SOURCE argument of a ``python -c``/``python3 -c``
+    invocation, or ``None`` (review 2, M1). Not shell text -- a substring
+    test on it is enough, per the review's own judgement."""
+    if not _PYTHON_HEAD_RE.match(head_name):
+        return None
+    for index, token in enumerate(tokens[1:], start=1):
+        if token == "-c" and index + 1 < len(tokens):
+            return tokens[index + 1]
+    return None
+
+
+def _strip_timeout_prefix(tokens: list[str]) -> list[str]:
+    """``tokens`` with a leading ``timeout [OPTIONS] DURATION`` stripped, or
+    ``tokens`` unchanged when it does not start with ``timeout`` (review 2,
+    M1: ``timeout 900 bash -c '...'`` is an everyday agent shape). Flags are
+    skipped by their leading ``-``; genuine flag VALUES (e.g. ``-s SIGNAL``)
+    are not specially handled -- no test shape here needs it, and skipping
+    one token too few only means the duration is mistaken for the command,
+    which still tokenises safely and falls through to no match rather than
+    a wrong one.
+    """
+    if not tokens or tokens[0] != "timeout":
+        return tokens
+    index = 1
+    while index < len(tokens) and tokens[index].startswith("-"):
+        index += 1
+    if index < len(tokens):
+        index += 1  # the duration argument itself
+    return tokens[index:]
 
 
 def _substitution_inner_segments(text: str) -> list[str]:
@@ -194,12 +378,45 @@ def _segment_executes_script(segment: str) -> bool:
     if not tokens:
         return False
 
-    head = _segment_head(tokens)
-    head_name = head.rsplit("/", 1)[-1] if head else ""
-    if head_name in _DATA_CONSUMERS:
+    head_index = _segment_head_index(tokens)
+    command_tokens = tokens[head_index:] if head_index is not None else tokens
+    # `timeout N bash -c '...'` (review 2, M1): the ACTUAL command sits
+    # after timeout's own duration argument, so it is stripped before any
+    # of the checks below look at the head.
+    command_tokens = _strip_timeout_prefix(command_tokens)
+    if not command_tokens:
         return False
 
-    return any(_word_names_the_script(token) for token in tokens)
+    head = command_tokens[0]
+    head_name = head.rsplit("/", 1)[-1]
+    # n3 (Plan 00466 review 2): the exemption is for the TRUSTED bare-word
+    # reader, not whatever basename a path happens to end in -- `head ==
+    # head_name` requires no `/` prefix at all, so a shadowed or
+    # path-qualified `cat` gets no exemption and is judged like any other
+    # unrecognised head.
+    if (
+        head == head_name
+        and head_name in _DATA_CONSUMERS
+        and not _data_consumer_exemption_voided(head_name, command_tokens)
+    ):
+        return False
+
+    string_arg = _string_executor_argument(head_name, command_tokens)
+    if string_arg is not None and _has_real_invocation(string_arg):
+        return True
+
+    python_arg = _python_dash_c_argument(head_name, command_tokens)
+    if python_arg is not None and _BLOCKED_SCRIPT in python_arg:
+        return True
+
+    if any(_word_could_name_the_script(token) for token in tokens):
+        return True
+    # A real brace expansion (`{run_all.sh,}`) has no internal whitespace, so
+    # shlex would keep it as one word -- except `{`/`}` are themselves
+    # punctuation chars (needed for `{ cmd; }` group syntax), which tears it
+    # into three tokens before `_word_could_name_the_script` ever sees a
+    # complete span. Recover it from the raw segment text instead.
+    return any(_word_could_name_the_script(word) for word in _brace_words_in_segment(segment))
 
 
 def _has_real_invocation(command: str) -> bool:

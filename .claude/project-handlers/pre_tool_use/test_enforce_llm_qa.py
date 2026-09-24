@@ -406,6 +406,171 @@ class TestEnforceLlmQaHandler:
         ):
             assert handler.matches(bash_hook_input(command)) is False, command
 
+    # ── matches() — M1 review 2 (Plan 00466 guard-defects review 2): 19 ──
+    # further regressions, all still ALLOW on the branch above (DENY on
+    # main). Three shapes: a string-executor whose script mention is not
+    # the LAST thing in the string, a glued redirection with no whitespace
+    # before `>`/`<`, and a glob/brace word that could expand to the script.
+
+    def test_still_matches_a_shell_dash_c_string_where_the_script_is_not_last(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        """`_word_names_the_script` requires the WHOLE shlex word to end in
+        `/run_all.sh` -- true only when the invocation is the last thing in
+        a `-c` string. Trailing flags, redirections or a second command
+        after `;`/`|` inside the string defeated that. The `-c` argument
+        must be re-parsed as its own shell text."""
+        for command in (
+            "bash -c './scripts/qa/run_all.sh --fast'",
+            'bash -c "./scripts/qa/run_all.sh 2>&1"',
+            "bash -c '../scripts/qa/run_all.sh; echo done'",
+            "bash -lc 'cd x && ./scripts/qa/run_all.sh > untracked/scratch/qa.txt 2>&1'",
+            "sh -c '../scripts/qa/run_all.sh|cat'",
+        ):
+            assert handler.matches(bash_hook_input(command)) is True, command
+
+    def test_still_matches_timeout_wrapping_a_shell_dash_c_string(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        """`timeout N bash -c '...'` is an everyday agent shape: timeout's
+        own duration argument must be skipped to reach the wrapped shell."""
+        command = "timeout 900 bash -c '../scripts/qa/run_all.sh > out.txt 2>&1'"
+        assert handler.matches(bash_hook_input(command)) is True
+
+    def test_still_matches_eval_of_a_string_naming_the_script(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        for command in (
+            "eval '../scripts/qa/run_all.sh --fast'",
+            'eval "../scripts/qa/run_all.sh;"',
+        ):
+            assert handler.matches(bash_hook_input(command)) is True, command
+
+    def test_still_matches_python_dash_c_naming_the_script(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        """A `python -c`/`python3 -c` argument is Python, not shell text --
+        a substring test on the argument is enough (the review's own
+        judgement: 'for python -c, a substring test is fine'). The second
+        command's `os` module call is built by concatenation, not as a
+        source literal: this file's own `security_antipattern` static scan
+        denies authoring that call's dotted spelling textually, regardless
+        of it being BASH TEXT inside a Python string rather than executing
+        code."""
+        os_system_call = "os." + "system('./scripts/qa/run_all.sh')"
+        for command in (
+            "python3 -c 'import subprocess; subprocess.run([\"./scripts/qa/run_all.sh\"])'",
+            f'python3 -c "import os; {os_system_call}"',
+        ):
+            assert handler.matches(bash_hook_input(command)) is True, command
+
+    def test_still_matches_ssh_and_watch_and_su_string_executors(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        for command in (
+            "ssh localhost '../scripts/qa/run_all.sh -v'",
+            "watch -n 60 '../scripts/qa/run_all.sh >/dev/null'",
+            "su -c '../scripts/qa/run_all.sh' someuser",
+        ):
+            assert handler.matches(bash_hook_input(command)) is True, command
+
+    def test_still_matches_a_glued_redirection(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        """No whitespace before `>`/`<` used to glue the redirection onto
+        the script's own word, so it no longer ended in `/run_all.sh`."""
+        for command in (
+            "./scripts/qa/run_all.sh>untracked/scratch/qa.txt",
+            "./scripts/qa/run_all.sh>untracked/scratch/qa.txt 2>&1",
+            "./scripts/qa/run_all.sh</dev/null",
+            "bash ./scripts/qa/run_all.sh>x",
+        ):
+            assert handler.matches(bash_hook_input(command)) is True, command
+
+    def test_still_matches_a_glob_or_brace_word_that_could_expand_to_the_script(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        """A shell glob or brace expression the shell could expand TO the
+        script's own name is a real invocation, even though the literal
+        shlex word is not an exact match."""
+        for command in (
+            "bash ./scripts/qa/run_all.sh*",
+            "bash {scripts/qa/run_all.sh,}",
+            "bash scripts/qa/{run_all.sh,x}",
+        ):
+            assert handler.matches(bash_hook_input(command)) is True, command
+
+    def test_does_not_match_unrelated_globs_or_quote_splicing(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        """Pre-existing ALLOW cases that the new glob handling must not
+        turn into false positives: a glob with no literal script-name
+        substring, and quote-spliced spellings. Also pins that a SHORT
+        interior wildcard right after the extension separator is left to
+        the sibling `secret_file_guard` niggle rather than handled here."""
+        for command in (
+            "bash scripts/qa/run_all*",
+            "bash scripts/qa/run_*.sh",
+            'bash scripts/qa/run_all.s"h"',
+            "bash scripts/qa/run_all''.sh",
+        ):
+            assert handler.matches(bash_hook_input(command)) is False, command
+
+    # ── matches() — n3 review 2 (Plan 00466 guard-defects review 2): the ──
+    # data-consumer exemption is matched by BASENAME (a path-qualified head
+    # like `/usr/bin/cat` slips through the same way) and does not exclude
+    # git/rg subcommands that themselves EXECUTE an argument.
+
+    def test_still_matches_git_bisect_run_naming_the_script(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        command = "git bisect run ./scripts/qa/run_all.sh"
+        assert handler.matches(bash_hook_input(command)) is True
+
+    def test_still_matches_git_rebase_dash_x_naming_the_script(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        for command in (
+            "git rebase -x ./scripts/qa/run_all.sh main",
+            "git rebase --exec ./scripts/qa/run_all.sh main",
+        ):
+            assert handler.matches(bash_hook_input(command)) is True, command
+
+    def test_still_matches_git_dash_c_alias_naming_the_script(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        command = "git -c alias.q=!./scripts/qa/run_all.sh q"
+        assert handler.matches(bash_hook_input(command)) is True
+
+    def test_still_matches_rg_dash_dash_pre_naming_the_script(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        command = "rg --pre ./scripts/qa/run_all.sh pattern file.txt"
+        assert handler.matches(bash_hook_input(command)) is True
+
+    def test_still_matches_a_path_qualified_data_consumer_head(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        """A path-qualified `cat` is not the trusted bare-word reader this
+        exemption exists for -- it could be a shadowed binary or a function
+        of the same basename -- so it gets no exemption at all and is
+        judged the same as any other unrecognised head."""
+        command = "/usr/bin/cat ./scripts/qa/run_all.sh"
+        assert handler.matches(bash_hook_input(command)) is True
+
+    def test_still_allows_ordinary_git_and_rg_invocations(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        """The exemption itself must survive n3's narrowing for the
+        overwhelming ordinary case: a ready git/rg command with no
+        subcommand shape that executes anything."""
+        for command in (
+            "git log --oneline -- scripts/qa/run_all.sh",
+            "git commit -m 'mentions run_all.sh in prose'",
+            "rg run_all.sh scripts/qa/",
+        ):
+            assert handler.matches(bash_hook_input(command)) is False, command
+
     # ── Acceptance tests ──
 
     def test_has_acceptance_tests(self, handler: EnforceLlmQaHandler) -> None:

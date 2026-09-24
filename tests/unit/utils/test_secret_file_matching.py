@@ -1303,6 +1303,250 @@ class TestIterProtectedMentions:
         assert not list(sfm.iter_protected_mentions("git status", sfm.DEFAULT_PROTECTED_PATTERNS))
 
 
+class TestInteriorWildcardDpIsBounded:
+    """B1 (Plan 00466 guard-defects review 2): the N10 interior-wildcard DP is
+    O(len(a) * len(b)) per call, and ``_interior_wildcard_mention`` calls it
+    once per bracket expansion, per non-both-edges pattern, per token — an
+    UNBOUNDED cost in the length of a single token. Since a PreToolUse
+    socket timeout is an ALLOW (``.claude/init.sh``), a token slow enough to
+    exhaust the client's 30s budget is a bypass, not just a nuisance:
+    placing it BEFORE a genuine mention in the same command delays the
+    verdict past the timeout while the real mention sits unscanned.
+
+    Every case here reproduces a review-measured shape (main: well under a
+    second; pre-fix branch: 15-35s) and pins it back under a small bound.
+    """
+
+    _BUDGET_SECONDS = 1.0
+
+    def test_the_60kb_bracket_and_star_bypass_shape_denies_fast(self) -> None:
+        """The review's own B1 evidence case: a[bc]x6 + 5000 stars + a,
+        immediately followed by a genuine mention — pre-fix this took
+        31.151s on the branch (0.096s on main)."""
+        token = "a" + "[bc]" * 6 + "*" * 5000 + "a"
+        command = f"cat {token}; cat .vault-pass"
+        start = time.perf_counter()
+        result = sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS)
+        elapsed = time.perf_counter() - start
+        assert result is not None
+        assert (
+            elapsed < self._BUDGET_SECONDS
+        ), f"took {elapsed:.3f}s, budget {self._BUDGET_SECONDS}s"
+
+    def test_two_hundred_bracket_and_star_tokens_denies_fast(self) -> None:
+        """The review's second timing case (105 KB): 200 x a[bc]x6<500*>a --
+        34.946s pre-fix (0.232s on main). 200 tokens x 64 bracket expansions
+        each is real volume (12800 intersection checks), not a per-token
+        blow-up, so this gets a more generous bound than the single-token
+        60 KB case above -- still a >20x improvement over pre-fix, and the
+        whole-scan deadline below is the backstop for volume like this."""
+        token = "a" + "[bc]" * 6 + "*" * 500 + "a"
+        command = " ".join([token] * 200)
+        start = time.perf_counter()
+        sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS)
+        elapsed = time.perf_counter() - start
+        assert elapsed < 3.0, f"took {elapsed:.3f}s"
+
+    def test_ordinary_one_megabyte_write_content_stays_bounded_by_the_deadline(
+        self,
+    ) -> None:
+        """The review's non-adversarial case: 1 MB of ordinary 'a*b ' tokens
+        (e.g. minified JS) -- 15-17s measured here pre-deadline vs main's own
+        4.564s baseline. Not achievable from the per-token DP budget alone:
+        no single token here is pathological, the cost is volume across
+        250k short tokens. This is exactly what the whole-scan deadline
+        exists for: with one supplied (as ``secret_file_guard`` supplies),
+        the call returns -- either with a real answer or a
+        ``TimeoutError`` -- well inside the deadline instead of running
+        past it, whichever outcome it is."""
+        content = "a*b " * 250_000
+        start = time.perf_counter()
+        outcome = "completed"
+        try:
+            sfm.find_protected_mention_detail(
+                content, sfm.DEFAULT_PROTECTED_PATTERNS, deadline=time.monotonic() + 2.0
+            )
+        except TimeoutError:
+            outcome = "timed out"
+        elapsed = time.perf_counter() - start
+        assert elapsed < 3.0, f"{outcome} in {elapsed:.3f}s, past a 2s deadline"
+
+    def test_a_lone_long_star_run_collapses_to_near_zero_cost(self) -> None:
+        """Collapsing repeated '*' is language-preserving (``a**b`` and
+        ``a*b`` match the same set) and removes the dominant cost driver
+        directly, independent of the budget cap."""
+        token = "a" + "*" * 60_000 + "a"
+        start = time.perf_counter()
+        sfm.find_protected_mention_detail(f"cat {token}", sfm.DEFAULT_PROTECTED_PATTERNS)
+        elapsed = time.perf_counter() - start
+        assert elapsed < 0.1, f"took {elapsed:.3f}s"
+
+    def test_scan_deadline_denies_via_the_fail_closed_route(self) -> None:
+        """The whole-scan deadline is a backstop: forcing an artificially
+        tiny deadline must raise so the guard's own fail-closed wrapper (N11)
+        turns it into a deny, rather than the scan silently truncating and
+        answering "no mention" for content it never finished examining."""
+        with pytest.raises(TimeoutError):
+            list(
+                sfm.iter_protected_mentions(
+                    "cat .vault-pass extra words here",
+                    sfm.DEFAULT_PROTECTED_PATTERNS,
+                    deadline=time.monotonic() - 1,
+                )
+            )
+
+
+class TestEdgeOpenTokensReachTheDpAgainstNonBothEdgesPatterns:
+    """M2a (Plan 00466 guard-defects review 2): a token whose OWN wildcard
+    sits at an edge (``*.vault-pas?word``, ``?rod.vault-passw*rd``,
+    ``*vault*password``) was excluded from the DP-intersection check
+    entirely -- it was gated on carrying NO edge wildcard, so it fell
+    through to the overlap heuristic, which the N4/m1 fix deliberately
+    narrowed and cannot re-widen. The DP is an EXACT glob-intersection test,
+    so running it for edge-open tokens too (against every pattern that is
+    NOT both-edges) closes this without reopening N4.
+    """
+
+    def test_leading_wildcard_plus_interior_question_mark_still_denies(self) -> None:
+        result = sfm.find_protected_mention_detail(
+            "cat *.vault-pas?word", sfm.DEFAULT_PROTECTED_PATTERNS
+        )
+        assert result is not None
+
+    def test_leading_question_mark_plus_interior_star_still_denies(self) -> None:
+        result = sfm.find_protected_mention_detail(
+            "cat ?rod.vault-passw*rd", sfm.DEFAULT_PROTECTED_PATTERNS
+        )
+        assert result is not None
+
+    def test_leading_wildcard_plus_literal_trailing_word_still_denies(self) -> None:
+        result = sfm.find_protected_mention_detail(
+            "cat *vault*password", sfm.DEFAULT_PROTECTED_PATTERNS
+        )
+        assert result is not None
+
+    def test_n4_false_positive_still_does_not_deny(self) -> None:
+        """The N4 shape this fix must not reopen: Python's unpacking
+        operator ``*words[position + 1 :]`` tokenises to ``*words[position``,
+        whose residue shares only a coincidental short edge with any stem,
+        with nowhere for the rest of it to go against an end-anchored
+        pattern."""
+        result = sfm.find_protected_mention_detail(
+            "echo *words[position", sfm.DEFAULT_PROTECTED_PATTERNS
+        )
+        assert result is None
+
+
+class TestUnexpandableBracketClassesAreTreatedAsWildcardInTheDp:
+    """M2b (Plan 00466 guard-defects review 2): a bracket expression that
+    ``_expand_bracket_expressions`` cannot enumerate (negated, a POSIX named
+    class, or an over-cap range) is left UNEXPANDED "so the fallback fails
+    CLOSED" -- but the DP previously read its ``[``/``]``/``!`` characters as
+    LITERAL, so it failed OPEN instead. Treating an unexpanded bracket
+    expression as a single ``?`` in the DP is a SUPERSET of what it can
+    really match, restoring the fail-closed direction.
+    """
+
+    def test_negated_bracket_with_bang_still_denies(self) -> None:
+        result = sfm.find_protected_mention_detail("cat id_r[!x]a", sfm.DEFAULT_PROTECTED_PATTERNS)
+        assert result is not None
+
+    def test_negated_bracket_with_caret_still_denies(self) -> None:
+        result = sfm.find_protected_mention_detail("cat id_r[^x]a", sfm.DEFAULT_PROTECTED_PATTERNS)
+        assert result is not None
+
+    def test_posix_named_class_still_denies(self) -> None:
+        result = sfm.find_protected_mention_detail(
+            "cat id_r[[:alpha:]]a", sfm.DEFAULT_PROTECTED_PATTERNS
+        )
+        assert result is not None
+
+    def test_over_cap_range_still_denies(self) -> None:
+        result = sfm.find_protected_mention_detail(
+            "cat id_[a-z][a-z]a", sfm.DEFAULT_PROTECTED_PATTERNS
+        )
+        assert result is not None
+
+
+class TestBraceExpansionBeforeTokenising:
+    """M2d (Plan 00466 guard-defects review 2): a real brace alternation
+    (``{s,}``) has no internal whitespace, so a shell reads it as ONE word --
+    but ``_tokenise`` splits on ``,`` (a general token delimiter), tearing it
+    apart before any spelling can be recognised. Brace words are found and
+    expanded against the RAW command text instead, the same conflict
+    ``enforce_llm_qa``'s M1 fix resolves for its own tokeniser.
+    """
+
+    def test_optional_middle_alternative_still_denies(self) -> None:
+        result = sfm.find_protected_mention_detail(
+            "cat .vault-pas{s,}word", sfm.DEFAULT_PROTECTED_PATTERNS
+        )
+        assert result is not None
+
+    def test_optional_trailing_alternative_still_denies(self) -> None:
+        result = sfm.find_protected_mention_detail("cat id_r{s,}a", sfm.DEFAULT_PROTECTED_PATTERNS)
+        assert result is not None
+
+    def test_bare_alternation_naming_the_exact_file_still_denies(self) -> None:
+        result = sfm.find_protected_mention_detail("cat {id_rsa,x}", sfm.DEFAULT_PROTECTED_PATTERNS)
+        assert result is not None
+
+    def test_both_edges_pattern_brace_alternative_still_denies(self) -> None:
+        result = sfm.find_protected_mention_detail(
+            "cat block-words.se{c,}ret", sfm.DEFAULT_PROTECTED_PATTERNS
+        )
+        assert result is not None
+
+
+class TestBothEdgesFilesystemTruthRoute:
+    """M2c (Plan 00466 guard-defects review 2): a both-edges pattern
+    (``*.secret*``, ``*vault_pass*``) asserts only "contains this text
+    anywhere", so a bare interior-wildcard spelling of it stays deliberately
+    unreachable through the DP/overlap heuristics -- those would over-fire on
+    ordinary prose (see ``_both_edges_residue_is_near_total_stem_match``'s
+    own docstring). The filesystem is the only oracle that cannot itself
+    false-positive: expand the token's glob against the HOOK's cwd (passed
+    explicitly here, never the daemon process's own) and deny only when a
+    REAL protected-shaped file is what it names.
+    """
+
+    def test_interior_question_mark_spelling_denies_when_the_file_is_real(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "demo.secret").write_text("x")
+        result = sfm.find_protected_mention_detail(
+            "cat demo.se?ret", sfm.DEFAULT_PROTECTED_PATTERNS, cwd=str(tmp_path)
+        )
+        assert result is not None
+        assert result[0] == "*.secret*"
+
+    def test_interior_star_spelling_denies_when_the_file_is_real(self, tmp_path: Path) -> None:
+        (tmp_path / "demo.secret").write_text("x")
+        result = sfm.find_protected_mention_detail(
+            "cat demo.s*t", sfm.DEFAULT_PROTECTED_PATTERNS, cwd=str(tmp_path)
+        )
+        assert result is not None
+        assert result[0] == "*.secret*"
+
+    def test_vault_pass_interior_spelling_denies_when_the_file_is_real(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "vault_passwords.yml").write_text("x")
+        result = sfm.find_protected_mention_detail(
+            "cat vault?passwords.yml", sfm.DEFAULT_PROTECTED_PATTERNS, cwd=str(tmp_path)
+        )
+        assert result is not None
+        assert result[0] == "*vault_pass*"
+
+    def test_a_glob_that_expands_to_nothing_does_not_deny(self, tmp_path: Path) -> None:
+        """No real file named this way exists here -- a glob to nothing
+        reads nothing, so there is genuinely no disclosure to stop."""
+        result = sfm.find_protected_mention_detail(
+            "cat demo.se?ret", sfm.DEFAULT_PROTECTED_PATTERNS, cwd=str(tmp_path)
+        )
+        assert result is None
+
+
 _CWD = "/proj"
 _ENC = "group_vars/all/vault_passwords.yml"
 _ENC_TEMPLATE = "templates/app.secrets"

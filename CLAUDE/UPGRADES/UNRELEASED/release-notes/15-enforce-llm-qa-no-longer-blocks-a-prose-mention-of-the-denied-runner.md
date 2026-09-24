@@ -16,3 +16,10 @@ command's head is a recognised data consumer (`cat`/`grep`/`head`/etc.,
 `git`/`gh`) that could not execute it — and leaves a bare prose mention
 alone. A quoted multi-word argument tokenises as ONE word, so it is never
 mistaken for the script's own path.
+
+Correction: the deny-by-default restoration described above still missed 19
+real-invocation shapes (a string-executor argument where the script is not
+the last thing in the string, a glued redirection, a glob/brace word that
+could expand to the script) — see the "enforce_llm_qa re-parses a
+string-executor argument, a glued redirection and a glob/brace spelling of
+the denied runner" release note for the follow-up fix.

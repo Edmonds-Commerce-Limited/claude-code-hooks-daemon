@@ -38,10 +38,12 @@ and is pinned by its own tests. Containment is a separate premise, so it gets a
 separate handler rather than weakening an existing one to make room.
 """
 
+import json
 import logging
 import os
 import shlex
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -206,6 +208,21 @@ _ERROR_RULE = Rule(
 )
 
 
+@dataclass(frozen=True)
+class _DispatchKey:
+    """Identifies one dispatch by everything ``_offending_targets`` reads
+    (m2, Plan 00466 review 2) -- NOT by where the call lives. ``tool_input``
+    is serialised whole (JSON, sorted keys) rather than field-by-field: this
+    handler reads several shapes across tools (``file_path``, multiple
+    destination flags, nested shell content), and a whole-payload key never
+    goes stale when one of those is extended.
+    """
+
+    tool_name: str
+    tool_input_json: str
+    cwd: str
+
+
 class ProjectContainmentHandler(PreToolUseHandlerBase):
     """Deny a write to a path named outside the repository root.
 
@@ -231,6 +248,59 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
         # assumed one is a hole.
         self._allowed_external_paths: list[str] | None = None
         self._allow_claude_home: bool = True
+        # m2 (Plan 00466 review 2): a one-shot bridge from matches() to
+        # handle() for a SINGLE dispatch -- see _compute_and_cache's
+        # docstring for the bug this closes.
+        self._cached_dispatch: (
+            tuple[_DispatchKey, tuple[list[str], Path | None, Exception | None]] | None
+        ) = None
+
+    def _dispatch_key(self, hook_input: dict[str, Any]) -> _DispatchKey:
+        tool_name = str(hook_input.get(HookInputField.TOOL_NAME, ""))
+        tool_input = hook_input.get(HookInputField.TOOL_INPUT, {})
+        cwd = str(hook_input.get(HookInputField.CWD, ""))
+        try:
+            tool_input_json = json.dumps(tool_input, sort_keys=True, default=str)
+        except TypeError as exc:
+            # `default=str` covers almost everything JSON cannot represent
+            # natively; the one residual is a key type `json.dumps` itself
+            # rejects (e.g. a non-string dict key when `sort_keys=True`
+            # cannot compare mixed types). `repr` is still a valid dispatch
+            # key here -- logged so a NEW payload shape that keeps hitting
+            # this branch is visible, not silent.
+            logger.warning(
+                "project_containment: tool_input not JSON-serialisable, "
+                "falling back to repr() for the dispatch key: %s",
+                exc,
+            )
+            tool_input_json = repr(tool_input)
+        return _DispatchKey(tool_name=tool_name, tool_input_json=tool_input_json, cwd=cwd)
+
+    def _compute_and_cache(
+        self, hook_input: dict[str, Any]
+    ) -> tuple[list[str], Path | None, Exception | None]:
+        """Evaluate ONCE and leave the result for this same dispatch's
+        ``handle()`` (m2, Plan 00466 review 2).
+
+        ``matches()`` and ``handle()`` used to call
+        ``_offending_targets_or_error`` independently, so a raise
+        ``matches()`` correctly turned into a DENY (via the error route)
+        could be silently overwritten by a CLEAN re-evaluation inside
+        ``handle()`` if the underlying fault was transient.
+        """
+        result = self._offending_targets_or_error(hook_input)
+        self._cached_dispatch = (self._dispatch_key(hook_input), result)
+        return result
+
+    def _take_cached(
+        self, hook_input: dict[str, Any]
+    ) -> tuple[list[str], Path | None, Exception | None]:
+        """The result ``matches()`` computed for THIS call, else a fresh one."""
+        cached = self._cached_dispatch
+        if cached is not None and cached[0] == self._dispatch_key(hook_input):
+            self._cached_dispatch = None
+            return cached[1]
+        return self._offending_targets_or_error(hook_input)
 
     @staticmethod
     def _claude_home() -> Path:
@@ -553,21 +623,50 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """True when this call names at least one out-of-root write target,
         or (Plan 00466 N11) evaluation could not be completed at all."""
-        offending, _root, error = self._offending_targets_or_error(hook_input)
+        offending, _root, error = self._compute_and_cache(hook_input)
         return bool(offending) or error is not None
 
     def get_rules(self) -> list[Rule]:
         return [_RULE, _ERROR_RULE]
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
-        """Deny, naming every offending path and the sanctioned location."""
-        offending, root, error = self._offending_targets_or_error(hook_input)
+        """Deny, naming every offending path and the sanctioned location.
+
+        The whole body after a real match is wrapped in its own fail-closed
+        net (m1, Plan 00466 review 2): ``_offending_targets_or_error`` only
+        guarantees reaching a VERDICT, not that everything downstream of a
+        real match (the disclosure tracker, ``RuleFormatter``, string
+        building) can never raise -- and an exception escaping ``handle()``
+        unwrapped is exactly what a non-strict chain treats as "no match"
+        for a call that had a genuine out-of-root write target.
+        """
+        offending, root, error = self._take_cached(hook_input)
         if error is not None:
             return self._deny_for_evaluation_error(hook_input, error)
         if not offending:
             return GatingResult(decision=Decision.ALLOW)
         assert root is not None  # error is None here, so _resolved_root() succeeded
 
+        try:
+            return self._build_deny_result(hook_input, offending, root)
+        except Exception as exc:
+            logger.exception(
+                "project_containment: handle() raised after a real match; "
+                "denying for safety (Plan 00466 m1)"
+            )
+            return GatingResult(
+                decision=Decision.DENY,
+                reason=(
+                    f"BLOCKED [{RuleID.PROJECT_CONTAINMENT_EVALUATION_ERROR}]: "
+                    f"project_containment matched an out-of-root write but could not build "
+                    f"its explanation: {type(exc).__name__}: {exc}\n\nDenying for safety."
+                ),
+            )
+
+    def _build_deny_result(
+        self, hook_input: dict[str, Any], offending: list[str], root: Path
+    ) -> GatingResult:
+        """The real ``handle()`` body, run inside its caller's try/except."""
         transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
         tracker = get_data_layer().disclosure
         formatter = RuleFormatter()

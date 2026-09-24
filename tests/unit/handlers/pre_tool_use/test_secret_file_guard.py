@@ -17,6 +17,7 @@ from tests.vault_payloads import vault_file_bytes
 from claude_code_hooks_daemon.constants import HandlerID, Priority
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.core.chain import HandlerChain
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
 from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.handlers.pre_tool_use import secret_file_guard as guard_module
@@ -381,7 +382,10 @@ class TestFailsClosedOnEvaluationError:
         assert result.decision == Decision.DENY
         assert result.reason is not None
         assert "RuntimeError" in result.reason
-        assert "synthetic failure injected by the test" in result.reason
+        # n1 (Plan 00466 guard-defects review 2): the exception MESSAGE goes
+        # to the log only, never the deny reason -- see
+        # TestErrorRouteEchoesOnlyTheExceptionType below.
+        assert "synthetic failure injected by the test" not in result.reason
 
     def test_read_route_exception_still_denies(self, monkeypatch: pytest.MonkeyPatch) -> None:
         def _raise(*_args: object, **_kwargs: object) -> bool:
@@ -396,6 +400,27 @@ class TestFailsClosedOnEvaluationError:
         assert result.decision == Decision.DENY
         assert result.reason is not None
         assert "ValueError" in result.reason
+
+    def test_bash_scan_deadline_timeout_still_denies(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """B1 (Plan 00466 guard-defects review 2): the mention scan raises
+        ``TimeoutError`` when it exceeds the deadline this handler supplies
+        (``sfm.SCAN_DEADLINE_SECONDS``) -- a real ``iter_protected_mentions``
+        run out of time reaches exactly this same route, since a raise from
+        ``find_protected_mention_detail`` is indistinguishable from any
+        other evaluation exception to ``_evaluate``'s wrapper."""
+
+        def _raise(*_args: object, **_kwargs: object) -> None:
+            raise TimeoutError("secret_file_guard mention scan exceeded its deadline")
+
+        monkeypatch.setattr(guard_module.sfm, "find_protected_mention_detail", _raise)
+        handler = _handler()
+        hook_input = _hook_input("Bash", {"command": "echo hello"})
+
+        assert handler.matches(hook_input) is True
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "TimeoutError" in result.reason
 
     def test_grep_directory_route_exception_still_denies(
         self, monkeypatch: pytest.MonkeyPatch
@@ -458,6 +483,171 @@ class TestFailsClosedOnEvaluationError:
 
         assert result.reason is not None
         assert result.reason.startswith(f"BLOCKED [{RuleID.SECRET_EVALUATION_ERROR}]")
+
+
+class TestChainLevelFailClosedBehaviour:
+    """n4 (Plan 00466 guard-defects review 2): every prior N11/m1/m2 test in
+    this file calls ``matches()``/``handle()`` directly -- not through
+    ``HandlerChain.execute(..., strict_mode=False)``, which is the property
+    actually claimed ("this guard fails closed independent of the daemon's
+    strict_mode"). That gap is exactly why m1 (an exception in `handle()`'s
+    own tail) was not caught by the existing direct-call tests.
+    """
+
+    def test_a_handle_tail_exception_still_denies_through_the_chain(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _raise(self: object, *_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("synthetic chain-level failure")
+
+        monkeypatch.setattr(guard_module.RuleFormatter, "verbose", _raise)
+        chain = HandlerChain()
+        chain.add(_handler())
+        hook_input = _hook_input("Read", {"file_path": "/proj/.vault-pass"})
+
+        result = chain.execute(hook_input, strict_mode=False)
+        assert result.result.decision == Decision.DENY
+
+    def test_an_evaluation_exception_still_denies_through_the_chain(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _raise(*_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("synthetic chain-level evaluation failure")
+
+        monkeypatch.setattr(guard_module.sfm, "find_protected_mention_detail", _raise)
+        chain = HandlerChain()
+        chain.add(_handler())
+        hook_input = _hook_input("Bash", {"command": "echo hello"})
+
+        result = chain.execute(hook_input, strict_mode=False)
+        assert result.result.decision == Decision.DENY
+
+
+class TestErrorRouteEchoesOnlyTheExceptionType:
+    """n1 (Plan 00466 guard-defects review 2): the deny reason on an
+    evaluation-error route must show only the exception TYPE -- the message
+    itself goes to the log only (``logger.exception``). Today no raise path
+    carries a filename, but Plan 00356's rule is that a name DISCOVERED by
+    a directory walk must never be echoed, and an ``OSError`` message from a
+    future ``stat`` call could easily carry one.
+    """
+
+    def test_the_evaluation_error_route_omits_the_message(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _raise(*_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("a message that must never reach the deny reason")
+
+        monkeypatch.setattr(guard_module.sfm, "find_protected_mention_detail", _raise)
+        handler = _handler()
+        result = handler.handle(_hook_input("Bash", {"command": "echo hello"}))
+
+        assert result.reason is not None
+        assert "RuntimeError" in result.reason
+        assert "a message that must never reach the deny reason" not in result.reason
+
+    def test_the_handle_tail_error_route_omits_the_message(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _raise(self: object, *_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("a different message that must never reach the deny reason")
+
+        monkeypatch.setattr(guard_module.RuleFormatter, "verbose", _raise)
+        handler = _handler()
+        hook_input = _hook_input("Read", {"file_path": "/proj/.vault-pass"})
+        result = handler.handle(hook_input)
+
+        assert result.reason is not None
+        assert "RuntimeError" in result.reason
+        assert "a different message that must never reach the deny reason" not in result.reason
+
+
+class TestMatchesAndHandleShareOneEvaluation:
+    """m2 (Plan 00466 guard-defects review 2): ``matches()`` and ``handle()``
+    each independently called ``_matched_pattern_and_route`` -- so a
+    TRANSIENT raise seen by ``matches()`` (denied, correctly, via the error
+    route) could be silently overwritten by a clean re-evaluation inside
+    ``handle()``, turning a correct DENY into an ALLOW for a call ``matches()``
+    itself already flagged. The two calls must share ONE evaluation per
+    dispatch.
+    """
+
+    def test_a_transient_raise_seen_by_matches_is_not_erased_by_handle(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls = {"count": 0}
+
+        def _flaky(*_args: object, **_kwargs: object) -> tuple[str, str] | None:
+            calls["count"] += 1
+            if calls["count"] == 1:
+                raise RuntimeError("transient failure, first call only")
+            return None  # a clean re-evaluation finds nothing
+
+        monkeypatch.setattr(guard_module.sfm, "find_protected_mention_detail", _flaky)
+        handler = _handler()
+        hook_input = _hook_input("Bash", {"command": "echo hello"})
+
+        assert handler.matches(hook_input) is True  # error route: matches() saw the raise
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "RuntimeError" in result.reason
+
+
+class TestHandleTailFailsClosed:
+    """m1 (Plan 00466 guard-defects review 2): ``_evaluate``'s fail-closed
+    wrapper only covers reaching a VERDICT. Once ``handle()`` has a real
+    match it does further work UNWRAPPED -- resolving the disclosure
+    tracker, formatting the rule, string-building the message -- and an
+    exception there used to propagate straight out of ``handle()``, which a
+    non-strict chain (every install unless ``strict_mode: true``, and M3
+    found that inert here too) treats as "no match": ALLOW, for a call that
+    had a GENUINE protected mention. ``matches()`` already returned True
+    for every case below; the only question is whether ``handle()`` denies
+    or raises.
+    """
+
+    def test_data_layer_lookup_exception_still_denies(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _raise() -> None:
+            raise RuntimeError("synthetic get_data_layer failure")
+
+        monkeypatch.setattr(guard_module, "get_data_layer", _raise)
+        handler = _handler()
+        hook_input = _hook_input("Read", {"file_path": "/proj/.vault-pass"})
+
+        assert handler.matches(hook_input) is True
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "RuntimeError" in result.reason
+
+    def test_rule_formatter_exception_still_denies(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def _raise(self: object, *_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("synthetic RuleFormatter.verbose failure")
+
+        monkeypatch.setattr(guard_module.RuleFormatter, "verbose", _raise)
+        handler = _handler()
+        hook_input = _hook_input("Read", {"file_path": "/proj/.vault-pass"})
+
+        assert handler.matches(hook_input) is True
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "RuntimeError" in result.reason
+
+    def test_unhashable_transcript_path_still_denies(self) -> None:
+        """The review's own concrete case: a list where a string is
+        expected (harness-supplied, not agent-controllable, but the fail
+        path must hold regardless of how the bad value got there)."""
+        handler = _handler()
+        hook_input = _hook_input("Read", {"file_path": "/proj/.vault-pass"})
+        hook_input["transcript_path"] = ["not", "a", "string"]
+
+        assert handler.matches(hook_input) is True
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
 
 
 class TestDisclosureLadder:
