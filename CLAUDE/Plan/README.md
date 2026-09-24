@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00463: full qa is a main thread gate](00463-full-qa-is-a-main-thread-gate/PLAN.md) - Not Started (owner request after five worktree agents ran the ~18-minute full suite at once: a `scope: SUB` guard denies configured full-QA commands in sub-agents and names the targeted forms; the coordinator runs the full gate serially on each branch before merge)
+
 - [00462: php lsp advice keeps composer dependencies indexed](00462-php-lsp-advice-keeps-composer-dependencies-indexed/PLAN.md) - Not Started (#56: `lsp_noise_checker` tells a PHP project to exclude all of `**/vendor` from intelephense, which removes every Composer dependency from the index, so every library type is undefined)
 
 - [00461: journal entries only through the stamping tool](00461-journal-entries-only-through-the-stamping-tool/PLAN.md) - In Progress (owner directive after a session of hand-stamped entries, one 40 minutes in the future: an Edit/Write/Bash append to a plan `JOURNAL/` day-file is DENIED and pointed at `mkplan.bash --journal`, which shipped in v3.66.0 and was never used)
@@ -286,27 +288,27 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 462 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 463 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 396 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 43 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 44 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
 - **Cancelled/Abandoned**: 13 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00108 superseded by 00117, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213, 00135 superseded by the supervisor workstream)
 
-- **Folder-to-number reconciliation**: 43 + 396 + 13 = **452 folders**, spanning
-  **449 distinct plan numbers** — three numbers carry two folders each, the
+- **Folder-to-number reconciliation**: 44 + 396 + 13 = **453 folders**, spanning
+  **450 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
   (`001-`, `002-`, `003-`), so they count as present. That leaves **13** of the
-  462 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
+  463 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
   00145, 00191, 00195, 00210, 00258, 00300, 00303, 00325 — abandoned drafts, numbers
   burned by transient probes (00195 during the v3.51.0 acceptance run, 00258
   during the v3.54.0 one), and one withdrawn duplicate (00210, scaffolded by a
   sub-agent that then found Plan 00208 already covered the work).
-  449 + 13 = 462. ✅
+  450 + 13 = 463. ✅
 
   Note on **00191**: it stays folderless deliberately. The number was claimed
   by a branch that renumbered itself and was never merged; Plan 00267
