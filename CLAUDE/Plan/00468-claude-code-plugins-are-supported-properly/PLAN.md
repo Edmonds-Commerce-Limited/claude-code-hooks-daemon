@@ -110,10 +110,13 @@ first, and the other fixes build on it.
 
 ### Phase 5: documentation (G3, G4, G5, P8)
 
-- [ ] ⬜ **Task 5.1**: Vendor the Claude Code plugin and hooks docs with
+- [x] ✅ **Task 5.1**: Vendor the Claude Code plugin and hooks docs with
   `remote-docs add` (G3). Add a "Claude Code plugins alongside the daemon"
   section and fix the hook-source and environment tables (G4). Separate
-  "daemon plugin" from "Claude Code plugin" everywhere (G5).
+  "daemon plugin" from "Claude Code plugin" everywhere (G5). The canonical
+  home is `CLAUDE/ClaudeCodePlugins.md`, with a human summary at
+  `docs/guides/CLAUDE_CODE_PLUGINS.md`. Task 4.1's security-docs note should
+  link to it rather than restate the `updatedInput` limit.
 - [ ] ⬜ **Task 5.2**: P8 is 00422 N24 (the orchestrator simulation says
   "would have been denied" for Bash). Confirm Plan 00463's fix covers it, or
   fix it here.

@@ -88,7 +88,7 @@ optional sugar accepted anywhere a repository-relative path is:
 `normalise_repo_relative_path` (`utils/repo_relative_path.py`) strips a
 leading `{REPO_ROOT}/` before validating, so `{REPO_ROOT}/web` and `web` declare the
 same thing, and a bare relative path stays valid without it. On the handful
-of fields EXEMPT from the repo-relative-only rule (a plugin path,
+of fields EXEMPT from the repo-relative-only rule (a daemon plugin path,
 `project_handlers.path`) it is the portable alternative to a genuine
 absolute path: `expand_repo_root_token` resolves it against the project root
 at load time, while a leading `/` still means a deliberate, machine-specific

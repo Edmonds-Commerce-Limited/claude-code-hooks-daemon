@@ -1270,6 +1270,11 @@ step with the first.
 **Revised: nothing to build here.** What remains is remedy (1), which is
 owner-gated, and the ledger is where it waits.
 
+**✅ Remedied.** Owner question 4 was decided unattended as remedy (1), a
+dedicated `untracked/acceptance/` root, and recorded in
+[DECISIONS.md](DECISIONS.md). The probe fixtures moved there (branch
+n422-n11, `bf10107c`, landed with B1 at 2e6483a3).
+
 ### N12 — the supervisor asset has been red under its own lint gate since v3.65.0
 
 `tests/integration/test_client_owned_asset_lint.py::TestPythonAssetsAreCleanUnderRuffDefaults`
@@ -1650,6 +1655,11 @@ coordinator's full-QA gate script now does the same.
    suspends idle shutdown while QA runs.
 2. At minimum, `smoke_test` distinguishes "idled out during this run"
    from "never started", so the failure names its real cause.
+
+**✅ Remedied** by remedy 1 (branch n422-n27, `76dd6c8a`, landed with B1 at
+2e6483a3): `llm_qa` starts an idled-out daemon before a tool that consumes
+it live, so no keep-alive is needed. Delivery report:
+`subagent-reports/` (commit `ef799b98`).
 
 ### N26 — commit gates never see content staged earlier in the same command
 

@@ -1444,7 +1444,7 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
         )
 
         # Stated once; the prose is rendered from it (Plan 00243). Not
-        # scratch_path(): untracked/ is itself an ALLOWED location, so this
+        # acceptance_path(): untracked/ is itself an ALLOWED location, so this
         # test's file_path must stay at the project root to exercise the
         # wrong-location deny path at all.
         #
