@@ -5425,6 +5425,62 @@ def cmd_secret_meta(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_probe(args: argparse.Namespace) -> int:
+    """Send one hand-built payload through the project's hook entry point, marked.
+
+    Plan 00466 N12: a probe piped into ``.claude/hooks/<event>`` by hand is
+    recorded in ``verdicts.jsonl`` as a real agent's traffic unless it carries
+    ``synthetic_source``. This verb sets it (``manual-probe``) unless the
+    payload already names its own producer, then prints the verdict.
+
+    Returns:
+        0 when the daemon answered, whatever it decided; 1 when it gave no
+        verdict (not reached, event rejected, answer not JSON, timed out);
+        2 when the payload or event was wrong and nothing was sent.
+    """
+    from claude_code_hooks_daemon.daemon.hook_probe import (
+        PROBE_TIMEOUT_SECONDS,
+        ProbeInputError,
+        build_probe_event,
+        dispatch_probe,
+        entry_point_for,
+        probe_session_id,
+        render_verdict,
+        resolve_probe_event,
+    )
+
+    override = getattr(args, "project_root", None)
+    project_root = Path(override) if override else Path(get_project_path(None))
+    try:
+        raw = args.json if args.json is not None else Path(args.file).read_text(encoding="utf-8")
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ProbeInputError(f"the payload is not valid JSON: {exc}") from exc
+        event = resolve_probe_event(args.event)
+        hook_event = build_probe_event(
+            payload, event=event, project_root=project_root, session_id=probe_session_id()
+        )
+        entry_point = entry_point_for(project_root, event)
+    except (ProbeInputError, OSError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+
+    try:
+        outcome = dispatch_probe(entry_point, hook_event, project_root=project_root)
+    except subprocess.TimeoutExpired:
+        print(
+            f"ERROR: {entry_point} did not answer within {PROBE_TIMEOUT_SECONDS}s",
+            file=sys.stderr,
+        )
+        return 1
+    code, text = render_verdict(
+        event=event, entry_point=entry_point, hook_event=hook_event, outcome=outcome
+    )
+    print(text, file=sys.stdout if code == 0 else sys.stderr)
+    return code
+
+
 def cmd_contract_status(
     args: argparse.Namespace,
     fetch: "Callable[[str], bytes] | None" = None,
@@ -9973,6 +10029,26 @@ def main() -> int:
         help="Project root for config + key resolution (trusted as-is; auto-detected by default)",
     )
     parser_secret_meta.set_defaults(func=cmd_secret_meta)
+
+    # probe (Plan 00466 N12) — a hand-built payload, marked as synthetic traffic
+    parser_probe = subparsers.add_parser(
+        "probe",
+        help="Send one hook payload through the project's entry point, marked "
+        "synthetic_source=manual-probe, and print the verdict",
+    )
+    parser_probe.add_argument(
+        "event",
+        help="Hook event: PreToolUse, pre-tool-use or pre_tool_use (any wired event)",
+    )
+    probe_payload = parser_probe.add_mutually_exclusive_group(required=True)
+    probe_payload.add_argument("--json", help="The payload as a JSON object")
+    probe_payload.add_argument("--file", type=Path, help="A file holding the JSON payload")
+    parser_probe.add_argument(
+        "--project-root",
+        type=Path,
+        help="Project whose .claude/hooks/ entry point is used (auto-detected by default)",
+    )
+    parser_probe.set_defaults(func=cmd_probe)
 
     # contract-status (Plan 00327) — is the vendored hooks contract current upstream?
     parser_contract_status = subparsers.add_parser(

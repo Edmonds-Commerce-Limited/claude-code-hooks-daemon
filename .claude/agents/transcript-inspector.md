@@ -147,10 +147,17 @@ python3 /tmp/find_last_assistant.py "$TRANSCRIPT"
 
 ## Step 4: Test the Hook Script Directly
 
-This isolates whether the shell script layer is broken.
+This isolates whether the shell script layer is broken. The Stop probes in
+this file are deliberately UNMARKED. `auto_continue_stop` is scoped `MAIN`,
+and a probe marked `"synthetic_source":"manual-probe"` (which is also what
+`/workspace/bin/hooks-daemon probe` sends) is never shown to it. A marked
+probe would therefore answer `{}` whether the hook works or not. The cost is
+that each probe is logged as a real stop; see
+[DEBUGGING_STOP_HOOK.md](../../CLAUDE/DEBUGGING_STOP_HOOK.md#test-the-hook-script-layer-1).
 
 ```bash
 # Test the stop hook script with a minimal input
+# unmarked-probe: auto_continue_stop is scoped MAIN, so a marked probe would never reach it
 echo '{"hook_event_name":"Stop","stop_hook_active":false}' | /workspace/.claude/hooks/stop
 ```
 
@@ -190,6 +197,7 @@ SOCK=$(ls /workspace/untracked/daemon-*.sock 2>/dev/null | head -1)
 echo "Socket: $SOCK"
 
 # Send a Stop event directly to the daemon
+# unmarked-probe: auto_continue_stop is scoped MAIN, so a marked probe would never reach it
 echo '{"event":"Stop","hook_input":{"hook_event_name":"Stop","stop_hook_active":false}}' \
     | nc -U "$SOCK"
 ```
@@ -253,6 +261,7 @@ The `auto_continue_stop` handler reads the transcript to inspect the last assist
 
 ```bash
 # Simulate full hook_input with transcript_path
+# unmarked-probe: auto_continue_stop is scoped MAIN, so a marked probe would never reach it
 echo "{\"hook_event_name\":\"Stop\",\"stop_hook_active\":false,\"transcript_path\":\"$TRANSCRIPT\"}" \
     | /workspace/.claude/hooks/stop
 ```
@@ -266,7 +275,7 @@ Claude stopped without STOPPING BECAUSE: prefix
     └── preventedContinuation: false
         ├── hasOutput: false → Hook script produced nothing
         │   ├── Check daemon is running: /workspace/bin/hooks-daemon status
-        │   └── Check hook script: echo '...' | /workspace/.claude/hooks/stop
+        │   └── Check hook script: Step 4's unmarked stop probe
         └── hasOutput: true, level: "suggestion"
             ├── Daemon returned {} (ALLOW)
             ├── Test socket directly (Step 5)
@@ -332,10 +341,12 @@ for i,l in enumerate(open('$TRANSCRIPT')):
 "
 
 # 3. Test hook script
+# unmarked-probe: auto_continue_stop is scoped MAIN, so a marked probe would never reach it
 echo '{"hook_event_name":"Stop","stop_hook_active":false}' | /workspace/.claude/hooks/stop
 
 # 4. Test daemon socket
 SOCK=$(ls /workspace/untracked/daemon-*.sock | head -1)
+# unmarked-probe: auto_continue_stop is scoped MAIN, so a marked probe would never reach it
 echo '{"event":"Stop","hook_input":{"hook_event_name":"Stop","stop_hook_active":false}}' | nc -U "$SOCK"
 
 # 5. Check internal log

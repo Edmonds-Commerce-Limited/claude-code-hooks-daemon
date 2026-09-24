@@ -32,6 +32,7 @@ from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.daemon.hook_probe import response_decision, response_text
 from claude_code_hooks_daemon.daemon.playbook_harness import (
     PROBE_DISPATCH_TIMEOUT_SECONDS,
     ExecutableProbe,
@@ -110,29 +111,6 @@ def partitioned(playbook: list[dict]) -> tuple[list[ExecutableProbe], list[Skipp
     return split_playbook(playbook, REPO_ROOT)
 
 
-def _response_text(payload: dict) -> str:
-    """Every place a handler's message can land, concatenated.
-
-    A pattern is asserted against the response as a whole rather than against
-    one named key: a deny reason, an advisory context and a system message are
-    different keys, and pinning the key would make a correct message read as a
-    missing one.
-    """
-    hook_specific = payload.get("hookSpecificOutput") or {}
-    parts = [
-        hook_specific.get("permissionDecisionReason"),
-        hook_specific.get("additionalContext"),
-        payload.get("reason"),
-        payload.get("systemMessage"),
-    ]
-    return "\n".join(str(part) for part in parts if part)
-
-
-def _response_decision(payload: dict) -> str:
-    hook_specific = payload.get("hookSpecificOutput") or {}
-    return str(hook_specific.get("permissionDecision") or payload.get("decision") or "")
-
-
 def _dispatch(probe: ExecutableProbe, env: dict[str, str]) -> tuple[str, str, str | None]:
     """Send one probe to the production wrapper; return (decision, text, error).
 
@@ -176,7 +154,9 @@ def _dispatch(probe: ExecutableProbe, env: dict[str, str]) -> tuple[str, str, st
         payload = json.loads(raw)
     except json.JSONDecodeError:
         return "", raw, f"response was not JSON: {raw[:200]!r}"
-    return _response_decision(payload), _response_text(payload), daemon_error(payload)
+    # The pattern is asserted against `response_text`, the response as a
+    # whole: pinning one key would make a correct message read as missing.
+    return response_decision(payload), response_text(payload), daemon_error(payload)
 
 
 def _is_removable_probe_target(target: Path) -> bool:

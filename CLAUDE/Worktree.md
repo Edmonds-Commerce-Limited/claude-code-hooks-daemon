@@ -80,10 +80,16 @@ Verify with a probe rather than by inspection — the wrong-daemon failure is
 silent, and its answer looks exactly like the right one:
 
 ```bash
-printf '{"tool_name":"Bash","tool_input":{"command":"true"},"hook_event_name":"PreToolUse","session_id":"probe"}' \
+printf '{"tool_name":"Bash","tool_input":{"command":"true"},"hook_event_name":"PreToolUse","session_id":"probe","synthetic_source":"manual-probe"}' \
   | bash .claude/hooks/pre-tool-use
 ./bin/hooks-daemon logs -n 5   # the probe's session_id appears in THIS worktree's log
 ```
+
+`./bin/hooks-daemon probe PreToolUse --json '{"tool_name":"Bash","tool_input":{"command":"true"}}'`
+does the same through this checkout's entry point, and prints the session id
+to look for. Either way the payload carries `synthetic_source`, so the
+verdict log does not count the probe as an agent's tool call (see
+[DEBUGGING_HOOKS.md](DEBUGGING_HOOKS.md#probing-a-handler-by-hand-hooks-daemon-probe)).
 
 A not-installed answer names the checkout it is answering for, so an answer
 about another checkout is visible in the response itself.

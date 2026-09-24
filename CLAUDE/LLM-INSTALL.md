@@ -191,20 +191,29 @@ git commit -m "Install Claude Code Hooks Daemon" && git push
 .claude/hooks-daemon/bin/hooks-daemon status
 
 # Test destructive git is blocked
-echo '{"tool_name": "Bash", "tool_input": {"command": "git reset --hard HEAD"}}' \
+echo '{"tool_name": "Bash", "tool_input": {"command": "git reset --hard HEAD"}, "synthetic_source": "manual-probe"}' \
   | bash .claude/hooks/pre-tool-use
 # Expected: {"hookSpecificOutput": {"permissionDecision": "deny", ...}}
 
 # Test sed is blocked
-echo '{"tool_name": "Bash", "tool_input": {"command": "sed -i s/foo/bar/ file.txt"}}' \
+echo '{"tool_name": "Bash", "tool_input": {"command": "sed -i s/foo/bar/ file.txt"}, "synthetic_source": "manual-probe"}' \
   | bash .claude/hooks/pre-tool-use
 # Expected: {"hookSpecificOutput": {"permissionDecision": "deny", ...}}
 
 # Test normal commands pass through
-echo '{"tool_name": "Bash", "tool_input": {"command": "ls -la"}}' \
+echo '{"tool_name": "Bash", "tool_input": {"command": "ls -la"}, "synthetic_source": "manual-probe"}' \
   | bash .claude/hooks/pre-tool-use
 # Expected: {} (empty = allow)
+
+# The same check through the helper, which sets synthetic_source itself
+# and prints the decision:
+.claude/hooks-daemon/bin/hooks-daemon probe PreToolUse --json '{"tool_name": "Bash", "tool_input": {"command": "ls -la"}}'
+# Expected: decision: allow
 ```
+
+Every test payload carries `"synthetic_source": "manual-probe"`. Without it,
+the daemon's verdict log records the probe as a real agent's tool call (see
+[DEBUGGING_HOOKS.md](DEBUGGING_HOOKS.md#probing-a-handler-by-hand-hooks-daemon-probe)).
 
 **If all tests pass**: Hooks active.
 
@@ -216,8 +225,8 @@ A successful installation meets ALL of these conditions:
 
 1. **Daemon running**: `.claude/hooks-daemon/bin/hooks-daemon status` shows `RUNNING`
 2. **Hooks deployed**: `.claude/hooks/pre-tool-use` and the other hook scripts exist. The executable bit is NOT a requirement — `settings.json` invokes each wrapper as `bash <path>` precisely so a dropped `+x` cannot break hooks (Plan 00102)
-3. **Blocking works**: `echo '{"tool_name":"Bash","tool_input":{"command":"git reset --hard"}}' | bash .claude/hooks/pre-tool-use` returns a `deny` decision
-4. **Safe commands pass**: `echo '{"tool_name":"Bash","tool_input":{"command":"ls"}}' | bash .claude/hooks/pre-tool-use` returns `{}` (allow)
+3. **Blocking works**: `echo '{"tool_name":"Bash","tool_input":{"command":"git reset --hard"},"synthetic_source":"manual-probe"}' | bash .claude/hooks/pre-tool-use` returns a `deny` decision
+4. **Safe commands pass**: `echo '{"tool_name":"Bash","tool_input":{"command":"ls"},"synthetic_source":"manual-probe"}' | bash .claude/hooks/pre-tool-use` returns `{}` (allow)
 5. **No DEGRADED MODE**: `.claude/hooks-daemon/bin/hooks-daemon logs` shows no "DEGRADED MODE" warnings
 6. **Git clean**: `.claude/hooks-daemon/` is excluded via `.gitignore`, not tracked by git
 
@@ -598,8 +607,8 @@ python3 --version
 **Handlers not blocking:**
 
 ```bash
-# Test hook manually
-echo '{"tool_name": "Bash", "tool_input": {"command": "git reset --hard"}}' | bash .claude/hooks/pre-tool-use
+# Test hook manually (marked, so the verdict log does not count it as real)
+echo '{"tool_name": "Bash", "tool_input": {"command": "git reset --hard"}, "synthetic_source": "manual-probe"}' | bash .claude/hooks/pre-tool-use
 
 # Check handler config
 grep -A 1 "destructive_git:" .claude/hooks-daemon.yaml

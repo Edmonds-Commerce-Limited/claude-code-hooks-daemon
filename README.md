@@ -508,8 +508,13 @@ something to paste into an issue:
 # Force restart
 .claude/hooks-daemon/bin/hooks-daemon restart
 
-# Verify hook forwarding works
-echo '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"echo test"}}' | \
+# Verify hook forwarding works (the helper marks the probe as synthetic
+# traffic, so the verdict log does not count it as an agent's tool call)
+.claude/hooks-daemon/bin/hooks-daemon probe PreToolUse --json '{"tool_name":"Bash","tool_input":{"command":"echo test"}}'
+# Expected: decision: allow
+
+# The same probe as a raw payload, with the marker set by hand
+echo '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"echo test"},"synthetic_source":"manual-probe"}' | \
   .claude/hooks/pre-tool-use
 # Expected: JSON with decision="allow"
 ```

@@ -95,6 +95,81 @@ agent** is a full independent session (its own `session_id`, its own bar) while 
 triggered a bar and *whose* identity it carried — multiple sessions on one host/project
 share one daemon, so the daemon sees every session's Status renders.
 
+## Probing a Handler by Hand (`hooks-daemon probe`)
+
+To read one handler's verdict without driving Claude Code, send it a
+hand-built payload. **Mark the payload as a probe.** The daemon writes every
+decision to `verdicts.jsonl`, and a probe arriving through `.claude/hooks/` looks
+exactly like an agent's tool call. An unmarked probe is recorded as REAL
+traffic and skews every figure drawn from the log. That includes the
+orchestrator-simulate record that Plan 00418's enforcement decision is read
+from, so the damage is not cosmetic.
+
+The marker is the `synthetic_source` field on the payload. Its value names
+the producer. For a hand-sent probe that value is **`manual-probe`**. The
+classifier lives in `src/claude_code_hooks_daemon/daemon/synthetic_traffic.py`.
+
+**Use the helper.** It sets the marker for you:
+
+```bash
+bin/hooks-daemon probe PreToolUse --json '{"tool_name":"Bash","tool_input":{"command":"ls -la"}}'
+bin/hooks-daemon probe PreToolUse --file untracked/scratch/payload.json
+```
+
+It sends the payload through the project's own entry point
+(`.claude/hooks/<event>`) and prints the decision, the reason and the raw
+response. Before sending, it fills in anything the payload leaves out:
+
+- `synthetic_source: manual-probe`
+- `hook_event_name`
+- `cwd`, set to the project root
+- a fresh `session_id` (`manual-probe-<hex>`), so a handler with a
+  once-per-session or disclosure-ladder behaviour answers as it would on a
+  first fire. Set `session_id` yourself to probe a repeat.
+
+A payload that already carries its own `synthetic_source` keeps it. A
+`synthetic_source` that is empty or not a string is refused, because the log
+would ignore it. The event can be spelled `PreToolUse`, `pre-tool-use` or
+`pre_tool_use`. The exit code is 0 when the daemon answered, whatever it
+decided. It is 1 when there was no verdict: the daemon was not reached,
+rejected the event, or answered with something that is not JSON. It is 2 when
+the payload or event was wrong, and nothing was sent.
+
+**Probing a command a guard matches:** put the payload in a file and use
+`--file`. The guard judges your own Bash command's text. A `--json` or `echo`
+argument that spells out `git reset --hard` is therefore denied before the
+probe ever runs.
+
+**A marked probe cannot test a `MAIN`- or `SUB`-scoped handler.** The
+marker does more than label the log line. `core/handler_scope.py`'s
+`scope_admits` refuses a synthetic event for any handler scoped `MAIN` or
+`SUB`, because a fabricated event is neither a real main thread nor a
+subagent. The handlers scoped that way today are `auto_continue_stop`,
+`cron_stop_enforcer` and `teammate_reap_advisor` (`MAIN`), and
+`subagent_cron_delete_blocker` (`SUB`). The `orchestrator_simulate` project
+handler declines synthetic events itself. A marked probe aimed at any of
+these is answered as if the handler were not there. Measured: a marked Stop
+probe answers `{}`, and the same payload unmarked is blocked with
+`R-STOP-NO-REASON`. For events that can carry `agent_id` (PreToolUse,
+PostToolUse, Stop, SubagentStop, SubagentStart), the helper prints a note
+saying so. To test one of these handlers, send the probe unmarked and accept
+that it is logged as real. A document that teaches such a probe says why on
+the line before it, as `# unmarked-probe: <reason>`; the guard below accepts
+nothing less.
+
+**Piping a raw payload instead:** set the field yourself.
+
+```bash
+echo '{"tool_name":"Bash","tool_input":{"command":"ls -la"},"synthetic_source":"manual-probe"}' \
+  | bash .claude/hooks/pre-tool-use
+```
+
+`tests/integration/test_documented_hook_probes_are_marked.py` fails in two
+cases. The first is a document that sends a payload to a hook entry point or
+to the daemon socket without the field and without an `unmarked-probe:`
+reason. The second is a document that teaches such a probe but never shows
+the helper.
+
 ## Workflow: From Scenario to Handler
 
 ### Step 1: Identify Scenario

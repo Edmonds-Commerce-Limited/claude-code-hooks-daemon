@@ -183,7 +183,19 @@ for i, line in enumerate(lines):
 
 ### Test the Hook Script (Layer 1)
 
+**The Stop probes in this document are deliberately UNMARKED.** Probing
+normally means setting `"synthetic_source":"manual-probe"`, or using
+`./bin/hooks-daemon probe`, which sets it. Otherwise `verdicts.jsonl` records
+the probe as a real agent's stop (see
+[DEBUGGING_HOOKS.md](DEBUGGING_HOOKS.md#probing-a-handler-by-hand-hooks-daemon-probe)).
+Here that would defeat the test. `auto_continue_stop` is scoped `MAIN`, and a
+marked probe is never shown to a `MAIN`- or `SUB`-scoped handler, so a marked
+Stop probe answers `{}` whether the hook works or not. Each probe below
+therefore goes unmarked and is logged as real, and says so on the line
+before it.
+
 ```bash
+# unmarked-probe: auto_continue_stop is scoped MAIN, so a marked probe would never reach it
 echo '{"hook_event_name":"Stop","stop_hook_active":false}' | /workspace/.claude/hooks/stop
 ```
 
@@ -203,6 +215,7 @@ Broken outputs and their meanings:
 
 ```bash
 SOCK=$(ls /workspace/untracked/daemon-*.sock 2>/dev/null | head -1)
+# unmarked-probe: auto_continue_stop is scoped MAIN, so a marked probe would never reach it
 echo '{"event":"Stop","hook_input":{"hook_event_name":"Stop","stop_hook_active":false}}' \
     | nc -U "$SOCK"
 ```
@@ -292,6 +305,7 @@ If the event name reaching the dispatcher is not the exact PascalCase token (e.g
 To verify: the event name is not constructed anywhere in Python — it is the `hook_event_name` field Claude Code puts in the payload, forwarded verbatim by `.claude/hooks/stop` and routed by `EventRouter` (`src/claude_code_hooks_daemon/core/router.py`). Probe the live daemon and read back what it thinks the event was:
 
 ```bash
+# unmarked-probe: auto_continue_stop is scoped MAIN, so a marked probe would never reach it
 echo '{"hook_event_name":"Stop","stop_hook_active":false}' | bash .claude/hooks/stop
 ```
 
@@ -320,11 +334,13 @@ Run these in order and stop at the first failure:
 ./bin/hooks-daemon status
 
 # 2. Does the hook script produce a block response?
+# unmarked-probe: auto_continue_stop is scoped MAIN, so a marked probe would never reach it
 echo '{"hook_event_name":"Stop","stop_hook_active":false}' | /workspace/.claude/hooks/stop
 # Expected: {"decision":"block","reason":"..."}
 
 # 3. Does the socket return a deny decision?
 SOCK=$(ls /workspace/untracked/daemon-*.sock | head -1)
+# unmarked-probe: auto_continue_stop is scoped MAIN, so a marked probe would never reach it
 echo '{"event":"Stop","hook_input":{"hook_event_name":"Stop","stop_hook_active":false}}' | nc -U "$SOCK"
 # Expected: {"result":{"decision":"deny",...},"handlers_matched":["auto_continue_stop"]}
 
@@ -352,6 +368,7 @@ After any code change to the stop hook chain:
 2. Run the hook script test:
 
    ```bash
+   # unmarked-probe: auto_continue_stop is scoped MAIN, so a marked probe would never reach it
    echo '{"hook_event_name":"Stop","stop_hook_active":false}' | /workspace/.claude/hooks/stop
    ```
 

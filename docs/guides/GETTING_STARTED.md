@@ -114,10 +114,14 @@ You should see output indicating the daemon is **RUNNING** with a PID and socket
 
 ### Test That Hooks Work
 
+Each test payload below carries `"synthetic_source": "manual-probe"`. That
+marks it as a probe, so the daemon's verdict log does not count it as one of
+your agent's real tool calls.
+
 Test a destructive git command (should be blocked):
 
 ```bash
-echo '{"tool_name": "Bash", "tool_input": {"command": "git reset --hard HEAD"}}' \
+echo '{"tool_name": "Bash", "tool_input": {"command": "git reset --hard HEAD"}, "synthetic_source": "manual-probe"}' \
   | bash .claude/hooks/pre-tool-use
 ```
 
@@ -126,18 +130,27 @@ Expected: A JSON response with `"permissionDecision": "deny"` and a reason expla
 Test a safe command (should be allowed):
 
 ```bash
-echo '{"tool_name": "Bash", "tool_input": {"command": "ls -la"}}' \
+echo '{"tool_name": "Bash", "tool_input": {"command": "ls -la"}, "synthetic_source": "manual-probe"}' \
   | bash .claude/hooks/pre-tool-use
 ```
 
 Expected: `{}` (empty JSON, meaning "allow").
+
+The `probe` command does the same, sets the marker for you, and prints the
+decision in words:
+
+```bash
+.claude/hooks-daemon/bin/hooks-daemon probe PreToolUse --json '{"tool_name": "Bash", "tool_input": {"command": "ls -la"}}'
+```
+
+Expected: `decision: allow`.
 
 ### Confirm a Handler Actually Fires (Optional)
 
 The check above proves the pipeline is connected, but an "allow" looks identical to a daemon that is doing nothing. To see a handler actually make a decision, send it something it is supposed to block:
 
 ```bash
-echo '{"tool_name": "Bash", "tool_input": {"command": "git reset --hard"}}' \
+echo '{"tool_name": "Bash", "tool_input": {"command": "git reset --hard"}, "synthetic_source": "manual-probe"}' \
   | bash .claude/hooks/pre-tool-use
 ```
 

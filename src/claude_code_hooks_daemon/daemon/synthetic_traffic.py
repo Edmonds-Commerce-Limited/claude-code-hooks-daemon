@@ -15,7 +15,8 @@ to 79%.
 
 1. A producer MARKS its own events with :data:`SYNTHETIC_SOURCE_FIELD`. This
    is the truthful route — the harness is the one party that knows it is a
-   harness — and it is checked first.
+   harness — and it is checked first. A hand-sent probe is marked the same
+   way, with :data:`MANUAL_PROBE`; ``hooks-daemon probe`` does it for you.
 2. A known synthetic SESSION SHAPE is recognised. This is the fallback: it
    classifies the window written before the marker existed, and covers a
    producer whose events this repository does not construct.
@@ -49,6 +50,11 @@ PLAYBOOK_PROBE: Final[str] = "playbook-probe"
 
 #: The forwarder's socket-stdin integration test.
 SOCKET_STDIN_TEST: Final[str] = "socket-stdin-test"
+
+#: A payload a person or agent sends by hand to probe a handler: what
+#: ``hooks-daemon probe`` (``daemon/hook_probe.py``) sets, and the value the
+#: probing docs tell a raw payload to carry (Plan 00466 N12).
+MANUAL_PROBE: Final[str] = "manual-probe"
 
 #: Session-id prefixes that identify a synthetic producer. A prefix rather
 #: than an exact id because the harness mints one session PER PROBE PER RUN.
