@@ -3,6 +3,28 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
+### N33 — a worktree agent's `secret_file_guard.exclude_paths` change had no effect after a daemon restart
+
+**Found by the integration-B2 fix agent.** The agent was writing tests in
+`worktree-integration-b2` that must name protected-looking filenames.
+R-SECRET-SCRIPT-AUTHOR kept denying the writes. It added the two test files
+to `secret_file_guard.options.exclude_paths` in the WORKTREE's
+`.claude/hooks-daemon.yaml` and restarted the worktree's daemon. The denials
+continued. It worked around it by building the filenames at runtime.
+
+**Why (unverified):** the likeliest cause is that a sub-agent's hook calls
+are served by the daemon of the Claude Code session's project root (the
+main checkout), not by the worktree's own daemon. If so, a worktree config
+change cannot affect that agent's own enforcement until it lands on main.
+The docs say "restart the daemon" without saying WHICH daemon enforces a
+worktree agent's tool calls, so the agent could not diagnose it.
+
+**Candidate remedy:** first reproduce it and establish which daemon served
+the denial (the hook log's project root and socket). Then either make the
+deny reason name the config file it was judged against, or document
+worktree-agent enforcement in CLAUDE/Worktree.md. Also consider an advisory
+when a worktree's handler config differs from the enforcing daemon's.
+
 ### N32 — `pipe_blocker` splits at a `\|` inside double quotes and reads the next word as a pipe stage
 
 **Found by the Plan 00463 agent.** The command
