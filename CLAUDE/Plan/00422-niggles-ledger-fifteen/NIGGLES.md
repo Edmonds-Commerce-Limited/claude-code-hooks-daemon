@@ -1748,6 +1748,15 @@ be made against the path relative to the project root. The mechanism
 suspected above (`core/worktree_paths.py`) is not involved. Candidate
 remedies 1-3 above are withdrawn. Graduated to its own plan.
 
+**Remedied by Plan 00458.** All six sites (and `matches_directory`) use
+`utils/path_segments.py::matches_path_segment`. It matches whole segments
+of the project-relative path and returns False for a path outside the
+root, so a blocking guard fails closed. `scripts/qa/check_skip_list_substring.py`
+flags the class, including through derived loop variables. It is recorded
+in `CLAUDE/Security/AsymmetricSiblingProtection.md`. Plan 00456's final
+QA passed with 0 failures in `worktree-issue-53-venv`, the worktree
+where this was found.
+
 ### N19 — the Python nested-install check can never fire in a real client
 
 **Found**: reviewing Plan 00455 (issue #54). Its implementation agent copied
