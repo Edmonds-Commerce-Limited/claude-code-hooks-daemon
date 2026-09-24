@@ -476,8 +476,9 @@ handlers:
             command: pytest
             full_args: [tests, tests/unit, .]
             bare_is_full: true
-            # pytest's own value-taking options (and common plugins'), so a
-            # flag's value is never read as a path.
+            # pytest's complete option set (and common plugins'), so a flag's
+            # value is never read as a path; an unknown plugin flag is read as
+            # taking a value.
             option_grammar: pytest
             read_only_flags: [--collect-only, --co, --help, -h, --version]
         targeted_qa_commands:

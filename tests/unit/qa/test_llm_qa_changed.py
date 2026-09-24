@@ -20,6 +20,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -108,6 +109,19 @@ class TestTheChangedTestsTool:
         assert "allowed" in line
         assert ".claude/hooks-daemon.yaml" in line
 
+    def test_each_unmapped_file_carries_its_reason(self) -> None:
+        """Delta review N3f: "too broad" landed in `unmapped` with no reason given."""
+        line = llm_qa.SUMMARIZERS["changed_tests"](
+            {
+                "summary": {"files_considered": 1, "test_files_selected": 0},
+                "unmapped": ["src/pkg/hub.py"],
+                "unmapped_reasons": {"src/pkg/hub.py": {"reason": "too-broad", "detail": "d"}},
+                "unmapped_allowed": False,
+                "tests": [],
+            }
+        )
+        assert "src/pkg/hub.py [too-broad]" in line
+
     def test_a_failure_is_named_in_the_summary(self) -> None:
         line = llm_qa.SUMMARIZERS["changed_tests"](
             {
@@ -153,10 +167,22 @@ class TestChangedOptions:
         _, _, error = llm_qa.split_changed_options(["lint", "--allow-unmapped"])
         assert error is not None
 
-    def test_the_forwarded_options_end_up_on_the_runners_command(self) -> None:
-        command = llm_qa.tool_command("changed_tests", ["--base", "trunk"])
-        assert command[-2:] == ["--base", "trunk"]
-        assert "run_changed_tests.py" in " ".join(command)
+    def test_run_tool_puts_the_forwarded_options_on_the_command_it_runs(
+        self, monkeypatch: Any
+    ) -> None:
+        launched: list[list[str]] = []
+
+        def fake_run(argv: list[str], **_: Any) -> Any:
+            launched.append(argv)
+            return SimpleNamespace(returncode=0)
+
+        monkeypatch.setattr(llm_qa, "venv_python", lambda: Path("/venv/bin/python"))
+        monkeypatch.setattr(llm_qa.subprocess, "run", fake_run)
+        assert llm_qa.run_tool("changed_tests", ["--base", "trunk"]) == 0
+        (argv,) = launched
+        assert argv[0] == "/venv/bin/python"
+        assert argv[-2:] == ["--base", "trunk"]
+        assert "run_changed_tests.py" in " ".join(argv)
 
 
 def test_the_usage_line_names_changed(capsys: Any, monkeypatch: Any) -> None:

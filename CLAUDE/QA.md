@@ -73,35 +73,69 @@ there, and merges queued behind it would build on a red tree.
 tests, `docs_qa`, `plan_qa`, `shell_check`, `declared_invariant_pairs`, and
 `changed_tests`: pytest on the tests mapped from every file changed since the
 merge base, uncommitted and untracked files included. The runner's docstring
-(`scripts/qa/run_changed_tests.py`) owns the mapping order. In short:
+(`scripts/qa/run_changed_tests.py`) owns the mapping. A test file selects
+itself. Any other file's coverage is the UNION of:
 
-- A declared rule in `scripts/qa/changed_tests_map.yaml` names the tests or the
-  `changed` tools that cover a file. Markdown, shell, the dogfood config and the
-  upgrade manifests are declared there.
-- Otherwise a test file selects itself, and a module maps to its MIRRORED
-  tests (`src/<pkg>/a/b.py` maps to `tests/unit/a/test_b*.py`). With no mirror,
-  the same names anywhere under `tests/` count, and then the tests that import it.
-- A deleted module maps to the tests that still name or import it.
+- its declared rule in `scripts/qa/changed_tests_map.yaml`;
+- its MIRRORED tests (`src/<pkg>/a/b.py` maps to `tests/unit/a/test_b*.py`);
+- the tests that refer to it: by path, by a path built from its parts, by a
+  basename no other file shares, or by importing it;
+- one hop of DEPENDENTS: each source that refers to it the same way adds its
+  own unit tests.
+
+References are read from the syntax tree, so a comment or docstring that
+mentions a file does not count. A conftest's tests are its whole subtree.
+**A `tools:` rule certifies lint only.** `*.md` mapped to `docs_qa`/`plan_qa`,
+or `*.sh` to `shell_check`, says those checks ran. It says nothing about the
+behaviour of a test that reads the file, and that test is selected through the
+union.
 
 **A changed file that maps to nothing FAILS the run**, and is named in the
-summary. So does an empty change set. The mapping is a heuristic, and the
-coordinator's full run is the backstop for what it cannot see. The remedy for
-an unmapped file is, in order: add the test it lacks; add a rule to the map;
-or pass `--allow-unmapped`, which passes and records that the full gate must
-cover it. `--base REF` changes the base, which defaults to the branch
+summary with its reason. So does an empty change set. There are three reasons:
+
+- `uncovered`: nothing refers to it.
+- `too-broad`: its reach passes the cap of 40 test files. A hub module, a
+  widely loaded config, and the root `tests/conftest.py` all hit this. Its own
+  tests still run when they fit.
+- `deleted-but-referenced`: it was deleted and a source still refers to it.
+
+The remedy is, in order:
+
+1. add the test the file lacks;
+2. add a rule to the map;
+3. pass `--allow-unmapped`, which passes and records that the full gate must
+   cover it.
+
+A `too-broad` file is the full gate's by definition, so `--allow-unmapped` is
+its honest answer. `--base REF` changes the base, which defaults to the branch
 `origin/HEAD` names. `changed` refuses to run on the base branch itself,
 because there the merge base is HEAD.
 
-**A targeted `pytest` names its paths.** Bare `pytest` is the whole suite
-wherever it is typed, including from `cd tests/unit/handlers`, so it is denied
-there too. Write `pytest tests/unit/handlers/` instead.
+**A targeted `pytest` names its paths.** This is a policy, not a claim about
+pytest. Bare `pytest` run from `tests/unit/core` collects only that directory,
+because `testpaths` applies only from the rootdir. But the guard cannot see
+which directory an agent's shell is in, so it counts every bare run as full.
+Write `pytest tests/unit/handlers/` rather than
+`cd tests/unit/handlers && pytest`.
 
 `llm_qa.py --read-only all` summarises the recorded results without running
 anything, so a sub-agent may use it to read a result the coordinator produced.
-Each run records the tree it judged (HEAD plus a digest of the uncommitted
-changes) in `untracked/qa/provenance.json`. A read-only summary **fails** any
-result recorded for a different tree, marked `STALE`, so an old green run
-never reads as a pass for the current code.
+Each run records per tool, in `untracked/qa/provenance.json`:
+
+- the tree it judged (HEAD plus a digest of the uncommitted changes);
+- the live verdict and exit code;
+- the sha256 of the report the tool wrote.
+
+A run deletes each tool's old report before running it. A read-only summary
+**fails** a result in any of these cases:
+
+- It was recorded for a different tree. This is marked `STALE`.
+- Its report is missing or is not the one the run wrote.
+- Its recorded exit code was non-zero.
+
+So neither an old green run nor a crashed tool's leftover report reads as a
+pass. A tree that changes during a run is said at the end of that run, because
+those results certify no tree.
 
 ### The Automated Checks
 

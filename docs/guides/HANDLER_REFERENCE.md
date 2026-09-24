@@ -1398,7 +1398,15 @@ handlers:
 
 **Description:** Denies a full-suite QA run when the caller is a **sub-agent**. The full gate belongs to the coordinator, which runs it once per delivery, on the branch head, one run at a time. Several agents each running the whole suite exhaust the host, and the coordinator repeats those runs before merging anyway. The deny names the targeted commands the project declares.
 
-**What it matches:** a Bash command that would RUN a declared `full_qa_patterns` entry. The command is split into commands, and each is resolved through wrappers (`timeout`, `env`, `nohup`, `sudo`), interpreters (`python3 x.py`, `python -m pytest`, `bash -c '...'`), grouping, `uv run`/`poetry run`/`pdm run`/`hatch run` (their own flags skipped), and `uvx`/`uv tool run` to the program it starts.
+**What it matches:** a Bash command that would RUN a declared `full_qa_patterns` entry. The command is split into commands, and each is resolved to the program it starts, through:
+
+- wrappers (`timeout`, `env`, `nohup`, `sudo`);
+- interpreters (`python3 x.py`, `python -m pytest`, `bash -c '...'`);
+- grouping;
+- `uv run`/`poetry run`/`pdm run`/`hatch run env:cmd`;
+- `uvx`/`uv tool run`, with any version pin such as `pytest@8`.
+
+A runner flag no table lists may take a value (`uv run --color never pytest`), so the word after it is tried both as that value and as the command.
 
 **Always allowed:** the main thread's own run; a mention in a commit message, `grep`, `echo` or `cat`; a run carrying one of the pattern's `read_only_flags`; and any run that targets a path narrower than the whole suite.
 
@@ -1409,13 +1417,36 @@ handlers:
 | `full_qa_patterns`     | `[]`    | Entries `{id, command, full_args?, bare_is_full?, read_only_flags?, value_flags?, option_grammar?}` |
 | `targeted_qa_commands` | `[]`    | Commands the deny lists under "RUN INSTEAD"; empty names the generic form                           |
 
-In a pattern, `command` is the program's basename. `full_args` lists the operands that make it the whole suite; omit it and every run is full. `bare_is_full` makes a run that targets no path full. Only a PATH-LIKE word targets a run: one containing `/` or `::`, ending in `.py`, or naming something that exists in the command's directory. Any other word is taken as a flag's value (`--timeout 60`, `--log-level DEBUG`), so an unlisted flag cannot make a full run look targeted. `value_flags` lists flags whose value can look like a path (`--rootdir .`), and `option_grammar: pytest` adds every value-taking option of pytest and its common plugins. A malformed entry is skipped and logged, and enabling the handler with no usable pattern is reported by `hooks-daemon check`.
+In a pattern:
+
+- `command` is the program's basename.
+- `full_args` lists the operands that make it the whole suite. Omit it and every run is full.
+- `bare_is_full` makes a run that targets no path full.
+- `value_flags` lists flags whose value can look like a path (`--rootdir .`).
+- `option_grammar: pytest` supplies pytest's complete option set, with and without values, for pytest and its common plugins.
+
+Only a PATH-LIKE word targets a run. That is a word that:
+
+- contains `/` or `::`;
+- ends in `.py`; or
+- names something that exists in the directory the command runs in. That is the event's working directory, moved by any `cd` earlier in the same command.
+
+Any other word is ignored, so a bare flag value such as `--timeout 60` cannot make a full run look targeted. A path-shaped value can: without a grammar, the word after an unlisted flag is still read as a target. With `option_grammar`, a flag the grammar does not know (a plugin's) is read as taking a value, so `--json-report-file out/r.json` does not target the run. To avoid a false deny, name the test paths before such a flag, or write it as `--flag=value`.
+
+A malformed entry is skipped and logged. `hooks-daemon check` reports a handler enabled with no usable pattern.
 
 **Scope must stay `SUB`.** Any other `scope:` override makes the handler deny the coordinator's own full gate, so nobody can run it. `hooks-daemon check` reports that as a misconfiguration.
 
 **Coverage:** proven for Agent-tool sub-agents and in-process teammates, whose payloads carry `agent_id`. A Workflow-tool agent's payload is unmeasured, so the handler is not claimed to see one. It keys only on `agent_id` being present, so no change is needed if Workflow agents turn out to carry it.
 
-**Limit:** a resource guard for cooperating agents, not a security boundary. Not seen: a substitution inside double quotes, a script that runs the suite under an undeclared name, arguments supplied by `xargs`, and `env -S`. The coordinator's full gate still runs before every merge.
+**Limit:** a resource guard for cooperating agents, not a security boundary. Not seen:
+
+- a substitution inside double quotes;
+- a script that runs the suite under an undeclared name;
+- arguments supplied by `xargs`;
+- a `cd` target the shell would expand (`cd $DIR`). After one, words are judged by shape alone.
+
+The coordinator's full gate still runs before every merge.
 
 **Config example:**
 

@@ -520,6 +520,22 @@ class TestTheSimulatedRecordTellsTheTruth:
         context = self._context(write_hook_input("/workspace/src/thing.py", "x"))
         assert self._WOULD_DENY in context
 
+    def test_never_denied_is_said_only_of_a_tool_outside_the_blocked_set(
+        self, monkeypatch: Any
+    ) -> None:
+        """Delta review N9: the phrase was a literal, true only while Bash stays unblocked."""
+        import orchestrator_simulate
+
+        assert "never denied" in orchestrator_simulate._recorded_verdict({"tool_name": "Bash"})
+        monkeypatch.setattr(
+            orchestrator_simulate,
+            "_BLOCKED_TOOLS",
+            orchestrator_simulate._BLOCKED_TOOLS | {"Bash"},
+        )
+        assert "never denied" not in orchestrator_simulate._recorded_verdict({"tool_name": "Bash"})
+        guidance = OrchestratorSimulateHandler(blocking=False).get_claude_md() or ""
+        assert "`Bash` is recorded but never" not in guidance
+
     def test_the_simulated_claim_agrees_with_the_armed_verdict_across_the_surface(self) -> None:
         """ "would have been denied" appears exactly when blocking mode DENIES."""
         armed = OrchestratorSimulateHandler(blocking=True)

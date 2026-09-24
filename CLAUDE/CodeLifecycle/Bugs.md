@@ -316,7 +316,9 @@ If bug is found during acceptance testing:
 1. Stop acceptance testing immediately
 2. Create failing test for bug (unit/integration)
 3. Fix bug using TDD
-4. Run FULL QA: ./scripts/qa/llm_qa.py all
+4. Run QA: main Claude runs FULL QA, ./scripts/qa/llm_qa.py all; a
+   sub-agent runs ./scripts/qa/llm_qa.py changed, and the coordinator runs
+   the full gate (see CLAUDE/QA.md, "Full QA Is the Coordinator's Gate")
 5. Restart daemon successfully
 6. RESTART acceptance testing FROM TEST 1.1
 7. Continue until ALL tests pass with ZERO code changes

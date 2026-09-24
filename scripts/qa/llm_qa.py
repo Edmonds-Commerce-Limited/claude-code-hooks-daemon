@@ -25,7 +25,7 @@ import os
 import re
 import subprocess
 import sys
-from collections.abc import Callable, Generator, Sequence
+from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Final, NamedTuple, TypeAlias
@@ -252,8 +252,11 @@ def run_lock(path: Path | str) -> Generator[None]:
 # Plan 00463, review finding 3. `--read-only` is how a sub-agent reads the
 # coordinator's full run without running it, and nothing tied the JSON to a
 # commit: a green result from an older commit, or from before later edits,
-# read as a pass. Each run now records the tree it judged, and a read-only
-# summary FAILS a result recorded for any other tree.
+# read as a pass. Each run records, per tool, the tree it judged, the live
+# verdict and exit code, and the hash of the report it wrote. A read-only
+# summary FAILS a result recorded for any other tree or a report the run did
+# not write, and re-applies the recorded exit code (delta review N1: a crashed
+# tool's older green report once read as a pass).
 
 #: Per-tool record of the tree each result was produced from.
 PROVENANCE_FILE: Final[str] = "provenance.json"
@@ -263,8 +266,17 @@ _TREE_CHANGED_DURING_RUN: Final[str] = "changed-during-run"
 
 _STATE_HEAD: Final[str] = "head"
 _STATE_DIGEST: Final[str] = "tree_digest"
+_RECORD_PASSED: Final[str] = "passed"
+_RECORD_EXIT_CODE: Final[str] = "exit_code"
+_RECORD_OUTPUT_DIGEST: Final[str] = "output_sha256"
+_DIGEST_ALGORITHM: Final[str] = "sha256"
 _SHORT_SHA: Final[int] = 12
 _GIT_STATE_TIMEOUT_SECONDS: Final[int] = 60
+
+#: One tool's provenance entry, as JSON: the tree (str), the live verdict
+#: (bool), the exit code (int) and its report's hash (str, or None when the
+#: run wrote no report).
+ProvenanceRecord: TypeAlias = dict[str, str | bool | int | None]
 
 #: (exit code, stdout bytes) for one git call; injected in tests.
 GitBytesRunner = Callable[[list[str], Path], tuple[int, bytes]]
@@ -306,7 +318,9 @@ def worktree_state(root: Path, *, git: GitBytesRunner = _run_git_bytes) -> dict[
     for name in sorted(entry for entry in untracked.split(b"\0") if entry):
         digest.update(b"\0" + name + b"\0")
         try:
-            digest.update((root / name.decode()).read_bytes())
+            # Streamed, so a large untracked artefact is never held whole.
+            with open(root / name.decode(), "rb") as handle:
+                digest.update(hashlib.file_digest(handle, _DIGEST_ALGORITHM).digest())
         except (OSError, UnicodeDecodeError) as exc:
             # Still part of the digest, as its failure: a file that cannot be
             # read now and could later must not match its readable self.
@@ -314,13 +328,13 @@ def worktree_state(root: Path, *, git: GitBytesRunner = _run_git_bytes) -> dict[
     return {_STATE_HEAD: head.decode().strip(), _STATE_DIGEST: digest.hexdigest()}
 
 
-def stale_reason(recorded: dict[str, str] | None, current: dict[str, str] | None) -> str | None:
+def stale_reason(recorded: ProvenanceRecord | None, current: dict[str, str] | None) -> str | None:
     """Why a recorded result does not describe the current tree, or None when it does."""
     if current is None:
         return "the working tree cannot be read (git failed), so no result can be tied to it"
     if not recorded:
         return "no record of which tree this result judged; re-run the tool"
-    recorded_head = recorded.get(_STATE_HEAD, "")
+    recorded_head = str(recorded.get(_STATE_HEAD, ""))
     current_head = current[_STATE_HEAD]
     if recorded_head != current_head:
         return (
@@ -335,7 +349,43 @@ def stale_reason(recorded: dict[str, str] | None, current: dict[str, str] | None
     return None
 
 
-def read_provenance(qa_dir: Path) -> dict[str, dict[str, str]]:
+def output_reason(recorded: ProvenanceRecord, output: Path) -> str | None:
+    """Why the report on disk is not the one the recorded run wrote, or None when it is.
+
+    A run removes each tool's report before running it, so a tool that
+    crashed leaves nothing behind rather than an older green report.
+    """
+    if _RECORD_EXIT_CODE not in recorded:
+        return "the record carries no verdict for this result; re-run the tool"
+    expected = recorded.get(_RECORD_OUTPUT_DIGEST)
+    if expected is None:
+        return "the recorded run wrote no report; re-run the tool"
+    if output_digest(output) != expected:
+        return "the report on disk is not the one that run wrote; re-run the tool"
+    return None
+
+
+def output_digest(path: Path) -> str | None:
+    """The sha256 of a tool's report, or None when there is none."""
+    if not path.is_file():
+        return None
+    with open(path, "rb") as handle:
+        return hashlib.file_digest(handle, _DIGEST_ALGORITHM).hexdigest()
+
+
+def run_record(
+    state: dict[str, str], *, exit_code: int, passed: bool, output: Path
+) -> ProvenanceRecord:
+    """One tool's entry: the tree it judged, its live verdict and its report's hash."""
+    return {
+        **state,
+        _RECORD_PASSED: passed,
+        _RECORD_EXIT_CODE: exit_code,
+        _RECORD_OUTPUT_DIGEST: output_digest(output),
+    }
+
+
+def read_provenance(qa_dir: Path) -> dict[str, ProvenanceRecord]:
     """The per-tool record; missing or unreadable reads as no record at all."""
     try:
         data = json.loads((qa_dir / PROVENANCE_FILE).read_text(encoding="utf-8"))
@@ -344,11 +394,10 @@ def read_provenance(qa_dir: Path) -> dict[str, dict[str, str]]:
     return data if isinstance(data, dict) else {}
 
 
-def record_provenance(qa_dir: Path, tools: list[str], state: dict[str, str]) -> None:
-    """Record ``state`` as the tree each of ``tools`` judged, keeping the others."""
+def record_provenance(qa_dir: Path, records: Mapping[str, ProvenanceRecord]) -> None:
+    """Record each tool's entry, keeping the entries of tools not in ``records``."""
     recorded = read_provenance(qa_dir)
-    for tool in tools:
-        recorded[tool] = dict(state)
+    recorded.update(records)
     qa_dir.mkdir(parents=True, exist_ok=True)
     (qa_dir / PROVENANCE_FILE).write_text(json.dumps(recorded, indent=2), encoding="utf-8")
 
@@ -747,7 +796,11 @@ def _summarize_changed_tests(data: QaReport) -> str:
                 "or pass --allow-unmapped"
             )
         )
-        shown = unmapped_files[:_MAX_NAMED_FAILURES]
+        reasons = data.get("unmapped_reasons", {})
+        shown = [
+            f"{name} [{reasons[name].get('reason')}]" if name in reasons else name
+            for name in unmapped_files[:_MAX_NAMED_FAILURES]
+        ]
         more = unmapped - len(shown)
         line += f"\n   unmapped ({verdict}): " + ", ".join(shown)
         if more:
@@ -954,6 +1007,9 @@ _REPORT_ERROR_LABEL: Final[str] = "⚠️  TOOL ERROR:"
 # Prefix for a `--read-only` result recorded for a different tree (Plan 00463).
 _STALE_LABEL: Final[str] = "⚠️  STALE:"
 
+#: Said by a run whose results cannot be tied to one tree.
+_TREE_WARNING_LABEL: Final[str] = "⚠️  NOT RECORDED FOR THIS TREE:"
+
 # Where a tool may record why it could not run. Two locations because the
 # shipped scripts genuinely use both: run_smoke_test.sh writes a top-level
 # `error`, run_shell_check.sh nests one inside `summary`.
@@ -1045,11 +1101,6 @@ def resolved_command(config: ToolConfig) -> list[str]:
     return [
         str(venv_python()) if part == VENV_PYTHON_PLACEHOLDER else part for part in config.command
     ]
-
-
-def tool_command(name: str, extra_args: Sequence[str] = ()) -> list[str]:
-    """A tool's registered command with ``extra_args`` appended, placeholder unfilled."""
-    return [*TOOL_REGISTRY[name].command, *extra_args]
 
 
 def run_tool(name: str, extra_args: Sequence[str] = ()) -> int:
@@ -1270,39 +1321,79 @@ def main() -> int:
     return _run_tools(tools, read_only=False, forwarded=forwarded)
 
 
+def _record_run(run_records: Mapping[str, tuple[int, bool]], before: dict[str, str] | None) -> None:
+    """Record what this run certifies, and say at once when it certifies no tree."""
+    if before is None:
+        print(f"\n{_TREE_WARNING_LABEL} the working tree cannot be read, so nothing was recorded")
+        return
+    after = worktree_state(PROJECT_ROOT)
+    state = before
+    if after != before:
+        state = {**before, _STATE_DIGEST: _TREE_CHANGED_DURING_RUN}
+        print(
+            f"\n{_TREE_WARNING_LABEL} the working tree changed during the run, so these "
+            "results certify no tree: `--read-only` will read them STALE. Re-run on a "
+            "still tree."
+        )
+    record_provenance(
+        QA_OUTPUT_DIR,
+        {
+            name: run_record(
+                state,
+                exit_code=exit_code,
+                passed=passed,
+                output=QA_OUTPUT_DIR / TOOL_REGISTRY[name].json_file,
+            )
+            for name, (exit_code, passed) in run_records.items()
+        },
+    )
+
+
 def _run_tools(tools: list[str], *, read_only: bool, forwarded: Sequence[str] = ()) -> int:
     """Run (or merely summarize) each tool and print the overall verdict.
 
-    A run records the tree it judged (before and after must agree, or the
-    record matches no tree). A read-only summary checks each result against
-    that record and fails one recorded for another tree.
+    A run records, per tool, the tree it judged (before and after must agree,
+    or the record matches no tree), the live verdict, the exit code and the
+    hash of the report the tool wrote. A read-only summary fails a result
+    recorded for another tree, a report that is not the one recorded, and
+    re-applies the recorded exit code, so it can never pass what the live run
+    failed.
     """
     all_passed = True
     tool_results: dict[str, tuple[bool, str]] = {}
+    run_records: dict[str, tuple[int, bool]] = {}
     before = worktree_state(PROJECT_ROOT)
     recorded = read_provenance(QA_OUTPUT_DIR) if read_only else {}
 
     for name in tools:
-        # Run the tool (unless read-only)
+        output = QA_OUTPUT_DIR / TOOL_REGISTRY[name].json_file
         exit_code: int | None = None
         stale: str | None = None
         if read_only:
-            stale = stale_reason(recorded.get(name), before)
+            record = recorded.get(name)
+            stale = stale_reason(record, before) or (
+                output_reason(record, output) if record else None
+            )
+            recorded_exit = record.get(_RECORD_EXIT_CODE) if record else None
+            exit_code = recorded_exit if isinstance(recorded_exit, int) else None
         else:
+            # Removed first, so a tool that writes nothing leaves nothing: an
+            # older green report must never stand in for this run's result.
+            output.unlink(missing_ok=True)
             extra = forwarded if name == _CHANGED_TESTS_TOOL else ()
             exit_code = run_tool(name, extra)
 
         # Summarize from JSON, passing exit code for cross-check
         passed, summary = summarize_tool(name, exit_code=exit_code, stale=stale)
         tool_results[name] = (passed, summary)
+        if exit_code is not None and not read_only:
+            run_records[name] = (exit_code, passed)
         print(summary, end="")
         if not passed:
             all_passed = False
 
-    if not read_only and before is not None:
-        after = worktree_state(PROJECT_ROOT)
-        state = before if after == before else {**before, _STATE_DIGEST: _TREE_CHANGED_DURING_RUN}
-        record_provenance(QA_OUTPUT_DIR, tools, state)
+    if not read_only:
+        _record_run(run_records, before)
 
     # Overall summary
     total = len(tools)

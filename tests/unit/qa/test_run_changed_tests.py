@@ -70,6 +70,8 @@ def _git_answering(
             assert "--no-renames" in args, "a rename must list the old path too"
             assert args[-1] == _MERGE_BASE, "the diff must be taken against the merge base"
             return 0, diff, ""
+        if args[0] == "ls-files" and "--cached" in args:
+            return 0, "".join(f"{relative}\n" for relative in _tree(root)), ""
         if args[0] == "ls-files":
             return 0, untracked, ""
         if args[:2] == ["symbolic-ref", "--quiet"] and args[-1] == "HEAD":
@@ -90,9 +92,18 @@ def _rules(*entries: dict[str, Any]) -> list[Any]:
     return rules
 
 
+def _tree(root: Path) -> list[str]:
+    """Every file under ``root``, as ``git ls-files --cached --others`` would list it."""
+    return sorted(
+        path.relative_to(root).as_posix()
+        for path in root.rglob("*")
+        if path.is_file() and "untracked" not in path.relative_to(root).parts
+    )
+
+
 def _select(root: Path, changed: list[str], rules: list[Any] | None = None) -> Any:
     return changed_tests.select_tests(
-        changed, changed_tests.build_test_index(root), root, rules or []
+        changed, changed_tests.build_corpus(root, _tree(root)), root, rules or []
     )
 
 
@@ -164,7 +175,7 @@ class TestMirroredSelection:
         )
         selection = _select(tmp_path, ["src/pkg/strategies/pipe_blocker/common.py"])
         assert selection.selected == ["tests/unit/strategies/pipe_blocker/test_common.py"]
-        assert selection.mapping[0]["rule"] == "mirror"
+        assert selection.mapping[0]["rules"] == ["reference"]
 
     def test_variants_in_the_mirror_are_selected(self, tmp_path: Path) -> None:
         _touch(
@@ -185,11 +196,20 @@ class TestMirroredSelection:
         selection = _select(tmp_path, ["scripts/qa/llm_qa.py"])
         assert selection.selected == ["tests/unit/qa/test_llm_qa_run_lock.py"]
 
-    def test_with_no_mirror_a_global_name_search_is_the_fallback(self, tmp_path: Path) -> None:
-        _touch(tmp_path, "src/pkg/core/thing.py", "tests/integration/test_thing.py")
-        selection = _select(tmp_path, ["src/pkg/core/thing.py"])
-        assert selection.selected == ["tests/integration/test_thing.py"]
-        assert selection.mapping[0]["rule"] == "name"
+    def test_a_test_elsewhere_is_selected_by_what_it_imports_not_its_name(
+        self, tmp_path: Path
+    ) -> None:
+        """Delta review N3e: `test_<stem>_*` anywhere picked unrelated tests for short stems."""
+        _touch(tmp_path, "src/claude_code_hooks_daemon/constants/handlers.py")
+        _touch(tmp_path, "tests/integration/test_handlers_do_not_match_prose.py", text="x = 1\n")
+        _touch(tmp_path, "tests/unit/skill_scan/test_handlers.py", text="x = 1\n")
+        _touch(
+            tmp_path,
+            "tests/integration/test_ids.py",
+            text="from claude_code_hooks_daemon.constants.handlers import HandlerID\n",
+        )
+        selection = _select(tmp_path, ["src/claude_code_hooks_daemon/constants/handlers.py"])
+        assert selection.selected == ["tests/integration/test_ids.py"]
 
     def test_a_changed_test_file_selects_itself(self, tmp_path: Path) -> None:
         _touch(tmp_path, "tests/unit/test_thing.py")
@@ -216,10 +236,10 @@ class TestImportReferences:
         _touch(tmp_path, "tests/unit/test_unrelated.py", text="import os\n")
         selection = _select(tmp_path, ["src/claude_code_hooks_daemon/core/orphan.py"])
         assert selection.selected == ["tests/unit/test_other.py", "tests/unit/test_user.py"]
-        assert selection.mapping[0]["rule"] == "import"
+        assert selection.mapping[0]["rules"] == ["reference"]
 
-    def test_a_reach_too_broad_to_target_is_unmapped(self, tmp_path: Path) -> None:
-        """Every test importing a package is the full suite by another name."""
+    def test_a_reach_too_broad_to_target_is_unmapped_and_says_why(self, tmp_path: Path) -> None:
+        """Every test importing a package is the full suite by another name (N3f)."""
         _touch(tmp_path, "src/claude_code_hooks_daemon/__init__.py")
         for number in range(changed_tests.MAX_IMPORT_SELECTION + 1):
             _touch(
@@ -230,6 +250,120 @@ class TestImportReferences:
         selection = _select(tmp_path, ["src/claude_code_hooks_daemon/__init__.py"])
         assert selection.selected == []
         assert selection.unmapped == ["src/claude_code_hooks_daemon/__init__.py"]
+        reason = selection.reasons["src/claude_code_hooks_daemon/__init__.py"]
+        assert reason["reason"] == "too-broad"
+
+    def test_a_mention_in_a_comment_or_docstring_is_not_a_reference(self, tmp_path: Path) -> None:
+        _touch(tmp_path, "src/claude_code_hooks_daemon/core/orphan.py")
+        _touch(
+            tmp_path,
+            "tests/unit/test_prose.py",
+            text=(
+                '"""Unlike claude_code_hooks_daemon.core.orphan, this is prose."""\n'
+                "# see src/claude_code_hooks_daemon/core/orphan.py\n"
+            ),
+        )
+        selection = _select(tmp_path, ["src/claude_code_hooks_daemon/core/orphan.py"])
+        assert selection.unmapped == ["src/claude_code_hooks_daemon/core/orphan.py"]
+
+
+class TestTheUnionOfEveryRule:
+    """Delta review N3: the first hit used to end the search, so "0 unmapped" overstated."""
+
+    def test_a_declared_tools_rule_does_not_hide_a_test_that_reads_the_file(
+        self, tmp_path: Path
+    ) -> None:
+        _touch(tmp_path, "scripts/qa/run_tests.sh")
+        _touch(
+            tmp_path,
+            "tests/unit/qa/test_runner_script.py",
+            text='SCRIPT = ROOT / "scripts" / "qa" / "run_tests.sh"\n',
+        )
+        rules = _rules({"glob": "*.sh", "tools": ["shell_check"], "why": "shellcheck"})
+        selection = _select(tmp_path, ["scripts/qa/run_tests.sh"], rules)
+        assert selection.selected == ["tests/unit/qa/test_runner_script.py"]
+        assert selection.mapping[0]["rules"] == ["declared", "reference"]
+
+    def test_a_path_built_from_parts_is_a_reference(self, tmp_path: Path) -> None:
+        """`CLAUDE/Plan/README.md` shares its basename, so the parts must both appear."""
+        _touch(tmp_path, "CLAUDE/Plan/README.md", "docs/README.md")
+        _touch(
+            tmp_path,
+            "tests/integration/test_plan_index.py",
+            text='INDEX = ROOT / "CLAUDE" / "Plan" / "README.md"\n',
+        )
+        _touch(tmp_path, "tests/unit/test_docs.py", text='README = ROOT / "docs" / "README.md"\n')
+        selection = _select(tmp_path, ["CLAUDE/Plan/README.md"])
+        assert selection.selected == ["tests/integration/test_plan_index.py"]
+
+    def test_a_mirror_hit_does_not_hide_a_dependents_tests(self, tmp_path: Path) -> None:
+        """N3b: shell_segmentation's consumers' tests ran only when named after it."""
+        _touch(
+            tmp_path,
+            "src/claude_code_hooks_daemon/utils/shell_segmentation.py",
+            "tests/unit/utils/test_shell_segmentation.py",
+        )
+        _touch(
+            tmp_path,
+            "src/claude_code_hooks_daemon/utils/process_probe.py",
+            text="from claude_code_hooks_daemon.utils.shell_segmentation import COMMAND_WRAPPERS\n",
+        )
+        _touch(tmp_path, "tests/unit/utils/test_process_probe.py")
+        selection = _select(tmp_path, ["src/claude_code_hooks_daemon/utils/shell_segmentation.py"])
+        assert selection.selected == [
+            "tests/unit/utils/test_process_probe.py",
+            "tests/unit/utils/test_shell_segmentation.py",
+        ]
+        assert selection.mapping[0]["rules"] == ["reference", "dependent"]
+
+    def test_a_package_init_reaches_only_what_imports_the_package_itself(
+        self, tmp_path: Path
+    ) -> None:
+        """Importing a submodule does not use what the `__init__` re-exports."""
+        _touch(
+            tmp_path,
+            "src/claude_code_hooks_daemon/constants/__init__.py",
+            text="from claude_code_hooks_daemon.constants.ids import HandlerID\n",
+        )
+        _touch(tmp_path, "src/claude_code_hooks_daemon/constants/ids.py")
+        _touch(tmp_path, "src/claude_code_hooks_daemon/constants/paths.py")
+        _touch(
+            tmp_path,
+            "tests/unit/test_reexport.py",
+            text="from claude_code_hooks_daemon.constants import HandlerID\n",
+        )
+        _touch(
+            tmp_path,
+            "tests/unit/test_paths_only.py",
+            text="from claude_code_hooks_daemon.constants import paths\n",
+        )
+        selection = _select(tmp_path, ["src/claude_code_hooks_daemon/constants/ids.py"])
+        assert selection.selected == ["tests/unit/test_reexport.py"]
+
+    def test_a_too_broad_reach_still_runs_the_files_own_tests(self, tmp_path: Path) -> None:
+        _touch(
+            tmp_path,
+            "src/claude_code_hooks_daemon/core/scope.py",
+            "tests/unit/core/test_scope.py",
+        )
+        _touch(
+            tmp_path,
+            "src/claude_code_hooks_daemon/core/hub.py",
+            text="from claude_code_hooks_daemon.core.scope import SUB\n",
+        )
+        for number in range(changed_tests.MAX_IMPORT_SELECTION + 1):
+            _touch(
+                tmp_path,
+                f"tests/unit/core/test_hub_{number}.py",
+                text="from claude_code_hooks_daemon.core.hub import run\n",
+            )
+        selection = _select(tmp_path, ["src/claude_code_hooks_daemon/core/scope.py"])
+        assert selection.unmapped == ["src/claude_code_hooks_daemon/core/scope.py"]
+        reason = selection.reasons["src/claude_code_hooks_daemon/core/scope.py"]
+        assert reason["reason"] == "too-broad"
+        assert "core/hub.py" in reason["detail"]
+        assert reason["tests_run"] == ["tests/unit/core/test_scope.py"]
+        assert selection.selected == ["tests/unit/core/test_scope.py"]
 
 
 class TestNothingPassesSilently:
@@ -257,7 +391,20 @@ class TestNothingPassesSilently:
         selection = _select(tmp_path, ["src/claude_code_hooks_daemon/core/gone.py"])
         assert selection.unmapped == []
         assert selection.deleted == ["src/claude_code_hooks_daemon/core/gone.py"]
-        assert selection.mapping[0]["rule"] == "deleted-unreferenced"
+        assert selection.mapping[0]["rules"] == ["deleted-unreferenced"]
+
+    def test_a_deleted_module_a_source_still_imports_is_unmapped(self, tmp_path: Path) -> None:
+        """N3d: it was checked against tests only, so a dangling import passed."""
+        _touch(
+            tmp_path,
+            "src/claude_code_hooks_daemon/core/user.py",
+            text="from claude_code_hooks_daemon.core.gone import x\n",
+        )
+        selection = _select(tmp_path, ["src/claude_code_hooks_daemon/core/gone.py"])
+        assert selection.unmapped == ["src/claude_code_hooks_daemon/core/gone.py"]
+        reason = selection.reasons["src/claude_code_hooks_daemon/core/gone.py"]
+        assert reason["reason"] == "deleted-but-referenced"
+        assert "core/user.py" in reason["detail"]
 
     def test_a_non_python_file_with_no_declared_rule_is_unmapped_and_listed(
         self, tmp_path: Path
@@ -279,7 +426,7 @@ class TestNothingPassesSilently:
         selection = _select(tmp_path, [".claude/hooks-daemon.yaml"], rules)
         assert selection.selected == ["tests/integration/test_dogfood.py"]
         assert selection.unmapped == []
-        assert selection.mapping[0]["rule"] == "declared"
+        assert selection.mapping[0]["rules"] == ["declared"]
 
     def test_a_declared_rule_can_name_the_tools_that_cover_a_file(self, tmp_path: Path) -> None:
         _touch(tmp_path, "CLAUDE/QA.md")
@@ -288,10 +435,36 @@ class TestNothingPassesSilently:
         assert selection.unmapped == []
         assert selection.mapping[0]["tools"] == ["docs_qa"]
 
-    def test_a_conftest_is_unmapped(self, tmp_path: Path) -> None:
-        """Its reach is its whole directory, which a targeted run cannot cover."""
-        _touch(tmp_path, "tests/conftest.py")
-        assert _select(tmp_path, ["tests/conftest.py"]).unmapped == ["tests/conftest.py"]
+    def test_the_root_conftest_is_too_broad(self, tmp_path: Path) -> None:
+        """N3c: every test loads it, so its subtree is the suite."""
+        _touch(tmp_path, "tests/conftest.py", "tests/unit/test_a.py")
+        _touch(tmp_path, "tests/unit/test_b.py", text="from tests.conftest import fixture\n")
+        selection = _select(tmp_path, ["tests/conftest.py"])
+        assert selection.unmapped == ["tests/conftest.py"]
+        assert selection.reasons["tests/conftest.py"]["reason"] == "too-broad"
+
+    def test_a_nested_conftest_runs_its_whole_subtree(self, tmp_path: Path) -> None:
+        """N3c: it was mapped to the few tests that import it by name."""
+        _touch(
+            tmp_path,
+            "tests/unit/qa/conftest.py",
+            "tests/unit/qa/test_a.py",
+            "tests/unit/qa/deep/test_b.py",
+            "tests/unit/other/test_c.py",
+        )
+        selection = _select(tmp_path, ["tests/unit/qa/conftest.py", "tests/unit/qa/test_a.py"])
+        assert selection.selected == ["tests/unit/qa"]
+        assert selection.mapping[0]["rules"] == ["conftest-subtree"]
+
+    def test_a_helper_modules_tests_are_its_importers(self, tmp_path: Path) -> None:
+        _touch(tmp_path, "tests/unit/qa/helpers.py")
+        _touch(
+            tmp_path,
+            "tests/unit/qa/test_user.py",
+            text="from tests.unit.qa.helpers import build\n",
+        )
+        selection = _select(tmp_path, ["tests/unit/qa/helpers.py"])
+        assert selection.selected == ["tests/unit/qa/test_user.py"]
 
 
 class TestDeclaredRules:
@@ -384,6 +557,18 @@ class TestTheReport:
         )
         assert report["summary"]["passed_all"] is False
         assert report["unmapped"] == ["src/pkg/orphan.py"]
+
+    def test_the_reason_for_each_unmapped_file_is_in_the_report(self) -> None:
+        reasons = {"src/pkg/hub.py": {"reason": "too-broad", "detail": "d", "tests_run": []}}
+        report = changed_tests.build_report(
+            base="main",
+            changed=["src/pkg/hub.py"],
+            selection=changed_tests.Selection(unmapped=["src/pkg/hub.py"], reasons=reasons),
+            exit_code=None,
+            output="",
+            allow_unmapped=False,
+        )
+        assert report["unmapped_reasons"] == reasons
 
     def test_an_explicit_allowance_passes_but_records_it(self) -> None:
         report = changed_tests.build_report(

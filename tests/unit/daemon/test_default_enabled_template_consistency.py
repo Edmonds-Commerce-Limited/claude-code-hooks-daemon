@@ -53,6 +53,9 @@ _EXPECTED_OPT_IN_CONFIG_KEYS = {
     # handler that fires for them is noise on day one — a handler learned as
     # noise is not read later when it has something to say.
     "routine_qa_sweep",
+    # Plan 00463: a project's full-QA commands cannot be known in advance, so
+    # the handler ships off and inert until it declares `full_qa_patterns`.
+    "subagent_full_qa_blocker",
 }
 
 

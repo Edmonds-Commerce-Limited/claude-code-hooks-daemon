@@ -37,6 +37,7 @@ from claude_code_hooks_daemon.daemon.synthetic_traffic import (
     SYNTHETIC_SOURCE_FIELD,
 )
 from claude_code_hooks_daemon.handlers.pre_tool_use.subagent_full_qa_blocker import (
+    PYTEST_FLAG_OPTIONS,
     PYTEST_VALUE_OPTIONS,
     FullQaPattern,
     SubagentFullQaBlockerHandler,
@@ -161,6 +162,26 @@ _FULL_RUNS: list[tuple[str, str]] = [
     ("pytest ${PWD}/tests", "pytest-whole-suite"),
     ("env -C /srv/wt pytest", "pytest-whole-suite"),
     ("env --chdir=/srv/wt pytest", "pytest-whole-suite"),
+    # Delta review N5: runner flags no table lists, and redirect and home forms.
+    ("uv run --color never pytest", "pytest-whole-suite"),
+    ("uv run --exclude-newer 2024-01-01 pytest", "pytest-whole-suite"),
+    ("uv run --resolution lowest pytest", "pytest-whole-suite"),
+    ("uv --some-new-global-flag value run pytest", "pytest-whole-suite"),
+    ("poetry run --directory x pytest", "pytest-whole-suite"),
+    ("pdm run -p x pytest", "pytest-whole-suite"),
+    ("uvx pytest@8", "pytest-whole-suite"),
+    ("uvx pytest@8.3.0 tests/", "pytest-whole-suite"),
+    ("uv tool run pytest@8", "pytest-whole-suite"),
+    ("hatch run test:pytest", "pytest-whole-suite"),
+    ("./scripts/qa/llm_qa.py all&>out.txt", "llm-qa-whole-suite"),
+    ("./scripts/qa/llm_qa.py all &> out.txt", "llm-qa-whole-suite"),
+    ("pytest ~/proj/tests", "pytest-whole-suite"),
+    ("pytest $HOME/proj/tests", "pytest-whole-suite"),
+    ("pytest ${HOME}/proj/tests/", "pytest-whole-suite"),
+    # Delta review N4: a plugin flag the grammar does not know takes a value, so
+    # its path-shaped value is not a target.
+    ("pytest --json-report-file out/r.json", "pytest-whole-suite"),
+    ("pytest --some-plugin out/x", "pytest-whole-suite"),
 ]
 
 _NOT_FULL_RUNS: list[str] = [
@@ -187,7 +208,19 @@ _NOT_FULL_RUNS: list[str] = [
     "pytest --timeout 60 tests/unit/handlers/test_x.py",
     "uv run --frozen pytest tests/unit/handlers/test_x.py",
     "uv run -- pytest tests/unit/core",
+    "uv run --color never pytest tests/unit/handlers/test_x.py",
+    "uvx pytest@8 tests/unit/handlers/test_x.py",
+    "hatch run test:pytest tests/unit/core",
+    # The first word after `run` that no flag can claim is the command.
+    "uv run mytool pytest",
     "./scripts/qa/llm_qa.py changed>out.txt",
+    "./scripts/qa/llm_qa.py changed&>out.txt",
+    # Known booleans, clusters and attached values take nothing from the next word.
+    "pytest -xvs tests/unit/handlers/test_x.py",
+    "pytest -n8 tests/unit/handlers/test_x.py",
+    "pytest --lf tests/unit/handlers/test_x.py",
+    "pytest --json-report-file=out/r.json tests/unit/x.py",
+    "pytest tests/unit/x.py --some-plugin-flag",
     # Mentions, not invocations: the guard parses, it does not substring-match.
     'grep -rn "llm_qa.py all" CLAUDE/',
     "grep -rn llm_qa.py all",
@@ -293,6 +326,73 @@ class TestOperandsArePaths:
         assert (
             find_full_qa_invocation("pytest handlers", self._patterns(), cwd=tmp_path) is not None
         )
+
+
+class TestTheDirectoryTheCommandCdsInto:
+    """Delta review N4: `cd tests/unit && pytest handlers` was judged from the event's cwd."""
+
+    @staticmethod
+    def _tree(tmp_path: Path) -> Path:
+        (tmp_path / "tests" / "unit" / "handlers").mkdir(parents=True)
+        return tmp_path
+
+    def test_a_word_is_looked_up_where_the_command_cds_to(self, tmp_path: Path) -> None:
+        root = self._tree(tmp_path)
+        command = "cd tests/unit && pytest handlers"
+        assert find_full_qa_invocation(command, _patterns(), cwd=root) is None
+
+    def test_each_cd_moves_on_from_the_last(self, tmp_path: Path) -> None:
+        root = self._tree(tmp_path)
+        command = "cd tests; cd unit && pytest handlers"
+        assert find_full_qa_invocation(command, _patterns(), cwd=root) is None
+
+    def test_an_absolute_cd_replaces_the_directory(self, tmp_path: Path) -> None:
+        root = self._tree(tmp_path)
+        command = f"cd {root / 'tests' / 'unit'} && pytest handlers"
+        assert find_full_qa_invocation(command, _patterns(), cwd=Path("/elsewhere")) is None
+
+    def test_a_word_absent_where_the_command_cds_to_is_still_full(self, tmp_path: Path) -> None:
+        root = self._tree(tmp_path)
+        command = "cd tests/unit && pytest nothing_here"
+        assert find_full_qa_invocation(command, _patterns(), cwd=root) is not None
+
+    def test_a_cd_it_cannot_resolve_falls_back_to_the_path_shape(self, tmp_path: Path) -> None:
+        root = self._tree(tmp_path)
+        assert find_full_qa_invocation("cd $X && pytest handlers", _patterns(), cwd=root)
+        assert find_full_qa_invocation("cd $X && pytest a/b.py", _patterns(), cwd=root) is None
+
+
+class TestAnUnknownFlagUnderAGrammar:
+    """Delta review N4: a plugin flag the grammar does not know used to fail open.
+
+    Under ``option_grammar`` every option pytest has is known, so an unknown
+    one is a plugin's, and it is read as taking a value (fail closed). Name the
+    test paths first, or pass the value as ``--flag=value``.
+    """
+
+    def test_its_next_word_is_its_value_even_when_path_shaped(self) -> None:
+        match = find_full_qa_invocation("pytest --plugin-flag tests/unit/x.py", _patterns())
+        assert match is not None
+
+    def test_without_a_grammar_an_undeclared_flag_takes_no_value(self) -> None:
+        patterns, _ = parse_full_qa_patterns(
+            [{"id": "x", "command": "runner", "full_args": ["all"], "bare_is_full": True}]
+        )
+        assert find_full_qa_invocation("runner --flag tests/unit/x.py", patterns) is None
+
+    def test_every_boolean_option_of_the_running_pytest_is_known(
+        self, pytestconfig: pytest.Config
+    ) -> None:
+        """The other half of the grammar pin: without it, a boolean reads as unknown."""
+        parser = pytestconfig._parser.optparser
+        takes_none = {
+            option
+            for action in parser._actions
+            if action.nargs == 0
+            for option in action.option_strings
+        }
+        assert takes_none, "the parser exposed no options; this test would prove nothing"
+        assert takes_none <= PYTEST_FLAG_OPTIONS, sorted(takes_none - PYTEST_FLAG_OPTIONS)
 
 
 class TestThePytestOptionGrammar:

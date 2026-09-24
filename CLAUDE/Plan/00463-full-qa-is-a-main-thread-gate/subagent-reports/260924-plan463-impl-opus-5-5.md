@@ -38,17 +38,20 @@ Phase 2 is untouched.
 error_hiding, project_handlers, docs_qa, plan_qa, shell_check, declared_invariant_pairs and
 `changed_tests`. `changed_tests` (`scripts/qa/run_changed_tests.py`) collects the files
 changed since the merge base, plus untracked files, with renames split into a deletion and
-an addition. It maps each file to tests in this order:
+an addition. A test file selects itself. Any other file's coverage is the UNION of four
+parts, since delta review N3:
 
-1. a declared rule in `scripts/qa/changed_tests_map.yaml`, for files with no test of their
-   own name, such as the config, the release notes and the markdown;
-2. a test file selects itself;
-3. the mirror, `tests/unit/<path>/test_<stem>*.py`;
-4. a test of the same name anywhere;
-5. tests that import the module, capped at 40 before a match counts as too broad;
-6. a deleted file that nothing still references.
+- its declared rule in `scripts/qa/changed_tests_map.yaml`;
+- its mirror, `tests/unit/<path>/test_<stem>*.py`;
+- the tests that refer to it by path, by a path built from its parts, by a unique basename,
+  or by importing it. These are read from the syntax tree, so a comment or docstring does
+  not count;
+- one hop of dependents' own unit tests.
 
-A file that none of these maps fails the run and is named. `--allow-unmapped` is the
+A nested conftest runs its subtree. The root conftest is too broad, and so is any reach past
+40 test files; a too-broad file still runs its own tests. A deleted file that a source
+still refers to is unmapped. Each unmapped file carries its reason (`uncovered`,
+`too-broad`, `deleted-but-referenced`), and it fails the run. `--allow-unmapped` is the
 explicit escape. `--base` overrides the merge base, which defaults to origin/HEAD and
 falls back to `main`. The run refuses to start on the base branch or with no changes. It
 writes `untracked/qa/changed_tests.json`, and `changed_tests` is excluded from `all`.
@@ -82,6 +85,45 @@ writes `untracked/qa/changed_tests.json`, and `changed_tests` is excluded from `
   - The tautology test is gone.
   - QA.md warns about bare pytest.
   - The success criterion names only the two measured agent kinds.
+
+## Delta review fixes (N1 to N10, `260924-plan463-delta-review-opus-5-5.md`)
+
+The tests came first. Each new test was run against the code as it stood and failed before
+the fix; for N3 the scenarios were also driven through HEAD's `run_changed_tests.py`, and
+all six failed there.
+
+- **N1**: each tool's provenance entry now carries the live verdict, the exit code and the
+  sha256 of the report it wrote. A run deletes a tool's old report before running it.
+  `--read-only` re-applies the recorded exit code, and fails a missing, replaced or unwritten
+  report. `_run_tools` is tested end to end with `run_tool` stubbed: a crash with no output,
+  a green report with exit 1, a replaced report, and a clean run.
+- **N2**: a tree that changes during the run is printed at the end of that run. It fired for
+  real during this work, when the `format` tool rewrote two files mid-run.
+- **N3**: the union mapping above, with a JSON reason for each unmapped file. On this
+  branch it selects 196 test files, up from 107, and it found a real defect. The new
+  opt-in handler was missing from `test_default_enabled_template_consistency.py`'s expected
+  set, a test the old mapping never ran. That test is now fixed. Eleven files are honestly
+  `too-broad`: the constants modules, `cli.py`, `registry.py`, `handler_scope.py`,
+  `init_config.py`, the handler, the dogfood config, CLAUDE.md and HOOKS-DAEMON.md.
+- **N4**: each `cd` in a command moves the directory that path lookups use, and one the
+  shell would expand drops back to shape. Under `option_grammar`, a flag in neither
+  `PYTEST_VALUE_OPTIONS` nor the new `PYTEST_FLAG_OPTIONS` is read as taking a value, so
+  it fails closed. Both sets are pinned against the installed parser. HANDLER_REFERENCE
+  now says where a path-shaped value can still target a run.
+- **N5**: a word after an unlisted runner flag is tried both as that flag's value and as
+  the command, for the global flags and the `run` flags alike. The other fixes:
+  - `uvx pytest@8` and `uv tool run pytest@8` drop the version pin;
+  - `hatch run env:cmd` is split into the environment and the command;
+  - `&>` splits an attached redirect;
+  - `~/`, `$HOME/` and `${HOME}/` read as absolute;
+  - `env -S` is off the limits list, because it is seen.
+- **N6**: `tool_command` is deleted. The forwarding test now drives `run_tool`, and the
+  `_run_tools` tests pin that forwarding reaches `changed_tests` only.
+- **N7**: QA.md now states bare pytest as policy. Bare `pytest` from `tests/unit/core`
+  collects only that directory, but the guard cannot see the shell's directory.
+- **N8**: the Bugs.md FAIL-FAST cycle has the role split.
+- **N9**: "never denied" and the guidance's Bash sentence are derived from `_BLOCKED_TOOLS`.
+- **N10**: untracked files are hashed streamed (`hashlib.file_digest`), never read whole.
 
 ## Task 1.1 measurements
 
@@ -155,10 +197,12 @@ writes `untracked/qa/changed_tests.json`, and `changed_tests` is excluded from `
 
 ## Verification (targeted only, under this plan's rule)
 
-- After the review fixes, `./scripts/qa/llm_qa.py changed` passed 12/12: 2616 tests from
-  107 test files, mapped from 57 changed files, with 0 unmapped. A further targeted run of
-  the handler, evasion, shell utility, QA-script, CLI status, registry and doc/config
-  integration tests passed 2058.
+- After the delta review fixes, `./scripts/qa/llm_qa.py changed --allow-unmapped` passed
+  12/12. That was 6979 tests from 196 test files, mapped from 59 changed files. The 11
+  unmapped files are the too-broad ones listed above, and they are the full gate's. Without
+  `--allow-unmapped` the run fails on exactly those 11. A further targeted run of the QA
+  scripts, handler, evasion, shell utility, CLI status, registry, deadlock and doc/config
+  integration tests passed 2100.
 - docs_qa, plan_qa, doc_truth, repo_hygiene, british_english, handler_reference,
   declared_invariant_pairs and security were clean.
 - The broader targeted pytest runs all passed:

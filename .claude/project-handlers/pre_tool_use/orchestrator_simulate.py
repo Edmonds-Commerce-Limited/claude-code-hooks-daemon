@@ -251,10 +251,25 @@ def _call_detail(hook_input: dict[str, Any]) -> str:
 
 
 def _recorded_verdict(hook_input: dict[str, Any]) -> str:
-    """What the record says about a matched call the blocking policy allows."""
-    if hook_input.get("tool_name") == "Bash":
-        return "recorded, not a would-be denial (Bash is never denied by this mode)"
+    """What the record says about a matched call the blocking policy allows.
+
+    "Never denied" is derived from ``_BLOCKED_TOOLS``, not written as a fact,
+    so a tool that joins the blocked set stops being described that way.
+    """
+    tool_name = hook_input.get("tool_name")
+    if tool_name not in _BLOCKED_TOOLS:
+        return f"recorded, not a would-be denial ({tool_name} is never denied by this mode)"
     return "recorded, not a would-be denial (allowed by the blocking policy)"
+
+
+def _unblocked_bash_sentence() -> str:
+    """The guidance's Bash sentence, said only while Bash is outside the blocked set."""
+    if "Bash" in _BLOCKED_TOOLS:
+        return ""
+    return (
+        "`Bash` is recorded but never a would-be denial, so the coordinator's full "
+        "QA gate is unaffected when blocking is armed. "
+    )
 
 
 class OrchestratorSimulateHandler(PreToolUseHandlerBase):
@@ -423,11 +438,10 @@ class OrchestratorSimulateHandler(PreToolUseHandlerBase):
         return (
             "## orchestrator-simulate — orchestrator-only mode, SIMULATE ONLY (Plan 00418)\n\n"
             "Records every main-thread call to a non-coordination tool, and says "
-            "which ones the blocking policy WOULD deny: `Write`, `Edit` and "
-            "`NotebookEdit` outside `CLAUDE/Plan/`. `Bash` is recorded but never "
-            "a would-be denial, so the coordinator's full QA gate is unaffected "
-            "when blocking is armed. Never blocks — every call is allowed "
-            "regardless of what this handler matches. A subagent call "
+            "which ones the blocking policy WOULD deny: "
+            f"{', '.join(f'`{tool}`' for tool in sorted(_BLOCKED_TOOLS))} outside "
+            f"`CLAUDE/Plan/`. {_unblocked_bash_sentence()}Never blocks — every call "
+            "is allowed regardless of what this handler matches. A subagent call "
             "(`agent_id` present) is always exempt.\n\n"
             "**Why**: gathering evidence for where the coordination-tool "
             "boundary should sit, before any blocking decision is made.\n\n"

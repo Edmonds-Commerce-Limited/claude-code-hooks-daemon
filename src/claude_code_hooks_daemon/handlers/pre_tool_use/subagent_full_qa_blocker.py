@@ -195,8 +195,107 @@ PYTEST_VALUE_OPTIONS: Final[frozenset[str]] = frozenset(
     }
 )
 
+#: Every pytest option that takes NO value, from the same sources. With the
+#: value options it completes the grammar, so a flag in neither is a plugin's
+#: the grammar does not know. ``test_subagent_full_qa_blocker`` pins it too.
+PYTEST_FLAG_OPTIONS: Final[frozenset[str]] = frozenset(
+    {
+        # pytest core
+        "-h",
+        "-l",
+        "-q",
+        "-s",
+        "-v",
+        "-x",
+        "-V",
+        "--cache-clear",
+        "--co",
+        "--collect-in-virtualenv",
+        "--collect-only",
+        "--collectonly",
+        "--continue-on-collection-errors",
+        "--disable-plugin-autoload",
+        "--disable-pytest-warnings",
+        "--disable-warnings",
+        "--doctest-continue-on-failure",
+        "--doctest-ignore-import-errors",
+        "--doctest-modules",
+        "--exitfirst",
+        "--failed-first",
+        "--ff",
+        "--fixtures",
+        "--fixtures-per-test",
+        "--force-short-summary",
+        "--full-trace",
+        "--fulltrace",
+        "--funcargs",
+        "--help",
+        "--keep-duplicates",
+        "--keepduplicates",
+        "--last-failed",
+        "--lf",
+        "--markers",
+        "--new-first",
+        "--nf",
+        "--no-fold-skipped",
+        "--no-header",
+        "--no-showlocals",
+        "--no-summary",
+        "--noconftest",
+        "--pdb",
+        "--pyargs",
+        "--quiet",
+        "--runxfail",
+        "--setup-only",
+        "--setup-plan",
+        "--setup-show",
+        "--setuponly",
+        "--setupplan",
+        "--setupshow",
+        "--showlocals",
+        "--stepwise",
+        "--stepwise-reset",
+        "--stepwise-skip",
+        "--strict",
+        "--strict-config",
+        "--strict-markers",
+        "--sw",
+        "--sw-reset",
+        "--sw-skip",
+        "--trace",
+        "--trace-config",
+        "--traceconfig",
+        "--verbose",
+        "--version",
+        "--xfail-tb",
+        # pytest-cov
+        "--cov-append",
+        "--cov-branch",
+        "--cov-reset",
+        "--no-cov",
+        "--no-cov-on-fail",
+        # pytest-xdist, pytest-randomly, pytest-html
+        "-f",
+        "--looponfail",
+        "--randomly-dont-reset-seed",
+        "--randomly-dont-reorganize",
+        "--self-contained-html",
+    }
+)
+
+
+@dataclass(frozen=True, slots=True)
+class _OptionGrammar:
+    """A program's complete option set: what takes a value, and what does not."""
+
+    value_options: frozenset[str]
+    flag_options: frozenset[str]
+
+
 #: Named grammars a pattern can adopt with ``option_grammar``.
-_OPTION_GRAMMARS: Final[Mapping[str, frozenset[str]]] = {"pytest": PYTEST_VALUE_OPTIONS}
+_OPTION_GRAMMARS: Final[Mapping[str, _OptionGrammar]] = {
+    "pytest": _OptionGrammar(value_options=PYTEST_VALUE_OPTIONS, flag_options=PYTEST_FLAG_OPTIONS)
+}
 _REQUIRED_TEXT_KEYS: Final[tuple[str, ...]] = (_KEY_ID, _KEY_COMMAND)
 _WORD_LIST_KEYS: Final[tuple[str, ...]] = (_KEY_FULL_ARGS, _KEY_READ_ONLY_FLAGS, _KEY_VALUE_FLAGS)
 
@@ -215,7 +314,8 @@ class FullQaPattern:
         full_args: Operands that make the program run the whole suite. None
             means every run of it is full. Any other operand targets the run
             only when it is path-like: it contains ``/`` or ``::``, ends in
-            ``.py``, or exists under the event's working directory.
+            ``.py``, or exists in the directory the command runs in (the
+            event's working directory, moved by any ``cd`` before it).
         bare_is_full: With ``full_args`` set, a run naming no operand at all
             is full too (``pytest`` with no path collects the whole suite).
         read_only_flags: Flags that make the run a read rather than a run
@@ -223,6 +323,10 @@ class FullQaPattern:
         value_flags: Flags whose next word is their value, so that word is not
             mistaken for an operand (``pytest -k expr``). A declared
             ``option_grammar`` is merged in here.
+        flag_options: With an ``option_grammar``, the options that take no
+            value. A flag in neither set is then a plugin's the grammar does
+            not know, and it is read as taking a value (fail closed). None
+            without a grammar: an undeclared flag then takes no value.
     """
 
     pattern_id: str
@@ -231,6 +335,7 @@ class FullQaPattern:
     bare_is_full: bool
     read_only_flags: frozenset[str]
     value_flags: frozenset[str]
+    flag_options: frozenset[str] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -309,7 +414,7 @@ def _parse_entry(position: int, entry: object) -> tuple[FullQaPattern | None, st
         return None, f"entry {position}: `{_KEY_BARE_IS_FULL}` must be true or false"
 
     grammar_name = entry.get(_KEY_OPTION_GRAMMAR)
-    grammar: frozenset[str] = frozenset()
+    grammar: _OptionGrammar | None = None
     if grammar_name is not None:
         if grammar_name not in _OPTION_GRAMMARS:
             known = ", ".join(sorted(_OPTION_GRAMMARS))
@@ -317,6 +422,7 @@ def _parse_entry(position: int, entry: object) -> tuple[FullQaPattern | None, st
         grammar = _OPTION_GRAMMARS[grammar_name]
 
     full_args = word_lists[_KEY_FULL_ARGS]
+    declared_value_flags = word_lists[_KEY_VALUE_FLAGS] or frozenset()
     return (
         FullQaPattern(
             pattern_id=str(entry[_KEY_ID]).strip(),
@@ -326,7 +432,8 @@ def _parse_entry(position: int, entry: object) -> tuple[FullQaPattern | None, st
             ),
             bare_is_full=bare_is_full,
             read_only_flags=word_lists[_KEY_READ_ONLY_FLAGS] or frozenset(),
-            value_flags=(word_lists[_KEY_VALUE_FLAGS] or frozenset()) | grammar,
+            value_flags=declared_value_flags | (grammar.value_options if grammar else frozenset()),
+            flag_options=grammar.flag_options if grammar else None,
         ),
         None,
     )
@@ -438,6 +545,11 @@ _RUNNER_SUBCOMMAND: Final[str] = "run"
 _UV: Final[str] = "uv"
 _UV_TOOL_SUBCOMMAND: Final[str] = "tool"
 _UVX: Final[str] = "uvx"
+#: ``uvx pytest@8`` runs ``pytest``, pinned to version 8.
+_VERSION_PIN: Final[str] = "@"
+#: ``hatch run env:command`` runs ``command`` in ``env``.
+_HATCH: Final[str] = "hatch"
+_HATCH_ENV_SEPARATOR: Final[str] = ":"
 
 #: How deep ``bash -c '...'`` is followed. Deeper nesting is not a way anyone
 #: runs a test suite by accident.
@@ -454,12 +566,20 @@ _PYTHON_SUFFIX: Final[str] = ".py"
 #: ``$PWD/tests`` and ``${PWD}/tests`` are ``./tests``.
 _CWD_VARIABLE_PREFIXES: Final[tuple[str, ...]] = ("$PWD/", "${PWD}/")
 _CWD_VARIABLES: Final[frozenset[str]] = frozenset({"$PWD", "${PWD}"})
+#: A path from the home directory is absolute: it does not depend on the cwd.
+_HOME_PREFIXES: Final[tuple[str, ...]] = ("~/", "$HOME/", "${HOME}/")
+#: ``cd`` moves the directory later words are looked up in; a target that
+#: starts with an expansion goes somewhere this cannot see.
+_CD: Final[str] = "cd"
+_UNSEEN_CD_PREFIXES: Final[tuple[str, ...]] = ("$", "~", "`")
+#: ``-n`` of ``-n8``: a short option is a dash and one letter.
+_SHORT_OPTION: Final[int] = 2
 
-#: The first redirection character inside a word: ``all>out.txt`` is the
-#: operand ``all`` and a redirect, because shlex does not split at ``>``.
-_ATTACHED_REDIRECT_START: Final[re.Pattern[str]] = re.compile(r"[<>]")
+#: The first redirection inside a word: ``all>out.txt`` and ``all&>out.txt``
+#: are the operand ``all`` and a redirect, because shlex splits at neither.
+_ATTACHED_REDIRECT_START: Final[re.Pattern[str]] = re.compile(r"&?[<>]")
 #: A redirection operator with its target in the NEXT word.
-_BARE_REDIRECT_OPERATOR: Final[re.Pattern[str]] = re.compile(r"^(?:>>?|<<?<?|>&|<&|>\|)$")
+_BARE_REDIRECT_OPERATOR: Final[re.Pattern[str]] = re.compile(r"^(?:&?>>?|<<?<?|>&|<&|>\|)$")
 
 
 def _words(segment: str) -> list[str]:
@@ -526,7 +646,7 @@ def _resolve(words: list[str], segment: str, depth: int) -> Iterator[tuple[str, 
         return
 
     if name == _UVX:
-        yield from _resolve(rest[_skip_flags(rest, _UV_RUN_VALUE_FLAGS, 0) :], segment, depth)
+        yield from _resolve_run_tail(rest, 0, _UV_RUN_VALUE_FLAGS, segment, depth, tool=True)
         return
 
     runner = _PROJECT_RUNNERS.get(name)
@@ -545,42 +665,101 @@ def _resolve(words: list[str], segment: str, depth: int) -> Iterator[tuple[str, 
     yield name, rest, segment
 
 
-def _skip_flags(words: Sequence[str], value_flags: frozenset[str], start: int) -> int:
-    """The index of the first word from ``start`` that is not a flag or a flag's value.
+def _is_flag(word: str) -> bool:
+    return word.startswith(FLAG_PREFIX) and word != LONE_DASH
 
-    A ``--`` ends the flags and is consumed; a ``--flag=value`` carries its
-    value with it.
+
+def _command_positions(
+    words: Sequence[str], value_flags: frozenset[str], start: int
+) -> Iterator[int]:
+    """Each position from ``start`` where the next command word may begin.
+
+    A word after a listed value flag is that flag's value. A word after an
+    UNLISTED flag may be its value or the command, since no table lists every
+    runner flag (``--color never``, ``--resolution lowest``): it is yielded,
+    and the scan goes on as though it were the value. The first word no flag
+    can claim ends the scan, and so does the word after ``--``.
     """
     index = start
+    after_unlisted_flag = False
     while index < len(words):
         word = words[index]
         if word == END_OF_OPTIONS:
-            return index + 1
-        if not word.startswith(FLAG_PREFIX) or word == LONE_DASH:
-            return index
-        index += 2 if word in value_flags else 1
-    return index
+            yield index + 1
+            return
+        if _is_flag(word):
+            listed = word in value_flags
+            index += 2 if listed else 1
+            after_unlisted_flag = not listed and _FLAG_VALUE_SEPARATOR not in word
+            continue
+        yield index
+        if not after_unlisted_flag:
+            return
+        after_unlisted_flag = False
+        index += 1
+
+
+def _resolve_run_tail(
+    words: list[str],
+    start: int,
+    value_flags: frozenset[str],
+    segment: str,
+    depth: int,
+    *,
+    tool: bool = False,
+) -> Iterator[tuple[str, list[str], str]]:
+    """Resolve what ``run`` starts, trying each word that may be the command.
+
+    A candidate that is really a flag's value names a program no pattern
+    declares, so trying it costs nothing; skipping it could skip the command.
+    ``tool`` strips a version pin (``pytest@8``), as ``uvx`` accepts one.
+    """
+    for index in _command_positions(words, value_flags, start):
+        tail = list(words[index:])
+        if tool and tail:
+            tail[0] = tail[0].split(_VERSION_PIN, 1)[0]
+        yield from _resolve(tail, segment, depth)
 
 
 def _resolve_runner(
     name: str, runner: _Runner, rest: list[str], segment: str, depth: int
 ) -> Iterator[tuple[str, list[str], str]]:
-    """``uv [flags] run [flags] [--] cmd`` and its siblings run ``cmd``."""
-    index = _skip_flags(rest, runner.global_value_flags, 0)
-    if index >= len(rest):
-        return
-    if rest[index] == _RUNNER_SUBCOMMAND:
-        start = _skip_flags(rest, runner.run_value_flags, index + 1)
-        yield from _resolve(rest[start:], segment, depth)
-        return
-    if (
-        name == _UV
-        and rest[index] == _UV_TOOL_SUBCOMMAND
-        and index + 1 < len(rest)
-        and rest[index + 1] == _RUNNER_SUBCOMMAND
-    ):
-        start = _skip_flags(rest, _UV_RUN_VALUE_FLAGS, index + 2)
-        yield from _resolve(rest[start:], segment, depth)
+    """``uv [flags] run [flags] [--] cmd`` and its siblings run ``cmd``.
+
+    The subcommand is looked for the same way as the command, so an
+    unlisted global flag's value cannot hide ``run`` either.
+    """
+    for index in _command_positions(rest, runner.global_value_flags, 0):
+        if index >= len(rest):
+            return
+        if rest[index] == _RUNNER_SUBCOMMAND:
+            tail = rest[: index + 1] + _hatch_command(rest[index + 1 :]) if name == _HATCH else rest
+            yield from _resolve_run_tail(tail, index + 1, runner.run_value_flags, segment, depth)
+            return
+        if (
+            name == _UV
+            and rest[index] == _UV_TOOL_SUBCOMMAND
+            and index + 1 < len(rest)
+            and rest[index + 1] == _RUNNER_SUBCOMMAND
+        ):
+            yield from _resolve_run_tail(
+                rest, index + 2, _UV_RUN_VALUE_FLAGS, segment, depth, tool=True
+            )
+            return
+
+
+def _hatch_command(words: list[str]) -> list[str]:
+    """``hatch run test:pytest`` runs ``pytest`` in the ``test`` environment."""
+    for position, word in enumerate(words):
+        if _is_flag(word):
+            continue
+        env, separator, command = word.partition(_HATCH_ENV_SEPARATOR)
+        if not (separator and env and command):
+            return words
+        resolved = list(words)
+        resolved[position] = command
+        return resolved
+    return words
 
 
 def _resolve_python(rest: list[str], segment: str) -> Iterator[tuple[str, list[str], str]]:
@@ -685,11 +864,40 @@ def _split_attached_redirect(argument: str) -> tuple[str, bool]:
     return argument[: found.start()], bool(_BARE_REDIRECT_OPERATOR.match(argument[found.start() :]))
 
 
+def _takes_next_word(flag: str, pattern: FullQaPattern) -> bool:
+    """Whether ``flag`` consumes the word after it as its value.
+
+    A declared or grammar value flag does. Without a grammar nothing else
+    does. Under a grammar, a known option, a cluster of known short options
+    (``-xvs``) and a short value option with its value attached (``-n8``)
+    take nothing, and any other flag is a plugin's the grammar does not know:
+    it is read as taking a value, so a path-shaped value
+    (``--json-report-file out/r.json``) never passes for a target.
+    """
+    if _FLAG_VALUE_SEPARATOR in flag:
+        return False
+    if flag in pattern.value_flags:
+        return True
+    known = pattern.flag_options
+    if known is None or flag in known:
+        return False
+    if flag.startswith(_LONG_FLAG_PREFIX):
+        return True
+    if flag[:_SHORT_OPTION] in pattern.value_flags:
+        return False
+    return not all(f"{FLAG_PREFIX}{letter}" in known for letter in flag[1:])
+
+
+def _is_absolute(operand: str) -> bool:
+    """A path from the filesystem root, or from the home directory (``~/``, ``$HOME/``)."""
+    return operand.startswith((_PATH_SEPARATOR, *_HOME_PREFIXES))
+
+
 def _operand_is_full(operand: str, full_args: frozenset[str]) -> bool:
     """An operand names a full run directly, or as an absolute path ending in one."""
     if operand in full_args:
         return True
-    if not operand.startswith(_PATH_SEPARATOR):
+    if not _is_absolute(operand):
         return False
     return any(
         operand.endswith(_PATH_SEPARATOR + entry) for entry in full_args if entry != _CURRENT_DIR
@@ -722,7 +930,7 @@ def _is_full_run(pattern: FullQaPattern, arguments: Sequence[str], cwd: Path | N
             if argument.split(_FLAG_VALUE_SEPARATOR, 1)[0] in pattern.read_only_flags:
                 return False
             if (
-                argument in pattern.value_flags
+                _takes_next_word(argument, pattern)
                 and index < len(arguments)
                 and not arguments[index].startswith(FLAG_PREFIX)
             ):
@@ -751,19 +959,43 @@ def find_full_qa_invocation(
         command: The Bash command as the tool received it (line continuations
             already joined by ``get_bash_command``).
         patterns: The validated declaration.
-        cwd: The directory the command runs in, so a bare word naming a
-            directory there counts as a path. None judges by shape alone.
+        cwd: The directory the command starts in, so a bare word naming a
+            directory there counts as a path. Each ``cd`` in the command
+            moves it on. None judges by shape alone.
 
     Returns:
         The pattern that matched and the command segment it matched in.
     """
     if not patterns:
         return None
+    here = cwd
     for program, arguments, segment in _invocations(command):
+        if program == _CD:
+            here = _changed_directory(here, arguments)
+            continue
         for pattern in patterns:
-            if pattern.command == program and _is_full_run(pattern, arguments, cwd):
+            if pattern.command == program and _is_full_run(pattern, arguments, here):
                 return FullQaMatch(pattern_id=pattern.pattern_id, segment=segment.strip())
     return None
+
+
+def _changed_directory(current: Path | None, arguments: Sequence[str]) -> Path | None:
+    """Where ``cd <arguments>`` leaves the command, or None when it cannot be known.
+
+    An argument the shell would expand (``$X``, ``~``), ``cd -`` and a bare
+    ``cd`` all lead somewhere this cannot see, so the path shape decides
+    from there on. Commands are followed in order, which treats a ``cd``
+    inside a subshell as though it persisted: a bounded approximation.
+    """
+    operands = [word for word in arguments if not _is_flag(word)]
+    if len(operands) != 1:
+        return None
+    target = operands[0]
+    if target == LONE_DASH or target.startswith(_UNSEEN_CD_PREFIXES):
+        return None
+    if target.startswith(_PATH_SEPARATOR):
+        return Path(target)
+    return None if current is None else current / target
 
 
 # ── The handler ────────────────────────────────────────────────────────────
@@ -1002,9 +1234,11 @@ class SubagentFullQaBlockerHandler(PreToolUseHandlerBase):
             "read_only_flags?, value_flags?, option_grammar?}`, where `command` is the "
             "program's basename and `full_args` are the operands that make it run the "
             "whole suite (omit it and every run is full). Any other operand narrows the "
-            "run only if it is path-like; `option_grammar: pytest` supplies pytest's "
-            "value-taking options so a flag's value is never read as a path. Ships off "
-            "with no patterns; enabled with none, `hooks-daemon check` reports it as "
-            "unable to fire. Keep `scope` at SUB: any other scope denies the "
-            "coordinator's own run."
+            "run only if it is path-like, looked up in the directory the command `cd`s "
+            "to. `option_grammar: pytest` supplies pytest's complete option set, so a "
+            "flag's value is never read as a path, and a plugin flag it does not know "
+            "is read as taking a value: name test paths BEFORE such a flag, or write "
+            "`--flag=value`. Ships off with no patterns; enabled with none, "
+            "`hooks-daemon check` reports it as unable to fire. Keep `scope` at SUB: "
+            "any other scope denies the coordinator's own run."
         )

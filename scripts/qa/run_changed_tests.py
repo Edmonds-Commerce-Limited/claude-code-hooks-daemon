@@ -6,25 +6,32 @@ and the coordinator runs the full suite once per delivery. The targeted path
 has to be ONE command, or each agent invents its own subset and some invent
 none.
 
-**Every changed file is accounted for, or the run fails.** Each one maps, in
-this order, to:
+**Every changed file is accounted for, or the run fails.** A test file
+selects itself. Any other file's coverage is the UNION of:
 
-1. a DECLARED rule in ``changed_tests_map.yaml``: named tests, or the
-   ``llm_qa.py`` tools that cover it (markdown is docs QA's, shell is
-   shellcheck's). Declared beats inferred.
-2. itself, when it is a test file.
-3. the MIRRORED tests: ``src/<pkg>/a/b.py`` and ``scripts/a/b.py`` map to
+1. its DECLARED rule in ``changed_tests_map.yaml``: named tests, or the
+   ``llm_qa.py`` tools that check it. A ``tools`` rule certifies only what
+   those tools check (markdown lint, shellcheck), never behaviour.
+2. its MIRRORED tests: ``src/<pkg>/a/b.py`` and ``scripts/a/b.py`` map to
    ``tests/unit/a/test_b.py`` and ``test_b_*.py``.
-4. with no mirror, the same names anywhere under ``tests/``.
-5. the tests that IMPORT it, for a module under ``src/`` or ``tests/``. A
-   reach wider than ``MAX_IMPORT_SELECTION`` files is the full suite by
-   another name, so it is unmapped instead.
+3. the tests that REFER to it: by its path, by a path suffix, by its
+   basename when no other file shares it, or by importing it.
+4. one hop of DEPENDENTS: each source that refers to it the same way adds
+   its own unit tests (its mirror, else the tests that refer to it). A
+   conftest's tests are its whole subtree. Reach beyond one hop is the
+   coordinator's full gate.
 
-A DELETED module maps to the tests that still name or import it, because they
-are exactly the ones that now break. One nothing references is verified
-rather than skipped. Anything left over is UNMAPPED, and an unmapped file
-fails the run unless ``--allow-unmapped`` says the coordinator's full gate
-will cover it. A run that tested nothing never reads as a pass.
+References are read from the syntax tree, so a comment or docstring that
+mentions a file is not a dependency.
+
+A reach wider than ``MAX_IMPORT_SELECTION`` test files is the full suite by
+another name, and so is the root ``tests/conftest.py``: those are unmapped as
+``too-broad``. A DELETED file maps to the tests that still refer to it, which
+are exactly the ones that now break. One that a source still refers to is
+unmapped, and one nothing refers to is verified rather than skipped. An
+unmapped file fails the run unless ``--allow-unmapped`` says the
+coordinator's full gate will cover it, and the report records why each one is
+unmapped. A run that tested nothing never reads as a pass.
 
 "Changed" is everything that differs from the merge base with ``--base``:
 committed work on the branch, uncommitted edits, and new untracked files. On
@@ -49,19 +56,24 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import ast
 import fnmatch
 import json
+import logging
 import re
 import subprocess  # nosec B404 — runs git and this interpreter, argv form, no shell
 import sys
-from collections.abc import Callable, Mapping
+from collections import Counter
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Final
 
 import yaml
 
 from claude_code_hooks_daemon.qa.pytest_text_report import parse_pytest_text_output
+
+logger = logging.getLogger(__name__)
 
 _PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 _QA_OUTPUT_DIR_PARTS: Final[tuple[str, str]] = ("untracked", "qa")
@@ -89,20 +101,29 @@ _TEST_GLOB: Final[str] = "test_*.py"
 _TEST_PREFIX: Final[str] = "test_"
 _PYTHON_SUFFIX: Final[str] = ".py"
 _PACKAGE_INIT_STEM: Final[str] = "__init__"
+_CONFTEST: Final[str] = "conftest.py"
+#: Where the code a change can reach a test through lives.
+_MODULE_ROOTS: Final[frozenset[str]] = frozenset({_SOURCE_ROOT, _SCRIPTS_ROOT, _TEST_ROOT})
+#: How many of a deleted file's remaining referrers a reason names.
+_NAMED_DEPENDENTS: Final[int] = 5
 
-#: An import reach wider than this is the full suite by another name.
+#: A reach wider than this many test files is the full suite by another name.
 MAX_IMPORT_SELECTION: Final[int] = 40
 
-# Mapping rules, as recorded in the report.
+# Mapping rules, as recorded in the report. A file's entry lists every rule
+# that contributed tests, because its coverage is their union.
 RULE_DECLARED: Final[str] = "declared"
 RULE_SELF: Final[str] = "self"
-RULE_MIRROR: Final[str] = "mirror"
-RULE_NAME: Final[str] = "name"
-RULE_IMPORT: Final[str] = "import"
+RULE_REFERENCE: Final[str] = "reference"
+RULE_SUBTREE: Final[str] = "conftest-subtree"
+RULE_DEPENDENT: Final[str] = "dependent"
 RULE_DELETED_TEST: Final[str] = "deleted-test"
 RULE_DELETED_UNREFERENCED: Final[str] = "deleted-unreferenced"
-#: Not a mapping: the import reach exceeded ``MAX_IMPORT_SELECTION``.
-_TOO_BROAD: Final[str] = "too-broad"
+
+# Why a file is unmapped, as recorded in the report.
+REASON_TOO_BROAD: Final[str] = "too-broad"
+REASON_UNCOVERED: Final[str] = "uncovered"
+REASON_STILL_REFERENCED: Final[str] = "deleted-but-referenced"
 
 # Declared-rule keys.
 _KEY_RULES: Final[str] = "rules"
@@ -144,6 +165,7 @@ class Selection:
     selected: list[str] = field(default_factory=list)
     mapping: list[dict[str, Any]] = field(default_factory=list)
     unmapped: list[str] = field(default_factory=list)
+    reasons: dict[str, dict[str, Any]] = field(default_factory=dict)
     deleted: list[str] = field(default_factory=list)
     non_python: list[str] = field(default_factory=list)
 
@@ -247,6 +269,14 @@ def changed_files(
     return sorted(set(_lines(diffed)) | set(_lines(untracked))), None
 
 
+def tree_files(root: Path, *, git: GitRunner = run_git) -> tuple[list[str] | None, str | None]:
+    """Every tracked and untracked (not ignored) file: what a change can be searched in."""
+    code, stdout, stderr = git(["ls-files", "--cached", "--others", "--exclude-standard"], root)
+    if code != 0:
+        return None, f"git ls-files failed: {stderr.strip() or 'no output'}"
+    return _lines(stdout), None
+
+
 def _text_list(value: object) -> tuple[str, ...] | None:
     if not isinstance(value, list) or not all(isinstance(v, str) and v.strip() for v in value):
         return None
@@ -311,18 +341,20 @@ def _named(stem: str, filename: str) -> bool:
     )
 
 
-def _mirror_dir(path: Path) -> str | None:
+def _mirror_dir(path: PurePosixPath) -> str | None:
     """``tests/unit/<dirs>`` for a module under ``src/<pkg>/`` or ``scripts/``."""
     parts = path.parts
     if len(parts) > 2 and parts[0] == _SOURCE_ROOT:
-        return Path(_TEST_ROOT, _UNIT_DIR, *parts[2:-1]).as_posix()
+        return PurePosixPath(_TEST_ROOT, _UNIT_DIR, *parts[2:-1]).as_posix()
     if len(parts) > 1 and parts[0] == _SCRIPTS_ROOT:
-        return Path(_TEST_ROOT, _UNIT_DIR, *parts[1:-1]).as_posix()
+        return PurePosixPath(_TEST_ROOT, _UNIT_DIR, *parts[1:-1]).as_posix()
     return None
 
 
-def _dotted_name(path: Path) -> str | None:
+def _dotted_name(path: PurePosixPath) -> str | None:
     """The import name of a module under ``src/`` or ``tests/``, or None."""
+    if path.suffix != _PYTHON_SUFFIX:
+        return None
     parts = list(path.with_suffix("").parts)
     if parts[0] == _SOURCE_ROOT:
         parts = parts[1:]
@@ -333,128 +365,415 @@ def _dotted_name(path: Path) -> str | None:
     return ".".join(parts) or None
 
 
-def _importers(dotted: str, sources: Mapping[str, str]) -> list[str]:
-    """Test files that import ``dotted`` (or anything below it)."""
-    direct = re.compile(rf"(?<![\w.]){re.escape(dotted)}(?!\w)")
-    parent, _, leaf = dotted.rpartition(".")
-    from_import = (
-        re.compile(rf"from\s+{re.escape(parent)}\s+import\s+(\([^)]*\)|[^\n]*)") if parent else None
-    )
-    leaf_word = re.compile(rf"\b{re.escape(leaf)}\b")
-    found: list[str] = []
-    for test_path, text in sources.items():
-        if direct.search(text) or (
-            from_import is not None
-            and any(leaf_word.search(match.group(1)) for match in from_import.finditer(text))
-        ):
-            found.append(test_path)
-    return sorted(found)
+def _is_test_file(path: PurePosixPath) -> bool:
+    return path.parts[0] == _TEST_ROOT and fnmatch.fnmatch(path.name, _TEST_GLOB)
 
 
-def _load_sources(root: Path, index: Mapping[str, list[str]]) -> dict[str, str]:
-    """Every indexed test file's text. An unreadable test file is a broken tree: it raises."""
-    return {
-        test_path: (root / test_path).read_text(encoding="utf-8")
-        for paths in index.values()
-        for test_path in paths
-    }
+@dataclass(frozen=True, slots=True)
+class SourceRefs:
+    """What one Python source can refer to another file through.
+
+    Read from the syntax tree, not the text, so a path or module named in a
+    comment or docstring is not a dependency: prose that mentions a file does
+    not break when it changes.
+
+    Attributes:
+        strings: Every string constant that is not a docstring, joined by
+            newlines, for path search.
+        constants: The same constants as a set, for exact matches.
+        imports: Every module an ``import`` statement names, and each
+            ``from``-imported name joined to its module, relative imports
+            resolved.
+    """
+
+    strings: str
+    constants: frozenset[str]
+    imports: frozenset[str]
 
 
-def _python_tests(
-    relative: str,
-    index: Mapping[str, list[str]],
-    sources: Mapping[str, str],
-) -> tuple[str | None, list[str]]:
-    """``(rule, tests)`` for a Python file, or ``(None, [])`` when nothing maps."""
-    path = Path(relative)
-    if path.stem != _PACKAGE_INIT_STEM:
-        mirror = _mirror_dir(path)
-        if mirror is not None:
-            in_mirror = [
-                test_path
-                for filename, test_paths in index.items()
-                if _named(path.stem, filename)
-                for test_path in test_paths
-                if Path(test_path).parent.as_posix() == mirror
-            ]
-            if in_mirror:
-                return RULE_MIRROR, sorted(in_mirror)
-        if path.parts[0] != _TEST_ROOT:
-            anywhere = [
-                test_path
-                for filename, test_paths in index.items()
-                if _named(path.stem, filename)
-                for test_path in test_paths
-            ]
-            if anywhere:
-                return RULE_NAME, sorted(anywhere)
-
+def _package_of(relative: str) -> list[str]:
+    """The dotted package a source's relative imports resolve against, as parts."""
+    path = PurePosixPath(relative)
     dotted = _dotted_name(path)
     if dotted is None:
-        return None, []
-    importers = [test for test in _importers(dotted, sources) if test != relative]
-    if len(importers) > MAX_IMPORT_SELECTION:
-        return _TOO_BROAD, []
-    if importers:
-        return RULE_IMPORT, importers
-    return None, []
+        return []
+    parts = dotted.split(".")
+    return parts if path.stem == _PACKAGE_INIT_STEM else parts[:-1]
+
+
+def source_refs(text: str, relative: str) -> SourceRefs:
+    """The references in one source. Unparseable source raises: the tree is broken."""
+    tree = ast.parse(text, filename=relative)
+    docstrings = {
+        id(node.value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant)
+    }
+    constants = [
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and id(node) not in docstrings
+    ]
+    imports: set[str] = set()
+    package = _package_of(relative)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imports.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            # Only the names: `from pkg import sub` uses `sub`, not what
+            # `pkg/__init__.py` provides, though it runs it.
+            base_parts = package[: len(package) - (node.level - 1)] if node.level else []
+            module = ".".join([*base_parts, *([node.module] if node.module else [])])
+            if module:
+                imports.update(f"{module}.{alias.name}" for alias in node.names)
+    return SourceRefs(
+        strings="\n".join(constants), constants=frozenset(constants), imports=frozenset(imports)
+    )
+
+
+def _read_refs(root: Path, relative: str) -> SourceRefs:
+    """A source's references; one that does not parse is searched as plain text.
+
+    The tree carries deliberately broken fixtures (``tests/fixtures/``). Such
+    a file imports nothing, but it can still name a path, so it is kept, and
+    searched over its whole text, rather than dropped.
+    """
+    text = (root / relative).read_text(encoding="utf-8")
+    try:
+        return source_refs(text, relative)
+    except SyntaxError as exc:
+        logger.info("%s does not parse (%s); searched as plain text", relative, exc.msg)
+        return SourceRefs(strings=text, constants=frozenset(), imports=frozenset())
+
+
+@dataclass(frozen=True, slots=True)
+class Corpus:
+    """What a changed file is searched for in.
+
+    Attributes:
+        index: Every ``test_*.py`` under ``tests/``, keyed by filename.
+        tests: The references of each of those test files.
+        modules: The references of every other Python file under ``src/``,
+            ``scripts/`` and ``tests/`` (conftests and helpers included): the
+            code a change can reach a test THROUGH.
+        basename_counts: How many files in the tree carry each basename. A
+            basename alone identifies a file only when no other file shares it.
+        module_names: The dotted name of every module and package in the tree,
+            to tell ``from pkg import sub`` (a module) from ``from pkg import
+            Name`` (something the package's ``__init__`` provides).
+    """
+
+    index: Mapping[str, list[str]]
+    tests: Mapping[str, SourceRefs]
+    modules: Mapping[str, SourceRefs]
+    basename_counts: Mapping[str, int]
+    module_names: frozenset[str]
+
+
+def build_corpus(root: Path, tree: Sequence[str]) -> Corpus:
+    """The corpus for ``root``, whose files (tracked and untracked) are ``tree``."""
+    index = build_test_index(root)
+    modules: dict[str, SourceRefs] = {}
+    for relative in tree:
+        path = PurePosixPath(relative)
+        if (
+            path.suffix == _PYTHON_SUFFIX
+            and path.parts[0] in _MODULE_ROOTS
+            and not _is_test_file(path)
+            and (root / relative).is_file()
+        ):
+            modules[relative] = _read_refs(root, relative)
+    return Corpus(
+        index=index,
+        tests={
+            test_path: _read_refs(root, test_path)
+            for paths in index.values()
+            for test_path in paths
+        },
+        modules=modules,
+        basename_counts=Counter(PurePosixPath(relative).name for relative in tree),
+        module_names=frozenset(
+            name for relative in tree if (name := _dotted_name(PurePosixPath(relative))) is not None
+        ),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _Needles:
+    """The spellings by which a source can refer to one file.
+
+    ``package`` is set for a package ``__init__``: importing a submodule runs
+    it too, but what the ``__init__`` itself provides is reached only by
+    importing the package, or a name from it that is not a submodule.
+    """
+
+    paths: tuple[str, ...]
+    last_two: tuple[str, str] | None
+    dotted: str | None
+    package: bool
+
+
+def _needles(relative: str, basename_counts: Mapping[str, int]) -> _Needles:
+    path = PurePosixPath(relative)
+    paths = [relative]
+    last_two: tuple[str, str] | None = None
+    if len(path.parts) > 1:
+        last_two = (path.parts[-2], path.parts[-1])
+        paths.append("/".join(last_two))
+    if basename_counts.get(path.name, 0) == 1:
+        paths.append(path.name)
+    return _Needles(
+        paths=tuple(dict.fromkeys(paths)),
+        last_two=last_two,
+        dotted=_dotted_name(path),
+        package=path.stem == _PACKAGE_INIT_STEM,
+    )
+
+
+def _path_pattern(literal: str) -> re.Pattern[str]:
+    """``literal`` as a whole path or path suffix, not part of a longer name."""
+    return re.compile(rf"(?<![\w.-]){re.escape(literal)}(?![\w-])")
+
+
+def _refers(refs: SourceRefs, needles: _Needles, module_names: frozenset[str]) -> bool:
+    """Whether a source names the file by path, builds its path from parts, or imports it."""
+    for literal in needles.paths:
+        if literal in refs.strings and _path_pattern(literal).search(refs.strings):
+            return True
+    if needles.last_two is not None and all(part in refs.constants for part in needles.last_two):
+        return True
+    dotted = needles.dotted
+    if dotted is None:
+        return False
+    below = f"{dotted}."
+    for name in (*refs.imports, *refs.constants):
+        if name == dotted:
+            return True
+        if not name.startswith(below):
+            continue
+        child = f"{below}{name[len(below) :].split('.')[0]}"
+        if not (needles.package and child in module_names):
+            return True
+    return False
+
+
+@dataclass(slots=True)
+class _Cover:
+    """How one changed file is covered, or why it is not."""
+
+    rules: list[str] = field(default_factory=list)
+    tests: set[str] = field(default_factory=set)
+    tools: tuple[str, ...] = ()
+    reason: tuple[str, str] | None = None
+
+
+class _Mapper:
+    """Maps changed files onto tests, caching each file's search across the change set."""
+
+    def __init__(self, corpus: Corpus) -> None:
+        self._corpus = corpus
+        self._test_refs: dict[str, frozenset[str]] = {}
+        self._module_refs: dict[str, frozenset[str]] = {}
+
+    def _needles(self, relative: str) -> _Needles:
+        return _needles(relative, self._corpus.basename_counts)
+
+    def referencing_tests(self, relative: str) -> frozenset[str]:
+        """Test files that name or import ``relative``."""
+        if relative not in self._test_refs:
+            needles = self._needles(relative)
+            self._test_refs[relative] = frozenset(
+                test
+                for test, refs in self._corpus.tests.items()
+                if test != relative and _refers(refs, needles, self._corpus.module_names)
+            )
+        return self._test_refs[relative]
+
+    def referencing_modules(self, relative: str) -> frozenset[str]:
+        """Non-test sources that name or import ``relative``."""
+        if relative not in self._module_refs:
+            needles = self._needles(relative)
+            self._module_refs[relative] = frozenset(
+                module
+                for module, refs in self._corpus.modules.items()
+                if module != relative and _refers(refs, needles, self._corpus.module_names)
+            )
+        return self._module_refs[relative]
+
+    def mirror_tests(self, relative: str) -> set[str]:
+        path = PurePosixPath(relative)
+        mirror = _mirror_dir(path)
+        if mirror is None or path.stem == _PACKAGE_INIT_STEM:
+            return set()
+        return {
+            test_path
+            for filename, test_paths in self._corpus.index.items()
+            if _named(path.stem, filename)
+            for test_path in test_paths
+            if PurePosixPath(test_path).parent.as_posix() == mirror
+        }
+
+    def own_tests(self, relative: str) -> tuple[set[str], str | None]:
+        """A file's own tests: its conftest subtree, or its mirror plus its references.
+
+        Returns the tests and, for the root conftest, why no subtree can cover it.
+        """
+        path = PurePosixPath(relative)
+        if path.name == _CONFTEST and path.parts[0] == _TEST_ROOT:
+            subtree = path.parent.as_posix()
+            if subtree == _TEST_ROOT:
+                return set(), f"`{relative}` is loaded by every test: its subtree is the suite"
+            return {subtree}, None
+        return self.mirror_tests(relative) | self.referencing_tests(relative), None
+
+    def dependent_tests(self, relative: str) -> tuple[set[str], str | None]:
+        """A dependent's own unit tests: its mirror, else the tests that refer to it.
+
+        Not every test that touches a hub such as the CLI: a change reaches a
+        dependent through what the dependent does, which its own tests cover.
+        """
+        path = PurePosixPath(relative)
+        if path.name == _CONFTEST:
+            return self.own_tests(relative)
+        mirrored = self.mirror_tests(relative)
+        return (mirrored or set(self.referencing_tests(relative))), None
+
+    def cover(self, relative: str, exists: bool, rule: DeclaredRule | None) -> _Cover:
+        """Every test a change to ``relative`` can break, or why that cannot be targeted.
+
+        A file whose reach is too broad still runs its OWN tests when they
+        fit the cap, so the agent gets that signal, but it stays unmapped: the
+        rest of its reach is the coordinator's full gate.
+        """
+        cover = _Cover()
+        path = PurePosixPath(relative)
+        if rule is not None:
+            cover.rules.append(RULE_DECLARED)
+            cover.tests.update(rule.tests)
+            cover.tools = rule.tools
+        if _is_test_file(path):
+            cover.rules.append(RULE_SELF if exists else RULE_DELETED_TEST)
+            if exists:
+                cover.tests.add(relative)
+            return cover
+
+        own, broad = self.own_tests(relative)
+        if broad is not None:
+            cover.reason = (REASON_TOO_BROAD, broad)
+            return cover
+        if own:
+            cover.rules.append(RULE_SUBTREE if path.name == _CONFTEST else RULE_REFERENCE)
+            cover.tests.update(own)
+        if len(cover.tests) > MAX_IMPORT_SELECTION:
+            cover.reason = (REASON_TOO_BROAD, self._too_broad(len(cover.tests), "its own tests"))
+            cover.tests.clear()
+            return cover
+
+        dependents = self.referencing_modules(relative)
+        if dependents and not exists:
+            named = ", ".join(sorted(dependents)[:_NAMED_DEPENDENTS])
+            cover.reason = (
+                REASON_STILL_REFERENCED,
+                f"deleted, but {len(dependents)} source file(s) still refer to it: {named}",
+            )
+            return cover
+        reach, broad = self._reach(cover.tests, dependents)
+        if broad is not None:
+            cover.reason = (REASON_TOO_BROAD, broad)
+            return cover
+        if dependents:
+            cover.rules.append(RULE_DEPENDENT)
+        cover.tests = reach
+
+        if not exists and not cover.tests:
+            cover.rules.append(RULE_DELETED_UNREFERENCED)
+        elif not cover.tests and not cover.tools:
+            cover.reason = (REASON_UNCOVERED, "no test, declared rule or dependent covers it")
+        return cover
+
+    def _reach(self, own: set[str], dependents: frozenset[str]) -> tuple[set[str], str | None]:
+        """``own`` plus each dependent's tests, or why that reach is too broad to target.
+
+        One hop: a dependent's own tests are where a change to what it
+        consumes shows first. Reach beyond that is the coordinator's full
+        gate, since through a registry that imports every handler it is the
+        whole suite.
+        """
+        reach = set(own)
+        for module in sorted(dependents):
+            tests, broad = self.dependent_tests(module)
+            if broad is not None:
+                return reach, f"reached through {module}: {broad}"
+            reach.update(tests)
+            if len(reach) > MAX_IMPORT_SELECTION:
+                return reach, self._too_broad(len(reach), f"its tests through {module}")
+        return reach, None
+
+    @staticmethod
+    def _too_broad(count: int, via: str) -> str:
+        return (
+            f"{via} pass {MAX_IMPORT_SELECTION} test files ({count} and counting): the "
+            "suite by another name, so the coordinator's full gate covers it"
+        )
+
+
+def _prune_covered(selected: set[str]) -> list[str]:
+    """Drop test files a selected directory already runs, so nothing runs twice."""
+    directories = [entry for entry in selected if not entry.endswith(_PYTHON_SUFFIX)]
+    return sorted(
+        entry
+        for entry in selected
+        if not any(entry != d and entry.startswith(f"{d}/") for d in directories)
+    )
 
 
 def select_tests(
-    changed: list[str],
-    index: dict[str, list[str]],
-    root: Path,
-    rules: list[DeclaredRule],
+    changed: list[str], corpus: Corpus, root: Path, rules: list[DeclaredRule]
 ) -> Selection:
-    """Account for every changed file: tests, a declared rule, or unmapped."""
+    """Account for every changed file: every test it can break, or why it is unmapped.
+
+    A file's coverage is the UNION of its declared rule, its mirrored tests,
+    the tests that name or import it, and the tests of every source that
+    reaches it. Stopping at the first hit reported "0 unmapped" for a module
+    whose dependents' tests never ran (delta review N3).
+    """
     selection = Selection()
     selected: set[str] = set()
-    sources: dict[str, str] | None = None
+    mapper = _Mapper(corpus)
 
     for relative in changed:
-        path = Path(relative)
-        exists = (root / path).is_file()
+        path = PurePosixPath(relative)
+        exists = (root / relative).is_file()
         if not exists:
             selection.deleted.append(relative)
         if path.suffix != _PYTHON_SUFFIX:
             selection.non_python.append(relative)
 
         rule = next((r for r in rules if fnmatch.fnmatch(relative, r.glob)), None)
-        if rule is not None:
-            selected.update(rule.tests)
-            selection.mapping.append(
-                {
-                    "file": relative,
-                    "rule": RULE_DECLARED,
-                    "tests": list(rule.tests),
-                    "tools": list(rule.tools),
-                }
-            )
-            continue
-
-        if path.suffix != _PYTHON_SUFFIX:
+        cover = mapper.cover(relative, exists, rule)
+        selected.update(cover.tests)
+        if cover.reason is not None:
+            code, detail = cover.reason
             selection.unmapped.append(relative)
+            selection.reasons[relative] = {
+                "reason": code,
+                "detail": detail,
+                "tests_run": sorted(cover.tests),
+            }
             continue
 
-        is_test = path.parts[0] == _TEST_ROOT and path.name.startswith(_TEST_PREFIX)
-        if is_test:
-            rule_name = RULE_SELF if exists else RULE_DELETED_TEST
-            tests = [relative] if exists else []
-        else:
-            if sources is None:
-                sources = _load_sources(root, index)
-            found_rule, tests = _python_tests(relative, index, sources)
-            if found_rule is None and not exists and _dotted_name(path) is not None:
-                found_rule = RULE_DELETED_UNREFERENCED
-            if found_rule is None or found_rule == _TOO_BROAD:
-                selection.unmapped.append(relative)
-                continue
-            rule_name = found_rule
+        entry: dict[str, Any] = {
+            "file": relative,
+            "rules": cover.rules,
+            "tests": sorted(cover.tests),
+        }
+        if cover.tools:
+            entry["tools"] = list(cover.tools)
+        selection.mapping.append(entry)
 
-        selected.update(tests)
-        selection.mapping.append({"file": relative, "rule": rule_name, "tests": tests})
-
-    selection.selected = sorted(selected)
+    selection.selected = _prune_covered(selected)
     return selection
 
 
@@ -497,6 +816,7 @@ def build_report(
         "selected": selection.selected,
         "mapping": selection.mapping,
         "unmapped": selection.unmapped,
+        "unmapped_reasons": selection.reasons,
         "unmapped_allowed": allow_unmapped,
         "deleted": selection.deleted,
         "non_python": selection.non_python,
@@ -574,7 +894,11 @@ def _verdict(
     if problems:
         return failure_report("; ".join(problems)), EXIT_OPERATIONAL
 
-    selection = select_tests(changed, build_test_index(root), root, rules)
+    tree, error = tree_files(root, git=run_git)
+    if tree is None:
+        return failure_report(error or "the tree could not be listed"), EXIT_OPERATIONAL
+
+    selection = select_tests(changed, build_corpus(root, tree), root, rules)
     exit_code, output = run_pytest(selection.selected, root) if selection.selected else (None, "")
     report = build_report(
         base=base,
@@ -603,7 +927,11 @@ def _describe(report: dict[str, Any]) -> str:
         line = f"no tests ran ({scope})"
     if unmapped:
         verdict = "ALLOWED" if report["unmapped_allowed"] else "FAILS the run"
-        line += f"\nunmapped ({verdict}): " + ", ".join(unmapped)
+        reasons = report.get("unmapped_reasons", {})
+        line += f"\nunmapped ({verdict}):"
+        for name in unmapped:
+            why = reasons.get(name, {})
+            line += f"\n  {name} [{why.get('reason', REASON_UNCOVERED)}] {why.get('detail', '')}"
     return line
 
 
