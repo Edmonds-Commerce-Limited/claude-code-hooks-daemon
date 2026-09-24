@@ -41,6 +41,29 @@ config_changes:
       recommended: true
       dormant: false
 
+    - key: handlers.session_start.failsafe_cron_session_advisor
+      description: >-
+        The failsafe recovery cron's SessionStart counterpart (Plan 00394). A
+        session used to be told to create the failsafe cron only at its first
+        plan write, so a session that stalled before one had no recovery net.
+        At the start of every NEW session this gives the same CronList-first
+        reconcile and canonical prompt as recovery_cron_advisor. Silent on a
+        resumed session, when recovery_cron_advisor is disabled (its switch
+        covers both), and when the failsafe cron is declared under an enabled
+        persistent_crons, where persistent_cron_assertor states it instead.
+      example_yaml: |
+        handlers:
+          session_start:
+            failsafe_cron_session_advisor:
+              enabled: true
+              priority: 70
+      migration_note: >-
+        On by default, advisory only, never blocks. To turn the failsafe cron's
+        advice off everywhere, disable recovery_cron_advisor; this handler
+        follows it.
+      recommended: true
+      dormant: false
+
   renamed: []
 
   removed: []

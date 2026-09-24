@@ -126,6 +126,15 @@ If nothing matches, report "no eligible issue" and stop. That is a success.
 Say how many issues the whitelist skipped, so "nothing to do" and "nothing
 allowed through" are distinguishable in the tick's output.
 
+**When the only reason is that every eligible issue is `agent-needs-human`,
+say so with the `[awaiting-human]` token**: `STOPPING BECAUSE: [awaiting-human] every eligible issue is agent-needs-human (#14, #22, …)`. Use it only when
+nothing else in the session can move either — the token is session-wide. It
+arms the blockage marker, and the daemon then drops later `issue-sdlc` ticks
+before they reach the model, at zero token cost, until a real prompt arrives
+or the marker expires (Plan 00388). Without it a backlog parked on a human
+costs a full model turn every hour. This works only for a cron whose prompt
+still starts with the `[tick:job:issue-sdlc]` line the daemon supplies.
+
 ### Recovering a stalled issue — establish the state, do not infer it
 
 **The label is a claim by a process that died. Trust git instead.** This path has
