@@ -658,6 +658,145 @@ class TestMultiLineQuoting:
         assert [v.line for v in violations] == [3]
 
 
+class TestCaseInsideSubstitution:
+    """A ``case`` pattern's ``)`` does not close the ``$(...)`` it sits in.
+
+    Counting parens alone closed the substitution at the first pattern, so
+    the rest of the ``case`` was judged as top-level commands: an echo in a
+    later clause read as an unredirected stdout write.
+    """
+
+    def test_a_multi_line_case_capture_is_one_command(self, tmp_path: Path) -> None:
+        src = _write(
+            tmp_path,
+            "out.sh",
+            "#!/bin/bash\n"
+            "print_info() {\n"
+            '    local kind=$(case "$1" in\n'
+            "        a) echo alpha ;;\n"
+            "        b)\n"
+            "            echo beta ;;\n"
+            "    esac)\n"
+            '    echo "done" >&2\n'
+            '    echo "stray"\n'
+            "}\n",
+        )
+        violations = audit_files([src])
+        assert _rules(violations) == ["log-helper-stdout"]
+        assert [v.line for v in violations] == [9]
+
+    def test_the_capture_joins_onto_its_first_line_and_ends_at_esac(self) -> None:
+        from audit_capture_corruption import _logical_lines
+
+        logical = _logical_lines(
+            [
+                '    local kind=$(case "$1" in',
+                "        a) echo alpha ;;",
+                "        b)",
+                "            echo beta ;;",
+                "    esac)",
+                '    echo "stray"',
+            ]
+        )
+        assert logical.unclosed_at is None
+        assert logical.lines[1:5] == ["", "", "", ""]
+        assert logical.lines[0].endswith("esac)")
+        assert logical.lines[5] == '    echo "stray"'
+
+    def test_a_pattern_with_the_optional_leading_paren(self, tmp_path: Path) -> None:
+        src = _write(
+            tmp_path,
+            "out.sh",
+            "#!/bin/bash\n"
+            "print_info() {\n"
+            '    local kind=$(case "$1" in\n'
+            "        (a) echo alpha ;;\n"
+            "        b)\n"
+            "            echo beta ;;\n"
+            "        (c|d)\n"
+            "            echo gamma ;;\n"
+            "    esac)\n"
+            '    echo "stray"\n'
+            "}\n",
+        )
+        violations = audit_files([src])
+        assert _rules(violations) == ["log-helper-stdout"]
+        assert [v.line for v in violations] == [10]
+
+    def test_a_case_nested_in_a_substitution_inside_a_case_clause(self, tmp_path: Path) -> None:
+        src = _write(
+            tmp_path,
+            "out.sh",
+            "#!/bin/bash\n"
+            "print_info() {\n"
+            '    local kind=$(case "$1" in\n'
+            '        a) $(case "$2" in\n'
+            "               b) : ;;\n"
+            "           esac)\n"
+            "            echo inner ;;\n"
+            "    esac)\n"
+            '    echo "stray"\n'
+            "}\n",
+        )
+        violations = audit_files([src])
+        assert _rules(violations) == ["log-helper-stdout"]
+        assert [v.line for v in violations] == [9]
+
+    def test_the_nested_one_line_form_closes_where_bash_closes_it(self) -> None:
+        from audit_capture_corruption import _logical_lines
+
+        line = "    k=$(case x in a) $(case y in b) ;; esac) ;; esac)"
+        logical = _logical_lines([line, '    echo "stray"'])
+        assert logical.unclosed_at is None
+        assert logical.lines == [line, '    echo "stray"']
+
+    def test_the_last_clause_may_omit_its_double_semicolon(self, tmp_path: Path) -> None:
+        src = _write(
+            tmp_path,
+            "out.sh",
+            "#!/bin/bash\n"
+            "print_info() {\n"
+            '    local kind=$(case "$1" in\n'
+            "        a)\n"
+            "            echo alpha\n"
+            "    esac)\n"
+            '    echo "stray"\n'
+            "}\n",
+        )
+        violations = audit_files([src])
+        assert _rules(violations) == ["log-helper-stdout"]
+        assert [v.line for v in violations] == [7]
+
+    def test_extglob_parens_inside_a_pattern_are_balanced_before_its_close(self) -> None:
+        from audit_capture_corruption import _logical_lines
+
+        lines = [
+            '    k=$(case "$1" in',
+            "        @(a|b)) echo ab ;&",
+            "        (+(c)) echo c ;;",
+            "    esac)",
+            '    echo "stray"',
+        ]
+        logical = _logical_lines(lines)
+        assert logical.unclosed_at is None
+        assert logical.lines[1:4] == ["", "", ""]
+        assert logical.lines[4] == '    echo "stray"'
+
+    def test_the_word_case_as_an_argument_starts_no_case(self, tmp_path: Path) -> None:
+        src = _write(
+            tmp_path,
+            "out.sh",
+            "#!/bin/bash\n"
+            "print_info() {\n"
+            "    local word=$(echo case in a)\n"
+            '    echo "stray"\n'
+            "}\n",
+        )
+        violations = audit_files([src])
+        assert _rules(violations) == ["log-helper-stdout"]
+        assert [v.line for v in violations] == [4]
+
+
 # ── Real-repo smoke ────────────────────────────────────────────────
 
 

@@ -56,7 +56,7 @@ import argparse
 import json
 import re
 import sys
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -80,6 +80,16 @@ _ANSI = "$'"
 _BACKTICK = "`"
 # Characters after which a `#` starts a comment and `((` starts arithmetic.
 _WORD_BREAKS = frozenset(" \t;&|(")
+# A `case` inside $( ... ) moves through these phases; only a `)` that is not
+# a pattern's own terminator may close the substitution.
+_CASE_SUBJECT = "subject"
+_CASE_PATTERN = "pattern"
+_CASE_BODY = "body"
+_CASE_WORD_RE = re.compile(r"(case|in|esac)(?=[\s;&|()]|$)")
+_CLAUSE_ENDS = (";;&", ";;", ";&")
+# Characters and reserved words after which a word is in command position.
+_COMMAND_STARTS = frozenset(";&|({)")
+_COMMAND_KEYWORDS = frozenset({"then", "do", "else", "elif", "if", "while", "until", "!"})
 # `<<` or `<<-`, then a delimiter word that may be quoted or backslashed.
 _HEREDOC_OPERATOR_RE = re.compile(r"<<-?[ \t]*((?:'[^']*'|\"[^\"]*\"|\\.|[^\s;&|<>()'\"\\])+)")
 
@@ -190,12 +200,30 @@ class FunctionDef:
 
 
 @dataclass
+class _Case:
+    """One open ``case ... esac`` inside a substitution."""
+
+    phase: str = _CASE_SUBJECT
+    pattern_started: bool = False
+    pattern_depth: int = 0
+
+
+@dataclass
 class _Span:
     """An open quoting, substitution or arithmetic span on the tokeniser stack."""
 
     kind: str
     start_line: int
     depth: int = 0
+    cases: list[_Case] = field(default_factory=list)
+
+
+def _at_command_position(line: str, i: int) -> bool:
+    """Is the word at ``i`` where a command, and so a reserved word, may start?"""
+    before = line[:i].rstrip()
+    if not before or before[-1] in _COMMAND_STARTS:
+        return True
+    return before.split()[-1] in _COMMAND_KEYWORDS
 
 
 @dataclass
@@ -250,6 +278,61 @@ class _ShellTokeniser:
         if self.stack[-1].depth == 0:
             self.stack.pop()
 
+    def _case_step(self, line: str, i: int) -> int | None:
+        """Track ``case ... esac`` inside the substitution on top of the stack.
+
+        Returns the index to resume from when ``line[i]`` was consumed as
+        ``case`` syntax, or ``None`` to fall through to ordinary scanning. A
+        pattern's closing ``)`` -- after an optional leading ``(`` and any
+        balanced extglob parens -- is consumed here, so it never reaches the
+        paren count that closes the substitution.
+        """
+        span = self.stack[-1]
+        clause = span.cases[-1] if span.cases else None
+        word = None
+        if i == 0 or line[i - 1] in _WORD_BREAKS or line[i - 1] == ")":
+            word = _CASE_WORD_RE.match(line, i)
+        name = word.group(1) if word else None
+
+        if clause is None or clause.phase == _CASE_BODY:
+            if word and _at_command_position(line, i):
+                if name == "case":
+                    span.cases.append(_Case())
+                    return word.end()
+                if name == "esac" and clause is not None:
+                    span.cases.pop()
+                    return word.end()
+            ender = next((e for e in _CLAUSE_ENDS if line.startswith(e, i)), None)
+            if clause is not None and ender:
+                span.cases[-1] = _Case(phase=_CASE_PATTERN)
+                return i + len(ender)
+            return None
+
+        if clause.phase == _CASE_SUBJECT:
+            if word and name == "in":
+                clause.phase = _CASE_PATTERN
+                return word.end()
+            return None
+
+        if word and name == "esac":
+            span.cases.pop()
+            return word.end()
+        ch = line[i]
+        if ch == "(":
+            if clause.pattern_started:
+                clause.pattern_depth += 1
+            clause.pattern_started = True
+            return i + 1
+        if ch == ")":
+            if clause.pattern_depth:
+                clause.pattern_depth -= 1
+            else:
+                clause.phase = _CASE_BODY
+            return i + 1
+        if not ch.isspace():
+            clause.pattern_started = True
+        return None
+
     def scan(self, line: str, lineno: int) -> tuple[bool, int | None]:
         """Advance over one physical line.
 
@@ -296,6 +379,9 @@ class _ShellTokeniser:
                 continue
             elif ch in (_SQ, _DQ):
                 self.stack.append(_Span(ch, lineno))
+            elif top == _SUBST and (resume := self._case_step(line, i)) is not None:
+                i = resume
+                continue
             elif line.startswith("((", i) and (i == 0 or line[i - 1] in _WORD_BREAKS):
                 self.stack.append(_Span(_ARITH, lineno, depth=2))
                 i += 2

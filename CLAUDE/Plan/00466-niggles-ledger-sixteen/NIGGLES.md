@@ -31,7 +31,9 @@ Checking the rest of the file for the same one-line-at-a-time assumption found t
 
 A heredoc operator now counts only in code. A heredoc body starts after the first newline that is real shell syntax.
 
-Because quote state now decides which lines are judged, a file whose quote, substitution or heredoc never closes is reported as `unparseable-shell`. Before, it was silently audited as one run-on line. On all 65 scanned scripts, the new tokeniser extracts the same 227 functions and the same captured names as before, and reports no unclosed spans. The known limit: a `case` pattern's unbalanced `)` inside a `$(...)` can close that substitution early. Nothing in the scanned scripts has that shape. Report: [subagent-reports/260924-n466-n20-opus-5-5.md](subagent-reports/260924-n466-n20-opus-5-5.md).
+Because quote state now decides which lines are judged, a file whose quote, substitution or heredoc never closes is reported as `unparseable-shell`. Before, it was silently audited as one run-on line. Inside a `$(...)` it also tracks `case ... esac`, so a pattern's `)` never closes the substitution. That covers a pattern's optional leading `(`, extglob parens, `;;`, `;&` and `;;&`, a last clause without `;;`, and a `case` nested in a substitution inside a clause. `case` counts as a reserved word only where a command can start.
+
+On all 65 scanned scripts, the new tokeniser extracts the same 227 functions and the same captured names as before, and reports no unclosed spans. Report: [subagent-reports/260924-n466-n20-opus-5-5.md](subagent-reports/260924-n466-n20-opus-5-5.md).
 
 N16 is filed on the unmerged `worktree-n466-guard-defects` branch; it joins this file at integration.
 
