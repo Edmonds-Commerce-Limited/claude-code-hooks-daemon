@@ -27,6 +27,7 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import textwrap
@@ -605,6 +606,135 @@ class TestADetachedBuildIsBoundedAndNamed:
         log = Path(out["log"][0])
         assert f"pid {pid}" in log.read_text(), "the log names the build's pid"
         _wait_for_lock_release(daemon_dir)
+
+
+def _strays(pattern: str) -> list[str]:
+    """Processes whose whole command line is ``pattern`` (pgrep excludes itself)."""
+    probe = subprocess.run(  # nosec B603 B607 - fixed argv, no shell
+        ["pgrep", "-fx", pattern], capture_output=True, text=True, check=False
+    )
+    return probe.stdout.split()
+
+
+class TestOnlyATimeoutIsATimeout:
+    """Re-review N2: a shutdown or a manual ``kill`` of the running pid is not
+    a timeout. It records no failure, so the next hook retries."""
+
+    def test_a_term_inside_the_bound_records_no_failure_and_allows_retry(
+        self, tmp_path: Path
+    ) -> None:
+        daemon_dir = _daemon_dir(tmp_path)
+        env = _env(tmp_path, with_uv=_stub_uv(tmp_path, sleep=5))
+        first = _fields(_run("hook", daemon_dir, env).stdout)
+        time.sleep(1)
+        pid = int(_fields(_run("hook", daemon_dir, env).stdout)["pid"][0])
+
+        os.kill(pid, signal.SIGTERM)
+        _wait_for_lock_release(daemon_dir)
+
+        log = Path(first["log"][0]).read_text()
+        assert _markers(daemon_dir) == [], log
+        assert "timed out" not in log
+        assert "stopped by a signal" in log
+        assert _fields(_run("hook", daemon_dir, env).stdout)["state"] == ["started"]
+        _wait_for_lock_release(daemon_dir)
+
+    def test_a_stop_after_the_venv_resolves_is_not_a_failure(self, tmp_path: Path) -> None:
+        daemon_dir = _daemon_dir(tmp_path)
+        env = _env(tmp_path, with_uv=_stub_uv(tmp_path))
+        assert _run("repair", daemon_dir, env).returncode == 0
+        assert _resolves(daemon_dir, env)
+
+        judged = subprocess.run(  # nosec B603 - fixed argv, no shell
+            [
+                BASH,
+                "-c",
+                f'source "{DRIVER}"\n'
+                f'_VB_CHILD_DAEMON_DIR="{daemon_dir}"\n'
+                f'_VB_CHILD_MARKER="{daemon_dir}/untracked/.venv-bootstrap-fp.failed"\n'
+                "_VB_CHILD_INPUTS=inputs\n_VB_CHILD_STARTED=1\n_VB_CHILD_BOUND=1\n"
+                "_vb_judge_stop 143",
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=_TIMEOUT_SECONDS,
+            check=False,
+        )
+
+        assert judged.returncode == 0, judged.stderr
+        assert _markers(daemon_dir) == []
+        assert "timed out" not in judged.stderr
+
+
+class TestTheBoundHoldsWithoutTimeout:
+    """Re-review N3: stock macOS has no ``timeout``, ``setsid`` or ``flock``.
+    The bound must still hold there, or the heartbeat keeps a hung build's
+    lock fresh for ever."""
+
+    def test_a_hung_build_ends_failed_with_no_timeout_binary(self, tmp_path: Path) -> None:
+        daemon_dir = _daemon_dir(tmp_path)
+        env = _env(
+            tmp_path,
+            with_uv=_stub_uv(tmp_path, sleep=60),
+            extra={
+                "HOOKS_DAEMON_VENV_BUILD_TIMEOUT": "2",
+                "HOOKS_DAEMON_VENV_LOCK_HEARTBEAT_SECONDS": "1",
+            },
+        )
+        for tool in ("timeout", "setsid", "flock"):
+            (tmp_path / "tools" / tool).unlink()
+
+        first = _fields(_run("hook", daemon_dir, env).stdout)
+        assert first["state"] == ["started"]
+        _wait_for_path_gone(daemon_dir / "untracked" / ".venv-bootstrap.lock.d")
+
+        assert len(_markers(daemon_dir)) == 1
+        assert "timed out after 2s" in Path(first["log"][0]).read_text()
+        assert _fields(_run("hook", daemon_dir, env).stdout)["state"] == ["failed"]
+
+
+class TestNoStrayHeartbeats:
+    """Re-review N6: a heartbeat is only for a holder that keeps the lock, and
+    stopping one stops its ``sleep`` too."""
+
+    def test_failed_state_hooks_start_no_heartbeat(self, tmp_path: Path) -> None:
+        daemon_dir = _daemon_dir(tmp_path)
+        env = _env(
+            tmp_path,
+            with_uv=_stub_uv(tmp_path, fail=True),
+            extra={
+                "HOOKS_DAEMON_VENV_LOCK_BACKEND": "mkdir",
+                "HOOKS_DAEMON_VENV_LOCK_HEARTBEAT_SECONDS": "97",
+            },
+        )
+        assert _fields(_run("hook", daemon_dir, env).stdout)["state"] == ["started"]
+        _wait_for_path_gone(daemon_dir / "untracked" / ".venv-bootstrap.lock.d")
+
+        for _ in range(3):
+            assert _fields(_run("hook", daemon_dir, env).stdout)["state"] == ["failed"]
+
+        assert _strays("sleep 97") == []
+
+    def test_release_stops_the_heartbeat_and_its_sleep(self, tmp_path: Path) -> None:
+        daemon_dir = _daemon_dir(tmp_path)
+        env = _env(
+            tmp_path,
+            with_uv=None,
+            extra={
+                "HOOKS_DAEMON_VENV_LOCK_BACKEND": "mkdir",
+                "HOOKS_DAEMON_VENV_LOCK_HEARTBEAT_SECONDS": "89",
+            },
+        )
+
+        result = _source_venv_sh(
+            # The heartbeat must be asleep when the release comes.
+            f'acquire_venv_lock "{daemon_dir}"\nsleep 1\nrelease_venv_lock\nsleep 0.5',
+            env,
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert _strays("sleep 89") == []
 
 
 class TestRepairWaitsOutAHookStartedBuild:

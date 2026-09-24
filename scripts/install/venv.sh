@@ -357,6 +357,8 @@ _VENV_LOCK_BACKEND=""
 _VENV_LOCK_FD=""
 _VENV_LOCK_DIR=""
 _VENV_LOCK_HEARTBEAT_PID=""
+# Set by venv_heartbeat_start.
+VENV_HEARTBEAT_PID=""
 
 #
 # venv_bootstrap_switched_off_by() - Which setting switches venv bootstrap off.
@@ -443,35 +445,80 @@ _venv_lock_wait_bound() {
 }
 
 #
-# _venv_lock_start_heartbeat() - Keep a mkdir lock fresh while this process lives.
+# venv_heartbeat_seconds() - The heartbeat interval in seconds, validated.
 #
-# Touches the lock directory every HOOKS_DAEMON_VENV_LOCK_HEARTBEAT_SECONDS
-# until this process exits or the directory goes. It writes nothing to the
-# caller's streams (a command substitution capturing the caller must not wait
-# on it); what it has to say goes to a file inside the lock directory.
-#
-_venv_lock_start_heartbeat() {
-    local lock_dir="$1" owner="$$"
+venv_heartbeat_seconds() {
     local interval="${HOOKS_DAEMON_VENV_LOCK_HEARTBEAT_SECONDS:-$VENV_LOCK_HEARTBEAT_SECONDS_DEFAULT}"
-    (
-        # kill -0's own complaint, once the owner is gone, is the loop's exit.
-        while _hb_probe="$(kill -0 "$owner" 2>&1)" && [ -d "$lock_dir" ]; do
-            touch "$lock_dir"
-            sleep "$interval"
-        done
-    ) < /dev/null > /dev/null 2>> "$lock_dir/heartbeat.log" &
-    _VENV_LOCK_HEARTBEAT_PID="$!"
+    if [[ ! "$interval" =~ ^[1-9][0-9]*$ ]]; then
+        print_warning "ensure_venv: HOOKS_DAEMON_VENV_LOCK_HEARTBEAT_SECONDS must be a positive number of seconds, got '$interval'; using $VENV_LOCK_HEARTBEAT_SECONDS_DEFAULT"
+        interval="$VENV_LOCK_HEARTBEAT_SECONDS_DEFAULT"
+    fi
+    echo "$interval"
 }
 
 #
-# _venv_lock_stop_heartbeat() - Stop this process's heartbeat, if it runs one.
+# venv_heartbeat_start() - Keep a path's mtime fresh while this process lives.
+#
+# Touches $1 every venv_heartbeat_seconds until this process exits or $1 goes,
+# and sets VENV_HEARTBEAT_PID for venv_heartbeat_stop (a global, not stdout: a
+# command substitution would make the heartbeat a child this shell cannot
+# wait for). It writes nothing to
+# the caller's streams (a command substitution capturing the caller must not
+# wait on it); its stderr goes to $2. Its sleep runs as a waited-on job, so a
+# stop signal reaches the loop at once and the loop takes the sleep with it:
+# no orphaned sleep outlives a stop.
+#
+venv_heartbeat_start() {
+    local path="$1" errors="$2" owner="$$" interval
+    interval="$(venv_heartbeat_seconds)"
+    (
+        _hb_sleep=""
+        # A sleep that already ended leaves kill nothing to do; its complaint
+        # is the only output, and it is not an error here.
+        trap '_hb_out="$(kill "$_hb_sleep" 2>&1)"; exit 0' TERM
+        # kill -0's own complaint, once the owner is gone, is the loop's exit.
+        while _hb_probe="$(kill -0 "$owner" 2>&1)" && [ -e "$path" ]; do
+            touch "$path"
+            sleep "$interval" &
+            _hb_sleep="$!"
+            wait "$_hb_sleep"
+        done
+    ) < /dev/null > /dev/null 2>> "$errors" &
+    VENV_HEARTBEAT_PID="$!"
+}
+
+#
+# venv_heartbeat_stop() - Stop a heartbeat venv_heartbeat_start returned, and wait for it.
+#
+venv_heartbeat_stop() {
+    local pid="$1" out rc=0
+    [ -n "$pid" ] || return 0
+    if ! out="$(kill "$pid" 2>&1)"; then
+        print_verbose "heartbeat $pid had already stopped: $out"
+        return 0
+    fi
+    # Reaped here, so its sleep is gone by the time this returns.
+    wait "$pid" || rc=$?
+    print_verbose "heartbeat $pid stopped (status $rc)"
+}
+
+#
+# _venv_lock_start_heartbeat() - Keep a mkdir lock fresh while this process holds it.
+#
+# Only for a holder that KEEPS the lock (acquire_venv_lock, adopt_venv_lock):
+# a try-then-release caller such as the hook path never runs one.
+#
+_venv_lock_start_heartbeat() {
+    local lock_dir="$1"
+    venv_heartbeat_start "$lock_dir" "$lock_dir/heartbeat.log"
+    _VENV_LOCK_HEARTBEAT_PID="$VENV_HEARTBEAT_PID"
+}
+
+#
+# _venv_lock_stop_heartbeat() - Stop this process's lock heartbeat, if it runs one.
 #
 _venv_lock_stop_heartbeat() {
-    [ -n "$_VENV_LOCK_HEARTBEAT_PID" ] || return 0
-    local out
-    if ! out="$(kill "$_VENV_LOCK_HEARTBEAT_PID" 2>&1)"; then
-        print_verbose "venv lock heartbeat $_VENV_LOCK_HEARTBEAT_PID had already stopped: $out"
-    fi
+    venv_heartbeat_stop "$_VENV_LOCK_HEARTBEAT_PID"
     _VENV_LOCK_HEARTBEAT_PID=""
 }
 
@@ -564,7 +611,6 @@ _venv_lock_try_once() {
     if mkdir_err="$(mkdir "$lock_dir" 2>&1)"; then
         echo "$$" > "$lock_dir/pid"
         _VENV_LOCK_DIR="$lock_dir"
-        _venv_lock_start_heartbeat "$lock_dir"
         return 0
     fi
     if [ ! -d "$lock_dir" ]; then
@@ -789,6 +835,11 @@ acquire_venv_lock() {
     while :; do
         rc=0
         _venv_lock_try_once "$daemon_dir" || rc=$?
+        if [ "$rc" -eq 0 ]; then
+            # Held for a build, however long it takes: keep it fresh.
+            _venv_lock_start_heartbeat "$lock_dir"
+            return 0
+        fi
         if [ "$rc" -ne "$VENV_LOCK_HELD" ]; then
             return "$rc"
         fi

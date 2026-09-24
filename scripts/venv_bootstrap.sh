@@ -51,10 +51,12 @@
 #   .venv-bootstrap.current       the record of the detached build holding the
 #                                 lock now (venv.sh VENV_BUILD_RECORD_NAME)
 #
-# A detached build is bounded: HOOKS_DAEMON_VENV_BUILD_TIMEOUT seconds (900),
-# then TERM, which records it as failed, then KILL. `timeout` (coreutils)
-# enforces it; where there is none (stock macOS), the build is unbounded and
-# the running state's pid is how to end it.
+# A detached build is bounded on every platform: HOOKS_DAEMON_VENV_BUILD_TIMEOUT
+# seconds (900) from the hook that started it, after which the child's own
+# watchdog sends the build's process group TERM, then KILL. Only that is
+# recorded as "timed out". Any other stop (a shutdown, someone ending the
+# running state's pid) records nothing, so the next hook retries, and no stop
+# is a failure when this path's venv resolves anyway.
 #
 # Retry policy: a failed build is NOT retried by the hook path until its
 # inputs signature changes (pyproject.toml or uv.lock content, the chosen
@@ -340,18 +342,11 @@ _vb_hook() {
     if command -v setsid > /dev/null; then
         detach=(setsid)
     fi
-    # timeout signals its whole process group, so uv and everything it runs
-    # end with the build (review I1).
-    local -a bounded=()
-    if command -v timeout > /dev/null; then
-        bounded=(timeout -k "$VENV_BUILD_KILL_GRACE_SECONDS" "$bound")
-    else
-        print_warning "venv bootstrap: no 'timeout' command here, so this background build is unbounded; the running state names its pid"
-    fi
     # Detached with every standard stream redirected, so the hook's stdout
     # pipe closes when this process exits and Claude Code does not wait on
-    # the build. The child inherits the lock descriptor.
-    HOOKS_DAEMON_VENV_LOCK_INHERITED="$spec" "${detach[@]}" ${bounded[@]+"${bounded[@]}"} \
+    # the build. The child inherits the lock descriptor, and bounds its own
+    # build (_vb_build), so the bound needs no `timeout` command.
+    HOOKS_DAEMON_VENV_LOCK_INHERITED="$spec" "${detach[@]}" \
         bash "$_VB_SCRIPTS_DIR/venv_bootstrap.sh" \
         build "$daemon_dir" "$VB_PYTHON" "$VB_FINGERPRINT" "$VB_INPUTS" \
         < /dev/null >> "$log" 2>&1 &
@@ -361,32 +356,108 @@ _vb_hook() {
     echo "log=$log"
 }
 
-# The detached child's own identity, for its exit and timeout traps.
+# The detached child's own identity, for its traps and its verdict on a stop.
 _VB_CHILD_DAEMON_DIR=""
 _VB_CHILD_LOG=""
 _VB_CHILD_MARKER=""
 _VB_CHILD_INPUTS=""
+_VB_CHILD_STARTED=""
+_VB_CHILD_BOUND=""
+# Process groups: the build job, and the watchdog that bounds it.
+_VB_CHILD_JOB=""
+_VB_CHILD_WATCHDOG=""
 
 #
-# _vb_build_exit() - Release the lock; drop the record if it is still ours.
+# _vb_signal_group() - Send a signal to a whole process group, reporting a miss.
+#
+_vb_signal_group() {
+    local sig="$1" pgid="$2" out
+    if ! out="$(kill "-$sig" -- "-$pgid" 2>&1)"; then
+        print_verbose "venv bootstrap: process group $pgid had already ended ($sig: $out)"
+    fi
+}
+
+#
+# _vb_watchdog() - Stop the build job's whole process group at its bound.
+#
+# Runs as its own job (process group), so stopping the watchdog takes its
+# sleep with it. TERM first, then KILL after the grace, which is how the bound
+# holds on every platform, with or without a `timeout` command (re-review N3):
+# the lock heartbeat keeps a LIVE holder fresh, so without this a hung build
+# would hold the lock for ever.
+#
+_vb_watchdog() {
+    local job="$1" wait_for="$2" grace="$3"
+    sleep "$wait_for"
+    print_warning "venv bootstrap: the build reached its ${_VB_CHILD_BOUND}s bound; stopping it"
+    _vb_signal_group TERM "$job"
+    sleep "$grace"
+    _vb_signal_group KILL "$job"
+}
+
+#
+# _vb_judge_stop() - Say what a stopped build means, and record it only if it is a failure.
+#
+# A build job ends by signal either at its bound (the watchdog) or because
+# something else stopped it: a shutdown, or someone ending the pid the running
+# state names. Only the first is a timeout, and neither is a failure when this
+# path's venv resolves anyway (re-review N2). A stop that is not a timeout
+# records nothing, so the next hook retries.
+#
+# Args: $1 the stopped job's status. Returns 0 (the venv resolves), 124 (timed
+# out, marker written) or 143 (stopped, nothing recorded).
+#
+_vb_judge_stop() {
+    local status="$1" resolved elapsed
+    if resolved="$(resolve_venv_python "$_VB_CHILD_DAEMON_DIR")"; then
+        rm -f "$_VB_CHILD_MARKER"
+        print_success "venv bootstrap: the build was stopped (status $status), but $resolved resolves for this path; nothing is recorded as failed."
+        return 0
+    fi
+    elapsed=$(($(date +%s) - _VB_CHILD_STARTED))
+    if [ "$elapsed" -ge "$_VB_CHILD_BOUND" ]; then
+        _vb_write_marker "$_VB_CHILD_MARKER" "$_VB_CHILD_INPUTS" "timeout"
+        print_error "venv bootstrap FAILED: the build timed out after ${_VB_CHILD_BOUND}s (HOOKS_DAEMON_VENV_BUILD_TIMEOUT) and was stopped."
+        print_error "  Hooks will not retry it until its inputs change. Find out what hung, then retry in the foreground: $_VB_CHILD_DAEMON_DIR/bin/hooks-daemon repair"
+        return 124
+    fi
+    print_warning "venv bootstrap: the build was stopped by a signal after ${elapsed}s, inside its ${_VB_CHILD_BOUND}s bound (a shutdown, or someone ending it)."
+    print_warning "  Nothing is recorded as failed, so the next hook starts it again."
+    return 143
+}
+
+#
+# _vb_build_stop() - TERM/HUP/INT to the build process: stop the job, then judge.
+#
+_vb_build_stop() {
+    trap - TERM HUP INT
+    local status=143
+    if [ -n "$_VB_CHILD_JOB" ]; then
+        _vb_signal_group TERM "$_VB_CHILD_JOB"
+        wait "$_VB_CHILD_JOB" || status=$?
+        _VB_CHILD_JOB=""
+    fi
+    local verdict=0
+    _vb_judge_stop "$status" || verdict=$?
+    exit "$verdict"
+}
+
+#
+# _vb_build_exit() - Leave nothing running, release the lock, drop our record.
 #
 _vb_build_exit() {
+    if [ -n "$_VB_CHILD_WATCHDOG" ]; then
+        _vb_signal_group TERM "$_VB_CHILD_WATCHDOG"
+    fi
+    if [ -n "$_VB_CHILD_JOB" ]; then
+        _vb_signal_group KILL "$_VB_CHILD_JOB"
+    fi
     release_venv_lock
     local recorded
     if recorded="$(venv_build_record_field "$_VB_CHILD_DAEMON_DIR" log)" \
             && [ "$recorded" = "$_VB_CHILD_LOG" ]; then
         rm -f "$(_vb_record_path "$_VB_CHILD_DAEMON_DIR")"
     fi
-}
-
-#
-# _vb_build_timed_out() - TERM from `timeout`: record the failure, then exit.
-#
-_vb_build_timed_out() {
-    _vb_write_marker "$_VB_CHILD_MARKER" "$_VB_CHILD_INPUTS" "timeout"
-    print_error "venv bootstrap FAILED: the build timed out after $(venv_build_timeout)s (HOOKS_DAEMON_VENV_BUILD_TIMEOUT) and was stopped."
-    print_error "  Hooks will not retry it until its inputs change. Find out what hung, then retry in the foreground: $_VB_CHILD_DAEMON_DIR/bin/hooks-daemon repair"
-    exit 124
 }
 
 _vb_build() {
@@ -398,12 +469,41 @@ _vb_build() {
 
     adopt_venv_lock "$daemon_dir" || exit 1
     trap _vb_build_exit EXIT
-    trap _vb_build_timed_out TERM
+    trap _vb_build_stop TERM HUP INT
 
-    print_info "venv bootstrap: build pid $$"
+    # The bound runs from when the hook started the build (its record).
+    local now remaining
+    now="$(date +%s)"
+    if ! _VB_CHILD_STARTED="$(venv_build_record_field "$daemon_dir" started)" \
+            || [[ ! "$_VB_CHILD_STARTED" =~ ^[0-9]+$ ]]; then
+        _VB_CHILD_STARTED="$now"
+    fi
+    if ! _VB_CHILD_BOUND="$(venv_build_record_field "$daemon_dir" bound)" \
+            || [[ ! "$_VB_CHILD_BOUND" =~ ^[1-9][0-9]*$ ]]; then
+        _VB_CHILD_BOUND="$(venv_build_timeout)"
+    fi
+    remaining=$((_VB_CHILD_STARTED + _VB_CHILD_BOUND - now))
+    [ "$remaining" -ge 1 ] || remaining=1
+
+    print_info "venv bootstrap: build pid $$, bound ${_VB_CHILD_BOUND}s"
     printf 'pid=%s\n' "$$" >> "$(_vb_record_path "$daemon_dir")"
 
-    _vb_build_under_lock "$daemon_dir" "$python" "$fingerprint" "$inputs"
+    # Job control gives the build and the watchdog a process group each, so
+    # the watchdog, a stop, or this process's exit can end uv and everything
+    # it started, never touching whatever group this process was started in.
+    local status=0
+    set -m
+    _vb_build_under_lock "$daemon_dir" "$python" "$fingerprint" "$inputs" &
+    _VB_CHILD_JOB="$!"
+    _vb_watchdog "$_VB_CHILD_JOB" "$remaining" "$VENV_BUILD_KILL_GRACE_SECONDS" < /dev/null &
+    _VB_CHILD_WATCHDOG="$!"
+    set +m
+    wait "$_VB_CHILD_JOB" || status=$?
+    _VB_CHILD_JOB=""
+    if [ "$status" -gt 128 ]; then
+        _vb_judge_stop "$status" || status=$?
+    fi
+    return "$status"
 }
 
 _vb_repair() {
@@ -467,4 +567,7 @@ _vb_main() {
     esac
 }
 
-_vb_main "$@"
+# Run only when executed; sourcing (tests of one function) defines and returns.
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+    _vb_main "$@"
+fi

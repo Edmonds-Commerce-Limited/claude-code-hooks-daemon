@@ -13,8 +13,10 @@ after it finishes starts the daemon. When a condition fails, nothing is
 changed and the message names each failed condition with its fix. A failed
 build is reported with its log and is not retried until its inputs change
 (including an in-place `uv self update`). A background build is bounded by
-`HOOKS_DAEMON_VENV_BUILD_TIMEOUT` (default 900 seconds), after which it is
-stopped and reported failed, and while it runs the message names its pid.
+`HOOKS_DAEMON_VENV_BUILD_TIMEOUT` (default 900 seconds) on every platform,
+macOS included, after which it is stopped and reported failed. While it runs,
+the message names its pid. Stopping it any other way (a shutdown, a manual
+kill) is not recorded as a failure, and the next hook retries.
 `HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP=1` or `CI=true` switches the automatic build
 off, and the message names which. An explicit `repair` still builds.
 
@@ -30,6 +32,8 @@ minutes.
 The skill's `install` no longer escalates to `--force` by itself. A clone with
 no working venv is repaired in place, and nothing is deleted. An explicit
 `install --force` keeps every environment's `untracked/venv-*` across the
-re-clone, in a directory git ignores. If the run is killed outright, the next
-`install` puts them back. Switching between the host and container views of one project no
-longer deletes the other view's venv.
+re-clone, in a directory git ignores. They go back only into a directory that
+holds a clone, and a newer copy already there is kept. If the run is killed
+outright, the next `install` puts them back once that run is gone. Switching
+between the host and container views of one project no longer deletes the
+other view's venv.

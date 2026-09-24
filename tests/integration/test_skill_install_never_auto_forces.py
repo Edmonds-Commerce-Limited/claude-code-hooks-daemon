@@ -15,8 +15,10 @@ installer records the ``FORCE`` it was given and mimics the real force path:
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
+import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Final
@@ -63,8 +65,9 @@ if [ -f "{box.root / 'installer-fails'}" ]; then
     echo "ERR simulated clone failure" >&2
     exit 3
 fi
-mkdir -p "$daemon_dir/untracked/{_FRESH_VENV}/bin"
+mkdir -p "$daemon_dir/untracked/{_FRESH_VENV}/bin" "$daemon_dir/bin"
 echo fresh > "$daemon_dir/untracked/{_FRESH_VENV}/built-by"
+echo "a cloned wrapper" > "$daemon_dir/bin/hooks-daemon"
 """)
     curl = box.root / "tools" / "curl"
     curl.write_text(f"""#!/bin/bash
@@ -95,8 +98,31 @@ def sandbox(tmp_path: Path) -> Iterator[Sandbox]:
     box.cleanup()
 
 
+#: A 1s heartbeat, so a dead run's aside dir goes quiet within seconds.
+_FAST_HEARTBEAT: Final[dict[str, str]] = {"HOOKS_DAEMON_VENV_LOCK_HEARTBEAT_SECONDS": "1"}
+#: Two missed beats: long enough for a dead owner's heartbeat to have stopped.
+_HEARTBEAT_SILENCE_SECONDS: Final[float] = 2.5
+
+
 def _skill_install(box: Sandbox, *args: str) -> subprocess.CompletedProcess[str]:
-    return box.run([BASH, str(SKILL_SCRIPTS / "install.sh"), *args])
+    return box.run([BASH, str(SKILL_SCRIPTS / "install.sh"), *args], extra_env=_FAST_HEARTBEAT)
+
+
+def _aside_dirs(box: Sandbox) -> list[Path]:
+    return sorted((box.project / ".claude").glob(".hooks-daemon-venvs.*"))
+
+
+def _dead_pid() -> int:
+    """The pid of a process that has already exited and been reaped."""
+    gone = subprocess.Popen(["true"])  # nosec B603 B607 - fixed argv
+    gone.wait()
+    return gone.pid
+
+
+def _this_host() -> str:
+    return subprocess.run(  # nosec B603 B607 - fixed argv, no shell
+        ["hostname"], capture_output=True, text=True, check=True
+    ).stdout.strip()
 
 
 def _installer_calls(box: Sandbox) -> list[str]:
@@ -221,16 +247,31 @@ class TestAnExplicitForceKeepsEveryVenv:
         assert result.returncode == 0, result.stdout + result.stderr
         assert (stale / "built-by").read_text() == "fresh\n"
 
-    def test_venvs_are_restored_even_when_the_installer_fails(self, sandbox: Sandbox) -> None:
+    def test_a_failed_install_keeps_the_venvs_aside_and_creates_no_venv_only_dir(
+        self, sandbox: Sandbox
+    ) -> None:
+        """Re-review N5: the installer removed the clone and then failed. Putting
+        the venvs back would create a daemon dir holding only venvs, which the
+        installer then refuses as "already installed". They stay aside, the
+        output says so, and the next successful run restores them."""
         other = sandbox.other_view_venv()
         before = snapshot(other)
         (sandbox.root / "installer-fails").touch()
 
-        result = _skill_install(sandbox, "--force")
+        failed = _skill_install(sandbox, "--force")
 
-        assert result.returncode != 0
+        assert failed.returncode != 0
+        assert not sandbox.clone.exists(), "no daemon dir holding only venvs"
+        [aside] = _aside_dirs(sandbox)
+        assert snapshot(aside / OTHER_VIEW_VENV) == before
+        assert str(aside) in failed.stdout + failed.stderr
+
+        (sandbox.root / "installer-fails").unlink()
+        result = _skill_install(sandbox)
+
+        assert result.returncode == 0, result.stdout + result.stderr
         assert snapshot(sandbox.clone / "untracked" / OTHER_VIEW_VENV) == before
-        assert not list((sandbox.project / ".claude").glob(".hooks-daemon-venvs.*"))
+        assert _aside_dirs(sandbox) == []
 
 
 class TestVenvsStrandedByAKilledForceAreRecovered:
@@ -243,7 +284,9 @@ class TestVenvsStrandedByAKilledForceAreRecovered:
         result = _skill_install(sandbox, "--force")
         assert result.returncode != 0
         (sandbox.root / "installer-killed").unlink()
-        [aside] = list((sandbox.project / ".claude").glob(".hooks-daemon-venvs.*"))
+        [aside] = _aside_dirs(sandbox)
+        # The killed run's heartbeat stops with it.
+        time.sleep(_HEARTBEAT_SILENCE_SECONDS)
         return aside
 
     def test_the_aside_directory_ignores_itself(self, sandbox: Sandbox) -> None:
@@ -268,6 +311,111 @@ class TestVenvsStrandedByAKilledForceAreRecovered:
         assert snapshot(other) == before
         assert not aside.exists()
         assert str(aside) in output, "the recovery must be announced"
+
+    def test_a_newer_venv_of_the_same_name_survives_a_force(self, sandbox: Sandbox) -> None:
+        """Re-review N1: while a copy sat stranded, its environment rebuilt the
+        venv. The next --force must keep the NEWER copy, and say why."""
+        other = sandbox.other_view_venv()
+        (other / "generation").write_text("OLD\n")
+        self._strand(sandbox)
+        (other / "bin").mkdir(parents=True)
+        (other / "generation").write_text("NEWER\n")
+
+        result = _skill_install(sandbox, "--force")
+
+        output = result.stdout + result.stderr
+        assert result.returncode == 0, output
+        assert (other / "generation").read_text() == "NEWER\n"
+        assert _aside_dirs(sandbox) == []
+        assert "stranded" in output.lower() and "newer" in output.lower(), output
+        assert "rebuilt for this environment" not in output
+
+    def test_a_stranded_copy_gives_way_to_the_current_venv(self, sandbox: Sandbox) -> None:
+        """A plain run in the #53 state (a clone, no venv for this path) finds a
+        dead run's aside dir holding an OLD copy of a venv that is in place."""
+        sandbox.stub_uv()
+        other = sandbox.other_view_venv()
+        (other / "generation").write_text("CURRENT\n")
+        aside = sandbox.project / ".claude" / ".hooks-daemon-venvs.DeAd01"
+        (aside / OTHER_VIEW_VENV / "bin").mkdir(parents=True)
+        (aside / OTHER_VIEW_VENV / "generation").write_text("OLD\n")
+        (aside / "owner").write_text(f"pid={_dead_pid()}\nhost={_this_host()}\n")
+        stale = time.time() - 10
+        os.utime(aside, (stale, stale))
+
+        result = _skill_install(sandbox)
+
+        output = result.stdout + result.stderr
+        assert result.returncode == 0, output
+        assert (other / "generation").read_text() == "CURRENT\n"
+        assert _aside_dirs(sandbox) == []
+        assert "newer copy is already in place" in output
+
+    def test_stranded_venvs_stay_aside_when_no_clone_can_take_them(self, sandbox: Sandbox) -> None:
+        """Re-review N5, for an adopted dir: a run that fails before installing
+        leaves them aside, released for the next run, and says so. (The killed
+        run had already removed the clone.)"""
+        other = sandbox.other_view_venv()
+        before = snapshot(other)
+        aside = self._strand(sandbox)
+        assert not sandbox.clone.exists()
+        (sandbox.root / "installer-fails").touch()
+
+        failed = _skill_install(sandbox)
+
+        assert failed.returncode != 0
+        assert not sandbox.clone.exists()
+        assert snapshot(aside / OTHER_VIEW_VENV) == before
+        assert str(aside) in failed.stdout + failed.stderr
+
+        (sandbox.root / "installer-fails").unlink()
+        result = _skill_install(sandbox)
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert snapshot(other) == before
+
+
+class TestALiveAsideDirIsNotTaken:
+    """Re-review N4: two overlapping runs (host and container) must not take
+    each other's aside dir. Only a dir whose owner is gone is adopted."""
+
+    def _aside_owned_by(self, sandbox: Sandbox, pid: int) -> Path:
+        aside = sandbox.project / ".claude" / ".hooks-daemon-venvs.LiVe01"
+        venv = aside / OTHER_VIEW_VENV
+        (venv / "bin").mkdir(parents=True)
+        (aside / ".gitignore").write_text("*\n")
+        (aside / "owner").write_text(f"pid={pid}\nhost={_this_host()}\n")
+        return aside
+
+    def test_an_aside_dir_whose_owner_lives_is_left_alone(self, sandbox: Sandbox) -> None:
+        sandbox.stub_uv()
+        owner = subprocess.Popen(["sleep", "30"])  # nosec B603 B607 - fixed argv
+        try:
+            aside = self._aside_owned_by(sandbox, owner.pid)
+            before = snapshot(aside)
+
+            result = _skill_install(sandbox)
+
+            output = result.stdout + result.stderr
+            assert result.returncode == 0, output
+            assert snapshot(aside) == before, "a live run's aside dir must not be touched"
+            assert not (sandbox.clone / "untracked" / OTHER_VIEW_VENV).exists()
+            assert str(aside) in output and "may still be running" in output.lower(), output
+        finally:
+            owner.kill()
+            owner.wait()
+
+    def test_an_aside_dir_whose_owner_is_gone_is_adopted(self, sandbox: Sandbox) -> None:
+        sandbox.stub_uv()
+        aside = self._aside_owned_by(sandbox, _dead_pid())
+        stale = time.time() - 10
+        os.utime(aside, (stale, stale))
+
+        result = _skill_install(sandbox)
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert (sandbox.clone / "untracked" / OTHER_VIEW_VENV).is_dir()
+        assert not aside.exists()
 
 
 class TestTheDeployedCopyMatchesItsTemplate:
