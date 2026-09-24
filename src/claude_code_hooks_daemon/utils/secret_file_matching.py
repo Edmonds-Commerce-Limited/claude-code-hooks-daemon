@@ -26,6 +26,8 @@ import fnmatch
 import logging
 import os
 import re
+import shlex
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final
@@ -752,114 +754,137 @@ def find_protected_mention_detail(
     of a file's many words tripped it. Echoing it discloses nothing: it is
     text the caller just supplied, never content read from a protected file.
     """
+    return next(iter_protected_mentions(command, patterns), None)
+
+
+def iter_protected_mentions(command: str, patterns: tuple[str, ...]) -> Iterator[tuple[str, str]]:
+    """``(pattern, token)`` for EVERY protected mention in ``command``, in order.
+
+    One entry per mentioning token, carrying the first glob it trips. The
+    encrypted-target exemption (Plan 00459) needs them all: a command is let
+    through only when each one is confirmed, and stopping at the first would
+    confirm an encrypted file while a plaintext one sat later in the line.
+    """
     if not command or not patterns:
-        return None
+        return
     project_root = resolve_project_root()
     stem_pairs = _pattern_literal_stems(patterns)
     for token in _tokenise(_without_import_module_paths(command)):
-        for raw_form in _normalised_token_forms(token):
-            # A token whose bracket expressions are all finite denotes exactly
-            # the set of its expansions, so that set -- not the bracketed
-            # spelling -- is what the glob heuristics must judge (Plan 00356).
-            expansions = _expand_bracket_expressions(raw_form)
-            # The UNEXPANDED spelling still faces the LITERAL check: a shell
-            # passes an unmatched glob through verbatim, so a file literally
-            # named `x[0].secret` is reachable under that exact name.
-            literal_forms = [raw_form] if expansions == [raw_form] else [raw_form, *expansions]
-            for form in literal_forms:
-                for pattern in patterns:
-                    if path_matches_globs(form, (pattern,), project_root=project_root):
-                        return (pattern, token)
-            for form in expansions:
-                if not _is_glob_shaped(form):
-                    continue
-                basename = form.rsplit("/", maxsplit=1)[-1]
-                residue = _token_literal_residue(basename)
-                if not residue:
-                    continue
-                # Where the token's wildcard sits decides which overlap
-                # direction is a plausible truncation (see the helper).
-                has_leading_wildcard = _has_leading_wildcard(basename)
-                has_trailing_wildcard = _has_trailing_wildcard(basename)
-                for stem, pattern in stem_pairs:
-                    stem_basename = stem.rsplit("/", maxsplit=1)[-1]
-                    # Original fnmatch check (v3.55.0 release code review): a
-                    # POSIX character class is a regex, not a path glob —
-                    # fnmatch('vault_pass', '[A-Za-z]*') is True, so without
-                    # the residue gate every stem matched any bracketed
-                    # token. The token must share literal text with the stem
-                    # (residue is a substring of the stem) before its fnmatch
-                    # result counts. This only catches a token whose residue
-                    # is a PREFIX-compatible spelling of an anchored-start
-                    # stem (e.g. ".vault-p*" vs stem ".vault-pass").
-                    #
-                    # Plan 00284 live dogfooding find: a residue below
-                    # ``_MIN_GLOB_OVERLAP_CHARS`` is too generic to trust —
-                    # a bare ``.`` (the residue of a ``.*?`` regex
-                    # quantifier token, isolated whenever it sits between
-                    # ``<``/``>`` delimiters) is a substring of every
-                    # dot-leading stem, and used raw as the fnmatch pattern
-                    # it absorbs the rest via its own ``*``/``?``. Reusing
-                    # the overlap check's threshold here (not a separate
-                    # constant) because both gates encode the identical
-                    # concept: how many literal characters are needed
-                    # before a partial glob match is trusted as a genuine
-                    # truncation rather than coincidence.
-                    # Gated on both-edges-wildcard via the NEAR-TOTAL-MATCH
-                    # test, not a flat exclusion (Plan 00311 follow-up to
-                    # Plan 00306): with a wildcard on BOTH sides,
-                    # `fnmatch(stem, basename)` succeeds whenever the residue
-                    # occurs ANYWHERE inside the stem, not just as a real
-                    # prefix/suffix truncation -- an ordinary "*word*"
-                    # contains-glob (or prose emphasis) coincidentally
-                    # matching a stem that merely contains that substring
-                    # elsewhere (e.g. ``*word*`` against ``.vault-password``,
-                    # which ends "...s-s-w-o-r-d") is not evidence of a real
-                    # protected filename. But a both-edges token whose residue
-                    # effectively SPELLS the stem (``*zzz-passwd*`` against a
-                    # ``*.zzz-passwd`` stem) really does glob-expand to the
-                    # protected file and must still deny -- see
-                    # ``_both_edges_residue_is_near_total_stem_match``.
-                    if (
-                        len(residue) >= _MIN_GLOB_OVERLAP_CHARS
-                        and residue in stem_basename
-                        and (
-                            not (has_leading_wildcard and has_trailing_wildcard)
-                            or _both_edges_residue_is_near_total_stem_match(residue, stem_basename)
-                        )
-                        and fnmatch.fnmatch(stem_basename, basename)
-                    ):
-                        return (pattern, token)
-                    # Plan 00272 gap fix (G2), GATED to leading-wildcard
-                    # patterns only (over-blocking regression fix, same
-                    # plan): a trailing-wildcard TRUNCATION of a real
-                    # protected basename can carry an arbitrary prefix
-                    # belonging to the pattern's own LEADING wildcard (e.g.
-                    # "dummy.vault-p*" truncates the real file
-                    # "dummy.vault-password", matched by "*.vault-password"
-                    # whose fixed stem ".vault-password" has no "dummy"
-                    # prefix to compare against). The overlap check exists
-                    # ONLY for that shape: an exact-filename pattern
-                    # ("id_rsa") or a pattern anchored at the START
-                    # (".vault-pass*") has NO arbitrary-prefix wildcard for
-                    # a token to hide behind, so a genuine truncation of
-                    # THOSE patterns is already a literal PREFIX of the stem
-                    # and is caught by the fnmatch check above — the overlap
-                    # test adds nothing there but false positives (a token
-                    # like "sample*" or "id*" sharing a coincidental 2-char
-                    # edge with "id_rsa" was denied before this gate).
-                    if pattern.startswith("*") and _glob_token_overlaps_stem(
-                        residue,
-                        stem_basename,
-                        leading_wildcard=has_leading_wildcard,
-                        trailing_wildcard=has_trailing_wildcard,
-                    ):
-                        return (pattern, token)
-        real = _realpath_if_resolvable(token)
-        if real is not None:
+        pattern = _token_mention(token, patterns, stem_pairs, project_root)
+        if pattern is not None:
+            yield (pattern, token)
+
+
+def _token_mention(
+    token: str,
+    patterns: tuple[str, ...],
+    stem_pairs: list[tuple[str, str]],
+    project_root: str | None,
+) -> str | None:
+    """The first protected glob ``token`` names (or could glob-expand to), else None."""
+    for raw_form in _normalised_token_forms(token):
+        # A token whose bracket expressions are all finite denotes exactly
+        # the set of its expansions, so that set -- not the bracketed
+        # spelling -- is what the glob heuristics must judge (Plan 00356).
+        expansions = _expand_bracket_expressions(raw_form)
+        # The UNEXPANDED spelling still faces the LITERAL check: a shell
+        # passes an unmatched glob through verbatim, so a file literally
+        # named `x[0].secret` is reachable under that exact name.
+        literal_forms = [raw_form] if expansions == [raw_form] else [raw_form, *expansions]
+        for form in literal_forms:
             for pattern in patterns:
-                if path_matches_globs(real, (pattern,), project_root=project_root):
-                    return (pattern, token)
+                if path_matches_globs(form, (pattern,), project_root=project_root):
+                    return pattern
+        for form in expansions:
+            if not _is_glob_shaped(form):
+                continue
+            basename = form.rsplit("/", maxsplit=1)[-1]
+            residue = _token_literal_residue(basename)
+            if not residue:
+                continue
+            # Where the token's wildcard sits decides which overlap
+            # direction is a plausible truncation (see the helper).
+            has_leading_wildcard = _has_leading_wildcard(basename)
+            has_trailing_wildcard = _has_trailing_wildcard(basename)
+            for stem, pattern in stem_pairs:
+                stem_basename = stem.rsplit("/", maxsplit=1)[-1]
+                # Original fnmatch check (v3.55.0 release code review): a
+                # POSIX character class is a regex, not a path glob —
+                # fnmatch('vault_pass', '[A-Za-z]*') is True, so without
+                # the residue gate every stem matched any bracketed
+                # token. The token must share literal text with the stem
+                # (residue is a substring of the stem) before its fnmatch
+                # result counts. This only catches a token whose residue
+                # is a PREFIX-compatible spelling of an anchored-start
+                # stem (e.g. ".vault-p*" vs stem ".vault-pass").
+                #
+                # Plan 00284 live dogfooding find: a residue below
+                # ``_MIN_GLOB_OVERLAP_CHARS`` is too generic to trust —
+                # a bare ``.`` (the residue of a ``.*?`` regex
+                # quantifier token, isolated whenever it sits between
+                # ``<``/``>`` delimiters) is a substring of every
+                # dot-leading stem, and used raw as the fnmatch pattern
+                # it absorbs the rest via its own ``*``/``?``. Reusing
+                # the overlap check's threshold here (not a separate
+                # constant) because both gates encode the identical
+                # concept: how many literal characters are needed
+                # before a partial glob match is trusted as a genuine
+                # truncation rather than coincidence.
+                # Gated on both-edges-wildcard via the NEAR-TOTAL-MATCH
+                # test, not a flat exclusion (Plan 00311 follow-up to
+                # Plan 00306): with a wildcard on BOTH sides,
+                # `fnmatch(stem, basename)` succeeds whenever the residue
+                # occurs ANYWHERE inside the stem, not just as a real
+                # prefix/suffix truncation -- an ordinary "*word*"
+                # contains-glob (or prose emphasis) coincidentally
+                # matching a stem that merely contains that substring
+                # elsewhere (e.g. ``*word*`` against ``.vault-password``,
+                # which ends "...s-s-w-o-r-d") is not evidence of a real
+                # protected filename. But a both-edges token whose residue
+                # effectively SPELLS the stem (``*zzz-passwd*`` against a
+                # ``*.zzz-passwd`` stem) really does glob-expand to the
+                # protected file and must still deny -- see
+                # ``_both_edges_residue_is_near_total_stem_match``.
+                if (
+                    len(residue) >= _MIN_GLOB_OVERLAP_CHARS
+                    and residue in stem_basename
+                    and (
+                        not (has_leading_wildcard and has_trailing_wildcard)
+                        or _both_edges_residue_is_near_total_stem_match(residue, stem_basename)
+                    )
+                    and fnmatch.fnmatch(stem_basename, basename)
+                ):
+                    return pattern
+                # Plan 00272 gap fix (G2), GATED to leading-wildcard
+                # patterns only (over-blocking regression fix, same
+                # plan): a trailing-wildcard TRUNCATION of a real
+                # protected basename can carry an arbitrary prefix
+                # belonging to the pattern's own LEADING wildcard (e.g.
+                # "dummy.vault-p*" truncates the real file
+                # "dummy.vault-password", matched by "*.vault-password"
+                # whose fixed stem ".vault-password" has no "dummy"
+                # prefix to compare against). The overlap check exists
+                # ONLY for that shape: an exact-filename pattern
+                # ("id_rsa") or a pattern anchored at the START
+                # (".vault-pass*") has NO arbitrary-prefix wildcard for
+                # a token to hide behind, so a genuine truncation of
+                # THOSE patterns is already a literal PREFIX of the stem
+                # and is caught by the fnmatch check above — the overlap
+                # test adds nothing there but false positives (a token
+                # like "sample*" or "id*" sharing a coincidental 2-char
+                # edge with "id_rsa" was denied before this gate).
+                if pattern.startswith("*") and _glob_token_overlaps_stem(
+                    residue,
+                    stem_basename,
+                    leading_wildcard=has_leading_wildcard,
+                    trailing_wildcard=has_trailing_wildcard,
+                ):
+                    return pattern
+    real = _realpath_if_resolvable(token)
+    if real is not None:
+        for pattern in patterns:
+            if path_matches_globs(real, (pattern,), project_root=project_root):
+                return pattern
     return None
 
 
@@ -975,7 +1000,10 @@ DIRECTORY_SCAN_MAX_ENTRIES: Final[int] = 5000
 
 
 def directory_contains_protected(
-    directory: str, patterns: tuple[str, ...], max_entries: int = DIRECTORY_SCAN_MAX_ENTRIES
+    directory: str,
+    patterns: tuple[str, ...],
+    max_entries: int = DIRECTORY_SCAN_MAX_ENTRIES,
+    is_exempt: Callable[[str], bool] | None = None,
 ) -> str | None:
     """First protected glob matched by any file under ``directory``, else None.
 
@@ -985,6 +1013,10 @@ def directory_contains_protected(
     ``max_entries`` — once the cap is hit the scan stops and answers None,
     so a huge tree cannot stall dispatch; that residue is a documented
     limit, not a guarantee.
+
+    ``is_exempt`` skips a protected file the caller has confirmed safe to
+    read (Plan 00459: encrypted at rest), so a tree holding only such files
+    is not flagged while one plaintext file beside them still is.
     """
     if not patterns:
         return None
@@ -1000,8 +1032,11 @@ def directory_contains_protected(
                 return None
             full_path = str(Path(current_dir) / name)
             for pattern in patterns:
-                if path_matches_globs(full_path, (pattern,), project_root=project_root):
-                    return pattern
+                if not path_matches_globs(full_path, (pattern,), project_root=project_root):
+                    continue
+                if is_exempt is not None and is_exempt(full_path):
+                    break
+                return pattern
     return None
 
 
@@ -1192,3 +1227,167 @@ def _paths_only_in_flag_position(
         if find_protected_mention(bare, patterns) is not None:
             return False
     return True
+
+
+# ── Encrypted-target exemption (Plan 00459) ──────────────────────────────────
+#
+# Ciphertext is harmless to read only while the reader cannot decrypt it, and
+# Ansible finds a vault password WITHOUT the command naming it (the
+# `DEFAULT_VAULT_PASSWORD_FILE` config key, `ANSIBLE_VAULT_PASSWORD_FILE`), as
+# does `git diff` under the common `diff=ansible-vault` textconv setup. A list
+# of commands that decrypt could never be complete, so the heads below are
+# the ones that CANNOT, and every other head keeps the existing verdict.
+
+#: Plain file commands that print, count, list or relocate bytes as they are.
+#: `grep` is absent on purpose: `grep -r` reads a whole tree, and the named
+#: encrypted file must not vouch for the plaintext beside it (the Grep TOOL
+#: covers searching an encrypted file).
+_ENCRYPTED_TARGET_COMMANDS: Final[frozenset[str]] = frozenset(
+    {"cat", "head", "tail", "wc", "ls", "stat", "file", "cp", "mv"}
+)
+
+#: git subcommands that never run a textconv filter. `diff`, `log`, `show`,
+#: `blame` and `grep` all can.
+_ENCRYPTED_TARGET_GIT_SUBCOMMANDS: Final[frozenset[str]] = frozenset(
+    {"add", "commit", "status", "mv", "rm", "ls-files", "check-ignore"}
+)
+
+#: Flags that make an allowed git subcommand render a diff or open an editor.
+#: Short flags are checked letter by letter, so a cluster (`-vm`) is caught.
+_DIFF_RENDERING_LONG_FLAGS: Final[tuple[str, ...]] = (
+    "--patch",
+    "--interactive",
+    "--edit",
+    "--verbose",
+)
+_DIFF_RENDERING_SHORT_FLAGS: Final[frozenset[str]] = frozenset("piev")
+
+#: Any of these makes the word the shell opens differ from the text written:
+#: parameter/command substitution, escapes, line continuation, globs, braces
+#: and tilde. Refused anywhere in the command, not just in the mention, since
+#: an expansion in another word can change where the mention resolves.
+_EXPANSION_CHARS: Final[frozenset[str]] = frozenset("$`\\\n\r*?[]{}~")
+
+#: Operator characters shlex splits out as their own tokens.
+_SHELL_OPERATOR_CHARS: Final[frozenset[str]] = frozenset("();<>|&")
+
+#: The only operator tokens allowed: redirections. Everything else joins,
+#: backgrounds, pipes or wraps commands, and a second command could change
+#: directory before the first reads (`cd other && cat <file>`).
+_REDIRECTION_OPERATORS: Final[frozenset[str]] = frozenset(
+    {"<", ">", ">>", ">&", "<&", "&>", "&>>", "<>"}
+)
+
+
+def is_encrypted_target_invocation(
+    command: str,
+    patterns: tuple[str, ...],
+    *,
+    cwd: str | None,
+    is_encrypted: Callable[[str], bool],
+) -> bool:
+    """True when ``command`` names only protected files confirmed encrypted,
+    in a command that cannot decrypt them (Plan 00459).
+
+    ALL of these must hold, and anything unrecognised fails closed:
+
+    - one simple command: no expansion characters anywhere, quoting that
+      parses, and no operator but a redirection;
+    - its head is an allowlisted reader (``_ENCRYPTED_TARGET_COMMANDS``, or
+      ``git`` with an allowlisted subcommand directly after it, so no global
+      option such as ``-C`` can move the read, and no diff-rendering flag);
+    - at least one protected mention, and EVERY one is a complete literal
+      shell word that resolves -- absolute, or joined to the absolute
+      ``cwd`` -- to a file ``is_encrypted`` confirms. A glob that could also
+      reach a plaintext sibling is never a complete literal word.
+
+    ``is_encrypted`` receives an absolute path and must read the file at the
+    time of the call: the answer is not cached here.
+    """
+    if any(char in _EXPANSION_CHARS for char in command):
+        return False
+    words = _shell_words(command)
+    if not words or not _is_single_simple_command(words):
+        return False
+    if not _is_encrypted_target_reader(words):
+        return False
+    mentions = list(iter_protected_mentions(command, patterns))
+    if not mentions:
+        return False
+    literal_words = frozenset(words)
+    return all(
+        _mention_is_encrypted(token, literal_words, cwd, is_encrypted)
+        for _pattern, token in mentions
+    )
+
+
+def _shell_words(command: str) -> list[str] | None:
+    """POSIX shell words with operators split out, or ``None`` if unparseable."""
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    # `#` starts a comment only at the start of a word in bash; left as a word
+    # character, nothing that bash would read is ever dropped from the view.
+    lexer.commenters = ""
+    try:
+        return list(lexer)
+    except ValueError as exc:
+        # Unbalanced quoting: the shell's own reading is unknown, so the
+        # command is not confirmed. Registered in error_hiding_exclusions.json.
+        logger.debug("encrypted-target exemption: command not parseable: %s", exc)
+        return None
+
+
+def _is_single_simple_command(words: list[str]) -> bool:
+    for word in words:
+        if word and all(char in _SHELL_OPERATOR_CHARS for char in word):
+            if word not in _REDIRECTION_OPERATORS:
+                return False
+    return True
+
+
+def _is_encrypted_target_reader(words: list[str]) -> bool:
+    head = words[0]
+    if head in _ENCRYPTED_TARGET_COMMANDS:
+        return True
+    if head != _GIT_EXECUTABLE or len(words) < 2:
+        return False
+    if words[1] not in _ENCRYPTED_TARGET_GIT_SUBCOMMANDS:
+        return False
+    return not any(_renders_a_diff(word) for word in words[2:])
+
+
+def _renders_a_diff(word: str) -> bool:
+    if any(word == flag or word.startswith(flag + "=") for flag in _DIFF_RENDERING_LONG_FLAGS):
+        return True
+    if word.startswith("-") and not word.startswith("--"):
+        return any(letter in _DIFF_RENDERING_SHORT_FLAGS for letter in word[1:])
+    return False
+
+
+def _mention_is_encrypted(
+    token: str,
+    literal_words: frozenset[str],
+    cwd: str | None,
+    is_encrypted: Callable[[str], bool],
+) -> bool:
+    # A token that is only PART of a shell word (`x<file>`, `--flag=<file>`,
+    # a commit message naming it) does not name the file the command opens.
+    if token not in literal_words or token.startswith("-"):
+        return False
+    path = resolve_against_cwd(token, cwd)
+    return path is not None and is_encrypted(path)
+
+
+def resolve_against_cwd(path: str, cwd: str | None) -> str | None:
+    """``path`` as a normalised absolute path, or ``None`` if that is unknowable.
+
+    A relative path means nothing without the caller's working directory,
+    and resolving it against the DAEMON's would judge a different file, so
+    a missing or relative ``cwd`` answers ``None`` rather than a guess.
+    """
+    candidate = Path(path)
+    if not candidate.is_absolute():
+        if cwd is None or not Path(cwd).is_absolute():
+            return None
+        candidate = Path(cwd) / candidate
+    return os.path.normpath(candidate)
