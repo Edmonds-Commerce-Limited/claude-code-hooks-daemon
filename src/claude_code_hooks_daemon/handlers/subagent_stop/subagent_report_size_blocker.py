@@ -26,9 +26,7 @@ from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import SubagentStopHandlerBase
 from claude_code_hooks_daemon.utils.option_coercion import coerce_int_option
 from claude_code_hooks_daemon.utils.subagent_report_paths import (
-    DEFAULT_REPORT_DIR as _DEFAULT_PERSISTED_REPORT_DIR,
-)
-from claude_code_hooks_daemon.utils.subagent_report_paths import (
+    DEFAULT_PERSISTED_REPORT_DIR,
     find_persisted_report,
 )
 from claude_code_hooks_daemon.utils.subagent_tool_resolution import (
@@ -92,12 +90,17 @@ class SubagentReportSizeBlockerHandler(SubagentStopHandlerBase):
         # reply. Separately configurable from `_fallback_report_dir` above
         # (still used for the never-persisted fallback message), but shares
         # the same default -- change both together if you reconfigure either.
-        self._persisted_report_dir: str = _DEFAULT_PERSISTED_REPORT_DIR
+        self._persisted_report_dir: str = DEFAULT_PERSISTED_REPORT_DIR
         # Test-only override (mirrors subagent_report_path_verifier's
         # `_project_root`): production resolves lazily via `_root()` so the
         # handler is never pinned to whatever directory the daemon happened
         # to start in.
         self._project_root: Path | None = None
+        # Test-only override for the user-agent lookup (review m10):
+        # without one, `resolve_agent_can_write` falls back to the real
+        # `Path.home()`, which a test never intends to consult. Production
+        # leaves this None, which IS that documented fallback.
+        self._home_dir: Path | None = None
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """True for every SubagentStop except a re-entry (loop guard)."""
@@ -132,9 +135,11 @@ class SubagentReportSizeBlockerHandler(SubagentStopHandlerBase):
         """
         agent_type = hook_input.get("agent_type")
         root = resolve_lookup_root(self._project_root, getattr(self, "_workspace_root", None))
-        return resolve_agent_can_write(agent_type if isinstance(agent_type, str) else None, root)
+        return resolve_agent_can_write(
+            agent_type if isinstance(agent_type, str) else None, root, home_dir=self._home_dir
+        )
 
-    def _find_persisted_report(self, hook_input: dict[str, Any]) -> Path | None:
+    def _find_persisted_report(self, hook_input: dict[str, Any], message: str) -> Path | None:
         """Plan 00460 Task 1.6: what `subagent_report_persistence` already saved.
 
         Globs by agent type/id (:func:`find_persisted_report`) rather than
@@ -144,6 +149,14 @@ class SubagentReportSizeBlockerHandler(SubagentStopHandlerBase):
         not match an exact reconstruction either. No in-memory hand-off
         between the two handlers: only this lookup, run after the persister
         by priority ordering (10 before 15).
+
+        Review m2 (probe P8): a resumed agent keeps its `agent_id`, so a
+        glob-by-id-alone match can find an EARLIER stop's file if THIS
+        stop's own write failed (disk full, permissions) -- citing it would
+        tell the agent its CURRENT reply is saved when it is really an
+        older one. Only a match whose content equals the current
+        ``message`` is cited; anything else is treated the same as no
+        match at all, falling through to the older messages.
         """
         agent_id = hook_input.get("agent_id")
         if not isinstance(agent_id, str) or not agent_id:
@@ -151,9 +164,16 @@ class SubagentReportSizeBlockerHandler(SubagentStopHandlerBase):
         agent_type = hook_input.get("agent_type")
         root = resolve_lookup_root(self._project_root, getattr(self, "_workspace_root", None))
         target_dir = root / self._persisted_report_dir
-        return find_persisted_report(
+        found = find_persisted_report(
             target_dir, agent_type if isinstance(agent_type, str) else "", agent_id
         )
+        if found is None:
+            return None
+        try:
+            content = found.read_text()
+        except OSError:
+            return None
+        return found if content == message else None
 
     @staticmethod
     def _deny_saved(
@@ -166,12 +186,17 @@ class SubagentReportSizeBlockerHandler(SubagentStopHandlerBase):
         Bash-workaround warning for a read-only agent (Task 1.3's own
         concern is unrelated to WHO saved the file, only to what a
         Write-less agent might try instead).
+
+        Review M3: the warning must not claim the daemon's own save was
+        content-checked -- it was not (the persister runs no
+        sensitive-content, secret-file or markdown-location check at all).
+        The only true claim is that a copy already exists, so there is
+        nothing left to write.
         """
         bash_warning = (
             "\n\nDo NOT write your own copy via a Bash heredoc/redirect/`tee` "
-            "— the file above is already saved through the content-safe "
-            "daemon path; writing your own bypasses the guards a real "
-            "`Write` call would get."
+            "— the daemon has already saved the full text to the path "
+            "above, so there is nothing for you to write."
             if warn_against_bash_write
             else ""
         )
@@ -246,7 +271,7 @@ class SubagentReportSizeBlockerHandler(SubagentStopHandlerBase):
 
         can_write = self._agent_can_write(hook_input)
 
-        persisted = self._find_persisted_report(hook_input)
+        persisted = self._find_persisted_report(hook_input, message)
         if persisted is not None:
             return self._deny_saved(
                 persisted, len(message), threshold, warn_against_bash_write=can_write is False
@@ -297,7 +322,7 @@ class SubagentReportSizeBlockerHandler(SubagentStopHandlerBase):
             "missing.\n\n"
             "**Fix (usual case, Plan 00460 Task 1.6)**: `subagent_report_"
             "persistence` already saved this stop's full reply to a "
-            f"gitignored file (default `{_DEFAULT_PERSISTED_REPORT_DIR}`) "
+            f"gitignored file (default `{DEFAULT_PERSISTED_REPORT_DIR}`) "
             "before this handler runs — the deny message names that exact "
             "path. Reply with the path plus a short completion summary; "
             "nothing needs to be written by the agent itself, whether or "

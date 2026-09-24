@@ -53,8 +53,20 @@ def _subagent_stop_input(message: str, **extra: Any) -> dict[str, Any]:
 
 
 @pytest.fixture
-def handler() -> SubagentReportSizeBlockerHandler:
-    return SubagentReportSizeBlockerHandler()
+def handler(tmp_path: Path) -> SubagentReportSizeBlockerHandler:
+    """Review m10: without an explicit test seam, `_agent_can_write` falls
+    back to `Path.cwd()` for the project-agent lookup and `Path.home()` for
+    the user-agent one -- both real, live filesystem locations that can
+    hold a `.claude/agents/*.md` this dogfooding checkout genuinely ships
+    (a real risk since review M4 now consults project/user agents BEFORE
+    the built-in table). Rooting both at fresh, empty tmp_path
+    subdirectories by default makes every test hermetic; a test that wants
+    a real project/user agent file still creates one under these same
+    directories."""
+    instance = SubagentReportSizeBlockerHandler()
+    instance._project_root = tmp_path / "project"
+    instance._home_dir = tmp_path / "home"
+    return instance
 
 
 class TestIdentity:
@@ -276,17 +288,24 @@ class TestPersistedReportLookup:
     """Plan 00460 Task 1.6: when `subagent_report_persistence` already saved
     the reply, point the agent at that path instead of asking it to write
     (or condense into) one -- for EVERY agent type, read-only or writable.
-    The old messages survive only as the fallback when nothing was found."""
+    The old messages survive only as the fallback when nothing was found.
+
+    Review m6: the persisted-report directory now matches the persister's
+    real default (`.../auto/`), not the shared `untracked/agent-reports/`.
+    Review m2: a cited match's content must equal the CURRENT
+    `last_assistant_message` -- so every "already saved" test below writes
+    the persisted file with that exact content, not an arbitrary stand-in.
+    """
 
     def test_points_writable_agent_at_the_saved_path(
         self, handler: SubagentReportSizeBlockerHandler, tmp_path: Path
     ) -> None:
         handler._project_root = tmp_path
-        report_dir = tmp_path / "untracked" / "agent-reports"
+        report_dir = tmp_path / "untracked" / "agent-reports" / "auto"
         report_dir.mkdir(parents=True)
-        saved = report_dir / "260924-134530-general-purpose-agent-1.md"
-        saved.write_text("the full report")
         oversized = "x" * (handler._threshold_chars + 1)
+        saved = report_dir / "260924-134530-general-purpose-agent-1.md"
+        saved.write_text(oversized)
 
         result = handler.handle(_subagent_stop_input(oversized, agent_id="agent-1"))
 
@@ -299,11 +318,11 @@ class TestPersistedReportLookup:
         self, handler: SubagentReportSizeBlockerHandler, tmp_path: Path
     ) -> None:
         handler._project_root = tmp_path
-        report_dir = tmp_path / "untracked" / "agent-reports"
+        report_dir = tmp_path / "untracked" / "agent-reports" / "auto"
         report_dir.mkdir(parents=True)
-        saved = report_dir / "260924-134530-Explore-agent-9.md"
-        saved.write_text("the full report")
         oversized = "x" * (handler._threshold_chars + 1)
+        saved = report_dir / "260924-134530-Explore-agent-9.md"
+        saved.write_text(oversized)
 
         result = handler.handle(
             _subagent_stop_input(oversized, agent_type="Explore", agent_id="agent-9")
@@ -318,15 +337,57 @@ class TestPersistedReportLookup:
         self, handler: SubagentReportSizeBlockerHandler, tmp_path: Path
     ) -> None:
         handler._project_root = tmp_path
-        report_dir = tmp_path / "untracked" / "agent-reports"
+        report_dir = tmp_path / "untracked" / "agent-reports" / "auto"
         report_dir.mkdir(parents=True)
-        (report_dir / "260924-134530-general-purpose-agent-1.md").write_text("saved")
         oversized = "x" * (handler._threshold_chars + 1)
+        (report_dir / "260924-134530-general-purpose-agent-1.md").write_text(oversized)
 
         result = handler.handle(_subagent_stop_input(oversized, agent_id="agent-1"))
 
         assert result.reason is not None
         assert "Write the full report to a file now" not in result.reason
+
+    def test_saved_path_message_does_not_overclaim_content_safety(
+        self, handler: SubagentReportSizeBlockerHandler, tmp_path: Path
+    ) -> None:
+        """Review M3: the persister runs NO content checks (its own
+        docstring says so) -- the deny message must not tell an LLM that
+        relays it to the coordinator otherwise."""
+        handler._project_root = tmp_path
+        report_dir = tmp_path / "untracked" / "agent-reports" / "auto"
+        report_dir.mkdir(parents=True)
+        oversized = "x" * (handler._threshold_chars + 1)
+        (report_dir / "260924-134530-Explore-agent-1.md").write_text(oversized)
+
+        result = handler.handle(
+            _subagent_stop_input(oversized, agent_type="Explore", agent_id="agent-1")
+        )
+
+        assert result.reason is not None
+        assert "content-safe" not in result.reason
+        assert "content checks" not in result.reason
+
+    def test_a_match_with_different_content_is_not_cited(
+        self, handler: SubagentReportSizeBlockerHandler, tmp_path: Path
+    ) -> None:
+        """Review m2 (probe P8): a resumed agent keeps its `agent_id`. If
+        THIS stop's write failed, the glob would otherwise still find an
+        EARLIER stop's file for the same agent_id and cite it as though it
+        held the current reply -- only a content match may be cited."""
+        handler._project_root = tmp_path
+        report_dir = tmp_path / "untracked" / "agent-reports" / "auto"
+        report_dir.mkdir(parents=True)
+        (report_dir / "260920-100000-general-purpose-agent-1.md").write_text(
+            "an EARLIER stop's reply, not this one"
+        )
+        oversized = "x" * (handler._threshold_chars + 1)
+
+        result = handler.handle(_subagent_stop_input(oversized, agent_id="agent-1"))
+
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "already saved" not in result.reason
+        assert "subagent-reports" in result.reason
 
     def test_falls_back_to_the_old_writable_message_when_nothing_was_persisted(
         self, handler: SubagentReportSizeBlockerHandler, tmp_path: Path

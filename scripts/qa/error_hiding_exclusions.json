@@ -1295,6 +1295,12 @@
       "function": "write_new_file_never_overwrite",
       "rule": "log-and-continue",
       "reason": "Plan 00460 review finding m3: after O_CREAT|O_EXCL already created the file on disk, an OSError from the content write must not leave a truncated/empty file behind for find_persisted_report to later cite as though it were a complete reply -- so the write-failure branch (already covered by the return-none-on-error entry above) additionally attempts candidate.unlink(missing_ok=True). If even THAT fails (a second, independent filesystem error), logging and continuing to the same None return is correct: the outer branch is already returning None and logging the original write failure, and a cleanup failure on top of an already-fail-open path must not escalate to raising. Covered by test_removes_a_partial_file_when_the_content_write_fails."
+    },
+    {
+      "file": "handlers/subagent_stop/subagent_report_size_blocker.py",
+      "function": "_find_persisted_report",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00460 review finding m2: reading the candidate file's content is purely to compare it against the current last_assistant_message (a match is required before the caller may cite the path) -- the read is not load-bearing on its own. An OSError here (the file vanishing between find_persisted_report's glob and this read, a concurrent prune) is exactly as harmless to treat as 'no match' as the ordinary content-mismatch case one line later, which is this same function's normal control flow, not an exception. The caller (handle()) already treats None identically to 'nothing usable was persisted' and falls back to the pre-Task-1.6 messages, so raising here would turn a benign filesystem race in a TERMINAL SubagentStop handler into a crashed dispatch over a lookup that was already best-effort."
     }
   ]
 }
