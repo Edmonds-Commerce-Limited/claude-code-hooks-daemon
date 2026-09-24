@@ -6,7 +6,7 @@
 (Tasks 1.2, 2.1 to 2.3)
 
 Nothing was merged to main and nothing was pushed. Item 4 of the brief (the
-config-dir exclusion in the P3 walkers) waits for batch B2 and is not done.
+config-dir exclusion in the P3 walkers) was done after B2 landed.
 
 ## Commits
 
@@ -21,6 +21,9 @@ config-dir exclusion in the P3 walkers) waits for batch B2 and is not done.
 | `4d58dd04` | Task 4.1: plugins that ship hooks, at session start and in `health`            | 41           |
 | `11bf4c5e` | Task 4.3: `lsp_enforcement` judges LSP from enabled plugins; integration fixes | 42           |
 | `738c4e5e` | Merge main `3104434b` (B1 archive, 00466 N28-N33); ledger conflicts, both kept |              |
+| `fbb8becf` | 00466 N26: `audit_shell` gets the same fix; the class pin covers `audit_*.py`  | 37 (edited)  |
+| `dc8869db` | Merge main `455ee636` (B2); one scan-scope mechanism kept                      |              |
+| `bba3a5ab` | Task 3.1 / item 4: P3 walkers always skip an in-project Claude config dir      | 25 (edited)  |
 
 Release note 40 was skipped on purpose (n466-n24 holds it).
 
@@ -70,10 +73,36 @@ plus one missing-directory test for each CLI. The ledger row is marked Remedied.
   covers `audit_*.py`. `audit_error_hiding` and `audit_capture_corruption`
   were already safe and self-guarded; the pin requires their artefact from
   the hostile location. RED: `TestScansFromAnyCheckoutLocation` in
-  `tests/unit/qa/test_audit_shell.py`. B2's `08c4be0e` (doc_truth) is to be
-  reconciled with this branch's doc_truth fix when B2 lands.
+  `tests/unit/qa/test_audit_shell.py`.
+- **Reconciled with B2 (`dc8869db`)**: B2's `08c4be0e` used an inline
+  `relative_to` in `check_doc_truth._iter_markdown`, not a second helper, so
+  there was no duplicate to delete. The merged walker keeps main's
+  `git_visible_paths` / `project_path_is_protected` filtering (`fd6c5438`),
+  judges `_UNSCANNED_DIR_NAMES` through `relative_parts`, and keeps the one
+  vacuous guard in `main()`. B2's test is kept. The class pin also now
+  classifies main's new `check_unreachable_handle_branch.py`. **Gap noted,
+  not fixed**: that check passes when its scan root is missing (0 of 0
+  candidates, so the vacuous guard cannot fire).
 
 The ledger row is marked Remedied.
+
+## Task 3.1 / brief item 4: the config dir in the P3 walkers
+
+`utils/claude_config.is_in_claude_config_dir(path, project_root)` compares
+the raw and resolved forms of both the path and `claude_config_dir()`, so a
+ccy home symlinked into the project is caught whichever way the link runs.
+A config dir that contains the project claims nothing. It is used by:
+
+- `format-markdown` (`_iter_markdown_candidates` prunes directories and skips
+  files), and so by `housekeeping`;
+- `find-comment-blocks` (`_iter_dir_files_git_filtered`);
+- `markdown_organization`, whose private check now delegates to it.
+
+The exclusion holds for a tracked config dir and for a project that is not a
+git repository. Tests: `TestIsInClaudeConfigDir`,
+`TestCmdFormatMarkdownSkipsTheClaudeConfigDir` and
+`TestFindLongCommentBlocksSkipsTheClaudeConfigDir`. All use a fake config
+dir via `CLAUDE_CONFIG_DIR`. They were RED (4 failed) before the change.
 
 ## The worktree question: settled from Claude Code's bundle, resolver fixed
 
@@ -174,8 +203,11 @@ fixture keeps every lsp test off the real config dir.
 
 ## Known limits
 
-- Item 4 (config-dir exclusion in the n466-docs-corpus P3 walkers) is not
-  done: B2 had not landed.
+- Release note numbers 30, 31 and 32 exist both on this branch and on main.
+  They are left for renumbering at integration.
+- The 00468 journal has an advise-level plan_qa ordering finding (an 18:42
+  entry after a 21:32 one) from the merge. The journal guard forbids moving
+  entry lines, so it stays.
 - `lsp_enforcement` and the plugin hooks advisory resolve plugins on each
   call they need them. There is no cache.
 - In cloud sessions Claude Code starts no plugin language servers. The daemon
@@ -193,6 +225,6 @@ fixture keeps every lsp test off the real config dir.
 
 ## Ready to archive
 
-- **00468**: no. Open: Task 3.1 (walkers), 4.2 (G9, waits for 00464), 5.2
-  (P8 confirmation), and brief item 4.
+- **00468**: no. Open: 4.2 (G9, waits for 00464) and 5.2 (P8
+  confirmation).
 - **00466**: no. Other ledger entries are open; N26 and N27 are Remedied.
