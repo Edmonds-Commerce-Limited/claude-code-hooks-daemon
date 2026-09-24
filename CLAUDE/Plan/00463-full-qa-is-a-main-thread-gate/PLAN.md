@@ -152,7 +152,7 @@ commands that ARE allowed, and they must exist.
   entry point and its tests.
 - [x] ✅ **Task 1.4**: The docs and workflow changes listed in Goals,
   plus a release note. Enable the handler in this repo's config.
-- [ ] ⬜ **Task 1.5**: Targeted QA in the worktree, then hand over. Under
+- [x] ✅ **Task 1.5**: Targeted QA in the worktree, then hand over. Under
   this plan's own rule, the coordinator runs the full gate.
 
 ### Phase 2: Deliver

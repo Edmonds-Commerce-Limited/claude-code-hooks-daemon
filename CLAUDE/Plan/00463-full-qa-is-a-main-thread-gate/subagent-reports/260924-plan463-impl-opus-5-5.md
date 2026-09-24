@@ -255,6 +255,113 @@ The `main-moved` design in the bullet above is superseded by the review 3 fixes 
   (the call names no tool)" for a call with no `tool_name`; PLAN.md's long line is
   rewrapped.
 
+## Review 4 fixes (`260924-plan463-review4-opus-5-5.md`)
+
+Every reproduction became a RED test first. Commits: `ba513f23` (N1, N2, N12),
+`49b4e3dc` (the blocker), `091a3ee3` (N3, N7, N11 and the docs), `403e3284` (merge of
+main at `57a255cb`).
+
+- **N1 (major): documents read by glob.** `changed_tests_map.yaml` gains a `path_glob`
+  key (Path.glob semantics: `*` within a segment, `**` at any depth), and every matching
+  rule now applies, not the first. Declared: the documented-commands checker, the
+  branch-install gate, the skill-reference and skill-surface tests, and the repo-hygiene
+  fixtures. Tests: `tests/unit/qa/test_run_changed_tests.py` (malformed rules,
+  `path_glob` semantics, union of rules);
+  `tests/unit/qa/test_glob_readers_are_declared.py`, whose `TestEveryGlobReaderIsDeclared`
+  scans `tests/` with the AST for `.glob`/`.rglob`/`os.walk` over the repo and fails on an
+  undeclared reader, and whose `TestTheReviewReproduction` pins the review's pages as
+  `targeted`. QA.md says how glob readers are declared, and which checkers run in the
+  recheck.
+
+- **N2 (major): the head that lands.** `refs/integration/certified/<branch>` is written
+  only by a passing `all` over every tool on a clean tree (`_certify_gate`) or a
+  successful `--advance`. `main-moved` says `head-moved` (exit 7) first, unless HEAD is
+  that head on a clean tree. `--advance` refuses a dirty tree, needs a certified head,
+  and refuses any commit since it that is not a merge, and any merge that edits a path
+  `main` did not move (compared against `git merge-tree`'s automatic merge). `--start`
+  refuses a second start without `--restart`, which clears the certified head. The
+  review's reproductions: (a) `TestTheCertifiedHead`, (b)
+  `TestAdvancingNeedsTheHeadThatLands`, (c) `TestStartingTwice`, all in
+  `tests/unit/qa/test_llm_qa_main_moved.py`, with `TestTheGateRunCertifies` and
+  `TestFinishing`.
+
+- **N3: `case $?` under `set -e`.** Both AgentTeam.md blocks use
+  `rc=0; ./scripts/qa/llm_qa.py main-moved || rc=$?; case $rc in … esac`, with a
+  `head-moved` branch. `tests/integration/test_main_moved_branching_survives_errexit.py`
+  takes both snippets from the document and EXECUTES them under `set -euo pipefail`
+  for exits 0, 1, 4, 5, 6 and 7, with `llm_qa.py` and `git` stubbed: every run reaches
+  the end, and only exit 0 fast-forwards.
+
+- **N4-N6, N8, N9 (blocker).** In `test_subagent_full_qa_blocker.py` (`_FULL_RUNS`,
+  `_NOT_FULL_RUNS`, `TestWhatCannotBeParsed`, `TestTheParserEdges`,
+  `TestTheDirectoryTheCommandCdsInto`, `TestOperandsAreJudgedFromTheirRepository`):
+
+  - N4: `$(…)` and backticks inside double quotes are followed;
+  - N5: globs and braces are judged by what they reach; `eval`, `bash <<<`,
+    echo/printf piped into a shell, `bash < <(echo …)`, `source`/`.`, `time -p` and
+    `builtin` are followed; `$'…'` is decoded locally, not through 464's lexer;
+  - N6: operands are resolved and judged against the nearest `.git`/`pyproject.toml`;
+  - N8: `.` after a `cd` resolves where the cd went, and a BARE run after a cd is judged
+    as `.` from there, so `cd tests/unit/qa && pytest -q` is targeted;
+  - N9: `xargs` runs its command, judged by its explicit arguments;
+  - the reviewer's probe list beyond that: `$(pwd)/tests`, `setsid`, `ionice`, `chrt`,
+    `taskset`, `flock` (and `flock -c`), `xvfb-run`, `script -c`, `parallel … ::: …` and
+    `pipx run` are now followed;
+  - the lead's rule: an unparseable command naming a declared program is DENIED, with
+    "UNPARSED: this command could not be parsed" in the reason.
+
+  The reviewer's `probe_463r4_blocker.py` now reports 1 mismatch of 166:
+  `python -c 'import pytest; pytest.main(["tests"])'`. That stays a documented limit (it
+  is Python, not a shell command), with `$(which pytest)`, `"$(command -v pytest)"`,
+  `hatch test`, tox, nox, `cat commands.txt | bash` and `bash < commands.txt`, each
+  pinned in `_DOCUMENTED_LIMITS` against HANDLER_REFERENCE.md. The blocker module's line
+  coverage from its own test file is 98.6%.
+
+- **N7: prose that avoids the start words.** The guidance test now starts a candidate at
+  any word naming a declared program, reads `cat` heredoc bodies, and expands `NAME=value`
+  assignments. Ten new RED rows (the probe's six plus `<<-` and `${NAME}` forms), and a
+  negative set (a narrow pytest, a `python3 <<'PY'` body, `llm_qa.py changed`). The
+  reviewer's `probe_463r4_setup_worktree.py` catches all nine rows. Widening it flagged
+  three of the script's own lines that mentioned pytest bare. They are reworded, and the
+  agent template now names a path: `pytest tests/unit/qa/test_x.py`.
+
+- **N10: a quoted heredoc delimiter holding a blank.** The shared
+  `utils/shell_segmentation.py` delimiter pattern accepts it;
+  `test_a_quoted_delimiter_holding_a_blank_is_inert`. This is a change to a shared
+  module, so it affects every handler that blanks heredoc bodies.
+
+- **N11.** AgentTeam.md deletes the parent with `git branch -d` (it was fast-forwarded
+  into main). Dropping a child builds a new parent from `main`, and QA.md says the new
+  branch becomes the plan's parent.
+
+- **N12.** The refs are kind-first (`refs/integration/base/<branch>`,
+  `refs/integration/certified/<branch>`), which mirrors the branch namespace, so two refs
+  cannot collide. `--finish` deletes both once `main` holds the certified head. The
+  targeted range check compares resolved commits.
+
+**Merge of main (`57a255cb`).** Conflicts:
+
+- `llm_qa.py`: both sides are kept. Main's `ensure_live_daemon` now runs inside this
+  branch's provenance-recording run.
+- Main's `test_llm_qa_live_daemon.py` fixture now:
+  - stubs `run_tool` and `summarize_tool` with this branch's signatures;
+  - points `QA_OUTPUT_DIR` at a temporary directory. Without that, its live run would
+    delete and rewrite the checkout's real `untracked/qa/` reports.
+- CLAUDE.md and HOOKS-DAEMON.md are regenerated.
+- 00466 PLAN.md and NIGGLES.md: main's rows are kept, with N2 set to Remedied.
+
+The 00466 journal needed a different fix. This branch's 18:36 N2 correction landed before
+main's 17:50 and 18:24 entries. `plan_journal_guard` refuses a hand-moved entry, so the
+entry was deleted from that position and re-appended through `mkplan.bash` at the
+current time. The file is in time order, and nothing else in it changed.
+
+Main's release notes run to 20, so this plan's note is now `21-…md`.
+
+**Also changed:** ledger 00466 N29 records "return a local assigned in the handler" as
+evading `error_hiding`, and this branch had just done that in the blocker's `_words`.
+That code is reshaped: the shlex failure is caught where the unparsed verdict is
+produced, and no None-returning helper remains.
+
 ## Task 1.1 measurements
 
 - **In-process teammate: `agent_id` is present.** Measured live on this teammate's own
@@ -311,7 +418,8 @@ The `main-moved` design in the bullet above is superseded by the review 3 fixes 
   - `validate_worktrees.sh`;
   - whole-suite pytest: bare, `tests`, `tests/unit` or `.`.
 - The `.example` file and the `init_config` template carry a disabled entry.
-- The release note is `UNRELEASED/release-notes/13-...md`. The config-changes manifest
+- The release note is `UNRELEASED/release-notes/21-...md` (renumbered from 13 at the
+  merge of main). The config-changes manifest
   is `UNRELEASED/config-changes/v3.67.0.yaml`. That filename may collide with other
   in-flight plans' manifests at merge.
 - Docs:
@@ -326,6 +434,22 @@ The `main-moved` design in the bullet above is superseded by the review 3 fixes 
   restart after merge, so a conflict there resolves by taking either side and restarting.
 
 ## Verification (targeted only, under this plan's rule)
+
+- After the review 4 fixes, before the merge: `./scripts/qa/llm_qa.py changed --allow-unmapped` passed 12/12, with `changed_tests` at 7550 passed, 12 skipped, from
+  207 test files mapped from 68 changed files (11 unmapped, all `too-broad`). Named
+  tools passed: format, lint, type_check, pyright, magic_values, error_hiding,
+  shell_check, docs_qa, plan_qa, british_english, sensitive_content, handler_reference,
+  doc_truth, doc_snippets, repo_hygiene.
+- After the merge of main: the same static tools plus `generated_doc_drift` passed. A
+  targeted pytest run passed 2101, with 1 skipped. It covered:
+  - `tests/unit/qa`;
+  - the blocker, evasion and shell-segmentation tests;
+  - the setup_worktree test;
+  - the errexit, deadlock, documented-commands, doc-truth, guidance-coverage and
+    repo-hygiene integration tests.
+- The worktree daemon was restarted and reported RUNNING before each commit.
+
+Review 3 round:
 
 - After the review 3 fixes: `./scripts/qa/llm_qa.py changed --allow-unmapped` passed
   12/12, with `changed_tests` at 7316 passed, 12 skipped, from 204 test files mapped from
@@ -361,6 +485,12 @@ Earlier rounds:
 
 ## For the coordinator
 
+- A niggle for the open ledger, not filed from this branch: `pipe_blocker` denied
+  `grep -n "a\|--finish\|head-moved\|^#" CLAUDE/QA.md | bin/echd-capture --head 80` as
+  R-PIPE-TO-HEAD. It split at `\|` inside the double-quoted pattern, then read the stage
+  starting `head-moved` as `head`. The 00463 journal has the finding.
+
 - Put this branch through the batched integration gate with the other ready branches
   (Task 2.1).
+
 - The Workflow-tool probe is the only open measurement.
