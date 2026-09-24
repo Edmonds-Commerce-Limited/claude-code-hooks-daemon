@@ -707,6 +707,67 @@ class TestGoalLedgerIntegration:
 
         assert result.decision == Decision.ALLOW
 
+    def test_retirement_refresh_propagates_ledger_failure(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """Unlike the real-flip path above, ``_maybe_refresh_on_retirement``
+        has no substantive fallback to perform on a ``ProjectContext``
+        failure, so review RV-n2 (round 2) has it propagate rather than
+        catch-and-log -- catching here would be ``error_hiding``'s own
+        ``log-and-continue`` anti-pattern, not a fix for the return-None
+        one it replaced. The failure is left to ``core/chain.py``'s
+        documented per-handler fail-open boundary, one level up."""
+        plan = self._write_plan("00274-first-plan")
+        handler.handle(self._hook_input(plan))
+        completed = self._write_plan("00274-first-plan", status="Complete")
+
+        def _boom(cls: object) -> Path:
+            raise RuntimeError("no project context")
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                "claude_code_hooks_daemon.handlers.post_tool_use.goal_injection."
+                "ProjectContext.daemon_untracked_dir",
+                classmethod(_boom),
+            )
+            with pytest.raises(RuntimeError, match="no project context"):
+                handler.handle(self._hook_input(completed))
+
+    def test_reassert_propagates_ledger_failure(self, handler: GoalInjectionHandler) -> None:
+        """Same contract as the retirement-refresh test above, for
+        ``_maybe_reassert_for_new_session`` -- a session touching an
+        already-live plan without flipping it, under a ``ProjectContext``
+        failure."""
+        plan = self._write_plan("00274-first-plan")
+        handler.handle(self._hook_input(plan))
+        # An Edit whose old_string carries no Status line and whose
+        # reconstructed pre-edit text is still In Progress is "not a flip"
+        # (``_is_real_flip_to_in_progress``), which is what routes to
+        # ``_maybe_reassert_for_new_session`` rather than the real-flip path
+        # above -- a Write here would instead read as a flip (no git HEAD
+        # to compare against in this fixture) and exercise the wrong branch.
+        touch = {
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": str(plan),
+                "old_string": "Body.",
+                "new_string": "Body. Touched.",
+            },
+            "session_id": "other-session",
+        }
+
+        def _boom(cls: object) -> Path:
+            raise RuntimeError("no project context")
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                "claude_code_hooks_daemon.handlers.post_tool_use.goal_injection."
+                "ProjectContext.daemon_untracked_dir",
+                classmethod(_boom),
+            )
+            with pytest.raises(RuntimeError, match="no project context"):
+                handler.handle(touch)
+
 
 class TestCombinedGoalSignal:
     """Plan 00299: the signal reflects EVERY live ledgered plan, not just

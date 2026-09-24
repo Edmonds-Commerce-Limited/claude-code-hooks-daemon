@@ -856,41 +856,52 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         return BlockingResult(decision=Decision.ALLOW)
 
     @staticmethod
-    def _open_ledger() -> GoalLedger | None:
+    def _open_ledger() -> GoalLedger:
         """Build a :class:`GoalLedger` against the daemon's untracked dir.
 
-        Review RV-n2: every ledger access in this class now goes through
-        this ONE fail-open helper, resolving the split the first review's
-        n4 flagged — ``_write_combined_signal``/``_ledger_record`` already
-        caught ``RuntimeError`` from ``daemon_untracked_dir()`` and fell
-        back, while the retirement-refresh and reassert paths called it
-        unguarded on the theory that the failure "cannot happen on the real
-        dispatch path". The second review read that split as unresolved,
-        not deliberate: ``ProjectContext`` not yet being initialised is
-        exactly the kind of ordering hazard a best-effort PostToolUse
-        sensor must survive, the same as every other ledger access in this
-        module already does — an uncaught exception here would reach the
-        dispatcher and, under ``strict_mode``, DENY the underlying
-        Write/Edit outright, which is a far worse outcome for a sensor that
-        is documented to never block than silently skipping one goal
-        signal. Returns ``None`` (logged) on failure.
+        Raises ``RuntimeError`` when ``ProjectContext`` has not been
+        initialised — it does not catch, so every caller sees the SAME
+        failure and decides its own fail-open action explicitly, rather
+        than interpreting a shared ``None`` sentinel this helper would
+        otherwise have to invent.
 
-        The failure path assigns to a local instead of returning directly
-        from the ``except`` block: ``error_hiding``'s ``return-none-on-error``
-        check flags a literal ``return None``/bare ``return`` INSIDE an
-        except handler specifically, on the theory that it is indistinguishable
-        from a routine empty result to any caller not reading this
-        docstring. Deciding "did the try succeed" via a plain post-try
-        sentinel check is the same fail-open behaviour without that shape.
+        Review RV-n2 (round 1) unified every ledger access behind a
+        version of this helper that caught the error itself and returned
+        ``None``. Review RV-n2 (round 2) rejected that: assigning the
+        caught error to a local so a LATER, separate ``return`` statement
+        reads it is the exact same "swallow the exception and hand back an
+        ambiguous empty result" behaviour ``error_hiding``'s
+        ``return-none-on-error`` check exists to catch, restructured only
+        enough that the checker's AST pattern (a literal ``return None``/
+        bare ``return`` textually INSIDE an ``except`` block) no longer
+        matches it — the runtime behaviour was identical. That is a
+        suppression in a different shape, not a fix.
+
+        Letting the exception propagate here means each of this class's
+        four ledger-touching callers now decides its OWN fail-open action,
+        sized to what it can meaningfully do on failure, rather than all
+        four sharing one invented "give up" shape:
+
+        - ``_write_combined_signal`` catches and falls back to writing the
+          caller-supplied fallback signal verbatim — a substantive
+          alternate action, not a bare log.
+        - ``_ledger_record`` catches and reports no displacement (an empty
+          list is a legitimate, differently-typed answer to "what did this
+          newly displace", not a disguised ``None``).
+        - ``_maybe_refresh_on_retirement`` and
+          ``_maybe_reassert_for_new_session`` do NOT catch at all — neither
+          has anything substantive to fall back to (both are ``-> None``,
+          and a bare "log the error, then keep going" except clause is
+          ``error_hiding``'s OWN separate ``log-and-continue`` anti-pattern,
+          not a fix for the first one. The exception is left to
+          ``core/chain.py``'s per-handler wrapper
+          (``fail-open-boundaries.yaml``, ``chain.py``/``execute``): an
+          already-reviewed, already-documented fail-open boundary that logs,
+          surfaces the failure in the result's context, and denies instead
+          under ``strict_mode`` — the same contract every other handler in
+          this codebase already relies on.
         """
-        ledger_path: Path | None
-        try:
-            ledger_path = ProjectContext.daemon_untracked_dir() / LEDGER_FILENAME
-        except RuntimeError as e:
-            logger.warning("goal_injection: ledger skipped (no project context): %s", e)
-            ledger_path = None
-        if ledger_path is None:
-            return None
+        ledger_path = ProjectContext.daemon_untracked_dir() / LEDGER_FILENAME
         return GoalLedger(ledger_path)
 
     def _maybe_refresh_on_retirement(
@@ -927,16 +938,26 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         stale goal signal stuck forever. Re-rendering each owner's own
         combined signal is idempotent and cheap relative to the correctness
         this buys.
+
+        Unlike ``_write_combined_signal``/``_ledger_record``, this method
+        does NOT catch ``_open_ledger``'s ``RuntimeError`` itself. There is
+        no substantive fail-open action to take here beyond "log and do
+        nothing further" (this method returns nothing to fall back to), and
+        a bare log-then-continue except clause is its own recognised
+        anti-pattern (``error_hiding``'s ``log-and-continue`` check) — this
+        module has one already-reviewed, already-documented fail-open
+        boundary for exactly that shape, one level up:
+        ``core/chain.py``'s per-handler exception wrapper
+        (``fail-open-boundaries.yaml``, ``chain.py``/``execute``), which
+        logs, surfaces the failure in the result's context, and denies
+        instead under ``strict_mode`` — the same contract every other
+        handler in this codebase already relies on, not a bespoke one
+        invented for this method.
         """
         doc = PlanDoc.parse(plan_text)
         if doc.status is None or doc.status not in TERMINAL_STATUSES:
             return
-        ledger = self._open_ledger()
-        if ledger is None:
-            return
-        owners = ledger.owning_sessions(plan_number)
-        if not owners:
-            return
+        owners = self._open_ledger().owning_sessions(plan_number)
         for owner in owners:
             self._write_combined_signal(
                 owner, plan_md_path, fallback=None, fallback_plan_number=plan_number
@@ -995,6 +1016,12 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
            touch — UNLESS it is already a stakeholder of THIS plan
            specifically (:meth:`GoalLedger.has_live_entry`), which is
            exactly the resumed-session case rule 1 exists to fix.
+
+        Same fail-open contract as ``_maybe_refresh_on_retirement`` above:
+        ``_open_ledger``'s ``RuntimeError`` is NOT caught here either, for
+        the same reason -- nothing substantive to fall back to, so it is
+        left to ``core/chain.py``'s already-reviewed, already-documented
+        fail-open boundary one level up.
         """
         if not session_id:
             return
@@ -1002,8 +1029,6 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         if self._reasserted.get(latch_key):
             return
         ledger = self._open_ledger()
-        if ledger is None:
-            return
         already_this_plan = ledger.has_live_entry(session_id, plan_number)
         if not already_this_plan and ledger.session_has_entries(session_id):
             return
@@ -1023,7 +1048,7 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         # flip path in handle(): a failed write must leave this pair free
         # to retry on the next qualifying event.
         if written is not None:
-            self._reasserted[latch_key] = True
+            self._reasserted[(session_id, plan_number)] = True
 
     def _write_combined_signal(
         self,
@@ -1044,13 +1069,13 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         session stop (Plan 00320).
         """
         try:
-            ledger_path = ProjectContext.daemon_untracked_dir() / LEDGER_FILENAME
+            ledger = self._open_ledger()
         except RuntimeError as e:
             logger.warning("goal_injection: combined signal skipped (no project context): %s", e)
             return self._write_fallback(session_id, fallback, fallback_plan_number)
 
         plan_dir = plan_md_path.parent.parent
-        refs: list[LivePlanRef] = GoalLedger(ledger_path).live_plan_refs(plan_dir)
+        refs: list[LivePlanRef] = ledger.live_plan_refs(plan_dir)
         if not refs:
             return self._write_fallback(session_id, fallback, fallback_plan_number)
 
@@ -1094,8 +1119,10 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         grandparent is the active plan directory used for reconciliation.
         Returns the plan numbers this emission newly displaced.
         """
-        ledger = self._open_ledger()
-        if ledger is None:
+        try:
+            ledger = self._open_ledger()
+        except RuntimeError as e:
+            logger.warning("goal_injection: ledger record skipped (no project context): %s", e)
             return []
         plan_dir = plan_md_path.parent.parent
         return ledger.record_emission(session_id, plan_number, joined, plan_dir)
