@@ -384,6 +384,16 @@ else
 fi
 echo ""
 
+echo "30. Running Skip-List-Substring Check..."
+echo "----------------------------------------"
+if ! "${VENV_PYTHON}" "${SCRIPT_DIR}/check_skip_list_substring.py" --json; then
+    OVERALL_EXIT_CODE=1
+    echo "❌ Skip-list-substring check FAILED"
+else
+    echo "✅ Skip-list-substring check PASSED"
+fi
+echo ""
+
 # Print overall summary
 echo "========================================"
 echo "QA Summary"
@@ -423,6 +433,7 @@ results = {
     "Hook Contract": "untracked/qa/hook_contract.json",
     "Input Contract": "untracked/qa/input_contract.json",
     "Authored Path Stat": "untracked/qa/authored_path_stat.json",
+    "Skip List Substring": "untracked/qa/skip_list_substring.json",
     "Declared Invariant Pairs": "untracked/qa/declared_invariant_pairs.json",
     "Fail-Open Inventory": "untracked/qa/fail_open_inventory.json",
     "Dangerous Invocation Corpus": "untracked/qa/dangerous_invocation_corpus.json",

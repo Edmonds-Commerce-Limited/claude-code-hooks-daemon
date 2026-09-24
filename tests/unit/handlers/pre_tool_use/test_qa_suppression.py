@@ -214,6 +214,98 @@ class TestQaSuppressionHandlerMatches:
         hook_input = _make_write_input("/workspace/venv/lib/main.py", f"x = 1  {PY_TYPE_IGNORE}")
         assert handler.matches(hook_input) is False
 
+    def test_myvenv_directory_is_not_skipped(self) -> None:
+        """``myvenv/`` merely ends in ``venv/`` -- not a skip match (Plan 00458)."""
+        from claude_code_hooks_daemon.handlers.pre_tool_use.qa_suppression import (
+            QaSuppressionHandler,
+        )
+
+        handler = QaSuppressionHandler()
+        hook_input = _make_write_input("/workspace/myvenv/lib/main.py", f"x = 1  {PY_TYPE_IGNORE}")
+        assert handler.matches(hook_input) is True
+
+    def test_rebuild_directory_is_not_skipped(self) -> None:
+        """``rebuild/`` merely ends in ``build/`` -- not a skip match."""
+        from claude_code_hooks_daemon.handlers.pre_tool_use.qa_suppression import (
+            QaSuppressionHandler,
+        )
+
+        handler = QaSuppressionHandler()
+        hook_input = _make_write_input("/workspace/rebuild/main.py", f"x = 1  {PY_TYPE_IGNORE}")
+        assert handler.matches(hook_input) is True
+
+    def test_worktree_named_with_a_venv_suffix_is_not_skipped(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """00422 N20's reproduction: a worktree named ``...-venv`` must not
+        silently stand this guard down for everything beneath it."""
+        from pathlib import Path
+
+        from claude_code_hooks_daemon.core import project_context as pc
+        from claude_code_hooks_daemon.handlers.pre_tool_use.qa_suppression import (
+            QaSuppressionHandler,
+        )
+
+        root = "/workspace/untracked/worktrees/worktree-issue-53-venv"
+        monkeypatch.setattr(pc.ProjectContext, "_initialized", True, raising=False)
+        monkeypatch.setattr(
+            pc.ProjectContext, "project_root", classmethod(lambda cls: Path(root)), raising=False
+        )
+
+        handler = QaSuppressionHandler()
+        hook_input = _make_write_input(
+            f"{root}/untracked/scratch/acceptance-test-qa-python/sample.py",
+            f"x = 1  {PY_TYPE_IGNORE}",
+        )
+        assert handler.matches(hook_input) is True
+
+    def test_venv_directly_under_the_project_root_is_still_skipped(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A genuine ``venv/`` directly under the project root is still a
+        skip match once resolved relative to that root."""
+        from pathlib import Path
+
+        from claude_code_hooks_daemon.core import project_context as pc
+        from claude_code_hooks_daemon.handlers.pre_tool_use.qa_suppression import (
+            QaSuppressionHandler,
+        )
+
+        monkeypatch.setattr(pc.ProjectContext, "_initialized", True, raising=False)
+        monkeypatch.setattr(
+            pc.ProjectContext,
+            "project_root",
+            classmethod(lambda cls: Path("/workspace")),
+            raising=False,
+        )
+
+        handler = QaSuppressionHandler()
+        hook_input = _make_write_input("/workspace/venv/lib/main.py", f"x = 1  {PY_TYPE_IGNORE}")
+        assert handler.matches(hook_input) is False
+
+    def test_a_project_living_under_a_directory_named_venv_is_still_guarded(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Even project-relative matching must not be fooled by an ANCESTOR
+        directory named ``venv`` -- only a ``venv/`` segment INSIDE the
+        project should skip."""
+        from pathlib import Path
+
+        from claude_code_hooks_daemon.core import project_context as pc
+        from claude_code_hooks_daemon.handlers.pre_tool_use.qa_suppression import (
+            QaSuppressionHandler,
+        )
+
+        root = "/home/dev/venv/proj"
+        monkeypatch.setattr(pc.ProjectContext, "_initialized", True, raising=False)
+        monkeypatch.setattr(
+            pc.ProjectContext, "project_root", classmethod(lambda cls: Path(root)), raising=False
+        )
+
+        handler = QaSuppressionHandler()
+        hook_input = _make_write_input(f"{root}/src/main.py", f"x = 1  {PY_TYPE_IGNORE}")
+        assert handler.matches(hook_input) is True
+
 
 class TestQaSuppressionHandlerHandle:
     """Test handle() method - deny with language-appropriate message."""
