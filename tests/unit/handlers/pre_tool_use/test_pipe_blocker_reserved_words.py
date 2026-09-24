@@ -91,6 +91,49 @@ class TestEveryReservedWordIsSkipped:
         assert handler.matches(_bash("time -p grep x f | head")) is False
 
 
+class TestASubshellIsJudgedOnItsLastCommand:
+    """`( ... ) | head` truncates the output of the subshell's last pipeline command."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "(grep x f) | head",
+            "( (grep x f) ) | head",
+            "((grep x f)) | tail -3",
+            "(cd src && grep -rn x .) | head",
+            "(pytest tests/ | grep FAIL) | head",
+            "( ! grep x f ) | head",
+            "for f in a; do (grep x $f) | head; done",
+        ],
+    )
+    def test_a_cheap_last_command_is_allowed(
+        self, handler: PipeBlockerHandler, command: str
+    ) -> None:
+        assert handler.matches(_bash(command)) is False
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "(pytest tests/) | head",
+            "( (pytest tests/) ) | head",
+            "(grep x f; pytest tests/) | tail",
+            "(cd src && pytest) | head",
+        ],
+    )
+    def test_an_expensive_last_command_is_denied(
+        self, handler: PipeBlockerHandler, command: str
+    ) -> None:
+        assert handler.matches(_bash(command)) is True
+        assert "Piping pytest to tail/head" in _reason(handler, command)
+
+    def test_an_unknown_producer_is_suggested_without_its_parentheses(
+        self, handler: PipeBlockerHandler
+    ) -> None:
+        reason = _reason(handler, "( (mytool --report) ) | head")
+        assert '"^mytool\\\\b"' in reason
+        assert "mytool --report 2>&1" in reason
+
+
 class TestTheWhitelistSuggestionNeverNamesAReservedWord:
     @pytest.mark.parametrize("prefix", _PREFIXES)
     def test_an_unknown_producer_is_suggested_by_its_own_name(

@@ -300,6 +300,21 @@
     file: src/claude_code_hooks_daemon/handlers/pre_tool_use/verification_result_gate.py
     symbol: _GIT_SPAN_HEAD
 
+- id: secret-exemptions-reach-the-transparent-word-strip
+  relation: reaches
+  helper: strip_transparent_reserved_words
+  reason: >
+    both grant a secret-file exemption to one simple command, and `time` or `!`
+    in front changes neither which command runs nor what it reads, so an
+    exemption that sees only the bare form denies `time ansible-playbook
+    --vault-password-file ...` and `! cat <encrypted file>` falsely.
+  left:
+    file: src/claude_code_hooks_daemon/utils/secret_file_matching.py
+    function: is_exempt_invocation
+  right:
+    file: src/claude_code_hooks_daemon/utils/secret_file_matching.py
+    function: is_encrypted_target_invocation
+
 # `bash_flags._SET_STATEMENT` has no row on purpose. It asks whether a `set`
 # still applies to the statements AFTER it, not which command a segment runs,
 # so only `{`, `!` and `time` count there: a `set` behind `then`/`do`/`else`
