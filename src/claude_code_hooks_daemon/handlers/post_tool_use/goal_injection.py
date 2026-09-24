@@ -31,11 +31,12 @@ the replaced span never touched the Status line, the line reads now exactly
 what it already read, so nothing fires. A Write has already landed on disk by
 the time PostToolUse runs, so there is no unmodified copy left on disk to
 diff against; the file's content at git HEAD stands in for "before" instead
-(``_head_plan_text``), and a path absent at HEAD (new or never committed)
-correctly reads as nothing to flip FROM. The once-per-``(plan, session)``
-latch (in-memory) still applies on top of the transition check and still
-resets per session, so a genuine flip re-fires in a new session exactly as
-before.
+(``utils.git_facts.project_relative_head_text``, shared with
+``recovery_cron_advisor``), and a path absent at HEAD (new or never
+committed) correctly reads as nothing to flip FROM. The once-per-plan-per-
+session latch (in-memory) still applies on top of the transition check and
+still resets per session, so a genuine flip re-fires in a new session
+exactly as before.
 
 **Multi-plan combined signal (Plan 00299)**: the upstream `/goal` slot is a
 single, last-writer-wins value, so under concurrent plans the goal ledger
@@ -70,7 +71,7 @@ from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
 from claude_code_hooks_daemon.core.utils import get_file_path
 from claude_code_hooks_daemon.plan_qa.model import TERMINAL_STATUSES, PlanDoc, PlanStatus
 from claude_code_hooks_daemon.utils.ccy_supervisor import supervisor_relevance
-from claude_code_hooks_daemon.utils.git_facts import GitFactsBase
+from claude_code_hooks_daemon.utils.git_facts import project_relative_head_text
 from claude_code_hooks_daemon.utils.goal_ledger import LEDGER_FILENAME, GoalLedger, LivePlanRef
 from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
 
@@ -622,9 +623,10 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         ``tool_response`` shape, and no fixture or vendored doc in this repo
         pins what a Write/Edit ``tool_response`` actually carries — while
         HEAD is a stable interface this project already relies on elsewhere
-        (``utils.git_facts``). A path absent at HEAD (brand new, or never
-        committed) correctly reads as "nothing to flip FROM": a fresh
-        In-Progress PLAN.md is a genuine flip, not noise.
+        (``utils.git_facts``, shared with ``recovery_cron_advisor`` via
+        :func:`project_relative_head_text`). A path absent at HEAD (brand
+        new, or never committed) correctly reads as "nothing to flip FROM":
+        a fresh In-Progress PLAN.md is a genuine flip, not noise.
         """
         tool_name = hook_input.get(HookInputField.TOOL_NAME)
         if tool_name == ToolName.EDIT:
@@ -634,29 +636,10 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
             if not before.status_line_present:
                 return False
             return before.status != PlanStatus.IN_PROGRESS
-        before_text = self._head_plan_text(file_path)
+        before_text = project_relative_head_text(file_path)
         if before_text is None:
             return True
         return PlanDoc.parse(before_text).status != PlanStatus.IN_PROGRESS
-
-    def _head_plan_text(self, file_path: Path) -> str | None:
-        """``file_path``'s content at git HEAD, or None (see caller's note).
-
-        None covers every "nothing to compare against" case alike: no
-        repository, an unresolvable path, or a path HEAD has never seen —
-        the caller treats all three as "this write cannot be anything but a
-        flip", which is the correct reading for each.
-        """
-        try:
-            root = ProjectContext.project_root().resolve()
-        except (RuntimeError, OSError) as e:
-            logger.warning("goal_injection: HEAD lookup skipped (no project root): %s", e)
-            return None
-        try:
-            relative = Path(file_path).resolve().relative_to(root).as_posix()
-        except (ValueError, OSError):
-            return None
-        return GitFactsBase(root).head_file_text(relative)
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """True for a Write/Edit landing on an ACTIVE plan's PLAN.md."""

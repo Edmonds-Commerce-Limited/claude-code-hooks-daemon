@@ -1,4 +1,4 @@
-"""Read-only git facts, shared by both QA commit gates.
+"""Read-only git facts, shared by both QA commit gates and PostToolUse handlers.
 
 Everything a cross-file check needs from git, behind one small class:
 
@@ -18,6 +18,11 @@ for git plumbing that has nothing to do with plans — one of the edges
 :class:`plan_qa.gitfacts.GitFacts` subclasses this and adds the one genuinely
 plan-specific accessor, the plan counter, so plan QA's callers are unaffected
 and docs QA depends on this module alone.
+
+:func:`project_relative_head_text` is a THIRD caller family (ledger 00466
+N3): PostToolUse handlers reading "what did this file say a moment ago"
+after a Write/Edit has already landed on disk, resolved against
+``ProjectContext.project_root()`` rather than a caller-supplied repo root.
 """
 
 from collections.abc import Sequence
@@ -27,6 +32,7 @@ from pathlib import Path
 from typing import Final
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.utils.git_repo import run_git
 
 # name-status codes that carry TWO paths (old NUL new) in -z output.
@@ -157,6 +163,37 @@ class GitFactsBase:
         if result.returncode != 0:
             return None
         return result.stdout
+
+
+def project_relative_head_text(file_path: Path) -> str | None:
+    """``file_path``'s content at git HEAD, resolved against the project root.
+
+    Shared by every PostToolUse handler that needs "what did this file say a
+    moment ago" once a Write/Edit has already landed on disk (ledger 00466
+    N3): ``goal_injection`` and ``recovery_cron_advisor`` both compare a
+    just-written PLAN.md against this to tell a real status TRANSITION from
+    a write that merely lands on a file already in that state.
+
+    Returns ``None`` for every "nothing to compare against" case alike — no
+    repository, ``file_path`` outside the project root, or a path HEAD has
+    never seen (new file, never committed) — so a caller with nothing to
+    diff against can only read the write as a genuine transition, never as
+    an error. Membership is a plain comparison (``Path.is_relative_to``),
+    never a caught ``ValueError``; the git read is a typed absent answer
+    from git's own exit code (:meth:`GitFactsBase.head_file_text`), never a
+    caught exception. ``ProjectContext.project_root()`` is called unguarded:
+    by the time any handler dispatches, the daemon has always initialised
+    it, so a ``RuntimeError`` here means genuine misconfiguration and is
+    left to propagate to the dispatcher (``core/chain.py``), which already
+    treats a handler exception as fail-open advisory noise (or fail-closed
+    in strict mode) — catching it here would only hide that
+    misconfiguration behind a false "nothing to compare against".
+    """
+    root = ProjectContext.project_root().resolve()
+    resolved = file_path.resolve()
+    if not resolved.is_relative_to(root):
+        return None
+    return GitFactsBase(root).head_file_text(resolved.relative_to(root).as_posix())
 
 
 def _parse_name_status_z(output: str) -> tuple[StagedChange, ...]:

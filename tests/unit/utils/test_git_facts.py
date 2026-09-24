@@ -19,7 +19,11 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
-from claude_code_hooks_daemon.utils.git_facts import GitFactsBase, StagedChange
+from claude_code_hooks_daemon.utils.git_facts import (
+    GitFactsBase,
+    StagedChange,
+    project_relative_head_text,
+)
 
 
 def _git(root: Path, *args: str) -> None:
@@ -149,3 +153,41 @@ class TestItIsStrictlyReadOnly:
         facts.last_commit_date("committed.md")
 
         assert {change.path for change in GitFactsBase(repo).staged_changes()} == before
+
+
+class TestProjectRelativeHeadText:
+    """Ledger 00466 N3: the shared HEAD-comparison helper both
+    ``goal_injection`` and ``recovery_cron_advisor`` use for their
+    transition checks."""
+
+    @pytest.fixture(autouse=True)
+    def _mock_project_root(self, monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.utils.git_facts.ProjectContext.project_root",
+            classmethod(lambda cls: repo),
+        )
+
+    def test_a_committed_path_returns_its_head_content(self, repo: Path) -> None:
+        (repo / "committed.md").write_text("changed\n", encoding="utf-8")
+
+        assert project_relative_head_text(repo / "committed.md") == "original\n"
+
+    def test_a_never_committed_path_is_none(self, repo: Path) -> None:
+        assert project_relative_head_text(repo / "added.md") is None
+
+    def test_a_path_outside_the_project_root_is_none(self, tmp_path: Path) -> None:
+        outside = tmp_path / "outside.md"
+        outside.write_text("x\n", encoding="utf-8")
+
+        assert project_relative_head_text(outside) is None
+
+    def test_a_nested_path_resolves_correctly(self, repo: Path) -> None:
+        nested_dir = repo / "CLAUDE" / "Plan" / "00042-my-plan"
+        nested_dir.mkdir(parents=True)
+        nested = nested_dir / "PLAN.md"
+        nested.write_text("**Status**: Complete\n", encoding="utf-8")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-m", "add plan")
+        nested.write_text("**Status**: Complete\n\nMore.\n", encoding="utf-8")
+
+        assert project_relative_head_text(nested) == "**Status**: Complete\n"
