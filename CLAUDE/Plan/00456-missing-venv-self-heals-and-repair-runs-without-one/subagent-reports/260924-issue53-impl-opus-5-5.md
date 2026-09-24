@@ -15,7 +15,8 @@ Phase 2 (merge, CI, daemon restart, #53) is for the lead.
 | `20cbfcd3` | Skill `install.sh` never auto-forces; `--force` keeps every `untracked/venv-*`             |
 | `e11bbcaa` | SELF_INSTALL / LLM-UPDATE / TROUBLESHOOTING / skill `install.md`; release note 06          |
 | `21b5cf8d` | Venv-free verbs are one dispatch (`_run_venv_free_verb`), ready for `signal`               |
-| (last)     | QA result, Task 1.5 tick, this report                                                      |
+| `0f181704` | This report, draft (the QA run's target)                                                   |
+| (last)     | QA result in this report and the journal (Task 1.5 left unticked, see QA)                  |
 
 ## Design as built
 
@@ -157,7 +158,40 @@ Both daemons were stopped afterwards.
 
 ## QA
 
-QA_LINE_PLACEHOLDER
+Full `./scripts/qa/llm_qa.py all` on HEAD `0f181704`: one foreground-polled
+run, no daemon restarts, no commits during it.
+
+```
+❌ tests: 25603 passed, 2 failed, 24 skipped | coverage: 95.1%
+QA: 34/35 PASSED, 1/35 FAILED
+```
+
+Every other tool passes: format, lint, mypy, pyright, shell_audit,
+capture_corruption, plan_qa, docs_qa, smoke_test and the rest.
+
+**The two test failures are pre-existing and depend on location. They are
+not caused by this branch.** The failing tests are
+`test_acceptance_contract.py::...produces_its_declared_verdict` and
+`test_playbook_harness.py::...matches_its_expected_decision_and_reason`.
+Both fail on the same 14 DENY probes: QaSuppression, CommentChangelog (13
+languages) and CommentSize, each with "matches() returned False for its own
+declared input". The probes write under
+`$CLAUDE_PROJECT_DIR/untracked/scratch/`, which from a worktree is inside
+`untracked/worktrees/`, and those handlers skip that tree.
+
+- **A/B.** The same input to `QaSuppressionHandler.matches()` is False
+  under this worktree's path and True under `/tmp/elsewhere-project/`.
+- **Merge base.** At `46f5c5b1`, in this worktree, the same 14 probes fail.
+- **Branch diff.** The branch diff over the handlers, core, the project
+  config and those tests is empty.
+
+The expectation is that they pass from a normal checkout: CI, or main after
+the merge. That has not been verified from here. **Task 1.5 and "Full QA
+passes and CI is green" are therefore left unticked** for the lead to
+confirm after the merge. For the niggles ledger: the acceptance suite cannot
+be fully green from any `untracked/worktrees/` checkout, because the probe
+scratch path falls inside the handlers' own worktree exclusion. Evidence is
+in the journal entry at 11:04.
 
 ## Unresolved / out of scope (not changed here)
 
