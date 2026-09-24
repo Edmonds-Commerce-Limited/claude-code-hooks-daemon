@@ -3,6 +3,29 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
+N34 is taken on the `worktree-n466-n24` branch (the chain deadline cannot
+interrupt a running handler) and lands with that branch.
+
+### N35 — `daemon_sync_after_merge` judges a `cd <worktree> && git merge` against the session root's ORIG_HEAD
+
+**Found by the Plan 00421 agent.** It ran `cd <worktree> && git merge main`
+inside a worktree. The advisory then reported the MAIN checkout's own
+`ORIG_HEAD..HEAD` and named `.claude/hooks-daemon.yaml` and project-handlers
+as changed. The worktree merge had touched neither.
+
+**Why:** `_is_foreign_repo` and the diff both use the hook payload's cwd,
+which is the session root. They ignore the directory the command itself
+`cd`s into. This is the same attribution family as N28 (project_containment
+ignoring a same-command `cd`) and N33 (which daemon, or which checkout,
+a worktree agent's action is judged against).
+
+**Candidate remedy:** resolve the merge's working directory from the
+command, using the shell lexer's `cd` tracking from Plan 00464 (the
+shell-parser consolidation). Run the ORIG_HEAD diff in THAT repository, and
+say nothing when it is a different checkout from the one the daemon
+serves. RED test: `cd <other-worktree> && git merge main` emits no advisory
+about the session root.
+
 ### N33 — a worktree agent's `secret_file_guard.exclude_paths` change had no effect after a daemon restart
 
 **Found by the integration-B2 fix agent.** The agent was writing tests in
