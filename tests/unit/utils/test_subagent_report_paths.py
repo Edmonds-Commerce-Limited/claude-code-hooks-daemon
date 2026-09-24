@@ -10,6 +10,8 @@ without any cross-handler in-memory coupling.
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -19,6 +21,11 @@ from claude_code_hooks_daemon.utils.subagent_report_paths import (
     report_filename,
     write_new_file_never_overwrite,
 )
+
+# tests/unit/utils/test_subagent_report_paths.py -> repo root, same idiom as
+# tests/integration/test_deployed_skill_trees.py's REPO_ROOT.
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_GIT = shutil.which("git") or "git"
 
 
 class TestReportFilename:
@@ -137,3 +144,20 @@ class TestFindPersistedReport:
 class TestDefaultReportDir:
     def test_is_under_untracked(self) -> None:
         assert DEFAULT_REPORT_DIR.startswith("untracked/")
+
+    def test_is_actually_gitignored_in_this_repo(self) -> None:
+        """Plan 00460 Task 1.6 pins this as a fact about THIS repo's
+        `.gitignore`, not just a naming convention -- a string starting with
+        "untracked/" would pass the sibling test above even if the pattern
+        were ever narrowed to spare some of that tree."""
+        probe = _REPO_ROOT / DEFAULT_REPORT_DIR / "probe.md"
+        result = subprocess.run(
+            [_GIT, "-C", str(_REPO_ROOT), "check-ignore", "-q", str(probe)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, (
+            f"{DEFAULT_REPORT_DIR} is not gitignored in {_REPO_ROOT} -- "
+            "subagent_report_persistence would leak agent replies into git status"
+        )
