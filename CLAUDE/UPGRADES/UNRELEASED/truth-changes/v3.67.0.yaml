@@ -1,5 +1,30 @@
 version: "3.67.0"
 truth_changes:
+  - topic: tool-controls
+    id: subagent-report-destination
+    was: >
+      `dispatch_declaration` offers two equal ways to declare where a
+      dispatched subagent's long-form report goes: a plan folder's
+      `subagent-reports/{yymmdd}-{agent-name}-{model}.md`, or an explicit
+      "not plan work" destination falling back to `untracked/agent-reports/`.
+      A dispatch that names a plan folder but writes its report to the
+      gitignored fallback draws nothing.
+    now: >
+      A subagent's final message travels over a bounded-size channel that
+      can silently elide the MIDDLE of an oversized inline report, so
+      long-form output goes to a FILE and the reply is a short summary plus
+      the path (`subagent_report_size_blocker` denies an oversized reply).
+      `dispatch_declaration` asks every dispatch to declare where that file
+      goes, and the DEFAULT is the dispatching plan's folder:
+      `<plan-folder>/subagent-reports/{yymmdd}-{agent-name}-{model}.md`, which
+      is tracked and is committed with the plan (ledger 00422 N5). The
+      gitignored `untracked/agent-reports/` (`fallback_report_dir`) is only
+      for dispatches with no plan, declared as "not plan work". A report
+      written there is lost when the container goes. A dispatch that names a
+      plan folder but declares a destination under the fallback now gets an
+      advisory naming the plan's `subagent-reports/`. It is never a deny.
+      IF YOUR PROJECT'S DOCS OR AGENT BRIEFS SEND PLAN WORK'S REPORTS TO
+      `untracked/agent-reports/`, POINT THEM AT THE PLAN FOLDER INSTEAD.
   - topic: plan-journalling
     id: journal-correction-entry
     was: >
