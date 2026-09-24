@@ -1374,9 +1374,20 @@ def _mention_is_encrypted(
     # a commit message naming it) does not name the file the command opens.
     if token not in literal_words or token.startswith("-"):
         return False
-    path = Path(token)
-    if not path.is_absolute():
+    path = resolve_against_cwd(token, cwd)
+    return path is not None and is_encrypted(path)
+
+
+def resolve_against_cwd(path: str, cwd: str | None) -> str | None:
+    """``path`` as a normalised absolute path, or ``None`` if that is unknowable.
+
+    A relative path means nothing without the caller's working directory,
+    and resolving it against the DAEMON's would judge a different file, so
+    a missing or relative ``cwd`` answers ``None`` rather than a guess.
+    """
+    candidate = Path(path)
+    if not candidate.is_absolute():
         if cwd is None or not Path(cwd).is_absolute():
-            return False
-        path = Path(cwd) / path
-    return is_encrypted(os.path.normpath(path))
+            return None
+        candidate = Path(cwd) / candidate
+    return os.path.normpath(candidate)

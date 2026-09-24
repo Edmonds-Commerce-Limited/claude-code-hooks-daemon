@@ -1294,6 +1294,18 @@ class TestEncryptedTargetInvocationDenies:
         assert not _encrypted_ok(f"cat '{_ENC}")
 
 
+class TestResolveAgainstCwd:
+    def test_absolute_path_is_normalised(self) -> None:
+        assert sfm.resolve_against_cwd("/proj/a/../b.yml", None) == "/proj/b.yml"
+
+    def test_relative_path_joins_the_cwd(self) -> None:
+        assert sfm.resolve_against_cwd("./a/b.yml", "/proj") == "/proj/a/b.yml"
+
+    def test_relative_path_without_a_usable_cwd_is_unknowable(self) -> None:
+        assert sfm.resolve_against_cwd("a/b.yml", None) is None
+        assert sfm.resolve_against_cwd("a/b.yml", "proj") is None
+
+
 class TestResolveConfiguredPatterns:
     """Plan 00272 Task 4-5: the shared cross-handler pattern resolver."""
 

@@ -6,18 +6,24 @@ are DENIED — except the ``secret-meta`` helper and allowlisted consumers with
 the path in flag position. No escape hatch (Decision 3).
 """
 
+from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
+from tests.vault_payloads import vault_file_bytes
 
 from claude_code_hooks_daemon.constants import HandlerID, Priority
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
 from claude_code_hooks_daemon.core.rule import Rule
+from claude_code_hooks_daemon.handlers.pre_tool_use import secret_file_guard as guard_module
 from claude_code_hooks_daemon.handlers.pre_tool_use.secret_file_guard import (
     SecretFileGuardHandler,
 )
+from claude_code_hooks_daemon.utils import encrypted_at_rest
 
 
 @pytest.fixture(autouse=True)
@@ -405,3 +411,241 @@ class TestDisclosureLadder:
 
         assert result.reason is not None
         assert "secret-meta" in result.reason
+
+
+# ── Plan 00459: a protected file whose content is encrypted at rest ──────────
+
+_VAULT_REL = "group_vars/all/vault_passwords.yml"
+_TEMPLATE_REL = "templates/app.secrets"
+
+
+@pytest.fixture()
+def project(tmp_path: Path) -> Iterator[Path]:
+    """A project root the guard resolves as its own, with an encrypted vars file."""
+    root = tmp_path / "project"
+    root.mkdir()
+    _put(root, _VAULT_REL, vault_file_bytes())
+    with patch.object(guard_module, "resolve_project_root", return_value=str(root)):
+        yield root
+
+
+def _put(root: Path, relpath: str, data: bytes) -> Path:
+    target = root / relpath
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(data)
+    return target
+
+
+def _decrypt_in_place(root: Path, relpath: str) -> None:
+    """What `ansible-vault decrypt` leaves behind: the same path, plaintext."""
+    (root / relpath).write_bytes(b"db_password: not-a-real-secret\n")
+
+
+def _in(root: Path, tool_name: str, tool_input: dict[str, Any]) -> dict[str, Any]:
+    return {"tool_name": tool_name, "tool_input": tool_input, "cwd": str(root)}
+
+
+def _verdict(hook_input: dict[str, Any]) -> Decision:
+    handler = _handler()
+    if not handler.matches(hook_input):
+        return Decision.ALLOW
+    return handler.handle(hook_input).decision
+
+
+class TestEncryptedFileOnPathTools:
+    def test_read_of_encrypted_file_is_allowed(self, project: Path) -> None:
+        hook_input = _in(project, "Read", {"file_path": str(project / _VAULT_REL)})
+        assert not _handler().matches(hook_input)
+        assert _handler().handle(hook_input).decision == Decision.ALLOW
+
+    def test_read_of_the_same_path_decrypted_in_place_is_denied(self, project: Path) -> None:
+        hook_input = _in(project, "Read", {"file_path": str(project / _VAULT_REL)})
+        assert _verdict(hook_input) == Decision.ALLOW
+        _decrypt_in_place(project, _VAULT_REL)
+        assert _verdict(hook_input) == Decision.DENY
+
+    def test_encrypted_dot_secrets_template_is_allowed(self, project: Path) -> None:
+        _put(project, _TEMPLATE_REL, vault_file_bytes(version="1.2", label="prod"))
+        hook_input = _in(project, "Read", {"file_path": str(project / _TEMPLATE_REL)})
+        assert _verdict(hook_input) == Decision.ALLOW
+
+    def test_relative_path_resolves_against_cwd(self, project: Path) -> None:
+        assert _verdict(_in(project, "Read", {"file_path": _VAULT_REL})) == Decision.ALLOW
+
+    def test_relative_path_without_cwd_is_denied(self, project: Path) -> None:
+        assert _verdict(_hook_input("Read", {"file_path": _VAULT_REL})) == Decision.DENY
+
+    def test_edit_and_write_of_encrypted_file_are_allowed(self, project: Path) -> None:
+        path = str(project / _VAULT_REL)
+        edit = _in(project, "Edit", {"file_path": path, "old_string": "a", "new_string": "b"})
+        write = _in(project, "Write", {"file_path": path, "content": "x"})
+        assert _verdict(edit) == Decision.ALLOW
+        assert _verdict(write) == Decision.ALLOW
+
+    def test_grep_of_encrypted_file_is_allowed(self, project: Path) -> None:
+        hook_input = _in(project, "Grep", {"pattern": "x", "path": str(project / _VAULT_REL)})
+        assert _verdict(hook_input) == Decision.ALLOW
+
+    def test_grep_rooted_at_a_tree_of_only_encrypted_files_is_allowed(self, project: Path) -> None:
+        hook_input = _in(project, "Grep", {"pattern": "x", "path": str(project / "group_vars")})
+        assert _verdict(hook_input) == Decision.ALLOW
+
+    def test_grep_rooted_at_a_tree_with_a_plaintext_sibling_is_denied(self, project: Path) -> None:
+        _put(project, "group_vars/all/.vault-pass", b"not-a-real-secret\n")
+        hook_input = _in(project, "Grep", {"pattern": "x", "path": str(project / "group_vars")})
+        assert _verdict(hook_input) == Decision.DENY
+
+    def test_symlink_named_like_a_vault_file_to_a_plaintext_secret_is_denied(
+        self, project: Path
+    ) -> None:
+        plaintext = _put(project, "notes/plain.txt", b"db_password: not-a-real-secret\n")
+        link = project / "group_vars/web/vault_passwords.yml"
+        link.parent.mkdir(parents=True)
+        link.symlink_to(plaintext)
+        assert _verdict(_in(project, "Read", {"file_path": str(link)})) == Decision.DENY
+        assert _verdict(_in(project, "Bash", {"command": f"cat {link}"})) == Decision.DENY
+
+    def test_file_too_large_to_verify_is_denied(self, project: Path) -> None:
+        hook_input = _in(project, "Read", {"file_path": str(project / _VAULT_REL)})
+        with patch.object(encrypted_at_rest, "MAX_INSPECTED_BYTES", 16):
+            assert _verdict(hook_input) == Decision.DENY
+
+    def test_empty_file_is_denied(self, project: Path) -> None:
+        _put(project, _VAULT_REL, b"")
+        assert _verdict(_in(project, "Read", {"file_path": _VAULT_REL})) == Decision.DENY
+        assert _verdict(_in(project, "Bash", {"command": f"git add {_VAULT_REL}"})) == Decision.DENY
+
+    def test_encrypted_file_outside_the_project_root_is_denied(
+        self, tmp_path: Path, project: Path
+    ) -> None:
+        outside = _put(tmp_path, "elsewhere/vault_passwords.yml", vault_file_bytes())
+        assert _verdict(_in(project, "Read", {"file_path": str(outside)})) == Decision.DENY
+
+    def test_plaintext_vault_password_file_is_protected_as_before(self, project: Path) -> None:
+        _put(project, ".vault-pass", b"not-a-real-secret\n")
+        assert _verdict(_in(project, "Read", {"file_path": ".vault-pass"})) == Decision.DENY
+        assert _verdict(_in(project, "Bash", {"command": "cat .vault-pass"})) == Decision.DENY
+
+
+class TestEncryptedFileOnBash:
+    def test_git_add_naming_it_is_allowed(self, project: Path) -> None:
+        assert _verdict(_in(project, "Bash", {"command": f"git add {_VAULT_REL}"})) == (
+            Decision.ALLOW
+        )
+
+    def test_git_commit_naming_it_is_allowed(self, project: Path) -> None:
+        command = f"git commit -m 'Rotate the database password' -- {_VAULT_REL}"
+        assert _verdict(_in(project, "Bash", {"command": command})) == Decision.ALLOW
+
+    def test_git_add_after_decrypting_in_place_is_denied(self, project: Path) -> None:
+        hook_input = _in(project, "Bash", {"command": f"git add {_VAULT_REL}"})
+        _decrypt_in_place(project, _VAULT_REL)
+        handler = _handler()
+        assert handler.matches(hook_input)
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert result.reason.startswith(f"BLOCKED [{RuleID.SECRET_BASH_MENTION}]")
+
+    def test_glob_covering_the_encrypted_file_and_a_plaintext_sibling_is_denied(
+        self, project: Path
+    ) -> None:
+        _put(project, f"{_VAULT_REL}.bak", b"db_password: not-a-real-secret\n")
+        command = "cat group_vars/all/vault_pass*"
+        assert _verdict(_in(project, "Bash", {"command": command})) == Decision.DENY
+
+    def test_encrypted_and_plaintext_protected_files_together_are_denied(
+        self, project: Path
+    ) -> None:
+        _put(project, ".vault-pass", b"not-a-real-secret\n")
+        command = f"git add {_VAULT_REL} .vault-pass"
+        assert _verdict(_in(project, "Bash", {"command": command})) == Decision.DENY
+
+    def test_ansible_vault_view_and_decrypt_stay_denied(self, project: Path) -> None:
+        for command in (
+            f"ansible-vault view {_VAULT_REL}",
+            f"ansible-vault decrypt {_VAULT_REL}",
+            f"ansible-vault edit {_VAULT_REL}",
+        ):
+            assert _verdict(_in(project, "Bash", {"command": command})) == Decision.DENY, command
+
+    def test_commands_that_could_decrypt_via_configured_password_stay_denied(
+        self, project: Path
+    ) -> None:
+        for command in (
+            f"ansible localhost -m debug -a var=db_password -e @{_VAULT_REL}",
+            f"git diff {_VAULT_REL}",
+            f"python3 decrypt.py {_VAULT_REL}",
+        ):
+            assert _verdict(_in(project, "Bash", {"command": command})) == Decision.DENY, command
+
+    def test_directory_change_before_the_read_is_denied(self, project: Path) -> None:
+        command = f"cd inventories/staging && cat {_VAULT_REL}"
+        assert _verdict(_in(project, "Bash", {"command": command})) == Decision.DENY
+
+    def test_bash_without_cwd_cannot_resolve_a_relative_mention(self, project: Path) -> None:
+        hook_input = _hook_input("Bash", {"command": f"git add {_VAULT_REL}"})
+        assert _verdict(hook_input) == Decision.DENY
+
+    def test_existing_consumer_exemption_is_unchanged(self, project: Path) -> None:
+        command = "ansible-playbook --vault-password-file .vault-pass site.yml"
+        assert _verdict(_in(project, "Bash", {"command": command})) == Decision.ALLOW
+
+
+class TestEncryptedFileOnScriptAuthoring:
+    def test_script_naming_an_encrypted_file_is_still_denied(self, project: Path) -> None:
+        """A script runs LATER, by a command that does not name the file, so
+        no check can happen at the time of use -- and the file may have been
+        decrypted in place by then."""
+        hook_input = _in(
+            project,
+            "Write",
+            {"file_path": str(project / "deploy.sh"), "content": f"cat {_VAULT_REL}\n"},
+        )
+        handler = _handler()
+        assert handler.matches(hook_input)
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert result.reason.startswith(f"BLOCKED [{RuleID.SECRET_SCRIPT_AUTHOR}]")
+
+
+class TestEncryptedFileGuidance:
+    def test_claude_md_explains_the_encrypted_exemption(self) -> None:
+        text = _handler().get_claude_md()
+        assert text is not None
+        assert "encrypted at rest" in text.lower()
+        assert "ansible-vault view|decrypt" in text
+
+    def test_deny_text_explains_the_encrypted_exemption(self) -> None:
+        for rule in _handler().get_rules():
+            assert "encrypted" in rule.verbose.lower(), rule.rule_id
+
+
+class TestEncryptedFileAcceptanceProbes:
+    def _probe(self, title_fragment: str) -> Any:
+        matches = [t for t in _handler().get_acceptance_tests() if title_fragment in t.title]
+        assert len(matches) == 1, title_fragment
+        return matches[0]
+
+    def test_allow_probe_for_an_encrypted_file(self) -> None:
+        probe = self._probe("allows naming an encrypted")
+        assert probe.expected_decision == Decision.ALLOW
+        assert probe.setup_commands
+        assert probe.cleanup_commands
+
+    def test_deny_probe_for_the_decrypted_twin(self) -> None:
+        probe = self._probe("decrypted in place")
+        assert probe.expected_decision == Decision.DENY
+        assert probe.setup_commands
+
+    def test_allow_probe_fixture_is_a_confirmed_vault_payload(self, tmp_path: Path) -> None:
+        """The printf fixture must decode to what the detector confirms, or the
+        ALLOW probe would pass or fail for the wrong reason."""
+        probe = self._probe("allows naming an encrypted")
+        writes = [cmd for cmd in probe.setup_commands if cmd.startswith("printf '")]
+        assert len(writes) == 1
+        payload = writes[0].split("'")[1].replace("\\n", "\n")
+        target = tmp_path / "fixture.yml"
+        target.write_text(payload)
+        assert encrypted_at_rest.is_encrypted_at_rest(target, tmp_path)
