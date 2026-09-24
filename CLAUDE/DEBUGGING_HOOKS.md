@@ -164,7 +164,8 @@ as if the handler were not there. Measured: a marked Stop probe with no
 `R-STOP-NO-REASON`.
 
 `probe_as` is honoured only when `synthetic_source` is a probe source
-(`PROBE_CLASS_SOURCES`, today just `manual-probe`). A harness run, a cron tick
+(`PROBE_CLASS_SOURCES`: `manual-probe`, and `transport-verify`, which the
+transport toggle's own verification probes carry). A harness run, a cron tick
 or a supervisor-generated event cannot claim a thread. It keeps the refusal
 whatever it carries, and the helper warns when a caller-supplied source makes
 `probe_as` inert. Handlers that record state about real agents ignore
@@ -180,10 +181,16 @@ echo '{"tool_name":"Bash","tool_input":{"command":"ls -la"},"synthetic_source":"
   | bash .claude/hooks/pre-tool-use
 ```
 
-`tests/integration/test_documented_hook_probes_are_marked.py` fails in two
-cases: a document sends a payload to a hook entry point or to the daemon
-socket without `synthetic_source`, or it teaches such a probe but never shows
-the helper. There is no exemption. `tests/acceptance/test_documented_stop_probe.py`
+`tests/integration/test_documented_hook_probes_are_marked.py` fails in three
+cases:
+
+- a document sends a payload to a hook entry point or to the daemon socket
+  without `synthetic_source`;
+- it teaches such a probe but never shows the helper;
+- an inline probe (an `echo` payload, or `probe --json`) is denied by this
+  project's own handlers before it is sent.
+
+There is no exemption. `tests/acceptance/test_documented_stop_probe.py`
 sends the Stop probe the debugging docs teach through the live entry point,
 and asserts that it is blocked.
 

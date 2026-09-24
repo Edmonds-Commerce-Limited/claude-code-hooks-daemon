@@ -12,6 +12,7 @@ deployed-forwarder path is covered by the acceptance cycle test.
 
 from __future__ import annotations
 
+import json
 import socket
 import subprocess
 from pathlib import Path
@@ -21,6 +22,12 @@ import pytest
 
 from claude_code_hooks_daemon.config.models import TransportConfig
 from claude_code_hooks_daemon.constants.events import wired_event_metas
+from claude_code_hooks_daemon.daemon.synthetic_traffic import (
+    PROBE_AS_FIELD,
+    PROBE_CLASS_SOURCES,
+    SYNTHETIC_SOURCE_FIELD,
+    TRANSPORT_VERIFY,
+)
 from claude_code_hooks_daemon.install import transport_verify
 from claude_code_hooks_daemon.install.forwarder_generator import (
     INIT_SH_ANCHOR,
@@ -42,6 +49,60 @@ def _write_script(path: Path, body: str) -> Path:
     path.write_text("#!/bin/bash\n" + body)
     path.chmod(0o755)
     return path
+
+
+def _capturing(path: Path, answer: str, exit_code: int = 0) -> Path:
+    """A stub forwarder that saves what it was sent beside itself."""
+    return _write_script(
+        path,
+        f'cat > "$(dirname "$0")/{path.name}.sent"\necho \'{answer}\'\nexit {exit_code}\n',
+    )
+
+
+def _sent(path: Path) -> dict[str, object]:
+    sent: dict[str, object] = json.loads((path.parent / f"{path.name}.sent").read_text())
+    return sent
+
+
+class TestEveryProbeIsMarked:
+    """Plan 00466 N12: a toggle's verification probes are not agent traffic.
+
+    Their session id (`transport-toggle-probe`) matched no synthetic shape, so
+    every `transport on|off` was written to verdicts.jsonl as a real session's
+    tool call and stop.
+    """
+
+    def test_the_source_is_declared_probe_class(self) -> None:
+        """Its Stop probe must reach MAIN-scoped `auto_continue_stop`, which a
+        synthetic event can only do by naming its thread."""
+        assert TRANSPORT_VERIFY == "transport-verify"
+        assert TRANSPORT_VERIFY in PROBE_CLASS_SOURCES
+
+    def test_the_pre_tool_use_probe_is_marked_and_stands_for_main(self, tmp_path: Path) -> None:
+        forwarder = _capturing(tmp_path / "pre-tool-use", "{}")
+        assert probe_pre_tool_use(tmp_path).passed
+        sent = _sent(forwarder)
+        assert sent[SYNTHETIC_SOURCE_FIELD] == TRANSPORT_VERIFY
+        assert sent[PROBE_AS_FIELD] == "main"
+
+    def test_the_status_line_probe_is_marked(self, tmp_path: Path) -> None:
+        """Status carries no agent_id, so it names no thread."""
+        forwarder = _capturing(tmp_path / "status-line", "main | Sonnet")
+        assert probe_status_line(tmp_path).passed
+        sent = _sent(forwarder)
+        assert sent[SYNTHETIC_SOURCE_FIELD] == TRANSPORT_VERIFY
+        assert PROBE_AS_FIELD not in sent
+
+    def test_the_stop_probe_is_marked_and_stands_for_main(self, tmp_path: Path) -> None:
+        forwarder = _write_script(
+            tmp_path / "stop",
+            f'cat > "{tmp_path}/stop.sent"\n'
+            'echo \'{"decision":"block","reason":"explain"}\'\necho explain >&2\nexit 2\n',
+        )
+        assert probe_stop_hard_block(tmp_path).passed
+        sent = _sent(forwarder)
+        assert sent[SYNTHETIC_SOURCE_FIELD] == TRANSPORT_VERIFY
+        assert sent[PROBE_AS_FIELD] == "main"
 
 
 class TestPreToolUseProbe:

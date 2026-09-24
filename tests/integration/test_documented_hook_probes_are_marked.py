@@ -23,6 +23,12 @@ There is no exception. A probe of a handler scoped MAIN or SUB, such as
 with ``probe_as`` (``core/handler_scope.py`` honours it for a probe-class
 source only).
 
+A third rule keeps the probe runnable at all. The guards judge the prober's
+OWN Bash command text, so an inline payload that spells out the command a
+guard matches (``git reset --hard``) is denied before it reaches the hook.
+Every inline probe is therefore judged by this project's handlers, and one
+they deny must move its payload into a file (``--file``).
+
 A new example written without the field fails here, not in a month's worth of
 misclassified records.
 """
@@ -30,10 +36,17 @@ misclassified records.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
+from unittest.mock import Mock, patch
 
 import pytest
+import yaml
 
+from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.daemon.controller import DaemonController
+from claude_code_hooks_daemon.daemon.hook_probe import response_decision, response_text
 from claude_code_hooks_daemon.daemon.synthetic_traffic import SYNTHETIC_SOURCE_FIELD
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -152,6 +165,34 @@ def has_dispatch(text: str) -> bool:
     return any(is_dispatch(line) for _, line in logical_lines(text))
 
 
+#: The helper with its payload on the command line. ``--file`` keeps the
+#: payload out of the prober's command, which is the point of it.
+_HELPER_INLINE = re.compile(r"hooks-daemon probe\b.*\s--json\b")
+
+#: An inline code span; a prose line quotes its command inside one.
+_CODE_SPAN = re.compile(r"`([^`]+)`")
+
+
+def _is_inline_probe(command: str) -> bool:
+    return is_dispatch(command) or bool(_HELPER_INLINE.search(command))
+
+
+def inline_probes(text: str) -> list[tuple[int, str]]:
+    """Every probe command whose payload is spelled out in the command itself.
+
+    A prose line is judged by the code span holding the command, not by the
+    sentence around it, which nobody runs.
+    """
+    probes: list[tuple[int, str]] = []
+    for number, line in logical_lines(text):
+        spans = [span for span in _CODE_SPAN.findall(line) if _is_inline_probe(span)]
+        if spans:
+            probes.extend((number, span) for span in spans)
+        elif _is_inline_probe(line):
+            probes.append((number, line))
+    return probes
+
+
 class TestTheDetector:
     """The guard is only as good as its reading of a command."""
 
@@ -210,6 +251,87 @@ class TestTheDetector:
             'echo \'{"hook_event_name":"Stop"}\' | bash .claude/hooks/stop'
         )
         assert unmarked_dispatches(text)
+
+    def test_an_inline_helper_payload_is_an_inline_probe(self) -> None:
+        text = 'bin/hooks-daemon probe PreToolUse --json \'{"tool_name":"Bash"}\''
+        assert inline_probes(text) == [(1, text)]
+
+    def test_a_payload_in_a_file_is_not_an_inline_probe(self) -> None:
+        assert not inline_probes("bin/hooks-daemon probe PreToolUse --file payload.json")
+
+    def test_a_prose_line_is_judged_by_its_code_span(self) -> None:
+        command = 'echo \'{"synthetic_source":"manual-probe"}\' | bash .claude/hooks/stop'
+        assert inline_probes(f"3. **Blocks**: `{command}` returns a block") == [(1, command)]
+
+
+_JUDGE_CONFIG = "version: '1.0'\ndaemon:\n  idle_timeout_seconds: 600\nhandlers: {}\n"
+
+
+@pytest.fixture(scope="module")
+def judge(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Any]:
+    """Judge a Bash command as this project's own handlers would.
+
+    The prober's command is what a guard sees, so the command is dispatched
+    as a Bash PreToolUse through the real controller, with the handler
+    section of this repository's own ``.claude/hooks-daemon.yaml``.
+    """
+    workspace = tmp_path_factory.mktemp("probe-judge")
+    (workspace / ".claude").mkdir()
+    (workspace / ".git").mkdir()
+    (workspace / ".claude" / "hooks-daemon.yaml").write_text(_JUDGE_CONFIG, encoding="utf-8")
+    repo_config = (REPO_ROOT / ".claude" / "hooks-daemon.yaml").read_text(encoding="utf-8")
+    controller = DaemonController()
+    # ``return_value``: initialise() resolves the git remote through subprocess.
+    with patch("subprocess.run", return_value=Mock(returncode=0, stdout="/tmp/test\n")):
+        controller.initialise(
+            handler_config=yaml.safe_load(repo_config)["handlers"], workspace_root=workspace
+        )
+    judged = 0
+
+    def _judge(command: str) -> dict[str, Any]:
+        nonlocal judged
+        judged += 1
+        # A fresh session per command: a once-per-session guard judges each afresh.
+        return controller.process_request(
+            {
+                "event": "PreToolUse",
+                "hook_input": {
+                    "hook_event_name": "PreToolUse",
+                    "tool_name": "Bash",
+                    "tool_input": {"command": command},
+                    "session_id": f"probe-judge-{judged}",
+                    "cwd": str(workspace),
+                },
+            }
+        )
+
+    yield _judge
+    ProjectContext.reset()
+
+
+def test_the_judge_denies_an_inline_probe_of_a_guarded_command(judge: Any) -> None:
+    """Otherwise the corpus test below would pass on a judge that denies nothing."""
+    probe = (
+        'echo \'{"tool_name":"Bash","tool_input":{"command":"git reset --hard"},'
+        '"synthetic_source":"manual-probe"}\' | bash .claude/hooks/pre-tool-use'
+    )
+    assert response_decision(judge(probe)) == "deny"
+
+
+def test_no_documented_inline_probe_is_denied_before_it_is_sent(judge: Any) -> None:
+    offenders = []
+    for path in _documents():
+        for number, command in inline_probes(path.read_text(encoding="utf-8")):
+            response = judge(command)
+            if response_decision(response) == "deny":
+                reason = response_text(response).splitlines()[0]
+                offenders.append(f"{path.relative_to(REPO_ROOT)}:{number}: {reason}")
+    assert not offenders, (
+        "These documented probes spell out, in the prober's own Bash command, a "
+        "command this project's guards deny, so the probe is blocked before it "
+        "reaches the hook. Show the payload as a file and send it with "
+        f"`{HELPER} <Event> --file <path>`:\n" + "\n".join(offenders)
+    )
 
 
 def test_the_corpus_is_not_empty() -> None:

@@ -38,6 +38,7 @@ from claude_code_hooks_daemon.daemon.synthetic_traffic import (
     PROBE_AGENT_ID,
     PROBE_AS_FIELD,
     SYNTHETIC_SOURCE_FIELD,
+    TRANSPORT_VERIFY,
 )
 
 _AGENT_ID = "agent_01H9XQK2M4N7P"
@@ -143,6 +144,11 @@ class TestProbeAs:
         assert not scope_admits(HandlerScope.MAIN, event)
         sub = {**event, PROBE_AS_FIELD: "sub", "agent_id": PROBE_AGENT_ID}
         assert not scope_admits(HandlerScope.SUB, sub)
+
+    def test_the_transport_verification_source_is_declared_probe_class(self) -> None:
+        """Its Stop probe exists to see `auto_continue_stop` block."""
+        event = {**_main_thread(), SYNTHETIC_SOURCE_FIELD: TRANSPORT_VERIFY, PROBE_AS_FIELD: "main"}
+        assert scope_admits(HandlerScope.MAIN, event)
 
     @pytest.mark.parametrize("value", ["MAIN", "orchestrator", "", 1, None])
     def test_an_unknown_probe_as_value_is_refused(self, value: object) -> None:

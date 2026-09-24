@@ -793,9 +793,11 @@ echo '{"tool_name":"Bash","tool_input":{"command":"ls -la"},"synthetic_source":"
 A synthetic event is otherwise neither a main thread nor a subagent, so a
 handler scoped `MAIN` or `SUB` never sees it. `probe_as: main|sub` (the
 helper's `--as`) lets it through. This is honoured only for a probe-class
-source (`manual-probe`), never for a harness, a cron tick or a supervisor
-event. `probe_as: sub` carries the fixed `agent_id` `manual-probe-agent`,
-which no consumer mistakes for a real teammate.
+source, never for a harness, a cron tick or a supervisor event. The
+probe-class sources are declared by name in `PROBE_CLASS_SOURCES`:
+`manual-probe`, and `transport-verify`, which the transport toggle's own
+verification probes carry. `probe_as: sub` carries the fixed `agent_id`
+`manual-probe-agent`, which no consumer mistakes for a real teammate.
 
 If your handler RECORDS something about real agents or sessions, it should
 decline a synthetic event, as report persistence and the goal ledger do.

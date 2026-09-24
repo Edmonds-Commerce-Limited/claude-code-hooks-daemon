@@ -259,15 +259,25 @@ bash .claude/hooks-daemon/scripts/upgrade.sh --project-root "$PWD" "$TARGET_VERS
 .claude/hooks-daemon/bin/hooks-daemon probe PreToolUse --json '{"tool_name": "Bash", "tool_input": {"command": "ls -la"}}'
 # Expected: decision: allow
 
-# Test destructive git still blocked
-echo '{"tool_name": "Bash", "tool_input": {"command": "git reset --hard HEAD"}, "synthetic_source": "manual-probe"}' | \
-  .claude/hooks/pre-tool-use
-# Expected: {"hookSpecificOutput": {"permissionDecision": "deny", ...}}
 ```
 
-A raw test payload carries `"synthetic_source": "manual-probe"`, which the
-helper sets for you. Without it, the daemon's verdict log records the probe as
-a real agent's tool call (see
+To test that destructive git is still blocked, save this payload as
+`untracked/scratch/probe-destructive-git.json` with the Write tool:
+
+```json
+{"tool_name": "Bash", "tool_input": {"command": "git reset --hard HEAD"}}
+```
+
+```bash
+.claude/hooks-daemon/bin/hooks-daemon probe PreToolUse --file untracked/scratch/probe-destructive-git.json
+# Expected: decision: deny
+```
+
+The payload goes in a file because the guards judge your own Bash command's
+text too: an `echo` or `--json` that spells out `git reset --hard` is denied
+before the probe runs. A shell heredoc is judged the same way. The helper
+marks the probe `"synthetic_source": "manual-probe"`. Without that marker,
+the daemon's verdict log records the probe as a real agent's tool call (see
 [DEBUGGING_HOOKS.md](DEBUGGING_HOOKS.md#probing-a-handler-by-hand-hooks-daemon-probe)).
 
 **RESTART CLAUDE CODE**: After upgrading, tell the user to restart their Claude Code session (exit and re-enter). New hook event types and settings changes only take effect after a session restart.

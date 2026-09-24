@@ -64,16 +64,22 @@ SOCKET_STDIN_TEST: Final[str] = "socket-stdin-test"
 #: probing docs tell a raw payload to carry (Plan 00466 N12).
 MANUAL_PROBE: Final[str] = "manual-probe"
 
+#: The transport toggle's real-invocation verification probes
+#: (``install/transport_verify.py``). Probe-class: its Stop probe exists to
+#: see MAIN-scoped ``auto_continue_stop`` block.
+TRANSPORT_VERIFY: Final[str] = "transport-verify"
+
 #: Field a PROBE sets to name the thread it stands for. The marker keeps the
 #: probe out of the real record, and a synthetic event is neither a main
 #: thread nor a subagent, so without this a probe could never reach a MAIN- or
 #: SUB-scoped handler (``core/handler_scope.py``).
 PROBE_AS_FIELD: Final[str] = "probe_as"
 
-#: The only sources allowed to name a thread. A probe is sent to exercise
-#: handlers, so it may stand for a thread; a harness run, a cron tick or a
-#: supervisor-generated event must never pass for one, and keeps the refusal.
-PROBE_CLASS_SOURCES: Final[frozenset[str]] = frozenset({MANUAL_PROBE})
+#: The only sources allowed to name a thread, each declared here by name. A
+#: probe is sent to exercise handlers, so it may stand for a thread; a harness
+#: run, a cron tick or a supervisor-generated event must never pass for one,
+#: and keeps the refusal.
+PROBE_CLASS_SOURCES: Final[frozenset[str]] = frozenset({MANUAL_PROBE, TRANSPORT_VERIFY})
 
 #: The ``agent_id`` a probe standing for a subagent carries. Documented and
 #: fixed, so every consumer of ``agent_id`` can tell it from a real teammate,

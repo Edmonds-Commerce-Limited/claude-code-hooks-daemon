@@ -118,15 +118,6 @@ Each test payload below carries `"synthetic_source": "manual-probe"`. That
 marks it as a probe, so the daemon's verdict log does not count it as one of
 your agent's real tool calls.
 
-Test a destructive git command (should be blocked):
-
-```bash
-echo '{"tool_name": "Bash", "tool_input": {"command": "git reset --hard HEAD"}, "synthetic_source": "manual-probe"}' \
-  | bash .claude/hooks/pre-tool-use
-```
-
-Expected: A JSON response with `"permissionDecision": "deny"` and a reason explaining why the command was blocked.
-
 Test a safe command (should be allowed):
 
 ```bash
@@ -147,14 +138,17 @@ Expected: `decision: allow`.
 
 ### Confirm a Handler Actually Fires (Optional)
 
-The check above proves the pipeline is connected, but an "allow" looks identical to a daemon that is doing nothing. To see a handler actually make a decision, send it something it is supposed to block:
+The check above proves the pipeline is connected, but an "allow" looks identical to a daemon that is doing nothing. To see a handler actually make a decision, send it something it is supposed to block. Save this payload as `untracked/scratch/probe-destructive-git.json`:
 
-```bash
-echo '{"tool_name": "Bash", "tool_input": {"command": "git reset --hard"}, "synthetic_source": "manual-probe"}' \
-  | bash .claude/hooks/pre-tool-use
+```json
+{"tool_name": "Bash", "tool_input": {"command": "git reset --hard"}}
 ```
 
-Expected: a JSON response denying the command, with a reason from the `destructive_git` handler. Nothing is executed — the hook only inspects the command.
+```bash
+.claude/hooks-daemon/bin/hooks-daemon probe PreToolUse --file untracked/scratch/probe-destructive-git.json
+```
+
+Expected: `decision: deny`, with a reason from the `destructive_git` handler. Nothing is executed — the hook only inspects the command. The payload is in a file because the guards also judge an agent's own command: an `echo` that spells out `git reset --hard` is itself blocked when Claude Code runs it.
 
 This is strictly better evidence than a "hook is alive" message: it exercises a real handler, its matching logic, and the deny path all at once.
 
