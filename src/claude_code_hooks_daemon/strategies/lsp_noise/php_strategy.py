@@ -281,25 +281,49 @@ def _substitute_dependency_roots(
     return sorted(wanted)
 
 
+#: Suffixes a normalised entry may carry, past its root name, and still mean
+#: "the whole tree" to a glob-matching exclude engine - a bare wildcard
+#: segment, not a narrower nested pattern (`/bin/**`, `/**/{Tests,tests}/**`).
+_WHOLE_ROOT_SUFFIXES: Final[tuple[str, ...]] = ("", "/*", "/**", "/**/*")
+
+
+def _is_whole_root_exclude(entry: str, name: str) -> bool:
+    """Whether `entry`, normalised, excludes the entire `name/` tree outright.
+
+    Segment-bounded, not substring: normalises a leading ``./`` or ``/``, a
+    trailing ``/``, and an optional leading ``**/`` any-depth prefix, then
+    requires what remains to be exactly `name` followed by nothing narrower
+    than a bare wildcard segment. This is what keeps ``**/myvendor/**`` and
+    ``**/vendor-cache/**`` (first-party directories that merely CONTAIN
+    ``name`` as a substring of their own, different, name) from matching -
+    their first path segment is ``myvendor``/``vendor-cache``, never `name`.
+    """
+    normalized = entry
+    if normalized.startswith("./"):
+        normalized = normalized[2:]
+    elif normalized.startswith("/"):
+        normalized = normalized[1:]
+    normalized = normalized.rstrip("/")
+    if normalized.startswith(_ANY_DEPTH_PREFIX):
+        normalized = normalized[len(_ANY_DEPTH_PREFIX) :]
+    return any(normalized == f"{name}{suffix}" for suffix in _WHOLE_ROOT_SUFFIXES)
+
+
 def _harmful_root_excludes(
     present: list[str], replacements: dict[str, tuple[str, ...]]
 ) -> list[tuple[str, str]]:
     """Present entries that exclude an entire declared dependency root outright.
 
-    Returns ``(entry, root_name)`` pairs. A bare root name, its any-depth
-    glob, or that glob with a trailing wildcard segment (``vendor``,
-    ``**/vendor``, ``**/vendor/**``) all remove the root from intelephense's
-    INDEX entirely - keyed off `replacements`' declared names, never a
-    literal ``"vendor"`` check.
+    Returns ``(entry, root_name)`` pairs, keyed off `replacements`' declared
+    names, never a literal ``"vendor"`` check - see `_is_whole_root_exclude`
+    for the matching rule.
     """
-    harmful: list[tuple[str, str]] = []
-    for entry in present:
-        stripped = entry.rstrip("/")
-        for name in replacements:
-            whole_root = {name, f"{_ANY_DEPTH_PREFIX}{name}", f"{_ANY_DEPTH_PREFIX}{name}/**"}
-            if stripped in whole_root:
-                harmful.append((entry, name))
-    return harmful
+    return [
+        (entry, name)
+        for entry in present
+        for name in replacements
+        if _is_whole_root_exclude(entry, name)
+    ]
 
 
 def _load_json_object(path: Path) -> dict[str, Any] | None:

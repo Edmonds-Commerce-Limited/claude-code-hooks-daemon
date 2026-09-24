@@ -17,7 +17,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
+
+import pytest
 
 from claude_code_hooks_daemon.constants import DaemonPath
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
@@ -203,6 +205,69 @@ class TestDependencyRootSubstitution:
         text = "\n".join(lines)
         assert "harmful" in text.lower()
         assert DaemonPath.UNTRACKED_DIR in text
+
+
+class TestHarmfulEntrySpellings:
+    """Every glob spelling that removes the whole root, and only those.
+
+    `_harmful_root_excludes` must match on a normalised, segment-bounded
+    form - never a substring - so `**/myvendor/**` and `**/vendor-cache/**`
+    (both first-party-shaped directories that merely CONTAIN "vendor" as a
+    substring of their own name) are never mistaken for Composer's `vendor/`.
+    """
+
+    _REPLACEMENTS: ClassVar[dict[str, tuple[str, ...]]] = {
+        "vendor": ("**/vendor/**/{Tests,tests}/**", "**/vendor/**/vendor/**")
+    }
+
+    @pytest.mark.parametrize(
+        "entry",
+        [
+            "vendor",
+            "**/vendor",
+            "**/vendor/**",
+            "vendor/**",
+            "vendor/*",
+            "./vendor",
+            "./vendor/**",
+            "/vendor/**",
+            "**/vendor/*",
+            "vendor/",
+            "**/vendor/**/*",
+        ],
+    )
+    def test_whole_root_spellings_are_flagged_harmful(self, entry: str) -> None:
+        harmful = _harmful_root_excludes([entry], self._REPLACEMENTS)
+        assert harmful == [(entry, "vendor")]
+
+    @pytest.mark.parametrize(
+        "entry",
+        [
+            "**/vendor/**/{Tests,tests}/**",
+            "**/vendor/**/vendor/**",
+            "**/vendor/bin/**",
+            "**/myvendor/**",
+            "**/vendor-cache/**",
+        ],
+    )
+    def test_non_whole_root_entries_are_not_flagged(self, entry: str) -> None:
+        assert _harmful_root_excludes([entry], self._REPLACEMENTS) == []
+
+    def test_a_harmful_entry_that_entry_covers_treats_as_complete_is_still_reported(
+        self, tmp_path: Path
+    ) -> None:
+        """`**/vendor/**` string-prefix-covers the nested replacement entries too.
+
+        `entry_covers` calls the nested wanted entries "present" via its
+        parent-path prefix check, silencing `missing` - the harmful finding
+        must not depend on `missing` being non-empty to surface.
+        """
+        exclude = ["**/vendor/**"]
+        _write_lsp_json(tmp_path, "lsp-noise-php-exclude", exclude)
+        lines, _ = PhpLspNoiseStrategy().exclude_finding(tmp_path, frozenset({"**/vendor"}))
+        text = "\n".join(lines)
+        assert "harmful" in text.lower()
+        assert "Missing" not in text
 
 
 class TestSubstitutionIsTableDriven:
