@@ -47,6 +47,11 @@ _LOCK_FILE_MODE: Final[int] = _PRIVATE_FILE_MODE
 
 _ENTRIES_KEY: Final[str] = "entries"
 _MAX_ENTRIES: Final[int] = 100
+# RV3-m5: bounds ONE entry's owner set, distinct from _MAX_ENTRIES above
+# (which bounds the number of ENTRIES). A rolling ledger plan touched by
+# dozens of teammates can otherwise accumulate owners without bound, each
+# one a combined-signal write on every later terminal transition.
+_MAX_OWNERS_PER_ENTRY: Final[int] = 50
 
 _PLAN_MD_FILENAME: Final[str] = "PLAN.md"
 
@@ -117,6 +122,20 @@ class LivePlanRef:
     plan_text: str
 
 
+def _add_owner(sessions: list[str], session_id: str) -> None:
+    """Append ``session_id`` to ``sessions`` if absent, with FIFO eviction
+    of the OLDEST owner at :data:`_MAX_OWNERS_PER_ENTRY` (RV3-m5). Shared by
+    :meth:`GoalLedger.record_emission` and :meth:`GoalLedger.reassert_session`
+    -- both grow the same additive ``sessions`` set and both need the same
+    bound.
+    """
+    if session_id in sessions:
+        return
+    if len(sessions) >= _MAX_OWNERS_PER_ENTRY:
+        del sessions[0]
+    sessions.append(session_id)
+
+
 def _optional_str(value: Any) -> str | None:
     return None if value is None else str(value)
 
@@ -157,7 +176,11 @@ def _find_plan_md_text(plan_dir: Path, plan_number: str) -> tuple[str, str] | No
             continue
         try:
             text = plan_md.read_text(encoding="utf-8")
-        except OSError as e:
+        except (OSError, ValueError) as e:
+            # RV3-m8: ValueError catches read_text's UnicodeDecodeError too
+            # (a non-UTF-8 PLAN.md), the same tolerance review RV-m5 gave
+            # the ledger file itself -- a binary/corrupt sibling plan must
+            # not crash a live plan's own refresh.
             logger.warning("goal_ledger: cannot read %s: %s", plan_md, e)
             continue
         return folder.name, text
@@ -184,7 +207,8 @@ def _plan_state(plan_dir: Path, plan_number: str) -> str:
             continue
         try:
             text = plan_md.read_text(encoding="utf-8")
-        except OSError as e:
+        except (OSError, ValueError) as e:
+            # RV3-m8: same ValueError tolerance as _find_plan_md_text above.
             logger.warning("goal_ledger: cannot read %s: %s", plan_md, e)
             return _STATE_UNREADABLE
         doc = PlanDoc.parse(text)
@@ -407,8 +431,7 @@ class GoalLedger:
                 # A re-emission re-arms the /goal slot for this plan.
                 existing.displaced_by = None
                 existing.displaced_at = None
-                if session_id not in existing.sessions:
-                    existing.sessions.append(session_id)
+                _add_owner(existing.sessions, session_id)
             else:
                 entries.append(
                     GoalLedgerEntry(
@@ -457,13 +480,38 @@ class GoalLedger:
         terminal write landing on disk and this read must not silently
         suppress every owning session's retraction just because it won the
         race to reconcile first.
+
+        RV3-M1: answers from the LIVE entry when one exists (at most one
+        ever does -- ``record_emission`` only reuses a not-yet-retired
+        entry, so a reopened plan appends a NEW one rather than reviving
+        the old), or else the MOST RECENTLY retired terminal entry.
+        ``record_emission`` appends a fresh entry every time a retired plan
+        is reopened, so a plan with more than one completed lifecycle has
+        several retired entries for the same ``plan_number`` -- answering
+        from the first one in the list handed a reopened-and-recompleted
+        plan's retraction to the ORIGINAL session instead of whoever
+        actually reopened and recompleted it.
         """
-        for e in self.entries():
-            if e.plan_number == plan_number and (
-                e.retired_at is None or e.retired_reason == RETIRED_TERMINAL_STATUS
-            ):
-                return list(e.sessions)
-        return []
+        matches = [e for e in self.entries() if e.plan_number == plan_number]
+        live = next((e for e in matches if e.retired_at is None), None)
+        if live is not None:
+            return list(live.sessions)
+        retired_terminal = [e for e in matches if e.retired_reason == RETIRED_TERMINAL_STATUS]
+        if not retired_terminal:
+            return []
+        most_recent = max(retired_terminal, key=lambda e: e.retired_at or 0.0)
+        return list(most_recent.sessions)
+
+    def is_plan_live(self, plan_number: str) -> bool:
+        """True when a not-yet-retired entry exists for this plan number.
+
+        Read-only, no reconciliation, no lock -- same posture as
+        :meth:`has_live_entry`, but ownership-independent: RV3-m6's Write
+        flip detector needs "has ANYONE already ledgered this plan as
+        started", which git HEAD cannot answer when the flip landed on
+        disk before it was committed.
+        """
+        return any(e.plan_number == plan_number and e.retired_at is None for e in self.entries())
 
     def session_has_entries(self, session_id: str) -> bool:
         """True when the ledger has EVER recorded an emission for this session.
@@ -509,8 +557,7 @@ class GoalLedger:
             )
             if existing is None:
                 return False
-            if session_id not in existing.sessions:
-                existing.sessions.append(session_id)
+            _add_owner(existing.sessions, session_id)
             existing.emitted_at = time.time()
             self._save(entries)
         return True

@@ -29,6 +29,7 @@ from claude_code_hooks_daemon.handlers.post_tool_use.goal_injection import (
     _MAX_JOINED_CHARS,
     _SIGNAL_SUBDIR,
     _SIGNAL_SUFFIX,
+    _SOURCE_CLI,
     _SOURCE_STATUS_FLIP,
     GoalInjectionHandler,
     LivePlan,
@@ -544,11 +545,25 @@ class TestGoalInjectionHandler:
         assert other_path.exists()
 
     def test_latch_disabled_via_option_refires(self, handler: GoalInjectionHandler) -> None:
+        """RV3-m6 makes a repeated Write to an already-ledgered-live plan
+        route through the reassert path (itself now latched, RV3-m4), so a
+        genuine Edit-based flip is used here to isolate what this test is
+        actually about: the ``_once_per_plan_per_session`` OPTION governing
+        the flip path's own latch, independent of either newer gate."""
         handler._once_per_plan_per_session = False
         plan = self._write_plan()
-        handler.handle(self._hook_input(plan))
+        flip = {
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": str(plan),
+                "old_string": "**Status**: Not Started",
+                "new_string": "**Status**: In Progress",
+            },
+            "session_id": _SESSION,
+        }
+        handler.handle(flip)
         self._signal_path().unlink()
-        handler.handle(self._hook_input(plan))
+        handler.handle(flip)
         assert self._signal_path().exists()
 
     def test_missing_plan_file_is_harmless(self, handler: GoalInjectionHandler) -> None:
@@ -1182,17 +1197,23 @@ class TestStatusFlipDetection:
     def test_replace_all_colliding_with_unrelated_text_does_not_falsely_flip(
         self, handler: GoalInjectionHandler
     ) -> None:
-        """Same collision, via ``replace_all`` -- every occurrence of
-        ``new_string`` is reversed at once, so this exercises the
-        ``replace_all`` branch of the reconstruction rather than the
-        candidate-enumeration branch."""
+        """RV3-m1: the plan is ALREADY In Progress, and one table cell reads
+        'Not Started'. The fixture is the file exactly as a real
+        ``replace_all('Not Started' -> 'In Progress')`` Edit would leave it
+        on disk -- pre_edit's ONE 'Not Started' occurrence transformed, not
+        hand-authored -- so the Status line's own occurrence of the target
+        text is UNCHANGED by the edit (it was already 'In Progress'), and a
+        blind full reversal wrongly reverses it too. The prior version of
+        this test used a fixture no Edit tool call could ever produce (its
+        'post-edit' text still contained ``old_string`` everywhere), so it
+        exercised the safe early-exit rather than the collision logic."""
         plan = self._plan_path()
-        plan.write_text(
+        pre_edit = (
             "# Plan 00269: supervisor goal message injection\n\n"
             "**Status**: In Progress\n\n"
-            "| Task | State |\n| --- | --- |\n| A | Not Started |\n",
-            encoding="utf-8",
+            "| Task | State |\n| --- | --- |\n| A | Not Started |\n"
         )
+        plan.write_text(pre_edit.replace("Not Started", "In Progress"), encoding="utf-8")
 
         edit = self._edit_hook_input(plan, old_string="Not Started", new_string="In Progress")
         edit["tool_input"]["replace_all"] = True
@@ -1201,6 +1222,168 @@ class TestStatusFlipDetection:
 
         assert result.decision == Decision.ALLOW
         assert not self._signal_path().exists()
+
+    def test_replace_all_colliding_with_two_unrelated_cells_does_not_falsely_flip(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """RV3-m1's C2b: same collision, with TWO 'Not Started' cells
+        genuinely flipped by the same replace_all -- the ambiguity check
+        must hold regardless of how many OTHER sites the edit touches."""
+        plan = self._plan_path()
+        pre_edit = (
+            "# Plan 00269: supervisor goal message injection\n\n"
+            "**Status**: In Progress\n\n"
+            "| Task | State |\n| --- | --- |\n"
+            "| A | Not Started |\n| B | Not Started |\n"
+        )
+        plan.write_text(pre_edit.replace("Not Started", "In Progress"), encoding="utf-8")
+
+        edit = self._edit_hook_input(plan, old_string="Not Started", new_string="In Progress")
+        edit["tool_input"]["replace_all"] = True
+
+        result = handler.handle(edit)
+
+        assert result.decision == Decision.ALLOW
+        assert not self._signal_path().exists()
+
+    def test_replace_all_single_occurrence_on_status_line_still_detected(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """RV3-m1's regression control: when the Status line is the ONLY
+        occurrence of ``new_string`` (no colliding cell anywhere), the
+        ambiguity check must not needlessly suppress the flip -- there is
+        nothing to disambiguate when there is only one candidate site."""
+        plan = self._plan_path()
+        pre_edit = (
+            "# Plan 00269: supervisor goal message injection\n\n"
+            "**Status**: Not Started\n\nBody.\n"
+        )
+        plan.write_text(pre_edit.replace("Not Started", "In Progress"), encoding="utf-8")
+
+        edit = self._edit_hook_input(plan, old_string="Not Started", new_string="In Progress")
+        edit["tool_input"]["replace_all"] = True
+
+        result = handler.handle(edit)
+
+        assert result.decision == Decision.ALLOW
+        assert self._signal_path().exists()
+
+    # ---- RV3-m2: the post-state check must agree with PlanDoc, not a
+    # literal-only regex that cannot see past a fenced/second Status line --
+
+    def test_task_tick_on_a_not_started_plan_with_a_fenced_status_example_stays_silent(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """C7b: a fenced example line reading '**Status**: In Progress'
+        must not make an unrelated task-tick edit look like a flip."""
+        plan = self._plan_path()
+        plan.write_text(
+            "# Plan 00269: supervisor goal message injection\n\n"
+            "**Status**: Not Started\n\n"
+            "Example:\n\n```markdown\n**Status**: In Progress\n```\n\n"
+            "- [ ] a\n",
+            encoding="utf-8",
+        )
+
+        result = handler.handle(
+            self._edit_hook_input(plan, old_string="- [ ] a", new_string="- [x] a")
+        )
+
+        assert result.decision == Decision.ALLOW
+        assert not self._signal_path().exists()
+
+    def test_editing_a_second_status_line_to_in_progress_on_an_in_progress_plan_stays_silent(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """C8: the REAL Status line already reads In Progress; a per-phase
+        second '**Status**:' line moving to In Progress is not the flip
+        PlanDoc (and thus this handler) cares about."""
+        plan = self._plan_path()
+        plan.write_text(
+            "# Plan 00269: supervisor goal message injection\n\n"
+            "**Status**: In Progress\n\n"
+            "### Phase 2\n\n**Status**: Not Started\n",
+            encoding="utf-8",
+        )
+
+        result = handler.handle(
+            self._edit_hook_input(
+                plan,
+                old_string="### Phase 2\n\n**Status**: Not Started",
+                new_string="### Phase 2\n\n**Status**: In Progress",
+            )
+        )
+
+        assert result.decision == Decision.ALLOW
+        assert not self._signal_path().exists()
+
+    def test_flip_to_in_progress_with_a_date_qualifier_is_still_detected(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """C11: a bonus of switching the post-state check to PlanDoc (RV3-m2)
+        -- a Status line carrying a trailing date qualifier, which the old
+        literal-only regex could never match, is a real flip PlanDoc
+        recognises correctly (this was a MISSED flip on main too)."""
+        plan = self._plan_path()
+        plan.write_text(
+            "# Plan 00269: supervisor goal message injection\n\n"
+            "**Status**: In Progress (2026-09-24)\n",
+            encoding="utf-8",
+        )
+
+        result = handler.handle(
+            self._edit_hook_input(
+                plan,
+                old_string="**Status**: Not Started",
+                new_string="**Status**: In Progress (2026-09-24)",
+            )
+        )
+
+        assert result.decision == Decision.ALLOW
+        assert self._signal_path().exists()
+
+    # ---- RV3-m6: the Write path must not fire on a plan already ledgered
+    # live, even when git HEAD lags an uncommitted flip --
+
+    def test_write_of_a_plan_already_live_in_the_ledger_but_uncommitted_does_not_displace(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """C5g: S1 flips 00304 (uncommitted -- HEAD still reads Not
+        Started), then S2 flips 00305 (marking 00304 displaced). Teammate
+        S3 then Writes 00304 -- this must NOT be misread as a FRESH flip:
+        that would wrongly emit a new ledger record for 00304, marking the
+        still-live 00305 displaced in turn. The ledger, not git HEAD, is
+        authoritative for whether 00304 has already started."""
+        self._init_repo()
+        first = self._plan_path("00304-first")
+        first.write_text(_plan_md("Not Started"), encoding="utf-8")
+        second = self._plan_path("00305-second")
+        second.write_text(_plan_md("Not Started"), encoding="utf-8")
+        _git(self._project, "add", "-A")
+        _git(self._project, "commit", "-m", "create plans")
+
+        def _write_as(file_path: Path, session: str) -> dict[str, Any]:
+            return {
+                "tool_name": "Write",
+                "tool_input": {"file_path": str(file_path)},
+                "session_id": session,
+            }
+
+        first.write_text(_plan_md("In Progress"), encoding="utf-8")
+        handler.handle(_write_as(first, "S1"))  # S1's flip, uncommitted
+        second.write_text(_plan_md("In Progress"), encoding="utf-8")
+        handler.handle(_write_as(second, "S2"))  # S2 flips 00305, displacing 00304
+
+        result = handler.handle(_write_as(first, "S3"))
+
+        assert result.decision == Decision.ALLOW
+        assert result.context == [], "re-Writing 00304 must not re-displace 00305"
+        entry_305 = next(
+            e
+            for e in GoalLedger(self._untracked / LEDGER_FILENAME).entries()
+            if e.plan_number == "00305"
+        )
+        assert entry_305.displaced_by is None
 
     def test_genuine_flip_still_detected_when_new_string_is_unambiguous(
         self, handler: GoalInjectionHandler
@@ -1563,3 +1746,290 @@ class TestResumedSameSessionReassertion(TestNewSessionReassertion):
             "signal file rewritten after a restart consumed it"
         )
         assert "00296" in json.loads(signal_path.read_text(encoding="utf-8"))["rendered_lines"][0]
+
+
+class TestReview3Fixes(TestNewSessionReassertion):
+    """Review 3 (Plan 00466, subagent-reports/260924-n466-goalflip-review3-
+    opus-5-5.md): RV3-M1 (major), RV3-m3, RV3-m4, RV3-m5. Inherits the
+    fixture plumbing from ``TestNewSessionReassertion``.
+    """
+
+    def _clear_path(self, session: str) -> Path:
+        return self._untracked / _SIGNAL_SUBDIR / f"{session}{_CLEAR_SUFFIX}"
+
+    def _intent_path(self, session: str) -> Path:
+        return self._untracked / _SIGNAL_SUBDIR / f"{session}{_SIGNAL_SUFFIX}"
+
+    # ---- RV3-M1: transition-based retirement + owning_sessions picks the
+    # right entry --------------------------------------------------------
+
+    def test_reopened_plan_completed_by_a_different_session_retracts_that_session(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """A4: S1 flips and completes 00296. S2 reopens it and completes it
+        again. S2 -- not S1, who has nothing to do with the reopen -- must
+        get its `.goal-clear`."""
+        plan = self._plan_path("00296-first")
+        plan.write_text(_plan_md("In Progress"), encoding="utf-8")
+        handler.handle(
+            self._edit_input(plan, "S1", "**Status**: Not Started", "**Status**: In Progress")
+        )
+        plan.write_text(_plan_md("Complete"), encoding="utf-8")
+        handler.handle(
+            self._edit_input(plan, "S1", "**Status**: In Progress", "**Status**: Complete")
+        )
+        assert self._clear_path("S1").exists()
+        self._clear_path("S1").unlink()
+
+        # S2 reopens (Complete -> In Progress) and completes it again.
+        plan.write_text(_plan_md("In Progress"), encoding="utf-8")
+        handler.handle(
+            self._edit_input(plan, "S2", "**Status**: Complete", "**Status**: In Progress")
+        )
+        plan.write_text(_plan_md("Complete"), encoding="utf-8")
+        handler.handle(
+            self._edit_input(plan, "S2", "**Status**: In Progress", "**Status**: Complete")
+        )
+
+        assert self._clear_path(
+            "S2"
+        ).exists(), "S2 reopened and recompleted the plan -- it must get its own .goal-clear"
+        assert not self._clear_path(
+            "S1"
+        ).exists(), "S1 has nothing to do with the reopen and must not be re-signalled"
+
+    def test_reopened_plan_completion_does_not_signal_an_unrelated_owner(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """A4b: as above, plus a second live plan owned only by S3 -- S1
+        must not be handed a fresh goal naming a plan it never touched."""
+        plan = self._plan_path("00296-first")
+        plan.write_text(_plan_md("In Progress"), encoding="utf-8")
+        handler.handle(
+            self._edit_input(plan, "S1", "**Status**: Not Started", "**Status**: In Progress")
+        )
+        plan.write_text(_plan_md("Complete"), encoding="utf-8")
+        handler.handle(
+            self._edit_input(plan, "S1", "**Status**: In Progress", "**Status**: Complete")
+        )
+        self._clear_path("S1").unlink(missing_ok=True)
+
+        other = self._plan_path("00298-other")
+        other.write_text(_plan_md("In Progress"), encoding="utf-8")
+        handler.handle(
+            self._edit_input(other, "S3", "**Status**: Not Started", "**Status**: In Progress")
+        )
+
+        plan.write_text(_plan_md("In Progress"), encoding="utf-8")
+        handler.handle(
+            self._edit_input(plan, "S2", "**Status**: Complete", "**Status**: In Progress")
+        )
+        plan.write_text(_plan_md("Complete"), encoding="utf-8")
+        handler.handle(
+            self._edit_input(plan, "S2", "**Status**: In Progress", "**Status**: Complete")
+        )
+
+        assert not self._intent_path("S1").exists(), (
+            "S1 must not receive a fresh goal-intent naming 00298 -- it never " "touched that plan"
+        )
+        assert not self._clear_path("S1").exists()
+
+    def test_note_on_an_already_complete_plan_signals_nobody(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """X2: S1 completed 00296 and consumed its .goal-clear. An unrelated
+        session edits the still-Complete, not-yet-archived plan (a note, no
+        status change) -- this must not resurrect a signal for S1."""
+        plan = self._plan_path("00296-first")
+        plan.write_text(_plan_md("In Progress"), encoding="utf-8")
+        handler.handle(
+            self._edit_input(plan, "S1", "**Status**: Not Started", "**Status**: In Progress")
+        )
+        plan.write_text(_plan_md("Complete"), encoding="utf-8")
+        handler.handle(
+            self._edit_input(plan, "S1", "**Status**: In Progress", "**Status**: Complete")
+        )
+        self._clear_path("S1").unlink()  # simulate the supervisor consuming it
+
+        handler.handle(
+            self._edit_input(plan, "X", "## Overview\n\nBody.", "## Overview\n\nBody.\n\nNote.")
+        )
+
+        assert not self._clear_path(
+            "S1"
+        ).exists(), "an edit that changed no status must not re-signal S1 at all"
+
+    def test_note_on_an_already_complete_plan_does_not_clear_a_manual_goal(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """X7: S1 completed 00296, then ran a manual inject-goal for an
+        unledgered 00301 -- a later note-only edit to the still-Complete
+        00296 must not type `/goal clear` over S1's manual goal."""
+        plan = self._plan_path("00296-first")
+        plan.write_text(_plan_md("In Progress"), encoding="utf-8")
+        handler.handle(
+            self._edit_input(plan, "S1", "**Status**: Not Started", "**Status**: In Progress")
+        )
+        plan.write_text(_plan_md("Complete"), encoding="utf-8")
+        handler.handle(
+            self._edit_input(plan, "S1", "**Status**: In Progress", "**Status**: Complete")
+        )
+        self._clear_path("S1").unlink()
+        # Simulate the manual inject-goal CLI tool's own write for 00301.
+        write_goal_signal("S1", "00301", "manual goal for 00301", _SOURCE_CLI)
+        assert self._intent_path("S1").exists()
+
+        handler.handle(
+            self._edit_input(plan, "X", "## Overview\n\nBody.", "## Overview\n\nBody.\n\nNote.")
+        )
+
+        assert not self._clear_path("S1").exists(), (
+            "the note-only edit must not tell the supervisor to clear S1's "
+            "manual goal for an unrelated plan"
+        )
+        assert self._intent_path("S1").exists(), "S1's manual goal-intent must survive untouched"
+
+    # ---- RV3-m3: a session's OWN combined signal names a plan it does not
+    # own -- it must become an owner of every plan it is told about -------
+
+    def test_a_session_becomes_an_owner_of_every_plan_its_own_signal_names(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """X1: S1 flips 00296. S3 flips 00298 and its OWN combined signal
+        names both 00296 and 00298 -- S3 must become an owner of 00296 too,
+        so S1 completing 00296 later refreshes S3's stale text."""
+        first = self._plan_path("00296-first")
+        first.write_text(_plan_md("In Progress"), encoding="utf-8")
+        second = self._plan_path("00298-second")
+        second.write_text(_plan_md("In Progress"), encoding="utf-8")
+        handler.handle(
+            self._edit_input(first, "S1", "**Status**: Not Started", "**Status**: In Progress")
+        )
+        handler.handle(
+            self._edit_input(second, "S3", "**Status**: Not Started", "**Status**: In Progress")
+        )
+        joined = self._signal("S3")["rendered_lines"][0]
+        assert "00296" in joined and "00298" in joined  # sanity: combined text
+
+        first.write_text(_plan_md("Complete"), encoding="utf-8")
+        handler.handle(
+            self._edit_input(first, "S1", "**Status**: In Progress", "**Status**: Complete")
+        )
+
+        refreshed = self._signal("S3")["rendered_lines"][0]
+        assert "00296" not in refreshed, "S3 was never refreshed for a plan its own text named"
+        assert "00298" in refreshed
+
+    # ---- RV3-m4: the flip path must set the reassert latch too, and both
+    # latch maps must be bounded ------------------------------------------
+
+    def test_a_same_session_edit_right_after_its_own_flip_emits_nothing(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """B2/C9: the session that just flipped a plan adds a table row in
+        the SAME daemon lifetime -- this must not write a second signal."""
+        plan = self._plan_path("00296-first")
+        plan.write_text(_plan_md("In Progress"), encoding="utf-8")
+        handler.handle(
+            self._edit_input(plan, "S1", "**Status**: Not Started", "**Status**: In Progress")
+        )
+        first_mtime = self._intent_path("S1").stat().st_mtime_ns
+        self._intent_path("S1").unlink()
+
+        handler.handle(self._edit_input(plan, "S1", "- [ ] a", "- [x] a"))
+
+        assert not self._intent_path("S1").exists(), (
+            f"a redundant signal was written after the flip's own latch "
+            f"should already cover this (first_mtime={first_mtime})"
+        )
+
+    def test_reassert_latch_map_is_bounded(self, handler: GoalInjectionHandler) -> None:
+        """B5: many distinct sessions reasserting must not grow the
+        in-memory reassert latch map without bound."""
+        plan = self._plan_path("00296-first")
+        plan.write_text(_plan_md("In Progress"), encoding="utf-8")
+        handler.handle(
+            self._edit_input(
+                plan, "sess-original", "**Status**: Not Started", "**Status**: In Progress"
+            )
+        )
+
+        for i in range(400):
+            handler.handle(self._edit_input(plan, f"sess-{i}", "- [ ] a", "- [x] a"))
+
+        assert len(handler._reasserted) <= 256
+
+    # ---- RV3-m5: plan ownership must be bounded, and refreshing many
+    # owners must render the combined text ONCE, not once per owner -------
+
+    def test_plan_ownership_is_bounded(self, handler: GoalInjectionHandler) -> None:
+        """A5: 150 distinct sessions each reassert the same live plan --
+        ``sessions`` must not grow without bound (the 100-entry ledger cap
+        bounds ENTRIES, not owners within one)."""
+        plan = self._plan_path("00296-first")
+        plan.write_text(_plan_md("In Progress"), encoding="utf-8")
+        handler.handle(
+            self._edit_input(
+                plan, "sess-original", "**Status**: Not Started", "**Status**: In Progress"
+            )
+        )
+
+        for i in range(150):
+            handler.handle(self._edit_input(plan, f"teammate-{i}", "- [ ] a", "- [x] a"))
+
+        ledger = GoalLedger(self._untracked / LEDGER_FILENAME)
+        owners = ledger.owning_sessions("00296")
+        assert len(owners) < 151, "plan ownership grew without bound across 150 reasserts"
+
+    def test_refreshing_many_owners_renders_the_combined_text_once(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """A5's timing half: refreshing N owners on a terminal write must
+        not re-derive the combined text (a full live-plan-dir scan) once
+        PER owner -- it should render once and write N times."""
+        import time as _time
+
+        plan = self._plan_path("00296-first")
+        plan.write_text(_plan_md("In Progress"), encoding="utf-8")
+        handler.handle(
+            self._edit_input(
+                plan, "sess-original", "**Status**: Not Started", "**Status**: In Progress"
+            )
+        )
+        for i in range(150):
+            handler.handle(self._edit_input(plan, f"teammate-{i}", "- [ ] a", "- [x] a"))
+
+        plan.write_text(_plan_md("Complete"), encoding="utf-8")
+        started = _time.monotonic()
+        handler.handle(
+            self._edit_input(
+                plan, "sess-original", "**Status**: In Progress", "**Status**: Complete"
+            )
+        )
+        elapsed = _time.monotonic() - started
+
+        assert elapsed < 0.1, f"retirement refresh took {elapsed:.3f}s for ~150 owners"
+
+    # ---- RV3-m8: a non-UTF-8 sibling plan must not crash a real dispatch -
+
+    def test_non_utf8_sibling_plan_does_not_crash_a_reassert(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        first = self._plan_path("00296-first")
+        first.write_text(_plan_md("In Progress"), encoding="utf-8")
+        bad = self._plan_path("00298-bad")
+        bad.write_text(_plan_md("In Progress"), encoding="utf-8")
+        handler.handle(
+            self._edit_input(first, "S1", "**Status**: Not Started", "**Status**: In Progress")
+        )
+        handler.handle(
+            self._edit_input(bad, "S3", "**Status**: Not Started", "**Status**: In Progress")
+        )
+        bad.write_bytes(b"\xff\xfe\x00\x01not valid utf-8")
+
+        # A fresh session touches the (still-readable) first plan without
+        # flipping it -- the reassert path must tolerate the unreadable
+        # sibling when it renders the combined signal.
+        result = handler.handle(self._edit_input(first, "S9", "- [ ] a", "- [x] a"))
+
+        assert result.decision == Decision.ALLOW

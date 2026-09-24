@@ -209,12 +209,11 @@ class DocsGenerator:
         """
         # Ledger 00466 N7 sibling: priority alone is not a total order --
         # same-priority handlers otherwise keep whatever order
-        # HandlerRegistry.list_handlers() handed back, which was driven by
-        # register_all()'s two unsorted event_dir.glob("*.py") passes, now
-        # wrapped in sorted() (review m6/RV-n1) -- not pkgutil.walk_packages()
-        # upstream of it, which already sorts its own scan internally; an
-        # earlier version of this comment named pkgutil, which review RV-n1
-        # found still misattributed the cause. Break ties on config_key
+        # HandlerRegistry.list_handlers() handed back, which is driven by
+        # register_all()'s two event_dir.glob("*.py") passes, wrapped in
+        # sorted() here (NOT pkgutil.walk_packages() upstream of it, which
+        # already sorts its own scan internally -- the glob passes are the
+        # actual source of the nondeterminism). Break ties on config_key
         # (h[1], the value actually rendered in the "Handler" column) so
         # the table is a pure function of the handler set regardless.
         handlers.sort(key=lambda h: (h[3], h[1]))

@@ -29,15 +29,24 @@ below.
 **Two behaviours from Plan 00276/00269 are preserved, not just "no action
 needed":**
 
-- **A plan going terminal drops it from every owning session's combined
-  `/goal` text, however it reaches that state.** The retirement refresh
-  used to key on an in-memory latch that a daemon restart empties; it now
-  asks the persistent goal ledger instead, so a plan flipped in one daemon
-  process and completed in the next is still retracted promptly. The
-  ledger now records EVERY session ever handed a plan's goal, not just the
-  most recent one, so a plan completing under a DIFFERENT session than the
-  one that flipped it still drops out of the flipping session's own
-  `/goal` too.
+- **A plan going terminal drops it from every CURRENT owning session's
+  combined `/goal` text, when the triggering write is itself what moved
+  the plan into that terminal status.** The retirement refresh used to key
+  on an in-memory latch that a daemon restart empties; it now asks the
+  persistent goal ledger instead, so a plan flipped in one daemon process
+  and completed in the next is still retracted promptly. Like the flip
+  side, the refresh only fires on a genuine transition INTO a terminal
+  status — a later edit that merely touches an already-Complete plan (a
+  note before its archive move, say) refreshes nobody. "Current owner" is
+  resolved from the plan's live ledger entry, or else its MOST RECENTLY
+  retired one, so a plan reopened and completed a second time retracts
+  whoever actually did that, not a stale session from an earlier
+  completed-then-reopened lifecycle. A session also becomes an owner of
+  every plan its OWN combined `/goal` text names — not only the plan that
+  triggered its write — so a plan it never directly touched still
+  refreshes correctly for it later. Ownership per plan is capped (the
+  oldest owner drops first past the cap) so a rolling ledger plan touched
+  by dozens of teammates cannot grow its refresh cost without bound.
 - **A resumed session still gets its `/goal` back — including a resume
   with the SAME session id.** Plan 00269 relied on "the first edit to an
   already-In-Progress plan re-fires" to survive a session restart. A
@@ -46,10 +55,18 @@ needed":**
   owns it, never replacing them) and gets its own signal (re)written —
   with none of a real flip's side effects (no new ledger record, no
   displacement of any other live plan, no "GOAL DISPLACED" advisory). This
-  fires once per `(session, plan)` per daemon lifetime, so a resumed
-  session whose signal file was lost across a restart gets it back even
-  though its session id and ledger history are unchanged. A session that
-  already real-flipped a DIFFERENT plan of its own does not implicitly
-  absorb an unrelated plan it merely happens to touch.
+  fires once per `(session, plan)` per daemon lifetime — including
+  immediately after that same session's own real flip, so an unrelated
+  follow-up edit in the same lifetime does not write a redundant second
+  signal — so a resumed session whose signal file was lost across a
+  restart gets it back even though its session id and ledger history are
+  unchanged. A session that already real-flipped a DIFFERENT plan of its
+  own does not implicitly absorb an unrelated plan it merely happens to
+  touch. For a Write specifically (not an Edit, which reads its own
+  before/after span directly), git HEAD can lag an uncommitted flip that
+  already landed on disk and in the ledger; the ledger — not HEAD — is
+  authoritative for whether a plan has already started, so a teammate's
+  Write to an already-ledgered-live plan is never misread as a fresh flip
+  even before anyone commits.
 
 No other action is needed — everything above is automatic.

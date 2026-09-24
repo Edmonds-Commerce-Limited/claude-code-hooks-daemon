@@ -232,6 +232,40 @@ class TestLivePlanRefs:
         assert ledger.live_plan_refs(tmp_path / "CLAUDE" / "Plan") == []
 
 
+class TestNonUtf8PlanMd:
+    """RV3-m8: a non-UTF-8 PLAN.md must be treated as unreadable, not crash
+    the caller -- review RV-m5 fixed this class for the ledger FILE itself
+    (``entries()``); this pins the same tolerance for a live PLAN.md a
+    reconciliation pass reads (``_plan_state`` via ``live_plan_numbers``)
+    and for ``live_plan_refs``' own text lookup (``_find_plan_md_text``)."""
+
+    def test_live_plan_numbers_tolerates_a_non_utf8_sibling_plan(self, tmp_path: Path) -> None:
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        _make_plan(plan_dir, _PLAN_A, _STATUS_IN_PROGRESS)
+        bad_folder = _make_plan(plan_dir, _PLAN_B, _STATUS_IN_PROGRESS)
+        (bad_folder / "PLAN.md").write_bytes(b"\xff\xfe\x00\x01not valid utf-8")
+        ledger = GoalLedger(tmp_path / LEDGER_FILENAME)
+        ledger.record_emission(_SESSION, _PLAN_A, _GOAL_LINE, plan_dir)
+        ledger.record_emission(_SESSION, _PLAN_B, _GOAL_LINE, plan_dir)
+
+        # Must not raise UnicodeDecodeError; the unreadable plan is simply
+        # not reported live (nor wrongly retired -- state is "unreadable",
+        # never "missing" or "terminal").
+        assert ledger.live_plan_numbers(plan_dir) == [_PLAN_A]
+
+    def test_live_plan_refs_tolerates_a_non_utf8_sibling_plan(self, tmp_path: Path) -> None:
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        _make_plan(plan_dir, _PLAN_A, _STATUS_IN_PROGRESS)
+        bad_folder = _make_plan(plan_dir, _PLAN_B, _STATUS_IN_PROGRESS)
+        (bad_folder / "PLAN.md").write_bytes(b"\xff\xfe\x00\x01not valid utf-8")
+        ledger = GoalLedger(tmp_path / LEDGER_FILENAME)
+        ledger.record_emission(_SESSION, _PLAN_A, _GOAL_LINE, plan_dir)
+        ledger.record_emission(_SESSION, _PLAN_B, _GOAL_LINE, plan_dir)
+
+        refs = ledger.live_plan_refs(plan_dir)
+        assert [r.plan_number for r in refs] == [_PLAN_A]
+
+
 class TestBoundedGrowth:
     def test_retired_entries_are_pruned_beyond_cap(self, tmp_path: Path) -> None:
         plan_dir = tmp_path / "CLAUDE" / "Plan"
@@ -479,6 +513,86 @@ class TestOwningSessions:
         ledger.live_plan_numbers(plan_dir)
 
         assert ledger.owning_sessions(_PLAN_A) == []
+
+
+class TestOwningSessionsAfterReopen:
+    """RV3-M1: a reopened-and-recompleted plan must answer from the LIVE
+    entry, or else the MOST RECENTLY retired terminal one -- never the
+    first entry in the list, which is what let a reopen retract the
+    WRONG (original) session's signal."""
+
+    def test_a_live_entry_always_wins_over_an_older_retired_one(self, tmp_path: Path) -> None:
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        folder = _make_plan(plan_dir, _PLAN_A, _STATUS_IN_PROGRESS)
+        ledger = GoalLedger(tmp_path / LEDGER_FILENAME)
+        # First lifecycle: SESSION flips and completes it.
+        ledger.record_emission(_SESSION, _PLAN_A, _GOAL_LINE, plan_dir)
+        (folder / "PLAN.md").write_text(
+            f"# Plan {_PLAN_A}: example plan\n\n**Status**: Complete\n", encoding="utf-8"
+        )
+        ledger.live_plan_numbers(plan_dir)  # reconciles + retires the first entry
+        # Second lifecycle: OTHER_SESSION reopens and re-flips it -- a NEW
+        # entry is appended (record_emission only reuses a still-LIVE one).
+        (folder / "PLAN.md").write_text(
+            f"# Plan {_PLAN_A}: example plan\n\n**Status**: In Progress\n", encoding="utf-8"
+        )
+        ledger.record_emission(_OTHER_SESSION, _PLAN_A, _GOAL_LINE, plan_dir)
+
+        assert ledger.owning_sessions(_PLAN_A) == [_OTHER_SESSION]
+
+    def test_no_live_entry_picks_the_most_recently_retired_one(self, tmp_path: Path) -> None:
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        folder = _make_plan(plan_dir, _PLAN_A, _STATUS_IN_PROGRESS)
+        ledger = GoalLedger(tmp_path / LEDGER_FILENAME)
+        ledger.record_emission(_SESSION, _PLAN_A, _GOAL_LINE, plan_dir)
+        (folder / "PLAN.md").write_text(
+            f"# Plan {_PLAN_A}: example plan\n\n**Status**: Complete\n", encoding="utf-8"
+        )
+        ledger.live_plan_numbers(plan_dir)
+        # Reopen and re-complete with a different session -- both entries
+        # end up retired-terminal; only the SECOND lifecycle's owner must
+        # be answered.
+        (folder / "PLAN.md").write_text(
+            f"# Plan {_PLAN_A}: example plan\n\n**Status**: In Progress\n", encoding="utf-8"
+        )
+        ledger.record_emission(_OTHER_SESSION, _PLAN_A, _GOAL_LINE, plan_dir)
+        (folder / "PLAN.md").write_text(
+            f"# Plan {_PLAN_A}: example plan\n\n**Status**: Complete\n", encoding="utf-8"
+        )
+        ledger.live_plan_numbers(plan_dir)
+
+        assert ledger.owning_sessions(_PLAN_A) == [_OTHER_SESSION]
+
+
+class TestIsPlanLive:
+    """RV3-m6: the Write flip detector needs to know whether the ledger
+    ALREADY has a live entry for a plan, independent of which session owns
+    it -- git HEAD can lag an uncommitted flip."""
+
+    def test_true_for_a_live_entry(self, tmp_path: Path) -> None:
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        _make_plan(plan_dir, _PLAN_A, _STATUS_IN_PROGRESS)
+        ledger = GoalLedger(tmp_path / LEDGER_FILENAME)
+        ledger.record_emission(_SESSION, _PLAN_A, _GOAL_LINE, plan_dir)
+
+        assert ledger.is_plan_live(_PLAN_A) is True
+
+    def test_false_for_a_plan_never_ledgered(self, tmp_path: Path) -> None:
+        ledger = GoalLedger(tmp_path / LEDGER_FILENAME)
+
+        assert ledger.is_plan_live(_PLAN_A) is False
+
+    def test_false_for_a_retired_entry(self, tmp_path: Path) -> None:
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        folder = _make_plan(plan_dir, _PLAN_A, _STATUS_IN_PROGRESS)
+        ledger = GoalLedger(tmp_path / LEDGER_FILENAME)
+        ledger.record_emission(_SESSION, _PLAN_A, _GOAL_LINE, plan_dir)
+        (folder / "PLAN.md").write_text(
+            f"# Plan {_PLAN_A}: example plan\n\n**Status**: Complete\n", encoding="utf-8"
+        )
+        ledger.live_plan_numbers(plan_dir)
+
+        assert ledger.is_plan_live(_PLAN_A) is False
 
 
 class TestUnreadableEncoding:

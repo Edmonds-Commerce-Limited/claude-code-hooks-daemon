@@ -24,60 +24,63 @@ Safety model (PLAN.md Decisions 2 and 3):
   repository-owner act as enabling a standing authorisation entry.
 
 Trigger semantics are TRANSITION-based (ledger 00466 N3): the handler fires
-only when THIS Write/Edit is what moved the Status line to In Progress, never
-merely because the post-write file happens to already read In Progress. An
-Edit's transition is read from its own ``old_string``/``new_string`` — when
-the replaced span never touched the Status line, the pre-edit text is
-reconstructed from what is already on disk and parsed properly (review m4;
-``old_string`` alone can carry just the status VALUE with no ``**Status**:``
-prefix). Reconstruction tries every occurrence of ``new_string`` as a
-candidate edit site and keeps only the ones consistent with what the Edit
-tool actually enforced, reporting a flip only when every surviving
-candidate agrees (review RV-m1; ``_is_flip_via_reconstruction``) — a bare
-value like "In Progress" can otherwise collide with unrelated text (a table
-cell, a title) and reconstruct the WRONG span. A Write has already landed on
-disk by the time PostToolUse runs, so there is no unmodified copy left on
-disk to diff against; the file's content at git HEAD stands in for "before"
-instead (``utils.git_facts.project_relative_head_text``, shared with
-``recovery_cron_advisor``, and read from the file's OWN enclosing repository
-— review m5 — not necessarily the project root's), and a path absent at HEAD
-(new or never committed) correctly reads as nothing to flip FROM. The
+only when THIS Write/Edit is what moved the Status line INTO a target
+classification -- into In Progress for the flip signal, into a terminal
+status for the retirement refresh -- never merely because the post-write
+file happens to already read that way. Both directions share one
+reconstruction (``_is_real_transition``): an Edit's pre-edit text is
+recovered by reversing this edit against the post-edit text already on
+disk and parsed with the same fenced-block-aware parser
+(:class:`plan_qa.model.PlanDoc`) the post-state check uses, trying every
+occurrence of the replaced text as a candidate edit site and reporting a
+transition only when every surviving candidate agrees (a bare value like
+"In Progress" can otherwise collide with unrelated text -- a table cell, a
+title, a fenced example -- and reconstruct the WRONG span). A Write has
+already landed on disk by the time PostToolUse runs, so there is no
+unmodified copy left to diff against; the file's content at git HEAD
+(``utils.git_facts.project_relative_head_text``, read from the file's OWN
+enclosing repository) stands in for "before" instead, narrowed further for
+the in-progress flip by the ledger itself (a Write's git-HEAD signal can lag
+an uncommitted flip that already landed on disk and in the ledger). The
 once-per-plan-per-session latch (in-memory) still applies on top of the
 transition check and still resets per session.
 
-**A resumed session still gets its goal back (review M3/RV-m3)**, restoring
-Plan 00269 Task 2.1's original intent without reintroducing N3's
-over-firing: a non-flip touch of an already-ledgered plan ADDS this session
-to the plan's live ledger entry (``GoalLedger.reassert_session`` —
-additive, review RV-M1; no displacement bookkeeping runs, unlike a real
-flip) and writes this session's own signal
-(``_maybe_reassert_for_new_session``), gated by an in-memory
-``(session_id, plan_number)`` latch that resets every daemon lifetime — not
-by whether the persisted ledger has ever heard of this session, which is
-what let a SAME-session-id resume (Claude Code's ``--resume``/
-``--continue``) go unanswered even though its OWN earlier real flip is
+**A resumed session still gets its goal back**, restoring Plan 00269 Task
+2.1's original intent without reintroducing N3's over-firing: a non-flip
+touch of an already-ledgered plan ADDS this session to the plan's live
+ledger entry (``GoalLedger.reassert_session`` -- additive, never a transfer)
+and writes this session's own signal (``_maybe_reassert_for_new_session``),
+gated by an in-memory ``(session_id, plan_number)`` latch that resets every
+daemon lifetime -- not by whether the persisted ledger has ever heard of
+this session, so a SAME-session-id resume (Claude Code's ``--resume``/
+``--continue``) gets answered even though its OWN earlier real flip is
 exactly what ledgered the plan in the first place. A session that already
 real-flipped a DIFFERENT plan of its own does not implicitly absorb an
 unrelated plan it merely happens to touch. A completing write is likewise
-still detected via the persisted ledger, not the in-memory latch, so it
-survives a daemon restart too (review M2, ``_maybe_refresh_on_retirement``)
-— and now refreshes EVERY session the ledger ever handed that plan's goal
-to, not just whichever session's write happened to trigger the terminal
-read (review RV-M1/RV-m2), since ownership is additive rather than a
-single value one session can quietly lose.
+detected via the persisted ledger, not the in-memory latch, so it survives a
+daemon restart too (``_maybe_refresh_on_retirement``) -- and refreshes EVERY
+session the ledger currently answers as an owner (the plan's live entry, or
+else its most recently retired one), since ownership is additive rather than
+a single value one session can quietly lose.
 
 **Multi-plan combined signal (Plan 00299)**: the upstream `/goal` slot is a
 single, last-writer-wins value, so under concurrent plans the goal ledger
 (``goal_ledger.GoalLedger``, per plan number with a ``sessions`` set of
-every owner — review RV-M1) is the SOURCE OF TRUTH, and the signal this
-handler writes is a RENDERED VIEW of every still-live ledgered plan for the
-session (``render_combined_goal_line``): one live plan renders
-byte-for-byte identically to the pre-00299 single-plan text; two or more
-render one combined work line naming every live plan number. A plan
-reaching a terminal status re-renders the signal to drop it for every
-owning session (``_maybe_refresh_on_retirement``), without disturbing any
-other still-live plan's contribution. The supervisor's own thrash guard
+every owner) is the SOURCE OF TRUTH, and the signal this handler writes is a
+RENDERED VIEW of every still-live ledgered plan for the session
+(``render_combined_goal_line``): one live plan renders byte-for-byte
+identically to the pre-00299 single-plan text; two or more render one
+combined work line naming every live plan number. A session becomes an
+owner of every plan its OWN combined text names this way, not only the one
+that triggered the write, so a plan it never directly touched still
+refreshes correctly when it later reaches a terminal status. A plan
+reaching a terminal status re-renders the signal ONCE and writes it to
+every owning session (``_maybe_refresh_on_retirement``), without disturbing
+any other still-live plan's contribution. The supervisor's own thrash guard
 (``last_goal_text``) skips re-typing an unchanged combined `/goal`.
+
+Full defect history and review write-ups: ``CLAUDE/Plan/00466-niggles-
+ledger-sixteen/NIGGLES.md`` (N3).
 
 Opt-in (``get_default_enabled() -> False``); never blocks.
 """
@@ -86,6 +89,7 @@ import json
 import logging
 import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar, Final
@@ -102,6 +106,7 @@ from claude_code_hooks_daemon.plan_qa.model import TERMINAL_STATUSES, PlanDoc, P
 from claude_code_hooks_daemon.utils.ccy_supervisor import supervisor_relevance
 from claude_code_hooks_daemon.utils.git_facts import project_relative_head_text
 from claude_code_hooks_daemon.utils.goal_ledger import LEDGER_FILENAME, GoalLedger, LivePlanRef
+from claude_code_hooks_daemon.utils.markdown_fences import line_spans_outside_fences
 from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
 
 logger = logging.getLogger(__name__)
@@ -216,9 +221,10 @@ _MULTI_WORK_LINE_TEXT: Final[str] = (
 # _FALLBACK_PLAN_DIR and _plan_dir()/_plan_path_pattern() below.
 _FALLBACK_PLAN_DIR: Final[str] = "CLAUDE/Plan"
 _COMPLETED_SEGMENT: Final[str] = "/Completed/"
-_STATUS_IN_PROGRESS_RE: Final[re.Pattern[str]] = re.compile(
-    r"^\*\*Status\*\*:\s*In Progress\s*$", re.MULTILINE
-)
+# RV3-m2: locates a candidate Status line's position for the replace_all
+# ambiguity check below -- classification of ITS VALUE is always left to
+# PlanDoc (fenced-block-aware, tolerant of dates/icons), never this regex.
+_STATUS_LINE_LOCATE_RE: Final[re.Pattern[str]] = re.compile(r"^\*\*Status\*\*\s*:")
 _PLAN_MD_FILENAME: Final[str] = "PLAN.md"
 _TITLE_HEADING_PREFIX: Final[str] = "# "
 # Strips a redundant "Plan NNNNN: " lead-in from the heading text, since the
@@ -540,6 +546,45 @@ def clear_goal_signal(session_id: str) -> bool:
         return False
 
 
+def _real_status_line_span(text: str) -> tuple[int, int] | None:
+    """Start/end character offsets of the first non-fenced ``**Status**:``
+    line -- the same line :class:`PlanDoc` treats as the document's real
+    status. RV3-m1's ``replace_all`` ambiguity check (below) uses this to
+    tell whether a matched occurrence of ``new_string`` coincides with THAT
+    specific line, as opposed to an unrelated line (a table cell, a fenced
+    example) that merely contains the same text.
+    """
+    for start, end, content in line_spans_outside_fences(text):
+        if _STATUS_LINE_LOCATE_RE.match(content):
+            return start, end
+    return None
+
+
+def _reverse_all_except(text: str, new_string: str, old_string: str, skip_site: int) -> str:
+    """Reverse every non-overlapping occurrence of ``new_string`` back to
+    ``old_string``, except the one starting at ``skip_site`` (left as
+    ``new_string``). Used by RV3-m1's ``replace_all`` ambiguity check to
+    build the "what if only the OTHER occurrences were really this edit"
+    candidate.
+    """
+    pieces: list[str] = []
+    cursor = 0
+    search_from = 0
+    while True:
+        site = text.find(new_string, search_from)
+        if site == -1:
+            break
+        if site == skip_site:
+            pieces.append(text[cursor : site + len(new_string)])
+        else:
+            pieces.append(text[cursor:site])
+            pieces.append(old_string)
+        cursor = site + len(new_string)
+        search_from = cursor
+    pieces.append(text[cursor:])
+    return "".join(pieces)
+
+
 def extract_plan_title(plan_text: str) -> str:
     """First ``# `` heading of PLAN.md, minus any leading ``Plan NNNNN:``."""
     for raw_line in plan_text.splitlines():
@@ -560,11 +605,11 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
     already-In-Progress plan, emits nothing THROUGH THE FLIP PATH — but a
     session touching an already-live plan without flipping it still gets
     its OWN goal signal rewritten, once per ``(session, plan)`` per daemon
-    lifetime (review M3/RV-m3, ``_maybe_reassert_for_new_session``),
-    restoring the "goal survives a session restart" contract — including a
-    SAME-session-id resume — without a real flip's displacement side
-    effects, and it ADDS to the plan's ownership rather than transferring
-    it away from whoever already held it (review RV-M1).
+    lifetime (``_maybe_reassert_for_new_session``), restoring the "goal
+    survives a session restart" contract — including a SAME-session-id
+    resume — without a real flip's displacement side effects, and it ADDS
+    to the plan's ownership rather than transferring it away from whoever
+    already held it.
 
     Sensor only: the daemon never types; the ccy PTY supervisor consumes the
     signal at its injection choke point. ADVISORY: never blocks, never denies.
@@ -645,10 +690,24 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         return True
 
     @staticmethod
-    def _is_flip_via_reconstruction(tool_input: dict[str, Any], post_edit_text: str) -> bool:
+    def _is_in_progress_status(status: PlanStatus | None) -> bool:
+        return status == PlanStatus.IN_PROGRESS
+
+    @staticmethod
+    def _is_terminal_status(status: PlanStatus | None) -> bool:
+        return status is not None and status in TERMINAL_STATUSES
+
+    @staticmethod
+    def _is_transition_via_reconstruction(
+        tool_input: dict[str, Any],
+        post_edit_text: str,
+        is_target: Callable[[PlanStatus | None], bool],
+    ) -> bool:
         """Undo this Edit against the CURRENT (post-edit) text and ask
-        whether the Status line was moved OFF ``In Progress``... in reverse:
-        whether the pre-edit Status read something other than In Progress.
+        whether the pre-edit Status satisfied ``is_target`` -- if it did
+        NOT, this Edit is the transition INTO ``is_target`` (a real flip to
+        In Progress, or a real move into a terminal status, depending on
+        which predicate the caller passed).
 
         Review m4: ``old_string`` alone is not always enough to answer
         whether the Status line was touched — an agent may quote only the
@@ -669,30 +728,42 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         tried as a candidate edit site, and only a candidate whose reversal
         leaves ``old_string`` unique in the reconstructed text could be the
         one the tool actually matched — anything else is a coincidental
-        collision, not the real site. A flip is reported only when EVERY
-        surviving candidate agrees the pre-edit Status read something other
-        than In Progress; any disagreement, or no viable candidate at all
+        collision, not the real site. A transition is reported only when
+        EVERY surviving candidate agrees the pre-edit Status did not satisfy
+        ``is_target``; any disagreement, or no viable candidate at all
         (mirrors this method's prior conservative default for an
-        unreversable edit), reads as "not a flip".
+        unreversable edit), reads as "not a transition".
 
         ``replace_all`` carries no uniqueness guarantee for ``old_string`` at
-        all (that is the point of ``replace_all``), so a per-occurrence
-        candidate filter cannot apply the same way. Instead: a genuine
-        ``replace_all(old_string -> new_string)`` replaces EVERY literal
-        occurrence of ``old_string``, so a clean application leaves NONE
-        behind anywhere in the resulting text. If ``old_string`` is still
-        present in the post-edit text, the file does not cleanly correspond
-        to "every occurrence got replaced" — e.g. ``new_string`` merely
-        COLLIDES with unrelated pre-existing text (a table cell that was
-        never ``old_string``-shaped at all) that sits alongside genuinely
-        replaced sites — and with no reliable way to tell which occurrence,
-        if any, is the real one, this conservatively reads as "not a flip".
-        Otherwise every occurrence of ``new_string`` is reversed at once
-        (there is no leftover ``old_string`` to disagree with) and the
-        reconstruction is parsed normally — this also correctly detects a
-        genuine BULK multi-site flip (the Status line changed alongside
-        several now-identical table cells in the one edit), not just a
-        single-site one.
+        all (that is the point of ``replace_all``), so the per-occurrence
+        candidate filter above does not apply. Review RV3-m1: a clean
+        ``replace_all`` leaves no ``old_string`` behind, so the ORIGINAL
+        guard (bail out if ``old_string`` survives anywhere) only catches a
+        collision where the edit was never cleanly applied at all -- it does
+        NOT catch the far more common case where ``new_string`` ALREADY sat
+        on the real Status line before this edit, untouched, while a
+        DIFFERENT site (a table cell) was the one genuinely replaced: after
+        a clean ``replace_all`` neither the untouched Status line's
+        occurrence nor the genuinely-replaced one leaves any ``old_string``
+        behind, so that guard cannot distinguish them, and blindly reversing
+        EVERY occurrence (including the untouched Status line) reconstructs
+        a status the edit never touched. So: if a ``new_string`` occurrence
+        overlaps the real (non-fenced) Status line AND at least one other
+        occurrence exists elsewhere, two verdicts are compared -- reversing
+        every occurrence, and reversing every occurrence EXCEPT the one on
+        the Status line (i.e. leaving the Status line exactly as the
+        post-edit file already reads). Agreement means the Status line's own
+        occurrence was never genuinely ambiguous either way; disagreement
+        means it cannot be told apart, so this conservatively reads as "not
+        a transition" -- the SAME trade-off this method already accepts for
+        an unreversable non-``replace_all`` edit, now extended to cover a
+        genuine BULK multi-site transition that happens to include the
+        Status line too (previously detected, now conservatively missed,
+        because there is no way from the post-edit text alone to tell that
+        case apart from the untouched-Status-line collision it is most often
+        confused with). A single occurrence overlapping the Status line, with
+        nothing else to disambiguate against, is unambiguous and answered
+        directly from the full reversal.
         """
         new_string = str(tool_input.get(_FIELD_NEW_STRING, ""))
         old_string = str(tool_input.get(_FIELD_OLD_STRING, ""))
@@ -701,8 +772,31 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         if bool(tool_input.get(_FIELD_REPLACE_ALL, False)):
             if old_string and old_string in post_edit_text:
                 return False
-            candidate = post_edit_text.replace(new_string, old_string)
-            return PlanDoc.parse(candidate).status != PlanStatus.IN_PROGRESS
+            sites: list[int] = []
+            search_from = 0
+            while True:
+                site = post_edit_text.find(new_string, search_from)
+                if site == -1:
+                    break
+                sites.append(site)
+                search_from = site + 1
+            status_span = _real_status_line_span(post_edit_text)
+            overlapping = None
+            if status_span is not None:
+                s_start, s_end = status_span
+                overlapping = next((s for s in sites if s_start <= s < s_end), None)
+            full_reverse = post_edit_text.replace(new_string, old_string)
+            full_verdict = not is_target(PlanDoc.parse(full_reverse).status)
+            other_sites = [s for s in sites if s != overlapping]
+            if overlapping is None or not other_sites:
+                return full_verdict
+            partial_reverse = _reverse_all_except(
+                post_edit_text, new_string, old_string, overlapping
+            )
+            partial_verdict = not is_target(PlanDoc.parse(partial_reverse).status)
+            if full_verdict != partial_verdict:
+                return False
+            return full_verdict
 
         verdicts: list[bool] = []
         search_from = 0
@@ -714,32 +808,41 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
                 post_edit_text[:site] + old_string + post_edit_text[site + len(new_string) :]
             )
             if candidate.count(old_string) == _SINGLE_REPLACEMENT:
-                verdicts.append(PlanDoc.parse(candidate).status != PlanStatus.IN_PROGRESS)
+                verdicts.append(not is_target(PlanDoc.parse(candidate).status))
             search_from = site + 1
         return bool(verdicts) and all(verdicts)
 
-    def _is_real_flip_to_in_progress(
-        self, hook_input: dict[str, Any], file_path: Path, post_edit_text: str
+    def _is_real_transition(
+        self,
+        hook_input: dict[str, Any],
+        file_path: Path,
+        post_edit_text: str,
+        *,
+        is_target: Callable[[PlanStatus | None], bool],
     ) -> bool:
-        """True only when THIS Write/Edit is what set Status to In Progress.
-
-        The caller already knows the post-write file reads In Progress; this
-        decides whether that is NEW (a real flip) or PRE-EXISTING (the file
-        already read In Progress before this call landed) — ledger 00466 N3.
+        """True only when THIS Write/Edit is what moved the Status line INTO
+        the ``is_target`` classification -- never merely because the
+        post-write file already satisfies it. Shared by the in-progress
+        flip detector (``is_target=_is_in_progress_status``) and RV3-M1's
+        terminal-transition detector (``is_target=_is_terminal_status``) so
+        both read pre-edit state through the same tested machinery.
 
         Edit: ``old_string`` is the FIRST witness of the pre-edit text
-        consulted, and it is often enough on its own: when it carries a
-        ``**Status**:`` line, that line's prior value settles the question
-        directly, with no need to touch disk again. When it does not — the
-        replaced span may genuinely never have touched the Status line, or
-        may have quoted only the bare value with no prefix (review m4) — the
-        full pre-edit file is reconstructed by reversing this edit against
-        the post-edit text already on disk
-        (:meth:`_is_flip_via_reconstruction`, which also resolves review
-        RV-m1's ``new_string`` collision case) and parsed properly. An
-        irreversible reconstruction (``new_string`` not found) is read as
-        "not a flip", matching the conservative default this function
-        already used for an ``old_string`` with no Status line.
+        consulted, and used DIRECTLY only when its ``**Status**:`` line is
+        verified to be the document's REAL one (RV3-m2): a fragment carrying
+        a per-phase or fenced-example ``**Status**:`` line is not the plan's
+        actual status line, and trusting it in isolation misread a
+        completely unrelated edit under that OTHER line as a top-level
+        transition. The full pre-edit file is instead always reconstructed
+        by reversing this edit against the post-edit text already on disk
+        (:meth:`_is_transition_via_reconstruction`, which also resolves
+        review RV-m1/RV3-m1's ``new_string`` collision cases) and parsed
+        with the SAME fenced-block-aware, first-line-wins rule PlanDoc
+        already applies to the post-edit side — so both sides of the
+        transition agree on what "the real Status line" is. An irreversible
+        reconstruction (``new_string`` not found) is read as "not a
+        transition", the conservative default this function already used
+        for an ``old_string`` with no Status line at all.
 
         Write: the file has already landed on disk by the time PostToolUse
         runs, so there is no unmodified copy left to compare against. git
@@ -755,21 +858,58 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         :func:`project_relative_head_text`, which reads it from the file's
         OWN enclosing repository — review m5 — not necessarily the project
         root's). A path absent at HEAD (brand new, or never committed)
-        correctly reads as "nothing to flip FROM": a fresh In-Progress
-        PLAN.md is a genuine flip, not noise.
+        correctly reads as "nothing to transition FROM": a fresh document
+        already in the target state is a genuine transition, not noise.
         """
         tool_name = hook_input.get(HookInputField.TOOL_NAME)
         if tool_name == ToolName.EDIT:
             tool_input = hook_input.get(HookInputField.TOOL_INPUT, {}) or {}
-            old_string = str(tool_input.get(_FIELD_OLD_STRING, ""))
-            before = PlanDoc.parse(old_string)
-            if before.status_line_present:
-                return before.status != PlanStatus.IN_PROGRESS
-            return self._is_flip_via_reconstruction(tool_input, post_edit_text)
+            return self._is_transition_via_reconstruction(tool_input, post_edit_text, is_target)
         before_text = project_relative_head_text(file_path, ProjectContext.project_root())
         if before_text is None:
             return True
-        return PlanDoc.parse(before_text).status != PlanStatus.IN_PROGRESS
+        return not is_target(PlanDoc.parse(before_text).status)
+
+    def _is_real_flip_to_in_progress(
+        self, hook_input: dict[str, Any], file_path: Path, plan_number: str, post_edit_text: str
+    ) -> bool:
+        """True only when THIS Write/Edit is what set Status to In Progress.
+
+        Delegates to :meth:`_is_real_transition`. RV3-m6: for a Write only,
+        a positive transition verdict is narrowed further -- git HEAD can
+        lag an uncommitted flip (a teammate's Write lands on disk, and in
+        the ledger, before it is ever committed), so a Write that reads
+        "not yet in progress at HEAD" is still not a fresh flip when the
+        ledger ALREADY has a live entry for this plan: someone else already
+        started it, and this Write is not what did so. Edit is immune to
+        this race -- its ``old_string``/``new_string`` are the tool's own
+        record of the pre-/post-edit text on THIS call, not a git snapshot.
+        """
+        transition = self._is_real_transition(
+            hook_input, file_path, post_edit_text, is_target=self._is_in_progress_status
+        )
+        if not transition:
+            return False
+        if hook_input.get(HookInputField.TOOL_NAME) != ToolName.EDIT and self._ledger_plan_is_live(
+            plan_number
+        ):
+            return False
+        return True
+
+    def _ledger_plan_is_live(self, plan_number: str) -> bool:
+        """RV3-m6: True when the ledger already has a live entry for
+        ``plan_number``, regardless of which session owns it. Fails open to
+        False (not live) on a ``ProjectContext`` failure -- this is a
+        narrowing check layered on top of the git-HEAD verdict
+        :meth:`_is_real_flip_to_in_progress` already computed, so falling
+        back to THAT verdict is a substantive fallback, not a swallow.
+        """
+        try:
+            ledger = self._open_ledger()
+        except RuntimeError as e:
+            logger.warning("goal_injection: live-plan check skipped (no project context): %s", e)
+            return False
+        return ledger.is_plan_live(plan_number)
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """True for a Write/Edit landing on an ACTIVE plan's PLAN.md."""
@@ -809,11 +949,21 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
 
         session_id = str(hook_input.get(HookInputField.SESSION_ID, "") or "")
 
-        if not _STATUS_IN_PROGRESS_RE.search(plan_text):
-            self._maybe_refresh_on_retirement(session_id, plan_number, Path(file_path), plan_text)
+        # RV3-m2: PlanDoc, not a literal-only regex, decides the post-write
+        # state -- the same fenced-block-aware, date/icon-tolerant parser
+        # the pre-write side already used, so both sides of the transition
+        # agree on what "the real Status line" is (a fenced example or a
+        # per-phase second Status line no longer masquerades as it).
+        post_doc = PlanDoc.parse(plan_text)
+        if not self._is_in_progress_status(post_doc.status):
+            self._maybe_refresh_on_retirement(
+                session_id, plan_number, Path(file_path), plan_text, hook_input
+            )
             return BlockingResult(decision=Decision.ALLOW)
 
-        if not self._is_real_flip_to_in_progress(hook_input, Path(file_path), plan_text):
+        if not self._is_real_flip_to_in_progress(
+            hook_input, Path(file_path), plan_number, plan_text
+        ):
             self._maybe_reassert_for_new_session(
                 session_id, plan_number, plan_text, folder, Path(file_path)
             )
@@ -843,8 +993,14 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
 
         # Latch only after a CONFIRMED write -- a failed write (returns
         # None) must leave the session free to retry on the next
-        # qualifying event, or it never gets a /goal at all.
-        self._record_latch(latch_key)
+        # qualifying event, or it never gets a /goal at all. RV3-m4: the
+        # reassert latch is set here too, not just _fired -- otherwise a
+        # same-session, same-lifetime non-flip touch right after this flip
+        # falls through to _maybe_reassert_for_new_session and writes a
+        # second, redundant signal before that path's OWN latch would ever
+        # have been set.
+        self._record_latch(self._fired, latch_key)
+        self._record_latch(self._reasserted, latch_key)
 
         if displaced:
             plans = ", ".join(displaced)
@@ -865,22 +1021,9 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         than interpreting a shared ``None`` sentinel this helper would
         otherwise have to invent.
 
-        Review RV-n2 (round 1) unified every ledger access behind a
-        version of this helper that caught the error itself and returned
-        ``None``. Review RV-n2 (round 2) rejected that: assigning the
-        caught error to a local so a LATER, separate ``return`` statement
-        reads it is the exact same "swallow the exception and hand back an
-        ambiguous empty result" behaviour ``error_hiding``'s
-        ``return-none-on-error`` check exists to catch, restructured only
-        enough that the checker's AST pattern (a literal ``return None``/
-        bare ``return`` textually INSIDE an ``except`` block) no longer
-        matches it — the runtime behaviour was identical. That is a
-        suppression in a different shape, not a fix.
-
-        Letting the exception propagate here means each of this class's
-        four ledger-touching callers now decides its OWN fail-open action,
-        sized to what it can meaningfully do on failure, rather than all
-        four sharing one invented "give up" shape:
+        Each of this class's four ledger-touching callers decides its OWN
+        fail-open action, sized to what it can meaningfully do on failure,
+        rather than all four sharing one invented "give up" shape:
 
         - ``_write_combined_signal`` catches and falls back to writing the
           caller-supplied fallback signal verbatim — a substantive
@@ -893,51 +1036,58 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
           has anything substantive to fall back to (both are ``-> None``,
           and a bare "log the error, then keep going" except clause is
           ``error_hiding``'s OWN separate ``log-and-continue`` anti-pattern,
-          not a fix for the first one. The exception is left to
-          ``core/chain.py``'s per-handler wrapper
+          not a fix for the first one. The exception propagates to
+          ``core/chain.py``'s per-handler exception wrapper
           (``fail-open-boundaries.yaml``, ``chain.py``/``execute``): an
           already-reviewed, already-documented fail-open boundary that logs,
-          surfaces the failure in the result's context, and denies instead
-          under ``strict_mode`` — the same contract every other handler in
-          this codebase already relies on.
+          surfaces the failure in the result's context, and ALLOWs — except
+          under ``strict_mode`` (this repo's setting), where it both DENIES
+          the tool call and stops the rest of this PostToolUse chain (no
+          handler after this one's priority runs for that event; see
+          ``core/chain.py``'s ``execute``) — the same contract every other
+          handler in this codebase already relies on.
         """
         ledger_path = ProjectContext.daemon_untracked_dir() / LEDGER_FILENAME
         return GoalLedger(ledger_path)
 
     def _maybe_refresh_on_retirement(
-        self, session_id: str, plan_number: str, plan_md_path: Path, plan_text: str
+        self,
+        session_id: str,
+        plan_number: str,
+        plan_md_path: Path,
+        plan_text: str,
+        hook_input: dict[str, Any],
     ) -> None:
-        """Refresh EVERY owning session's combined signal when a LEDGERED
-        plan just retired.
+        """Refresh EVERY owning session's combined signal when THIS write is
+        what moved a LEDGERED plan into a terminal status.
 
-        Retirement itself is detected lazily inside the ledger (every
-        ``live_plan_refs`` call re-reads each live plan's current PLAN.md),
-        so this only decides whether re-rendering is worthwhile: a terminal
-        write for a plan nobody ever ledgered has nothing to refresh, so it
-        is skipped fast without needlessly re-rendering.
+        RV3-M1: gated on :meth:`_is_real_transition` (target: terminal), the
+        same transition discipline ledger 00466 N3 already requires for the
+        flip side. Without this, ANY later write that merely leaves an
+        already-Complete (or otherwise terminal) plan alone -- a note added
+        before its Plan Completion Checklist archive move, say -- re-read as
+        "just retired" and re-signalled every owner: handing an unrelated
+        session a fresh goal for a plan it never touched, or clearing a
+        session's own unrelated manual goal.
 
         Review M2: "somebody emitted a goal for this plan" is answered from
         the PERSISTENT ``GoalLedger`` (:meth:`GoalLedger.owning_sessions`),
-        not the in-memory ``self._fired`` latch. A daemon restart empties
-        ``_fired`` but leaves the ledger untouched — the once-common example
-        is `daemon_restart_verifier` requiring one before every commit — and
-        ledger 00466 N3's flip-only rule means a later non-flip write never
-        re-latches either, so without this a plan that flipped and
-        completed in different daemon LIFETIMES silently never dropped out
-        of the combined `/goal` text.
+        not the in-memory ``self._fired`` latch, so a plan flipped and
+        completed in different daemon lifetimes (a restart between them)
+        still drops out of the combined `/goal` text.
 
-        Review RV-M1/RV-m2: EVERY session ``owning_sessions`` names is
-        refreshed here, not just the session whose write triggered this
-        terminal read. The pre-fix single-owner ledger meant only the
-        CURRENT owner's signal ever got refreshed — once a second session
-        had reasserted the SAME plan, the original flipping session's own
-        signal could never be retracted again, because nothing refreshed
-        it. It is also a pre-existing gap on main this closes as a side
-        effect: even without a reassert, a DIFFERENT session completing a
-        plan than the one that flipped it left the flipping session's own
-        stale goal signal stuck forever. Re-rendering each owner's own
-        combined signal is idempotent and cheap relative to the correctness
-        this buys.
+        Review RV-M1/RV3-M1: EVERY session ``owning_sessions`` names is
+        refreshed, not just whichever session's write triggered this read --
+        ``owning_sessions`` itself answers from the plan's LIVE entry, or
+        else its MOST RECENTLY retired one, so a plan reopened and
+        recompleted under a different session retracts the RIGHT session,
+        never a stale one from an earlier lifecycle.
+
+        RV3-m5: the combined text is rendered ONCE (:meth:`_render_combined`)
+        and written to every owner, rather than re-derived per owner (which
+        was a full live-plan-directory read PER owner -- measured at 0.25s
+        for 150 owners, against 0.003s on main before this class of gap
+        existed at all).
 
         Unlike ``_write_combined_signal``/``_ledger_record``, this method
         does NOT catch ``_open_ledger``'s ``RuntimeError`` itself. There is
@@ -957,11 +1107,31 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         doc = PlanDoc.parse(plan_text)
         if doc.status is None or doc.status not in TERMINAL_STATUSES:
             return
-        owners = self._open_ledger().owning_sessions(plan_number)
-        for owner in owners:
-            self._write_combined_signal(
-                owner, plan_md_path, fallback=None, fallback_plan_number=plan_number
+        if not self._is_real_transition(
+            hook_input, plan_md_path, plan_text, is_target=self._is_terminal_status
+        ):
+            return
+        ledger = self._open_ledger()
+        owners = ledger.owning_sessions(plan_number)
+        if not owners:
+            return
+        plan_dir = plan_md_path.parent.parent
+        refs = ledger.live_plan_refs(plan_dir)
+        if not refs:
+            for owner in owners:
+                clear_goal_signal(owner)
+            return
+        payload = self._render_combined(refs)
+        if payload is None:
+            logger.warning(
+                "goal_injection: combined render failed while refreshing %d owner(s); "
+                "leaving existing goal signals untouched",
+                len(owners),
             )
+            return
+        plan_numbers_field, combined = payload
+        for owner in owners:
+            write_goal_signal(owner, plan_numbers_field, combined, _SOURCE_STATUS_FLIP)
 
     def _maybe_reassert_for_new_session(
         self,
@@ -1048,7 +1218,7 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         # flip path in handle(): a failed write must leave this pair free
         # to retry on the next qualifying event.
         if written is not None:
-            self._reasserted[(session_id, plan_number)] = True
+            self._record_latch(self._reasserted, latch_key)
 
     def _write_combined_signal(
         self,
@@ -1067,6 +1237,14 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         just went terminal. Retracting is the point: leaving the previously
         written file in place is what let a retired goal keep challenging
         session stop (Plan 00320).
+
+        RV3-m3: ``session_id`` is registered as an owner of every plan its
+        OWN combined text just named (:meth:`_extend_ownership`), not only
+        the one plan that triggered this write -- a session's `/goal`
+        already lists every live ledgered plan project-wide (that is what
+        makes it COMBINED), so a session that never touched some other named
+        plan directly still reads it in its own text, and without this that
+        other plan's later completion never refreshed this session either.
         """
         try:
             ledger = self._open_ledger()
@@ -1079,6 +1257,34 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         if not refs:
             return self._write_fallback(session_id, fallback, fallback_plan_number)
 
+        payload = self._render_combined(refs)
+        if payload is None:
+            # Live plans exist and we simply could not render them (e.g. a
+            # malformed plan number). That is NOT a retirement, so it must not
+            # reach the retract path: clearing here would empty the /goal slot
+            # while the ledger still reports work owed.
+            logger.warning(
+                "goal_injection: combined render failed for %d live plan(s); "
+                "leaving the existing goal signal untouched",
+                len(refs),
+            )
+            return None
+        plan_numbers_field, combined = payload
+        self._extend_ownership(ledger, session_id, refs)
+        return write_goal_signal(session_id, plan_numbers_field, combined, _SOURCE_STATUS_FLIP)
+
+    def _render_combined(self, refs: list[LivePlanRef]) -> tuple[str, str] | None:
+        """Render the combined ``/goal`` payload from an already-fetched
+        live-plan set: ``(plan_numbers_field, joined_text)``, or ``None``
+        when rendering failed (e.g. a malformed plan number).
+
+        RV3-m5: split out of ``_write_combined_signal`` so
+        ``_maybe_refresh_on_retirement`` can render ONCE and write the same
+        text to every owner, instead of re-deriving it (a full live-plan-
+        directory read) once PER owner. ``refs`` is assumed non-empty; the
+        empty case is each caller's own to handle (it means something
+        different at each: the single-plan fallback vs. a full retraction).
+        """
         live_plans = [
             LivePlan(
                 plan_number=ref.plan_number,
@@ -1089,19 +1295,27 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         ]
         combined = render_combined_goal_line(live_plans, mode=self._mode, raw_lines=self._lines)
         if combined is None:
-            # Live plans exist and we simply could not render them (e.g. a
-            # malformed plan number). That is NOT a retirement, so it must not
-            # reach the retract path: clearing here would empty the /goal slot
-            # while the ledger still reports work owed.
-            logger.warning(
-                "goal_injection: combined render failed for %d live plan(s); "
-                "leaving the existing goal signal untouched",
-                len(live_plans),
-            )
             return None
-
         plan_numbers_field = ",".join(sorted(plan.plan_number for plan in live_plans))
-        return write_goal_signal(session_id, plan_numbers_field, combined, _SOURCE_STATUS_FLIP)
+        return plan_numbers_field, combined
+
+    @staticmethod
+    def _extend_ownership(ledger: GoalLedger, session_id: str, refs: list[LivePlanRef]) -> None:
+        """RV3-m3: register ``session_id`` as an owner of every plan its own
+        combined ``/goal`` text just named. Skips a plan this session
+        already owns -- ``reassert_session`` locks and writes unconditionally
+        even for a no-op membership check, so this avoids a redundant write
+        on the common case (a session's own just-flipped plan is already in
+        ``refs``). Deliberately NOT used by the retirement-refresh fan-out
+        in ``_maybe_refresh_on_retirement``: that path already writes one
+        signal per EXISTING owner (RV3-m5's bounded cost), and extending
+        ownership there too would reintroduce an O(owners x live plans)
+        write pattern for a widening this method does not need to perform on
+        every single refresh.
+        """
+        for ref in refs:
+            if not ledger.has_live_entry(session_id, ref.plan_number):
+                ledger.reassert_session(session_id, ref.plan_number)
 
     @staticmethod
     def _write_fallback(session_id: str, fallback: str | None, plan_number: str) -> Path | None:
@@ -1128,17 +1342,33 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         return ledger.record_emission(session_id, plan_number, joined, plan_dir)
 
     def _read_plan(self, path: Path) -> str | None:
-        """Read the just-written PLAN.md from disk; None when unreadable."""
+        """Read the just-written PLAN.md from disk; None when unreadable.
+
+        RV3-m8: ``ValueError`` (not just ``OSError``) is caught alongside so
+        a non-UTF-8 PLAN.md (``read_text``'s ``UnicodeDecodeError``, a
+        ``ValueError`` subclass) is treated as unreadable like any other
+        bad file, matching review RV-m5's tolerance for the ledger file
+        itself, rather than crashing this handler under ``strict_mode``.
+        """
         try:
             return path.read_text(encoding="utf-8")
-        except OSError as e:
+        except (OSError, ValueError) as e:
             logger.warning("goal_injection: could not read %s: %s", path, e)
             return None
 
-    def _record_latch(self, key: tuple[str, str]) -> None:
-        if key not in self._fired and len(self._fired) >= _MAX_TRACKED_LATCHES:
-            del self._fired[next(iter(self._fired))]
-        self._fired[key] = True
+    @staticmethod
+    def _record_latch(latches: dict[tuple[str, str], bool], key: tuple[str, str]) -> None:
+        """Set ``key`` in ``latches`` with FIFO eviction at
+        ``_MAX_TRACKED_LATCHES``. RV3-m4: shared by ``self._fired`` and
+        ``self._reasserted`` -- both are per-``(session, plan)`` in-memory
+        latches, and both need the SAME bound (a long-lived daemon touched
+        by hundreds of distinct sessions must not leak memory in either
+        map), so one bounded-insert helper serves both instead of each
+        reimplementing FIFO eviction.
+        """
+        if key not in latches and len(latches) >= _MAX_TRACKED_LATCHES:
+            del latches[next(iter(latches))]
+        latches[key] = True
 
     def get_claude_md(self) -> str | None:
         return (

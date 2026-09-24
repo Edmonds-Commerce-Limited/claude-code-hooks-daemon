@@ -428,8 +428,9 @@ together on the same branch:
   write no longer re-latched either — so a plan flipped in one daemon
   lifetime and completed in the next never dropped out of the combined
   `/goal` signal. Fixed by asking the PERSISTENT `GoalLedger` instead
-  (`GoalLedger.has_live_entry`, via the new `_session_ledgered_plan`),
-  which survives the restart the latch does not. Pinned by
+  (`GoalLedger.has_live_entry` at the time; superseded by
+  `owning_sessions` in the third review pass below), which survives the
+  restart the latch does not. Pinned by
   `test_completing_a_plan_after_a_daemon_restart_still_refreshes_signal`
   (a fresh `GoalInjectionHandler` instance simulates the restart; RED
   against the pre-fix code).
@@ -481,7 +482,7 @@ together on the same branch:
 - **n4 — acknowledged, not changed.** `_is_inside_project` fails open on
   an uninitialised `ProjectContext`; `project_relative_head_text` lets it
   propagate (by design, from the first review pass). Both new M2/M3
-  helpers (`_session_ledgered_plan`, `_maybe_reassert_for_new_session`)
+  helpers (`_maybe_refresh_on_retirement`, `_maybe_reassert_for_new_session`)
   now follow the SAME unguarded-propagation convention for consistency
   (and because `error_hiding` flagged the None-returning one) — the
   review itself called this "only reachable uninitialised", i.e. never on
@@ -549,8 +550,11 @@ AGAINST each other — fixed together with an ownership schema change:
   application leaves none behind) before reversing every occurrence at
   once — otherwise conservatively "not a flip", the same trade-off as a
   contrived title-collision missed-flip case this review accepted as
-  out of scope. Pinned by two RED tests (a table-cell collision, its
-  `replace_all` variant) plus a regression control.
+  out of scope. **The `replace_all` half was not actually fixed by this**:
+  review 3 (RV3-m1, below) found the "absent `old_string`" guard never
+  fires on real `replace_all` output (a clean application always removes
+  every `old_string`), and both pinning tests used a post-edit fixture no
+  Edit tool call could produce. See RV3-m1 for the real fix.
 - **RV-n1 — the m6 fix narrative still blamed `pkgutil.walk_packages()`**,
   which already sorts its own directory scan; the real (now fixed) source
   was `HandlerRegistry.register_all`'s two previously-unsorted
@@ -559,10 +563,19 @@ AGAINST each other — fixed together with an ownership schema change:
 - **RV-n2 — the fail-open convention split flagged by the first review's n4
   was read as unresolved, not intentional.** Unified behind one helper,
   `_open_ledger()`, that every ledger-opening call site in the class now
-  goes through — catching `RuntimeError` and logging, matching
-  `_write_combined_signal`/`_ledger_record`'s pre-existing convention
-  rather than the unguarded propagation the retirement-refresh/reassert
-  paths used before.
+  goes through. The FIRST fix (this bullet, as originally written) caught
+  `RuntimeError` inside `_open_ledger()` itself and returned `None`. The
+  coordinator's own review of that fix (niggle N29) found it evaded
+  `error_hiding`'s `return-none-on-error` check by assigning the caught
+  error to a local read by a later, separate `return` — same behaviour,
+  different AST shape. Commit `c40d4ce6` undid that: `_open_ledger()` now
+  raises with no `try`/`except` at all, and each caller decides its own
+  fail-open action explicitly (see its docstring). `error_hiding`'s
+  `log-and-continue` check independently confirmed the two callers with
+  nothing substantive to fall back to (`_maybe_refresh_on_retirement`,
+  `_maybe_reassert_for_new_session`) cannot legitimately catch-and-log
+  either, so both now propagate to `core/chain.py`'s own documented
+  per-handler fail-open boundary instead.
 - **RV-n3 — no test covered the RV-M1 scenarios or RV-m1's collision case
   (now fixed above); a registry test read the chain's PRIVATE
   `._handlers` list, which only worked because the lazy `.handlers` sort
@@ -574,6 +587,145 @@ AGAINST each other — fixed together with an ownership schema change:
 Release note 13 and the module/class docstrings corrected again to
 describe the ADDITIVE ownership and per-daemon-lifetime reassert latch
 instead of the second pass's (now superseded) single-owner transfer.
+
+**Fourth review pass (major RV3-M1, minors RV3-m1 through RV3-m8, nits
+RV3-n1/n3/n4)**, fixed together:
+
+- **RV3-M1 — the retirement refresh was state-based, not transition-based,
+  and `owning_sessions` answered from the FIRST ledger entry for a plan
+  number, including long-retired ones.** A reopened-and-recompleted plan
+  retracted the WRONG (original) session, and any later edit to an
+  already-Complete, not-yet-archived plan re-signalled every past owner —
+  handing a session a goal for a plan it never touched, or clearing a
+  session's own unrelated manual `inject-goal` goal. Fixed on both halves:
+  `_maybe_refresh_on_retirement` now shares `_is_real_transition` with the
+  flip side (target: a terminal status), gated exactly like N3 already
+  gates the flip; `GoalLedger.owning_sessions` answers from the plan's LIVE
+  entry when one exists, or else its MOST RECENTLY retired terminal one,
+  never the first in the list. Pinned by RED tests for a reopened plan
+  completed by a different session, the same with a second unrelated live
+  plan, a note on an already-Complete plan, and the same note not clearing
+  a manual goal.
+- **RV3-m1 — the `replace_all` guard from the third pass never fires on
+  real Edit-tool output.** A clean `replace_all` application always removes
+  every `old_string`, so the "bail if `old_string` survives" guard was
+  vacuous, and the reconstruction blindly reversed EVERY occurrence of
+  `new_string` — including an untouched Status line that merely already
+  read the same text as a genuinely-replaced table cell. Fixed: when an
+  occurrence overlaps the real (non-fenced) Status line AND at least one
+  other occurrence exists, two verdicts are compared — reverse everything,
+  and reverse everything except the Status line's own occurrence;
+  disagreement reads conservatively as "not a flip" (the same accepted
+  trade-off the third pass already used elsewhere, now correctly extended
+  to also miss a genuine bulk Status-line-plus-cells flip, which cannot be
+  told apart from the collision from post-edit text alone). A single
+  occurrence with nothing to disambiguate against is answered directly, so
+  the ordinary single-site case is untouched. Both third-pass tests
+  rewritten to use a REAL post-edit fixture (the pre-edit text with the
+  transformation actually applied), plus a two-cell variant and a
+  single-occurrence regression control.
+- **RV3-m2 — the post-write "is it In Progress now?" check used a
+  literal-only regex, disagreeing with the fenced-block-aware, first-line-
+  wins `PlanDoc` the pre-write side already used.** A fenced example or a
+  per-phase second `**Status**:` line could make an unrelated edit look
+  like a flip, or (via the Edit fast path trusting `old_string`'s own
+  fragment in isolation) make a per-phase Status line edit look like a
+  top-level one. Fixed: `handle()`'s post-state check now uses
+  `PlanDoc.parse(plan_text).status`, and the Edit fast path is removed —
+  every Edit goes through the same reconstruct-and-compare `PlanDoc.parse`
+  machinery the Write side already used, so both sides of the transition
+  agree on what "the real Status line" is. A useful side effect: a Status
+  line carrying a trailing date qualifier (`In Progress (2026-09-24)`),
+  which the old literal regex could never match, is now correctly detected
+  too.
+- **RV3-m3 — a session whose own combined `/goal` text NAMES a plan it
+  does not own is never refreshed when that plan later completes.** The
+  combined text lists every live ledgered plan project-wide, but ownership
+  only grew through a flip or reassert of THAT specific plan, so a session
+  reading a plan's number in its own text could still be carrying a stale
+  copy of it forever. Fixed: `_write_combined_signal` now registers its
+  session as an owner of every plan its own rendered text just named
+  (`_extend_ownership`), not only the one that triggered the write.
+  Deliberately NOT applied to the retirement-refresh fan-out (RV3-m5 below
+  needs that path's cost bounded by EXISTING owners only).
+- **RV3-m4 — the flip path never set the reassert latch, and the latch map
+  was unbounded.** The session that just flipped a plan could write a
+  second, redundant signal on its own very next non-flip edit in the same
+  daemon lifetime (the reassert path's own latch had never been armed),
+  and 400 distinct reasserting sessions grew `self._reasserted` without
+  bound, unlike `self._fired`'s existing 256-entry FIFO cap. Fixed: the
+  flip path now sets both latches on a confirmed write, and `_record_latch`
+  is a single bounded-insert helper shared by both maps.
+- **RV3-m5 — plan ownership grew without bound, and refreshing many owners
+  re-derived the combined text once PER owner.** 150 teammate sessions
+  touching one live plan gave 151 owners with nothing pruning `sessions`,
+  and completing that plan took 0.25s (a full live-plan-directory read per
+  owner) against 0.003s on main. Fixed: `GoalLedgerEntry.sessions` is
+  capped (`_add_owner`, FIFO-drops the oldest owner past the cap), and
+  `_maybe_refresh_on_retirement` renders the combined payload ONCE
+  (`_render_combined`) and writes it to every owner, rather than
+  recomputing it per owner.
+- **RV3-m6 — the Write path still fired on an already-In-Progress plan
+  that was not yet committed as such.** git HEAD lagging an uncommitted
+  flip meant a teammate's plain Write to an already-live plan could be
+  misread as a fresh flip, wrongly re-emitting a ledger record and
+  displacing another live plan. Fixed: for a Write only (Edit reads its
+  own before/after span directly, immune to this race), a positive
+  transition verdict is narrowed further by `_ledger_plan_is_live` — the
+  ledger, not HEAD, is authoritative for whether a plan has already
+  started.
+- **RV3-m7 — documentation drift**, all corrected: the third pass's RV-n2
+  bullet still described the round-1 catch-and-log helper after `c40d4ce6`
+  reverted it to a propagating raise; two mentions of a
+  `_session_ledgered_plan` method that was never actually named that; the
+  RV-m1 bullet's "pinned by two RED tests" claim for `replace_all` (see
+  RV3-m1 above); release note 13's three over-claims (see the note itself).
+  This entry's status is held at 🔄 until this pass lands.
+- **RV3-m8 — a non-UTF-8 PLAN.md of any LIVE ledgered plan crashed the
+  handler, on more paths than the ledger-file case review RV-m5 already
+  fixed.** `goal_ledger.py`'s `_plan_state` and `_find_plan_md_text` (used
+  by reconciliation and by rendering the combined text respectively), and
+  `goal_injection.py`'s own `_read_plan`, each caught only `OSError`.
+  Under `strict_mode` (this repo), an unrelated plan's bad bytes turned a
+  routine reassert or refresh into a blocking "SYSTEM ERROR" for the
+  handler's whole PostToolUse chain. Fixed: all three now also catch
+  `ValueError` (covers `read_text`'s `UnicodeDecodeError`), treating the
+  plan as unreadable rather than crashing — matching RV-m5's existing
+  tolerance for the ledger file itself.
+- **RV3-n1 — held for a follow-up, not code changed.** `c40d4ce6`'s
+  propagating `_open_ledger()` is correct; the failure it exposes (a
+  `RuntimeError` reaching a real dispatch) cannot happen in a real daemon,
+  since the controller initialises `ProjectContext` before
+  `register_all`. The one true gap this nit found — the docstrings not
+  mentioning that `strict_mode` also STOPS the rest of the PostToolUse
+  chain, not just denies — is now documented in `_open_ledger`'s
+  docstring.
+- **RV3-n3 — review-round narration trimmed from code comments and
+  docstrings** (the module docstring, `_open_ledger`'s docstring, and the
+  `docs_generator.py`/`claude_md_injector.py` `pkgutil` asides) to describe
+  current state; the module docstring now points at this file for full
+  history instead of citing review labels inline.
+- **RV3-n4 — the committed CLAUDE.md block was main's handler order, not
+  this branch's own code's order** (last written by a main merge, one
+  restart away from a spurious reorder commit). Regenerated by a daemon
+  restart before this pass's commit.
+- **RV3-n2 and RV3-n5 — acknowledged, not fixed this pass.** RV3-n2:
+  `session_has_entries`'s "ever recorded" docstring wording is stale
+  (`record_emission` overwrites `session_id` with the latest flipper, and
+  pruning drops entries), a documentation nit mostly subsumed by RV3-m5's
+  widening. RV3-n5: a value-only real flip missed when "In Progress" also
+  appears as a table cell is, from the Edit payload alone, genuinely
+  indistinguishable — the conservative "not a flip" answer is accepted,
+  same as main. Both are candidates for the PreToolUse status-snapshot
+  follow-up the review recommends next.
+
+New tests: `TestOwnershipSurvivesASecondSession`-adjacent scenarios in
+`test_goal_injection.py` (`TestReview3Fixes`, inheriting the
+`TestNewSessionReassertion` fixture plumbing), new `replace_all`/fenced-
+Status/uncommitted-Write cases in `TestStatusFlipDetection`, and new
+`GoalLedger` test classes (`TestOwningSessionsAfterReopen`, `TestIsPlanLive`,
+`TestNonUtf8PlanMd`) plus a `line_spans_outside_fences` primitive and its
+tests in `utils/markdown_fences.py`.
 
 ### N2 — `setup_worktree.sh` tells every agent to run the full suite through `run_all.sh`
 

@@ -681,12 +681,10 @@ class ClaudeMdInjector:
         # (ledger 00466 N7): self._handlers is whatever order the caller
         # passed in, and that caller chain ultimately bottoms out at
         # HandlerRegistry.register_all()'s two event_dir.glob("*.py")
-        # passes — now wrapped in sorted() (review m6/RV-n1). The true
-        # source of the nondeterminism was THAT unsorted glob, not
-        # pkgutil.walk_packages() upstream of it, which already sorts its
-        # own directory scan internally; an earlier version of this comment
-        # named pkgutil, which review RV-n1 found still misattributed the
-        # cause here. Before the glob fix, directory-entry order was not
+        # passes, wrapped in sorted() here (NOT pkgutil.walk_packages()
+        # upstream of it, which already sorts its own directory scan
+        # internally -- the glob passes are the actual source of the
+        # nondeterminism). Before the glob fix, directory-entry order was not
         # guaranteed stable across processes or machines, so two daemons
         # over the identical handler set could emit a differently-ordered
         # <hooksdaemon> block, causing a spurious restart commit and
