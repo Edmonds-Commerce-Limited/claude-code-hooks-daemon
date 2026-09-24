@@ -45,6 +45,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N10 | A wildcard in the middle of a protected filename gets past `secret_file_guard`                            | 00466 review       | 🔄 In progress        |
 | N11 | Any exception in `secret_file_guard.matches()` lets the call through unless `strict_mode` is on           | 00466 review       | 🔄 In progress        |
 | N12 | A hand-built probe payload is logged as real traffic, because nothing tells a prober to mark it           | 00467 audit        | ⬜ Open               |
+| N13 | The plan-index statistics arithmetic is checked only by full QA, so a wrong count reaches main            | Coordinator        | ⬜ Open               |
 
 ## Tasks
 
