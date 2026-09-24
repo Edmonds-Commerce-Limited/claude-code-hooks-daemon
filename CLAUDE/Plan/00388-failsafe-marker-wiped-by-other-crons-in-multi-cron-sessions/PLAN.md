@@ -212,7 +212,7 @@ of this resurfacing as a separate decision later.
 - [x] Every fail-open path is unchanged: no marker, wrong session, expired marker
   and missing project context all still ALLOW.
 - [x] Every release-bound consequence is in the pending-release holding area, or
-  this plan records why it has none. Release note 48, a truth-change entry.
+  this plan records why it has none. Release note 29, a truth-change entry.
 - [ ] Full QA passes and CI is green. Targeted QA only on the branch; the
   coordinator runs the full gate over the merged batch.
 

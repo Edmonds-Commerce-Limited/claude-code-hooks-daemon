@@ -159,7 +159,7 @@ option 3 would impose a default cron on every client. Assumption: the owner's
 - [x] The claim that `recovery_cron_advisor` "already establishes this shape" is
   corrected wherever it is written down.
 - [x] Every release-bound consequence is in the pending-release holding area, or
-  this plan records why it has none. Release note 49, a config-changes entry and
+  this plan records why it has none. Release note 30, a config-changes entry and
   a truth-change entry.
 - [ ] Full QA passes and CI is green. Targeted QA only on the branch; the
   coordinator runs the full gate over the merged batch.

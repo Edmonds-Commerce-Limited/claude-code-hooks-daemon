@@ -122,7 +122,8 @@ SubagentStop enforcer or `blockage_marker.py`.
 
 ## Release-bound consequences
 
-- Release notes 48 (Plan 00388) and 49 (Plan 00394).
+- Release notes 48 (Plan 00388) and 49 (Plan 00394), renumbered 29 and 30 at
+  integration B2.
 - A `config-changes/v3.67.0.yaml` entry for
   `handlers.session_start.failsafe_cron_session_advisor`.
 - Two `truth-changes/v3.67.0.yaml` entries under the `plan-workflow` topic.
