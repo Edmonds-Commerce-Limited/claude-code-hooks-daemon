@@ -539,6 +539,13 @@ handlers:
       enabled: true        # Enable when using CLAUDE/Plan/ structure
       priority: 33
 
+    # Plan 00461: a JOURNAL/ entry goes through `mkplan.bash --journal`, which
+    # stamps the real UTC time. A coordinator and five sub-agents appended every
+    # entry by hand in one session, one of them 40 minutes in the future.
+    plan_journal_guard:
+      enabled: true
+      priority: 31
+
     agent_isolation_advisor:  # Advises worktree isolation for concurrent agents
       enabled: true
       priority: 46

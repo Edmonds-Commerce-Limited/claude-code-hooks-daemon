@@ -16,7 +16,6 @@ Equal times PASS. Two entries in the same minute is ordinary — only a time
 EARLIER than one above it is a defect.
 """
 
-import re
 from typing import Final
 
 from claude_code_hooks_daemon.plan_qa.checks.common import (
@@ -25,7 +24,11 @@ from claude_code_hooks_daemon.plan_qa.checks.common import (
     journal_level,
     journalling_active,
 )
-from claude_code_hooks_daemon.plan_qa.model import PlanLocation, parse_journal_dayfile_name
+from claude_code_hooks_daemon.plan_qa.model import (
+    PlanLocation,
+    journal_entry_headings,
+    parse_journal_dayfile_name,
+)
 from claude_code_hooks_daemon.plan_qa.types import (
     CheckContext,
     CheckSpec,
@@ -56,16 +59,6 @@ CHECK_ID: Final[str] = "journal-entry-ordering"
 #: ``YY`` to a full year, so a two-digit tuple here would never compare true.
 _NO_BACKFILL_BEFORE: Final[tuple[int, int, int]] = (2026, 9, 11)
 
-#: An entry heading at the START of a line: ``## HH:MM · category · REF``.
-#: Anchored with no leading whitespace on purpose — the preamble quotes the
-#: grammar inside a blockquote (``> ## HH:MM …``), which must never count.
-_ENTRY_HEADING: Final[re.Pattern[str]] = re.compile(r"^## (\d{2}):(\d{2})\b")
-
-#: Journals embed fenced logs and diffs without limit, and those bodies can
-#: contain entry-shaped lines quoted from elsewhere. Tracking the fence state
-#: is what stops a quoted heading being read as this file's own entry.
-_FENCE: Final[re.Pattern[str]] = re.compile(r"^\s*(```|~~~)")
-
 #: Leads with the append, not the move, because the move is the one that can be
 #: ILLEGAL: `journal-append-only` forbids rewriting an entry that is already
 #: committed, so a remediation opening with "move it" tells most readers to do
@@ -84,33 +77,14 @@ _REMEDIATION: Final[str] = (
 )
 
 
-def _entry_times(content: str) -> list[tuple[int, str]]:
-    """Every entry heading's time, in file order, as (minutes, ``HH:MM``)."""
-    times: list[tuple[int, str]] = []
-    in_fence = False
-    for line in content.splitlines():
-        if _FENCE.match(line):
-            in_fence = not in_fence
-            continue
-        if in_fence:
-            continue
-        match = _ENTRY_HEADING.match(line)
-        if match is None:
-            continue
-        hours, minutes = int(match.group(1)), int(match.group(2))
-        times.append((hours * 60 + minutes, f"{match.group(1)}:{match.group(2)}"))
-    return times
-
-
 def _rule(context: CheckContext, target: JournalEditTarget, content: str) -> list[Finding]:
-    times = _entry_times(content)
     regressions: list[str] = []
     highest, highest_label = -1, ""
-    for minutes, label in times:
-        if minutes < highest:
-            regressions.append(f"`{label}` appears after `{highest_label}`")
+    for heading in journal_entry_headings(content):
+        if heading.minutes < highest:
+            regressions.append(f"`{heading.label}` appears after `{highest_label}`")
         else:
-            highest, highest_label = minutes, label
+            highest, highest_label = heading.minutes, heading.label
 
     if not regressions:
         return []

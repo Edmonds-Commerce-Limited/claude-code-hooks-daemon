@@ -341,6 +341,63 @@ class JournalDayfileName:
         return date(self.year, self.month, self.day)
 
 
+#: An entry heading at the START of a line: ``## HH:MM · category · REF``.
+#: Anchored with no leading whitespace on purpose — the day-file preamble quotes
+#: the grammar inside a blockquote (``> ## HH:MM …``), which must never count.
+_JOURNAL_ENTRY_HEADING_RE: Final[re.Pattern[str]] = re.compile(r"^## (\d{2}):(\d{2})\b")
+
+_MINUTES_PER_HOUR: Final[int] = 60
+
+#: The entry grammar's legal categories, in the order the grammar states them.
+#: `mkplan.bash` enforces the same set and `_JOURNAL_TEMPLATE_.md` states it as
+#: prose; `tests/unit/scripts/test_journal_category_sync.py` pins all three.
+JOURNAL_CATEGORIES: Final[tuple[str, ...]] = (
+    "action",
+    "finding",
+    "decision",
+    "thought",
+    "blocker",
+    "handoff",
+)
+
+
+@dataclass(frozen=True)
+class JournalEntryHeading:
+    """The clock reading on one journal entry heading (Plan 00461)."""
+
+    hour: int
+    minute: int
+
+    @property
+    def label(self) -> str:
+        """The reading as written, ``HH:MM``."""
+        return f"{self.hour:02d}:{self.minute:02d}"
+
+    @property
+    def minutes(self) -> int:
+        """Minutes since midnight, for ordering comparisons."""
+        return self.hour * _MINUTES_PER_HOUR + self.minute
+
+
+def journal_entry_headings(content: str) -> list[JournalEntryHeading]:
+    """Every journal entry heading in ``content``, in file order.
+
+    The one parser for the entry grammar: the ordering and future-dated checks
+    read times with it, and ``plan_journal_guard`` counts entries with it, so
+    the three cannot disagree about what an entry is. Journals embed fenced
+    logs and diffs without limit, and those can quote entry-shaped lines from
+    elsewhere, so lines inside a fence are not entries.
+    """
+    headings: list[JournalEntryHeading] = []
+    for line in lines_outside_fences(content):
+        match = _JOURNAL_ENTRY_HEADING_RE.match(line)
+        if match is not None:
+            headings.append(
+                JournalEntryHeading(hour=int(match.group(1)), minute=int(match.group(2)))
+            )
+    return headings
+
+
 def parse_journal_dayfile_name(filename: str) -> JournalDayfileName | None:
     """Parse ``NNNNN-Journal-YY-MM-DD.md`` into its parts, or ``None``.
 

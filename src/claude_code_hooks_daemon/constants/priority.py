@@ -254,6 +254,11 @@ class Priority:
     COMMENT_CHANGELOG = 31
     COMMENT_SIZE = 33
 
+    # Plan 00461: beside plan_number_helper, the other guard that redirects a
+    # hand-rolled plan-tree write to `mkplan.bash`. Ahead of plan_qa_edit (44),
+    # whose journal advisories are moot for an entry that is denied here.
+    PLAN_JOURNAL_GUARD = 31
+
     # Plan 00268: "a verification result must be consumed" is QA enforcement,
     # so it sits in this band rather than with the safety blockers. Advisory by
     # default, and non-terminal either way, so its exact slot only decides the

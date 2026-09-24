@@ -1,10 +1,10 @@
 # Hooks Daemon - Active Configuration
 
-> Generated on 2026-09-21 (v3.66.0) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
+> Generated on 2026-09-24 (v3.66.0) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
 
 ## Active Handlers
 
-### PreToolUse (63 handlers)
+### PreToolUse (64 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -40,6 +40,7 @@
 | 23 | ask_user_question_blocker | TERMINAL | Allow AskUserQuestion only when every question is prefix-justified |
 | 30 | qa_suppression | BLOCKING | Block QA suppression comments across all supported languages |
 | 31 | comment_changelog | BLOCKING | Block Write/Edit content that writes historical narrative into a comment |
+| 31 | plan_journal_guard | BLOCKING | Deny a journal entry written by hand rather than through `mkplan.bash --journal` |
 | 33 | comment_size | BLOCKING | Block/advise on over-long comments, tiered like plan-doc-size |
 | 33 | plan_number_helper | BLOCKING | Detect bash commands attempting to discover plan numbers and provide correct answer |
 | 34 | verification_result_gate | NON-TERMINAL | Advise when a verifier's exit status is never consumed before a mutator |
@@ -154,15 +155,16 @@
 | 9 | teammate_reap_advisor | ADVISORY | Report the Stop payload's ``background_tasks`` count and name ``TaskStop`` |
 | 10 | auto_continue_stop | TERMINAL | Intercept Stop events and enforce explicit stop reasons or auto-continue |
 
-### SubagentStop (3 handlers)
+### SubagentStop (4 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
 | 7 | cron_subagent_stop_enforcer | BLOCKING | Block a SubagentStop while a declared persistent cron is missing |
 | 8 | subagent_report_path_verifier | BLOCKING | Block a SubagentStop whose claimed report file does not exist |
+| 9 | subagent_cache_aggregator | NON-TERMINAL | Record a stopping sub-agent's prompt-cache totals for the status line |
 | 15 | subagent_report_size_blocker | TERMINAL | Block a SubagentStop whose ``last_assistant_message`` is oversized |
 
-### Status (15 handlers)
+### Status (16 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -174,6 +176,7 @@
 | 12 | context_sidecar | NON-TERMINAL | Write an observe-only context-state sidecar for the PTY supervisor |
 | 13 | supervisor_indicator | NON-TERMINAL | Show whether the ccy PTY supervisor is overseeing the session |
 | 14 | current_time | NON-TERMINAL | Display current local time in status line (24-hour format, no seconds) |
+| 15 | prompt_cache_indicator | NON-TERMINAL | Render prompt-cache hit ratio, TTL, and a warning when the cache is cold |
 | 20 | git_branch | NON-TERMINAL | Show current git branch with magicmonty-style status icons if in a git repo |
 | 25 | git_repo_name | NON-TERMINAL | Show git repository name at start of status line |
 | 25 | working_directory | NON-TERMINAL | Display working directory when it differs from project root |

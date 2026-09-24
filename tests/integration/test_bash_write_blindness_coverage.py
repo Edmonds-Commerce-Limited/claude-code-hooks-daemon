@@ -98,6 +98,16 @@ _BASH_BLINDNESS_VERDICT: dict[str, tuple[str, str]] = {
         "conservatism bounds it, and a target needing shell expansion yields "
         "no path rather than a guessed one",
     ),
+    "PlanJournalGuardHandler": (
+        _PARTIAL,
+        "Plan 00461: the Bash surface IS the point of this handler, since a "
+        "heredoc append is how a future-dated entry got in. It reads "
+        "get_bash_write_targets (redirect, tee, heredoc, cp/mv/install/dd) and "
+        "adds interpreter one-liners and in-place editors, so every literal "
+        "spelling of a day-file is seen. PARTIAL because the accessor declines a "
+        'target built by expansion (`> "$F"`) and a script fed on stdin is not '
+        "read; the resident guidance names the routes it denies, not all routes",
+    ),
     "AbsolutePathHandler": (
         _OUT_OF_FRAME,
         "premise is about a TOOL ARGUMENT being absolute, not a file on disk; "

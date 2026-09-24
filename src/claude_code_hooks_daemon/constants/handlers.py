@@ -352,6 +352,14 @@ class HandlerID:
         config_key="plan_number_helper",
         display_name="plan-number-helper",
     )
+    # Plan journal guard (PreToolUse) -- Plan 00461: a journal entry reaches a
+    # JOURNAL/ day-file only through `mkplan.bash --journal`, which stamps the
+    # real UTC time. Hand-typed stamps landed 40 minutes in the future.
+    PLAN_JOURNAL_GUARD = HandlerIDMeta(
+        class_name="PlanJournalGuardHandler",
+        config_key="plan_journal_guard",
+        display_name="plan-journal-guard",
+    )
     DAEMON_STATS = HandlerIDMeta(
         class_name="DaemonStatsHandler",
         config_key="daemon_stats",

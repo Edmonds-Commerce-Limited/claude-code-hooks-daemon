@@ -23,6 +23,8 @@ from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.plan_qa.model import JOURNAL_CATEGORIES
+
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
 _MKPLAN_COPIES = (
@@ -76,6 +78,10 @@ class TestTheTwoTruthsAgree:
     def test_every_mkplan_copy_agrees_with_every_template_copy(self) -> None:
         readings = {str(p): _categories_from_bash(p) for p in _MKPLAN_COPIES}
         readings.update({str(p): _categories_from_prose(p) for p in _TEMPLATE_COPIES})
+        # The daemon's own copy, which `plan_journal_guard` prints in its deny
+        # reason (Plan 00461). A deny naming a category the tool rejects would
+        # send the agent from one refusal straight into another.
+        readings["plan_qa.model.JOURNAL_CATEGORIES"] = list(JOURNAL_CATEGORIES)
 
         distinct = {tuple(v) for v in readings.values()}
 

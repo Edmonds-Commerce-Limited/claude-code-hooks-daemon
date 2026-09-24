@@ -431,6 +431,16 @@ _NOT_COMMAND_ANCHORED: dict[str, str] = {
         "as git-only either: _is_git_only_chain requires EVERY segment to be git "
         "or navigation, so `cd <repo> && git pull && cat x` is still judged"
     ),
+    "PlanJournalGuardHandler": (
+        "matches on the write TARGET's location (a plan JOURNAL/ day-file), not a "
+        "command name - the Bash route reads get_bash_write_targets like "
+        "ProjectContainmentHandler below, so respelling the writer does not move "
+        "where the bytes land. Its two command-anchored parts resolve the head "
+        "through shell_segmentation.command_word, and their respellings "
+        "(`/usr/bin/python3`, `sudo -E sed -i`, `FOO=1 python3`) are asserted in "
+        "tests/unit/handlers/pre_tool_use/test_plan_journal_guard.py; it also "
+        "needs a plan tree with a deployed scaffolder to match at all"
+    ),
     "ProjectContainmentHandler": (
         "matches on the write TARGET's location, not a command name - the Bash "
         "route reads get_bash_write_targets, which tokenises with shlex and "

@@ -218,6 +218,7 @@ class ConfigTemplate:
             "    verification_result_gate: {enabled: true, priority: 34}  # Advise when a verifier's result is never consumed before a mutator\n"
             "    bash_safe_mode: {enabled: false, priority: 36}  # Opt-in: require a set safety prelude on sequenced Bash (warn-first)\n"
             "    plan_number_helper: {enabled: true, priority: 30}  # Provide correct next plan number\n"
+            "    plan_journal_guard: {enabled: true, priority: 31}  # Journal entries only via mkplan.bash --journal\n"
             "    markdown_organization:  # Plan tracking and markdown organization\n"
             "      enabled: true\n"
             "      priority: 35\n"

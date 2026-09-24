@@ -291,6 +291,10 @@ handlers:
       # Plan directory is the top-level plan_workflow.directory (single source
       # of truth) — no per-handler track_plans_in_project needed.
 
+    plan_journal_guard:    # A JOURNAL/ entry goes through `mkplan.bash --journal` (UTC-stamped)
+      enabled: true        # Inert unless plan_workflow is on and mkplan.bash --journal is deployed
+      priority: 31
+
     agent_isolation_advisor:  # Advises worktree isolation when agents share a checkout
       enabled: false          # Enable if you dispatch concurrent agents
       priority: 46
