@@ -40,6 +40,7 @@ from claude_code_hooks_daemon.core.utils import (
     bash_write_destinations,
     split_heredocs,
 )
+from claude_code_hooks_daemon.utils.command_evasion import strip_reserved_word_prefix
 from claude_code_hooks_daemon.utils.path_predicates import TextOrReason
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     command_word,
@@ -417,7 +418,12 @@ class _Analysis:
 
 
 def _words(stage: str) -> list[str]:
-    """Shell words of one stage, without grouping; whitespace words if unparseable."""
+    """Shell words of one stage, without grouping or leading reserved words.
+
+    Whitespace words if unparseable. `do python3 -c ...` runs python3, so the
+    reserved word goes before anything reads the head (Plan 00422 N25).
+    """
+    stage = strip_reserved_word_prefix(stage)
     try:
         words = shlex.split(stage)
     except ValueError as exc:
