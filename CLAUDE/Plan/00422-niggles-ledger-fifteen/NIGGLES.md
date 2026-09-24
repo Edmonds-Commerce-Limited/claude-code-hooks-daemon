@@ -1604,6 +1604,31 @@ That gap is real and is accepted, not overlooked: content quality is not
 checkable from here, and a guard that pretended otherwise would be the same
 false-assurance failure this ledger keeps recording.
 
+### N23 — a worktree commit is judged against the main checkout's staged tree
+
+**Found**: Plan 00462's agent ran `git commit` in its worktree and was
+denied by `R-PLAN-QA-COMMIT` for a README link to
+`Completed/00456-…/PLAN.md`. That path did not exist in the worktree:
+not tracked, not on disk. It existed only in the MAIN checkout's index,
+where the coordinator was archiving 00456 at that moment. An identical
+retry passed after the coordinator committed.
+
+**Why it happens.** The daemon's DEBUG payload log shows an in-process
+teammate's PreToolUse payload carrying `"cwd": "/workspace"`, the main
+checkout, while it works in its worktree. `plan_qa_commit_gate` decides the
+repository to judge from that field (`_is_foreign_repo` →
+`GitRepo.resolve_for(cwd)` against `ProjectContext.project_root()`) and
+never reads the `cd` at the front of the command. `docs_qa_commit_gate`,
+`staged_lint_gate` and `sensitive_content`'s commit scan also key on
+`cwd`. So every worktree commit is judged against main's staged tree. It
+is denied for main's state, and its own content is never examined. That
+includes the secret-term scan, whose documented contract is that the
+commit is the gate. `git merge` does not pass through those gates, so a
+term committed in a worktree reaches `main` unscanned.
+
+**Graduated to Plan 00464** (a class defect across several gates, with a
+fail-open security direction).
+
 ### N22 — the local "full QA" never runs shellcheck
 
 **Found**: Plan 00456's final QA was checked before merge. Every
