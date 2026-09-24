@@ -50,8 +50,8 @@
     symbol: UNIVERSAL_WHITELIST_PATTERNS
     extract: regex_head_names
   right:
-    file: src/claude_code_hooks_daemon/utils/process_probe.py
-    symbol: _WRAPPERS
+    file: src/claude_code_hooks_daemon/utils/shell_segmentation.py
+    symbol: COMMAND_WRAPPERS
     extract: dict_keys
 
 - id: worktree-relocation-verbs-vs-write-indicators

@@ -188,6 +188,10 @@ pytest tests/ -v
 # Expected: ALL CHECKS PASSED
 ```
 
+The full suite is the main thread's gate. A sub-agent runs
+`./scripts/qa/llm_qa.py changed` and hands over a commit; see
+[QA.md](../QA.md), "Full QA Is the Coordinator's Gate".
+
 **If ANY test fails**: You introduced a regression. Fix it before proceeding.
 
 ## Phase 5: Daemon Verification (MANDATORY)
@@ -278,7 +282,7 @@ A bug fix is DONE when ALL of the following are verified:
 
 ### 5. Full QA
 
-- [ ] Run: `./scripts/qa/llm_qa.py all`
+- [ ] Run: `./scripts/qa/llm_qa.py all` (main thread; a sub-agent runs `changed`)
 - [ ] Expected: "ALL CHECKS PASSED"
 
 ### 5b. Client-Mode Verification (if paths/interpreters/wrappers/assets changed)

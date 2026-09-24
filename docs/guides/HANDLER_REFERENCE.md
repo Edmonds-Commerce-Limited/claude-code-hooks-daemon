@@ -1385,6 +1385,56 @@ handlers:
 
 ---
 
+#### subagent_full_qa_blocker
+
+| Property       | Value                                           |
+| -------------- | ----------------------------------------------- |
+| **Config key** | `subagent_full_qa_blocker`                      |
+| **Priority**   | 32                                              |
+| **Type**       | Blocking (terminal)                             |
+| **Event**      | PreToolUse                                      |
+| **Scope**      | `SUB` (sub-agents only)                         |
+| **Default**    | Disabled, and inert until patterns are declared |
+
+**Description:** Denies a full-suite QA run when the caller is a **sub-agent**. The full gate belongs to the coordinator, which runs it once per delivery, on the branch head, one run at a time. Several agents each running the whole suite exhaust the host, and the coordinator repeats those runs before merging anyway. The deny names the targeted commands the project declares.
+
+**What it matches:** a Bash command that would RUN a declared `full_qa_patterns` entry. The command is split into commands, and each is resolved through wrappers (`timeout`, `env`, `nohup`, `sudo`), interpreters (`python3 x.py`, `python -m pytest`, `bash -c '...'`), grouping, and `uv run`/`poetry run` to the program it starts.
+
+**Always allowed:** the main thread's own run; a mention in a commit message, `grep`, `echo` or `cat`; a run carrying one of the pattern's `read_only_flags`; and any run whose operands do not name the whole suite.
+
+**Options:**
+
+| Option                 | Default | Meaning                                                                            |
+| ---------------------- | ------- | ---------------------------------------------------------------------------------- |
+| `full_qa_patterns`     | `[]`    | Entries `{id, command, full_args?, bare_is_full?, read_only_flags?, value_flags?}` |
+| `targeted_qa_commands` | `[]`    | Commands the deny lists under "RUN INSTEAD"; empty names the generic form          |
+
+In a pattern, `command` is the program's basename. `full_args` lists the operands that make it the whole suite; omit it and every run is full. `bare_is_full` makes a run with no operand full. `value_flags` are flags whose next word is a value rather than an operand (`pytest -k expr`). A malformed entry is skipped and logged, and enabling the handler with no usable pattern is reported by `hooks-daemon check`.
+
+**Limit:** a resource guard for cooperating agents, not a security boundary. A substitution inside double quotes, or a script that runs the suite under an undeclared name, is not seen. The coordinator's full gate still runs before every merge.
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    subagent_full_qa_blocker:
+      enabled: true
+      priority: 32
+      options:
+        full_qa_patterns:
+          - id: pytest-whole-suite
+            command: pytest
+            full_args: [tests, .]
+            bare_is_full: true
+            value_flags: [-k, -m, -n]
+            read_only_flags: [--collect-only]
+        targeted_qa_commands:
+          - "pytest <explicit test files or directories>"
+```
+
+---
+
 #### verification_result_gate
 
 | Property       | Value                      |
@@ -4030,6 +4080,7 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | `qa_suppression`               | PreToolUse        | 30       | noqa, type: ignore, eslint-disable, nolint, ... (all langs)           |
 | `plan_number_helper`           | PreToolUse        | 30       | Broken plan number discovery commands                                 |
 | `comment_changelog`            | PreToolUse        | 31       | Changelog narrative in a comment (`Prior <version>:`, dated entries)  |
+| `subagent_full_qa_blocker`     | PreToolUse        | 32       | A declared full-suite QA run inside a sub-agent (opt-in)              |
 | `comment_size`                 | PreToolUse        | 33       | Over-long comments growing past the size limit                        |
 | `markdown_organization`        | PreToolUse        | 35       | Disorganised markdown; untracked Claude memory writes                 |
 | `lsp_enforcement`              | PreToolUse        | 38       | Grep/rg used for symbol lookups (use LSP)                             |

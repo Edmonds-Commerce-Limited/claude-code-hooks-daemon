@@ -30,6 +30,8 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Final
 
 from claude_code_hooks_daemon.utils.command_evasion import git_subcommand_index
 
@@ -359,6 +361,93 @@ def command_word(word: str) -> str:
     """
     unquoted = word.replace('"', "").replace("'", "")
     return unquoted.lstrip(_WORD_GROUPING_PREFIXES).rsplit("/", 1)[-1]
+
+
+@dataclass(frozen=True, slots=True)
+class CommandWrapper:
+    """A command that RUNS another command, and what to skip to reach it.
+
+    Attributes:
+        value_flags: Flags whose following word is a value, not the command.
+        positional_operands: Positional words consumed before the wrapped
+            command starts. ``timeout``'s DURATION is the only one shipped.
+    """
+
+    value_flags: frozenset[str]
+    positional_operands: int = 0
+
+
+#: Wrappers whose job is to run the command after them. One table, because two
+#: guards reading two copies came to disagree about ``env``: one peeled it, the
+#: other whitelisted it, and the same command was judged under two names. The
+#: pipe whitelist must stay disjoint from these keys, which
+#: ``scripts/qa/declared-invariant-pairs.yaml`` enforces.
+COMMAND_WRAPPERS: Final[dict[str, CommandWrapper]] = {
+    "watch": CommandWrapper(value_flags=frozenset({"-n", "--interval"})),
+    "timeout": CommandWrapper(
+        value_flags=frozenset({"-s", "--signal", "-k", "--kill-after"}),
+        positional_operands=1,
+    ),
+    "nohup": CommandWrapper(value_flags=frozenset()),
+    "sudo": CommandWrapper(value_flags=frozenset({"-u", "-g", "-p"})),
+    "env": CommandWrapper(value_flags=frozenset({"-u", "--unset"})),
+    "nice": CommandWrapper(value_flags=frozenset({"-n", "--adjustment"})),
+    "stdbuf": CommandWrapper(value_flags=frozenset({"-i", "-o", "-e"})),
+    "command": CommandWrapper(value_flags=frozenset()),
+}
+
+#: A flag starts with this, except the two spellings below that are operands.
+_FLAG_PREFIX: Final[str] = "-"
+_LONE_DASH: Final[str] = "-"
+_END_OF_OPTIONS: Final[str] = "--"
+
+
+def peel_command_wrappers(argv: Sequence[str]) -> tuple[tuple[str, ...], int]:
+    """Skip the wrappers at the front of ``argv`` to reach the command they run.
+
+    ``timeout -s KILL 60 nice -n 5 pytest`` runs ``pytest``. A guard that judged
+    the first word would judge ``timeout``, and a guard that judged every word
+    would mistake ``KILL`` for a command. Peeling uses each wrapper's own flag
+    grammar, so a value flag takes its value with it and a positional operand
+    is consumed exactly as the wrapper consumes it.
+
+    Args:
+        argv: The words of ONE command, already split. Environment assignments
+            are the caller's concern, because whether ``FOO=1`` is an
+            assignment or an operand depends on where it sits.
+
+    Returns:
+        ``(names, start)``: the wrapper names peeled, in order, and the index of
+        the wrapped command's first word. ``start == len(argv)`` means the
+        wrappers wrapped nothing.
+    """
+    names: list[str] = []
+    index = 0
+    while index < len(argv):
+        name = command_word(argv[index])
+        wrapper = COMMAND_WRAPPERS.get(name)
+        if wrapper is None:
+            break
+        names.append(name)
+        index += 1
+        positionals = wrapper.positional_operands
+        while index < len(argv):
+            argument = argv[index]
+            is_flag = argument.startswith(_FLAG_PREFIX) and argument not in (
+                _LONE_DASH,
+                _END_OF_OPTIONS,
+            )
+            if is_flag:
+                index += 1
+                if argument in wrapper.value_flags and index < len(argv):
+                    index += 1
+                continue
+            if positionals > 0:
+                index += 1
+                positionals -= 1
+                continue
+            break
+    return tuple(names), index
 
 
 def value_can_substitute(value: str) -> bool:

@@ -53,19 +53,27 @@ To prevent false completion claims discovered in Wave 2 audit, all agent teams M
 
 ### Roles and Responsibilities
 
+**Every role below is a sub-agent, and every sub-agent runs TARGETED QA.** The
+full suite (`llm_qa.py all`, `run_tests.sh`, a whole-tree `pytest`) is the team
+lead's gate. The lead runs it on the delivered branch head, one worktree at a
+time, before merging, and `subagent_full_qa_blocker` denies it to a sub-agent.
+The split and its reasons: [QA.md](QA.md), "Full QA Is the Coordinator's Gate".
+
 **1. Developer Agents** (Implementation)
 
 - Write code following TDD (write tests first)
 - Implement features/handlers in isolated worktrees
-- Run QA suite and verify daemon restarts
+- Run targeted QA (`./scripts/qa/llm_qa.py changed`) and verify daemon restarts
 - Commit work with plan reference
-- Report "implementation complete" (NOT "task complete")
+- Report "implementation complete" (NOT "task complete") with the commit hash
 - **Cannot claim completion** - only claim "ready for testing"
 
 **2. Tester Agents** (Verification)
 
 - Independently verify developer's claims
-- Run full test suite in developer's worktree
+- Run the tests covering the change in developer's worktree
+  (`./scripts/qa/llm_qa.py changed_tests`, plus `pytest` on the test files the
+  plan names)
 - Execute acceptance tests from PLAN.md
 - Test actual functionality in live environment
 - Report "tests pass" or "tests fail with details"
@@ -74,9 +82,9 @@ To prevent false completion claims discovered in Wave 2 audit, all agent teams M
 **3. QA Agents** (Quality Assurance)
 
 - **See CLAUDE/QA.md for complete QA Agent role definition**
-- Verify EVERY QA check passes (`scripts/qa/run_all.sh` enumerates them; do not restate the count)
+- Verify every TARGETED check passes (`./scripts/qa/llm_qa.py changed security`)
 - Verify daemon restarts successfully
-- Check coverage meets 95% minimum
+- Coverage is measured by the lead's full run, not here
 - **Check library/plugin separation** (no project-specific handlers in library)
 - Review code for architectural issues
 - Report "QA pass" or "QA fail with details"
@@ -206,7 +214,7 @@ The team lead (operating from `/workspace/`) is responsible for orchestrating th
 **Gate 1 - Tester Agent:**
 
 - Spawns after developer reports "ready for testing"
-- Runs full test suite in developer's worktree
+- Runs the tests covering the change in developer's worktree (not the whole suite)
 - Executes acceptance tests from PLAN.md
 - Tests actual functionality
 - Reports: "tests pass" → advance to Gate 2, OR "tests fail" → back to developer
@@ -214,9 +222,8 @@ The team lead (operating from `/workspace/`) is responsible for orchestrating th
 **Gate 2 - QA Agent:**
 
 - Spawns after Tester reports "tests pass"
-- Runs `./scripts/qa/llm_qa.py all` in developer's worktree
+- Runs targeted QA (`./scripts/qa/llm_qa.py changed security`) in developer's worktree
 - Verifies daemon restarts successfully
-- Checks 95%+ coverage
 - Reports: "QA pass" → advance to Gate 3, OR "QA fail" → back to developer
 
 **Gate 3 - Senior Reviewer:**
@@ -238,7 +245,12 @@ The team lead (operating from `/workspace/`) is responsible for orchestrating th
 
 **Team Lead Decision:**
 
-- If all 4 gates pass: Merge child → parent
+- If all 4 gates pass: run the FULL gate yourself (`./scripts/qa/llm_qa.py all`
+  in the child worktree, on the delivered head, one worktree at a time). It
+  covers every check and 95%+ coverage.
+- If the full gate passes: Merge child → parent
+- If the full gate fails: send the failing checks to the developer, who fixes
+  them with targeted runs and hands back a new commit; re-run the full gate
 - If any gate fails: Developer fixes and restarts from Gate 1
 - If Honesty Checker vetoes: Entire branch rejected, back to planning
 
@@ -357,7 +369,8 @@ All agents operate from `/workspace/untracked/worktrees/worktree-child-plan-NNNN
 2. Read PLAN.md to understand goals and success criteria
 3. **Write failing tests FIRST** (TDD - see [CLAUDE/CodeLifecycle/Features.md](CodeLifecycle/Features.md))
 4. Implement code to make tests pass
-5. Run `./scripts/qa/llm_qa.py all` (auto-fix what you can with `./scripts/qa/run_autofix.sh`)
+5. Run targeted QA: `./scripts/qa/llm_qa.py changed` (auto-fix what you can with
+   `./scripts/qa/run_autofix.sh`). Not `all`: the full gate is the team lead's.
 6. Verify daemon: `./bin/hooks-daemon restart && status`
 7. Commit with "Plan NNNNN: " prefix
 8. Update task to `ready_for_testing` status (NOT "completed")
@@ -392,7 +405,8 @@ SendMessage(
 
 1. Triggered after developer reports "ready for testing"
 2. `cd` to developer's worktree (same worktree, different agent)
-3. Run full test suite: `./scripts/qa/run_tests.sh`
+3. Run the tests covering the change: `./scripts/qa/llm_qa.py changed_tests`,
+   plus `pytest` on any test files the plan names (never the whole suite)
 4. Execute acceptance tests from PLAN.md (if applicable)
 5. Test actual functionality (run commands that should trigger handler)
 6. Verify behaviour matches plan's expected behaviour
@@ -437,9 +451,10 @@ SendMessage(
 
 1. Triggered after Tester reports "tests verified"
 2. `cd` to developer's worktree
-3. Run `./scripts/qa/llm_qa.py all` (every check must pass — the runner enumerates them; do not restate the count)
+3. Run targeted QA: `./scripts/qa/llm_qa.py changed security` (every check it
+   runs must pass). Not `all`: the full gate is the team lead's.
 4. Verify daemon restarts: `./bin/hooks-daemon restart && status`
-5. Check coverage: Must be 95%+ (shown in QA output)
+5. Coverage is measured by the team lead's full run; do not claim a figure
 6. Verify no security issues (Bandit must pass)
 7. Report "QA verified" or "QA failed" via `SendMessage`
 
@@ -447,7 +462,7 @@ SendMessage(
 
 - Auto-fix and claim it passes (developer must fix)
 - Claim task is "complete" (you only verify quality)
-- Accept \<95% coverage
+- Run the full suite (it is denied to sub-agents; the team lead runs it)
 - Ignore security issues
 
 **Report Format (PASS):**
@@ -456,7 +471,7 @@ SendMessage(
 SendMessage(
   type="message",
   recipient="team-lead",
-  content="QA complete for [task]. Every QA check passes. Coverage: XX.XX%. Daemon restarts successfully. Ready for senior review.",
+  content="QA complete for [task]. Every targeted check passes. Daemon restarts successfully. Ready for senior review.",
   summary="QA verified - pass"
 )
 ```
@@ -719,31 +734,33 @@ CRITICAL WORKTREE ISOLATION:
 YOUR ROLE (Developer):
 1. Implement features/handlers following TDD (tests FIRST)
 2. Make tests pass
-3. Run QA suite
+3. Run TARGETED QA (the full suite is the team lead's gate, and is denied to you)
 4. Verify daemon restarts
 5. Commit work
-6. Report "ready for testing" (NOT "complete")
+6. Report "ready for testing" (NOT "complete") with the commit hash
 
 WORKFLOW:
 1. Read CLAUDE/Plan/NNNNN-description/PLAN.md (understand goals)
 2. Mark TaskList task #N as in_progress
 3. Write FAILING tests first (@CLAUDE/CodeLifecycle/Features.md)
 4. Implement code to make tests pass
-5. Run: ./scripts/qa/llm_qa.py all (MUST pass)
+5. Run: ./scripts/qa/llm_qa.py changed (MUST pass), plus any named tools the
+   change calls for (e.g. handler_reference docs_qa plan_qa)
 6. Verify: ./bin/hooks-daemon restart && status
 7. Commit: "Plan NNNNN: [description]"
 8. Update task status to "ready_for_testing"
-9. SendMessage to team-lead: "Ready for testing"
+9. SendMessage to team-lead: "Ready for testing" + commit hash
 
 YOU CANNOT:
 - Claim task is "complete" (only claim "ready for testing")
 - Skip TDD (tests must be written BEFORE implementation)
-- Commit without QA passing
+- Commit without targeted QA passing
+- Run the full suite (llm_qa.py all / run_tests.sh / a whole-tree pytest)
 - Skip daemon restart check
 
 REPORT COMPLETION:
 SendMessage(type="message", recipient="team-lead",
-  content="Implementation complete. Tests pass, QA passes, daemon restarts. Ready for verification.",
+  content="Implementation complete at <commit>. Targeted QA passes, daemon restarts. Ready for verification.",
   summary="Ready for testing")
 ```
 
@@ -762,17 +779,18 @@ Independently verify developer's implementation actually works.
 
 WORKFLOW:
 1. cd to worktree path above
-2. Run full test suite: ./scripts/qa/run_tests.sh
+2. Run the tests covering the change: ./scripts/qa/llm_qa.py changed_tests,
+   plus pytest on the test files the plan names (never the whole suite; the
+   team lead runs that)
 3. Execute acceptance tests from PLAN.md (if applicable)
 4. Test actual functionality (run commands that should trigger handler)
-5. Verify behavior matches plan's expected behavior
+5. Verify behaviour matches plan's expected behaviour
 6. Report "tests verified" OR "tests failed with details"
 
 PASS CRITERIA:
-- All unit tests pass
-- All integration tests pass
+- The unit and integration tests covering the change pass
 - Acceptance tests pass (if applicable)
-- Actual behavior matches plan
+- Actual behaviour matches plan
 
 REPORT FORMAT:
 If PASS:
@@ -805,16 +823,16 @@ See CLAUDE/QA.md for complete role definition. Key responsibilities:
 
 WORKFLOW:
 1. cd to worktree path above
-2. Run: ./scripts/qa/llm_qa.py all (every check must pass)
+2. Run: ./scripts/qa/llm_qa.py changed security (every check must pass; not
+   `all`, which is the team lead's gate and is denied to you)
 3. Verify daemon: ./bin/hooks-daemon restart && status
-4. Check coverage: MUST be 95%+ (shown in QA output)
+4. Coverage is measured by the team lead's full run; do not claim a figure
 5. Verify no security issues (Bandit must pass)
 6. Check library/plugin separation (see CLAUDE/QA.md)
 7. Report "QA verified" OR "QA failed with details"
 
 PASS CRITERIA:
-- Every QA check passes (the runner enumerates them; do not restate the count)
-- Coverage ≥ 95%
+- Every targeted check passes
 - Daemon restarts successfully
 - No security issues
 - Library/plugin separation maintained
@@ -822,7 +840,7 @@ PASS CRITERIA:
 REPORT FORMAT:
 If PASS:
   SendMessage(type="message", recipient="team-lead",
-    content="QA complete. Every QA check passes. Coverage: XX%. Daemon restarts. Library/plugin separation verified. Ready for review.",
+    content="QA complete. Every targeted check passes. Daemon restarts. Library/plugin separation verified. Ready for review and the full gate.",
     summary="QA verified - pass")
 
 If FAIL:
@@ -1399,10 +1417,16 @@ git status  # Confirm everything clean
 
 **Solution**:
 
-- Use `scripts/validate_worktrees.sh` (runs QA sequentially across worktrees)
-- Each agent runs QA in their OWN worktree (safe if not concurrent with same worktree)
+- Full QA runs on the team lead's thread only, one worktree at a time
+  (`subagent_full_qa_blocker` denies it to sub-agents; see
+  [QA.md](QA.md), "Full QA Is the Coordinator's Gate")
+- Sub-agents run targeted QA (`./scripts/qa/llm_qa.py changed`) in their OWN
+  worktree, which is cheap and does not contend
+- `scripts/validate_worktrees.sh` runs the full suite sequentially across
+  worktrees, for the lead
 
-**Prevention**: Don't run QA in same worktree from multiple processes.
+**Prevention**: Don't run QA in same worktree from multiple processes, and
+don't run more than one full suite at a time on one host.
 
 ### Lesson 5: Venv Per Worktree (Editable Install)
 
@@ -1771,7 +1795,10 @@ Wave 2 audit revealed 50% of merged work was incomplete with false claims. The m
 - [ ] **Gate 2**: Tester reports "tests verified" → Spawn QA agent
 - [ ] **Gate 3**: QA reports "QA verified" → Spawn Senior Reviewer agent
 - [ ] **Gate 4**: Reviewer reports "approved" → Spawn Honesty Checker agent
-- [ ] **Merge Decision**: Honesty Checker reports "genuine" → Merge child to parent
+- [ ] **Full gate (yours)**: Honesty Checker reports "genuine" → run
+  `./scripts/qa/llm_qa.py all` in the child worktree on the delivered head,
+  one worktree at a time
+- [ ] **Merge Decision**: full gate green → Merge child to parent
 - [ ] If ANY gate fails → Send back to developer, restart from Gate 1
 
 **Per Task - Integration (After All 4 Gates Pass):**
@@ -1815,7 +1842,7 @@ Wave 2 audit revealed 50% of merged work was incomplete with false claims. The m
 
 - [ ] Write failing tests FIRST (TDD)
 - [ ] Implement code to pass tests
-- [ ] Run `./scripts/qa/llm_qa.py all` (MUST pass)
+- [ ] Run `./scripts/qa/llm_qa.py changed` (MUST pass; never `all`, which is the lead's)
 - [ ] Verify daemon: `./bin/hooks-daemon restart && status`
 - [ ] Commit with "Plan NNNNN: " prefix
 - [ ] Update task to `ready_for_testing` (NOT completed)
@@ -1830,7 +1857,8 @@ Wave 2 audit revealed 50% of merged work was incomplete with false claims. The m
 ### Tester Agent Checklist (Gate 1)
 
 - [ ] Verify in developer's worktree
-- [ ] Run full test suite: `./scripts/qa/run_tests.sh`
+- [ ] Run the tests covering the change: `./scripts/qa/llm_qa.py changed_tests`
+  plus `pytest` on test files the plan names (never the whole suite)
 - [ ] Execute acceptance tests from PLAN.md
 - [ ] Test actual functionality (trigger handler)
 - [ ] Verify behaviour matches plan
@@ -1839,9 +1867,9 @@ Wave 2 audit revealed 50% of merged work was incomplete with false claims. The m
 ### QA Agent Checklist (Gate 2)
 
 - [ ] Verify in developer's worktree
-- [ ] Run `./scripts/qa/llm_qa.py all` (every check must pass)
+- [ ] Run `./scripts/qa/llm_qa.py changed security` (every check must pass)
 - [ ] Verify daemon restarts successfully
-- [ ] Check coverage ≥ 95%
+- [ ] Leave coverage to the lead's full run (a targeted run does not measure it)
 - [ ] Verify no security issues
 - [ ] Report "QA verified" (pass) OR "QA failed" (reject) via `SendMessage`
 

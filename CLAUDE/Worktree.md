@@ -103,9 +103,10 @@ produces the retired pre-v3.7.0 layout, and the fingerprint-aware venv
 resolver refuses it — every `bin/hooks-daemon` call then exits telling you to
 reinstall.
 
-`./scripts/validate_worktrees.sh` runs this project's QA suite sequentially
-across all (or one named) worktree, checking the venv and editable install
-first:
+`./scripts/validate_worktrees.sh` runs this project's full QA suite
+sequentially across all (or one named) worktree, checking the venv and
+editable install first. It is a coordinator tool: in a sub-agent it is denied
+along with every other full-suite command.
 
 ```bash
 ./scripts/validate_worktrees.sh                     # all worktrees
@@ -115,11 +116,17 @@ first:
 ## Running This Project's QA Suite Inside a Worktree
 
 Wherever the core document says "run this project's test/QA suite", the
-concrete command in this repository is:
+concrete command in this repository depends on who is running it:
 
 ```bash
-./scripts/qa/llm_qa.py all
+./scripts/qa/llm_qa.py changed   # the sub-agent working in the worktree: targeted QA
+./scripts/qa/llm_qa.py all       # the coordinator, on the delivered head, before merging
 ```
+
+A sub-agent hands over targeted results and a commit hash. The coordinator then
+runs the full gate in that worktree, one worktree at a time. Running full
+suites one after another is also what stops the collisions below. Why, and
+what the deny says, is in [QA.md](QA.md), "Full QA Is the Coordinator's Gate".
 
 ## Concurrent QA Limitation (Critical)
 

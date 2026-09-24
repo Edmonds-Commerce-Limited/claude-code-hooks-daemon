@@ -45,11 +45,14 @@ Run these checks in order:
 
    - **ABORT if dirty**: User must commit or stash ALL changes manually
 
-2. **QA checks** (ALL must pass): `./scripts/qa/llm_qa.py all`
+2. **QA checks** (ALL must pass): `./scripts/qa/llm_qa.py --read-only all`
 
-   - Runs every check in the suite (`scripts/qa/run_all.sh` is the single
-     source of truth for which checks exist)
-   - **ABORT if any check fails**: User must fix issues and re-run release
+   - Reads the recorded results of main Claude's full run (RELEASING.md
+     Step 8) without re-running anything. This agent is a sub-agent, so it
+     never starts the full suite itself; see `CLAUDE/QA.md`, "Full QA Is the
+     Coordinator's Gate"
+   - **ABORT if any check fails or has no recorded result**: User must run
+     the full gate on the main thread, fix issues, and re-run release
 
 3. **Version consistency**: All version strings in files match current version
 
@@ -689,7 +692,7 @@ This agent only handles Stage 1.
 **Pre-Validation Errors (IMMEDIATE ABORT):**
 
 - **Dirty git state** → ABORT with message: "Commit all changes before releasing"
-- **QA failures** → ABORT with message: "Fix QA issues (run ./scripts/qa/llm_qa.py all), then retry"
+- **QA failures** → ABORT with message: "Fix QA issues (main Claude runs ./scripts/qa/llm_qa.py all), then retry"
   - Never attempt to fix QA issues (formatting, lint, tests, security)
   - User must manually fix and re-run release
 - **Version inconsistency** → ABORT with message: "Fix version mismatches manually"

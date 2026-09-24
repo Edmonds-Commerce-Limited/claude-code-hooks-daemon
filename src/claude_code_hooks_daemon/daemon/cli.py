@@ -2028,8 +2028,10 @@ def _collect_enforcement_status_lines(project_path: Path) -> list[str]:
     handlers have no such probe (the base default is `[]`), and instantiating
     the full handler set here — bypassing the registry, config filtering and
     daemon lifecycle — would be the wrong tool for a `handlers`-wide sweep.
-    This targets the three handlers the design identified as degrading
-    silently; a fourth would be added the same way.
+    This targets the handlers known to degrade silently: the three whose
+    posture comes from disk, plus ``subagent_full_qa_blocker``, which is inert
+    when enabled with no declared patterns (Plan 00463). Another is added the
+    same way.
 
     Best-effort: config-load failure here must not break `check`, which is
     also used to diagnose a broken config — so any error falls back to
@@ -2039,19 +2041,29 @@ def _collect_enforcement_status_lines(project_path: Path) -> list[str]:
         Advisory lines, or an empty list when every probed handler is nominal
         at every evaluated root.
     """
+    from claude_code_hooks_daemon.constants import EventID, HandlerID
     from claude_code_hooks_daemon.core.workspace import ProjectRegistry
     from claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit import LintOnEditHandler
     from claude_code_hooks_daemon.handlers.post_tool_use.validate_eslint_on_write import (
         ValidateEslintOnWriteHandler,
     )
     from claude_code_hooks_daemon.handlers.pre_tool_use.npm_command import NpmCommandHandler
+    from claude_code_hooks_daemon.handlers.pre_tool_use.subagent_full_qa_blocker import (
+        SubagentFullQaBlockerHandler,
+    )
 
     config_file = project_path / ".claude" / "hooks-daemon.yaml"
     registry: ProjectRegistry
+    full_qa_settings: dict[str, Any] = {}
     try:
         config_dict = ConfigLoader.load(config_file) if config_file.exists() else {}
         config = Config.model_validate(config_dict)
         registry = ProjectRegistry.from_config(config, project_path)
+        full_qa_settings = (
+            _build_handler_config_mapping(config)
+            .get(EventID.PRE_TOOL_USE.config_key, {})
+            .get(HandlerID.SUBAGENT_FULL_QA_BLOCKER.config_key, {})
+        )
     except (PydanticValidationError, OSError, ValueError):
         registry = ProjectRegistry.single_project(project_path)
 
@@ -2071,6 +2083,14 @@ def _collect_enforcement_status_lines(project_path: Path) -> list[str]:
     ]
     for handler in handlers:
         handler._project_registry = registry
+
+    # Asked only when ENABLED: off is its shipped default (Plan 00463), not a
+    # degraded state. Its posture comes from its declaration, not from disk, so
+    # the configured patterns are handed over the way the registry would.
+    if full_qa_settings.get("enabled"):
+        full_qa = SubagentFullQaBlockerHandler()
+        full_qa._full_qa_patterns = (full_qa_settings.get("options") or {}).get("full_qa_patterns")
+        handlers.append(full_qa)
 
     statuses: list[str] = []
     seen: set[str] = set()

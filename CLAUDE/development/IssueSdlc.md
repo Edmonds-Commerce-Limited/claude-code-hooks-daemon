@@ -294,6 +294,11 @@ Dispatch an implementation sub-agent into that worktree with:
   say so rather than implement it. This is not a courtesy: on #34 the sub-agent
   rejected the approach in the brief and rejected "all existing tests still
   pass" as unachievable, and was right on both counts;
+- the QA split. The sub-agent runs TARGETED QA (`./scripts/qa/llm_qa.py changed`, plus named tools the change calls for), commits, and reports the
+  commit hash. It does not run the full suite, and
+  `subagent_full_qa_blocker` denies it if it tries: the full gate is Step 5,
+  and it is yours (see [../QA.md](../QA.md), "Full QA Is the Coordinator's
+  Gate");
 - the report destination. Here a plan folder DOES exist, so name it:
   `<plan-folder>/subagent-reports/{yymmdd}-{agent-name}-{model}.md`. Long-form
   output goes to a FILE — a sub-agent's return travels over a bounded channel
@@ -306,7 +311,10 @@ code.
 
 ## Step 5 — QA
 
-Inside the worktree: `./scripts/qa/llm_qa.py all`.
+Inside the worktree, on the head the sub-agent reported:
+`./scripts/qa/llm_qa.py all`. This is the full gate, and it is the
+coordinator's: run it here, on this thread, never delegated to a sub-agent,
+one worktree at a time. The sub-agent has already run targeted QA.
 
 Read the suite's **own** exit line, not the wrapper's. Chaining with `;` gives
 the exit status of the last command in the chain, which has silently reported a

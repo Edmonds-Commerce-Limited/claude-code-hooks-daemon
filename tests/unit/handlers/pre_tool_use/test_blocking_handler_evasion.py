@@ -119,6 +119,25 @@ _EVASION_CASES: dict[str, tuple[str, tuple[str, ...]]] = {
             "git \\\n  commit -m x",
         ),
     ),
+    "SubagentFullQaBlockerHandler": (
+        "./scripts/qa/llm_qa.py all",
+        (
+            # The command is resolved through wrappers, interpreters and
+            # grouping rather than read off the segment head. Each spelling
+            # below runs the same whole suite.
+            f"{_SAFE_PATH}/scripts/qa/llm_qa.py all",
+            "python3 scripts/qa/llm_qa.py all",
+            "env FOO=1 ./scripts/qa/llm_qa.py all",
+            "timeout 3600 ./scripts/qa/llm_qa.py all",
+            "sudo -E ./scripts/qa/llm_qa.py all",
+            "bash -c './scripts/qa/llm_qa.py all'",
+            "(./scripts/qa/llm_qa.py all)",
+            "echo $(./scripts/qa/llm_qa.py all)",
+            "./scripts/qa/llm_qa.py \\\n  all",
+            "./scripts/qa/llm_qa.\\\npy all",
+            "python -m pytest",
+        ),
+    ),
     "IssueFilingGateHandler": (
         "gh issue create --repo Edmonds-Commerce-Limited/claude-code-hooks-daemon --title x",
         (
@@ -277,6 +296,18 @@ _EVASION_CASES: dict[str, tuple[str, tuple[str, ...]]] = {
 # ran. Nothing in the evasion table above would have noticed: every "must block"
 # case still passed. Both directions need a guard.
 _MUST_NOT_MATCH: dict[str, tuple[str, ...]] = {
+    "SubagentFullQaBlockerHandler": (
+        # A mention is not a run, and a targeted run is the allowed path the
+        # deny message sends the agent to. Denying either would get the guard
+        # switched off.
+        'grep -rn "llm_qa.py all" CLAUDE/',
+        'git commit -m "the coordinator runs llm_qa.py all"',
+        'echo "./scripts/qa/llm_qa.py all"',
+        "./scripts/qa/llm_qa.py --read-only all",
+        "./scripts/qa/llm_qa.py changed",
+        "pytest tests/unit/handlers/pre_tool_use/test_x.py",
+        "cat scripts/qa/run_all.sh",
+    ),
     "IssueFilingGateHandler": (
         # Every one of these is the SAME widening risk from the other side: a
         # project filing on its own backlog, and a read of ours. The third is
@@ -545,6 +576,27 @@ _CONFIGURATORS: dict[str, Callable[[Handler], None]] = {
     # needs no configurator: it is pre-seeded out of the box.
     "FlaggableContentChannelGuardHandler": lambda handler: setattr(
         handler, "_flaggable_path_globs", ["firewall/**"]
+    ),
+    # Ships with no patterns (Plan 00463): a client's full-QA commands cannot
+    # be known in advance, so it matches nothing until they are declared.
+    "SubagentFullQaBlockerHandler": lambda handler: setattr(
+        handler,
+        "_full_qa_patterns",
+        [
+            {
+                "id": "llm-qa-whole-suite",
+                "command": "llm_qa.py",
+                "full_args": ["all", "tests"],
+                "read_only_flags": ["--read-only"],
+            },
+            {"id": "run-all", "command": "run_all.sh"},
+            {
+                "id": "pytest-whole-suite",
+                "command": "pytest",
+                "full_args": ["tests"],
+                "bare_is_full": True,
+            },
+        ],
     ),
 }
 

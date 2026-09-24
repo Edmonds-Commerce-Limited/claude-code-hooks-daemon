@@ -1,6 +1,6 @@
 # Plan 00463: full qa is a main thread gate
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-24
 **Owner**: dev
 **Priority**: High
@@ -91,7 +91,7 @@ commands that ARE allowed, and they must exist.
     goes live it denies the main thread's Bash. The full-QA gate is
     orchestration, so it must be on that mode's allowlist, or the two
     features deadlock: nobody can run full QA.
-- [ ] ⬜ **Task 1.2**: RED tests for the handler.
+- [x] ✅ **Task 1.2**: RED tests for the handler.
   - Each pattern form is denied under an `agent_id` payload.
   - It is allowed without one, and on a synthetic event.
   - Targeted forms are allowed everywhere. These include
@@ -100,11 +100,11 @@ commands that ARE allowed, and they must exist.
     `run_shell_check.sh`.
   - Pattern matching is shlex/word-bounded and not a substring match, so
     a commit message or `grep` mentioning "llm_qa.py all" is not denied.
-- [ ] ⬜ **Task 1.3**: The handler, following the handler lifecycle (a
+- [x] ✅ **Task 1.3**: The handler, following the handler lifecycle (a
   HandlerID, Priority and RuleID constant, guidance text, and an
   acceptance test marked for a sub-agent context). Then the targeted QA
   entry point and its tests.
-- [ ] ⬜ **Task 1.4**: The docs and workflow changes listed in Goals,
+- [x] ✅ **Task 1.4**: The docs and workflow changes listed in Goals,
   plus a release note. Enable the handler in this repo's config.
 - [ ] ⬜ **Task 1.5**: Targeted QA in the worktree, then hand over. Under
   this plan's own rule, the coordinator runs the full gate.

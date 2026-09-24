@@ -27,12 +27,53 @@ Complete quality assurance for the Claude Code Hooks Daemon consists of **three 
 ### Running Automated QA
 
 ```bash
-./scripts/qa/llm_qa.py all
+./scripts/qa/llm_qa.py all       # the FULL gate: the coordinator (main thread) runs this
+./scripts/qa/llm_qa.py changed   # TARGETED: what a sub-agent runs before handing over
 ```
 
-Agents MUST use `llm_qa.py all` — the `enforce_llm_qa` project handler denies a
-direct `run_all.sh` invocation by an agent. `run_all.sh` remains the
-human-at-a-terminal entry point and runs the same suite with verbose output.
+Agents MUST use `llm_qa.py`, never `run_all.sh`: the `enforce_llm_qa` project
+handler denies a direct `run_all.sh` invocation by an agent. `run_all.sh` remains
+the human-at-a-terminal entry point and runs the same suite with verbose output.
+
+### Full QA Is the Coordinator's Gate; Sub-Agents Run Targeted QA
+
+The full suite runs **once per delivery, on the coordinator's thread, one run
+at a time**. A sub-agent never runs it. This is enforced: in a sub-agent,
+`subagent_full_qa_blocker` (Plan 00463) denies every command this repository
+declares as full, which is `llm_qa.py all`, `llm_qa.py tests`, `run_all.sh`,
+`run_tests.sh`, `scripts/validate_worktrees.sh`, and a `pytest` with no path or
+with `tests/`, `tests/unit` or `.` as its path. The deny lists the targeted
+forms. The main thread is never affected.
+
+**Why.** When the rule was made, five full runs were executing at once, one
+per worktree, each about 25,700 tests over 15-20 minutes on eight cores. Each
+agent re-ran the suite after every fix round, and the coordinator ran it again
+before merging. The per-checkout run lock (Plan 00262) cannot help across
+worktrees.
+
+**Why the gate stays BEFORE the merge.** Cross-cutting checks break from
+changes far away: guidance coverage, docs QA, plan QA, the handler reference and
+the acceptance probes. A first full run on `main` would land every such break
+there, and merges queued behind it would build on a red tree.
+
+**The split:**
+
+| Who                  | Runs                                                                                                                                                                                              | Hands over                                      |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| Sub-agent (any kind) | `./scripts/qa/llm_qa.py changed`, plus named tools the change calls for (`llm_qa.py handler_reference docs_qa ...`) and `pytest` on explicit test files or directories narrower than `tests/unit` | A commit hash and the targeted results          |
+| Coordinator          | `./scripts/qa/llm_qa.py all` in the agent's worktree, on the delivered branch head, one worktree at a time, before merging                                                                        | A merge, or the failures sent back to the agent |
+
+`llm_qa.py changed` runs the fast static tools (`magic_values`, `format`,
+`lint`, `type_check`, `pyright`, `error_hiding`), the project handlers' own
+tests, and `changed_tests`: pytest on the tests mapped by module NAME from
+every file changed since the merge base with `main`, uncommitted and untracked
+files included. The mapping is a heuristic, and the coordinator's full run is
+the backstop for what a name cannot see. When nothing maps, the summary says
+`no tests ran` rather than `0 failed`, and `changed_tests.json` lists each
+changed source file with no mapped test under `unmapped`.
+
+`llm_qa.py --read-only all` summarises the last run's JSON without running
+anything, so a sub-agent may use it to read a result the coordinator produced.
 
 ### The Automated Checks
 
@@ -124,19 +165,23 @@ Verify code meets quality standards (format, lint, types, coverage, security).
 
 WORKFLOW:
 1. cd to target directory
-2. Run: ./scripts/qa/llm_qa.py all (every check it runs)
+2. Run TARGETED QA: ./scripts/qa/llm_qa.py changed security
+   (NOT `all`: the full suite is the coordinator's gate and is denied to
+   sub-agents. See CLAUDE/QA.md "Full QA Is the Coordinator's Gate".)
 3. Verify daemon: ./bin/hooks-daemon restart && status
-4. Check coverage: MUST be 95%+ (shown in QA output)
+4. Coverage is measured by the coordinator's full run. Read it with
+   ./scripts/qa/llm_qa.py --read-only tests once that run exists.
 5. Verify no security issues (Bandit must pass)
 6. **Check library/plugin separation** (see checklist below)
 7. Report "QA verified" OR "QA failed with details"
 
 PASS CRITERIA:
-- EVERY QA check the runner runs passes (it enumerates them; do not assume a count)
-- Coverage ≥ 95%
+- EVERY targeted check passes, and no changed source file is left unmapped
+  without a reason
 - Daemon restarts successfully
 - No security issues
 - Library/plugin separation maintained (no project-specific handlers in library)
+- The coordinator's full run (every check, coverage ≥ 95%) still gates the merge
 
 LIBRARY/PLUGIN SEPARATION CHECKLIST:
 8. Library/Plugin Separation:
@@ -450,19 +495,22 @@ All plugin handlers MUST implement `get_acceptance_tests()` - empty arrays are r
 
 ### For Individual Work (No Agent Teams)
 
-1. **During development**: Write tests first (TDD)
-2. **Before committing**: Run `./scripts/qa/llm_qa.py all` (automated QA)
+1. **During development**: Write tests first (TDD); iterate with
+   `./scripts/qa/llm_qa.py changed`
+2. **Before committing**: Run `./scripts/qa/llm_qa.py all` (you are the main
+   thread here, so the full gate is yours)
 3. **Fix any issues**: Use `./scripts/qa/run_autofix.sh` for format/lint
 4. **Verify daemon**: `./bin/hooks-daemon restart && status`
 5. **For significant work**: Spawn QA Agent for deep review
 
 ### For Agent Team Work
 
-Follow the 4-gate verification process:
+Follow the 4-gate verification process. Every gate agent runs TARGETED QA; the
+coordinator's full gate is the last step before the merge:
 
 ```
 Developer Agent
-    ↓ Reports "ready for testing"
+    ↓ Reports "ready for testing" (targeted QA green, work committed)
     ↓
 Tester Agent (GATE 1) - Tests verified
     ↓
@@ -472,7 +520,9 @@ Senior Reviewer (GATE 3) - Completeness verified
     ↓
 Honesty Checker (GATE 4) - Value verified
     ↓
-Merge (ONLY after all 4 gates pass)
+Coordinator - FULL gate: llm_qa.py all on the branch head, one worktree at a time
+    ↓
+Merge (ONLY after all 4 gates AND the full gate pass)
 ```
 
 **See `CLAUDE/AgentTeam.md` for complete agent team workflow details.**
@@ -580,15 +630,24 @@ grep -r "dogfooding" src/claude_code_hooks_daemon/handlers/
 1. Read failure details in `/workspace/untracked/qa/*.json`
 2. Fix issues
 3. Run `./scripts/qa/run_autofix.sh` (for format/lint)
-4. Re-run `./scripts/qa/llm_qa.py all`
+4. Re-run the tools that failed (`./scripts/qa/llm_qa.py <tool> ...`), then
+   `changed`. The coordinator re-runs `all` once the fix is handed back.
 5. Repeat until all pass
+
+### Coordinator's Full Gate Fails
+
+- Send the failing check names and their JSON detail to the agent that owns
+  the worktree. The agent fixes them with targeted runs and hands back a new
+  commit.
+- Re-run the full gate on the new head. Never merge a head the full gate has
+  not passed.
 
 ### Sub-Agent QA Fails
 
 **QA Agent (Gate 2) Fails**:
 
 - Developer must fix quality issues
-- Re-run automated QA
+- Re-run targeted QA
 - Restart from Gate 1 (Tester)
 
 **Senior Reviewer (Gate 3) Rejects**:
@@ -611,8 +670,11 @@ grep -r "dogfooding" src/claude_code_hooks_daemon/handlers/
 ### Commands
 
 ```bash
-# Run all automated QA (agents; run_all.sh is the human entry point)
+# Full gate: the coordinator (main thread) only; run_all.sh is the human entry point
 ./scripts/qa/llm_qa.py all
+
+# Targeted QA: what a sub-agent runs before handing over a commit
+./scripts/qa/llm_qa.py changed
 
 # Auto-fix format and lint issues
 ./scripts/qa/run_autofix.sh
@@ -622,7 +684,7 @@ grep -r "dogfooding" src/claude_code_hooks_daemon/handlers/
 ./scripts/qa/run_lint.sh
 ./scripts/qa/run_type_check.sh
 ./scripts/qa/run_pyright_check.py --json
-./scripts/qa/run_tests.sh
+./scripts/qa/run_tests.sh          # the WHOLE suite: coordinator only
 ./scripts/qa/run_security_check.sh
 ./scripts/qa/run_dependency_check.sh
 

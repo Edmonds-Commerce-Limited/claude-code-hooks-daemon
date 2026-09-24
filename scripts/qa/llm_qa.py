@@ -7,8 +7,12 @@ machine-parseable output with pointers to detailed JSON.
 
 Usage:
     ./scripts/qa/llm_qa.py all              # Run every QA check in the suite
-    ./scripts/qa/llm_qa.py tests lint       # Run specific tools
+    ./scripts/qa/llm_qa.py changed          # Targeted: fast static tools + mapped tests
+    ./scripts/qa/llm_qa.py lint type_check  # Run specific tools
     ./scripts/qa/llm_qa.py --read-only all  # Summarize existing JSON only
+
+``all`` is the coordinator's full gate. A sub-agent runs ``changed`` or named
+tools, and ``subagent_full_qa_blocker`` denies it the full suite (Plan 00463).
 """
 
 from __future__ import annotations
@@ -475,6 +479,14 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
         json_file="input_contract.json",
         jq_hint="jq '.violations[] | {rule, event, subject, message}'",
     ),
+    # Targeted only (Plan 00463): pytest on the tests mapped from what changed
+    # since the merge base. Excluded from `all`, which runs the whole suite
+    # through `tests` and would run these a second time.
+    "changed_tests": ToolConfig(
+        command=_python("run_changed_tests.py", "--json"),
+        json_file="changed_tests.json",
+        jq_hint="jq '.tests[] | select(.outcome == \"failed\") | .name'",
+    ),
     # smoke_test MUST stay last: it probes the live daemon, so it belongs
     # after every static check has had its say. Pinned by
     # test_smoke_test_is_last_in_registry -- three tools were appended below
@@ -486,7 +498,28 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
     ),
 }
 
-ALL_TOOL_NAMES = list(TOOL_REGISTRY)
+#: Tools that exist for the targeted path only, and never run as part of `all`.
+_TARGETED_ONLY_TOOLS: Final[frozenset[str]] = frozenset({"changed_tests"})
+
+ALL_TOOL_NAMES = [name for name in TOOL_REGISTRY if name not in _TARGETED_ONLY_TOOLS]
+
+#: `changed`: what a sub-agent runs before handing a commit to the coordinator.
+#: The fast static tools, the project handlers' own suite (seconds), and the
+#: tests mapped from the change set. Never `tests`, which is the whole suite.
+CHANGED_TOOL_NAMES: Final[list[str]] = [
+    "magic_values",
+    "format",
+    "lint",
+    "type_check",
+    "pyright",
+    "error_hiding",
+    "project_handlers",
+    "changed_tests",
+]
+
+#: Selection words that expand to a tool list rather than naming one tool.
+_SELECTION_ALL: Final[str] = "all"
+_SELECTION_CHANGED: Final[str] = "changed"
 
 
 # ── Summarizers ────────────────────────────────────────────────────
@@ -536,21 +569,52 @@ def _summarize_tests(data: QaReport) -> str:
     cov = data.get("coverage", {}).get("percent_covered", 0)
     error_part = f", {errors} errored" if errors else ""
     line = f"{passed} passed, {failed} failed{error_part}, {skipped} skipped | coverage: {cov:.1f}%"
+    return line + _named_failures(data, "tests.json")
 
-    # Name the failures (Plan 00226). A count alone forces a full re-run to
-    # find out what broke, and a re-run may not reproduce an order-dependent
-    # failure — during Plan 00224 one of two real failures was never
-    # identified. Bounded so a mass breakage cannot flood the artifact.
+
+def _named_failures(data: QaReport, json_file: str) -> str:
+    """The failing test names, one per line, or "" when there are none.
+
+    Named rather than counted (Plan 00226). A count alone forces a full re-run
+    to find out what broke, and a re-run may not reproduce an order-dependent
+    failure — during Plan 00224 one of two real failures was never
+    identified. Bounded so a mass breakage cannot flood the artifact.
+    """
     names = [t.get("name", "") for t in data.get("tests", []) if t.get("outcome") == "failed"]
     names = [name for name in names if name]
     if not names:
-        return line
+        return ""
 
     shown = names[:_MAX_NAMED_FAILURES]
-    line += "\n   failed: " + "\n           ".join(shown)
+    text = "\n   failed: " + "\n           ".join(shown)
     if len(names) > len(shown):
-        line += f"\n           ... and {len(names) - len(shown)} more (see tests.json)"
-    return line
+        text += f"\n           ... and {len(names) - len(shown)} more (see {json_file})"
+    return text
+
+
+def _summarize_changed_tests(data: QaReport) -> str:
+    """The targeted run, saying outright when it ran nothing.
+
+    ``0 failed`` from an empty selection reads as a pass, and a sub-agent
+    handing that to the coordinator as evidence would be overstating it.
+    """
+    s = data.get("summary", {})
+    considered = s.get("files_considered", 0)
+    selected = s.get("test_files_selected", 0)
+    unmapped = len(data.get("unmapped", []))
+    scope = f"{selected} test files from {considered} changed files ({unmapped} unmapped)"
+    if selected == 0:
+        return (
+            f"no tests ran: no test files mapped from {considered} changed files "
+            f"({unmapped} unmapped)"
+        )
+    errors = s.get("errors", 0)
+    error_part = f", {errors} errored" if errors else ""
+    line = (
+        f"{s.get('passed', 0)} passed, {s.get('failed', 0)} failed{error_part}, "
+        f"{s.get('skipped', 0)} skipped | {scope}"
+    )
+    return line + _named_failures(data, "changed_tests.json")
 
 
 def _summarize_security(data: QaReport) -> str:
@@ -719,6 +783,7 @@ SUMMARIZERS: dict[str, Summarizer] = {
     "british_english": _summarize_violations,
     "semgrep": _summarize_violations,
     "project_handlers": _summarize_project_handlers,
+    "changed_tests": _summarize_changed_tests,
     "hook_contract": _summarize_hook_contract,
     "input_contract": _summarize_hook_contract,
 }
@@ -910,6 +975,31 @@ def summarize_tool(name: str, exit_code: int | None = None) -> tuple[bool, str]:
 # ── CLI ────────────────────────────────────────────────────────────
 
 
+def resolve_tools(names: list[str]) -> tuple[list[str], list[str]]:
+    """Expand the selection words, keeping order and dropping repeats.
+
+    ``all`` anywhere means the full suite and nothing else: every other name is
+    already in it. ``changed`` expands to its targeted list, and a named tool
+    beside it is added once.
+
+    Returns:
+        ``(tools, unknown)``: the tools to run, and each name that is neither a
+        selection word nor a registered tool.
+    """
+    if _SELECTION_ALL in names:
+        return list(ALL_TOOL_NAMES), []
+    tools: list[str] = []
+    unknown: list[str] = []
+    for name in names:
+        expanded = CHANGED_TOOL_NAMES if name == _SELECTION_CHANGED else [name]
+        for tool in expanded:
+            if tool not in TOOL_REGISTRY:
+                unknown.append(tool)
+            elif tool not in tools:
+                tools.append(tool)
+    return tools, unknown
+
+
 def main() -> int:
     """Entry point."""
     args = sys.argv[1:]
@@ -920,21 +1010,18 @@ def main() -> int:
         args.remove("--read-only")
 
     if not args or "--help" in args or "-h" in args:
-        print("Usage: llm_qa.py [--read-only] <tool|all> [tool ...]")
-        print(f"Tools: {', '.join(ALL_TOOL_NAMES)}")
+        print("Usage: llm_qa.py [--read-only] <tool|all|changed> [tool ...]")
+        print(f"  {_SELECTION_ALL}: the full suite (the coordinator's gate)")
+        print(f"  {_SELECTION_CHANGED}: targeted, {', '.join(CHANGED_TOOL_NAMES)}")
+        print(f"Tools: {', '.join(TOOL_REGISTRY)}")
         return EXIT_SUCCESS
 
-    # Resolve tool list
-    if "all" in args:
-        tools = ALL_TOOL_NAMES
-    else:
-        tools = []
-        for name in args:
-            if name not in TOOL_REGISTRY:
-                print(f"Unknown tool: {name}")
-                print(f"Available: {', '.join(ALL_TOOL_NAMES)}")
-                return EXIT_FAILURE
-            tools.append(name)
+    tools, unknown = resolve_tools(args)
+    if unknown:
+        for name in unknown:
+            print(f"Unknown tool: {name}")
+        print(f"Available: {_SELECTION_ALL}, {_SELECTION_CHANGED}, {', '.join(TOOL_REGISTRY)}")
+        return EXIT_FAILURE
 
     # The run lock guards the EXECUTING path only. `--read-only` runs no tools,
     # so it cannot contend -- and it is exactly the command someone reaches for

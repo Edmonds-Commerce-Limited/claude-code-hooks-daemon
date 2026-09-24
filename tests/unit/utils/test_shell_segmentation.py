@@ -29,6 +29,8 @@ from __future__ import annotations
 import pytest
 
 from claude_code_hooks_daemon.utils.shell_segmentation import (
+    COMMAND_WRAPPERS,
+    peel_command_wrappers,
     quoted_heredoc_command_words,
     quoted_heredoc_receivers,
     split_unquoted,
@@ -637,3 +639,51 @@ class TestQuotedHeredocCommandWords:
 
     def test_command_without_a_heredoc_reports_nothing(self) -> None:
         assert quoted_heredoc_command_words("git commit -m 'msg'") == []
+
+
+class TestPeelCommandWrappers:
+    """Which words at the front of an argv only RUN the command after them.
+
+    One table, shared, because a second copy is how two guards come to
+    disagree about ``env`` (Plan 00463): ``process_probe`` peeled it and
+    ``pipe_blocker`` whitelisted it, so the same command was judged on two
+    different names. The full-QA guard needs the same answer, so it reads
+    the same table rather than growing a third.
+    """
+
+    def test_no_wrapper_starts_at_zero(self) -> None:
+        assert peel_command_wrappers(["pytest", "tests/"]) == ((), 0)
+
+    def test_a_bare_wrapper_is_peeled(self) -> None:
+        assert peel_command_wrappers(["nohup", "pytest"]) == (("nohup",), 1)
+
+    def test_a_positional_operand_is_consumed(self) -> None:
+        """``timeout``'s DURATION is not the command it runs."""
+        assert peel_command_wrappers(["timeout", "3600", "pytest"]) == (("timeout",), 2)
+
+    def test_a_value_flag_consumes_its_value(self) -> None:
+        argv = ["sudo", "-u", "builder", "pytest"]
+        assert peel_command_wrappers(argv) == (("sudo",), 3)
+
+    def test_a_valueless_flag_is_skipped_alone(self) -> None:
+        assert peel_command_wrappers(["sudo", "-E", "pytest"]) == (("sudo",), 2)
+
+    def test_stacked_wrappers_are_all_peeled_in_order(self) -> None:
+        argv = ["timeout", "-s", "KILL", "60", "nice", "-n", "5", "pytest"]
+        assert peel_command_wrappers(argv) == (("timeout", "nice"), 7)
+
+    def test_a_path_qualified_wrapper_is_recognised(self) -> None:
+        assert peel_command_wrappers(["/usr/bin/env", "pytest"]) == (("env",), 1)
+
+    def test_a_lone_wrapper_peels_to_the_end(self) -> None:
+        """Nothing is wrapped, so the command start is past the argv."""
+        assert peel_command_wrappers(["nohup"]) == (("nohup",), 1)
+
+    def test_an_empty_argv_is_nothing_to_peel(self) -> None:
+        assert peel_command_wrappers([]) == ((), 0)
+
+    def test_the_table_holds_the_wrappers_process_probe_relies_on(self) -> None:
+        """Guard the move: every name the wait classifier peeled is still here."""
+        assert {"watch", "timeout", "nohup", "sudo", "env", "nice", "stdbuf", "command"} <= set(
+            COMMAND_WRAPPERS
+        )

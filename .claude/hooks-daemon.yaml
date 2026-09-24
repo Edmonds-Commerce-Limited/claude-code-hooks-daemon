@@ -449,6 +449,41 @@ handlers:
       #   max_comment_block_lines: 40
       #   mode: block               # block | warn
 
+    # Plan 00463: full QA is the coordinator's gate. Measured when the owner
+    # asked: five whole-suite runs at once, one per worktree, each re-run after
+    # every fix round and again by the coordinator before merging. A sub-agent
+    # runs targeted QA and hands over a commit; the coordinator runs the full
+    # gate on that branch head, one run at a time. scope=SUB, so the main
+    # thread's own run draws nothing.
+    subagent_full_qa_blocker:
+      enabled: true
+      priority: 32
+      options:
+        full_qa_patterns:
+          - id: llm-qa-whole-suite
+            command: llm_qa.py
+            full_args: [all, tests]
+            read_only_flags: [--read-only, --help, -h]
+          - id: run-all
+            command: run_all.sh
+          - id: run-tests
+            command: run_tests.sh
+          - id: validate-worktrees
+            command: validate_worktrees.sh
+          # `tests/unit` is 883 of 1,097 test files, so it is the whole suite
+          # here in all but name. A narrower directory is targeted.
+          - id: pytest-whole-suite
+            command: pytest
+            full_args: [tests, tests/unit, .]
+            bare_is_full: true
+            value_flags: [-k, -m, -n, -p, -c, -o, -W, --maxfail, --deselect, --ignore,
+                          --ignore-glob, --rootdir, --tb, --durations, --basetemp, --junitxml]
+            read_only_flags: [--collect-only, --co, --help, -h, --version]
+        targeted_qa_commands:
+          - "./scripts/qa/llm_qa.py changed"
+          - "./scripts/qa/llm_qa.py <tool> [<tool> ...]   (e.g. lint type_check pyright)"
+          - "pytest <explicit test files or directories narrower than tests/unit>"
+
     bash_safe_mode:  # Opt-in safe-prelude forcer (Plan 00270); dogfooded here in warn mode
       enabled: true
       priority: 36

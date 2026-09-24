@@ -468,6 +468,18 @@ class TestBashIsNeverDenied:
         result = self.handler.handle(bash_hook_input("git status && git diff"))
         assert result.rule == "git status+git diff"
 
+    def test_the_coordinators_full_qa_gate_is_never_denied(self, bash_hook_input: Any) -> None:
+        """Plan 00463 depends on this: full QA is a MAIN-THREAD gate.
+
+        `subagent_full_qa_blocker` denies a sub-agent's full-suite run, so the
+        coordinator is the only role left that can run it. If this mode ever
+        denied main-thread Bash, the two would deadlock and nobody could run
+        full QA. This test is where that surfaces. If it fails, put the full
+        gate on this mode's allowlist; do not delete the test.
+        """
+        result = self.handler.handle(bash_hook_input("./scripts/qa/llm_qa.py all"))
+        assert result.decision == Decision.ALLOW
+
 
 class TestThePlanDirectoryIsExempt:
     """The lead owns its own plan folder, by this project's directory roles.
