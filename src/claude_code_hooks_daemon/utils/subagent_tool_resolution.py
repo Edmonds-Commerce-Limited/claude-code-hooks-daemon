@@ -7,10 +7,19 @@ resolver each handler would grow its own guess, and the two could disagree
 about the very agent that triggered Plan 00460 (an ``Explore`` stop blocked
 with "write the report to a file" when Explore has no Write tool at all).
 
-Resolution order — each documented with the built-in table's citation and
-the project/user-agent frontmatter fields below:
+Resolution order (review M4: PROJECT/USER before built-in, not after —
+the vendored doc states a project/user agent named e.g. ``Explore``
+OVERRIDES the built-in of the same name; consulting the built-in table
+first answered that override wrong):
 
-1. **Built-in types**: a constant table, ONLY for types the vendored
+1. **Project agents** (``<project_root>/.claude/agents/**/*.md``):
+   frontmatter ``tools``/``disallowedTools``, matched by the file's `name:`
+   field — "identity comes only from the `name` frontmatter field", not the
+   filename (vendored doc, "Choose the subagent scope").
+2. **User agents** (``<home_dir>/.claude/agents/**/*.md``): same rule,
+   consulted only when no project agent matches — mirrors Claude Code's own
+   project-before-user precedence for a shared name.
+3. **Built-in types**: a constant table, ONLY for types the vendored
    ``remote-docs/code.claude.com/docs/en/sub-agents.md`` doc explicitly
    enumerates the tools of (Explore, Plan, general-purpose, claude). Two
    further built-ins (``claude-code-guide``, ``statusline-setup``) are named
@@ -18,16 +27,11 @@ the project/user-agent frontmatter fields below:
    Task 1.1 requires resolving built-ins from documentation with a citation,
    and there isn't one for these two, so they resolve to unknown rather than
    reusing a secondhand claim (see Plan 00460 journal, T1.1 finding).
-2. **Project agents** (``<project_root>/.claude/agents/**/*.md``):
-   frontmatter ``tools``/``disallowedTools``, matched by the file's `name:`
-   field — "identity comes only from the `name` frontmatter field", not the
-   filename (same vendored doc, "Choose the subagent scope").
-3. **User agents** (``<home_dir>/.claude/agents/**/*.md``): same rule,
-   consulted only when no project agent matches — mirrors Claude Code's own
-   project-before-user precedence for a shared name.
-4. Anything else — a plugin agent (not cheaply resolvable: its location
-   depends on marketplace/plugin config this module does not track) or a
-   name matching nothing above — resolves to unknown.
+4. Anything else — a MANAGED-settings override (the doc's own precedence
+   tier ABOVE project/user, not consulted here), a plugin agent (not
+   cheaply resolvable: its location depends on marketplace/plugin config
+   this module does not track), or a name matching nothing above —
+   resolves to unknown (review M4 scope note).
 
 ``None`` means "cannot resolve"; every caller MUST keep its EXISTING
 behaviour for it rather than guessing either way.
@@ -35,12 +39,15 @@ behaviour for it rather than guessing either way.
 
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 from typing import Any, Final
 
 from claude_code_hooks_daemon.utils.markdown_format import parse_frontmatter_yaml
 from claude_code_hooks_daemon.utils.path_exclusion import resolve_project_root
+
+_LOGGER = logging.getLogger(__name__)
 
 # Citation: remote-docs/code.claude.com/docs/en/sub-agents.md,
 # "Built-in subagents" section — "Tools: read-only tools; Write and Edit are
@@ -129,7 +136,8 @@ def _find_agent_frontmatter(agents_dir: Path, agent_type: str) -> dict[str, Any]
     for path in sorted(agents_dir.rglob("*.md")):
         try:
             content = path.read_text()
-        except OSError:
+        except OSError as exc:
+            _LOGGER.debug("subagent_tool_resolution: cannot read %s: %s", path, exc)
             continue
         frontmatter = parse_frontmatter_yaml(content)
         if frontmatter is not None and frontmatter.get(_NAME_FIELD) == agent_type:
@@ -152,19 +160,28 @@ def resolve_agent_can_write(
     if not agent_type:
         return None
 
-    if agent_type in _BUILTIN_READ_ONLY:
-        return False
-    if agent_type in _BUILTIN_WRITABLE:
-        return True
-
+    # Review M4: project, THEN user, agents are consulted BEFORE the
+    # built-in table -- the vendored doc states a user/project subagent can
+    # OVERRIDE a built-in of the same name (e.g. a project's own writable
+    # `Explore`), and the earlier built-in-first order failed towards
+    # READ-ONLY for that override, the opposite of this module's own
+    # documented "unknown, keep today's behaviour" fail-safe contract.
     for base in (project_root, home_dir if home_dir is not None else Path.home()):
         frontmatter = _find_agent_frontmatter(base.joinpath(*_AGENTS_DIR_PARTS), agent_type)
         if frontmatter is not None:
             return _can_write_from_frontmatter(frontmatter)
 
+    if agent_type in _BUILTIN_READ_ONLY:
+        return False
+    if agent_type in _BUILTIN_WRITABLE:
+        return True
+
     # Plugin agents are not cheaply resolvable here: their on-disk location
     # depends on marketplace/plugin configuration this module does not
-    # track (Plan 00460 Task 1.1 scope decision).
+    # track (Plan 00460 Task 1.1 scope decision). A managed-settings
+    # override (the doc's own precedence tier above project/user) is the
+    # same kind of gap and is documented as out of scope for the same
+    # reason (review M4).
     return None
 
 

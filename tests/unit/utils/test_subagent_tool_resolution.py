@@ -4,17 +4,20 @@
 whether a dispatched/stopping `agent_type` can create a NEW file via `Write`,
 so there is ONE resolver (Task 1.1) rather than two subtly different guesses.
 
-Resolution order, each documented with its own test class below:
+Resolution order, each documented with its own test class below (review
+M4: PROJECT/USER before built-in, since a project/user agent can OVERRIDE
+a built-in of the same name -- see TestManagedOverridePrecedence):
 
-1. Built-in types — a small constant table, cited against the vendored
+1. Project agents (`<project_root>/.claude/agents/**/*.md`) — frontmatter
+   `tools`/`disallowedTools`, matched by the `name:` field per the doc
+   ("identity comes only from the `name` frontmatter field"), not filename.
+2. User agents (`<home_dir>/.claude/agents/**/*.md`) — same rule.
+3. Built-in types — a small constant table, cited against the vendored
    `remote-docs/code.claude.com/docs/en/sub-agents.md` doc. A built-in whose
    tools the doc does NOT enumerate (`claude-code-guide`, `statusline-setup`)
    resolves to unknown (``None``) rather than being guessed.
-2. Project agents (`<project_root>/.claude/agents/**/*.md`) — frontmatter
-   `tools`/`disallowedTools`, matched by the `name:` field per the doc
-   ("identity comes only from the `name` frontmatter field"), not filename.
-3. User agents (`<home_dir>/.claude/agents/**/*.md`) — same rule.
-4. Anything else (plugin agents, a type matching nothing above) — unknown.
+4. Anything else (a managed-settings override, a plugin agent, a type
+   matching nothing above) — unknown.
 
 ``None`` means "cannot resolve" and every caller must keep TODAY's
 behaviour for it (fail-safe default), never treat it as either True or
@@ -23,7 +26,11 @@ False.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+from unittest.mock import patch
+
+import pytest
 
 from claude_code_hooks_daemon.utils.subagent_tool_resolution import (
     resolve_agent_can_write,
@@ -170,6 +177,54 @@ class TestProjectAgents:
         assert resolve_agent_can_write("malformed", tmp_path) is None
 
 
+class TestManagedOverridePrecedence:
+    """Review M4: the vendored doc (remote-docs/code.claude.com/docs/en/
+    sub-agents.md:55) states 'A user or project subagent named Explore
+    overrides the built-in' -- so project/user agents must be consulted
+    BEFORE the built-in table, not after. The prior order failed towards
+    READ-ONLY for a project's own writable `Explore` override, which is
+    the opposite of this module's own documented fail-safe contract
+    ('unknown, keep today's behaviour')."""
+
+    def test_a_project_explore_override_with_write_resolves_writable(self, tmp_path: Path) -> None:
+        _write_agent(
+            tmp_path / ".claude" / "agents",
+            "explore.md",
+            "name: Explore\ndescription: project override\ntools: Read, Write, Bash",
+        )
+        assert resolve_agent_can_write("Explore", tmp_path) is True
+
+    def test_a_project_explore_override_with_no_tools_line_inherits_write(
+        self, tmp_path: Path
+    ) -> None:
+        """The doc's own recommended shape for overriding Explore: no
+        `tools:` line at all, which inherits every tool including Write."""
+        _write_agent(
+            tmp_path / ".claude" / "agents",
+            "explore.md",
+            "name: Explore\ndescription: project override, inherits everything\nmodel: haiku",
+        )
+        assert resolve_agent_can_write("Explore", tmp_path) is True
+
+    def test_a_project_plan_override_without_write_still_reads_as_read_only(
+        self, tmp_path: Path
+    ) -> None:
+        """A project override that keeps the built-in's own read-only shape
+        must still resolve read-only -- the fix is about PRECEDENCE, not
+        about always answering True."""
+        _write_agent(
+            tmp_path / ".claude" / "agents",
+            "plan.md",
+            "name: Plan\ndescription: project override, still read-only\ntools: Read, Grep",
+        )
+        assert resolve_agent_can_write("Plan", tmp_path) is False
+
+    def test_builtin_table_still_answers_when_no_override_exists(self, tmp_path: Path) -> None:
+        """No project/user agent named Explore anywhere -- falls through to
+        the built-in table exactly as before."""
+        assert resolve_agent_can_write("Explore", tmp_path) is False
+
+
 class TestUserAgents:
     def test_home_agent_without_write_is_read_only(self, tmp_path: Path) -> None:
         project_root = tmp_path / "project"
@@ -218,3 +273,27 @@ class TestResolveLookupRoot:
         # resolve_project_root() returns None and this falls all the way
         # through to the process cwd.
         assert resolve_lookup_root(None, None) == Path.cwd()
+
+
+class TestUnreadableAgentFileIsLogged:
+    """Review m11: every OTHER fail-open site this plan added logs; the
+    directory-scan loop's `except OSError: continue` was a bare skip.
+    Portable without real permission bits (this suite can run as root,
+    where chmod 000 does not actually deny root): monkeypatch `read_text`
+    to raise for the specific candidate file."""
+
+    def test_an_unreadable_file_is_skipped_and_logged_at_debug(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        _write_agent(
+            tmp_path / ".claude" / "agents",
+            "broken.md",
+            "name: broken\ndescription: this file will fail to read\ntools: Read",
+        )
+
+        with patch.object(Path, "read_text", side_effect=OSError("permission denied")):
+            with caplog.at_level(logging.DEBUG):
+                result = resolve_agent_can_write("broken", tmp_path)
+
+        assert result is None
+        assert any(record.levelno == logging.DEBUG for record in caplog.records)
