@@ -1,6 +1,6 @@
 # Plan 00455: self install exposes the conventional cli path
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-24
 **Owner**: dev
 **GitHub Issue**: #54
@@ -82,9 +82,9 @@ instead.
 
 ### Phase 2: Deliver
 
-- [ ] ⬜ **Task 2.1**: Merge `--no-ff`, verify ancestry and CI, and restart
+- [x] ✅ **Task 2.1**: Merge `--no-ff`, verify ancestry and CI, and restart
   the daemon to confirm the link appears.
-- [ ] ⬜ **Task 2.2**: Comment on #54 and close it.
+- [x] ✅ **Task 2.2**: Comment on #54 and close it.
 
 ## Success Criteria
 
@@ -100,8 +100,10 @@ instead.
 - [x] Nothing is tracked under `.claude/hooks-daemon/`. Still covered by the
   existing `/hooks-daemon/` `.claude/.gitignore` entry; unchanged by this plan.
 - [x] Full QA passes and CI is green in this worktree
-  (`./scripts/qa/llm_qa.py all`: 35/35 PASSED, twice). CI itself is verified
-  at merge time (Task 2.1), outside this worktree's authority.
+  (`./scripts/qa/llm_qa.py all`: 35/35 PASSED, twice). CI on main is green
+  at `002293ac` (run 35977500551), which contains the merge.
+- [x] Every release-bound consequence is in the pending-release holding area:
+  `UNRELEASED/release-notes/03-self-install-checkouts-now-expose-the-conventional-cli-path.md`
 
 ## Delivery & Milestones
 
@@ -109,4 +111,5 @@ instead.
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00455-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- Not yet delivered.
+- Merged to main at `e6a11e19` (`--no-ff`, from `aba664a0`). The daemon was
+  restarted after deleting the link, and it recreated the link.
