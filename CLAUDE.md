@@ -558,10 +558,6 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - flaggable_work_advisor — delegate flaggable work BEFORE reading it
 
-<!-- handler: background-process-tracker -->
-
-- background_process_tracker — backgrounded processes are tracked
-
 <!-- handler: budget-exhaustion-detector -->
 
 - budget_exhaustion_detector — hidden agent budgets are surfaced
@@ -594,6 +590,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - model_downgrade_recorder — the automatic model downgrade is written down
 
+<!-- handler: background-process-tracker -->
+
+- background_process_tracker — backgrounded processes are tracked
+
 <!-- handler: recovery-cron-advisor -->
 
 - recovery_cron_advisor — failsafe recovery cron lifecycle advisory
@@ -614,10 +614,6 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - git_upstream_checker — additive fetch + pull/cleanup advice on session start
 
-<!-- handler: hook-registration-checker -->
-
-- hook_registration_checker — hooks configuration policy
-
 <!-- handler: model-fallback-detector -->
 
 - model_fallback_detector — silent model substitution is surfaced
@@ -634,13 +630,25 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - plan_workflow_asset_checker — plan tooling provisioning alert
 
+<!-- handler: reference-repo-sweep -->
+
+- reference_repo_sweep — reference clones are made fresh before you read them
+
+<!-- handler: tool-disable-advisor -->
+
+- tool_disable_advisor — declared never-want tools are checked at session start
+
 <!-- handler: project-handler-load-checker -->
 
 - project_handler_load_checker — project protection degraded alert
 
-<!-- handler: reference-repo-sweep -->
+<!-- handler: hook-registration-checker -->
 
-- reference_repo_sweep — reference clones are made fresh before you read them
+- hook_registration_checker — hooks configuration policy
+
+<!-- handler: session-actions-directive -->
+
+- session_actions_directive — the must-do list is delivered as a turn
 
 <!-- handler: routine-qa-sweep -->
 
@@ -649,14 +657,6 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 <!-- handler: secret-file-hygiene-checker -->
 
 - secret_file_hygiene_checker -- on-disk hygiene for protected paths
-
-<!-- handler: session-actions-directive -->
-
-- session_actions_directive — the must-do list is delivered as a turn
-
-<!-- handler: tool-disable-advisor -->
-
-- tool_disable_advisor — declared never-want tools are checked at session start
 
 <!-- handler: idle-housekeeping-advisory -->
 
