@@ -118,6 +118,22 @@ Per-site tests added (all use the `pc.ProjectContext` monkeypatch idiom from
 updated for the stripped-leading-slash convention (the only pre-existing
 test asserting the old literal form).
 
+**Addendum, per review feedback**: the initial per-site tests above only
+exercised `venv/`/`vendor/`/`docs/`/`tests/`, but the same bare-substring bug
+applied identically to every OTHER entry of each list (`build/`, `dist/`,
+`node_modules/`, `migrations/`, `tests/fixtures/`, `.env.example`, ...), and
+a fix proven against one entry does not prove it against the rest. Added a
+parametrized collision test (`x<entry>` — the entry string is present but not
+segment-bounded — is not matched) and a positive test (the entry directly
+under the project root is still matched) for **every entry of the list
+actually in play** at each of the six sites, importing each list from its
+source module (`PYTHON_QA_SUPPRESSION_SKIP_DIRECTORIES`,
+`DEFAULT_SKIP_DIRECTORIES`, `SKIP_PATTERNS`, `COMMON_TEST_DIRECTORIES`, and
+british_english's default `CHECK_DIRECTORIES` three) rather than
+hand-duplicating the entries, so the tests stay in sync with the list itself.
+80 new parametrized cases; 336 tests pass across the six touched files;
+detector stays green (commit `6defb10a`).
+
 ## Task 1.4 — Security register + release note
 
 `CLAUDE/Security/AsymmetricSiblingProtection.md`: new Instance "The worktree
@@ -159,6 +175,14 @@ tests/acceptance/test_playbook_harness.py::TestTheDeclaredProbesBehaveAsDeclared
   ::test_every_executable_probe_matches_its_expected_decision_and_reason PASSED [13.52s]
 ```
 
+After the every-skip-list-entry test addendum (commit `6defb10a`), daemon
+restarted again and the suite re-run in full:
+
+```
+✅ tests: 25664 passed, 0 failed, 24 skipped | coverage: 95.1%
+QA: 36/36 PASSED
+```
+
 ## Out of scope / follow-up for the owner
 
 - `strategies/tdd/common.py::matches_directory` (used by all 11 per-language
@@ -176,6 +200,7 @@ tests/acceptance/test_playbook_harness.py::TestTheDeclaredProbesBehaveAsDeclared
 - `d693e13c` — Task 1.2 detector, RED
 - `25c4573e` — Task 1.3 shared matcher
 - `ebb31e61` — Task 1.3 all six sites moved, GREEN
+- `6defb10a` — every-skip-list-entry test addendum, per review feedback
 - `4f8cac90` — Task 1.4 security doc instance + release note
 
 Phase 1 (Tasks 1.1-1.4) complete; PLAN.md and the JOURNAL day-file are
