@@ -428,34 +428,234 @@ class TestBackslashContinuation:
         assert [v.line for v in violations] == [6]
 
     def test_a_trailing_backslash_inside_single_quotes_is_not_a_continuation(self) -> None:
-        """A backslash is literal inside single quotes, so the line ends there."""
-        from audit_capture_corruption import _join_continuations
+        """A backslash is literal inside single quotes; the string, not the
+        backslash, is what carries the command onto the next line."""
+        from audit_capture_corruption import _logical_lines
 
         lines = [
             "    local usage='run the tool \\",
             "with args'",
             '    echo "status"',
         ]
-        assert _join_continuations(lines) == lines
+        assert _logical_lines(lines).lines == [
+            "    local usage='run the tool \\ with args'",
+            "",
+            '    echo "status"',
+        ]
 
     def test_a_backslash_before_a_closing_single_quote_escapes_nothing(self) -> None:
         """``'a\\'`` is a complete string, so the trailing ``\\`` after it IS one."""
-        from audit_capture_corruption import _join_continuations
+        from audit_capture_corruption import _logical_lines
 
         lines = [
             "    echo 'a\\' \\",
             "        >&2",
         ]
-        assert _join_continuations(lines) == ["    echo 'a\\' >&2", ""]
+        assert _logical_lines(lines).lines == ["    echo 'a\\' >&2", ""]
 
     def test_a_trailing_backslash_in_a_comment_is_not_a_continuation(self) -> None:
-        from audit_capture_corruption import _join_continuations
+        from audit_capture_corruption import _logical_lines
 
         lines = [
             "    # see C:\\",
             '    echo "status"',
         ]
-        assert _join_continuations(lines) == lines
+        assert _logical_lines(lines).lines == lines
+
+
+# ── Multi-line quoting and heredocs (Plan 00466 N20) ───────────────
+
+
+class TestMultiLineQuoting:
+    """A quoted string, ``$(...)`` or heredoc that spans physical lines is
+    part of ONE logical command. Judging it a physical line at a time either
+    misses a redirect that sits after the closing quote (false positive) or
+    mistakes quoted text for shell syntax, which can hide real code (false
+    negative)."""
+
+    def test_single_quoted_echo_redirected_after_the_closing_quote_is_not_flagged(
+        self, tmp_path: Path
+    ) -> None:
+        src = _write(
+            tmp_path,
+            "out.sh",
+            "#!/bin/bash\nprint_info() {\n    echo 'x\ny' >&2\n}\n",
+        )
+        assert audit_files([src]) == []
+
+    def test_single_quoted_echo_with_no_redirect_is_still_flagged(self, tmp_path: Path) -> None:
+        src = _write(
+            tmp_path,
+            "out.sh",
+            "#!/bin/bash\nprint_info() {\n    echo 'x\ny'\n}\n",
+        )
+        violations = audit_files([src])
+        assert _rules(violations) == ["log-helper-stdout"]
+        assert [v.line for v in violations] == [3]
+
+    def test_double_quoted_echo_redirected_after_the_closing_quote_is_not_flagged(
+        self, tmp_path: Path
+    ) -> None:
+        src = _write(
+            tmp_path,
+            "out.sh",
+            '#!/bin/bash\nprint_info() {\n    echo "x\ny" >&2\n}\n',
+        )
+        assert audit_files([src]) == []
+
+    def test_double_quoted_echo_with_no_redirect_is_still_flagged(self, tmp_path: Path) -> None:
+        src = _write(
+            tmp_path,
+            "out.sh",
+            '#!/bin/bash\nprint_info() {\n    echo "x\ny"\n}\n',
+        )
+        violations = audit_files([src])
+        assert _rules(violations) == ["log-helper-stdout"]
+        assert [v.line for v in violations] == [3]
+
+    def test_a_closing_brace_inside_a_string_does_not_end_the_function(
+        self, tmp_path: Path
+    ) -> None:
+        src = _write(
+            tmp_path,
+            "out.sh",
+            "#!/bin/bash\n"
+            "print_info() {\n"
+            '    echo "usage:\n'
+            "}\n"
+            '" >&2\n'
+            '    echo "stray"\n'
+            "}\n",
+        )
+        violations = audit_files([src])
+        assert _rules(violations) == ["log-helper-stdout"]
+        assert [v.line for v in violations] == [6]
+
+    def test_an_apostrophe_inside_a_substitution_inside_double_quotes_opens_nothing(
+        self, tmp_path: Path
+    ) -> None:
+        src = _write(
+            tmp_path,
+            "out.sh",
+            "#!/bin/bash\n"
+            "print_info() {\n"
+            '    echo "$(printf \'%s\' "it\'s")" >&2\n'
+            '    echo "stray"\n'
+            "}\n",
+        )
+        violations = audit_files([src])
+        assert _rules(violations) == ["log-helper-stdout"]
+        assert [v.line for v in violations] == [4]
+
+    def test_a_capture_that_opens_on_one_line_and_names_the_function_on_the_next_is_seen(
+        self, tmp_path: Path
+    ) -> None:
+        defn = _write(
+            tmp_path,
+            "lib.sh",
+            '#!/bin/bash\nresolve_path() {\n    echo "found path"\n    echo "$resolved"\n}\n',
+        )
+        caller = _write(tmp_path, "use.sh", "#!/bin/bash\nVAR=$(\n    resolve_path /a\n)\n")
+        violations = audit_files([defn, caller])
+        assert _rules(violations) == ["capture-corruption"]
+        assert [v.line for v in violations] == [3]
+
+    def test_a_heredoc_operator_inside_quotes_is_not_a_heredoc(self, tmp_path: Path) -> None:
+        """The ``scripts/upgrade.sh`` shape: the old regex read
+        ``'<<<UPGRADE_METADATA'`` as a heredoc and blanked the rest of the file."""
+        src = _write(
+            tmp_path,
+            "out.sh",
+            "#!/bin/bash\n"
+            "print_info() {\n"
+            "    printf '\\n<<<MARKER\\n' >&2\n"
+            '    echo "stray"\n'
+            "}\n",
+        )
+        violations = audit_files([src])
+        assert _rules(violations) == ["log-helper-stdout"]
+        assert [v.line for v in violations] == [4]
+
+    def test_a_heredoc_operator_in_a_comment_is_not_a_heredoc(self, tmp_path: Path) -> None:
+        src = _write(
+            tmp_path,
+            "out.sh",
+            "#!/bin/bash\n"
+            "print_info() {\n"
+            "    # the usage text goes through cat <<EOF\n"
+            '    echo "stray"\n'
+            "}\n",
+        )
+        violations = audit_files([src])
+        assert _rules(violations) == ["log-helper-stdout"]
+        assert [v.line for v in violations] == [4]
+
+    def test_a_here_string_is_not_a_heredoc(self, tmp_path: Path) -> None:
+        src = _write(
+            tmp_path,
+            "out.sh",
+            "#!/bin/bash\n"
+            "print_info() {\n"
+            "    read -r word <<<WORD\n"
+            '    echo "stray"\n'
+            "}\n",
+        )
+        violations = audit_files([src])
+        assert _rules(violations) == ["log-helper-stdout"]
+        assert [v.line for v in violations] == [4]
+
+    def test_a_left_shift_in_arithmetic_is_not_a_heredoc(self, tmp_path: Path) -> None:
+        src = _write(
+            tmp_path,
+            "out.sh",
+            "#!/bin/bash\n"
+            "print_info() {\n"
+            "    local mask=$(( 1 << shift ))\n"
+            '    echo "stray"\n'
+            "}\n",
+        )
+        violations = audit_files([src])
+        assert _rules(violations) == ["log-helper-stdout"]
+        assert [v.line for v in violations] == [4]
+
+    def test_a_double_quoted_heredoc_delimiter_still_hides_the_body(self, tmp_path: Path) -> None:
+        src = _write(
+            tmp_path,
+            "out.sh",
+            "#!/bin/bash\n"
+            "print_info() {\n"
+            '    cat <<"EOF" >&2\n'
+            "echo it's body text, not code\n"
+            "EOF\n"
+            "}\n",
+        )
+        assert audit_files([src]) == []
+
+    def test_an_unterminated_quote_fails_the_audit_instead_of_hiding_the_file(
+        self, tmp_path: Path
+    ) -> None:
+        """Quote state now decides which lines are judged; if it never closes,
+        the rest of the file would silently collapse into one line."""
+        src = _write(
+            tmp_path,
+            "out.sh",
+            '#!/bin/bash\nprint_info() {\n    echo \'never closed >&2\n    echo "stray"\n}\n',
+        )
+        violations = audit_files([src])
+        assert _rules(violations) == ["unparseable-shell"]
+        assert [v.line for v in violations] == [3]
+
+    def test_an_unterminated_heredoc_fails_the_audit_instead_of_hiding_the_file(
+        self, tmp_path: Path
+    ) -> None:
+        src = _write(
+            tmp_path,
+            "out.sh",
+            '#!/bin/bash\nprint_info() {\n    cat <<EOF >&2\nbody\n}\necho "stray"\n',
+        )
+        violations = audit_files([src])
+        assert _rules(violations) == ["unparseable-shell"]
+        assert [v.line for v in violations] == [3]
 
 
 # ── Real-repo smoke ────────────────────────────────────────────────

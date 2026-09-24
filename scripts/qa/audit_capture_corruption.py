@@ -26,6 +26,12 @@ in ``scripts/`` and ``src/.../skills/``:
      are diagnostic helpers and have no business writing to stdout — the
      v3.10.0 SEV-1 was a missing ``>&2`` on ``print_info``.
 
+Both checks judge LOGICAL commands: a backslash continuation, or a quote,
+``$(...)`` or backtick left open at the end of a line, joins the next line
+onto the command, and heredoc bodies are skipped as data. A file whose
+quoting never closes is reported as ``unparseable-shell`` rather than
+silently audited as one run-on line.
+
 Legitimate exceptions (rare) must carry an explicit marker:
 
     echo "non-return stdout"  # capture-audit: allow -- <reason>
@@ -63,7 +69,19 @@ DEFAULT_OUTPUT = REPO_ROOT / "untracked" / "qa" / "capture_corruption.json"
 _FUNC_DEF_RE = re.compile(r"^([a-zA-Z_][a-zA-Z0-9_]*)\(\)\s*\{\s*$")
 _FUNC_END_RE = re.compile(r"^}\s*$")
 
-_HEREDOC_OPEN_RE = re.compile(r"<<-?\s*'?([A-Za-z_][A-Za-z0-9_]*)'?")
+# Spans on the shell tokeniser's stack. _CODE is the grammar itself (top
+# level); _SUBST is code inside $( ... ), closed by its matching paren.
+_CODE = "code"
+_SUBST = "$("
+_ARITH = "$(("
+_SQ = "'"
+_DQ = '"'
+_ANSI = "$'"
+_BACKTICK = "`"
+# Characters after which a `#` starts a comment and `((` starts arithmetic.
+_WORD_BREAKS = frozenset(" \t;&|(")
+# `<<` or `<<-`, then a delimiter word that may be quoted or backslashed.
+_HEREDOC_OPERATOR_RE = re.compile(r"<<-?[ \t]*((?:'[^']*'|\"[^\"]*\"|\\.|[^\s;&|<>()'\"\\])+)")
 
 _RETURN_RE = re.compile(r"^\s*return(\s+\S+)?\s*$")
 _EXIT_RE = re.compile(r"^\s*exit(\s+\S+)?\s*$")
@@ -171,88 +189,185 @@ class FunctionDef:
     function_level_marker: bool = False
 
 
-def _strip_heredoc_bodies(lines: list[str]) -> list[str]:
-    """Replace heredoc bodies with blank lines so echo/printf checks ignore them.
+@dataclass
+class _Span:
+    """An open quoting, substitution or arithmetic span on the tokeniser stack."""
 
-    Preserves line numbering. Heredoc opener and terminator stay intact;
-    only the body lines are blanked.
+    kind: str
+    start_line: int
+    depth: int = 0
+
+
+@dataclass
+class _Heredoc:
+    delimiter: str
+    opener_line: int
+
+
+@dataclass
+class LogicalLines:
+    """A file folded into logical commands, one physical line per slot.
+
+    ``lines[i]`` holds the whole command that STARTS on physical line ``i+1``;
+    a slot whose line belongs to an earlier command, or to a heredoc body or
+    terminator, is blank. ``unclosed_at`` is the 1-based line where a quote,
+    substitution or heredoc opened and never closed, else ``None``.
     """
-    out: list[str] = []
-    expect_terminator: str | None = None
-    for line in lines:
-        if expect_terminator is not None:
-            if line.strip() == expect_terminator:
-                expect_terminator = None
-                out.append(line)
-            else:
-                out.append("")
-            continue
-        match = _HEREDOC_OPEN_RE.search(line)
-        if match:
-            expect_terminator = match.group(1)
-        out.append(line)
-    return out
+
+    lines: list[str]
+    unclosed_at: int | None
 
 
-def _line_continues(line: str, quote: str | None) -> tuple[bool, str | None]:
-    """Does ``line`` end in a backslash continuation, given the quote it opens in?
+class _ShellTokeniser:
+    """Just enough shell lexing to know where each command starts and ends.
 
-    Returns that verdict plus the quote still open at the end of the line
-    (``'``, ``"``, ``$'`` or ``None``), which the next physical line opens in.
-    A backslash is literal inside single quotes and inside a comment, so
-    neither can continue a line; inside double quotes (and ``$'...'``) it can.
+    Tracks the quoting/substitution stack across physical lines, backslash
+    continuations, comments, and heredoc operators -- which only count in
+    code, never inside quotes, comments, here-strings or arithmetic.
     """
-    i = 0
-    last = len(line) - 1
-    while i <= last:
-        ch = line[i]
-        if quote == "'":
-            if ch == "'":
-                quote = None
-        elif ch == "\\":
-            if i == last:
-                return True, quote
-            i += 1  # the escaped character is literal
-        elif quote is not None:
-            if ch == quote[-1]:
-                quote = None
-        elif ch == "#" and (i == 0 or line[i - 1].isspace()):
-            return False, None
-        elif ch == "$" and line[i + 1 : i + 2] == "'":
-            quote = "$'"
+
+    def __init__(self) -> None:
+        self.stack: list[_Span] = []
+        self.pending: list[_Heredoc] = []
+        self.bodies: list[_Heredoc] = []
+
+    def _top(self) -> str:
+        return self.stack[-1].kind if self.stack else _CODE
+
+    def _open_dollar(self, line: str, i: int, lineno: int) -> int:
+        """Push the span a ``$``-construct at ``i`` opens; return the next index."""
+        if line.startswith("$((", i):
+            self.stack.append(_Span(_ARITH, lineno, depth=2))
+            return i + 3
+        if line.startswith("$(", i):
+            self.stack.append(_Span(_SUBST, lineno, depth=1))
+            return i + 2
+        self.stack.append(_Span(_ANSI, lineno))
+        return i + 2
+
+    def _close_paren(self) -> None:
+        self.stack[-1].depth -= 1
+        if self.stack[-1].depth == 0:
+            self.stack.pop()
+
+    def scan(self, line: str, lineno: int) -> tuple[bool, int | None]:
+        """Advance over one physical line.
+
+        Returns whether it ends in a backslash continuation, and the index
+        where a comment starts on it (``None`` if it has none).
+        """
+        i = 0
+        last = len(line) - 1
+        while i <= last:
+            ch = line[i]
+            top = self._top()
+            if top == _SQ:
+                if ch == "'":
+                    self.stack.pop()
+            elif ch == "\\":
+                if i == last:
+                    return True, None
+                i += 1  # the escaped character is literal
+            elif top == _ANSI:
+                if ch == "'":
+                    self.stack.pop()
+            elif top == _DQ:
+                if ch == '"':
+                    self.stack.pop()
+                elif ch == "`":
+                    self.stack.append(_Span(_BACKTICK, lineno))
+                elif line.startswith("$(", i):
+                    i = self._open_dollar(line, i, lineno)
+                    continue
+            elif top == _ARITH:
+                if ch == "(":
+                    self.stack[-1].depth += 1
+                elif ch == ")":
+                    self._close_paren()
+            elif ch == "#" and (i == 0 or line[i - 1] in _WORD_BREAKS):
+                return False, i
+            elif ch == "`":
+                if top == _BACKTICK:
+                    self.stack.pop()
+                else:
+                    self.stack.append(_Span(_BACKTICK, lineno))
+            elif line.startswith(("$(", "$'"), i):
+                i = self._open_dollar(line, i, lineno)
+                continue
+            elif ch in (_SQ, _DQ):
+                self.stack.append(_Span(ch, lineno))
+            elif line.startswith("((", i) and (i == 0 or line[i - 1] in _WORD_BREAKS):
+                self.stack.append(_Span(_ARITH, lineno, depth=2))
+                i += 2
+                continue
+            elif top == _SUBST and ch == "(":
+                self.stack[-1].depth += 1
+            elif top == _SUBST and ch == ")":
+                self._close_paren()
+            elif line.startswith("<<<", i):
+                i += 3
+                continue
+            elif match := _HEREDOC_OPERATOR_RE.match(line, i):
+                delimiter = re.sub(r"[\"'\\]", "", match.group(1))
+                self.pending.append(_Heredoc(delimiter, lineno))
+                i = match.end()
+                continue
             i += 1
-        elif ch in ("'", '"'):
-            quote = ch
-        i += 1
-    return False, quote
+        return False, None
+
+    def line_ended(self, continues: bool) -> None:
+        """A newline that is shell syntax starts any pending heredoc bodies."""
+        if self.pending and not continues and self._top() in (_CODE, _SUBST, _BACKTICK):
+            self.bodies.extend(self.pending)
+            self.pending.clear()
+
+    def in_body(self, line: str) -> bool:
+        """Consume ``line`` if it is heredoc body or terminator."""
+        if not self.bodies:
+            return False
+        if line.strip() == self.bodies[0].delimiter:
+            self.bodies.pop(0)
+        return True
+
+    def unclosed_at(self) -> int | None:
+        if self.stack:
+            return self.stack[0].start_line
+        open_heredocs = self.bodies + self.pending
+        return open_heredocs[0].opener_line if open_heredocs else None
 
 
-def _join_continuations(lines: list[str]) -> list[str]:
-    """Fold each backslash-continued command onto its first physical line.
+def _logical_lines(raw_lines: list[str]) -> LogicalLines:
+    """Fold ``raw_lines`` into logical commands, keeping physical line numbers.
 
-    ``echo "x" \\`` with ``>&2`` on the next line is ONE command; judging the
-    physical lines apart reads it as an unredirected echo. The line count is
-    preserved -- continuation lines become blank -- so a finding still carries
-    the line number where its command starts. Run AFTER
-    ``_strip_heredoc_bodies``: a heredoc body is data, and joining its last
-    line onto the terminator would swallow the terminator.
+    A command spans physical lines through a backslash continuation or an
+    open quote, ``$(...)`` or backtick; it is joined onto the line it starts
+    on and the lines it swallowed are left blank, so a finding still names
+    the line its command starts on. Heredoc bodies and terminators are data
+    and are blanked. Only the LAST physical line of a command keeps its
+    comment, so a trailing ``# capture-audit:`` marker survives the join.
     """
+    tokeniser = _ShellTokeniser()
     out: list[str] = []
-    quote: str | None = None
     head: int | None = None
-    for line in lines:
-        continues, quote = _line_continues(line, quote)
+    for index, line in enumerate(raw_lines):
+        if tokeniser.in_body(line):
+            out.append("")
+            continue
+        continues, comment_at = tokeniser.scan(line, index + 1)
+        tokeniser.line_ended(continues)
+        ends = not continues and not tokeniser.stack
         piece = line[:-1] if continues else line
+        if not ends and comment_at is not None:
+            piece = line[:comment_at]
         if head is None:
             out.append(piece)
-            if continues:
-                head = len(out) - 1
+            head = None if ends else index
             continue
         out[head] = f"{out[head].rstrip()} {piece.strip()}"
         out.append("")
-        if not continues:
+        if ends:
             head = None
-    return out
+    return LogicalLines(lines=out, unclosed_at=tokeniser.unclosed_at())
 
 
 def _has_function_level_marker(lines: list[str], def_idx: int) -> bool:
@@ -668,17 +783,35 @@ def audit_files(paths: list[Path]) -> list[Violation]:
     detection scopes against, Plan 00200 Task 1.6); the second collects the
     ``$(...)``-captured and redirect-consumed name sets now that the known
     set exists, then closes the redirect-consumed set over the caller graph.
+
+    A file whose quoting never closes is itself a violation: which lines get
+    judged depends on that quoting, so auditing past it would pass lines it
+    never actually saw.
     """
     per_file_lines: list[list[str]] = []
     all_func_defs: list[FunctionDef] = []
+    parse_violations: list[Violation] = []
 
     for path in paths:
         try:
             source = path.read_text(encoding="utf-8")
         except OSError as exc:
             raise RuntimeError(f"could not read {path}: {exc}") from exc
-        raw_lines = source.splitlines()
-        lines = _join_continuations(_strip_heredoc_bodies(raw_lines))
+        logical = _logical_lines(source.splitlines())
+        if logical.unclosed_at is not None:
+            parse_violations.append(
+                Violation(
+                    file=str(path),
+                    line=logical.unclosed_at,
+                    function="-",
+                    rule="unparseable-shell",
+                    message=(
+                        "a quote, $(...), backtick or heredoc opened here never "
+                        "closes, so the lines after it cannot be audited"
+                    ),
+                )
+            )
+        lines = logical.lines
         per_file_lines.append(lines)
         all_func_defs.extend(_extract_functions(lines, str(path)))
 
@@ -693,7 +826,9 @@ def audit_files(paths: list[Path]) -> list[Violation]:
     redirect_consumed_defs = _resolve_definitions(redirect_consumed_names, all_func_defs)
     redirect_consumed_defs = _propagate_redirect_consumption(redirect_consumed_defs, all_func_defs)
 
-    return _audit_with_known_functions(all_func_defs, all_captured, redirect_consumed_defs)
+    return parse_violations + _audit_with_known_functions(
+        all_func_defs, all_captured, redirect_consumed_defs
+    )
 
 
 _EXCLUDE_DIR_PARTS = {

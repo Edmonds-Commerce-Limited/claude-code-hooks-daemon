@@ -15,11 +15,23 @@ candidate remedies.
 
 **Candidate remedy:** a timeout, or any semgrep error entry in its JSON output (`errors[]`), fails the gate and names the rule and file. RED test: a rule forced to time out on a fixture makes the gate exit non-zero with the rule named. Check the other QA wrappers for the same "tool error reads as clean" shape, and pin the class.
 
-### N20 — the capture-corruption auditor judges a multi-line single-quoted string one line at a time
+### N20 — ✅ Remedied — the capture-corruption auditor judges a multi-line single-quoted string one line at a time
 
 **Found by the B1 integration agent**, as the stated limit of its fix for the auditor's backslash-continuation false positive. `scripts/qa/audit_capture_corruption.py` now joins `\`-continued lines, but a single-quoted string that spans physical lines (`echo 'x` followed by `y' >&2`) is still judged per line. So the redirect on the second line is not seen, and the echo is flagged. Nothing in the repository has that shape today, so it is latent. The same false positive that broke B1's gate would come back the first time someone writes one.
 
 **Candidate remedy:** carry the open-quote state across physical lines for single-quoted strings too, joining the logical line the same way continuations are joined. RED test: the two-line single-quoted echo with the redirect on the second line is not flagged, and one without the redirect is.
+
+**Remedy:** the auditor now reads each file through one tokeniser (`_logical_lines`), not a heredoc regex plus a per-line continuation join. The tokeniser tracks a stack of single, double and `$'` quotes, `$(...)`, backticks and arithmetic across physical lines. A command stays open while a quote or substitution is open, or while a line ends in a backslash. Each command is joined onto the line it starts on, and the lines it swallows are blanked, so findings keep their physical line numbers. Double-quoted strings, backticks and `$(` captures are covered too. A capture that names its function on the line after `$(` is now seen.
+
+Checking the rest of the file for the same one-line-at-a-time assumption found three more defects in heredoc detection, fixed in the same change:
+
+- **A heredoc operator was recognised anywhere on a line**, including inside quotes and comments. `scripts/upgrade.sh:949` (`printf '\n<<<UPGRADE_METADATA\n'`) made the auditor skip the last 12 non-empty lines of that file. That was a latent false negative: code nobody was auditing.
+- **`<<"EOF"` and `<<\EOF` were not recognised**, so their bodies were audited as code.
+- **Here-strings (`<<<`) and arithmetic shifts** could both be misread as heredocs.
+
+A heredoc operator now counts only in code. A heredoc body starts after the first newline that is real shell syntax.
+
+Because quote state now decides which lines are judged, a file whose quote, substitution or heredoc never closes is reported as `unparseable-shell`. Before, it was silently audited as one run-on line. On all 65 scanned scripts, the new tokeniser extracts the same 227 functions and the same captured names as before, and reports no unclosed spans. The known limit: a `case` pattern's unbalanced `)` inside a `$(...)` can close that substitution early. Nothing in the scanned scripts has that shape. Report: [subagent-reports/260924-n466-n20-opus-5-5.md](subagent-reports/260924-n466-n20-opus-5-5.md).
 
 N16 is filed on the unmerged `worktree-n466-guard-defects` branch; it joins this file at integration.
 
