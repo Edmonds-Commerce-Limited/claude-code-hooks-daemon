@@ -50,6 +50,17 @@ import os
 import sys
 from pathlib import Path
 from types import ModuleType
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    # Type-checking only -- never executed (see the module docstring for why
+    # a REAL import of these here would defeat this module's whole point).
+    # mypy/pyright run inside the fully-provisioned dev venv, so resolving
+    # this costs nothing at check time; it gives `operator_signal`/`paths`
+    # their real types below instead of the bare `ModuleType` a dynamic
+    # load would otherwise leave them with.
+    from claude_code_hooks_daemon.daemon import paths as _paths_type
+    from claude_code_hooks_daemon.utils import operator_signal as _operator_signal_type
 
 _PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 _UTILS_DIR = _PACKAGE_ROOT / "utils"
@@ -83,15 +94,20 @@ def _load_by_file_path(dotted_name: str, file_path: Path) -> ModuleType:
     return module
 
 
-# temp_names has no internal dependencies; operator_signal needs it cached
-# first (its own `from claude_code_hooks_daemon.utils.temp_names import ...`
-# resolves from sys.modules, not a real import). paths.py has no internal
-# claude_code_hooks_daemon dependencies of its own.
-_load_by_file_path("claude_code_hooks_daemon.utils.temp_names", _UTILS_DIR / "temp_names.py")
-operator_signal = _load_by_file_path(
-    "claude_code_hooks_daemon.utils.operator_signal", _UTILS_DIR / "operator_signal.py"
-)
-paths = _load_by_file_path("claude_code_hooks_daemon.daemon.paths", _DAEMON_DIR / "paths.py")
+if TYPE_CHECKING:
+    operator_signal = _operator_signal_type
+    paths = _paths_type
+else:
+    # temp_names has no internal dependencies; operator_signal needs it
+    # cached first (its own
+    # `from claude_code_hooks_daemon.utils.temp_names import ...` resolves
+    # from sys.modules, not a real import). paths.py has no internal
+    # claude_code_hooks_daemon dependencies of its own.
+    _load_by_file_path("claude_code_hooks_daemon.utils.temp_names", _UTILS_DIR / "temp_names.py")
+    operator_signal = _load_by_file_path(
+        "claude_code_hooks_daemon.utils.operator_signal", _UTILS_DIR / "operator_signal.py"
+    )
+    paths = _load_by_file_path("claude_code_hooks_daemon.daemon.paths", _DAEMON_DIR / "paths.py")
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -109,9 +125,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "(reboot/shutdown warnings), without a venv."
         ),
     )
-    parser.add_argument(
-        "kind", choices=sorted(operator_signal.KINDS), help="Signal kind"
-    )
+    parser.add_argument("kind", choices=sorted(operator_signal.KINDS), help="Signal kind")
     parser.add_argument(
         "--minutes",
         type=int,

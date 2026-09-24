@@ -197,7 +197,11 @@ class TestRunSignalCli:
 
     def test_refuses_an_invalid_request_before_writing(self, tmp_path: Path, capsys) -> None:
         rc = run_signal_cli(
-            tmp_path, kind=KIND_REBOOT_WARNING, minutes=None, all_sessions=False, session_id=_SESSION
+            tmp_path,
+            kind=KIND_REBOOT_WARNING,
+            minutes=None,
+            all_sessions=False,
+            session_id=_SESSION,
         )
 
         assert rc == 1

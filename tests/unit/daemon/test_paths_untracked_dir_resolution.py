@@ -42,8 +42,10 @@ class TestGetUntrackedDir:
         assert get_untracked_dir(tmp_path) == tmp_path / ".claude" / "hooks-daemon" / "untracked"
 
     def test_accepts_a_string_path(self, tmp_path: Path) -> None:
-        assert get_untracked_dir(str(tmp_path)) == tmp_path / ".claude" / "hooks-daemon" / "untracked"
+        assert (
+            get_untracked_dir(str(tmp_path)) == tmp_path / ".claude" / "hooks-daemon" / "untracked"
+        )
 
     def test_resolves_a_relative_path(self, tmp_path: Path, monkeypatch) -> None:
         monkeypatch.chdir(tmp_path)
-        assert get_untracked_dir(Path(".")) == tmp_path / ".claude" / "hooks-daemon" / "untracked"
+        assert get_untracked_dir(Path()) == tmp_path / ".claude" / "hooks-daemon" / "untracked"

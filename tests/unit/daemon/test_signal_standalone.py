@@ -25,15 +25,12 @@ import ast
 import json
 import os
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-SCRIPT_PATH = (
-    REPO_ROOT / "src" / "claude_code_hooks_daemon" / "daemon" / "signal_standalone.py"
-)
+SCRIPT_PATH = REPO_ROOT / "src" / "claude_code_hooks_daemon" / "daemon" / "signal_standalone.py"
 _CLI_PY = REPO_ROOT / "src" / "claude_code_hooks_daemon" / "daemon" / "cli.py"
 _UTILS_DIR = REPO_ROOT / "src" / "claude_code_hooks_daemon" / "utils"
 _SYNTAX_FLOOR = (3, 10)  # see TestSyntaxFloor -- paths.py's bare `X | Y` annotations
@@ -144,7 +141,9 @@ class TestEndToEndWithoutVenv:
     no venv, no sys.path setup: it locates its siblings via `__file__`.
     """
 
-    def _run(self, tmp_path: Path, *args: str, session_id: str | None = None) -> subprocess.CompletedProcess[str]:
+    def _run(
+        self, tmp_path: Path, *args: str, session_id: str | None = None
+    ) -> subprocess.CompletedProcess[str]:
         env = _clean_env()
         if session_id is not None:
             env["CLAUDE_CODE_SESSION_ID"] = session_id
@@ -276,7 +275,9 @@ class TestKindChoicesMatchCliPy:
             for kw in node.keywords:
                 if kw.arg == "choices" and isinstance(kw.value, ast.Tuple):
                     choices = {
-                        elt.value for elt in kw.value.elts if isinstance(elt, ast.Constant)
+                        elt.value
+                        for elt in kw.value.elts
+                        if isinstance(elt, ast.Constant) and isinstance(elt.value, str)
                     }
         assert choices is not None, "could not find the signal subparser's `kind` choices in cli.py"
         assert choices == set(KINDS)
