@@ -26,6 +26,56 @@ from claude_code_hooks_daemon.daemon.cli import (
 )
 from claude_code_hooks_daemon.daemon.venv_lock import VenvLockTimeout
 
+#: The uv every test here resolves, wherever this machine keeps its own.
+_UV: str = "/opt/uv/bin/uv"
+
+
+@pytest.fixture(autouse=True)
+def _resolved_uv(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("claude_code_hooks_daemon.daemon.cli.find_uv", lambda: _UV)
+
+
+class TestCmdRepairUsesTheBuildsUv:
+    """Review B2: the repair spawns the uv the gate and the bash build found.
+
+    A bare ``uv`` spawn misses ``~/.local/bin`` (uv's default home), which the
+    bash build puts on PATH itself. So ``bin/hooks-daemon repair`` built the
+    venv and then failed with "'uv' not found", and the skill escalated.
+    """
+
+    def _args(self, tmp_path: Path) -> argparse.Namespace:
+        return argparse.Namespace(project_root=tmp_path)
+
+    def test_the_sync_spawns_the_resolved_uv(self, tmp_path: Path) -> None:
+        done = MagicMock(returncode=0, stderr="", stdout="OK\n")
+        with (
+            patch("claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path),
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=None),
+            patch("subprocess.run", return_value=done) as mock_run,
+        ):
+            assert cmd_repair(self._args(tmp_path)) == 0
+
+        assert mock_run.call_args_list[0].args[0] == [_UV, "sync"]
+
+    def test_no_uv_anywhere_names_both_places_and_spawns_nothing(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.setattr("claude_code_hooks_daemon.daemon.cli.find_uv", lambda: None)
+        with (
+            patch("claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path),
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=None),
+            patch("subprocess.run") as mock_run,
+        ):
+            assert cmd_repair(self._args(tmp_path)) == 1
+
+        mock_run.assert_not_called()
+        out = capsys.readouterr().out
+        assert "'uv' not found" in out
+        assert "~/.local/bin" in out
+
 
 class TestCmdRepair:
     """Tests for cmd_repair command."""
@@ -378,7 +428,7 @@ class TestCmdRepairTargetsTheDaemonDir:
             yield
 
         def fake_run(argv: list[str], **kwargs: object) -> MagicMock:
-            if argv[:2] == ["uv", "sync"]:
+            if argv == [_UV, "sync"]:
                 sync_calls.append({"argv": argv, **kwargs})
             done = MagicMock()
             done.returncode = 0

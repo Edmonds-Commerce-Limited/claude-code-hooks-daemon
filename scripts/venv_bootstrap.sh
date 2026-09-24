@@ -20,16 +20,22 @@
 #       uv sync can take longer. Prints key=value lines for init.sh:
 #         state=started|running|failed|refused|disabled|error
 #         log=<path>          the build log (started, running, failed)
+#         pid=<n>             the running build's process (running, once known)
+#         elapsed=<seconds>   how long it has been running (running)
 #         missing=<id>        one per failed precondition (refused)
 #         fix=<id>: <text>    one per failed precondition (refused)
-#         detail=<text>       what went wrong (error)
+#         detail=<text>       what went wrong (error), or the setting that
+#                             switched automatic builds off (disabled)
 #       Exit 0 whatever the state; 2 on a usage error.
 #
 #   venv_bootstrap.sh repair <daemon_dir>
 #       bin/hooks-daemon repair, before any venv exists. Builds in the
 #       FOREGROUND (the CLI has no hook timeout), waiting for a build already
 #       in progress rather than starting a second. Clears the failed-build
-#       marker first. Exit 0 once the venv resolves, 1 otherwise.
+#       marker first. An explicit repair is a deliberate request, so it builds
+#       even where HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP=1 or CI=true switches the
+#       automatic build off (and says so). Exit 0 once the venv resolves, 1
+#       otherwise.
 #
 #   venv_bootstrap.sh build  <daemon_dir> <python> <fingerprint> <inputs>
 #       The detached child `hook` starts. It inherits the lock through
@@ -38,18 +44,29 @@
 # State, all dot-prefixed under <daemon_dir>/untracked/ so no venv-* glob
 # matches them, and keyed on the fingerprint the venv itself is named by, so
 # one environment's failure never blocks another's build:
-#   .venv-bootstrap-<fp>.log      the last build's output
+#   .venv-bootstrap-<fp>.log      the last build's output; its first lines name
+#                                 the build's pid
 #   .venv-bootstrap-<fp>.failed   present after a failed build: holds the
 #                                 inputs signature it failed with
-#   .venv-bootstrap.current       the log of the build holding the lock now
+#   .venv-bootstrap.current       the record of the detached build holding the
+#                                 lock now (venv.sh VENV_BUILD_RECORD_NAME)
+#
+# A detached build is bounded: HOOKS_DAEMON_VENV_BUILD_TIMEOUT seconds (900),
+# then TERM, which records it as failed, then KILL. `timeout` (coreutils)
+# enforces it; where there is none (stock macOS), the build is unbounded and
+# the running state's pid is how to end it.
 #
 # Retry policy: a failed build is NOT retried by the hook path until its
 # inputs signature changes (pyproject.toml or uv.lock content, the chosen
-# interpreter, or the resolved uv; see paths.bootstrap_inputs_signature), or
-# until `repair` clears the marker. A failure that changes no input (network
-# down, disk full) waits for `repair`.
+# interpreter, or the uv binary: its path or its bytes; see
+# paths.bootstrap_inputs_signature), or until `repair` clears the marker. A
+# failure that changes no input (network down, disk full) waits for `repair`.
+# The marker is judged while holding the lock, so a hook that raced a build
+# failing cannot delete that fresh marker and retry.
 #
-# HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP=1 switches the hook path off (state=disabled).
+# HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP=1 or CI=true (the settings that make
+# ensure_venv skip, venv.sh venv_bootstrap_switched_off_by) switch the hook
+# path off: state=disabled, detail=<the setting>.
 #
 
 set -euo pipefail
@@ -81,7 +98,7 @@ _vb_usage() {
 
 _vb_log_path() { echo "$1/untracked/.venv-bootstrap-$2.log"; }
 _vb_marker_path() { echo "$1/untracked/.venv-bootstrap-$2.failed"; }
-_vb_current_path() { echo "$1/untracked/.venv-bootstrap.current"; }
+_vb_record_path() { echo "$1/untracked/$VENV_BUILD_RECORD_NAME"; }
 
 #
 # _vb_one_line() - Collapse text onto one line for the key=value protocol.
@@ -183,14 +200,22 @@ _vb_clone_version() {
 }
 
 #
-# _vb_print_running() - state=running, naming the holder's log when it is ours.
+# _vb_print_running() - state=running, naming the holder when it is a detached build.
+#
+# Another holder (an upgrade, a repair) keeps no record, so only the state is
+# printed for it.
 #
 _vb_print_running() {
-    local current
-    current="$(_vb_current_path "$1")"
+    local daemon_dir="$1" value started
     echo "state=running"
-    if [ -f "$current" ]; then
-        echo "log=$(cat "$current")"
+    if value="$(venv_build_record_field "$daemon_dir" log)"; then
+        echo "log=$value"
+    fi
+    if value="$(venv_build_record_field "$daemon_dir" pid)"; then
+        echo "pid=$value"
+    fi
+    if started="$(venv_build_record_field "$daemon_dir" started)" && [[ "$started" =~ ^[0-9]+$ ]]; then
+        echo "elapsed=$(($(date +%s) - started))"
     fi
 }
 
@@ -202,12 +227,21 @@ _vb_print_running() {
 # hook could start the daemon from it. Records or clears the failed-build
 # marker accordingly.
 #
-# Returns 0 when the venv for this path now resolves, 1 otherwise.
+# Bootstrap switched off here is NOT a failed build: ensure_venv would skip
+# and report success, so the build is refused up front and no marker is left.
+#
+# Returns 0 when the venv for this path now resolves, 1 when the build failed,
+# 2 when bootstrap is switched off.
 #
 _vb_build_under_lock() {
     local daemon_dir="$1" python="$2" fingerprint="$3" inputs="$4"
-    local marker version build_rc=0 resolved
+    local marker version build_rc=0 resolved switched_off
     marker="$(_vb_marker_path "$daemon_dir" "$fingerprint")"
+
+    if switched_off="$(venv_bootstrap_switched_off_by)"; then
+        print_error "venv bootstrap: NOT building: $switched_off switches venv bootstrap off here. No failure is recorded."
+        return 2
+    fi
 
     if version="$(_vb_clone_version "$daemon_dir")"; then
         print_info "venv bootstrap: building the venv for $daemon_dir with $python (fingerprint $fingerprint)"
@@ -226,16 +260,17 @@ _vb_build_under_lock() {
 
     _vb_write_marker "$marker" "$inputs" "$build_rc"
     print_error "venv bootstrap FAILED: no venv resolves for $daemon_dir after the build (ensure_venv exit $build_rc)."
-    print_error "  Hooks will not retry until pyproject.toml, uv.lock, the Python interpreter or uv changes."
+    print_error "  Hooks will not retry until pyproject.toml, uv.lock, the Python interpreter or the uv binary changes."
     print_error "  After fixing the cause, retry in the foreground: $daemon_dir/bin/hooks-daemon repair"
     return 1
 }
 
 _vb_hook() {
-    local daemon_dir="$1"
+    local daemon_dir="$1" switched_off
 
-    if [ "${HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP:-0}" = "1" ]; then
+    if switched_off="$(venv_bootstrap_switched_off_by)"; then
         echo "state=disabled"
+        echo "detail=$switched_off"
         return 0
     fi
 
@@ -264,15 +299,6 @@ _vb_hook() {
         return 0
     fi
 
-    local log marker
-    log="$(_vb_log_path "$daemon_dir" "$VB_FINGERPRINT")"
-    marker="$(_vb_marker_path "$daemon_dir" "$VB_FINGERPRINT")"
-    if [ -f "$marker" ] && [ "$(_vb_marker_inputs "$marker")" = "$VB_INPUTS" ]; then
-        echo "state=failed"
-        echo "log=$log"
-        return 0
-    fi
-
     local rc=0
     try_acquire_venv_lock "$daemon_dir" || rc=$?
     if [ "$rc" -eq "$VENV_LOCK_HELD" ]; then
@@ -285,12 +311,28 @@ _vb_hook() {
         return 0
     fi
 
-    # This process holds the lock, so it is the only starter. A marker still
-    # here recorded different inputs: this build is the retry it allows.
+    # This process holds the lock, so it is the only starter, and the marker
+    # is judged only now: a build that failed while this hook was on its way
+    # here wrote its marker under the lock, and must not be retried.
+    local log marker
+    log="$(_vb_log_path "$daemon_dir" "$VB_FINGERPRINT")"
+    marker="$(_vb_marker_path "$daemon_dir" "$VB_FINGERPRINT")"
+    if [ -f "$marker" ] && [ "$(_vb_marker_inputs "$marker")" = "$VB_INPUTS" ]; then
+        release_venv_lock
+        echo "state=failed"
+        echo "log=$log"
+        return 0
+    fi
+
+    # A marker still here recorded different inputs: this build is the retry
+    # it allows.
     rm -f "$marker"
-    printf 'venv bootstrap started %s (python %s, daemon dir %s)\n' \
-        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$VB_PYTHON" "$daemon_dir" > "$log"
-    echo "$log" > "$(_vb_current_path "$daemon_dir")"
+    local bound
+    bound="$(venv_build_timeout)"
+    printf 'venv bootstrap started %s (python %s, daemon dir %s, bound %ss)\n' \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$VB_PYTHON" "$daemon_dir" "$bound" > "$log"
+    printf 'log=%s\nstarted=%s\nbound=%s\n' "$log" "$(date +%s)" "$bound" \
+        > "$(_vb_record_path "$daemon_dir")"
 
     local spec
     spec="$(venv_lock_handoff_spec)"
@@ -298,10 +340,19 @@ _vb_hook() {
     if command -v setsid > /dev/null; then
         detach=(setsid)
     fi
+    # timeout signals its whole process group, so uv and everything it runs
+    # end with the build (review I1).
+    local -a bounded=()
+    if command -v timeout > /dev/null; then
+        bounded=(timeout -k "$VENV_BUILD_KILL_GRACE_SECONDS" "$bound")
+    else
+        print_warning "venv bootstrap: no 'timeout' command here, so this background build is unbounded; the running state names its pid"
+    fi
     # Detached with every standard stream redirected, so the hook's stdout
     # pipe closes when this process exits and Claude Code does not wait on
     # the build. The child inherits the lock descriptor.
-    HOOKS_DAEMON_VENV_LOCK_INHERITED="$spec" "${detach[@]}" bash "$_VB_SCRIPTS_DIR/venv_bootstrap.sh" \
+    HOOKS_DAEMON_VENV_LOCK_INHERITED="$spec" "${detach[@]}" ${bounded[@]+"${bounded[@]}"} \
+        bash "$_VB_SCRIPTS_DIR/venv_bootstrap.sh" \
         build "$daemon_dir" "$VB_PYTHON" "$VB_FINGERPRINT" "$VB_INPUTS" \
         < /dev/null >> "$log" 2>&1 &
     forget_venv_lock
@@ -310,33 +361,60 @@ _vb_hook() {
     echo "log=$log"
 }
 
-# The detached child's own log and the "current build" pointer it clears.
+# The detached child's own identity, for its exit and timeout traps.
+_VB_CHILD_DAEMON_DIR=""
 _VB_CHILD_LOG=""
-_VB_CHILD_CURRENT=""
+_VB_CHILD_MARKER=""
+_VB_CHILD_INPUTS=""
 
 #
-# _vb_build_exit() - Release the lock; drop the pointer if it is still ours.
+# _vb_build_exit() - Release the lock; drop the record if it is still ours.
 #
 _vb_build_exit() {
     release_venv_lock
-    if [ -f "$_VB_CHILD_CURRENT" ] && [ "$(cat "$_VB_CHILD_CURRENT")" = "$_VB_CHILD_LOG" ]; then
-        rm -f "$_VB_CHILD_CURRENT"
+    local recorded
+    if recorded="$(venv_build_record_field "$_VB_CHILD_DAEMON_DIR" log)" \
+            && [ "$recorded" = "$_VB_CHILD_LOG" ]; then
+        rm -f "$(_vb_record_path "$_VB_CHILD_DAEMON_DIR")"
     fi
+}
+
+#
+# _vb_build_timed_out() - TERM from `timeout`: record the failure, then exit.
+#
+_vb_build_timed_out() {
+    _vb_write_marker "$_VB_CHILD_MARKER" "$_VB_CHILD_INPUTS" "timeout"
+    print_error "venv bootstrap FAILED: the build timed out after $(venv_build_timeout)s (HOOKS_DAEMON_VENV_BUILD_TIMEOUT) and was stopped."
+    print_error "  Hooks will not retry it until its inputs change. Find out what hung, then retry in the foreground: $_VB_CHILD_DAEMON_DIR/bin/hooks-daemon repair"
+    exit 124
 }
 
 _vb_build() {
     local daemon_dir="$1" python="$2" fingerprint="$3" inputs="$4"
-    _VB_CHILD_CURRENT="$(_vb_current_path "$daemon_dir")"
+    _VB_CHILD_DAEMON_DIR="$daemon_dir"
     _VB_CHILD_LOG="$(_vb_log_path "$daemon_dir" "$fingerprint")"
+    _VB_CHILD_MARKER="$(_vb_marker_path "$daemon_dir" "$fingerprint")"
+    _VB_CHILD_INPUTS="$inputs"
 
-    adopt_venv_lock || exit 1
+    adopt_venv_lock "$daemon_dir" || exit 1
     trap _vb_build_exit EXIT
+    trap _vb_build_timed_out TERM
+
+    print_info "venv bootstrap: build pid $$"
+    printf 'pid=%s\n' "$$" >> "$(_vb_record_path "$daemon_dir")"
 
     _vb_build_under_lock "$daemon_dir" "$python" "$fingerprint" "$inputs"
 }
 
 _vb_repair() {
-    local daemon_dir="$1"
+    local daemon_dir="$1" switched_off
+
+    # The switch governs AUTOMATIC builds; asking for a repair is the
+    # deliberate request it leaves open (review B1).
+    if switched_off="$(venv_bootstrap_switched_off_by)"; then
+        print_info "venv bootstrap: $switched_off switches AUTOMATIC venv builds off; an explicit repair builds anyway."
+        unset HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP CI
+    fi
 
     if ! _vb_gate "$daemon_dir"; then
         print_error "venv bootstrap: $VB_ERROR"

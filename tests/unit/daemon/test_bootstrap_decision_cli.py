@@ -47,6 +47,23 @@ _TIMEOUT_SECONDS = 30
 _ALL_MISSING_IDS = ("uv", "pyproject.toml", "uv.lock", "compatible-python", "untracked-writable")
 
 
+@pytest.fixture(autouse=True)
+def _isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """uv's default home is searched; keep this machine's real one out of it."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    return home
+
+
+def _uv_in_home(home: Path, body: str = "#!/bin/sh\nexit 0\n") -> Path:
+    uv = home / ".local" / "bin" / "uv"
+    uv.parent.mkdir(parents=True, exist_ok=True)
+    uv.write_text(body)
+    uv.chmod(0o755)
+    return uv
+
+
 @pytest.fixture
 def daemon_dir(tmp_path: Path) -> Path:
     (tmp_path / "pyproject.toml").write_text(_PYPROJECT)
@@ -224,6 +241,59 @@ class TestInputsSignature:
     def test_survives_a_missing_pyproject(self, daemon_dir: Path) -> None:
         (daemon_dir / "pyproject.toml").unlink()
         assert bootstrap_inputs_signature(daemon_dir)
+
+    def test_changes_when_uv_is_updated_in_place(
+        self, daemon_dir: Path, _isolated_home: Path
+    ) -> None:
+        """Review S1: `uv self update` rewrites the binary at the same path."""
+        uv = _uv_in_home(_isolated_home, "#!/bin/sh\necho uv 0.4.0\n")
+        before = bootstrap_inputs_signature(daemon_dir)
+        uv.write_text("#!/bin/sh\necho uv 0.5.11, a new release\n")
+        assert bootstrap_inputs_signature(daemon_dir) != before
+
+
+class TestFindUv:
+    """Review B2: every uv check and spawn sees the uv the bash build uses.
+
+    scripts/install/venv.sh puts ``$HOME/.local/bin`` (uv's own installer's
+    target) at the front of PATH before building. A Python check or spawn that
+    only asks PATH disagrees with the build whenever the caller's PATH lacks
+    it, which is a non-login shell in a container: the #53 environment.
+    """
+
+    def test_uv_home_wins_like_the_bash_prepend(
+        self, _isolated_home: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        uv = _uv_in_home(_isolated_home)
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.daemon.paths.shutil.which", lambda _n: "/p/uv"
+        )
+        assert paths.find_uv() == str(uv)
+
+    def test_path_is_the_fallback(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.daemon.paths.shutil.which", lambda _n: "/p/uv"
+        )
+        assert paths.find_uv() == "/p/uv"
+
+    def test_none_when_neither_has_it(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("claude_code_hooks_daemon.daemon.paths.shutil.which", lambda _n: None)
+        assert paths.find_uv() is None
+
+    def test_a_non_executable_file_in_uv_home_is_not_uv(
+        self, _isolated_home: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _uv_in_home(_isolated_home).chmod(0o644)
+        monkeypatch.setattr("claude_code_hooks_daemon.daemon.paths.shutil.which", lambda _n: None)
+        assert paths.find_uv() is None
+
+    def test_the_gate_accepts_uv_found_only_in_uv_home(
+        self, daemon_dir: Path, _isolated_home: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _patch_all_good(monkeypatch)
+        monkeypatch.setattr("claude_code_hooks_daemon.daemon.paths.shutil.which", lambda _n: None)
+        _uv_in_home(_isolated_home)
+        assert "uv" not in paths.can_inline_bootstrap(daemon_dir).missing
 
 
 class TestItNeedsNoVenv:

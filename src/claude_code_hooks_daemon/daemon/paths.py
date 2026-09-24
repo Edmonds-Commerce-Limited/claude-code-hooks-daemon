@@ -684,6 +684,28 @@ def _load_toml_or_raise(path: Path) -> dict[str, Any]:
         raise _TomlParseError(str(exc)) from exc
 
 
+_UV_BINARY_NAME = "uv"
+# Where uv's own installer puts it; relative to $HOME.
+_UV_DEFAULT_HOME = Path(".local") / "bin"
+
+
+def find_uv() -> str | None:
+    """Return the ``uv`` every venv builder uses, or ``None`` when there is none.
+
+    ``scripts/install/venv.sh`` puts ``$HOME/.local/bin`` at the FRONT of PATH
+    before any build, because uv's installer puts uv there and only edits shell
+    rc files, so a non-login shell (a container's tool shell, GitHub issue #53)
+    has it off PATH. Every Python-side check and spawn goes through here, so it
+    sees the uv the bash build does (Plan 00456 review B2).
+    """
+    home = os.environ.get("HOME")
+    if home:
+        candidate = Path(home) / _UV_DEFAULT_HOME / _UV_BINARY_NAME
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return shutil.which(_UV_BINARY_NAME)
+
+
 def can_inline_bootstrap(daemon_dir: Path) -> BootstrapDecision:
     """Decide whether the daemon may bootstrap its own venv in-place.
 
@@ -698,9 +720,9 @@ def can_inline_bootstrap(daemon_dir: Path) -> BootstrapDecision:
     missing: list[str] = []
     reasons: list[str] = []
 
-    if shutil.which("uv") is None:
+    if find_uv() is None:
         missing.append(_BOOTSTRAP_MISSING_UV)
-        reasons.append("uv not resolvable on PATH")
+        reasons.append("uv not resolvable on PATH or in ~/.local/bin")
 
     pyproject_path = daemon_dir / _PYPROJECT_FILENAME
     pyproject_data: dict[str, Any] | None = None
@@ -816,13 +838,28 @@ def bootstrap_inputs_signature(daemon_dir: Path) -> str:
     A failed build records this beside its log, and the hook path retries only
     once it differs (Plan 00456): the dependency pins (``pyproject.toml`` +
     ``uv.lock``, via the resolver's own lock hash), the interpreter running
-    this check, and the ``uv`` that would do the build. An environmental
-    failure that changes none of them waits for an explicit ``repair``.
+    this check, and the ``uv`` that would do the build: its path, and its size
+    and mtime, so an in-place ``uv self update`` counts too (review S1). An
+    environmental failure that changes none of them waits for an explicit
+    ``repair``.
     """
     lock_hash = _compute_project_lock_hash_stdlib(daemon_dir) or "no-pyproject"
-    uv_path = shutil.which("uv") or "no-uv"
-    material = f"{lock_hash}|{Path(sys.executable).resolve()}|{uv_path}"
+    material = f"{lock_hash}|{Path(sys.executable).resolve()}|{_uv_identity()}"
     return hashlib.sha256(material.encode("utf-8")).hexdigest()[:16]
+
+
+def _uv_identity() -> str:
+    """``find_uv``'s path plus its size and mtime, for the inputs signature."""
+    uv_path = find_uv()
+    if uv_path is None:
+        return "no-uv"
+    try:
+        stat = Path(uv_path).resolve().stat()
+    except OSError as exc:
+        # Present but unreadable: the path alone still identifies it, and the
+        # errno is part of the identity so a later fix changes the signature.
+        return f"{uv_path}:unreadable:{exc.errno}"
+    return f"{uv_path}:{stat.st_size}:{stat.st_mtime_ns}"
 
 
 def _one_line(text: str) -> str:

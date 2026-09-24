@@ -147,10 +147,14 @@ class Sandbox:
                 (tools / tool).symlink_to(real)
         (self.root / "home").mkdir()
 
-    def stub_uv(self, *, sleep: float = 0.0, fail: bool = False) -> None:
-        """Put a `uv` on PATH that builds (or fails to build) a usable venv."""
-        stub_dir = self.root / "uv-stub"
-        stub_dir.mkdir(exist_ok=True)
+    def stub_uv(self, *, sleep: float = 0.0, fail: bool = False, in_uv_home: bool = False) -> None:
+        """Put a `uv` on PATH that builds (or fails to build) a usable venv.
+
+        With ``in_uv_home`` it goes in ``$HOME/.local/bin`` instead, where uv's
+        own installer puts it and which the caller's PATH does not name.
+        """
+        stub_dir = self.root / "home" / ".local" / "bin" if in_uv_home else self.root / "uv-stub"
+        stub_dir.mkdir(parents=True, exist_ok=True)
         venv_python = textwrap.dedent(f"""\
             #!/bin/bash
             if [ "${{1:-}}" = "-m" ] && [ "${{2:-}}" = "claude_code_hooks_daemon.daemon.cli" ] \\

@@ -322,12 +322,30 @@ venv_lock_hash_matches() {
 # with nothing to build must not queue behind one that has.
 #
 # Tunables (seconds):
-#   HOOKS_DAEMON_VENV_LOCK_TIMEOUT        wait bound before giving up  (120)
-#   HOOKS_DAEMON_VENV_LOCK_STALE_SECONDS  mkdir lock age presumed dead (600)
+#   HOOKS_DAEMON_VENV_LOCK_TIMEOUT            wait bound before giving up  (120)
+#   HOOKS_DAEMON_VENV_LOCK_STALE_SECONDS      mkdir lock age presumed dead (600)
+#   HOOKS_DAEMON_VENV_LOCK_HEARTBEAT_SECONDS  how often a live mkdir holder
+#                                             refreshes its lock's age      (60)
+#   HOOKS_DAEMON_VENV_BUILD_TIMEOUT           bound on a DETACHED build     (900)
+#
+# A mkdir lock's staleness is judged by age alone: a pid cannot be checked
+# across the host and container views that share this directory. So every
+# mkdir holder runs a heartbeat that keeps the lock's age below the stale
+# threshold for as long as the holder lives (Plan 00456 review I2).
 #
 VENV_LOCK_FILE_NAME=".venv-bootstrap.lock"
 VENV_LOCK_TIMEOUT_DEFAULT=120
 VENV_LOCK_STALE_SECONDS_DEFAULT=600
+VENV_LOCK_HEARTBEAT_SECONDS_DEFAULT=60
+
+# The record a DETACHED build (scripts/venv_bootstrap.sh) keeps while it holds
+# the lock: key=value lines log=, started= (epoch), bound= (seconds) and, once
+# the child runs, pid=. A waiter behind that build waits out the build's own
+# bound rather than the generic lock bound (Plan 00456 review I4).
+VENV_BUILD_RECORD_NAME=".venv-bootstrap.current"
+VENV_BUILD_TIMEOUT_DEFAULT=900
+# After the bound, the build is sent TERM; this long later, KILL.
+VENV_BUILD_KILL_GRACE_SECONDS=30
 
 # try_acquire_venv_lock's "another process holds it" status (EX_TEMPFAIL):
 # distinct from 1, which means the lock could not be taken at all.
@@ -338,6 +356,124 @@ VENV_LOCK_HELD=75
 _VENV_LOCK_BACKEND=""
 _VENV_LOCK_FD=""
 _VENV_LOCK_DIR=""
+_VENV_LOCK_HEARTBEAT_PID=""
+
+#
+# venv_bootstrap_switched_off_by() - Which setting switches venv bootstrap off.
+#
+# Echoes "HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP=1" or "CI=true" and returns 0 when
+# one does (CI environments stub venvs out of band); returns 1 otherwise. The
+# one definition ensure_venv and the bootstrap driver both consult.
+#
+venv_bootstrap_switched_off_by() {
+    if [ "${HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP:-0}" = "1" ]; then
+        echo "HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP=1"
+        return 0
+    fi
+    if [ "${CI:-}" = "true" ]; then
+        echo "CI=true"
+        return 0
+    fi
+    return 1
+}
+
+#
+# venv_build_timeout() - A detached build's bound in seconds, validated.
+#
+venv_build_timeout() {
+    local bound="${HOOKS_DAEMON_VENV_BUILD_TIMEOUT:-$VENV_BUILD_TIMEOUT_DEFAULT}"
+    if [[ ! "$bound" =~ ^[1-9][0-9]*$ ]]; then
+        print_warning "venv bootstrap: HOOKS_DAEMON_VENV_BUILD_TIMEOUT must be a positive number of seconds, got '$bound'; using $VENV_BUILD_TIMEOUT_DEFAULT"
+        bound="$VENV_BUILD_TIMEOUT_DEFAULT"
+    fi
+    echo "$bound"
+}
+
+#
+# venv_build_record_field() - One key of a detached build's record.
+#
+# Args: $1 daemon_dir, $2 key. Echoes the value; returns 1 if the record or
+# the key is absent.
+#
+venv_build_record_field() {
+    local record="$1/untracked/$VENV_BUILD_RECORD_NAME" wanted="$2" key value
+    [ -f "$record" ] || return 1
+    while IFS='=' read -r key value; do
+        if [ "$key" = "$wanted" ]; then
+            echo "$value"
+            return 0
+        fi
+    done < "$record"
+    return 1
+}
+
+#
+# _venv_detached_build_wait() - How long a detached build may still hold the lock.
+#
+# Echoes the seconds left in the recorded build's bound (plus the KILL grace)
+# and returns 0 while that is positive; returns 1 when no detached build is
+# recorded or its bound has passed. Only consulted once the lock is known to
+# be held.
+#
+_venv_detached_build_wait() {
+    local daemon_dir="$1" started bound remaining
+    started="$(venv_build_record_field "$daemon_dir" started)" || return 1
+    bound="$(venv_build_record_field "$daemon_dir" bound)" || return 1
+    [[ "$started" =~ ^[0-9]+$ ]] && [[ "$bound" =~ ^[0-9]+$ ]] || return 1
+    remaining=$((started + bound + VENV_BUILD_KILL_GRACE_SECONDS - $(date +%s)))
+    [ "$remaining" -gt 0 ] || return 1
+    echo "$remaining"
+}
+
+#
+# _venv_lock_wait_bound() - The wait bound for a lock found held.
+#
+# The generic bound, or the recorded detached build's remaining bound when
+# that is longer, announced. Args: $1 daemon_dir, $2 generic bound.
+#
+_venv_lock_wait_bound() {
+    local daemon_dir="$1" bound="$2" build_wait
+    if build_wait="$(_venv_detached_build_wait "$daemon_dir")" && [ "$build_wait" -gt "$bound" ]; then
+        local log
+        log="$(venv_build_record_field "$daemon_dir" log)" || log="(not recorded)"
+        print_info "ensure_venv: a background venv build holds the lock (log: $log) — waiting up to ${build_wait}s, its own bound"
+        bound="$build_wait"
+    fi
+    echo "$bound"
+}
+
+#
+# _venv_lock_start_heartbeat() - Keep a mkdir lock fresh while this process lives.
+#
+# Touches the lock directory every HOOKS_DAEMON_VENV_LOCK_HEARTBEAT_SECONDS
+# until this process exits or the directory goes. It writes nothing to the
+# caller's streams (a command substitution capturing the caller must not wait
+# on it); what it has to say goes to a file inside the lock directory.
+#
+_venv_lock_start_heartbeat() {
+    local lock_dir="$1" owner="$$"
+    local interval="${HOOKS_DAEMON_VENV_LOCK_HEARTBEAT_SECONDS:-$VENV_LOCK_HEARTBEAT_SECONDS_DEFAULT}"
+    (
+        # kill -0's own complaint, once the owner is gone, is the loop's exit.
+        while _hb_probe="$(kill -0 "$owner" 2>&1)" && [ -d "$lock_dir" ]; do
+            touch "$lock_dir"
+            sleep "$interval"
+        done
+    ) < /dev/null > /dev/null 2>> "$lock_dir/heartbeat.log" &
+    _VENV_LOCK_HEARTBEAT_PID="$!"
+}
+
+#
+# _venv_lock_stop_heartbeat() - Stop this process's heartbeat, if it runs one.
+#
+_venv_lock_stop_heartbeat() {
+    [ -n "$_VENV_LOCK_HEARTBEAT_PID" ] || return 0
+    local out
+    if ! out="$(kill "$_VENV_LOCK_HEARTBEAT_PID" 2>&1)"; then
+        print_verbose "venv lock heartbeat $_VENV_LOCK_HEARTBEAT_PID had already stopped: $out"
+    fi
+    _VENV_LOCK_HEARTBEAT_PID=""
+}
 
 #
 # _venv_lock_backend() - Echo the lock backend to use: "flock" or "mkdir".
@@ -428,6 +564,7 @@ _venv_lock_try_once() {
     if mkdir_err="$(mkdir "$lock_dir" 2>&1)"; then
         echo "$$" > "$lock_dir/pid"
         _VENV_LOCK_DIR="$lock_dir"
+        _venv_lock_start_heartbeat "$lock_dir"
         return 0
     fi
     if [ ! -d "$lock_dir" ]; then
@@ -533,6 +670,8 @@ forget_venv_lock() {
     if [ "$_VENV_LOCK_BACKEND" = "flock" ] && [ -n "$_VENV_LOCK_FD" ]; then
         exec {_VENV_LOCK_FD}>&-
     fi
+    # The adopting child runs its own heartbeat.
+    _venv_lock_stop_heartbeat
     _VENV_LOCK_FD=""
     _VENV_LOCK_DIR=""
     _VENV_LOCK_BACKEND=""
@@ -543,12 +682,27 @@ forget_venv_lock() {
 # adopt_venv_lock() - Take ownership of a lock handed over by a parent.
 #
 # Reads HOOKS_DAEMON_VENV_LOCK_INHERITED (see venv_lock_handoff_spec) and
-# confirms the lock really is held through it, so release_venv_lock frees it.
+# confirms the lock really is daemon_dir's venv lock and is held through it,
+# so release_venv_lock frees it. The spec is an environment variable, so it is
+# never trusted to name the lock: a mkdir spec must be exactly daemon_dir's
+# lock directory (release removes it), and a flock descriptor must be open on
+# daemon_dir's lock file where /proc can say so. The variable is then unset,
+# so nothing the build runs inherits it.
+#
+# Args:
+#   $1 - daemon_dir
 #
 # Returns 0 owning the lock, 1 with a message otherwise.
 #
 adopt_venv_lock() {
+    local daemon_dir="$1"
     local spec="${HOOKS_DAEMON_VENV_LOCK_INHERITED:-}"
+    local lock_file="$daemon_dir/untracked/$VENV_LOCK_FILE_NAME"
+    unset HOOKS_DAEMON_VENV_LOCK_INHERITED
+    if [ -z "$daemon_dir" ]; then
+        print_error "adopt_venv_lock: daemon_dir required"
+        return 1
+    fi
     case "$spec" in
         flock:*)
             local fd="${spec#flock:}"
@@ -556,11 +710,24 @@ adopt_venv_lock() {
                 print_error "adopt_venv_lock: inherited descriptor '$fd' does not hold the venv lock"
                 return 1
             fi
+            if [ -e "/proc/$$/fd/$fd" ]; then
+                local opened expected
+                opened="$(readlink "/proc/$$/fd/$fd")"
+                expected="$(cd -P "$daemon_dir/untracked" && pwd)/$VENV_LOCK_FILE_NAME"
+                if [ "$opened" != "$expected" ]; then
+                    print_error "adopt_venv_lock: inherited descriptor '$fd' is open on $opened, not $expected"
+                    return 1
+                fi
+            fi
             _VENV_LOCK_BACKEND="flock"
             _VENV_LOCK_FD="$fd"
             ;;
         mkdir:*)
             local dir="${spec#mkdir:}"
+            if [ "$dir" != "$lock_file.d" ]; then
+                print_error "adopt_venv_lock: inherited lock directory '$dir' is not this daemon's venv lock ($lock_file.d)"
+                return 1
+            fi
             if [ ! -d "$dir" ]; then
                 print_error "adopt_venv_lock: inherited lock directory is gone: $dir"
                 return 1
@@ -568,6 +735,7 @@ adopt_venv_lock() {
             echo "$$" > "$dir/pid"
             _VENV_LOCK_BACKEND="mkdir"
             _VENV_LOCK_DIR="$dir"
+            _venv_lock_start_heartbeat "$dir"
             ;;
         *)
             print_error "adopt_venv_lock: HOOKS_DAEMON_VENV_LOCK_INHERITED is not a lock spec: '$spec'"
@@ -603,6 +771,7 @@ acquire_venv_lock() {
         if [ "$rc" -ne "$VENV_LOCK_HELD" ]; then
             return "$rc"
         fi
+        timeout="$(_venv_lock_wait_bound "$daemon_dir" "$timeout")"
         print_info "ensure_venv: another process holds the venv lock ($lock_file) — waiting up to ${timeout}s for its build to finish"
         exec {_VENV_LOCK_FD}>"$lock_file"
         if flock -w "$timeout" "$_VENV_LOCK_FD"; then
@@ -629,6 +798,7 @@ acquire_venv_lock() {
             return 1
         fi
         if [ "$announced" = 0 ]; then
+            timeout="$(_venv_lock_wait_bound "$daemon_dir" "$timeout")"
             print_info "ensure_venv: another process holds the venv lock ($lock_dir) — waiting up to ${timeout}s for its build to finish"
             announced=1
         fi
@@ -640,12 +810,25 @@ acquire_venv_lock() {
 #
 # release_venv_lock() - Release whatever acquire_venv_lock took. Returns 0.
 #
+# A mkdir lock is removed only while its pid file still names this process:
+# if it was reclaimed as stale meanwhile, it is someone else's lock now, and
+# removing it would admit a third builder.
+#
 release_venv_lock() {
     if [ "$_VENV_LOCK_BACKEND" = "flock" ] && [ -n "$_VENV_LOCK_FD" ]; then
         exec {_VENV_LOCK_FD}>&-
         _VENV_LOCK_FD=""
     elif [ "$_VENV_LOCK_BACKEND" = "mkdir" ] && [ -n "$_VENV_LOCK_DIR" ]; then
-        rm -rf "$_VENV_LOCK_DIR"
+        _venv_lock_stop_heartbeat
+        local holder=""
+        if [ -f "$_VENV_LOCK_DIR/pid" ]; then
+            holder="$(cat "$_VENV_LOCK_DIR/pid")"
+        fi
+        if [ "$holder" = "$$" ]; then
+            rm -rf "$_VENV_LOCK_DIR"
+        else
+            print_warning "ensure_venv: not removing $_VENV_LOCK_DIR: it now belongs to pid '${holder:-unknown}', not this process ($$)"
+        fi
         _VENV_LOCK_DIR=""
     fi
     _VENV_LOCK_BACKEND=""
@@ -784,8 +967,9 @@ _ensure_venv_fingerprint() {
     fi
 
     # CI gate: allow opt-out for CI environments that stub venvs
-    if [ "${HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP:-0}" = "1" ] || [ "${CI:-}" = "true" ]; then
-        print_verbose "ensure_venv: skipped (HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP or CI set)"
+    local switched_off
+    if switched_off="$(venv_bootstrap_switched_off_by)"; then
+        print_verbose "ensure_venv: skipped ($switched_off)"
         return "$_ENSURE_VENV_SKIPPED"
     fi
 

@@ -104,6 +104,60 @@ class TestRepairWithNoVenv:
         assert snapshot(sandbox.clone) == before
 
 
+class TestRepairFindsUvWhereTheBuildDoes:
+    """Review B2: uv's own installer puts it in ~/.local/bin and edits only
+    shell rc files, so a non-login shell (a container's tool shell, #53) has
+    it off PATH. The build finds it there; the Python repair must too."""
+
+    def test_uv_only_in_uv_home_repairs_cleanly(self, sandbox: Sandbox) -> None:
+        sandbox.stub_uv(in_uv_home=True)
+
+        result = sandbox.wrapper("repair")
+
+        output = result.stdout + result.stderr
+        assert result.returncode == 0, output
+        assert "'uv' not found" not in output
+        assert "Venv repaired successfully" in output
+        assert sandbox.resolves()
+
+
+class TestTheVerbIsFoundPastGlobalOptions:
+    """Review S3: the intercept looks for the subcommand, not just ``$1``."""
+
+    def test_repair_after_a_global_option_still_builds(self, sandbox: Sandbox) -> None:
+        sandbox.stub_uv()
+
+        result = sandbox.wrapper("--project-root", str(sandbox.project), "repair")
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert sandbox.resolves()
+
+    def test_repair_help_builds_nothing(self, sandbox: Sandbox) -> None:
+        sandbox.stub_uv()
+        before = snapshot(sandbox.clone)
+
+        result = sandbox.wrapper("repair", "--help")
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "repair" in result.stdout
+        assert sandbox.uv_calls() == []
+        assert snapshot(sandbox.clone) == before
+
+
+class TestADamagedCloneIsNamedNotLoopedOn:
+    """Review S4: with no driver in the clone, "run repair" is circular advice."""
+
+    def test_a_missing_driver_is_named(self, sandbox: Sandbox) -> None:
+        (sandbox.clone / "scripts" / "venv_bootstrap.sh").unlink()
+
+        result = sandbox.wrapper("repair")
+
+        assert result.returncode == _NO_VENV_EXIT
+        assert "scripts/venv_bootstrap.sh" in result.stderr
+        assert "Build the venv for this project path" not in result.stderr
+        assert_never_suggests_install_or_force(result.stderr)
+
+
 class TestRepairWithAVenvIsUnchanged:
     def test_goes_straight_to_the_python_repair(self, sandbox: Sandbox) -> None:
         sandbox.stub_uv()
@@ -149,7 +203,7 @@ class TestVenvFreeVerbsAreOneDispatch:
 
     def test_the_dispatch_is_one_function_with_a_case_arm_per_verb(self, wrapper_text: str) -> None:
         body = _function_body(wrapper_text, _DISPATCH_FUNCTION)
-        assert re.search(r'^\s*case "\$\{1:-\}" in$', body, re.MULTILINE)
+        assert re.search(r'^\s*case "\$verb" in$', body, re.MULTILINE)
         assert re.search(r"^\s*repair\)$", body, re.MULTILINE)
         assert re.search(r"^\s*\*\)$", body, re.MULTILINE)
 

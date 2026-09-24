@@ -72,6 +72,8 @@ _HOOKS_DAEMON_BOOTSTRAP_LOG=""
 _HOOKS_DAEMON_BOOTSTRAP_MISSING=""
 _HOOKS_DAEMON_BOOTSTRAP_FIXES=""
 _HOOKS_DAEMON_BOOTSTRAP_DETAIL=""
+_HOOKS_DAEMON_BOOTSTRAP_PID=""
+_HOOKS_DAEMON_BOOTSTRAP_ELAPSED=""
 
 #
 # emit_hook_error() - Output a valid hook error response to stdout
@@ -211,18 +213,24 @@ When it finishes, the next hook starts the daemon on its own."
                 _hd_venv_state_note=" - a venv build is running in the background"
                 ;;
             running)
+                local _hd_build_who=""
+                if [[ -n "$_HOOKS_DAEMON_BOOTSTRAP_PID" ]]; then
+                    _hd_build_who="
+Build process: pid $_HOOKS_DAEMON_BOOTSTRAP_PID, running for ${_HOOKS_DAEMON_BOOTSTRAP_ELAPSED:-?}s (in the environment that started it)."
+                fi
                 _hd_venv_missing_remedy="A venv build is ALREADY RUNNING under this clone — nothing to do but wait.
-Build log: ${_HOOKS_DAEMON_BOOTSTRAP_LOG:-not recorded here (another process, such as an upgrade or a repair, holds the venv build lock)}
+Build log: ${_HOOKS_DAEMON_BOOTSTRAP_LOG:-not recorded here (another process, such as an upgrade or a repair, holds the venv build lock)}${_hd_build_who}
 When it finishes, the next hook starts the daemon, or starts this path's own
-build if the one running belonged to another environment."
+build if the one running belonged to another environment. A background build
+is stopped and reported as failed if it outlives its bound."
                 _hd_venv_state_note=" - a venv build is running in the background"
                 ;;
             failed)
                 _hd_venv_missing_remedy="THE LAST AUTOMATIC BUILD OF THIS VENV FAILED. Its log says why:
   $_HOOKS_DAEMON_BOOTSTRAP_LOG
 Hooks do not retry it until pyproject.toml, uv.lock, the Python interpreter or
-uv changes. Once the cause is fixed, retry in the foreground (it shows the
-output):
+the uv binary changes. Once the cause is fixed, retry in the foreground (it
+shows the output):
   $_hd_repair_cmd"
                 _hd_venv_state_note=" - the automatic venv build failed"
                 ;;
@@ -234,9 +242,11 @@ ${_HOOKS_DAEMON_BOOTSTRAP_FIXES}Fix them and the next hook builds the venv on it
                 _hd_venv_state_note=" - automatic venv build refused ($_HOOKS_DAEMON_BOOTSTRAP_MISSING)"
                 ;;
             disabled)
-                _hd_venv_missing_remedy="Automatic venv builds are switched off here (HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP=1).
-To build it now: $_hd_repair_cmd
-$_hd_venv_missing_remedy"
+                _hd_venv_missing_remedy="Automatic venv builds are switched off here (${_HOOKS_DAEMON_BOOTSTRAP_DETAIL:-HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP=1}).
+That setting stops hooks building a venv on their own; an explicit repair still
+builds one. To build it now:
+  $_hd_repair_cmd"
+                _hd_venv_state_note=" - automatic venv builds switched off (${_HOOKS_DAEMON_BOOTSTRAP_DETAIL:-HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP=1})"
                 ;;
             error)
                 _hd_venv_missing_remedy="The automatic build could not be evaluated: $_HOOKS_DAEMON_BOOTSTRAP_DETAIL
@@ -1134,6 +1144,8 @@ _venv_self_heal() {
                 ;;
             fix) _HOOKS_DAEMON_BOOTSTRAP_FIXES="$_HOOKS_DAEMON_BOOTSTRAP_FIXES  - $value"$'\n' ;;
             detail) _HOOKS_DAEMON_BOOTSTRAP_DETAIL="$value" ;;
+            pid) _HOOKS_DAEMON_BOOTSTRAP_PID="$value" ;;
+            elapsed) _HOOKS_DAEMON_BOOTSTRAP_ELAPSED="$value" ;;
         esac
     done <<< "$output"
     return 0

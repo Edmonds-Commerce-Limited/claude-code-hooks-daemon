@@ -77,6 +77,8 @@ _TOOLS: Final[tuple[str, ...]] = (
     "ls",
     "readlink",
     "printf",
+    "timeout",
+    "cp",
 )
 
 
@@ -462,6 +464,273 @@ class TestRepairBuildsInTheForeground:
 
         assert result.returncode == 0, result.stderr
         assert len(_uv_calls(tmp_path)) == 1, "repair must reuse the build it waited for"
+
+
+def _markers(daemon_dir: Path) -> list[Path]:
+    return sorted((daemon_dir / "untracked").glob(".venv-bootstrap-*.failed"))
+
+
+def _wait_for_path_gone(path: Path) -> None:
+    deadline = time.monotonic() + _BUILD_WAIT_SECONDS
+    while time.monotonic() < deadline:
+        if not path.exists():
+            return
+        time.sleep(0.2)
+    raise AssertionError(f"{path} was never removed")
+
+
+def _source_venv_sh(script: str, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    """Run ``script`` in bash with scripts/install/venv.sh sourced."""
+    venv_sh = REPO_ROOT / "scripts" / "install" / "venv.sh"
+    return subprocess.run(  # nosec B603 - fixed argv, no shell
+        [BASH, "-c", f'set -euo pipefail\nsource "{venv_sh}"\n{script}'],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=_TIMEOUT_SECONDS,
+        check=False,
+    )
+
+
+class TestSwitchedOffMeansSwitchedOff:
+    """Review B1: ensure_venv skips on HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP=1 AND on
+    CI=true. The hook must refuse on both, naming which, and an explicit
+    ``repair`` is a deliberate request that builds regardless. A skipped build
+    is never recorded as a failed one."""
+
+    def test_ci_true_is_reported_as_disabled_and_names_the_variable(self, tmp_path: Path) -> None:
+        daemon_dir = _daemon_dir(tmp_path)
+        before = _snapshot(daemon_dir)
+        env = _env(tmp_path, with_uv=_stub_uv(tmp_path), extra={"CI": "true"})
+
+        out = _fields(_run("hook", daemon_dir, env).stdout)
+
+        assert out["state"] == ["disabled"], out
+        assert out["detail"] == ["CI=true"]
+        assert _snapshot(daemon_dir) == before
+        assert _uv_calls(tmp_path) == []
+
+    def test_the_opt_out_names_its_variable(self, tmp_path: Path) -> None:
+        daemon_dir = _daemon_dir(tmp_path)
+        env = _env(
+            tmp_path, with_uv=_stub_uv(tmp_path), extra={"HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP": "1"}
+        )
+
+        out = _fields(_run("hook", daemon_dir, env).stdout)
+
+        assert out["detail"] == ["HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP=1"]
+
+    @pytest.mark.parametrize(
+        "switch", [{"HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP": "1"}, {"CI": "true"}], ids=["opt-out", "ci"]
+    )
+    def test_an_explicit_repair_builds_regardless(
+        self, tmp_path: Path, switch: dict[str, str]
+    ) -> None:
+        daemon_dir = _daemon_dir(tmp_path)
+        env = _env(tmp_path, with_uv=_stub_uv(tmp_path), extra=switch)
+
+        result = _run("repair", daemon_dir, env)
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert _resolves(daemon_dir, env)
+        assert len(_uv_calls(tmp_path)) == 1
+        assert _markers(daemon_dir) == []
+        name = next(iter(switch))
+        assert name in result.stderr, "the override must be announced, naming the variable"
+
+    def test_a_switched_off_build_child_writes_no_failed_marker(self, tmp_path: Path) -> None:
+        daemon_dir = _daemon_dir(tmp_path)
+        lock_dir = daemon_dir / "untracked" / ".venv-bootstrap.lock.d"
+        lock_dir.mkdir()
+        env = _env(
+            tmp_path,
+            with_uv=_stub_uv(tmp_path),
+            extra={
+                "CI": "true",
+                "HOOKS_DAEMON_VENV_LOCK_BACKEND": "mkdir",
+                "HOOKS_DAEMON_VENV_LOCK_INHERITED": f"mkdir:{lock_dir}",
+            },
+        )
+
+        result = subprocess.run(  # nosec B603 - fixed argv, no shell
+            [BASH, str(DRIVER), "build", str(daemon_dir), sys.executable, "fp", "inputs"],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=_TIMEOUT_SECONDS,
+            check=False,
+        )
+
+        assert result.returncode != 0
+        assert "CI=true" in result.stderr
+        assert _markers(daemon_dir) == []
+        assert _uv_calls(tmp_path) == []
+        assert not lock_dir.exists(), "the adopted lock is still released"
+
+
+class TestADetachedBuildIsBoundedAndNamed:
+    """Review I1: a hung build must not hold the lock for ever, and the
+    process holding it must be findable."""
+
+    def test_a_build_past_its_bound_ends_failed_and_is_reported(self, tmp_path: Path) -> None:
+        daemon_dir = _daemon_dir(tmp_path)
+        env = _env(
+            tmp_path,
+            with_uv=_stub_uv(tmp_path, sleep=30),
+            extra={"HOOKS_DAEMON_VENV_BUILD_TIMEOUT": "2"},
+        )
+
+        first = _fields(_run("hook", daemon_dir, env).stdout)
+        assert first["state"] == ["started"]
+        _wait_for_lock_release(daemon_dir)
+
+        assert len(_markers(daemon_dir)) == 1
+        assert "timed out" in Path(first["log"][0]).read_text()
+        out = _fields(_run("hook", daemon_dir, env).stdout)
+        assert out["state"] == ["failed"]
+        assert len(_uv_calls(tmp_path)) == 1
+
+    def test_running_names_the_live_build_pid_and_its_age(self, tmp_path: Path) -> None:
+        daemon_dir = _daemon_dir(tmp_path)
+        env = _env(tmp_path, with_uv=_stub_uv(tmp_path, sleep=4))
+        assert _fields(_run("hook", daemon_dir, env).stdout)["state"] == ["started"]
+        time.sleep(1)
+
+        out = _fields(_run("hook", daemon_dir, env).stdout)
+
+        assert out["state"] == ["running"]
+        pid = int(out["pid"][0])
+        os.kill(pid, 0)
+        assert int(out["elapsed"][0]) >= 0
+        log = Path(out["log"][0])
+        assert f"pid {pid}" in log.read_text(), "the log names the build's pid"
+        _wait_for_lock_release(daemon_dir)
+
+
+class TestRepairWaitsOutAHookStartedBuild:
+    """Review I4: repair, the skill and upgrade must not give up at the 120s lock
+    bound behind a build a hook started; they wait for that build's own bound."""
+
+    def test_repair_outwaits_the_generic_lock_bound(self, tmp_path: Path) -> None:
+        daemon_dir = _daemon_dir(tmp_path)
+        env = _env(
+            tmp_path,
+            with_uv=_stub_uv(tmp_path, sleep=4),
+            extra={"HOOKS_DAEMON_VENV_LOCK_TIMEOUT": "1"},
+        )
+        assert _fields(_run("hook", daemon_dir, env).stdout)["state"] == ["started"]
+
+        result = _run("repair", daemon_dir, env)
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert len(_uv_calls(tmp_path)) == 1, "repair must reuse the build it waited for"
+
+
+class TestTheMkdirLockSurvivesALongBuild:
+    """Review I2: without flock, lock staleness is judged by age. A live build
+    must keep its lock fresh, and a holder only ever removes its own lock."""
+
+    def _env(self, tmp_path: Path, *, sleep: float) -> dict[str, str]:
+        return _env(
+            tmp_path,
+            with_uv=_stub_uv(tmp_path, sleep=sleep),
+            extra={
+                "HOOKS_DAEMON_VENV_LOCK_BACKEND": "mkdir",
+                "HOOKS_DAEMON_VENV_LOCK_STALE_SECONDS": "3",
+                "HOOKS_DAEMON_VENV_LOCK_HEARTBEAT_SECONDS": "1",
+            },
+        )
+
+    def test_a_build_older_than_the_stale_age_is_still_running(self, tmp_path: Path) -> None:
+        daemon_dir = _daemon_dir(tmp_path)
+        env = self._env(tmp_path, sleep=7)
+        lock_dir = daemon_dir / "untracked" / ".venv-bootstrap.lock.d"
+
+        assert _fields(_run("hook", daemon_dir, env).stdout)["state"] == ["started"]
+        time.sleep(5)
+        second = _fields(_run("hook", daemon_dir, env).stdout)
+
+        assert second["state"] == ["running"], second
+        _wait_for_path_gone(lock_dir)
+        assert len(_uv_calls(tmp_path)) == 1
+        assert _resolves(daemon_dir, env)
+
+    def test_release_leaves_a_lock_another_process_now_holds(self, tmp_path: Path) -> None:
+        lock_dir = tmp_path / "lock.d"
+        lock_dir.mkdir()
+        (lock_dir / "pid").write_text("999999\n")
+
+        result = _source_venv_sh(
+            f'_VENV_LOCK_BACKEND=mkdir\n_VENV_LOCK_DIR="{lock_dir}"\nrelease_venv_lock',
+            _env(tmp_path, with_uv=None),
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert lock_dir.is_dir(), "a lock whose pid is not ours must not be removed"
+
+
+class TestAdoptionOnlyTakesTheRealLock:
+    """Review S5: the inherited spec is an environment variable; a mkdir spec
+    naming any other directory must not be adopted (and later rm -rf'd)."""
+
+    def test_a_foreign_directory_is_refused_and_untouched(self, tmp_path: Path) -> None:
+        daemon_dir = _daemon_dir(tmp_path)
+        foreign = tmp_path / "precious"
+        foreign.mkdir()
+        before = _snapshot(foreign)
+        env = _env(
+            tmp_path,
+            with_uv=None,
+            extra={"HOOKS_DAEMON_VENV_LOCK_INHERITED": f"mkdir:{foreign}"},
+        )
+
+        result = _source_venv_sh(f'adopt_venv_lock "{daemon_dir}"', env)
+
+        assert result.returncode != 0
+        assert _snapshot(foreign) == before
+
+
+class TestTheFailedMarkerIsJudgedUnderTheLock:
+    """Review I6: a build can fail and write its marker between a hook's marker
+    check and its lock acquire. Judged under the lock, that hook reports the
+    failure instead of deleting the fresh marker and retrying."""
+
+    def test_a_marker_written_just_before_the_acquire_is_honoured(self, tmp_path: Path) -> None:
+        daemon_dir = _daemon_dir(tmp_path)
+        real_flock = shutil.which("flock")
+        assert real_flock is not None
+        tools = tmp_path / "tools"
+        tools.mkdir()
+        saved = tmp_path / "saved-marker"
+        calls = tmp_path / "flock-calls"
+        # The driver's second flock call is its lock acquire: plant the
+        # failed build's marker right then, as a racing build would.
+        (tools / "flock").write_text(textwrap.dedent(f"""\
+            #!/bin/bash
+            n=0
+            if [ -f "{calls}" ]; then n="$(cat "{calls}")"; fi
+            n=$((n + 1))
+            echo "$n" > "{calls}"
+            if [ "$n" -eq 2 ] && [ -f "{saved}" ]; then
+                cp "{saved}" "$(cat "{tmp_path / 'marker-path'}")"
+            fi
+            exec "{real_flock}" "$@"
+            """))
+        (tools / "flock").chmod(0o755)
+        failing = _env(tmp_path, with_uv=_stub_uv(tmp_path, fail=True))
+        assert _fields(_run("hook", daemon_dir, failing).stdout)["state"] == ["started"]
+        _wait_for_lock_release(daemon_dir)
+        [marker] = _markers(daemon_dir)
+        shutil.copy2(marker, saved)
+        (tmp_path / "marker-path").write_text(str(marker))
+        marker.unlink()
+        calls.unlink()
+
+        out = _fields(_run("hook", daemon_dir, failing).stdout)
+
+        assert out["state"] == ["failed"], out
+        assert len(_uv_calls(tmp_path)) == 1, "the racing hook must not retry the build"
+        assert marker.is_file()
 
 
 class TestUsage:

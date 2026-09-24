@@ -67,6 +67,7 @@ from claude_code_hooks_daemon.daemon.paths import (
     cleanup_socket,
     cleanup_stale_daemon_files,
     cleanup_stale_session_dirs,
+    find_uv,
     get_pid_path,
     get_socket_path,
     python_venv_fingerprint,
@@ -1854,9 +1855,18 @@ def cmd_repair(args: argparse.Namespace) -> int:
 
 def _repair_venv_locked(daemon_dir: Path, venv_path: Path, env: dict[str, str]) -> int:
     """The mutating half of ``cmd_repair``; the caller holds the venv build lock."""
+    # The uv the bash build and the gate use, ~/.local/bin included (Plan
+    # 00456 review B2): a bare "uv" misses it wherever PATH does.
+    uv = find_uv()
+    if uv is None:
+        print(
+            "ERROR: 'uv' not found on PATH or in ~/.local/bin. "
+            "Install with: curl -LsSf https://astral.sh/uv/install.sh | sh"
+        )
+        return 1
     try:
-        result = subprocess.run(  # nosec B603 B607 - uv is trusted tool, no user input
-            ["uv", "sync"],
+        result = subprocess.run(  # nosec B603 - uv resolved by find_uv, no user input
+            [uv, "sync"],
             cwd=str(daemon_dir),
             env=env,
             capture_output=True,

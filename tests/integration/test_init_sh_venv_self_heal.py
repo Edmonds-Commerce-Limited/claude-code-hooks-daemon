@@ -169,6 +169,22 @@ class TestARefusedBuildChangesNothing:
         assert snapshot(sandbox.clone) == before
         assert sandbox.uv_calls() == []
 
+    def test_ci_true_is_named_never_reported_as_a_failed_build(self, sandbox: Sandbox) -> None:
+        """Review B1: CI=true makes ensure_venv skip, so the hook must not start
+        a "build" that runs no uv and then report it FAILED on every hook."""
+        sandbox.stub_uv()
+        before = snapshot(sandbox.clone)
+
+        contexts = [_context(sandbox.hook(extra_env={"CI": "true"})) for _ in range(2)]
+
+        for context in contexts:
+            assert "CI=true" in context, context
+            assert "failed" not in context.lower(), context
+            assert f"{sandbox.clone}/bin/hooks-daemon repair" in context
+            assert_never_suggests_install_or_force(context)
+        assert snapshot(sandbox.clone) == before
+        assert sandbox.uv_calls() == []
+
 
 class TestNoBuildIsAttemptedWhereThe00454CasesSayDoNotTouch:
     def test_an_unreadable_clone_version_never_builds(self, sandbox: Sandbox) -> None:
