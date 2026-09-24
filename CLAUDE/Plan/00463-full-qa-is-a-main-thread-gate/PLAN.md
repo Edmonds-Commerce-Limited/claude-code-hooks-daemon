@@ -86,8 +86,10 @@ commands that ARE allowed, and they must exist.
   only for Agent-tool sub-agents and teammates. The default is off with no
   patterns. There is no deadlock with orchestrator-only mode: its blocking
   policy never denies Bash, and an integration test proves this on the real
-  chain with the mode armed. The simulate record's "would have been denied"
-  for Bash is a separate defect, filed by the coordinator. The questions were:
+  chain with the mode armed. The simulate record's false "would have been
+  denied" for Bash (ledger 00422 N24) is fixed here, so the record now says
+  "would have been denied" only when the blocking policy denies. The
+  questions were:
   - Does an in-process teammate's PreToolUse payload carry `agent_id`,
     like an Agent-tool sub-agent's? Measure it live, not from docs. Do
     the same for a Workflow-tool agent. If either lacks it, the guard

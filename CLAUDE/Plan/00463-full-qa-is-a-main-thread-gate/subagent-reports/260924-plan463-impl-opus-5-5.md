@@ -109,10 +109,15 @@ writes `untracked/qa/changed_tests.json`, and `changed_tests` is excluded from `
   - **Cause.** `orchestrator_simulate.py` `handle()` printed that text for every call
     `matches()` flags. The blocking policy (`_would_deny`) refuses only Write, Edit and
     NotebookEdit outside `CLAUDE/Plan/`. The record was false; the policy was not.
-  - **Not fixed here.** A fix to the simulate message was committed at `14c0b806` and then
-    reverted at the coordinator's direction. The coordinator is filing the simulate/live
-    disagreement as its own defect. `orchestrator_simulate.py` is back to its content at
-    `644a5939`.
+  - **Fixed here; this remedies ledger 00422 N24.** The fix was committed at `14c0b806`,
+    reverted at `f330cf41` on an earlier direction, and restored once the coordinator
+    accepted it as the N24 remedy. `_policy_denies()` holds the policy, and `_would_deny()`
+    gates it on the switch. The simulate record says "would have been denied" only when
+    that policy denies. Other matched calls read "recorded, not a would-be denial", and
+    Bash adds "Bash is never denied by this mode". `TestTheSimulatedRecordTellsTheTruth`
+    ties the record to the armed verdict across the tool surface. The integration test
+    checks that the full gate's record carries no would-be denial. The coordinator ticks
+    N24 when 00463 merges.
   - **The real policy against the real gate (kept).**
     `tests/integration/test_full_qa_gate_is_never_deadlocked.py` builds the live PreToolUse
     chain: library handlers via `register_all()` on this repo's config, plus all discovered
