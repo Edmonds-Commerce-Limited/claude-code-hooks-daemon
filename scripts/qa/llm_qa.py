@@ -253,11 +253,16 @@ Summarizer = Callable[[QaReport], str]
 
 
 class ToolConfig(NamedTuple):
-    """Configuration for a single QA tool."""
+    """Configuration for a single QA tool.
+
+    ``live_daemon`` marks a tool that probes this checkout's RUNNING daemon;
+    :func:`ensure_live_daemon` runs before it (00422 N27).
+    """
 
     command: list[str]
     json_file: str
     jq_hint: str
+    live_daemon: bool = False
 
 
 def _python(script: str, *args: str) -> list[str]:
@@ -311,10 +316,13 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
     # know WHAT failed back to the count they had already been shown. That is
     # why Plan 00226's missing failure names had no surface on which they could
     # look wrong. Asserted by test_llm_qa_count_implies_detail.py.
+    # A live consumer through tests/acceptance: its daemon fixtures skip with
+    # no socket, and a skip in a RELEASING.md Step 12.0 gate is a failure.
     "tests": ToolConfig(
         command=_bash("run_tests.sh"),
         json_file="tests.json",
         jq_hint="jq '.tests[] | select(.outcome == \"failed\") | .name'",
+        live_daemon=True,
     ),
     "security": ToolConfig(
         command=_bash("run_security_check.sh"),
@@ -493,6 +501,7 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
         command=_bash("run_smoke_test.sh"),
         json_file="smoke_test.json",
         jq_hint="jq '.probes[] | {name, passed, expected, actual_decision}'",
+        live_daemon=True,
     ),
 }
 
@@ -851,6 +860,61 @@ def resolved_command(config: ToolConfig) -> list[str]:
     ]
 
 
+# This checkout's own wrapper: in a worktree it resolves the worktree's daemon.
+DAEMON_CLI: Final[Path] = PROJECT_ROOT / "bin" / "hooks-daemon"
+DAEMON_CLI_TIMEOUT_SECONDS: Final[int] = 120
+
+_DAEMON_STARTED_LABEL: Final[str] = "⚙️  DAEMON STARTED:"
+_DAEMON_START_FAILED_LABEL: Final[str] = "⚠️  DAEMON START FAILED:"
+
+
+def _daemon_cli(subcommand: str) -> subprocess.CompletedProcess[str]:
+    """Run ``bin/hooks-daemon <subcommand>`` for this checkout, capturing output."""
+    return subprocess.run(
+        [str(DAEMON_CLI), subcommand],
+        capture_output=True,
+        text=True,
+        cwd=str(PROJECT_ROOT),
+        timeout=DAEMON_CLI_TIMEOUT_SECONDS,
+        check=False,
+    )
+
+
+def ensure_live_daemon(tool: str) -> str | None:
+    """Start this checkout's daemon if it is not running, before ``tool`` probes it.
+
+    A stopped daemon is an ordinary state, not a defect: it exits after
+    ``idle_timeout_seconds`` without hook traffic, and a worktree's daemon gets
+    none while its session's hooks go to the main checkout's daemon, so a
+    restart at the start of a long run is gone by its end (00422 N27). Every
+    real hook starts it on demand; this does the same. It never RESTARTS a
+    running daemon, so a stale one still fails the freshness check.
+
+    Returns:
+        None when the daemon was already running, otherwise a line to print
+        saying it was started or why it could not be.
+    """
+    try:
+        if _daemon_cli("status").returncode == 0:
+            return None
+        started = _daemon_cli("start")
+    except subprocess.TimeoutExpired:
+        return (
+            f"   {_DAEMON_START_FAILED_LABEL} {DAEMON_CLI} did not answer within "
+            f"{DAEMON_CLI_TIMEOUT_SECONDS}s before {tool}"
+        )
+    if started.returncode == 0:
+        return (
+            f"   {_DAEMON_STARTED_LABEL} no daemon was running before {tool} (it stops "
+            f"after idle_timeout_seconds without hook traffic), so llm_qa started one"
+        )
+    output = f"{started.stdout}{started.stderr}".strip()
+    return (
+        f"   {_DAEMON_START_FAILED_LABEL} no daemon was running before {tool}, and "
+        f"`bin/hooks-daemon start` failed (exit {started.returncode}): {output}"
+    )
+
+
 def run_tool(name: str) -> int:
     """Run a QA tool, suppressing its stdout/stderr. Returns exit code."""
     config = TOOL_REGISTRY[name]
@@ -989,6 +1053,10 @@ def _run_tools(tools: list[str], *, read_only: bool) -> int:
         # Run the tool (unless read-only)
         exit_code: int | None = None
         if not read_only:
+            if TOOL_REGISTRY[name].live_daemon:
+                daemon_note = ensure_live_daemon(name)
+                if daemon_note is not None:
+                    print(daemon_note)
             exit_code = run_tool(name)
 
         # Summarize from JSON, passing exit code for cross-check
