@@ -293,3 +293,54 @@ unreliable to test against as root, which this container runs as.
 No new QA exclusions or config changes (one pre-existing exclusion entry
 removed). Release note added:
 `CLAUDE/UPGRADES/UNRELEASED/release-notes/37-a-slow-secret-file-guard-or-enforce-llm-qa-scan-is-no-longer-a-fail-open.md`.
+
+## Addendum 3: review 4 — quarantine_artefact_read_guard fail-closed wrapper
+
+Review 4's remaining item: this repo has `quarantine_artefact_read_guard`
+ENABLED (`R-QUARANTINE-ARTEFACT-READ` is live), and it is itself a SAFETY+
+BLOCKING guard. The "disclosed trade-off" in Addendum 1/2 -- a non-ENOENT
+error reaching it via `find_protected_mention_strict` now raises instead of
+returning `None` -- is only harmless if the exception is caught somewhere
+and denied. Before this addendum it was NOT: `core/chain.py`'s per-handler
+catch treats a propagated exception as "did not match" under the daemon's
+default non-strict `strict_mode`, so a raise here was an ALLOW, exactly the
+fail-open class the rest of this review round has been closing. Fixed
+directly rather than depending on N24's separate handler-wide fail-closed
+sweep, which lives on another branch.
+
+`quarantine_artefact_read_guard.py` now carries the identical wrapper
+posture as `secret_file_guard`'s own N11 fix (Plan 00466 N11):
+`_matched_pattern` (the single dispatch point `matches()`/`handle()` share)
+wraps the real evaluation (renamed `_evaluate_matched_pattern`) in a
+try/except that NEVER re-raises -- an exception is logged and returns
+`(_INTERNAL_ERROR_PATTERN, type(exc).__name__)`, denied by `handle()` via a
+new `_ERROR_RULE` (`R-QUARANTINE-ARTEFACT-READ-EVALUATION-ERROR`) whose
+message names the exception TYPE (never its full text, which could itself
+carry flaggable content discovered by a directory walk) -- the same
+restraint `secret_file_guard` N11 takes. `get_rules()` now returns both
+Rules.
+
+New tests (TDD, RED before the fix), `TestFailClosedOnEvaluationError` in
+`test_quarantine_artefact_read_guard.py`: `matches()` is `True` when
+evaluation raises; `handle()` denies with the exception type name and the
+new rule ID in the reason, for a simulated failing-glob-base error
+(`PermissionError`, the exact shape a non-ENOENT `_expand_glob_token`
+failure now takes); a raise is never indistinguishable from a genuine
+"no match" ALLOW. `get_rules()`'s existing single-rule test updated to
+expect 2. Verified via `pytest tests/unit/handlers/pre_tool_use/test_quarantine_artefact_read_guard.py tests/unit/constants/test_rule_ids.py`
+(81 passed) and the full related suite (619 passed, listed above plus
+`test_rule_ids.py`).
+
+## QA (review 4, quarantine wrapper)
+
+- `scripts/qa/run_format_check.sh` — clean (2 files auto-fixed by black,
+  re-verified clean).
+- `python scripts/qa/audit_error_hiding.py` (whole-project) — 0 violations.
+- `python scripts/qa/llm_qa.py lint / type_check / security / magic_values / error_hiding / fail_open_inventory / declared_invariant_pairs` — all
+  PASSED, 0 issues each.
+- `pytest tests/unit/handlers/pre_tool_use/test_quarantine_artefact_read_guard.py tests/unit/constants/test_rule_ids.py` —
+  81 passed.
+- `pytest` across every related suite touched this round (secret_file_matching,
+  shell_expansion, secret_file_guard, quarantine_artefact_read_guard,
+  project_containment, enforce_llm_qa, rule_ids) — 619 passed.
+- Daemon restarted before this commit.

@@ -377,6 +377,52 @@ class TestHandle:
         assert result.decision == Decision.ALLOW
 
 
+class TestFailClosedOnEvaluationError:
+    """n466-n24 review 4: an exception during evaluation must deny, with a
+    reason naming the error -- the same posture as secret_file_guard's N11
+    fail-closed wrapper. A failing glob-expansion base is exactly the shape
+    that regressed here: `_expand_glob_token` propagating on a non-ENOENT
+    OSError (Plan 00466 guard-defects) reaches this handler via
+    `find_protected_mention_strict`, which has no wrapper of its own."""
+
+    def test_matches_is_true_when_evaluation_raises(
+        self, handler: QuarantineArtefactReadGuardHandler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _raise(self: Any, hook_input: dict[str, Any]) -> str | None:
+            raise OSError("simulated glob-expansion failure")
+
+        monkeypatch.setattr(QuarantineArtefactReadGuardHandler, "_evaluate_matched_pattern", _raise)
+        payload = _hook_input("Bash", {"command": "cat some-opus-security-DETAIL-token"})
+        assert handler.matches(payload) is True
+
+    def test_handle_denies_when_a_failing_glob_base_raises(
+        self, handler: QuarantineArtefactReadGuardHandler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _raise(self: Any, hook_input: dict[str, Any]) -> str | None:
+            raise PermissionError("simulated permission-denied glob base")
+
+        monkeypatch.setattr(QuarantineArtefactReadGuardHandler, "_evaluate_matched_pattern", _raise)
+        payload = _hook_input("Bash", {"command": "cat some-opus-security-DETAIL-token"})
+        result = handler.handle(payload)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "PermissionError" in result.reason
+        assert RuleID.QUARANTINE_ARTEFACT_READ_EVALUATION_ERROR in result.reason
+
+    def test_allow_is_never_returned_when_evaluation_raises(
+        self, handler: QuarantineArtefactReadGuardHandler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A raise must never be indistinguishable from "no match found"."""
+
+        def _raise(self: Any, hook_input: dict[str, Any]) -> str | None:
+            raise ValueError("simulated malformed-pattern failure")
+
+        monkeypatch.setattr(QuarantineArtefactReadGuardHandler, "_evaluate_matched_pattern", _raise)
+        payload = _hook_input("Read", {"file_path": "/p/src/app.py"})
+        result = handler.handle(payload)
+        assert result.decision == Decision.DENY
+
+
 class TestGuidanceSurfaces:
     def test_get_claude_md(self, handler: QuarantineArtefactReadGuardHandler) -> None:
         guidance = handler.get_claude_md()
@@ -446,15 +492,22 @@ class TestEdgeBranches:
 
 
 class TestQuarantineArtefactReadGuardGetRules:
-    """get_rules() declares the single Rule backing this handler (Plan 00116)."""
+    """get_rules() declares the 2 Rules backing this handler (Plan 00116; the
+    evaluation-error Rule added n466-n24 review 4 mirrors secret_file_guard's
+    own N11 fail-closed wrapper)."""
 
-    def test_returns_one_rule(self, handler: QuarantineArtefactReadGuardHandler) -> None:
+    def test_returns_two_rules(self, handler: QuarantineArtefactReadGuardHandler) -> None:
         rules = handler.get_rules()
-        assert len(rules) == 1
-        assert isinstance(rules[0], Rule)
+        assert len(rules) == 2
+        assert all(isinstance(rule, Rule) for rule in rules)
 
     def test_rule_id_matches_constant(self, handler: QuarantineArtefactReadGuardHandler) -> None:
         assert handler.get_rules()[0].rule_id == RuleID.QUARANTINE_ARTEFACT_READ
+
+    def test_error_rule_id_matches_constant(
+        self, handler: QuarantineArtefactReadGuardHandler
+    ) -> None:
+        assert handler.get_rules()[1].rule_id == RuleID.QUARANTINE_ARTEFACT_READ_EVALUATION_ERROR
 
     def test_rule_has_non_empty_verbose(self, handler: QuarantineArtefactReadGuardHandler) -> None:
         assert handler.get_rules()[0].verbose

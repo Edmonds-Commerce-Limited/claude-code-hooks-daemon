@@ -539,6 +539,11 @@ class RuleID:
     #: Reading a quarantined *-opus-security-DETAIL* artefact back into the coordinator.
     QUARANTINE_ARTEFACT_READ: str = "R-QUARANTINE-ARTEFACT-READ"
 
+    #: A call this guard could not finish evaluating (n466-n24 review 4): denied
+    #: structurally, independent of the daemon's global strict_mode -- mirrors
+    #: SECRET_EVALUATION_ERROR's own N11 rationale.
+    QUARANTINE_ARTEFACT_READ_EVALUATION_ERROR: str = "R-QUARANTINE-ARTEFACT-READ-EVALUATION-ERROR"
+
     # ------------------------------------------------------------------
     # flaggable_content_channel_guard handler (ships disabled)
     # ------------------------------------------------------------------

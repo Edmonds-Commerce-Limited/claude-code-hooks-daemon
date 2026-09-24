@@ -35,6 +35,7 @@ with zero configuration.
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any, Final
 
@@ -50,6 +51,8 @@ from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.bash_flags import SPAN_SEPARATORS, split_statements
 from claude_code_hooks_daemon.utils.command_evasion import compile_command_name_pattern
 from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
+
+logger = logging.getLogger(__name__)
 
 _RULE = Rule(
     rule_id=RuleID.QUARANTINE_ARTEFACT_READ,
@@ -76,6 +79,44 @@ _RULE = Rule(
         "read the file."
     ),
 )
+
+# n466-n24 review 4: an exception anywhere in evaluation is not a decision
+# this guard actually made -- `core/chain.py`'s per-handler catch treats a
+# propagated exception as "did not match" whenever the daemon's global
+# `strict_mode` is the client default (`false`), fail-opening this
+# SAFETY+BLOCKING guard. Mirrors `secret_file_guard`'s own N11 rule/wrapper
+# (Plan 00466 N11) rather than depending on N24's separate handler-wide
+# fail-closed sweep, which lives on another branch.
+_ERROR_RULE: Final[Rule] = Rule(
+    rule_id=RuleID.QUARANTINE_ARTEFACT_READ_EVALUATION_ERROR,
+    blocked="a call this guard could not finish evaluating",
+    why=(
+        "An exception during evaluation is not a decision the guard actually made "
+        '-- treating it as "no match" would let a genuine DETAIL-artefact read '
+        "through unexamined whenever the SAME defect crashed the scan"
+    ),
+    fix=(
+        "This is a bug in the guard itself, not something to work around -- "
+        "report it via the hooks-daemon skill (issue-report)"
+    ),
+    verbose=(
+        "quarantine_artefact_read_guard could not finish judging this call -- an "
+        "exception was raised mid-evaluation rather than a real ALLOW or DENY "
+        "verdict being reached.\n\n"
+        "This guard fails CLOSED on that outcome, structurally, independent of "
+        "the daemon's global `strict_mode` setting: an unfinished judgement is "
+        'denied, never silently treated as "did not match" -- the same '
+        'position `secret_file_guard` takes for its own "could not finish '
+        'evaluating" case (Plan 00466 N11).\n\n'
+        "This is a bug in the guard, not something to configure around. Report "
+        "it via the hooks-daemon skill (issue-report)."
+    ),
+)
+
+# Sentinel for `_matched_pattern`'s fail-closed wrapper: never a real glob
+# (those come from `_effective_globs()`), so it can never collide with a
+# genuine match.
+_INTERNAL_ERROR_PATTERN: Final[str] = "<internal-error>"
 
 # ── Config modes (command_hints' clobber-or-extend convention) ──────────────
 _MODE_ADDITIVE: Final[str] = "additive"
@@ -193,7 +234,36 @@ class QuarantineArtefactReadGuardHandler(PreToolUseHandlerBase):
 
     # ── Matching (single dispatch point shared by matches()/handle()) ───────
 
-    def _matched_pattern(self, hook_input: dict[str, Any]) -> str | None:
+    def _matched_pattern(self, hook_input: dict[str, Any]) -> tuple[str, str] | None:
+        """``(pattern, detail)`` for this tool call, or ``None`` -- NEVER raises.
+
+        n466-n24 review 4: wraps ``_evaluate_matched_pattern`` so this method
+        -- and therefore ``matches()``/``handle()`` -- never propagates an
+        exception. An exception anywhere in evaluation is filed under
+        ``_INTERNAL_ERROR_PATTERN`` and denied, mirroring
+        ``secret_file_guard``'s own N11 fail-closed wrapper (Plan 00466 N11)
+        rather than depending on N24's separate handler-wide sweep, which
+        lives on another branch.
+
+        ``detail`` is the matched glob on a genuine match, or the raised
+        exception's TYPE NAME on an evaluation error -- never its full
+        message, which could itself carry flaggable content discovered by a
+        directory walk (the same restraint ``secret_file_guard`` N11 takes).
+        """
+        try:
+            pattern = self._evaluate_matched_pattern(hook_input)
+        except Exception as exc:
+            logger.exception(
+                "quarantine_artefact_read_guard: evaluation raised; denying "
+                "for safety (n466-n24 review 4)"
+            )
+            return (_INTERNAL_ERROR_PATTERN, type(exc).__name__)
+        if pattern is None:
+            return None
+        return (pattern, pattern)
+
+    def _evaluate_matched_pattern(self, hook_input: dict[str, Any]) -> str | None:
+        """The real evaluation ``_matched_pattern`` wraps."""
         if not isinstance(hook_input, dict):
             return None
         tool_name = hook_input.get(HookInputField.TOOL_NAME)
@@ -254,8 +324,8 @@ class QuarantineArtefactReadGuardHandler(PreToolUseHandlerBase):
         return self._matched_pattern(hook_input) is not None
 
     def get_rules(self) -> list[Rule]:
-        """Return the single Rule backing this handler's blocking behaviour."""
-        return [_RULE]
+        """Return the 2 Rule objects backing this handler's blocking behaviour."""
+        return [_RULE, _ERROR_RULE]
 
     # ── Handling ────────────────────────────────────────────────────────────
 
@@ -267,9 +337,12 @@ class QuarantineArtefactReadGuardHandler(PreToolUseHandlerBase):
         appended on every fire — it changes per invocation, so it is not
         part of the static teaching content.
         """
-        pattern = self._matched_pattern(hook_input)
-        if pattern is None:
+        matched = self._matched_pattern(hook_input)
+        if matched is None:
             return GatingResult(decision=Decision.ALLOW)
+        pattern, detail = matched
+        if pattern == _INTERNAL_ERROR_PATTERN:
+            return self._deny_for_evaluation_error(hook_input, detail)
 
         transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
         tracker = get_data_layer().disclosure
@@ -286,6 +359,32 @@ class QuarantineArtefactReadGuardHandler(PreToolUseHandlerBase):
 
         message += f"\n\nMatched glob: `{pattern}`"
 
+        return GatingResult(decision=Decision.DENY, reason=message)
+
+    def _deny_for_evaluation_error(self, hook_input: dict[str, Any], detail: str) -> GatingResult:
+        """Deny for the ``_INTERNAL_ERROR_PATTERN`` case (n466-n24 review 4):
+        the guard raised rather than reaching a real verdict. Same verbose-
+        first/terse-after disclosure ladder as the real route, keyed on
+        ``_ERROR_RULE``'s own rule_id, plus the exception TYPE NAME so the
+        report that fixes the underlying bug does not need to reproduce it
+        from scratch.
+        """
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+        tracker = get_data_layer().disclosure
+        formatter = RuleFormatter()
+
+        if transcript_path and tracker.was_disclosed(
+            transcript_path, RuleID.QUARANTINE_ARTEFACT_READ_EVALUATION_ERROR
+        ):
+            message = formatter.terse(_ERROR_RULE)
+        else:
+            if transcript_path:
+                tracker.mark_disclosed(
+                    transcript_path, RuleID.QUARANTINE_ARTEFACT_READ_EVALUATION_ERROR
+                )
+            message = formatter.verbose(_ERROR_RULE)
+
+        message += f"\n\nInternal error: {detail}"
         return GatingResult(decision=Decision.DENY, reason=message)
 
     # ── Guidance surfaces ───────────────────────────────────────────────────
