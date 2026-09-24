@@ -271,6 +271,7 @@ class ConfigTemplate:
             "    global_npm_advisor: {enabled: true, priority: 40}  # Advise on npm install -g (non-blocking)\n"
             "    plan_workflow: {enabled: true, priority: 45}     # Guidance when creating plans\n"
             "    agent_isolation_advisor: {enabled: true, priority: 46}  # Advise worktree isolation for concurrent agents (non-blocking)\n"
+            "    installed_plugin_edit_advisor: {enabled: true, priority: 42}  # Advise when a write lands in an installed Claude Code plugin's files (non-blocking)\n"
             "    dispatch_declaration: {enabled: true, priority: 48}  # Advise/enforce a file-handoff declaration on Task dispatch\n"
             "    docs_qa_edit: {enabled: true, priority: 47}      # Docs QA lint on documentation writes (fires only when documentation.enabled)\n"
             "    docs_qa_commit_gate: {enabled: true, priority: 47}  # STAGED docs QA gate on git commit (fires only when documentation.enabled; warn-first)\n"

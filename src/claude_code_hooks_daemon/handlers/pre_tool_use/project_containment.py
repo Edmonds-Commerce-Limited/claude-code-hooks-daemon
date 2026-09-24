@@ -66,7 +66,7 @@ from claude_code_hooks_daemon.core.utils import (
     get_bash_command,
     get_bash_write_targets,
 )
-from claude_code_hooks_daemon.utils.claude_config import claude_config_dir
+from claude_code_hooks_daemon.utils.claude_config import claude_config_dir, session_config_dir
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
 
@@ -205,13 +205,17 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
         """Claude Code's own state directory, from :func:`claude_config_dir`.
 
         That is ``CLAUDE_CONFIG_DIR`` or the default ``~/.claude`` in the
-        DAEMON's environment, which is fixed when the daemon starts; reading it
-        per call does not change that. A session started with a different
-        ``CLAUDE_CONFIG_DIR`` or ``HOME`` has its own Claude home judged
-        against the daemon's, because the hook payload carries neither value
-        (Plan 00468 G10).
+        DAEMON's environment, which is fixed when the daemon starts. The hook
+        payload carries neither value, so a session run with a different one
+        is covered by :meth:`_session_claude_home` instead (Plan 00468 G10).
         """
         return claude_config_dir()
+
+    @staticmethod
+    def _session_claude_home(hook_input: dict[str, Any]) -> Path | None:
+        """The calling session's own Claude home, from the payload's transcript
+        path (Plan 00468 G10); see :func:`session_config_dir`."""
+        return session_config_dir(hook_input.get(HookInputField.TRANSCRIPT_PATH))
 
     def _offending_targets(self, hook_input: dict[str, Any]) -> list[str]:
         """Every named write target that lies outside the repository root.
@@ -226,12 +230,15 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
         """
         root = self._resolved_root()
         scratchpad = self._harness_scratchpad(hook_input)
+        session_home = self._session_claude_home(hook_input)
         offending: list[str] = []
 
         for candidate in self._named_targets(hook_input):
             if candidate in offending:
                 continue
-            if self._is_outside(candidate, root) and not self._is_permitted(candidate, scratchpad):
+            if self._is_outside(candidate, root) and not self._is_permitted(
+                candidate, scratchpad, session_home
+            ):
                 offending.append(candidate)
 
         return offending
@@ -480,10 +487,14 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
             return False
         return not self._is_within(candidate, root)
 
-    def _is_permitted(self, candidate: str, scratchpad: Path | None) -> bool:
+    def _is_permitted(
+        self, candidate: str, scratchpad: Path | None, session_home: Path | None = None
+    ) -> bool:
         """Is this out-of-root path covered by an allowance?"""
-        if self._allow_claude_home and self._is_within(candidate, self._claude_home().resolve()):
-            return True
+        if self._allow_claude_home:
+            homes = [self._claude_home(), *([session_home] if session_home else [])]
+            if any(self._is_within(candidate, home.resolve()) for home in homes):
+                return True
         if scratchpad is not None and self._is_within(candidate, scratchpad.resolve()):
             return True
         return any(
@@ -566,7 +577,8 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
             "internally; and a target the daemon cannot resolve without executing "
             'the command (`> "$OUT"`), which yields no path rather than a guess.\n\n'
             "**Claude Code's own state directory is allowed** (`$CLAUDE_CONFIG_DIR`, "
-            "else `~/.claude`). It is not scratch, and it is not ephemeral where it is "
+            "else `~/.claude`, and the session's own, read from the transcript path "
+            "in the payload). It is not scratch, and it is not ephemeral where it is "
             "mapped into the bind mount. That does NOT re-open Claude auto-memory: "
             "`markdown_organization` blocks `~/.claude/projects/*/memory/*.md` on a "
             "different premise — this rule asks whether a path is DURABLE, that one "

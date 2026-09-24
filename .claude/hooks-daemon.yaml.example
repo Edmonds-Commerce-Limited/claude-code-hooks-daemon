@@ -299,6 +299,10 @@ handlers:
       enabled: false          # Enable if you dispatch concurrent agents
       priority: 46
 
+    installed_plugin_edit_advisor:  # Advises when a write lands in an installed Claude Code plugin's files
+      enabled: true
+      priority: 42
+
     dispatch_declaration:  # Advises/enforces a file-handoff declaration on Task dispatch
       enabled: true          # On by default (Plan 00307 Task 4.3); set false to opt out
       priority: 48

@@ -95,7 +95,7 @@ first, and the other fixes build on it.
   layout rules, and the memory policy is unchanged (P4). A plugin root is
   recognised by `.claude-plugin/plugin.json` or `marketplace.json`, and its
   component markdown is allowed (G8).
-- [ ] ⬜ **Task 3.3**: An advisory on writes under the installed plugin cache
+- [x] ✅ **Task 3.3**: An advisory on writes under the installed plugin cache
   or marketplaces (G16). `project_containment` reads the Claude home per
   session (G10).
 

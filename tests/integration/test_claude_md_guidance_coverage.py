@@ -431,6 +431,10 @@ _EXEMPT_FROM_GUIDANCE: dict[str, str] = {
     "DaemonDocsGuardHandler": "T4 one sentence at fire time carries the whole advice",
     "GitContextInjectorHandler": "T4 the injected git status IS the content",
     "GlobalNpmAdvisorHandler": "T4 never denies; the fire-time note is the whole advice",
+    "InstalledPluginEditAdvisorHandler": (
+        "T4 never denies; the fire-time note names the file, the update that "
+        "discards it, and the fork/upstream remedy"
+    ),
     "WebSearchYearHandler": "T4 message already carries the year, query and alternatives",
     "GitFilemodeCheckerHandler": "T4 fires once at session start with the full remedy",
     "GuardConfigDriftHandler": (

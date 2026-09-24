@@ -550,6 +550,10 @@ handlers:
       enabled: true
       priority: 46
 
+    installed_plugin_edit_advisor:  # Advises when a write lands in an installed Claude Code plugin (Plan 00468 G16)
+      enabled: true
+      priority: 42
+
     dispatch_declaration:  # Advises a file-handoff declaration on Task dispatch (Plan 00307)
       enabled: true
       priority: 48

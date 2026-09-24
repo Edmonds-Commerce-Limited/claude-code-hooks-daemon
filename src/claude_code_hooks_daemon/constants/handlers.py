@@ -424,6 +424,12 @@ class HandlerID:
         config_key="agent_isolation_advisor",
         display_name="agent-isolation-advisor",
     )
+    # Plan 00468 G16: a write into an installed Claude Code plugin's files.
+    INSTALLED_PLUGIN_EDIT_ADVISOR = HandlerIDMeta(
+        class_name="InstalledPluginEditAdvisorHandler",
+        config_key="installed_plugin_edit_advisor",
+        display_name="installed-plugin-edit-advisor",
+    )
     GIT_HOOKS_EXECUTABLE_FIXER = HandlerIDMeta(
         class_name="GitHooksExecutableFixerHandler",
         config_key="git_hooks_executable_fixer",

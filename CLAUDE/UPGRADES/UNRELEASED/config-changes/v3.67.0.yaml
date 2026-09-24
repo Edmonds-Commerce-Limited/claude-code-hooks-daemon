@@ -41,6 +41,30 @@ config_changes:
       recommended: true
       dormant: false
 
+    - key: handlers.pre_tool_use.installed_plugin_edit_advisor
+      description: >-
+        Advises, never blocks, when a Write, Edit, NotebookEdit or plain Bash
+        write lands in an installed Claude Code plugin's files: plugins/cache/
+        or plugins/marketplaces/ under the Claude config dir, both the
+        daemon's and the session's own (read from the payload's transcript
+        path). Claude Code replaces those files on the next plugin update, so
+        the change is lost without a word, and it alters a third-party prompt,
+        hook or script as its author published it. The advisory names each
+        file and says to fork the plugin or send the change upstream. A
+        plugin's own data store, plugins/data/, is not covered.
+      example_yaml: |
+        handlers:
+          pre_tool_use:
+            installed_plugin_edit_advisor:
+              enabled: true
+              priority: 42
+      migration_note: >-
+        On by default and silent unless a write targets an installed plugin's
+        files. Disable with
+        handlers.pre_tool_use.installed_plugin_edit_advisor.enabled: false.
+      recommended: true
+      dormant: false
+
   renamed: []
 
   removed: []

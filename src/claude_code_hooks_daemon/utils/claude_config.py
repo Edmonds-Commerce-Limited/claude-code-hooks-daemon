@@ -30,6 +30,7 @@ PROJECTS_DIRNAME: Final[str] = "projects"
 #: Claude Code cuts a longer project directory name and appends a hash.
 PROJECT_DIR_NAME_MAX_LENGTH: Final[int] = 200
 
+_TRANSCRIPT_SUFFIX: Final[str] = ".jsonl"
 _REPLACEMENT_UNIT: Final[str] = "-"
 _BASE36_DIGITS: Final[str] = "0123456789abcdefghijklmnopqrstuvwxyz"
 _UTF16_UNIT_BYTES: Final[int] = 2
@@ -84,6 +85,26 @@ def config_dir_within(project_root: Path, *, config_dir: Path | None = None) -> 
     if resolved_dir == resolved_root or not resolved_dir.is_relative_to(resolved_root):
         return None
     return resolved_dir.relative_to(resolved_root).as_posix()
+
+
+def session_config_dir(transcript_path: object) -> Path | None:
+    """The calling session's config dir, read from its transcript path.
+
+    Claude Code keeps a session's transcript at
+    ``<config dir>/projects/<name>/<session>.jsonl`` and names it in every hook
+    payload, so that exact shape yields the SESSION's config dir, which may
+    differ from the daemon's (Plan 00468 G10). Any other shape, or a relative
+    path, yields None: an allowance is never inferred from a guess.
+    """
+    if not isinstance(transcript_path, str) or not transcript_path:
+        return None
+    transcript = Path(transcript_path)
+    if not transcript.is_absolute() or transcript.suffix != _TRANSCRIPT_SUFFIX:
+        return None
+    projects_dir = transcript.parent.parent
+    if projects_dir.name != PROJECTS_DIRNAME:
+        return None
+    return projects_dir.parent
 
 
 def _utf16_units(text: str) -> list[int]:

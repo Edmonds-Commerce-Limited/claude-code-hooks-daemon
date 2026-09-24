@@ -322,6 +322,10 @@ class Priority:
     # QA pair at 44 -- a sibling gate on the same `git commit` trigger, not an
     # extension of either.
     STAGED_LINT_GATE = 43
+    # Plan 00468 G16: an advisory on writes into an installed Claude Code
+    # plugin's files. It only adds context, so it sits in the workflow band
+    # after the gates at 40 that can decide something.
+    INSTALLED_PLUGIN_EDIT_ADVISOR = 42
     # Plan 00367: shares 43 with staged_lint_gate the way the docs QA pair
     # shares 47 -- disjoint tool shapes (PLAN.md Write/Edit vs git-commit
     # Bash), so the slot never collides in practice. Sits BEFORE the plan QA

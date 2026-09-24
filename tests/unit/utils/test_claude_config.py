@@ -18,6 +18,7 @@ from claude_code_hooks_daemon.utils.claude_config import (
     claude_project_dir,
     config_dir_within,
     project_dir_name,
+    session_config_dir,
 )
 
 
@@ -76,6 +77,31 @@ class TestConfigDirWithin:
         """A config dir equal to the root would make every project file
         'config' — never a sensible answer, so it is refused."""
         assert config_dir_within(tmp_path, config_dir=tmp_path) is None
+
+
+class TestSessionConfigDir:
+    """The calling session's config dir, read from the transcript path Claude
+    Code names in every payload (Plan 00468 G10): the daemon's own
+    environment is fixed at start and may belong to a different home."""
+
+    def test_the_transcript_names_its_config_dir(self, tmp_path: Path) -> None:
+        transcript = tmp_path / "home" / ".claude" / "projects" / "-repo" / "abc.jsonl"
+        assert session_config_dir(str(transcript)) == tmp_path / "home" / ".claude"
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            None,
+            "",
+            42,
+            "relative/projects/-repo/abc.jsonl",
+            "/home/.claude/logs/-repo/abc.jsonl",
+            "/home/.claude/projects/-repo/abc.txt",
+            "/home/.claude/projects/-repo/session/subagents/agent-1.jsonl",
+        ],
+    )
+    def test_any_other_shape_names_nothing(self, value: object) -> None:
+        assert session_config_dir(value) is None
 
 
 class TestProjectDirName:
