@@ -4,7 +4,13 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00417: supervisor operator signals](00417-supervisor-operator-signals/PLAN.md) - Complete at `5237f62a`…`3edc1ba4` + the archiving commit (a closed channel letting a host warn every session that the machine reboots in N minutes; fixed kinds, integer payload, no free text, because a channel from outside the container is a prompt-injection surface by default. From issue #39)
+
+- [00416: session start action tiers and teeth](00416-session-start-action-tiers-and-teeth/PLAN.md) - Complete at `c2e52bb5`…`97b7dea2` + the archiving commit (SessionStart output was delivered but not ACTED ON — 25 handlers in one flat block read as scenery. ACTION_REQUIRED is COMPUTED from "has a verifier and it is failing", never declared, so the tier cannot inflate; the Stop hook blocks on a failing verifier. Carried N6/N15 from 00413)
+
 - [00413: niggles ledger thirteen](00413-niggles-ledger-thirteen/PLAN.md) - Complete at `1861a5ec`…`c2e52bb5` + the archiving commit (seventeen entries, all terminal; opened by a new collaborator's fresh clone, the one environment this project structurally cannot dogfood. N3→00414, N17→00415, N6/N15→00416)
+
+- [00412: jobs, recurring work and security review](00412-jobs-recurring-work-and-security-review/PLAN.md) - Complete at `f1c99abb`…`f48e1349` + the archiving commit (a second work concept beside Plans: a ROUTINE is recurring work that never completes, recorded per RUN with coverage as an INTERVAL so a gap between runs is detectable. First routine is a security review — a full sweep plus a per-release delta — run for real; the unbuilt work carries to 00421)
 
 - [00411: host hostname in status line](00411-host-hostname-in-status-line/PLAN.md) - Complete at `03aabcee`…`09adbf9b` + the archiving commit (an optional segment naming the machine the session is really on; a container's own hostname is the container ID, and probing proved the host's name is unreadable from inside one — the `/etc/hosts` loopback read is host-distro-dependent, so an explicit export is the mechanism and the read is only a hint)
 

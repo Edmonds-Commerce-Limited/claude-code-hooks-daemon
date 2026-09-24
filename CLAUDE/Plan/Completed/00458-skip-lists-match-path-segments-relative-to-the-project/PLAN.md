@@ -1,6 +1,6 @@
 # Plan 00458: skip lists match path segments relative to the project
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-24
 **Owner**: dev
 **Priority**: High
@@ -91,16 +91,24 @@ keeping the defect.
 
 ### Phase 2: Deliver
 
-- [ ] ⬜ **Task 2.1**: Merge `--no-ff`, verify ancestry and CI, and restart
+- [x] ✅ **Task 2.1**: Merge `--no-ff`, verify ancestry and CI, and restart
   the daemon.
-- [ ] ⬜ **Task 2.2**: Mark 00422 N20 remedied.
+- [x] ✅ **Task 2.2**: Mark 00422 N20 remedied.
 
 ## Success Criteria
 
-- [ ] In a worktree whose name ends in `-venv`, the 14 acceptance DENY
-  probes produce their declared decisions.
-- [ ] The detector fails on the pre-fix tree and passes after.
-- [ ] Full QA passes and CI is green.
+- [x] In a worktree whose name ends in `-venv`, the 14 acceptance DENY
+  probes produce their declared decisions. Plan 00456's final QA in
+  `worktree-issue-53-venv` ran at `0686445d`, which contains the fix
+  merge `b8ce4b49`. It had 0 failing tests, including
+  `TestTheDeclaredProbesBehaveAsDeclared`.
+- [x] The detector fails on the pre-fix tree and passes after. It was RED on
+  exactly the six sites (`d693e13c`), and GREEN after `ebb31e61`.
+- [x] Full QA passes and CI is green. CI on main is green at `aeca4c04`
+  (run 36007636154), which contains all three merges.
+- [x] Every release-bound consequence is in the pending-release holding
+  area:
+  `UNRELEASED/release-notes/08-skip-lists-now-match-whole-path-segments-relative-to-your-project.md`
 
 ## Delivery & Milestones
 
@@ -108,4 +116,6 @@ keeping the defect.
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00458-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- Not yet delivered.
+- Merged to main at `b8ce4b49` (the fix), then `54f5c357`
+  (`matches_directory` is project-relative too) and `47999859` (the
+  detector follows derived loop variables), all `--no-ff`.
