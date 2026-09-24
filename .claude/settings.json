@@ -1,16 +1,10 @@
 {
-  "plansDirectory": "./CLAUDE/Plan",
   "permissions": {
     "deny": [
       "Edit(//tmp/**)",
       "Edit(//var/tmp/**)",
       "Edit(//dev/shm/**)"
     ]
-  },
-  "statusLine": {
-    "type": "command",
-    "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/status-line",
-    "refreshInterval": 1
   },
   "hooks": {
     "PreToolUse": [
@@ -316,5 +310,22 @@
       }
     ]
   },
-  "enableArtifact": false
+  "enableArtifact": false,
+  "statusLine": {
+    "type": "command",
+    "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/status-line",
+    "refreshInterval": 1
+  },
+  "extraKnownMarketplaces": {
+    "defence-before-fix": {
+      "source": {
+        "source": "github",
+        "repo": "Defence-Before-Fix/claude-plugin"
+      }
+    }
+  },
+  "plansDirectory": "./CLAUDE/Plan",
+  "enabledPlugins": {
+    "defence-before-fix@defence-before-fix": true
+  }
 }
