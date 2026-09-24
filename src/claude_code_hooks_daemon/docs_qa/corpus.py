@@ -53,7 +53,7 @@ from claude_code_hooks_daemon.utils.authored_paths import (
     authored_path,
     contained_authored_path,
 )
-from claude_code_hooks_daemon.utils.git_repo import git_visible_paths
+from claude_code_hooks_daemon.utils.git_repo import git_visible_ancestor_dirs, git_visible_paths
 from claude_code_hooks_daemon.utils.markdown_links import extract_link_targets
 from claude_code_hooks_daemon.utils.path_exclusion import is_path_excluded
 from claude_code_hooks_daemon.utils.vendor_paths import (
@@ -152,23 +152,6 @@ OWN_EXCLUDED_DIR_NAMES: Final[frozenset[str]] = frozenset(
 # plugin markdown the filter exists to remove -- so the one deliberate
 # inclusion is named here explicitly rather than left an accidental gap.
 _GITIGNORED_MARKDOWN_INCLUDES: Final[frozenset[str]] = frozenset({".claude/ccy/CLAUDE.md"})
-
-
-def _git_visible_ancestor_dirs(rel_paths: frozenset[str]) -> frozenset[str]:
-    """Every directory (at every depth) that encloses one of ``rel_paths``.
-
-    A tree walk must still DESCEND into a directory that merely CONTAINS a
-    git-visible file, the same "descending is not including" principle
-    :func:`walk_into` already applies to vendor exceptions -- pruning by the
-    file-level answer alone would never reach a git-visible file nested two
-    levels under an otherwise-ignored parent.
-    """
-    dirs: set[str] = set()
-    for rel_path in rel_paths:
-        parts = rel_path.split("/")
-        for depth in range(1, len(parts)):
-            dirs.add("/".join(parts[:depth]))
-    return frozenset(dirs)
 
 
 def is_module_doc_path(rel_path: str, agent_tree: str) -> bool:
@@ -344,7 +327,7 @@ def iter_markdown_paths(
     descend_roots = (
         None
         if git_visible is None
-        else _git_visible_ancestor_dirs(git_visible | _GITIGNORED_MARKDOWN_INCLUDES)
+        else git_visible_ancestor_dirs(git_visible | _GITIGNORED_MARKDOWN_INCLUDES)
     )
     matches: list[str] = []
     for dirpath, dirnames, filenames in os.walk(project_root):

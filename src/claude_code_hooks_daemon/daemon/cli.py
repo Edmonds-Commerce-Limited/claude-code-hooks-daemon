@@ -98,7 +98,11 @@ from claude_code_hooks_daemon.install.release_notes import load_release_notes_be
 from claude_code_hooks_daemon.issue_report.build import build_report
 from claude_code_hooks_daemon.issue_report.upstream import filing_command
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
-from claude_code_hooks_daemon.utils.git_repo import run_git
+from claude_code_hooks_daemon.utils.git_repo import (
+    git_visible_ancestor_dirs,
+    git_visible_paths,
+    run_git,
+)
 from claude_code_hooks_daemon.utils.hook_registration import (
     detect_duplicate_hooks,
     detect_legacy_hook_commands,
@@ -5253,8 +5257,9 @@ def _iter_markdown_candidates(
 ) -> Iterator[Path]:
     """Yield markdown files below ``root``, in directory-walk order.
 
-    Two independent filters apply here (Plan 00429), and only to this
-    directory WALK — a file the caller names directly bypasses both:
+    Three independent filters apply here, and only to this directory WALK —
+    a file the caller names directly bypasses all three (see
+    ``cmd_format_markdown``'s own gitignore refusal for that case instead):
 
     - Any directory below ``root`` that is itself a git repository is
       pruned, so nothing inside it is ever visited. The walk root's OWN
@@ -5266,15 +5271,33 @@ def _iter_markdown_candidates(
       resolve against ``project_root``, NOT against ``root`` — they are
       declared relative to the project, so a walk root below it must still
       match them (see ``_enclosing_project_root``).
+    - Plan 00468 P3 / Plan 00466 N9's class: a path git does not consider
+      part of the project (untracked, matched by a ``.gitignore`` rule) is
+      excluded too. A nested git repo protects a vendored dependency with
+      its OWN checkout (the filter above), but a Claude Code plugin's cache
+      or marketplace snapshot under ``.claude/ccy/plugins/`` has no ``.git``
+      of its own — nothing else here would ever notice it is not this
+      project's content. See :func:`utils.git_repo.git_visible_paths` for
+      the single git call this costs and its not-a-repository fallback.
     """
     from claude_code_hooks_daemon.utils.path_exclusion import is_path_excluded
 
     project_root_str = str(project_root)
+    git_visible = git_visible_paths(project_root)
+    descend_roots = None if git_visible is None else git_visible_ancestor_dirs(git_visible)
     for dirpath, dirnames, filenames in os.walk(root):
         current = Path(dirpath)
-        dirnames[:] = sorted(
-            name for name in dirnames if not _is_nested_git_repo_root(current / name)
-        )
+        kept_dirnames = []
+        for name in sorted(dirnames):
+            child = current / name
+            if _is_nested_git_repo_root(child):
+                continue
+            if descend_roots is not None and not _rel_is_git_visible(
+                child, project_root, descend_roots
+            ):
+                continue
+            kept_dirnames.append(name)
+        dirnames[:] = kept_dirnames
         for filename in sorted(filenames):
             candidate = current / filename
             if not candidate.name.lower().endswith(_MARKDOWN_EXTENSIONS):
@@ -5286,7 +5309,54 @@ def _iter_markdown_candidates(
                 continue
             if is_path_excluded(str(candidate), exclude_paths, project_root=project_root_str):
                 continue
+            if git_visible is not None and not _rel_is_git_visible(
+                candidate, project_root, git_visible
+            ):
+                continue
             yield candidate
+
+
+def _rel_is_git_visible(path: Path, project_root: Path, visible: frozenset[str]) -> bool:
+    """Whether ``path``, expressed relative to ``project_root``, is in ``visible``.
+
+    ``visible`` is either :func:`utils.git_repo.git_visible_paths`'s own
+    result (file membership) or :func:`utils.git_repo.git_visible_ancestor_dirs`'
+    output (directory-descent membership) — both are keyed the same way, by
+    the POSIX-relative path from ``project_root``. A ``path`` outside
+    ``project_root`` entirely (which should not occur: every caller derives
+    both from the same walk) is treated as not visible rather than raising.
+    """
+    try:
+        rel = path.relative_to(project_root).as_posix()
+    except ValueError:
+        return False
+    return rel in visible
+
+
+def _gitignored_message(path: Path) -> str:
+    """The refusal text `cmd_format_markdown` prints for a gitignored target."""
+    return (
+        f"ERROR: {path} is gitignored -- format-markdown will not rewrite content "
+        "outside the project (Plan 00468 P3)"
+    )
+
+
+def _is_gitignored(path: Path, project_root: Path) -> bool:
+    """Whether ``git`` ignores ``path`` (Plan 00468 P3).
+
+    Used to refuse an EXPLICITLY named target (file or directory) before
+    any walk begins — ``_iter_markdown_candidates``'s per-candidate filter
+    only ever prunes a walk, and a file or directory the caller names
+    directly bypasses every walk filter by design (the same "explicit
+    consent" convention ``daemon.exclude_paths`` already follows there).
+
+    ``False`` when ``project_root`` is not a git repository, or
+    ``check-ignore`` cannot answer: the outside-a-repo fallback
+    :func:`utils.git_repo.git_visible_paths` already documents this same
+    choice — nothing is refused when there is no git truth to refuse it by.
+    """
+    result = run_git(project_root, "check-ignore", "-q", str(path))
+    return result.returncode == 0
 
 
 def _format_single_markdown_file(path: Path, check: bool) -> tuple[bool, bool]:
@@ -5341,6 +5411,21 @@ def cmd_format_markdown(args: argparse.Namespace) -> int:
         print(f"ERROR: Path does not exist: {path}", file=sys.stderr)
         return 1
 
+    # Plan 00468 P3: an EXPLICITLY named target -- file or directory -- that
+    # git ignores is refused outright, before any walk or single-file write.
+    # `_iter_markdown_candidates`'s filtering only ever prunes a WALK; a
+    # target the caller names directly bypasses every walk filter by design
+    # (see that function's own docstring), so this is the one place that
+    # question is asked for the target itself. `_enclosing_project_root`
+    # expects a DIRECTORY to start climbing from -- `path` is only guaranteed
+    # to be one once the `path.is_file()` branch below has ruled the other
+    # case out, so a file target climbs from its PARENT instead (mirrors
+    # `GitRepo.resolve_for`'s own file-vs-directory normalisation).
+    project_root = _enclosing_project_root(path if path.is_dir() else path.parent)
+    if _is_gitignored(path, project_root):
+        print(_gitignored_message(path), file=sys.stderr)
+        return 1
+
     if path.is_file():
         if not path.name.lower().endswith(_MARKDOWN_EXTENSIONS):
             print(f"ERROR: {path} is not a markdown file", file=sys.stderr)
@@ -5356,12 +5441,12 @@ def cmd_format_markdown(args: argparse.Namespace) -> int:
         return 0
 
     # Directory mode: recurse and process every markdown file, skipping any
-    # nested git repository below `path` and anything `daemon.exclude_paths`
-    # excludes (Plan 00429) -- neither filter applies to a file the caller
+    # nested git repository below `path`, anything `daemon.exclude_paths`
+    # excludes (Plan 00429), and anything git does not consider part of the
+    # project (Plan 00468 P3) -- neither filter applies to a file the caller
     # names directly, handled in the branch above.
     from claude_code_hooks_daemon.config.models import Config
 
-    project_root = _enclosing_project_root(path)
     config = Config.load_or_default(project_root / ".claude" / "hooks-daemon.yaml")
     exclude_paths = config.daemon.exclude_paths
 

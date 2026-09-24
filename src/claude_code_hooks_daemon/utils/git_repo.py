@@ -158,6 +158,25 @@ def git_visible_paths(project_root: Path) -> frozenset[str] | None:
     return frozenset(token for token in result.stdout.split("\0") if token)
 
 
+def git_visible_ancestor_dirs(rel_paths: frozenset[str]) -> frozenset[str]:
+    """Every directory (at every depth) that encloses one of ``rel_paths``.
+
+    A pruned tree walk must still DESCEND into a directory that merely
+    CONTAINS a git-visible file — pruning by the file-level answer alone
+    would never reach a git-visible file nested two levels under an
+    otherwise-ignored parent. Shared by every caller of
+    :func:`git_visible_paths` that prunes its OWN walk rather than reading a
+    pre-built candidate list (:mod:`docs_qa.corpus`, ``daemon.cli``'s
+    ``format-markdown`` walk).
+    """
+    dirs: set[str] = set()
+    for rel_path in rel_paths:
+        parts = rel_path.split("/")
+        for depth in range(1, len(parts)):
+            dirs.add("/".join(parts[:depth]))
+    return frozenset(dirs)
+
+
 _GIT_DIR_ENTRY: Final[str] = ".git"
 _GIT_FILE_GITDIR_PREFIX: Final[str] = "gitdir:"
 _WORKTREE_GITDIR_MARKER: Final[str] = "/worktrees/"

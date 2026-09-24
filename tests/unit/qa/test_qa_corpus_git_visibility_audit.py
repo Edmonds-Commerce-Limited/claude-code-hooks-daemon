@@ -1,5 +1,5 @@
-"""Every QA corpus that enumerates files from disk answers "is this part of
-the project" the same way (Plan 00466 N9).
+"""Every QA/daemon walker that enumerates files from disk answers "is this
+part of the project" the same way (Plan 00466 N9, extended by Plan 00468 P3).
 
 ``docs_qa/corpus.py`` walked the filesystem with no regard for
 ``.gitignore``, so installing a Claude Code plugin -- which vendors spec
@@ -11,12 +11,21 @@ consumed by ``docs_qa/corpus.py`` and ``scripts/qa/check_doc_truth.py``
 (which had the SAME gap under a different name: ``.claude/ccy/plugins/cache/``
 was never added to its directory denylist).
 
-That remedy's own text asks for a CLASS audit: every other QA corpus named in
-the ledger entry either moves onto the same shared helper, or documents why
-it must see ignored files. This is that audit, made mechanical rather than a
-one-off note: :data:`_AUDIT` is the declared verdict for each corpus, and the
-tests below verify each declared fact still holds, the same ratchet shape
-``test_qa_package_dependency_direction.py`` uses for import edges. A corpus
+Plan 00468's own plugin audit (finding P3) found the identical defect one
+layer down: ``daemon/cli.py``'s ``format-markdown`` walk would silently
+REWRITE a gitignored plugin's vendored markdown (173 ``Would reformat``
+lines against a real install), and ``docs_qa/comment_finder.py``'s
+``find-comment-blocks`` would surface its comments as this project's own
+documentation debt. Both are migrated here too, alongside
+``format-markdown``'s own explicit-target refusal (naming a gitignored path
+directly is refused with a message, not silently walked to zero files).
+
+Both remedies ask for a CLASS audit: every QA/daemon walker either moves onto
+the same shared helper, or documents why it must see ignored files. This is
+that audit, made mechanical rather than a one-off note: :data:`_AUDIT` is the
+declared verdict for each walker, and the tests below verify each declared
+fact still holds, the same ratchet shape
+``test_qa_package_dependency_direction.py`` uses for import edges. A walker
 that starts walking the filesystem again without updating its entry here, or
 whose entry claims "migrated" but stops importing the shared helper, fails
 the test that exercises it.
@@ -153,6 +162,35 @@ _AUDIT: Final[dict[str, AuditEntry]] = {
             "is tracked."
         ),
     ),
+    "format_markdown": AuditEntry(
+        verdict=Verdict.MIGRATED,
+        source="src/claude_code_hooks_daemon/daemon/cli.py",
+        reason=(
+            "Plan 00468 P3, release-blocking: _iter_markdown_candidates "
+            "pruned nested git repos and daemon.exclude_paths but ignored "
+            ".gitignore, so `format-markdown .claude/ccy/plugins --check` "
+            "reported 173 Would-reformat lines against a real plugin "
+            "install. Now filters through git_visible_paths, with a "
+            "directory-descent prune (git_visible_ancestor_dirs) for "
+            "performance, plus a separate explicit-target refusal "
+            "(_is_gitignored) so naming a gitignored path directly is "
+            "refused with a message rather than silently walked to zero "
+            "files."
+        ),
+    ),
+    "find_comment_blocks": AuditEntry(
+        verdict=Verdict.MIGRATED,
+        source="src/claude_code_hooks_daemon/docs_qa/comment_finder.py",
+        reason=(
+            "Plan 00468 P3's sibling: _iter_candidate_files's directory "
+            "expansion (path.rglob('*')) had the same gap -- a gitignored "
+            "plugin's comments would surface in the docs-qa agent's "
+            "worklist as this project's own documentation debt. Now "
+            "filters through git_visible_paths via GitRepo.resolve_for; a "
+            "file argument named directly is still unfiltered, matching "
+            "daemon.cli's explicit-consent convention."
+        ),
+    ),
 }
 
 
@@ -197,9 +235,9 @@ def _calls_shared_helper(source: str) -> bool:
 
 
 class TestEveryNamedCorpusIsAudited:
-    """The set this file covers must match the ledger's own list exactly."""
+    """The set this file covers must match both ledger entries' lists."""
 
-    def test_every_ledger_named_corpus_has_an_entry(self) -> None:
+    def test_every_00466_n9_named_corpus_has_an_entry(self) -> None:
         named = {
             "plan_qa",
             "doc_snippets",
@@ -213,7 +251,12 @@ class TestEveryNamedCorpusIsAudited:
             "docs_qa",
         }
         missing = named - set(_AUDIT)
-        assert missing == set(), f"corpora named in the ledger with no audit entry: {missing}"
+        assert missing == set(), f"corpora named in ledger 00466 N9 with no audit entry: {missing}"
+
+    def test_every_00468_p3_named_walker_has_an_entry(self) -> None:
+        named = {"format_markdown", "find_comment_blocks"}
+        missing = named - set(_AUDIT)
+        assert missing == set(), f"walkers named in Plan 00468 P3 with no audit entry: {missing}"
 
 
 class TestMigratedCorporaActuallyUseTheSharedHelper:

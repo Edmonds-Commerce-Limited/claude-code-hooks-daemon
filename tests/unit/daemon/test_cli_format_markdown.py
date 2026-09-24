@@ -281,6 +281,147 @@ class TestCmdFormatMarkdownRepositoryBoundary:
         assert _ALIGNED_MARKER not in vendored_doc.read_text()
 
 
+def _git_init_project(project_root: Path) -> None:
+    """Init ``project_root`` itself as a git repo, no commit yet.
+
+    Distinct from :func:`_git_init_with_commit`, which inits a NESTED repo
+    below the walk root (the repository-BOUNDARY tests above). Here the walk
+    ROOT itself is the repository, which is what ``git_visible_paths`` reads.
+    """
+    subprocess.run(["git", "init", str(project_root)], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(project_root), "config", "user.email", "test@example.com"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(project_root), "config", "user.name", "Test"],
+        check=True,
+        capture_output=True,
+    )
+
+
+def _git_commit_all(project_root: Path) -> None:
+    subprocess.run(["git", "-C", str(project_root), "add", "-A"], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(project_root), "commit", "-m", "initial"],
+        check=True,
+        capture_output=True,
+    )
+
+
+class TestCmdFormatMarkdownGitIgnore:
+    """Plan 00468 P3 / Plan 00466 N9's class: a gitignored, non-git directory
+    (a Claude Code plugin's cache -- ``.claude/ccy/plugins/cache/...`` has no
+    ``.git`` of its own, so the nested-repo boundary above never protects it)
+    must not be walked, rewritten, or even reported as needing a reformat.
+    """
+
+    def test_gitignored_directory_is_not_walked_or_rewritten(self, tmp_path: Path) -> None:
+        _git_init_project(tmp_path)
+        own_file = tmp_path / "own.md"
+        own_file.write_text(_UNALIGNED_TABLE)
+        _git_commit_all(tmp_path)
+
+        (tmp_path / ".gitignore").write_text("plugins/\n")
+        plugin_doc = tmp_path / "plugins" / "cache" / "some-plugin" / "SPEC.md"
+        plugin_doc.parent.mkdir(parents=True)
+        plugin_doc.write_text(_UNALIGNED_TABLE)
+
+        args = argparse.Namespace(path=tmp_path, check=False)
+        result = cmd_format_markdown(args)
+
+        assert result == 0
+        assert _ALIGNED_MARKER in own_file.read_text()
+        assert _ALIGNED_MARKER not in plugin_doc.read_text()
+
+    def test_gitignored_directory_is_not_reported_in_check_mode(self, tmp_path: Path) -> None:
+        _git_init_project(tmp_path)
+        own_file = tmp_path / "own.md"
+        own_file.write_text("# Own\n\nAlready clean.\n")
+        _git_commit_all(tmp_path)
+
+        (tmp_path / ".gitignore").write_text("plugins/\n")
+        plugin_doc = tmp_path / "plugins" / "cache" / "some-plugin" / "SPEC.md"
+        plugin_doc.parent.mkdir(parents=True)
+        plugin_doc.write_text(_UNALIGNED_TABLE)
+
+        args = argparse.Namespace(path=tmp_path, check=True)
+        result = cmd_format_markdown(args)
+
+        assert (
+            result == 0
+        ), "the gitignored plugin file must not surface as a would-reformat finding"
+        assert plugin_doc.read_text() == _UNALIGNED_TABLE
+
+    def test_untracked_but_not_ignored_file_is_still_formatted(self, tmp_path: Path) -> None:
+        _git_init_project(tmp_path)
+        (tmp_path / ".gitkeep").write_text("")
+        _git_commit_all(tmp_path)
+
+        new_file = tmp_path / "new.md"
+        new_file.write_text(_UNALIGNED_TABLE)
+
+        args = argparse.Namespace(path=tmp_path, check=False)
+        result = cmd_format_markdown(args)
+
+        assert result == 0
+        assert _ALIGNED_MARKER in new_file.read_text()
+
+    def test_naming_a_gitignored_directory_directly_is_refused(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Task 3.1: ``format-markdown .claude/ccy/plugins`` must not rewrite
+        anything, even when the plugin tree is named directly rather than
+        reached by walking a wider root."""
+        _git_init_project(tmp_path)
+        (tmp_path / "own.md").write_text("# Own\n")
+        _git_commit_all(tmp_path)
+
+        (tmp_path / ".gitignore").write_text("plugins/\n")
+        plugins_dir = tmp_path / "plugins"
+        plugin_doc = plugins_dir / "cache" / "some-plugin" / "SPEC.md"
+        plugin_doc.parent.mkdir(parents=True)
+        plugin_doc.write_text(_UNALIGNED_TABLE)
+
+        args = argparse.Namespace(path=plugins_dir, check=False)
+        result = cmd_format_markdown(args)
+
+        assert result == 1
+        assert plugin_doc.read_text() == _UNALIGNED_TABLE
+        captured = capsys.readouterr()
+        assert "gitignored" in captured.err.lower()
+
+    def test_naming_a_gitignored_file_directly_is_refused(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _git_init_project(tmp_path)
+        (tmp_path / "own.md").write_text("# Own\n")
+        _git_commit_all(tmp_path)
+
+        (tmp_path / ".gitignore").write_text("ignored.md\n")
+        ignored_file = tmp_path / "ignored.md"
+        ignored_file.write_text(_UNALIGNED_TABLE)
+
+        args = argparse.Namespace(path=ignored_file, check=False)
+        result = cmd_format_markdown(args)
+
+        assert result == 1
+        assert ignored_file.read_text() == _UNALIGNED_TABLE
+        captured = capsys.readouterr()
+        assert "gitignored" in captured.err.lower()
+
+    def test_outside_a_git_repo_falls_back_to_the_unfiltered_walk(self, tmp_path: Path) -> None:
+        own_file = tmp_path / "own.md"
+        own_file.write_text(_UNALIGNED_TABLE)
+
+        args = argparse.Namespace(path=tmp_path, check=False)
+        result = cmd_format_markdown(args)
+
+        assert result == 0
+        assert _ALIGNED_MARKER in own_file.read_text()
+
+
 class TestCmdFormatMarkdownExcludePaths:
     """Plan 00429: the directory walk honours ``daemon.exclude_paths``."""
 
