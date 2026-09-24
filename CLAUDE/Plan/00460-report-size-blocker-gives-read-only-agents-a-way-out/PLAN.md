@@ -83,12 +83,12 @@ when the dispatched type cannot write.
 
 ## Success Criteria
 
-- [ ] Test: an `Explore` stop over the threshold never receives "write the
+- [x] Test: an `Explore` stop over the threshold never receives "write the
   report to a file" and gets the read-only way out. A
   `general-purpose` stop is unchanged.
-- [ ] Test: a project agent whose frontmatter `tools:` lacks `Write` is
+- [x] Test: a project agent whose frontmatter `tools:` lacks `Write` is
   treated as read-only; one with no `tools:` line is not.
-- [ ] Test: `dispatch_declaration` advises on a read-only type with a
+- [x] Test: `dispatch_declaration` advises on a read-only type with a
   declared report path.
 - [ ] Full QA passes and CI is green.
 
