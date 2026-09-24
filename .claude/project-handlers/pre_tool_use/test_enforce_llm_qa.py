@@ -527,6 +527,67 @@ class TestEnforceLlmQaHandler:
         command = "git bisect run ./scripts/qa/run_all.sh"
         assert handler.matches(bash_hook_input(command)) is True
 
+    # ── matches() — M-3 timing bounds (Plan 00466 review 3): the SAME ──
+    # catastrophic `\S*\{[^{}]*\}\S*` regex the secret matcher's M2d fix
+    # abandoned was still present here, plus an unbounded `_expand_braces`
+    # recursion and an unbounded eval-recursion re-parse. Every case here
+    # must both stay under 1s AND end in the correct verdict.
+
+    def test_a_huge_no_brace_word_does_not_trigger_catastrophic_backtracking(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        """The reviewer's 94 KB / 200 KB reproducer: a huge run of
+        non-whitespace carrying no brace at all, immediately followed by a
+        real invocation."""
+        import time
+
+        for size_kb in (94, 200):
+            word = "a" * (size_kb * 1024)
+            command = f"echo {word} run_all.shx"
+            start = time.monotonic()
+            result = handler.matches(bash_hook_input(command))
+            elapsed = time.monotonic() - start
+            assert elapsed < 1.0, f"{size_kb}KB took {elapsed:.2f}s"
+            # `run_all.shx` does not itself name the script and `echo` is
+            # not a real invocation -- ALLOW is the correct verdict here,
+            # timing is the point of this test.
+            assert result is False
+
+    def test_a_wide_brace_word_stays_fast(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        """`{a,b}` x 22 in one word: exponential (2**22 spellings) under
+        naive recursion. Mirrors the reviewer's exact reproducer shape --
+        no token in the command literally names the script (`run_all.shx`
+        does not), so this can only reach a verdict by actually walking
+        `_brace_words_in_segment`/`_expand_braces`, the path review 3
+        found unbounded. The brace word exceeds the shared expander's
+        spelling cap, so the verdict is DENY (fail closed: "cannot rule
+        out" a spelling that names the script), not the specific
+        substring-match ALLOW a fully-enumerated check would give."""
+        import time
+
+        command = "bash " + "{a,b}" * 22 + " run_all.shx"
+        start = time.monotonic()
+        result = handler.matches(bash_hook_input(command))
+        elapsed = time.monotonic() - start
+        assert elapsed < 1.0, f"took {elapsed:.2f}s"
+        assert result is True
+
+    def test_deeply_padded_eval_recursion_stays_fast(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        """The reviewer's `eval `x100 reproducer: each level re-joins and
+        re-parses the whole remaining command, and (before this fix) also
+        re-ran the catastrophic brace regex against it every level."""
+        import time
+
+        command = "eval " * 100 + "a" * (20 * 1024) + " run_all.shx"
+        start = time.monotonic()
+        handler.matches(bash_hook_input(command))
+        elapsed = time.monotonic() - start
+        assert elapsed < 1.0, f"took {elapsed:.2f}s"
+
     def test_still_matches_git_rebase_dash_x_naming_the_script(
         self, handler: EnforceLlmQaHandler, bash_hook_input: Any
     ) -> None:

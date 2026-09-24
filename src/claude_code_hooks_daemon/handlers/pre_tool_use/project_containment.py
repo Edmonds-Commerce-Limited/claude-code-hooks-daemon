@@ -287,17 +287,47 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
         ``matches()`` correctly turned into a DENY (via the error route)
         could be silently overwritten by a CLEAN re-evaluation inside
         ``handle()`` if the underlying fault was transient.
+
+        M-2 (Plan 00466 review 3): ``_dispatch_key`` is called inside its
+        own try/except, not just ``_offending_targets_or_error`` -- this
+        handler's ``_dispatch_key`` already tolerates a malformed
+        ``tool_input`` (``json.dumps(..., default=str)``), but the
+        secret_file_guard sibling this pattern is copied from did not, and
+        the class fix belongs at this shared seam so neither copy can drift
+        back into the same hole.
         """
         result = self._offending_targets_or_error(hook_input)
-        self._cached_dispatch = (self._dispatch_key(hook_input), result)
+        try:
+            key = self._dispatch_key(hook_input)
+        except Exception:
+            logger.exception(
+                "project_containment: _dispatch_key raised; not caching "
+                "(Plan 00466 review 3 M-2)"
+            )
+            self._cached_dispatch = None
+            return result
+        self._cached_dispatch = (key, result)
         return result
 
     def _take_cached(
         self, hook_input: dict[str, Any]
     ) -> tuple[list[str], Path | None, Exception | None]:
-        """The result ``matches()`` computed for THIS call, else a fresh one."""
+        """The result ``matches()`` computed for THIS call, else a fresh one.
+
+        M-2 (Plan 00466 review 3): see ``_compute_and_cache`` for why
+        ``_dispatch_key`` is wrapped here too.
+        """
         cached = self._cached_dispatch
-        if cached is not None and cached[0] == self._dispatch_key(hook_input):
+        try:
+            key = self._dispatch_key(hook_input)
+        except Exception:
+            logger.exception(
+                "project_containment: _dispatch_key raised; re-evaluating "
+                "(Plan 00466 review 3 M-2)"
+            )
+            self._cached_dispatch = None
+            return self._offending_targets_or_error(hook_input)
+        if cached is not None and cached[0] == key:
             self._cached_dispatch = None
             return cached[1]
         return self._offending_targets_or_error(hook_input)

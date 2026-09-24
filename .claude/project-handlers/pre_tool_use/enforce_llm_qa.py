@@ -8,10 +8,12 @@ verbose run_all.sh directly.
 import fnmatch
 import re
 import shlex
-from typing import Any
+from collections.abc import Iterator
+from typing import Any, Final
 
 from claude_code_hooks_daemon.core import AcceptanceTest, Handler, HookResult, TestType
 from claude_code_hooks_daemon.core.hook_result import Decision
+from claude_code_hooks_daemon.utils import shell_expansion
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     split_unquoted,
     strip_quoted_heredoc_bodies,
@@ -202,34 +204,18 @@ def _word_names_the_script(word: str) -> bool:
     return word == _BLOCKED_SCRIPT or word.endswith("/" + _BLOCKED_SCRIPT)
 
 
-#: One-level ``{a,b,c}`` brace group -- the shapes review 2 raised
-#: (``{run_all.sh,}``, ``scripts/qa/{run_all.sh,x}``) need no nesting.
-_BRACE_GROUP_RE = re.compile(r"\{([^{}]*)\}")
+#: M-3 (Plan 00466 review 3): brace-word discovery AND expansion both moved
+#: to the shared bounded primitives in ``utils/shell_expansion`` -- this
+#: module's own ``_BRACE_GROUP_RE``/``_expand_braces`` and, worse, a
+#: ``\S*\{[^{}]*\}\S*`` word-finder regex (the EXACT catastrophically
+#: backtracking shape the secret matcher's own M2d fix abandoned -- measured
+#: here independently at 15s/94KB, >45s/200KB on adversarial no-brace input)
+#: used to live here as a second, independent copy of both defects.
 
 
-def _expand_braces(word: str) -> list[str]:
-    """Concrete spellings of ``word`` for each ``{a,b,c}`` group in it, or
-    ``[word]`` unchanged when it has none (review 2, M1)."""
-    match = _BRACE_GROUP_RE.search(word)
-    if match is None:
-        return [word]
-    prefix, suffix = word[: match.start()], word[match.end() :]
-    expansions = [prefix + alternative + suffix for alternative in match.group(1).split(",")]
-    return [spelling for expansion in expansions for spelling in _expand_braces(expansion)]
-
-
-#: A raw `{...}` brace-expansion WORD, matched directly against the segment
-#: TEXT rather than a shlex token (review 2, M1): `{`/`}` are in
-#: `_PUNCTUATION_CHARS` (needed for the `{ group; }` syntax), so shlex
-#: splits a real brace expansion (`{run_all.sh,}`, no internal whitespace)
-#: into three separate tokens (`{`, the comma-joined body, `}`) before
-#: `_word_could_name_the_script` ever sees it whole.
-_BRACE_WORD_RE = re.compile(r"\S*\{[^{}]*\}\S*")
-
-
-def _brace_words_in_segment(segment: str) -> list[str]:
-    """Every raw brace-expansion word in ``segment``'s own text."""
-    return _BRACE_WORD_RE.findall(segment)
+def _brace_words_in_segment(segment: str) -> Iterator[str]:
+    """Every raw brace-expansion word in ``segment``'s own text (lazily)."""
+    return shell_expansion.iter_brace_words(segment)
 
 
 def _word_could_name_the_script(word: str) -> bool:
@@ -238,8 +224,20 @@ def _word_could_name_the_script(word: str) -> bool:
     a token such as ``run_all.sh*`` or ``{run_all.sh,}`` is not literally
     equal to the script's own path, but names it just as directly as an
     exact word does the moment the shell expands it.
+
+    M-3 (Plan 00466 review 3): a brace group past the shared expander's cap
+    raises ``TooManyToEnumerateError`` rather than enumerating -- treated
+    here as "could name it" (fail closed, DENY): this guard's whole
+    redesign (M1, review 2) is already deny-by-default, over-blocking being
+    the accepted safe direction (m-3, review 2's own minor), so an
+    unenumerable brace word gets the same treatment as one that plainly
+    does.
     """
-    for candidate in _expand_braces(word):
+    try:
+        candidates = shell_expansion.expand_braces(word)
+    except shell_expansion.TooManyToEnumerateError:
+        return True
+    for candidate in candidates:
         if _word_names_the_script(candidate):
             return True
         basename = candidate.rsplit("/", 1)[-1]
@@ -344,7 +342,18 @@ def _substitution_inner_segments(text: str) -> list[str]:
     return inner_segments
 
 
-def _segment_executes_script(segment: str) -> bool:
+#: M-3 (Plan 00466 review 3): a string-executor argument (``eval``) and a
+#: command substitution both feed BACK into ``_has_real_invocation``, which
+#: re-tokenises and re-scans essentially the whole remaining text at every
+#: level -- a legitimate command nests maybe two or three of these deep;
+#: past this cap the recursion gives up and treats the segment as a
+#: candidate invocation (fail closed, matching this guard's own
+#: deny-by-default direction), rather than continuing to re-parse
+#: attacker-controlled padding a fixed, small number of times more.
+_MAX_INVOCATION_RECURSION_DEPTH: Final[int] = 20
+
+
+def _segment_executes_script(segment: str, *, depth: int = 0) -> bool:
     """True when ``segment`` is a REAL invocation of the blocked script.
 
     Deny-by-default (Plan 00466 review M1): the script is a real invocation
@@ -367,9 +376,16 @@ def _segment_executes_script(segment: str) -> bool:
     A segment that can't be tokenised safely (unbalanced quoting) falls back
     to the old conservative substring check — deny rather than silently wave
     a real invocation through because it broke the parser.
+
+    ``depth`` (M-3, Plan 00466 review 3) is threaded through every
+    recursive call (a substitution's inner segment, a string-executor's
+    nested command) -- see :data:`_MAX_INVOCATION_RECURSION_DEPTH`.
     """
+    if depth > _MAX_INVOCATION_RECURSION_DEPTH:
+        return True
+
     for inner_segment in _substitution_inner_segments(segment):
-        if _segment_executes_script(inner_segment):
+        if _segment_executes_script(inner_segment, depth=depth + 1):
             return True
 
     tokens = _tokenise(segment)
@@ -402,7 +418,7 @@ def _segment_executes_script(segment: str) -> bool:
         return False
 
     string_arg = _string_executor_argument(head_name, command_tokens)
-    if string_arg is not None and _has_real_invocation(string_arg):
+    if string_arg is not None and _has_real_invocation(string_arg, depth=depth + 1):
         return True
 
     python_arg = _python_dash_c_argument(head_name, command_tokens)
@@ -419,11 +435,11 @@ def _segment_executes_script(segment: str) -> bool:
     return any(_word_could_name_the_script(word) for word in _brace_words_in_segment(segment))
 
 
-def _has_real_invocation(command: str) -> bool:
+def _has_real_invocation(command: str, *, depth: int = 0) -> bool:
     """True when any top-level segment of ``command`` really runs the script."""
     for segment in _split_top_level(command):
         stripped = segment.strip()
-        if stripped and _segment_executes_script(stripped):
+        if stripped and _segment_executes_script(stripped, depth=depth):
             return True
     return False
 

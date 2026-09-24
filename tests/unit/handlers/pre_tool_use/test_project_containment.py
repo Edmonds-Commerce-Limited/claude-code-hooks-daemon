@@ -496,6 +496,51 @@ class TestFailsClosedOnEvaluationError:
         assert RuleID.PROJECT_CONTAINMENT_EVALUATION_ERROR in rule_ids
 
 
+class TestDispatchKeyMalformedToolInput:
+    """M-2 (Plan 00466 review 3): a companion pin to
+    secret_file_guard's own -- `_dispatch_key` here already tolerates a
+    malformed `tool_input` (`json.dumps(..., default=str)` handles `None`/a
+    list/a string), so these are expected to pass even before the review 3
+    wrap; they pin that fact rather than reproduce a live bug, and guard
+    against the SAME `_dispatch_key`-outside-the-wrapper shape being
+    reintroduced here later.
+    """
+
+    @pytest.mark.parametrize("bad_tool_input", [None, [], "not-a-dict"])
+    def test_matches_does_not_raise(
+        self, handler: ProjectContainmentHandler, bad_tool_input: object
+    ) -> None:
+        hook_input = {"tool_name": "Write", "tool_input": bad_tool_input}
+
+        # Never raises -- whatever the verdict, it must be reached safely.
+        handler.matches(hook_input)
+
+    @pytest.mark.parametrize("bad_tool_input", [None, [], "not-a-dict"])
+    def test_handle_alone_never_raises(
+        self, handler: ProjectContainmentHandler, bad_tool_input: object
+    ) -> None:
+        hook_input = {"tool_name": "Write", "tool_input": bad_tool_input}
+
+        # No preceding matches() call -- exercises _take_cached's own
+        # unwrapped _dispatch_key call on a cache miss.
+        handler.handle(hook_input)
+
+    def test_dispatch_key_falls_back_to_repr_for_an_unsortable_key(
+        self, handler: ProjectContainmentHandler, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """n-2 (Plan 00466 review 3): the ``repr()`` fallback path
+        (``_dispatch_key``'s own ``except TypeError``) was previously
+        untested -- a dict with MIXED key types makes
+        ``json.dumps(..., sort_keys=True)`` raise ``TypeError`` trying to
+        compare an ``int`` key against a ``str`` one."""
+        hook_input = {"tool_name": "Write", "tool_input": {1: "a", "b": "c"}}
+
+        # Never raises -- the repr() fallback is exercised, not a crash.
+        handler.matches(hook_input)
+        handler.handle(hook_input)
+        assert "falling back to repr()" in caplog.text
+
+
 class TestMatchesAndHandleShareOneEvaluation:
     """m2 (Plan 00466 guard-defects review 2): ``matches()`` and ``handle()``
     each independently called ``_offending_targets_or_error`` -- so a

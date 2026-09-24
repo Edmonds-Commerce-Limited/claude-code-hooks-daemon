@@ -23,6 +23,7 @@ level — see the plan's RESEARCH-read-routes.md class-(d) rows.
 """
 
 import fnmatch
+import itertools
 import logging
 import os
 import re
@@ -35,6 +36,7 @@ from typing import Any, Final
 
 import yaml
 
+from claude_code_hooks_daemon.utils import shell_expansion
 from claude_code_hooks_daemon.utils.command_evasion import git_subcommand_index
 from claude_code_hooks_daemon.utils.path_exclusion import (
     path_matches_globs,
@@ -1064,6 +1066,8 @@ def _both_edges_glob_mention(
     both_edges_stems: tuple[str, ...],
     project_root: str | None,
     cwd: str | None,
+    *,
+    deadline: float | None = None,
 ) -> str | None:
     """First both-edges protected pattern a glob-shaped token's filesystem
     expansion actually matches, else ``None`` (M2c, Plan 00466 review 2).
@@ -1084,6 +1088,11 @@ def _both_edges_glob_mention(
     payload), never the daemon process's own -- a Bash tool call resolves a
     relative glob against where IT ran, not where this long-lived daemon
     process happens to sit.
+
+    ``deadline`` (M-1, Plan 00466 review 3) is forwarded to
+    :func:`_expand_glob_token`'s own recursive-glob walk -- see that
+    function's docstring for why the whole-scan deadline must be checked
+    INSIDE the filesystem walk, not only between tokens.
     """
     if not both_edges_patterns:
         return None
@@ -1103,6 +1112,7 @@ def _both_edges_glob_mention(
             project_root,
             cwd=cwd,
             max_expansions=_MAX_BOTH_EDGES_FS_EXPANSIONS,
+            deadline=deadline,
         )
         if match is not None:
             return match
@@ -1194,7 +1204,20 @@ def iter_protected_mentions(
     (M2d) -- ``_tokenise`` splits on ``,``, which tears a real brace
     alternation like ``{s,}`` apart before it can be recognised as one word,
     so brace words are found and expanded straight from the untokenised text
-    instead (see :func:`_brace_expanded_tokens`).
+    instead (see :func:`_brace_expansion_tokens`).
+
+    B1-R3 (Plan 00466 review 3): the brace half of the token stream is now a
+    LAZY generator chained onto the ordinary tokens, not an eagerly-built
+    list -- review 2's own B1 fix passed a ``deadline``, but only checked it
+    once per token in THIS loop, after ``tokens`` had already been fully
+    materialised (including every brace spelling). An exponential
+    ``{a,b}``x22 word built its full expansion before the loop -- and
+    therefore the deadline check -- ever ran once. Chaining lazily means
+    pulling the NEXT token (which may be where an over-cap brace word raises
+    ``TooManyToEnumerateError``, itself fail-closed the same way a deadline
+    breach is) only happens after THIS token has already passed the check
+    below, so construction is now bounded by the very same per-token gate
+    that bounds consumption.
     """
     if not command or not patterns:
         return
@@ -1206,10 +1229,10 @@ def iter_protected_mentions(
         if _has_leading_wildcard(pattern) and _has_trailing_wildcard(pattern)
     )
     both_edges_stems = tuple(stem for stem, _pattern in _pattern_literal_stems(both_edges_patterns))
-    tokens = [
-        *_tokenise(_without_import_module_paths(command)),
-        *_brace_expanded_tokens(command),
-    ]
+    tokens = itertools.chain(
+        _tokenise(_without_import_module_paths(command)),
+        _brace_expansion_tokens(command),
+    )
     for token in tokens:
         if deadline is not None and time.monotonic() > deadline:
             raise TimeoutError("secret_file_guard mention scan exceeded its deadline")
@@ -1219,6 +1242,7 @@ def iter_protected_mentions(
             stem_pairs,
             project_root,
             cwd=cwd,
+            deadline=deadline,
             both_edges_patterns=both_edges_patterns,
             both_edges_stems=both_edges_stems,
         )
@@ -1226,69 +1250,24 @@ def iter_protected_mentions(
             yield (pattern, token)
 
 
-#: M2d (Plan 00466 guard-defects review 2): a raw ``{...}`` brace-alternation
-#: WORD, matched directly against the command TEXT rather than a delimiter
-#: token -- ``_tokenise`` splits on ``,`` (a general shell-word delimiter),
-#: so a real brace group like ``{s,}`` (no internal whitespace, one shell
-#: word) is torn into separate pieces before any spelling can be recognised.
-#: Mirrors ``enforce_llm_qa``'s identical M1 fix for its own tokeniser.
-_BRACE_GROUP_RE: Final[re.Pattern[str]] = re.compile(r"\{([^{}]*)\}")
+def _brace_expansion_tokens(command: str) -> Iterator[str]:
+    """Lazily yield every concrete spelling of every raw brace-expansion word
+    in ``command`` (B1-R3, Plan 00466 review 3).
 
-#: Cap on how many raw brace groups :func:`_brace_expanded_tokens` walks --
-#: see that function's own docstring for the volume-cost case this bounds.
-_MAX_BRACE_WORD_MATCHES: Final[int] = 500
-
-
-def _expand_braces(word: str) -> list[str]:
-    """Every concrete spelling of ``word`` after resolving ITS OWN brace group.
-
-    Recurses so a leftover brace group inside an alternative (``a{b,c{d,e}}``)
-    is expanded too. A word with no brace group returns itself unchanged.
+    One word at a time, via the shared bounded primitives in
+    ``utils/shell_expansion`` -- word discovery (:func:`shell_expansion.
+    iter_brace_words`) is itself bounded and non-backtracking, and each
+    word's own expansion (:func:`shell_expansion.expand_braces`) is capped
+    on total spellings AND recursion depth, raising ``TooManyToEnumerateError``
+    (a plain ``Exception``, caught the same way ``TimeoutError`` already is
+    by ``secret_file_guard``'s fail-closed wrapper) rather than ever
+    materialising an exponential blow-up. Superseded this module's own prior
+    ``_expand_braces``/``_brace_expanded_tokens`` -- see
+    ``iter_protected_mentions``'s docstring for why this must also be LAZY,
+    not just capped.
     """
-    match = _BRACE_GROUP_RE.search(word)
-    if match is None:
-        return [word]
-    prefix, suffix = word[: match.start()], word[match.end() :]
-    alternatives = match.group(1).split(",")
-    return [
-        spelling
-        for alternative in alternatives
-        for spelling in _expand_braces(prefix + alternative + suffix)
-    ]
-
-
-def _brace_expanded_tokens(command: str) -> list[str]:
-    """Concrete spellings of every raw brace-expansion word in ``command``.
-
-    Anchored on :func:`_BRACE_GROUP_RE`'s own matches (bounded: ``[^{}]*``
-    cannot backtrack ambiguously), then each match's surrounding non-
-    whitespace run is found with a plain linear scan -- NOT a
-    ``\\S*{...}\\S*`` regex. That shape was tried first and measured
-    CATASTROPHICALLY slow on adversarial input with no ``{``/``}`` at all
-    (a 60000-character run of ``*``, one of B1's own timing fixtures): the
-    engine backtracks over every possible split point of the greedy
-    ``\\S*`` before concluding there is no brace group to anchor on,
-    turning a 0.1s budget into 5.7s (B1's own bypass class, reintroduced by
-    this fix).
-
-    Bounded to the first ``_MAX_BRACE_WORD_MATCHES`` groups: many brace
-    groups butted together with no separating whitespace (so each one's own
-    boundary scan re-walks a growing shared span) is a volume cost the same
-    way B1's own 1 MB-of-ordinary-tokens case was -- no single group is
-    pathological, the risk is many of them.
-    """
-    tokens: list[str] = []
-    for count, match in enumerate(_BRACE_GROUP_RE.finditer(command)):
-        if count >= _MAX_BRACE_WORD_MATCHES:
-            break
-        start = match.start()
-        while start > 0 and not command[start - 1].isspace():
-            start -= 1
-        end = match.end()
-        while end < len(command) and not command[end].isspace():
-            end += 1
-        tokens.extend(_expand_braces(command[start:end]))
-    return tokens
+    for word in shell_expansion.iter_brace_words(command):
+        yield from shell_expansion.expand_braces(word)
 
 
 def _token_mention(
@@ -1298,6 +1277,7 @@ def _token_mention(
     project_root: str | None,
     *,
     cwd: str | None = None,
+    deadline: float | None = None,
     both_edges_patterns: tuple[str, ...] = (),
     both_edges_stems: tuple[str, ...] = (),
 ) -> str | None:
@@ -1407,7 +1387,12 @@ def _token_mention(
             if match is not None:
                 return match
             match = _both_edges_glob_mention(
-                expansions, both_edges_patterns, both_edges_stems, project_root, cwd
+                expansions,
+                both_edges_patterns,
+                both_edges_stems,
+                project_root,
+                cwd,
+                deadline=deadline,
             )
             if match is not None:
                 return match
@@ -1464,6 +1449,7 @@ def _expand_glob_token(
     *,
     cwd: str | None = None,
     max_expansions: int | None = None,
+    deadline: float | None = None,
 ) -> str | None:
     """First protected pattern matched by a file ``token`` actually expands to.
 
@@ -1485,6 +1471,16 @@ def _expand_glob_token(
     bases before giving up unmatched (``None`` means unbounded, the
     pre-existing behaviour) — a PreToolUse hot path must not pay for an
     unbounded directory listing.
+
+    M-1 (Plan 00466 review 3): a pattern carrying a recursive ``**``
+    component is walked through :func:`shell_expansion.bounded_recursive_glob`
+    instead of ``Path.glob`` — ``Path.glob("**/…")`` only counts YIELDED
+    matches, so a token whose final component matches NOTHING still walks
+    the entire tree before concluding, however large it is. A non-recursive
+    pattern keeps using ``Path.glob`` (a single directory listing bounds
+    its own cost; not the shape review 3 flagged). ``deadline`` is forwarded
+    to the bounded walker so it is checked INSIDE the filesystem walk, not
+    only between tokens.
     """
     token_path = Path(token)
     if token_path.is_absolute():
@@ -1516,14 +1512,32 @@ def _expand_glob_token(
         if key in seen:
             continue
         seen.add(key)
-        # `Path.glob` is a generator function: the call itself never raises.
-        # A pattern it rejects (`a**b`) raises ValueError on the FIRST
-        # ITERATION, and an unreadable directory raises OSError mid-walk, so
-        # the guard must wrap the consumption, not the construction (Plan
-        # 00357 — a guard around the call alone let the exception escape and
-        # fail the calling security handler open). Consumed lazily, still.
+        # Any pattern rooted at the bare filesystem anchor goes through the
+        # bounded walker, whether or not it spells `**` literally -- own
+        # live finding, own RED test: `/*/*/*/*/*/*/*.se?ret-zq9x` (one of
+        # review 3's own probe shapes) carries no `**` at all but still
+        # forces `Path.glob` to expand a full directory listing at every
+        # one of several root-relative levels. `bounded_recursive_glob`
+        # itself decides whether THIS pattern is broad enough to refuse.
+        if "**" in pattern_str or base == Path(base.anchor):
+            # Own walk, own cap on entries VISITED (not just matched) --
+            # TooManyToEnumerateError/TimeoutError deliberately propagate
+            # uncaught here: both are fail-closed signals for the caller's
+            # own wrapper, not "this token expands to nothing".
+            matches_iter: Iterator[Path] = shell_expansion.bounded_recursive_glob(
+                base, pattern_str, deadline=deadline
+            )
+        else:
+            # `Path.glob` is a generator function: the call itself never
+            # raises. A pattern it rejects (`a**b`) raises ValueError on the
+            # FIRST ITERATION, and an unreadable directory raises OSError
+            # mid-walk, so the guard must wrap the consumption, not the
+            # construction (Plan 00357 — a guard around the call alone let
+            # the exception escape and fail the calling security handler
+            # open). Consumed lazily, still.
+            matches_iter = base.glob(pattern_str)
         try:
-            for match in base.glob(pattern_str):
+            for match in matches_iter:
                 examined += 1
                 match_str = str(match)
                 for pattern in patterns:

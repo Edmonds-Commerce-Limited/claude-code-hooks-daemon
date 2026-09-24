@@ -485,6 +485,47 @@ class TestFailsClosedOnEvaluationError:
         assert result.reason.startswith(f"BLOCKED [{RuleID.SECRET_EVALUATION_ERROR}]")
 
 
+class TestDispatchKeyMalformedToolInput:
+    """M-2 (Plan 00466 review 3): `_dispatch_key` itself was called OUTSIDE
+    the fail-closed wrapper -- a malformed `tool_input` (None, a list, a bare
+    string, instead of the expected dict) made its `.get()` calls raise
+    `AttributeError`, which escaped `matches()`/`handle()` entirely and was
+    treated as "no match" by a non-strict chain. This is a regression the m2
+    caching fix (Plan 00466 review 2) itself introduced: `_evaluate`'s own
+    fail-closed wrapper correctly denies for the SAME malformed payload, but
+    `_dispatch_key` sat one line below it, unwrapped.
+    """
+
+    @pytest.mark.parametrize("bad_tool_input", [None, [], "not-a-dict"])
+    def test_matches_does_not_raise_and_reports_a_match(self, bad_tool_input: object) -> None:
+        handler = _handler()
+        hook_input = {"tool_name": "Bash", "tool_input": bad_tool_input}
+
+        assert handler.matches(hook_input) is True
+
+    @pytest.mark.parametrize("bad_tool_input", [None, [], "not-a-dict"])
+    def test_handle_denies_for_safety(self, bad_tool_input: object) -> None:
+        handler = _handler()
+        hook_input = {"tool_name": "Bash", "tool_input": bad_tool_input}
+
+        handler.matches(hook_input)
+        result = handler.handle(hook_input)
+
+        assert result.decision == Decision.DENY
+
+    @pytest.mark.parametrize("bad_tool_input", [None, [], "not-a-dict"])
+    def test_handle_alone_also_denies(self, bad_tool_input: object) -> None:
+        """`handle()` called with no preceding `matches()` for the SAME
+        input must independently deny too -- the cache miss path
+        (`_take_cached_matched`) calls `_dispatch_key` unwrapped as well."""
+        handler = _handler()
+        hook_input = {"tool_name": "Bash", "tool_input": bad_tool_input}
+
+        result = handler.handle(hook_input)
+
+        assert result.decision == Decision.DENY
+
+
 class TestChainLevelFailClosedBehaviour:
     """n4 (Plan 00466 guard-defects review 2): every prior N11/m1/m2 test in
     this file calls ``matches()``/``handle()`` directly -- not through

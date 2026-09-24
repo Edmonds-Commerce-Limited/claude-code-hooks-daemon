@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
+from claude_code_hooks_daemon.utils.shell_expansion import TooManyToEnumerateError
 
 #: Wall-clock ceiling for the wide-range tests below. The rejected path does
 #: no allocation at all, so it costs microseconds; a range materialised before
@@ -1394,6 +1395,113 @@ class TestInteriorWildcardDpIsBounded:
                     deadline=time.monotonic() - 1,
                 )
             )
+
+
+class TestBraceAndFsWalkAreBounded:
+    """B1-R3 / M-1 (Plan 00466 review 3): review 2's own B1 fix, and its own
+    new M2 sub-fixes, EACH independently reintroduced B1's own defect class
+    -- a slow SAFETY-guard scan is a fail-open. m-1 (review 3's own minor):
+    the timing suite above pinned the DP/star shapes but had NO timing test
+    for `{a,b}`xN brace expansion or a `/**/` filesystem walk, which is
+    precisely why these shipped unfixed. This class is that pin, on the
+    reviewer's own exact shapes.
+    """
+
+    _BUDGET_SECONDS = 1.0
+
+    @pytest.mark.parametrize("repetitions", [20, 22, 40])
+    def test_brace_alternation_with_a_real_mention_denies_fast(self, repetitions: int) -> None:
+        """The blocker's exact exploit shape: a genuine `.vault-password`
+        mention sits in the SAME command as an exponential brace word --
+        pre-fix this took 36.3s at x20 and was killed past 90s at x22."""
+        command = f"cat .vault-password; echo {'{a,b}' * repetitions}"
+        start = time.perf_counter()
+        result = sfm.find_protected_mention_detail(
+            command,
+            sfm.DEFAULT_PROTECTED_PATTERNS,
+            deadline=time.monotonic() + sfm.SCAN_DEADLINE_SECONDS,
+        )
+        elapsed = time.perf_counter() - start
+        assert elapsed < self._BUDGET_SECONDS, f"took {elapsed:.3f}s"
+        assert result is not None
+
+    @pytest.mark.parametrize("repetitions", [20, 22, 40])
+    def test_brace_alternation_alone_stays_fast_even_past_the_cap(self, repetitions: int) -> None:
+        """No genuine mention this time -- past the shared expander's
+        spelling cap the scan must still raise (fail closed) fast, not
+        silently answer "no mention" after enumerating for tens of
+        seconds."""
+        command = "echo " + "{a,b}" * repetitions
+        start = time.perf_counter()
+        with pytest.raises(TooManyToEnumerateError):
+            list(
+                sfm.iter_protected_mentions(
+                    command,
+                    sfm.DEFAULT_PROTECTED_PATTERNS,
+                    deadline=time.monotonic() + sfm.SCAN_DEADLINE_SECONDS,
+                )
+            )
+        elapsed = time.perf_counter() - start
+        assert elapsed < self._BUDGET_SECONDS, f"took {elapsed:.3f}s"
+
+    def test_a_recursive_glob_token_rooted_at_the_filesystem_root_denies_fast(
+        self,
+    ) -> None:
+        """M-1's own reproducer: `cat /**/*.se?ret-zq9x; cat .vault-password`
+        took 9.5s pre-fix on this small container alone -- a real client
+        filesystem (large home dir, node_modules, mounted volumes) can push
+        a single such token well past the client's 30s chain budget. A
+        `/**/` token rooted at the bare filesystem root is refused
+        OUTRIGHT (fail closed) rather than walked at all, so this raises --
+        exactly like the deadline case above, ``secret_file_guard``'s own
+        wrapper is what turns the raise into a deny."""
+        command = "cat /**/*.se?ret-zq9x; cat .vault-password"
+        start = time.perf_counter()
+        with pytest.raises(TooManyToEnumerateError):
+            sfm.find_protected_mention_detail(
+                command,
+                sfm.DEFAULT_PROTECTED_PATTERNS,
+                deadline=time.monotonic() + sfm.SCAN_DEADLINE_SECONDS,
+            )
+        elapsed = time.perf_counter() - start
+        assert elapsed < self._BUDGET_SECONDS, f"took {elapsed:.3f}s"
+
+    def test_ten_root_rooted_recursive_glob_tokens_deny_fast(self) -> None:
+        """M-1's own multi-token reproducer -- 10 x `cat /**/*.se?ret-zq9x`
+        tokens, 9.0s pre-fix (the deadline caught it between tokens, but
+        the FIRST token alone already ran multiple seconds). The FIRST
+        token alone is refused outright now, so this raises immediately."""
+        command = " ".join(["cat /**/*.se?ret-zq9x"] * 10) + "; cat .vault-password"
+        start = time.perf_counter()
+        with pytest.raises(TooManyToEnumerateError):
+            sfm.find_protected_mention_detail(
+                command,
+                sfm.DEFAULT_PROTECTED_PATTERNS,
+                deadline=time.monotonic() + sfm.SCAN_DEADLINE_SECONDS,
+            )
+        elapsed = time.perf_counter() - start
+        assert elapsed < self._BUDGET_SECONDS, f"took {elapsed:.3f}s"
+
+    @pytest.mark.parametrize("size_kb", [94, 200])
+    def test_huge_no_op_regex_shaped_input_with_a_real_mention_denies_fast(
+        self, size_kb: int
+    ) -> None:
+        """The reviewer's 94 KB / 200 KB regex-shaped reproducer: a large
+        run of `a[bc]x6<*>a` immediately followed by a genuine mention (the
+        pre-existing DP/star-collapse cap already bounds this -- this test
+        pins it at the sizes review 3 specifically re-measured)."""
+        unit = "a" + "[bc]" * 6 + "*" * 500 + "a"
+        n = max(1, (size_kb * 1024) // (len(unit) + 1))
+        command = " ".join([unit] * n) + "; cat .vault-password"
+        start = time.perf_counter()
+        result = sfm.find_protected_mention_detail(
+            command,
+            sfm.DEFAULT_PROTECTED_PATTERNS,
+            deadline=time.monotonic() + sfm.SCAN_DEADLINE_SECONDS,
+        )
+        elapsed = time.perf_counter() - start
+        assert elapsed < sfm.SCAN_DEADLINE_SECONDS + self._BUDGET_SECONDS, f"took {elapsed:.3f}s"
+        assert result is not None
 
 
 class TestEdgeOpenTokensReachTheDpAgainstNonBothEdgesPatterns:

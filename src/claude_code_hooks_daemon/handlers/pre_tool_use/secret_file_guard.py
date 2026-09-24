@@ -293,9 +293,26 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         ``handle()`` if the underlying fault was transient -- exactly the
         gap the fail-closed wrapper (N11) exists to close, reopened one
         layer up.
+
+        M-2 (Plan 00466 review 3): ``_dispatch_key`` itself is NOT wrapped
+        by ``_matched_pattern_and_route``'s try/except -- a malformed
+        ``tool_input`` (``None``, a list, a bare string instead of a dict)
+        makes its own ``.get()`` calls raise ``AttributeError``, one line
+        below a ``matched`` that (via ``_evaluate``'s IDENTICAL raise,
+        already caught) correctly reflects the fail-closed error route.
+        Catching it here just means "do not cache" -- ``matched`` is
+        already the right, safe answer.
         """
         matched = self._matched_pattern_and_route(hook_input)
-        self._cached_dispatch = (self._dispatch_key(hook_input), matched)
+        try:
+            key = self._dispatch_key(hook_input)
+        except Exception:
+            logger.exception(
+                "secret_file_guard: _dispatch_key raised; not caching " "(Plan 00466 review 3 M-2)"
+            )
+            self._cached_dispatch = None
+            return matched
+        self._cached_dispatch = (key, matched)
         return matched
 
     def _take_cached_matched(self, hook_input: dict[str, Any]) -> tuple[str, str, str] | None:
@@ -305,9 +322,23 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         stale verdict; the key check guards the case ``handle()`` is called
         without a prior ``matches()`` for the SAME input (defensive, not
         expected in the real chain).
+
+        M-2 (Plan 00466 review 3): see ``_compute_and_cache_matched`` for
+        why ``_dispatch_key`` must be called inside its own try/except here
+        too -- a raise falls back to a fresh, still fail-closed,
+        ``_matched_pattern_and_route`` call rather than escaping.
         """
         cached = self._cached_dispatch
-        if cached is not None and cached[0] == self._dispatch_key(hook_input):
+        try:
+            key = self._dispatch_key(hook_input)
+        except Exception:
+            logger.exception(
+                "secret_file_guard: _dispatch_key raised; re-evaluating "
+                "(Plan 00466 review 3 M-2)"
+            )
+            self._cached_dispatch = None
+            return self._matched_pattern_and_route(hook_input)
+        if cached is not None and cached[0] == key:
             self._cached_dispatch = None
             return cached[1]
         return self._matched_pattern_and_route(hook_input)
