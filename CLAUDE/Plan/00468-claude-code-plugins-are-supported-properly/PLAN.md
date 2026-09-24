@@ -58,9 +58,10 @@ first, and the other fixes build on it.
   `enabledPlugins` or `extraKnownMarketplaces`, on every install and upgrade
   route (shell copy, three-way merge, Python generator). Review
   `plansDirectory` under the same rule. Add a SELF_INSTALL.md line saying
-  that `.claude/settings.json` ships to clients (G6). `plansDirectory` was
-  dogfood-only, so it moved to `settings.local.json` and the test covers it
-  too.
+  that `.claude/settings.json` ships to clients (G6). **Decided (unattended,
+  2026-09-24)**: `plansDirectory` is dogfood-only (the plan workflow is
+  opt-in and its directory configurable), so it moved to
+  `settings.local.json` and the test covers it too.
 
 ### Phase 2: one resolver for the config dir and enabled plugins (G13, P2, P6, P7, G11, G12, G14, G15)
 
@@ -77,6 +78,9 @@ first, and the other fixes build on it.
 - [x] ✅ **Task 2.3**: The LSP exclude advice and skill-reference checks
   derive the config dir (G11). `skill-scan` knows plugin and user skills
   (G14). `tool-report` sums enabled plugins' always-on cost (G15).
+  **Decided (unattended, 2026-09-24)**: `check_skill_references.py` keeps
+  its `ccy` name exclusion beside the derived one, because `.claude/ccy/`
+  also holds tracked supervisor files that CI does not scan today.
 - [ ] ⬜ **Task 2.4**: File the upstream DBF issue: both agents lack `Write`
   but are told to write a report.
 
