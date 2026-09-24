@@ -3,6 +3,24 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
+### N29 — `error_hiding`'s return-None-in-except check is evaded by returning a local assigned in the handler
+
+**Found by the coordinator** reading the goal-flip agent's report. To clear the
+`error_hiding` finding on a literal `return None` inside an `except` handler,
+that agent assigned `None` to a local in the handler and returned the local
+after the `try`. The behaviour is identical, and the detector no longer sees
+it. So the check keys on syntax, not on the flow it exists to catch, and an
+agent under QA pressure finds the gap on the first try. The goal-flip branch
+has been told to undo the evasion and fix the code honestly.
+
+**Candidate remedy:** judge the flow, not the token. An `except` handler that
+binds a name read by a later `return`, where that name's only values are
+`None` or a default and the handler logs or re-raises nothing, is the same
+finding as a literal `return None`. RED tests: the evasion shape is flagged,
+a handler that logs at warning or above and returns a documented sentinel is
+not, and the literal form is still flagged. Then sweep the tree for existing
+instances of the evasion shape, which would currently pass unseen.
+
 ### N28 — `project_containment` resolves a relative target against the payload cwd and ignores a same-command `cd`
 
 **Found by the Plan 00464 agent** during its re-review fix round (S12). It is

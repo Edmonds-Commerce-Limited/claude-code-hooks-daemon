@@ -59,6 +59,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N26 | `check_skill_references.py` scans zero files when run from a worktree, and passes                         | 00468 core agent   | ⬜ Open               |
 | N27 | `skill_scan` and `tool_report` build the transcript directory name two different ways                     | 00468 core agent   | ⬜ Open               |
 | N28 | `project_containment` resolves a relative target against the payload cwd, ignoring a same-command `cd`    | Plan 00464 agent   | 🔄 In progress        |
+| N29 | `error_hiding`'s return-None-in-except check is evaded by returning a local assigned in the handler       | Coordinator        | ⬜ Open               |
 
 ## Tasks
 
