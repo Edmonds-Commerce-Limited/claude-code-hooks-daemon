@@ -1,0 +1,476 @@
+"""``scripts/venv_bootstrap.sh``: build a missing venv without the hook waiting (Plan 00456).
+
+GitHub issue #53: a daemon clone shared by two environments (host and
+container views of one bind-mounted project) has a venv for one of them only.
+The other environment's hooks find the clone but no venv for their path. This
+driver is what init.sh calls in that state (``hook``), and what
+``bin/hooks-daemon repair`` calls before any venv exists (``repair``).
+
+``hook`` must never block. The hook timeout is 60s and a real ``uv sync`` can
+take longer, so the build runs DETACHED under the existing venv build lock
+(Plan 00100 Phase 4). The hook takes the lock without waiting, hands it to
+the detached child, and returns at once. A second hook finds the lock held and
+starts nothing. A failed build leaves a marker keyed on the venv's own
+fingerprint, and the hook does not respawn until the build's inputs change or
+an explicit ``repair`` clears it.
+
+Tests run the REAL driver against a tmp daemon dir holding only the data files
+a clone contributes (``pyproject.toml``, ``uv.lock``, ``version.py``). The
+driver finds its own libraries beside itself, exactly as it does in a clone. A
+stub ``uv`` stands in for the build: it logs every call, can sleep so builds
+overlap, can fail, and lays down a ``bin/python`` that execs this test's
+interpreter, so the metadata write and the resolver see a working venv.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import os
+import shutil
+import subprocess
+import sys
+import textwrap
+import time
+from pathlib import Path
+from typing import Final
+
+import pytest
+
+REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
+DRIVER: Final[Path] = REPO_ROOT / "scripts" / "venv_bootstrap.sh"
+BASH: Final[str] = shutil.which("bash") or "/bin/bash"
+_TIMEOUT_SECONDS: Final[int] = 60
+_BUILD_WAIT_SECONDS: Final[float] = 30.0
+
+_CLONE_VERSION: Final[str] = "3.61.0"
+_OTHER_VIEW_VENV: Final[str] = "venv-home_dev_project_claude_hooks-daemon-py311-0badc0de"
+
+#: Tools the driver and the libraries it sources need. `uv` is deliberately
+#: absent: each test decides whether a stub is on PATH.
+_TOOLS: Final[tuple[str, ...]] = (
+    "bash",
+    "sh",
+    "env",
+    "cat",
+    "dirname",
+    "basename",
+    "mkdir",
+    "rm",
+    "mv",
+    "touch",
+    "chmod",
+    "date",
+    "sleep",
+    "stat",
+    "uname",
+    "grep",
+    "awk",
+    "tr",
+    "flock",
+    "setsid",
+    "nohup",
+    "sync",
+    "mktemp",
+    "head",
+    "cut",
+    "wc",
+    "ls",
+    "readlink",
+    "printf",
+)
+
+
+def _daemon_dir(tmp_path: Path) -> Path:
+    daemon_dir = tmp_path / "clone"
+    daemon_dir.mkdir()
+    (daemon_dir / "pyproject.toml").write_text(
+        '[project]\nname = "fake-daemon"\nversion = "3.61.0"\nrequires-python = ">=3.11"\n'
+    )
+    (daemon_dir / "uv.lock").write_text("# lock v1\n")
+    version_py = daemon_dir / "src" / "claude_code_hooks_daemon" / "version.py"
+    version_py.parent.mkdir(parents=True)
+    version_py.write_text(f'__version__ = "{_CLONE_VERSION}"\n')
+    (daemon_dir / "untracked").mkdir()
+    return daemon_dir
+
+
+def _other_view_venv(daemon_dir: Path) -> Path:
+    """Another environment's venv: a different slug, a dangling interpreter."""
+    venv = daemon_dir / "untracked" / _OTHER_VIEW_VENV
+    (venv / "bin").mkdir(parents=True)
+    (venv / "bin" / "python").symlink_to("/nonexistent/host-only/python3.11")
+    (venv / "pyvenv.cfg").write_text("home = /nonexistent/host-only\n")
+    site = venv / "lib" / "python3.11" / "site-packages"
+    site.mkdir(parents=True)
+    (site / "_claude_code_hooks_daemon.pth").write_text(
+        "/home/dev/project/.claude/hooks-daemon/src\n"
+    )
+    (venv / ".daemon-metadata.json").write_text('{"python_path": "x", "lock_hash": "y"}\n')
+    return venv
+
+
+def _snapshot(root: Path) -> dict[str, str]:
+    """Every path under root with a digest of what it is: bytes, link, mode."""
+    state: dict[str, str] = {}
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        for name in sorted(dirnames + filenames):
+            path = Path(dirpath) / name
+            rel = str(path.relative_to(root))
+            st = path.lstat()
+            if path.is_symlink():
+                state[rel] = f"link:{path.readlink()}"
+            elif path.is_dir():
+                state[rel] = f"dir:{oct(st.st_mode)}"
+            else:
+                digest = hashlib.sha256(path.read_bytes()).hexdigest()
+                state[rel] = f"file:{oct(st.st_mode)}:{digest}"
+    return state
+
+
+def _stub_uv(tmp_path: Path, *, sleep: float = 0.0, fail: bool = False) -> Path:
+    stub_dir = tmp_path / "uv-stub"
+    stub_dir.mkdir(exist_ok=True)
+    uv_log = tmp_path / "uv-calls.log"
+    body = textwrap.dedent(f"""\
+        #!/bin/bash
+        echo "uv $* target=${{UV_PROJECT_ENVIRONMENT:-UNSET}}" >> "{uv_log}"
+        sleep {sleep}
+        if [ "{int(fail)}" = "1" ]; then
+            echo "error: simulated resolver failure (network unreachable)" >&2
+            exit 2
+        fi
+        mkdir -p "$UV_PROJECT_ENVIRONMENT/bin"
+        printf '#!/bin/bash\\nexec "{sys.executable}" "$@"\\n' > "$UV_PROJECT_ENVIRONMENT/bin/python"
+        chmod +x "$UV_PROJECT_ENVIRONMENT/bin/python"
+        exit 0
+        """)
+    uv = stub_dir / "uv"
+    uv.write_text(body)
+    uv.chmod(0o755)
+    return stub_dir
+
+
+def _uv_calls(tmp_path: Path) -> list[str]:
+    log = tmp_path / "uv-calls.log"
+    return [ln for ln in log.read_text().splitlines() if ln.strip()] if log.exists() else []
+
+
+def _tool_dir(tmp_path: Path) -> Path:
+    bindir = tmp_path / "tools"
+    bindir.mkdir(exist_ok=True)
+    for tool in _TOOLS:
+        real = shutil.which(tool)
+        if real is not None and not (bindir / tool).exists():
+            (bindir / tool).symlink_to(real)
+    return bindir
+
+
+def _env(
+    tmp_path: Path, *, with_uv: Path | None, extra: dict[str, str] | None = None
+) -> dict[str, str]:
+    path = [str(_tool_dir(tmp_path))]
+    if with_uv is not None:
+        path.insert(0, str(with_uv))
+    env = {
+        "PATH": ":".join(path),
+        # venv.sh prepends $HOME/.local/bin, uv's default home. A tmp HOME
+        # keeps this machine's real uv out of the picture.
+        "HOME": str(tmp_path / "home"),
+        # Deterministic interpreter: the gate and the build both use it.
+        "HOOKS_DAEMON_PYTHON": sys.executable,
+        "NO_COLOR": "1",
+    }
+    if extra:
+        env.update(extra)
+    return env
+
+
+def _run(verb: str, daemon_dir: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(  # nosec B603 - fixed argv, no shell
+        [BASH, str(DRIVER), verb, str(daemon_dir)],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=_TIMEOUT_SECONDS,
+        check=False,
+    )
+
+
+def _fields(stdout: str) -> dict[str, list[str]]:
+    out: dict[str, list[str]] = {}
+    for line in stdout.splitlines():
+        key, sep, value = line.partition("=")
+        assert sep, f"hook output must be key=value lines, got {line!r}"
+        out.setdefault(key, []).append(value)
+    return out
+
+
+def _wait_for_lock_release(daemon_dir: Path) -> None:
+    """The detached build holds the venv lock for exactly as long as it runs."""
+    lock = daemon_dir / "untracked" / ".venv-bootstrap.lock"
+    deadline = time.monotonic() + _BUILD_WAIT_SECONDS
+    while time.monotonic() < deadline:
+        probe = subprocess.run(  # nosec B603 - fixed argv, no shell
+            ["flock", "-n", str(lock), "true"], capture_output=True, check=False
+        )
+        if probe.returncode == 0:
+            return
+        time.sleep(0.2)
+    raise AssertionError("the detached build never released the venv lock")
+
+
+def _resolves(daemon_dir: Path, env: dict[str, str]) -> bool:
+    lib = REPO_ROOT / "scripts" / "lib" / "resolve_venv.sh"
+    probe = subprocess.run(  # nosec B603 - fixed argv, no shell
+        [BASH, str(lib), "python", str(daemon_dir)],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=_TIMEOUT_SECONDS,
+        check=False,
+    )
+    return probe.returncode == 0 and probe.stdout.strip() != ""
+
+
+class TestTheHookStartsOneDetachedBuild:
+    def test_all_green_starts_a_build_that_leaves_a_resolvable_venv(self, tmp_path: Path) -> None:
+        daemon_dir = _daemon_dir(tmp_path)
+        env = _env(tmp_path, with_uv=_stub_uv(tmp_path))
+
+        started = time.monotonic()
+        result = _run("hook", daemon_dir, env)
+        elapsed = time.monotonic() - started
+
+        assert result.returncode == 0, result.stderr
+        out = _fields(result.stdout)
+        assert out["state"] == ["started"], result.stdout
+        log = Path(out["log"][0])
+        assert log.parent == daemon_dir / "untracked"
+        assert log.name.startswith(".venv-bootstrap-") and log.name.endswith(".log")
+        assert elapsed < 10, f"the hook must not wait for the build ({elapsed:.1f}s)"
+
+        _wait_for_lock_release(daemon_dir)
+        assert len(_uv_calls(tmp_path)) == 1
+        assert _resolves(daemon_dir, env), log.read_text()
+        assert "succeeded" in log.read_text().lower()
+        assert not list((daemon_dir / "untracked").glob(".venv-bootstrap-*.failed"))
+
+    def test_the_hook_returns_before_a_slow_build_finishes(self, tmp_path: Path) -> None:
+        daemon_dir = _daemon_dir(tmp_path)
+        env = _env(tmp_path, with_uv=_stub_uv(tmp_path, sleep=5))
+
+        started = time.monotonic()
+        result = _run("hook", daemon_dir, env)
+        elapsed = time.monotonic() - started
+
+        assert _fields(result.stdout)["state"] == ["started"], result.stdout + result.stderr
+        assert elapsed < 4, f"a 5s build must not hold the hook for {elapsed:.1f}s"
+        _wait_for_lock_release(daemon_dir)
+        assert _resolves(daemon_dir, env)
+
+    def test_concurrent_hooks_start_exactly_one_build(self, tmp_path: Path) -> None:
+        daemon_dir = _daemon_dir(tmp_path)
+        env = _env(tmp_path, with_uv=_stub_uv(tmp_path, sleep=3))
+
+        procs = [
+            subprocess.Popen(  # nosec B603 - fixed argv, no shell
+                [BASH, str(DRIVER), "hook", str(daemon_dir)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=env,
+            )
+            for _ in range(6)
+        ]
+        states: list[str] = []
+        for proc in procs:
+            stdout, stderr = proc.communicate(timeout=_TIMEOUT_SECONDS)
+            assert proc.returncode == 0, stderr
+            states.extend(_fields(stdout)["state"])
+
+        _wait_for_lock_release(daemon_dir)
+        assert states.count("started") == 1, states
+        assert set(states) <= {"started", "running"}, states
+        assert len(_uv_calls(tmp_path)) == 1, _uv_calls(tmp_path)
+        assert _resolves(daemon_dir, env)
+
+    def test_a_hook_during_a_build_reports_running_and_names_the_log(self, tmp_path: Path) -> None:
+        daemon_dir = _daemon_dir(tmp_path)
+        env = _env(tmp_path, with_uv=_stub_uv(tmp_path, sleep=3))
+
+        first = _fields(_run("hook", daemon_dir, env).stdout)
+        second = _fields(_run("hook", daemon_dir, env).stdout)
+
+        assert first["state"] == ["started"]
+        assert second["state"] == ["running"]
+        assert second["log"] == first["log"]
+        _wait_for_lock_release(daemon_dir)
+        assert len(_uv_calls(tmp_path)) == 1
+
+    def test_another_environments_venv_is_byte_for_byte_untouched(self, tmp_path: Path) -> None:
+        daemon_dir = _daemon_dir(tmp_path)
+        other = _other_view_venv(daemon_dir)
+        before = _snapshot(other)
+        env = _env(tmp_path, with_uv=_stub_uv(tmp_path))
+
+        assert _fields(_run("hook", daemon_dir, env).stdout)["state"] == ["started"]
+        _wait_for_lock_release(daemon_dir)
+
+        assert _resolves(daemon_dir, env)
+        assert _snapshot(other) == before
+        built = [
+            p.name for p in (daemon_dir / "untracked").glob("venv-*") if p.name != _OTHER_VIEW_VENV
+        ]
+        assert len(built) == 1, built
+
+
+class TestItRefusesAndChangesNothing:
+    def test_uv_missing_is_refused_with_its_fix_and_zero_mutation(self, tmp_path: Path) -> None:
+        daemon_dir = _daemon_dir(tmp_path)
+        _other_view_venv(daemon_dir)
+        before = _snapshot(daemon_dir)
+
+        result = _run("hook", daemon_dir, _env(tmp_path, with_uv=None))
+
+        assert result.returncode == 0, result.stderr
+        out = _fields(result.stdout)
+        assert out["state"] == ["refused"]
+        assert out["missing"] == ["uv"]
+        assert out["fix"][0].startswith("uv: ")
+        assert "--force" not in result.stdout and "args=install" not in result.stdout
+        assert _snapshot(daemon_dir) == before, "a refused gate must not create a single file"
+
+    def test_no_compatible_python_is_refused_with_the_discovery_diagnostic(
+        self, tmp_path: Path
+    ) -> None:
+        daemon_dir = _daemon_dir(tmp_path)
+        before = _snapshot(daemon_dir)
+        bogus = tmp_path / "not-a-python"
+        bogus.write_text("#!/bin/bash\nexit 1\n")
+        bogus.chmod(0o755)
+        env = _env(tmp_path, with_uv=_stub_uv(tmp_path), extra={"HOOKS_DAEMON_PYTHON": str(bogus)})
+
+        out = _fields(_run("hook", daemon_dir, env).stdout)
+
+        assert out["state"] == ["refused"]
+        assert out["missing"] == ["compatible-python"]
+        assert "HOOKS_DAEMON_PYTHON" in out["fix"][0]
+        assert _snapshot(daemon_dir) == before
+        assert _uv_calls(tmp_path) == []
+
+    def test_the_opt_out_is_honoured_with_zero_mutation(self, tmp_path: Path) -> None:
+        daemon_dir = _daemon_dir(tmp_path)
+        before = _snapshot(daemon_dir)
+        env = _env(
+            tmp_path,
+            with_uv=_stub_uv(tmp_path),
+            extra={"HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP": "1"},
+        )
+
+        out = _fields(_run("hook", daemon_dir, env).stdout)
+
+        assert out["state"] == ["disabled"]
+        assert _snapshot(daemon_dir) == before
+        assert _uv_calls(tmp_path) == []
+
+
+class TestAFailedBuildIsRememberedNotRespawned:
+    def _fail_once(self, tmp_path: Path) -> tuple[Path, dict[str, str], dict[str, list[str]]]:
+        daemon_dir = _daemon_dir(tmp_path)
+        env = _env(tmp_path, with_uv=_stub_uv(tmp_path, fail=True))
+        first = _fields(_run("hook", daemon_dir, env).stdout)
+        assert first["state"] == ["started"]
+        _wait_for_lock_release(daemon_dir)
+        return daemon_dir, env, first
+
+    def test_the_next_hook_reports_failed_with_the_log_and_does_not_respawn(
+        self, tmp_path: Path
+    ) -> None:
+        daemon_dir, env, first = self._fail_once(tmp_path)
+        log = Path(first["log"][0])
+        assert "network unreachable" in log.read_text(), "uv's own error must reach the log"
+
+        for _ in range(3):
+            out = _fields(_run("hook", daemon_dir, env).stdout)
+            assert out["state"] == ["failed"], out
+            assert out["log"] == first["log"]
+
+        assert len(_uv_calls(tmp_path)) == 1, "a failed build must not be retried on every hook"
+        assert not _resolves(daemon_dir, env)
+
+    def test_changed_inputs_allow_one_retry(self, tmp_path: Path) -> None:
+        daemon_dir, env, _ = self._fail_once(tmp_path)
+        (daemon_dir / "uv.lock").write_text("# lock v2, the fix\n")
+
+        out = _fields(_run("hook", daemon_dir, env).stdout)
+
+        assert out["state"] == ["started"]
+        _wait_for_lock_release(daemon_dir)
+        assert len(_uv_calls(tmp_path)) == 2
+
+    def test_a_build_whose_venv_does_not_resolve_counts_as_failed(self, tmp_path: Path) -> None:
+        """uv can exit 0 and still leave nothing the resolver accepts: success is
+        judged by the resolver, not by ensure_venv's exit code."""
+        daemon_dir = _daemon_dir(tmp_path)
+        stub_dir = tmp_path / "uv-stub"
+        stub_dir.mkdir()
+        (stub_dir / "uv").write_text(
+            f'#!/bin/bash\necho "uv $*" >> "{tmp_path / "uv-calls.log"}"\nexit 0\n'
+        )
+        (stub_dir / "uv").chmod(0o755)
+        env = _env(tmp_path, with_uv=stub_dir)
+
+        assert _fields(_run("hook", daemon_dir, env).stdout)["state"] == ["started"]
+        _wait_for_lock_release(daemon_dir)
+
+        out = _fields(_run("hook", daemon_dir, env).stdout)
+        assert out["state"] == ["failed"]
+        assert len(_uv_calls(tmp_path)) == 1
+
+
+class TestRepairBuildsInTheForeground:
+    def test_repair_builds_clears_the_failed_marker_and_exits_zero(self, tmp_path: Path) -> None:
+        daemon_dir = _daemon_dir(tmp_path)
+        failing = _env(tmp_path, with_uv=_stub_uv(tmp_path, fail=True))
+        assert _fields(_run("hook", daemon_dir, failing).stdout)["state"] == ["started"]
+        _wait_for_lock_release(daemon_dir)
+        assert list((daemon_dir / "untracked").glob(".venv-bootstrap-*.failed"))
+
+        working = _env(tmp_path, with_uv=_stub_uv(tmp_path))
+        result = _run("repair", daemon_dir, working)
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert _resolves(daemon_dir, working)
+        assert not list((daemon_dir / "untracked").glob(".venv-bootstrap-*.failed"))
+
+    def test_repair_with_uv_missing_names_it_and_changes_nothing(self, tmp_path: Path) -> None:
+        daemon_dir = _daemon_dir(tmp_path)
+        before = _snapshot(daemon_dir)
+
+        result = _run("repair", daemon_dir, _env(tmp_path, with_uv=None))
+
+        assert result.returncode == 1
+        assert "uv" in result.stderr
+        assert _snapshot(daemon_dir) == before
+
+    def test_repair_waits_for_a_background_build_and_reuses_it(self, tmp_path: Path) -> None:
+        daemon_dir = _daemon_dir(tmp_path)
+        env = _env(tmp_path, with_uv=_stub_uv(tmp_path, sleep=2))
+        assert _fields(_run("hook", daemon_dir, env).stdout)["state"] == ["started"]
+
+        result = _run("repair", daemon_dir, env)
+
+        assert result.returncode == 0, result.stderr
+        assert len(_uv_calls(tmp_path)) == 1, "repair must reuse the build it waited for"
+
+
+class TestUsage:
+    def test_an_unknown_verb_is_a_usage_error(self, tmp_path: Path) -> None:
+        result = _run("explode", _daemon_dir(tmp_path), _env(tmp_path, with_uv=None))
+        assert result.returncode == 2
+        assert "usage" in result.stderr.lower()
+
+    @pytest.mark.parametrize("verb", ["hook", "repair"])
+    def test_a_missing_daemon_dir_is_a_usage_error(self, tmp_path: Path, verb: str) -> None:
+        result = _run(verb, tmp_path / "absent", _env(tmp_path, with_uv=None))
+        assert result.returncode == 2

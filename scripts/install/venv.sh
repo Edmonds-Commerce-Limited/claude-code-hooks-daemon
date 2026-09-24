@@ -329,7 +329,12 @@ VENV_LOCK_FILE_NAME=".venv-bootstrap.lock"
 VENV_LOCK_TIMEOUT_DEFAULT=120
 VENV_LOCK_STALE_SECONDS_DEFAULT=600
 
-# Set by acquire_venv_lock, consumed by release_venv_lock.
+# try_acquire_venv_lock's "another process holds it" status (EX_TEMPFAIL):
+# distinct from 1, which means the lock could not be taken at all.
+VENV_LOCK_HELD=75
+
+# Set by acquire_venv_lock / try_acquire_venv_lock / adopt_venv_lock,
+# consumed by release_venv_lock.
 _VENV_LOCK_BACKEND=""
 _VENV_LOCK_FD=""
 _VENV_LOCK_DIR=""
@@ -377,6 +382,202 @@ _venv_lock_dir_mtime() {
 }
 
 #
+# _venv_mkdir_lock_is_stale() - Has a mkdir lock outlived its holder?
+#
+# Args: $1 lock_dir. Echoes the lock's age in seconds and returns 0 when it is
+# at least HOOKS_DAEMON_VENV_LOCK_STALE_SECONDS old; returns 1 otherwise.
+#
+_venv_mkdir_lock_is_stale() {
+    local lock_dir="$1" mtime age
+    local stale="${HOOKS_DAEMON_VENV_LOCK_STALE_SECONDS:-$VENV_LOCK_STALE_SECONDS_DEFAULT}"
+    mtime="$(_venv_lock_dir_mtime "$lock_dir")" || return 1
+    age=$(( $(date +%s) - mtime ))
+    [ "$age" -ge "$stale" ] || return 1
+    echo "$age"
+}
+
+#
+# _venv_lock_try_once() - One attempt at the lock; never waits.
+#
+# Requires _VENV_LOCK_BACKEND to be set. A stale mkdir lock is reclaimed
+# (announced) before the attempt.
+#
+# Returns 0 holding the lock, $VENV_LOCK_HELD if another process holds it,
+# 1 with a message if the lock cannot be created at all.
+#
+_venv_lock_try_once() {
+    local daemon_dir="$1"
+    local lock_file="$daemon_dir/untracked/$VENV_LOCK_FILE_NAME"
+    mkdir -p "$daemon_dir/untracked"
+
+    if [ "$_VENV_LOCK_BACKEND" = "flock" ]; then
+        exec {_VENV_LOCK_FD}>"$lock_file"
+        if flock -n "$_VENV_LOCK_FD"; then
+            return 0
+        fi
+        exec {_VENV_LOCK_FD}>&-
+        _VENV_LOCK_FD=""
+        return "$VENV_LOCK_HELD"
+    fi
+
+    local lock_dir="$lock_file.d" mkdir_err age
+    if [ -d "$lock_dir" ] && age="$(_venv_mkdir_lock_is_stale "$lock_dir")"; then
+        print_warning "ensure_venv: removing stale venv lock $lock_dir (${age}s old, its holder is presumed dead)"
+        rm -rf "$lock_dir"
+    fi
+    if mkdir_err="$(mkdir "$lock_dir" 2>&1)"; then
+        echo "$$" > "$lock_dir/pid"
+        _VENV_LOCK_DIR="$lock_dir"
+        return 0
+    fi
+    if [ ! -d "$lock_dir" ]; then
+        print_error "ensure_venv: cannot create venv lock $lock_dir: $mkdir_err"
+        return 1
+    fi
+    return "$VENV_LOCK_HELD"
+}
+
+#
+# try_acquire_venv_lock() - Take the venv build lock only if it is free now.
+#
+# For callers that must not queue behind a build in progress (the hook path,
+# Plan 00456): a held lock means a build is already running.
+#
+# Args:
+#   $1 - daemon_dir
+#
+# Returns 0 holding the lock, $VENV_LOCK_HELD (75) if another process holds
+# it, 1 with a message on any other failure. Pair a 0 with release_venv_lock
+# (or hand it to a child with venv_lock_handoff_spec + forget_venv_lock).
+#
+try_acquire_venv_lock() {
+    local daemon_dir="$1"
+    if [ -z "$daemon_dir" ]; then
+        print_error "try_acquire_venv_lock: daemon_dir required"
+        return 1
+    fi
+    _VENV_LOCK_BACKEND="$(_venv_lock_backend)" || return 1
+    local rc=0
+    _venv_lock_try_once "$daemon_dir" || rc=$?
+    if [ "$rc" -ne 0 ]; then
+        _VENV_LOCK_BACKEND=""
+    fi
+    return "$rc"
+}
+
+#
+# venv_lock_is_held() - Is another process holding the venv build lock?
+#
+# Read-only: never creates the lock file or untracked/, so a caller that ends
+# up changing nothing leaves nothing behind. A stale mkdir lock counts as free
+# (the next acquire reclaims it).
+#
+# Returns 0 if held, 1 if free, absent, or the backend is unusable (the
+# acquire that follows reports that error properly).
+#
+venv_lock_is_held() {
+    local daemon_dir="$1" backend
+    local lock_file="$daemon_dir/untracked/$VENV_LOCK_FILE_NAME"
+    backend="$(_venv_lock_backend)" || return 1
+
+    if [ "$backend" = "flock" ]; then
+        [ -f "$lock_file" ] || return 1
+        local probe_fd held=0
+        exec {probe_fd}<"$lock_file"
+        if ! flock -n "$probe_fd"; then
+            held=1
+        fi
+        exec {probe_fd}<&-
+        [ "$held" = 1 ]
+        return
+    fi
+
+    [ -d "$lock_file.d" ] || return 1
+    local stale_age
+    if stale_age="$(_venv_mkdir_lock_is_stale "$lock_file.d")"; then
+        print_verbose "venv_lock_is_held: $lock_file.d is ${stale_age}s old, so its holder is presumed dead"
+        return 1
+    fi
+    return 0
+}
+
+#
+# venv_lock_handoff_spec() - Describe the lock held here so a child can adopt it.
+#
+# Echoes "flock:<fd>" or "mkdir:<dir>". The child is started with the spec in
+# HOOKS_DAEMON_VENV_LOCK_INHERITED and inherits the flock descriptor (or owns
+# the lock directory); this process then calls forget_venv_lock. The lock is
+# never free in between, so no other starter can slip in.
+#
+venv_lock_handoff_spec() {
+    if [ "$_VENV_LOCK_BACKEND" = "flock" ] && [ -n "$_VENV_LOCK_FD" ]; then
+        echo "flock:$_VENV_LOCK_FD"
+        return 0
+    fi
+    if [ "$_VENV_LOCK_BACKEND" = "mkdir" ] && [ -n "$_VENV_LOCK_DIR" ]; then
+        echo "mkdir:$_VENV_LOCK_DIR"
+        return 0
+    fi
+    print_error "venv_lock_handoff_spec: this process does not hold the venv lock"
+    return 1
+}
+
+#
+# forget_venv_lock() - Drop this process's claim after handing the lock off.
+#
+# Closes this process's copy of the flock descriptor (the child's copy keeps
+# the lock) and leaves a mkdir lock directory in place for the child to
+# remove. Returns 0.
+#
+forget_venv_lock() {
+    if [ "$_VENV_LOCK_BACKEND" = "flock" ] && [ -n "$_VENV_LOCK_FD" ]; then
+        exec {_VENV_LOCK_FD}>&-
+    fi
+    _VENV_LOCK_FD=""
+    _VENV_LOCK_DIR=""
+    _VENV_LOCK_BACKEND=""
+    return 0
+}
+
+#
+# adopt_venv_lock() - Take ownership of a lock handed over by a parent.
+#
+# Reads HOOKS_DAEMON_VENV_LOCK_INHERITED (see venv_lock_handoff_spec) and
+# confirms the lock really is held through it, so release_venv_lock frees it.
+#
+# Returns 0 owning the lock, 1 with a message otherwise.
+#
+adopt_venv_lock() {
+    local spec="${HOOKS_DAEMON_VENV_LOCK_INHERITED:-}"
+    case "$spec" in
+        flock:*)
+            local fd="${spec#flock:}"
+            if [[ ! "$fd" =~ ^[0-9]+$ ]] || ! flock -n "$fd"; then
+                print_error "adopt_venv_lock: inherited descriptor '$fd' does not hold the venv lock"
+                return 1
+            fi
+            _VENV_LOCK_BACKEND="flock"
+            _VENV_LOCK_FD="$fd"
+            ;;
+        mkdir:*)
+            local dir="${spec#mkdir:}"
+            if [ ! -d "$dir" ]; then
+                print_error "adopt_venv_lock: inherited lock directory is gone: $dir"
+                return 1
+            fi
+            echo "$$" > "$dir/pid"
+            _VENV_LOCK_BACKEND="mkdir"
+            _VENV_LOCK_DIR="$dir"
+            ;;
+        *)
+            print_error "adopt_venv_lock: HOOKS_DAEMON_VENV_LOCK_INHERITED is not a lock spec: '$spec'"
+            return 1
+            ;;
+    esac
+    return 0
+}
+
+#
 # acquire_venv_lock() - Take the venv build lock for daemon_dir, bounded.
 #
 # Args:
@@ -395,14 +596,15 @@ acquire_venv_lock() {
         return 1
     fi
     _VENV_LOCK_BACKEND="$(_venv_lock_backend)" || return 1
-    mkdir -p "$daemon_dir/untracked"
 
     if [ "$_VENV_LOCK_BACKEND" = "flock" ]; then
-        exec {_VENV_LOCK_FD}>"$lock_file"
-        if flock -n "$_VENV_LOCK_FD"; then
-            return 0
+        local rc=0
+        _venv_lock_try_once "$daemon_dir" || rc=$?
+        if [ "$rc" -ne "$VENV_LOCK_HELD" ]; then
+            return "$rc"
         fi
         print_info "ensure_venv: another process holds the venv lock ($lock_file) — waiting up to ${timeout}s for its build to finish"
+        exec {_VENV_LOCK_FD}>"$lock_file"
         if flock -w "$timeout" "$_VENV_LOCK_FD"; then
             return 0
         fi
@@ -414,25 +616,12 @@ acquire_venv_lock() {
     fi
 
     local lock_dir="$lock_file.d"
-    local stale="${HOOKS_DAEMON_VENV_LOCK_STALE_SECONDS:-$VENV_LOCK_STALE_SECONDS_DEFAULT}"
-    local waited=0 announced=0 mkdir_err mtime age
+    local waited=0 announced=0 rc
     while :; do
-        if mkdir_err="$(mkdir "$lock_dir" 2>&1)"; then
-            echo "$$" > "$lock_dir/pid"
-            _VENV_LOCK_DIR="$lock_dir"
-            return 0
-        fi
-        if [ ! -d "$lock_dir" ]; then
-            print_error "ensure_venv: cannot create venv lock $lock_dir: $mkdir_err"
-            return 1
-        fi
-        if mtime="$(_venv_lock_dir_mtime "$lock_dir")"; then
-            age=$(( $(date +%s) - mtime ))
-            if [ "$age" -ge "$stale" ]; then
-                print_warning "ensure_venv: removing stale venv lock $lock_dir (${age}s old, its holder is presumed dead)"
-                rm -rf "$lock_dir"
-                continue
-            fi
+        rc=0
+        _venv_lock_try_once "$daemon_dir" || rc=$?
+        if [ "$rc" -ne "$VENV_LOCK_HELD" ]; then
+            return "$rc"
         fi
         if [ "$waited" -ge "$timeout" ]; then
             print_error "ensure_venv: gave up waiting for the venv lock after ${timeout}s: $lock_dir"
@@ -522,32 +711,12 @@ ensure_venv() {
     local target_version="$2"
     local python_bin="${3:-python3}"
 
-    if [ -z "$daemon_dir" ] || [ -z "$target_version" ]; then
-        print_error "ensure_venv: daemon_dir and target_version required"
-        return 1
-    fi
-
-    # CI gate: allow opt-out for CI environments that stub venvs
-    if [ "${HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP:-0}" = "1" ] || [ "${CI:-}" = "true" ]; then
-        print_verbose "ensure_venv: skipped (HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP or CI set)"
+    local fingerprint rc=0
+    fingerprint="$(_ensure_venv_fingerprint "$daemon_dir" "$target_version" "$python_bin")" || rc=$?
+    if [ "$rc" -eq "$_ENSURE_VENV_SKIPPED" ]; then
         return 0
     fi
-
-    # Compute fingerprint via the SSOT helper. Must be sourced by the caller.
-    if ! declare -F python_venv_fingerprint > /dev/null; then
-        print_error "ensure_venv: python_venv_fingerprint not loaded — source scripts/install/python_fingerprint.sh first"
-        return 1
-    fi
-
-    # Plan 00124: pass daemon_dir as the slug root so the venv is keyed by the
-    # project-path slug (venv-{slug}-py{MM}-{hash}), matching the Python
-    # resolver's keyed lookup (paths.py get_venv_path / resolve_existing_venv).
-    # Without the root the bare slug-less key collides between a host view and a
-    # container view of the same bind-mounted project that share a Python
-    # fingerprint — they would then fight over one shared venv.
-    local fingerprint
-    if ! fingerprint=$(python_venv_fingerprint "$python_bin" "$daemon_dir"); then
-        print_error "ensure_venv: failed to compute fingerprint for $python_bin"
+    if [ "$rc" -ne 0 ]; then
         return 1
     fi
 
@@ -565,6 +734,77 @@ ensure_venv() {
     _ensure_venv_build "$daemon_dir" "$venv_path" "$target_version" "$python_bin" "$fingerprint" || build_rc=$?
     release_venv_lock
     return "$build_rc"
+}
+
+#
+# ensure_venv_locked() - ensure_venv for a caller that already holds the lock.
+#
+# Same arguments, output and return codes as ensure_venv, minus the lock: the
+# caller took it (try_acquire_venv_lock, acquire_venv_lock, or adopt_venv_lock
+# in a detached child) and releases it. Taking it again here would block on
+# the caller's own lock, since flock(2) excludes a second descriptor even
+# within one process.
+#
+ensure_venv_locked() {
+    local daemon_dir="$1"
+    local target_version="$2"
+    local python_bin="${3:-python3}"
+
+    local fingerprint rc=0
+    fingerprint="$(_ensure_venv_fingerprint "$daemon_dir" "$target_version" "$python_bin")" || rc=$?
+    if [ "$rc" -eq "$_ENSURE_VENV_SKIPPED" ]; then
+        return 0
+    fi
+    if [ "$rc" -ne 0 ]; then
+        return 1
+    fi
+
+    _ensure_venv_build "$daemon_dir" "$daemon_dir/untracked/venv-$fingerprint" \
+        "$target_version" "$python_bin" "$fingerprint"
+}
+
+# _ensure_venv_fingerprint's "bootstrap is switched off here" status.
+_ENSURE_VENV_SKIPPED=3
+
+#
+# _ensure_venv_fingerprint() - Validate ensure_venv's arguments, echo the fingerprint.
+#
+# Args: $1 daemon_dir, $2 target_version, $3 python_bin.
+#
+# Returns 0 with the fingerprint on stdout, $_ENSURE_VENV_SKIPPED when
+# HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP=1 or CI=true switches bootstrap off, 1 on
+# an error (already reported).
+#
+_ensure_venv_fingerprint() {
+    local daemon_dir="$1" target_version="$2" python_bin="$3"
+
+    if [ -z "$daemon_dir" ] || [ -z "$target_version" ]; then
+        print_error "ensure_venv: daemon_dir and target_version required"
+        return 1
+    fi
+
+    # CI gate: allow opt-out for CI environments that stub venvs
+    if [ "${HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP:-0}" = "1" ] || [ "${CI:-}" = "true" ]; then
+        print_verbose "ensure_venv: skipped (HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP or CI set)"
+        return "$_ENSURE_VENV_SKIPPED"
+    fi
+
+    # Compute fingerprint via the SSOT helper. Must be sourced by the caller.
+    if ! declare -F python_venv_fingerprint > /dev/null; then
+        print_error "ensure_venv: python_venv_fingerprint not loaded — source scripts/install/python_fingerprint.sh first"
+        return 1
+    fi
+
+    # Plan 00124: pass daemon_dir as the slug root so the venv is keyed by the
+    # project-path slug (venv-{slug}-py{MM}-{hash}), matching the Python
+    # resolver's keyed lookup (paths.py get_venv_path / resolve_existing_venv).
+    # Without the root the bare slug-less key collides between a host view and a
+    # container view of the same bind-mounted project that share a Python
+    # fingerprint — they would then fight over one shared venv.
+    if ! python_venv_fingerprint "$python_bin" "$daemon_dir"; then
+        print_error "ensure_venv: failed to compute fingerprint for $python_bin"
+        return 1
+    fi
 }
 
 #

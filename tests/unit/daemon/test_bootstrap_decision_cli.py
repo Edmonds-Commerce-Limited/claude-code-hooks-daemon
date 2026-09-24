@@ -234,7 +234,14 @@ class TestItNeedsNoVenv:
         # -S skips site-packages entirely, so the editable install of this
         # package is invisible: only paths.py's own stdlib imports can load.
         result = subprocess.run(  # nosec B603 - fixed argv, no shell
-            [sys.executable, "-S", str(_PATHS_PY), "bootstrap-decision", "--daemon-dir", str(daemon_dir)],
+            [
+                sys.executable,
+                "-S",
+                str(_PATHS_PY),
+                "bootstrap-decision",
+                "--daemon-dir",
+                str(daemon_dir),
+            ],
             capture_output=True,
             text=True,
             env=env,
