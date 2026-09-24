@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00424: remote docs add overwrites existing capture](00424-remote-docs-add-overwrites-existing-capture/PLAN.md) - Complete at `ad8e79b3`…`08f8b9c9` + the archiving commit (from issue #42: a second `add` of one URL silently replaced the first capture. The catch the report could not see is that `check` PRINTS plain `add` as the licence-drift remedy, so the refusal and that remedy moved together, welded by a test — nothing pinned that line before, in either direction)
+
 - [00423: per handler scope main sub](00423-per-handler-scope-main-sub/PLAN.md) - Complete at `93f2a1c0`…`48733f1b` + the archiving commit (from issues #40/#41: handlers declare `scope: ALL|MAIN|SUB`, keyed on `agent_id` presence because `agent_type` was measured empty in 4 of 5 subagent stops; #41's three destructive controls are scoped but deliberately not built)
 
 - [00419: niggles ledger fourteen](00419-niggles-ledger-fourteen/PLAN.md) - Complete at `6a6f9a43`…`2778206f` + the archiving commit (fifteen entries, eleven terminal; the four that were not are re-filed into 00422 rather than counted as closed, because nothing downstream re-reads a closed plan. N1: `debug_hooks.sh` could not run in the repository that dogfoods it)

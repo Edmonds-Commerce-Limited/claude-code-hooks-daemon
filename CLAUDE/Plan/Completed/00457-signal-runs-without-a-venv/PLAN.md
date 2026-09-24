@@ -1,6 +1,6 @@
 # Plan 00457: signal runs without a venv
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-24
 **Owner**: dev
 **GitHub Issue**: #55
@@ -81,9 +81,10 @@ commands can be added. `signal` becomes the second command it handles.
 
 ### Phase 2: Deliver
 
-- [ ] ⬜ **Task 2.1**: Merge `--no-ff`, verify ancestry and CI, and restart
-  the daemon.
-- [ ] ⬜ **Task 2.2**: Comment on #55 and close it.
+- [x] ✅ **Task 2.1**: Merge `--no-ff`, verify ancestry and CI, and restart
+  the daemon. Merged at `6eb51575`; CI green on `a80dd491`, which contains
+  it.
+- [x] ✅ **Task 2.2**: Comment on #55 and close it. Closed as completed.
 
 ## Success Criteria
 
@@ -95,6 +96,8 @@ commands can be added. `signal` becomes the second command it handles.
   semantics question shared with `repair`, not exercised here.
 - [x] Malformed requests are still refused, as they are today.
 - [x] Full QA passes and CI is green.
+- [x] Every release-bound consequence is in the pending-release holding
+  area: `CLAUDE/UPGRADES/UNRELEASED/release-notes/07-the-operator-signal-channel-now-runs-without-a-venv.md`.
 
 ## Delivery & Milestones
 
@@ -102,4 +105,4 @@ commands can be added. `signal` becomes the second command it handles.
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00457-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- Not yet delivered.
+- Delivered: merge `6eb51575` (#55), CI green on `a80dd491`.
