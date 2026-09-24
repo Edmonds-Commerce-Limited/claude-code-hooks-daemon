@@ -64,7 +64,7 @@ first, and the other fixes build on it.
 
 ### Phase 2: one resolver for the config dir and enabled plugins (G13, P2, P6, P7, G11, G12, G14, G15)
 
-- [ ] ⬜ **Task 2.1**: `claude_config_dir()`, and an enabled-plugins resolver
+- [x] ✅ **Task 2.1**: `claude_config_dir()`, and an enabled-plugins resolver
   that reads `installed_plugins.json` and `enabledPlugins` per scope, honours
   `projectPath` for project scope, and lists each plugin's agents, skills,
   hooks and LSP servers. `project_containment` (G10's docstring) and every

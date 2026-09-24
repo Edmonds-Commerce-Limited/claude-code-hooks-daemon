@@ -532,6 +532,18 @@ class TestTheClaudeHomeDirectoryIsAllowed:
         with patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(tmp_path / "claude-home")}):
             assert handler.matches(_write("/tmp/notes.md")) is True
 
+    def test_the_home_comes_from_the_shared_config_dir_resolver(
+        self, handler: ProjectContainmentHandler, tmp_path: Path
+    ) -> None:
+        """Plan 00468 G13: one resolver answers "where is the Claude home?" for
+        every handler, so this one cannot drift from the agent resolver."""
+        claude_home = tmp_path / "resolved-home"
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.project_containment.claude_config_dir",
+            return_value=claude_home,
+        ):
+            assert handler.matches(_write(str(claude_home / "plugins" / "data" / "x"))) is False
+
 
 _SCRATCHPAD = "/tmp/claude-0/-workspace/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/scratchpad"
 

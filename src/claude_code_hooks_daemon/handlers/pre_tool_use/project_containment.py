@@ -39,7 +39,6 @@ separate handler rather than weakening an existing one to make room.
 """
 
 import logging
-import os
 import shlex
 import tempfile
 from pathlib import Path
@@ -67,6 +66,7 @@ from claude_code_hooks_daemon.core.utils import (
     get_bash_command,
     get_bash_write_targets,
 )
+from claude_code_hooks_daemon.utils.claude_config import claude_config_dir
 from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
 
@@ -85,9 +85,8 @@ SCRATCH_DIR = ProjectPath.SCRATCH_DIR
 #: ``~/.claude/projects/*/memory/*.md`` on a different premise (untracked
 #: knowledge bypasses review) through its own raw-string marker rule.
 #: Containment asks "is it durable?", that rule asks "is it reviewable?", and a
-#: path can fail the second while passing the first.
-_CLAUDE_CONFIG_DIR_ENV = "CLAUDE_CONFIG_DIR"
-_DEFAULT_CLAUDE_HOME = ".claude"
+#: path can fail the second while passing the first. Where the home is comes
+#: from the shared ``claude_config_dir()`` resolver (Plan 00468 G13).
 
 #: The harness's per-session scratchpad is allowed too, but on a different
 #: footing from the Claude home: it IS ephemeral, and it is allowed anyway
@@ -203,17 +202,16 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
 
     @staticmethod
     def _claude_home() -> Path:
-        """Claude Code's own state directory.
+        """Claude Code's own state directory, from :func:`claude_config_dir`.
 
-        ``CLAUDE_CONFIG_DIR`` when set, else the documented default. Read at
-        call time rather than cached: the daemon outlives any one session, and
-        a cached value would silently follow the environment the daemon
-        happened to start in.
+        That is ``CLAUDE_CONFIG_DIR`` or the default ``~/.claude`` in the
+        DAEMON's environment, which is fixed when the daemon starts; reading it
+        per call does not change that. A session started with a different
+        ``CLAUDE_CONFIG_DIR`` or ``HOME`` has its own Claude home judged
+        against the daemon's, because the hook payload carries neither value
+        (Plan 00468 G10).
         """
-        configured = os.environ.get(_CLAUDE_CONFIG_DIR_ENV)
-        if configured:
-            return Path(configured)
-        return Path.home() / _DEFAULT_CLAUDE_HOME
+        return claude_config_dir()
 
     def _offending_targets(self, hook_input: dict[str, Any]) -> list[str]:
         """Every named write target that lies outside the repository root.

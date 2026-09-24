@@ -41,6 +41,15 @@ _FRONTMATTER_RE: Final[re.Pattern[str]] = re.compile(
 )
 
 
+#: The lenient frontmatter fallback's line shapes: an UNINDENTED
+#: ``key: rest-of-line`` (the rest taken literally, colons and all), and an
+#: indented ``- item`` under a key whose own value was empty.
+_LENIENT_KEY_RE: Final[re.Pattern[str]] = re.compile(r"^([A-Za-z_][A-Za-z0-9_-]*)\s*:(.*)$")
+_LENIENT_LIST_ITEM_RE: Final[re.Pattern[str]] = re.compile(r"^\s+-\s+(.*)$")
+#: The shortest string that can be a quoted value: the two quotes alone.
+_QUOTED_MIN_LENGTH: Final[int] = 2
+
+
 def _restore_thematic_breaks(content: str) -> str:
     """Replace mdformat's 70-underscore thematic break with ``---``."""
     return "\n".join(
@@ -91,6 +100,62 @@ def parse_frontmatter_yaml(content: str) -> dict[str, Any] | None:
     except yaml.YAMLError:
         return None
     return loaded if isinstance(loaded, dict) else None
+
+
+def parse_frontmatter_lenient(content: str) -> dict[str, Any] | None:
+    """Parse frontmatter as YAML, else by top-level ``key: rest-of-line`` lines.
+
+    Claude Code loads agent and skill files that strict YAML rejects: a
+    description holding ``: `` is enough (``mapping values are not allowed
+    here``). Plan 00468 audit P6 found this repository's own
+    ``code-reviewer.md`` invisible to the daemon for exactly that reason. So
+    valid YAML is parsed exactly as :func:`parse_frontmatter_yaml` does, and
+    only a failure falls back to reading each unindented ``key: value`` line
+    with the value taken literally to the end of the line.
+
+    The fallback also collects an indented ``- item`` list under an empty
+    key, folds any other indented line into the value above it, strips one
+    pair of matching quotes, and maps an empty value to None, as YAML does.
+
+    Returns None when there is no frontmatter block, or when the block holds
+    no key line at all.
+    """
+    strict = parse_frontmatter_yaml(content)
+    if strict is not None:
+        return strict
+    block, _body = split_frontmatter(content)
+    if not block:
+        return None
+    inner = block.split("\n", 1)[1].rsplit("---", 1)[0]
+
+    parsed: dict[str, Any] = {}
+    current: str | None = None
+    for line in inner.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        key_match = _LENIENT_KEY_RE.match(line)
+        if key_match is not None:
+            key = str(key_match.group(1))
+            parsed[key] = _unquote(key_match.group(2).strip()) or None
+            current = key
+            continue
+        if current is None or line[:1] not in (" ", "\t"):
+            continue
+        item_match = _LENIENT_LIST_ITEM_RE.match(line)
+        existing = parsed[current]
+        if item_match is not None and (existing is None or isinstance(existing, list)):
+            parsed[current] = [*(existing or []), _unquote(item_match.group(1).strip())]
+        elif isinstance(existing, str):
+            parsed[current] = f"{existing} {stripped}"
+    return parsed or None
+
+
+def _unquote(value: str) -> str:
+    """``value`` without one pair of matching surrounding quotes."""
+    if len(value) >= _QUOTED_MIN_LENGTH and value[0] == value[-1] and value[0] in "\"'":
+        return value[1:-1]
+    return value
 
 
 def format_markdown_text(content: str) -> str:
