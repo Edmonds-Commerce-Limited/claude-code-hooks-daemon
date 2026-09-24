@@ -105,24 +105,34 @@ source "$RESOLVE_LIB"
 
 BOOTSTRAP="$DAEMON_DIR/scripts/venv_bootstrap.sh"
 
+# Global options that take a value, below. `_subcommand_of` and the `signal`
+# arm's own reconstruction loop (it must drop the "signal" token before
+# argparse ever sees it) each need to recognise the same set -- ONE array, so
+# the two can never list it differently and drift apart.
+_VALUE_TAKING_GLOBAL_OPTS=(--project-root --pid-file --socket)
+
+# True (0) iff $1 is one of the options above.
+_is_value_taking_global_opt() {
+    local opt
+    for opt in "${_VALUE_TAKING_GLOBAL_OPTS[@]}"; do
+        [ "$1" = "$opt" ] && return 0
+    done
+    return 1
+}
+
 # _subcommand_of() - The subcommand in "$@": the first word that is neither a
-# global option nor the value of one (the CLI's --project-root, --pid-file and
-# --socket each take one). Returns 1 when there is none.
+# global option nor the value of one. Returns 1 when there is none.
 _subcommand_of() {
     while [ "$#" -gt 0 ]; do
-        case "$1" in
-            --project-root | --pid-file | --socket)
-                [ "$#" -ge 2 ] || return 1
-                shift 2
-                ;;
-            -*)
-                shift
-                ;;
-            *)
-                printf '%s' "$1"
-                return 0
-                ;;
-        esac
+        if _is_value_taking_global_opt "$1"; then
+            [ "$#" -ge 2 ] || return 1
+            shift 2
+        elif [[ "$1" == -* ]]; then
+            shift
+        else
+            printf '%s' "$1"
+            return 0
+        fi
     done
     return 1
 }
@@ -180,14 +190,16 @@ _run_venv_free_verb() {
                 echo "   restores its tracked files." >&2
                 exit 5
             fi
-            system_python="$(command -v python3 || true)"
-            if [ -z "$system_python" ]; then
+            if ! system_python="$(command -v python3)"; then
                 echo "❌ hooks-daemon signal: no system python3 on PATH; the venv-free signal channel" >&2
                 echo "   needs one." >&2
                 exit 5
             fi
-            if ! "$system_python" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)' \
-                    2>/dev/null; then
+            # No stderr redirect: if this probe itself crashes (a corrupt
+            # interpreter, a bad shebang -- anything other than a clean
+            # "too old"), the real reason must reach the caller, not be
+            # thrown away in favour of a generic "too old" message.
+            if ! "$system_python" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)'; then
                 echo "❌ hooks-daemon signal: $system_python is older than the Python 3.8 this entry" >&2
                 echo "   point needs. Use a newer system python3, or set up a venv for this project" >&2
                 echo "   ($BIN_DIR/hooks-daemon repair)." >&2
@@ -199,26 +211,39 @@ _run_venv_free_verb() {
             # prefix to swallow. Drop the "signal" token from wherever
             # `_subcommand_of` found it among the global options, so it is
             # never mistaken for <kind>.
+            #
+            # `_run_venv_free_verb` is itself called as `if ! ... ; then`,
+            # and bash suspends `set -e` for every command run inside a
+            # function invoked as an `if`/`while` condition -- not just the
+            # function's own top-level exit status. An unconditional
+            # `shift 2` here when one of these value-taking global options is
+            # the LAST argument (no value follows) would therefore fail
+            # WITHOUT stopping the script, leaving `$#` unchanged and this
+            # loop spinning forever. Each branch below checks it has a value
+            # before shifting past it; a missing value is passed through
+            # as a bare flag for signal_standalone.py's own argparse to
+            # report clearly, instead of looping or dying unexplained.
             local rest=() matched_verb=0
             while [ "$#" -gt 0 ]; do
-                case "$1" in
-                    --project-root | --pid-file | --socket)
-                        rest+=("$1" "${2:-}")
+                if _is_value_taking_global_opt "$1"; then
+                    if [ "$#" -ge 2 ]; then
+                        rest+=("$1" "$2")
                         shift 2
-                        ;;
-                    -*)
+                    else
                         rest+=("$1")
                         shift
-                        ;;
-                    *)
-                        if [ "$matched_verb" -eq 0 ]; then
-                            matched_verb=1
-                        else
-                            rest+=("$1")
-                        fi
-                        shift
-                        ;;
-                esac
+                    fi
+                elif [[ "$1" == -* ]]; then
+                    rest+=("$1")
+                    shift
+                else
+                    if [ "$matched_verb" -eq 0 ]; then
+                        matched_verb=1
+                    else
+                        rest+=("$1")
+                    fi
+                    shift
+                fi
             done
             # ${rest[@]+"${rest[@]}"} rather than a bare "${rest[@]}": under
             # `set -u`, bash <4.4 (macOS ships 3.2.57) raises "unbound

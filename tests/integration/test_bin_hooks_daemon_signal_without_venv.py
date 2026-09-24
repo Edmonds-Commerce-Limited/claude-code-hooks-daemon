@@ -106,6 +106,64 @@ class TestSignalWithNoVenv:
         assert "3.8" in result.stderr
         assert sandbox.uv_calls() == []
 
+    def test_a_broken_python3s_own_stderr_is_not_swallowed(self, sandbox: Sandbox) -> None:
+        """Review fix 1: the version probe used to redirect the broken
+        interpreter's own stderr to /dev/null, so a python3 that crashes for
+        a reason OTHER than "too old" (a corrupt install, a bad shebang) was
+        reported identically to a clean old-version refusal -- the real
+        reason was thrown away. The probe's stderr must reach ours."""
+        broken_python3 = sandbox.root / "tools" / "python3"
+        broken_python3.unlink()
+        broken_python3.write_text(
+            "#!/bin/bash\necho 'PYTHON3-IS-CORRUPT-MARKER' >&2\nexit 1\n", encoding="utf-8"
+        )
+        broken_python3.chmod(0o755)
+
+        result = sandbox.wrapper(
+            "signal", "reboot-cancelled", "--all-sessions", "--project-root", str(sandbox.project)
+        )
+
+        assert result.returncode == _NO_VENV_EXIT
+        assert "PYTHON3-IS-CORRUPT-MARKER" in result.stderr
+
+    def test_no_system_python3_on_path_is_named_clearly(self, sandbox: Sandbox) -> None:
+        """Review fix 1: `command -v python3 || true` is the banned
+        error-hiding shape (a bare `|| true` on a command whose failure is
+        meaningful) -- assert on the behaviour it must still produce once
+        rewritten as an explicit `if ! system_python=$(command -v python3);
+        then ...`: python3 missing entirely is still refused at exit 5 with
+        a clear message, not a raw `set -e` failure."""
+        (sandbox.root / "tools" / "python3").unlink()
+
+        result = sandbox.wrapper(
+            "signal", "reboot-cancelled", "--all-sessions", "--project-root", str(sandbox.project)
+        )
+
+        assert result.returncode == _NO_VENV_EXIT
+        assert "no system python3" in result.stderr.lower()
+
+
+class TestMissingValueForAGlobalOption:
+    """Review fix 2: the reconstruction loop that strips the "signal" verb
+    replicates ``_subcommand_of``'s value-taking-option recognition
+    (--project-root/--pid-file/--socket), but originally did an unconditional
+    ``shift 2`` -- which fails under this script's own ``set -e`` when the
+    option is the LAST argument, so the script died with no explanation
+    at all. The fix passes the bare flag through so signal_standalone.py's
+    own argparse reports the missing value clearly.
+    """
+
+    def test_project_root_as_the_last_argument_is_not_a_silent_crash(
+        self, sandbox: Sandbox
+    ) -> None:
+        result = sandbox.wrapper("signal", "reboot-cancelled", "--all-sessions", "--project-root")
+
+        output = result.stdout + result.stderr
+        assert result.returncode != 0
+        assert output.strip(), "must not die with empty stdout and stderr"
+        assert "shift" not in output.lower(), "a raw bash builtin error leaked through"
+        assert "project-root" in output.lower()
+
 
 class TestTheVerbIsFoundPastGlobalOptions:
     """Mirrors ``TestTheVerbIsFoundPastGlobalOptions`` in the repair test file

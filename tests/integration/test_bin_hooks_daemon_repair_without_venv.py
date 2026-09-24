@@ -217,3 +217,15 @@ class TestDispatchHasOneArmPerVerb:
         assert f'if ! {_DISPATCH_FUNCTION} "$@"; then' in wrapper_text
         assert '"${1:-}" = "repair"' not in wrapper_text
         assert '"${1:-}" = "signal"' not in wrapper_text
+
+    def test_value_taking_global_options_are_listed_in_one_place(self, wrapper_text: str) -> None:
+        """Review fix 3 (Task 1.3): `_subcommand_of` and `signal`'s own
+        reconstruction loop both need to recognise --project-root/
+        --pid-file/--socket as taking a value. Each had its own literal
+        case-pattern list, free to drift apart. There must be exactly one
+        definition (a shared array/helper) that both consult."""
+        matches = re.findall(r"--project-root.*?--pid-file.*?--socket", wrapper_text)
+        assert len(matches) == 1, (
+            "expected the value-taking global options to be listed in "
+            f"exactly one place, found {len(matches)}: {matches}"
+        )
