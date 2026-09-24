@@ -284,6 +284,60 @@ class TestEnforceLlmQaHandler:
         """The escape fix must not swing into denying ordinary reads."""
         assert handler.matches(bash_hook_input(r"grep -n 'a\' scripts/qa/run_all.sh")) is False
 
+    # ── matches() — real invocation vs prose mention (N6, Plan 00466) ──
+
+    def test_does_not_match_a_prose_mention_in_a_quoted_title_flag(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        """The exact live false positive: a `mkplan.bash --title "..."`
+        journal entry whose quoted title happens to name the runner in
+        prose. The command's own leading word (`mkplan.bash`) is not the
+        script and not a wrapper, so the substring-only test previously
+        denied every such entry."""
+        command = (
+            "CLAUDE/Plan/mkplan.bash --journal 00466 finding "
+            "untracked/scratch/body.md --ref N2 "
+            '--title "worktree setup names the denied full-suite runner run_all.sh"'
+        )
+        assert handler.matches(bash_hook_input(command)) is False
+
+    def test_does_not_match_a_prose_mention_in_a_gh_body(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        assert (
+            handler.matches(
+                bash_hook_input(
+                    'gh issue comment 56 --body "fixed the run_all.sh advice in the docs"'
+                )
+            )
+            is False
+        )
+
+    def test_still_matches_a_relative_invocation_after_cd_with_double_ampersand(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        """`&&` chains two segments exactly like `;` does for this guard."""
+        assert handler.matches(bash_hook_input("cd scripts/qa && ./run_all.sh")) is True
+
+    def test_still_matches_an_sh_dash_c_invocation(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        """`sh -c '...'` hands the whole inner string to sh, which then runs it."""
+        assert handler.matches(bash_hook_input("sh -c './scripts/qa/run_all.sh'")) is True
+
+    def test_still_matches_a_bare_command_substitution(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        assert handler.matches(bash_hook_input("echo $(./scripts/qa/run_all.sh)")) is True
+
+    def test_does_not_match_an_unrelated_wrapper_invocation(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        """A wrapper naming a DIFFERENT script must not be caught by the
+        mere presence of the word 'bash' elsewhere in the command."""
+        command = 'bash scripts/qa/run_tests.sh; echo "see run_all.sh notes"'
+        assert handler.matches(bash_hook_input(command)) is False
+
     # ── Acceptance tests ──
 
     def test_has_acceptance_tests(self, handler: EnforceLlmQaHandler) -> None:
