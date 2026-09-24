@@ -186,7 +186,7 @@ _SCRIPT_EXTENSIONS: Final[tuple[str, ...]] = (
 
 # Plan 00459 acceptance probes: an encrypted vars file and its decrypted twin,
 # at the vault-vars name the default `*vault_pass*` glob matches.
-_PROBE_DIR: Final[str] = "untracked/scratch/acceptance-test-secret-guard"
+_PROBE_DIR: Final[str] = "untracked/acceptance/acceptance-test-secret-guard"
 _PROBE_VAULT_RELPATH: Final[str] = "group_vars/all/vault_passwords.yml"
 _PROBE_ENCRYPTED_DIR: Final[str] = f"{_PROBE_DIR}/encrypted/group_vars/all"
 _PROBE_ENCRYPTED_FILE: Final[str] = f"{_PROBE_DIR}/encrypted/{_PROBE_VAULT_RELPATH}"
@@ -559,13 +559,13 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         )
 
         # The default globs match on BASENAME, so the probe can sit in the
-        # sanctioned scratch directory and still trip `*.vault-password`. No
+        # gitignored acceptance directory and still trip `*.vault-password`. No
         # file is created: the deny is decided from the path.
         protected_read_probe = ToolPayload(
             tool_name=ToolName.READ,
             tool_input={
                 "file_path": (
-                    "$CLAUDE_PROJECT_DIR/untracked/scratch/"
+                    "$CLAUDE_PROJECT_DIR/untracked/acceptance/"
                     "acceptance-test-secret-guard/fixture.vault-password"
                 )
             },

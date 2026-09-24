@@ -1383,7 +1383,7 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
             AcceptanceTest(
                 title="unquoted heredoc prose gets a short reason, no fabricated remediation",
                 command=(
-                    "false && cat >> untracked/scratch/never-created-$$.md <<EOF\n"
+                    "false && cat >> untracked/acceptance/never-created-$$.md <<EOF\n"
                     "the guardrail described above blocks piping straight to a pager e.g. output | tail -20\n"
                     "EOF"
                 ),

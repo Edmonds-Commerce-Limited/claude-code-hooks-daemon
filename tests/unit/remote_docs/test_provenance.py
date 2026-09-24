@@ -261,3 +261,81 @@ class TestStaleness:
 
         assert result.provenance is not None
         assert result.provenance.is_stale(date(2099, 1, 1)) is False
+
+
+# A documentation UUID of the shape upstream example payloads carry. It is
+# assembled at runtime so this file's own text never matches the dogfood
+# session-uuid public pattern.
+_EXAMPLE_UUID = "-".join(("550e8400", "e29b", "41d4", "a716", "446655440000"))
+
+
+def _captured(body: str) -> str:
+    """A document exactly as ``remote-docs add`` writes it."""
+    from claude_code_hooks_daemon.remote_docs.capture import capture
+
+    return capture(
+        "https://example.com/docs/page",
+        fetch_fn=lambda _url: body.encode("utf-8"),
+        now=datetime(2026, 9, 24, tzinfo=UTC),
+    ).content
+
+
+class TestIsUnalteredCapture:
+    """Plan 00468: the body of a capture still hashes to its ``source_sha256``."""
+
+    def test_a_fresh_capture_is_unaltered(self) -> None:
+        from claude_code_hooks_daemon.remote_docs.provenance import is_unaltered_capture
+
+        assert is_unaltered_capture(_captured(f"# Page\n\nid {_EXAMPLE_UUID}\n")) is True
+
+    def test_a_body_edited_after_capture_is_altered(self) -> None:
+        from claude_code_hooks_daemon.remote_docs.provenance import is_unaltered_capture
+
+        content = _captured("# Page\n\nupstream text\n") + f"added {_EXAMPLE_UUID}\n"
+
+        assert is_unaltered_capture(content) is False
+
+    def test_a_document_without_provenance_is_not_a_capture(self) -> None:
+        from claude_code_hooks_daemon.remote_docs.provenance import is_unaltered_capture
+
+        assert is_unaltered_capture(f"# Notes\n\n{_EXAMPLE_UUID}\n") is False
+
+    def test_provenance_whose_hash_names_other_bytes_is_altered(self) -> None:
+        from claude_code_hooks_daemon.remote_docs.provenance import is_unaltered_capture
+
+        assert is_unaltered_capture(_frontmatter()) is False
+
+
+class TestIsFaithfulVendoredCopy:
+    """Only an unaltered capture INSIDE the remote tree stands public patterns down."""
+
+    def test_an_unaltered_capture_in_the_tree_is_faithful(self) -> None:
+        from claude_code_hooks_daemon.remote_docs.provenance import is_faithful_vendored_copy
+
+        content = _captured(f"id {_EXAMPLE_UUID}\n")
+
+        assert is_faithful_vendored_copy("remote-docs/example.com/p.md", content, "remote-docs")
+
+    def test_the_same_capture_outside_the_tree_is_not(self) -> None:
+        from claude_code_hooks_daemon.remote_docs.provenance import is_faithful_vendored_copy
+
+        content = _captured(f"id {_EXAMPLE_UUID}\n")
+
+        assert not is_faithful_vendored_copy("docs/p.md", content, "remote-docs")
+        assert not is_faithful_vendored_copy("remote-docs-copy/p.md", content, "remote-docs")
+
+    def test_a_non_markdown_file_in_the_tree_is_not(self) -> None:
+        from claude_code_hooks_daemon.remote_docs.provenance import is_faithful_vendored_copy
+
+        content = _captured(f"id {_EXAMPLE_UUID}\n")
+
+        assert not is_faithful_vendored_copy(
+            "remote-docs/example.com/p.txt", content, "remote-docs"
+        )
+
+    def test_an_edited_capture_in_the_tree_is_not(self) -> None:
+        from claude_code_hooks_daemon.remote_docs.provenance import is_faithful_vendored_copy
+
+        content = _captured("upstream\n") + f"{_EXAMPLE_UUID}\n"
+
+        assert not is_faithful_vendored_copy("remote-docs/example.com/p.md", content, "remote-docs")

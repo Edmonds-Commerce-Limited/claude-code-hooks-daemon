@@ -17,10 +17,12 @@ The callers are hook handlers, where an escaping exception would take down the
 gate rather than report a bad document.
 """
 
+import hashlib
 import re
 from dataclasses import dataclass
 from datetime import date, datetime
 from enum import StrEnum
+from pathlib import PurePosixPath
 from typing import Any, Final
 from urllib.parse import urlparse
 
@@ -35,6 +37,12 @@ UNREVIEWED: Final[str] = "unreviewed"
 
 #: ``stale_after`` sentinel for a deliberately frozen archival snapshot (D6).
 NEVER: Final[str] = "never"
+
+#: What capture writes between the closing ``---`` line and the upstream body.
+#: The body after it is exactly the bytes ``source_sha256`` was taken of.
+CAPTURE_BODY_SEPARATOR: Final[str] = "\n"
+
+_MARKDOWN_SUFFIX: Final[str] = ".md"
 
 #: A hex SHA-256 digest: exactly 64 hex characters.
 _SHA256_RE: Final[re.Pattern[str]] = re.compile(r"\A[0-9a-f]{64}\Z", re.IGNORECASE)
@@ -319,6 +327,46 @@ def parse_provenance(content: str) -> ParseResult:
         errors=(),
         body=body,
     )
+
+
+def is_unaltered_capture(content: str) -> bool:
+    """Whether ``content`` is a capture whose body still hashes to ``source_sha256``.
+
+    Capture stores the fetched bytes as the body and records their hash, so a
+    match means nobody has changed the body since it was fetched. A mismatch,
+    or no valid provenance at all, means the text is not upstream's as
+    recorded and must be treated as our own.
+    """
+    result = parse_provenance(content)
+    if result.provenance is None or not result.body.startswith(CAPTURE_BODY_SEPARATOR):
+        return False
+    body = result.body[len(CAPTURE_BODY_SEPARATOR) :]
+    return hashlib.sha256(body.encode("utf-8")).hexdigest() == result.provenance.source_sha256
+
+
+def is_faithful_vendored_copy(relative_path: str, content: str, remote_tree: str) -> bool:
+    """Whether a file is an unaltered capture sitting in the remote-docs tree.
+
+    The single rule the sensitive-content handler and its whole-tree QA scan
+    share for standing PUBLIC patterns down (Plan 00468). Those patterns catch
+    this project's own material leaking in, and a faithful copy of an upstream
+    page cannot carry any. The secret word list is never stood down by this.
+
+    ``relative_path`` is relative to the project root; ``remote_tree`` is
+    ``documentation.trees.remote``.
+    """
+    return is_remote_tree_document(relative_path, remote_tree) and is_unaltered_capture(content)
+
+
+def is_remote_tree_document(relative_path: str, remote_tree: str) -> bool:
+    """Whether ``relative_path`` names a markdown document inside the remote-docs tree.
+
+    The cheap half of :func:`is_faithful_vendored_copy`, so a caller that must
+    fetch a file's content first can skip every file that could never qualify.
+    """
+    path = PurePosixPath(relative_path)
+    tree_parts = PurePosixPath(remote_tree.strip("/")).parts
+    return path.suffix == _MARKDOWN_SUFFIX and path.parts[: len(tree_parts)] == tree_parts
 
 
 def _optional_str(data: dict[str, Any], field: str) -> str | None:

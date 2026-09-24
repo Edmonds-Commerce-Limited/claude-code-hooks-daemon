@@ -916,6 +916,45 @@ def get_venv_path(project_dir: Path | str) -> Path:
     return untracked_dir / f"venv-{python_venv_fingerprint(project_path)}"
 
 
+# Plan 00466 N1: bound on the run probe below. Deliberately separate from
+# _PYTHON_VERSION_PROBE_TIMEOUT_SECS (PATH discovery) -- that probe parses
+# "Python X.Y.Z" from `--version` output, which the bash-script fakes this
+# resolver's own test suite uses do not print. This probe only needs the
+# candidate to launch and exit cleanly, so it is reusable by real venvs and
+# test fakes alike. 5s mirrors Timeout.VALIDATION_CHECK
+# (client_validator.py's own venv-runs probe) for one shared expectation of
+# "how long a venv interpreter may reasonably take to start".
+_VENV_RUN_PROBE_TIMEOUT_SECS = 5.0
+
+
+def _venv_interpreter_runs(candidate: Path) -> bool:
+    """Return True iff ``candidate`` can actually execute on this host.
+
+    The executable bit alone does not prove a venv interpreter can run: it
+    can be present and ``+x`` and still fail at exec time -- wrong
+    architecture/libc from a container build, or a symlink into a
+    container-only path (Plan 00466 N1, first observed in #55). Launches
+    the candidate on a tiny stdlib-only probe and requires a clean exit,
+    bounded by :data:`_VENV_RUN_PROBE_TIMEOUT_SECS` so a hung or crashing
+    interpreter cannot stall resolution. A dangling symlink or a binary
+    the kernel cannot load raises ``OSError`` before a process even
+    starts; both are treated as "does not run", same as a clean non-zero
+    exit.
+    """
+    import subprocess  # nosec B404 — trusted: probing a resolved venv path, no user input
+
+    try:
+        result = subprocess.run(  # nosec B603 — fixed argv, no shell, no user input
+            [str(candidate), "-c", "import sys"],
+            capture_output=True,
+            timeout=_VENV_RUN_PROBE_TIMEOUT_SECS,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0
+
+
 def resolve_existing_venv_python(daemon_dir: Path | str) -> Path:
     """Resolve the bin/python of an already-installed venv under ``daemon_dir``.
 
@@ -949,6 +988,20 @@ def resolve_existing_venv_python(daemon_dir: Path | str) -> Path:
     a useful "venv missing" error message that still mentions the legacy
     path (relevant for brand-new installs where nothing has been
     provisioned yet).
+
+    **Deliberately does not run-probe its candidates** (unlike
+    :func:`resolve_existing_venv_python_with_diagnostics`, Plan 00466 N1).
+    This function is called fresh on every user turn by
+    ``daemon_upgrade_detector`` (see its docstring), so a subprocess spawn
+    here would land on the hot path the diagnostics resolver is kept off
+    of. Its current callers never execute the returned interpreter --
+    ``daemon_upgrade_detector`` only reads ``.daemon-metadata.json`` next
+    to it, and ``client_validator.validate_daemon_can_start`` runs its own
+    explicit ``subprocess.run(..., timeout=...)`` probe before invoking
+    whatever this returns. If a future caller of this function DOES need
+    to execute the result, it must probe before doing so -- do not add a
+    probe here to "fix" that; add it at the call site closest to the exec,
+    the way ``validate_daemon_can_start`` already does.
 
     Args:
         daemon_dir: Daemon installation directory (holds ``untracked/``).
@@ -1047,18 +1100,29 @@ def resolve_existing_venv_python_with_diagnostics(
     daemon_path = Path(daemon_dir)
     steps: list[str] = []
 
-    def _pick_interpreter(venv_dir: Path) -> Path | None:
-        """Return the first executable interpreter in ``venv_dir/bin``.
+    def _pick_interpreter(venv_dir: Path, *, unrunnable: list[str] | None = None) -> Path | None:
+        """Return the first executable, RUNNABLE interpreter in ``venv_dir/bin``.
 
         Real venvs have both ``bin/python`` and ``bin/python3``. Some bash
         callers (notably ``scripts/venv-include.bash`` and its test fakes)
         create only one of the two. The SSOT must accept either so every
         caller agrees on whether a venv is usable.
+
+        Plan 00466 N1: the executable bit alone does not prove a candidate
+        can run on this host (see :func:`_venv_interpreter_runs`). A
+        candidate that is present and ``+x`` but fails the run probe is
+        appended to ``unrunnable`` (when given) so the caller can name it
+        in its own diagnostic, instead of silently looking identical to
+        "nothing here at all".
         """
         for name in ("python", "python3"):
             candidate = venv_dir / "bin" / name
-            if candidate.is_file() and os.access(candidate, os.X_OK):
+            if not candidate.is_file() or not os.access(candidate, os.X_OK):
+                continue
+            if _venv_interpreter_runs(candidate):
                 return candidate
+            if unrunnable is not None:
+                unrunnable.append(str(candidate))
         return None
 
     override = os.environ.get("HOOKS_DAEMON_VENV_PATH")
@@ -1108,7 +1172,16 @@ def resolve_existing_venv_python_with_diagnostics(
                 )
                 continue
             python_path = Path(metadata["python_path"])
-            if python_path.is_file() and os.access(python_path, os.X_OK):
+            # Plan 00466 N1: is_file()+X_OK proves the file exists and is
+            # marked executable, not that it RUNS -- a container-built venv
+            # reused via a shared/NFS-mounted untracked/ can pass both and
+            # still fail at exec time on this host.
+            usable = (
+                python_path.is_file()
+                and os.access(python_path, os.X_OK)
+                and _venv_interpreter_runs(python_path)
+            )
+            if usable:
                 steps.append(
                     f"step 2: metadata match OK — using {python_path} "
                     f"(from {candidate_dir / _DAEMON_METADATA_FILENAME})"
@@ -1117,7 +1190,7 @@ def resolve_existing_venv_python_with_diagnostics(
             steps.append(
                 f"step 2: metadata at {candidate_dir / _DAEMON_METADATA_FILENAME} "
                 f"matches current lock_hash but python_path={python_path} "
-                "is missing or not executable"
+                "is missing, not executable, or cannot run on this host"
             )
             # Plan 00110 Task 4.6: glob-and-sort discovery (returns observed
             # probes alongside the chosen candidate so the no-alternative
@@ -1161,9 +1234,20 @@ def resolve_existing_venv_python_with_diagnostics(
             else:
                 steps.append(f"step 2: no venv-*/ found under {untracked}")
 
+    # Plan 00466 N1: the fingerprint-keyed venv is the "slug-exact" match --
+    # its directory name is derived from THIS running interpreter's own
+    # fingerprint, so in the common case it was built by (or is compatible
+    # with) something that demonstrably works here. It is still probed:
+    # #55 showed an exact-fingerprint venv can be container-built and
+    # unrunnable too (a shared/NFS-mounted untracked/, or an image whose
+    # version+base_prefix+machine happen to collide with the host's). This
+    # function is only reached on a resolver-cache MISS (see the bash
+    # hot-path cache in scripts/lib/resolve_venv.sh), so the extra spawn
+    # never lands on the steady-state per-hook path.
     fingerprint = python_venv_fingerprint(daemon_path)
     keyed_dir = untracked / f"venv-{fingerprint}"
-    keyed_py = _pick_interpreter(keyed_dir)
+    keyed_unrunnable: list[str] = []
+    keyed_py = _pick_interpreter(keyed_dir, unrunnable=keyed_unrunnable)
     if keyed_py is not None:
         if _is_legacy_stamp_only(keyed_dir):
             steps.append(
@@ -1174,6 +1258,12 @@ def resolve_existing_venv_python_with_diagnostics(
         else:
             steps.append(f"step 3: fingerprint-keyed venv OK — using {keyed_py}")
             return keyed_py, steps
+    elif keyed_unrunnable:
+        steps.append(
+            f"step 3: fingerprint-keyed candidate(s) executable but cannot run on this "
+            f"host: {keyed_unrunnable} — rebuild the venv for this project path: "
+            f"{daemon_path}/bin/hooks-daemon repair"
+        )
     else:
         steps.append(
             f"step 3: fingerprint-keyed path {keyed_dir / 'bin' / 'python'} "
@@ -1183,6 +1273,7 @@ def resolve_existing_venv_python_with_diagnostics(
     scanned: list[str] = []
     legacy_skipped: list[str] = []
     slug_skipped_scan: list[str] = []
+    unrunnable_scan: list[str] = []
     if untracked.is_dir():
         scan_current_slug = project_path_slug(daemon_path)
         for candidate_dir in sorted(untracked.glob("venv-*")):
@@ -1192,7 +1283,7 @@ def resolve_existing_venv_python_with_diagnostics(
                 assert slug_skip_reason is not None
                 slug_skipped_scan.append(slug_skip_reason)
                 continue
-            candidate_py = _pick_interpreter(candidate_dir)
+            candidate_py = _pick_interpreter(candidate_dir, unrunnable=unrunnable_scan)
             if candidate_py is None:
                 continue
             if _is_legacy_stamp_only(candidate_dir):
@@ -1208,6 +1299,12 @@ def resolve_existing_venv_python_with_diagnostics(
                 f"(have {_LEGACY_DAEMON_VERSION_STAMP}, lack {_DAEMON_METADATA_FILENAME}) "
                 "— need rebuild via ensure_venv"
             )
+        elif unrunnable_scan:
+            steps.append(
+                f"step 4: scan fallback found candidate(s) executable but cannot run on "
+                f"this host: {unrunnable_scan} — rebuild the venv for this project path: "
+                f"{daemon_path}/bin/hooks-daemon repair"
+            )
         elif scanned:
             steps.append(f"step 4: scan fallback found no executable bin/python among {scanned}")
         else:
@@ -1216,7 +1313,8 @@ def resolve_existing_venv_python_with_diagnostics(
         steps.append(f"step 4: scan fallback — {untracked} does not exist")
 
     legacy_dir = untracked / "venv"
-    legacy_py = _pick_interpreter(legacy_dir)
+    legacy_unrunnable: list[str] = []
+    legacy_py = _pick_interpreter(legacy_dir, unrunnable=legacy_unrunnable)
     if legacy_py is not None:
         if _is_legacy_stamp_only(legacy_dir):
             steps.append(
@@ -1227,6 +1325,12 @@ def resolve_existing_venv_python_with_diagnostics(
         else:
             steps.append(f"step 5: legacy fallback OK — using {legacy_py}")
             return legacy_py, steps
+    elif legacy_unrunnable:
+        steps.append(
+            f"step 5: legacy candidate(s) executable but cannot run on this host: "
+            f"{legacy_unrunnable} — rebuild the venv for this project path: "
+            f"{daemon_path}/bin/hooks-daemon repair"
+        )
     else:
         steps.append(
             f"step 5: legacy path {legacy_dir / 'bin' / 'python'} missing or not executable"

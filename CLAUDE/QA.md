@@ -66,6 +66,14 @@ while the runner ran considerably more.
   check's own configured allowlist — a finding left standing should be a
   decision, not an accident. A sweep that cannot run reports no-verdict
   rather than the empty result a clean sweep produces
+- **Generated-Doc Drift** (`check_generated_doc_drift.py`) — regenerates
+  `.claude/HOOKS-DAEMON.md` through `generate-docs` into a throwaway directory
+  and fails when the committed body differs. A daemon restart never rewrites
+  that file, so **any change to the handler set, a handler's priority or its
+  docstring's first line needs `bin/hooks-daemon generate-docs` and the result
+  committed alongside it**. The `> Generated on … (vX.Y.Z)` marker line is
+  excluded from the comparison (it records the deployed-from version
+  `scripts/upgrade.sh` reads) but its absence fails
 
 ### Success Criteria
 
@@ -436,11 +444,11 @@ def get_acceptance_tests(self) -> list[AcceptanceTest]:
     ]
 ```
 
-### Plugin Handlers
+### Daemon Plugin Handlers
 
-**Custom plugins are automatically included** in generated playbooks.
+**Daemon plugins (handler modules) are automatically included** in generated playbooks.
 
-All plugin handlers MUST implement `get_acceptance_tests()` - empty arrays are rejected.
+All daemon plugin handlers MUST implement `get_acceptance_tests()` - empty arrays are rejected.
 
 **See `CLAUDE/AcceptanceTests/GENERATING.md` for complete documentation.**
 

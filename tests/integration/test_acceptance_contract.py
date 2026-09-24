@@ -51,7 +51,7 @@ target must exist on disk with the post-write content BEFORE dispatch (or
 `lint_on_edit._is_lintable`'s `Path(file_path).exists()` never sees it), and
 a declared `setup_commands`/`cleanup_commands` pair is translated to a plain
 filesystem operation via the SAME `vet_probe_commands` used there -- never a
-shell, and bounded to `untracked/scratch/`.
+shell, and bounded to `untracked/acceptance/`.
 """
 
 from __future__ import annotations
@@ -67,6 +67,7 @@ import pytest
 
 from claude_code_hooks_daemon.config.loader import ConfigLoader
 from claude_code_hooks_daemon.config.models import Config
+from claude_code_hooks_daemon.constants.paths import ProjectPath
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.router import EventRouter
@@ -85,7 +86,7 @@ logger = logging.getLogger(__name__)
 
 #: Where a fixture action is allowed to act, relative to the checkout --
 #: the same bound `tests/acceptance/test_playbook_harness.py` applies.
-_PROBE_SCRATCH = ("untracked", "scratch")
+_PROBE_ROOT = tuple(ProjectPath.ACCEPTANCE_DIR.split("/"))
 
 
 def _repo_root() -> Path:
@@ -222,12 +223,12 @@ def _is_removable_probe_target(target: Path) -> bool:
     """Only ever touch a path this probe is entitled to own.
 
     Mirrors `tests/acceptance/test_playbook_harness.py`'s same-named guard:
-    bounded to gitignored scratch inside the repo and the system temp
-    directory, never trusted to the playbook's own declared path.
+    bounded to the gitignored acceptance root inside the repo and the system
+    temp directory, never trusted to the playbook's own declared path.
     """
-    scratch = _repo_root().joinpath(*_PROBE_SCRATCH)
+    probe_root = _repo_root().joinpath(*_PROBE_ROOT)
     temp_root = Path(tempfile.gettempdir())
-    return target.is_relative_to(scratch) or target.is_relative_to(temp_root)
+    return target.is_relative_to(probe_root) or target.is_relative_to(temp_root)
 
 
 def _perform_fixture_actions(actions: list[FixtureAction]) -> None:
@@ -235,7 +236,7 @@ def _perform_fixture_actions(actions: list[FixtureAction]) -> None:
 
     No shell. `vet_probe_commands` (inside `plan_probe`) has already
     translated each declared setup/cleanup command into one of three
-    operations and proved its path resolves inside `untracked/scratch/`.
+    operations and proved its path resolves inside `untracked/acceptance/`.
     Mirrors `tests/acceptance/test_playbook_harness.py`'s `_perform`.
     """
     for action in actions:

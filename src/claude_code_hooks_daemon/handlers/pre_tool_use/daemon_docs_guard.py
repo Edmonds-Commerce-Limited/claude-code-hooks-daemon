@@ -11,7 +11,7 @@ from claude_code_hooks_daemon.constants import (
 )
 from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
-from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
 # Pattern that identifies the daemon's internal docs directory.
 # In normal installs, the daemon is cloned to .claude/hooks-daemon/, which brings
@@ -21,7 +21,7 @@ _DAEMON_CLAUDE_PATTERN = "hooks-daemon/CLAUDE/"
 
 _TARGET_TOOLS = {ToolName.READ, ToolName.WRITE, ToolName.EDIT}
 
-#: Acceptance-test fixture directory, below the sanctioned scratch root.
+#: Acceptance-test fixture directory, below the gitignored acceptance root.
 _FIXTURE_DIR = "acceptance-test-daemon-docs"
 
 
@@ -97,7 +97,7 @@ class DaemonDocsGuardHandler(PreToolUseHandlerBase):
             ToolPayload,
         )
 
-        fixture_file = scratch_path(
+        fixture_file = acceptance_path(
             _FIXTURE_DIR, ".claude", "hooks-daemon", "CLAUDE", "PlanWorkflow.md"
         )
         # Stated once; the prose is rendered from it (Plan 00243).
@@ -115,17 +115,17 @@ class DaemonDocsGuardHandler(PreToolUseHandlerBase):
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[r"WRONG CLAUDE", r"hooks-daemon"],
                 safety_notes=(
-                    "Inside the gitignored scratch directory - safe. Advisory handler "
+                    "Inside the gitignored acceptance directory - safe. Advisory handler "
                     "allows read but warns."
                 ),
                 test_type=TestType.ADVISORY,
                 setup_commands=[
-                    f"mkdir -p untracked/scratch/{_FIXTURE_DIR}/.claude/hooks-daemon/CLAUDE",
+                    f"mkdir -p untracked/acceptance/{_FIXTURE_DIR}/.claude/hooks-daemon/CLAUDE",
                     "echo '# Test PlanWorkflow' > "
-                    f"untracked/scratch/{_FIXTURE_DIR}/.claude/hooks-daemon/"
+                    f"untracked/acceptance/{_FIXTURE_DIR}/.claude/hooks-daemon/"
                     "CLAUDE/PlanWorkflow.md",
                 ],
-                cleanup_commands=[f"rm -rf untracked/scratch/{_FIXTURE_DIR}"],
+                cleanup_commands=[f"rm -rf untracked/acceptance/{_FIXTURE_DIR}"],
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=False,
             ),
