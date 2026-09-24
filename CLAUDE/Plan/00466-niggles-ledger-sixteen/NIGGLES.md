@@ -14,7 +14,31 @@ candidate remedies.
 - A worktree's regenerated block that never matches main's.
 
 **Candidate remedy:** emit in a total order that depends only on the handler set, for example tier, then priority, then handler name. Test that two injector runs over the same handlers in shuffled input order produce byte-identical blocks. Check whether `HOOKS-DAEMON.md` generation has the same tie problem, and give it the same fix.
-`goal_injection` treats any edit of an In Progress plan as the plan starting
+
+**Remedy shipped in commit `0dba7bfb`.** `_collect_tiers()`
+(`core/claude_md_injector.py`) now sorts each of the three tier lists
+(`promoted`, `progressive`, `fallback`) by handler name before returning
+them — name alone is a complete total order because two active handlers
+never share a name, and priority is not consulted because handlers from
+different event chains are mixed into one flat CLAUDE.md tier where
+priority carries no meaningful cross-event-type ordering. `daemon/ controller.py`'s handler collection was reading the chain's private,
+unsorted `_handlers` list instead of its public `handlers` property (which
+already sorts by `(priority, name)` on access, the same pattern
+`EventRouter.get_all_handlers()` uses) — fixed to use `chain.handlers`, a
+defence-in-depth fix at the layer the ordering actually originates from
+(`HandlerRegistry.discover()`'s `pkgutil.walk_packages()` filesystem scan,
+whose directory order is not guaranteed). `TestGuidanceOrderIsIndependentOfDiscoveryOrder`
+(4 tests, RED against the pre-fix code) asserts forward- and
+reverse-ordered handler lists inject byte-identical `<hooksdaemon>`
+blocks. The sibling tie in `.claude/HOOKS-DAEMON.md` generation
+(`daemon/docs_generator.py`'s `_render_handler_table()`) sorted by
+priority only, so same-priority handlers kept registry order; fixed to
+sort by `(priority, config_key)`, pinned by
+`test_same_priority_handlers_are_order_independent` (1 test, RED against
+the pre-fix code). Verified idempotent: `regenerate-docs` run twice in a
+row produces the identical diff both times.
+
+### N3 — `goal_injection` treats any edit of an In Progress plan as the plan starting, and displaces the live goal
 
 **Found by the coordinator**, live. The supervisor had set the goal to Plan
 00461\. The coordinator then added a table row to this ledger's PLAN.md. That

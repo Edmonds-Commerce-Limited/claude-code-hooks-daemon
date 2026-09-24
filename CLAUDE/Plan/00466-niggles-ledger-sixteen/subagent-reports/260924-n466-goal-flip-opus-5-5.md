@@ -1,8 +1,9 @@
-# Subagent report: Ledger 00466 N3 — goal_injection real-flip fix
+# Subagent report: Ledger 00466 N3/N7 — goal_injection real-flip fix, CLAUDE.md guidance order
 
-**Agent**: Claude Opus 5.5
+**Agent**: Claude Opus 5.5 (N3, N3 follow-up), Claude Sonnet 5 (N7)
 **Task**: Fix `goal_injection` firing on any edit of an already-In-Progress
-plan (niggle N3), TDD-first, in worktree
+plan (niggle N3), then fix the CLAUDE.md guidance block's nondeterministic
+order (niggle N7), TDD-first, in worktree
 `worktree-n466-goal-flip`.
 
 ## RED evidence
@@ -263,5 +264,122 @@ Test runs after the follow-up:
 
 Daemon restarted and confirmed `Daemon: RUNNING` before each follow-up
 commit.
+
+## N7 — CLAUDE.md guidance block order was not deterministic
+
+After N3 was committed and reported, the coordinator queued N7 on the same
+branch. Merged `main` (commit `0b226357` and later) first, to pick up the
+ledger's N7 finding entry; resolved two conflicts (`PLAN.md`'s niggle table,
+and the JOURNAL day-file's conflict markers — deletion-only, per
+`plan_journal_guard.py`'s documented exemption) in merge commit `f80e9956`.
+Restarted the daemon post-merge and re-ran the N3/N3-follow-up test suites
+(177 tests) to confirm the merge left that work intact before starting N7.
+
+### Root-cause trace
+
+`ClaudeMdInjector._collect_tiers()` (`core/claude_md_injector.py:642`)
+iterated `self._handlers` and appended straight into the `promoted`,
+`progressive` and `fallback` tier lists with no sort at all — the block's
+order was whatever order the constructor's `handlers` argument arrived in.
+Traced that argument back through the call chain:
+
+- `daemon/controller.py:327` built it as
+  `[h for chain in self._router._chains.values() for h in chain._handlers]`
+  — reading `HandlerChain`'s **private**, insertion-order `_handlers` list.
+- `HandlerChain` already has a **public** `handlers` property
+  (`core/chain.py`) that sorts by `(priority, name)` on first access after
+  any `.add()` and caches the result — the correct pattern, and the one
+  `EventRouter.get_all_handlers()` (`core/router.py:261`) already uses.
+  `controller.py` was bypassing it.
+- Even with sorted-by-priority input, handlers sharing a priority still tie,
+  and `_collect_tiers()` had no tiebreaker of its own — so the true fix has
+  to live in `_collect_tiers()` regardless of what `controller.py` does.
+- The ultimate root of *why* two daemons ever disagreed on an initial order
+  is `HandlerRegistry.discover()` (`handlers/registry.py:309`), which uses
+  `pkgutil.walk_packages()` over the filesystem — directory-entry order is
+  not guaranteed stable across processes or checkouts. Chose not to try to
+  make filesystem scanning itself deterministic; instead made every
+  downstream consumer (chain, injector, docs generator) independently
+  order-invariant, per the brief's "fix it at the right layer" — the layer
+  that actually renders output is the layer that must guarantee determinism,
+  regardless of what upstream hands it.
+
+### The fix
+
+1. `_collect_tiers()`: sorts each of the three tier lists
+   (`promoted`, `progressive`, `fallback`) by handler name
+   (`item[0]`) before returning. Name alone is a complete total order within
+   one tier — two active handlers never share a name — so no further
+   tiebreaker is needed; priority is deliberately not consulted here because
+   handlers from different event chains are mixed into one flat CLAUDE.md
+   tier, where priority carries no meaningful ordering across event types.
+2. `daemon/controller.py:327`: `chain._handlers` → `chain.handlers`, so the
+   input `_collect_tiers()` receives is already the correctly-sorted public
+   view rather than raw insertion order — defence in depth, not required for
+   correctness given (1), but closes the actual point where the
+   nondeterminism entered.
+3. `.claude/HOOKS-DAEMON.md`'s sibling tie problem, per the brief's explicit
+   ask: `daemon/docs_generator.py`'s `_render_handler_table()` sorted
+   `handlers.sort(key=lambda h: h[3])` — priority only, no tiebreaker.
+   Same-priority handlers kept whatever order the (also nondeterministic)
+   `HandlerRegistry.list_handlers()` produced. Fixed to
+   `key=lambda h: (h[3], h[1])` — priority, then `config_key` (the value
+   actually rendered in the table's "Handler" column).
+
+### RED evidence
+
+- `tests/unit/core/test_claude_md_injector.py`:
+  `TestGuidanceOrderIsIndependentOfDiscoveryOrder` (4 tests —
+  promoted-tier, progressive-tier, fallback-tier, all-three-together), each
+  injecting the same handler set in forward and reversed constructor order
+  into separate `tmp_path` subdirectories and asserting byte-identical
+  `<hooksdaemon>` block content. `pytest ... -k TestGuidanceOrderIsIndependentOfDiscoveryOrder -q` → **4 failed, 65
+  deselected** against the pre-fix code, each diff showing handler entries
+  positioned by input order rather than a stable order.
+- `tests/unit/daemon/test_docs_generator.py`:
+  `test_same_priority_handlers_are_order_independent` — two priority-30
+  handlers (`aaa-handler`, `zzz-handler`) built via two registries in
+  opposite orders; asserts identical `generate_markdown()` output. Failed
+  against the pre-fix code with the two table rows swapped between runs.
+
+After the fix, both suites are green:
+`tests/unit/core/test_claude_md_injector.py` — 69 passed;
+`tests/unit/daemon/test_docs_generator.py` — 56 passed. Also re-ran the full
+controller test suite (`test_controller.py` +
+`test_controller_agent_sync.py` + `test_controller_degraded_mode.py` +
+`test_controller_modes.py` + `test_controller_plugin_loading.py` +
+`test_controller_project_handlers.py` +
+`test_controller_directory_role_rules_sync.py`) since `controller.py`
+changed — 110 passed.
+
+### Regeneration and idempotence
+
+Restarted the worktree daemon (`./bin/hooks-daemon restart`, confirmed
+`Daemon: RUNNING`), then ran `./bin/hooks-daemon regenerate-docs`. Result:
+`.claude/HOOKS-DAEMON.md` changed only in the expected, unrelated way (one
+row's description text picked up N3's earlier docstring wording change,
+"flips to" → "TRANSITIONS to" — not a reorder); the CLAUDE.md
+`<hooksdaemon>` block itself had **zero diff** against what was already
+committed, confirming the committed block already matched the new
+deterministic order. Ran `regenerate-docs` a second time immediately after:
+identical diff (none beyond the first run), confirming idempotence.
+
+### Targeted QA
+
+```
+./scripts/qa/llm_qa.py format lint type_check pyright magic_values error_hiding docs_qa plan_qa
+```
+
+Result: `QA: 8/8 PASSED`, no exclusions added. `run_autofix.sh` run over the
+touched files first; no formatting changes were needed.
+
+### Commit
+
+`0dba7bfb` — the N7 fix: `_collect_tiers()` sort, `controller.py`'s
+`chain.handlers` fix, `docs_generator.py`'s tiebreaker, the RED tests, and
+the regenerated `.claude/HOOKS-DAEMON.md`. Ledger update (PLAN.md row →
+Remedied, NIGGLES.md N7 Remedy paragraph, journal entry via `mkplan.bash --journal`, this report) lands in the commit that follows it.
+
+Daemon restarted and confirmed `Daemon: RUNNING` before the commit.
 
 HEAD SHA at report time: see the commit that adds this update.
