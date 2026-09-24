@@ -4,6 +4,7 @@ Tests HandlerChain execution, priority ordering, terminal/non-terminal behavior,
 error handling, and ChainExecutionResult.
 """
 
+import time
 from typing import Any
 
 from claude_code_hooks_daemon.constants.tags import HandlerTag
@@ -25,6 +26,7 @@ class MockHandler(Handler):
         raise_exception: Exception | None = None,
         raise_in_matches: Exception | None = None,
         tags: list[str] | None = None,
+        sleep_in_handle: float = 0.0,
     ) -> None:
         """Initialize mock handler.
 
@@ -40,12 +42,16 @@ class MockHandler(Handler):
                 which covers matches() as well as handle() (Plan 00466 N24 m1).
             tags: Handler tags (default []); pass HandlerTag.SAFETY +
                 HandlerTag.BLOCKING to exercise the fail-closed-on-raise path.
+            sleep_in_handle: Real seconds to sleep inside handle() before
+                returning, so a later handler's chain-deadline check (Plan
+                00466 N25) has genuinely elapsed wall-clock time to measure.
         """
         super().__init__(name=name, priority=priority, terminal=terminal, tags=tags)
         self._should_match = should_match
         self._result = result or HookResult.allow()
         self._raise_exception = raise_exception
         self._raise_in_matches = raise_in_matches
+        self._sleep_in_handle = sleep_in_handle
         self.matches_called = 0
         self.handle_called = 0
 
@@ -59,6 +65,8 @@ class MockHandler(Handler):
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Handle the input."""
         self.handle_called += 1
+        if self._sleep_in_handle:
+            time.sleep(self._sleep_in_handle)
         if self._raise_exception:
             raise self._raise_exception
         return self._result
@@ -886,6 +894,78 @@ class TestHandlerChain:
         assert result.result.decision == Decision.DENY
         assert result.result.reason is not None
         assert "SYSTEM ERROR" in result.result.reason
+
+    def test_deadline_exceeded_denies_a_safety_blocking_handler_not_yet_run(self) -> None:
+        """Plan 00466 N25: a chain deadline denies a SAFETY+BLOCKING handler
+        it ran out of time to judge, rather than letting a slow handler
+        exhaust the CLIENT's own timeout (which fails the whole chain open).
+        """
+        chain = HandlerChain()
+        slow = MockHandler("slow", priority=10, sleep_in_handle=0.05)
+        guard = MockHandler(
+            "safety-guard",
+            priority=20,
+            terminal=True,
+            tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING],
+        )
+        chain.add(slow)
+        chain.add(guard)
+
+        result = chain.execute({"tool_name": "Bash"}, deadline_seconds=0.01)
+
+        assert slow.handle_called == 1
+        # The deadline is hit before the guard is even asked whether it
+        # matches -- there is no time budget left to run it at all.
+        assert guard.matches_called == 0
+        assert guard.handle_called == 0
+        assert result.result.decision == Decision.DENY
+        assert result.result.reason is not None
+        assert "safety-guard" in result.result.reason
+        assert "not judged in time" in result.result.reason.lower()
+        assert result.terminated_by == "safety-guard"
+
+    def test_deadline_exceeded_skips_an_advisory_handler_with_a_note(self) -> None:
+        """A non-SAFETY+BLOCKING handler is skipped, not denied, on deadline."""
+        chain = HandlerChain()
+        slow = MockHandler("slow", priority=10, sleep_in_handle=0.05)
+        advisory = MockHandler("advisory", priority=20, tags=[HandlerTag.ADVISORY])
+        chain.add(slow)
+        chain.add(advisory)
+
+        result = chain.execute({"tool_name": "Bash"}, deadline_seconds=0.01)
+
+        assert advisory.matches_called == 0
+        assert result.result.decision == Decision.ALLOW
+        assert any("advisory" in ctx and "deadline" in ctx.lower() for ctx in result.result.context)
+
+    def test_deadline_none_never_denies_on_its_own(self) -> None:
+        """The default (no deadline passed) is unenforced -- backward compatible."""
+        chain = HandlerChain()
+        slow = MockHandler("slow", priority=10, sleep_in_handle=0.02)
+        guard = MockHandler(
+            "safety-guard",
+            priority=20,
+            tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING],
+        )
+        chain.add(slow)
+        chain.add(guard)
+
+        result = chain.execute({"tool_name": "Bash"})
+
+        assert guard.handle_called == 1
+        assert result.result.decision == Decision.ALLOW
+
+    def test_deadline_not_exceeded_runs_every_handler_normally(self) -> None:
+        chain = HandlerChain()
+        h1 = MockHandler("h1", priority=10)
+        h2 = MockHandler("h2", priority=20, terminal=True)
+        chain.add(h1)
+        chain.add(h2)
+
+        result = chain.execute({"tool_name": "Bash"}, deadline_seconds=5.0)
+
+        assert h2.handle_called == 1
+        assert result.result.decision == Decision.ALLOW
 
     def test_execute_preserves_handler_priority_order(self) -> None:
         """execute processes handlers in strict priority order."""

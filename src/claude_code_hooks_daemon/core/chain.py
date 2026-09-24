@@ -367,6 +367,7 @@ class HandlerChain:
         strict_mode: bool = False,
         *,
         collect_all: bool = False,
+        deadline_seconds: float | None = None,
     ) -> ChainExecutionResult:
         """Execute the handler chain for an event.
 
@@ -382,6 +383,17 @@ class HandlerChain:
         advisory handler that raises keeps the ``strict_mode`` behaviour
         below unchanged.
 
+        ``deadline_seconds`` (Plan 00466 N25) closes a related gap: the
+        CLIENT's own socket timeout (30s, well above any daemon-side budget
+        here) fails the WHOLE chain open on expiry, so a merely slow handler
+        bypassed every guard behind it, not just itself. Checked once per
+        handler, before it runs: once exceeded, a SAFETY+BLOCKING handler not
+        yet run is treated exactly like N24's raise -- DENY, naming the
+        handler, "not judged in time" -- and a non-SAFETY+BLOCKING handler is
+        skipped with a context note instead of denied. Deliberately NOT
+        `collect_all`-aware: collect_all assumes there is budget left to keep
+        evaluating, which is precisely what has run out here.
+
         Args:
             hook_input: Hook input dictionary to process
             strict_mode: If True, FAIL FAST on handler exceptions (fail-closed).
@@ -392,6 +404,10 @@ class HandlerChain:
                 every matching handler runs and the response is ONE merged
                 report — the first deny leads, the other denies follow as
                 bounded excerpts, the advisories are summarised in a table.
+            deadline_seconds: ``daemon.chain.deadline_seconds`` (Plan 00466
+                N25). None (the default for every existing caller that does
+                not pass it) leaves the chain unbounded, matching the
+                pre-existing behaviour.
 
         Returns:
             ChainExecutionResult with final result and metadata
@@ -414,6 +430,52 @@ class HandlerChain:
         advisories: list[tuple[str, HookResult]] = []
 
         for handler in self.handlers:
+            if (
+                deadline_seconds is not None
+                and (time.perf_counter() - start_time) >= deadline_seconds
+            ):
+                # Plan 00466 N25: out of budget before this handler even ran.
+                # A SAFETY+BLOCKING handler not judged in time is treated
+                # exactly like N24's raise -- deny, naming the handler --
+                # because "no verdict" must never read as "allowed". Anything
+                # else is skipped with a note; the client's own (much larger)
+                # timeout is still the true backstop for those.
+                is_safety_blocking = (
+                    HandlerTag.SAFETY in handler.tags and HandlerTag.BLOCKING in handler.tags
+                )
+                if is_safety_blocking:
+                    deadline_result = HookResult.deny(
+                        reason=(
+                            f"{handler.name}: not judged in time "
+                            f"(chain deadline of {deadline_seconds}s exceeded)"
+                        ),
+                    )
+                    accumulated_context.append(
+                        f"Handler {handler.name} not judged in time: chain "
+                        f"deadline ({deadline_seconds}s) exceeded"
+                    )
+                    deadline_result.add_handler(handler.name)
+                    deadline_result.context = list(accumulated_context)
+                    decisions.append(
+                        HandlerVerdict(
+                            handler=handler.name,
+                            decision=deadline_result.decision,
+                            terminal=handler.terminal,
+                        )
+                    )
+                    handlers_executed.append(handler.name)
+                    final_result = deadline_result
+                    terminated_by = handler.name
+                    if decided_by is None:
+                        decided_by = handler.name
+                    break
+                else:
+                    accumulated_context.append(
+                        f"Handler {handler.name} skipped: chain deadline "
+                        f"({deadline_seconds}s) exceeded"
+                    )
+                    continue
+
             try:
                 # Scope gate (Plan 00423), BEFORE matches(). A handler the
                 # scope refuses is skipped entirely — not matched, not

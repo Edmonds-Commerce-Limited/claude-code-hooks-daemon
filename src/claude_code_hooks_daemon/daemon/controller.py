@@ -982,6 +982,7 @@ class DaemonController:
                 hook_input_dict,
                 strict_mode=strict_mode,
                 collect_all=self._chain_config.collect_all_violations,
+                deadline_seconds=self._chain_config.deadline_seconds,
             )
             processing_time = (time.perf_counter() - start_time) * 1000
             self._stats.record_request(event.event_type.value, processing_time)

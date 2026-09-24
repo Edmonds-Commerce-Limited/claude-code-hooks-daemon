@@ -1,9 +1,11 @@
 """Tests for EventRouter."""
 
+import time
 from unittest.mock import patch
 
 import pytest
 
+from claude_code_hooks_daemon.constants.tags import HandlerTag
 from claude_code_hooks_daemon.core.chain import ChainExecutionResult
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.handler import Handler
@@ -19,13 +21,15 @@ class MockHandler(Handler):
         name: str = "mock",
         priority: int = 50,
         terminal: bool = False,
+        tags: list[str] | None = None,
     ) -> None:
         """Initialize mock handler."""
-        super().__init__(name=name, priority=priority, terminal=terminal)
+        super().__init__(name=name, priority=priority, terminal=terminal, tags=tags)
         self.matches_called = False
         self.handle_called = False
         self.match_result = True
         self.handle_result = HookResult.allow()
+        self.sleep_in_handle = 0.0
 
     def matches(self, hook_input: dict) -> bool:
         """Track matches call."""
@@ -35,6 +39,8 @@ class MockHandler(Handler):
     def handle(self, hook_input: dict) -> HookResult:
         """Track handle call."""
         self.handle_called = True
+        if self.sleep_in_handle:
+            time.sleep(self.sleep_in_handle)
         return self.handle_result
 
     def get_claude_md(self) -> str | None:
@@ -310,6 +316,27 @@ class TestEventRouter:
         assert (merged.result.reason or "").endswith(
             "To disable: handlers.pre_tool_use.first  (set enabled: false)"
         )
+
+    def test_route_passes_deadline_seconds_through_to_the_chain(self, router: EventRouter) -> None:
+        """daemon.chain.deadline_seconds reaches HandlerChain.execute (Plan 00466 N25)."""
+        slow = MockHandler(name="slow", priority=10)
+        slow.sleep_in_handle = 0.05
+        guard = MockHandler(
+            name="safety-guard",
+            priority=20,
+            terminal=True,
+            tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING],
+        )
+        router.register(EventType.PRE_TOOL_USE, slow)
+        router.register(EventType.PRE_TOOL_USE, guard)
+
+        result = router.route(EventType.PRE_TOOL_USE, {"toolName": "Bash"}, deadline_seconds=0.01)
+
+        assert slow.handle_called is True
+        assert guard.handle_called is False
+        assert result.result.decision == Decision.DENY
+        assert "safety-guard" in (result.result.reason or "")
+        assert "not judged in time" in (result.result.reason or "").lower()
 
     def test_permission_request_chain_is_allow_final(self, router: EventRouter) -> None:
         """PermissionRequest is the one event where 'approve and stop' is the semantic."""

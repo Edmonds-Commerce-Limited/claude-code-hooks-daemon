@@ -56,3 +56,28 @@ truth_changes:
       strict_mode: true, SO A HANDLER CRASH HERE DENIES" AS A REASON A DEFECT
       IS NOT EXPLOITABLE, RE-CHECK THAT CLAIM: BEFORE THIS CHANGE IT WAS FALSE
       EVERYWHERE, INCLUDING HERE.
+  - topic: daemon-config
+    id: chain-deadline-on-client-timeout
+    was: >
+      The daemon had no deadline of its own for a PreToolUse chain. The
+      client's own 30s socket timeout was the only bound, and on that
+      timeout the client's fallback emitted an advisory-only
+      `hookSpecificOutput`, which is an ALLOW for every non-`Stop` event. A
+      handler slow enough to run out the client's budget therefore bypassed
+      every handler still queued behind it, not just itself — measured on
+      `destructive_git`'s `strip_inert_spans` at 99s/98s on 200 KB inputs.
+    now: >
+      `daemon.chain.deadline_seconds` (Plan 00466 N25) is a new config key,
+      default 20s, well under the client's 30s socket timeout. When a
+      PreToolUse chain exceeds it, every `SAFETY`+`BLOCKING` handler not yet
+      run is denied under the `strict-mode-handler-exceptions` fail-closed
+      rule above, naming the handler as "not judged in time"; every other
+      not-yet-run handler is skipped instead, with an advisory note. Setting
+      it to `null` disables enforcement. `strip_inert_spans` is also now
+      linear, so the specific 99s/98s repros no longer approach either
+      deadline.
+
+      IF YOUR PROJECT'S DOCS OR SECURITY REVIEWS ASSERT THAT A SLOW HANDLER
+      CAN ONLY AFFECT ITS OWN DECISION, RE-CHECK THAT CLAIM FOR THE VERSION
+      BEFORE THIS CHANGE: A SLOW HANDLER SILENTLY ALLOWED EVERYTHING QUEUED
+      BEHIND IT TOO.

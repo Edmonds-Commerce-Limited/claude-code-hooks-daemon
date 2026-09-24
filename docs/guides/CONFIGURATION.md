@@ -85,6 +85,7 @@ daemon:
 | `self_install_mode`            | `false` | Used when the daemon runs from the project root instead of `.claude/hooks-daemon/`. Only needed for daemon development.                                                                                                     |
 | `input_validation.enabled`     | `true`  | Validates hook event data before processing. Catches malformed events early.                                                                                                                                                |
 | `input_validation.strict_mode` | `false` | When `true`, invalid events are denied. When `false`, invalid events are allowed through with a warning logged.                                                                                                             |
+| `chain.deadline_seconds`       | `20`    | Per-event chain deadline in seconds, well under the client's own 30s socket timeout — see [Chain Deadline](#chain-deadline) below.                                                                                          |
 
 ---
 
@@ -668,6 +669,10 @@ Always include the `version` field at the top of your config.
 ### Strict Mode
 
 With `daemon.strict_mode: true`, a handler that raises an exception denies the call instead of being skipped. This is useful during development to catch handler bugs immediately. In production, leave it `false` so the daemon continues running even if a single handler has a problem — except a handler tagged both `SAFETY` and `BLOCKING`, which always denies on its own raise, whatever this setting says: a safety guard that crashed has not judged the call. See [CLAUDE/Security/FailOpenBoundaries.md](../../CLAUDE/Security/FailOpenBoundaries.md) for the full inventory of what still fails open.
+
+### Chain Deadline
+
+The hook client gives the daemon a socket timeout (30s) and treats an expired one as an ALLOW for the whole PreToolUse chain — so a single slow handler used to bypass every guard behind it, not just itself. `daemon.chain.deadline_seconds` (default `20`, comfortably under that 30s budget) bounds how long the daemon itself spends on one event: once it is exceeded, a handler tagged both `SAFETY` and `BLOCKING` that has not run yet is denied ("not judged in time"), and any other not-yet-run handler is skipped with a note. Setting it to `null` disables enforcement — not recommended, since that reopens the original bypass.
 
 ---
 

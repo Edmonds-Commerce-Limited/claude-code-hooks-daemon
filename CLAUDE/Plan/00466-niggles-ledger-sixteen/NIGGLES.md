@@ -113,7 +113,7 @@ files where skills exist, so a vacuous pass cannot recur. Audit the other
 `scripts/qa/check_*.py` for the same "0 examined, PASS" shape and pin the
 class with a test that runs each check from a worktree fixture.
 
-### N25 — a slow handler runs out the client's 30 s budget, and a timeout is an ALLOW for the whole PreToolUse chain
+### N25 — ✅ Remedied — a slow handler runs out the client's 30 s budget, and a timeout is an ALLOW for the whole PreToolUse chain
 
 **Found by the guard-defects security review 2**
 ([report](subagent-reports/260924-n466-guards-review2-opus-5-5.md), B1 and
@@ -148,6 +148,50 @@ Deliberately NOT a remedy: making the client fail closed on timeout. A
 daemon that is merely slow (an overloaded host) would then block every tool
 call. The deadline belongs inside the daemon, where it can tell safety
 handlers from advisories.
+
+**✅ Remedied.** All three candidate remedies landed, on the same branch as
+N24 (which this depends on for its fail-closed wording):
+
+1. `ChainConfig.deadline_seconds` (`config/models.py`) is a new config key,
+   default `Timeout.CHAIN_DEADLINE_DEFAULT = 20` (seconds), threaded through
+   `DaemonController.initialise()` -> `process_event()` ->
+   `EventRouter.route()` -> `HandlerChain.execute()` the same narrow-slice DI
+   idiom N24 used for `strict_mode`. Inside `execute()`'s per-handler loop, a
+   deadline check runs before each handler: once exceeded, every remaining
+   SAFETY+BLOCKING handler is denied under N24's fail-closed rule with a "not
+   judged in time" reason naming the handler; every other remaining handler
+   is skipped with an advisory note instead of running. `deadline_seconds: None` disables enforcement entirely. Unit coverage: `test_chain.py`,
+   `test_router.py`, `test_chain_config.py`, `test_controller.py` (deadline
+   reaches the router end-to-end).
+2. `strip_inert_spans` (via `shell_segmentation.py`) is now linear. The root
+   cause was the same shape in three places: `strip_message_bodies`'s
+   segment/binary/subcommand resolution and `strip_quoted_heredoc_bodies`'s
+   substitution-depth and receiving-segment lookups all re-derived
+   prefix-dependent state from scratch (`command[:match_start]`) for every
+   regex match, instead of advancing incrementally in the guaranteed
+   left-to-right match order. Replaced with three stateful trackers
+   (`_SegmentTracker`, `_SubstitutionDepthTracker`, `_LastNewlineTracker`)
+   that each bound their per-match cost to the gap since the previous query.
+   Reproduced review 2's exact repros directly: the 40000-`-m`-flag case
+   (99.179s on main) now runs in 0.139s; the 5000-heredoc case (98.342s on
+   main) now runs in 0.453s. Timing tests pinned at 200 KB in
+   `tests/unit/utils/test_shell_segmentation_performance.py`; full
+   `destructive_git`/`curl_pipe_shell`/`shell_segmentation` regression stays
+   green.
+3. `tests/unit/handlers/test_safety_handlers_hostile_input_performance.py`
+   drives every `HandlerTag.SAFETY` `pre_tool_use` handler (23 of them,
+   discovered via `iter_builtin_handler_classes()`, never a hardcoded list)
+   with four hostile shapes — many small quoted/backslashed/wildcarded
+   tokens (the shape that actually caused #2's bug: many MATCHES, not one
+   giant token) and deep `$(...)` nesting — against both a `Bash` command
+   payload and a `Write` file-content payload, each under a 5s bound at
+   100 KB. Found no other super-linear handler. One handler,
+   `SecretFileGuardHandler`, is markedly slower than its peers (~1.3s at
+   100 KB vs \<0.25s for everything else) but measured LINEAR up to 800 KB
+   (doubling input doubles time) — a high constant factor, not a
+   superlinearity bug, so it is noted here rather than "fixed": worth a
+   follow-up look if it ever becomes a real bottleneck, but out of this
+   niggle's scope (which is specifically superlinear paths).
 
 ### N24 — ✅ Remedied — `daemon.strict_mode` never reaches the live daemon, so every guard fails OPEN on a handler exception
 
@@ -209,11 +253,18 @@ off; a non-safety advisory handler that raises still allows, and says so.
    still winning when both apply).
 
 Also added an acceptance-level, live-daemon check
-(`.claude/project-handlers/pre_tool_use/n24_strict_mode_probe.py` +
-`tests/acceptance/test_n24_strict_mode_probe_socket.py`) that proves the
-wiring end-to-end against a real running daemon process, without depending
-on N5's lifecycle: a project-only handler raises ONLY for a payload marked
-`synthetic_source: n24-probe`, which no real Claude Code session ever sends.
+(`tests/integration/test_n24_strict_mode_probe_isolated_daemon.py`) that
+proves the wiring end-to-end against a real daemon process, without
+depending on N5's lifecycle: a probe handler raises ONLY for a payload
+marked `synthetic_source: n24-probe`, which no real Claude Code session ever
+sends. It started as a permanent file under this repository's own
+`.claude/project-handlers/` plus a socket test against the already-running
+shared daemon; both are now gone, superseded by this file, which starts its
+own isolated daemon (the same pattern `test_daemon_smoke.py` uses) in a tmp
+project and writes the probe's source into that tmp project's own
+`.claude/project-handlers/` before starting it — a probe this narrow has no
+business permanently installed in a maintainer-visible directory meant for
+genuinely useful project handlers.
 
 The N5 and N11 entries' "this repository runs `strict_mode: true`, so here
 the crash denied" claim is corrected below, in place, rather than restated

@@ -18,7 +18,7 @@ from pydantic import (
     model_validator,
 )
 
-from claude_code_hooks_daemon.constants import EventKey, wired_event_metas
+from claude_code_hooks_daemon.constants import EventKey, Timeout, wired_event_metas
 from claude_code_hooks_daemon.core.handler_scope import (
     SCOPE_CONFIG_KEY,
     HandlerScope,
@@ -1607,6 +1607,17 @@ class ChainConfig(BaseModel):
             Costs the extra handlers' execution time on the blocked path;
             ``CLAUDE/Plan/00242-terminal-handlers-are-a-flawed-primitive/
             MEASUREMENTS.md`` records the numbers.
+        deadline_seconds: Per-event chain deadline (Plan 00466 N25), well
+            under the client's own socket timeout (30s): that client-side
+            timeout fails the WHOLE chain open on expiry, so a merely slow
+            handler bypassed every guard behind it, not just itself. Once
+            exceeded, a handler tagged both ``SAFETY`` and ``BLOCKING`` not
+            yet run is treated exactly like N24's raise-while-evaluating —
+            denied, naming the handler, "not judged in time" — and any other
+            not-yet-run handler is skipped with a context note. ``None``
+            disables enforcement entirely (NOT recommended: a slow handler
+            can then exhaust the client's own timeout, which fails the whole
+            chain open with no guard getting a say).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -1617,6 +1628,15 @@ class ChainConfig(BaseModel):
             "Keep running after a deny and report every violation of a tool "
             "call in one merged response (opt-in; default short-circuits on "
             "the first terminal deny)"
+        ),
+    )
+    deadline_seconds: Annotated[float, Field(gt=0)] | None = Field(
+        default=Timeout.CHAIN_DEADLINE_DEFAULT,
+        description=(
+            "Per-event chain deadline in seconds, well under the client's "
+            "own socket timeout. A SAFETY+BLOCKING handler not yet run when "
+            "it is exceeded is denied as 'not judged in time'; any other "
+            "not-yet-run handler is skipped. None disables enforcement."
         ),
     )
 

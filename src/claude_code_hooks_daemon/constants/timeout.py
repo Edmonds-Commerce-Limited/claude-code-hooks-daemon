@@ -46,6 +46,14 @@ class Timeout:
     # Hook dispatch timeouts (milliseconds)
     HOOK_DISPATCH = 5_000  # 5 seconds (max time for single handler)
     HOOK_TOTAL = 30_000  # 30 seconds (max time for all handlers in chain)
+    # Daemon-side chain deadline (seconds; Plan 00466 N25). Well under
+    # HOOK_TOTAL's 30s client budget: a client-side timeout fails the WHOLE
+    # chain OPEN (`.claude/init.sh` reads it as an empty context, an ALLOW
+    # for every non-Stop event), so a slow handler bypassed every guard
+    # behind it. Enforced inside `HandlerChain.execute` instead, where a
+    # SAFETY+BLOCKING handler can still be told from an advisory and denied
+    # rather than silently skipped.
+    CHAIN_DEADLINE_DEFAULT = 20
 
     # Network/IO timeouts (seconds)
     SOCKET_CONNECT = 5  # 5 seconds (Unix socket connection)

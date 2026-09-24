@@ -967,6 +967,34 @@ class TestControllerChainConfig:
         denied_by = [d.handler for d in result.decisions if d.decision.value == "deny"]
         assert len(denied_by) >= 2, denied_by
 
+    def test_deadline_seconds_reaches_the_router(self, workspace_root: Path) -> None:
+        """daemon.chain.deadline_seconds reaches EventRouter.route (Plan 00466 N25)."""
+        from claude_code_hooks_daemon.core.hook_result import HookResult
+        from claude_code_hooks_daemon.core.router import EventRouter
+
+        controller = self._initialised_controller(
+            workspace_root, chain=ChainConfig(deadline_seconds=12.5)
+        )
+
+        captured: dict[str, Any] = {}
+
+        def fake_route(
+            self: EventRouter,
+            event_type: EventType,
+            hook_input: dict[str, Any],
+            strict_mode: bool = False,
+            *,
+            collect_all: bool = False,
+            deadline_seconds: float | None = None,
+        ) -> ChainExecutionResult:
+            captured["deadline_seconds"] = deadline_seconds
+            return ChainExecutionResult(result=HookResult.allow())
+
+        with patch.object(EventRouter, "route", new=fake_route):
+            controller.process_event(self._bash_event("echo hi"))
+
+        assert captured["deadline_seconds"] == 12.5
+
     def test_history_records_each_handlers_own_verdict(self, workspace_root: Path) -> None:
         """A handler that ALLOWED must not be recorded as having denied just
         because another handler denied the same call — that is what burnt

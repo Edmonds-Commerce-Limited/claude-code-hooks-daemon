@@ -300,41 +300,71 @@ _PATH_SEPARATOR = "/"
 #: Where a top-level scan starts when no earlier separator is found.
 _SEGMENT_START = 0
 
+#: Combined alternation of `_CHAIN_SEPARATORS`, longest-first so `&&`/`||`
+#: match whole (there is no bare `&`/`|` in the list, so no other ordering
+#: risk). Used by `_SegmentTracker` to find every separator in a gap with one
+#: scan instead of one `rfind` per separator per query.
+_CHAIN_SEPARATOR_PATTERN = re.compile("|".join(re.escape(sep) for sep in _CHAIN_SEPARATORS))
 
-def _segment_words(command: str, index: int) -> list[str]:
-    """Words of the command segment that owns the flag at ``index``.
+#: How far into a segment `_SegmentTracker` looks for the binary and
+#: subcommand. Generous for any real invocation (`git -C /path -c x=y
+#: commit`), and a bound here is what keeps a single-segment command with
+#: thousands of matches (Plan 00466 N25's repro: 40000 `-m x` flags, no chain
+#: separator anywhere) from re-splitting an ever-growing prefix for every
+#: match. A segment whose subcommand sits further out than this resolves to
+#: "" (unknown), which is the FAIL-SAFE direction here: the flag is left
+#: unblanked and scanned normally, never silently treated as prose.
+_SEGMENT_WORD_SCAN_BOUND = 4096
 
-    Bounded by chain separators so a `git commit` earlier in the line cannot
-    lend its message-taking status to a later `python -m` in the same command.
+
+class _SegmentTracker:
+    """Resolves, and caches, which top-level command segment owns each match.
+
+    `strip_message_bodies` used to answer "what segment owns this `-m`/`-F`
+    flag?" by re-deriving it from scratch for every match: `rfind` each chain
+    separator over `command[:index]`, then `command[start:index].split()`.
+    Both costs grow with `index`, and Plan 00466 N25's repro -- a single 200
+    KB `git commit` carrying 40000 repeated `-m x` flags, with NO chain
+    separator anywhere -- made every one of those 40000 matches re-split an
+    ever-growing prefix: 99s where a linear scan takes milliseconds.
+
+    A segment's identity cannot change between two matches unless a chain
+    separator sits between them, and `re.sub`/`re.finditer` visit matches in
+    strictly ascending position order. So this resolves a segment once and
+    reuses it for every later match in the same segment, and the separator
+    search that decides whether a NEW segment started is bounded to the GAP
+    since the previous match rather than restarted from the beginning --
+    those gaps are disjoint and sum to at most `len(command)` over the whole
+    scan.
     """
-    start = _SEGMENT_START
-    for separator in _CHAIN_SEPARATORS:
-        found = command.rfind(separator, _SEGMENT_START, index)
-        if found != -1:
-            start = max(start, found + len(separator))
-    return command[start:index].split()
 
+    __slots__ = ("_binary", "_command", "_scanned_to", "_segment_start", "_subcommand")
 
-def _segment_binary(command: str, index: int) -> str:
-    """Basename of the command word that owns the flag at ``index``."""
-    words = _segment_words(command, index)
-    if not words:
-        return ""
-    return words[0].rpartition(_PATH_SEPARATOR)[2]
+    def __init__(self, command: str) -> None:
+        self._command = command
+        self._scanned_to = _SEGMENT_START
+        self._segment_start = _SEGMENT_START
+        self._binary = ""
+        self._subcommand = ""
+        self._resolve(_SEGMENT_START)
 
+    def _resolve(self, start: int) -> None:
+        """(Re)compute the binary/subcommand for the segment beginning at ``start``."""
+        window = self._command[start : start + _SEGMENT_WORD_SCAN_BOUND].split()
+        self._binary = window[0].rpartition(_PATH_SEPARATOR)[2] if window else ""
+        position = git_subcommand_index(window, 0) if window else None
+        self._subcommand = window[position] if position is not None else ""
 
-def _segment_subcommand(command: str, index: int) -> str:
-    """The SUBCOMMAND that owns the flag at ``index``, or ``""``.
-
-    The subcommand always precedes its flags, so the words before ``index`` are
-    enough. Global options are skipped by the same helper the regex grammar
-    uses, so ``git -C /path commit -m x`` still resolves to ``commit``.
-    """
-    words = _segment_words(command, index)
-    if not words:
-        return ""
-    position = git_subcommand_index(words, 0)
-    return words[position] if position is not None else ""
+    def binary_and_subcommand(self, index: int) -> tuple[str, str]:
+        """``(binary, subcommand)`` of the segment owning the flag at ``index``."""
+        last_separator_end = None
+        for match in _CHAIN_SEPARATOR_PATTERN.finditer(self._command, self._scanned_to, index):
+            last_separator_end = match.end()
+        if last_separator_end is not None:
+            self._segment_start = last_separator_end
+            self._resolve(self._segment_start)
+        self._scanned_to = index
+        return self._binary, self._subcommand
 
 
 def command_word(word: str) -> str:
@@ -419,12 +449,14 @@ def strip_message_bodies(command: str) -> str:
         untouched.
     """
 
+    tracker = _SegmentTracker(command)
+
     def _blank_if_inert(match: re.Match[str]) -> str:
-        binary = _segment_binary(command, match.start())
+        binary, subcommand = tracker.binary_and_subcommand(match.start())
         if binary not in _MESSAGE_TAKING_COMMANDS:
             return match.group(0)
         allowed = _MESSAGE_TAKING_SUBCOMMANDS.get(binary)
-        if allowed is not None and _segment_subcommand(command, match.start()) not in allowed:
+        if allowed is not None and subcommand not in allowed:
             return match.group(0)
         if value_can_substitute(match.group("value")):
             return match.group(0)
@@ -511,12 +543,17 @@ def strip_quoted_heredoc_bodies(command: str) -> str:
         'echo hi'
     """
 
+    depth_tracker = _SubstitutionDepthTracker(command)
+    newline_tracker = _LastNewlineTracker(command)
+
     def _blank_if_nothing_can_execute_it(match: re.Match[str]) -> str:
         # Three questions, because each was separately a real hole: who
         # RECEIVES the body, what it is PIPED ON to, and whether the whole
         # command sits in a SUBSTITUTION whose output lands in command
         # position. Any one of them failing keeps the body.
-        if not _receiver_is_data_sink(command, match.start("opener")):
+        if not _receiver_is_data_sink(
+            command, match.start("opener"), depth_tracker, newline_tracker
+        ):
             return match.group(0)
         if not _downstream_is_all_data_sinks(match.group("opener_tail")):
             return match.group(0)
@@ -533,7 +570,12 @@ def strip_quoted_heredoc_bodies(command: str) -> str:
     return _QUOTED_HEREDOC_BODY_PATTERN.sub(_blank_if_nothing_can_execute_it, command)
 
 
-def _receiver_is_data_sink(command: str, opener_start: int) -> bool:
+def _receiver_is_data_sink(
+    command: str,
+    opener_start: int,
+    depth_tracker: _SubstitutionDepthTracker,
+    newline_tracker: _LastNewlineTracker,
+) -> bool:
     """Does the command feeding the heredoc at ``opener_start`` only READ it?
 
     Decided per heredoc rather than per command: ``cat > a <<'A' … bash <<'B'``
@@ -549,62 +591,131 @@ def _receiver_is_data_sink(command: str, opener_start: int) -> bool:
     receiver is even resolved, because there the receiver is not the whole
     story: ``$(cat <<'EOF' … )`` really is fed to ``cat``, and bash then runs
     what ``cat`` emitted. See :data:`_SUBSTITUTION_OPENER_PATTERN`.
+
+    ``depth_tracker``/``newline_tracker`` carry state ACROSS calls for the
+    same top-level scan (Plan 00466 N25) — see their own docstrings. Callers
+    querying `opener_start` values in ascending order (every caller here
+    does, via `re.sub`/`re.finditer`) get each character of `command`
+    inspected at most once between them, however many heredocs it contains.
     """
-    if _inside_command_substitution(command, opener_start):
+    if depth_tracker.inside_substitution_at(opener_start):
         return False
-    segment = _receiving_segment(command, opener_start)
+    segment = _receiving_segment(command, opener_start, newline_tracker)
     if _SUBSTITUTION_OPENER_PATTERN.match(segment.lstrip()):
         return False
     word = _segment_command_word(segment)
     return word is not None and word in DATA_SINKS
 
 
-def _inside_command_substitution(command: str, opener_start: int) -> bool:
-    """Is the heredoc opener at ``opener_start`` inside an OPEN substitution?
+class _SubstitutionDepthTracker:
+    """Incrementally answers "is this position inside an open substitution?".
 
-    Asked of the RAW text before the opener, because the segment the anchored
-    :data:`_SUBSTITUTION_OPENER_PATTERN` sees has already been split on
-    ``&&``/``||``/``;``/``|``/``&`` with the LAST piece kept. Any separator
-    inside the substitution therefore moved the ``$(`` out of the segment and
-    the anchor stopped matching -- while bash went on substituting the output
-    and running it. ``$(true && cat <<'EOF' … )`` is the shape that got
-    through.
+    The stateless check this replaces -- walk the command from index 0,
+    tracking quote state and ``$(...)``/backtick depth -- is correct but
+    O(position) per call. Called once per heredoc match, in a command with
+    many heredocs and no separator between them (Plan 00466 N25's repro: 5000
+    quoted heredocs in 200 KB), that made the whole scan O(n^2): 98s where a
+    single linear pass takes milliseconds.
 
-    Quotes are tracked because they decide whether an opener is one: ``$(`` is
-    literal inside single quotes and live inside double quotes, and an
-    apostrophe inside double quotes (``"don't"``) is not a quote opener.
-
-    Over-reporting containment is the safe error -- it withholds the exemption
-    and the body is scanned, costing a false positive. Under-reporting hands a
-    live command to every caller as blanked prose.
+    Relies on the SAME ordering guarantee `_SegmentTracker` does: callers
+    query strictly ascending positions (true for every caller here, via
+    `re.sub`/`re.finditer` over one command), so resuming from where the
+    previous query left off, rather than restarting at 0, inspects each
+    character of the command at most once across the whole scan.
     """
-    depth = 0
-    in_single = False
-    in_double = False
-    in_backtick = False
-    index = 0
 
-    while index < opener_start:
-        char = command[index]
-        if char == "\\" and not in_single:
-            index += 2
-            continue
-        if char == "'" and not in_double and not in_backtick:
-            in_single = not in_single
-        elif char == '"' and not in_single:
-            in_double = not in_double
-        elif not in_single:
-            if char == "`":
-                in_backtick = not in_backtick
-            elif command.startswith("$(", index):
-                depth += 1
+    __slots__ = ("_command", "_depth", "_in_backtick", "_in_double", "_in_single", "_index")
+
+    def __init__(self, command: str) -> None:
+        self._command = command
+        self._index = 0
+        self._depth = 0
+        self._in_single = False
+        self._in_double = False
+        self._in_backtick = False
+
+    def inside_substitution_at(self, position: int) -> bool:
+        """True if ``position`` sits inside an OPEN ``$(...)``/backtick span.
+
+        Quotes are tracked because they decide whether an opener is one:
+        ``$(`` is literal inside single quotes and live inside double
+        quotes, and an apostrophe inside double quotes (``"don't"``) is not
+        a quote opener. Over-reporting containment is the safe error here --
+        it withholds the exemption and the body is scanned, costing a false
+        positive. Under-reporting hands a live command to every caller as
+        blanked prose.
+        """
+        command = self._command
+        index = self._index
+        depth = self._depth
+        in_single = self._in_single
+        in_double = self._in_double
+        in_backtick = self._in_backtick
+
+        while index < position:
+            char = command[index]
+            if char == "\\" and not in_single:
                 index += 2
                 continue
-            elif char == ")" and depth > 0:
-                depth -= 1
-        index += 1
+            if char == "'" and not in_double and not in_backtick:
+                in_single = not in_single
+            elif char == '"' and not in_single:
+                in_double = not in_double
+            elif not in_single:
+                if char == "`":
+                    in_backtick = not in_backtick
+                elif command.startswith("$(", index):
+                    depth += 1
+                    index += 2
+                    continue
+                elif char == ")" and depth > 0:
+                    depth -= 1
+            index += 1
 
-    return depth > 0 or in_backtick
+        self._index = index
+        self._depth = depth
+        self._in_single = in_single
+        self._in_double = in_double
+        self._in_backtick = in_backtick
+        return depth > 0 or in_backtick
+
+
+class _LastNewlineTracker:
+    """Incrementally finds the most recent newline strictly before a position.
+
+    ``_receiving_segment`` used to compute this as
+    ``command[:opener_start].rsplit("\\n", 1)[-1]``: a full copy of the
+    command's PREFIX, made fresh for every heredoc match. The copy's cost
+    grows with `opener_start`, so many heredocs in one command (Plan 00466
+    N25's repro) made it O(n^2) even though the segments it returns are
+    individually short.
+
+    Bounding the search to the GAP since the previous query (`opener_start`
+    values arrive in ascending order, the same guarantee
+    `_SubstitutionDepthTracker` relies on) keeps each call's cost
+    proportional to that gap rather than to the absolute position, and the
+    gaps are disjoint and sum to at most `len(command)`.
+    """
+
+    __slots__ = ("_command", "_last_newline", "_scanned_to")
+
+    def __init__(self, command: str) -> None:
+        self._command = command
+        self._scanned_to = 0
+        self._last_newline = -1
+
+    def line_start_before(self, position: int) -> int:
+        """Index right after the most recent literal ``\\n`` before ``position``.
+
+        Deliberately naive about quoting/escaping, matching the ``rsplit``
+        behaviour it replaces exactly: every literal newline is a line
+        boundary here, full stop.
+        """
+        found = self._command.rfind("\n", self._scanned_to, position)
+        if found != -1:
+            self._last_newline = found
+        self._scanned_to = position
+        return self._last_newline + 1
 
 
 def _downstream_is_all_data_sinks(opener_tail: str) -> bool:
@@ -689,16 +800,24 @@ def _heredoc_receiving_segments(command: str) -> list[str]:
     ``<<`` opener -- a pipe stage or an ``&&`` branch, not the whole line, so
     ``echo x | bash <<'EOF'`` resolves to bash rather than echo.
     """
+    newline_tracker = _LastNewlineTracker(command)
     return [
-        _receiving_segment(command, match.start("opener"))
+        _receiving_segment(command, match.start("opener"), newline_tracker)
         for match in _QUOTED_HEREDOC_BODY_PATTERN.finditer(command)
     ]
 
 
-def _receiving_segment(command: str, opener_start: int) -> str:
-    """Return the command segment feeding the heredoc opening at ``opener_start``."""
-    preceding = command[:opener_start]
-    last_line = preceding.rsplit("\n", 1)[-1]
+def _receiving_segment(
+    command: str, opener_start: int, newline_tracker: _LastNewlineTracker
+) -> str:
+    """Return the command segment feeding the heredoc opening at ``opener_start``.
+
+    ``newline_tracker`` carries state across calls for the same top-level
+    scan (Plan 00466 N25) -- see its own docstring. Callers must query
+    ``opener_start`` values in ascending order, which every caller here does.
+    """
+    line_start = newline_tracker.line_start_before(opener_start)
+    last_line = command[line_start:opener_start]
     # Blanked, not removed: an fd redirect's `&` is punctuation, and leaving it
     # in lets `_RECEIVER_SEPARATORS`' lone `&` cut `cat 2>&1 ` at the redirect.
     without_redirects = _FD_REDIRECT_PATTERN.sub(" ", last_line)
