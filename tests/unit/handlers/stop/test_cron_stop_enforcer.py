@@ -323,6 +323,22 @@ class TestASessionPausedJobIsAcceptedVisibly:
         assert "PAUSED" in result.reason
         assert "owner asked to stop issue-sdlc for today" in result.reason
 
+    def test_the_deny_hands_over_the_unpaused_jobs_sentinel_only(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The pause (ledger 00422 N4) and the tick sentinel (Plan 00388) came
+        from separate branches: the job to re-create is given with its
+        sentinel, and the paused one is named but not given to re-create."""
+        other = PersistentCronConfig(id="other-job", schedule="41 * * * *", prompt="q")
+        handler = self._paused_handler(monkeypatch, tmp_path, _JOB, other)
+        self._pause(tmp_path, _JOB.id)
+
+        result = handler.handle({"session_id": self._SESSION, "session_crons": []})
+
+        assert result.reason is not None
+        assert "[tick:job:other-job]" in result.reason
+        assert f"[tick:job:{_JOB.id}]" not in result.reason
+
     def test_a_paused_job_that_is_running_anyway_says_nothing(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:

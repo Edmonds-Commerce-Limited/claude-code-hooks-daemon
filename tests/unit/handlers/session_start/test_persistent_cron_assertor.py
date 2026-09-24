@@ -269,3 +269,27 @@ class TestTheDeclaredPromptCarriesItsTickSentinel:
         prompt_start = context.index("    prompt:") + 1
         assert context[prompt_start].strip() == "[tick:job:gh-issue-sdlc]"
         assert context[prompt_start + 1].strip() == _JOB.prompt
+
+    def test_a_pause_leaves_the_other_jobs_sentinel_in_place(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Ledger 00422 N4's pause filter and Plan 00388's sentinel both shape
+        this advisory, and they landed on separate branches: the job still
+        asked for keeps its sentinel, and the paused one gains no create
+        instruction."""
+        second = PersistentCronConfig(id="second-job", schedule="41 * * * *", prompt="q")
+        handler = _handler(monkeypatch, _config(_JOB, second))
+        path = tmp_path / CRON_PAUSES_FILENAME
+        monkeypatch.setattr(handler, "_pauses_path", lambda: path)
+        now = time.time()
+        record_pause(
+            path,
+            CronPause(job_id=_JOB.id, session_id="s", reason="owner stopped it", recorded_at=now),
+            now=now,
+        )
+
+        context = handler.handle({"session_id": "s"}).context
+
+        assert "[tick:job:second-job]" in [line.strip() for line in context]
+        assert "[tick:job:gh-issue-sdlc]" not in "\n".join(context)
+        assert "owner stopped it" in "\n".join(context)
