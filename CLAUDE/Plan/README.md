@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00467: recommend the defence before fix plugin to client projects](00467-recommend-the-defence-before-fix-plugin-to-client-projects/PLAN.md) - In Progress (owner request: the DBF plugin is installed here at project scope to dogfood; Phase 1 evaluates it against written criteria and files shortfalls upstream, and Phase 2 recommends it to client projects only on the owner's sign-off)
+
 - [00466: niggles ledger sixteen](00466-niggles-ledger-sixteen/PLAN.md) - In Progress, the OPEN ledger for new niggles (00422 passed its size warning with N29 and keeps only its own entries; opens with N1: the venv fallback accepts an interpreter that cannot run on this host)
 
 - [00465: commit gates see the index after same command staging](00465-commit-gates-see-the-index-after-same-command-staging/PLAN.md) - Not Started (from 00422 N26: gates read the index before the command runs, so `git add f && git commit` passes the secret-term scan and every other staged-content gate unexamined; starts after 00464, same gates)
@@ -286,27 +288,27 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 466 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 467 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 400 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 43 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 44 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
 - **Cancelled/Abandoned**: 13 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00108 superseded by 00117, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213, 00135 superseded by the supervisor workstream)
 
-- **Folder-to-number reconciliation**: 43 + 400 + 13 = **456 folders**, spanning
-  **453 distinct plan numbers** — three numbers carry two folders each, the
+- **Folder-to-number reconciliation**: 44 + 400 + 13 = **457 folders**, spanning
+  **454 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
   (`001-`, `002-`, `003-`), so they count as present. That leaves **13** of the
-  466 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
+  467 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
   00145, 00191, 00195, 00210, 00258, 00300, 00303, 00325 — abandoned drafts, numbers
   burned by transient probes (00195 during the v3.51.0 acceptance run, 00258
   during the v3.54.0 one), and one withdrawn duplicate (00210, scaffolded by a
   sub-agent that then found Plan 00208 already covered the work).
-  453 + 13 = 466. ✅
+  454 + 13 = 467. ✅
 
   Note on **00191**: it stays folderless deliberately. The number was claimed
   by a branch that renumbered itself and was never merged; Plan 00267
