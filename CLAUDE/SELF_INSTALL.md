@@ -105,6 +105,46 @@ PY="$(resolve_venv_python /workspace)"
 "$PY" -m pytest tests/unit -q
 ```
 
+### The conventional client path (`.claude/hooks-daemon/bin/hooks-daemon`)
+
+Every hooks-daemon project should expose the CLI at
+`<project>/.claude/hooks-daemon/bin/hooks-daemon` -- external session
+managers look for it there, because a normal client install's cloned daemon
+already lives at that path. A self-install checkout has no clone: `bin/`
+sits at the project root instead. `ProjectContext.initialize` (the single
+chokepoint every daemon-adjacent process passes through once at startup)
+creates a relative symlink to close that gap:
+
+```
+.claude/hooks-daemon/bin/hooks-daemon -> ../../../bin/hooks-daemon
+```
+
+So both paths work from the very first daemon start or CLI invocation in a
+self-install checkout, main or worktree:
+
+```bash
+./bin/hooks-daemon status                              # always worked
+.claude/hooks-daemon/bin/hooks-daemon status            # now also works
+```
+
+**Generated, not tracked.** The link is created idempotently (never
+overwrites an existing symlink or a real file) and lives under
+`.claude/hooks-daemon/`, which `.claude/.gitignore` already excludes for a
+different reason (it is where a CLIENT'S clone would go). A tracked link
+would defeat that: clients install by cloning this repository into
+`<client>/.claude/hooks-daemon/`, so a tracked link would land at
+`<client>/.claude/hooks-daemon/.claude/hooks-daemon/` in every client --
+and `.claude/init.sh`'s nested-installation check treats exactly that
+directory as a broken install.
+
+Because `.claude/hooks-daemon/` now genuinely exists in a self-install
+checkout (once the daemon has started at least once), every check that
+used to read "does this directory exist" as "is a client clone installed
+here" had to be re-keyed on a REAL clone instead -- something a client
+clone has and the link-only marker does not, namely its own
+`pyproject.toml`. See Plan 00455 for the full audit of affected sites (bash
+and Python) and which were already safe.
+
 ### Config File
 
 ```bash
