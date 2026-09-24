@@ -39,10 +39,9 @@ creating a new In Progress plan still emits.
 `PlanDoc.parse` and answers directly from that fragment's own Status line
 (absent → this edit never touched it → not a flip; present and not In
 Progress → a flip). For `Write` there is no pre-write disk copy left by the
-time PostToolUse runs, so git HEAD stands in for "before"
-(`_head_plan_text`, via the already-shared `utils.git_facts.GitFactsBase`)
-— deliberately not the Write/Edit `tool_response`, whose shape this
-codebase has never verified for either tool (see this same folder's
+time PostToolUse runs, so git HEAD stands in for "before" — deliberately
+not the Write/Edit `tool_response`, whose shape this codebase has never
+verified for either tool (see this same folder's
 `POSTTOOLUSE_FIXTURE_VERIFICATION.md`). A path absent at HEAD (new or never
 committed) reads as nothing to flip FROM, matching the pre-existing
 single-plan contract. The once-per-`(plan, session)` latch and the
@@ -50,19 +49,39 @@ retirement-refresh path are unchanged. `TestStatusFlipDetection` (8 tests,
 3 RED against the old code) pins the contract; the module docstring, the
 class docstring and `get_claude_md()` now state it explicitly.
 
-Sibling audit: `recovery_cron_advisor`'s Edit-path completion detection
-(`_edit_results_in_status_complete`) already requires the edit's own
-`old_string`/`new_string` to assert Complete, so it does not share this
-defect. Its Write-path (`_STATUS_COMPLETE_RE.search(content)` against the
-whole new file) is state-based in the same way this bug was, but its
-dedup (`_should_advise_once`) is a one-shot-ever-per-plan-folder latch, not
-a per-session one, and the consequence is a single advisory message —
-no ledger record, no goal-slot write, nothing another plan can be displaced
-by — so it was left as documented existing behaviour rather than folded
-into this fix. `plan_close_approval._is_terminal_flip` was already
-transition-based (compares `PlanDoc.parse(current).status` against the
-proposed status). `plan_qa_edit.py`'s "In Progress" occurrences are guidance
-prose, not status-detection logic.
+**Follow-up in commits `6699fbbd` and `4813adc8`**, after review. The first
+`_head_plan_text` caught `RuntimeError`/`OSError`/`ValueError` and returned
+`None`, which `error_hiding`'s `return-none-on-error` check flagged; the
+initial fix added an exclusion, which the review correctly rejected —
+this project allows no new QA suppressions. Restructured instead: path
+membership is now a plain `Path.is_relative_to` comparison, never a caught
+`ValueError`, and `ProjectContext.project_root()` is called unguarded — by
+the time any handler dispatches the daemon has always initialised it, so a
+`RuntimeError` here means genuine misconfiguration and is left to propagate
+to the dispatcher (`core/chain.py`'s existing per-handler exception
+handling), rather than being swallowed into a false "nothing to compare
+against". The lookup moved out to
+`utils.git_facts.project_relative_head_text` so it has one home instead of
+a per-handler copy. `error_hiding` now passes with zero violations and no
+exclusion for this code.
+
+The review also asked for the sibling to be fixed, not just documented as
+accepted: `recovery_cron_advisor`'s Write-path completion check
+(`_STATUS_COMPLETE_RE.search(content)` against the whole new file) shared
+the exact same state-vs-transition defect shape for `**Status**: Complete`
+— "only an advisory" was not a reason to keep it. `_detect_lifecycle_phase`
+now calls `_write_is_real_completion`, which reuses
+`project_relative_head_text` rather than a second copy: a Write whose
+content reads Complete is COMPLETION only when the plan was not already
+Complete at HEAD; otherwise the event matches no phase at all (never falls
+through to PROGRESS/CREATION). `TestWriteCompletionIsTransitionBased` (4
+tests, 1 RED against the pre-fix code) pins the contract. Its Edit path
+(`_edit_results_in_status_complete`) already required the edit's own
+`old_string`/`new_string` to assert Complete and needed no change.
+`plan_close_approval._is_terminal_flip` was already transition-based
+(compares `PlanDoc.parse(current).status` against the proposed status).
+`plan_qa_edit.py`'s "In Progress" occurrences are guidance prose, not
+status-detection logic.
 
 ### N2 — `setup_worktree.sh` tells every agent to run the full suite through `run_all.sh`
 
