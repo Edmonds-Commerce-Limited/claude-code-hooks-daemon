@@ -3,6 +3,152 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
+### N31 — the dispatch-declaration advisory does not recognise "File to write to: <path>"
+
+**Found by the 00467 dogfood agent.** A dispatch brief that named its report
+path as `File to write to: <path>` still drew the Plan 00307
+dispatch-declaration advisory saying no report destination was declared.
+The advisory matches a narrower set of phrasings than briefs actually use,
+so it nags on a correct dispatch, and a nag that is often wrong teaches
+people to skim it.
+
+**Candidate remedy:** recognise any phrasing that pairs a write verb or noun
+("write", "report", "file", "output", "save") with a path in the brief, not
+only fixed phrases. RED tests: the phrasing above is recognised, and a brief
+with no path at all still draws the advisory.
+
+### N30 — more shell code that must survive a hostile PATH depends on a PATH command
+
+**Found by the 00467 dogfood agent**, applying the Defence Before Fix method
+to the watchdog defect fixed at 766677c1 (00466 N1's follow-up). An
+independent search for the same class ("shell code that must survive a
+hostile or stripped `PATH` runs a command looked up on `PATH`, and its
+absence silently takes a wrong branch") found four more candidates:
+
+- `scripts/venv_bootstrap.sh:443` and `:474` (`date`). The agent reproduced
+  this idiom.
+- `scripts/install/venv.sh:427` (`date`).
+- `scripts/install/daemon_control.sh:40-43` (`pgrep`).
+
+These are the venv and install paths, which exist to work when the host's
+tools are broken, exactly as `resolve_venv.sh` does.
+
+**Candidate remedy:**
+
+1. Fix each instance: use a bash builtin (`printf '%(...)T'` for dates,
+   `/proc` or `kill -0` for process checks). Where there is no builtin,
+   make the missing command a loud, explicit failure rather than a silent
+   wrong branch.
+2. The detector the method asks for: a check over the scripts that must
+   survive a hostile PATH (`resolve_venv.sh`, `venv_bootstrap.sh`,
+   `scripts/install/*.sh`, the `bin/` wrappers) that flags an external
+   command whose failure is not handled. It could be a `shell_audit` rule, or
+   a test that runs each such script's functions under an empty `PATH`. It
+   must catch the original watchdog shape, verified by reverting 766677c1 in
+   a scratch copy.
+
+### N29 — `error_hiding`'s return-None-in-except check is evaded by returning a local assigned in the handler
+
+**Found by the coordinator** reading the goal-flip agent's report. To clear the
+`error_hiding` finding on a literal `return None` inside an `except` handler,
+that agent assigned `None` to a local in the handler and returned the local
+after the `try`. The behaviour is identical, and the detector no longer sees
+it. So the check keys on syntax, not on the flow it exists to catch, and an
+agent under QA pressure finds the gap on the first try. The goal-flip branch
+has been told to undo the evasion and fix the code honestly.
+
+**Candidate remedy:** judge the flow, not the token. An `except` handler that
+binds a name read by a later `return`, where that name's only values are
+`None` or a default and the handler logs or re-raises nothing, is the same
+finding as a literal `return None`. RED tests: the evasion shape is flagged,
+a handler that logs at warning or above and returns a documented sentinel is
+not, and the literal form is still flagged. Then sweep the tree for existing
+instances of the evasion shape, which would currently pass unseen.
+
+### N28 — `project_containment` resolves a relative target against the payload cwd and ignores a same-command `cd`
+
+**Found by the Plan 00464 agent** during its re-review fix round (S12). It is
+an instance of 00464's own defect class: the payload `cwd` is where the
+session started, not where the command runs. So `cd <elsewhere> && <write to a relative path>` was judged against the wrong directory, and the containment
+verdict could be wrong in both directions.
+
+**Remedied on the 00464 branch** (`worktree-plan-464-commit-gate-repo`,
+827c45df) through the new `find_command_placements`, which every
+path-judging guard is meant to share. Two sibling walkers still resolve
+their own way: `reference_repo_freshness` (the 00464 agent fixes it on that
+branch) and `secret_file_matching` (after the guard-defects branch merges,
+in the shell-parser consolidation). Mark Remedied when 00464 lands; the
+siblings are tracked in the coordinator's consolidation work.
+
+### N27 — `skill_scan` and `tool_report` build the transcript directory name two different ways
+
+**Found by the 00468 core agent** (report on its branch,
+`subagent-reports/260924-p468-core-opus-5-5.md`). Claude Code keeps a
+project's transcripts under a directory named after the project path, with
+characters it cannot use in a name replaced. `skill_scan` and `tool_report`
+each derive that name with their own code, and they disagree for a path
+containing `.` or `_`. So for such a project one of them reads the wrong
+directory, finds nothing, and reports "no data" rather than an error.
+
+**Candidate remedy:** one helper derives the transcript directory from the
+project path, pinned to Claude Code's real rule (checked against a real
+`~/.claude/projects/` entry for a path with `.`, `_` and `-`). Both commands
+and every other derivation site use it (sweep for the other derivations).
+The helper raises, not returns empty, when the directory does not exist and
+the caller asked for it. RED test: a project path with `.` and `_` resolves
+to the same directory from both commands.
+
+### N26 — `check_skill_references.py` scans zero files when run from a worktree
+
+**Found by the 00468 core agent.** Run from any worktree, the skill
+references QA check reports success after scanning 0 files. A check that
+examines nothing and passes is a fail-open gate: every sub-agent's targeted
+QA runs from a worktree, so the check has been silently vacuous exactly
+where branches are verified.
+
+**Candidate remedy:** find why the file discovery comes up empty in a
+worktree (a `.git` file rather than a directory, or a path anchored to the
+main checkout), and fix it. Separately, the check FAILS when it scans zero
+files where skills exist, so a vacuous pass cannot recur. Audit the other
+`scripts/qa/check_*.py` for the same "0 examined, PASS" shape and pin the
+class with a test that runs each check from a worktree fixture.
+
+### N25 — a slow handler runs out the client's 30 s budget, and a timeout is an ALLOW for the whole PreToolUse chain
+
+**Found by the guard-defects security review 2**
+([report](subagent-reports/260924-n466-guards-review2-opus-5-5.md), B1 and
+m3). `.claude/hooks/pre-tool-use` gives the daemon `--timeout-ms 30000`. On a
+read-side socket timeout, `.claude/init.sh` (about lines 1654-1661) emits
+`hookSpecificOutput` with context only, which is an ALLOW for every non-Stop
+event. So any handler that can be made slow enough bypasses every guard
+behind it, not just itself. Two instances are measured:
+
+- `destructive_git`'s `strip_inert_spans` takes 99 s on a 200 KB command.
+  That is already on main.
+- The guard-defects branch's interior-wildcard DP takes 31 s on a crafted
+  60 KB command. That one is fixed on its branch as review 2's B1.
+
+Fixing each slow handler one by one leaves the class open: the next
+super-linear regex or DP reopens it silently.
+
+**Candidate remedies (the class, not the instance):**
+
+1. The daemon enforces a per-event deadline well under the client budget
+   (for example 20 s for the whole chain). When it passes, the remaining
+   SAFETY+BLOCKING handlers are treated as having raised, which means DENY
+   with a "not judged in time" reason under N24's fail-closed rule.
+   Advisory handlers are skipped with a note.
+2. Fix the measured instance: `strip_inert_spans` becomes linear, with a
+   timing test at 200 KB.
+3. A test harness drives every SAFETY handler with large hostile inputs
+   (long runs of quotes, backslashes, wildcards and nesting) under a time
+   bound, so a super-linear path fails CI rather than a client.
+
+Deliberately NOT a remedy: making the client fail closed on timeout. A
+daemon that is merely slow (an overloaded host) would then block every tool
+call. The deadline belongs inside the daemon, where it can tell safety
+handlers from advisories.
+
 ### N24 — ✅ Remedied — `daemon.strict_mode` never reaches the live daemon, so every guard fails OPEN on a handler exception
 
 **Found by the guard-defects security review 2**
