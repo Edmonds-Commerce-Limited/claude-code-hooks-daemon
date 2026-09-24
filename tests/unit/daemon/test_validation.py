@@ -520,9 +520,7 @@ class TestCheckForNestedInstallation:
         result = check_for_nested_installation(tmp_path)
         assert result is None
 
-    def test_cleans_up_nested_install_even_when_outer_has_pyproject(
-        self, tmp_path: Path
-    ) -> None:
+    def test_cleans_up_nested_install_even_when_outer_has_pyproject(self, tmp_path: Path) -> None:
         """A real outer clone (pyproject.toml present) still gets its inner
         nested artifact cleaned up.
 
@@ -554,9 +552,7 @@ class TestCheckForNestedInstallation:
         outer .claude/hooks-daemon/ clone at all -- only the bare CLI symlink
         Plan 00455 creates.
         """
-        (tmp_path / "pyproject.toml").write_text(
-            "[project]\nname = 'claude-code-hooks-daemon'\n"
-        )
+        (tmp_path / "pyproject.toml").write_text("[project]\nname = 'claude-code-hooks-daemon'\n")
         (tmp_path / "src" / "claude_code_hooks_daemon").mkdir(parents=True)
         bin_dir = tmp_path / ".claude" / "hooks-daemon" / "bin"
         bin_dir.mkdir(parents=True)

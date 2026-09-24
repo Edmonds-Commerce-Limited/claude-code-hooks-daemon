@@ -22,9 +22,10 @@ on — the rule set in ``pyrightconfig.json`` decides what is an error, and
 that file is pinned by ``tests/unit/test_pyright_config.py``.
 
 Imports resolve against the interpreter running this script, passed as
-``--pythonpath``: ``pyrightconfig.json``'s ``untracked/venv`` is a symlink only
-the main checkout has, and a worktree or CI runner without it would report
-every third-party import missing.
+``--pythonpath``: ``pyrightconfig.json``'s ``untracked/lsp-venv`` is a symlink
+only a checkout whose self-install daemon has started carries, and a worktree
+before its first daemon start or a CI runner that never starts one would
+report every third-party import missing.
 
 Usage:
     python scripts/qa/run_pyright_check.py [--json] [--root DIR] [--pyright PATH]
@@ -104,12 +105,13 @@ def resolve_pyright_binary(
 def default_interpreter() -> Path:
     """The interpreter pyright resolves imports against: the one running QA.
 
-    ``pyrightconfig.json`` names ``untracked/venv``, a symlink only the main
-    checkout carries. A linked worktree and a CI runner have the
-    fingerprint-keyed venv and no symlink, so left to the config pyright
-    finds no site-packages there and reports every third-party import
-    missing (597 of them, measured in a worktree). Passing the QA venv's own
-    interpreter makes the verdict the same in every checkout.
+    ``pyrightconfig.json`` names ``untracked/lsp-venv``, a symlink only a
+    checkout whose self-install daemon has started carries. A linked worktree
+    before its daemon's first start and a CI runner have the fingerprint-keyed
+    venv and no symlink, so left to the config pyright finds no site-packages
+    there and reports every third-party import missing (597 of them, measured
+    in a worktree). Passing the QA venv's own interpreter makes the verdict
+    the same in every checkout.
     """
     return Path(sys.executable)
 

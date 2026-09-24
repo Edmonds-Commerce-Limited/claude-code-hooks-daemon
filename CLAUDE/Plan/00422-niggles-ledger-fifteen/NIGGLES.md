@@ -1729,6 +1729,22 @@ or `language server`; the two `LSP` matches (00075, 00368) are Complete; the
 ledger has no entry. Plan 00368 is the likely origin of the symlink design and
 is where to look first.
 
+**Remedied**: a variant of remedy (2), with a new name rather than reusing
+`untracked/venv` — `untracked/lsp-venv`, which collides with neither the
+`LEGACY_VENV` meaning of the old path nor the `venv-*` glob the skill and the
+eager-cleanup/prune-venvs code scan, so no cleanup exemption was needed
+anywhere. `ProjectContext.initialize()`'s self-install branch now creates and
+(unlike the CLI symlink) repoints the link on every daemon start, derived
+from `sys.prefix`, restricted to when the running interpreter's venv lives
+directly under this project's own `untracked/`. `pyrightconfig.json`'s
+`venv` key now names it. LSP.md's three checked claims are corrected in
+place, including the "exists only in the main checkout" line, which is now
+false in the other direction: it exists in ANY self-install checkout whose
+daemon has started at least once, worktrees included. Checked and confirmed
+by reading: none of the upgrade's legacy-venv removal, the eager
+stale-venv sweep, or `_enumerate_venvs`' venv listing matches or touches
+`lsp-venv` (their glob/prefix checks are `venv` exact or `venv-*` prefix).
+
 ### N17 — a stale docstring in `paths.py` produced a confident wrong verdict in a live investigation
 
 **Found**: triaging issue #53, by checking a sub-agent's finding before acting
