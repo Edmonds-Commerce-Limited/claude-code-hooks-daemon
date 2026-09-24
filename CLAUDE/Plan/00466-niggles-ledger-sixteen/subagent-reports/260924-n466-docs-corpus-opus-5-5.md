@@ -80,3 +80,5 @@ Both commits are on `worktree-n466-docs-corpus`, not merged or pushed. No `sed`,
 ## Note on release note numbering
 
 `CLAUDE/UPGRADES/UNRELEASED/release-notes/13-docs-qa-and-doc-truth-now-respect-gitignore.md` uses `13`, one above the highest existing file (`12-...`) at the time this worktree branched. If another concurrent worktree also added a `13-*` file before integration, the coordinator will need to renumber one of them.
+
+Integration B2 renumbered it to `24-docs-qa-and-doc-truth-now-respect-gitignore.md`, and the Plan 00468 T3.1 note `29-...` to `25-format-markdown-and-find-comment-blocks-now-respect-gitignore.md`.
