@@ -913,9 +913,43 @@ if [ -n "$_metadata_venv_python" ] && [ -x "$_metadata_venv_python" ]; then
 fi
 
 # ------------------------------------------------------------
+# Post-upgrade tasks (Plan 00376 Task 4.3)
+# ------------------------------------------------------------
+# A third mirror of the two blocks above. A release's post-upgrade tasks are
+# the work a clean upgrade does not do for the project, and nothing runs them,
+# so an agent running the bare script must still SEE that they exist and that
+# upgrade.md step 6 carries them out. A branch install's CLI includes the
+# UNRELEASED tasks by itself, from its own install stamp.
+if [ -n "$_metadata_venv_python" ] && [ -x "$_metadata_venv_python" ]; then
+    # Exit 1 means tasks exist (normal!), 0 none, 2 on error or an older
+    # target that has no such command; same idiom as above.
+    _tasks_rc=0
+    if _tasks_out="$("$_metadata_venv_python" -m claude_code_hooks_daemon.daemon.cli \
+        check-post-upgrade-tasks \
+        --from "${FROM_VERSION#v}" \
+        --to "${TARGET_SEMVER#v}" 2>&1)"; then
+        _tasks_rc=0
+    else
+        _tasks_rc=$?
+    fi
+
+    if [ "$_tasks_rc" -eq 1 ]; then
+        echo ""
+        _info "${_BOLD}Post-upgrade tasks to carry out${_NC}"
+        echo "$_tasks_out"
+        _info "Carry out every task per upgrade.md step 6 before reporting the upgrade done."
+        _info "Re-run manually: \"$_metadata_venv_python\" -m claude_code_hooks_daemon.daemon.cli check-post-upgrade-tasks --from ${FROM_VERSION#v} --to ${TARGET_SEMVER#v}"
+    elif [ "$_tasks_rc" -eq 0 ]; then
+        _ok "Post-upgrade tasks: none for this upgrade."
+    else
+        _warn "Post-upgrade task list unavailable (check-post-upgrade-tasks exit $_tasks_rc; older target?)."
+    fi
+fi
+
+# ------------------------------------------------------------
 # Worktree seed config drift (Plan 00267)
 # ------------------------------------------------------------
-# Third mirror of the two blocks above. Unlike them this is NOT version-gated:
+# Another mirror of the blocks above. Unlike them this is NOT version-gated:
 # the daemon's shipped default for seed entries is necessarily empty, so no
 # manifest can tell a project which of ITS git-ignored local files a fresh
 # worktree ought to carry. The answer comes from scanning the repository, which

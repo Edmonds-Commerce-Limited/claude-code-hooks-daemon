@@ -3671,6 +3671,49 @@ def cmd_check_truth_changes(args: argparse.Namespace) -> int:
     return 1 if result["has_changes"] else 0
 
 
+def cmd_check_post_upgrade_tasks(args: argparse.Namespace) -> int:
+    """List the post-upgrade tasks of every guide a version range crosses (Plan 00376).
+
+    The command behind the upgrade skill's mandatory post-upgrade-tasks step.
+    Versioned tasks come from each ``v{A}-to-v{B}/post-upgrade-tasks/`` in
+    (from, to]; the UNRELEASED holding area's tasks join exactly for a branch
+    install, or when ``--include-unreleased`` forces them in.
+
+    Args:
+        args: Parsed CLI arguments with from_version, to_version, format, and
+              optional upgrades_dir and include_unreleased.
+
+    Returns:
+        0 if no tasks, 1 if tasks to carry out, 2 on error.
+    """
+    from claude_code_hooks_daemon.install.upgrade_guides import run_check_post_upgrade_tasks
+
+    upgrades_dir: Path | None = (
+        Path(args.upgrades_dir) if getattr(args, "upgrades_dir", None) else None
+    )
+    # Plan 00291: same switch as check-truth-changes.
+    include_unreleased: bool | None = True if getattr(args, "include_unreleased", False) else None
+
+    try:
+        result = run_check_post_upgrade_tasks(
+            from_version=args.from_version,
+            to_version=args.to_version,
+            upgrades_dir=upgrades_dir,
+            include_unreleased=include_unreleased,
+            output_format=args.format,
+        )
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 2
+
+    if args.format == "json":
+        print(json.dumps(result, indent=2))
+    else:
+        print(result["text"])
+
+    return 1 if result["has_tasks"] else 0
+
+
 def _resolve_transcript(args: argparse.Namespace) -> Path | None:
     """The transcript to analyse: the one named, else the project's newest.
 
@@ -8976,6 +9019,46 @@ def main() -> int:
     )
     _add_report_offload_arguments(parser_check_truth, default_subdir=_REPORT_OFFLOAD_TRUTH_SUBDIR)
     parser_check_truth.set_defaults(func=cmd_check_truth_changes)
+
+    # check-post-upgrade-tasks command (Plan 00376)
+    parser_post_upgrade = subparsers.add_parser(
+        "check-post-upgrade-tasks",
+        help="List the post-upgrade tasks to carry out for the versions you just crossed",
+    )
+    parser_post_upgrade.add_argument(
+        "--from",
+        dest="from_version",
+        required=True,
+        metavar="VERSION",
+        help="Version you upgraded from (e.g. 3.62.1)",
+    )
+    parser_post_upgrade.add_argument(
+        "--to",
+        dest="to_version",
+        required=True,
+        metavar="VERSION",
+        help="Version you upgraded to (e.g. 3.66.0)",
+    )
+    parser_post_upgrade.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        help="Output format: text (default) or json",
+    )
+    parser_post_upgrade.add_argument(
+        "--upgrades-dir",
+        dest="upgrades_dir",
+        metavar="PATH",
+        default=None,
+        help="Override the CLAUDE/UPGRADES directory (for testing)",
+    )
+    parser_post_upgrade.add_argument(
+        "--include-unreleased",
+        dest="include_unreleased",
+        action="store_true",
+        help="Also read the UNRELEASED staged tasks (automatic for a non-release install)",
+    )
+    parser_post_upgrade.set_defaults(func=cmd_check_post_upgrade_tasks)
 
     # issue-report command (Plan 00403) — a filable upstream issue body
     parser_issue_report = subparsers.add_parser(

@@ -783,7 +783,7 @@ print("", file=sys.stderr)
 print("📚 REQUIRED READING: Upgrade Guides", file=sys.stderr)
 print("=" * 70, file=sys.stderr)
 print(f"Upgrading from v{checker.current_version} to v{checker.target_version}", file=sys.stderr)
-print(f"You are skipping {len(guides)} intermediate version(s).", file=sys.stderr)
+print(f"{len(guides)} document(s) describe what this upgrade changes.", file=sys.stderr)
 print("", file=sys.stderr)
 print("Please review the following upgrade guides:", file=sys.stderr)
 for guide in guides:

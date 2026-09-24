@@ -2,8 +2,9 @@
 
 Client-facing gap found while auditing the hooks-daemon skill: `optimise` was
 documented in THREE places -- SKILL.md's own "Optimise Configuration" section,
-`optimise.md`, and `upgrade.md` step 8, which calls it mandatory and says the
-upgrade "is not finished until it has run" -- while being absent from the
+`optimise.md`, and `upgrade.md`'s config-optimisation step, which calls it
+mandatory and says the upgrade "is not finished until it has run" -- while
+being absent from the
 `case` statement that routes subcommands. Typing `/hooks-daemon optimise` fell
 through to the unknown-subcommand branch.
 

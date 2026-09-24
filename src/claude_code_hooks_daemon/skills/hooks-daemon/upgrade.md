@@ -10,8 +10,8 @@ Upgrade the Claude Code Hooks Daemon and commit the result atomically.
    /hooks-daemon upgrade                              # latest
    /hooks-daemon upgrade 3.14.0                       # specific version
    /hooks-daemon upgrade --force                      # reinstall current
-   /hooks-daemon upgrade --skip-config-optimisation    # opt out of step 8
-   /hooks-daemon optimise                              # step 8 on its own
+   /hooks-daemon upgrade --skip-config-optimisation    # opt out of step 9
+   /hooks-daemon optimise                              # step 9 on its own
    ```
 
 2. **Parse the metadata block** emitted on stdout between the
@@ -104,8 +104,8 @@ Upgrade the Claude Code Hooks Daemon and commit the result atomically.
      `.claude/hooks-daemon.yaml`.
    - A line marked "has a migration Note" (e.g. "migrate existing memory into
      tracked docs first") needs that migration performed **before** enabling —
-     read the Note for that key in the full advisory and follow any referenced
-     post-upgrade task.
+     read the Note for that key in the full advisory. A post-upgrade task it
+     references is one of the tasks step 6 lists; carry it out there.
    - **💡 New Options Available** is a count; the options are informational and
      listed with examples in the full advisory — adopt if useful. `--full`
      prints the whole advisory inline instead.
@@ -122,7 +122,41 @@ Upgrade the Claude Code Hooks Daemon and commit the result atomically.
    Stage and commit any `.claude/hooks-daemon.yaml` edits separately from the
    daemon upgrade commit below.
 
-6. **Stage daemon-owned paths ONLY** with explicit `git add` — other
+6. **Carry out the post-upgrade tasks for every version you crossed** —
+   MANDATORY (skip only on a `--force` reinstall, where
+   `from_version == to_version`). A release can ship work that a clean
+   upgrade does not do for you: auditing files a previous version's bug
+   damaged, migrating a value or an interface this project consumes,
+   retiring a workaround. That work lives in each crossed upgrade guide's
+   `post-upgrade-tasks/`, and nothing runs it except this step. It is
+   separate from step 5's migration Notes: an upgrade that changes no config
+   key can still carry tasks. List them:
+
+   ```bash
+   .claude/hooks-daemon/bin/hooks-daemon check-post-upgrade-tasks \
+       --from ${from_version} --to ${to_version}
+   ```
+
+   Exit code `0` means there are no tasks, so skip to the next step. Exit
+   code `1` lists every task file, oldest guide first, with its severity and
+   type. For **each** task, in order:
+
+   - Read the whole file.
+   - Skip it only if its `Applies to` does not cover the version you
+     upgraded from.
+   - Follow `How to detect if this applies to you`. If it does not apply,
+     record that and move on.
+   - Otherwise follow `How to handle`, then `How to confirm`. Adapt the
+     sample commands to this project; never run them blind, and ask the user
+     wherever the task says to.
+   - **NEVER** edit anything under `.claude/hooks-daemon/`.
+
+   Report every task's outcome to the user grouped by severity, `critical`
+   first. A `critical` task you could not complete means the upgrade is not
+   finished: say so rather than report success. Stage and commit any project
+   edits **separately** from the daemon upgrade commit below.
+
+7. **Stage daemon-owned paths ONLY** with explicit `git add` — other
    working-tree changes are not part of this commit. Never `git add .`:
 
    ```bash
@@ -131,7 +165,7 @@ Upgrade the Claude Code Hooks Daemon and commit the result atomically.
            .claude/settings.json
    ```
 
-7. **Commit** with the metadata block in the body:
+8. **Commit** with the metadata block in the body:
 
    ```
    hooks daemon upgrade: ${from_version} → ${to_version}
@@ -153,7 +187,7 @@ Upgrade the Claude Code Hooks Daemon and commit the result atomically.
 If the daemon is not RUNNING after upgrade, do NOT commit — investigate
 first (`.claude/hooks-daemon/bin/hooks-daemon logs`).
 
-8. **Run the config-optimisation review** (Plan 00308) — mandatory unless
+9. **Run the config-optimisation review** (Plan 00308) — mandatory unless
    `--skip-config-optimisation` was passed to this upgrade. Step 5 above
    surfaces recommended config KEYS via `check-config-migrations`; this step
    is the full per-handler review that decides which ones to enable, applies
@@ -165,9 +199,9 @@ first (`.claude/hooks-daemon/bin/hooks-daemon logs`).
    /hooks-daemon optimise
    ```
 
-   Run it in THIS session, immediately after the commit in step 7 above (it
+   Run it in THIS session, immediately after the commit in step 8 above (it
    may itself edit `.claude/hooks-daemon.yaml` and restart the daemon — that
-   is a separate, later commit, same discipline as steps 4-5's
+   is a separate, later commit, same discipline as steps 4-6's
    project-doc/config edits). The upgrade is not finished until it has run:
    do not defer it to a later session, and do not report it back as an
    optional follow-up. If `--skip-config-optimisation` was passed, skip this

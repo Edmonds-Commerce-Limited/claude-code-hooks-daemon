@@ -1,6 +1,6 @@
 # Plan 00376: pre upgrade phase with migration and confirm gate
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-11
 **Owner**: joseph
 **Priority**: High
@@ -28,8 +28,9 @@ with the incoming version. That is false here: `scripts/upgrade.sh` Step 6
 ("Land the daemon dir on the target version FIRST (before Layer 2)") checks out
 the target, and Step 8 then delegates to `$DAEMON_DIR/scripts/upgrade_version.sh`
 — the NEW version's script. The whole incoming tree, including its upgrade
-manifests, is readable before anything is deployed; the existing compat check
-already relies on this, reading the new `CHANGELOG.md` from `$DAEMON_DIR`.
+manifests, is readable before anything is deployed. The existing compat check
+was written to rely on this, reading the new `CHANGELOG.md` from `$DAEMON_DIR`,
+but on the supported route it never runs (see Task 1.1).
 "Pre-upgrade" here means pre-DEPLOY, not pre-fetch.
 
 Three measured facts drive the remaining work:
@@ -49,7 +50,8 @@ Three measured facts drive the remaining work:
   path reads it, `.claude/skills/hooks-daemon/upgrade.md` never mentions it,
   and unlike `release-notes/` it has no schema test. Plans are required to
   write tasks there as part of their definition of done; those tasks are then
-  read by nobody.
+  read by nobody. (Task 4.3 closes the "read by nobody" half; the schema test
+  is still Task 4.1.)
 
 The motivating change is Plan 00375, which renames a public CLI JSON key. The
 owner's ruling is that deprecation windows are not the answer — they are delay,
@@ -90,6 +92,15 @@ rather than only matching syntax.
   Layer 2 (`scripts/upgrade_version.sh`, around the pre-install checks at
   `:511` and compat at `:536-603`), which is already after checkout and before
   any deploy. No new fetch mechanism is required — see the Overview.
+  **Re-verify first, measured while fixing 4.2 and 4.3**: on the supported
+  route that site never runs. Layer 1 checks the target out before it calls
+  Layer 2, so Layer 2's "already at target" test
+  (`scripts/upgrade_version.sh:339`) is always true, and the idempotent path
+  exits at `:509` before the compat check (`:511+`) and the Step 5a reading
+  list. Invoked directly, both run against the PRE-checkout tree, which holds
+  no guide for the version being installed. When this task moves the phase,
+  pass `include_unreleased` from `BRANCH_INSTALL_STATE`. The running venv is
+  the previous install's, so its stamp cannot answer the question.
 - [ ] ⬜ **Task 1.2**: Characterise what "abort" must undo at that point. The
   daemon dir is ALREADY on the target checkout (`upgrade.sh:550`) while nothing
   has been deployed — so an abort is not free, and the plan must define whether
@@ -134,16 +145,29 @@ rather than only matching syntax.
 - [ ] ⬜ **Task 4.1**: `post-upgrade-tasks/` has no runner and no schema test.
   Either give it both or stop requiring plans to write into it; a surface that
   plans are obliged to feed and nothing reads is worse than no surface.
-- [ ] ⬜ **Task 4.2**: `install/upgrade_compatibility.py:351-373` scans only
+- [x] ✅ **Task 4.2**: `install/upgrade_compatibility.py:351-373` scans only
   `CLAUDE/UPGRADES/v{major}/` and never `UNRELEASED/`, so unreleased breaking
-  changes are invisible to compatibility checking.
-- [ ] ⬜ **Task 4.3**: `.claude/skills/hooks-daemon/upgrade.md` has no STEP that
+  changes are invisible to compatibility checking. Fixed:
+  `suggest_upgrade_guides` resolves guides through
+  `install/upgrade_guides.py` and takes `include_unreleased` (`None` asks the
+  install stamp). The same sweep found that it also missed every
+  patch-numbered guide (`v3.62.1-to-v3.63.0` and the three after it) and every
+  README-only guide; those are fixed too. Pinned by
+  `TestSuggestUpgradeGuidesSeesTheWholeTree` in
+  `tests/unit/install/test_upgrade_compatibility.py`. The Layer 2 caller of
+  this list is unreachable on the supported route: see Task 1.1.
+- [x] ✅ **Task 4.3**: `.claude/skills/hooks-daemon/upgrade.md` has no STEP that
   reads the post-upgrade tasks for the versions just crossed. Do not close this
   on a grep: line 108 does say "follow any referenced post-upgrade task", but
   that is a passing clause inside the config-advisory step, reachable only when
   a config key happens to carry a migration Note. An upgrade that changes no
   config key never reaches it, so the tasks go unread. What is missing is a
-  step of its own in the numbered procedure.
+  step of its own in the numbered procedure. Fixed: the new
+  `hooks-daemon check-post-upgrade-tasks --from --to` lists the tasks of
+  every crossed guide (plus `UNRELEASED/` for a branch install). It is run by
+  upgrade.md mandatory step 6, by a mandatory Post-Update section in
+  `CLAUDE/LLM-UPDATE.md`, and by `scripts/upgrade.sh`, which had the same gap.
+  Pinned by `tests/integration/test_post_upgrade_tasks_are_reachable.py`.
 
 ### Phase 5: Prove it on Plan 00375
 

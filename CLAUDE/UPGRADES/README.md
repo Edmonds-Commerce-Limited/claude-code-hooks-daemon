@@ -217,6 +217,7 @@ Required sections:
 - Instructions for an LLM/human to follow **after** a successful upgrade.
 - Use for: audits of files possibly damaged by bugs in prior versions, config-value reviews, workflow changes, data migrations, or any other situation where a clean upgrade alone is not enough.
 - Schema and conventions: `CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks/README.md`.
+- Reached by `hooks-daemon check-post-upgrade-tasks --from <previous> --to <new>`, which lists the tasks of every guide directory in that range; the upgrade skill and `CLAUDE/LLM-UPDATE.md` make running it a mandatory step. The guide directory must be named `v{A}-to-v{B}` for the range to find it.
 - Authoring during a release cycle: drop tasks into `CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks/`. The `/release` skill moves them into the versioned guide at release time.
 - Omit the directory entirely if no post-upgrade tasks apply to the release.
 

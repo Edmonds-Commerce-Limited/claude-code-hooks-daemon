@@ -17,7 +17,7 @@ Any situation where a successful upgrade is **not enough on its own** — the us
 
 ## What post-upgrade tasks are NOT
 
-- **Not an automation pipeline.** There is no runner. Nothing executes these tasks automatically. They are prompts/instructions for a capable agent to read and act on.
+- **Not an automation pipeline.** Nothing executes these tasks automatically. They are prompts/instructions for a capable agent to read and act on. The agent reaches them through `hooks-daemon check-post-upgrade-tasks --from <previous> --to <new>`, which lists every task of every guide the upgrade crossed; the upgrade skill (`upgrade.md` step 6), `CLAUDE/LLM-UPDATE.md` ("Post-Update: Carry Out Post-Upgrade Tasks") and the bare upgrade script all run it. A task is reachable only if its file matches `NN-*.md` and sits in a `v{A}-to-v{B}/post-upgrade-tasks/` directory (or here, before release); `tests/integration/test_post_upgrade_tasks_are_reachable.py` fails on any that does not.
 - **Not a place for general release-note content.** Release notes go in `RELEASES/vX.Y.Z.md`. Tasks are only for things that need *post-upgrade action*.
 - **Not a substitute for `verification.sh`.** `verification.sh` confirms the upgrade itself succeeded. Post-upgrade tasks are about work *after* a successful upgrade.
 

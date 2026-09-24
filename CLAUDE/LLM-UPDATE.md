@@ -437,6 +437,56 @@ Review the output and check:
 
 ---
 
+## Post-Update: Carry Out Post-Upgrade Tasks (MANDATORY)
+
+**Run this after every upgrade, whichever route you took** (the curl+script
+path, `/hooks-daemon upgrade`, or the manual steps). A release can ship work
+that a clean code upgrade does not do for you: auditing files a buggy
+previous version damaged, migrating a value or an interface the project
+consumes, retiring a workaround. That work lives in each crossed upgrade
+guide's `post-upgrade-tasks/`, and nothing executes it except this step. An
+upgrade that changes no config key can still carry tasks, so do not skip this
+because the config advisory was empty.
+
+List the tasks for exactly the versions you crossed (the script prints the
+same list, and the two versions, under "Post-upgrade tasks to carry out"):
+
+```bash
+.claude/hooks-daemon/bin/hooks-daemon check-post-upgrade-tasks \
+    --from <previous version> --to <new version>
+```
+
+Exit code `0` means there is nothing to do. Exit code `1` lists every task
+file, oldest guide first, with its severity and type. A non-release (branch)
+install also lists the tasks staged for the next release under
+`CLAUDE/UPGRADES/UNRELEASED/`, because that code is already running.
+
+For **each** task, in order:
+
+1. Read the whole file, starting with its header block (Type, Severity,
+   Applies to, Idempotent).
+2. **Skip** it only if `Applies to` does not cover the version you upgraded
+   from.
+3. Follow `## How to detect if this applies to you`. If it does not apply,
+   record that and move on.
+4. Otherwise follow `## How to handle`, then `## How to confirm`. Adapt sample
+   commands to the project; do not run them blindly, and ask the user where
+   the task says to.
+5. Never edit anything under `.claude/hooks-daemon/`.
+
+Report a summary to the user grouped by severity:
+
+- `critical` — the upgrade is not finished until it is done; block the
+  user's next step until acknowledged.
+- `recommended` — surface clearly; the user can defer.
+- `optional` — mention briefly.
+
+Commit any project edits separately from the daemon upgrade commit.
+
+Schema and full convention: `CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks/README.md`.
+
+---
+
 ## Post-Update: Update Project CLAUDE.md
 
 After upgrading, verify the `### Hooks Daemon` section in the project's root `CLAUDE.md` is present and current.
@@ -614,33 +664,18 @@ ls -la CLAUDE/UPGRADES/v*/
 3. Read `CLAUDE/UPGRADES/v2/v2.1-to-v2.2/v2.1-to-v2.2.md` (if exists)
 4. Apply v2.1 to v2.2 upgrade steps
 5. Verify with `verification.sh` at each step
-6. **Process post-upgrade tasks** (if `post-upgrade-tasks/` exists in any traversed upgrade guide) — see next section.
+6. **Carry out the post-upgrade tasks** for the whole range — see
+   [Post-Update: Carry Out Post-Upgrade Tasks](#post-update-carry-out-post-upgrade-tasks-mandatory).
 
 **If no upgrade guide exists**: Check `RELEASES/vX.Y.Z.md` for that version's upgrade instructions section.
 
 ### Post-Upgrade Tasks (MANDATORY after upgrade completes)
 
-After every successful upgrade, check each traversed upgrade guide for a `post-upgrade-tasks/` directory. These are advisory instructions the upgrading LLM (or human) is expected to read and act on — they cover audits for damage from prior versions, config-value reviews, workflow changes, and similar work that a clean code upgrade alone does not handle.
-
-**Workflow**:
-
-1. For each upgrade in the path (`v2.0-to-v2.1`, `v2.1-to-v2.2`, …):
-   ```bash
-   ls .claude/hooks-daemon/CLAUDE/UPGRADES/v*/v*-to-v*/post-upgrade-tasks/ 2>/dev/null
-   ```
-2. If a `post-upgrade-tasks/` directory exists, open its `README.md` for the task index.
-3. For each task:
-   - Read the header block (Type, Severity, Applies to, Idempotent).
-   - **Skip** if `Applies to` does not cover the project's prior version.
-   - Otherwise, follow the `## How to detect`, `## How to handle`, and `## How to confirm` sections. Adapt sample commands to the project; do not run them blindly.
-4. Report a summary to the user grouped by severity:
-   - `critical` — block the user's next step until acknowledged.
-   - `recommended` — surface clearly; user can defer.
-   - `optional` — mention briefly.
-
-**Why this matters**: A successful code upgrade does not undo damage already done by a buggy prior version, nor does it migrate stale config, nor does it adapt the user's workflow to changed handler behaviour. Skipping post-upgrade tasks leaves known issues unaddressed.
-
-Schema and full convention: `CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks/README.md`.
+The procedure lives in one place:
+[Post-Update: Carry Out Post-Upgrade Tasks](#post-update-carry-out-post-upgrade-tasks-mandatory).
+Use `check-post-upgrade-tasks` rather than globbing `CLAUDE/UPGRADES/`: a glob
+lists every guide ever shipped instead of the ones you crossed, and misses the
+tasks staged under `UNRELEASED/` that a branch install is already running.
 
 ---
 
