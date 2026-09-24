@@ -487,12 +487,14 @@ class ReferenceRepoFreshnessHandler(PreToolUseHandlerBase):
                 continue
 
             if known is None or subject not in known:
-                message = self._not_verified(subject, project_root)
+                blocking = self._is_blocking(session_id, subject, config.mode)
+                message = self._not_verified(subject, project_root, blocking=blocking)
                 return self._verdict(message, session_id, subject, config.mode)
 
             state = known[subject]
             if state.needs_attention:
-                message = self._stale(state, project_root)
+                blocking = self._is_blocking(session_id, subject, config.mode)
+                message = self._stale(state, project_root, blocking=blocking)
                 return self._verdict(message, session_id, subject, config.mode)
 
             note = self._unconfirmed(state, subject, session_id, project_root)
@@ -520,25 +522,44 @@ class ReferenceRepoFreshnessHandler(PreToolUseHandlerBase):
         self._record(session_id, key)
         return note
 
-    def _not_verified(self, subject: Path, project_root: Path) -> str:
+    def _not_verified(self, subject: Path, project_root: Path, *, blocking: bool) -> str:
         """Nobody has checked this repo.
 
         A DIFFERENT sentence and a different rule ID from :meth:`_stale`, on
         purpose: "nobody checked" and "this is out of date" call for different
         responses, and collapsing them would either cry wolf or give false
         comfort. Two rules means `explain-rule` can answer each on its own terms.
+
+        ``blocking`` selects the headline: the deny rendering when this call
+        will actually be denied, the ALLOW-path advisory rendering (Plan
+        00466 N8) when it will not -- an `advise`-mode result or a
+        `block_once` repeat must never open with "BLOCKED", because the
+        call already ran.
         """
+        headline = (
+            self._formatter.verbose(_NOT_VERIFIED_RULE)
+            if blocking
+            else self._formatter.advisory(_NOT_VERIFIED_RULE)
+        )
         detail = (
             f"{NOT_VERIFIED_HEADLINE}: no in-date reading exists for "
             f"{display_path(subject, project_root)}, so what it contains may not be "
             "what you think it is."
         )
-        return f"{self._formatter.verbose(_NOT_VERIFIED_RULE)}\n\n{detail}"
+        return f"{headline}\n\n{detail}"
 
-    def _stale(self, state: RepoState, project_root: Path) -> str:
-        """This repo was checked, and it is not what the reader thinks it is."""
+    def _stale(self, state: RepoState, project_root: Path, *, blocking: bool) -> str:
+        """This repo was checked, and it is not what the reader thinks it is.
+
+        See :meth:`_not_verified` for what ``blocking`` selects and why.
+        """
+        headline = (
+            self._formatter.verbose(_STALE_RULE)
+            if blocking
+            else self._formatter.advisory(_STALE_RULE)
+        )
         lines = [
-            self._formatter.verbose(_STALE_RULE),
+            headline,
             "",
             "a governed reference repo is NOT up to date, and reading it now would "
             "mean reasoning from stale source:",
@@ -559,8 +580,28 @@ class ReferenceRepoFreshnessHandler(PreToolUseHandlerBase):
             )
         return "\n".join(lines)
 
+    def _is_blocking(self, session_id: str, subject: Path, mode: str) -> bool:
+        """Whether THIS occurrence, under ``mode``, will actually stop the call.
+
+        Mirrors :meth:`_verdict`'s own decision exactly, without the
+        recording side effect: a message must be built with the RIGHT
+        headline before ``_verdict`` is called, so this preview has to
+        exist separately from the one authoritative decision (and
+        recording) `_verdict` still makes. Consistency between the two is
+        pinned by ``TestIsBlockingMatchesVerdict``.
+        """
+        if mode == _MODE_ADVISE:
+            return False
+        if mode == _MODE_BLOCK:
+            return True
+        return not self._already_reported(session_id, str(subject))
+
     def _verdict(self, message: str, session_id: str, subject: Path, mode: str) -> GatingResult:
-        """Apply the configured enforcement posture to a problem already found."""
+        """Apply the configured enforcement posture to a problem already found.
+
+        ``message`` must already be rendered for the outcome this produces
+        -- see :meth:`_is_blocking`, called by ``handle()`` before this.
+        """
         if mode == _MODE_ADVISE:
             return GatingResult(decision=Decision.ALLOW, context=[message])
 
