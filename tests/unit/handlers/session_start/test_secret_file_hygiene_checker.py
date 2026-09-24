@@ -56,7 +56,7 @@ def _no_project_config() -> Any:
     repository. Tests of that check patch ``_load_config`` themselves.
     """
     with patch.object(
-        hygiene_module.SecretFileHygieneCheckerHandler, "_load_config", return_value=None
+        hygiene_module.SecretFileHygieneCheckerHandler, "_load_config", return_value=Config()
     ):
         yield
 
@@ -485,12 +485,20 @@ class TestAbsentDeclaredPath:
     def cache_file(self, tmp_path: Path) -> Path:
         return tmp_path / "daemon-untracked" / "absence-cache.json"
 
-    def _run(self, handler: Any, root: Path, config: Config | None, cache_file: Path) -> list[str]:
+    def _run(
+        self, handler: Any, root: Path, config: Config | Exception, cache_file: Path
+    ) -> list[str]:
+        """Run the handler; an Exception ``config`` is what loading the config raises."""
         cls = hygiene_module.SecretFileHygieneCheckerHandler
+        loaded = (
+            patch.object(cls, "_load_config", side_effect=config)
+            if isinstance(config, Exception)
+            else patch.object(cls, "_load_config", return_value=config)
+        )
         with (
             _patched_root(root),
             _patched_patterns(),
-            patch.object(cls, "_load_config", return_value=config),
+            loaded,
             patch.object(cls, "_absence_cache_file", return_value=cache_file),
         ):
             result = handler.handle({"source": "startup"})
@@ -536,8 +544,33 @@ class TestAbsentDeclaredPath:
 
         assert self._run(handler, repo, config, cache_file) == []
 
-    def test_no_loadable_config_is_silent(self, handler: Any, repo: Path, cache_file: Path) -> None:
-        assert self._run(handler, repo, None, cache_file) == []
+    def test_unloadable_config_is_said_not_hidden(
+        self, handler: Any, repo: Path, cache_file: Path
+    ) -> None:
+        """A check that could not run must not read as a clean one."""
+        rendered = " ".join(self._run(handler, repo, ValueError("bad yaml"), cache_file))
+
+        assert "did not run cleanly" in rendered
+        assert "config does not load" in rendered
+        assert "ValueError: bad yaml" in rendered
+
+    def test_unreadable_told_record_is_said_and_the_finding_told(
+        self, handler: Any, repo: Path, cache_file: Path
+    ) -> None:
+        cache_file.parent.mkdir(parents=True)
+        cache_file.write_text("x")
+        real_read_text = Path.read_text
+
+        def failing_read_text(path: Path, *args: Any, **kwargs: Any) -> str:
+            if path == cache_file:
+                raise PermissionError("denied")
+            return real_read_text(path, *args, **kwargs)
+
+        with patch.object(Path, "read_text", failing_read_text):
+            rendered = " ".join(self._run(handler, repo, _config(word_list=_WORD_LIST), cache_file))
+
+        assert "unreadable (PermissionError: denied)" in rendered
+        assert _WORD_LIST in rendered
 
     def test_literal_guarded_path_absent_is_reported(
         self, handler: Any, repo: Path, cache_file: Path
@@ -608,16 +641,17 @@ class TestAbsentDeclaredPath:
         (repo / _WORD_LIST).unlink()
         assert _WORD_LIST in " ".join(self._run(handler, repo, config, cache_file))
 
-    def test_unwritable_cache_still_reports_and_never_raises(
+    def test_unwritable_told_record_still_reports_and_says_it_will_repeat(
         self, handler: Any, repo: Path, tmp_path: Path
     ) -> None:
         blocker = tmp_path / "not-a-dir"
         blocker.write_text("x")
-        cache_file = blocker / "absence-cache.json"
+        cache_file = blocker / "absence-told.sha256"
 
         rendered = " ".join(self._run(handler, repo, _config(word_list=_WORD_LIST), cache_file))
 
         assert _WORD_LIST in rendered
+        assert "could not be written" in rendered
 
     def test_existing_findings_and_absence_are_both_reported(
         self, handler: Any, repo: Path, cache_file: Path

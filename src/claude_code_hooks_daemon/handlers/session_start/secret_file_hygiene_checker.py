@@ -34,12 +34,13 @@ it is inert. Only an explicit declaration counts -- ``sensitive_content``'s
 configured is no gap. Absence is judged by ``stat()`` alone, and it is told
 ONCE per change of the findings (keyed by a content hash in the daemon's
 untracked dir, the ``gitignore_safety_checker`` pattern), so a state the owner
-has chosen does not become per-session noise.
+has chosen does not become per-session noise. A check that cannot run (an
+unloadable config, an unreadable or unwritable key file) says so in the
+advisory every session instead of logging the failure away.
 """
 
 import hashlib
 import json
-import logging
 import os
 import stat
 from dataclasses import dataclass
@@ -61,8 +62,6 @@ from claude_code_hooks_daemon.utils.git_file_states import (
     unignore_advice,
 )
 from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
-
-logger = logging.getLogger(__name__)
 
 _CHMOD_HINT: Final[str] = "chmod 600 <path> (owner read/write only)"
 _GIT_DIR_NAME: Final[str] = ".git"
@@ -109,8 +108,24 @@ _OPTION_PROTECTED_PATHS: Final[str] = "protected_paths"
 _GLOB_CHARS: Final[tuple[str, ...]] = ("*", "?", "[")
 _PATH_SEPARATOR: Final[str] = "/"
 
-_ABSENCE_CACHE_FILE_NAME: Final[str] = "secret_file_absence_cache.json"
-_ABSENCE_CACHE_KEY: Final[str] = "absent_hash"
+#: Holds only the sha256 of the last findings told -- plain text, so there is
+#: nothing to parse and nothing to fail parsing.
+_ABSENCE_CACHE_FILE_NAME: Final[str] = "secret_file_absence_told.sha256"
+
+_ABSENCE_PROBLEM_HEADING: Final[str] = (
+    "⚠️  SECRET FILE HYGIENE: the absent-protected-path check did not run cleanly"
+)
+_CONFIG_UNLOADABLE: Final[str] = (
+    "the config does not load ({error}), so no declared protected path was "
+    "checked -- run `bin/hooks-daemon config-validate`"
+)
+_TOLD_KEY_UNREADABLE: Final[str] = (
+    "the record of what was already told is unreadable ({error}), so any "
+    "absent path below is told again"
+)
+_TOLD_KEY_UNWRITABLE: Final[str] = (
+    "the record of what was told could not be written ({error}), so this repeats next session"
+)
 
 _ABSENT_HEADING: Final[str] = "⚠️  SECRET FILE HYGIENE: a protected path the config names is ABSENT"
 _WORD_LIST_INERT: Final[str] = (
@@ -133,6 +148,18 @@ class _Absent:
     relpath: str
     declared_by: str
     consequence: str
+
+
+@dataclass(frozen=True)
+class _AbsenceReport:
+    """What the absence check tells this session: findings, and problems met."""
+
+    absent: list[_Absent]
+    problems: list[str]
+
+
+def _describe(exc: Exception) -> str:
+    return f"{type(exc).__name__}: {exc}"
 
 
 def _encrypted_recovery(relpath: str, *, tracked: bool, ignored: bool) -> str | None:
@@ -170,17 +197,17 @@ class SecretFileHygieneCheckerHandler(SessionStartHandlerBase):
         project_root = ProjectContext.project_root()
         patterns = sfm.resolve_configured_patterns()
         scan = scan_git_file_states(project_root)
-        absent = self._absent_to_report(project_root)
+        absence = self._absent_to_report(project_root)
 
         if scan is not None:
             findings, encrypted = self._collect_findings_git(project_root, patterns, scan)
             # A project whose only matches are encrypted gets no output at
             # all: the warning simply stops (Plan 00459).
             if not findings:
-                return AdvisoryResult(decision=Decision.ALLOW, context=self._render_absent(absent))
+                return AdvisoryResult(decision=Decision.ALLOW, context=self._render_absent(absence))
             return AdvisoryResult(
                 decision=Decision.ALLOW,
-                context=self._render(findings, encrypted=encrypted, absent=absent),
+                context=self._render(findings, encrypted=encrypted, absence=absence),
             )
 
         # Fallback: no git available. gitignore/tracked status is meaningless
@@ -193,13 +220,13 @@ class SecretFileHygieneCheckerHandler(SessionStartHandlerBase):
                 decision=Decision.ALLOW,
                 context=[
                     f"⚠️  SECRET FILE HYGIENE: {_NOT_A_REPO_NOTICE}",
-                    *self._render_absent(absent, leading_blank=True),
+                    *self._render_absent(absence, leading_blank=True),
                 ],
             )
         return AdvisoryResult(
             decision=Decision.ALLOW,
             context=self._render(
-                findings, encrypted=encrypted, not_a_repo=True, truncated=truncated, absent=absent
+                findings, encrypted=encrypted, not_a_repo=True, truncated=truncated, absence=absence
             ),
         )
 
@@ -207,19 +234,9 @@ class SecretFileHygieneCheckerHandler(SessionStartHandlerBase):
     # declared-but-absent protected paths (Plan 00414)
     # ------------------------------------------------------------------
 
-    def _load_config(self) -> Config | None:
-        """The project's config as it is on disk now, or None if it does not load.
-
-        A config broken since the daemon started is reported by config
-        validation and by `check-source-fresh`, not here; this advisory then
-        has no declarations it can trust, so it judges none -- loudly, at
-        WARNING, rather than guessing from defaults.
-        """
-        try:
-            return Config.load_or_default(ProjectContext.config_path())
-        except (OSError, ValueError) as exc:
-            logger.warning("Absent-protected-path check skipped, config does not load: %s", exc)
-            return None
+    def _load_config(self) -> Config:
+        """The project's config as it is on disk now (raises if it does not load)."""
+        return Config.load_or_default(ProjectContext.config_path())
 
     def _absence_cache_file(self) -> Path:
         return ProjectContext.daemon_untracked_dir() / _ABSENCE_CACHE_FILE_NAME
@@ -245,16 +262,18 @@ class SecretFileHygieneCheckerHandler(SessionStartHandlerBase):
             return False
         return _PATH_SEPARATOR in entry.strip(_PATH_SEPARATOR)
 
-    def _declared_absent(self, project_root: Path, config: Config) -> list[_Absent]:
-        """Every explicitly declared protected path that ``stat()`` cannot find.
+    def _declared_absent(self, project_root: Path, config: Config) -> tuple[int, list[_Absent]]:
+        """``(declared count, absent)``: explicit declarations, and those ``stat()`` cannot find.
 
         ``Path.exists`` follows a symlink, so a seeded link whose target is
         gone counts as absent -- the guard behind it is just as inert.
         """
+        declared = 0
         absent: list[_Absent] = []
         content_options = self._enabled_options(config, _SENSITIVE_CONTENT)
         word_list = content_options.get(_OPTION_WORD_LIST) if content_options else None
         if isinstance(word_list, str) and word_list:
+            declared += 1
             path = sr.resolve_secret_word_list_path(word_list, project_root)
             if not path.exists():
                 absent.append(
@@ -269,6 +288,7 @@ class SecretFileHygieneCheckerHandler(SessionStartHandlerBase):
         for entry in entries if isinstance(entries, list) else []:
             if not self._is_declared_path(entry):
                 continue
+            declared += 1
             relative = str(entry).lstrip(_PATH_SEPARATOR)
             if not (project_root / relative).exists():
                 absent.append(
@@ -278,7 +298,7 @@ class SecretFileHygieneCheckerHandler(SessionStartHandlerBase):
                         consequence=_GUARDED_PATH_MISSING,
                     )
                 )
-        return absent
+        return declared, absent
 
     @staticmethod
     def _display_path(path: Path, project_root: Path) -> str:
@@ -287,55 +307,67 @@ class SecretFileHygieneCheckerHandler(SessionStartHandlerBase):
         except ValueError:
             return str(path)
 
-    def _absent_to_report(self, project_root: Path) -> list[_Absent]:
-        """The declared-absent paths to tell NOW: only when they changed.
+    def _absent_to_report(self, project_root: Path) -> _AbsenceReport:
+        """The declared-absent paths to tell NOW, and any problem met finding out.
 
         Keyed by a hash of the findings, so a new declaration, a path lost
         again after being restored, or a moved path is told once more, and an
-        unchanged state is not. The cache is best-effort: when it cannot be
-        read or written the findings are told rather than hidden.
+        unchanged state is not. A failure on the way -- an unloadable config,
+        an unreadable or unwritable key file -- is never logged away: it goes
+        into the advisory, every session, because a check that could not run
+        must not read as a clean one.
         """
-        config = self._load_config()
-        if config is None:
-            return []
-        absent = self._declared_absent(project_root, config)
+        problems: list[str] = []
+        try:
+            config = self._load_config()
+        except (OSError, ValueError) as exc:
+            problems.append(_CONFIG_UNLOADABLE.format(error=_describe(exc)))
+            return _AbsenceReport(absent=[], problems=problems)
+        declared, absent = self._declared_absent(project_root, config)
+        if not declared:
+            return _AbsenceReport(absent=[], problems=problems)
         current = hashlib.sha256(
             json.dumps([[a.relpath, a.declared_by] for a in absent]).encode("utf-8"),
             usedforsecurity=False,
         ).hexdigest()
-        cache_file = self._absence_cache_file()
-        previous = self._read_absence_hash(cache_file)
+        told_file = self._absence_cache_file()
+        previous = self._read_told_key(told_file, problems)
         if previous == current or (not absent and previous is None):
-            return []
-        self._write_absence_hash(cache_file, current)
-        return absent
+            return _AbsenceReport(absent=[], problems=problems)
+        self._write_told_key(told_file, current, problems)
+        return _AbsenceReport(absent=absent, problems=problems)
 
     @staticmethod
-    def _read_absence_hash(cache_file: Path) -> str | None:
-        if not cache_file.is_file():
+    def _read_told_key(told_file: Path, problems: list[str]) -> str | None:
+        """The key last told, or None when nothing has been told (or it cannot be read)."""
+        if not told_file.is_file():
             return None
         try:
-            value = json.loads(cache_file.read_text(encoding="utf-8")).get(_ABSENCE_CACHE_KEY)
-        except (OSError, ValueError, AttributeError) as exc:
-            logger.debug("Unreadable absence cache %s, treated as empty: %s", cache_file, exc)
-            return None
-        return value if isinstance(value, str) else None
-
-    @staticmethod
-    def _write_absence_hash(cache_file: Path, value: str) -> None:
-        try:
-            cache_file.parent.mkdir(parents=True, exist_ok=True)
-            cache_file.write_text(json.dumps({_ABSENCE_CACHE_KEY: value}), encoding="utf-8")
+            return told_file.read_text(encoding="utf-8").strip()
         except OSError as exc:
-            logger.debug("Could not write absence cache %s: %s", cache_file, exc)
+            problems.append(_TOLD_KEY_UNREADABLE.format(error=_describe(exc)))
+        return None
 
     @staticmethod
-    def _render_absent(absent: list[_Absent], *, leading_blank: bool = False) -> list[str]:
-        if not absent:
-            return []
-        lines = [""] if leading_blank else []
+    def _write_told_key(told_file: Path, value: str, problems: list[str]) -> None:
+        try:
+            told_file.parent.mkdir(parents=True, exist_ok=True)
+            told_file.write_text(value, encoding="utf-8")
+        except OSError as exc:
+            problems.append(_TOLD_KEY_UNWRITABLE.format(error=_describe(exc)))
+
+    @staticmethod
+    def _render_absent(report: _AbsenceReport, *, leading_blank: bool = False) -> list[str]:
+        lines: list[str] = []
+        if report.problems:
+            lines += ["", _ABSENCE_PROBLEM_HEADING] if leading_blank else [_ABSENCE_PROBLEM_HEADING]
+            lines += [f"  - {problem}" for problem in report.problems]
+            leading_blank = True
+        if not report.absent:
+            return lines
+        lines += [""] if leading_blank else []
         lines += [_ABSENT_HEADING, ""]
-        for item in absent:
+        for item in report.absent:
             lines.append(f"  {item.relpath} (declared by {item.declared_by}):")
             lines.append(f"    - {item.consequence}")
         lines += ["", _ABSENT_ONCE_NOTICE]
@@ -443,7 +475,7 @@ class SecretFileHygieneCheckerHandler(SessionStartHandlerBase):
         encrypted: list[str],
         not_a_repo: bool = False,
         truncated: bool = False,
-        absent: list[_Absent] | None = None,
+        absence: _AbsenceReport | None = None,
     ) -> list[str]:
         lines = [
             "⚠️  SECRET FILE HYGIENE: protected paths need attention",
@@ -462,7 +494,8 @@ class SecretFileHygieneCheckerHandler(SessionStartHandlerBase):
             lines += ["", _NOT_A_REPO_NOTICE]
         if truncated:
             lines += ["", _TRUNCATED_NOTICE]
-        lines += self._render_absent(absent or [], leading_blank=True)
+        if absence is not None:
+            lines += self._render_absent(absence, leading_blank=True)
         lines += ["", _CONTENT_NOTICE]
         return lines
 
