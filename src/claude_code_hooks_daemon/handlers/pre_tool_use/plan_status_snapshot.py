@@ -40,7 +40,7 @@ from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
 from claude_code_hooks_daemon.plan_qa.model import PlanDoc
 from claude_code_hooks_daemon.utils.ccy_supervisor import supervisor_relevance
 from claude_code_hooks_daemon.utils.plan_status_snapshot import plan_status_snapshots
-from claude_code_hooks_daemon.utils.plan_trigger import matched_plan_write_or_edit
+from claude_code_hooks_daemon.utils.plan_trigger import PlanUnreadable, matched_plan_write_or_edit
 
 logger = logging.getLogger(__name__)
 
@@ -76,10 +76,16 @@ class PlanStatusSnapshotHandler(PreToolUseHandlerBase):
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Record the plan's pre-write status; always ALLOW.
 
-        A missing or unreadable file records ``None`` -- itself a valid,
-        meaningful ground-truth snapshot (no Status line, or a brand-new
-        plan file this Write is about to create for the first time), never
-        skipped as though nothing had been recorded.
+        A missing file records ``None`` -- itself a valid, meaningful
+        ground-truth snapshot (no Status line: a brand-new plan file this
+        Write is about to create for the first time), never skipped as
+        though nothing had been recorded. A file that EXISTS but cannot be
+        read or decoded is genuinely anomalous (``_read_plan`` raises
+        ``PlanUnreadable``): recording ``None`` for THAT case would
+        confidently assert "no prior status" when the truth is simply
+        unknown, so nothing is recorded at all -- `goal_injection` then
+        falls back to its own inference for this ``tool_use_id``, exactly
+        as it already does for the "no snapshot exists" case.
         """
         matched = matched_plan_write_or_edit(hook_input, self._project_layout)
         if matched is None:
@@ -88,25 +94,37 @@ class PlanStatusSnapshotHandler(PreToolUseHandlerBase):
         tool_use_id = str(hook_input.get(HookInputField.TOOL_USE_ID, "") or "")
         if not tool_use_id:
             return GatingResult(decision=Decision.ALLOW)
-        plan_text = self._read_plan(Path(file_path))
+        try:
+            plan_text = self._read_plan(Path(file_path))
+        except PlanUnreadable as e:
+            logger.warning(
+                "plan_status_snapshot: %s; recording no snapshot for tool_use_id=%r "
+                "-- goal_injection falls back to its own inference",
+                e,
+                tool_use_id,
+            )
+            return GatingResult(decision=Decision.ALLOW)
         status = PlanDoc.parse(plan_text).status if plan_text is not None else None
         plan_status_snapshots.record(tool_use_id, status)
         return GatingResult(decision=Decision.ALLOW)
 
     @staticmethod
     def _read_plan(path: Path) -> str | None:
-        """Read the plan's CURRENT (pre-write) text; ``None`` when unreadable.
+        """Read the plan's CURRENT (pre-write) text; ``None`` when no file
+        exists yet (the common brand-new-plan case, not an error -- checked
+        BEFORE the try so this branch never touches an except handler).
 
-        Mirrors ``goal_injection._read_plan``'s tolerance: ``ValueError``
-        (a non-UTF-8 file's ``UnicodeDecodeError``) is caught alongside
-        ``OSError`` (missing file -- the common brand-new-plan case) rather
-        than crashing this handler under ``strict_mode``.
+        Raises:
+            PlanUnreadable: the file exists but could not be read
+                (``OSError``) or decoded (``ValueError``, e.g. a non-UTF-8
+                ``UnicodeDecodeError``).
         """
+        if not path.is_file():
+            return None
         try:
             return path.read_text(encoding="utf-8")
         except (OSError, ValueError) as e:
-            logger.debug("plan_status_snapshot: could not read %s: %s", path, e)
-            return None
+            raise PlanUnreadable(f"could not read {path}: {e}") from e
 
     def get_claude_md(self) -> str | None:
         return (

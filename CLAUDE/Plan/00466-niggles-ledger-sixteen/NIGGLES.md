@@ -736,32 +736,55 @@ RV3-n1/n3/n4)**, fixed together:
   `TestGroundTruthSnapshotResolution` in `test_goal_injection.py` (C3b,
   m4d's C3, a restart-fallback pair, and an empty-`tool_use_id` case),
   `test_plan_status_snapshot.py`, `test_plan_trigger.py`, and
-  `tests/unit/handlers/pre_tool_use/test_plan_status_snapshot.py`.
-- **RV3-n2 — `session_has_entries` now tracks what its name says.**
-  `record_emission` overwrites an entry's single `session_id` field with
-  whoever re-emits for the SAME plan next, and `_prune` can drop the entry
-  out of the ledger entirely — either one silently lost the "this session
-  once recorded a real emission" fact the method's own docstring claimed to
-  answer. Fixed: a ledger-wide, bounded, order-preserving
-  `ever_recorded_sessions` list (`_EVER_RECORDED_KEY`), populated ONLY by
-  `record_emission` (both the new-entry and re-emission branches) and
-  read/persisted through the SAME locked read-modify-write every other
-  mutator already uses — it survives both the field overwrite and pruning,
-  because it is no longer derived from either. Deliberately NOT populated
-  by `reassert_session`: a session that has only ever been ADDED to a
-  plan's ownership (never performed a real emission itself) must still
-  read as having no entries of its own — B4 — so it correctly remains free
-  to become a stakeholder of a second, unrelated live plan it is asked to
-  track too (Plan 00269's own motivating case, still pinned by
+  `tests/unit/handlers/pre_tool_use/test_plan_status_snapshot.py`. Both
+  `_read_plan` sites (`goal_injection.py`, `plan_status_snapshot.py`) raise
+  a shared `PlanUnreadable` (`utils/plan_trigger.py`) instead of returning
+  `None` on a read/decode failure — a missing file is checked BEFORE the
+  `try` (not an error; the ordinary brand-new-plan case), so nothing
+  inside either function's `except` block ever returns `None`. Each single
+  caller catches `PlanUnreadable` explicitly, logs a WARNING naming the
+  path and cause, and takes its own documented fail-open branch. This
+  replaces the error_hiding exclusion both functions carried; there is no
+  exclusion for either any more.
+- **RV3-n2 — `session_has_entries` now tracks what its name says, and the
+  B4 decision is pinned here.** `record_emission` overwrites an entry's
+  single `session_id` field with whoever re-emits for the SAME plan next,
+  and `_prune` can drop the entry out of the ledger entirely — either one
+  silently lost the "this session once recorded a real emission" fact the
+  method's own docstring claimed to answer. Fixed: a ledger-wide, bounded,
+  order-preserving `ever_recorded_sessions` list (`_EVER_RECORDED_KEY`),
+  populated ONLY by `record_emission` (both the new-entry and re-emission
+  branches) and read/persisted through the SAME locked read-modify-write
+  every other mutator already uses — it survives both the field overwrite
+  and pruning, because it is no longer derived from either. Deliberately
+  NOT populated by `reassert_session`: a session that has only ever been
+  ADDED to a plan's ownership (never performed a real emission itself)
+  must still read as having no entries of its own, so it correctly remains
+  free to become a stakeholder of a second, unrelated live plan it is
+  asked to track too (Plan 00269's own motivating case, still pinned by
   `TestOwnershipSurvivesASecondSession` in `test_goal_injection.py`).
-  Review 3's own worked example for B4 ("T becomes an owner of 00298") is
-  `_extend_ownership`'s (RV3-m3) project-wide combined-signal side effect,
-  a separate, deliberate mechanism this pass did not touch — team-lead's
-  instruction named `session_has_entries` specifically. New tests:
-  `TestSessionHasEntries` in `test_goal_ledger.py`
+  **B4 decision (accepted by team-lead, review-4-prep):** review 3's own
+  worked example for B4 ("T becomes an owner of 00298") is
+  `_extend_ownership`'s (RV3-m3) project-wide combined-signal side effect
+  — the combined `/goal` text is global, so absorption only decides WHO IS
+  REFRESHED when a plan retires, not who owns what in any sense that needs
+  gating. `session_has_entries` is a SEPARATE, narrower question ("has
+  this session ever performed a real emission"), and `_extend_ownership`
+  is left untouched — this pass did not restrict it further. Backing
+  `GoalLedger`-level tests: `TestSessionHasEntries` in `test_goal_ledger.py`
   (`test_survives_session_id_overwrite_by_a_different_re_emitting_session`,
   `test_survives_pruning_past_the_entry_cap`,
-  `test_false_for_a_reassert_only_session`).
+  `test_false_for_a_reassert_only_session`). `_load_raw` raises a shared
+  `LedgerUnreadable` (`utils/goal_ledger.py`) instead of returning `None`
+  on a genuine read/parse failure — a missing file (nothing written yet)
+  is checked BEFORE the `try`, not an error. Every one of its five public
+  callers (`entries`, `record_emission`, `reassert_session`,
+  `live_plan_numbers`, `session_has_entries`) catches it explicitly, logs
+  its OWN WARNING naming the path, cause, and which fail-open branch it is
+  taking, rather than sharing one central catch-and-log. This replaces the
+  error_hiding exclusion `_load_raw` carried; there is no exclusion for it
+  any more. New tests: `TestUnreadableLedgerRaisesADomainException` in
+  `test_goal_ledger.py`.
 
 New tests: `TestOwnershipSurvivesASecondSession`-adjacent scenarios in
 `test_goal_injection.py` (`TestReview3Fixes`, inheriting the

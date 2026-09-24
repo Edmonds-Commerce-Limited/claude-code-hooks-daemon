@@ -198,6 +198,81 @@ class TestFailOpen:
         assert ledger.live_plan_numbers(plan_dir) == [_PLAN_A]
 
 
+class TestUnreadableLedgerRaisesADomainException:
+    """team-lead review-4-prep: ``_load_raw`` raises ``LedgerUnreadable``
+    for a genuinely CORRUPT ledger (never returns None on error -- ``None``
+    is reserved for the ordinary "nothing written yet" case), and every
+    public caller catches it explicitly, logs a WARNING naming the path
+    and cause, and takes its own documented fail-open branch."""
+
+    def _corrupt_ledger(self, tmp_path: Path) -> Path:
+        ledger_path = tmp_path / LEDGER_FILENAME
+        ledger_path.write_text("{not json", encoding="utf-8")
+        return ledger_path
+
+    def test_load_raw_raises_on_corrupt_json(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.utils.goal_ledger import LedgerUnreadable
+
+        ledger = GoalLedger(self._corrupt_ledger(tmp_path))
+        with pytest.raises(LedgerUnreadable):
+            ledger._load_raw()
+
+    def test_load_raw_returns_none_for_a_missing_file(self, tmp_path: Path) -> None:
+        """Missing is NOT unreadable -- it is the ordinary first-ever-use case."""
+        ledger = GoalLedger(tmp_path / LEDGER_FILENAME)
+        assert ledger._load_raw() is None
+
+    def test_entries_logs_a_warning_for_a_corrupt_ledger(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        ledger = GoalLedger(self._corrupt_ledger(tmp_path))
+        with caplog.at_level("WARNING"):
+            result = ledger.entries()
+        assert result == []
+        assert "goal_ledger" in caplog.text
+
+    def test_session_has_entries_logs_a_warning_and_reads_as_false(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        ledger = GoalLedger(self._corrupt_ledger(tmp_path))
+        with caplog.at_level("WARNING"):
+            result = ledger.session_has_entries(_SESSION)
+        assert result is False
+        assert "goal_ledger" in caplog.text
+
+    def test_reassert_session_logs_a_warning_and_returns_false(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        ledger = GoalLedger(self._corrupt_ledger(tmp_path))
+        with caplog.at_level("WARNING"):
+            result = ledger.reassert_session(_SESSION, _PLAN_A)
+        assert result is False
+        assert "goal_ledger" in caplog.text
+
+    def test_live_plan_numbers_logs_a_warning_and_reads_as_empty(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        ledger = GoalLedger(self._corrupt_ledger(tmp_path))
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        with caplog.at_level("WARNING"):
+            result = ledger.live_plan_numbers(plan_dir)
+        assert result == []
+        assert "goal_ledger" in caplog.text
+
+    def test_record_emission_logs_a_warning_and_starts_fresh(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        ledger_path = self._corrupt_ledger(tmp_path)
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        _make_plan(plan_dir, _PLAN_A, _STATUS_IN_PROGRESS)
+        ledger = GoalLedger(ledger_path)
+        with caplog.at_level("WARNING"):
+            displaced = ledger.record_emission(_SESSION, _PLAN_A, _GOAL_LINE, plan_dir)
+        assert displaced == []
+        assert GoalLedger(ledger_path).entries()[0].plan_number == _PLAN_A
+        assert "goal_ledger" in caplog.text
+
+
 class TestLivePlanRefs:
     """Plan 00299: resolved (folder, PLAN.md text) per live plan, for the
     combined-goal renderer."""

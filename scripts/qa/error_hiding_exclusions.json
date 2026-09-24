@@ -231,24 +231,6 @@
       "reason": "Best-effort supervisor-channel signal (Plan 00283), identical contract to goal_injection.write_goal_signal: a UserPromptSubmit advisory must never break the prompt that triggered it. Narrow excepts (RuntimeError for missing project context, OSError for the write) are logged at warning before returning None; the single caller (_route_reinforcement) treats None as 'fail open to folded hook-context', so a reinforcement is never lost."
     },
     {
-      "file": "handlers/post_tool_use/goal_injection.py",
-      "function": "_read_plan",
-      "rule": "return-none-on-error",
-      "reason": "Reading the just-written PLAN.md is advisory sensing (Plan 00269): an unreadable file means no goal signal, never a broken Write/Edit tool call. Narrow except OSError is logged at warning; the single caller treats None as 'do not fire'."
-    },
-    {
-      "file": "handlers/pre_tool_use/plan_status_snapshot.py",
-      "function": "_read_plan",
-      "rule": "return-none-on-error",
-      "reason": "Plan 00466 RV3-n5: same contract as goal_injection._read_plan, one hook event earlier -- reading the plan's PRE-write text is advisory sensing for a PreToolUse handler that always ALLOWs. A missing file (the common brand-new-plan case) or a non-UTF-8 one (ValueError) records None, which is itself a valid ground-truth snapshot (no prior Status line), not a skipped record. Narrow excepts (OSError, ValueError) are logged at debug; the single caller treats None as the snapshot value to record, never as a reason to abandon the dispatch."
-    },
-    {
-      "file": "utils/goal_ledger.py",
-      "function": "_load_raw",
-      "rule": "return-none-on-error",
-      "reason": "Plan 00466 RV3-n2: replaces entries()'s own former inline try/except with the SAME fail-open contract review RV-m5 already established for it (an unreadable or corrupt ledger behaves as empty, never raises out of this fail-open API) -- now shared by both entries() and _parse_ever_recorded() so a caller needing both reads the file once. Narrow excepts (OSError, ValueError for a non-UTF-8 file) are logged at warning; every caller treats None as 'nothing on disk yet'."
-    },
-    {
       "file": "daemon/cli.py",
       "function": "send_daemon_request",
       "rule": "return-none-on-error",

@@ -155,6 +155,25 @@ class TestPlanStatusSnapshotHandler:
         assert found is False
         assert status is None
 
+    def test_handle_logs_a_warning_for_an_unreadable_plan_and_records_nothing(
+        self, handler: PlanStatusSnapshotHandler, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """team-lead review-4-prep: _read_plan raises PlanUnreadable for a
+        genuinely corrupt/non-UTF-8 file; handle() catches it explicitly,
+        logs a WARNING, and records nothing -- goal_injection then falls
+        back to its own inference for this tool_use_id."""
+        plan = self._plan_path()
+        plan.write_bytes(b"\xff\xfe\x00\x01not valid utf-8")
+
+        with caplog.at_level("WARNING"):
+            result = handler.handle(self._hook_input(plan, tool_use_id="tu-badbytes"))
+
+        assert result.decision == Decision.ALLOW
+        status, found = plan_status_snapshots.consume("tu-badbytes")
+        assert found is False
+        assert status is None
+        assert "plan_status_snapshot" in caplog.text
+
     def test_get_claude_md_present(self, handler: PlanStatusSnapshotHandler) -> None:
         text = handler.get_claude_md()
         assert text is not None

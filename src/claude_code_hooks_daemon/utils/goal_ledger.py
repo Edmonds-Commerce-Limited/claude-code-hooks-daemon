@@ -79,6 +79,17 @@ _STATE_MISSING: Final[str] = "missing"
 _STATE_UNREADABLE: Final[str] = "unreadable"
 
 
+class LedgerUnreadable(Exception):
+    """Raised when the ledger file exists but cannot be read or parsed.
+
+    Reserved for a GENUINE anomaly (permission error, corrupt JSON,
+    non-UTF-8 bytes) -- a missing file (nothing written yet, the ordinary
+    first-ever-use case) is not this and is never raised for. Every public
+    caller catches this explicitly, logs a WARNING naming the path and
+    cause, and takes its own documented fail-open branch.
+    """
+
+
 def resolve_plan_dir(project_root: Path, configured: str | None) -> Path:
     """Resolve the active plan directory from the plan-workflow config.
 
@@ -283,31 +294,39 @@ class GoalLedger:
     # ── persistence ────────────────────────────────────────────────────────
 
     def _load_raw(self) -> Any:
-        """Parse the raw ledger JSON (any shape); ``None`` on any read/parse
-        failure, including a missing file.
+        """Parse the raw ledger JSON (any shape); ``None`` when no ledger
+        has been written yet (checked BEFORE the try, so this branch never
+        touches an except handler -- a missing file is not an error).
 
-        Review RV-m5: ``ValueError`` (not just ``json.JSONDecodeError``) is
-        caught alongside ``OSError`` so a ledger file that is valid bytes but
-        not valid UTF-8 (``read_text``'s ``UnicodeDecodeError``, itself a
-        ``ValueError`` subclass) is treated as corrupt like any other
-        unreadable ledger, rather than raising past this fail-open API. This
-        repo runs the daemon in ``strict_mode``, where an uncaught exception
-        here would DENY every PLAN.md edit with a system error.
+        Raises:
+            LedgerUnreadable: the file exists but could not be read
+                (``OSError``) or parsed (``ValueError`` -- invalid JSON, or
+                a non-UTF-8 ``UnicodeDecodeError``, itself a ``ValueError``
+                subclass). Every caller catches this explicitly, logs a
+                WARNING naming the path and cause, and takes its own
+                documented fail-open branch -- this repo runs the daemon in
+                ``strict_mode``, where an UNCAUGHT exception here would DENY
+                every PLAN.md edit with a system error.
 
-        Shared by :meth:`entries` and :meth:`_parse_ever_recorded` (RV3-n2)
-        so a caller needing BOTH reads the file once, not twice.
+        Shared by :meth:`entries` and every other caller needing the raw
+        ``ever_recorded_sessions`` list too (RV3-n2), so code needing BOTH
+        reads the file once, not twice.
         """
+        if not self._path.is_file():
+            return None
         try:
             return json.loads(self._path.read_text(encoding="utf-8"))
-        except FileNotFoundError:
-            return None
         except (OSError, ValueError) as e:
-            logger.warning("goal_ledger: unreadable ledger %s: %s", self._path, e)
-            return None
+            raise LedgerUnreadable(f"cannot read ledger {self._path}: {e}") from e
 
     def entries(self) -> list[GoalLedgerEntry]:
         """Load all entries; an unreadable or corrupt ledger yields ``[]``."""
-        return self._parse_entries(self._load_raw())
+        try:
+            raw = self._load_raw()
+        except LedgerUnreadable as e:
+            logger.warning("goal_ledger: %s; entries() reads as empty (fail-open)", e)
+            return []
+        return self._parse_entries(raw)
 
     def _parse_entries(self, raw: Any) -> list[GoalLedgerEntry]:
         # ``raw is None`` means _load_raw already handled (and, for a real
@@ -459,9 +478,15 @@ class GoalLedger:
         """
         with self._locked():
             now = time.time()
-            raw = self._load_raw()
-            entries = self._parse_entries(raw)
-            ever_recorded = self._parse_ever_recorded(raw)
+            try:
+                raw = self._load_raw()
+            except LedgerUnreadable as e:
+                logger.warning("goal_ledger: %s; record_emission proceeds from an empty ledger", e)
+                entries: list[GoalLedgerEntry] = []
+                ever_recorded: list[str] = []
+            else:
+                entries = self._parse_entries(raw)
+                ever_recorded = self._parse_ever_recorded(raw)
             _, states = self._reconcile(entries, plan_dir)
 
             displaced: list[str] = []
@@ -597,7 +622,12 @@ class GoalLedger:
         case: nothing here should stop it from also becoming a stakeholder
         of a second, unrelated live plan it is asked to track).
         """
-        return session_id in self._parse_ever_recorded(self._load_raw())
+        try:
+            raw = self._load_raw()
+        except LedgerUnreadable as e:
+            logger.warning("goal_ledger: %s; session_has_entries reads as False (fail-open)", e)
+            return False
+        return session_id in self._parse_ever_recorded(raw)
 
     def reassert_session(self, session_id: str, plan_number: str) -> bool:
         """Add ``session_id`` to a still-live entry's set of owning sessions.
@@ -624,7 +654,13 @@ class GoalLedger:
         method, which stays simple and safe to call repeatedly.
         """
         with self._locked():
-            raw = self._load_raw()
+            try:
+                raw = self._load_raw()
+            except LedgerUnreadable as e:
+                logger.warning(
+                    "goal_ledger: %s; reassert_session finds nothing to reassert onto", e
+                )
+                return False
             entries = self._parse_entries(raw)
             existing = next(
                 (e for e in entries if e.plan_number == plan_number and e.retired_at is None),
@@ -648,7 +684,11 @@ class GoalLedger:
         must still defend.
         """
         with self._locked():
-            raw = self._load_raw()
+            try:
+                raw = self._load_raw()
+            except LedgerUnreadable as e:
+                logger.warning("goal_ledger: %s; live_plan_numbers reads as empty", e)
+                return []
             entries = self._parse_entries(raw)
             changed, states = self._reconcile(entries, plan_dir)
             if changed:

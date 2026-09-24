@@ -464,6 +464,25 @@ class TestGoalInjectionHandler:
         assert result.decision == Decision.ALLOW
         assert not self._signal_path().exists()
 
+    def test_unreadable_plan_logs_a_warning_and_emits_nothing(
+        self, handler: GoalInjectionHandler, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """team-lead review-4-prep: _read_plan raises PlanUnreadable for a
+        genuinely corrupt/non-UTF-8 file; handle() catches it explicitly,
+        logs a WARNING, and emits nothing -- the documented fail-open
+        branch for a file this handler cannot make sense of."""
+        plan_dir = self._project / "CLAUDE" / "Plan" / _PLAN_FOLDER
+        plan_dir.mkdir(parents=True, exist_ok=True)
+        plan_file = plan_dir / "PLAN.md"
+        plan_file.write_bytes(b"\xff\xfe\x00\x01not valid utf-8")
+
+        with caplog.at_level("WARNING"):
+            result = handler.handle(self._hook_input(plan_file))
+
+        assert result.decision == Decision.ALLOW
+        assert not self._signal_path().exists()
+        assert "goal_injection" in caplog.text
+
     def test_matches_honours_non_default_plan_dir_from_facade(
         self, handler: GoalInjectionHandler
     ) -> None:

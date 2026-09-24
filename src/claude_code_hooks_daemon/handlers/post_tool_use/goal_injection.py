@@ -108,6 +108,7 @@ from claude_code_hooks_daemon.utils.git_facts import project_relative_head_text
 from claude_code_hooks_daemon.utils.goal_ledger import LEDGER_FILENAME, GoalLedger, LivePlanRef
 from claude_code_hooks_daemon.utils.markdown_fences import line_spans_outside_fences
 from claude_code_hooks_daemon.utils.plan_status_snapshot import plan_status_snapshots
+from claude_code_hooks_daemon.utils.plan_trigger import PlanUnreadable
 from claude_code_hooks_daemon.utils.plan_trigger import (
     is_inside_project as _plan_trigger_is_inside_project,
 )
@@ -993,8 +994,10 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         folder = match.group(1)
         plan_number = folder.split("-", 1)[0].zfill(5)
 
-        plan_text = self._read_plan(Path(file_path))
-        if plan_text is None:
+        try:
+            plan_text = self._read_plan(Path(file_path))
+        except PlanUnreadable as e:
+            logger.warning("goal_injection: %s; no goal signal for this write", e)
             return BlockingResult(decision=Decision.ALLOW)
 
         session_id = str(hook_input.get(HookInputField.SESSION_ID, "") or "")
@@ -1392,20 +1395,26 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         plan_dir = plan_md_path.parent.parent
         return ledger.record_emission(session_id, plan_number, joined, plan_dir)
 
-    def _read_plan(self, path: Path) -> str | None:
-        """Read the just-written PLAN.md from disk; None when unreadable.
+    @staticmethod
+    def _read_plan(path: Path) -> str:
+        """Read the just-written PLAN.md from disk.
 
         RV3-m8: ``ValueError`` (not just ``OSError``) is caught alongside so
         a non-UTF-8 PLAN.md (``read_text``'s ``UnicodeDecodeError``, a
         ``ValueError`` subclass) is treated as unreadable like any other
         bad file, matching review RV-m5's tolerance for the ledger file
         itself, rather than crashing this handler under ``strict_mode``.
+
+        Raises:
+            PlanUnreadable: the file could not be read or decoded -- the
+                single caller catches this explicitly, logs a WARNING, and
+                takes the documented fail-open branch (no goal signal for
+                this write).
         """
         try:
             return path.read_text(encoding="utf-8")
         except (OSError, ValueError) as e:
-            logger.warning("goal_injection: could not read %s: %s", path, e)
-            return None
+            raise PlanUnreadable(f"could not read {path}: {e}") from e
 
     @staticmethod
     def _record_latch(latches: dict[tuple[str, str], bool], key: tuple[str, str]) -> None:

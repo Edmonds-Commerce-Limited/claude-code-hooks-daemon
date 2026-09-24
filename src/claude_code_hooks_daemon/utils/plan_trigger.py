@@ -30,6 +30,20 @@ FALLBACK_PLAN_DIR: Final[str] = "CLAUDE/Plan"
 COMPLETED_SEGMENT: Final[str] = "/Completed/"
 
 
+class PlanUnreadable(Exception):
+    """Raised when a plan's PLAN.md exists but cannot be read or decoded.
+
+    Shared by ``goal_injection._read_plan`` (post-write) and
+    ``plan_status_snapshot._read_plan`` (pre-write) -- both read the SAME
+    kind of file for the SAME reason (advisory sensing for a hook handler
+    that must never raise out of its own dispatch), so both raise this ONE
+    domain exception rather than each inventing its own. Each caller
+    catches it explicitly, logs a WARNING naming the path and cause, and
+    takes its own documented fail-open branch -- never a bare
+    ``return None`` inside the except itself.
+    """
+
+
 def plan_dir_for(project_layout: ProjectLayout | None) -> str:
     """Configured plan directory (facade, or the matching default)."""
     return project_layout.plan_dir if project_layout is not None else FALLBACK_PLAN_DIR
