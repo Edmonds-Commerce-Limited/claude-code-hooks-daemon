@@ -167,7 +167,11 @@ class LspNoiseCheckerHandler(SessionStartHandlerBase):
                 "The language server reports other checkouts' and fixtures' "
                 "defects against this one, and a noisy stream is skimmed"
             ),
-            fix="Add the listed exclude entries (the advisory prints them ready to use)",
+            fix=(
+                "Add the listed exclude entries (the advisory prints them ready to use); "
+                "a finding that instead names an entry as harmful means REMOVE it - "
+                "follow the exact instruction printed, never assume every finding means add"
+            ),
             verbose=(
                 "ADVISORY (never blocks). Claude Code injects a language server's "
                 "diagnostics after every edit. Without an exclude for the daemon's "
@@ -181,8 +185,11 @@ class LspNoiseCheckerHandler(SessionStartHandlerBase):
                 "  Each language's finding names its own fix - a config file's "
                 "`exclude` key, a module or workspace boundary, or (when the tool takes "
                 "no project-level exclude at all) the exact client-settings snippet to "
-                "add. Then end the running language server so it re-reads the config "
-                "(R-LSP-SERVER-STALE)."
+                "add. A dependency directory a language server resolves TYPES from (PHP's "
+                "`vendor/`, via intelephense) is never asked for as a bare exclude entry - "
+                "if an existing override excludes one anyway, the finding names it harmful "
+                "and tells you to remove it, not add it. Then end the running language "
+                "server so it re-reads the config (R-LSP-SERVER-STALE)."
             ),
         )
         self._stale_rule = Rule(
@@ -310,7 +317,10 @@ class LspNoiseCheckerHandler(SessionStartHandlerBase):
             "\n"
             f"- `{RuleID.LSP_CONFIG_EXCLUDE}`: apply the printed fix for that "
             "language — a config file's `exclude` key, a module or workspace "
-            "boundary, or a client-settings snippet.\n"
+            "boundary, or a client-settings snippet. A finding that names an "
+            "entry as harmful means REMOVE it (a dependency directory a server "
+            "resolves types from is never asked for as a bare exclude) — read "
+            "which action each finding asks for, never assume it is always add.\n"
             f"- `{RuleID.LSP_SERVER_STALE}`: end the named process; the harness "
             "respawns a fresh one on the next LSP use.\n"
             "\n"

@@ -12,7 +12,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00463: full qa is a main thread gate](00463-full-qa-is-a-main-thread-gate/PLAN.md) - Not Started (owner request after five worktree agents ran the ~18-minute full suite at once: a `scope: SUB` guard denies configured full-QA commands in sub-agents and names the targeted forms; the coordinator runs the full gate serially on each branch before merge)
 
-- [00462: php lsp advice keeps composer dependencies indexed](00462-php-lsp-advice-keeps-composer-dependencies-indexed/PLAN.md) - Not Started (#56: `lsp_noise_checker` tells a PHP project to exclude all of `**/vendor` from intelephense, which removes every Composer dependency from the index, so every library type is undefined)
+- [00462: php lsp advice keeps composer dependencies indexed](00462-php-lsp-advice-keeps-composer-dependencies-indexed/PLAN.md) - In Progress (#56: `lsp_noise_checker` tells a PHP project to exclude all of `**/vendor` from intelephense, which removes every Composer dependency from the index, so every library type is undefined; Phase 1 implemented and QA-green, Phase 2 merge/close pending)
 
 - [00461: journal entries only through the stamping tool](00461-journal-entries-only-through-the-stamping-tool/PLAN.md) - In Progress (owner directive after a session of hand-stamped entries, one 40 minutes in the future: an Edit/Write/Bash append to a plan `JOURNAL/` day-file is DENIED and pointed at `mkplan.bash --journal`, which shipped in v3.66.0 and was never used)
 

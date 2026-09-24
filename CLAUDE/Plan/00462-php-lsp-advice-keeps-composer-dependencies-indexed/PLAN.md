@@ -1,6 +1,6 @@
 # Plan 00462: php lsp advice keeps composer dependencies indexed
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-24
 **Owner**: dev
 **Priority**: High
@@ -59,11 +59,11 @@ confirms this with sources rather than by assumption.
 
 ### Phase 1: TDD in a worktree
 
-- [ ] ⬜ **Task 1.1**: For each strategy, record with sources whether that
+- [x] ✅ **Task 1.1**: For each strategy, record with sources whether that
   server's exclude setting removes files from import/type resolution or
   only from checking. Record it in the journal. If another language has the
   same defect, add it to this plan's scope.
-- [ ] ⬜ **Task 1.2**: RED tests.
+- [x] ✅ **Task 1.2**: RED tests.
   - The PHP no-override snippet contains no bare `**/vendor`, and does
     contain the nested entries.
   - An override with intelephense's defaults plus the plain trees gives no
@@ -72,13 +72,13 @@ confirms this with sources rather than by assumption.
   - A test checks that the `**/vendor` substitution is keyed to that
     language's dependency directory and is not a hard-coded string
     special case.
-- [ ] ⬜ **Task 1.3**: Implementation. The language strategy decides which
+- [x] ✅ **Task 1.3**: Implementation. The language strategy decides which
   shared required names are dependency roots it must keep indexed (the
   handler stays language-free, per the module's CLAUDE.md). Update the
   PHP strategy docstring, handler guidance and `explain-handler` text.
   Write a release note that tells a PHP project to remove `**/vendor` from
   an override that followed the old advice.
-- [ ] ⬜ **Task 1.4**: Full QA green. Restart the worktree daemon first.
+- [x] ✅ **Task 1.4**: Full QA green. Restart the worktree daemon first.
 
 ### Phase 2: Deliver
 
