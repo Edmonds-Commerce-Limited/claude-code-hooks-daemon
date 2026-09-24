@@ -1283,6 +1283,24 @@
       "function": "find_persisted_report",
       "rule": "return-none-on-error",
       "reason": "Plan 00460 Task 1.6: this is a best-effort LOOKUP the size blocker uses to find what the persister already saved, not a load-bearing read -- the function's own docstring says so ('or None'), and its sole caller (subagent_report_size_blocker._find_persisted_report) already treats a None return identically to 'nothing was persisted', falling back to the pre-Task-1.6 deny message. An OSError globbing the report directory (permissions, a concurrent removal) is exactly as harmless to conceal as the ordinary 'no match found' case two lines later, which is this same function's normal control flow, not an exception. Logged at debug (not warning): a missing/unreadable report directory is the common case for any project that has not yet had a SubagentStop, not an anomaly worth surfacing. Covered by test_returns_none_when_directory_is_missing."
+    },
+    {
+      "file": "utils/subagent_report_paths.py",
+      "function": "_ensure_self_ignoring",
+      "rule": "log-and-continue",
+      "reason": "Plan 00460 review finding B1: writing the self-ignoring `.gitignore` (the runtime enforcement that a client repo's own ignore rules cannot be trusted to cover this directory) is a best-effort defence in depth layered on top of the write it accompanies -- the write itself already has its own logged, never-raised fail-open contract (the return-none-on-error entry for write_new_file_never_overwrite above), and a failure writing the marker must not additionally fail that already-decided-fail-open write. Logged at warning, not silently swallowed."
+    },
+    {
+      "file": "utils/subagent_report_paths.py",
+      "function": "resolve_confined_report_dir",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00460 review finding M1: this function's OWN documented contract (docstring: 'Returns None for all of those -- callers must skip persistence entirely rather than guess a safer target') is a validation gate, not a read that can fail -- a report_dir that resolves outside the project root (ValueError from Path.relative_to) is exactly as invalid as an empty string or an absolute path, both handled by the same None return a few lines earlier in this same function's normal control flow. Raising here would turn a misconfigured YAML option into a crashed SubagentStop dispatch instead of the documented 'skip persistence, log a warning' outcome the sole caller (subagent_report_persistence.handle) already implements. Covered by TestResolveConfinedReportDir's full negative-case suite in tests/unit/utils/test_subagent_report_paths.py."
+    },
+    {
+      "file": "utils/subagent_report_paths.py",
+      "function": "write_new_file_never_overwrite",
+      "rule": "log-and-continue",
+      "reason": "Plan 00460 review finding m3: after O_CREAT|O_EXCL already created the file on disk, an OSError from the content write must not leave a truncated/empty file behind for find_persisted_report to later cite as though it were a complete reply -- so the write-failure branch (already covered by the return-none-on-error entry above) additionally attempts candidate.unlink(missing_ok=True). If even THAT fails (a second, independent filesystem error), logging and continuing to the same None return is correct: the outer branch is already returning None and logging the original write failure, and a cleanup failure on top of an already-fail-open path must not escalate to raising. Covered by test_removes_a_partial_file_when_the_content_write_fails."
     }
   ]
 }
