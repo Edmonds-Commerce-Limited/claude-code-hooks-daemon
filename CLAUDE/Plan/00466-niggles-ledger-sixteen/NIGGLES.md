@@ -3,6 +3,55 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
+### N34 — `secret_file_guard`'s linear scan has enough constant factor to blow past the chain deadline on its own
+
+**Found while measuring N25's deadline margin, on request from the
+coordinator.** `SecretFileGuardHandler` scales LINEARLY with command length
+(confirmed up to 800 KB earlier under N25 Task 3 — doubling the input
+roughly doubles the time), but its constant factor (~12µs/byte, on a hostile
+"many small quoted tokens" command) is steep enough that size alone gets it
+into trouble:
+
+| Size | Wall-clock | % of the 20s `chain.deadline_seconds` budget                                 |
+| ---- | ---------- | ---------------------------------------------------------------------------- |
+| 1 MB | 12.315s    | 61.6%                                                                        |
+| 4 MB | 48.958s    | 244.8% — past BOTH the 20s daemon deadline AND the 30s client socket timeout |
+
+**This exposes a gap in N25's own deadline enforcement**, not a new bug in
+`secret_file_guard` itself: `HandlerChain.execute`'s deadline check
+(`core/chain.py`) runs BETWEEN handlers, in the per-handler loop, before
+each one starts. It has no way to interrupt a handler that is already
+running — so a single handler slow enough to exceed the deadline WITHIN its
+own `matches()`/`handle()` call blows straight through the budget with no
+check-in, and the client's own 30s socket timeout can still be reached
+before the daemon ever responds. At 4 MB, `secret_file_guard` alone
+reproduces the exact failure mode N25 set out to close: a slow handler
+silently allowing everything queued behind it (via the client's ALLOW
+fallback on timeout), just from ONE handler's own runtime rather than from
+being queued behind others.
+
+Not fixed here — reported per the coordinator's specific ask ("report
+secret_file_guard's wall-clock at 1 MB and 4 MB so we know its margin
+against the 20s deadline"), which is a measurement, not a remedy.
+
+**Candidate remedies (either closes the gap, at different cost):**
+
+1. Make `secret_file_guard`'s per-character cost cheaper — the constant
+   factor, not the scaling, is the problem (a linear handler should not
+   need 12µs/byte). Likely worth profiling `secret_file_matching.py`'s glob
+   matching against however many configured patterns for a per-match cost
+   that could be pooled once per command instead of repeated.
+2. A per-handler wall-clock budget enforced from OUTSIDE the handler
+   (a thread/signal-based timeout around each `matches()`/`handle()` call,
+   not just the inter-handler check), so a single pathological handler
+   cannot exceed its own slice regardless of cause. Heavier change than #1:
+   changes the execution model, not just one handler's algorithm.
+3. A hard size cap on the command/content text this handler scans at all,
+   past which it denies outright rather than scanning (a multi-megabyte
+   Bash command or Write body is itself an unusual shape worth treating
+   with suspicion). Cheapest fix, but narrower — protects only this
+   handler, not the general "one handler exceeds the deadline solo" class.
+
 ### N33 — a worktree agent's `secret_file_guard.exclude_paths` change had no effect after a daemon restart
 
 **Found by the integration-B2 fix agent.** The agent was writing tests in
@@ -230,6 +279,25 @@ N24 (which this depends on for its fail-closed wording):
    superlinearity bug, so it is noted here rather than "fixed": worth a
    follow-up look if it ever becomes a real bottleneck, but out of this
    niggle's scope (which is specifically superlinear paths).
+
+**Harness extended (guard-defects review 3 follow-up).** Review 3 found a
+DIFFERENT class from the 100 KB-scale shapes above: COMBINATORIAL blowup on
+a SHORT input — `echo {a,b}` x20 (110 bytes) took 36s on a guard whose bug
+lives on the `guard-defects`/`463` branches, not this one.
+`TestCombinatorialSmallInputShapesStayLinear` (same file) adds brace
+expansion (x16/x20/x24), nested braces, `/**/` and `**/*` globs, bracket
+classes, and deep `eval`/`bash -c` nesting, all under 300 bytes, applied to
+both a `Bash` command and a `Write` `file_path`. It also sweeps this
+repository's own `.claude/project-handlers/` (`enforce_llm_qa` included)
+best-effort, via the same `ProjectHandlerLoader` the daemon uses — 28
+handlers swept in total. Clean on this branch (27/27 pass, ~7s): expected,
+since the vulnerable code these shapes target is not present here yet — the
+harness is the "class detector" the guard-defects/463 branches fix against,
+not a fix itself. Measuring `secret_file_guard`'s margin against the 20s
+deadline at 1 MB/4 MB (requested alongside this) surfaced a related but
+DISTINCT gap, filed separately as N34: the deadline check in `chain.py`
+only runs BETWEEN handlers, so one handler slow enough within its OWN
+execution is not covered at all.
 
 ### N24 — ✅ Remedied — `daemon.strict_mode` never reaches the live daemon, so every guard fails OPEN on a handler exception
 
