@@ -91,6 +91,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
 
+from claude_code_hooks_daemon.utils.git_repo import git_visible_paths
+
 _PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 _QA_OUTPUT_DIR_PARTS: Final[tuple[str, str]] = ("untracked", "qa")
 _OUTPUT_FILENAME: Final[str] = "doc_truth.json"
@@ -172,6 +174,14 @@ _CLI_INVOCATION_RE: Final[re.Pattern[str]] = re.compile(
 # `worktrees` covers concurrent agents' isolated checkouts (`.claude/worktrees/`,
 # `untracked/worktrees/`): a DIFFERENT branch's tree, judged by its own QA run
 # and again at merge — its in-flight docs must not fail the main tree's gate.
+#
+# Plan 00466 N9: this denylist names `marketplaces` but not its sibling
+# `.claude/ccy/plugins/cache/`, so a gitignored plugin install's CACHED spec
+# markdown could still reach `_check_shell_fences` as a false finding.
+# `_iter_markdown` also filters against `git_visible_paths`, which catches
+# every gitignored directory by construction rather than by name -- this set
+# is only a cheap pre-prune (skip walking a big ignored tree at all); the
+# git filter is the correctness backstop.
 _UNSCANNED_DIR_NAMES: Final[frozenset[str]] = frozenset(
     {
         ".git",
@@ -485,12 +495,22 @@ def known_slash_commands() -> frozenset[str]:
 
 
 def _iter_markdown(root: Path) -> list[Path]:
-    """Every documentation markdown file under ``root``, noise directories aside."""
-    return sorted(
+    """Every documentation markdown file under ``root``, noise directories
+    aside, and further filtered to what ``git`` considers part of the
+    project (Plan 00466 N9). ``None`` from :func:`git_visible_paths` (``root``
+    is not a git repository) means no filtering: every fixture this checker's
+    own test suite builds under a plain ``tmp_path`` must keep scanning
+    everything it writes.
+    """
+    git_visible = git_visible_paths(root)
+    candidates = (
         path
         for path in root.rglob(_MARKDOWN_GLOB)
         if not _UNSCANNED_DIR_NAMES.intersection(path.parts)
     )
+    if git_visible is None:
+        return sorted(candidates)
+    return sorted(path for path in candidates if path.relative_to(root).as_posix() in git_visible)
 
 
 def _check_shell_fences(

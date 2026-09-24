@@ -132,6 +132,32 @@ def run_git(
         return subprocess.CompletedProcess(argv, _GIT_UNAVAILABLE, "", str(exc))
 
 
+def git_visible_paths(project_root: Path) -> frozenset[str] | None:
+    """Every project-relative path ``git`` would add right now: tracked
+    files, plus untracked files no ``.gitignore`` rule excludes (Plan 00466
+    N9).
+
+    The single shared "what counts as part of the project" answer for every
+    QA corpus that enumerates files from disk rather than reading the
+    index/working-tree diff directly — a gitignored vendored install (e.g. a
+    Claude Code plugin's cache under ``.claude/ccy/plugins/``) is not
+    project content, and a plain filesystem walk has no way to tell the two
+    apart. ONE combined ``git ls-files --cached --others --exclude-standard``
+    call, never one per file: cheap enough to run once per corpus build.
+
+    Returns ``None`` when ``project_root`` is not a git repository (or git
+    is unavailable): callers fall back to their pre-existing unfiltered walk
+    rather than guessing either "nothing is ignored" or "everything is" —
+    the fixture trees this daemon's own test suite builds under ``tmp_path``
+    are not git repositories unless a test opts in, and must keep scanning
+    everything they write.
+    """
+    result = run_git(project_root, "ls-files", "--cached", "--others", "--exclude-standard", "-z")
+    if result.returncode != 0:
+        return None
+    return frozenset(token for token in result.stdout.split("\0") if token)
+
+
 _GIT_DIR_ENTRY: Final[str] = ".git"
 _GIT_FILE_GITDIR_PREFIX: Final[str] = "gitdir:"
 _WORKTREE_GITDIR_MARKER: Final[str] = "/worktrees/"

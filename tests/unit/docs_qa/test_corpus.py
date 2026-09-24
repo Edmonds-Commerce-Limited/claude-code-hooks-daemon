@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import subprocess
 from collections.abc import Callable, Generator
 from pathlib import Path
 
@@ -10,6 +11,7 @@ import pytest
 
 from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
 from claude_code_hooks_daemon.constants.paths import ProjectPath
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.docs_qa.corpus import (
     _CACHE_SCHEMA_VERSION,
     COMMON_VENDORED_BUILD_DIR_NAMES,
@@ -37,6 +39,23 @@ from claude_code_hooks_daemon.docs_qa.policy import (
     DocumentationTreesPolicy,
 )
 from claude_code_hooks_daemon.utils.vendor_paths import VendorScope
+
+
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(  # nosec B603 B607 - trusted git binary, fixed argv, test fixture only
+        ["git", "-C", str(repo), *args],
+        capture_output=True,
+        check=True,
+        timeout=Timeout.GIT_CONTEXT,
+    )
+
+
+def _init_repo(root: Path) -> None:
+    """A committable git repo at ``root`` -- shared by every test that needs
+    ``git ls-files`` to answer for real (Plan 00466 N9)."""
+    _git(root, "init")
+    _git(root, "config", "user.email", "t@example.com")
+    _git(root, "config", "user.name", "T")
 
 
 def _scaffold(root: Path) -> None:
@@ -376,6 +395,65 @@ class TestIterCorpusPaths:
         # No .claude/ directory at all.
         paths = iter_corpus_paths(tmp_path, DocumentationPolicy())
         assert paths == [tmp_path / "CLAUDE" / "Foo.md"]
+
+
+class TestIterCorpusPathsGitIgnore:
+    """Plan 00466 N9: the corpus must judge ``git``'s view of the tree, not
+    the raw filesystem -- a gitignored Claude Code plugin install
+    (``.claude/ccy/plugins/...``) must never surface as a corpus document."""
+
+    def test_gitignored_markdown_is_not_returned(self, tmp_path: Path) -> None:
+        _init_repo(tmp_path)
+        (tmp_path / "CLAUDE").mkdir()
+        (tmp_path / "CLAUDE" / "Tracked.md").write_text("# tracked\n")
+        _git(tmp_path, "add", "-A")
+        _git(tmp_path, "commit", "-m", "initial")
+        (tmp_path / ".gitignore").write_text("CLAUDE/Vendored.md\n")
+        (tmp_path / "CLAUDE" / "Vendored.md").write_text("# vendored\n")
+
+        rel = {
+            str(p.relative_to(tmp_path)) for p in iter_corpus_paths(tmp_path, DocumentationPolicy())
+        }
+
+        assert "CLAUDE/Tracked.md" in rel
+        assert "CLAUDE/Vendored.md" not in rel
+
+    def test_tracked_markdown_is_still_returned(self, tmp_path: Path) -> None:
+        _init_repo(tmp_path)
+        (tmp_path / "CLAUDE").mkdir()
+        (tmp_path / "CLAUDE" / "Tracked.md").write_text("# tracked\n")
+        _git(tmp_path, "add", "-A")
+        _git(tmp_path, "commit", "-m", "initial")
+
+        rel = {
+            str(p.relative_to(tmp_path)) for p in iter_corpus_paths(tmp_path, DocumentationPolicy())
+        }
+
+        assert "CLAUDE/Tracked.md" in rel
+
+    def test_untracked_but_not_ignored_markdown_is_still_returned(self, tmp_path: Path) -> None:
+        _init_repo(tmp_path)
+        (tmp_path / ".gitkeep").write_text("")
+        _git(tmp_path, "add", "-A")
+        _git(tmp_path, "commit", "-m", "initial")
+        (tmp_path / "CLAUDE").mkdir()
+        (tmp_path / "CLAUDE" / "New.md").write_text("# new, unstaged\n")
+
+        rel = {
+            str(p.relative_to(tmp_path)) for p in iter_corpus_paths(tmp_path, DocumentationPolicy())
+        }
+
+        assert "CLAUDE/New.md" in rel
+
+    def test_outside_a_git_repo_falls_back_to_the_unfiltered_walk(self, tmp_path: Path) -> None:
+        (tmp_path / "CLAUDE").mkdir()
+        (tmp_path / "CLAUDE" / "Foo.md").write_text("# foo\n")
+
+        rel = {
+            str(p.relative_to(tmp_path)) for p in iter_corpus_paths(tmp_path, DocumentationPolicy())
+        }
+
+        assert "CLAUDE/Foo.md" in rel
 
 
 class TestBuildAndSaveCorpus:
@@ -1242,6 +1320,70 @@ class TestIterMarkdownPaths:
         assert matches == ["src/NOTES.md"]
         assert entered_dirs
         assert not any("node_modules" in entered for entered in entered_dirs)
+
+
+class TestIterMarkdownPathsGitIgnore:
+    """Plan 00466 N9: installing a Claude Code plugin lands vendored markdown
+    under the gitignored ``.claude/ccy/plugins/`` tree. ``module-doc-budget``
+    and ``source-tree-markdown`` both draw from this walk, so a gitignored
+    file reaching either as a finding is the reported defect."""
+
+    def test_gitignored_markdown_under_a_source_like_dir_is_not_returned(
+        self, tmp_path: Path
+    ) -> None:
+        _init_repo(tmp_path)
+        (tmp_path / "src" / "pkg").mkdir(parents=True)
+        (tmp_path / "src" / "pkg" / "TRACKED.md").write_text("tracked")
+        _git(tmp_path, "add", "-A")
+        _git(tmp_path, "commit", "-m", "initial")
+        (tmp_path / ".gitignore").write_text("ignored/\n")
+        (tmp_path / "ignored" / "src").mkdir(parents=True)
+        (tmp_path / "ignored" / "src" / "VENDORED.md").write_text("vendored")
+
+        assert iter_markdown_paths(tmp_path, vendor_scopes=()) == ["src/pkg/TRACKED.md"]
+
+    def test_tracked_markdown_is_still_returned(self, tmp_path: Path) -> None:
+        _init_repo(tmp_path)
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "NOTES.md").write_text("real")
+        _git(tmp_path, "add", "-A")
+        _git(tmp_path, "commit", "-m", "initial")
+
+        assert iter_markdown_paths(tmp_path, vendor_scopes=()) == ["src/NOTES.md"]
+
+    def test_untracked_but_not_ignored_markdown_is_still_returned(self, tmp_path: Path) -> None:
+        _init_repo(tmp_path)
+        (tmp_path / ".gitkeep").write_text("")
+        _git(tmp_path, "add", "-A")
+        _git(tmp_path, "commit", "-m", "initial")
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "NEW.md").write_text("new, unstaged")
+
+        assert iter_markdown_paths(tmp_path, vendor_scopes=()) == ["src/NEW.md"]
+
+    def test_outside_a_git_repo_falls_back_to_the_unfiltered_walk(self, tmp_path: Path) -> None:
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "NOTES.md").write_text("real")
+
+        assert iter_markdown_paths(tmp_path, vendor_scopes=()) == ["src/NOTES.md"]
+
+    def test_claude_ccy_claude_md_is_returned_despite_being_gitignored(
+        self, tmp_path: Path
+    ) -> None:
+        """``.claude/ccy/CLAUDE.md`` is deliberately never whitelisted in
+        ``.claude/ccy/.gitignore`` (untracked, ignored by design -- see that
+        file's own comment), yet ``is_module_doc_path`` names it as squarely
+        in ``module-doc-budget``'s scope. The git-visibility filter must not
+        silently drop this named, deliberate exception."""
+        _init_repo(tmp_path)
+        (tmp_path / ".gitkeep").write_text("")
+        _git(tmp_path, "add", "-A")
+        _git(tmp_path, "commit", "-m", "initial")
+        (tmp_path / ".claude" / "ccy").mkdir(parents=True)
+        (tmp_path / ".claude" / "ccy" / ".gitignore").write_text("*\n!.gitignore\n")
+        (tmp_path / ".claude" / "ccy" / "CLAUDE.md").write_text("module doc")
+
+        assert iter_markdown_paths(tmp_path, vendor_scopes=()) == [".claude/ccy/CLAUDE.md"]
 
 
 class TestProjectExcludePaths:
