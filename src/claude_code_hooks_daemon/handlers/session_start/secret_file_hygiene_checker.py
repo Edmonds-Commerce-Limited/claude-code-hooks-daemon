@@ -6,9 +6,15 @@ the SESSION-START half: for every protected path (the effective
 secret_file_guard globs) that EXISTS on disk, advise -- never block -- when
 it is (a) not gitignored, (b) git-tracked, or (c) group/world-readable.
 
-Metadata only. The file's CONTENTS are never opened -- only ``git ls-files``
-(three cheap, index-backed enumerations, no filesystem walk) and ``stat()``
-are used, so this advisory cannot leak what it is protecting.
+Content never enters the advisory. Files are found with ``git ls-files``
+(three cheap, index-backed enumerations, no filesystem walk) and judged with
+``stat()``, plus ONE content check that runs inside the daemon and returns
+only a format name: ``utils.encrypted_at_rest`` (Plan 00459). A file that is
+a whole-file Ansible Vault payload is ciphertext, and tracking it is the
+point of Vault, so it gets no gitignore, untrack or permissions finding. A
+YAML file with inline ``!vault`` values gets a conditional statement instead
+of the untrack advice, because only its owner knows whether every secret in
+it is vaulted.
 
 **File enumeration is git-native, not a blind ``os.walk``** (Plan 00272 code
 review): an unfiltered directory walk with an entry cap can exhaust its cap
@@ -39,6 +45,7 @@ from claude_code_hooks_daemon.core import AdvisoryResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
+from claude_code_hooks_daemon.utils.encrypted_at_rest import AtRestFormat, classify_at_rest
 from claude_code_hooks_daemon.utils.git_repo import run_git
 from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 
@@ -48,6 +55,22 @@ _GIT_DIR_NAME: Final[str] = ".git"
 _ISSUE_NOT_GITIGNORED: Final[str] = "not gitignored -- add it to .gitignore"
 _ISSUE_TRACKED: Final[str] = "git-tracked -- untrack it: git rm --cached <path>"
 _ISSUE_PERMISSIONS: Final[str] = f"group/world-readable -- run: {_CHMOD_HINT}"
+_ISSUE_INLINE_VAULT: Final[str] = (
+    "has inline `!vault` values -- tracking it is correct ONLY if every secret "
+    "value in it is vaulted; the daemon cannot verify that, so reads stay denied"
+)
+
+_ENCRYPTED_HEADING: Final[str] = (
+    "Encrypted at rest (whole-file Ansible Vault) -- tracking is correct, no action. "
+    "It would need action only if decrypted in place:"
+)
+_CONTENT_NOTICE: Final[str] = (
+    "Content never enters this advisory: the only read is the daemon's own "
+    "encrypted-at-rest format check."
+)
+
+#: One file's findings: ``(relpath, issues)``.
+_Finding = tuple[str, list[str]]
 
 _NOT_A_REPO_NOTICE: Final[str] = (
     "not a git repository (or git is unavailable): gitignore/tracked checks "
@@ -99,23 +122,29 @@ class SecretFileHygieneCheckerHandler(SessionStartHandlerBase):
         scan = self._scan_repo(project_root)
 
         if scan is not None:
-            findings = self._collect_findings_git(project_root, patterns, scan)
+            findings, encrypted = self._collect_findings_git(project_root, patterns, scan)
+            # A project whose only matches are encrypted gets no output at
+            # all: the warning simply stops (Plan 00459).
             if not findings:
                 return AdvisoryResult(decision=Decision.ALLOW, context=[])
-            return AdvisoryResult(decision=Decision.ALLOW, context=self._render(findings))
+            return AdvisoryResult(
+                decision=Decision.ALLOW, context=self._render(findings, encrypted=encrypted)
+            )
 
         # Fallback: no git available. gitignore/tracked status is meaningless
         # here, so only permissions are checked -- and the notice that this
         # happened is NEVER dropped, even when nothing else is found.
         protected, truncated = self._find_protected_files_fallback(project_root, patterns)
-        findings = self._collect_findings_permissions_only(project_root, protected)
+        findings, encrypted = self._collect_findings_permissions_only(project_root, protected)
         if not findings and not truncated:
             return AdvisoryResult(
                 decision=Decision.ALLOW, context=[f"⚠️  SECRET FILE HYGIENE: {_NOT_A_REPO_NOTICE}"]
             )
         return AdvisoryResult(
             decision=Decision.ALLOW,
-            context=self._render(findings, not_a_repo=True, truncated=truncated),
+            context=self._render(
+                findings, encrypted=encrypted, not_a_repo=True, truncated=truncated
+            ),
         )
 
     # ------------------------------------------------------------------
@@ -149,21 +178,31 @@ class SecretFileHygieneCheckerHandler(SessionStartHandlerBase):
 
     def _collect_findings_git(
         self, project_root: Path, patterns: tuple[str, ...], scan: _RepoScan
-    ) -> list[tuple[str, list[str]]]:
-        findings: list[tuple[str, list[str]]] = []
+    ) -> tuple[list[_Finding], list[str]]:
+        """``(findings, encrypted relpaths)`` for every protected path git knows."""
+        findings: list[_Finding] = []
+        encrypted: list[str] = []
         for relpath in sorted(scan.all_paths):
             if not sfm.path_is_protected(str(project_root / relpath), patterns):
                 continue
+            at_rest = classify_at_rest(project_root / relpath, project_root)
+            if at_rest is AtRestFormat.ANSIBLE_VAULT:
+                encrypted.append(relpath)
+                continue
             issues: list[str] = []
-            if relpath not in scan.ignored:
-                issues.append(_ISSUE_NOT_GITIGNORED)
-            if relpath in scan.tracked:
-                issues.append(_ISSUE_TRACKED)
+            if at_rest is AtRestFormat.ANSIBLE_VAULT_INLINE:
+                if relpath not in scan.ignored or relpath in scan.tracked:
+                    issues.append(_ISSUE_INLINE_VAULT)
+            else:
+                if relpath not in scan.ignored:
+                    issues.append(_ISSUE_NOT_GITIGNORED)
+                if relpath in scan.tracked:
+                    issues.append(_ISSUE_TRACKED)
             if self._permissions_insecure(project_root / relpath):
                 issues.append(_ISSUE_PERMISSIONS)
             if issues:
                 findings.append((relpath, issues))
-        return findings
+        return findings, encrypted
 
     # ------------------------------------------------------------------
     # non-git fallback (permissions only)
@@ -196,12 +235,15 @@ class SecretFileHygieneCheckerHandler(SessionStartHandlerBase):
 
     def _collect_findings_permissions_only(
         self, project_root: Path, relpaths: list[str]
-    ) -> list[tuple[str, list[str]]]:
-        findings: list[tuple[str, list[str]]] = []
+    ) -> tuple[list[_Finding], list[str]]:
+        findings: list[_Finding] = []
+        encrypted: list[str] = []
         for relpath in relpaths:
-            if self._permissions_insecure(project_root / relpath):
+            if classify_at_rest(project_root / relpath, project_root) is AtRestFormat.ANSIBLE_VAULT:
+                encrypted.append(relpath)
+            elif self._permissions_insecure(project_root / relpath):
                 findings.append((relpath, [_ISSUE_PERMISSIONS]))
-        return findings
+        return findings, encrypted
 
     # ------------------------------------------------------------------
     # shared
@@ -216,8 +258,9 @@ class SecretFileHygieneCheckerHandler(SessionStartHandlerBase):
 
     def _render(
         self,
-        findings: list[tuple[str, list[str]]],
+        findings: list[_Finding],
         *,
+        encrypted: list[str],
         not_a_repo: bool = False,
         truncated: bool = False,
     ) -> list[str]:
@@ -229,11 +272,16 @@ class SecretFileHygieneCheckerHandler(SessionStartHandlerBase):
             lines.append(f"  {relpath}:")
             for issue in issues:
                 lines.append(f"    - {issue}")
+        if encrypted:
+            # Named so a reader is not left wondering why a file matching the
+            # same glob is missing from the list above.
+            lines += ["", _ENCRYPTED_HEADING]
+            lines += [f"  {relpath}" for relpath in encrypted]
         if not_a_repo:
             lines += ["", _NOT_A_REPO_NOTICE]
         if truncated:
             lines += ["", _TRUNCATED_NOTICE]
-        lines += ["", "Metadata only -- content was never read."]
+        lines += ["", _CONTENT_NOTICE]
         return lines
 
     def get_default_enabled(self) -> bool:
@@ -248,10 +296,20 @@ class SecretFileHygieneCheckerHandler(SessionStartHandlerBase):
             "- **not gitignored** -- add it to `.gitignore`\n"
             "- **git-tracked** -- `git rm --cached <path>` to untrack it\n"
             "- **group/world-readable** -- `chmod 600 <path>`\n\n"
-            "**Metadata only.** Files are enumerated via `git ls-files` (tracked, "
-            "untracked-visible and untracked-ignored -- three cheap index reads, "
-            "no filesystem walk) and checked with `stat()` -- the file's CONTENTS "
-            "are never opened, so this advisory cannot leak what it protects. This "
+            "**A file encrypted at rest is left alone.** When the file's content "
+            "is a whole-file Ansible Vault payload (`$ANSIBLE_VAULT;...` header "
+            "and hex armour, checked every session), it is ciphertext and "
+            "committing it is the point of Vault: it gets none of the findings "
+            "above, and the advisory stays silent if nothing else is wrong. The "
+            "same file decrypted in place gets the full advice again. A YAML "
+            "file with inline `!vault |` values gets one statement instead: "
+            "tracking it is correct only if EVERY secret value in it is vaulted, "
+            "which the daemon cannot verify.\n\n"
+            "**Content never enters the advisory.** Files are enumerated via "
+            "`git ls-files` (tracked, untracked-visible and untracked-ignored -- "
+            "three cheap index reads, no filesystem walk) and checked with "
+            "`stat()`; the one content read is the encrypted-at-rest format "
+            "check, inside the daemon, which returns only a format name. This "
             "is the SessionStart half of the permissions/ownership hygiene the "
             "`secret-meta` CLI already reports on demand for a single path.\n\n"
             "**Outside a git repository** (or when `git` is unavailable), "

@@ -15,6 +15,7 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
+from tests.vault_payloads import inline_vault_yaml, vault_file_bytes
 
 from claude_code_hooks_daemon.constants import HandlerID, Priority
 from claude_code_hooks_daemon.constants.timeout import Timeout
@@ -237,6 +238,98 @@ class TestNonGitFallback:
         assert result.decision == Decision.ALLOW
         rendered = " ".join(result.context)
         assert "INCOMPLETE" in rendered
+
+
+class TestEncryptedAtRest:
+    """Plan 00459: an encrypted file is tracked on purpose; never tell a
+    project to untrack it."""
+
+    def _tracked(self, repo: Path, name: str, data: bytes, mode: int = 0o644) -> Path:
+        target = repo / name
+        target.write_bytes(data)
+        target.chmod(mode)
+        _git(repo, "add", name)
+        _git(repo, "commit", "-m", f"add {name}")
+        return target
+
+    def _rendered(self, handler: Any, repo: Path) -> str:
+        with _patched_root(repo), _patched_patterns():
+            result = handler.handle({"source": "startup"})
+        assert result.decision == Decision.ALLOW
+        return "\n".join(result.context)
+
+    def test_encrypted_tracked_file_alone_is_silent(self, handler: Any, repo: Path) -> None:
+        """The owner's report: the warning should simply stop."""
+        self._tracked(repo, "vars.dummy-fixture-glob", vault_file_bytes())
+        assert self._rendered(handler, repo) == ""
+
+    def test_encrypted_file_is_listed_as_fine_beside_a_real_finding(
+        self, handler: Any, repo: Path
+    ) -> None:
+        self._tracked(repo, "vars.dummy-fixture-glob", vault_file_bytes())
+        self._tracked(repo, "plain.dummy-fixture-glob", b"not-a-real-secret\n", 0o600)
+        rendered = self._rendered(handler, repo)
+        assert hygiene_module._ENCRYPTED_HEADING in rendered
+        assert "vars.dummy-fixture-glob" in rendered
+        # Exactly one file gets the untrack advice: the plaintext one.
+        assert rendered.count("git rm --cached") == 1
+        assert rendered.index("plain.dummy-fixture-glob") < rendered.index(
+            hygiene_module._ENCRYPTED_HEADING
+        )
+
+    def test_decrypted_in_place_gets_the_advice_back(self, handler: Any, repo: Path) -> None:
+        target = self._tracked(repo, "vars.dummy-fixture-glob", vault_file_bytes())
+        assert self._rendered(handler, repo) == ""
+        target.write_bytes(b"db_password: not-a-real-secret\n")
+        rendered = self._rendered(handler, repo)
+        assert "vars.dummy-fixture-glob" in rendered
+        assert "git rm --cached" in rendered
+        assert hygiene_module._ENCRYPTED_HEADING not in rendered
+
+    def test_inline_vault_values_get_the_conditional_statement(
+        self, handler: Any, repo: Path
+    ) -> None:
+        self._tracked(repo, "vars.dummy-fixture-glob", inline_vault_yaml(), 0o600)
+        rendered = self._rendered(handler, repo)
+        assert hygiene_module._ISSUE_INLINE_VAULT in rendered
+        assert "git rm --cached" not in rendered
+        assert hygiene_module._ISSUE_NOT_GITIGNORED not in rendered
+
+    def test_inline_vault_file_gitignored_and_untracked_is_silent(
+        self, handler: Any, repo: Path
+    ) -> None:
+        target = repo / "vars.dummy-fixture-glob"
+        target.write_bytes(inline_vault_yaml())
+        target.chmod(0o600)
+        (repo / ".gitignore").write_text("*.dummy-fixture-glob\n")
+        _git(repo, "add", ".gitignore")
+        _git(repo, "commit", "-m", "ignore")
+        assert self._rendered(handler, repo) == ""
+
+    def test_encrypted_file_outside_a_repo_gets_no_permissions_finding(
+        self, handler: Any, tmp_path: Path
+    ) -> None:
+        not_a_repo = tmp_path / "plain-dir"
+        not_a_repo.mkdir()
+        target = not_a_repo / "vars.dummy-fixture-glob"
+        target.write_bytes(vault_file_bytes())
+        target.chmod(0o644)
+        with _patched_root(not_a_repo), _patched_patterns():
+            result = handler.handle({"source": "startup"})
+        rendered = "\n".join(result.context)
+        assert "chmod 600" not in rendered
+        assert "not a git repository" in rendered
+
+    def test_armour_never_reaches_the_advisory(self, handler: Any, repo: Path) -> None:
+        self._tracked(repo, "vars.dummy-fixture-glob", vault_file_bytes())
+        self._tracked(repo, "plain.dummy-fixture-glob", b"do-not-leak-this-content\n")
+        rendered = self._rendered(handler, repo)
+        assert "ANSIBLE_VAULT" not in rendered
+        assert "do-not-leak-this-content" not in rendered
+
+    def test_guidance_explains_encrypted_files(self, handler: Any) -> None:
+        text = handler.get_claude_md()
+        assert "encrypted at rest" in text.lower()
 
 
 class TestGitNativeEnumeration:
