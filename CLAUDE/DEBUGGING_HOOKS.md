@@ -205,8 +205,11 @@ rule. Any acceptance or integration test, or script under `scripts/`, with a
 route to the live daemon must mark each payload with a probe-class source.
 The routes are this repository's `.claude/hooks/` entry points, the acceptance
 `daemon_socket` fixture, and the live socket. A payload for an event that can
-carry `agent_id` also needs `probe_as`. A test that starts its own daemon in a
-temporary directory writes to a log deleted with it, and is not judged.
+carry `agent_id` also needs `probe_as`. A status-line payload has no
+`hook_event_name` (the transport injects it), so on the status-line route the
+guard knows it by its shape: fields only the daemon's status-line schema
+declares, such as `model` and `workspace`. A test that starts its own daemon
+in a temporary directory writes to a log deleted with it, and is not judged.
 
 ## Workflow: From Scenario to Handler
 
