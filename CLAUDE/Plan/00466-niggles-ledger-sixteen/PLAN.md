@@ -41,7 +41,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N3  | `goal_injection` treats any edit of an In Progress plan as the plan starting, and displaces the live goal | Coordinator        | 🔄 In progress        |
 | N7  | The regenerated CLAUDE.md guidance block is not deterministic, so a restart commits a reorder             | Coordinator        | 🔄 In progress        |
 | N8  | `reference_repo_freshness` says BLOCKED on a call it allows                                               | Coordinator        | ⬜ Open               |
-| N9  | `docs_qa` judges gitignored markdown, so installing a Claude Code plugin fails local full QA              | Coordinator        | 🔄 In progress        |
+| N9  | `docs_qa` judges gitignored markdown, so installing a Claude Code plugin fails local full QA              | Coordinator        | ✅ Remedied           |
 
 ## Tasks
 
