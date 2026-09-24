@@ -125,7 +125,7 @@ class WriteClobberGuardHandler(PreToolUseHandlerBase):
 
     def _record(self, hook_input: dict[str, Any], path: str) -> None:
         """Remember that this session knows the contents of ``path``."""
-        known = self._known_paths.setdefault(self._session_id(hook_input), set())
+        known = self._known_paths.get_or_insert(self._session_id(hook_input), set())
         if len(known) < _MAX_PATHS_PER_SESSION:
             known.add(path)
 

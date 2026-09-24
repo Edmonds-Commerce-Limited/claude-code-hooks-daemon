@@ -25,6 +25,7 @@ from claude_code_hooks_daemon.core import BlockingResult, Decision, ProjectConte
 from claude_code_hooks_daemon.core.handler_bases import UserPromptSubmitHandlerBase
 from claude_code_hooks_daemon.core.transcript_reader import TranscriptMessage, TranscriptReader
 from claude_code_hooks_daemon.daemon.housekeeping import report_only_steps
+from claude_code_hooks_daemon.handlers.utils.bounded_fifo_map import BoundedFifoMap
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +109,10 @@ class IdleHousekeepingAdvisoryHandler(UserPromptSubmitHandlerBase):
         self._custom_guidance_mode: str = _DEFAULT_CUSTOM_GUIDANCE_MODE
         # Per-session housekeeping-pass counter (in-memory; resets on daemon
         # restart, which is acceptable for a bounded beta safety-net feature).
-        self._passes_by_session: dict[str, int] = {}
+        # Bounded with atomic FIFO eviction.
+        self._passes_by_session: BoundedFifoMap[str, int] = BoundedFifoMap(
+            max_entries=_MAX_TRACKED_SESSIONS
+        )
 
     def get_default_enabled(self) -> bool:
         """Opt-in: ships OFF by default (beta).
@@ -170,12 +174,12 @@ class IdleHousekeepingAdvisoryHandler(UserPromptSubmitHandlerBase):
         return BlockingResult(decision=Decision.ALLOW, context=[self._build_guidance()])
 
     def _record_pass(self, session_id: str) -> None:
-        """Increment this session's pass count, bounding the tracking map."""
-        if (
-            session_id not in self._passes_by_session
-            and len(self._passes_by_session) >= _MAX_TRACKED_SESSIONS
-        ):
-            self._passes_by_session.pop(next(iter(self._passes_by_session)))
+        """Increment this session's pass count, bounding the tracking map.
+
+        The read and the write are two locked steps, not one: a session's
+        prompts arrive one at a time, so two increments for the SAME session
+        never race, and different sessions touch different keys.
+        """
         self._passes_by_session[session_id] = self._passes_by_session.get(session_id, 0) + 1
 
     def _build_guidance(self) -> str:

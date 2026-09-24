@@ -38,7 +38,7 @@ _MISSING = object()
 class BoundedFifoMap(MutableMapping[K, V], Generic[K, V]):
     """A ``dict`` capped at ``max_entries`` that evicts its OLDEST entry.
 
-    Every insert path — item assignment, :meth:`put`, :meth:`setdefault`,
+    Every insert path — item assignment, :meth:`put`, :meth:`get_or_insert`,
     :meth:`insert_if_absent` — adds a NEW key to a full map by first evicting
     the oldest-inserted entry (FIFO). Overwriting a key already present evicts
     nothing and keeps its position. FIFO rather than LIFO matters: evicting the
@@ -106,8 +106,13 @@ class BoundedFifoMap(MutableMapping[K, V], Generic[K, V]):
         with self._lock:
             self._insert(key, value, journal)
 
-    def setdefault(self, key: K, default: V) -> V:
-        """Return the value for ``key``, inserting ``default`` (bounded) if absent."""
+    def get_or_insert(self, key: K, default: V) -> V:
+        """Return the value for ``key``, inserting ``default`` (bounded) if absent.
+
+        The atomic form of ``setdefault``. The inherited ``setdefault`` is a
+        read and then a write, so two callers racing on one new key can each
+        insert their own default and one of them keeps a value the map dropped.
+        """
         with self._lock:
             if key in self._data:
                 return self._data[key]
@@ -129,15 +134,21 @@ class BoundedFifoMap(MutableMapping[K, V], Generic[K, V]):
             return True
 
     def _insert(self, key: K, value: V, journal: SideEffectJournal | None) -> None:
-        """Bounded insert. Caller holds the lock."""
-        if key not in self._data and len(self._data) >= self._max_entries:
-            victim = next(iter(self._data))
+        """Bounded insert.
+
+        Callers already hold the lock; taking it again (it is re-entrant) keeps
+        the select-then-evict visibly inside it, which is what the semgrep rule
+        checks.
+        """
+        with self._lock:
+            if key not in self._data and len(self._data) >= self._max_entries:
+                victim = next(iter(self._data))
+                if journal is not None:
+                    journal.snapshot(self, victim)
+                del self._data[victim]
             if journal is not None:
-                journal.snapshot(self, victim)
-            del self._data[victim]
-        if journal is not None:
-            journal.snapshot(self, key)
-        self._data[key] = value
+                journal.snapshot(self, key)
+            self._data[key] = value
 
     # ── Removals ─────────────────────────────────────────────────────────────
 

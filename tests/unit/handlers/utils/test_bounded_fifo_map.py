@@ -86,10 +86,15 @@ class TestFifoEviction:
         assert list(fifo) == ["k0", "k1", "k2", "k3"]
         assert fifo["k0"] == 100
 
-    def test_setdefault_evicts_the_oldest_and_returns_the_stored_value(self) -> None:
+    def test_get_or_insert_evicts_the_oldest_and_returns_the_stored_value(self) -> None:
+        fifo = _full()
+        assert fifo.get_or_insert("new", 5) == 5
+        assert fifo.get_or_insert("new", 6) == 5
+        assert list(fifo) == ["k1", "k2", "k3", "new"]
+
+    def test_inherited_setdefault_is_bounded_too(self) -> None:
         fifo = _full()
         assert fifo.setdefault("new", 5) == 5
-        assert fifo.setdefault("new", 6) == 5
         assert list(fifo) == ["k1", "k2", "k3", "new"]
 
     def test_insert_if_absent_claims_once(self) -> None:
@@ -157,11 +162,11 @@ class TestConcurrentCallersNeverRaise:
         assert not hammer(insert)
         assert len(fifo) == 8
 
-    def test_setdefault_and_iteration(self) -> None:
+    def test_get_or_insert_and_iteration(self) -> None:
         fifo = _full(8)
 
         def insert_and_scan(worker: int, index: int) -> None:
-            fifo.setdefault(f"w{worker}-{index}", index)
+            fifo.get_or_insert(f"w{worker}-{index}", index)
             list(fifo)
 
         assert not hammer(insert_and_scan)
