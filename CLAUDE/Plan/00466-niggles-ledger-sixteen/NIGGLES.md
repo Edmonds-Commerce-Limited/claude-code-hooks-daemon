@@ -3,6 +3,29 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
+N34 is taken on the `worktree-n466-n24` branch (the chain deadline cannot
+interrupt a running handler) and lands with that branch.
+
+### N35 — `daemon_sync_after_merge` judges a `cd <worktree> && git merge` against the session root's ORIG_HEAD
+
+**Found by the Plan 00421 agent.** It ran `cd <worktree> && git merge main`
+inside a worktree. The advisory then reported the MAIN checkout's own
+`ORIG_HEAD..HEAD` and named `.claude/hooks-daemon.yaml` and project-handlers
+as changed. The worktree merge had touched neither.
+
+**Why:** `_is_foreign_repo` and the diff both use the hook payload's cwd,
+which is the session root. They ignore the directory the command itself
+`cd`s into. This is the same attribution family as N28 (project_containment
+ignoring a same-command `cd`) and N33 (which daemon, or which checkout,
+a worktree agent's action is judged against).
+
+**Candidate remedy:** resolve the merge's working directory from the
+command, using the shell lexer's `cd` tracking from Plan 00464 (the
+shell-parser consolidation). Run the ORIG_HEAD diff in THAT repository, and
+say nothing when it is a different checkout from the one the daemon
+serves. RED test: `cd <other-worktree> && git merge main` emits no advisory
+about the session root.
+
 ### N33 — a worktree agent's `secret_file_guard.exclude_paths` change had no effect after a daemon restart
 
 **Found by the integration-B2 fix agent.** The agent was writing tests in
@@ -173,6 +196,22 @@ files where skills exist, so a vacuous pass cannot recur. Audit the other
 `scripts/qa/check_*.py` for the same "0 examined, PASS" shape and pin the
 class with a test that runs each check from a worktree fixture.
 
+**The cause, and two more instances (integration B2).** Each checker drops a
+file whose path contains a noise-directory name such as `untracked` or
+`worktrees`, and it tests the ABSOLUTE path. Every agent checkout lives at
+`untracked/worktrees/<name>/`, so every file matches:
+
+- `check_doc_truth.py` `_iter_markdown`: 0 docs scanned in every worktree.
+  **Fixed on the B2 branch** (08c4be0e): it tests the path below `--root`.
+  1785 docs scanned after, 0 violations. The test is
+  `test_a_checkout_inside_a_worktrees_directory_is_still_scanned`.
+- `audit_shell.py` `_is_excluded`: it keeps 0 of the worktree's `.sh` files, so
+  `shell_audit` passes vacuously. Not fixed. B2 ran it by hand over the
+  relative `scripts/` and skill-scripts directories: 52 files, no violations.
+- `check_skill_references.py` (this entry): `_EXCLUDED_DIRS` holds both names
+  and is tested against `path.parts`, so it is very likely the same cause.
+  `check_github_urls.py` tests `path.parts` the same way and should be checked.
+
 **Remedy** (branch `worktree-p468-core`):
 
 - **Cause.** Not the `.git` file: `_should_exclude` matched `_EXCLUDED_DIRS`
@@ -218,8 +257,15 @@ test rather than given their own zero guard.
   classifies `audit_*.py` as well. `audit_error_hiding.py` and
   `audit_capture_corruption.py` were already relative, and already exit 1
   when they collect nothing (Plan 00364 Task 5.4). They are pinned by
-  requiring their artefact from the hostile location. The B2 integration's
-  own doc_truth fix (08c4be0e) is reconciled when B2 lands on main.
+  requiring their artefact from the hostile location.
+
+- **Reconciled with B2.** B2's doc_truth fix (08c4be0e) and its git-visible
+  and protected-path filter (fd6c5438) are kept. The noise-name test in
+  `_iter_markdown` now goes through `scan_scope.relative_parts`, the one
+  mechanism. B2's `test_a_checkout_inside_a_worktrees_directory_is_still_scanned`
+  is kept. There was no duplicate helper to delete: B2 had used an inline
+  `relative_to`. B2's new `check_unreachable_handle_branch.py` is classified in
+  the pin as a counted walker.
 
 ### N25 — a slow handler runs out the client's 30 s budget, and a timeout is an ALLOW for the whole PreToolUse chain
 
@@ -290,6 +336,12 @@ so here the crash denied" is false.
 RED tests: a live-path daemon with `strict_mode: true` denies on a raising
 handler; a SAFETY+BLOCKING handler that raises denies even with `strict_mode`
 off; a non-safety advisory handler that raises still allows, and says so.
+
+### N23 — `recovery_cron_advisor` hands one request's lifecycle phase to another, through the singleton
+
+**Found by Plan 00449's agent** while fixing the eviction race in the same handler. `matches()` stores the detected phase on the handler (`self._cached_phase`) and `handle()` consumes it. The handler is a daemon-lifetime singleton and `server.py` dispatches on a thread pool, so request B's `matches()` can overwrite the value between request A's `matches()` and `handle()`. A then advises on B's phase (CREATION guidance for a PROGRESS edit, say), and B finds the cache already cleared and detects again. It raises nothing, so no test or log shows it. This is a different class from Plan 00449's select-then-evict: per-call state parked on a shared object between two calls. It is out of that plan's scope by its own Non-Goals ("no audit of every mutable handler attribute").
+
+**Candidate remedy:** stop caching on the instance (detect in `handle()`, or key the cache by thread with `threading.local`), with a RED test that interleaves two requests' `matches()` and `handle()`. Then treat it as a class: sweep for any `self._x` assigned in `matches()` and read in `handle()`. That shape is mechanical enough for a semgrep rule like `scripts/qa/semgrep/unlocked-eviction.yaml`.
 
 ### N22 — `lsp_enforcement` takes another command's argument for a grep symbol lookup
 
@@ -365,13 +417,19 @@ N16 is filed on the unmerged `worktree-n466-guard-defects` branch; it joins this
 
 **Candidate remedy:** treat any shell-glob token as a pattern, and deny when the pattern could match a protected name. Compare against the protected basenames and stems, or expand it against the directory when that exists. Keep it no looser than the N4 rule. RED tests: interior `?`, `*` and bracket globs of each shipped protected pattern are denied, while unrelated globs such as `*.py` and `src/*.md` are allowed.
 
-### N9 — `docs_qa` judges gitignored markdown, so installing a Claude Code plugin fails local full QA
+### N9 — ✅ Remedied — `docs_qa` judges gitignored markdown, so installing a Claude Code plugin fails local full QA
 
 **Found by the coordinator** right after installing the Defence Before Fix plugin at project scope (Plan 00467). In this container Claude Code's config directory is `.claude/ccy/`, so the plugin's cache (`.claude/ccy/plugins/cache/...`) and marketplace clone (`.claude/ccy/plugins/marketplaces/...`) land inside the repository. Both are gitignored (`.claude/ccy/.gitignore:3: *`). `llm_qa.py docs_qa` then reported 12 `source-tree-markdown` findings, one per vendored spec file, and the tool FAILED. It reported 0 findings at batch A's gate, before the install. CI does not see this, because a fresh checkout has no `.claude/ccy/`. Every local full QA run, including the coordinator's integration gate, now fails on files that are not part of the project.
 
 The docs corpus walks the filesystem without honouring `.gitignore` (`docs_qa/corpus.py`; it already special-cases `.claude/ccy/CLAUDE.md`, lines 149 and 421).
 
 **Candidate remedy:** the corpus considers only tracked files plus untracked files that are NOT ignored, i.e. `git ls-files --cached --others --exclude-standard`, with a defined fallback outside a git repository. Keep any deliberate inclusion that is ignored but meant to be scanned explicit and named. RED test: a gitignored markdown file under a source-like directory produces no finding, and a tracked one still does. Audit the other QA corpora (plan_qa, doc_snippets, doc_truth, repo_hygiene, sensitive_content, british_english) for the same filesystem-walk assumption, and pin the class.
+
+**Remedied.** `utils/git_repo.py` gained `git_visible_paths(project_root)`: one combined `git ls-files --cached --others --exclude-standard -z` call returning every path git would add, or `None` outside a git repository (callers then fall back to their pre-existing unfiltered walk). `docs_qa/corpus.py`'s `iter_markdown_paths` and `iter_corpus_paths` both filter through it; `.claude/ccy/CLAUDE.md` — deliberately untracked and gitignored, yet named in scope by `is_module_doc_path`'s own docstring — is kept via a small named exception set (`_GITIGNORED_MARKDOWN_INCLUDES`) rather than left an accidental gap, with a directory-descent rule (`_git_visible_ancestor_dirs`) so the walk still reaches it.
+
+The class audit found a SECOND live instance of the same defect: `scripts/qa/check_doc_truth.py`'s `_iter_markdown` denylisted `.claude/ccy/plugins/marketplaces/` by name but not its sibling `cache/` directory, so a plugin's cached spec markdown could still reach `_check_shell_fences` as a false finding. Fixed the same way (filtered through `git_visible_paths`) and reproduced directly with a fixture that git-ignores `.claude/ccy/` and plants a violation inside it.
+
+The rest of the named corpora were audited and left unmigrated, each for a stated, mechanically-pinned reason: `repo_hygiene`, `sensitive_content` and `british_english` already scan `git ls-files` directly by design (tracked-only is deliberate for hygiene/secret-scanning); `magic_values` and `error_hiding` are scoped to `src/`/`tests/`/`scripts/` only, which carry no `.gitignore` gap; `doc_snippets`'s glob set never reaches a nested `.claude/ccy/` subtree; `handler_reference` never walks a directory at all (it introspects the live `HandlerRegistry`); `plan_qa`'s `PlanTree.scan` descends only the configured plan directory via `iterdir()`, never a project-root-wide walk. `tests/unit/qa/test_qa_corpus_git_visibility_audit.py` pins this table as a ratchet: every `MIGRATED` entry is verified by AST to actually import and call `git_visible_paths`, every declared source path is checked to still exist, and every `ALLOWLISTED` entry must carry a non-trivial reason — mirroring `test_qa_package_dependency_direction.py`'s shape.
 
 ### N8 — ✅ Remedied — `reference_repo_freshness` says BLOCKED on a call it allows
 

@@ -89,6 +89,29 @@ config_changes:
       recommended: true
       dormant: false
 
+    - key: handlers.session_start.failsafe_cron_session_advisor
+      description: >-
+        The failsafe recovery cron's SessionStart counterpart (Plan 00394). A
+        session used to be told to create the failsafe cron only at its first
+        plan write, so a session that stalled before one had no recovery net.
+        At the start of every NEW session this gives the same CronList-first
+        reconcile and canonical prompt as recovery_cron_advisor. Silent on a
+        resumed session, when recovery_cron_advisor is disabled (its switch
+        covers both), and when the failsafe cron is declared under an enabled
+        persistent_crons, where persistent_cron_assertor states it instead.
+      example_yaml: |
+        handlers:
+          session_start:
+            failsafe_cron_session_advisor:
+              enabled: true
+              priority: 70
+      migration_note: >-
+        On by default, advisory only, never blocks. To turn the failsafe cron's
+        advice off everywhere, disable recovery_cron_advisor; this handler
+        follows it.
+      recommended: true
+      dormant: false
+
   renamed: []
 
   removed: []
@@ -118,3 +141,30 @@ config_changes:
         on this handler.
       recommended: true
       dormant: false
+    # Ledger 00422 N1: the init template now ships each handler's Priority
+    # constant. Documentation-only (no recommended_value): a project that set
+    # its own priority chose it, and must not be told to change it.
+    - key: handlers.status_line.git_repo_name.priority
+      description: >-
+        The init template now ships 3 (was 5), matching Priority.GIT_REPO_NAME.
+        At 5 the unlisted environment_indicator (4) rendered before the
+        repository name instead of after it.
+      migration_note: >-
+        Set 3 if your config still holds the old shipped value of 5 and you
+        want the environment indicator after the repository name.
+    - key: handlers.status_line.account_display.priority
+      description: >-
+        The init template now ships 5 (was 6), matching
+        Priority.ACCOUNT_DISPLAY. Relative order is unchanged.
+    - key: handlers.status_line.host_hostname.priority
+      description: >-
+        The init template now ships 6 (was 7), matching Priority.HOST_HOSTNAME.
+        Relative order is unchanged.
+    - key: handlers.pre_tool_use.security_antipattern.priority
+      description: >-
+        The init template now ships 14 (was 15), matching
+        Priority.SECURITY_ANTIPATTERN and the band shared by sensitive_content,
+        secret_file_guard and project_containment. It now runs before
+        tdd_enforcement and pipe_blocker (15), so when one tool call trips
+        both and the chain stops at the first deny, the security deny is the
+        one reported.

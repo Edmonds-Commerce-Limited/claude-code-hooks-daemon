@@ -58,6 +58,7 @@ WALKERS: dict[str, tuple[str, str]] = {
     "check_sensitive_content.py": ("sensitive_content.json", "files_scanned"),
     "check_skill_references.py": ("skill_references.json", "files_scanned"),
     "check_skip_list_substring.py": ("skip_list_substring.json", "files_scanned"),
+    "check_unreachable_handle_branch.py": ("unreachable_handle_branch.json", "files_scanned"),
 }
 
 #: Checks that read a fixed input (and fail when it is missing), or report no

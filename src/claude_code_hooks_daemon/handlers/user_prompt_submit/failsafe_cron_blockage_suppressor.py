@@ -59,6 +59,14 @@ interruption during the blocked window is still bounded by "however long the
 owner takes to respond" (BRAINSTORM.md), and the expiry itself further bounds
 an unresponsive owner's silence.
 
+**Which prompt is the owner (Plan 00388).** A prompt clears the marker and the
+cadence only if it carries no daemon tick sentinel (``utils.cron_tick``). Every
+cron prompt the daemon supplies has one -- the failsafe, the background
+watchdog, every ``persistent_crons`` job -- so in a multi-cron session another
+cron's tick no longer reads as the owner coming back. A declared job's tick is
+dropped under a live marker too; the watchdog's never is. A cron whose prompt
+the daemon never wrote still reads as the owner, which fails toward clearing.
+
 **Never terminal.** ``idle_housekeeping_advisory`` and
 ``standing_authorisations`` also key off the same canonical cron prompt and
 must keep running on every NON-suppressed tick. A non-terminal DENY still
@@ -81,6 +89,7 @@ from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.handlers.post_tool_use.recovery_cron_advisor import (
     CANONICAL_CRON_PROMPT_MARKER,
+    is_failsafe_prompt,
 )
 from claude_code_hooks_daemon.utils.blockage_marker import (
     MARKER_FILENAME,
@@ -95,6 +104,7 @@ from claude_code_hooks_daemon.utils.cron_cadence import (
     reset_cadence,
     write_cadence,
 )
+from claude_code_hooks_daemon.utils.cron_tick import DaemonTick, TickKind, classify_tick
 from claude_code_hooks_daemon.utils.goal_ledger import (
     LEDGER_FILENAME,
     GoalLedger,
@@ -136,6 +146,22 @@ _BACKOFF_RULE: Final[Rule] = Rule(
         "then every 4, and no sparser -- a session interrupted by a rate "
         "limit still recovers once the limit lifts. Any genuine (non-cron) "
         "user prompt resets it to hourly immediately."
+    ),
+)
+
+_DECLARED_RULE: Final[Rule] = Rule(
+    rule_id=RuleID.DECLARED_CRON_SUPPRESSED,
+    blocked="A delivered persistent_crons tick, while a 'blocked only on human input' marker is live",
+    why="A declared job's tick against a session blocked only on human input costs a full model turn",
+    fix="Nothing to do -- this is expected. Send a real message to clear the marker and resume ticks",
+    verbose=(
+        "This session recorded a 'blocked only on human input' marker still "
+        "within its expiry window, and this tick carries a declared "
+        "persistent_crons job's [tick:job:<id>] sentinel, so it was dropped "
+        "before reaching the model -- no turn spent (Plan 00388). Only ticks "
+        "the daemon supplied the prompt for are recognised; a real user prompt "
+        "clears the marker and every cron resumes, and the marker's own expiry "
+        "restores them if the owner stays silent for longer."
     ),
 )
 
@@ -266,12 +292,15 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
         cadence_path = untracked_dir / CADENCE_FILENAME
 
         prompt = hook_input.get(HookInputField.PROMPT)
-        is_cron_prompt = isinstance(prompt, str) and CANONICAL_CRON_PROMPT_MARKER in prompt
+        tick = classify_tick(prompt)
+        # By sentinel, or by the heading literal a failsafe cron created before
+        # the sentinel existed carries alone (Plan 00388).
+        is_failsafe_tick = isinstance(prompt, str) and is_failsafe_prompt(prompt)
 
-        if not is_cron_prompt:
-            # A genuine (non-cron) prompt means the owner is back -- clear any
-            # stale marker now instead of waiting up to expiry_hours for it to
-            # lapse on its own, and reset the cadence to hourly for the same
+        if tick is None and not is_failsafe_tick:
+            # A prompt carrying no daemon tick sentinel is the owner -- clear
+            # any stale marker now instead of waiting up to expiry_hours for it
+            # to lapse on its own, and reset the cadence to hourly for the same
             # reason. Both are fail-open (they log and swallow OSError), so
             # this never blocks the prompt.
             clear_marker(marker_path)
@@ -282,6 +311,11 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
         now = self._clock()
         expiry_seconds = self._expiry_hours * _SECONDS_PER_HOUR
         declared = marker_is_valid(marker, session_id, now, expiry_seconds)
+
+        if not is_failsafe_tick and tick is not None:
+            # Another daemon cron's tick is never the owner, so it touches
+            # neither the marker nor the cadence (Plan 00388).
+            return self._handle_other_tick(tick, declared=declared, session_id=session_id)
 
         try:
             owed = self._work_is_owed()
@@ -318,6 +352,35 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
         )
         return BlockingResult(decision=Decision.DENY, reason=RuleFormatter().verbose(_RULE))
 
+    @staticmethod
+    def _handle_other_tick(tick: DaemonTick, *, declared: bool, session_id: str) -> BlockingResult:
+        """Decide a recognised tick from a cron other than the failsafe.
+
+        A declared ``persistent_crons`` job stands down with the marker (Task
+        2.4, Plan 00392 N1): the session said it is blocked only on the human,
+        and the observed case was an ``issue-sdlc`` tick finding every issue
+        parked on one. The watchdog never does -- reaping runaway background
+        processes is not blocked on the human, and an idle wait is exactly the
+        window it was created to cover.
+
+        Args:
+            tick: The recognised tick, never the failsafe.
+            declared: Whether a still-valid marker exists for this session.
+            session_id: The current session.
+
+        Returns:
+            DENY for a declared job's tick under a live marker, else ALLOW.
+        """
+        if tick.kind is not TickKind.DECLARED or not declared:
+            return BlockingResult(decision=Decision.ALLOW)
+        logger.info(
+            "failsafe_cron_blockage_suppressor: suppressing declared cron %s for session %s",
+            tick.job_id,
+            session_id,
+        )
+        reason = f"{RuleFormatter().verbose(_DECLARED_RULE)}\n\nDeclared job: {tick.job_id}"
+        return BlockingResult(decision=Decision.DENY, reason=reason)
+
     def _apply_backoff(self, cadence_path: Path, session_id: str) -> BlockingResult:
         """Advance the cadence and drop or deliver this tick accordingly.
 
@@ -341,13 +404,14 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
         return BlockingResult(decision=Decision.DENY, reason=RuleFormatter().verbose(_BACKOFF_RULE))
 
     def get_rules(self) -> list[Rule]:
-        """Return both Rules backing this handler's DENY paths.
+        """Return the Rules backing this handler's DENY paths.
 
-        Two, not one, because the situations differ in what the agent can do
+        Separate rules because the situations differ in what the agent can do
         about them: suppression needs a declaration and stops ticks entirely
-        until a real prompt; the backoff needs nothing and never stops them.
+        until a real prompt; the backoff needs nothing and never stops them;
+        a declared job's suppression names a different cron.
         """
-        return [_RULE, _BACKOFF_RULE]
+        return [_RULE, _BACKOFF_RULE, _DECLARED_RULE]
 
     def get_claude_md(self) -> str | None:
         """Document the suppression contract."""
@@ -365,6 +429,15 @@ class FailsafeCronBlockageSuppressorHandler(UserPromptSubmitHandlerBase):
             "(`expiry_hours`, default 24) so an extended silence restores "
             "full hourly coverage automatically. Never terminal: other "
             "handlers keyed on the same canonical prompt still run.\n\n"
+            "**Several crons in one session** (Plan 00388). Every cron prompt "
+            "the daemon hands you starts with a sentinel line — "
+            "`[tick:failsafe]`, `[tick:watchdog]` or `[tick:job:<id>]` — so "
+            "paste it verbatim and never drop that line. A tick carrying one "
+            "is never mistaken for the owner, so it leaves the marker and the "
+            "cadence alone. A declared `persistent_crons` job's tick is also "
+            "dropped while the marker is live (`R-DECLARED-CRON-SUPPRESSED`); "
+            "the watchdog's is always delivered. A cron prompt you composed "
+            "yourself carries no sentinel and still reads as the owner.\n\n"
             "**A session that declares nothing is backed off, not left at "
             "hourly** (Plan 00337). When the daemon-side goal ledger holds no "
             "still-live goal, ticks thin out — hourly, then every 2 hours, "

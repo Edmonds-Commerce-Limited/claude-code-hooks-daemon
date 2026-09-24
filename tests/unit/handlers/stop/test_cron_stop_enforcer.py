@@ -19,6 +19,7 @@ than guessed (see the plan's DESIGN-cron-enforcement.md):
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +36,14 @@ from claude_code_hooks_daemon.handlers.stop.cron_stop_enforcer import (
     CronStopEnforcerHandler,
 )
 from claude_code_hooks_daemon.utils.cron_enforcement import PROMPT_DELIVERY_CAP
+from claude_code_hooks_daemon.utils.cron_pause import (
+    CRON_PAUSES_FILENAME,
+    PAUSE_ADVISE_INTERVAL,
+    PAUSE_TTL_SECONDS,
+    CronPause,
+    record_pause,
+    remove_pause,
+)
 
 
 class _RootedCronStopEnforcerHandler(CronStopEnforcerHandler):
@@ -192,6 +201,166 @@ class TestMultipleDeclaredJobs:
         assert result.reason is not None
         assert "missing-job" in result.reason
         assert "gh-issue-sdlc" not in result.reason
+
+
+class TestASessionPausedJobIsAcceptedVisibly:
+    """Ledger 00422 N4, decision 2: a job paused for THIS session through
+    ``hooks-daemon cron-pause`` may be missing, and the output says so."""
+
+    _SESSION = "paused-session"
+
+    def _paused_handler(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *jobs: PersistentCronConfig
+    ) -> CronStopEnforcerHandler:
+        handler = _handler(monkeypatch, _config(*jobs))
+        monkeypatch.setattr(handler, "_pauses_path", lambda: tmp_path / CRON_PAUSES_FILENAME)
+        return handler
+
+    def _pause(self, tmp_path: Path, job_id: str, *, session_id: str = _SESSION) -> None:
+        record_pause(
+            tmp_path / CRON_PAUSES_FILENAME,
+            CronPause(
+                job_id=job_id,
+                session_id=session_id,
+                reason="owner asked to stop issue-sdlc for today",
+                recorded_at=time.time(),
+            ),
+            now=time.time(),
+        )
+
+    def test_a_paused_missing_job_allows(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        handler = self._paused_handler(monkeypatch, tmp_path, _JOB)
+        self._pause(tmp_path, _JOB.id)
+
+        result = handler.handle({"session_id": self._SESSION, "session_crons": []})
+
+        assert result.decision is Decision.ALLOW
+
+    def test_the_allow_names_the_job_the_reason_and_the_expiry(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        handler = self._paused_handler(monkeypatch, tmp_path, _JOB)
+        self._pause(tmp_path, _JOB.id)
+
+        result = handler.handle({"session_id": self._SESSION, "session_crons": []})
+
+        text = "\n".join(result.context)
+        assert _JOB.id in text
+        assert "owner asked to stop issue-sdlc for today" in text
+        assert "expires" in text
+
+    def test_the_pause_note_is_rate_limited_but_speaks_first(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Every ALLOW-with-context on Stop costs a turn, so the note speaks on
+        the first stop and then periodically -- never on none of them."""
+        handler = self._paused_handler(monkeypatch, tmp_path, _JOB)
+        self._pause(tmp_path, _JOB.id)
+        payload = {"session_id": self._SESSION, "session_crons": []}
+
+        results = [handler.handle(payload) for _ in range(PAUSE_ADVISE_INTERVAL + 1)]
+
+        spoke = [bool(r.context) for r in results]
+        assert spoke[0] is True
+        assert spoke[1] is False
+        assert spoke[PAUSE_ADVISE_INTERVAL] is True
+
+    def test_another_sessions_pause_does_not_apply(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        handler = self._paused_handler(monkeypatch, tmp_path, _JOB)
+        self._pause(tmp_path, _JOB.id, session_id="some-other-session")
+
+        result = handler.handle({"session_id": self._SESSION, "session_crons": []})
+
+        assert result.decision is Decision.DENY
+
+    def test_an_expired_pause_blocks_again(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        handler = self._paused_handler(monkeypatch, tmp_path, _JOB)
+        stale_at = time.time() - PAUSE_TTL_SECONDS - 60
+        record_pause(
+            tmp_path / CRON_PAUSES_FILENAME,
+            CronPause(job_id=_JOB.id, session_id=self._SESSION, reason="r", recorded_at=stale_at),
+            now=stale_at,
+        )
+
+        result = handler.handle({"session_id": self._SESSION, "session_crons": []})
+
+        assert result.decision is Decision.DENY
+
+    def test_a_resumed_job_blocks_again(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        handler = self._paused_handler(monkeypatch, tmp_path, _JOB)
+        self._pause(tmp_path, _JOB.id)
+        remove_pause(
+            tmp_path / CRON_PAUSES_FILENAME,
+            job_id=_JOB.id,
+            session_id=self._SESSION,
+            now=time.time(),
+        )
+
+        result = handler.handle({"session_id": self._SESSION, "session_crons": []})
+
+        assert result.decision is Decision.DENY
+
+    def test_an_unpaused_missing_job_still_blocks_and_the_pause_is_named(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        other = PersistentCronConfig(id="other-job", schedule="41 * * * *", prompt="q")
+        handler = self._paused_handler(monkeypatch, tmp_path, _JOB, other)
+        self._pause(tmp_path, _JOB.id)
+
+        result = handler.handle({"session_id": self._SESSION, "session_crons": []})
+
+        assert result.decision is Decision.DENY
+        assert result.reason is not None
+        assert "other-job" in result.reason
+        assert "PAUSED" in result.reason
+        assert "owner asked to stop issue-sdlc for today" in result.reason
+
+    def test_the_deny_hands_over_the_unpaused_jobs_sentinel_only(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The pause (ledger 00422 N4) and the tick sentinel (Plan 00388) came
+        from separate branches: the job to re-create is given with its
+        sentinel, and the paused one is named but not given to re-create."""
+        other = PersistentCronConfig(id="other-job", schedule="41 * * * *", prompt="q")
+        handler = self._paused_handler(monkeypatch, tmp_path, _JOB, other)
+        self._pause(tmp_path, _JOB.id)
+
+        result = handler.handle({"session_id": self._SESSION, "session_crons": []})
+
+        assert result.reason is not None
+        assert "[tick:job:other-job]" in result.reason
+        assert f"[tick:job:{_JOB.id}]" not in result.reason
+
+    def test_a_paused_job_that_is_running_anyway_says_nothing(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        handler = self._paused_handler(monkeypatch, tmp_path, _JOB)
+        self._pause(tmp_path, _JOB.id)
+        payload = {
+            "session_id": self._SESSION,
+            "session_crons": [_session_cron(_JOB.schedule, _JOB.prompt)],
+        }
+
+        result = handler.handle(payload)
+
+        assert result.decision is Decision.ALLOW
+        assert result.context == []
+
+    def test_no_untracked_dir_means_no_pause(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        handler = _handler(monkeypatch, _config(_JOB))
+        monkeypatch.setattr(handler, "_pauses_path", lambda: None)
+
+        result = handler.handle({"session_id": self._SESSION, "session_crons": []})
+
+        assert result.decision is Decision.DENY
 
 
 class TestHandlerWiring:

@@ -2687,16 +2687,18 @@ handlers:
 
 **Description:** On a `Task` tool dispatch, checks the prompt for a file-handoff declaration — either the plan folder the subagent is working in, or an explicit "not plan work" statement paired with a declared file destination. A subagent's final message travels back over a bounded-size wire channel that can silently elide an oversized inline report in the MIDDLE, so a coordinator can receive what looks like a complete report while content is missing (Plan 00307). Declaring a file destination up front is the dispatch-time half of the fix; [`subagent_report_size_blocker`](#subagent_report_size_blocker) is the return-time half.
 
-**Fires when:** the dispatched prompt names neither a plan-folder path (`CLAUDE/Plan/NNNNN-name/`, or the project's configured plan directory) nor the `not plan work` phrase plus a declared write/save/report/output/store destination.
+**Default destination:** the dispatching plan's folder. Its `subagent-reports/{yymmdd}-{agent-name}-{model}.md` is tracked by git and committed with the plan. `fallback_report_dir` is gitignored, so it is the fallback only when no plan applies: a report written there is lost when the container goes.
 
-**Enforcement mode:** advisory by default — injects the contract as `additionalContext` and still allows the dispatch. `options.strict: true` denies an undeclared dispatch instead.
+**Fires when:** the dispatched prompt names neither a plan-folder path (`CLAUDE/Plan/NNNNN-name/`, or the project's configured plan directory) nor the `not plan work` phrase plus a declared write/save/report/output/store destination. Separately, a prompt that names a plan folder but declares a destination under `fallback_report_dir` gets an advisory naming that plan's `subagent-reports/` instead.
+
+**Enforcement mode:** advisory by default — injects the contract as `additionalContext` and still allows the dispatch. `options.strict: true` denies an undeclared dispatch instead. The plan-work-to-fallback advisory is never a deny, in either mode.
 
 **Options:**
 
-| Option                | Type   | Default                    | Description                                                           |
-| --------------------- | ------ | -------------------------- | --------------------------------------------------------------------- |
-| `strict`              | `bool` | `false`                    | When true, denies a dispatch that declares neither destination shape. |
-| `fallback_report_dir` | `str`  | `untracked/agent-reports/` | Directory named in the contract text for non-plan-work dispatches.    |
+| Option                | Type   | Default                    | Description                                                                       |
+| --------------------- | ------ | -------------------------- | --------------------------------------------------------------------------------- |
+| `strict`              | `bool` | `false`                    | When true, denies a dispatch that declares neither destination shape.             |
+| `fallback_report_dir` | `str`  | `untracked/agent-reports/` | Gitignored directory for dispatches with no plan; plan work sent here is advised. |
 
 **Config example:**
 
@@ -3195,6 +3197,8 @@ handlers:
 **Why it exists:** the supervisor's model auto-restore has to tell a MACHINE downgrade from a model you chose yourself. Everything else it could look at — typed keystrokes, a model high-water mark, `~/.claude/settings.json` — can only infer that a change *was not* yours, and a live dogfood showed what that costs: the supervisor typed `/model fable` at a human who had just picked Opus, forced their effort to that model's floor, and queued a `/compact`. The transcript record attributes the downgrade to the platform POSITIVELY, so a model you pick yourself is never overridden — it produces no such record.
 
 **Turning it off disables the auto-restore.** Since the supervisor arms only on this signal, a session with no recorder never restores. That is the safe direction, and it is not silent: the supervisor writes `downgrade fable -> opus is unattributed (no model_downgrade_recorder signal) — no restore` to its decision log.
+
+**The effort floor answers the mirror question the other way, on purpose.** A model drop with no platform record opens no restore. An *effort* drop the supervisor did not type is trusted as yours: it is latched like a typed `/effort <level>`, so the per-model floor stops for the rest of that model spell. This covers a level picked from the bare `/effort` selector, which types nothing the supervisor can read. Both rules stop the supervisor reverting a change it cannot prove was its own or the platform's. The decision log records `effort <from> -> <to> on <family> was not injected by the supervisor — latched as a manual choice`.
 
 It never blocks, never advises, and writes nothing at all for a session that was never downgraded. The signal names both models, both families, the refusal category and the scope — never any message content.
 
@@ -3801,6 +3805,8 @@ handlers:
 The backoff thins ticks to hourly, then every 2 hours, then every 4, and **never sparser** (`R-FAILSAFE-CRON-BACKED-OFF`), so a session interrupted by a rate limit still recovers once the limit lifts. Any genuine user prompt resets it to hourly. "Could not determine whether work is owed" is a third value, not a synonym for "no": on the undeclared path it counts as owed, so an unresolvable plan directory costs a wasted tick rather than a silently withdrawn safety net. Adding the ledger consult means this handler carries `HandlerTag.PLANNING` — a project that disables that tag now disables this handler too.
 
 **Fails open everywhere:** no marker, a marker for a different session, an expired marker, a corrupt/unreadable marker, an unreadable cadence file, or no resolvable project context all ALLOW the tick through unchanged — suppression is a positive assertion made only when every condition is individually verified, never the default. Any genuine (non-cron) user prompt clears the marker immediately (a different handler-independent behaviour of `auto_continue_stop`'s narrow write conditions never re-arming outside a new matching stop).
+
+**Several crons in one session (Plan 00388):** a prompt is the owner, and clears the marker and the cadence, only if it carries no daemon tick sentinel. Every cron prompt the daemon supplies starts with one — `[tick:failsafe]` (the canonical prompt), `[tick:watchdog]` (`background_process_tracker`, now supplied verbatim) and `[tick:job:<id>]` (every `persistent_crons` job, as the assertor and the Stop enforcer render it) — so another cron's tick no longer wipes the marker. A declared job's tick is also dropped while the marker is live (`R-DECLARED-CRON-SUPPRESSED`, no backoff); the watchdog's is always delivered, because reaping runaway processes is not blocked on the human. A cron whose prompt the daemon never wrote — agent-composed, `/loop`, `ScheduleWakeup`, or one created before this change — still reads as the owner, which fails toward clearing. The old `FAILSAFE RECOVERY CHECK` literal stays recognised for failsafe crons created before the sentinel.
 
 **Never terminal:** `idle_housekeeping_advisory` and `standing_authorisations` also key off the same canonical cron prompt and must keep running on every non-suppressed tick. A non-terminal DENY still survives later handlers regardless of registration order.
 

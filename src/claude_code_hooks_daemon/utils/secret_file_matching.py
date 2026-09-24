@@ -34,7 +34,10 @@ from typing import Any, Final
 
 import yaml
 
-from claude_code_hooks_daemon.utils.command_evasion import git_subcommand_index
+from claude_code_hooks_daemon.utils.command_evasion import (
+    git_subcommand_index,
+    strip_transparent_reserved_words,
+)
 from claude_code_hooks_daemon.utils.path_exclusion import (
     path_matches_globs,
     resolve_project_root,
@@ -1118,11 +1121,17 @@ def is_exempt_invocation(
     the compound as a whole is judged by the deny rule instead. A single
     leading ``cd <dir> &&`` is removed before that judgement (see
     ``_strip_leading_cd``); everything after it faces the unchanged rule.
+
+    A leading ``time`` or ``!`` is looked past (Plan 00422 N25): neither
+    changes which command runs or what it reads. ``then``, ``do`` and the
+    other compound-only reserved words are NOT, so a fragment of a compound
+    command is never judged as the single command this exemption requires.
     """
     stripped = command.strip()
     if not stripped:
         return False
     stripped = _strip_leading_cd(stripped, patterns) or stripped
+    stripped = strip_transparent_reserved_words(stripped)
     if _PROCESS_SUBSTITUTION in stripped:
         return False
     if any(separator in stripped for separator in _COMMAND_SEPARATORS):
@@ -1303,10 +1312,13 @@ def is_encrypted_target_invocation(
 
     ``is_encrypted`` receives an absolute path and must read the file at the
     time of the call: the answer is not cached here.
+
+    A leading ``time`` or ``!`` is looked past before the head is read, as in
+    ``is_exempt_invocation``; no other reserved word is.
     """
     if any(char in _EXPANSION_CHARS for char in command):
         return False
-    words = _shell_words(command)
+    words = _shell_words(strip_transparent_reserved_words(command))
     if not words or not _is_single_simple_command(words):
         return False
     if not _is_encrypted_target_reader(words):

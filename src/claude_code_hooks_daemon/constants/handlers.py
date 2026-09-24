@@ -885,6 +885,14 @@ class HandlerID:
         config_key="persistent_cron_assertor",
         display_name="persistent-cron-assertor",
     )
+    # Plan 00394 option 2: the failsafe recovery cron's SessionStart
+    # counterpart, so a session is covered from its start rather than from its
+    # first plan write. Follows recovery_cron_advisor's switch.
+    FAILSAFE_CRON_SESSION_ADVISOR = HandlerIDMeta(
+        class_name="FailsafeCronSessionAdvisorHandler",
+        config_key="failsafe_cron_session_advisor",
+        display_name="failsafe-cron-session-advisor",
+    )
     # Cron Stop enforcer (Stop handler) -- Plan 00416 Task 1.1: the teeth
     # PERSISTENT_CRON_ASSERTOR cannot have. session_crons reaches Stop (unlike
     # SessionStart), so this VERIFIES declared persistent_crons jobs against

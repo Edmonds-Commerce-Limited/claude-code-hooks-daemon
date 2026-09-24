@@ -662,6 +662,10 @@ handlers:
       enabled: true            # Silent unless persistent_crons.enabled AND a job is declared; Claude Code crons are session-only, so they need re-creating each session
       priority: 70
 
+    failsafe_cron_session_advisor:  # The failsafe recovery cron from session start, not from the first plan write (Plan 00394)
+      enabled: true                 # New sessions only; follows recovery_cron_advisor's switch; silent when the failsafe is declared under persistent_crons
+      priority: 70
+
   # PreCompact handlers (run before conversation compaction)
   pre_compact:
     disclosure_reset_pre_compact:  # Reset per-agent rule-disclosure state before compaction (Plan 00116 Phase 4)
