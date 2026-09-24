@@ -116,7 +116,7 @@ when the dispatched type cannot write.
 - [x] Test: the size blocker's over-threshold message points at the
   saved path when persistence succeeded, and falls back to the
   pre-Task-1.6 message when it did not.
-- [ ] Full QA passes (foreground, on the final commit).
+- [x] Full QA passes (foreground, on the final commit).
 
 ## Delivery & Milestones
 
