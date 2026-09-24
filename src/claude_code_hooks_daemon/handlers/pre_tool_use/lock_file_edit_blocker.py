@@ -19,9 +19,9 @@ from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
-from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
-#: Acceptance-test fixture directory, below the sanctioned scratch root.
+#: Acceptance-test fixture directory, below the gitignored acceptance root.
 _FIXTURE_DIR: Final[str] = "acceptance-test-locks"
 
 _RULE = Rule(
@@ -242,14 +242,14 @@ class LockFileEditBlockerHandler(PreToolUseHandlerBase):
         write_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": scratch_path(_FIXTURE_DIR, "package-lock.json"),
+                "file_path": acceptance_path(_FIXTURE_DIR, "package-lock.json"),
                 "content": "{}",
             },
         )
         edit_probe = ToolPayload(
             tool_name=ToolName.EDIT,
             tool_input={
-                "file_path": scratch_path(_FIXTURE_DIR, "Cargo.lock"),
+                "file_path": acceptance_path(_FIXTURE_DIR, "Cargo.lock"),
                 "old_string": "old",
                 "new_string": "new",
             },
@@ -268,12 +268,12 @@ class LockFileEditBlockerHandler(PreToolUseHandlerBase):
                     r"npm install",
                 ],
                 safety_notes=(
-                    "Inside the gitignored scratch directory - safe. Handler blocks "
+                    "Inside the gitignored acceptance directory - safe. Handler blocks "
                     "Write before file is created."
                 ),
                 test_type=TestType.BLOCKING,
-                setup_commands=[f"mkdir -p untracked/scratch/{_FIXTURE_DIR}"],
-                cleanup_commands=[f"rm -rf untracked/scratch/{_FIXTURE_DIR}"],
+                setup_commands=[f"mkdir -p untracked/acceptance/{_FIXTURE_DIR}"],
+                cleanup_commands=[f"rm -rf untracked/acceptance/{_FIXTURE_DIR}"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),
@@ -289,15 +289,15 @@ class LockFileEditBlockerHandler(PreToolUseHandlerBase):
                     r"cargo update",
                 ],
                 safety_notes=(
-                    "Inside the gitignored scratch directory - safe. Handler blocks "
+                    "Inside the gitignored acceptance directory - safe. Handler blocks "
                     "Edit before file is modified."
                 ),
                 test_type=TestType.BLOCKING,
                 setup_commands=[
-                    f"mkdir -p untracked/scratch/{_FIXTURE_DIR}",
-                    f"echo 'old content' > untracked/scratch/{_FIXTURE_DIR}/Cargo.lock",
+                    f"mkdir -p untracked/acceptance/{_FIXTURE_DIR}",
+                    f"echo 'old content' > untracked/acceptance/{_FIXTURE_DIR}/Cargo.lock",
                 ],
-                cleanup_commands=[f"rm -rf untracked/scratch/{_FIXTURE_DIR}"],
+                cleanup_commands=[f"rm -rf untracked/acceptance/{_FIXTURE_DIR}"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),

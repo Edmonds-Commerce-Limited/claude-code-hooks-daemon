@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final
 
+from claude_code_hooks_daemon.constants.paths import ProjectPath
 from claude_code_hooks_daemon.constants.protocol import HookInputField
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.daemon.synthetic_traffic import (
@@ -51,7 +52,7 @@ PlaybookBlock = dict[str, Any]
 DISPATCHABLE_EVENTS = frozenset({"PreToolUse", "PostToolUse"})
 
 #: Written unexpanded into the playbook so it stays portable across installs
-#: (`scratch_path`, `project_dir_path`); a client's root is not this one's.
+#: (`acceptance_path`, `project_dir_path`); a client's root is not this one's.
 _PROJECT_DIR_PATTERN = re.compile(r"\$\{CLAUDE_PROJECT_DIR\}|\$CLAUDE_PROJECT_DIR")
 
 _FILE_PATH_KEY = "file_path"
@@ -109,7 +110,7 @@ class ExecutableProbe:
 #: running an unreviewed one because its path looked acceptable is unbounded.
 #:
 #: Anchored end to end, so a shape cannot be reached by appending to a
-#: permitted one: `mkdir -p <scratch> && rm -rf /` matches none of these.
+#: permitted one: `mkdir -p <fixture> && rm -rf /` matches none of these.
 _PERMITTED_PROBE_COMMANDS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"^mkdir -p (?P<path>[^\s;&|<>]+)$"), "mkdir"),
     (re.compile(r"^install -d (?P<path>[^\s;&|<>]+)$"), "mkdir"),
@@ -122,8 +123,10 @@ _PERMITTED_PROBE_COMMANDS: tuple[tuple[re.Pattern[str], str], ...] = (
 )
 
 #: Where a probe is allowed to act, relative to the checkout. The same rule the
-#: harness applies to its own deletes.
-_PROBE_SCRATCH = ("untracked", "scratch")
+#: harness applies to its own deletes. Deliberately not the human scratch
+#: directory (Plan 00422 N11): a cleanup `rm -rf` there could take an agent's
+#: working notes with it.
+_PROBE_ROOT = tuple(ProjectPath.ACCEPTANCE_DIR.split("/"))
 
 
 @dataclass(frozen=True)
@@ -167,11 +170,11 @@ def vet_probe_commands(
     Everywhere else a command is data placed in `tool_input` and answered by
     the daemon; these describe real changes to the tree. So each is checked
     twice -- the shape must be on the closed list above, and the path it acts
-    on must resolve inside the checkout's scratch directory -- and then
+    on must resolve inside the checkout's acceptance root -- and then
     converted to a `FixtureAction` the caller performs directly.
 
-    Resolved, not string-matched: `untracked/scratch/../../etc` starts with the
-    sanctioned prefix and is not inside it.
+    Resolved, not string-matched: `untracked/acceptance/../../etc` starts with
+    the sanctioned prefix and is not inside it.
     """
     actions: list[FixtureAction] = []
     for command in commands or []:
@@ -184,9 +187,9 @@ def vet_probe_commands(
             resolved = Path(target)
             if not resolved.is_absolute():
                 resolved = project_root / resolved
-            scratch = project_root.joinpath(*_PROBE_SCRATCH)
+            probe_root = project_root.joinpath(*_PROBE_ROOT)
             try:
-                inside = resolved.resolve().is_relative_to(scratch.resolve())
+                inside = resolved.resolve().is_relative_to(probe_root.resolve())
             except OSError as exc:
                 # A path the filesystem cannot resolve is its own refusal, not a
                 # quiet vote for "outside": the two have different remedies, and
@@ -196,7 +199,7 @@ def vet_probe_commands(
                 )
             if not inside:
                 return RefusedCommands(
-                    reason=f"fixture command acts outside {'/'.join(_PROBE_SCRATCH)}: {command!r}"
+                    reason=f"fixture command acts outside {ProjectPath.ACCEPTANCE_DIR}: {command!r}"
                 )
             actions.append(
                 FixtureAction(

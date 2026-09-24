@@ -3,12 +3,12 @@
 from typing import Any
 
 from claude_code_hooks_daemon.strategies.lint.common import COMMON_SKIP_PATHS, lint_output_dir
-from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
 # Language-specific constants
 _LANGUAGE_NAME = "Rust"
 _EXTENSIONS: tuple[str, ...] = (".rs",)
-#: Acceptance-test fixture directory, below the sanctioned scratch root.
+#: Acceptance-test fixture directory, below the gitignored acceptance root.
 _FIXTURE_DIR = "acceptance-test-lint-rust"
 #: Both commands share this framing. `clippy-driver` is a rustc wrapper, so it
 #: defaults to a BINARY crate and rejects any library-shaped file with E0601
@@ -92,18 +92,18 @@ class RustLintStrategy:
             ToolPayload,
         )
 
-        fixture_root = scratch_path(_FIXTURE_DIR)
+        fixture_root = acceptance_path(_FIXTURE_DIR)
         probe_valid = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": scratch_path(_FIXTURE_DIR, "valid.rs"),
+                "file_path": acceptance_path(_FIXTURE_DIR, "valid.rs"),
                 "content": "pub fn hello() {}",
             },
         )
         probe_invalid = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": scratch_path(_FIXTURE_DIR, "invalid.rs"),
+                "file_path": acceptance_path(_FIXTURE_DIR, "invalid.rs"),
                 "content": "pub fn hello( {}",
             },
         )
@@ -117,7 +117,7 @@ class RustLintStrategy:
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
                 safety_notes=(
-                    "Inside the gitignored scratch directory - safe. Creates temporary Rust file."
+                    "Inside the gitignored acceptance directory - safe. Creates temporary Rust file."
                 ),
                 test_type=TestType.ADVISORY,
                 setup_commands=[f"mkdir -p {fixture_root}"],
@@ -133,7 +133,7 @@ class RustLintStrategy:
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"Rust lint FAILED", r"invalid.rs"],
                 safety_notes=(
-                    "Inside the gitignored scratch directory - safe. "
+                    "Inside the gitignored acceptance directory - safe. "
                     "Creates temporary Rust file with syntax error."
                 ),
                 test_type=TestType.BLOCKING,

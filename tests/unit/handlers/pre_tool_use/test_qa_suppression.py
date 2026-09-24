@@ -257,7 +257,7 @@ class TestQaSuppressionHandlerMatches:
 
         handler = QaSuppressionHandler()
         hook_input = _make_write_input(
-            f"{root}/untracked/scratch/acceptance-test-qa-python/sample.py",
+            f"{root}/untracked/acceptance/acceptance-test-qa-python/sample.py",
             f"x = 1  {PY_TYPE_IGNORE}",
         )
         assert handler.matches(hook_input) is True

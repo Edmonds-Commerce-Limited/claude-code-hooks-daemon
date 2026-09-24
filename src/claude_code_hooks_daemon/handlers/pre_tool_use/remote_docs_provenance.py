@@ -228,13 +228,13 @@ class RemoteDocsProvenanceHandler(PreToolUseHandlerBase):
         )
 
         # The near-miss only has to be OUTSIDE the vendored tree, which the
-        # scratch directory already is -- so unlike its deny sibling it needs no
-        # exemption from the scratch rule.
+        # acceptance directory already is -- so unlike its deny sibling it
+        # needs no exemption from the acceptance-root rule.
         outside_tree_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
                 "file_path": (
-                    "$CLAUDE_PROJECT_DIR/untracked/scratch/acceptance-test-remote-docs/notes.md"
+                    "$CLAUDE_PROJECT_DIR/untracked/acceptance/acceptance-test-remote-docs/notes.md"
                 ),
                 "content": "# Notes\n\nOrdinary documentation, carrying no provenance.\n",
             },
@@ -247,12 +247,12 @@ class RemoteDocsProvenanceHandler(PreToolUseHandlerBase):
                 harness_cannot_produce=(
                     "`matches` requires the project-relative path to START with "
                     "the remote-docs directory, so no path under "
-                    "`untracked/scratch/` can reach this gate — and "
-                    "`test_every_declared_write_targets_the_scratch_directory` "
+                    "`untracked/acceptance/` can reach this gate — and "
+                    "`test_every_declared_write_targets_the_acceptance_directory` "
                     "forbids a payload aimed anywhere else, because a regressed "
                     "handler would then let the probe write into the working tree. "
                     "Convertible only by adding this handler to that test's "
-                    "`_OUTSIDE_SCRATCH_BY_CONTRACT` list, which is a deliberate "
+                    "`_OUTSIDE_ACCEPTANCE_ROOT_BY_CONTRACT` list, which is a deliberate "
                     "weakening of a safety invariant and belongs to a human. Its "
                     "near-miss sibling below IS dispatched. Covered by "
                     "tests/unit/handlers/pre_tool_use/test_remote_docs_provenance.py."

@@ -343,6 +343,121 @@ class TestLogHelperRule:
         assert violations == []
 
 
+# ── Backslash line continuations ───────────────────────────────────
+
+
+class TestBackslashContinuation:
+    """A ``\\``-continued command is judged as ONE logical line.
+
+    Judging physical lines alone read ``echo "x" \\`` as an unredirected
+    echo whenever its ``>&2`` sat on the continuation line -- the false
+    positive ``scripts/lib/resolve_venv.sh`` hit (Plan 00466 N1). Findings
+    must still carry the PHYSICAL line number where the command starts.
+    """
+
+    def test_stderr_redirect_on_the_continuation_line_is_not_flagged(self, tmp_path: Path) -> None:
+        defn = _write(
+            tmp_path,
+            "lib.sh",
+            "#!/bin/bash\n"
+            "resolve_path() {\n"
+            '    echo "resolve: candidate failed to run" \\\n'
+            '        "-- skipping" >&2\n'
+            '    echo "$resolved"\n'
+            "}\n",
+        )
+        caller = _write(tmp_path, "use.sh", "#!/bin/bash\nVAR=$(resolve_path /a)\n")
+        violations = audit_files([defn, caller])
+        assert violations == []
+
+    def test_non_redirect_continuation_is_still_flagged_at_its_first_line(
+        self, tmp_path: Path
+    ) -> None:
+        defn = _write(
+            tmp_path,
+            "lib.sh",
+            "#!/bin/bash\n"
+            "resolve_path() {\n"
+            '    echo "found" \\\n'
+            '        "path"\n'
+            '    echo "$resolved"\n'
+            "}\n",
+        )
+        caller = _write(tmp_path, "use.sh", "#!/bin/bash\nVAR=$(resolve_path /a)\n")
+        violations = audit_files([defn, caller])
+        assert _rules(violations) == ["capture-corruption"]
+        assert [v.line for v in violations] == [3]
+
+    def test_a_finding_after_a_continuation_keeps_its_physical_line_number(
+        self, tmp_path: Path
+    ) -> None:
+        src = _write(
+            tmp_path,
+            "out.sh",
+            "#!/bin/bash\n"
+            "print_info() {\n"
+            '    echo "a" \\\n'
+            '        "b" >&2\n'
+            '    echo "c"\n'
+            "}\n",
+        )
+        violations = audit_files([src])
+        assert _rules(violations) == ["log-helper-stdout"]
+        assert [v.line for v in violations] == [5]
+
+    def test_a_trailing_backslash_inside_a_heredoc_body_is_not_a_continuation(
+        self, tmp_path: Path
+    ) -> None:
+        """Joining the body line onto its terminator would swallow ``EOF``,
+        leave the heredoc open to end of file, and blank the stray echo."""
+        defn = _write(
+            tmp_path,
+            "lib.sh",
+            "#!/bin/bash\n"
+            "resolve_path() {\n"
+            "    cat <<EOF >&2\n"
+            "usage: tool \\\n"
+            "EOF\n"
+            '    echo "status"\n'
+            '    echo "$resolved"\n'
+            "}\n",
+        )
+        caller = _write(tmp_path, "use.sh", "#!/bin/bash\nVAR=$(resolve_path /a)\n")
+        violations = audit_files([defn, caller])
+        assert _rules(violations) == ["capture-corruption"]
+        assert [v.line for v in violations] == [6]
+
+    def test_a_trailing_backslash_inside_single_quotes_is_not_a_continuation(self) -> None:
+        """A backslash is literal inside single quotes, so the line ends there."""
+        from audit_capture_corruption import _join_continuations
+
+        lines = [
+            "    local usage='run the tool \\",
+            "with args'",
+            '    echo "status"',
+        ]
+        assert _join_continuations(lines) == lines
+
+    def test_a_backslash_before_a_closing_single_quote_escapes_nothing(self) -> None:
+        """``'a\\'`` is a complete string, so the trailing ``\\`` after it IS one."""
+        from audit_capture_corruption import _join_continuations
+
+        lines = [
+            "    echo 'a\\' \\",
+            "        >&2",
+        ]
+        assert _join_continuations(lines) == ["    echo 'a\\' >&2", ""]
+
+    def test_a_trailing_backslash_in_a_comment_is_not_a_continuation(self) -> None:
+        from audit_capture_corruption import _join_continuations
+
+        lines = [
+            "    # see C:\\",
+            '    echo "status"',
+        ]
+        assert _join_continuations(lines) == lines
+
+
 # ── Real-repo smoke ────────────────────────────────────────────────
 
 

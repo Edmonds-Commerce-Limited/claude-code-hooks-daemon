@@ -327,12 +327,12 @@ class DocsQaEditHandler(PreToolUseHandlerBase):
                 ),
                 harness_cannot_produce=(
                     "The rules-file shape check is scoped to `.claude/rules/`, so "
-                    "no path under `untracked/scratch/` reaches it, and "
-                    "`test_every_declared_write_targets_the_scratch_directory` "
+                    "no path under `untracked/acceptance/` reaches it, and "
+                    "`test_every_declared_write_targets_the_acceptance_directory` "
                     "forbids a payload aimed anywhere else — a regressed handler "
                     "would otherwise drop a stray rules file into the tree. "
                     "Convertible by adding this handler to that test's "
-                    "`_OUTSIDE_SCRATCH_BY_CONTRACT` list, which weakens a safety "
+                    "`_OUTSIDE_ACCEPTANCE_ROOT_BY_CONTRACT` list, which weakens a safety "
                     "invariant and is a human's call. Covered by "
                     "tests/unit/handlers/pre_tool_use/test_docs_qa_edit.py."
                 ),

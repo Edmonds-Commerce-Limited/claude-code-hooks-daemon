@@ -270,7 +270,7 @@ class WriteClobberGuardHandler(PreToolUseHandlerBase):
             tool_name=ToolName.WRITE,
             tool_input={
                 "file_path": (
-                    "$CLAUDE_PROJECT_DIR/untracked/scratch/"
+                    "$CLAUDE_PROJECT_DIR/untracked/acceptance/"
                     "acceptance-test-write-clobber/brand-new.txt"
                 ),
                 "content": "probe\n",

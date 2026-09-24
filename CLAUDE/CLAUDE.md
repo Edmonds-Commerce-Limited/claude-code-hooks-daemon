@@ -12,6 +12,7 @@ that owns the depth for every fact. The audience split (agent tree vs human
 | [DocumentationStrategy.md](DocumentationStrategy.md)                   | The documentation-SSoT rules: one canonical home per fact, satellite contracts      |
 | [ARCHITECTURE.md](ARCHITECTURE.md)                                     | System architecture and design decisions                                            |
 | [AgentTeam.md](AgentTeam.md)                                           | Agent team execution workflow                                                       |
+| [ClaudeCodePlugins.md](ClaudeCodePlugins.md)                           | Claude Code plugins alongside the daemon: scope, trust, plugin hooks, naming        |
 | [DEBUGGING_HOOKS.md](DEBUGGING_HOOKS.md)                               | Capturing hook event flows (`scripts/debug_hooks.sh`) before writing handlers       |
 | [DEBUGGING_STOP_HOOK.md](DEBUGGING_STOP_HOOK.md)                       | Diagnosing stop-hook failures to block                                              |
 | [DEBUGGING_TRANSCRIPTS.md](DEBUGGING_TRANSCRIPTS.md)                   | Post-mortem debugging via session transcripts                                       |

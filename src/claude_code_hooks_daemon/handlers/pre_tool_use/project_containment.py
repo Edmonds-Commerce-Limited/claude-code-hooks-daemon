@@ -67,7 +67,7 @@ from claude_code_hooks_daemon.core.utils import (
     get_bash_command,
     get_bash_write_targets,
 )
-from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
 
 #: Repo-relative home for scratch, shared with `pipe_blocker` so the handler
@@ -624,7 +624,7 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
         inside_write_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": scratch_path("acceptance-probe.md"),
+                "file_path": acceptance_path("acceptance-probe.md"),
                 "content": "# probe",
             },
         )
@@ -666,8 +666,8 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
                 requires_main_thread=False,
             ),
             AcceptanceTest(
-                title="The same scratch write, inside the repository",
-                # Absolute, unlike the tracked guidance that names the same
+                title="The same throwaway write, inside the repository",
+                # Absolute, unlike the tracked guidance that names its
                 # directory relatively (Decision 10): the playbook renders
                 # this verbatim for an agent, and a relative file_path is
                 # denied by AbsolutePathHandler first -- which would turn
@@ -683,12 +683,12 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
                 safety_notes=(
-                    "Writes one small file into the gitignored scratch directory; "
+                    "Writes one small file into the gitignored acceptance directory; "
                     "removed by the cleanup command."
                 ),
                 test_type=TestType.BLOCKING,
                 setup_commands=[],
-                cleanup_commands=[f"rm -f {SCRATCH_DIR}/acceptance-probe.md"],
+                cleanup_commands=[f"rm -f {ProjectPath.ACCEPTANCE_DIR}/acceptance-probe.md"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),
