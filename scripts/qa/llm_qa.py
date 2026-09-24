@@ -366,6 +366,11 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
         json_file="authored_path_stat.json",
         jq_hint="jq '.violations[] | {file, line, rule, message}'",
     ),
+    "skip_list_substring": ToolConfig(
+        command=_python("check_skip_list_substring.py", "--json"),
+        json_file="skip_list_substring.json",
+        jq_hint="jq '.violations[] | {file, line, rule, message}'",
+    ),
     "declared_invariant_pairs": ToolConfig(
         command=_python("check_declared_invariant_pairs.py", "--json"),
         json_file="declared_invariant_pairs.json",
@@ -697,6 +702,7 @@ SUMMARIZERS: dict[str, Summarizer] = {
     "python_var_guidance": _summarize_violations,
     "eacces_safe": _summarize_violations,
     "authored_path_stat": _summarize_violations,
+    "skip_list_substring": _summarize_violations,
     "declared_invariant_pairs": _summarize_violations,
     "fail_open_inventory": _summarize_violations,
     "dangerous_invocation_corpus": _summarize_violations,
