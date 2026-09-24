@@ -141,6 +141,7 @@ class DaemonController:
         "_router",
         "_source_fingerprint",
         "_stats",
+        "_strict_mode",
         "_verdict_log_config",
     )
 
@@ -169,6 +170,13 @@ class DaemonController:
         # Chain dispatch options (Plan 00242): same narrow-slice DI idiom.
         # Defaults keep the deny short-circuit (collect_all_violations=False).
         self._chain_config: ChainConfig = ChainConfig()
+        # Strict-mode flag (Plan 00466 N24): same narrow-slice DI idiom as
+        # the two above. Previously read from `self._config.strict_mode`,
+        # which is always None on the real startup path (see the comment
+        # block above), so every install's `daemon.strict_mode` was inert.
+        # Defaults False -- fail-open for a non-safety handler, matching the
+        # pre-existing default before this was wired up.
+        self._strict_mode: bool = False
         self._pseudo_dispatcher: PseudoEventDispatcher | None = None
         # Content fingerprint of the code this daemon loaded at startup (Plan
         # 00371); None until initialise() computes it, and never recomputed
@@ -192,6 +200,7 @@ class DaemonController:
         project_registry: "ProjectRegistry | None" = None,
         claude_md: "ClaudeMdConfig | None" = None,
         chain: "ChainConfig | None" = None,
+        strict_mode: bool | None = None,
         write_claude_md_in_linked_worktree: bool = False,
         worktree: "WorktreeConfig | None" = None,
         reference_repos: "ReferenceReposConfig | None" = None,
@@ -224,6 +233,11 @@ class DaemonController:
                 (pure progressive disclosure).
             chain: Optional ChainConfig (Plan 00242) — ``daemon.chain``.
                 None keeps the default: a terminal deny short-circuits.
+            strict_mode: ``daemon.strict_mode`` (Plan 00466 N24) — narrow
+                config-slice, same DI idiom as ``chain``/``verdict_log``.
+                None (every existing caller that does not pass it, e.g. most
+                unit tests) keeps the pre-existing default: fail-open for a
+                non-SAFETY+BLOCKING handler that raises.
             write_claude_md_in_linked_worktree: Regenerate the CLAUDE.md
                 block even when ``workspace_root`` is a linked git worktree.
                 Daemon startup leaves it False, so a worktree's branch never
@@ -252,6 +266,7 @@ class DaemonController:
         # back to VerdictLogConfig()'s own defaults (enabled).
         self._verdict_log_config = verdict_log or VerdictLogConfig()
         self._chain_config = chain or ChainConfig()
+        self._strict_mode = strict_mode if strict_mode is not None else False
 
         # Initialize ProjectContext singleton (single source of truth for project-level constants)
         # May already be initialized from CLI config validation
@@ -955,8 +970,12 @@ class DaemonController:
                 logger.debug("StatusLine raw hook_input: %s", hook_input_dict)
                 get_data_layer().session.update_from_status_event(hook_input_dict)
 
-            # Get strict_mode from config (default to False if no config)
-            strict_mode = self._config.strict_mode if self._config else False
+            # strict_mode is a narrow config-slice threaded through
+            # initialise() (Plan 00466 N24), the same DI idiom as
+            # chain/verdict_log — NOT `self._config`, whose comment in
+            # __init__ explains why it is never populated by the real
+            # daemon startup path.
+            strict_mode = self._strict_mode
 
             result = self._router.route(
                 event.event_type,

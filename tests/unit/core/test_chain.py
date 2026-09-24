@@ -6,6 +6,7 @@ error handling, and ChainExecutionResult.
 
 from typing import Any
 
+from claude_code_hooks_daemon.constants.tags import HandlerTag
 from claude_code_hooks_daemon.core.chain import ChainExecutionResult, HandlerChain
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
@@ -22,6 +23,8 @@ class MockHandler(Handler):
         should_match: bool = True,
         result: HookResult | None = None,
         raise_exception: Exception | None = None,
+        raise_in_matches: Exception | None = None,
+        tags: list[str] | None = None,
     ) -> None:
         """Initialize mock handler.
 
@@ -32,17 +35,25 @@ class MockHandler(Handler):
             should_match: Whether matches() returns True
             result: HookResult to return (or default allow)
             raise_exception: Exception to raise in handle()
+            raise_in_matches: Exception to raise in matches(), before handle()
+                is ever reached — exercises the chain's own try/except span,
+                which covers matches() as well as handle() (Plan 00466 N24 m1).
+            tags: Handler tags (default []); pass HandlerTag.SAFETY +
+                HandlerTag.BLOCKING to exercise the fail-closed-on-raise path.
         """
-        super().__init__(name=name, priority=priority, terminal=terminal)
+        super().__init__(name=name, priority=priority, terminal=terminal, tags=tags)
         self._should_match = should_match
         self._result = result or HookResult.allow()
         self._raise_exception = raise_exception
+        self._raise_in_matches = raise_in_matches
         self.matches_called = 0
         self.handle_called = 0
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if handler matches input."""
         self.matches_called += 1
+        if self._raise_in_matches:
+            raise self._raise_in_matches
         return self._should_match
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
@@ -750,6 +761,131 @@ class TestHandlerChain:
         assert result.result.decision == Decision.ALLOW
         # Exception context should be accumulated
         assert any("Handler exception:" in ctx for ctx in result.result.context)
+
+    def test_safety_blocking_handler_raise_denies_even_without_strict_mode(self) -> None:
+        """A SAFETY+BLOCKING handler that raises denies, whatever strict_mode says.
+
+        Plan 00466 N24 (M3/m1): a safety guard that crashes has not judged
+        the call, so falling through to the next handler as "no match" is a
+        bypass. This closes the class independently of ``daemon.strict_mode``,
+        which is inert in every real install today (see N24).
+        """
+        chain = HandlerChain()
+        h1 = MockHandler(
+            "safety-guard",
+            priority=10,
+            terminal=True,
+            raise_exception=ValueError("boom"),
+            tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING],
+        )
+        h2 = MockHandler("h2", priority=20, terminal=True)
+        chain.add(h1)
+        chain.add(h2)
+
+        hook_input = {"tool_name": "Bash"}
+        result = chain.execute(hook_input, strict_mode=False)
+
+        assert h2.handle_called == 0
+        assert result.result.decision == Decision.DENY
+        assert result.result.reason is not None
+        assert "safety-guard" in result.result.reason
+        assert "evaluation error" in result.result.reason.lower()
+        assert "denied for safety" in result.result.reason.lower()
+
+    def test_safety_blocking_handler_raise_in_matches_also_denies(self) -> None:
+        """The fail-closed path also covers a raise from ``matches()``, not just ``handle()``.
+
+        Plan 00466 N24 m1/m2: the per-guard fail-closed wrapper some handlers
+        carry only covers part of their own code; the chain-level policy
+        closes the gap structurally for every SAFETY+BLOCKING handler.
+        """
+        chain = HandlerChain()
+        h1 = MockHandler(
+            "safety-guard",
+            priority=10,
+            terminal=True,
+            raise_in_matches=TypeError("unhashable type: 'list'"),
+            tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING],
+        )
+        h2 = MockHandler("h2", priority=20, terminal=True)
+        chain.add(h1)
+        chain.add(h2)
+
+        hook_input = {"tool_name": "Bash"}
+        result = chain.execute(hook_input, strict_mode=False)
+
+        assert h1.handle_called == 0  # never reached handle() — matches() raised
+        assert h2.handle_called == 0
+        assert result.result.decision == Decision.DENY
+        assert result.result.reason is not None
+        assert "safety-guard" in result.result.reason
+
+    def test_non_safety_handler_raise_still_fails_open_without_strict_mode(self) -> None:
+        """An advisory / non-safety handler that raises keeps today's fail-open behaviour."""
+        chain = HandlerChain()
+        h1 = MockHandler(
+            "advisory",
+            priority=10,
+            raise_exception=ValueError("boom"),
+            tags=[HandlerTag.ADVISORY],
+        )
+        h2 = MockHandler("h2", priority=20, terminal=True)
+        chain.add(h1)
+        chain.add(h2)
+
+        hook_input = {"tool_name": "Bash"}
+        result = chain.execute(hook_input, strict_mode=False)
+
+        assert h2.handle_called == 1
+        assert result.result.decision == Decision.ALLOW
+        assert any("Handler exception:" in ctx for ctx in result.result.context)
+
+    def test_safety_tag_alone_without_blocking_still_fails_open(self) -> None:
+        """SAFETY without BLOCKING does not trigger the new fail-closed path.
+
+        The predicate is the SAFETY+BLOCKING combination specifically (the
+        tag pair every hardened guard in this repository already carries),
+        not SAFETY alone.
+        """
+        chain = HandlerChain()
+        h1 = MockHandler(
+            "safety-only",
+            priority=10,
+            raise_exception=ValueError("boom"),
+            tags=[HandlerTag.SAFETY],
+        )
+        h2 = MockHandler("h2", priority=20, terminal=True)
+        chain.add(h1)
+        chain.add(h2)
+
+        hook_input = {"tool_name": "Bash"}
+        result = chain.execute(hook_input, strict_mode=False)
+
+        assert h2.handle_called == 1
+        assert result.result.decision == Decision.ALLOW
+
+    def test_safety_blocking_handler_raise_honours_strict_mode_message(self) -> None:
+        """strict_mode's own message still wins when both conditions apply.
+
+        Both mechanisms deny, so this only pins that strict_mode's existing
+        wording is not silently replaced by the new SAFETY+BLOCKING wording.
+        """
+        chain = HandlerChain()
+        h1 = MockHandler(
+            "safety-guard",
+            priority=10,
+            terminal=True,
+            raise_exception=ValueError("boom"),
+            tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING],
+        )
+        chain.add(h1)
+
+        hook_input = {"tool_name": "Bash"}
+        result = chain.execute(hook_input, strict_mode=True)
+
+        assert result.result.decision == Decision.DENY
+        assert result.result.reason is not None
+        assert "SYSTEM ERROR" in result.result.reason
 
     def test_execute_preserves_handler_priority_order(self) -> None:
         """execute processes handlers in strict priority order."""

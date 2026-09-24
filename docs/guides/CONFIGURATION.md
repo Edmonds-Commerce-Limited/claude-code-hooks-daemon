@@ -77,14 +77,14 @@ daemon:
 
 ### Setting Details
 
-| Setting                        | Default | Description                                                                                                               |
-| ------------------------------ | ------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `idle_timeout_seconds`         | `600`   | Daemon shuts down after this many seconds without a hook call. It restarts automatically on the next call (lazy startup). |
-| `log_level`                    | `INFO`  | Controls how much detail appears in daemon logs. Use `DEBUG` when troubleshooting handler behaviour.                      |
-| `strict_mode`                  | `false` | When `true`, the daemon crashes on any unexpected error instead of continuing. Recommended for development/testing.       |
-| `self_install_mode`            | `false` | Used when the daemon runs from the project root instead of `.claude/hooks-daemon/`. Only needed for daemon development.   |
-| `input_validation.enabled`     | `true`  | Validates hook event data before processing. Catches malformed events early.                                              |
-| `input_validation.strict_mode` | `false` | When `true`, invalid events are denied. When `false`, invalid events are allowed through with a warning logged.           |
+| Setting                        | Default | Description                                                                                                                                                                                                                 |
+| ------------------------------ | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `idle_timeout_seconds`         | `600`   | Daemon shuts down after this many seconds without a hook call. It restarts automatically on the next call (lazy startup).                                                                                                   |
+| `log_level`                    | `INFO`  | Controls how much detail appears in daemon logs. Use `DEBUG` when troubleshooting handler behaviour.                                                                                                                        |
+| `strict_mode`                  | `false` | When `true`, a handler that raises denies the call instead of being skipped. A `SAFETY`+`BLOCKING` handler denies on its own raise either way — see [Strict Mode](#strict-mode) below. Recommended for development/testing. |
+| `self_install_mode`            | `false` | Used when the daemon runs from the project root instead of `.claude/hooks-daemon/`. Only needed for daemon development.                                                                                                     |
+| `input_validation.enabled`     | `true`  | Validates hook event data before processing. Catches malformed events early.                                                                                                                                                |
+| `input_validation.strict_mode` | `false` | When `true`, invalid events are denied. When `false`, invalid events are allowed through with a warning logged.                                                                                                             |
 
 ---
 
@@ -667,7 +667,7 @@ Always include the `version` field at the top of your config.
 
 ### Strict Mode
 
-With `daemon.strict_mode: true`, the daemon fails fast on any error. This is useful during development to catch config issues immediately. In production, leave it `false` so the daemon continues running even if a single handler has a problem.
+With `daemon.strict_mode: true`, a handler that raises an exception denies the call instead of being skipped. This is useful during development to catch handler bugs immediately. In production, leave it `false` so the daemon continues running even if a single handler has a problem — except a handler tagged both `SAFETY` and `BLOCKING`, which always denies on its own raise, whatever this setting says: a safety guard that crashed has not judged the call. See [CLAUDE/Security/FailOpenBoundaries.md](../../CLAUDE/Security/FailOpenBoundaries.md) for the full inventory of what still fails open.
 
 ---
 

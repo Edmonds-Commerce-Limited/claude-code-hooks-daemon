@@ -36,8 +36,13 @@ boundaries:
     trace: >-
       logger.exception, AND the exception text is appended to
       accumulated_context, so it reaches the caller in the result's context.
-      In strict_mode this branch denies instead. Blast radius is one handler,
-      not the chain -- F-BYPS verified this one as correctly built.
+      In strict_mode this branch denies instead. A handler tagged both
+      HandlerTag.SAFETY and HandlerTag.BLOCKING denies on its own raise
+      unconditionally, whatever strict_mode says (Plan 00466 N24 -- a
+      raising safety guard has not judged the call, and strict_mode was
+      found inert in every real install). Only a non-SAFETY+BLOCKING
+      handler still falls through this fail-open branch. Blast radius is one
+      handler, not the chain -- F-BYPS verified this one as correctly built.
 
   - surface: src/claude_code_hooks_daemon/core/chain.py
     scope: execute

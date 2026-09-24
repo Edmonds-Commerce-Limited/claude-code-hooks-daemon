@@ -479,21 +479,30 @@ class TestDaemonController:
 
         assert controller.is_initialised is True
 
-    def test_process_event_handles_handler_exception(
-        self, controller: DaemonController, workspace_root: Path
-    ) -> None:
-        """Process event handles exceptions from handler chain in strict mode."""
+    def test_process_event_handles_handler_exception(self, workspace_root: Path) -> None:
+        """Process event handles exceptions from handler chain in strict mode.
+
+        Regression test for Plan 00466 N24: this used to build the
+        controller as ``DaemonController(config=DaemonConfig(strict_mode=True))``,
+        a construction the real daemon never performs — its constructor
+        `config` parameter is never populated on the real startup path (see
+        the comment in ``DaemonController.__init__``). That let this test
+        pass while ``strict_mode`` stayed inert in every real install. It now
+        goes through ``get_controller()`` (the real daemon's own accessor)
+        plus ``initialise(strict_mode=True)`` — the narrow config-slice DI
+        idiom ``_build_initialised_controller`` (``daemon/cli.py``) actually
+        uses, mirroring ``chain``/``verdict_log``.
+        """
         from typing import Any
 
-        from claude_code_hooks_daemon.config.models import DaemonConfig
         from claude_code_hooks_daemon.constants import HandlerID, Priority
         from claude_code_hooks_daemon.core import Handler, HookResult
+        from claude_code_hooks_daemon.core.event import HookInput
 
-        # Create controller with strict_mode=True
-        config = DaemonConfig(strict_mode=True)
-        controller = DaemonController(config=config)
-
-        # Create a handler that raises an exception
+        # Create a handler that raises an exception. Not tagged
+        # SAFETY+BLOCKING, so a deny here is evidence of strict_mode
+        # specifically (Plan 00466 N24 Part 2 is exercised separately in
+        # tests/unit/core/test_chain.py).
         class ExplodingHandler(Handler):
             def __init__(self) -> None:
                 super().__init__(
@@ -514,44 +523,110 @@ class TestDaemonController:
             def get_acceptance_tests(self) -> list:
                 return []
 
-        # Initialize controller
-        with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = [
-                Mock(returncode=0, stdout=str(workspace_root) + "\n"),
-                Mock(returncode=0, stdout="git@github.com:test/repo.git\n"),
-                Mock(returncode=0, stdout=str(workspace_root) + "\n"),
-            ]
-            controller.initialise(workspace_root=workspace_root)
+        reset_controller()
+        try:
+            controller = get_controller()
 
-        # Register the exploding handler
-        controller._router.register(EventType.PRE_TOOL_USE, ExplodingHandler())
+            with patch("subprocess.run") as mock_run:
+                mock_run.side_effect = [
+                    Mock(returncode=0, stdout=str(workspace_root) + "\n"),
+                    Mock(returncode=0, stdout="git@github.com:test/repo.git\n"),
+                    Mock(returncode=0, stdout=str(workspace_root) + "\n"),
+                ]
+                controller.initialise(workspace_root=workspace_root, strict_mode=True)
 
+            controller._router.register(EventType.PRE_TOOL_USE, ExplodingHandler())
+
+            event = HookEvent(
+                event_type=EventType.PRE_TOOL_USE,
+                hook_input=HookInput(
+                    tool_name="Bash",
+                    tool_input={"command": "ls"},
+                    transcript_path="/tmp/transcript.jsonl",
+                ),
+            )
+
+            # Process event - handler will raise exception
+            result = controller.process_event(event)
+
+            # FAIL FAST: Handler crash should BLOCK operation (fail-closed)
+            # When protection system is down, default to blocking for safety
+            assert result.result.decision.value == "deny"
+            assert result.result.reason is not None
+            assert "SYSTEM ERROR" in result.result.reason
+            assert "crashed" in result.result.reason
+            # Check that RuntimeError appears somewhere in context
+            assert any("RuntimeError" in ctx for ctx in result.result.context)
+
+            # Stats should record error from the handler
+            stats = controller.get_stats()
+            assert stats.errors == 1
+        finally:
+            reset_controller()
+
+    def test_process_event_strict_mode_false_via_initialise_fails_open(
+        self, workspace_root: Path
+    ) -> None:
+        """The negative control: initialise(strict_mode=False) still fails open.
+
+        Pins that the narrow-slice wiring (Plan 00466 N24) actually reaches
+        ``process_event`` in both directions, not only the True case above.
+        """
+        from typing import Any
+
+        from claude_code_hooks_daemon.constants import HandlerID, Priority
+        from claude_code_hooks_daemon.core import Handler, HookResult
         from claude_code_hooks_daemon.core.event import HookInput
 
-        event = HookEvent(
-            event_type=EventType.PRE_TOOL_USE,
-            hook_input=HookInput(
-                tool_name="Bash",
-                tool_input={"command": "ls"},
-                transcript_path="/tmp/transcript.jsonl",
-            ),
-        )
+        class ExplodingHandler(Handler):
+            def __init__(self) -> None:
+                super().__init__(
+                    handler_id=HandlerID.DESTRUCTIVE_GIT,
+                    priority=Priority.DESTRUCTIVE_GIT,
+                    terminal=False,
+                )
 
-        # Process event - handler will raise exception
-        result = controller.process_event(event)
+            def matches(self, hook_input: dict[str, Any]) -> bool:
+                return True
 
-        # FAIL FAST: Handler crash should BLOCK operation (fail-closed)
-        # When protection system is down, default to blocking for safety
-        assert result.result.decision.value == "deny"
-        assert result.result.reason is not None
-        assert "SYSTEM ERROR" in result.result.reason
-        assert "crashed" in result.result.reason
-        # Check that RuntimeError appears somewhere in context
-        assert any("RuntimeError" in ctx for ctx in result.result.context)
+            def handle(self, hook_input: dict[str, Any]) -> HookResult:
+                raise RuntimeError("Handler exploded")
 
-        # Stats should record error from the handler
-        stats = controller.get_stats()
-        assert stats.errors == 1
+            def get_claude_md(self) -> str | None:
+                return None
+
+            def get_acceptance_tests(self) -> list:
+                return []
+
+        reset_controller()
+        try:
+            controller = get_controller()
+
+            with patch("subprocess.run") as mock_run:
+                mock_run.side_effect = [
+                    Mock(returncode=0, stdout=str(workspace_root) + "\n"),
+                    Mock(returncode=0, stdout="git@github.com:test/repo.git\n"),
+                    Mock(returncode=0, stdout=str(workspace_root) + "\n"),
+                ]
+                controller.initialise(workspace_root=workspace_root, strict_mode=False)
+
+            controller._router.register(EventType.PRE_TOOL_USE, ExplodingHandler())
+
+            event = HookEvent(
+                event_type=EventType.PRE_TOOL_USE,
+                hook_input=HookInput(
+                    tool_name="Bash",
+                    tool_input={"command": "ls"},
+                    transcript_path="/tmp/transcript.jsonl",
+                ),
+            )
+
+            result = controller.process_event(event)
+
+            assert result.result.decision.value == "allow"
+            assert any("Handler exception:" in ctx for ctx in result.result.context)
+        finally:
+            reset_controller()
 
 
 class TestControllerPluginLoadingEdgeCases:

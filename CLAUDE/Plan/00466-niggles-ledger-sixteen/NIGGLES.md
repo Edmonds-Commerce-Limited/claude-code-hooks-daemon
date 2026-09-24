@@ -3,7 +3,7 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
-### N24 — `daemon.strict_mode` never reaches the live daemon, so every guard fails OPEN on a handler exception
+### N24 — ✅ Remedied — `daemon.strict_mode` never reaches the live daemon, so every guard fails OPEN on a handler exception
 
 **Found by the guard-defects security review 2**
 ([report](subagent-reports/260924-n466-guards-review2-opus-5-5.md), M3), with a
@@ -36,6 +36,42 @@ so here the crash denied" is false.
 RED tests: a live-path daemon with `strict_mode: true` denies on a raising
 handler; a SAFETY+BLOCKING handler that raises denies even with `strict_mode`
 off; a non-safety advisory handler that raises still allows, and says so.
+
+**✅ Remedied.** Both halves landed:
+
+1. `DaemonController` gained a narrow-slice `_strict_mode` (Plan 00466 N24),
+   the same DI idiom `_chain_config`/`_verdict_log_config` already use:
+   `initialise(strict_mode=...)` sets it, `process_event` reads
+   `self._strict_mode` instead of the never-populated `self._config`.
+   `_build_initialised_controller` (`daemon/cli.py`) threads
+   `config.daemon.strict_mode` through, so the real startup path (`cmd_start`
+   → `_build_initialised_controller` → `initialise()`) now actually carries
+   it. Unit coverage: `tests/unit/daemon/test_cli_strict_mode_wiring.py`
+   (the `_build_initialised_controller` DI slice) and
+   `tests/unit/daemon/test_controller.py` (through `get_controller()` +
+   `initialise(strict_mode=...)`, both True and False).
+2. `HandlerChain.execute` (`core/chain.py`) now denies unconditionally, on
+   any raise from `matches()` or `handle()`, when the handler carries both
+   `HandlerTag.SAFETY` and `HandlerTag.BLOCKING` — independent of
+   `strict_mode`. The reason names the handler and the underlying exception
+   ("evaluation error, denied for safety"), distinct from the strict-mode
+   "SYSTEM ERROR" wording so a verdict log can tell the two paths apart.
+   Non-safety/advisory handlers keep the pre-existing fail-open behaviour.
+   Unit coverage: `tests/unit/core/test_chain.py` (5 new cases: raise in
+   `handle()`, raise in `matches()`, the SAFETY-without-BLOCKING negative
+   control, the non-safety negative control, and strict_mode's own wording
+   still winning when both apply).
+
+Also added an acceptance-level, live-daemon check
+(`.claude/project-handlers/pre_tool_use/n24_strict_mode_probe.py` +
+`tests/acceptance/test_n24_strict_mode_probe_socket.py`) that proves the
+wiring end-to-end against a real running daemon process, without depending
+on N5's lifecycle: a project-only handler raises ONLY for a payload marked
+`synthetic_source: n24-probe`, which no real Claude Code session ever sends.
+
+The N5 and N11 entries' "this repository runs `strict_mode: true`, so here
+the crash denied" claim is corrected below, in place, rather than restated
+here.
 
 ### N22 — `lsp_enforcement` takes another command's argument for a grep symbol lookup
 
@@ -101,7 +137,7 @@ N16 is filed on the unmerged `worktree-n466-guard-defects` branch; it joins this
 
 ### N11 — any exception in `secret_file_guard.matches()` lets the call through unless `strict_mode` is on
 
-**Found by the 00466 review** (major M4, `subagent-reports/260924-n466-review-opus-5-5.md`). N5's crash was the second time an exception in this guard's `matches()` skipped the guard entirely; Plan 00357 was the first. Under the default `strict_mode: false` the chain logs the exception and allows the call. This repository runs `strict_mode: true`, so here the crash denied, but a client on the defaults fails open. One raise path is still live after N5, though it isn't exploitable: a file path containing a NUL byte.
+**Found by the 00466 review** (major M4, `subagent-reports/260924-n466-review-opus-5-5.md`). N5's crash was the second time an exception in this guard's `matches()` skipped the guard entirely; Plan 00357 was the first. Under `strict_mode: false` the chain logs the exception and allows the call. **Correction (N24, guard-defects security review 2):** the sentence that stood here — "This repository runs `strict_mode: true`, so here the crash denied" — was false. `daemon.strict_mode` never reached the live daemon (see N24, now remedied), so a crash here fell open in EVERY install, including this repository's own, whatever `hooks-daemon.yaml` declared. With N24's fix live, a crash here now denies in this repository (`strict_mode: true`) and, independently, would also deny on any install once this guard is tagged `SAFETY`+`BLOCKING` (it already is) — see N24's Part 2. One raise path is still live after N5, though it isn't exploitable: a file path containing a NUL byte.
 
 **Candidate remedy:** make the guard structurally fail closed. A raise anywhere in its match or route computation becomes a deny naming the internal error, whatever the global `strict_mode`, because a protected-read guard that fails open is worse than a false deny. Pin it with a test that injects an exception at each stage. Then audit the other security guards that should behave the same (`sensitive_content`, `project_containment`, the destructive-git rules) and decide each one explicitly.
 

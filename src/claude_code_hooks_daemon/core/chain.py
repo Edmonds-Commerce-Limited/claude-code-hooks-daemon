@@ -25,7 +25,7 @@ from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from claude_code_hooks_daemon.constants import Priority
+from claude_code_hooks_daemon.constants import HandlerTag, Priority
 from claude_code_hooks_daemon.core.handler_scope import scope_admits
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
 
@@ -375,10 +375,18 @@ class HandlerChain:
         terminal handler ends the chain; an ALLOW never does (unless this
         chain was built with ``allow_is_final=True``).
 
+        A handler tagged both ``HandlerTag.SAFETY`` and ``HandlerTag.BLOCKING``
+        that raises always denies, whatever ``strict_mode`` says (Plan 00466
+        N24): a safety guard that crashed has not judged the call, so
+        treating that as "no match" would be a bypass. A non-safety or
+        advisory handler that raises keeps the ``strict_mode`` behaviour
+        below unchanged.
+
         Args:
             hook_input: Hook input dictionary to process
             strict_mode: If True, FAIL FAST on handler exceptions (fail-closed).
-                        If False, log and continue (fail-open).
+                        If False, log and continue (fail-open) — except for a
+                        SAFETY+BLOCKING handler, which always fails closed.
             collect_all: ``daemon.chain.collect_all_violations`` (Plan 00242
                 Phase 3). When True a deny no longer ends the chain either:
                 every matching handler runs and the response is ONE merged
@@ -494,6 +502,19 @@ class HandlerChain:
                 logger.exception("Handler %s raised exception", handler.name)
                 handlers_executed.append(handler.name)
 
+                # A SAFETY+BLOCKING handler that raises has not judged the
+                # call at all -- "no match" would be a silent bypass of
+                # exactly the guard meant to catch this call (Plan 00466
+                # N24 M3/m1). This applies whatever `strict_mode` says,
+                # because `strict_mode` is inert in every real install
+                # today (N24) and every other SAFETY guard has no per-guard
+                # fail-closed wrapper of its own. It also covers a raise
+                # from `matches()`, not only `handle()` (m1/m2): both sit
+                # inside this same try block.
+                is_safety_blocking = (
+                    HandlerTag.SAFETY in handler.tags and HandlerTag.BLOCKING in handler.tags
+                )
+
                 if strict_mode:
                     # STRICT MODE: FAIL FAST - handler crash = BLOCK operation (fail-closed)
                     error_result = HookResult.deny(
@@ -509,8 +530,28 @@ class HandlerChain:
                     if decided_by is None:
                         decided_by = handler.name
                     break
+                elif is_safety_blocking:
+                    # Independent of strict_mode: deny with a reason naming
+                    # the handler and the underlying error, rather than the
+                    # strict-mode "SYSTEM ERROR" wording, so the two paths
+                    # stay distinguishable in a verdict log.
+                    error_result = HookResult.deny(
+                        reason=(
+                            f"{handler.name}: evaluation error, denied for safety "
+                            f"({type(e).__name__}: {e})"
+                        ),
+                    )
+                    accumulated_context.append(f"Handler exception: {type(e).__name__}: {e}")
+                    error_result.add_handler(handler.name)
+                    error_result.context = list(accumulated_context)
+                    final_result = error_result
+                    terminated_by = handler.name
+                    if decided_by is None:
+                        decided_by = handler.name
+                    break
                 else:
-                    # NON-STRICT MODE: Fail-open - log error and continue chain
+                    # NON-STRICT MODE, non-safety handler: fail-open - log
+                    # error and continue chain
                     error_context = f"Handler exception: {type(e).__name__}: {e}"
                     accumulated_context.append(error_context)
                     # Continue to next handler

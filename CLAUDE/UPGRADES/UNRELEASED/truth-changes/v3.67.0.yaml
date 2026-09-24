@@ -33,3 +33,26 @@ truth_changes:
 
       IF YOUR PROJECT'S DOCS SAY ENCRYPTED VAULT FILES CANNOT BE STAGED BY AN
       AGENT, OR THAT THEY MUST BE UNTRACKED, THOSE INSTRUCTIONS ARE NOW FALSE.
+  - topic: daemon-config
+    id: strict-mode-handler-exceptions
+    was: >
+      `daemon.strict_mode: true` had no effect on the real daemon: a raising
+      handler was always treated as "no match" and the call allowed, however
+      `hooks-daemon.yaml` was configured. `DaemonController`'s `config`
+      constructor parameter, which `strict_mode` was read from, is never
+      populated by the real daemon startup path.
+    now: >
+      `daemon.strict_mode: true` (Plan 00466 N24) is threaded through
+      `DaemonController.initialise()` as a narrow config-slice — the same DI
+      idiom as `chain`/`verdict_log` — and reaches the real daemon. A raising
+      handler now denies the call instead of being skipped. Independently of
+      `strict_mode`, a handler tagged both `SAFETY` and `BLOCKING` that raises
+      (from `matches()` or `handle()`) always denies: a safety guard that
+      crashed has not judged the call. A non-`SAFETY`+`BLOCKING` handler under
+      `strict_mode: false` (the client default) is unchanged: it still fails
+      open, logged.
+
+      IF YOUR PROJECT'S DOCS OR SECURITY REVIEWS ASSERT "THIS REPOSITORY RUNS
+      strict_mode: true, SO A HANDLER CRASH HERE DENIES" AS A REASON A DEFECT
+      IS NOT EXPLOITABLE, RE-CHECK THAT CLAIM: BEFORE THIS CHANGE IT WAS FALSE
+      EVERYWHERE, INCLUDING HERE.

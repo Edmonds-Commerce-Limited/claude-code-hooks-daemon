@@ -3020,6 +3020,7 @@ def _build_initialised_controller(
         project_registry=ProjectRegistry.from_config(config, project_path),
         claude_md=config.claude_md,
         chain=config.daemon.chain,
+        strict_mode=config.daemon.strict_mode,
         write_claude_md_in_linked_worktree=write_claude_md_in_linked_worktree,
         worktree=config.worktree,
         reference_repos=config.reference_repos,
