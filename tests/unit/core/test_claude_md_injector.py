@@ -1729,6 +1729,23 @@ class TestGuidanceOrderIsIndependentOfDiscoveryOrder:
 
         assert forward == reverse
 
+    def test_promoted_tier_follows_the_authors_promoted_handlers_order(
+        self, tmp_path: Path
+    ) -> None:
+        """Review nit n6: alphabetical would lose the reason a handler is
+        promoted at all -- the config author's own ``promoted_handlers``
+        list order (e.g. most-triggered guidance first). That list is
+        itself a deterministic value, so honouring it does not reopen N7's
+        defect; it is a strictly better total order than alphabetising."""
+        zzz = _StubHandler("zzz_handler", "## zzz_handler\n\nPromoted prose Z.")
+        aaa = _StubHandler("aaa_handler", "## aaa_handler\n\nPromoted prose A.")
+        # Deliberately NOT alphabetical -- the author put zzz first.
+        promoted_handlers = ["zzz_handler", "aaa_handler"]
+
+        block = self._block(tmp_path / "root", [aaa, zzz], promoted_handlers=promoted_handlers)
+
+        assert block.index("zzz_handler") < block.index("aaa_handler")
+
     def test_progressive_tier_is_order_independent(self, tmp_path: Path) -> None:
         zzz = _StubHandler("zzz_progressive", None, rules=[self._rule("R-Z")])
         aaa = _StubHandler("aaa_progressive", None, rules=[self._rule("R-A")])

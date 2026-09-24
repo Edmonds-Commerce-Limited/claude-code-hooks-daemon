@@ -308,3 +308,104 @@ class TestConcurrentWriters:
         recorded = {e.plan_number for e in GoalLedger(ledger_path).entries()}
         # The flock around each read-modify-write means no emission is lost.
         assert recorded == set(numbers)
+
+
+class TestHasLiveEntry:
+    """Review M2: the persistent answer a fresh (post-restart) handler
+    instance needs, in place of an in-memory latch."""
+
+    def test_true_for_a_live_entry_owned_by_this_session(self, tmp_path: Path) -> None:
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        _make_plan(plan_dir, _PLAN_A, _STATUS_IN_PROGRESS)
+        ledger = GoalLedger(tmp_path / LEDGER_FILENAME)
+        ledger.record_emission(_SESSION, _PLAN_A, _GOAL_LINE, plan_dir)
+
+        assert ledger.has_live_entry(_SESSION, _PLAN_A) is True
+
+    def test_false_for_a_different_session(self, tmp_path: Path) -> None:
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        _make_plan(plan_dir, _PLAN_A, _STATUS_IN_PROGRESS)
+        ledger = GoalLedger(tmp_path / LEDGER_FILENAME)
+        ledger.record_emission(_SESSION, _PLAN_A, _GOAL_LINE, plan_dir)
+
+        assert ledger.has_live_entry(_OTHER_SESSION, _PLAN_A) is False
+
+    def test_false_for_a_retired_entry(self, tmp_path: Path) -> None:
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        _make_plan(plan_dir, _PLAN_A, _STATUS_IN_PROGRESS)
+        ledger = GoalLedger(tmp_path / LEDGER_FILENAME)
+        ledger.record_emission(_SESSION, _PLAN_A, _GOAL_LINE, plan_dir)
+        # Rewrite as terminal and reconcile via a live-plan-numbers read.
+        _make_plan(plan_dir, _PLAN_A, _STATUS_COMPLETE)
+        ledger.live_plan_numbers(plan_dir)
+
+        assert ledger.has_live_entry(_SESSION, _PLAN_A) is False
+
+    def test_false_when_the_ledger_has_never_heard_of_the_plan(self, tmp_path: Path) -> None:
+        ledger = GoalLedger(tmp_path / LEDGER_FILENAME)
+
+        assert ledger.has_live_entry(_SESSION, _PLAN_A) is False
+
+
+class TestSessionHasEntries:
+    """Review M3: distinguishes a genuinely new session from one that
+    already has its own live goal signal."""
+
+    def test_false_for_a_session_the_ledger_has_never_seen(self, tmp_path: Path) -> None:
+        ledger = GoalLedger(tmp_path / LEDGER_FILENAME)
+
+        assert ledger.session_has_entries(_SESSION) is False
+
+    def test_true_once_the_session_has_emitted(self, tmp_path: Path) -> None:
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        _make_plan(plan_dir, _PLAN_A, _STATUS_IN_PROGRESS)
+        ledger = GoalLedger(tmp_path / LEDGER_FILENAME)
+        ledger.record_emission(_SESSION, _PLAN_A, _GOAL_LINE, plan_dir)
+
+        assert ledger.session_has_entries(_SESSION) is True
+
+    def test_true_even_for_a_retired_entry(self, tmp_path: Path) -> None:
+        """A session that fully completed one plan is not "new" either."""
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        _make_plan(plan_dir, _PLAN_A, _STATUS_IN_PROGRESS)
+        ledger = GoalLedger(tmp_path / LEDGER_FILENAME)
+        ledger.record_emission(_SESSION, _PLAN_A, _GOAL_LINE, plan_dir)
+        _make_plan(plan_dir, _PLAN_A, _STATUS_COMPLETE)
+        ledger.live_plan_numbers(plan_dir)
+
+        assert ledger.session_has_entries(_SESSION) is True
+
+
+class TestReassertSession:
+    """Review M3: transfers ownership of a still-live entry with NONE of
+    ``record_emission``'s displacement side effects."""
+
+    def test_transfers_ownership_of_a_live_entry(self, tmp_path: Path) -> None:
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        _make_plan(plan_dir, _PLAN_A, _STATUS_IN_PROGRESS)
+        ledger = GoalLedger(tmp_path / LEDGER_FILENAME)
+        ledger.record_emission(_SESSION, _PLAN_A, _GOAL_LINE, plan_dir)
+
+        assert ledger.reassert_session(_OTHER_SESSION, _PLAN_A) is True
+        entry = next(e for e in ledger.entries() if e.plan_number == _PLAN_A)
+        assert entry.session_id == _OTHER_SESSION
+
+    def test_false_when_no_live_entry_exists(self, tmp_path: Path) -> None:
+        ledger = GoalLedger(tmp_path / LEDGER_FILENAME)
+
+        assert ledger.reassert_session(_SESSION, _PLAN_A) is False
+
+    def test_does_not_displace_any_other_live_plan(self, tmp_path: Path) -> None:
+        """The defining difference from record_emission: reasserting plan A
+        must never mark a DIFFERENT still-live plan B as displaced."""
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        _make_plan(plan_dir, _PLAN_A, _STATUS_IN_PROGRESS)
+        _make_plan(plan_dir, _PLAN_B, _STATUS_IN_PROGRESS)
+        ledger = GoalLedger(tmp_path / LEDGER_FILENAME)
+        ledger.record_emission(_SESSION, _PLAN_A, _GOAL_LINE, plan_dir)
+        ledger.record_emission(_OTHER_SESSION, _PLAN_B, _GOAL_LINE, plan_dir)
+
+        ledger.reassert_session(_OTHER_SESSION, _PLAN_A)
+
+        entry_b = next(e for e in ledger.entries() if e.plan_number == _PLAN_B)
+        assert entry_b.displaced_by is None

@@ -50,6 +50,7 @@ from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.chain import is_restrictive
 from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
+from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.side_effect_journal import SideEffectJournal
 from claude_code_hooks_daemon.core.utils import get_bash_command, get_file_path
 from claude_code_hooks_daemon.utils.git_facts import project_relative_head_text
@@ -347,7 +348,7 @@ def _write_is_real_completion(file_path: str) -> bool:
     inspect for a Write -- the whole file is the payload -- so this always
     goes to HEAD rather than short-circuiting on a local text check first.
     """
-    before_text = project_relative_head_text(Path(file_path))
+    before_text = project_relative_head_text(Path(file_path), ProjectContext.project_root())
     if before_text is None:
         return True
     return not _STATUS_COMPLETE_RE.search(before_text)

@@ -464,7 +464,13 @@ class HandlerRegistry:
 
             event_config = (config or {}).get(dir_name) or {}
 
-            for py_file in event_dir.glob("*.py"):
+            # sorted(): ledger 00466 N7/m6 -- os.scandir order (what a bare
+            # .glob() yields) is not guaranteed stable across processes or
+            # machines, so an unsorted walk here is the actual source of the
+            # registration-order nondeterminism the CLAUDE.md/HOOKS-DAEMON.md
+            # rendering-layer sorts were compensating for. Matches the
+            # existing pattern at line 198 above.
+            for py_file in sorted(event_dir.glob("*.py")):
                 if py_file.name.startswith("_"):
                     continue
 
@@ -507,8 +513,8 @@ class HandlerRegistry:
             # Get configuration for this event type
             event_config = (config or {}).get(dir_name) or {}
 
-            # Find all Python files in the directory
-            for py_file in event_dir.glob("*.py"):
+            # Find all Python files in the directory (sorted(): see PASS 1 above)
+            for py_file in sorted(event_dir.glob("*.py")):
                 if py_file.name.startswith("_"):
                     continue
 

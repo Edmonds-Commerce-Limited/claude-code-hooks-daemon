@@ -44,7 +44,9 @@ def _mock_project_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     git HEAD (``utils.git_facts.project_relative_head_text``), which needs a
     resolved project root -- ``ProjectContext.project_root()`` is called
     unguarded and would otherwise raise (uninitialised) for every test in
-    this module.
+    this module. Review nit n3: ``git_facts`` takes the root as a parameter
+    rather than importing ``ProjectContext`` itself, so this patches THIS
+    module's own import of it, not ``utils.git_facts``'s.
 
     None of this module's existing fixtures live under ``tmp_path``, so for
     them the path-membership check alone answers "nothing to compare
@@ -53,7 +55,8 @@ def _mock_project_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     ``TestWriteCompletionIsTransitionBased`` below, rooted at ``tmp_path``.
     """
     monkeypatch.setattr(
-        "claude_code_hooks_daemon.utils.git_facts.ProjectContext.project_root",
+        "claude_code_hooks_daemon.handlers.post_tool_use.recovery_cron_advisor."
+        "ProjectContext.project_root",
         classmethod(lambda cls: tmp_path),
     )
 

@@ -37,6 +37,7 @@ from claude_code_hooks_daemon.handlers.post_tool_use.goal_injection import (
     render_goal_line,
     write_goal_signal,
 )
+from claude_code_hooks_daemon.utils.goal_ledger import LEDGER_FILENAME, GoalLedger
 
 _PLAN_FOLDER = "00269-supervisor-goal-message-injection"
 _PLAN_NUMBER = "00269"
@@ -787,6 +788,32 @@ class TestCombinedGoalSignal:
         assert "00296" not in joined
         assert "00298" in joined
 
+    def test_completing_a_plan_after_a_daemon_restart_still_refreshes_signal(
+        self,
+    ) -> None:
+        """Review M2: the retirement refresh keyed on the in-memory
+        ``self._fired`` latch, which a daemon restart (a fresh handler
+        instance) empties. Ledger 00466 N3's flip-only rule made a
+        non-flip write stop re-latching too, so nothing ever re-armed it
+        -- a plan flipped in one daemon lifetime and completed in the
+        next silently never dropped out of the combined signal. The
+        refresh must be keyed on the persistent ``GoalLedger`` instead."""
+        first = self._write_plan("00296-first")
+        second = self._write_plan("00298-second")
+        daemon_one = GoalInjectionHandler()
+        daemon_one.handle(self._hook_input(first))
+        daemon_one.handle(self._hook_input(second))
+
+        # A fresh handler instance simulates a daemon restart: in-memory
+        # `_fired` is empty, but the ledger/untracked dir persist.
+        daemon_two = GoalInjectionHandler()
+        completed_first = self._write_plan("00296-first", status="Complete")
+        daemon_two.handle(self._hook_input(completed_first))
+
+        joined = self._signal()["rendered_lines"][0]
+        assert "00296" not in joined
+        assert "00298" in joined
+
     def test_terminal_write_for_unledgered_plan_is_a_no_op(
         self, handler: GoalInjectionHandler
     ) -> None:
@@ -1028,6 +1055,43 @@ class TestStatusFlipDetection:
         assert result.decision == Decision.ALLOW
         assert not self._signal_path().exists()
 
+    def test_edit_whose_old_string_is_only_the_status_value_still_emits(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """Review m4: ``old_string`` may carry just the VALUE ("Not Started"),
+        with no ``**Status**:`` prefix in the replaced span -- e.g. the agent
+        quoted the minimal unique context. ``PlanDoc.parse(old_string)`` alone
+        then finds no Status line and reads "never touched it", missing a
+        genuine flip. The pre-edit text must be reconstructed from what is
+        already on disk (undo this edit against the post-edit file) rather
+        than answered from ``old_string`` in isolation."""
+        plan = self._plan_path()
+        plan.write_text(_plan_md("In Progress"), encoding="utf-8")
+
+        result = handler.handle(
+            self._edit_hook_input(plan, old_string="Not Started", new_string="In Progress")
+        )
+
+        assert result.decision == Decision.ALLOW
+        assert self._signal_path().exists()
+
+    def test_edit_whose_old_string_value_was_already_in_progress_emits_nothing(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """The reconstruction control: undoing a value-only edit that never
+        changed the status (e.g. correcting unrelated nearby text tagged with
+        the same value-only ``old_string``/``new_string`` pair) must still
+        read as no flip."""
+        plan = self._plan_path()
+        plan.write_text(_plan_md("In Progress"), encoding="utf-8")
+
+        result = handler.handle(
+            self._edit_hook_input(plan, old_string="In Progress", new_string="In Progress")
+        )
+
+        assert result.decision == Decision.ALLOW
+        assert not self._signal_path().exists()
+
     # ---- Write: the transition is read against git HEAD -------------------
 
     def test_write_creating_a_brand_new_in_progress_plan_emits(
@@ -1113,3 +1177,137 @@ class TestStatusFlipDetection:
         joined = data["rendered_lines"][0]
         assert "00296" not in joined
         assert "00298" in joined
+
+
+class TestNewSessionReassertion:
+    """Review M3: Plan 00269 Task 2.1 deliberately chose "the first edit to
+    an already-In-Progress plan in a NEW session re-fires" -- that is what
+    made the goal survive a session restart. N3 requires a genuine
+    TRANSITION to fire the full flip path, which silently dropped this: a
+    resumed session got no `/goal` at all until a real flip or a manual
+    `inject-goal`. Restored through ``GoalLedger.reassert_session`` --
+    ownership transfer only, no displacement bookkeeping -- gated on this
+    session having NO ledger entries at all, so it never fires for a
+    session that already has its own live goal.
+    """
+
+    @pytest.fixture(autouse=True)
+    def mock_project_context(self, tmp_path: Path):
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                "claude_code_hooks_daemon.handlers.post_tool_use.goal_injection."
+                "ProjectContext.daemon_untracked_dir",
+                classmethod(lambda cls: tmp_path / "untracked"),
+            )
+            mp.setattr(
+                "claude_code_hooks_daemon.handlers.post_tool_use.goal_injection."
+                "ProjectContext.project_root",
+                classmethod(lambda cls: tmp_path),
+            )
+            self._untracked = tmp_path / "untracked"
+            self._project = tmp_path
+            yield
+
+    @pytest.fixture
+    def handler(self) -> GoalInjectionHandler:
+        return GoalInjectionHandler()
+
+    def _plan_path(self, folder: str) -> Path:
+        plan_dir = self._project / "CLAUDE" / "Plan" / folder
+        plan_dir.mkdir(parents=True, exist_ok=True)
+        return plan_dir / "PLAN.md"
+
+    def _signal(self, session: str) -> dict[str, Any]:
+        path = self._untracked / _SIGNAL_SUBDIR / f"{session}{_SIGNAL_SUFFIX}"
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def _edit_input(self, file_path: Path, session: str, old: str, new: str) -> dict[str, Any]:
+        return {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(file_path), "old_string": old, "new_string": new},
+            "session_id": session,
+        }
+
+    def test_a_new_session_touching_an_already_live_plan_gets_its_own_signal(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        plan = self._plan_path("00296-first")
+        plan.write_text(_plan_md("In Progress"), encoding="utf-8")
+        original_session = "sess-original"
+        handler.handle(
+            self._edit_input(
+                plan, original_session, "**Status**: Not Started", "**Status**: In Progress"
+            )
+        )
+        assert self._signal(original_session)  # sanity: the flip emitted
+
+        new_session = "sess-new"
+        result = handler.handle(
+            self._edit_input(
+                plan, new_session, "## Overview\n\nBody.", "## Overview\n\nBody.\n\nmore."
+            )
+        )
+
+        assert result.decision == Decision.ALLOW
+        assert not any("GOAL DISPLACED" in c for c in result.context)
+        signal = self._signal(new_session)
+        assert "00296" in signal["rendered_lines"][0]
+
+    def test_a_session_with_its_own_live_goal_does_not_reassert_an_unrelated_plan(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """The condition is "zero entries for THIS session", not merely "not
+        a flip" -- a session that already flipped its OWN plan must not
+        implicitly reassert an unrelated plan on a later non-flip touch."""
+        own_plan = self._plan_path("00297-own")
+        own_plan.write_text(_plan_md("In Progress"), encoding="utf-8")
+        session = "sess-busy"
+        handler.handle(
+            self._edit_input(
+                own_plan, session, "**Status**: Not Started", "**Status**: In Progress"
+            )
+        )
+
+        other_plan = self._plan_path("00296-other")
+        other_plan.write_text(_plan_md("In Progress"), encoding="utf-8")
+        handler.handle(
+            self._edit_input(
+                other_plan, "sess-original", "**Status**: Not Started", "**Status**: In Progress"
+            )
+        )
+
+        result = handler.handle(
+            self._edit_input(
+                other_plan, session, "## Overview\n\nBody.", "## Overview\n\nBody.\n\nmore."
+            )
+        )
+
+        assert result.decision == Decision.ALLOW
+        signal = self._signal(session)
+        assert "00296" not in signal["rendered_lines"][0]
+        assert "00297" in signal["rendered_lines"][0]
+
+    def test_reasserting_does_not_displace_another_live_plan(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        plan_a = self._plan_path("00296-a")
+        plan_a.write_text(_plan_md("In Progress"), encoding="utf-8")
+        handler.handle(
+            self._edit_input(plan_a, "sess-a", "**Status**: Not Started", "**Status**: In Progress")
+        )
+        plan_b = self._plan_path("00298-b")
+        plan_b.write_text(_plan_md("In Progress"), encoding="utf-8")
+        handler.handle(
+            self._edit_input(plan_b, "sess-b", "**Status**: Not Started", "**Status**: In Progress")
+        )
+
+        new_session = "sess-new"
+        handler.handle(
+            self._edit_input(
+                plan_a, new_session, "## Overview\n\nBody.", "## Overview\n\nBody.\n\nmore."
+            )
+        )
+
+        ledger = GoalLedger(self._untracked / LEDGER_FILENAME)
+        entry_b = next(e for e in ledger.entries() if e.plan_number == "00298")
+        assert entry_b.displaced_by is None

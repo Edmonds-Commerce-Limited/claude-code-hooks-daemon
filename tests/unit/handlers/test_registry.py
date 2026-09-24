@@ -536,6 +536,35 @@ class TestRegisterAll:
         handler_names = [h.name for h in pre_handlers.handlers]
         assert "prevent-destructive-git" in handler_names
 
+    def test_register_all_handler_order_is_independent_of_glob_order(self) -> None:
+        """Ledger 00466 N7/m6: the real unsorted source was register_all's
+        OWN two ``event_dir.glob("*.py")`` loops (PASS 1 and PASS 2), not
+        ``discover()`` -- ``discover()`` goes through ``pkgutil.walk_packages``,
+        which already sorts ``os.listdir`` output internally. ``glob()``
+        yields ``os.scandir`` order, which is not guaranteed stable, so
+        registration order must not depend on what order it returns."""
+        original_glob = Path.glob
+
+        def reversed_glob(self: Path, pattern: str, *args: Any, **kwargs: Any) -> list[Path]:
+            return list(reversed(list(original_glob(self, pattern, *args, **kwargs))))
+
+        normal_registry = HandlerRegistry()
+        normal_registry.discover()
+        normal_router = EventRouter()
+        normal_registry.register_all(normal_router)
+        normal_order = [h.name for h in normal_router.get_chain(EventType.PRE_TOOL_USE)._handlers]
+
+        with patch.object(Path, "glob", reversed_glob):
+            reversed_registry = HandlerRegistry()
+            reversed_registry.discover()
+            reversed_router = EventRouter()
+            reversed_registry.register_all(reversed_router)
+        reversed_order = [
+            h.name for h in reversed_router.get_chain(EventType.PRE_TOOL_USE)._handlers
+        ]
+
+        assert normal_order == reversed_order
+
 
 class TestEventTypeMapping:
     """Tests for EVENT_TYPE_MAPPING."""

@@ -384,6 +384,60 @@ class GoalLedger:
             self._save(entries)
         return sorted(displaced)
 
+    def has_live_entry(self, session_id: str, plan_number: str) -> bool:
+        """True when a not-yet-retired entry exists for THIS (session, plan).
+
+        Read-only, no reconciliation, no lock. Review M2: a caller deciding
+        whether ITS session is responsible for a plan needs an answer that
+        survives a process restart -- an in-memory latch does not, since a
+        fresh process starts with none. The persisted ledger does: an entry
+        written before a restart is still on disk, unaffected by the
+        restart, so this is the question to ask instead of any in-memory
+        state.
+        """
+        return any(
+            e.plan_number == plan_number and e.session_id == session_id and e.retired_at is None
+            for e in self.entries()
+        )
+
+    def session_has_entries(self, session_id: str) -> bool:
+        """True when the ledger has EVER recorded an emission for this session.
+
+        Review M3: distinguishes a genuinely NEW session (no entries at
+        all, so nothing here has told it about any goal yet) from a session
+        that already went through the injection flow itself (which does not
+        need re-arming — it already has its own live signal). Counts
+        retired entries too: a session that fully completed one plan and
+        moved on is not "new" either.
+        """
+        return any(e.session_id == session_id for e in self.entries())
+
+    def reassert_session(self, session_id: str, plan_number: str) -> bool:
+        """Transfer a still-live entry's ownership to ``session_id``.
+
+        Review M3: restores Plan 00269's "the goal survives a session
+        restart" intent for a session that resumes an already-ledgered plan
+        without a real flip, WITHOUT the side effects a full
+        :meth:`record_emission` would have — no displacement of any OTHER
+        live plan, because none of the bookkeeping that computes
+        displacement runs here at all. Returns ``True`` (and updates the
+        entry) only when a not-yet-retired entry for ``plan_number`` exists;
+        ``False`` means there is nothing this ledger can vouch for, and the
+        caller must not treat the touch as a resumed goal.
+        """
+        with self._locked():
+            entries = self.entries()
+            existing = next(
+                (e for e in entries if e.plan_number == plan_number and e.retired_at is None),
+                None,
+            )
+            if existing is None:
+                return False
+            existing.session_id = session_id
+            existing.emitted_at = time.time()
+            self._save(entries)
+        return True
+
     def live_plan_numbers(self, plan_dir: Path) -> list[str]:
         """Return ledgered plans still ``In Progress``; persists retirements.
 
