@@ -6,6 +6,24 @@ candidate remedies.
 N34 is taken on the `worktree-n466-n24` branch (the chain deadline cannot
 interrupt a running handler) and lands with that branch.
 
+### N36 — `destructive_git` denies a `grep` whose search pattern is the text of a force branch delete
+
+**Found by the Plan 00463 agent** (review-5 fix round, its nit n9). Searching
+the tree for the literal force-branch-delete command text (a grep argument,
+for example `grep -rn "git branch -D" docs/`) is denied as
+R-GIT-BRANCH-FORCE-DELETE. Nothing in the command deletes a branch: the
+text is data given to `grep`. It is the same class as N22
+(`lsp_enforcement` takes another command's argument for a symbol lookup)
+and the N32 pipe split: a guard matches a dangerous shape anywhere in the
+command string instead of at a command position.
+
+**Candidate remedy:** judge destructive-git shapes only at a real command
+position, using the shared shell lexer from the Plan 00464 shell-parser
+consolidation. Treat a quoted argument to a known data consumer (`grep`,
+`rg`, `echo`, `printf`, a git `-m` message) as data. RED tests: the grep
+above is allowed; `git branch -D x`, `cd r && git branch -D x`, and
+`bash -c 'git branch -D x'` are still denied.
+
 ### N35 — `daemon_sync_after_merge` judges a `cd <worktree> && git merge` against the session root's ORIG_HEAD
 
 **Found by the Plan 00421 agent.** It ran `cd <worktree> && git merge main`
@@ -63,6 +81,9 @@ Plan 00464 (the shell-parser consolidation), so pipe boundaries come from
 real tokenisation. Match a stage's command by whole word. RED tests: the
 command above is allowed; `pytest | head -1` is still denied; and
 `grep "x|y" f | head` is judged on `grep` (whitelisted), not on `y`.
+
+**Widened (Plan 00463 agent, review-5 n9):** an UNESCAPED `|` inside double
+quotes trips it too, not only `\|`. The RED tests must cover both spellings.
 
 ### N31 — the dispatch-declaration advisory does not recognise "File to write to: <path>"
 
