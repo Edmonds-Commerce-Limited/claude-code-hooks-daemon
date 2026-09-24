@@ -202,6 +202,12 @@ class TestStripQuotedHeredocBodies:
         command = 'git commit -F - <<"EOF"\nprose mentioning run_all.sh\nEOF'
         assert "run_all.sh" not in strip_quoted_heredoc_bodies(command)
 
+    @pytest.mark.parametrize("delimiter", [" EOF", "EOF X"])
+    def test_a_quoted_delimiter_holding_a_blank_is_inert(self, delimiter: str) -> None:
+        """Plan 00463 review 4 N10: `<<' EOF'` left the body scanned as commands."""
+        command = f"cat > n.txt <<'{delimiter}'\nprose mentioning run_all.sh\n{delimiter}"
+        assert "run_all.sh" not in strip_quoted_heredoc_bodies(command)
+
     def test_dash_form_delimiter_is_handled(self) -> None:
         command = "git commit -F - <<-'EOF'\n\tprose mentioning run_all.sh\n\tEOF"
         assert "run_all.sh" not in strip_quoted_heredoc_bodies(command)

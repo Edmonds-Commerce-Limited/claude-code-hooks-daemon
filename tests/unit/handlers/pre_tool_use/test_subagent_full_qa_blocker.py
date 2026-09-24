@@ -194,6 +194,65 @@ _FULL_RUNS: list[tuple[str, str]] = [
     ("pytest tests//unit", "pytest-whole-suite"),
     ("pytest tests/./unit", "pytest-whole-suite"),
     ("pytest tests/unit/qa/..", "pytest-whole-suite"),
+    # Review 4 N4: a substitution inside double quotes still RUNS its command.
+    ('out="$(./scripts/qa/llm_qa.py all 2>&1)"; echo "$out"', "llm-qa-whole-suite"),
+    ('x="$(pytest tests)"', "pytest-whole-suite"),
+    ('echo "$(pytest tests)"', "pytest-whole-suite"),
+    ('echo "`pytest tests`"', "pytest-whole-suite"),
+    ('git commit -m "$(./scripts/qa/llm_qa.py all)"', "llm-qa-whole-suite"),
+    ('echo "$(echo "$(pytest)")"', "pytest-whole-suite"),
+    # Review 4 N5: globs and braces the shell expands to the whole suite.
+    ("pytest tests/*", "pytest-whole-suite"),
+    ("pytest tests/unit/*", "pytest-whole-suite"),
+    ("pytest tests/{unit,integration}", "pytest-whole-suite"),
+    ("pytest tests/unit/**/test_*.py", "pytest-whole-suite"),
+    ("pytest *", "pytest-whole-suite"),
+    # Review 4 N5: code a shell reads from a string, a here-string or a pipe.
+    ("eval 'pytest tests'", "pytest-whole-suite"),
+    ("eval pytest", "pytest-whole-suite"),
+    ("bash <<< 'pytest tests'", "pytest-whole-suite"),
+    ("bash <<<'pytest tests'", "pytest-whole-suite"),
+    ("echo 'pytest tests' | bash", "pytest-whole-suite"),
+    ("printf 'pytest tests\\n' | sh", "pytest-whole-suite"),
+    ("bash < <(echo pytest tests)", "pytest-whole-suite"),
+    ("source scripts/qa/run_tests.sh", "run-tests"),
+    (". scripts/qa/run_tests.sh", "run-tests"),
+    ("time -p pytest tests", "pytest-whole-suite"),
+    ("builtin command pytest tests", "pytest-whole-suite"),
+    # Review 4 N5: ANSI-C quoting, whose `\'` shlex read as closing the quote.
+    ("echo $'a\\'b' ; ./scripts/qa/llm_qa.py all", "llm-qa-whole-suite"),
+    ("./scripts/qa/llm_qa.py $'all'", "llm-qa-whole-suite"),
+    # Review 4 N9: xargs runs its command; arguments from stdin cannot be seen.
+    ("xargs pytest tests", "pytest-whole-suite"),
+    ("echo tests | xargs pytest", "pytest-whole-suite"),
+    ("find tests -name 'test_*.py' | xargs pytest", "pytest-whole-suite"),
+    ("xargs -n 1 pytest", "pytest-whole-suite"),
+    # Review 4 probe: the working directory by substitution, and launchers that
+    # run the command after their own flags and operands.
+    ('pytest "$(pwd)/tests"', "pytest-whole-suite"),
+    ("pytest `pwd`/tests", "pytest-whole-suite"),
+    ('pytest "$(pwd)"', "pytest-whole-suite"),
+    ("ionice -c3 pytest", "pytest-whole-suite"),
+    ("ionice -c 2 -n 7 pytest tests", "pytest-whole-suite"),
+    ("chrt 0 pytest", "pytest-whole-suite"),
+    ("chrt -f 10 pytest tests", "pytest-whole-suite"),
+    ("setsid pytest tests", "pytest-whole-suite"),
+    ("setsid -f nice pytest", "pytest-whole-suite"),
+    ("flock /tmp/x pytest tests", "pytest-whole-suite"),
+    ("flock -w 5 /tmp/x pytest", "pytest-whole-suite"),
+    ("flock /tmp/x -c 'pytest tests'", "pytest-whole-suite"),
+    ("taskset -c 0 pytest", "pytest-whole-suite"),
+    ("taskset 0x1 pytest tests", "pytest-whole-suite"),
+    ("xvfb-run pytest", "pytest-whole-suite"),
+    ("xvfb-run -a -s '-screen 0 1x1x8' pytest", "pytest-whole-suite"),
+    ("script -c pytest", "pytest-whole-suite"),
+    ("script -q -c 'pytest tests' out.log", "pytest-whole-suite"),
+    ("script --command='pytest tests'", "pytest-whole-suite"),
+    ("pipx run pytest", "pytest-whole-suite"),
+    ("parallel pytest ::: tests", "pytest-whole-suite"),
+    ("parallel -j 2 pytest ::: tests/unit/x.py tests", "pytest-whole-suite"),
+    ("parallel ::: 'pytest tests'", "pytest-whole-suite"),
+    ("parallel pytest", "pytest-whole-suite"),
 ]
 
 _NOT_FULL_RUNS: list[str] = [
@@ -250,7 +309,124 @@ _NOT_FULL_RUNS: list[str] = [
     "python3 -c \"print('llm_qa.py all')\"",
     "ls tests/",
     "mypy tests/",
+    # Review 4: the same constructs, running something narrow or nothing full.
+    "pytest tests/unit/handlers/test_*.py",
+    "pytest tests/unit/{core,config}/test_x.py",
+    "eval 'pytest tests/unit/x.py'",
+    "echo 'pytest tests/unit/x.py' | bash",
+    'echo "$(git rev-parse HEAD)"',
+    'x="$(./scripts/qa/llm_qa.py changed)"',
+    'git commit -m "$(cat untracked/scratch/msg.txt)"',
+    "echo '$(pytest tests)'",
+    "echo $'a\\'b' ; ./scripts/qa/llm_qa.py lint",
+    "time -p pytest tests/unit/x.py",
+    "xargs pytest tests/unit/x.py",
+    'echo "unterminated',
+    'pytest "$(pwd)/tests/unit/handlers"',
+    "setsid pytest tests/unit/x.py",
+    "chrt 0 pytest tests/unit/x.py",
+    "flock /tmp/x pytest tests/unit/x.py",
+    "flock /tmp/x -c 'pytest tests/unit/x.py'",
+    "taskset 0x1 pytest tests/unit/x.py",
+    "ionice -c3 pytest tests/unit/x.py",
+    "script -c 'pytest tests/unit/x.py'",
+    "script out.log",
+    "parallel pytest ::: tests/unit/x.py tests/unit/y.py",
+    "parallel ::: 'pytest tests/unit/x.py'",
+    "pipx run pytest tests/unit/x.py",
+    "chrt -p 0 1234",
+    # Review 4 N10: a quoted delimiter with a blank is still a quoted delimiter.
+    "cat > n.txt <<' EOF'\npytest tests\n EOF",
+    "cat > n.txt <<'EOF X'\npytest tests\nEOF X",
 ]
+
+
+class TestWhatCannotBeParsed:
+    """The lead's rule for review 4: what cannot be parsed denies, and says so."""
+
+    def test_an_unparseable_command_naming_a_full_run_program_is_denied(self) -> None:
+        match = find_full_qa_invocation('pytest tests/unit/x.py "unterminated', _patterns())
+        assert match is not None
+        assert match.unparsed
+
+    def test_the_deny_says_the_command_could_not_be_parsed(self) -> None:
+        result = _handler().handle(_bash('pytest "unterminated'))
+        assert "could not be parsed" in (result.reason or "")
+
+
+#: The quoting, nesting and grammar edges of each construct the parser follows.
+_EDGE_FULL_RUNS: list[str] = [
+    "echo a\\ b; pytest $'tests'",
+    "pytest $'tests",
+    'x="$(echo \\) ; pytest tests)"',
+    "x=\"$(echo ')' ; pytest tests)\"",
+    'x="$( (pytest tests) )"',
+    "sleep 1 & pytest tests",
+    "echo -n pytest tests | bash",
+    "echo pytest tests | bash -o errexit",
+    "echo pytest tests | bash -s",
+    "echo pytest tests | bash > log.txt",
+    "flock -- /tmp/x pytest tests",
+    "parallel pytest :::: files.txt",
+    "hatch run pytest",
+    "hatch run --verbose test:pytest tests",
+    "python -mpytest tests",
+    "python -X dev -m pytest tests",
+    "python -u scripts/qa/llm_qa.py all",
+    "bash 2>err.txt -c 'pytest tests'",
+    "bash --norc -c 'pytest tests'",
+    "pytest tests/{unit,{a,b}}",
+    "cd a b && pytest",
+]
+_EDGE_NOT_FULL_RUNS: list[str] = [
+    'x="\\$(pytest tests)"',
+    "echo pytest tests | bash -c 'ls'",
+    "echo pytest tests | bash script.sh",
+    "bash < <(cat commands.txt)",
+    "source",
+    "uv run --frozen",
+    "uv tool run ruff check",
+    "flock /tmp/x -c",
+    "hatch run",
+    "python",
+    "python -m",
+    "bash <<< 'ls'",
+    "bash -c 'ls'",
+    "bash script.sh",
+    "pytest -- tests/unit/x.py",
+    "pytest tests/unit/x.py> out.txt",
+    "pytest tests/unit/{x",
+    "pytest tests/unit/{x}.py",
+]
+
+
+class TestTheParserEdges:
+    @pytest.mark.parametrize("command", _EDGE_FULL_RUNS)
+    def test_a_full_run_is_found(self, command: str) -> None:
+        assert find_full_qa_invocation(command, _patterns()) is not None, command
+
+    @pytest.mark.parametrize("command", _EDGE_NOT_FULL_RUNS)
+    def test_a_targeted_run_or_none_is_not(self, command: str) -> None:
+        assert find_full_qa_invocation(command, _patterns()) is None, command
+
+    def test_nesting_is_followed_to_a_fixed_depth(self) -> None:
+        """Deeper than three levels is not how anyone runs a suite by accident."""
+        assert find_full_qa_invocation("eval 'eval \"eval pytest\"'", _patterns()) is not None
+        four_deep = 'eval "eval \'eval \\"eval pytest\\"\'"'
+        assert find_full_qa_invocation(four_deep, _patterns()) is None
+
+    def test_a_word_no_path_can_hold_names_nothing(self, tmp_path: Path) -> None:
+        """An embedded NUL cannot be looked up, so it does not target the run."""
+        assert find_full_qa_invocation("pytest 'a\x00b'", _patterns(), cwd=tmp_path) is not None
+
+    def test_an_invalid_entry_is_skipped_and_the_rest_still_apply(self) -> None:
+        handler = _handler(patterns=[{"id": "broken"}, *_REPO_PATTERNS])
+        assert [p.pattern_id for p in handler._patterns()] == [p["id"] for p in _REPO_PATTERNS]
+
+    def test_targeted_forms_that_are_not_a_list_are_ignored(self) -> None:
+        handler = _handler()
+        handler._targeted_qa_commands = "pytest tests/unit/x.py"
+        assert handler._targeted_forms() == []
 
 
 #: Review 3 R7: whole-suite spellings the guard does NOT deny, each listed with
@@ -259,15 +435,12 @@ _NOT_FULL_RUNS: list[str] = [
 _DOCUMENTED_LIMITS: list[str] = [
     "$(which pytest)",
     '"$(command -v pytest)" tests',
-    "ionice -c3 pytest",
-    "taskset -c 0 pytest",
-    "xvfb-run pytest",
-    "script -c pytest",
-    "pipx run pytest",
     "hatch test",
     "tox",
     "nox",
-    "./scripts/qa/llm_qa.py $'all'",
+    "python -c 'import pytest; pytest.main([\"tests\"])'",
+    "cat commands.txt | bash",
+    "bash < commands.txt",
 ]
 
 
@@ -283,9 +456,7 @@ class TestTheDocumentedLimits:
         start = reference.index("#### subagent_full_qa_blocker")
         end = reference.find("\n#### ", start + 1)
         section = reference[start : end if end != -1 else len(reference)]
-        for spelling in ("$(which pytest)", "ionice", "taskset", "xvfb-run", "script -c"):
-            assert spelling in section, spelling
-        for spelling in ("pipx run", "hatch test", "tox", "nox", "$'all'"):
+        for spelling in ("$(which pytest)", "hatch test", "tox", "nox", "python -c", "| bash"):
             assert spelling in section, spelling
 
 
@@ -441,10 +612,80 @@ class TestTheDirectoryTheCommandCdsInto:
         root = self._tree(tmp_path)
         assert find_full_qa_invocation(command, _patterns(), cwd=root) is None, command
 
+    @pytest.mark.parametrize("dot", [".", "./"])
+    def test_the_current_directory_after_a_cd_is_where_the_cd_went(
+        self, tmp_path: Path, dot: str
+    ) -> None:
+        """Review 4 N8: `.` was matched literally against `full_args` before resolving."""
+        root = self._tree(tmp_path)
+        command = f"cd tests/unit/handlers && pytest {dot}"
+        assert find_full_qa_invocation(command, _patterns(), cwd=root) is None
+        assert find_full_qa_invocation(f"cd tests/unit && pytest {dot}", _patterns(), cwd=root)
+
+    @pytest.mark.parametrize("bare", ["pytest", "pytest -q", "pytest -x -p no:randomly"])
+    def test_a_bare_run_collects_where_the_cd_went(self, tmp_path: Path, bare: str) -> None:
+        """Review 4 probe: `cd tests/unit/qa && pytest -q` was denied as bare, hence full.
+
+        From below the repository root pytest collects the directory it runs
+        in, so a bare run is judged as the operand ``.`` from there.
+        """
+        root = self._tree(tmp_path)
+        (root / "pyproject.toml").write_text("", encoding="utf-8")
+        assert (
+            find_full_qa_invocation(f"cd tests/unit/handlers && {bare}", _patterns(), cwd=root)
+            is None
+        )
+        for full in ("cd tests/unit", "cd tests", "cd tests/unit/handlers/../..", "cd $X"):
+            assert find_full_qa_invocation(f"{full} && {bare}", _patterns(), cwd=root), full
+
     def test_a_cd_it_cannot_resolve_falls_back_to_the_path_shape(self, tmp_path: Path) -> None:
         root = self._tree(tmp_path)
         assert find_full_qa_invocation("cd $X && pytest handlers", _patterns(), cwd=root)
         assert find_full_qa_invocation("cd $X && pytest a/b.py", _patterns(), cwd=root) is None
+
+
+class TestOperandsAreJudgedFromTheirRepository:
+    """Review 4 N6: `full_args` were placed relative to the event's cwd.
+
+    A teammate starts in the main checkout and names a worktree's suite by
+    path, so the suite is judged against the repository that CONTAINS the
+    operand: the nearest directory holding ``.git`` or ``pyproject.toml``.
+    """
+
+    @staticmethod
+    def _checkout(tmp_path: Path) -> Path:
+        repo = tmp_path / "untracked" / "worktrees" / "wt"
+        (repo / "tests" / "unit" / "handlers").mkdir(parents=True)
+        (repo / ".git").write_text("gitdir: elsewhere\n", encoding="utf-8")
+        return repo
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "pytest untracked/worktrees/wt/tests",
+            "pytest untracked/worktrees/wt/tests/unit",
+            "pytest untracked/worktrees/wt",
+            "cd untracked/worktrees/wt/tests/unit/handlers && pytest ../..",
+        ],
+    )
+    def test_a_suite_named_from_outside_its_repository_is_full(
+        self, tmp_path: Path, command: str
+    ) -> None:
+        self._checkout(tmp_path)
+        assert find_full_qa_invocation(command, _patterns(), cwd=tmp_path) is not None, command
+
+    def test_the_repository_root_by_absolute_path_is_full(self, tmp_path: Path) -> None:
+        repo = self._checkout(tmp_path)
+        assert find_full_qa_invocation(f"pytest {repo}", _patterns(), cwd=tmp_path) is not None
+
+    def test_from_inside_the_tests_directory_a_whole_subtree_is_full(self, tmp_path: Path) -> None:
+        repo = self._checkout(tmp_path)
+        assert find_full_qa_invocation("pytest unit", _patterns(), cwd=repo / "tests") is not None
+
+    def test_a_narrow_path_into_another_repository_stays_targeted(self, tmp_path: Path) -> None:
+        self._checkout(tmp_path)
+        command = "pytest untracked/worktrees/wt/tests/unit/handlers"
+        assert find_full_qa_invocation(command, _patterns(), cwd=tmp_path) is None
 
 
 class TestAnUnknownFlagUnderAGrammar:

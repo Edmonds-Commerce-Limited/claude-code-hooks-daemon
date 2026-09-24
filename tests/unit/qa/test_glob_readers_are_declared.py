@@ -227,9 +227,8 @@ class TestTheReviewReproduction:
         ],
     )
     def test_a_page_the_command_checker_reads_selects_it(self, path: str) -> None:
-        assert (
-            "tests/integration/test_documented_commands_are_not_self_denied.py"
-            in _selected_for(path)
+        assert "tests/integration/test_documented_commands_are_not_self_denied.py" in _selected_for(
+            path
         )
 
     def test_a_plan_document_is_not_swept_in(self) -> None:

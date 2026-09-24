@@ -92,7 +92,7 @@ _QUOTED_HEREDOC_PATTERN = re.compile(
 # whole body. The closer then needs the lookahead: without it `EOF` is closed
 # by a body line reading `EOFDATA`, ending the body early and scanning the rest.
 _QUOTED_HEREDOC_BODY_PATTERN = re.compile(
-    r"(?P<opener><<-?\s*(?P<quote>['\"])(?P<delim>[\w.\-]+)(?P=quote))"
+    r"(?P<opener><<-?\s*(?P<quote>['\"])(?P<delim>[^'\"\n]+)(?P=quote))"
     r"(?P<opener_tail>[^\n]*)\n.*?\n"
     r"(?P<closer>[ \t]*(?P=delim)(?![\w.\-]))",
     re.DOTALL,

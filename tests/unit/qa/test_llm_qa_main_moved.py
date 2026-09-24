@@ -635,9 +635,7 @@ class TestTheCertifiedHead:
             llm_qa.certify_head(repo, llm_qa.worktree_state(repo))
         assert _certified(repo) is None
 
-    def test_a_gate_is_not_certified_when_the_tree_changed_during_the_run(
-        self, repo: Path
-    ) -> None:
+    def test_a_gate_is_not_certified_when_the_tree_changed_during_the_run(self, repo: Path) -> None:
         llm_qa.start_batch(repo, "main")
         judged = llm_qa.worktree_state(repo)
         _commit(repo, {"src/feature.py": "y = 3\n"}, "during the run")
@@ -737,7 +735,9 @@ class TestAdvancingNeedsTheHeadThatLands:
         base = _base(repo)
         moved = _on_main(repo, {_GUIDE: "# Guide 2\n"})
         _merge_main(repo)
-        _certify(repo, llm_qa.required_tools(llm_qa.VERDICT_TARGETED), changed_range=f"{base}..main")
+        _certify(
+            repo, llm_qa.required_tools(llm_qa.VERDICT_TARGETED), changed_range=f"{base}..main"
+        )
         assert llm_qa.advance_batch(repo, "main") == moved
 
 

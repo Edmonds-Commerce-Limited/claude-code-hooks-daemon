@@ -369,7 +369,9 @@ def parse_declared_rules(raw: object) -> tuple[list[DeclaredRule], list[str]]:
         if unknown:
             problems.append(f"rule {position}: unknown key(s) {', '.join(unknown)}")
         elif path_style and _KEY_GLOB in entry:
-            problems.append(f"rule {position}: give exactly one of `{_KEY_GLOB}` or `{_KEY_PATH_GLOB}`")
+            problems.append(
+                f"rule {position}: give exactly one of `{_KEY_GLOB}` or `{_KEY_PATH_GLOB}`"
+            )
         elif not isinstance(glob, str) or not glob.strip():
             problems.append(
                 f"rule {position}: `{_KEY_GLOB}` or `{_KEY_PATH_GLOB}` must be a non-empty string"
