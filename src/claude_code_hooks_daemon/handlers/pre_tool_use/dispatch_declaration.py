@@ -116,11 +116,11 @@ class DispatchDeclarationHandler(PreToolUseHandlerBase):
         # lookup (mirrors subagent_report_size_blocker's identically-named
         # attribute): production resolves lazily via resolve_lookup_root().
         self._project_root: Path | None = None
-        # Test-only override for resolve_agent_can_write's `home_dir` param
+        # Test-only override for resolve_agent_can_write's `config_dir` param
         # (mirrors subagent_report_size_blocker's identically-named
         # attribute, review finding m10): production leaves this None, which
-        # resolve_agent_can_write resolves lazily to the real Path.home().
-        self._home_dir: Path | None = None
+        # resolves lazily to the real Claude config dir (Plan 00468 G13).
+        self._config_dir: Path | None = None
 
     def _plan_dir(self) -> str:
         """Configured plan directory (facade, or the matching default).
@@ -230,7 +230,7 @@ class DispatchDeclarationHandler(PreToolUseHandlerBase):
         if not isinstance(subagent_type, str):
             return None
         root = resolve_lookup_root(self._project_root, getattr(self, "_workspace_root", None))
-        if resolve_agent_can_write(subagent_type, root, home_dir=self._home_dir) is False:
+        if resolve_agent_can_write(subagent_type, root, config_dir=self._config_dir) is False:
             return self._read_only_mismatch_text(subagent_type)
         return None
 
@@ -301,8 +301,9 @@ class DispatchDeclarationHandler(PreToolUseHandlerBase):
             "**Separately (Plan 00460 Task 1.4):** when the dispatch DOES "
             "declare a report destination but `subagent_type` resolves to "
             "an agent with no `Write` tool (a documented read-only "
-            "built-in, or a project/user agent whose frontmatter omits "
-            "`Write`), an ADVISORY fires — never a deny — pointing at the "
+            "built-in, or a project, user or enabled Claude Code plugin "
+            "agent whose frontmatter omits `Write`), an ADVISORY fires — "
+            "never a deny — pointing at the "
             "daemon's auto-saved path above and warning against a Bash "
             "write-around."
         )

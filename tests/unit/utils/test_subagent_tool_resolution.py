@@ -11,13 +11,19 @@ a built-in of the same name -- see TestManagedOverridePrecedence):
 1. Project agents (`<project_root>/.claude/agents/**/*.md`) — frontmatter
    `tools`/`disallowedTools`, matched by the `name:` field per the doc
    ("identity comes only from the `name` frontmatter field"), not filename.
-2. User agents (`<home_dir>/.claude/agents/**/*.md`) — same rule.
+2. User agents (`<config_dir>/agents/**/*.md`, the config dir being
+   `$CLAUDE_CONFIG_DIR` or `~/.claude`) — same rule.
 3. Built-in types — a small constant table, cited against the vendored
    `remote-docs/code.claude.com/docs/en/sub-agents.md` doc. A built-in whose
    tools the doc does NOT enumerate (`claude-code-guide`, `statusline-setup`)
    resolves to unknown (``None``) rather than being guessed.
-4. Anything else (a managed-settings override, a plugin agent, a type
-   matching nothing above) — unknown.
+4. Plugin agents (Plan 00468) — an enabled plugin's agent, by its scoped id.
+5. Anything else (a managed-settings override, a type matching nothing
+   above) — unknown.
+
+Frontmatter that strict YAML rejects falls back to a lenient parser (Plan
+00468 P6), and the whole definition is available through
+``resolve_agent_definition`` (P7).
 
 ``None`` means "cannot resolve" and every caller must keep TODAY's
 behaviour for it (fail-safe default), never treat it as either True or
@@ -33,9 +39,19 @@ from unittest.mock import patch
 import pytest
 
 from claude_code_hooks_daemon.utils.subagent_tool_resolution import (
+    AgentSource,
     resolve_agent_can_write,
+    resolve_agent_definition,
     resolve_lookup_root,
 )
+from tests.claude_plugin_fixture import READ_ONLY_TOOLS, install_fake_plugin
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_config_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A test that passes no ``config_dir`` must still never read the real
+    Claude home: point the default at an empty directory."""
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "default-config"))
 
 
 def _write_agent(agents_dir: Path, filename: str, frontmatter: str) -> None:
@@ -226,33 +242,189 @@ class TestManagedOverridePrecedence:
 
 
 class TestUserAgents:
-    def test_home_agent_without_write_is_read_only(self, tmp_path: Path) -> None:
+    def test_user_agent_without_write_is_read_only(self, tmp_path: Path) -> None:
         project_root = tmp_path / "project"
         project_root.mkdir()
-        home_dir = tmp_path / "home"
+        config_dir = tmp_path / "config"
         _write_agent(
-            home_dir / ".claude" / "agents",
+            config_dir / "agents",
             "personal-reviewer.md",
             "name: personal-reviewer\ndescription: user-scoped\ntools: Read, Grep",
         )
         assert (
-            resolve_agent_can_write("personal-reviewer", project_root, home_dir=home_dir) is False
+            resolve_agent_can_write("personal-reviewer", project_root, config_dir=config_dir)
+            is False
         )
 
-    def test_project_agent_takes_precedence_over_home_agent(self, tmp_path: Path) -> None:
+    def test_project_agent_takes_precedence_over_user_agent(self, tmp_path: Path) -> None:
         project_root = tmp_path / "project"
-        home_dir = tmp_path / "home"
+        config_dir = tmp_path / "config"
         _write_agent(
             project_root / ".claude" / "agents",
             "shared-name.md",
             "name: shared-name\ndescription: project scoped\ntools: Read, Write",
         )
         _write_agent(
-            home_dir / ".claude" / "agents",
+            config_dir / "agents",
             "shared-name.md",
             "name: shared-name\ndescription: user scoped\ntools: Read",
         )
-        assert resolve_agent_can_write("shared-name", project_root, home_dir=home_dir) is True
+        assert resolve_agent_can_write("shared-name", project_root, config_dir=config_dir) is True
+
+    def test_the_default_user_dir_honours_claude_config_dir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Plan 00468 G13: user agents live under ``$CLAUDE_CONFIG_DIR/agents``,
+        not a hard-coded ``~/.claude/agents``."""
+        config_dir = tmp_path / "custom-config"
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
+        monkeypatch.setenv("HOME", str(tmp_path / "unused-home"))
+        _write_agent(
+            config_dir / "agents",
+            "env-reviewer.md",
+            "name: env-reviewer\ndescription: user-scoped\ntools: Read",
+        )
+        assert resolve_agent_can_write("env-reviewer", tmp_path / "project") is False
+
+
+class TestLenientFrontmatter:
+    """Plan 00468 P6: Claude Code loads an agent whose description holds
+    ``: ``, which strict YAML rejects -- this repository's own
+    ``code-reviewer.md`` is exactly that shape."""
+
+    def test_a_colon_in_the_description_still_resolves_the_tools(self, tmp_path: Path) -> None:
+        _write_agent(
+            tmp_path / ".claude" / "agents",
+            "code-reviewer.md",
+            "name: code-reviewer\n"
+            "description: Expert code review. Analyzes real quality issues: dead code\n"
+            "tools: Read, Glob, Grep, Bash",
+        )
+        assert resolve_agent_can_write("code-reviewer", tmp_path) is False
+
+    def test_this_repositorys_code_reviewer_resolves_read_only(self, tmp_path: Path) -> None:
+        repo_root = Path(__file__).resolve().parents[3]
+        assert (repo_root / ".claude" / "agents" / "code-reviewer.md").is_file()
+        assert (
+            resolve_agent_can_write("code-reviewer", repo_root, config_dir=tmp_path / "config")
+            is False
+        )
+
+
+def _plugin_project(
+    tmp_path: Path, agents: dict[str, str | None], *, enable_in: str | None = "local"
+) -> tuple[Path, Path]:
+    """A project with one fake DBF-shaped plugin; returns (project, config)."""
+    project_root = tmp_path / "project"
+    (project_root / ".claude").mkdir(parents=True)
+    config_dir = tmp_path / "config"
+    install_fake_plugin(config_dir, project_root, agents=agents, enable_in=enable_in)
+    return project_root, config_dir
+
+
+class TestPluginAgents:
+    """Plan 00468 P2: plugin agents resolve through the enabled-plugins
+    resolver, by their scoped id ``<plugin>[:<subdir>...]:<name>``."""
+
+    def test_a_write_less_plugin_agent_is_read_only(self, tmp_path: Path) -> None:
+        project, config = _plugin_project(
+            tmp_path,
+            {"conformance-reviewer.md": f"name: conformance-reviewer\ntools: {READ_ONLY_TOOLS}"},
+        )
+        assert (
+            resolve_agent_can_write(
+                "defence-before-fix:conformance-reviewer", project, config_dir=config
+            )
+            is False
+        )
+
+    def test_a_plugin_agent_with_write_can_write(self, tmp_path: Path) -> None:
+        project, config = _plugin_project(
+            tmp_path, {"writer.md": "name: writer\ntools: Read, Write"}
+        )
+        assert (
+            resolve_agent_can_write("defence-before-fix:writer", project, config_dir=config) is True
+        )
+
+    def test_a_subfolder_agent_resolves_by_its_scoped_id(self, tmp_path: Path) -> None:
+        project, config = _plugin_project(tmp_path, {"review/security.md": "tools: Read"})
+        assert (
+            resolve_agent_can_write(
+                "defence-before-fix:review:security", project, config_dir=config
+            )
+            is False
+        )
+
+    def test_a_plugin_agent_with_no_frontmatter_inherits_every_tool(self, tmp_path: Path) -> None:
+        """Claude Code ignores every field of a plugin agent whose frontmatter
+        is missing, so no ``tools`` means the full inherited set."""
+        project, config = _plugin_project(tmp_path, {"plain.md": None})
+        assert (
+            resolve_agent_can_write("defence-before-fix:plain", project, config_dir=config) is True
+        )
+
+    def test_a_disabled_plugin_is_unknown(self, tmp_path: Path) -> None:
+        project, config = _plugin_project(
+            tmp_path, {"r.md": "name: r\ntools: Read"}, enable_in=None
+        )
+        settings = project / ".claude" / "settings.local.json"
+        settings.write_text('{"enabledPlugins": {"defence-before-fix@defence-before-fix": false}}')
+        assert resolve_agent_can_write("defence-before-fix:r", project, config_dir=config) is None
+
+    def test_an_unknown_scoped_id_is_unknown(self, tmp_path: Path) -> None:
+        project, config = _plugin_project(tmp_path, {"r.md": "name: r\ntools: Read"})
+        assert (
+            resolve_agent_can_write("defence-before-fix:nothing", project, config_dir=config)
+            is None
+        )
+
+
+class TestAgentDefinition:
+    """Plan 00468 P7: callers get the whole definition, not only Write."""
+
+    def test_a_plugin_definition_exposes_its_isolation(self, tmp_path: Path) -> None:
+        project, config = _plugin_project(
+            tmp_path,
+            {"conformance-reviewer.md": "name: conformance-reviewer\nisolation: worktree"},
+        )
+        definition = resolve_agent_definition(
+            "defence-before-fix:conformance-reviewer", project, config_dir=config
+        )
+        assert definition is not None
+        assert definition.source is AgentSource.PLUGIN
+        assert definition.isolation == "worktree"
+        assert definition.declares_worktree_isolation is True
+
+    def test_a_project_definition_exposes_its_frontmatter_and_path(self, tmp_path: Path) -> None:
+        _write_agent(
+            tmp_path / ".claude" / "agents",
+            "iso.md",
+            "name: iso\ndescription: d\nisolation: Worktree\ntools: Read",
+        )
+        definition = resolve_agent_definition("iso", tmp_path, config_dir=tmp_path / "config")
+        assert definition is not None
+        assert definition.source is AgentSource.PROJECT
+        assert definition.path == tmp_path / ".claude" / "agents" / "iso.md"
+        assert definition.frontmatter["tools"] == "Read"
+        assert definition.can_write is False
+        assert definition.declares_worktree_isolation is True
+
+    def test_no_isolation_field_is_none(self, tmp_path: Path) -> None:
+        _write_agent(tmp_path / ".claude" / "agents", "a.md", "name: a\ndescription: d")
+        definition = resolve_agent_definition("a", tmp_path, config_dir=tmp_path / "config")
+        assert definition is not None
+        assert definition.isolation is None
+        assert definition.declares_worktree_isolation is False
+
+    def test_a_builtin_definition_has_no_file(self, tmp_path: Path) -> None:
+        definition = resolve_agent_definition("Explore", tmp_path, config_dir=tmp_path / "c")
+        assert definition is not None
+        assert definition.source is AgentSource.BUILTIN
+        assert definition.path is None
+        assert definition.can_write is False
+
+    def test_an_unknown_type_has_no_definition(self, tmp_path: Path) -> None:
+        assert resolve_agent_definition("nope", tmp_path, config_dir=tmp_path / "c") is None
 
 
 class TestResolveLookupRoot:

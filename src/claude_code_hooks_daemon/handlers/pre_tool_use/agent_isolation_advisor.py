@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import logging
 import time
+from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.constants import (
@@ -40,6 +41,10 @@ from claude_code_hooks_daemon.handlers.status_line.thread_registry import (
     _REGISTRY_SUBDIR,
     read_live_entries,
 )
+from claude_code_hooks_daemon.utils.subagent_tool_resolution import (
+    resolve_agent_definition,
+    resolve_lookup_root,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +53,7 @@ logger = logging.getLogger(__name__)
 # counts as "already isolated" rather than earning a redundant nag.
 _ISOLATION_FIELD = "isolation"
 _WORKTREE_ISOLATION = "worktree"
+_SUBAGENT_TYPE_FIELD = "subagent_type"
 
 # Below this many live threads there is nothing to collide with, so the handler
 # stays silent. One thread is the spawning session itself.
@@ -61,7 +67,8 @@ class AgentIsolationAdvisorHandler(PreToolUseHandlerBase):
 
     - the Task tool is spawning an agent, and
     - more than one live thread is registered for this project, and
-    - the spawn has not already asked for worktree isolation.
+    - the spawn has not already asked for worktree isolation, and
+    - the agent's own definition does not declare ``isolation: worktree``.
     """
 
     def __init__(self) -> None:
@@ -75,6 +82,11 @@ class AgentIsolationAdvisorHandler(PreToolUseHandlerBase):
                 HandlerTag.NON_TERMINAL,
             ],
         )
+        # Test-only overrides for the agent-definition lookup (mirrors
+        # dispatch_declaration): production leaves both None, which resolves
+        # lazily to the project root and the real Claude config dir.
+        self._project_root: Path | None = None
+        self._config_dir: Path | None = None
 
     def _count_live_threads(self) -> int:
         """Live threads registered for this project, or 0 if that cannot be read.
@@ -90,6 +102,20 @@ class AgentIsolationAdvisorHandler(PreToolUseHandlerBase):
             logger.debug("Thread registry unreadable, skipping isolation advice: %s", exc)
             return 0
 
+    def _definition_declares_isolation(self, subagent_type: Any) -> bool:
+        """Does the dispatched agent's own definition say ``isolation: worktree``?
+
+        Plan 00468 P7: such an agent always runs in its own worktree, whatever
+        the call says, so advising isolation for it is a false alarm. Project,
+        user and enabled plugin agents are all read through the shared
+        resolver; an agent it cannot find is treated as not declaring it.
+        """
+        if not isinstance(subagent_type, str):
+            return False
+        root = resolve_lookup_root(self._project_root, getattr(self, "_workspace_root", None))
+        definition = resolve_agent_definition(subagent_type, root, config_dir=self._config_dir)
+        return definition is not None and definition.declares_worktree_isolation
+
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """True when a subagent spawn (Task/Agent) would join a shared checkout."""
         if hook_input.get(HookInputField.TOOL_NAME) not in SUBAGENT_DISPATCH_TOOL_NAMES:
@@ -103,7 +129,9 @@ class AgentIsolationAdvisorHandler(PreToolUseHandlerBase):
         if isinstance(isolation, str) and isolation.strip().lower() == _WORKTREE_ISOLATION:
             return False
 
-        return self._count_live_threads() >= _MIN_THREADS_TO_ADVISE
+        if self._count_live_threads() < _MIN_THREADS_TO_ADVISE:
+            return False
+        return not self._definition_declares_isolation(tool_input.get(_SUBAGENT_TYPE_FIELD))
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Suggest isolation, and name the case where the shared tree is correct."""

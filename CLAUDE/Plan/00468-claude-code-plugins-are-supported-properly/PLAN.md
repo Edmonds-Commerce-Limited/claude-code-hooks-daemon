@@ -69,7 +69,7 @@ first, and the other fixes build on it.
   `projectPath` for project scope, and lists each plugin's agents, skills,
   hooks and LSP servers. `project_containment` (G10's docstring) and every
   later task use it.
-- [ ] ⬜ **Task 2.2**: `subagent_tool_resolution` gains a plugin tier with
+- [x] ✅ **Task 2.2**: `subagent_tool_resolution` gains a plugin tier with
   scoped ids (P2). A YAML failure falls back to a lenient frontmatter parser
   (P6). The resolver returns the frontmatter, so `agent_isolation_advisor`
   honours `isolation: worktree` (P7). The size blocker's path is sanitised
