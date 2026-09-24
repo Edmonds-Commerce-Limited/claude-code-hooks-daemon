@@ -663,18 +663,6 @@
       "reason": "Plan 00200 Task 5.4: path_parts.index(\"controller\") raising ValueError when \"controller\" is absent is the EXPECTED case for a fallback path mapper (most source trees don't have a controller/ segment), not a bug -- falls back to a parent-directory-derived test path."
     },
     {
-      "file": "handlers/pre_tool_use/sensitive_content.py",
-      "function": "_compiled_public_pattern",
-      "rule": "silent-fallback",
-      "reason": "Plan 00200 Task 5.4: re.error from compiling a client-configured public_pattern is a documented no-match (see docstring: 'A pattern that fails to compile is a documented no-match -- never crashes the handler'), cached as None so a broken client config is not re-attempted every event."
-    },
-    {
-      "file": "handlers/pre_tool_use/flaggable_content_channel_guard.py",
-      "function": "_compiled_shape_pattern",
-      "rule": "silent-fallback",
-      "reason": "Plan 00278 Phase 3d.1: identical shape and rationale to sensitive_content.py::_compiled_public_pattern above -- re.error from compiling a client-configured extra_content_revealing_patterns entry is a documented no-match (see this function's own docstring), cached as None so a broken client config is not re-attempted every event. Letting it raise instead would crash FrontController's dispatch loop for every subsequent Bash command, silently disabling every OTHER PreToolUse safety handler below this one in priority order -- far worse than skipping one bad regex."
-    },
-    {
       "file": "handlers/session_start/optimal_config_checker.py",
       "function": "_check_max_output_tokens",
       "rule": "silent-fallback",

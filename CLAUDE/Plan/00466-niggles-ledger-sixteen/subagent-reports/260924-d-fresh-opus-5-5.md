@@ -1,8 +1,8 @@
-# Delivery report: 00466 N21 (d-fresh, Opus 5.5)
+# Delivery report: 00466 N21 and N29 (d-fresh, Opus 5.5)
 
-Branch `worktree-d-fresh`. N21 went through the same branch as Plans 00414 and
-00415 at team-lead's request. I did not edit the ledger (`PLAN.md`,
-`NIGGLES.md`); the coordinator owns N21's status row.
+Branch `worktree-d-fresh`. N21 and N29 went through the same branch as Plans
+00414 and 00415 at team-lead's request. Both are marked Remedied in the ledger
+(`PLAN.md` row and `NIGGLES.md` entry) on this branch.
 
 ## N21: the semgrep gate passed when a rule timed out
 
@@ -75,13 +75,67 @@ Tests: `test_a_root_inside_a_skipped_directory_name_is_still_scanned` /
 (audit_shell, skill_refs), `test_a_root_below_an_unscanned_name_is_still_scanned`
 (doc_truth).
 
+## N29: the return-None check was evaded through a local
+
+**Ruling on "documented sentinel".** A literal `return None` in a handler
+is flagged whether or not the handler logs, and that is unchanged. The new
+rule flags the local-variable spelling unless the handler re-raises or logs
+at warning or above. That matches the brief's own test: a handler that logs
+at warning and returns a documented sentinel is not flagged. A named sentinel
+constant (`value = PARSE_FAILED`) is not this finding at all. An empty
+`str`/`list`/`dict`/`tuple`/`set` counts as a fallback, the same as `None`.
+`0` and `False` do not: they are too often a real answer to flag without
+reading intent.
+
+**Detector** (`scripts/qa/audit_error_hiding.py`, rule `return-none-via-local`).
+It fires when a handler binds a fallback to a local, and later in the same
+function (nested scopes excluded) there is `return <local>`, or
+`return None` under `if <local> is None:` / `if not <local>:`, with no real
+rebinding in between. Binding the same fallback again in an outer handler
+does not count as a rebinding. The rule has its own id, so none of the 90
+existing `return-none-on-error` exclusions can cover it. It now also runs on
+`async def`, which the literal check had skipped entirely. RED first: 6 of
+the new tests failed before the change (the rest are negative cases), then 2
+more for the nested and `if` shapes. All pass now
+(`TestReturnNoneThroughALocal`, 18 test cases).
+
+**Sweep: 8 sites, all fixed, none excluded.**
+
+| Site                                                      | What it hid                                                                                                                                                                                        | Fix                                                                                                                                                                                                                 |
+| --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `daemon/cli.py::_qa_run_lock_holder`                      | A comment called the shape deliberate. A held lock with an unreadable pid returned "nothing holds it", which dropped the restart warning for a run in progress. "Cannot tell" was logged at debug. | A held lock now returns `"unknown"`. "Cannot tell" is logged at WARNING. `_qa_lock_is_held` probes the lock; `_recorded_qa_lock_holder` reads the pid. The test that pinned the old `None` now asserts `"unknown"`. |
+| `utils/secret_redaction.py::_resolve_active_path`         | An `OSError`/`RuntimeError` left redaction and the word-list guard INERT and logged only at debug, justified as "nothing configured". A missing config does not raise.                             | One handler logs every case at WARNING (INERT). New test.                                                                                                                                                           |
+| `sensitive_content._compiled_public_pattern`              | A public pattern that does not compile never matched, silently.                                                                                                                                    | Logged at WARNING once, when it is cached. Its `silent-fallback` exclusion is removed as stale.                                                                                                                     |
+| `flaggable_content_channel_guard._compiled_shape_pattern` | The same, for a content-revealing shape.                                                                                                                                                           | The same. Its exclusion is removed too.                                                                                                                                                                             |
+| `staged_lint_gate._syntax_check`                          | A lint tool that timed out or could not run meant the commit went through with the file unchecked, logged at debug.                                                                                | Logged at WARNING: "`<file>` was NOT checked".                                                                                                                                                                      |
+| `auto_continue_stop._parse_iso_timestamp`                 | An unparseable timestamp turns the staleness check off for that message, logged at debug.                                                                                                          | Logged at WARNING.                                                                                                                                                                                                  |
+| `merge_to_main_approval._shlex_tokens`                    | `None` stood for unbalanced quoting, which is expected input.                                                                                                                                      | The helper is gone. `_segment_tokens` handles the `ValueError` by running the next tokenising strategy inside the handler, so no value stands in for the error. Behaviour is identical.                             |
+| `server._handle_event_client` (async literal)             | Nothing: it logs at WARNING and returns an empty response. The bare `return` was simply newly visible once the check covered async functions.                                                      | The success path moves to `else:` via `_answer_event`. Behaviour is identical.                                                                                                                                      |
+
+Release-bound consequences for the coordinator to number: the restart warning
+now fires for a held QA lock whose pid cannot be read. Several guards also
+log at WARNING when they are inert or narrowed: a guard regex that does not
+compile, an unreadable config that leaves secret redaction off, and a staged
+file that was not linted.
+
 ## QA exclusions
 
-None were added. Two stale entries were removed from
+None were added. Four stale entries were removed from
 `scripts/qa/error_hiding_exclusions.json`: `check_skill_references.py::scan_directory`
-and `check_sensitive_content.py::_compile_public_patterns`. Both sites now
-report the error instead of skipping it. The `run_shell_check.sh` anchor line
-is unchanged. The diff against main for that file has removals only.
+and `check_sensitive_content.py::_compile_public_patterns` (N21), plus
+`sensitive_content.py::_compiled_public_pattern` and
+`flaggable_content_channel_guard.py::_compiled_shape_pattern` (N29). All four
+sites now report the error instead of skipping it. The `run_shell_check.sh`
+anchor line is unchanged. The diff against main for that file has removals
+only.
+
+## Overlaps for the coordinator
+
+- N26 (`check_skill_references.py` scans zero files from a worktree, assigned
+  to the 00468 core agent) is fixed on this branch as part of the N21 class
+  audit, together with the same defect in `github_urls`, `shell_audit` and
+  `doc_truth`. B2's `08c4be0e` fixes `doc_truth` the same way, so
+  `check_doc_truth.py` will conflict at integration.
 
 ## QA run (targeted)
 

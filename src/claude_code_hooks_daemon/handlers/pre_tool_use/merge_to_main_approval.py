@@ -117,22 +117,6 @@ _RULE_VERBOSE = (
 )
 
 
-def _shlex_tokens(text: str) -> list[str] | None:
-    """Shell-tokenise ``text``, or ``None`` when its quoting is unbalanced.
-
-    ``None`` is an ANSWER rather than a swallowed failure: unbalanced quoting is
-    an expected input here (see ``_segment_tokens``), and the caller acts on it
-    by trying the next strategy.
-    """
-    tokens: list[str] | None = None
-    try:
-        tokens = shlex.split(text)
-    except ValueError as exc:
-        logger.debug("Merge segment is not balanced shell quoting (%s): %r", exc, text)
-        tokens = None
-    return tokens
-
-
 def _segment_tokens(segment: str) -> list[str]:
     """Tokenise a matched merge segment into words, quoting removed.
 
@@ -150,21 +134,34 @@ def _segment_tokens(segment: str) -> list[str]:
     unrelated merges sharing one approval key means the one-shot approval a
     human granted for the first is consumed by the second (Plan 00407 N12
     review).
-    """
-    tokens = _shlex_tokens(segment)
-    if tokens is not None:
-        return tokens
 
+    Each ``ValueError`` from ``shlex`` is that expected unbalanced quoting, and
+    its handler IS the next strategy rather than a fallback value.
+    """
+    try:
+        return shlex.split(segment)
+    except ValueError as exc:
+        logger.debug("Merge segment is not balanced shell quoting (%s): %r", exc, segment)
+        return _unbalanced_segment_tokens(segment)
+
+
+def _unbalanced_segment_tokens(segment: str) -> list[str]:
+    """Tokenise a segment ``shlex`` rejected: drop a trailing closing quote first."""
     trimmed = segment.rstrip()
     if trimmed[-1:] in ('"', "'"):
-        balanced = _shlex_tokens(trimmed[:-1])
-        if balanced is not None:
-            return balanced
+        try:
+            return shlex.split(trimmed[:-1])
+        except ValueError as exc:
+            logger.debug("Trimmed merge segment is still unbalanced (%s)", exc)
+            return _whitespace_tokens(segment)
+    return _whitespace_tokens(segment)
 
-    # Still untokenisable. Split on whitespace so the merge is at least still
-    # DETECTED: naming the wrong branch denies THIS merge, whereas returning
-    # nothing would make `merge_target` answer None and stand the gate down
-    # altogether — the one outcome worse than a wrong name.
+
+def _whitespace_tokens(segment: str) -> list[str]:
+    """Still untokenisable. Split on whitespace so the merge is at least still
+    DETECTED: naming the wrong branch denies THIS merge, whereas returning
+    nothing would make `merge_target` answer None and stand the gate down
+    altogether — the one outcome worse than a wrong name."""
     return [token.strip("\"'") for token in segment.split()]
 
 

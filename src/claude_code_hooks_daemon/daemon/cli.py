@@ -1662,9 +1662,16 @@ def _print_mode_advisory(pre_mode: dict[str, Any]) -> None:
 #: harness to print an advisory.
 _QA_RUN_LOCK_RELPATH: Final[str] = "untracked/qa/.llm_qa.lock"
 
+_QA_LOCK_CANNOT_TELL: Final[str] = (
+    "Could not tell whether a QA run is in progress: %s. Restarting without the warning."
+)
+
 
 def _qa_run_lock_holder(project_root: Path) -> str | None:
     """Return the pid recorded in the QA run lock, or None when nothing holds it.
+
+    A held lock whose pid cannot be read answers ``"unknown"``. None also
+    means "cannot tell", which is logged at WARNING where it happens.
 
     Held-ness is decided by a NON-BLOCKING ``flock`` attempt, never by the file
     existing — the kernel releases an ``flock`` when its holder exits, so a lock
@@ -1677,51 +1684,58 @@ def _qa_run_lock_holder(project_root: Path) -> str | None:
         return None
 
     # Every other OSError answers "I cannot tell", which for an ADVISORY means
-    # no warning. Propagating instead ended `hooks-daemon restart` with a
-    # traceback — a stronger refusal than the one the caller's docstring
+    # no restart warning. Propagating instead ended `hooks-daemon restart` with
+    # a traceback — a stronger refusal than the one the caller's docstring
     # promises never to make, on the daemon's most-used recovery verb (Plan
     # 00407 N10). The window is ordinary rather than exotic: `is_file()` and
     # `os.open` are two calls, so a QA run that finishes between them unlinks
     # the file; a lock owned by another user answers EACCES to the O_RDWR open;
-    # and NFS or overlayfs can refuse `flock` outright.
-    # "Cannot tell" is carried in a variable and returned once at the end rather
-    # than by a `return None` inside each handler: an early return from an
-    # except body is indistinguishable from success to a reader AND to the
-    # error-hiding audit, which rejects the shape outright. Same degradation,
-    # stated where it can be seen.
+    # and NFS or overlayfs can refuse `flock` outright. "Cannot tell" is logged
+    # at WARNING, so it is never mistaken for "no run in progress".
     fd: int | None = None
     try:
         fd = os.open(lock_path, os.O_RDWR)
     except OSError as exc:
-        logger.debug("QA run lock could not be opened (%s); reporting no holder", exc)
+        logger.warning(_QA_LOCK_CANNOT_TELL, f"its lock could not be opened ({exc})")
         fd = None
 
     if fd is None:
         return None
 
-    holder: str | None = None
     try:
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            # Contention is the ANSWER here, not an error: a run holds the lock.
-            # Only this errno means held; reading the pid may still fail, and an
-            # unnamed holder is better than no warning at all.
-            try:
-                recorded = lock_path.read_text(encoding="utf-8").strip() or "unknown"
-            except OSError as exc:
-                logger.debug("QA run lock is held but unreadable (%s)", exc)
-                holder = None
-            else:
-                holder = recorded.removeprefix("pid=")
-        except OSError as exc:
-            logger.debug("QA run lock could not be tested (%s); reporting no holder", exc)
-            holder = None
-        else:
-            fcntl.flock(fd, fcntl.LOCK_UN)
+        held = _qa_lock_is_held(fd)
+    except OSError as exc:
+        logger.warning(_QA_LOCK_CANNOT_TELL, f"its lock could not be tested ({exc})")
+        held = False
     finally:
         os.close(fd)
-    return holder
+    return _recorded_qa_lock_holder(lock_path) if held else None
+
+
+def _qa_lock_is_held(fd: int) -> bool:
+    """Probe with a NON-BLOCKING ``flock``; any other ``OSError`` propagates."""
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        # Contention is the ANSWER here, not an error: a run holds the lock.
+        return True
+    fcntl.flock(fd, fcntl.LOCK_UN)
+    return False
+
+
+def _recorded_qa_lock_holder(lock_path: Path) -> str:
+    """The pid a HELD lock records, or ``"unknown"`` when it cannot be read.
+
+    Only called once contention has proved the lock is held, so an unreadable
+    pid still answers "held": an unnamed holder keeps the restart warning,
+    where "nothing holds it" would drop it for a run that is in progress.
+    """
+    try:
+        recorded = lock_path.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        logger.warning("QA run lock is held but its pid is unreadable (%s)", exc)
+        recorded = ""
+    return recorded.removeprefix("pid=") or "unknown"
 
 
 def _warn_if_qa_run_in_progress(args: argparse.Namespace) -> None:

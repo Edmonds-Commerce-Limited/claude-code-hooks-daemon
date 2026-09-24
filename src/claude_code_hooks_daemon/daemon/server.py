@@ -1041,6 +1041,23 @@ class HooksDaemon:
             chunks.append(chunk)
         return b"".join(chunks)
 
+    async def _answer_event(
+        self, event_json_key: str, hook_input: Any, writer: asyncio.StreamWriter
+    ) -> None:
+        """Dispatch one parsed event-socket payload and write its response."""
+        if isinstance(hook_input, dict) and not hook_input.get("hook_event_name"):
+            hook_input["hook_event_name"] = event_json_key
+
+        request_data = json.dumps({"event": event_json_key, "hook_input": hook_input})
+        response = await self._process_request(request_data)
+        response_json = json.dumps(response)
+
+        if is_blocking_response(response):
+            log_blocking_response(response_json, debug_enabled=logger.isEnabledFor(logging.DEBUG))
+
+        writer.write(response_json.encode())
+        await writer.drain()
+
     async def _handle_event_client(
         self, event_json_key: str, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
@@ -1081,22 +1098,8 @@ class HooksDaemon:
                 )
                 writer.write(json.dumps({}).encode())
                 await writer.drain()
-                return
-
-            if isinstance(hook_input, dict) and not hook_input.get("hook_event_name"):
-                hook_input["hook_event_name"] = event_json_key
-
-            request_data = json.dumps({"event": event_json_key, "hook_input": hook_input})
-            response = await self._process_request(request_data)
-            response_json = json.dumps(response)
-
-            if is_blocking_response(response):
-                log_blocking_response(
-                    response_json, debug_enabled=logger.isEnabledFor(logging.DEBUG)
-                )
-
-            writer.write(response_json.encode())
-            await writer.drain()
+            else:
+                await self._answer_event(event_json_key, hook_input, writer)
 
         except (BrokenPipeError, ConnectionResetError):
             self._log_lost_peer(None)

@@ -5,6 +5,7 @@ preventing the need for user input and enabling true YOLO mode automation.
 """
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -2293,6 +2294,19 @@ class TestMessageStalenessHelpers:
         )
 
         assert _parse_iso_timestamp("not-a-timestamp") is None
+
+    def test_an_unparseable_timestamp_is_said_at_warning(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """00466 N29: "age unknown" turns the staleness check off for that
+        message, so the unparseable value is logged at WARNING, not debug."""
+        from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import (
+            _parse_iso_timestamp,
+        )
+
+        with caplog.at_level(logging.WARNING):
+            assert _parse_iso_timestamp("n29-not-a-timestamp") is None
+        assert "n29-not-a-timestamp" in caplog.text
 
     def test_message_age_seconds_none_without_timestamp(self) -> None:
         """A message with no timestamp in raw has an unknowable age (None)."""

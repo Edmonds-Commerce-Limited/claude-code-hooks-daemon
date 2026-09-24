@@ -435,6 +435,41 @@ class TestActiveSecretTerms:
 
         assert any(record.levelno == logging.WARNING for record in caplog.records)
 
+    def test_a_config_that_cannot_be_read_says_so_at_warning(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """00466 N29: an OSError goes inert exactly like a bad config does.
+
+        It was logged at debug on the reasoning that it meant "nothing
+        configured", but a missing config loads the defaults without raising.
+        An OSError means a config that is there and cannot be read, and the
+        guard is left with no terms either way.
+        """
+        with (
+            patch(
+                "claude_code_hooks_daemon.core.project_context.ProjectContext._initialized", True
+            ),
+            patch(
+                "claude_code_hooks_daemon.core.project_context.ProjectContext.project_root",
+                return_value=tmp_path,
+            ),
+            patch(
+                "claude_code_hooks_daemon.core.project_context.ProjectContext.config_path",
+                return_value=tmp_path / ".claude" / "hooks-daemon.yaml",
+            ),
+            patch(
+                "claude_code_hooks_daemon.config.models.Config.load_or_default",
+                side_effect=PermissionError("denied"),
+            ),
+        ):
+            with caplog.at_level(logging.WARNING, logger=sr.logger.name):
+                assert sr.get_active_secret_terms() == ()
+
+        assert any(
+            record.levelno == logging.WARNING and "INERT" in record.getMessage()
+            for record in caplog.records
+        )
+
 
 @pytest.fixture(autouse=True)
 def _reset_module_caches() -> Generator[None, None, None]:

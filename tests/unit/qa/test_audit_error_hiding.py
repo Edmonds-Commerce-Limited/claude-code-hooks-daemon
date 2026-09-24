@@ -163,6 +163,160 @@ class TestSilentFallbackRule:
         assert "silent-fallback" in _rules(visitor.violations)
 
 
+def _visit(source: str) -> list[str]:
+    visitor = ErrorHidingVisitor(REPO_ROOT / "scripts" / "qa" / "fake.py")
+    visitor.visit(ast.parse(source))
+    return _rules(visitor.violations)
+
+
+class TestReturnNoneThroughALocal:
+    """00466 N29: the return-None finding is judged on the flow, not the token.
+
+    Binding None to a local in the handler and returning that local after the
+    ``try`` behaves exactly like ``return None`` inside the handler, and an
+    agent under QA pressure found that spelling on the first try.
+    """
+
+    _EVASION = (
+        "def f():\n"
+        "    try:\n"
+        "        value = risky()\n"
+        "    except ValueError:\n"
+        "        note = 'x'\n"
+        "        value = None\n"
+        "    return value\n"
+    )
+
+    def test_the_literal_form_is_still_flagged(self) -> None:
+        source = (
+            "def f():\n"
+            "    try:\n"
+            "        return risky()\n"
+            "    except ValueError:\n"
+            "        return None\n"
+        )
+        assert "return-none-on-error" in _visit(source)
+
+    def test_the_literal_form_is_flagged_in_an_async_function_too(self) -> None:
+        source = (
+            "async def f():\n"
+            "    try:\n"
+            "        return await risky()\n"
+            "    except ValueError:\n"
+            "        return None\n"
+        )
+        assert "return-none-on-error" in _visit(source)
+
+    def test_none_bound_in_the_handler_and_returned_after_the_try_is_flagged(self) -> None:
+        assert "return-none-via-local" in _visit(self._EVASION)
+
+    def test_an_empty_default_bound_in_the_handler_is_flagged(self) -> None:
+        source = (
+            "def f():\n"
+            "    try:\n"
+            "        rows = risky()\n"
+            "    except ValueError:\n"
+            "        logger.debug('no rows')\n"
+            "        rows = []\n"
+            "    return rows\n"
+        )
+        assert "return-none-via-local" in _visit(source)
+
+    def test_an_annotated_binding_is_flagged(self) -> None:
+        source = (
+            "def f() -> int | None:\n"
+            "    try:\n"
+            "        value: int | None = risky()\n"
+            "    except ValueError:\n"
+            "        count = 1\n"
+            "        value: int | None = None\n"
+            "    return value\n"
+        )
+        assert "return-none-via-local" in _visit(source)
+
+    def test_an_async_function_is_judged_too(self) -> None:
+        source = self._EVASION.replace("def f", "async def f")
+        assert "return-none-via-local" in _visit(source)
+
+    def test_a_handler_that_logs_at_warning_and_returns_a_documented_sentinel_is_not_flagged(
+        self,
+    ) -> None:
+        source = (
+            "def f() -> int | None:\n"
+            '    """Return the value, or None when it cannot be parsed (logged)."""\n'
+            "    try:\n"
+            "        value = risky()\n"
+            "    except ValueError as exc:\n"
+            "        logger.warning('unparseable: %s', exc)\n"
+            "        value = None\n"
+            "    return value\n"
+        )
+        assert "return-none-via-local" not in _visit(source)
+
+    @pytest.mark.parametrize("level", ["error", "exception", "critical"])
+    def test_any_level_above_warning_counts_as_saying_so(self, level: str) -> None:
+        source = self._EVASION.replace("note = 'x'", f"logger.{level}('boom')")
+        assert "return-none-via-local" not in _visit(source)
+
+    def test_a_debug_log_does_not_count_as_saying_so(self) -> None:
+        source = self._EVASION.replace("note = 'x'", "logger.debug('boom')")
+        assert "return-none-via-local" in _visit(source)
+
+    def test_a_handler_that_reraises_is_not_flagged(self) -> None:
+        source = self._EVASION.replace("note = 'x'", "raise RuntimeError('boom')")
+        assert "return-none-via-local" not in _visit(source)
+
+    def test_a_rebinding_between_the_try_and_the_return_is_not_flagged(self) -> None:
+        source = self._EVASION.replace(
+            "    return value\n",
+            "    if value is None:\n        value = compute_fallback()\n    return value\n",
+        )
+        assert "return-none-via-local" not in _visit(source)
+
+    def test_a_second_handler_binding_the_same_fallback_is_not_a_rebinding(self) -> None:
+        """Nested tries: an outer handler's ``value = None`` is the same finding,
+        not a rebinding that clears the inner one."""
+        source = (
+            "def f():\n"
+            "    try:\n"
+            "        try:\n"
+            "            value = risky()\n"
+            "        except KeyError:\n"
+            "            note = 'x'\n"
+            "            value = None\n"
+            "    except OSError:\n"
+            "        note = 'y'\n"
+            "        value = None\n"
+            "    return value\n"
+        )
+        visitor = ErrorHidingVisitor(REPO_ROOT / "scripts" / "qa" / "fake.py")
+        visitor.visit(ast.parse(source))
+        lines = sorted(
+            v["line"] for v in visitor.violations if v["rule"] == "return-none-via-local"
+        )
+        assert lines == [5, 8]
+
+    def test_returning_none_when_the_local_is_none_is_the_same_flow(self) -> None:
+        source = self._EVASION.replace(
+            "    return value\n", "    if value is None:\n        return None\n    return 1\n"
+        )
+        assert "return-none-via-local" in _visit(source)
+
+    def test_a_different_name_returned_is_not_flagged(self) -> None:
+        source = self._EVASION.replace("    return value\n", "    return other\n")
+        assert "return-none-via-local" not in _visit(source)
+
+    def test_a_named_sentinel_is_not_the_none_finding(self) -> None:
+        source = self._EVASION.replace("value = None", "value = PARSE_FAILED")
+        assert "return-none-via-local" not in _visit(source)
+
+    def test_a_return_in_a_nested_function_is_not_this_functions_flow(self) -> None:
+        source = self._EVASION.replace(
+            "    return value\n", "    def inner():\n        return value\n    return inner\n"
+        )
+        assert "return-none-via-local" not in _visit(source)
+
+
 class TestHeredocPythonExtraction:
     """Gap #2: Python embedded in a shell heredoc must be found and parsed."""
 

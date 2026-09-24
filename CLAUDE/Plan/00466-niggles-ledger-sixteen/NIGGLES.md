@@ -63,7 +63,7 @@ tools are broken, exactly as `resolve_venv.sh` does.
    must catch the original watchdog shape, verified by reverting 766677c1 in
    a scratch copy.
 
-### N29 — `error_hiding`'s return-None-in-except check is evaded by returning a local assigned in the handler
+### N29 — ✅ Remedied — `error_hiding`'s return-None-in-except check is evaded by returning a local assigned in the handler
 
 **Found by the coordinator** reading the goal-flip agent's report. To clear the
 `error_hiding` finding on a literal `return None` inside an `except` handler,
@@ -80,6 +80,35 @@ finding as a literal `return None`. RED tests: the evasion shape is flagged,
 a handler that logs at warning or above and returns a documented sentinel is
 not, and the literal form is still flagged. Then sweep the tree for existing
 instances of the evasion shape, which would currently pass unseen.
+
+**Remedied on the d-fresh branch** (`worktree-d-fresh`). `audit_error_hiding.py`
+has a new rule, `return-none-via-local`. It flags an `except` handler that binds
+`None` or an empty default (`[]`, `{}`, `()`, `""`, `list()`, ...) to a local
+when the function returns that local after the `try`, or returns `None` under
+`if local is None:` / `if not local:`, with no real rebinding in between. It
+does not flag a handler that re-raises or logs at warning or above. A named
+sentinel constant is not this finding. The rule has its own id, so none of the
+existing `return-none-on-error` exclusions can cover it. The literal check is
+unchanged, and it now runs on `async def` too, which it silently skipped
+before. Tests: `TestReturnNoneThroughALocal` in
+`tests/unit/qa/test_audit_error_hiding.py`.
+
+The sweep found 8 sites, and each was fixed with no exclusion. Two fixes
+removed now-stale `silent-fallback` exclusions:
+`sensitive_content._compiled_public_pattern` and
+`flaggable_content_channel_guard._compiled_shape_pattern`. A guard regex
+that does not compile now logs at WARNING once, naming the pattern.
+`secret_redaction._resolve_active_path` logs an unreadable config at WARNING
+(INERT), the same as a config that fails validation. `staged_lint_gate` says
+at WARNING that a file was NOT checked when its lint tool cannot run.
+`auto_continue_stop._parse_iso_timestamp` logs an unparseable transcript
+timestamp at WARNING. `merge_to_main_approval` handles the unbalanced-quote
+`ValueError` by running the next tokenising strategy inside the handler.
+`server._handle_event_client` (the async literal) moves the success path into
+`else:`. In `cli._qa_run_lock_holder`, a comment described the evasion as
+deliberate. The site also hid a bug: a held lock with an unreadable pid was
+reported as "nothing holds it", which dropped the restart warning. It now
+reports `"unknown"`, and "cannot tell" is logged at WARNING.
 
 ### N28 — `project_containment` resolves a relative target against the payload cwd and ignores a same-command `cd`
 
@@ -205,11 +234,13 @@ off; a non-safety advisory handler that raises still allows, and says so.
 
 **Candidate remedy:** tokenise the command into its separate simple commands (`;`, `&&`, `||`, `|`), and judge only the pattern argument of a `grep`/`rg` command, never a word belonging to a different command. RED test: the command above is allowed, and `python x.py foo; grep -rn 'def my_function' src/` is still caught on `my_function`. Once 00463/00464 land, this belongs on the shared shell lexer that the parser consolidation (coordinator queue) produces.
 
-### N21 — the semgrep QA gate passes when a rule times out
+### N21 — ✅ Remedied — the semgrep QA gate passes when a rule times out
 
 **Found by the 00414/00415 agent.** Its first version of a new semgrep rule timed out on `daemon/cli.py`, and `scripts/qa/run_semgrep_check.sh` reported PASS. A rule that times out has checked nothing for that file, so the gate fails OPEN, and the slower and more complex a rule is, the more likely it is to be silently skipped on exactly the large files it exists for.
 
 **Candidate remedy:** a timeout, or any semgrep error entry in its JSON output (`errors[]`), fails the gate and names the rule and file. RED test: a rule forced to time out on a fixture makes the gate exit non-zero with the rule named. Check the other QA wrappers for the same "tool error reads as clean" shape, and pin the class.
+
+**Remedied on the d-fresh branch** (`worktree-d-fresh`, 7946008c). Every `errors[]` entry is a violation naming the rule and file. A crash or an empty report fails as `semgrep-did-not-run`. RED test: `tests/unit/qa/test_run_semgrep_check.py`. The fixed gate caught a real timeout of `bounded-intent-unbounded-read-deferred` on `daemon/cli.py`, so the per-rule timeout is now 30 s. The same shape was fixed and pinned in 13 more wrappers. Separately, `github_urls`, `shell_audit`, `skill_refs` and `doc_truth` scanned 0 files from any worktree and passed; that overlaps N26. Detail: `subagent-reports/260924-d-fresh-opus-5-5.md`.
 
 ### N20 — the capture-corruption auditor judges a multi-line single-quoted string one line at a time
 
