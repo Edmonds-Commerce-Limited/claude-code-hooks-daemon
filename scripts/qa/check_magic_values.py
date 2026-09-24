@@ -42,6 +42,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Protocol
 
+from claude_code_hooks_daemon.utils.scan_scope import relative_parts, vacuous_scan_failure
+
 
 class _PositionedNode(Protocol):
     """An AST node that carries source position.
@@ -175,8 +177,12 @@ _DISPATCH_CALL_METHODS: frozenset[str] = frozenset({"sendall", "recv"})
 class MagicValueChecker(ast.NodeVisitor):
     """AST visitor that detects magic values in Python source."""
 
-    def __init__(self, filepath: Path) -> None:
+    def __init__(self, filepath: Path, root: Path | None = None) -> None:
         self.filepath = filepath
+        # Directory names are classified below the scanned tree's root when
+        # one is known (00466 N26): a checkout under a directory called
+        # `test` must not make every file a test file.
+        self._parts = relative_parts(filepath, root) if root is not None else filepath.parts
         self.violations: list[Violation] = []
         self._in_handler_init = False
         self._current_class_bases: list[str] = []
@@ -441,7 +447,7 @@ class MagicValueChecker(ast.NodeVisitor):
 
     def _is_test_file(self) -> bool:
         """Check if current file is a test file."""
-        return "test" in self.filepath.parts or self.filepath.name.startswith("test_")
+        return "test" in self._parts or self.filepath.name.startswith("test_")
 
     def visit_Subscript(self, node: ast.Subscript) -> None:
         """Detect magic config keys like config["enabled"]."""
@@ -528,12 +534,15 @@ def _contains_dispatch_call(node: ast.FunctionDef | ast.AsyncFunctionDef) -> boo
     return False
 
 
-def check_source(source: str, filepath: str = "<string>") -> list[Violation]:
+def check_source(
+    source: str, filepath: str = "<string>", root: Path | None = None
+) -> list[Violation]:
     """Check a source string for magic values.
 
     Args:
         source: Python source code to check
         filepath: File path for violation reports
+        root: The scanned tree's root, for classifying directory names
 
     Returns:
         List of violations found
@@ -543,16 +552,17 @@ def check_source(source: str, filepath: str = "<string>") -> list[Violation]:
     except SyntaxError:
         return []
 
-    checker = MagicValueChecker(Path(filepath))
+    checker = MagicValueChecker(Path(filepath), root)
     checker.visit(tree)
     return checker.violations
 
 
-def check_file(filepath: Path) -> list[Violation]:
+def check_file(filepath: Path, root: Path | None = None) -> list[Violation]:
     """Check a single Python file for magic values.
 
     Args:
         filepath: Path to the Python file
+        root: The scanned tree's root, for classifying directory names
 
     Returns:
         List of violations found
@@ -562,7 +572,7 @@ def check_file(filepath: Path) -> list[Violation]:
     except (OSError, UnicodeDecodeError):
         return []
 
-    return check_source(source, str(filepath))
+    return check_source(source, str(filepath), root)
 
 
 def main() -> int:
@@ -589,16 +599,16 @@ def main() -> int:
     # Check source files
     for pyfile in sorted(src_dir.rglob("*.py")):
         # Skip constants module itself (it defines the constants)
-        if "constants" in pyfile.parts:
+        if "constants" in relative_parts(pyfile, project_root):
             continue
-        violations.extend(check_file(pyfile))
+        violations.extend(check_file(pyfile, project_root))
         files_scanned += 1
 
     # Check test files (but skip test fixtures which are intentionally simplified)
     if tests_dir.exists():
         for pyfile in sorted(tests_dir.rglob("*.py")):
             # Skip test fixtures - they're intentionally simplified for testing
-            if "fixtures" in pyfile.parts:
+            if "fixtures" in relative_parts(pyfile, project_root):
                 continue
             # Skip test_qa_runner.py - it tests QA tools (ruff, mypy, etc), not Claude Code tools
             if pyfile.name == "test_qa_runner.py":
@@ -613,18 +623,24 @@ def main() -> int:
                 "test_init_config.py",
             ):
                 continue
-            violations.extend(check_file(pyfile))
+            violations.extend(check_file(pyfile, project_root))
             files_scanned += 1
 
     violations.sort(key=lambda v: (v.file, v.line, v.column))
+    vacuous = vacuous_scan_failure(
+        examined=files_scanned,
+        candidates=sum(1 for _ in src_dir.rglob("*.py")),
+        noun="source files",
+    )
 
     if json_output:
         output = {
             "summary": {
-                "passed": len(violations) == 0,
+                "passed": len(violations) == 0 and vacuous is None,
                 "total_violations": len(violations),
                 "by_rule": _count_by_rule(violations),
                 "files_scanned": files_scanned,
+                "vacuous_scan": vacuous,
             },
             "violations": [asdict(v) for v in violations],
         }
@@ -645,8 +661,10 @@ def main() -> int:
                 print(f"  {rule}: {count}")
         else:
             print(f"No magic value violations found ({files_scanned} files scanned).")
+    if vacuous is not None:
+        print(f"FAILED: {vacuous}", file=sys.stderr)
 
-    return 1 if violations else 0
+    return 1 if violations or vacuous is not None else 0
 
 
 def _count_by_rule(violations: list[Violation]) -> dict[str, int]:

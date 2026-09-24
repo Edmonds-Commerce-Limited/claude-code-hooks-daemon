@@ -91,6 +91,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
 
+from claude_code_hooks_daemon.utils.scan_scope import relative_parts, vacuous_scan_failure
+
 _PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 _QA_OUTPUT_DIR_PARTS: Final[tuple[str, str]] = ("untracked", "qa")
 _OUTPUT_FILENAME: Final[str] = "doc_truth.json"
@@ -485,11 +487,15 @@ def known_slash_commands() -> frozenset[str]:
 
 
 def _iter_markdown(root: Path) -> list[Path]:
-    """Every documentation markdown file under ``root``, noise directories aside."""
+    """Every documentation markdown file under ``root``, noise directories aside.
+
+    Directory names are matched below ``root`` only (00466 N26): matched on
+    the absolute path, a checkout under ``untracked/worktrees/`` walked nothing.
+    """
     return sorted(
         path
         for path in root.rglob(_MARKDOWN_GLOB)
-        if not _UNSCANNED_DIR_NAMES.intersection(path.parts)
+        if not _UNSCANNED_DIR_NAMES.intersection(relative_parts(path, root))
     )
 
 
@@ -605,13 +611,19 @@ def main(argv: list[str] | None = None) -> int:
     # `_iter_markdown` ever returned nothing (wrong root, a broken walk), every
     # rule below would report clean over a tree it never looked at.
     docs_scanned = len(_iter_markdown(root))
+    vacuous = vacuous_scan_failure(
+        examined=docs_scanned,
+        candidates=sum(1 for _ in root.rglob(_MARKDOWN_GLOB)),
+        noun="markdown files",
+    )
 
     payload: dict[str, object] = {
         "tool": _TOOL_NAME,
         "summary": {
-            "passed": not violations,
+            "passed": not violations and vacuous is None,
             "total_violations": len(violations),
             "docs_scanned": docs_scanned,
+            "vacuous_scan": vacuous,
             "by_rule": {
                 rule: sum(1 for v in violations if v.rule == rule)
                 for rule in (
@@ -633,6 +645,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.report_stdout:
         print(json.dumps(payload, indent=2))
+    elif vacuous is not None:
+        print(f"FAILED: {vacuous}")
     elif violations:
         print(f"Found {len(violations)} doc-truth violation(s):")
         for violation in violations:
@@ -641,7 +655,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print(f"No doc-truth violations found ({docs_scanned} docs scanned)")
 
-    return 1 if violations else 0
+    return 1 if violations or vacuous is not None else 0
 
 
 if __name__ == "__main__":

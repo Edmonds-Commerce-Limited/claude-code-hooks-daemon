@@ -43,7 +43,7 @@ tests were computed by running that JavaScript under node.
   `test_a_missing_derived_directory_is_named_on_stderr` test in both cli
   report test files. Release note 36.
 
-### N26 — `check_skill_references.py` scans zero files when run from a worktree
+### N26 — ✅ Remedied — `check_skill_references.py` scans zero files when run from a worktree
 
 **Found by the 00468 core agent.** Run from any worktree, the skill
 references QA check reports success after scanning 0 files. A check that
@@ -57,6 +57,43 @@ main checkout), and fix it. Separately, the check FAILS when it scans zero
 files where skills exist, so a vacuous pass cannot recur. Audit the other
 `scripts/qa/check_*.py` for the same "0 examined, PASS" shape and pin the
 class with a test that runs each check from a worktree fixture.
+
+**Remedy** (branch `worktree-p468-core`):
+
+- **Cause.** Not the `.git` file: `_should_exclude` matched `_EXCLUDED_DIRS`
+  against the ABSOLUTE path's parts. `untracked` and `worktrees` are
+  excluded names, and every worktree lives under `untracked/worktrees/`.
+
+- **Audit.** All 22 `check_*.py` were audited. Two more had the same shape:
+  `check_doc_truth.py` (0 docs from a worktree) and `check_github_urls.py`
+  (0 files). `check_magic_values.py` matched `constants`, `fixtures` and
+  `test` the same way, which is latent here and live for a checkout under
+  such a directory. Only `check_project_handler_tests.py` had a zero guard.
+
+- **Fix.** New `utils/scan_scope.py`:
+
+  - `relative_parts(path, root)` gives the components below the scan root;
+  - `vacuous_scan_failure(examined=, candidates=, noun=)` turns "examined 0 of
+    N" into a failure.
+
+  The four checks use both. From this worktree they now scan 699 (skill
+  refs), 1,774 (doc truth), 4,038 (GitHub URLs) and 1,763 (magic values)
+  files, with no new violations.
+
+- **Class pin.** `tests/integration/test_qa_walkers_examine_files_from_any_checkout.py`
+  copies the tracked tree under a path made of every excluded name
+  (`test/fixtures/constants/build/examples/Completed/venv/ccy/untracked/worktrees/wt`).
+  It runs each of the 14 tree-walking checks there and requires a non-zero
+  examined count. RED: 4 failed (skill refs, doc truth, GitHub URLs, magic
+  values). A second test requires every `check_*.py` to be listed as a
+  walker or a fixed-input check, so a new check cannot skip the pin.
+
+- **Existing tests.** The exclusion tests that asserted `passed` over a tree
+  holding only the excluded file (the vacuous shape itself) now scan a clean
+  companion file and assert the examined count. Release note 37.
+
+The other 10 walkers are worktree-safe, and are pinned by the integration
+test rather than given their own zero guard.
 
 ### N25 — a slow handler runs out the client's 30 s budget, and a timeout is an ALLOW for the whole PreToolUse chain
 

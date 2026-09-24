@@ -25,6 +25,7 @@ import sys
 from pathlib import Path
 
 from claude_code_hooks_daemon.utils.claude_config import claude_config_dir
+from claude_code_hooks_daemon.utils.scan_scope import relative_parts, vacuous_scan_failure
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -298,10 +299,16 @@ def _scan_markdown(filepath: Path) -> list[_Violation]:
 # ── File discovery ────────────────────────────────────────────────
 
 
-def _should_exclude(path: Path, include_filter: str | None = None) -> bool:
-    """Check if a file should be excluded from scanning."""
+def _should_exclude(path: Path, root: Path, include_filter: str | None = None) -> bool:
+    """Check if a file should be excluded from scanning.
+
+    Directory names are matched below ``root`` only (00466 N26): an agent
+    worktree lives under ``untracked/worktrees/``, so matching the absolute
+    path excluded every file and the check passed on nothing.
+    """
+    parts = relative_parts(path, root)
     # Exclude by directory
-    for part in path.parts:
+    for part in parts:
         if part in _EXCLUDED_DIRS:
             return True
 
@@ -317,7 +324,7 @@ def _should_exclude(path: Path, include_filter: str | None = None) -> bool:
         return True
 
     # Exclude self-referencing directories (skills, agents, install docs)
-    for part in path.parts:
+    for part in parts:
         if part in _EXCLUDED_SELF_REFERENCING_DIRS:
             return True
 
@@ -336,8 +343,13 @@ _SCANNERS = {
 }
 
 
-def _collect_files(directory: Path, include_filter: str | None = None) -> list[Path]:
-    """Collect scannable files, using _SCAN_DIRS when at project root."""
+def _collect_files(directory: Path, include_filter: str | None = None) -> tuple[list[Path], int]:
+    """Collect scannable files, using _SCAN_DIRS when at project root.
+
+    Returns:
+        The files to scan, and how many candidates were found before the
+        exclusions, so a scan that excluded everything can say so.
+    """
     files: list[Path] = []
     is_project_root = (directory / "pyproject.toml").exists() and (directory / "src").exists()
 
@@ -358,28 +370,27 @@ def _collect_files(directory: Path, include_filter: str | None = None) -> list[P
         for ext in _SCANNERS:
             files.extend(directory.rglob(f"*{ext}"))
 
-    return [
-        f
-        for f in files
-        if not _should_exclude(f, include_filter) and not f.is_symlink() and f.suffix in _SCANNERS
-    ]
+    candidates = [f for f in files if not f.is_symlink() and f.suffix in _SCANNERS]
+    kept = [f for f in candidates if not _should_exclude(f, directory, include_filter)]
+    return kept, len(candidates)
 
 
 def scan_directory(
     directory: Path,
     include_filter: str | None = None,
-) -> tuple[list[_Violation], int]:
+) -> tuple[list[_Violation], int, int]:
     """Scan a directory for skill-reference violations.
 
     Returns:
-        The violations found, and the count of files actually scanned — the
+        The violations found, the count of files actually scanned — the
         denominator that tells a genuinely clean sweep apart from one that
-        silently scanned nothing.
+        silently scanned nothing — and the candidate count before exclusions.
     """
     violations: list[_Violation] = []
     files_scanned = 0
 
-    for filepath in _collect_files(directory, include_filter):
+    files, candidates = _collect_files(directory, include_filter)
+    for filepath in files:
         scanner = _SCANNERS[filepath.suffix]
         try:
             violations.extend(scanner(filepath))
@@ -389,7 +400,7 @@ def scan_directory(
         files_scanned += 1
 
     violations.sort(key=lambda v: (v.file, v.line))
-    return violations, files_scanned
+    return violations, files_scanned, candidates
 
 
 # ── Main ──────────────────────────────────────────────────────────
@@ -415,12 +426,14 @@ def main() -> int:
         else:
             i += 1
 
-    violations, files_scanned = scan_directory(scan_path, include_filter)
+    violations, files_scanned, candidates = scan_directory(scan_path, include_filter)
+    vacuous = vacuous_scan_failure(examined=files_scanned, candidates=candidates, noun="files")
 
     output = {
         "tool": "skill_references",
         "summary": {
-            "passed": len(violations) == 0,
+            "passed": len(violations) == 0 and vacuous is None,
+            "vacuous_scan": vacuous,
             "total_violations": len(violations),
             "by_rule": {
                 "bare-python-module": sum(1 for v in violations if v.rule == "bare-python-module"),
@@ -441,14 +454,18 @@ def main() -> int:
         output_file = scan_path / _ARTEFACT_NAME if scan_path != _PROJECT_ROOT else _OUTPUT_FILE
         output_file.parent.mkdir(parents=True, exist_ok=True)
         output_file.write_text(json.dumps(output, indent=2))
-        if violations:
+        if vacuous is not None:
+            print(f"FAILED: {vacuous}")
+        elif violations:
             print(f"Found {len(violations)} skill-reference violations")
             for v in violations:
                 print(f"  {v.file}:{v.line}: [{v.rule}] {v.message}")
         else:
             print(f"No skill-reference violations found ({files_scanned} files scanned)")
     else:
-        if violations:
+        if vacuous is not None:
+            print(f"FAILED: {vacuous}")
+        elif violations:
             print(f"Found {len(violations)} skill-reference violations:\n")
             for v in violations:
                 print(f"  {v.file}:{v.line}")
@@ -457,7 +474,7 @@ def main() -> int:
         else:
             print(f"No skill-reference violations found ({files_scanned} files scanned)")
 
-    return 1 if violations else 0
+    return 1 if violations or vacuous is not None else 0
 
 
 if __name__ == "__main__":
