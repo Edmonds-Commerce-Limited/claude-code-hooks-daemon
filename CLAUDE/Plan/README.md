@@ -32,7 +32,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00428: auto compact window audit check](00428-auto-compact-window-audit-check/PLAN.md) - Not Started, BLOCKED ON THE OWNER (from issue #46: a seventh `optimal_config_checker` check for `CLAUDE_CODE_AUTO_COMPACT_WINDOW`; the gap is real but the spec was retracted and replaced by one inferred from a compiled CLI, which triage could not verify)
 
-- [00422: niggles ledger fifteen](00422-niggles-ledger-fifteen/PLAN.md) - Blocked on four stated owner questions, closed to new entries from N30 (those go to 00466) (opens with four entries inherited from 00419 — N8/N11/N12/N13 — because an unresolved entry left inside an archived ledger is indistinguishable from a resolved one; three of them are one class in three costumes: a guard right about the state it judges and wrong about the moment it judges it)
+- [00422: niggles ledger fifteen](00422-niggles-ledger-fifteen/PLAN.md) - In Progress, its six owner questions decided in DECISIONS.md; closed to new entries from N30 (those go to 00466) (four entries inherited from 00419, three of them one class: a guard right about the state it judges and wrong about the moment it judges it)
 
 - [00421: security detectors and ci enforcement](00421-security-detectors-and-ci-enforcement/PLAN.md) - Not Started (`qa.yml` runs no `scripts/qa/check_*.py` at all, so no Detector this project treats as binding has ever been enforced in CI. The single successor to 00412, carrying the four Fable rulings' unbuilt work: pin what makes a Detector binding, make the register state its own gaps, migrate the test-shaped Defences, then build the seven unwatched classes)
 

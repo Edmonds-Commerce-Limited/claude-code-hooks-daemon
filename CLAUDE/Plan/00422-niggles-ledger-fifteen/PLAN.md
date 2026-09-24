@@ -1,6 +1,6 @@
 # Plan 00422: niggles ledger fifteen
 
-**Status**: Blocked
+**Status**: In Progress
 **Created**: 2026-09-16
 **Owner**: joseph
 **Priority**: Medium
@@ -24,14 +24,9 @@ unfinished remedy, not the finding.
 ([00466](../00466-niggles-ledger-sixteen/PLAN.md)). This PLAN.md passed its
 size warning with N29.
 
-**Blocked, not in progress.** Eleven of the fifteen rows are terminal. Every
-one of the remaining four ⏸ rows is an owner question that has been stated and
-is waiting for an answer (N1 scope, N4 A/B/C, N7, N11), and both 🔄 rows have
-had their buildable half delivered — what is left in each is an open design
-question, not work. There is no row an executor could advance without an answer
-first, so the status says so: `In Progress` claimed work was moving and
-misreported this ledger as mid-work to the release slate check, which is the
-one reader that acts on the difference.
+**In progress again.** The ledger was Blocked on six owner questions. They
+are now decided in [DECISIONS.md](DECISIONS.md), so every open row has
+buildable work.
 
 **One of the four carries a class that now has three sightings**, and naming it
 is a goal of this plan rather than a footnote in it. 00419's N3 (the two
@@ -100,10 +95,10 @@ ledger's shape is readable without opening it:
 
 ## Questions waiting on the owner
 
-Six entries are blocked on a decision rather than on work. They are collected
-here so the whole set can be read in one sitting: each is ONE question, with
-what each answer costs and what happens while it goes unanswered. Nothing here
-needs investigation first — every one has been measured.
+**All six are decided** in [DECISIONS.md](DECISIONS.md). An unattended session
+took the recommended option for each and stated the assumption beside it, so
+the owner can reverse any one with a single message. The questions are kept
+below as they were put: each is ONE question, with what each answer costs.
 
 1. **N1 — how loud may a template-versus-constants test be?** `priority.py` and
    the `init_config.py` template disagree across the whole `status_line` block
