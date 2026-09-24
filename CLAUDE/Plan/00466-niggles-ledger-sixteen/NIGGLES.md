@@ -3,6 +3,12 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
+### N22 — `lsp_enforcement` takes another command's argument for a grep symbol lookup
+
+**Found by the coordinator**, live. The command was `python scripts/qa/llm_qa.py format lint ... plan_qa docs_qa ... > out.txt; grep -E '^(✅|❌)|^QA:' out.txt`. It was denied with `BLOCKED [R-LSP-SYMBOL-LOOKUP]: ... pattern 'plan_qa' looks like a symbol search`. `plan_qa` is a positional argument to `llm_qa.py`, not to `grep`. The grep's real pattern, `^(✅|❌)|^QA:`, is not symbol-shaped at all. The handler found a `grep` somewhere in the command and then took a symbol-like word from elsewhere in it. `block_once` let the identical retry through, so the cost was one wasted turn. But every "run a QA tool, then grep its capture" command is the everyday shape here, and each one is a coin toss on which word gets picked.
+
+**Candidate remedy:** tokenise the command into its separate simple commands (`;`, `&&`, `||`, `|`), and judge only the pattern argument of a `grep`/`rg` command, never a word belonging to a different command. RED test: the command above is allowed, and `python x.py foo; grep -rn 'def my_function' src/` is still caught on `my_function`. Once 00463/00464 land, this belongs on the shared shell lexer that the parser consolidation (coordinator queue) produces.
+
 ### N21 — the semgrep QA gate passes when a rule times out
 
 **Found by the 00414/00415 agent.** Its first version of a new semgrep rule timed out on `daemon/cli.py`, and `scripts/qa/run_semgrep_check.sh` reported PASS. A rule that times out has checked nothing for that file, so the gate fails OPEN, and the slower and more complex a rule is, the more likely it is to be silently skipped on exactly the large files it exists for.
@@ -156,7 +162,7 @@ checks that the script names no denied QA entry point.
 
 **Graduated to Plan 00463**, which owns the sub-agent QA policy.
 
-### N1 — `resolve_venv_python`'s fallback accepts a venv interpreter that cannot run on this host
+### N1 — ✅ Remedied — `resolve_venv_python`'s fallback accepts a venv interpreter that cannot run on this host
 
 **Found by Plan 00457's agent** (#55; recorded in 00457's JOURNAL as a
 finding). When the slug-exact venv is absent, `resolve_venv_python` falls
@@ -233,3 +239,18 @@ covering a fake executable that exits non-zero, a dangling symlink, a
 hanging candidate (bound respected), fall-through to a good second
 candidate, all-candidates-bad reaching the venv-free path, and the
 slug-exact venv unaffected when it genuinely works.
+
+**Follow-up defect, fixed at integration (766677c1).** The B1 full gate
+failed `tests/acceptance/test_v391_field_regression.py`. That test runs the
+resolver with a PATH holding only a broken `python3`. The watchdog ran
+`sleep` from PATH, so with no `sleep` it went straight to `kill -KILL`. A
+working venv was then rejected as "timed out after 5s", which is the v3.9.1
+field case this resolver exists to survive. The branch's targeted QA had
+not run that acceptance test. `_rv_wait_secs` now uses `sleep` when PATH
+has one. Otherwise it waits on `read -t` against a read-write
+process-substitution pipe, which needs no PATH lookup, and the kill runs
+only if the full bound elapsed. Two regression tests cover a PATH with no
+`sleep`: a good candidate still resolves, and a hanging one is still
+bounded.
+
+**✅ Remedied** on main (B1, 2e6483a3).
