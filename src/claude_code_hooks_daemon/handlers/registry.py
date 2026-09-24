@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeGuard
 
+from claude_code_hooks_daemon.config.models import handler_options
 from claude_code_hooks_daemon.constants.config import ConfigKey, resolve_priority
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.core.event import EventType
@@ -483,7 +484,7 @@ class HandlerRegistry:
                             # Use config key from HandlerID constant
                             try:
                                 registry_key = f"{event_type.value}.{config_key}"
-                                options = handler_config.get(ConfigKey.OPTIONS, {})
+                                options = handler_options(handler_config)
                                 # Include workspace_root in options if available
                                 if self._workspace_root:
                                     options["workspace_root"] = self._workspace_root
@@ -577,16 +578,16 @@ class HandlerRegistry:
 
                             # Apply options inheritance if handler shares options with parent
                             registry_key = f"{event_type.value}.{config_key}"
-                            handler_options = options_registry.get(registry_key, {})
+                            own_options = options_registry.get(registry_key, {})
 
                             if instance.shares_options_with:
                                 # Get parent options
                                 parent_key = f"{event_type.value}.{instance.shares_options_with}"
                                 parent_options = options_registry.get(parent_key, {})
                                 # Merge: parent options + child overrides
-                                merged_options = {**parent_options, **handler_options}
+                                merged_options = {**parent_options, **own_options}
                             else:
-                                merged_options = handler_options
+                                merged_options = own_options
 
                             # Apply all options as private attributes (generic for all handlers)
                             for option_key, option_value in merged_options.items():

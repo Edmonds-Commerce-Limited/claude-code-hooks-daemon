@@ -198,7 +198,7 @@ class OptimalConfigCheckerHandler(SessionStartHandlerBase):
         advice still applies. Plan 00131.
         """
         try:
-            from claude_code_hooks_daemon.config.models import Config
+            from claude_code_hooks_daemon.config.models import Config, handler_options
             from claude_code_hooks_daemon.core import ProjectContext
             from claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization import (
                 ALLOW_UNTRACKED_CLAUDE_MEMORY_OPTION,
@@ -206,11 +206,7 @@ class OptimalConfigCheckerHandler(SessionStartHandlerBase):
             )
 
             config = Config.load_or_default(ProjectContext.config_path())
-            md_org = config.handlers.pre_tool_use.get("markdown_organization", {})
-            if isinstance(md_org, dict):
-                options = md_org.get("options", {})
-            else:
-                options = getattr(md_org, "options", {})
+            options = handler_options(config.handlers.pre_tool_use.get("markdown_organization"))
             # Fallback to the shipped default (SSoT) so an unset option is read
             # exactly as the handler treats it — no drift between block + advisory.
             return (

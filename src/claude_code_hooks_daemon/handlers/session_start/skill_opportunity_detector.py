@@ -14,6 +14,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from claude_code_hooks_daemon.config.models import handler_options
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.core import AdvisoryResult, ProjectContext
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
@@ -57,8 +58,7 @@ class SkillOpportunityDetectorHandler(SessionStartHandlerBase):
         self.config.update(config)
 
     def _options(self) -> SkillScanOptions:
-        raw = self.config.get("options")
-        return SkillScanOptions.from_dict(raw if isinstance(raw, dict) else {})
+        return SkillScanOptions.from_dict(handler_options(self.config))
 
     def _state_dir(self) -> Path:
         """The daemon untracked dir holding the TTL state (never /tmp, B108)."""

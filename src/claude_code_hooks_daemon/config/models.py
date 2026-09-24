@@ -18,7 +18,7 @@ from pydantic import (
     model_validator,
 )
 
-from claude_code_hooks_daemon.constants import EventKey, wired_event_metas
+from claude_code_hooks_daemon.constants import ConfigKey, EventKey, wired_event_metas
 from claude_code_hooks_daemon.core.handler_scope import (
     SCOPE_CONFIG_KEY,
     HandlerScope,
@@ -99,6 +99,31 @@ class HandlerConfig(BaseModel):
         if v is None:
             return {}
         return v
+
+
+def handler_options(handler_config: object) -> dict[str, Any]:
+    """The ``options`` mapping of one handler block, whichever shape it arrives in.
+
+    A block is a ``HandlerConfig`` once ``Config`` has validated it
+    (``coerce_handler_configs`` converts every entry), and a plain dict
+    wherever raw YAML is read. A reader written for one shape finds nothing in
+    the other and silently falls back to defaults, which is how log and
+    payload redaction came to ignore a configured word list (Plan 00466 N14).
+    Every read of a block's options goes through here, pinned by
+    ``tests/unit/config/test_handler_options_accessor.py``.
+
+    Returns the stored mapping itself, not a copy, so a caller that augments
+    it behaves as it did when it read the key directly. Anything without a
+    mapping under ``options`` -- ``None``, a bare value, a null ``options:`` --
+    reads as empty.
+    """
+    if isinstance(handler_config, HandlerConfig):
+        return handler_config.options
+    if isinstance(handler_config, dict):
+        options = handler_config.get(ConfigKey.OPTIONS)
+        if isinstance(options, dict):
+            return options
+    return {}
 
 
 class EventHandlersConfig(BaseModel):
@@ -2179,18 +2204,7 @@ class Config(BaseModel):
             return self
 
         # Check for old-format options in markdown_organization handler
-        pre_tool_use = self.handlers.pre_tool_use
-        md_org = pre_tool_use.get("markdown_organization")
-        if md_org is None:
-            return self
-
-        if isinstance(md_org, HandlerConfig):
-            options = md_org.options
-        elif isinstance(md_org, dict):
-            options = md_org.get("options", {})
-        else:
-            return self
-
+        options = handler_options(self.handlers.pre_tool_use.get("markdown_organization"))
         track_plans = options.get("track_plans_in_project")
         if track_plans:
             self.plan_workflow = PlanWorkflowConfig(

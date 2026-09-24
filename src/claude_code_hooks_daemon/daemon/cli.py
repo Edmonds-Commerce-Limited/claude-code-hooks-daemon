@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
 from pydantic import ValidationError as PydanticValidationError
 
 from claude_code_hooks_daemon.config.loader import ConfigLoader
-from claude_code_hooks_daemon.config.models import Config
+from claude_code_hooks_daemon.config.models import Config, handler_options
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.constants.modes import DaemonMode
 from claude_code_hooks_daemon.constants.permissions import FileMode
@@ -2138,9 +2138,8 @@ def _collect_secret_redaction_status_lines(project_path: Path) -> list[str]:
         except (PydanticValidationError, OSError, ValueError):
             continue
 
-        handler_cfg = root_config.handlers.pre_tool_use.get("sensitive_content")
-        options = getattr(handler_cfg, "options", None)
-        configured = options.get("secret_word_list_path") if isinstance(options, dict) else None
+        options = handler_options(root_config.handlers.pre_tool_use.get("sensitive_content"))
+        configured = options.get("secret_word_list_path")
         message = secret_redaction.describe_secret_word_list_degradation(configured)
         if message and message not in seen:
             seen.add(message)
@@ -4281,17 +4280,13 @@ def cmd_inject_goal(args: argparse.Namespace) -> int:
         except (OSError, yaml.YAMLError) as e:
             print(f"WARNING: could not read {config_file}: {e}", file=sys.stderr)
             config_data = {}
-        options = (
-            config_data.get("handlers", {})
-            .get("post_tool_use", {})
-            .get("goal_injection", {})
-            .get("options", {})
+        options = handler_options(
+            config_data.get("handlers", {}).get("post_tool_use", {}).get("goal_injection")
             if isinstance(config_data, dict)
-            else {}
+            else None
         )
-        if isinstance(options, dict):
-            mode = str(options.get("mode", mode))
-            raw_lines = options.get("lines")
+        mode = str(options.get("mode", mode))
+        raw_lines = options.get("lines")
 
     # Initialise the project context UNCONDITIONALLY (no private-state peeking):
     # a repeat initialise raises RuntimeError, which simply means an earlier
@@ -5409,13 +5404,12 @@ def cmd_secret_meta(args: argparse.Namespace) -> int:
     override = getattr(args, "project_root", None)
     project_root = Path(override) if override else Path(get_project_path(None))
     config = load_config_safe(project_root) or {}
-    handler_options = (
+    guard_options = handler_options(
         config.get("handlers", {})
         .get("pre_tool_use", {})
-        .get(HandlerID.SECRET_FILE_GUARD.config_key, {})
-        .get("options", {})
-    ) or {}
-    allow_plain_hash = bool(handler_options.get("allow_plain_hash", False))
+        .get(HandlerID.SECRET_FILE_GUARD.config_key)
+    )
+    allow_plain_hash = bool(guard_options.get("allow_plain_hash", False))
 
     key_path = _daemon_untracked_dir(project_root) / KEY_FILE_NAME
     meta = collect_secret_meta(
@@ -6903,15 +6897,11 @@ def cmd_skill_scan(args: argparse.Namespace) -> int:
     project_root = resolved_root
 
     config = Config.load_or_default(project_root / ".claude" / "hooks-daemon.yaml")
-    handler_cfg = config.handlers.session_start.get(HandlerID.SKILL_OPPORTUNITY_DETECTOR.config_key)
-    # The config model parses handler entries into HandlerConfig objects, but a
-    # raw dict is tolerated too (defensive: this path also runs against
-    # hand-built configs in tests).
-    if isinstance(handler_cfg, dict):
-        raw_options = handler_cfg.get("options", {})
-    else:
-        raw_options = getattr(handler_cfg, "options", {})
-    options = SkillScanOptions.from_dict(raw_options if isinstance(raw_options, dict) else {})
+    options = SkillScanOptions.from_dict(
+        handler_options(
+            config.handlers.session_start.get(HandlerID.SKILL_OPPORTUNITY_DETECTOR.config_key)
+        )
+    )
 
     state_path = _daemon_untracked_dir(project_root) / STATE_FILE_NAME
     force = bool(getattr(args, "force", False))
@@ -6924,16 +6914,9 @@ def cmd_skill_scan(args: argparse.Namespace) -> int:
             )
             return 0
 
-    sensitive_cfg = config.handlers.pre_tool_use.get(HandlerID.SENSITIVE_CONTENT.config_key)
-    if isinstance(sensitive_cfg, dict):
-        sensitive_options = sensitive_cfg.get("options", {})
-    else:
-        sensitive_options = getattr(sensitive_cfg, "options", {})
-    configured_word_list = (
-        sensitive_options.get("secret_word_list_path")
-        if isinstance(sensitive_options, dict)
-        else None
-    )
+    configured_word_list = handler_options(
+        config.handlers.pre_tool_use.get(HandlerID.SENSITIVE_CONTENT.config_key)
+    ).get("secret_word_list_path")
     secret_terms = get_cached_secret_terms(
         resolve_secret_word_list_path(configured_word_list, project_root)
     )

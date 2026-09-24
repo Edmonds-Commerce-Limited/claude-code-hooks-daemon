@@ -17,6 +17,7 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from claude_code_hooks_daemon.config.models import handler_options
 from claude_code_hooks_daemon.constants.config import ConfigKey, resolve_priority
 from claude_code_hooks_daemon.core import AcceptanceTest
 from claude_code_hooks_daemon.core.cli_acceptance_test import CliAcceptanceTest
@@ -66,12 +67,7 @@ def _apply_configured_options(instance: object, handler_config: Any) -> None:
     registry's two-pass collection over every handler, and no handler currently
     both inherits options and varies its declared tests by one.
     """
-    if not isinstance(handler_config, dict):
-        return
-    options = handler_config.get(ConfigKey.OPTIONS) or {}
-    if not isinstance(options, dict):
-        return
-    for option_key, option_value in options.items():
+    for option_key, option_value in handler_options(handler_config).items():
         setattr(instance, f"_{option_key}", option_value)
 
 
