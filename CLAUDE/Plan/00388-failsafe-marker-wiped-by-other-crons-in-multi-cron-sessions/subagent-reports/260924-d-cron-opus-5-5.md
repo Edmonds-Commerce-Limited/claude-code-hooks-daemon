@@ -138,5 +138,12 @@ SubagentStop enforcer or `blockage_marker.py`.
   user_prompt_submit, stop, subagent_stop, recovery_cron_advisor,
   background_process_tracker, utils, skill_scan, config, constants, and the
   CLAUDE.md guidance coverage): 4261 passed.
+- `tests/integration`, `tests/unit/daemon` and `tests/unit/core`: 8419 passed,
+  9 skipped, 2 failed. Both failures are
+  `test_repo_hygiene_check.py` (`plan-stats-arithmetic` in
+  `CLAUDE/Plan/README.md`: 454 vs 455 distinct, 467 vs 468 allocated). They
+  predate this branch. It never touches that file, and main's `d10bbf13`
+  (Plan 00468 opened) last changed it. I left it alone because the brief forbids
+  editing the plan README.
 - Worktree daemon restarted and reports RUNNING, with no errors in the logs. The
   new handler is listed at priority 70.
