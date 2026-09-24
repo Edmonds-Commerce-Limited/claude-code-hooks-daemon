@@ -320,3 +320,18 @@ generation: NEWER"; TERM gives "state after TERM: ['started']" with no
 once. The stranded-order probe still finds an aside dir left behind. That
 is N4 working, not a leak: the probe reinstalls at once under the default
 60 s heartbeat, so the killed run's dir is still inside its two beats.
+
+**Full QA after N1-N6**, on `cb95eaea`. It was one run, 12:25 to 12:43,
+polled in the foreground, after restarting this worktree's daemon, and
+with no commits or restarts during it.
+
+```
+❌ tests: 25640 passed, 2 failed, 24 skipped | coverage: 95.1%
+QA: 34/35 PASSED, 1/35 FAILED
+```
+
+The only failures are the same 14 I5 probes (12 CommentChangelog, 1
+QaSuppression, 1 CommentSize), in `test_playbook_harness.py` and
+`test_acceptance_contract.py`. Everything else is green. The journal entry
+at 12:44 and this paragraph are the only changes after the run, and both
+are plan markdown.
