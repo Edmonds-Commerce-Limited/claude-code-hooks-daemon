@@ -75,8 +75,9 @@ first, and the other fixes build on it.
 - [ ] ⬜ **Task 2.3**: The LSP exclude advice and skill-reference checks
   derive the config dir (G11). `skill-scan` knows plugin and user skills
   (G14). `tool-report` sums enabled plugins' always-on cost (G15).
-- [ ] ⬜ **Task 2.4**: File the upstream DBF issue: both agents lack `Write`
-  but are told to write a report.
+- [x] ✅ **Task 2.4**: File the upstream DBF issue: both agents lack `Write`
+  but are told to write a report. Filed as
+  [Defence-Before-Fix/claude-plugin#3](https://github.com/Defence-Before-Fix/claude-plugin/issues/3).
 
 ### Phase 3: walkers and path guards leave plugin trees alone (P3, P4, G8, G10, G16)
 

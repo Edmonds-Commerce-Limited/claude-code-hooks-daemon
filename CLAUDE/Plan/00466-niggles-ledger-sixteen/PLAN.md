@@ -53,6 +53,12 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N19 | The registry's options-collection failure is logged at debug level                                        | N13/N14 agent      | 🔄 In progress        |
 | N20 | The capture-corruption auditor judges a multi-line single-quoted string one line at a time                | B1 integration     | ⬜ Open               |
 | N21 | The semgrep QA gate passes when a rule times out                                                          | 00414 agent        | 🔄 In progress        |
+| N22 | `lsp_enforcement` takes another command's argument for a grep symbol lookup                               | Coordinator        | ⬜ Open               |
+| N24 | `daemon.strict_mode` never reaches the live daemon, so every guard fails open on a handler exception      | guards review 2    | 🔄 In progress        |
+| N25 | A slow handler runs out the client's budget, and a timeout ALLOWs the whole PreToolUse chain              | guards review 2    | 🔄 In progress        |
+| N26 | `check_skill_references.py` scans zero files when run from a worktree, and passes                         | 00468 core agent   | ⬜ Open               |
+| N27 | `skill_scan` and `tool_report` build the transcript directory name two different ways                     | 00468 core agent   | ⬜ Open               |
+| N28 | `project_containment` resolves a relative target against the payload cwd, ignoring a same-command `cd`    | Plan 00464 agent   | 🔄 In progress        |
 
 ## Tasks
 

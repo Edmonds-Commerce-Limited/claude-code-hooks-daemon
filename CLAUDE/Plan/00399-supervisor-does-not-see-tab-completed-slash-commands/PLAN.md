@@ -1,6 +1,6 @@
 # Plan 00399: supervisor does not see tab completed slash commands
 
-**Status**: In Progress
+**Status**: Blocked
 **Created**: 2026-09-13
 **Owner**: joseph
 **Priority**: Medium
@@ -129,6 +129,10 @@ write-up saying otherwise would be a tidy story pointing the wrong way.
   `untracked/supervise/decision.log`, which should now appear however tmux
   encodes the keys. Since the ruling this task gates nothing: the record does
   not come from the input path at all.
+
+  **Blocked on this task alone.** Everything an agent can do shipped with B1
+  (2e6483a3). The plan waits for the owner to make the capture above, then
+  closes.
 
 ## Success Criteria
 
