@@ -44,6 +44,11 @@ when the dispatched type cannot write.
   explicitly forbids writing the file through Bash.
 - `dispatch_declaration` warns when a coordinator declares a report path
   for an agent type that cannot write.
+- Every sub-agent's final reply is persisted to a gitignored, bounded
+  location by the daemon itself — regardless of agent type or `Write`
+  access — so the owner's question ("is there a hook we can use at main
+  agent level to ensure sub agent reports are persisted to file?") has a
+  concrete answer that needs no per-agent cooperation.
 
 ## Non-Goals
 
@@ -75,6 +80,16 @@ when the dispatched type cannot write.
   `subagent_type` cannot write but the prompt declares a report path.
   Update the handler guidance (`get_claude_md`) for both handlers.
 - [x] ✅ **Task 1.5**: Release note. Full QA green.
+- [ ] ⬜ **Task 1.6**: The daemon persists every sub-agent's
+  `last_assistant_message` at SubagentStop to a gitignored, bounded
+  location under `untracked/agent-reports/`, never overwriting,
+  retention pruned to a configured cap from day one (issue #52 was a
+  feature with no pruner — do not repeat it). The size blocker points
+  every over-threshold agent (read-only or writable) at the saved path
+  instead of asking it to write one, keeping the old
+  write-to-file/condense messages only as the fallback when persistence
+  failed. `dispatch_declaration` mentions the auto-saved path. Success
+  criteria below.
 
 ### Phase 2: Deliver
 
@@ -91,6 +106,17 @@ when the dispatched type cannot write.
 - [x] Test: `dispatch_declaration` advises on a read-only type with a
   declared report path.
 - [x] Full QA passes and CI is green.
+- [ ] Test: a stop's `last_assistant_message` is persisted to a file for
+  every agent type (read-only, writable, unresolvable), whether or not
+  it is over the size threshold.
+- [ ] Test: persistence never overwrites an existing file (collision
+  suffixes instead).
+- [ ] Test: the report directory is pruned to the configured cap after
+  a write.
+- [ ] Test: the size blocker's over-threshold message points at the
+  saved path when persistence succeeded, and falls back to the
+  pre-Task-1.6 message when it did not.
+- [ ] Full QA passes (foreground, on the final commit).
 
 ## Delivery & Milestones
 
