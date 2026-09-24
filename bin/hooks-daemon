@@ -58,6 +58,14 @@
 #    commands like `plan-qa --lint` and fails closed in offline containers.
 # 3. It fails loudly. A wrapper that silently degrades would recreate the exact
 #    confusion this script exists to eliminate.
+# 4. `repair` works with NO venv for this project path (Plan 00456, GitHub
+#    issue #53). Every other verb needs the interpreter resolved below, so
+#    without a venv each of them exits 5 — and so did `repair`, the one verb
+#    whose job is fixing that. It is caught before the refusal: the clone's
+#    own scripts/venv_bootstrap.sh builds the venv in the foreground, under the
+#    same lock as every other builder, and the normal Python repair then runs.
+#    With a venv present, `repair` is untouched. Plan 00431 is the precedent
+#    for moving a check ahead of venv resolution.
 
 set -euo pipefail
 
@@ -90,10 +98,23 @@ fi
 # shellcheck disable=SC1090  # path is computed at runtime from DAEMON_DIR
 source "$RESOLVE_LIB"
 
+BOOTSTRAP="$DAEMON_DIR/scripts/venv_bootstrap.sh"
 if ! PYTHON="$(resolve_venv_python "$DAEMON_DIR")"; then
-    echo "❌ hooks-daemon: could not resolve a usable venv under $DAEMON_DIR" >&2
-    echo "   Run the installer/upgrade to rebuild it." >&2
-    exit 5
+    if [ "${1:-}" = "repair" ] && [ -f "$BOOTSTRAP" ]; then
+        echo "hooks-daemon repair: no venv resolves for this project path, so one is built first." >&2
+        if ! bash "$BOOTSTRAP" repair "$DAEMON_DIR"; then
+            echo "❌ hooks-daemon repair: the venv for this project path could not be built (see above)." >&2
+            exit 1
+        fi
+        if ! PYTHON="$(resolve_venv_python "$DAEMON_DIR")"; then
+            echo "❌ hooks-daemon repair: a venv was built but still does not resolve under $DAEMON_DIR" >&2
+            exit 1
+        fi
+    else
+        echo "❌ hooks-daemon: could not resolve a usable venv under $DAEMON_DIR" >&2
+        echo "   Build the venv for this project path: $BIN_DIR/hooks-daemon repair" >&2
+        exit 5
+    fi
 fi
 
 if [ ! -x "$PYTHON" ]; then
