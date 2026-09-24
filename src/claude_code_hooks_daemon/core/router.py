@@ -159,6 +159,7 @@ class EventRouter:
         *,
         collect_all: bool = False,
         deadline_seconds: float | None = None,
+        max_safety_input_bytes: int | None = None,
     ) -> ChainExecutionResult:
         """Route an event to its handler chain.
 
@@ -170,7 +171,10 @@ class EventRouter:
                 keep running after a deny and merge every violation into one
                 response. See ``HandlerChain.execute``.
             deadline_seconds: ``daemon.chain.deadline_seconds`` (Plan 00466
-                N25): a per-event chain deadline. See ``HandlerChain.execute``.
+                N25/N34): a per-event chain deadline, also bounding each
+                handler's own call. See ``HandlerChain.execute``.
+            max_safety_input_bytes: ``daemon.chain.max_safety_input_bytes``
+                (Plan 00466 N34 remedy 3). See ``HandlerChain.execute``.
 
         Returns:
             Execution result from the handler chain
@@ -203,6 +207,7 @@ class EventRouter:
             strict_mode=strict_mode,
             collect_all=collect_all,
             deadline_seconds=deadline_seconds,
+            max_safety_input_bytes=max_safety_input_bytes,
         )
 
         # Inject config key footer into DENY/ASK results

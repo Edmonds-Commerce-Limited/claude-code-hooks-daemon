@@ -25,7 +25,13 @@ from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from claude_code_hooks_daemon.constants import HandlerTag, Priority
+from claude_code_hooks_daemon.constants import HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.core.bounded_dispatch import (
+    BoundedDispatcher,
+    DispatchSaturated,
+    DispatchTimeout,
+    get_default_dispatcher,
+)
 from claude_code_hooks_daemon.core.handler_scope import scope_admits
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
 
@@ -45,6 +51,51 @@ _RESTRICTIVE_DECISIONS: frozenset[Decision] = frozenset(
 def is_restrictive(decision: Decision | str | None) -> bool:
     """True when ``decision`` restricts the tool call (deny/ask/defer)."""
     return decision in _RESTRICTIVE_DECISIONS
+
+
+# The bulk-text ``tool_input`` fields a SAFETY handler actually scans (Plan
+# 00466 N34 remedy 3). Deliberately NOT the whole payload -- an unrelated
+# large field (e.g. a long transcript_path) must never count against the
+# size cap, only the text a handler's own matches()/handle() would work over.
+_SIZED_TOOL_INPUT_FIELDS: tuple[str, ...] = ("command", "content", "new_string", "old_string")
+
+
+def _safety_payload_size(hook_input: dict[str, Any]) -> int:
+    """Best-effort byte size of the text a SAFETY handler would scan.
+
+    0 for a ``tool_input`` carrying none of :data:`_SIZED_TOOL_INPUT_FIELDS`
+    -- there is no known bulk text for the size cap to bound.
+    """
+    tool_input = hook_input.get(HookInputField.TOOL_INPUT)
+    if not isinstance(tool_input, dict):
+        return 0
+    total = 0
+    for field_name in _SIZED_TOOL_INPUT_FIELDS:
+        value = tool_input.get(field_name)
+        if isinstance(value, str):
+            total += len(value.encode("utf-8"))
+    return total
+
+
+def _dispatch_matches_and_handle(
+    handler: "Handler",
+    hook_input: dict[str, Any],
+    on_matched: Callable[[], None],
+) -> "HookResult | None":
+    """One handler's own decision, run on whichever thread calls this.
+
+    The single callable :meth:`BoundedDispatcher.run` dispatches (Plan 00466
+    N34): ``matches()`` and ``handle()`` combined, so the caller's ONE
+    ``Future.result(timeout=...)`` wait bounds both -- a handler slow inside
+    either call is bounded the same way. ``on_matched`` fires the instant
+    ``matches()`` returns True, before ``handle()`` runs, mirroring the
+    direct synchronous call's own ordering: a handler that matched is
+    recorded even when ``handle()`` itself goes on to raise.
+    """
+    if not handler.matches(hook_input):
+        return None
+    on_matched()
+    return handler.handle(hook_input)
 
 
 # Result fields that carry INFORMATION rather than a decision, and so travel
@@ -368,6 +419,8 @@ class HandlerChain:
         *,
         collect_all: bool = False,
         deadline_seconds: float | None = None,
+        max_safety_input_bytes: int | None = None,
+        dispatcher: "BoundedDispatcher[object] | None" = None,
     ) -> ChainExecutionResult:
         """Execute the handler chain for an event.
 
@@ -407,11 +460,29 @@ class HandlerChain:
             deadline_seconds: ``daemon.chain.deadline_seconds`` (Plan 00466
                 N25). None (the default for every existing caller that does
                 not pass it) leaves the chain unbounded, matching the
-                pre-existing behaviour.
+                pre-existing behaviour. When set, EVERY handler's own
+                ``matches()``/``handle()`` call is also individually bounded
+                (Plan 00466 N34) -- see :mod:`core.bounded_dispatch` -- not
+                only the gap between handlers.
+            max_safety_input_bytes: ``daemon.chain.max_safety_input_bytes``
+                (Plan 00466 N34 remedy 3). A SAFETY handler whose bulk-text
+                input exceeds this is denied (SAFETY+BLOCKING) or skipped
+                (otherwise) BEFORE dispatch is even attempted. None (the
+                default) disables this check; ``deadline_seconds`` still
+                applies regardless.
+            dispatcher: The :class:`BoundedDispatcher` to run handlers on
+                when ``deadline_seconds`` is set. None (the default for
+                every real caller) uses the shared, process-lifetime pool.
+                Tests that need to control or observe pool capacity directly
+                (e.g. saturation) inject their own instance instead.
 
         Returns:
             ChainExecutionResult with final result and metadata
         """
+        # Resolved once per call, not per handler: the shared, process-lifetime
+        # pool by default (Plan 00466 N34), or an injected one for tests that
+        # need to control/observe its capacity directly (e.g. saturation).
+        active_dispatcher = dispatcher if dispatcher is not None else get_default_dispatcher()
         start_time = time.perf_counter()
         accumulated_context: list[str] = []
         handlers_executed: list[str] = []
@@ -429,52 +500,180 @@ class HandlerChain:
         denials: list[tuple[str, HookResult]] = []
         advisories: list[tuple[str, HookResult]] = []
 
+        def _record_unjudged(handler: "Handler", reason: str, note: str) -> bool:
+            """Record a "could not be judged" verdict for ``handler``.
+
+            Shared core for every reason a handler might not get a real
+            verdict (Plan 00466 N24/N25/N34): a deadline already gone before
+            it was even considered, its own dispatch timing out, the
+            dispatch pool being saturated, or its input exceeding the SAFETY
+            size cap. A handler tagged both SAFETY and BLOCKING is denied
+            with ``reason`` -- exactly like N24's raise, because "no
+            verdict" must never read as "allowed". Anything else is skipped
+            with ``note`` as a context line; the client's own (much larger)
+            timeout is still the true backstop for those.
+
+            Returns:
+                True when the chain must stop (a terminal deny was recorded).
+            """
+            nonlocal final_result, terminated_by, decided_by
+            is_safety_blocking = (
+                HandlerTag.SAFETY in handler.tags and HandlerTag.BLOCKING in handler.tags
+            )
+            if is_safety_blocking:
+                unjudged_result = HookResult.deny(reason=reason)
+                accumulated_context.append(note)
+                unjudged_result.add_handler(handler.name)
+                unjudged_result.context = list(accumulated_context)
+                decisions.append(
+                    HandlerVerdict(
+                        handler=handler.name,
+                        decision=unjudged_result.decision,
+                        terminal=handler.terminal,
+                    )
+                )
+                handlers_executed.append(handler.name)
+                final_result = unjudged_result
+                terminated_by = handler.name
+                if decided_by is None:
+                    decided_by = handler.name
+                return True
+            accumulated_context.append(note)
+            return False
+
+        def _apply_deadline_exceeded(handler: "Handler", detail: str) -> bool:
+            """``_record_unjudged`` for a timing reason (deadline/dispatch)."""
+            return _record_unjudged(
+                handler,
+                reason=f"{handler.name}: not judged in time ({detail})",
+                note=(
+                    f"Handler {handler.name} not judged in time: {detail}"
+                    if (HandlerTag.SAFETY in handler.tags and HandlerTag.BLOCKING in handler.tags)
+                    else f"Handler {handler.name} skipped: {detail}"
+                ),
+            )
+
+        def _apply_oversized_input(handler: "Handler", payload_size: int, limit: int) -> bool:
+            """``_record_unjudged`` for the SAFETY input-size cap (Plan 00466
+            N34 remedy 3): defence in depth alongside the deadline -- a huge
+            payload can exhaust a handler's OWN budget regardless of how fast
+            its per-byte cost is, so this is checked BEFORE any dispatch is
+            even attempted, not after a timeout.
+            """
+            detail = f"{payload_size} bytes exceeds the {limit}-byte SAFETY evaluation limit"
+            return _record_unjudged(
+                handler,
+                reason=f"{handler.name}: input too large to evaluate safely ({detail})",
+                note=(
+                    f"Handler {handler.name} input too large to evaluate safely: {detail}"
+                    if (HandlerTag.SAFETY in handler.tags and HandlerTag.BLOCKING in handler.tags)
+                    else f"Handler {handler.name} skipped: input too large to evaluate safely ({detail})"
+                ),
+            )
+
+        def _record_matched_result(handler: "Handler", result: HookResult) -> bool:
+            """Post-``handle()`` bookkeeping shared by the direct-call and
+            bounded-dispatch paths below. Returns True when the chain must
+            stop (a terminal handler produced a decision that ends it).
+            """
+            nonlocal final_result, decided_by
+            logger.debug(
+                "Handler %s returned decision=%s, terminal=%s",
+                handler.name,
+                result.decision,
+                handler.terminal,
+            )
+            if self.context_transform is not None and result.context:
+                result.context = self.context_transform(handler, result.context)
+            handlers_executed.append(handler.name)
+            executed_handlers.append(handler)
+            matched_results.append(result)
+            result.add_handler(handler.name)
+
+            # Record THIS handler's own verdict now, before any later
+            # handler's laxer/stricter result can change what the eventual
+            # merged chain decision looks like (Plan 00209).
+            decisions.append(
+                HandlerVerdict(
+                    handler=handler.name,
+                    decision=result.decision,
+                    terminal=handler.terminal,
+                    rule=result.rule,
+                )
+            )
+
+            restrictive = is_restrictive(result.decision)
+
+            # First restrictive decision wins: it owns the reason shown AND
+            # the "To disable:" attribution, so the two can never disagree
+            # (Plan 00190 Task 0.5, made deliberate by Plan 00242 Task 3.3).
+            # A later, laxer result never overwrites it (Plan 00144
+            # regression: plan_qa_edit's deny at priority 44 was lost when
+            # markdown_organization's ALLOW landed at priority 50).
+            if decided_by is None and restrictive:
+                decided_by = handler.name
+            accumulated_context.extend(result.context)
+            if final_result is None or (restrictive and not is_restrictive(final_result.decision)):
+                final_result = result
+            if restrictive:
+                denials.append((handler.name, result))
+            elif result.context:
+                advisories.append((handler.name, result))
+
+            # Terminality belongs to the DECISION (Plan 00242): a restrictive
+            # result from a terminal handler ends the chain (unless
+            # collect-all mode wants every violation); an ALLOW continues
+            # unless this event opted in to "approve and stop"
+            # (allow_is_final).
+            ends_on_restrictive = restrictive and not collect_all
+            ends_on_allow = self.allow_is_final and not restrictive
+            return bool(handler.terminal and (ends_on_restrictive or ends_on_allow))
+
+        def _make_dispatch_call(handler: "Handler") -> Callable[[], "HookResult | None"]:
+            """A zero-argument closure over THIS ``handler`` for
+            :meth:`BoundedDispatcher.run` (Plan 00466 N34).
+
+            A named factory taking ``handler`` as a real parameter, not a
+            ``lambda h=handler: ...`` default-argument trick, is deliberate:
+            the latter both defeats type inference on the generic dispatcher
+            call and is easy to get subtly wrong for the classic
+            loop-variable-closure reason (a default argument binds it, but a
+            typo dropping the default silently reintroduces the bug).
+            """
+
+            def _call() -> "HookResult | None":
+                return _dispatch_matches_and_handle(
+                    handler, hook_input, lambda: handlers_matched.append(handler.name)
+                )
+
+            return _call
+
+        # Computed once per call, not per handler (Plan 00466 N34 remedy 3):
+        # a cheap O(field count) measurement, not a scan of the whole payload.
+        payload_size = _safety_payload_size(hook_input) if max_safety_input_bytes is not None else 0
+
         for handler in self.handlers:
             if (
                 deadline_seconds is not None
                 and (time.perf_counter() - start_time) >= deadline_seconds
             ):
-                # Plan 00466 N25: out of budget before this handler even ran.
-                # A SAFETY+BLOCKING handler not judged in time is treated
-                # exactly like N24's raise -- deny, naming the handler --
-                # because "no verdict" must never read as "allowed". Anything
-                # else is skipped with a note; the client's own (much larger)
-                # timeout is still the true backstop for those.
-                is_safety_blocking = (
-                    HandlerTag.SAFETY in handler.tags and HandlerTag.BLOCKING in handler.tags
-                )
-                if is_safety_blocking:
-                    deadline_result = HookResult.deny(
-                        reason=(
-                            f"{handler.name}: not judged in time "
-                            f"(chain deadline of {deadline_seconds}s exceeded)"
-                        ),
-                    )
-                    accumulated_context.append(
-                        f"Handler {handler.name} not judged in time: chain "
-                        f"deadline ({deadline_seconds}s) exceeded"
-                    )
-                    deadline_result.add_handler(handler.name)
-                    deadline_result.context = list(accumulated_context)
-                    decisions.append(
-                        HandlerVerdict(
-                            handler=handler.name,
-                            decision=deadline_result.decision,
-                            terminal=handler.terminal,
-                        )
-                    )
-                    handlers_executed.append(handler.name)
-                    final_result = deadline_result
-                    terminated_by = handler.name
-                    if decided_by is None:
-                        decided_by = handler.name
+                # Out of budget before this handler even ran (Plan 00466 N25).
+                if _apply_deadline_exceeded(
+                    handler, f"chain deadline ({deadline_seconds}s) exceeded"
+                ):
                     break
-                else:
-                    accumulated_context.append(
-                        f"Handler {handler.name} skipped: chain deadline "
-                        f"({deadline_seconds}s) exceeded"
-                    )
-                    continue
+                continue
+
+            if (
+                max_safety_input_bytes is not None
+                and payload_size > max_safety_input_bytes
+                and HandlerTag.SAFETY in handler.tags
+            ):
+                # Defence in depth (Plan 00466 N34 remedy 3): fail before
+                # dispatch is even attempted, not after paying its overhead.
+                if _apply_oversized_input(handler, payload_size, max_safety_input_bytes):
+                    break
+                continue
 
             try:
                 # Scope gate (Plan 00423), BEFORE matches(). A handler the
@@ -498,67 +697,57 @@ class HandlerChain:
                     )
                     continue
 
-                if handler.matches(hook_input):
-                    handlers_matched.append(handler.name)
-                    logger.debug("Handler %s matched event", handler.name)
+                if deadline_seconds is None:
+                    # No deadline configured: the original, fully synchronous
+                    # call -- unchanged, and zero bounded-dispatch overhead on
+                    # what is still every unit test's and every un-configured
+                    # install's own path.
+                    if handler.matches(hook_input):
+                        handlers_matched.append(handler.name)
+                        logger.debug("Handler %s matched event", handler.name)
+                        result = handler.handle(hook_input)
+                        if _record_matched_result(handler, result):
+                            terminated_by = handler.name
+                            break
+                    continue
 
-                    result = handler.handle(hook_input)
-                    logger.debug(
-                        "Handler %s returned decision=%s, terminal=%s",
-                        handler.name,
-                        result.decision,
-                        handler.terminal,
-                    )
-                    if self.context_transform is not None and result.context:
-                        result.context = self.context_transform(handler, result.context)
-                    handlers_executed.append(handler.name)
-                    executed_handlers.append(handler)
-                    matched_results.append(result)
-                    result.add_handler(handler.name)
-
-                    # Record THIS handler's own verdict now, before any later
-                    # handler's laxer/stricter result can change what the
-                    # eventual merged chain decision looks like (Plan 00209).
-                    decisions.append(
-                        HandlerVerdict(
-                            handler=handler.name,
-                            decision=result.decision,
-                            terminal=handler.terminal,
-                            rule=result.rule,
-                        )
-                    )
-
-                    restrictive = is_restrictive(result.decision)
-
-                    # First restrictive decision wins: it owns the reason shown
-                    # AND the "To disable:" attribution, so the two can never
-                    # disagree (Plan 00190 Task 0.5, made deliberate by Plan
-                    # 00242 Task 3.3). A later, laxer result never overwrites
-                    # it (Plan 00144 regression: plan_qa_edit's deny at priority
-                    # 44 was lost when markdown_organization's ALLOW landed at
-                    # priority 50).
-                    if decided_by is None and restrictive:
-                        decided_by = handler.name
-                    accumulated_context.extend(result.context)
-                    if final_result is None or (
-                        restrictive and not is_restrictive(final_result.decision)
+                # Plan 00466 N34: a chain deadline that only ever checks
+                # BETWEEN handlers cannot catch one slow WITHIN its own
+                # matches()/handle() -- exactly secret_file_guard's shape on
+                # multi-MB input (48.958s measured on 4 MB, past both this
+                # deadline and the client's own 30s socket timeout). Below,
+                # the handler's own call is bounded too: it runs on the
+                # shared pool and this thread waits on it for at most the
+                # REMAINING budget, not the handler's own sleep/scan time.
+                remaining = max(0.0, deadline_seconds - (time.perf_counter() - start_time))
+                outcome = active_dispatcher.run(
+                    _make_dispatch_call(handler),
+                    timeout=remaining,
+                    label=handler.name,
+                )
+                if isinstance(outcome, DispatchTimeout):
+                    if _apply_deadline_exceeded(
+                        handler, f"exceeded its {remaining:.2f}s dispatch budget"
                     ):
-                        final_result = result
-                    if restrictive:
-                        denials.append((handler.name, result))
-                    elif result.context:
-                        advisories.append((handler.name, result))
-
-                    # Terminality belongs to the DECISION (Plan 00242): a
-                    # restrictive result from a terminal handler ends the chain
-                    # (unless collect-all mode wants every violation); an ALLOW
-                    # continues unless this event opted in to "approve and
-                    # stop" (allow_is_final).
-                    ends_on_restrictive = restrictive and not collect_all
-                    ends_on_allow = self.allow_is_final and not restrictive
-                    if handler.terminal and (ends_on_restrictive or ends_on_allow):
-                        terminated_by = handler.name
                         break
+                    continue
+                if isinstance(outcome, DispatchSaturated):
+                    if _apply_deadline_exceeded(handler, "dispatch pool saturated"):
+                        break
+                    continue
+                if outcome is None:
+                    # matches() returned False -- nothing to record, exactly
+                    # like the direct-call path above.
+                    continue
+                # The only remaining possibility: `_make_dispatch_call`'s own
+                # closure returns `HookResult | None`, and None was just
+                # ruled out above -- this narrows `object` (BoundedDispatcher
+                # is generic over its DECLARED type, not this call's actual
+                # return type) back to what it always really was.
+                assert isinstance(outcome, HookResult)
+                if _record_matched_result(handler, outcome):
+                    terminated_by = handler.name
+                    break
 
             except Exception as e:
                 logger.exception("Handler %s raised exception", handler.name)

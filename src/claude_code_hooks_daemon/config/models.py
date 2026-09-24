@@ -1607,17 +1607,38 @@ class ChainConfig(BaseModel):
             Costs the extra handlers' execution time on the blocked path;
             ``CLAUDE/Plan/00242-terminal-handlers-are-a-flawed-primitive/
             MEASUREMENTS.md`` records the numbers.
-        deadline_seconds: Per-event chain deadline (Plan 00466 N25), well
+        deadline_seconds: Per-event chain deadline (Plan 00466 N25/N34), well
             under the client's own socket timeout (30s): that client-side
             timeout fails the WHOLE chain open on expiry, so a merely slow
-            handler bypassed every guard behind it, not just itself. Once
-            exceeded, a handler tagged both ``SAFETY`` and ``BLOCKING`` not
-            yet run is treated exactly like N24's raise-while-evaluating —
-            denied, naming the handler, "not judged in time" — and any other
-            not-yet-run handler is skipped with a context note. ``None``
-            disables enforcement entirely (NOT recommended: a slow handler
-            can then exhaust the client's own timeout, which fails the whole
-            chain open with no guard getting a say).
+            handler bypassed every guard behind it, not just itself. Checked
+            BETWEEN handlers, and (N34) each handler's own ``matches()``/
+            ``handle()`` call is ALSO individually bounded on a shared pool —
+            a handler slow enough within its own call (``secret_file_guard``
+            measured at 48.958s on 4 MB input) reproduces the exact bypass
+            this exists to close otherwise. Either way, a handler tagged both
+            ``SAFETY`` and ``BLOCKING`` not judged in time is denied, naming
+            the handler, "not judged in time"; any other not-yet-run handler
+            is skipped with a context note. ``None`` disables enforcement
+            entirely (NOT recommended: a slow handler can then exhaust the
+            client's own timeout, which fails the whole chain open with no
+            guard getting a say).
+        max_safety_input_bytes: Defence in depth alongside
+            ``deadline_seconds`` (Plan 00466 N34 remedy 3): the combined size
+            of a SAFETY handler's bulk-text input fields (Bash's ``command``,
+            Write's ``content``, Edit's ``old_string``/``new_string``) is
+            checked BEFORE dispatch is even attempted, so a truly pathological
+            payload fails fast and cheaply rather than paying dispatch
+            overhead only to be cut off by the deadline anyway. 2 MB (the
+            default) is comfortably above ordinary source files (typically
+            well under a few hundred KB) and even a large generated asset,
+            while still catching a payload far outside normal use early. This
+            is NOT the only guarantee against a slow handler — ``deadline_
+            seconds``'s per-handler bound (N34) already caps worst-case wall
+            clock regardless of size — so raising or disabling this (``None``)
+            is safe as long as ``deadline_seconds`` stays enforced. A SAFETY
+            +BLOCKING handler over the limit is denied, naming the size and
+            the limit; any other SAFETY handler is skipped with a context
+            note.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -1634,9 +1655,22 @@ class ChainConfig(BaseModel):
         default=Timeout.CHAIN_DEADLINE_DEFAULT,
         description=(
             "Per-event chain deadline in seconds, well under the client's "
-            "own socket timeout. A SAFETY+BLOCKING handler not yet run when "
-            "it is exceeded is denied as 'not judged in time'; any other "
-            "not-yet-run handler is skipped. None disables enforcement."
+            "own socket timeout. Enforced BETWEEN handlers and around each "
+            "handler's own matches()/handle() call (Plan 00466 N34). A "
+            "SAFETY+BLOCKING handler not judged in time is denied as 'not "
+            "judged in time'; any other not-yet-run handler is skipped. "
+            "None disables enforcement."
+        ),
+    )
+    max_safety_input_bytes: Annotated[int, Field(gt=0)] | None = Field(
+        default=Timeout.SAFETY_INPUT_SIZE_CAP_BYTES,
+        description=(
+            "Defence in depth alongside deadline_seconds (Plan 00466 N34): "
+            "a SAFETY handler whose bulk-text input (Bash command, Write "
+            "content, Edit old_string/new_string) exceeds this many bytes is "
+            "denied before dispatch is even attempted, rather than paying "
+            "dispatch overhead only to be cut off by the deadline. None "
+            "disables this check (deadline_seconds still applies)."
         ),
     )
 

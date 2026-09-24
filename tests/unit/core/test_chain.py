@@ -899,6 +899,12 @@ class TestHandlerChain:
         """Plan 00466 N25: a chain deadline denies a SAFETY+BLOCKING handler
         it ran out of time to judge, rather than letting a slow handler
         exhaust the CLIENT's own timeout (which fails the whole chain open).
+
+        Plan 00466 N34: ``slow`` itself is now ALSO bounded (it runs on the
+        shared dispatch pool, not the calling thread), so it is no longer
+        guaranteed to have finished by the time ``execute()`` returns --
+        only that it eventually does, in the background. Polling for that
+        rather than asserting it immediately keeps this deterministic.
         """
         chain = HandlerChain()
         slow = MockHandler("slow", priority=10, sleep_in_handle=0.05)
@@ -913,6 +919,9 @@ class TestHandlerChain:
 
         result = chain.execute({"tool_name": "Bash"}, deadline_seconds=0.01)
 
+        deadline = time.perf_counter() + 2.0
+        while slow.handle_called == 0 and time.perf_counter() < deadline:
+            time.sleep(0.01)
         assert slow.handle_called == 1
         # The deadline is hit before the guard is even asked whether it
         # matches -- there is no time budget left to run it at all.
@@ -965,6 +974,225 @@ class TestHandlerChain:
         result = chain.execute({"tool_name": "Bash"}, deadline_seconds=5.0)
 
         assert h2.handle_called == 1
+        assert result.result.decision == Decision.ALLOW
+
+    def test_a_safety_blocking_handler_that_oversleeps_itself_is_denied_within_the_deadline(
+        self,
+    ) -> None:
+        """Plan 00466 N34: the deadline now bounds a handler's OWN call, not
+        only the gap before it. Without this, N25's between-handlers check
+        never fires here -- this guard is the FIRST and ONLY handler, so
+        nothing runs before it to exhaust the budget; only bounding its own
+        execution can catch it. Mirrors the real finding: secret_file_guard
+        measured at 48.958s on 4 MB input, past the 20s chain deadline,
+        entirely inside its own call.
+        """
+        chain = HandlerChain()
+        guard = MockHandler(
+            "safety-guard",
+            priority=10,
+            terminal=True,
+            tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING],
+            sleep_in_handle=5.0,
+        )
+        chain.add(guard)
+
+        start = time.perf_counter()
+        result = chain.execute({"tool_name": "Bash"}, deadline_seconds=0.1)
+        elapsed = time.perf_counter() - start
+
+        # Bounded by the DEADLINE, not by the guard's own 5s sleep.
+        assert elapsed < 2.0
+        assert result.result.decision == Decision.DENY
+        assert result.result.reason is not None
+        assert "safety-guard" in result.result.reason
+        assert "not judged in time" in result.result.reason.lower()
+        assert result.terminated_by == "safety-guard"
+
+    def test_a_slow_advisory_only_handler_that_oversleeps_itself_allows_with_an_advisory(
+        self,
+    ) -> None:
+        """The non-SAFETY+BLOCKING mirror of the test above: bounded the same
+        way, but skipped with a context note rather than denied.
+        """
+        chain = HandlerChain()
+        advisory = MockHandler(
+            "slow-advisory",
+            priority=10,
+            tags=[HandlerTag.ADVISORY],
+            sleep_in_handle=5.0,
+        )
+        chain.add(advisory)
+
+        start = time.perf_counter()
+        result = chain.execute({"tool_name": "Bash"}, deadline_seconds=0.1)
+        elapsed = time.perf_counter() - start
+
+        assert elapsed < 2.0
+        assert result.result.decision == Decision.ALLOW
+        assert any(
+            "slow-advisory" in ctx and "budget" in ctx.lower() for ctx in result.result.context
+        )
+
+    def test_deadline_none_leaves_an_oversleeping_safety_handler_unbounded(self) -> None:
+        """Plan 00466 N34: ``deadline_seconds=None`` disables the NEW
+        per-handler bound too, not only the pre-existing between-handlers
+        check -- the direct, synchronous call path is taken, unchanged.
+        """
+        chain = HandlerChain()
+        guard = MockHandler(
+            "safety-guard",
+            priority=10,
+            tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING],
+            sleep_in_handle=0.05,
+        )
+        chain.add(guard)
+
+        result = chain.execute({"tool_name": "Bash"})
+
+        # No pool involved on this path -- the call already returned
+        # synchronously, so this is deterministic, not a race.
+        assert guard.handle_called == 1
+        assert result.result.decision == Decision.ALLOW
+
+    def test_dispatch_pool_saturation_denies_a_safety_blocking_handler(self) -> None:
+        """Plan 00466 N34 remedy 2's OTHER fail-closed case: a pool with no
+        free capacity refuses the submission outright rather than queuing
+        it -- an unbounded queue is exactly the "pile up threads" failure
+        this exists to prevent.
+        """
+        import threading
+
+        from claude_code_hooks_daemon.core.bounded_dispatch import BoundedDispatcher
+
+        small_pool = BoundedDispatcher(max_inflight=1)
+        occupied = threading.Event()
+        release = threading.Event()
+
+        def _occupy() -> None:
+            occupied.set()
+            release.wait(timeout=5.0)
+
+        filler = threading.Thread(
+            target=lambda: small_pool.run(_occupy, timeout=5.0, label="filler")
+        )
+        try:
+            filler.start()
+            assert occupied.wait(timeout=1.0)
+
+            chain = HandlerChain()
+            guard = MockHandler(
+                "safety-guard",
+                priority=10,
+                terminal=True,
+                tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING],
+            )
+            chain.add(guard)
+
+            start = time.perf_counter()
+            result = chain.execute(
+                {"tool_name": "Bash"}, deadline_seconds=5.0, dispatcher=small_pool
+            )
+            elapsed = time.perf_counter() - start
+        finally:
+            release.set()
+            filler.join(timeout=5.0)
+            small_pool.shutdown(wait=True)
+
+        # Refused immediately -- never waited anywhere near the 5s deadline.
+        assert elapsed < 1.0
+        assert result.result.decision == Decision.DENY
+        assert result.result.reason is not None
+        assert "safety-guard" in result.result.reason
+        assert "not judged in time" in result.result.reason.lower()
+
+    def test_oversized_bash_command_denies_a_safety_blocking_handler(self) -> None:
+        """Plan 00466 N34 remedy 3: an oversized payload is denied BEFORE
+        dispatch, naming the size and the limit -- not "not judged in time",
+        since no timing was ever involved.
+        """
+        chain = HandlerChain()
+        guard = MockHandler(
+            "safety-guard",
+            priority=10,
+            terminal=True,
+            tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING],
+        )
+        chain.add(guard)
+
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "x" * 100}}
+        result = chain.execute(hook_input, max_safety_input_bytes=50)
+
+        assert guard.matches_called == 0
+        assert guard.handle_called == 0
+        assert result.result.decision == Decision.DENY
+        assert result.result.reason is not None
+        assert "safety-guard" in result.result.reason
+        assert "too large" in result.result.reason.lower()
+        assert "100" in result.result.reason
+        assert "50" in result.result.reason
+
+    def test_oversized_write_content_skips_a_non_safety_blocking_handler(self) -> None:
+        """A SAFETY handler without BLOCKING is skipped with a note, not denied."""
+        chain = HandlerChain()
+        advisory = MockHandler("safety-advisory", priority=10, tags=[HandlerTag.SAFETY])
+        chain.add(advisory)
+
+        hook_input = {"tool_name": "Write", "tool_input": {"content": "x" * 100}}
+        result = chain.execute(hook_input, max_safety_input_bytes=50)
+
+        assert advisory.matches_called == 0
+        assert result.result.decision == Decision.ALLOW
+        assert any(
+            "safety-advisory" in ctx and "too large" in ctx.lower() for ctx in result.result.context
+        )
+
+    def test_non_safety_handler_is_unaffected_by_the_size_cap(self) -> None:
+        """The size cap is scoped to SAFETY handlers -- an ordinary advisory
+        still runs normally over an oversized payload.
+        """
+        chain = HandlerChain()
+        ordinary = MockHandler("ordinary", priority=10)
+        chain.add(ordinary)
+
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "x" * 100}}
+        result = chain.execute(hook_input, max_safety_input_bytes=50)
+
+        assert ordinary.matches_called == 1
+        assert ordinary.handle_called == 1
+        assert result.result.decision == Decision.ALLOW
+
+    def test_size_cap_none_disables_the_check(self) -> None:
+        """The default: no size cap configured means no size-based denial,
+        however large the payload.
+        """
+        chain = HandlerChain()
+        guard = MockHandler(
+            "safety-guard",
+            priority=10,
+            tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING],
+        )
+        chain.add(guard)
+
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "x" * 10_000}}
+        result = chain.execute(hook_input)
+
+        assert guard.handle_called == 1
+        assert result.result.decision == Decision.ALLOW
+
+    def test_size_within_the_cap_runs_normally(self) -> None:
+        chain = HandlerChain()
+        guard = MockHandler(
+            "safety-guard",
+            priority=10,
+            tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING],
+        )
+        chain.add(guard)
+
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "x" * 10}}
+        result = chain.execute(hook_input, max_safety_input_bytes=50)
+
+        assert guard.handle_called == 1
         assert result.result.decision == Decision.ALLOW
 
     def test_execute_preserves_handler_priority_order(self) -> None:

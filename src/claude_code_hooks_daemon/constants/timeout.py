@@ -55,6 +55,13 @@ class Timeout:
     # rather than silently skipped.
     CHAIN_DEADLINE_DEFAULT = 20
 
+    # SAFETY handler input-size cap in bytes (Plan 00466 N34 remedy 3),
+    # defence in depth alongside CHAIN_DEADLINE_DEFAULT. Ordinary source
+    # files are typically well under a few hundred KB; 2 MiB stays
+    # comfortably above even a large generated asset while still catching a
+    # payload far outside normal use BEFORE dispatch overhead is spent on it.
+    SAFETY_INPUT_SIZE_CAP_BYTES = 2 * 1024 * 1024  # 2 MiB
+
     # Network/IO timeouts (seconds)
     SOCKET_CONNECT = 5  # 5 seconds (Unix socket connection)
     FILE_LOCK = 10  # 10 seconds (file lock acquisition)

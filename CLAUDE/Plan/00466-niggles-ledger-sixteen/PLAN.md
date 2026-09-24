@@ -64,7 +64,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N31 | The dispatch-declaration advisory does not recognise "File to write to: <path>"                           | 00467 dogfood      | ⬜ Open               |
 | N32 | `pipe_blocker` splits at a `\|` inside double quotes and reads the next word as a pipe stage              | Plan 00463 agent   | ⬜ Open               |
 | N33 | A worktree agent's `secret_file_guard.exclude_paths` change had no effect after a daemon restart          | Integration B2 fix | ⬜ Open               |
-| N34 | `secret_file_guard`'s linear scan has enough constant factor to blow past the chain deadline on its own   | n466-n24           | ⬜ Open               |
+| N34 | `secret_file_guard`'s linear scan has enough constant factor to blow past the chain deadline on its own   | n466-n24           | ✅ Remedied           |
 
 ## Tasks
 

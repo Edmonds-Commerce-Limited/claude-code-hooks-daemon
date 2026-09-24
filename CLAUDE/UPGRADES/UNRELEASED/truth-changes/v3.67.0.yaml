@@ -81,3 +81,40 @@ truth_changes:
       CAN ONLY AFFECT ITS OWN DECISION, RE-CHECK THAT CLAIM FOR THE VERSION
       BEFORE THIS CHANGE: A SLOW HANDLER SILENTLY ALLOWED EVERYTHING QUEUED
       BEHIND IT TOO.
+  - topic: daemon-config
+    id: chain-deadline-per-handler-enforcement
+    was: >
+      `daemon.chain.deadline_seconds` (Plan 00466 N25) was checked once per
+      handler, BEFORE it ran — it bounded the gap BETWEEN handlers, never a
+      handler's own `matches()`/`handle()` call. A handler slow enough
+      within its own call reproduced the exact bypass N25 was built to
+      close: `secret_file_guard` measured at 48.958s on 4 MB of Write
+      content, past both the 20s chain deadline and the client's own 30s
+      socket timeout — with `secret_file_guard` as the FIRST and only
+      matching handler, nothing ran before it to trip the between-handlers
+      check at all.
+    now: >
+      Every handler's own call is now individually bounded too (Plan 00466
+      N34, `core.bounded_dispatch.BoundedDispatcher`): it runs on its own
+      daemon thread and the chain waits on it for at most the REMAINING
+      deadline budget, not however long the handler's own code takes. On
+      expiry the same fail-closed rule applies as the between-handlers case:
+      a `SAFETY`+`BLOCKING` handler not judged in time is denied, naming the
+      handler; anything else is skipped with an advisory note. The
+      overrunning call is never interrupted (Python cannot forcibly stop a
+      running thread) — it keeps running on its own daemon thread, logged
+      again at WARNING whenever it does finish, and never blocks the
+      daemon process's own shutdown. Concurrency is bounded (16 calls at
+      once, by default); a call beyond that is refused outright and treated
+      the same way as a timeout, never queued. A new companion key,
+      `daemon.chain.max_safety_input_bytes` (default 2 MiB), denies or skips
+      a `SAFETY` handler's oversized input BEFORE dispatch is even
+      attempted, as defence in depth alongside the deadline — not the only
+      guarantee, since the per-handler bound above already caps worst-case
+      wall clock regardless of size.
+
+      IF YOUR PROJECT'S DOCS OR SECURITY REVIEWS ASSERT THE CHAIN DEADLINE
+      COULD ONLY BE EXHAUSTED BY HANDLERS RUNNING BEFORE A SLOW ONE,
+      RE-CHECK THAT CLAIM FOR THE VERSION BEFORE THIS CHANGE: A SINGLE SLOW
+      HANDLER WITH NOTHING AHEAD OF IT IN PRIORITY ORDER WAS NOT BOUNDED AT
+      ALL.

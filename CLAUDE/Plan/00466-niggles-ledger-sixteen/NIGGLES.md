@@ -3,7 +3,7 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
-### N34 — `secret_file_guard`'s linear scan has enough constant factor to blow past the chain deadline on its own
+### N34 — ✅ Remedied — `secret_file_guard`'s linear scan has enough constant factor to blow past the chain deadline on its own
 
 **Found while measuring N25's deadline margin, on request from the
 coordinator.** `SecretFileGuardHandler` scales LINEARLY with command length
@@ -30,27 +30,66 @@ silently allowing everything queued behind it (via the client's ALLOW
 fallback on timeout), just from ONE handler's own runtime rather than from
 being queued behind others.
 
-Not fixed here — reported per the coordinator's specific ask ("report
+Originally reported per the coordinator's specific ask ("report
 secret_file_guard's wall-clock at 1 MB and 4 MB so we know its margin
-against the 20s deadline"), which is a measurement, not a remedy.
+against the 20s deadline"), which was a measurement, not a remedy at the
+time. The coordinator then asked for remedy 2 (below) to be implemented
+before the security review, since the gap is the same fail-open class N25
+exists to close and could not ship open.
 
-**Candidate remedies (either closes the gap, at different cost):**
+**✅ Remedied**: remedy 2, an externally enforced per-handler deadline, plus
+remedy 3 as defence in depth.
 
-1. Make `secret_file_guard`'s per-character cost cheaper — the constant
-   factor, not the scaling, is the problem (a linear handler should not
-   need 12µs/byte). Likely worth profiling `secret_file_matching.py`'s glob
-   matching against however many configured patterns for a per-match cost
-   that could be pooled once per command instead of repeated.
-2. A per-handler wall-clock budget enforced from OUTSIDE the handler
-   (a thread/signal-based timeout around each `matches()`/`handle()` call,
-   not just the inter-handler check), so a single pathological handler
-   cannot exceed its own slice regardless of cause. Heavier change than #1:
-   changes the execution model, not just one handler's algorithm.
-3. A hard size cap on the command/content text this handler scans at all,
-   past which it denies outright rather than scanning (a multi-megabyte
-   Bash command or Write body is itself an unusual shape worth treating
-   with suspicion). Cheapest fix, but narrower — protects only this
-   handler, not the general "one handler exceeds the deadline solo" class.
+- New module `core/bounded_dispatch.py` (`BoundedDispatcher`): runs a
+  handler's combined `matches()`+`handle()` call on its own DAEMON thread
+  and waits on it with `Future.result(timeout=remaining)`, where `remaining`
+  is whatever is left of the chain's `deadline_seconds` budget when that
+  handler starts — not the handler's own execution time. `HandlerChain. execute` now routes every handler through this when `deadline_seconds` is
+  set (unchanged, fully synchronous, when it is `None`). On expiry the SAME
+  fail-closed verdict N25 already used applies: a `SAFETY`+`BLOCKING`
+  handler not judged in time is denied, naming the handler; anything else is
+  skipped with an advisory note — both pre-check (N25, between handlers) and
+  this new post-dispatch-timeout case now share one `_record_unjudged`
+  helper in `chain.py`.
+- The overrunning call is genuinely abandoned, not killed (Python cannot
+  force-stop a thread) — logged again at WARNING with its actual elapsed
+  time whenever it does finish. Deliberately NOT
+  `concurrent.futures.ThreadPoolExecutor`: its worker threads are
+  non-daemon and CPython registers an `atexit` hook
+  (`concurrent.futures.thread._python_exit`) that JOINS every one of them
+  before the interpreter may exit — discovered live, via the isolated-daemon
+  e2e test below: the daemon's own `stop` hung for the full straggler sleep
+  before this was caught and the dispatcher rewritten onto plain
+  `threading.Thread(daemon=True)` per call. Concurrency is still bounded (16
+  calls at once, by default, via a semaphore): a call beyond that returns
+  `DispatchSaturated` immediately rather than queuing, and is treated the
+  same as a timeout.
+- Remedy 3: a new `daemon.chain.max_safety_input_bytes` config key (default
+  2 MiB), checked once per chain execution against the combined size of a
+  handler's bulk-text `tool_input` fields (Bash `command`, Write `content`,
+  Edit `old_string`/`new_string`). A `SAFETY` handler over the limit is
+  denied/skipped (the same split as above) BEFORE dispatch is even
+  attempted — cheaper than paying thread-dispatch overhead only to be cut
+  off by the deadline regardless. Explicitly NOT the only guarantee — the
+  per-handler deadline bound above already caps worst-case wall clock
+  regardless of size — so it is safe to raise or disable (`null`) as long as
+  `deadline_seconds` stays enforced. `secret_file_guard`'s own constant
+  factor was deliberately left alone, per the coordinator: the guard-defects
+  branch is rewriting `secret_file_matching` onto a shared bounded expander
+  and will profile the 12µs/byte cost there.
+- RED tests: `tests/unit/core/test_bounded_dispatch.py` (the dispatcher in
+  isolation — completes-within-budget, times-out-without-waiting,
+  stray-finishes-in-background, saturation-fails-fast) and new cases in
+  `tests/unit/core/test_chain.py` (a SAFETY handler that oversleeps ITSELF
+  denies within the deadline, not after its own sleep; a slow advisory-only
+  handler allows with an advisory the same way; pool saturation denies; the
+  size cap denies/skips/passes-through in each direction; `deadline_seconds: null` leaves an oversleeping handler fully unbounded, confirming the new
+  mechanism is disabled exactly like the old one). An end-to-end test,
+  `tests/integration/test_n34_deadline_probe_isolated_daemon.py`, starts its
+  own isolated daemon with a 1s configured deadline and a probe handler that
+  sleeps 8s, and asserts over the REAL socket that the client gets its deny
+  back in well under 2s — not after 8s, and nowhere near the client's own
+  30s timeout.
 
 ### N33 — a worktree agent's `secret_file_guard.exclude_paths` change had no effect after a daemon restart
 
