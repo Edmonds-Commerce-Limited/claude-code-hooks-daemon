@@ -20,6 +20,7 @@ Design constraints pinned:
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -145,6 +146,33 @@ class TestFailSafe:
 
         assert result.decision == Decision.ALLOW
         assert not (tmp_path / "untracked" / "agent-reports").exists()
+
+    def test_missing_field_matches_a_background_agents_stop_payload_shape(
+        self,
+        handler: SubagentReportPersistenceHandler,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Plan 00460 Task 1.6, explicitly requested coverage: a BACKGROUND
+        agent's SubagentStop payload is the same shape as any other missing/
+        empty ``last_assistant_message`` case above -- nothing written, and
+        the reason is logged at debug (not silently dropped, not an error)."""
+        hook_input = {
+            "hook_event_name": "SubagentStop",
+            "agent_id": "agent-bg",
+            "agent_type": "general-purpose",
+            "stop_hook_active": False,
+        }
+
+        with caplog.at_level(logging.DEBUG):
+            result = handler.handle(hook_input)
+
+        assert result.decision == Decision.ALLOW
+        assert not (tmp_path / "untracked" / "agent-reports").exists()
+        assert any(
+            record.levelno == logging.DEBUG and "nothing to persist" in record.message.lower()
+            for record in caplog.records
+        )
 
     def test_allows_when_last_assistant_message_is_not_a_string(
         self, handler: SubagentReportPersistenceHandler
