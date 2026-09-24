@@ -84,7 +84,10 @@ commands that ARE allowed, and they must exist.
   teammate carries `agent_id` (measured). A Workflow-tool agent is UNMEASURED,
   because the probe needs the owner's opt-in, so the guard's docs claim coverage
   only for Agent-tool sub-agents and teammates. The default is off with no
-  patterns. There is no deadlock with orchestrator-only mode. The questions were:
+  patterns. There is no deadlock with orchestrator-only mode: its policy never
+  denies Bash. An integration test proves this on the real chain with the mode
+  armed. Simulate mode's record falsely said "would have been denied" on every
+  Bash call, and it now matches the policy. The questions were:
   - Does an in-process teammate's PreToolUse payload carry `agent_id`,
     like an Agent-tool sub-agent's? Measure it live, not from docs. Do
     the same for a Workflow-tool agent. If either lacks it, the guard
