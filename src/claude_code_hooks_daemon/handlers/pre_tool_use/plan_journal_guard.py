@@ -79,7 +79,7 @@ from claude_code_hooks_daemon.plan_qa.model import (
     parse_journal_dayfile_name,
 )
 from claude_code_hooks_daemon.plan_qa.types import DEFAULT_JOURNAL_DIR_NAME
-from claude_code_hooks_daemon.utils.path_predicates import path_is_file
+from claude_code_hooks_daemon.utils.path_predicates import path_is_file, read_text_or_reason
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     command_word,
     split_unquoted,
@@ -95,6 +95,9 @@ _JOURNAL_FLAG: Final[str] = "--journal"
 
 #: `plan_workflow.qa.journal.mode` token that switches journalling off.
 _JOURNAL_MODE_OFF: Final[str] = "off"
+
+#: Decode policy for the files this handler only searches for ASCII markers.
+_DECODE_REPLACE: Final[str] = "replace"
 
 #: Every day-file name carries this, so a command without it cannot name one.
 #: A cheap prefilter run on every Bash call, never a coverage decision.
@@ -247,17 +250,16 @@ class PlanJournalGuardHandler(PreToolUseHandlerBase):
         script = layout.plan_root / MKPLAN_SCRIPT_NAME
         if not path_is_file(script, unreadable_means=False):
             return False
-        try:
-            script_text = script.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError) as exc:
+        read = read_text_or_reason(script, errors=_DECODE_REPLACE)
+        if read.text is None:
             logger.warning(
                 "plan_journal_guard: cannot read %s (%s); standing down rather "
                 "than naming a remedy that may not exist",
                 script,
-                exc,
+                read.reason,
             )
             return False
-        return _JOURNAL_FLAG in script_text
+        return _JOURNAL_FLAG in read.text
 
     # ------------------------------------------------------------------
     # Target resolution
@@ -319,11 +321,18 @@ class PlanJournalGuardHandler(PreToolUseHandlerBase):
             # the template and stamps the first entry in one step.
             return target if is_write else None
 
-        try:
-            before = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError) as exc:
-            logger.warning("plan_journal_guard: cannot read %s (%s)", path, exc)
+        # Headings are ASCII plus a middot, so a replaced byte can neither
+        # create nor hide one; a strict decode would only blind the guard.
+        read = read_text_or_reason(path, errors=_DECODE_REPLACE)
+        if read.text is None:
+            logger.warning(
+                "plan_journal_guard: cannot read %s (%s); the tool call will meet "
+                "the same error",
+                path,
+                read.reason,
+            )
             return None
+        before = read.text
         after = would_be_content(hook_input, current=before)
         if after is None:
             # An Edit whose old_string is absent fails with its own error.

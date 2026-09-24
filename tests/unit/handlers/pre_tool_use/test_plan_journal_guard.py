@@ -132,6 +132,25 @@ def _relative_live() -> str:
     return f"{PLAN_DIR}/{LIVE_FOLDER}/JOURNAL/{LIVE_DAYFILE}"
 
 
+def _refuse_to_read(monkeypatch: pytest.MonkeyPatch, basename: str) -> None:
+    """Make one file unreadable to the handler, as EACCES would.
+
+    Patched rather than chmod'ed: the suite may run as root, which reads a
+    mode-000 file regardless.
+    """
+    from claude_code_hooks_daemon.handlers.pre_tool_use import plan_journal_guard
+    from claude_code_hooks_daemon.utils.path_predicates import TextOrReason
+
+    real = plan_journal_guard.read_text_or_reason
+
+    def refusing(path: Any, **kwargs: Any) -> TextOrReason:
+        if Path(path).name == basename:
+            return TextOrReason(reason="[Errno 13] Permission denied")
+        return real(path, **kwargs)
+
+    monkeypatch.setattr(plan_journal_guard, "read_text_or_reason", refusing)
+
+
 class TestInitialisation:
     def test_is_a_terminal_blocking_planning_handler(self) -> None:
         instance = PlanJournalGuardHandler()
@@ -373,10 +392,17 @@ class TestUnreadableState:
     def test_edit_with_no_file_path_is_ignored(self, handler: PlanJournalGuardHandler) -> None:
         assert handler.matches({"tool_name": "Edit", "tool_input": {}}) is False
 
-    def test_undecodable_dayfile_is_not_judged(
+    def test_a_stray_undecodable_byte_does_not_blind_the_guard(
         self, handler: PlanJournalGuardHandler, project: Path
     ) -> None:
-        _live_path(project).write_bytes(b"\xff\xfe not utf-8")
+        _live_path(project).write_bytes(b"\xff\n" + EXISTING_JOURNAL.encode("utf-8"))
+        assert handler.matches(_append_edit(_live_path(project))) is True
+
+    def test_unreadable_dayfile_is_not_judged(
+        self, handler: PlanJournalGuardHandler, project: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The Edit tool meets the same error itself, so there is nothing to count."""
+        _refuse_to_read(monkeypatch, LIVE_DAYFILE)
         assert handler.matches(_append_edit(_live_path(project))) is False
 
     def test_unstattable_dayfile_is_not_judged(
@@ -394,10 +420,11 @@ class TestUnreadableState:
         monkeypatch.setattr(plan_journal_guard, "path_is_file", unstattable_dayfile)
         assert handler.matches(_append_edit(_live_path(project))) is False
 
-    def test_undecodable_scaffolder_stands_the_guard_down(
-        self, handler: PlanJournalGuardHandler, project: Path
+    def test_unreadable_scaffolder_stands_the_guard_down(
+        self, handler: PlanJournalGuardHandler, project: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        (project / PLAN_DIR / "mkplan.bash").write_bytes(b"\xff\xfe --journal")
+        """Unable to confirm the remedy exists, the guard does not name it."""
+        _refuse_to_read(monkeypatch, "mkplan.bash")
         assert handler.matches(_append_edit(_live_path(project))) is False
 
 
