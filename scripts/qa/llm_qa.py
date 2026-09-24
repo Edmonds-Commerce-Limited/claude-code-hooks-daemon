@@ -1280,11 +1280,22 @@ def split_changed_options(args: list[str]) -> tuple[list[str], list[str], str | 
 #: green run cover what would land.
 MAIN_MOVED_COMMAND: Final[str] = "main-moved"
 _START_OPTION: Final[str] = "--start"
+_RESTART_OPTION: Final[str] = "--restart"
 _ADVANCE_OPTION: Final[str] = "--advance"
-_MAIN_MOVED_OPTIONS: Final[frozenset[str]] = frozenset({_START_OPTION, _ADVANCE_OPTION})
+_FINISH_OPTION: Final[str] = "--finish"
+#: Every accepted option set; anything else is a usage error.
+_MAIN_MOVED_OPTION_SETS: Final[frozenset[frozenset[str]]] = frozenset(
+    {
+        frozenset(),
+        frozenset({_START_OPTION}),
+        frozenset({_START_OPTION, _RESTART_OPTION}),
+        frozenset({_ADVANCE_OPTION}),
+        frozenset({_FINISH_OPTION}),
+    }
+)
 _MAIN_MOVED_USAGE: Final[str] = (
-    f"Usage: llm_qa.py {MAIN_MOVED_COMMAND} [{_START_OPTION} | {_ADVANCE_OPTION}] [MAIN_REF]"
-    "  (MAIN_REF defaults to main)"
+    f"Usage: llm_qa.py {MAIN_MOVED_COMMAND} [{_START_OPTION} [{_RESTART_OPTION}] | "
+    f"{_ADVANCE_OPTION} | {_FINISH_OPTION}] [MAIN_REF]  (MAIN_REF defaults to main)"
 )
 _DEFAULT_MAIN_REF: Final[str] = "main"
 
@@ -1292,25 +1303,36 @@ VERDICT_UNMOVED: Final[str] = "unmoved"
 VERDICT_DOCS_ONLY: Final[str] = "docs-only"
 VERDICT_TARGETED: Final[str] = "targeted"
 VERDICT_FULL_GATE: Final[str] = "full-gate"
+#: The integration head is not the head a gate passed on a clean tree.
+VERDICT_HEAD_MOVED: Final[str] = "head-moved"
 #: Each verdict is an answer, not a failure, so each has its own exit code and
 #: a script can branch on it.
 EXIT_FULL_GATE: Final[int] = 4
 EXIT_DOCS_ONLY: Final[int] = 5
 EXIT_TARGETED: Final[int] = 6
+EXIT_HEAD_MOVED: Final[int] = 7
 _VERDICT_EXIT: Final[Mapping[str, int]] = {
     VERDICT_UNMOVED: EXIT_SUCCESS,
     VERDICT_DOCS_ONLY: EXIT_DOCS_ONLY,
     VERDICT_TARGETED: EXIT_TARGETED,
     VERDICT_FULL_GATE: EXIT_FULL_GATE,
+    VERDICT_HEAD_MOVED: EXIT_HEAD_MOVED,
 }
 
 #: What a docs-only move re-runs: checks that read documents and change nothing.
+#: The last four read the WHOLE tree, and a test runs each on this repository
+#: (``test_repo_hygiene_check`` and the like) while naming no file, so no
+#: mapping selects that test for a moved page: the checker runs instead.
 #: ``format`` is black, which checks Python and rewrites files, so it is not here.
 DOCS_ONLY_TOOL_NAMES: Final[list[str]] = [
     "plan_qa",
     "docs_qa",
     "british_english",
     "sensitive_content",
+    "repo_hygiene",
+    "doc_truth",
+    "doc_snippets",
+    "handler_reference",
 ]
 
 #: THE runtime-read set, defined here only. Runtime code reads these, so no
@@ -1332,11 +1354,18 @@ PATH_TESTED: Final[str] = "tested"
 PATH_FULL: Final[str] = "full"
 _PATH_KINDS: Final[tuple[str, ...]] = (PATH_FULL, PATH_TESTED, PATH_DOCS)
 
-#: The batch base lives in a git ref, not a shell variable: it must survive
-#: between Bash calls, and refs are shared by every worktree of the checkout.
-_BASE_REF_TEMPLATE: Final[str] = "refs/integration/{branch}/base"
+#: The batch base and the certified head live in git refs, not shell
+#: variables: they must survive between Bash calls, and refs are shared by
+#: every worktree of the checkout. The kind comes BEFORE the branch, so the
+#: refs mirror the branch namespace and cannot collide where branches cannot.
+_BASE_REF_TEMPLATE: Final[str] = "refs/integration/base/{branch}"
+_CERTIFIED_REF_TEMPLATE: Final[str] = "refs/integration/certified/{branch}"
 _SELECT_TIMEOUT_SECONDS: Final[int] = 600
 _RANGE_REPORT_KEY: Final[str] = "range"
+_MERGE_PARENTS: Final[int] = 2
+#: ``git status --porcelain``: "XY path", and X or Y of R/C for a rename/copy.
+_PORCELAIN_PATH_OFFSET: Final[int] = 3
+_PORCELAIN_COPY_OR_RENAME: Final[frozenset[str]] = frozenset({"R", "C"})
 
 
 class MainMovedError(RuntimeError):
@@ -1438,7 +1467,7 @@ def required_tools(verdict: str) -> list[str]:
     if verdict == VERDICT_TARGETED:
         extra = [tool for tool in DOCS_ONLY_TOOL_NAMES if tool not in CHANGED_TOOL_NAMES]
         return [*CHANGED_TOOL_NAMES, *extra]
-    if verdict == VERDICT_FULL_GATE:
+    if verdict in (VERDICT_FULL_GATE, VERDICT_HEAD_MOVED):
         return list(ALL_TOOL_NAMES)
     return []
 
@@ -1476,6 +1505,11 @@ def batch_base_ref(root: Path, git: GitBytesRunner = _run_git_bytes) -> str:
     return _BASE_REF_TEMPLATE.format(branch=integration_branch(root, git))
 
 
+def certified_ref(root: Path, git: GitBytesRunner = _run_git_bytes) -> str:
+    """The ref holding the head a gate last passed on, for this integration branch."""
+    return _CERTIFIED_REF_TEMPLATE.format(branch=integration_branch(root, git))
+
+
 def _is_ancestor(older: str, newer: str, root: Path, git: GitBytesRunner) -> bool:
     code, _ = git(["merge-base", "--is-ancestor", older, newer], root)
     if code not in (0, 1):
@@ -1483,28 +1517,139 @@ def _is_ancestor(older: str, newer: str, root: Path, git: GitBytesRunner) -> boo
     return code == 0
 
 
+def _ref_commit(ref: str, root: Path, git: GitBytesRunner) -> str | None:
+    """The commit ``ref`` holds, or None when it is not set."""
+    code, output = git(["rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"], root)
+    return output.decode().strip() if code == 0 else None
+
+
 def _recorded_base(root: Path, git: GitBytesRunner) -> tuple[str, str]:
     ref = batch_base_ref(root, git)
-    code, output = git(["rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"], root)
-    if code != 0:
+    base = _ref_commit(ref, root, git)
+    if base is None:
         raise MainMovedError(
             f"no batch base is recorded in {ref}: run `llm_qa.py {MAIN_MOVED_COMMAND} "
             f"{_START_OPTION}` on the integration branch when the batch is built"
         )
-    return ref, output.decode().strip()
+    return ref, base
+
+
+def uncommitted_paths(root: Path, git: GitBytesRunner = _run_git_bytes) -> list[str]:
+    """Tracked changes and untracked, not-ignored files: what ``--ff-only`` leaves behind."""
+    code, output = git(["status", "--porcelain", "-z", "--untracked-files=all"], root)
+    if code != 0:
+        raise MainMovedError(f"git status exited {code}, so the tree cannot be judged clean")
+    entries = iter(output.decode("utf-8", "surrogateescape").split("\0"))
+    paths = []
+    for entry in entries:
+        if not entry:
+            continue
+        paths.append(entry[_PORCELAIN_PATH_OFFSET:])
+        if _PORCELAIN_COPY_OR_RENAME & set(entry[:_PORCELAIN_PATH_OFFSET]):
+            # A rename or copy is followed by its source path, which carries no status.
+            next(entries, None)
+    return paths
+
+
+def _refuse_uncommitted(root: Path, git: GitBytesRunner, action: str) -> None:
+    dirty = uncommitted_paths(root, git)
+    if dirty:
+        shown = ", ".join(dirty[:3]) + (", ..." if len(dirty) > 3 else "")
+        raise MainMovedError(
+            f"{action}: the tree has uncommitted changes ({shown}), and --ff-only lands "
+            "only HEAD. Commit them (or remove them), then run the check again"
+        )
+
+
+def _delete_ref(ref: str, root: Path, git: GitBytesRunner) -> None:
+    if _ref_commit(ref, root, git) is not None:
+        _git_text(["update-ref", "-d", ref], root, git, f"could not delete {ref}")
 
 
 def start_batch(
-    root: Path, main_ref: str = _DEFAULT_MAIN_REF, *, git: GitBytesRunner = _run_git_bytes
+    root: Path,
+    main_ref: str = _DEFAULT_MAIN_REF,
+    *,
+    restart: bool = False,
+    git: GitBytesRunner = _run_git_bytes,
 ) -> str:
-    """Record the newest ``main_ref`` commit this branch contains as the batch base."""
+    """Record the newest ``main_ref`` commit this branch contains as the batch base.
+
+    A base already recorded is kept: a second start would move it forward past
+    code ``main`` added since, so that code would never meet the full gate.
+    ``restart`` is for a batch rebuilt from scratch only; it also clears the
+    certified head, so the full gate has to pass again.
+
+    Raises:
+        MainMovedError: a base exists and ``restart`` is not set, or git failed.
+    """
     ref = batch_base_ref(root, git)
+    existing = _ref_commit(ref, root, git)
+    if existing is not None and not restart:
+        raise MainMovedError(
+            f"a batch base is already recorded in {ref} ({existing[:_SHORT_SHA]}). Another "
+            "start would move it past whatever main added since, and skip the full gate for "
+            f"it. Run {MAIN_MOVED_COMMAND} to judge that movement instead. Only for a batch "
+            f"rebuilt from scratch: {_START_OPTION} {_RESTART_OPTION}, which also clears the "
+            "certified head, so `llm_qa.py all` must pass again"
+        )
     main = _commit_of(main_ref, root, git)
     base = _git_text(
         ["merge-base", "HEAD", main], root, git, f"this branch shares no history with {main_ref}"
     )
+    _delete_ref(certified_ref(root, git), root, git)
     _git_text(["update-ref", ref, base], root, git, f"could not record {ref}")
     return base
+
+
+def certify_head(
+    root: Path, judged: dict[str, str] | None, *, git: GitBytesRunner = _run_git_bytes
+) -> str | None:
+    """Record HEAD as the head the full gate passed on, and return it.
+
+    ``judged`` is the tree the passing run judged; it must still be the tree,
+    and the tree must be clean, because ``--ff-only`` lands only HEAD. Outside
+    a batch (no branch, or no base recorded) nothing is recorded: None.
+
+    Raises:
+        MainMovedError: the tree is dirty or changed since the run judged it.
+    """
+    code, _ = git(["symbolic-ref", "--quiet", "HEAD"], root)
+    if code != 0 or _ref_commit(batch_base_ref(root, git), root, git) is None:
+        return None
+    _refuse_uncommitted(root, git, "the gate cannot certify this head")
+    if judged is None or worktree_state(root, git=git) != judged:
+        raise MainMovedError(
+            "the gate cannot certify this head: the tree changed since the run judged it"
+        )
+    head = _commit_of("HEAD", root, git)
+    ref = certified_ref(root, git)
+    _git_text(["update-ref", ref, head], root, git, f"could not record {ref}")
+    return head
+
+
+def _head_uncertified(root: Path, git: GitBytesRunner) -> str | None:
+    """Why HEAD is not the head a gate passed on a clean tree, or None when it is."""
+    certified = _ref_commit(certified_ref(root, git), root, git)
+    if certified is None:
+        return (
+            "no full gate has passed on this branch since the batch base was recorded: "
+            f"run `llm_qa.py {_SELECTION_ALL}` on a clean tree"
+        )
+    head = _commit_of("HEAD", root, git)
+    if head != certified:
+        return (
+            f"HEAD {head[:_SHORT_SHA]} is not the head the gate passed "
+            f"({certified[:_SHORT_SHA]}): something was committed or merged after it. "
+            f"Run `llm_qa.py {_SELECTION_ALL}` on this head"
+        )
+    dirty = uncommitted_paths(root, git)
+    if dirty:
+        return (
+            f"the tree has uncommitted changes ({', '.join(dirty[:3])}), which --ff-only "
+            f"would not land: commit or remove them, then run `llm_qa.py {_SELECTION_ALL}`"
+        )
+    return None
 
 
 def moved_paths(
@@ -1590,7 +1735,10 @@ def main_moved(
     git: GitBytesRunner = _run_git_bytes,
     select: Selector = select_range,
 ) -> MainMoved:
-    """The verdict for what ``main_ref`` changed since the recorded batch base.
+    """The verdict for what would land: this head, plus what ``main_ref`` changed.
+
+    The integration head comes first: unless HEAD is the head a gate passed on
+    a clean tree, the verdict is ``head-moved`` whatever ``main`` did.
 
     Raises:
         MainMovedError: no base is recorded, a ref does not resolve, or git or
@@ -1598,6 +1746,9 @@ def main_moved(
     """
     _, base = _recorded_base(root, git)
     main = _commit_of(main_ref, root, git)
+    head_reason = _head_uncertified(root, git)
+    if head_reason is not None:
+        return MainMoved(VERDICT_HEAD_MOVED, base, main, [], head_reason)
     if main == base:
         return MainMoved(VERDICT_UNMOVED, base, main, [], f"{main_ref} is still the batch base")
     verdict, judged, reason = _judge_range(base, main, root, git, select)
@@ -1633,8 +1784,21 @@ def _recorded_range(report: Path) -> str | None:
     return value if isinstance(value, str) else None
 
 
-def _uncertified(verdict: str, spec: str, root: Path, qa_dir: Path) -> list[str]:
-    current = worktree_state(root)
+def _range_commits(spec: str, root: Path, git: GitBytesRunner) -> tuple[str, str] | None:
+    """Both ends of ``A..B`` as commits, or None when it is not such a range."""
+    older, separator, newer = spec.partition("..")
+    if not separator or not older or not newer or newer.startswith("."):
+        return None
+    ends = [_ref_commit(end, root, git) for end in (older, newer)]
+    if ends[0] is None or ends[1] is None:
+        return None
+    return ends[0], ends[1]
+
+
+def _uncertified(
+    verdict: str, commits: tuple[str, str], root: Path, qa_dir: Path, git: GitBytesRunner
+) -> list[str]:
+    current = worktree_state(root, git=git)
     records = read_provenance(qa_dir)
     problems = []
     for name in required_tools(verdict):
@@ -1644,12 +1808,73 @@ def _uncertified(verdict: str, spec: str, root: Path, qa_dir: Path) -> list[str]
             problems.append(f"{name}: {reason}")
     if verdict == VERDICT_TARGETED and not problems:
         ran = _recorded_range(qa_dir / TOOL_REGISTRY[_CHANGED_TESTS_TOOL].json_file)
-        if ran != spec:
+        if ran is None or _range_commits(ran, root, git) != commits:
             problems.append(
                 f"{_CHANGED_TESTS_TOOL} ran over {ran or 'no range'}; run it with "
-                f"{_RANGE_OPTION} {spec}"
+                f"{_RANGE_OPTION} {commits[0]}..{commits[1]}"
             )
     return problems
+
+
+def _merge_edits(merge: str, root: Path, git: GitBytesRunner) -> list[str]:
+    """Paths ``merge`` holds that differ from git's own merge of its parents.
+
+    Those are a conflict's resolution, or an edit made inside the merge.
+    """
+    parents = _git_text(
+        ["rev-list", "--parents", "-n", "1", merge], root, git, f"cannot read {merge}"
+    ).split()[1:]
+    if len(parents) != _MERGE_PARENTS:
+        raise MainMovedError(
+            f"{merge[:_SHORT_SHA]} merges {len(parents)} parents; only a two-parent merge "
+            f"of main can be judged. Run `llm_qa.py {_SELECTION_ALL}`"
+        )
+    code, output = git(["merge-tree", "--write-tree", "--no-messages", *parents], root)
+    if code not in (0, 1):
+        raise MainMovedError(f"git merge-tree for {merge[:_SHORT_SHA]} exited {code}")
+    automatic = output.decode().split("\n", 1)[0].strip()
+    names = _git_text(
+        ["diff", "--name-only", "-z", "--no-renames", automatic, merge],
+        root,
+        git,
+        f"cannot compare {merge[:_SHORT_SHA]} with its automatic merge",
+    )
+    return [name for name in names.split("\0") if name]
+
+
+def _only_main_merged(
+    certified: str, merged: str, moved: Sequence[str], root: Path, git: GitBytesRunner
+) -> None:
+    """Refuse when HEAD holds anything since ``certified`` that is not ``main`` merged in.
+
+    A commit that is not a merge is new work no recheck covers, and so is an
+    edit inside a merge on a path ``main`` did not move: both need the gate.
+    """
+    if not _is_ancestor(certified, "HEAD", root, git):
+        raise MainMovedError(
+            f"the certified head {certified[:_SHORT_SHA]} is not in this branch's history: "
+            f"run `llm_qa.py {_SELECTION_ALL}`"
+        )
+    listed = _git_text(
+        ["rev-list", "--parents", f"{certified}..HEAD", "--not", merged],
+        root,
+        git,
+        "cannot list the commits since the certified head",
+    )
+    moved_set = set(moved)
+    for line in filter(None, listed.splitlines()):
+        commit, *parents = line.split()
+        if len(parents) < _MERGE_PARENTS:
+            raise MainMovedError(
+                f"HEAD holds {commit[:_SHORT_SHA]}, a commit that is not a merge of main: "
+                f"the gate never judged it. Run `llm_qa.py {_SELECTION_ALL}`"
+            )
+        outside = [path for path in _merge_edits(commit, root, git) if path not in moved_set]
+        if outside:
+            raise MainMovedError(
+                f"the merge {commit[:_SHORT_SHA]} changes {', '.join(outside[:3])}, which "
+                f"main did not move, so no recheck covers it. Run `llm_qa.py {_SELECTION_ALL}`"
+            )
 
 
 def advance_batch(
@@ -1664,10 +1889,14 @@ def advance_batch(
 
     The recheck is the one the verdict for ``base..merged`` names, and it must
     have PASSED on the current tree (the provenance ``--read-only`` trusts).
+    The tree must be clean, and HEAD must hold nothing since the certified
+    head but ``main`` merged in; then HEAD becomes the certified head.
 
     Raises:
-        MainMovedError: nothing new is merged in, or the recheck has not passed.
+        MainMovedError: the tree is dirty, nothing new is merged in, HEAD holds
+            work the gate never judged, or the recheck has not passed.
     """
+    _refuse_uncommitted(root, git, "the base cannot advance")
     ref, base = _recorded_base(root, git)
     main = _commit_of(main_ref, root, git)
     merged = _git_text(
@@ -1679,16 +1908,53 @@ def advance_batch(
             f"merged into this branch. Merge it in (git merge --no-edit {main_ref}), run the "
             "recheck the verdict names, then advance"
         )
-    verdict, _, _ = _judge_range(base, merged, root, git, select)
+    certified_name = certified_ref(root, git)
+    certified = _ref_commit(certified_name, root, git)
+    if certified is None:
+        raise MainMovedError(
+            "no full gate has passed on this branch since the batch base was recorded: "
+            f"run `llm_qa.py {_SELECTION_ALL}` on a clean tree first"
+        )
+    verdict, judged, _ = _judge_range(base, merged, root, git, select)
+    _only_main_merged(certified, merged, [path.path for path in judged], root, git)
     qa = qa_dir if qa_dir is not None else root / QA_OUTPUT_DIR.relative_to(PROJECT_ROOT)
-    problems = _uncertified(verdict, f"{base}..{merged}", root, qa)
+    problems = _uncertified(verdict, (base, merged), root, qa, git)
     if problems:
         raise MainMovedError(
             f"the base stays at {base[:_SHORT_SHA]}: the {verdict} recheck has not passed "
             f"on this tree. " + "; ".join(problems)
         )
+    head = _commit_of("HEAD", root, git)
     _git_text(["update-ref", ref, merged, base], root, git, f"could not move {ref}")
+    _git_text(
+        ["update-ref", certified_name, head, certified],
+        root,
+        git,
+        f"could not move {certified_name}",
+    )
     return merged
+
+
+def finish_batch(
+    root: Path, main_ref: str = _DEFAULT_MAIN_REF, *, git: GitBytesRunner = _run_git_bytes
+) -> None:
+    """Delete the batch refs once ``main_ref`` holds the certified head.
+
+    Raises:
+        MainMovedError: there is no certified head, or it has not landed.
+    """
+    certified_name = certified_ref(root, git)
+    certified = _ref_commit(certified_name, root, git)
+    if certified is None:
+        raise MainMovedError(f"no certified head is recorded in {certified_name}")
+    main = _commit_of(main_ref, root, git)
+    if not _is_ancestor(certified, main, root, git):
+        raise MainMovedError(
+            f"{main_ref} does not hold the certified head {certified[:_SHORT_SHA]} yet: "
+            f"land the batch (git merge --ff-only) before finishing it"
+        )
+    _delete_ref(batch_base_ref(root, git), root, git)
+    _delete_ref(certified_name, root, git)
 
 
 def _recheck_command(outcome: MainMoved) -> str:
@@ -1716,6 +1982,10 @@ def _print_verdict(outcome: MainMoved, main_ref: str, root: Path) -> None:
             f"NEXT: from the main checkout, git merge --ff-only {branch}, then push. If "
             f"--ff-only refuses, {main_ref} moved again: run this command again."
         )
+    elif outcome.verdict == VERDICT_HEAD_MOVED:
+        print("NEXT, in this integration worktree, on a clean tree:")
+        print(f"  1. {_recheck_command(outcome)}   (a pass certifies this head)")
+        print(f"  2. ./scripts/qa/llm_qa.py {MAIN_MOVED_COMMAND}   (again)")
     else:
         print("NEXT, in this integration worktree:")
         print(f"  1. git merge --no-edit {main_ref}")
@@ -1726,21 +1996,30 @@ def _print_verdict(outcome: MainMoved, main_ref: str, root: Path) -> None:
 
 
 def main_moved_command(args: Sequence[str], *, root: Path = PROJECT_ROOT) -> int:
-    """``llm_qa.py main-moved [--start | --advance] [MAIN_REF]``."""
+    """``llm_qa.py main-moved [--start [--restart] | --advance | --finish] [MAIN_REF]``."""
     options = [arg for arg in args if arg.startswith("-")]
     refs = [arg for arg in args if not arg.startswith("-")]
-    if len(options) > 1 or not set(options) <= _MAIN_MOVED_OPTIONS or len(refs) > 1:
+    chosen = frozenset(options)
+    if len(chosen) != len(options) or chosen not in _MAIN_MOVED_OPTION_SETS or len(refs) > 1:
         print(_MAIN_MOVED_USAGE, file=sys.stderr)
         return EXIT_FAILURE
     main_ref = refs[0] if refs else _DEFAULT_MAIN_REF
     try:
-        if options == [_START_OPTION]:
-            base = start_batch(root, main_ref)
+        if _START_OPTION in chosen:
+            base = start_batch(root, main_ref, restart=_RESTART_OPTION in chosen)
             print(f"BATCH BASE: {base} recorded in {batch_base_ref(root)}")
+            print(f"NEXT: ./scripts/qa/llm_qa.py {_SELECTION_ALL}   (a pass certifies the head)")
             return EXIT_SUCCESS
-        if options == [_ADVANCE_OPTION]:
+        if _ADVANCE_OPTION in chosen:
             advanced = advance_batch(root, main_ref)
-            print(f"BATCH BASE: advanced to {advanced}. Run {MAIN_MOVED_COMMAND} again.")
+            print(
+                f"BATCH BASE: advanced to {advanced}; this head is certified. "
+                f"Run {MAIN_MOVED_COMMAND} again."
+            )
+            return EXIT_SUCCESS
+        if _FINISH_OPTION in chosen:
+            finish_batch(root, main_ref)
+            print(f"BATCH: landed on {main_ref}; the batch refs are removed.")
             return EXIT_SUCCESS
         outcome = main_moved(root, main_ref)
         _print_verdict(outcome, main_ref, root)
@@ -1778,8 +2057,9 @@ def main() -> int:
         )
         print("  --read-only: summarise; a result recorded for another tree FAILS")
         print(
-            f"  {MAIN_MOVED_COMMAND} [{_START_OPTION} | {_ADVANCE_OPTION}] [MAIN_REF]: the "
-            "batched gate's check when main moves (runs no tools)"
+            f"  {MAIN_MOVED_COMMAND} [{_START_OPTION} [{_RESTART_OPTION}] | {_ADVANCE_OPTION} | "
+            f"{_FINISH_OPTION}] [MAIN_REF]: the batched gate's check on what would land "
+            "(runs no tools)"
         )
         print(f"Tools: {', '.join(TOOL_REGISTRY)}")
         return EXIT_SUCCESS
@@ -1847,6 +2127,18 @@ def _record_run(run_records: Mapping[str, RunOutcome], before: dict[str, str] | 
     )
 
 
+def _certify_gate(judged: dict[str, str] | None) -> None:
+    """After a passing full run, record HEAD as the batch's certified head, and say so."""
+    try:
+        head = certify_head(PROJECT_ROOT, judged)
+    except MainMovedError as exc:
+        # The run's own verdict stands; only the certification is refused, and said.
+        print(f"\n{_TREE_WARNING_LABEL} {exc}")
+    else:
+        if head is not None:
+            print(f"\nGATE: {head[:_SHORT_SHA]} certified for {MAIN_MOVED_COMMAND}")
+
+
 def _run_tools(tools: list[str], *, read_only: bool, forwarded: Sequence[str] = ()) -> int:
     """Run (or merely summarize) each tool and print the overall verdict.
 
@@ -1899,6 +2191,8 @@ def _run_tools(tools: list[str], *, read_only: bool, forwarded: Sequence[str] = 
 
     if not read_only:
         _record_run(run_records, before)
+        if all_passed and set(ALL_TOOL_NAMES) <= set(tools):
+            _certify_gate(before)
 
     # Overall summary
     total = len(tools)

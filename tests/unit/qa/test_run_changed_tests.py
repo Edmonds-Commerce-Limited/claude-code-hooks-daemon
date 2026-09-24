@@ -515,11 +515,47 @@ class TestDeclaredRules:
             {"glob": "*.md", "tools": "docs_qa", "why": "w"},
             {"glob": "*.md", "tools": ["docs_qa"], "tests": ["x"], "why": "w"},
             {"glob": "*.md", "tools": ["docs_qa"], "why": "w", "surprise": 1},
+            {"glob": "*.md", "path_glob": "docs/*.md", "tools": ["docs_qa"], "why": "w"},
+            {"path_glob": "", "tools": ["docs_qa"], "why": "w"},
         ],
     )
     def test_a_malformed_rule_is_reported(self, entry: dict[str, Any]) -> None:
         _, problems = changed_tests.parse_declared_rules({"rules": [entry]})
         assert problems
+
+    @pytest.mark.parametrize(
+        ("pattern", "path", "matches"),
+        [
+            ("CLAUDE/*.md", "CLAUDE/QA.md", True),
+            ("CLAUDE/*.md", "CLAUDE/Plan/00466-x/NIGGLES.md", False),
+            ("docs/**/*.md", "docs/a.md", True),
+            ("docs/**/*.md", "docs/guides/deep/b.md", True),
+            ("docs/**/*.md", "docs/guides/b.txt", False),
+            ("docs/**/*.md", "other/docs/a.md", False),
+            ("README.md", "README.md", True),
+            ("README.md", "docs/README.md", False),
+        ],
+    )
+    def test_a_path_glob_matches_like_pathlib_glob(
+        self, pattern: str, path: str, matches: bool
+    ) -> None:
+        """Review 4 N1: the rule must read what the test's ``Path.glob`` reads, no more."""
+        assert changed_tests.path_glob_matches(path, pattern) is matches
+
+    def test_every_matching_rule_applies_not_only_the_first(self, tmp_path: Path) -> None:
+        """A glob reader's tests AND the doc tools both cover a page it reads."""
+        _touch(tmp_path, "docs/a.md", "tests/integration/test_pages.py")
+        rules = _rules(
+            {
+                "path_glob": "docs/**/*.md",
+                "tests": ["tests/integration/test_pages.py"],
+                "why": "it reads every page by glob",
+            },
+            {"glob": "*.md", "tools": ["docs_qa"], "why": "docs QA checks markdown"},
+        )
+        selection = _select(tmp_path, ["docs/a.md"], rules)
+        assert selection.selected == ["tests/integration/test_pages.py"]
+        assert selection.mapping[0]["tools"] == ["docs_qa"]
 
     def test_this_repositorys_map_is_valid_and_honest(self) -> None:
         """Every tool it names is one `changed` runs; every test it names exists."""

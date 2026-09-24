@@ -215,6 +215,10 @@ class TestTheReviewExamplesAgainstThisRepository:
             "CLAUDE/CodeLifecycle/General.md",
             "CLAUDE/core/PlanWorkflow.core.md",
             "BUG_REPORTING.md",
+            # Review 4 N1: read by glob, so these read docs-only or missed a test.
+            "docs/guides/TROUBLESHOOTING.md",
+            "docs/a-page-nothing-names-yet.md",
+            "CLAUDE/Worktree.md",
         ],
     )
     def test_a_document_tests_read_is_targeted_not_docs_only(
@@ -245,10 +249,10 @@ class TestTheReviewExamplesAgainstThisRepository:
         "path",
         [
             "CLAUDE/Plan/00466-niggles-ledger-sixteen/NIGGLES.md",
-            "docs/a-page-nothing-names-yet.md",
+            "CLAUDE/Plan/00466-niggles-ledger-sixteen/JOURNAL/00466-Journal-26-09-24.md",
         ],
     )
-    def test_a_ledger_entry_or_a_new_page_is_docs_only(
+    def test_a_ledger_or_journal_entry_is_docs_only(
         self, path: str, this_repository_judges: Any
     ) -> None:
         assert this_repository_judges(path) == _DOCS
@@ -259,6 +263,25 @@ class TestTheRecheck:
         """Review 3 R10: ``format`` is black; it checks Python and REWRITES files."""
         assert set(llm_qa.DOCS_ONLY_TOOL_NAMES) <= set(llm_qa.TOOL_REGISTRY)
         assert "format" not in llm_qa.DOCS_ONLY_TOOL_NAMES
+
+    @pytest.mark.parametrize(
+        ("checker_test", "tool"),
+        [
+            ("tests/integration/test_repo_hygiene_check.py", "repo_hygiene"),
+            ("tests/integration/test_doc_truth_check.py", "doc_truth"),
+            ("tests/integration/test_handler_reference_check.py", "handler_reference"),
+        ],
+    )
+    def test_a_whole_tree_checker_a_test_runs_on_this_repository_is_in_the_docs_recheck(
+        self, checker_test: str, tool: str
+    ) -> None:
+        """Review 4 N1: these tests read EVERY document through a checker, naming none.
+
+        No mapping can select them for a moved page, so the docs recheck runs
+        the checker they wrap instead.
+        """
+        assert (PROJECT_ROOT / checker_test).is_file()
+        assert tool in llm_qa.DOCS_ONLY_TOOL_NAMES
 
     def test_each_verdict_names_what_must_have_passed(self) -> None:
         required = llm_qa.required_tools
@@ -272,8 +295,10 @@ class TestTheRecheck:
 # ── Against a real repository ─────────────────────────────────────────────
 
 _BRANCH = "integ"
-_GUIDE = "docs/guide.md"
-_LONELY = "docs/lonely.md"
+# Outside docs/: this repository's map declares its glob readers there, and
+# select_range judges the fixture with that map.
+_GUIDE = "notes/guide.md"
+_LONELY = "notes/lonely.md"
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -373,7 +398,23 @@ def _certify(
 
 
 def _base(repo: Path) -> str:
-    return _git(repo, "rev-parse", f"refs/integration/{_BRANCH}/base")
+    return _git(repo, "rev-parse", f"refs/integration/base/{_BRANCH}")
+
+
+def _certified(repo: Path) -> str | None:
+    ref = f"refs/integration/certified/{_BRANCH}"
+    listed = _git(repo, "for-each-ref", "--format=%(objectname)", ref)
+    return listed or None
+
+
+def _gate(repo: Path) -> None:
+    """What a passing ``llm_qa.py all`` on this clean, still tree records."""
+    assert llm_qa.certify_head(repo, llm_qa.worktree_state(repo)) == _git(repo, "rev-parse", "HEAD")
+
+
+def _start(repo: Path) -> None:
+    llm_qa.start_batch(repo, "main")
+    _gate(repo)
 
 
 class TestTheBatchBase:
@@ -402,7 +443,7 @@ class TestTheBatchBase:
 class TestTheCheck:
     @pytest.fixture(autouse=True)
     def _started(self, repo: Path) -> None:
-        llm_qa.start_batch(repo, "main")
+        _start(repo)
 
     def test_unmoved(self, repo: Path) -> None:
         assert llm_qa.main_moved(repo, "main").verdict == llm_qa.VERDICT_UNMOVED
@@ -431,7 +472,7 @@ class TestTheCheck:
 
     def test_a_rename_out_of_src_is_judged_by_its_old_path(self, repo: Path) -> None:
         _git(repo, "checkout", "-q", "main")
-        _git(repo, "mv", "src/app.py", "docs/app.md")
+        _git(repo, "mv", "src/app.py", "notes/app.md")
         _git(repo, "commit", "-q", "-m", "move")
         _git(repo, "checkout", "-q", _BRANCH)
         outcome = llm_qa.main_moved(repo, "main")
@@ -440,7 +481,7 @@ class TestTheCheck:
 
     def test_a_symlinked_document_needs_the_full_gate(self, repo: Path) -> None:
         _git(repo, "checkout", "-q", "main")
-        (repo / "docs" / "app.md").symlink_to("../src/app.py")
+        (repo / "notes" / "app.md").symlink_to("../src/app.py")
         _git(repo, "add", "-A")
         _git(repo, "commit", "-q", "-m", "link")
         _git(repo, "checkout", "-q", _BRANCH)
@@ -466,7 +507,7 @@ class TestAdvancing:
 
     @pytest.fixture(autouse=True)
     def _started(self, repo: Path) -> None:
-        llm_qa.start_batch(repo, "main")
+        _start(repo)
 
     def test_nothing_to_advance_before_main_is_merged_in(self, repo: Path) -> None:
         _on_main(repo, {_LONELY: "# 2\n"})
@@ -537,14 +578,249 @@ class TestAdvancing:
         assert llm_qa.advance_batch(repo, "main") == moved
 
 
+class TestTheCertifiedHead:
+    """Review 4 N2: a verdict is about the head that lands, not only about ``main``.
+
+    ``refs/integration/certified/<branch>`` is the head a gate passed on a
+    clean tree. Only a passing ``llm_qa.py all`` and a successful ``--advance``
+    write it, and ``unmoved`` needs HEAD to be it, on a clean tree.
+    """
+
+    def test_no_gate_since_start_is_head_moved_not_unmoved(self, repo: Path) -> None:
+        llm_qa.start_batch(repo, "main")
+        outcome = llm_qa.main_moved(repo, "main")
+        assert outcome.verdict == llm_qa.VERDICT_HEAD_MOVED
+        assert "llm_qa.py all" in outcome.reason
+
+    def test_a_merge_after_the_gate_is_head_moved(self, repo: Path) -> None:
+        """Review 4 N2(a): a late child merged after the gate read ``unmoved``."""
+        _start(repo)
+        _git(repo, "checkout", "-q", "-b", "late-child", "main")
+        _commit(repo, {"src/late.py": "z = 1\n"}, "a late child")
+        _git(repo, "checkout", "-q", _BRANCH)
+        _git(repo, "merge", "-q", "--no-ff", "--no-edit", "late-child")
+        assert llm_qa.main_moved(repo, "main").verdict == llm_qa.VERDICT_HEAD_MOVED
+
+    def test_head_moved_is_checked_before_main_movement(self, repo: Path) -> None:
+        _start(repo)
+        _commit(repo, {"src/feature.py": "y = 2\n"}, "after the gate")
+        _on_main(repo, {_LONELY: "# 2\n"})
+        assert llm_qa.main_moved(repo, "main").verdict == llm_qa.VERDICT_HEAD_MOVED
+
+    @pytest.mark.parametrize(
+        "dirty",
+        [
+            {"src/feature.py": "y = 99\n"},
+            {"docs/untracked-copy.md": "# not committed\n"},
+        ],
+        ids=["tracked-edit", "untracked-file"],
+    )
+    def test_an_uncommitted_change_is_head_moved(self, repo: Path, dirty: dict[str, str]) -> None:
+        _start(repo)
+        _write(repo, dirty)
+        outcome = llm_qa.main_moved(repo, "main")
+        assert outcome.verdict == llm_qa.VERDICT_HEAD_MOVED
+        assert "uncommitted" in outcome.reason
+
+    def test_the_gate_again_on_the_new_head_restores_unmoved(self, repo: Path) -> None:
+        _start(repo)
+        _commit(repo, {"src/feature.py": "y = 2\n"}, "after the gate")
+        _gate(repo)
+        assert llm_qa.main_moved(repo, "main").verdict == llm_qa.VERDICT_UNMOVED
+
+    def test_a_gate_is_not_certified_on_a_dirty_tree(self, repo: Path) -> None:
+        llm_qa.start_batch(repo, "main")
+        _write(repo, {"docs/untracked-copy.md": "# x\n"})
+        with pytest.raises(llm_qa.MainMovedError, match="uncommitted"):
+            llm_qa.certify_head(repo, llm_qa.worktree_state(repo))
+        assert _certified(repo) is None
+
+    def test_a_gate_is_not_certified_when_the_tree_changed_during_the_run(
+        self, repo: Path
+    ) -> None:
+        llm_qa.start_batch(repo, "main")
+        judged = llm_qa.worktree_state(repo)
+        _commit(repo, {"src/feature.py": "y = 3\n"}, "during the run")
+        with pytest.raises(llm_qa.MainMovedError, match="changed"):
+            llm_qa.certify_head(repo, judged)
+        assert _certified(repo) is None
+
+    def test_outside_a_batch_a_gate_certifies_nothing(self, repo: Path) -> None:
+        assert llm_qa.certify_head(repo, llm_qa.worktree_state(repo)) is None
+        assert _certified(repo) is None
+
+
+class TestStartingTwice:
+    """Review 4 N2(b): a second ``--start`` silently reset the base past moved code."""
+
+    def test_a_second_start_is_refused_and_the_base_stays(self, repo: Path) -> None:
+        first = llm_qa.start_batch(repo, "main")
+        _on_main(repo, {"src/app.py": "x = 2\n"})
+        _merge_main(repo)
+        with pytest.raises(llm_qa.MainMovedError, match="--restart"):
+            llm_qa.start_batch(repo, "main")
+        assert _base(repo) == first
+
+    def test_restart_records_a_new_base_and_clears_the_certified_head(self, repo: Path) -> None:
+        _start(repo)
+        moved = _on_main(repo, {"src/app.py": "x = 2\n"})
+        _merge_main(repo)
+        assert llm_qa.start_batch(repo, "main", restart=True) == moved
+        assert _certified(repo) is None
+        assert llm_qa.main_moved(repo, "main").verdict == llm_qa.VERDICT_HEAD_MOVED
+
+
+class TestAdvancingNeedsTheHeadThatLands:
+    """Review 4 N2(c) and the late-merge path through ``--advance``."""
+
+    @pytest.fixture(autouse=True)
+    def _started(self, repo: Path) -> None:
+        _start(repo)
+
+    def test_advance_refuses_an_uncommitted_tree(self, repo: Path) -> None:
+        """N2(c): an untracked copy of a deleted doc certified a head that lacks it."""
+        before = _base(repo)
+        _on_main(repo, {_LONELY: "# 2\n"})
+        _merge_main(repo)
+        _write(repo, {"docs/untracked-copy.md": "# restored by hand\n"})
+        _certify(repo, llm_qa.DOCS_ONLY_TOOL_NAMES)
+        with pytest.raises(llm_qa.MainMovedError, match="uncommitted"):
+            llm_qa.advance_batch(repo, "main")
+        assert _base(repo) == before
+
+    def test_advance_refuses_work_merged_alongside_main(self, repo: Path) -> None:
+        before = _base(repo)
+        _on_main(repo, {_LONELY: "# 2\n"})
+        _merge_main(repo)
+        _commit(repo, {"src/feature.py": "y = 5\n"}, "not from main")
+        _certify(repo, llm_qa.DOCS_ONLY_TOOL_NAMES)
+        with pytest.raises(llm_qa.MainMovedError, match="llm_qa.py all"):
+            llm_qa.advance_batch(repo, "main")
+        assert _base(repo) == before
+
+    def test_advance_refuses_an_edit_made_inside_the_merge_of_main(self, repo: Path) -> None:
+        _on_main(repo, {_LONELY: "# 2\n"})
+        _git(repo, "merge", "-q", "--no-commit", "--no-ff", "main")
+        _write(repo, {"src/feature.py": "y = 6\n"})
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "--no-edit")
+        _certify(repo, llm_qa.DOCS_ONLY_TOOL_NAMES)
+        with pytest.raises(llm_qa.MainMovedError, match="src/feature.py"):
+            llm_qa.advance_batch(repo, "main")
+
+    def test_a_conflict_resolved_on_a_path_main_moved_can_advance(self, repo: Path) -> None:
+        _commit(repo, {_LONELY: "# branch side\n"}, "branch edits the doc")
+        _gate(repo)
+        moved = _on_main(repo, {_LONELY: "# main side\n"})
+        completed = subprocess.run(
+            ["git", "-C", str(repo), "merge", "-q", "--no-edit", "main"],
+            capture_output=True,
+            timeout=Timeout.QA_TEST_TIMEOUT,
+            check=False,
+        )
+        assert completed.returncode != 0, "the fixture must conflict"
+        _write(repo, {_LONELY: "# both sides\n"})
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "--no-edit")
+        _certify(repo, llm_qa.DOCS_ONLY_TOOL_NAMES)
+        assert llm_qa.advance_batch(repo, "main") == moved
+
+    def test_advance_certifies_the_merged_head(self, repo: Path) -> None:
+        _on_main(repo, {_LONELY: "# 2\n"})
+        _merge_main(repo)
+        _certify(repo, llm_qa.DOCS_ONLY_TOOL_NAMES)
+        llm_qa.advance_batch(repo, "main")
+        assert _certified(repo) == _git(repo, "rev-parse", "HEAD")
+
+    def test_the_range_check_compares_commits_not_spellings(self, repo: Path) -> None:
+        """Review 4 N12: ``<sha>..main`` is the same range as ``<sha>..<sha>``."""
+        base = _base(repo)
+        moved = _on_main(repo, {_GUIDE: "# Guide 2\n"})
+        _merge_main(repo)
+        _certify(repo, llm_qa.required_tools(llm_qa.VERDICT_TARGETED), changed_range=f"{base}..main")
+        assert llm_qa.advance_batch(repo, "main") == moved
+
+
+class TestTheGateRunCertifies:
+    """``llm_qa.py all`` writes the certified head, and only a clean, passing run does."""
+
+    @pytest.fixture
+    def stubbed(self, repo: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        qa_dir = _qa_dir(repo)
+        qa_dir.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr(llm_qa, "PROJECT_ROOT", repo)
+        monkeypatch.setattr(llm_qa, "QA_OUTPUT_DIR", qa_dir)
+
+        def run_tool(name: str, extra_args: Any = ()) -> int:
+            (qa_dir / llm_qa.TOOL_REGISTRY[name].json_file).write_text("{}", encoding="utf-8")
+            return 0
+
+        monkeypatch.setattr(llm_qa, "run_tool", run_tool)
+        return qa_dir
+
+    def _summaries(self, monkeypatch: pytest.MonkeyPatch, failing: str | None) -> None:
+        def summarize(name: str, **_: Any) -> tuple[bool, str]:
+            return name != failing, f"{name}\n"
+
+        monkeypatch.setattr(llm_qa, "summarize_tool", summarize)
+
+    def test_a_passing_full_run_in_a_batch_certifies_head(
+        self, repo: Path, stubbed: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        llm_qa.start_batch(repo, "main")
+        self._summaries(monkeypatch, failing=None)
+        assert llm_qa._run_tools(list(llm_qa.ALL_TOOL_NAMES), read_only=False) == 0
+        assert _certified(repo) == _git(repo, "rev-parse", "HEAD")
+
+    def test_a_failing_full_run_certifies_nothing(
+        self, repo: Path, stubbed: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        llm_qa.start_batch(repo, "main")
+        self._summaries(monkeypatch, failing="lint")
+        llm_qa._run_tools(list(llm_qa.ALL_TOOL_NAMES), read_only=False)
+        assert _certified(repo) is None
+
+    def test_a_partial_run_certifies_nothing(
+        self, repo: Path, stubbed: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        llm_qa.start_batch(repo, "main")
+        self._summaries(monkeypatch, failing=None)
+        llm_qa._run_tools(["lint"], read_only=False)
+        assert _certified(repo) is None
+
+
+class TestFinishing:
+    """Review 4 N12: the batch refs were never removed after the batch landed."""
+
+    def test_finish_refuses_before_the_certified_head_is_on_main(self, repo: Path) -> None:
+        _start(repo)
+        with pytest.raises(llm_qa.MainMovedError, match="--ff-only"):
+            llm_qa.finish_batch(repo, "main")
+        assert _certified(repo) is not None
+
+    def test_finish_removes_both_refs_once_the_batch_landed(self, repo: Path) -> None:
+        _start(repo)
+        _git(repo, "branch", "-f", "main", _BRANCH)
+        llm_qa.finish_batch(repo, "main")
+        assert _certified(repo) is None
+        assert _git(repo, "for-each-ref", f"refs/integration/base/{_BRANCH}") == ""
+
+    def test_the_refs_follow_the_branch_namespace(self, repo: Path) -> None:
+        """A branch ``a`` and ``a/base`` collided under ``refs/integration/<branch>/base``."""
+        _git(repo, "checkout", "-q", "-b", "feature/x")
+        assert llm_qa.batch_base_ref(repo) == "refs/integration/base/feature/x"
+        assert llm_qa.certified_ref(repo) == "refs/integration/certified/feature/x"
+
+
 class TestTheCommand:
     def _run(self, repo: Path, *args: str) -> int:
         return int(llm_qa.main_moved_command(list(args), root=repo))
 
-    def test_start_then_unmoved_exits_zero(
+    def test_start_then_the_gate_then_unmoved_exits_zero(
         self, repo: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         assert self._run(repo, "--start") == llm_qa.EXIT_SUCCESS
+        _gate(repo)
         assert self._run(repo) == llm_qa.EXIT_SUCCESS
         out = capsys.readouterr().out
         assert f"VERDICT: {llm_qa.VERDICT_UNMOVED}" in out
@@ -568,6 +844,7 @@ class TestTheCommand:
     ) -> None:
         """Review 3 R11: docs-only and unmoved shared exit 0."""
         self._run(repo, "--start")
+        _gate(repo)
         base = _base(repo)
         moved = _on_main(repo, files)
         capsys.readouterr()
@@ -587,12 +864,42 @@ class TestTheCommand:
         self, repo: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         self._run(repo, "--start")
+        _gate(repo)
         moved = _on_main(repo, {_LONELY: "# 2\n"})
         _merge_main(repo)
         assert self._run(repo, "--advance") == llm_qa.EXIT_FAILURE
         _certify(repo, llm_qa.DOCS_ONLY_TOOL_NAMES)
         assert self._run(repo, "--advance") == llm_qa.EXIT_SUCCESS
         assert moved in capsys.readouterr().out
+
+    def test_head_moved_has_its_own_exit_code_and_names_the_full_gate(
+        self, repo: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        self._run(repo, "--start")
+        capsys.readouterr()
+        assert self._run(repo) == llm_qa.EXIT_HEAD_MOVED
+        out = capsys.readouterr().out
+        assert f"VERDICT: {llm_qa.VERDICT_HEAD_MOVED}" in out
+        assert "llm_qa.py all" in out
+        assert "--ff-only" not in out
+
+    def test_start_twice_needs_restart_through_the_command(
+        self, repo: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert self._run(repo, "--start") == llm_qa.EXIT_SUCCESS
+        assert self._run(repo, "--start") == llm_qa.EXIT_FAILURE
+        assert "--restart" in capsys.readouterr().err
+        assert self._run(repo, "--start", "--restart") == llm_qa.EXIT_SUCCESS
+
+    def test_finish_through_the_command(
+        self, repo: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        self._run(repo, "--start")
+        _gate(repo)
+        assert self._run(repo, "--finish") == llm_qa.EXIT_FAILURE
+        _git(repo, "branch", "-f", "main", _BRANCH)
+        assert self._run(repo, "--finish") == llm_qa.EXIT_SUCCESS
+        assert _certified(repo) is None
 
     def test_an_error_prints_no_verdict(
         self, repo: Path, capsys: pytest.CaptureFixture[str]
@@ -602,7 +909,15 @@ class TestTheCommand:
 
     @pytest.mark.parametrize(
         "args",
-        [["a", "b"], ["--start", "--advance"], ["--bogus"], ["--start", "main", "extra"]],
+        [
+            ["a", "b"],
+            ["--start", "--advance"],
+            ["--bogus"],
+            ["--start", "main", "extra"],
+            ["--restart"],
+            ["--advance", "--restart"],
+            ["--finish", "--start"],
+        ],
     )
     def test_wrong_arguments_are_a_usage_error(
         self, repo: Path, args: list[str], capsys: pytest.CaptureFixture[str]

@@ -134,10 +134,15 @@ REASON_STILL_REFERENCED: Final[str] = "deleted-but-referenced"
 # Declared-rule keys.
 _KEY_RULES: Final[str] = "rules"
 _KEY_GLOB: Final[str] = "glob"
+_KEY_PATH_GLOB: Final[str] = "path_glob"
 _KEY_TESTS: Final[str] = "tests"
 _KEY_TOOLS: Final[str] = "tools"
 _KEY_WHY: Final[str] = "why"
-_RULE_KEYS: Final[frozenset[str]] = frozenset({_KEY_GLOB, _KEY_TESTS, _KEY_TOOLS, _KEY_WHY})
+_RULE_KEYS: Final[frozenset[str]] = frozenset(
+    {_KEY_GLOB, _KEY_PATH_GLOB, _KEY_TESTS, _KEY_TOOLS, _KEY_WHY}
+)
+#: A ``path_glob`` segment matching any number of directories, as in ``Path.glob``.
+_ANY_DEPTH: Final[str] = "**"
 
 _OUTCOME_FAILED: Final[str] = "failed"
 
@@ -156,12 +161,42 @@ PytestRunner = Callable[[list[str], Path], tuple[int, str]]
 
 @dataclass(frozen=True, slots=True)
 class DeclaredRule:
-    """One entry of the rules file: a glob and what covers the files it matches."""
+    """One entry of the rules file: a glob and what covers the files it matches.
+
+    ``glob`` is fnmatch (``*`` crosses ``/``); with ``path_style`` it is a
+    ``Path.glob`` pattern instead, so a rule can name exactly the files a test
+    reads by glob (``CLAUDE/*.md`` is one directory, ``docs/**/*.md`` any depth).
+    """
 
     glob: str
     tests: tuple[str, ...]
     tools: tuple[str, ...]
     why: str
+    path_style: bool = False
+
+    def matches(self, relative: str) -> bool:
+        """Whether this rule covers ``relative``."""
+        if self.path_style:
+            return path_glob_matches(relative, self.glob)
+        return fnmatch.fnmatch(relative, self.glob)
+
+
+def path_glob_matches(relative: str, pattern: str) -> bool:
+    """Whether ``Path(root).glob(pattern)`` would yield ``relative``.
+
+    Each segment is matched on its own, so ``*`` never crosses ``/``, and a
+    ``**`` segment matches zero or more whole directories.
+    """
+    return _segments_match(relative.split("/"), pattern.split("/"))
+
+
+def _segments_match(parts: Sequence[str], patterns: Sequence[str]) -> bool:
+    if not patterns:
+        return not parts
+    head, rest = patterns[0], patterns[1:]
+    if head == _ANY_DEPTH:
+        return any(_segments_match(parts[skip:], rest) for skip in range(len(parts) + 1))
+    return bool(parts) and fnmatch.fnmatchcase(parts[0], head) and _segments_match(parts[1:], rest)
 
 
 @dataclass(slots=True)
@@ -326,13 +361,19 @@ def parse_declared_rules(raw: object) -> tuple[list[DeclaredRule], list[str]]:
             problems.append(f"rule {position}: expected a mapping")
             continue
         unknown = sorted(str(key) for key in entry if key not in _RULE_KEYS)
-        glob, why = entry.get(_KEY_GLOB), entry.get(_KEY_WHY)
+        path_style = _KEY_PATH_GLOB in entry
+        glob = entry.get(_KEY_PATH_GLOB if path_style else _KEY_GLOB)
+        why = entry.get(_KEY_WHY)
         tests = _text_list(entry.get(_KEY_TESTS, []))
         tools = _text_list(entry.get(_KEY_TOOLS, []))
         if unknown:
             problems.append(f"rule {position}: unknown key(s) {', '.join(unknown)}")
+        elif path_style and _KEY_GLOB in entry:
+            problems.append(f"rule {position}: give exactly one of `{_KEY_GLOB}` or `{_KEY_PATH_GLOB}`")
         elif not isinstance(glob, str) or not glob.strip():
-            problems.append(f"rule {position}: `{_KEY_GLOB}` must be a non-empty string")
+            problems.append(
+                f"rule {position}: `{_KEY_GLOB}` or `{_KEY_PATH_GLOB}` must be a non-empty string"
+            )
         elif not isinstance(why, str) or not why.strip():
             problems.append(f"rule {position}: `{_KEY_WHY}` must say what covers these files")
         elif tests is None or tools is None:
@@ -342,7 +383,15 @@ def parse_declared_rules(raw: object) -> tuple[list[DeclaredRule], list[str]]:
                 f"rule {position}: give exactly one of `{_KEY_TESTS}` or `{_KEY_TOOLS}`"
             )
         else:
-            rules.append(DeclaredRule(glob=glob.strip(), tests=tests, tools=tools, why=why.strip()))
+            rules.append(
+                DeclaredRule(
+                    glob=glob.strip(),
+                    tests=tests,
+                    tools=tools,
+                    why=why.strip(),
+                    path_style=path_style,
+                )
+            )
     return rules, problems
 
 
@@ -672,19 +721,21 @@ class _Mapper:
         mirrored = self.mirror_tests(relative)
         return (mirrored or set(self.referencing_tests(relative))), None
 
-    def cover(self, relative: str, exists: bool, rule: DeclaredRule | None) -> _Cover:
+    def cover(self, relative: str, exists: bool, rules: Sequence[DeclaredRule]) -> _Cover:
         """Every test a change to ``relative`` can break, or why that cannot be targeted.
 
-        A file whose reach is too broad still runs its OWN tests when they
-        fit the cap, so the agent gets that signal, but it stays unmapped: the
-        rest of its reach is the coordinator's full gate.
+        ``rules`` are every declared rule that matches; their tests and tools
+        are all part of the cover. A file whose reach is too broad still runs
+        its OWN tests when they fit the cap, so the agent gets that signal, but
+        it stays unmapped: the rest of its reach is the coordinator's full gate.
         """
         cover = _Cover()
         path = PurePosixPath(relative)
-        if rule is not None:
+        if rules:
             cover.rules.append(RULE_DECLARED)
-            cover.tests.update(rule.tests)
-            cover.tools = rule.tools
+            for rule in rules:
+                cover.tests.update(rule.tests)
+            cover.tools = tuple(dict.fromkeys(tool for rule in rules for tool in rule.tools))
         if _is_test_file(path):
             cover.rules.append(RULE_SELF if exists else RULE_DELETED_TEST)
             if exists:
@@ -796,8 +847,7 @@ def select_tests(
         if path.suffix != _PYTHON_SUFFIX:
             selection.non_python.append(relative)
 
-        rule = next((r for r in rules if fnmatch.fnmatch(relative, r.glob)), None)
-        cover = mapper.cover(relative, exists, rule)
+        cover = mapper.cover(relative, exists, [rule for rule in rules if rule.matches(relative)])
         selected.update(cover.tests)
         if cover.reason is not None:
             code, detail = cover.reason
