@@ -300,3 +300,103 @@ class TestDetectsBootstrapReexecDollar0Source:
             "Skill scripts use $0-relative path resolution after a "
             f"self-bootstrap re-exec stanza. Offenders: {offenders}"
         )
+
+
+class TestDetectsHostilePathUnguardedCommand:
+    """Plan 00466 N30 DBF static complement: scripts that must survive a
+    hostile/stripped PATH (`resolve_venv.sh`, `portable_time.sh`,
+    `venv_bootstrap.sh`, `scripts/install/*.sh`) calling `date` or `pgrep`
+    directly, with no ``command -v`` guard anywhere in the enclosing
+    function, is flagged. This is the STATIC complement to the dynamic
+    empty-PATH integration tests (`tests/integration/
+    test_venv_bootstrap_hostile_path_epoch.py` and siblings) -- per the
+    brief, a static rule must not be the ONLY guard, so this narrows to a
+    declared file list rather than trying to judge every external command
+    in every script.
+    """
+
+    def test_flags_unguarded_date_in_a_hostile_path_file(self) -> None:
+        src = (
+            "#!/bin/bash\n"
+            "_x() {\n"
+            '    if [ "$(date +%s)" -ge "$deadline" ]; then\n'
+            "        echo late\n"
+            "    fi\n"
+            "}\n"
+        )
+        violations = audit_text(src, "scripts/lib/resolve_venv.sh")
+        assert "hostile-path-unguarded-command" in _rules(violations)
+
+    def test_flags_unguarded_pgrep_in_a_hostile_path_file(self) -> None:
+        src = '#!/bin/bash\n_x() {\n    pgrep -f "claude_code_hooks_daemon" > /dev/null\n}\n'
+        violations = audit_text(src, "scripts/install/daemon_control.sh")
+        assert "hostile-path-unguarded-command" in _rules(violations)
+
+    def test_allows_date_guarded_by_command_dash_v_in_the_same_function(self) -> None:
+        src = (
+            "#!/bin/bash\n"
+            "_x() {\n"
+            "    if command -v date > /dev/null; then\n"
+            "        date +%s\n"
+            "    fi\n"
+            "}\n"
+        )
+        violations = audit_text(src, "scripts/lib/resolve_venv.sh")
+        assert "hostile-path-unguarded-command" not in _rules(violations)
+
+    def test_allows_pgrep_guarded_by_command_dash_v_in_the_same_function(self) -> None:
+        src = (
+            "#!/bin/bash\n"
+            "_x() {\n"
+            "    if command -v pgrep > /dev/null; then\n"
+            "        pgrep -f pattern > /dev/null\n"
+            "    fi\n"
+            "}\n"
+        )
+        violations = audit_text(src, "scripts/install/daemon_control.sh")
+        assert "hostile-path-unguarded-command" not in _rules(violations)
+
+    def test_ignores_files_outside_the_hostile_path_list(self) -> None:
+        """The same unguarded `date` call outside the declared file list is
+        not this rule's concern -- it is not a script this class applies
+        to."""
+        src = "#!/bin/bash\n_x() {\n    date +%s\n}\n"
+        violations = audit_text(src, "scripts/qa/run_lint.sh")
+        assert "hostile-path-unguarded-command" not in _rules(violations)
+
+    def test_does_not_flag_date_as_a_hyphen_bounded_substring_of_a_word(self) -> None:
+        """ "up-to-date" contains "date" as a hyphen-bounded \\b word --
+        `\\b` alone treats hyphens as boundaries, so a naive word match
+        would misfire on ordinary prose/log text that is not a command
+        invocation at all (the real regression this caught:
+        scripts/install/venv.sh's "venv up-to-date at $venv_path")."""
+        src = '#!/bin/bash\n_x() {\n    print_verbose "venv up-to-date at $venv_path"\n}\n'
+        violations = audit_text(src, "scripts/install/venv.sh")
+        assert "hostile-path-unguarded-command" not in _rules(violations)
+
+    def test_marker_with_reason_suppresses_the_violation(self) -> None:
+        src = (
+            "#!/bin/bash\n"
+            "_x() {\n"
+            "    date +%s  # shell-audit: allow -- diagnostic log line only, not a decision\n"
+            "}\n"
+        )
+        violations = audit_text(src, "scripts/venv_bootstrap.sh")
+        assert "hostile-path-unguarded-command" not in _rules(violations)
+
+    def test_repo_hostile_path_files_are_clean(self) -> None:
+        """Self-scan: the real, fixed files must carry no unguarded date/pgrep."""
+        targets = [
+            REPO_ROOT / "scripts" / "lib" / "resolve_venv.sh",
+            REPO_ROOT / "scripts" / "lib" / "portable_time.sh",
+            REPO_ROOT / "scripts" / "venv_bootstrap.sh",
+            *sorted((REPO_ROOT / "scripts" / "install").glob("*.sh")),
+        ]
+        violations: list[Violation] = []
+        for target in targets:
+            assert target.is_file(), target
+            violations.extend(audit_file(target))
+        offenders = [
+            f"{v.file}:{v.line}" for v in violations if v.rule == "hostile-path-unguarded-command"
+        ]
+        assert offenders == [], f"Unguarded date/pgrep in hostile-PATH scripts: {offenders}"

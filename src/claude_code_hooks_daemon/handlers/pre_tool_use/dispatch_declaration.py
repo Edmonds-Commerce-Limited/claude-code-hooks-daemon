@@ -65,16 +65,56 @@ _FALLBACK_PLAN_DIR: Final[str] = "CLAUDE/Plan"
 # "not a plan" substring, so it does not false-fire on unrelated prose.
 _NOT_PLAN_WORK_PATTERN = re.compile(r"\bnot\s+plan\s+work\b", re.IGNORECASE)
 
-# A declared file destination: a verb ("write"/"save"/"report"/"output"/
-# "store") followed by "to"/"in"/"under"/"into" and a path-shaped token
-# (contains a "/"). This is a proxy for "names where files go", not a full
-# path grammar — it only needs to distinguish a destination declaration from
-# its absence.
-_DESTINATION_PATTERN = re.compile(
-    r"\b(?:writ(?:e|es|ten)|sav(?:e|es|ed)|report(?:s|ed)?|output(?:s|ted)?|stor(?:e|es|ed))\b"
-    r"\s+(?:it\s+)?(?:to|in|under|into)\s+\S*/",
+# A write-destination KEYWORD: a verb OR noun that names writing output
+# somewhere ("write"/"save"/"report"/"output"/"store"/"file"). Plan 00466
+# N31: the original grammar required one of these immediately followed by
+# "to"/"in"/"under"/"into" and then whitespace, which missed a brief phrased
+# as a label — "File to write to: <path>" — because the colon after "to"
+# broke the required whitespace, and "file" as a noun was not in the list at
+# all. Matched on its own (no fixed preposition); see
+# ``_prompt_declares_destination`` for how it is paired with a path.
+_DESTINATION_KEYWORD_PATTERN = re.compile(
+    r"\b(?:writ(?:e|es|ten|ing)|sav(?:e|es|ed|ing)|report(?:s|ed|ing)?"
+    r"|output(?:s|ted|ting)?|stor(?:e|es|ed|ing)|files?)\b",
     re.IGNORECASE,
 )
+
+# A path-shaped token: a "/" with non-space characters on both sides (e.g.
+# "CLAUDE/Plan/00307-x/report.md", "/tmp/out.txt", "untracked/scratch/x").
+# Loose by design — this only needs to distinguish "names a path" from
+# "names nothing", not parse a full path grammar.
+_PATH_TOKEN_PATTERN = re.compile(r"\S*/\S+")
+
+# A "clause" boundary: sentence-ending punctuation or a newline. Splitting on
+# this (rather than pairing a keyword with ANY path anywhere in the prompt)
+# is what keeps the Plan 00460 review finding m4 distinction intact — a
+# prompt that names a plan-folder path in one sentence and then says "write
+# your findings there" in the next must NOT count as declaring a
+# destination: the keyword and the path are in different clauses.
+_CLAUSE_BOUNDARY_PATTERN = re.compile(r"[.!?\n]+")
+
+
+def _prompt_declares_destination(prompt: str) -> bool:
+    """True if a destination keyword and a path token appear in the same clause.
+
+    A keyword match that falls INSIDE a path token does not count: a plan
+    folder name like ``00307-subagent-file-based-report-handoff`` contains
+    the substrings "file" and "report" as hyphen-bounded words, and without
+    this exclusion a bare plan-folder mention would wrongly count as
+    declaring a destination (regressing Plan 00460 review finding m4).
+    """
+    for clause in _CLAUSE_BOUNDARY_PATTERN.split(prompt):
+        path_spans = [m.span() for m in _PATH_TOKEN_PATTERN.finditer(clause)]
+        if not path_spans:
+            continue
+        for kw_match in _DESTINATION_KEYWORD_PATTERN.finditer(clause):
+            kw_start, kw_end = kw_match.span()
+            inside_a_path = any(
+                kw_start >= p_start and kw_end <= p_end for p_start, p_end in path_spans
+            )
+            if not inside_a_path:
+                return True
+    return False
 
 
 class DispatchDeclarationHandler(PreToolUseHandlerBase):
@@ -163,7 +203,7 @@ class DispatchDeclarationHandler(PreToolUseHandlerBase):
         """True if the prompt names a plan folder OR a non-plan-work destination."""
         if self._plan_path_pattern().search(prompt):
             return True
-        return bool(_NOT_PLAN_WORK_PATTERN.search(prompt) and _DESTINATION_PATTERN.search(prompt))
+        return bool(_NOT_PLAN_WORK_PATTERN.search(prompt) and _prompt_declares_destination(prompt))
 
     def _contract_text(self) -> str:
         return (
@@ -214,7 +254,7 @@ class DispatchDeclarationHandler(PreToolUseHandlerBase):
         """The Task 1.4 advisory text, or None when it does not apply.
 
         Only fires when the prompt declares an explicit report DESTINATION
-        (``has_destination``, a caller-supplied ``_DESTINATION_PATTERN``
+        (``has_destination``, a caller-supplied ``_prompt_declares_destination``
         match) — review finding m4: gating this on ``_has_declaration``
         over-fired, because that also matches a prompt that only mentions a
         plan folder as CONTEXT (e.g. "This is Plan 00307 work ... Write your
@@ -263,7 +303,7 @@ class DispatchDeclarationHandler(PreToolUseHandlerBase):
         prompt = tool_input.get("prompt", "") if isinstance(tool_input, dict) else ""
 
         if self._has_declaration(prompt):
-            has_destination = bool(_DESTINATION_PATTERN.search(prompt))
+            has_destination = _prompt_declares_destination(prompt)
             mismatch = self._read_only_dispatch_mismatch(hook_input, has_destination)
             context = [mismatch] if mismatch is not None else []
             return GatingResult(decision=Decision.ALLOW, context=context)

@@ -396,3 +396,98 @@ class TestConfiguredPlanDirectory:
 
         assert result.decision == Decision.ALLOW
         assert result.context == []
+
+
+class TestDestinationPhrasingRecognition:
+    """Plan 00466 N31: the destination check matches more than a fixed
+    "verb to/in/under/into path" grammar.
+
+    Found by the 00467 dogfood agent: a brief phrased as a label --
+    "File to write to: <path>" -- was NOT recognised, because the old
+    grammar required a preposition to be followed immediately by
+    whitespace, and the colon after "to" broke that. The fix recognises
+    any write-destination keyword ("write", "report", "file", "output",
+    "save") paired with a path-shaped token in the SAME clause (bounded by
+    sentence-ending punctuation or a newline) -- not only fixed phrases.
+
+    The clause boundary is what keeps the Plan 00460 review finding m4
+    distinction intact: a prompt that mentions a plan-folder path in one
+    sentence and a bare "write your findings there" in the next (see
+    ``_DECLARED_PROMPT`` at module level) must still NOT count as
+    declaring a destination -- the path and the verb are in different
+    clauses there.
+    """
+
+    def test_recognises_label_colon_path_phrasing(
+        self, handler: DispatchDeclarationHandler
+    ) -> None:
+        """The exact reported miss: 'File to write to: <path>'.
+
+        Deliberately NOT a ``CLAUDE/Plan/NNNNN-`` path -- that would satisfy
+        the separate plan-folder declaration route and mask a regression in
+        the destination-phrasing check this test targets.
+        """
+        prompt = (
+            "This is not plan work. File to write to: "
+            "/workspace/untracked/agent-reports/260924-probe-sonnet.md"
+        )
+
+        result = handler.handle(_task_input(prompt))
+
+        assert result.decision == Decision.ALLOW
+        assert result.context == []
+
+    def test_recognises_save_at_phrasing(self, handler: DispatchDeclarationHandler) -> None:
+        """ "save" + "at" (not one of the old to/in/under/into prepositions)."""
+        prompt = (
+            "This is not plan work. Save your findings at "
+            "untracked/scratch/findings.md when you are done."
+        )
+
+        result = handler.handle(_task_input(prompt))
+
+        assert result.decision == Decision.ALLOW
+        assert result.context == []
+
+    def test_recognises_report_destination_label_phrasing(
+        self, handler: DispatchDeclarationHandler
+    ) -> None:
+        """A bare "<label>: <path>" pairing with no verb-preposition grammar
+        at all. Deliberately not a ``CLAUDE/Plan/NNNNN-`` path, for the same
+        reason as the test above."""
+        prompt = (
+            "This is not plan work. Report destination: "
+            "untracked/agent-reports/260924-probe-sonnet-notes.md"
+        )
+
+        result = handler.handle(_task_input(prompt))
+
+        assert result.decision == Decision.ALLOW
+        assert result.context == []
+
+    def test_still_advises_when_no_path_is_present(
+        self, handler: DispatchDeclarationHandler
+    ) -> None:
+        """A brief that uses destination keywords but never names a path
+        must still draw the advisory -- recognising more PHRASINGS must not
+        turn into recognising a bare keyword as a declaration."""
+        prompt = "This is not plan work. Write a summary and report back when done."
+
+        result = handler.handle(_task_input(prompt))
+
+        assert result.decision == Decision.ALLOW
+        assert len(result.context) == 1
+        assert "DISPATCH DECLARATION" in result.context[0]
+
+    def test_plan_folder_mention_in_a_different_clause_still_not_a_destination(
+        self, handler: DispatchDeclarationHandler
+    ) -> None:
+        """Plan 00460 review finding m4, preserved: a path in one sentence
+        and the verb in the next must not pair up just because a looser
+        keyword search would find both somewhere in the prompt."""
+        hook_input = _task_input(_DECLARED_PROMPT, subagent_type="Explore")
+
+        result = handler.handle(hook_input)
+
+        assert result.decision == Decision.ALLOW
+        assert result.context == []

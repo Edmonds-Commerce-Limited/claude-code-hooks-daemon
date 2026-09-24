@@ -26,6 +26,7 @@ BASH = shutil.which("bash") or "/bin/bash"
 
 _TIMEOUT_SECONDS = 30
 _FAKE_CMDLINE = "python -m claude_code_hooks_daemon.daemon.cli start"
+_PATTERN = "claude_code_hooks_daemon"
 
 
 def _run_exists(tmp_path: Path, *, process_present: bool) -> subprocess.CompletedProcess[str]:
@@ -100,3 +101,106 @@ def test_no_gnu_alternation_in_pgrep() -> None:
         r"BUG 3: GNU `\|` alternation must not appear in executable code — "
         "use separate pgrep invocations for BSD compatibility:\n" + "\n".join(offenders)
     )
+
+
+class TestHostilePathFallback:
+    """Plan 00466 N30: `pgrep` is looked up on PATH -- when it is missing,
+    `_daemon_process_exists` must not silently answer "not running" (the
+    caller's retry fallback would then silently no-op, the same class of
+    hazard BUG 3 above fixed for BSD's `\\|`). It falls back to a pure-bash
+    /proc scan (Linux; no external command, so PATH cannot break it), and
+    only when even that is unavailable does it fail loudly -- answering
+    "maybe" rather than guessing "no"."""
+
+    def _harness(self, body: str, *, path: str = "") -> str:
+        path_line = f'export PATH="{path}"\n' if path else ""
+        return textwrap.dedent(f"""\
+            {path_line}export OUTPUT_SH_LOADED=1
+            print_verbose() {{ :; }}
+            print_error() {{ echo "PRINT_ERROR: $1" >&2; }}
+            . "{DAEMON_CONTROL_SH}"
+            {body}
+            """)
+
+    def _run(self, harness: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [BASH, "-c", harness],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_TIMEOUT_SECONDS,
+        )
+
+    def _write_fake_cmdline(self, proc_dir: Path, pid: int, argv: list[str]) -> None:
+        """A fabricated ``/proc/<pid>/cmdline`` -- NUL-separated argv, exactly
+        the kernel's real format. A FIXTURE proc dir (rather than a real
+        background process scanned via the host's real /proc) keeps this
+        deterministic: the real /proc is host-wide and this container may
+        already have an unrelated real daemon process running in it."""
+        pid_dir = proc_dir / str(pid)
+        pid_dir.mkdir(parents=True)
+        (pid_dir / "cmdline").write_bytes(("\0".join(argv) + "\0").encode())
+
+    def test_proc_fallback_finds_a_matching_process_with_no_pgrep_on_path(
+        self, tmp_path: Path
+    ) -> None:
+        path_without_pgrep = tmp_path / "path-no-pgrep"
+        path_without_pgrep.mkdir()
+        proc_dir = tmp_path / "fake-proc"
+        proc_dir.mkdir()
+        self._write_fake_cmdline(proc_dir, 111, ["python", "-m", _PATTERN + ".daemon.cli"])
+
+        harness = self._harness(
+            textwrap.dedent(f"""\
+                _HP_PROC_DIR="{proc_dir}"
+                if _daemon_process_exists; then echo FOUND; else echo MISSING; fi
+                """),
+            path=str(path_without_pgrep),
+        )
+        result = self._run(harness)
+
+        assert "FOUND" in result.stdout, (
+            f"a matching process must be found via /proc, not silently missed just "
+            f"because pgrep is unreachable. stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+
+    def test_proc_fallback_reports_missing_when_nothing_matches(self, tmp_path: Path) -> None:
+        path_without_pgrep = tmp_path / "path-no-pgrep"
+        path_without_pgrep.mkdir()
+        proc_dir = tmp_path / "fake-proc"
+        proc_dir.mkdir()
+        self._write_fake_cmdline(proc_dir, 222, ["some-other-process", "--flag"])
+
+        harness = self._harness(
+            textwrap.dedent(f"""\
+                _HP_PROC_DIR="{proc_dir}"
+                if _daemon_process_exists; then echo FOUND; else echo MISSING; fi
+                """),
+            path=str(path_without_pgrep),
+        )
+        result = self._run(harness)
+
+        assert "MISSING" in result.stdout, f"stdout={result.stdout!r} stderr={result.stderr!r}"
+
+    def test_loud_and_conservative_when_neither_pgrep_nor_proc_available(
+        self, tmp_path: Path
+    ) -> None:
+        """Neither pgrep nor /proc: must not silently guess "not running" --
+        says so loudly and answers "maybe" (FOUND), the safe direction for
+        a caller that only uses this to decide whether to retry a status
+        poll a little longer."""
+        path_without_pgrep = tmp_path / "path-no-pgrep"
+        path_without_pgrep.mkdir()
+        harness = self._harness(
+            textwrap.dedent(f"""\
+                _HP_PROC_DIR="{tmp_path / "no-such-proc"}"
+                if _daemon_process_exists; then echo FOUND; else echo MISSING; fi
+                """),
+            path=str(path_without_pgrep),
+        )
+        result = self._run(harness)
+
+        assert "FOUND" in result.stdout, f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        assert (
+            "PRINT_ERROR" in result.stderr
+        ), f"must say loudly that it could not determine an answer. stderr={result.stderr!r}"

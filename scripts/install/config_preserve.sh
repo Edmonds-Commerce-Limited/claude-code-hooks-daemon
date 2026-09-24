@@ -20,6 +20,13 @@ if [ -z "${OUTPUT_SH_LOADED+x}" ]; then
     source "$INSTALL_LIB_DIR/output.sh"
 fi
 
+# Ensure portable_time.sh (_hp_timestamp, Plan 00466 N30) is loaded.
+if ! declare -F _hp_timestamp > /dev/null; then
+    _cp_lib_dir="$(dirname "${BASH_SOURCE[0]}")"
+    # shellcheck source=../lib/portable_time.sh
+    source "${_cp_lib_dir%/install}/lib/portable_time.sh"
+fi
+
 # Basename prefix of the temp baseline copy resolve_old_default_config makes.
 # It is the ONLY thing that distinguishes our own copy from the path Layer 1
 # handed over, which cleanup_old_default_config must never delete.
@@ -57,7 +64,10 @@ backup_config() {
     fi
 
     local timestamp
-    timestamp=$(date +%Y%m%d-%H%M%S)
+    if ! timestamp=$(_hp_timestamp '%Y%m%d-%H%M%S'); then
+        print_error "backup_config: cannot determine a timestamp (see stderr above)"
+        return 1
+    fi
 
     local backup_file
     if [ -n "$backup_dir" ]; then
