@@ -240,3 +240,53 @@ QA: 36/36 PASSED
 Phase 1 (Tasks 1.1-1.4) complete; PLAN.md and the JOURNAL day-file are
 updated. Phase 2 (merge, daemon restart in the main checkout, mark 00422 N20
 remedied) is the team lead's.
+
+## Addendum: detector extended to follow simple derivation
+
+Merged to `main` as `54f5c357` first. The `matches_directory` shape the
+detector originally stayed quiet on -- a loop variable reassigned via a
+ternary/f-string/`+`/`.strip` before the `in` test -- WAS the 00422 N20
+defect, so a regression of exactly that shape would have passed the old
+detector unnoticed. Extended `check_skip_list_substring.py` to follow it.
+
+`_is_derived()` recognises the loop variable itself, an f-string wrapping a
+derived name, a `+` concatenation involving one, a `.rstrip`/`.lstrip`/
+`.strip` call on one, or either arm of a ternary -- recursively, so
+"concatenate then strip" chains still count. `_walk_and_track()` walks a
+`for` body in order (including one level into nested `if`/`else`, where
+`matches_directory`'s boundary-adding `pattern += "/"` lived), growing a
+`derived: frozenset[str]` on each assignment/aug-assign/ann-assign binding a
+derived value, and collecting every `in`-against-a-path-like-name compare
+seen along the way. Comprehensions get the same treatment. Deliberately NOT
+tracked: dict/list lookups, `.format()`, `%`-formatting, any method call
+outside `.rstrip`/`.lstrip`/`.strip` -- a rule that guesses at arbitrary
+data flow cries wolf.
+
+RED confirmed on the exact pre-fix `matches_directory` body and on
+`validate_eslint_on_write.py`'s pre-fix inline-f-string comprehension shape,
+via 4 new tests in `TestTheRuleFollowsDerivation`
+(`tests/unit/scripts/test_skip_list_substring_checker.py`), plus 4 new
+"stays quiet" tests pinning the deliberate blind spots (dict lookup,
+`.format()`, an unrelated method call, `.strip()` on an unrelated name).
+
+Extending the detector's shape also newly flags
+`validate_eslint_on_write.py`'s `is_worktree` (the inline f-string
+comprehension named out-of-scope in the original Task 1.1 audit as
+log-only). Fixed it too rather than carrying an exemption: routed through
+the file's own already-imported `matches_skip_path` (no `project_root` --
+this signal only feeds a log line, so the absolute-path fallback is correct,
+not a behaviour change).
+
+Detector run over `src/`: 0 violations, 603 files scanned -- both instances
+this extension can see were fixed in the same change. 626 tests pass across
+`test_skip_list_substring_checker.py`, `test_validate_eslint_on_write.py`,
+`strategies/tdd/`, and `test_tdd_enforcement.py`.
+
+Commit: `a4bccbb4` (source + tests), plus this report/journal addendum.
+Daemon restarted, full `llm_qa.py all` in the foreground:
+
+```
+✅ tests: 25674 passed, 0 failed, 24 skipped | coverage: 95.1%
+✅ skip_list_substring: 0 violations (603 files scanned)
+QA: 36/36 PASSED
+```
