@@ -15,19 +15,32 @@ Defence that keeps a seventh from reintroducing the class (Plan 00458,
 CLAUDE/Security/AsymmetricSiblingProtection.md).
 
 **The shape this rule looks for**: a comprehension's (or an explicit
-``for``'s) own loop variable, UNCHANGED, compared with ``in`` against
-something that looks like a path variable --
+``for``'s) own loop variable -- or a name simply DERIVED from it, see below
+-- compared with ``in`` against something that looks like a path variable --
 ``any(entry in file_path for entry in SOME_LIST)`` or the equivalent
 ``for entry in SOME_LIST: ... entry in file_path``. That is precisely the
 shape that makes the test a bare substring check between a LIST ITEM and a
 PATH.
 
-**What keeps it quiet.** A site that first NORMALISES the loop variable (for
-example ``strategies/tdd/common.py``'s ``matches_directory``, which builds
-``f"/{directory}/"`` before its own ``in`` test) binds a DIFFERENT name at the
-comparison, so the rule does not re-litigate a shape someone already bounded
-by another route. The right-hand side must also look like a path (its last
-dotted/attribute component matches ``PATH_NAME_PATTERN``) -- an unrelated
+**Follows simple derivation, not just the raw loop variable.** The original
+version of this rule required the loop variable to appear UNCHANGED, which
+meant ``strategies/tdd/common.py``'s ``matches_directory`` -- ``pattern =
+f"/{directory}/"`` then ``if pattern in file_path`` -- went unseen. That
+DERIVED name is the same hazard wearing a different name: ``pattern`` is
+still an unbounded substring test between a list entry and a path, just one
+assignment away from the loop variable. So a name bound (via plain
+assignment, an augmented `+=`, or a ternary) to an f-string wrapping the
+loop variable, a `+` concatenation involving it, or a `.rstrip()`/`.lstrip()`/
+`.strip()` call on it, is tracked as DERIVED and still triggers the rule
+when compared with ``in`` against a path-like name -- however many
+statements later. Only these specific, common normalisation idioms are
+followed; anything else (a function call that isn't `.rstrip`/`.lstrip`/
+`.strip`, a dict/list lookup, string formatting via `%` or `.format()`) is
+NOT tracked, deliberately -- a rule that guesses at arbitrary data flow is a
+rule that cries wolf.
+
+The right-hand side must also look like a path (its last dotted/attribute
+component matches ``PATH_NAME_PATTERN``) -- an unrelated
 ``any(keyword in content for keyword in KEYWORDS)`` is a different idiom
 entirely and is not this class. A single FIXED literal against a path
 (``"/vendor/" in file_path``, no list) is a narrower, different shape and is
@@ -132,59 +145,127 @@ def _looks_like_path(node: ast.expr) -> bool:
     return identifier is not None and bool(_PATH_NAME_PATTERN.search(identifier))
 
 
-def _is_bare_membership_of(compare: ast.Compare, loop_var: str) -> bool:
-    """Whether ``compare`` is ``loop_var in <path-like>`` (either order).
+#: Method calls on a string that preserve "derived from the loop variable"
+#: status: they only trim characters, never introduce new ones that could
+#: turn an unrelated string into something that happens to look derived.
+_TRACKED_STRIP_METHODS: Final[frozenset[str]] = frozenset({"rstrip", "lstrip", "strip"})
 
-    Requires exactly one ``in`` comparison, and requires the loop variable to
-    appear UNCHANGED -- a reassigned/normalised name (``pattern`` built from
-    ``directory``) is a different binding and does not match here, which is
-    what keeps an already-bounded site quiet.
+
+def _is_derived(expr: ast.expr, derived: frozenset[str]) -> bool:
+    """Whether ``expr`` is the loop variable, or built from it by a simple,
+    commonly-used normalisation: an f-string, ``+`` concatenation, a
+    ``.rstrip``/``.lstrip``/``.strip`` call, or either arm of a ternary.
+
+    ``derived`` is the set of names already known to carry the loop
+    variable's value (starts as just the loop variable itself; grows as
+    ``_track_derivations`` walks assignments in order). Recursive so a
+    multi-step derivation (concatenate, then strip) is still followed.
+    """
+    if isinstance(expr, ast.Name):
+        return expr.id in derived
+    if isinstance(expr, ast.JoinedStr):
+        return any(
+            isinstance(value, ast.FormattedValue) and _is_derived(value.value, derived)
+            for value in expr.values
+        )
+    if isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.Add):
+        return _is_derived(expr.left, derived) or _is_derived(expr.right, derived)
+    if (
+        isinstance(expr, ast.Call)
+        and isinstance(expr.func, ast.Attribute)
+        and expr.func.attr in _TRACKED_STRIP_METHODS
+    ):
+        return _is_derived(expr.func.value, derived)
+    if isinstance(expr, ast.IfExp):
+        return _is_derived(expr.body, derived) or _is_derived(expr.orelse, derived)
+    return False
+
+
+def _is_bare_membership_of(compare: ast.Compare, derived: frozenset[str]) -> bool:
+    """Whether ``compare`` is ``<derived-from-loop-var> in <path-like>``
+    (either order). Requires exactly one ``in`` comparison.
     """
     if len(compare.ops) != 1 or not isinstance(compare.ops[0], ast.In):
         return False
     left, right = compare.left, compare.comparators[0]
-    if isinstance(left, ast.Name) and left.id == loop_var:
+    if _is_derived(left, derived):
         return _looks_like_path(right)
-    if isinstance(right, ast.Name) and right.id == loop_var:
+    if _is_derived(right, derived):
         return _looks_like_path(left)
     return False
 
 
 def _comprehension_violations(node: ast.expr) -> list[ast.Compare]:
-    """``Compare`` nodes inside a comprehension that test its own loop var."""
+    """``Compare`` nodes inside a comprehension that test its own loop var
+    (or something derived from it inline, e.g. ``f"/{x}/" in file_path``)."""
     if not isinstance(node, ast.GeneratorExp | ast.ListComp | ast.SetComp):
         return []
     found: list[ast.Compare] = []
     for generator in node.generators:
         if not isinstance(generator.target, ast.Name):
             continue
-        loop_var = generator.target.id
+        derived = frozenset({generator.target.id})
         elt = node.elt
-        if isinstance(elt, ast.Compare) and _is_bare_membership_of(elt, loop_var):
+        if isinstance(elt, ast.Compare) and _is_bare_membership_of(elt, derived):
             found.append(elt)
     return found
 
 
-def _for_loop_violations(node: ast.For) -> list[ast.Compare]:
-    """``Compare`` nodes in a ``for`` body that test the loop's own variable.
+def _assignment_target_name(stmt: ast.stmt) -> str | None:
+    """The single ``Name`` a simple ``Assign``/``AugAssign``/``AnnAssign``
+    binds, or ``None`` for any other shape (tuple unpacking, attribute
+    targets, ...) -- those are not tracked, deliberately (see module
+    docstring: only the common idioms)."""
+    if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1:
+        target = stmt.targets[0]
+        return target.id if isinstance(target, ast.Name) else None
+    if isinstance(stmt, ast.AugAssign) and isinstance(stmt.target, ast.Name):
+        return stmt.target.id
+    if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
+        return stmt.target.id
+    return None
 
-    Shallow: only the loop's immediate body is examined (an ``if`` test or a
-    bare expression), matching the ``for x in LIST: if x in path:`` close
-    variant named in the plan. Not recursive into nested blocks, which keeps
-    this from crossing into an unrelated inner loop's own variable.
+
+def _walk_and_track(
+    stmts: list[ast.stmt], derived: frozenset[str], found: list[ast.Compare]
+) -> frozenset[str]:
+    """Walk ``stmts`` in order, growing ``derived`` on each assignment that
+    binds a derived value, and collecting every ``Compare`` violation seen
+    along the way (including inside a nested ``if``, since that is where the
+    real-world shape puts the boundary-adding statement:
+    ``if not pattern.endswith("/"): pattern += "/"``).
+
+    Deliberately shallow beyond ``if``: does not descend into a nested
+    ``for``/``while``/function body, which keeps this from crossing into an
+    unrelated inner scope's own variables.
     """
+    for stmt in stmts:
+        name = _assignment_target_name(stmt)
+        value = getattr(stmt, "value", None)
+        if name is not None:
+            already_derived = name in derived
+            if already_derived or (value is not None and _is_derived(value, derived)):
+                derived = derived | {name}
+            continue
+        if isinstance(stmt, ast.If):
+            if isinstance(stmt.test, ast.Compare) and _is_bare_membership_of(stmt.test, derived):
+                found.append(stmt.test)
+            derived = _walk_and_track(stmt.body, derived, found)
+            derived = _walk_and_track(stmt.orelse, derived, found)
+            continue
+        if isinstance(stmt, ast.Return | ast.Expr) and stmt.value is not None:
+            if isinstance(stmt.value, ast.Compare) and _is_bare_membership_of(stmt.value, derived):
+                found.append(stmt.value)
+    return derived
+
+
+def _for_loop_violations(node: ast.For) -> list[ast.Compare]:
+    """``Compare`` nodes in a ``for`` body that test the loop's own variable,
+    or a name simply derived from it (see ``_is_derived``)."""
     if not isinstance(node.target, ast.Name):
         return []
-    loop_var = node.target.id
     found: list[ast.Compare] = []
-    for stmt in node.body:
-        test = stmt.test if isinstance(stmt, ast.If) else None
-        candidates = [test] if test is not None else []
-        if isinstance(stmt, ast.Return | ast.Expr) and stmt.value is not None:
-            candidates.append(stmt.value)
-        for candidate in candidates:
-            if isinstance(candidate, ast.Compare) and _is_bare_membership_of(candidate, loop_var):
-                found.append(candidate)
+    _walk_and_track(node.body, frozenset({node.target.id}), found)
     return found
 
 
