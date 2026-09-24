@@ -2,11 +2,11 @@
 
 from typing import Any
 
-from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
 # ── Language-specific constants ──────────────────────────────────
 _LANGUAGE_NAME = "Java"
-#: Acceptance-test fixture directory, below the sanctioned scratch root.
+#: Acceptance-test fixture directory, below the gitignored acceptance root.
 _FIXTURE_DIR = "acceptance-test-qa-java"
 _EXTENSIONS: tuple[str, ...] = (".java",)
 _FORBIDDEN_PATTERNS: tuple[str, ...] = (
@@ -67,11 +67,11 @@ class JavaQaSuppressionStrategy:
             ToolPayload,
         )
 
-        fixture_root = scratch_path(_FIXTURE_DIR)
+        fixture_root = acceptance_path(_FIXTURE_DIR)
         probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": scratch_path(_FIXTURE_DIR, "Example.java"),
+                "file_path": acceptance_path(_FIXTURE_DIR, "Example.java"),
                 "content": "@Suppress" + "Warnings" + '("unchecked")\npublic class Example {}',
             },
         )
@@ -85,7 +85,7 @@ class JavaQaSuppressionStrategy:
                 expected_decision=Decision.DENY,
                 expected_message_patterns=["suppression", "BLOCKED", "Java"],
                 test_type=TestType.BLOCKING,
-                safety_notes="Inside the gitignored scratch directory - safe",
+                safety_notes="Inside the gitignored acceptance directory - safe",
                 setup_commands=[f"mkdir -p {fixture_root}"],
                 cleanup_commands=[f"rm -rf {fixture_root}"],
                 recommended_model=RecommendedModel.HAIKU,

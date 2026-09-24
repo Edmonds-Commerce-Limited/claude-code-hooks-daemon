@@ -17,9 +17,9 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_file_content, get_file_path
 from claude_code_hooks_daemon.plan_qa.paths import is_journal_file
-from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
-#: Acceptance-test fixture directory, below the sanctioned scratch root.
+#: Acceptance-test fixture directory, below the gitignored acceptance root.
 _FIXTURE_DIR: Final[str] = "acceptance-test-plantime"
 
 # Single source of truth for the one rule this handler enforces (Plan 00116,
@@ -232,7 +232,7 @@ class PlanTimeEstimatesHandler(PreToolUseHandlerBase):
         probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": scratch_path(_FIXTURE_DIR, "Plan", "001-test", "PLAN.md"),
+                "file_path": acceptance_path(_FIXTURE_DIR, "Plan", "001-test", "PLAN.md"),
                 "content": "# Plan 001\n\n**Estimated Effort**: 4 hours\n\nTask list here.",
             },
         )
@@ -252,12 +252,12 @@ class PlanTimeEstimatesHandler(PreToolUseHandlerBase):
                 # as denying for the wrong reason.
                 expected_message_patterns=[r"[Tt]ime estimate", r"BLOCKED"],
                 safety_notes=(
-                    "Inside the gitignored scratch directory - safe. Handler blocks "
+                    "Inside the gitignored acceptance directory - safe. Handler blocks "
                     "Write before file is created."
                 ),
                 test_type=TestType.BLOCKING,
-                setup_commands=[f"mkdir -p untracked/scratch/{_FIXTURE_DIR}/Plan/001-test"],
-                cleanup_commands=[f"rm -rf untracked/scratch/{_FIXTURE_DIR}"],
+                setup_commands=[f"mkdir -p untracked/acceptance/{_FIXTURE_DIR}/Plan/001-test"],
+                cleanup_commands=[f"rm -rf untracked/acceptance/{_FIXTURE_DIR}"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),

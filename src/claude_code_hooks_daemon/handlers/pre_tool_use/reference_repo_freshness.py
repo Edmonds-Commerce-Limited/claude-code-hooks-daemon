@@ -649,7 +649,7 @@ class ReferenceRepoFreshnessHandler(PreToolUseHandlerBase):
                     "resolves a subject only when a directory carrying a `.git` contains the "
                     "path, because inventing one denied `ls untracked/repos` with a remedy "
                     "nothing could ever satisfy. Fixture commands are bounded to "
-                    "`untracked/scratch/`, so the harness cannot build a checkout under a "
+                    "`untracked/acceptance/`, so the harness cannot build a checkout under a "
                     "governed root either. The deny path is covered end to end by "
                     "`tests/unit/handlers/pre_tool_use/test_reference_repo_freshness.py` "
                     "against a real cache on disk."
