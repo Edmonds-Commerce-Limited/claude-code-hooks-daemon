@@ -20,9 +20,7 @@ from pathlib import Path
 from typing import Final
 
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
-_PROJECT_DETECTION_SH: Final[Path] = (
-    _REPO_ROOT / "scripts" / "install" / "project_detection.sh"
-)
+_PROJECT_DETECTION_SH: Final[Path] = _REPO_ROOT / "scripts" / "install" / "project_detection.sh"
 _OUTPUT_SH: Final[Path] = _REPO_ROOT / "scripts" / "install" / "output.sh"
 
 _TIMEOUT_SECONDS: Final[int] = 30
@@ -32,9 +30,7 @@ def _run(project_root: Path, script: str) -> subprocess.CompletedProcess[str]:
     lib_dir = project_root / "lib"
     lib_dir.mkdir(exist_ok=True)
     guard_copy = lib_dir / "project_detection.sh"
-    guard_copy.write_text(
-        _PROJECT_DETECTION_SH.read_text(encoding="utf-8"), encoding="utf-8"
-    )
+    guard_copy.write_text(_PROJECT_DETECTION_SH.read_text(encoding="utf-8"), encoding="utf-8")
     (lib_dir / "output.sh").write_text(_OUTPUT_SH.read_text(encoding="utf-8"), encoding="utf-8")
     return subprocess.run(  # nosec B603 — fixed argv, no shell, trusted input
         ["bash", "-c", f'source "{guard_copy}"\n{script}'],
@@ -48,9 +44,7 @@ def _run(project_root: Path, script: str) -> subprocess.CompletedProcess[str]:
 
 
 class TestDetectProjectRootIgnoresALinkOnlyMarker:
-    def test_a_link_only_marker_does_not_satisfy_the_fallback_signal(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_link_only_marker_does_not_satisfy_the_fallback_signal(self, tmp_path: Path) -> None:
         """The fallback signal requires .claude/hooks-daemon/.git; the
         self-generated marker (a bare bin/hooks-daemon symlink) has none.
         """

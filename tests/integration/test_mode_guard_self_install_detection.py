@@ -26,9 +26,7 @@ _MODE_GUARD_SH: Final[Path] = _REPO_ROOT / "scripts" / "install" / "mode_guard.s
 
 _TIMEOUT_SECONDS: Final[int] = 30
 
-_DAEMON_PYPROJECT: Final[str] = (
-    '[project]\nname = "claude-code-hooks-daemon"\nversion = "1.0.0"\n'
-)
+_DAEMON_PYPROJECT: Final[str] = '[project]\nname = "claude-code-hooks-daemon"\nversion = "1.0.0"\n'
 
 
 def _self_install_layout(project_root: Path) -> None:
@@ -58,9 +56,7 @@ def _run(project_root: Path, script: str) -> subprocess.CompletedProcess[str]:
 
 
 class TestDetectSelfInstallMode:
-    def test_reports_self_install_with_no_claude_hooks_daemon_dir(
-        self, tmp_path: Path
-    ) -> None:
+    def test_reports_self_install_with_no_claude_hooks_daemon_dir(self, tmp_path: Path) -> None:
         """Baseline: the original, still-valid positive case."""
         _self_install_layout(tmp_path)
 
@@ -68,9 +64,7 @@ class TestDetectSelfInstallMode:
 
         assert result.stdout.strip() == "self-install", result.stderr
 
-    def test_reports_self_install_with_a_link_only_marker_present(
-        self, tmp_path: Path
-    ) -> None:
+    def test_reports_self_install_with_a_link_only_marker_present(self, tmp_path: Path) -> None:
         """The bug this plan fixes: a self-generated symlink is not a clone."""
         _self_install_layout(tmp_path)
         marker_bin = tmp_path / ".claude" / "hooks-daemon" / "bin"
@@ -92,9 +86,7 @@ class TestDetectSelfInstallMode:
 
         assert result.stdout.strip() == "normal", result.stderr
 
-    def test_reports_normal_without_self_install_source_markers(
-        self, tmp_path: Path
-    ) -> None:
+    def test_reports_normal_without_self_install_source_markers(self, tmp_path: Path) -> None:
         """Control: an ordinary project (no daemon source at all) is normal."""
         result = _run(tmp_path, f'get_install_mode "{tmp_path}"')
 
@@ -106,9 +98,7 @@ class TestEnsureNormalModeOnly:
     this repository -- the guard the link-only marker must not switch off.
     """
 
-    def test_aborts_in_self_install_mode_with_the_marker_present(
-        self, tmp_path: Path
-    ) -> None:
+    def test_aborts_in_self_install_mode_with_the_marker_present(self, tmp_path: Path) -> None:
         _self_install_layout(tmp_path)
         marker_bin = tmp_path / ".claude" / "hooks-daemon" / "bin"
         marker_bin.mkdir(parents=True)
@@ -127,9 +117,7 @@ class TestEnsureNormalModeOnly:
         real_clone.mkdir(parents=True)
         (real_clone / "pyproject.toml").write_text(_DAEMON_PYPROJECT, encoding="utf-8")
 
-        result = _run(
-            tmp_path, f'PROJECT_ROOT="{tmp_path}" ensure_normal_mode_only; echo rc=$?'
-        )
+        result = _run(tmp_path, f'PROJECT_ROOT="{tmp_path}" ensure_normal_mode_only; echo rc=$?')
 
         assert "SELF-INSTALL MODE DETECTED" not in result.stderr
         assert "rc=0" in result.stdout

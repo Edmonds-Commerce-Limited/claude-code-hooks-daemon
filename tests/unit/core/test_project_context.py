@@ -1,6 +1,5 @@
 """Tests for ProjectContext singleton."""
 
-import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -404,9 +403,7 @@ class TestSelfInstallCliSymlink:
 
         return project_root
 
-    def test_creates_the_conventional_symlink_in_self_install_mode(
-        self, tmp_path: Path
-    ) -> None:
+    def test_creates_the_conventional_symlink_in_self_install_mode(self, tmp_path: Path) -> None:
         project_root = self._init_self_install(tmp_path)
         link = project_root / ".claude" / "hooks-daemon" / "bin" / "hooks-daemon"
         assert link.is_symlink()
@@ -416,7 +413,7 @@ class TestSelfInstallCliSymlink:
         """A relative target survives the checkout being moved or cloned again."""
         project_root = self._init_self_install(tmp_path)
         link = project_root / ".claude" / "hooks-daemon" / "bin" / "hooks-daemon"
-        assert not Path(os.readlink(link)).is_absolute()
+        assert not link.readlink().is_absolute()
 
     def test_normal_mode_never_creates_the_symlink(self, tmp_path: Path) -> None:
         """Normal mode has no bin/hooks-daemon at the project root to link to."""

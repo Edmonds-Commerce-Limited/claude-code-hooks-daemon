@@ -215,9 +215,7 @@ class TestValidateInstallationTarget:
 
         assert "inside an existing installation" in str(exc_info.value)
 
-    def test_allows_a_link_only_self_install_marker_in_a_parent(
-        self, tmp_path: Path
-    ) -> None:
+    def test_allows_a_link_only_self_install_marker_in_a_parent(self, tmp_path: Path) -> None:
         """A self-install checkout's OWN generated symlink must not look like
         an installation to trees living under it (worktrees, client-mode test
         fixtures) -- Plan 00455. Unlike a real clone, the marker has no
@@ -225,9 +223,7 @@ class TestValidateInstallationTarget:
         """
         parent_link_only = tmp_path / "parent" / ".claude" / "hooks-daemon" / "bin"
         parent_link_only.mkdir(parents=True)
-        (parent_link_only / "hooks-daemon").symlink_to(
-            tmp_path / "parent" / "bin" / "hooks-daemon"
-        )
+        (parent_link_only / "hooks-daemon").symlink_to(tmp_path / "parent" / "bin" / "hooks-daemon")
 
         project_root = tmp_path / "parent" / "subproject"
         project_root.mkdir(parents=True)

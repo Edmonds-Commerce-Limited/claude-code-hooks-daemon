@@ -115,7 +115,7 @@ sits at the project root instead. `ProjectContext.initialize` (the single
 chokepoint every daemon-adjacent process passes through once at startup)
 creates a relative symlink to close that gap:
 
-```
+```text
 .claude/hooks-daemon/bin/hooks-daemon -> ../../../bin/hooks-daemon
 ```
 

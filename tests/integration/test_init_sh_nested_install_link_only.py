@@ -38,9 +38,7 @@ _UNRELATED_REMOTE: Final[str] = "git@github.com:someone/an-ordinary-project.git"
 _SOURCE_TIMEOUT_SECONDS: Final[int] = 30
 _GIT_TIMEOUT_SECONDS: Final[int] = 30
 
-_DAEMON_PYPROJECT: Final[str] = (
-    '[project]\nname = "claude-code-hooks-daemon"\nversion = "1.0.0"\n'
-)
+_DAEMON_PYPROJECT: Final[str] = '[project]\nname = "claude-code-hooks-daemon"\nversion = "1.0.0"\n'
 
 
 def _git(repo: Path, *args: str) -> None:
@@ -116,16 +114,14 @@ class TestGenuineNestedInstallIsStillRefused:
         result = _source(project)
 
         combined = result.stdout + result.stderr
-        assert _NESTED_INSTALL_CODE in combined, (
-            f"init.sh let a genuine nested installation through: {combined!r}"
-        )
+        assert (
+            _NESTED_INSTALL_CODE in combined
+        ), f"init.sh let a genuine nested installation through: {combined!r}"
 
     def test_the_refusal_still_exits_successfully(self, tmp_path: Path) -> None:
         """Failing OPEN is the point: a hook must never block Claude Code."""
         project = _throwaway_repo(tmp_path)
-        (project / ".claude" / "hooks-daemon" / ".claude" / "hooks-daemon").mkdir(
-            parents=True
-        )
+        (project / ".claude" / "hooks-daemon" / ".claude" / "hooks-daemon").mkdir(parents=True)
 
         assert _source(project).returncode == 0
 

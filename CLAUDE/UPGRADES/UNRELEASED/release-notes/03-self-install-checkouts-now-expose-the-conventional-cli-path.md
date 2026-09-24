@@ -1,7 +1,7 @@
 # Callout: self-install checkouts now expose the conventional CLI path
 
 **Plan**: 00455
-**Audience**: client projects | handler authors
+**Audience**: handler authors
 
 A self-install (dogfood) checkout of this repository now also has the daemon
 CLI at `.claude/hooks-daemon/bin/hooks-daemon` -- the same path every normal

@@ -148,9 +148,7 @@ class TestValidationUnaffectedByTheGeneratedCliSymlink:
     Locks the "confirmed safe" audit finding in place as a regression test.
     """
 
-    def test_self_install_with_the_generated_symlink_still_succeeds(
-        self, tmp_path: Path
-    ) -> None:
+    def test_self_install_with_the_generated_symlink_still_succeeds(self, tmp_path: Path) -> None:
         claude_dir = tmp_path / ".claude"
         claude_dir.mkdir()
         (tmp_path / "src" / "claude_code_hooks_daemon").mkdir(parents=True)
