@@ -19,107 +19,66 @@ Full detail on any rule: `bin/hooks-daemon explain-rule <ID>`.
 
 ## Frequently-triggered handler guidance
 
-<!-- handler: auto-continue-stop -->
+<!-- handler: enforce-lsp-usage -->
 
-### Stop Explanation Required
+## lsp_enforcement — use LSP tools for code symbol lookups
 
-Before stopping, **prefix your final message** with `STOPPING BECAUSE:` followed by a clear reason:
+Using `Grep` or `Bash` (grep/rg) to find class definitions, function signatures, or symbol references is blocked or redirected to LSP tools, which are faster and semantically accurate.
 
-```
-STOPPING BECAUSE: all tasks complete, QA passes, daemon restart verified.
-```
+**Prefer LSP tools for**:
 
-**Why**: The stop hook enforces intentional stops. Stopping without an explanation triggers an auto-block that asks you to explain or continue.
+- Finding where a class or function is defined → `goToDefinition`
+- Finding all usages of a symbol → `findReferences`
+- Getting type information or documentation → `hover`
+- Listing all symbols in a file → `documentSymbol`
+- Searching symbols across the project → `workspaceSymbol`
 
-**Alternatives**:
+**Grep/Bash grep is still appropriate for**: text patterns in content, log searching, finding strings in config files.
 
-- `STOPPING BECAUSE: <reason>` — stops cleanly with explanation
-- Continue working — no need to stop unless all work is genuinely complete
+Default mode (`block_once`): the first symbol-lookup grep in a session is denied with guidance; subsequent retries are allowed.
 
-**Do NOT**:
+<!-- handler: pipe-blocker -->
 
-- Stop mid-task without explanation
-- Ask confirmation questions and then stop (the hook auto-continues those)
-- Smuggle a rhetorical continue question inside a `STOPPING BECAUSE:` message ('STOPPING BECAUSE: slice 1 done. Want me to build slice 2?') — this is HARD-BLOCKED; the prefix does not exempt tautological questions. Just continue with the next unit of work
-- Use `AUTO-CONTINUE` unless you intend to keep working indefinitely
+### Pipe Blocker
 
-**Before asking a question, evaluate it critically**:
+Commands piped to `tail` or `head` are **blocked** — piping truncates output and causes information loss.
 
-- Tautological/rhetorical questions with obvious answers ("Should I continue?", "Would you like me to proceed?") — do NOT ask, just do it
-- Errors with a clear next step ("The test failed, should I fix it?") — do NOT ask, just fix it
-- Genuine choice questions where all options are valid ("Which of A, B, or C should we use?") — these deserve a response. Use `STOPPING BECAUSE: need user input` and ask your question
+**Do NOT do the theatre** of capturing output to a file and then echoing the WHOLE file to stdout — that defeats the point and just bloats tokens.
 
-**Recovering from a `tool_use_error` — do NOT stop silently**:
+**Preferred — the deployed `bin/echd-capture` helper**: capture the FULL output, see only a preview. Run it by the path below from the project root (the block message prints the absolute form); it is not on `PATH`, so never type the bare name.
 
-Some tool errors require an explicit recovery action, not a halt. The most common shape:
+```bash
+# WRONG — blocked (and truncates):
+pytest tests/ 2>&1 | tail -20
 
-- You call `Edit` or `Write` on a file you have not yet read.
-- Claude Code returns a `tool_use_error` (e.g. "File has not been read yet").
-- The correct recovery is **Read the file, then retry Edit/Write** — **do not stop**. Stopping silently after a tool error triggers a Stop-hook re-entry loop and wastes a turn.
-
-**Rule: Read before Edit/Write.** If you must edit a file you have not read, Read it first in the same turn. The daemon's Stop handler will detect a `tool_use_error` followed by a silent stop and re-fire to force recovery.
-
-**On Stop hook re-entry (the hook fires again after a prior block)**: your next response is treated like any other — it must either prefix with `STOPPING BECAUSE:` or continue the work. Re-entry does not exempt you from the explanation rule.
-
-**If you are stopping because you are blocked ONLY on the human, declare it — it turns the failsafe cron off**. Put the token immediately after the prefix:
-
-```
-STOPPING BECAUSE: [awaiting-human] the owner has to choose between A and B before anything else can move.
+# RIGHT — full capture, bounded preview + path to the rest:
+set -o pipefail
+pytest tests/ 2>&1 | bin/echd-capture 20
+# prints the last 20 lines + '(full output: /…/command-output-….txt)'.
+# Use --head N for the first N lines. pipefail keeps pytest's exit code visible.
 ```
 
-The token is matched exactly, so any wording after it works. These older phrasings are also still recognised, and are kept working rather than extended — a new wording is handled by the token, not by adding another phrase here:
+**Always-works alternative** (no helper, no pipe): `pytest tests/ > untracked/scratch/out.txt 2>&1` then read the file selectively. Keep the capture IN-REPO — `project_containment` denies a redirect to a path outside the repository, and a capture written outside it is gone on the next container restart.
 
-- `blocked only on human input`
-- `blocked only on the owner's input`
-- `need user input`
-- `waiting on the user's decision`
+**Allowed** (whitelisted): `grep`, `rg`, `awk`, `sed`, `jq`, `ls`, `cat`, `git log`, `git tag`, `git branch`, and other cheap filtering commands.
 
-Either form in your `STOPPING BECAUSE:` line records a marker that makes the daemon drop the next hourly failsafe-cron tick before it reaches you, at zero token cost. Without one, every tick costs a full turn to read and answer with nothing. The next real user message clears the marker and hourly ticks resume; it also expires on its own, so a mistake here costs you at most a day of ticks.
+**EVERY pipe in the command is judged, on its own producer.** A cheap pipe does not buy cover for an expensive one, so `git log | head -2 && pytest | head -1` is blocked on the `pytest` half. The `tail -f` / `head -c` exemptions are also per-pipe — an unrelated `&& tail -f x` elsewhere in the command exempts nothing.
 
-**Only when it is the ONLY thing blocking you.** A stop that merely mentions waiting on someone while other work remains must not use these shapes — that would silence a tick you could have used. If there is work you could still do, do it instead of stopping.
+**A pipe inside `$( )` or backticks belongs to the command INSIDE it.** `echo $(pytest tests/ | head -1)` is blocked on `pytest`, not allowed because `echo` is cheap — the output being thrown away is pytest's. Nesting and `<( )` behave the same. Whitelisted inner producers are still fine: `echo $(git log --format=%H | head -1)` is allowed. A `$( )` or backtick inside SINGLE quotes is literal text, so it is not treated as a substitution. That exemption is about SUBSTITUTION only — an ordinary single-quoted ARGUMENT containing `| head` is still scanned and still blocked, because the shell can hand that string to something that runs it. The exemptions that do cover a whole value are a git `-m`/`-F` message and a quoted-delimiter heredoc.
 
-<!-- handler: block-comment-changelog -->
+**Only PIPES are restricted — reading a file directly is not.** `tail -n 40 <file>`, `head -n 40 <file>` and `grep pattern <file>` take the path as an ARGUMENT, so no pipe exists and this handler never sees them. That is the supported way to sample a large append-only file such as a plan's `JOURNAL/` day-file — which you should tail or grep rather than read whole.
 
-## comment_changelog — no changelog narrative in code comments
+**Add to whitelist** (if safe to pipe): set `extra_whitelist` in `.claude/hooks-daemon.yaml` under `pipe_blocker`.
 
-A `Write`/`Edit` that puts HISTORICAL NARRATIVE into a code comment is blocked. A comment describes CURRENT STATE; changelog narrative belongs in git (the commit message), the project's changelog file, or a plan's `JOURNAL/` day-file.
+**A git message VALUE is exempt only while the shell cannot run it.** Prose in `git commit -m`/`git tag -m` is not scanned, so a literal `| tail` inside a message never counts as a pipe — but that exemption ends at a command substitution. Bash expands `$( )` and backticks inside DOUBLE quotes, so `git commit -m "$(pytest | tail -1)"` genuinely runs pytest and truncates it, and is blocked on the `pytest`. Single quotes substitute nothing and are exempt unconditionally, as is the `"$(cat <<'EOF' ... EOF)"` idiom, whose QUOTED delimiter makes the body literal. The exemption is also scoped to commands that actually take a message: `python -m pytest ... | tail` names `pytest` as its producer, because `-m` there means module.
 
-**Blocked (high-precision) signals**, either of which denies the write:
+**A quoted-delimiter heredoc is exempt when NOTHING on its line can EXECUTE the body.** `cat >> notes.md <<'EOF' ... EOF` writes its body out verbatim — the shell expands nothing in it — so a `| tail` sitting in that body was never going to run, and blocking it would be wrong. Quote the delimiter (`<<'EOF'`) whenever the body is prose, a code snippet, or anything else you are writing rather than executing. Where the REDIRECT sits makes no difference: `cat > notes.md <<'EOF'` and `cat <<'EOF' > notes.md` are the same command to bash and the same command here, and a delimiter carrying punctuation (`<<'EOF-1'`) counts too.
 
-- `Prior <version>:` / `Previously <version>:` phrasing
-- a dated entry (`2026-08-12: ...`)
+**But `bash <<'EOF'` IS scanned, because bash EXECUTES the body.** The quoted delimiter governs only what the OUTER shell expands on the way in; it never stops the receiving command running the bytes. So the exemption is granted from an allowlist of commands that consume their input as data (`cat`, `tee`, `git`, `jq`, `grep`, …), and THREE things must all pass it: the receiver, every stage the body is piped on to (`cat <<'EOF' | bash` runs it), and the command not sitting in a substitution (`$(cat <<'EOF' … )` puts the body's text in command position). Anything else — `bash`, `sh`, `python3`, `ssh host`, or simply a name the list does not carry — has its body scanned like any other command. Withholding the exemption is the cheap error here: it costs a false positive, where granting one wrongly costs the guard entirely.
 
-Both were measured with ZERO false positives across this project's own ~1,080 source/test files (Plan 00208's whole-repo self-scan) — every real hit was either the field-report shape itself or this handler's own test fixtures.
+**An UNQUOTED `<<EOF` IS still scanned, and that boundary is deliberate.** Bash performs command substitution inside an unquoted heredoc, so `cat <<EOF` with `$(pytest | tail -1)` in the body really does run pytest and truncate it. A bare `| tail` in unquoted prose can therefore still false-trigger: when the matched text reads as ENGLISH rather than as a command — it starts with a function word like "the", or such words make up a large share of it — the block reason is short and does NOT echo your text back or suggest a fabricated `extra_whitelist` entry. Just quote the delimiter and retry, or write prose content with the `Write` tool instead of a heredoc.
 
-**NOT blocked — advisory only**: a version-transition arrow (`1.2 -> 1.3`), a changelog verb naming a version (`Removed in v2.1.224`), two or more distinct versioned/dated entries in one comment (configurable via `max_history_entries`, default 1), `Fixed:`/`Added:`/`Changed:` bullet runs, retrospective phrasing (`used to`, `no longer`, `we switched from`). These four started as blocking signals but the same self-scan found each firing on legitimate code — version-processing utilities (upgrade compatibility checkers) legitimately cite multiple versions in their own docstrings, and "removed in vX.Y" describing an EXTERNAL tool's own deprecation is rationale, not a changelog entry about this project.
-
-**History as RATIONALE is legitimate and is NOT flagged.** A comment may recount the past when the past is the reason the code looks the way it is now, and re-litigating it would reintroduce a fixed bug — e.g. `# Plan 00047: do NOT re-add DISABLE_MOUSE, see...`. The separating test: an entry keyed by a RELEASE NUMBER is a changelog; an entry keyed by a FAILURE MODE (a plan number, a bug description) is a rationale.
-
-**No escape hatch** — unlike `comment_size`, this handler has no `MUST_..._BECAUSE` override: changelog content should be MOVED to git/a changelog file/a plan JOURNAL/, never exempted in place.
-
-**Scope**: only comment spans are scanned (not code), via the same Strategy Pattern language registry as `qa_suppression`. `.md` files are skipped entirely — markdown prose is not a comment. Only the ADDED text is checked on `Edit` (`new_string`) — removing changelog content is never blocked.
-
-**Excluded paths**: vendor/build/fixture dirs are skipped by default. Exempt more paths via `handlers.pre_tool_use.comment_changelog.options.exclude_paths` or the project-wide `daemon.exclude_paths`.
-
-<!-- handler: block-security-antipatterns -->
-
-## security_antipattern — OWASP security antipatterns are blocked
-
-A `Write`/`Edit` of code containing security antipatterns is blocked, across all supported languages. Fix the code to use safe patterns instead.
-
-**Blocked categories**:
-
-- Code injection: `eval`, `exec`, `new Function`, `__import__`, `instance_eval`, `yaml.load` — dynamic execution of a string
-- Command injection: `os.system`, `subprocess(..., shell=True)`, `shell_exec`, `proc_open`, `Runtime.exec`, `Process.Start`, `IO.popen`
-- Unsafe deserialization: `pickle.load`, `Marshal.load`, `unserialize`, `ObjectInputStream`, `XMLDecoder`, `BinaryFormatter`
-- XSS: `innerHTML`, `dangerouslySetInnerHTML`, `document.write`, `template.HTML`/`JS`/`URL`
-- Hardcoded credentials: AWS access keys, GitHub tokens, Stripe keys, private key blocks
-
-**This is pattern matching on known-dangerous constructs, not analysis.** It does NOT detect SQL injection, weak hashing, or path traversal — those are properties of how a value FLOWS, which a regex cannot see. Do not read a passing write as 'this code is secure'.
-
-**Supported languages**: Python, JavaScript/TypeScript, Go, PHP, Ruby, Java, Kotlin, C#, Rust, Swift, Dart. Coverage varies by language — a construct blocked in one is not necessarily blocked in another.
-
-**Excluded paths**: vendor/, node_modules/, and test fixtures are skipped by default. Exempt more paths with glob patterns via `handlers.pre_tool_use.security_antipattern.options.exclude_paths` or the project-wide `daemon.exclude_paths`.
+**Length is NOT part of that judgement.** A long command is still a command: a 100-character invocation with a worktree branch name and absolute paths gets the normal block reason, naming what matched and how to whitelist it. If you ever see the short prose reason for text that really was a command, that is a bug worth reporting — retrying it unchanged will block again.
 
 <!-- handler: block-sed-command -->
 
@@ -150,6 +109,63 @@ A `Write`/`Edit` of code containing security antipatterns is blocked, across all
   2. Dispatch one Haiku agent per file
   3. Each agent uses the `Edit` tool (never `sed`)
 
+<!-- handler: qa-suppression-blocker -->
+
+## qa_suppression — QA suppression annotations are blocked
+
+A `Write`/`Edit` that puts QA suppression directives into a source file is blocked, across all supported languages. Fix the underlying code issue instead.
+
+**Blocked annotation types (by language)**:
+
+- Python: `noqa` directives, `type: ignore` annotations
+- JavaScript/TypeScript: `eslint-disable` inline directives
+- Go: `nolint` directives (golangci-lint)
+- PHP: `phpstan-ignore`, `psalm-suppress` annotations
+- Java/Kotlin: `@SuppressWarnings`, `@Suppress` annotations
+- C#: `pragma warning disable` directives
+- Rust: `allow(...)` attributes anywhere in the file (item-level `#[allow(...)]` and crate-level `#![allow(...)]`)
+
+**Required action**: Fix the code so QA passes without suppression. If a suppression is genuinely necessary, ask the user to add it manually — this signals a conscious decision rather than a shortcut.
+
+**Excluded paths**: per-language vendor/build/node_modules dirs are skipped by default. Exempt more paths with glob patterns via `handlers.pre_tool_use.qa_suppression.options.exclude_paths` or the project-wide `daemon.exclude_paths` — use these for fixtures that must contain suppression annotations.
+
+<!-- handler: plan-number-helper -->
+
+## plan_number_helper — use `mkplan.bash` to create a plan
+
+**Before creating one, check nothing already covers it.** Dispatch the `hooks-daemon-plan-dedupe-scout` agent with a sentence describing the intended work; it reads the still-live plans and names any that already cover it, so you can merge or supersede instead of filing alongside. This is a SUGGESTION — it never blocks, it is a judgement call rather than a rule, and it can be wrong. It is worth the few seconds because the alternative failure is expensive and silent: a duplicate plan is usually discovered only after an agent has spent a lot of context re-deriving conclusions that already existed on disk.
+
+**Check its count against one you did not get from it.** The report carries a `Checked N live plans.` line, and the agent can only reconcile that against its own enumeration — which is no check at all when the enumeration is what went wrong. Measured on this agent: 34, then 32, then 17 plans reported for the same unchanged tree of 34. So state the number of plan folders in the plan root when you dispatch it (`mkplan.bash` prints it for you), and when the report's N disagrees, re-dispatch rather than act on the verdict — a scout that read a different tree has not answered your question.
+
+**To create a new plan, run the deployed scaffolding script:**
+
+```
+CLAUDE/Plan/mkplan.bash "descriptive-kebab-name"
+```
+
+**Hand-creating the folder is BLOCKED.** `mkdir <plan-dir>/NNNNN-name` is denied when the scaffolder is deployed: `mkdir` claims a number the moment the folder appears, but nothing records the claim until PLAN.md is written, so a concurrent agent reading the counter in between gets the SAME number and the collision surfaces only at the commit gate. This is narrow — `mkdir <plan-dir>/Completed`, a `JOURNAL/` inside a plan that already exists, and a `-p` re-create of an existing folder are all allowed, as is any path outside this workspace.
+
+(Use the project's configured plan directory if it is not `CLAUDE/Plan/`.) The script takes a lock, reads the same authoritative git counter (`hooksdaemon.latestPlanNumber`), assigns the next number atomically, creates the `NNNNN-name/` folder, scaffolds `PLAN.md`, and advances the counter — so concurrent runs can never collide on a number. It prints the new folder path on stdout. You still add the README index row yourself (the script reminds you).
+
+**If you only need the *number* (not a folder)**, read the counter and add 1 — this is the fallback, not the primary path:
+
+```
+git config --local hooksdaemon.latestPlanNumber
+```
+
+Add 1 to that value (zero-pad to 5 digits, e.g. counter `117` → next plan `00118`). The git counter is the source of truth; the daemon keeps it correct across branches.
+
+**Do NOT** scan `CLAUDE/Plan/` with `ls`/`find`/glob pipelines to discover the next number. Folder scans miss plans in `Completed/` and other subdirectories, and disagree across branches. The folder scan is only used to bootstrap the counter when the git key is unset (which `mkplan.bash` and the daemon both handle).
+
+**To FIND an existing plan** — a different question from the next number, and the one a folder scan is usually reaching for:
+
+```
+bin/hooks-daemon find-plan 412
+bin/hooks-daemon find-plan "jobs"
+```
+
+It searches the WHOLE tree including `Completed/`, which is precisely what a folder scan misses, and prints each plan's number, status and path.
+
 <!-- handler: block-sensitive-content -->
 
 ## sensitive_content — blocked patterns and secret terms are never written
@@ -172,23 +188,25 @@ If a compound command is denied because an unrelated part of it carries a term (
 
 Missing/empty/comments-only secret file = this source is silently inert.
 
-<!-- handler: enforce-lsp-usage -->
+<!-- handler: block-security-antipatterns -->
 
-## lsp_enforcement — use LSP tools for code symbol lookups
+## security_antipattern — OWASP security antipatterns are blocked
 
-Using `Grep` or `Bash` (grep/rg) to find class definitions, function signatures, or symbol references is blocked or redirected to LSP tools, which are faster and semantically accurate.
+A `Write`/`Edit` of code containing security antipatterns is blocked, across all supported languages. Fix the code to use safe patterns instead.
 
-**Prefer LSP tools for**:
+**Blocked categories**:
 
-- Finding where a class or function is defined → `goToDefinition`
-- Finding all usages of a symbol → `findReferences`
-- Getting type information or documentation → `hover`
-- Listing all symbols in a file → `documentSymbol`
-- Searching symbols across the project → `workspaceSymbol`
+- Code injection: `eval`, `exec`, `new Function`, `__import__`, `instance_eval`, `yaml.load` — dynamic execution of a string
+- Command injection: `os.system`, `subprocess(..., shell=True)`, `shell_exec`, `proc_open`, `Runtime.exec`, `Process.Start`, `IO.popen`
+- Unsafe deserialization: `pickle.load`, `Marshal.load`, `unserialize`, `ObjectInputStream`, `XMLDecoder`, `BinaryFormatter`
+- XSS: `innerHTML`, `dangerouslySetInnerHTML`, `document.write`, `template.HTML`/`JS`/`URL`
+- Hardcoded credentials: AWS access keys, GitHub tokens, Stripe keys, private key blocks
 
-**Grep/Bash grep is still appropriate for**: text patterns in content, log searching, finding strings in config files.
+**This is pattern matching on known-dangerous constructs, not analysis.** It does NOT detect SQL injection, weak hashing, or path traversal — those are properties of how a value FLOWS, which a regex cannot see. Do not read a passing write as 'this code is secure'.
 
-Default mode (`block_once`): the first symbol-lookup grep in a session is denied with guidance; subsequent retries are allowed.
+**Supported languages**: Python, JavaScript/TypeScript, Go, PHP, Ruby, Java, Kotlin, C#, Rust, Swift, Dart. Coverage varies by language — a construct blocked in one is not necessarily blocked in another.
+
+**Excluded paths**: vendor/, node_modules/, and test fixtures are skipped by default. Exempt more paths with glob patterns via `handlers.pre_tool_use.security_antipattern.options.exclude_paths` or the project-wide `daemon.exclude_paths`.
 
 <!-- handler: enforce-tdd -->
 
@@ -249,105 +267,87 @@ A `Write`/`Edit` of code that silently swallows errors is blocked. All errors mu
 
 **Excluded paths**: vendor/, node_modules/, and test-fixture dirs (tests/fixtures/, tests/assets/, __fixtures__/) are skipped by default. Exempt more paths with glob patterns via `handlers.pre_tool_use.error_hiding_blocker.options.exclude_paths` or the project-wide `daemon.exclude_paths` — use these for fixtures of deliberately-broken code instead of disabling the handler.
 
-<!-- handler: pipe-blocker -->
+<!-- handler: block-comment-changelog -->
 
-### Pipe Blocker
+## comment_changelog — no changelog narrative in code comments
 
-Commands piped to `tail` or `head` are **blocked** — piping truncates output and causes information loss.
+A `Write`/`Edit` that puts HISTORICAL NARRATIVE into a code comment is blocked. A comment describes CURRENT STATE; changelog narrative belongs in git (the commit message), the project's changelog file, or a plan's `JOURNAL/` day-file.
 
-**Do NOT do the theatre** of capturing output to a file and then echoing the WHOLE file to stdout — that defeats the point and just bloats tokens.
+**Blocked (high-precision) signals**, either of which denies the write:
 
-**Preferred — the deployed `bin/echd-capture` helper**: capture the FULL output, see only a preview. Run it by the path below from the project root (the block message prints the absolute form); it is not on `PATH`, so never type the bare name.
+- `Prior <version>:` / `Previously <version>:` phrasing
+- a dated entry (`2026-08-12: ...`)
 
-```bash
-# WRONG — blocked (and truncates):
-pytest tests/ 2>&1 | tail -20
+Both were measured with ZERO false positives across this project's own ~1,080 source/test files (Plan 00208's whole-repo self-scan) — every real hit was either the field-report shape itself or this handler's own test fixtures.
 
-# RIGHT — full capture, bounded preview + path to the rest:
-set -o pipefail
-pytest tests/ 2>&1 | bin/echd-capture 20
-# prints the last 20 lines + '(full output: /…/command-output-….txt)'.
-# Use --head N for the first N lines. pipefail keeps pytest's exit code visible.
-```
+**NOT blocked — advisory only**: a version-transition arrow (`1.2 -> 1.3`), a changelog verb naming a version (`Removed in v2.1.224`), two or more distinct versioned/dated entries in one comment (configurable via `max_history_entries`, default 1), `Fixed:`/`Added:`/`Changed:` bullet runs, retrospective phrasing (`used to`, `no longer`, `we switched from`). These four started as blocking signals but the same self-scan found each firing on legitimate code — version-processing utilities (upgrade compatibility checkers) legitimately cite multiple versions in their own docstrings, and "removed in vX.Y" describing an EXTERNAL tool's own deprecation is rationale, not a changelog entry about this project.
 
-**Always-works alternative** (no helper, no pipe): `pytest tests/ > untracked/scratch/out.txt 2>&1` then read the file selectively. Keep the capture IN-REPO — `project_containment` denies a redirect to a path outside the repository, and a capture written outside it is gone on the next container restart.
+**History as RATIONALE is legitimate and is NOT flagged.** A comment may recount the past when the past is the reason the code looks the way it is now, and re-litigating it would reintroduce a fixed bug — e.g. `# Plan 00047: do NOT re-add DISABLE_MOUSE, see...`. The separating test: an entry keyed by a RELEASE NUMBER is a changelog; an entry keyed by a FAILURE MODE (a plan number, a bug description) is a rationale.
 
-**Allowed** (whitelisted): `grep`, `rg`, `awk`, `sed`, `jq`, `ls`, `cat`, `git log`, `git tag`, `git branch`, and other cheap filtering commands.
+**No escape hatch** — unlike `comment_size`, this handler has no `MUST_..._BECAUSE` override: changelog content should be MOVED to git/a changelog file/a plan JOURNAL/, never exempted in place.
 
-**EVERY pipe in the command is judged, on its own producer.** A cheap pipe does not buy cover for an expensive one, so `git log | head -2 && pytest | head -1` is blocked on the `pytest` half. The `tail -f` / `head -c` exemptions are also per-pipe — an unrelated `&& tail -f x` elsewhere in the command exempts nothing.
+**Scope**: only comment spans are scanned (not code), via the same Strategy Pattern language registry as `qa_suppression`. `.md` files are skipped entirely — markdown prose is not a comment. Only the ADDED text is checked on `Edit` (`new_string`) — removing changelog content is never blocked.
 
-**A pipe inside `$( )` or backticks belongs to the command INSIDE it.** `echo $(pytest tests/ | head -1)` is blocked on `pytest`, not allowed because `echo` is cheap — the output being thrown away is pytest's. Nesting and `<( )` behave the same. Whitelisted inner producers are still fine: `echo $(git log --format=%H | head -1)` is allowed. A `$( )` or backtick inside SINGLE quotes is literal text, so it is not treated as a substitution. That exemption is about SUBSTITUTION only — an ordinary single-quoted ARGUMENT containing `| head` is still scanned and still blocked, because the shell can hand that string to something that runs it. The exemptions that do cover a whole value are a git `-m`/`-F` message and a quoted-delimiter heredoc.
+**Excluded paths**: vendor/build/fixture dirs are skipped by default. Exempt more paths via `handlers.pre_tool_use.comment_changelog.options.exclude_paths` or the project-wide `daemon.exclude_paths`.
 
-**Only PIPES are restricted — reading a file directly is not.** `tail -n 40 <file>`, `head -n 40 <file>` and `grep pattern <file>` take the path as an ARGUMENT, so no pipe exists and this handler never sees them. That is the supported way to sample a large append-only file such as a plan's `JOURNAL/` day-file — which you should tail or grep rather than read whole.
+<!-- handler: auto-continue-stop -->
 
-**Add to whitelist** (if safe to pipe): set `extra_whitelist` in `.claude/hooks-daemon.yaml` under `pipe_blocker`.
+### Stop Explanation Required
 
-**A git message VALUE is exempt only while the shell cannot run it.** Prose in `git commit -m`/`git tag -m` is not scanned, so a literal `| tail` inside a message never counts as a pipe — but that exemption ends at a command substitution. Bash expands `$( )` and backticks inside DOUBLE quotes, so `git commit -m "$(pytest | tail -1)"` genuinely runs pytest and truncates it, and is blocked on the `pytest`. Single quotes substitute nothing and are exempt unconditionally, as is the `"$(cat <<'EOF' ... EOF)"` idiom, whose QUOTED delimiter makes the body literal. The exemption is also scoped to commands that actually take a message: `python -m pytest ... | tail` names `pytest` as its producer, because `-m` there means module.
-
-**A quoted-delimiter heredoc is exempt when NOTHING on its line can EXECUTE the body.** `cat >> notes.md <<'EOF' ... EOF` writes its body out verbatim — the shell expands nothing in it — so a `| tail` sitting in that body was never going to run, and blocking it would be wrong. Quote the delimiter (`<<'EOF'`) whenever the body is prose, a code snippet, or anything else you are writing rather than executing. Where the REDIRECT sits makes no difference: `cat > notes.md <<'EOF'` and `cat <<'EOF' > notes.md` are the same command to bash and the same command here, and a delimiter carrying punctuation (`<<'EOF-1'`) counts too.
-
-**But `bash <<'EOF'` IS scanned, because bash EXECUTES the body.** The quoted delimiter governs only what the OUTER shell expands on the way in; it never stops the receiving command running the bytes. So the exemption is granted from an allowlist of commands that consume their input as data (`cat`, `tee`, `git`, `jq`, `grep`, …), and THREE things must all pass it: the receiver, every stage the body is piped on to (`cat <<'EOF' | bash` runs it), and the command not sitting in a substitution (`$(cat <<'EOF' … )` puts the body's text in command position). Anything else — `bash`, `sh`, `python3`, `ssh host`, or simply a name the list does not carry — has its body scanned like any other command. Withholding the exemption is the cheap error here: it costs a false positive, where granting one wrongly costs the guard entirely.
-
-**An UNQUOTED `<<EOF` IS still scanned, and that boundary is deliberate.** Bash performs command substitution inside an unquoted heredoc, so `cat <<EOF` with `$(pytest | tail -1)` in the body really does run pytest and truncate it. A bare `| tail` in unquoted prose can therefore still false-trigger: when the matched text reads as ENGLISH rather than as a command — it starts with a function word like "the", or such words make up a large share of it — the block reason is short and does NOT echo your text back or suggest a fabricated `extra_whitelist` entry. Just quote the delimiter and retry, or write prose content with the `Write` tool instead of a heredoc.
-
-**Length is NOT part of that judgement.** A long command is still a command: a 100-character invocation with a worktree branch name and absolute paths gets the normal block reason, naming what matched and how to whitelist it. If you ever see the short prose reason for text that really was a command, that is a bug worth reporting — retrying it unchanged will block again.
-
-<!-- handler: plan-number-helper -->
-
-## plan_number_helper — use `mkplan.bash` to create a plan
-
-**Before creating one, check nothing already covers it.** Dispatch the `hooks-daemon-plan-dedupe-scout` agent with a sentence describing the intended work; it reads the still-live plans and names any that already cover it, so you can merge or supersede instead of filing alongside. This is a SUGGESTION — it never blocks, it is a judgement call rather than a rule, and it can be wrong. It is worth the few seconds because the alternative failure is expensive and silent: a duplicate plan is usually discovered only after an agent has spent a lot of context re-deriving conclusions that already existed on disk.
-
-**Check its count against one you did not get from it.** The report carries a `Checked N live plans.` line, and the agent can only reconcile that against its own enumeration — which is no check at all when the enumeration is what went wrong. Measured on this agent: 34, then 32, then 17 plans reported for the same unchanged tree of 34. So state the number of plan folders in the plan root when you dispatch it (`mkplan.bash` prints it for you), and when the report's N disagrees, re-dispatch rather than act on the verdict — a scout that read a different tree has not answered your question.
-
-**To create a new plan, run the deployed scaffolding script:**
+Before stopping, **prefix your final message** with `STOPPING BECAUSE:` followed by a clear reason:
 
 ```
-CLAUDE/Plan/mkplan.bash "descriptive-kebab-name"
+STOPPING BECAUSE: all tasks complete, QA passes, daemon restart verified.
 ```
 
-**Hand-creating the folder is BLOCKED.** `mkdir <plan-dir>/NNNNN-name` is denied when the scaffolder is deployed: `mkdir` claims a number the moment the folder appears, but nothing records the claim until PLAN.md is written, so a concurrent agent reading the counter in between gets the SAME number and the collision surfaces only at the commit gate. This is narrow — `mkdir <plan-dir>/Completed`, a `JOURNAL/` inside a plan that already exists, and a `-p` re-create of an existing folder are all allowed, as is any path outside this workspace.
+**Why**: The stop hook enforces intentional stops. Stopping without an explanation triggers an auto-block that asks you to explain or continue.
 
-(Use the project's configured plan directory if it is not `CLAUDE/Plan/`.) The script takes a lock, reads the same authoritative git counter (`hooksdaemon.latestPlanNumber`), assigns the next number atomically, creates the `NNNNN-name/` folder, scaffolds `PLAN.md`, and advances the counter — so concurrent runs can never collide on a number. It prints the new folder path on stdout. You still add the README index row yourself (the script reminds you).
+**Alternatives**:
 
-**If you only need the *number* (not a folder)**, read the counter and add 1 — this is the fallback, not the primary path:
+- `STOPPING BECAUSE: <reason>` — stops cleanly with explanation
+- Continue working — no need to stop unless all work is genuinely complete
+
+**Do NOT**:
+
+- Stop mid-task without explanation
+- Ask confirmation questions and then stop (the hook auto-continues those)
+- Smuggle a rhetorical continue question inside a `STOPPING BECAUSE:` message ('STOPPING BECAUSE: slice 1 done. Want me to build slice 2?') — this is HARD-BLOCKED; the prefix does not exempt tautological questions. Just continue with the next unit of work
+- Use `AUTO-CONTINUE` unless you intend to keep working indefinitely
+
+**Before asking a question, evaluate it critically**:
+
+- Tautological/rhetorical questions with obvious answers ("Should I continue?", "Would you like me to proceed?") — do NOT ask, just do it
+- Errors with a clear next step ("The test failed, should I fix it?") — do NOT ask, just fix it
+- Genuine choice questions where all options are valid ("Which of A, B, or C should we use?") — these deserve a response. Use `STOPPING BECAUSE: need user input` and ask your question
+
+**Recovering from a `tool_use_error` — do NOT stop silently**:
+
+Some tool errors require an explicit recovery action, not a halt. The most common shape:
+
+- You call `Edit` or `Write` on a file you have not yet read.
+- Claude Code returns a `tool_use_error` (e.g. "File has not been read yet").
+- The correct recovery is **Read the file, then retry Edit/Write** — **do not stop**. Stopping silently after a tool error triggers a Stop-hook re-entry loop and wastes a turn.
+
+**Rule: Read before Edit/Write.** If you must edit a file you have not read, Read it first in the same turn. The daemon's Stop handler will detect a `tool_use_error` followed by a silent stop and re-fire to force recovery.
+
+**On Stop hook re-entry (the hook fires again after a prior block)**: your next response is treated like any other — it must either prefix with `STOPPING BECAUSE:` or continue the work. Re-entry does not exempt you from the explanation rule.
+
+**If you are stopping because you are blocked ONLY on the human, declare it — it turns the failsafe cron off**. Put the token immediately after the prefix:
 
 ```
-git config --local hooksdaemon.latestPlanNumber
+STOPPING BECAUSE: [awaiting-human] the owner has to choose between A and B before anything else can move.
 ```
 
-Add 1 to that value (zero-pad to 5 digits, e.g. counter `117` → next plan `00118`). The git counter is the source of truth; the daemon keeps it correct across branches.
+The token is matched exactly, so any wording after it works. These older phrasings are also still recognised, and are kept working rather than extended — a new wording is handled by the token, not by adding another phrase here:
 
-**Do NOT** scan `CLAUDE/Plan/` with `ls`/`find`/glob pipelines to discover the next number. Folder scans miss plans in `Completed/` and other subdirectories, and disagree across branches. The folder scan is only used to bootstrap the counter when the git key is unset (which `mkplan.bash` and the daemon both handle).
+- `blocked only on human input`
+- `blocked only on the owner's input`
+- `need user input`
+- `waiting on the user's decision`
 
-**To FIND an existing plan** — a different question from the next number, and the one a folder scan is usually reaching for:
+Either form in your `STOPPING BECAUSE:` line records a marker that makes the daemon drop the next hourly failsafe-cron tick before it reaches you, at zero token cost. Without one, every tick costs a full turn to read and answer with nothing. The next real user message clears the marker and hourly ticks resume; it also expires on its own, so a mistake here costs you at most a day of ticks.
 
-```
-bin/hooks-daemon find-plan 412
-bin/hooks-daemon find-plan "jobs"
-```
-
-It searches the WHOLE tree including `Completed/`, which is precisely what a folder scan misses, and prints each plan's number, status and path.
-
-<!-- handler: qa-suppression-blocker -->
-
-## qa_suppression — QA suppression annotations are blocked
-
-A `Write`/`Edit` that puts QA suppression directives into a source file is blocked, across all supported languages. Fix the underlying code issue instead.
-
-**Blocked annotation types (by language)**:
-
-- Python: `noqa` directives, `type: ignore` annotations
-- JavaScript/TypeScript: `eslint-disable` inline directives
-- Go: `nolint` directives (golangci-lint)
-- PHP: `phpstan-ignore`, `psalm-suppress` annotations
-- Java/Kotlin: `@SuppressWarnings`, `@Suppress` annotations
-- C#: `pragma warning disable` directives
-- Rust: `allow(...)` attributes anywhere in the file (item-level `#[allow(...)]` and crate-level `#![allow(...)]`)
-
-**Required action**: Fix the code so QA passes without suppression. If a suppression is genuinely necessary, ask the user to add it manually — this signals a conscious decision rather than a shortcut.
-
-**Excluded paths**: per-language vendor/build/node_modules dirs are skipped by default. Exempt more paths with glob patterns via `handlers.pre_tool_use.qa_suppression.options.exclude_paths` or the project-wide `daemon.exclude_paths` — use these for fixtures that must contain suppression annotations.
+**Only when it is the ONLY thing blocking you.** A stop that merely mentions waiting on someone while other work remains must not use these shapes — that would silence a tick you could have used. If there is work you could still do, do it instead of stopping.
 
 ## All other enforced rules
 
