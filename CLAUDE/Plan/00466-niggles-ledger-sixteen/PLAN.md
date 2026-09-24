@@ -47,7 +47,11 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N9  | `docs_qa` judges gitignored markdown, so installing a Claude Code plugin fails local full QA                             | Coordinator        | 🔄 In progress        |
 | N10 | A wildcard in the middle of a protected filename gets past `secret_file_guard`                                           | 00466 review       | ✅ Remedied           |
 | N11 | Any exception in `secret_file_guard.matches()` lets the call through unless `strict_mode` is on                          | 00466 review       | ✅ Remedied           |
-| N12 | `secret_file_guard`'s N4 splat exemption still false-positives against a both-edges pattern (`*vault_pass*`)             | 00466 review       | ⬜ Open               |
+| N12 | A hand-built probe payload is logged as real traffic, because nothing tells a prober to mark it                          | 00467 audit        | ⬜ Open               |
+| N13 | The plan-index statistics arithmetic is checked only by full QA, so a wrong count reaches main                           | Coordinator        | ⬜ Open               |
+| N14 | Log and payload redaction ignore a configured secret word list path                                                      | 00414 agent        | 🔄 In progress        |
+| N15 | `remote-docs add` scans a capture with an unconfigured `sensitive_content` handler                                       | 00468 docs agent   | 🔄 In progress        |
+| N16 | `secret_file_guard`'s N4 splat exemption still false-positives against a both-edges pattern (`*vault_pass*`)             | 00466 review       | ⬜ Open               |
 
 ## Tasks
 
