@@ -1,6 +1,6 @@
 # Plan 00458: skip lists match path segments relative to the project
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-24
 **Owner**: dev
 **Priority**: High
@@ -64,10 +64,11 @@ keeping the defect.
 
 ### Phase 1: TDD in a worktree
 
-- [ ] ⬜ **Task 1.1**: Audit. Confirm the six sites and search for more:
+- [x] ✅ **Task 1.1**: Audit. Confirm the six sites and search for more:
   any `in file_path`, `in path`, `startswith` or `endswith` test on a
   path against a directory list in handlers, strategies, core and utils.
-  List each with the direction in which it fails.
+  List each with the direction in which it fails. See JOURNAL 11:22 and
+  the subagent report for the full table.
 - [ ] ⬜ **Task 1.2**: Detector first. Add a QA check (or a semgrep rule, if
   the project routes this class that way) that flags a substring
   membership test between a path variable and a skip/exclude/directory
