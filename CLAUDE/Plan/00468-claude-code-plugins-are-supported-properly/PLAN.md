@@ -81,8 +81,9 @@ first, and the other fixes build on it.
   **Decided (unattended, 2026-09-24)**: `check_skill_references.py` keeps
   its `ccy` name exclusion beside the derived one, because `.claude/ccy/`
   also holds tracked supervisor files that CI does not scan today.
-- [ ] ⬜ **Task 2.4**: File the upstream DBF issue: both agents lack `Write`
-  but are told to write a report.
+- [x] ✅ **Task 2.4**: File the upstream DBF issue: both agents lack `Write`
+  but are told to write a report. Filed as
+  [Defence-Before-Fix/claude-plugin#3](https://github.com/Defence-Before-Fix/claude-plugin/issues/3).
 
 ### Phase 3: walkers and path guards leave plugin trees alone (P3, P4, G8, G10, G16)
 

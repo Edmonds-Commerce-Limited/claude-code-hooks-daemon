@@ -3,6 +3,109 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
+### N27 — `skill_scan` and `tool_report` build the transcript directory name two different ways
+
+**Found by the 00468 core agent** (report on its branch,
+`subagent-reports/260924-p468-core-opus-5-5.md`). Claude Code keeps a
+project's transcripts under a directory named after the project path, with
+characters it cannot use in a name replaced. `skill_scan` and `tool_report`
+each derive that name with their own code, and they disagree for a path
+containing `.` or `_`. So for such a project one of them reads the wrong
+directory, finds nothing, and reports "no data" rather than an error.
+
+**Candidate remedy:** one helper derives the transcript directory from the
+project path, pinned to Claude Code's real rule (checked against a real
+`~/.claude/projects/` entry for a path with `.`, `_` and `-`). Both commands
+and every other derivation site use it (sweep for the other derivations).
+The helper raises, not returns empty, when the directory does not exist and
+the caller asked for it. RED test: a project path with `.` and `_` resolves
+to the same directory from both commands.
+
+### N26 — `check_skill_references.py` scans zero files when run from a worktree
+
+**Found by the 00468 core agent.** Run from any worktree, the skill
+references QA check reports success after scanning 0 files. A check that
+examines nothing and passes is a fail-open gate: every sub-agent's targeted
+QA runs from a worktree, so the check has been silently vacuous exactly
+where branches are verified.
+
+**Candidate remedy:** find why the file discovery comes up empty in a
+worktree (a `.git` file rather than a directory, or a path anchored to the
+main checkout), and fix it. Separately, the check FAILS when it scans zero
+files where skills exist, so a vacuous pass cannot recur. Audit the other
+`scripts/qa/check_*.py` for the same "0 examined, PASS" shape and pin the
+class with a test that runs each check from a worktree fixture.
+
+### N25 — a slow handler runs out the client's 30 s budget, and a timeout is an ALLOW for the whole PreToolUse chain
+
+**Found by the guard-defects security review 2**
+([report](subagent-reports/260924-n466-guards-review2-opus-5-5.md), B1 and
+m3). `.claude/hooks/pre-tool-use` gives the daemon `--timeout-ms 30000`. On a
+read-side socket timeout, `.claude/init.sh` (about lines 1654-1661) emits
+`hookSpecificOutput` with context only, which is an ALLOW for every non-Stop
+event. So any handler that can be made slow enough bypasses every guard
+behind it, not just itself. Two instances are measured:
+
+- `destructive_git`'s `strip_inert_spans` takes 99 s on a 200 KB command.
+  That is already on main.
+- The guard-defects branch's interior-wildcard DP takes 31 s on a crafted
+  60 KB command. That one is fixed on its branch as review 2's B1.
+
+Fixing each slow handler one by one leaves the class open: the next
+super-linear regex or DP reopens it silently.
+
+**Candidate remedies (the class, not the instance):**
+
+1. The daemon enforces a per-event deadline well under the client budget
+   (for example 20 s for the whole chain). When it passes, the remaining
+   SAFETY+BLOCKING handlers are treated as having raised, which means DENY
+   with a "not judged in time" reason under N24's fail-closed rule.
+   Advisory handlers are skipped with a note.
+2. Fix the measured instance: `strip_inert_spans` becomes linear, with a
+   timing test at 200 KB.
+3. A test harness drives every SAFETY handler with large hostile inputs
+   (long runs of quotes, backslashes, wildcards and nesting) under a time
+   bound, so a super-linear path fails CI rather than a client.
+
+Deliberately NOT a remedy: making the client fail closed on timeout. A
+daemon that is merely slow (an overloaded host) would then block every tool
+call. The deadline belongs inside the daemon, where it can tell safety
+handlers from advisories.
+
+### N24 — `daemon.strict_mode` never reaches the live daemon, so every guard fails OPEN on a handler exception
+
+**Found by the guard-defects security review 2**
+([report](subagent-reports/260924-n466-guards-review2-opus-5-5.md), M3), with a
+live probe against this repository's own daemon. `.claude/hooks-daemon.yaml`
+sets `strict_mode: true`. A Write payload that makes a handler raise
+(`ValueError: no path specified`, the still-live N5 shape) came back as
+`additionalContext: "Handler exception: ..."`: an ALLOW, not the strict-mode
+`SYSTEM ERROR ... blocking for safety` deny.
+
+`daemon/controller.py:959` reads `self._config.strict_mode if self._config else False`. The constructor's own comment (`:162-166`) says the `config`
+parameter "is not populated by the real daemon startup path", and
+`get_controller()` (`:1210`) builds `DaemonController()` with no config. So
+`strict_mode` is inert in every install. Every SAFETY guard treats its own
+crash as "no match". The per-guard wrapper that N11 adds to `secret_file_guard`
+is the only thing between a crash and a bypass, and no other guard has one.
+The N5 and N11 entries' claim that "this repository runs `strict_mode: true`,
+so here the crash denied" is false.
+
+**Candidate remedy (both halves):**
+
+1. Plumb `config.daemon.strict_mode` into the controller's real startup path,
+   through the same narrow-slice injection already used for `ChainConfig`.
+   Test it through `get_controller()` and a real daemon start, not by
+   constructing the controller with a config the daemon never passes.
+2. Independently of `strict_mode`, the chain denies when a handler tagged
+   SAFETY and BLOCKING raises, because a safety guard that crashes has not
+   judged the call. That closes the class for every guard at once, including
+   the review's m1 (`handle()` outside the fail-closed wrapper).
+
+RED tests: a live-path daemon with `strict_mode: true` denies on a raising
+handler; a SAFETY+BLOCKING handler that raises denies even with `strict_mode`
+off; a non-safety advisory handler that raises still allows, and says so.
+
 ### N22 — `lsp_enforcement` takes another command's argument for a grep symbol lookup
 
 **Found by the coordinator**, live. The command was `python scripts/qa/llm_qa.py format lint ... plan_qa docs_qa ... > out.txt; grep -E '^(✅|❌)|^QA:' out.txt`. It was denied with `BLOCKED [R-LSP-SYMBOL-LOOKUP]: ... pattern 'plan_qa' looks like a symbol search`. `plan_qa` is a positional argument to `llm_qa.py`, not to `grep`. The grep's real pattern, `^(✅|❌)|^QA:`, is not symbol-shaped at all. The handler found a `grep` somewhere in the command and then took a symbol-like word from elsewhere in it. `block_once` let the identical retry through, so the cost was one wasted turn. But every "run a QA tool, then grep its capture" command is the everyday shape here, and each one is a coin toss on which word gets picked.

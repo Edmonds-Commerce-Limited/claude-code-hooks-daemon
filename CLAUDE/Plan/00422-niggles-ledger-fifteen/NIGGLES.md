@@ -1511,6 +1511,10 @@ plan-shaped utility belongs in `utils` at all, and where the shared tier
 constants should live, are both design questions this plan did not answer and
 should not have answered as a rider.
 
+**🔄 Graduated to [Plan 00469](../00469-qa-packages-import-plan-qa-from-shared-layers/PLAN.md)**,
+which records a decision for each row and starts once the 00466 goal-flip
+branch (which rewrites `goal_ledger`) has merged.
+
 ### N15 — the dedupe scout reported a file path for a report it never wrote
 
 **Found**: in the dispatch before filing Plan 00441, by going to read the
