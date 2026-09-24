@@ -287,6 +287,19 @@ off; a non-safety advisory handler that raises still allows, and says so.
 
 **Candidate remedy:** stop caching on the instance (detect in `handle()`, or key the cache by thread with `threading.local`), with a RED test that interleaves two requests' `matches()` and `handle()`. Then treat it as a class: sweep for any `self._x` assigned in `matches()` and read in `handle()`. That shape is mechanical enough for a semgrep rule like `scripts/qa/semgrep/unlocked-eviction.yaml`.
 
+**Checked against main after integration B2 (2026-09-24): still Open, not
+fixed.** `recovery_cron_advisor.py` still declares `self._cached_phase: LifecyclePhase | None = None` in `__init__`, sets it in `matches()`
+(`self._cached_phase = _detect_lifecycle_phase(...)`) and reads/clears it in
+`handle()` (`cached = self._cached_phase; self._cached_phase = None`) — the
+exact shape this entry names. `tests/unit/handlers/post_tool_use/test_recovery_cron_advisor.py`
+has `test_matches_then_handle_uses_cached_phase` but no interleaving/
+concurrency test. d-00449's `BoundedFifoMap` work (Plan 00449) fixed the
+select-then-evict class across 12 sites in 10 handlers, including three
+other spots in this same file, but explicitly excluded this per-call-state
+class from its Non-Goals and recorded it here instead — see its report,
+"Recorded, not fixed". Nothing else in integration batch B2 touches this
+attribute. Remains a candidate for whoever picks up this ledger.
+
 ### N22 — `lsp_enforcement` takes another command's argument for a grep symbol lookup
 
 **Found by the coordinator**, live. The command was `python scripts/qa/llm_qa.py format lint ... plan_qa docs_qa ... > out.txt; grep -E '^(✅|❌)|^QA:' out.txt`. It was denied with `BLOCKED [R-LSP-SYMBOL-LOOKUP]: ... pattern 'plan_qa' looks like a symbol search`. `plan_qa` is a positional argument to `llm_qa.py`, not to `grep`. The grep's real pattern, `^(✅|❌)|^QA:`, is not symbol-shaped at all. The handler found a `grep` somewhere in the command and then took a symbol-like word from elsewhere in it. `block_once` let the identical retry through, so the cost was one wasted turn. But every "run a QA tool, then grep its capture" command is the everyday shape here, and each one is a coin toss on which word gets picked.
