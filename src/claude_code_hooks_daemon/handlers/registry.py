@@ -311,13 +311,23 @@ class HandlerRegistry:
     registers them with the event router.
     """
 
-    __slots__ = ("_disabled_handlers", "_handlers", "_workspace_root")
+    __slots__ = ("_disabled_handlers", "_handlers", "_option_failures", "_workspace_root")
 
     def __init__(self) -> None:
         """Initialise empty registry."""
         self._handlers: dict[str, type[Handler]] = {}
         self._disabled_handlers: set[str] = set()
         self._workspace_root: Path | None = None
+        self._option_failures: dict[str, str] = {}
+
+    @property
+    def option_failures(self) -> dict[str, str]:
+        """Handlers whose configured options could not be collected, and why.
+
+        Keyed ``<EventType>.<config_key>``. Each one was registered on its
+        defaults, so ``health`` reports it as degraded protection.
+        """
+        return dict(self._option_failures)
 
     def discover(self, package_path: str = "claude_code_hooks_daemon.handlers") -> int:
         """Discover all handler classes in the handlers package.
@@ -465,6 +475,7 @@ class HandlerRegistry:
 
         # PASS 1: Collect all handler options
         options_registry: dict[str, dict[str, Any]] = {}
+        self._option_failures = {}
         handlers_dir = Path(__file__).parent
 
         for dir_name, event_type in EVENT_TYPE_MAPPING.items():
@@ -493,20 +504,28 @@ class HandlerRegistry:
                         config_key = _get_config_key(attr.__name__)
                         handler_config = event_config.get(config_key, {})
                         if handler_config.get(ConfigKey.ENABLED, True):
-                            # Use config key from HandlerID constant
+                            registry_key = f"{event_type.value}.{config_key}"
+                            # handler_options reads every block shape without
+                            # raising, so any exception here is a daemon
+                            # defect. Plan 00466 N19: one such defect once
+                            # dropped EVERY handler's options behind a
+                            # debug-level log line. The handler still runs on
+                            # its defaults, and health reports it degraded.
                             try:
-                                registry_key = f"{event_type.value}.{config_key}"
                                 options = handler_options(handler_config)
-                                # Include workspace_root in options if available
-                                if self._workspace_root:
-                                    options["workspace_root"] = self._workspace_root
-                                options_registry[registry_key] = options
-                            except Exception:
-                                logger.debug(
-                                    "Failed to collect options for handler '%s': %s",
-                                    config_key,
+                            except Exception as exc:
+                                logger.error(
+                                    "Options for handler '%s' could not be collected;"
+                                    " it runs on its defaults",
+                                    registry_key,
                                     exc_info=True,
                                 )
+                                self._option_failures[registry_key] = f"{type(exc).__name__}: {exc}"
+                                continue
+                            # Include workspace_root in options if available
+                            if self._workspace_root:
+                                options["workspace_root"] = self._workspace_root
+                            options_registry[registry_key] = options
 
         # PASS 2: Register handlers with inherited options
         count = 0

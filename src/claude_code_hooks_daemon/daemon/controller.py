@@ -1126,6 +1126,12 @@ class DaemonController:
         if self._degraded:
             health["config_errors"] = self._config_errors
 
+        # Plan 00466 N19: a handler whose options could not be collected runs
+        # on its defaults, which is degraded protection the operator must see.
+        option_failures = self._registry.option_failures
+        if option_failures:
+            health["option_failures"] = option_failures
+
         return health
 
     def get_handlers(self) -> dict[str, list[dict[str, Any]]]:

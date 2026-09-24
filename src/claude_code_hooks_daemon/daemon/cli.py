@@ -1197,7 +1197,19 @@ def cmd_health(args: argparse.Namespace) -> int:
     for line in _format_project_handler_health_lines(health_state):
         print(line)
 
-    healthy = status == "healthy" and not health_state.is_degraded
+    # Built-in handlers whose configured options could not be collected (Plan
+    # 00466 N19). Each runs on its defaults, so this drives the exit code too.
+    option_failures: dict[str, str] = result.get("option_failures", {})
+    print("\nHandler options:")
+    if not option_failures:
+        print("  OK — every handler received its configured options")
+    else:
+        print(f"  🚨 DEGRADED — {len(option_failures)} handler(s) running on defaults:")
+        for handler_key, reason in option_failures.items():
+            print(f"  - {handler_key}: {reason}")
+        print("  The daemon log has the traceback. This is a daemon defect; please report it.")
+
+    healthy = status == "healthy" and not health_state.is_degraded and not option_failures
     return 0 if healthy else 1
 
 
