@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any, Final
 
 from claude_code_hooks_daemon.constants.events import EventIDMeta, wired_event_metas
+from claude_code_hooks_daemon.constants.protocol import HookInputField
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.handler_scope import event_supports_scope
 from claude_code_hooks_daemon.daemon.playbook_harness import (
@@ -37,7 +38,11 @@ from claude_code_hooks_daemon.daemon.playbook_harness import (
 )
 from claude_code_hooks_daemon.daemon.synthetic_traffic import (
     MANUAL_PROBE,
+    PROBE_AGENT_ID,
+    PROBE_AS_FIELD,
+    PROBE_CLASS_SOURCES,
     SYNTHETIC_SOURCE_FIELD,
+    ProbeThread,
     classify_synthetic,
 )
 
@@ -86,12 +91,46 @@ def probe_session_id() -> str:
     return f"{MANUAL_PROBE}-{uuid.uuid4().hex[:_SESSION_SUFFIX_LENGTH]}"
 
 
+def _parse_thread(raw: object) -> ProbeThread:
+    """A payload's ``probe_as`` value, refused unless it names a thread exactly."""
+    for thread in ProbeThread:
+        if raw == thread.value:
+            return thread
+    valid = ", ".join(thread.value for thread in ProbeThread)
+    raise ProbeInputError(f"{PROBE_AS_FIELD} must be one of {valid}, got {raw!r}")
+
+
+def _resolve_thread(
+    payload: Mapping[str, Any], event: EventIDMeta, asked: ProbeThread | None
+) -> ProbeThread | None:
+    """The thread this probe stands for: asked, else the payload's, else main.
+
+    None for an event that carries no thread at all, where asking for one is
+    an error rather than something to ignore quietly.
+    """
+    in_payload = _parse_thread(payload[PROBE_AS_FIELD]) if PROBE_AS_FIELD in payload else None
+    if not event_supports_scope(event.json_key):
+        if asked is not None or in_payload is not None:
+            raise ProbeInputError(
+                f"{event.json_key} events carry no agent_id, so a probe of one stands "
+                f"for no thread; drop {PROBE_AS_FIELD}"
+            )
+        return None
+    if asked is not None and in_payload is not None and asked is not in_payload:
+        raise ProbeInputError(
+            f"the payload says {PROBE_AS_FIELD}: {in_payload.value}, but the probe was "
+            f"asked to stand for {asked.value}"
+        )
+    return asked or in_payload or ProbeThread.MAIN
+
+
 def build_probe_event(
     payload: object,
     *,
     event: EventIDMeta,
     project_root: Path,
     session_id: str,
+    probe_as: ProbeThread | None = None,
 ) -> dict[str, Any]:
     """The event to send: the caller's payload, marked and framed like Claude Code's.
 
@@ -99,11 +138,21 @@ def build_probe_event(
     ``session_id``, ``cwd``); framing the caller supplied is kept, so a
     prober can choose a session to probe a repeat fire.
 
+    On an event that can carry ``agent_id``, the probe also names the thread
+    it stands for (:data:`PROBE_AS_FIELD`, main unless asked otherwise), so a
+    MAIN- or SUB-scoped handler judges it. A subagent probe carries
+    :data:`PROBE_AGENT_ID`, the one identity no consumer mistakes for a real
+    teammate.
+
     Raises:
         ProbeInputError: The payload is not a JSON object, names a different
             event, or carries a marker the classifier would ignore. Sending
             that last one would record the probe as real traffic, which is
-            the defect this helper exists to prevent.
+            the defect this helper exists to prevent. Also raised for a
+            thread claim that contradicts itself: an unknown ``probe_as``,
+            one that disagrees with ``probe_as``, an ``agent_id`` on a
+            main-thread probe, or any ``agent_id`` but the probe's own on a
+            subagent probe.
     """
     if not isinstance(payload, dict):
         raise ProbeInputError(f"the payload must be a JSON object, not {type(payload).__name__}")
@@ -121,12 +170,28 @@ def build_probe_event(
                 f"{SYNTHETIC_SOURCE_FIELD} must be a non-empty string naming the producer, "
                 f"got {marker!r}; omit it and the probe is marked {MANUAL_PROBE!r}"
             )
+    thread = _resolve_thread(payload, event, probe_as)
+    agent_id = payload.get(HookInputField.AGENT_ID)
+    if thread is ProbeThread.MAIN and agent_id:
+        raise ProbeInputError(
+            f"a main-thread probe carries no agent_id, got {agent_id!r}; "
+            f"probe as {ProbeThread.SUB.value} to stand for a subagent"
+        )
+    if thread is ProbeThread.SUB and agent_id not in (None, PROBE_AGENT_ID):
+        raise ProbeInputError(
+            f"a subagent probe carries agent_id {PROBE_AGENT_ID!r}, never a real "
+            f"teammate's; got {agent_id!r}"
+        )
 
     hook_event: dict[str, Any] = dict(payload)
     hook_event.setdefault("hook_event_name", event.json_key)
     hook_event.setdefault("session_id", session_id)
     hook_event.setdefault("cwd", str(project_root))
     hook_event.setdefault(SYNTHETIC_SOURCE_FIELD, MANUAL_PROBE)
+    if thread is not None:
+        hook_event[PROBE_AS_FIELD] = thread.value
+    if thread is ProbeThread.SUB:
+        hook_event[HookInputField.AGENT_ID] = PROBE_AGENT_ID
     return hook_event
 
 
@@ -208,18 +273,22 @@ def render_verdict(
     The exit code of the entry point itself is not the test: the Stop
     forwarder exits 2 on a block, which is a verdict, not a failure.
     """
+    source = hook_event.get(SYNTHETIC_SOURCE_FIELD)
     header = [
         f"probe: {event.json_key} -> {entry_point}",
-        f"{SYNTHETIC_SOURCE_FIELD}: {hook_event.get(SYNTHETIC_SOURCE_FIELD)}",
+        f"{SYNTHETIC_SOURCE_FIELD}: {source}",
         f"session_id: {hook_event.get('session_id')}",
     ]
-    if event_supports_scope(event.json_key):
-        # `scope_admits` refuses a synthetic event for MAIN and SUB, so an
-        # allow here says nothing about those handlers. Measured on Stop: `{}`
-        # marked, a block unmarked.
+    if PROBE_AS_FIELD in hook_event:
+        header.append(f"{PROBE_AS_FIELD}: {hook_event[PROBE_AS_FIELD]}")
+    if event_supports_scope(event.json_key) and source not in PROBE_CLASS_SOURCES:
+        # Only a probe-class source may name a thread, so an allow here says
+        # nothing about scoped handlers. Measured on Stop: `{}` where the
+        # real stop is blocked.
         header.append(
-            "note: handlers scoped MAIN or SUB never see a marked probe, so their "
-            "verdict is not in this answer (CLAUDE/DEBUGGING_HOOKS.md)"
+            f"note: {SYNTHETIC_SOURCE_FIELD} {source!r} is not a probe source, so "
+            f"{PROBE_AS_FIELD} is ignored and handlers scoped MAIN or SUB never see "
+            "this probe (CLAUDE/DEBUGGING_HOOKS.md)"
         )
     unreachable = wrapper_unreachable_reason(outcome.stderr)
     if unreachable is not None:

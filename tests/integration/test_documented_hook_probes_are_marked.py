@@ -18,10 +18,10 @@ Two rules, both mechanical:
 2. A document with any such command also shows the helper,
    ``hooks-daemon probe``, which sets the marker itself.
 
-One exception, and it has to be stated. A marked probe is never shown to a
-handler scoped MAIN or SUB, so a probe written to test one of those, such as
-``auto_continue_stop``, must be sent unmarked. The line before it says so:
-``# unmarked-probe: <why>``, with a real sentence for the reason.
+There is no exception. A probe of a handler scoped MAIN or SUB, such as
+``auto_continue_stop``, is marked too, and names the thread it stands for
+with ``probe_as`` (``core/handler_scope.py`` honours it for a probe-class
+source only).
 
 A new example written without the field fails here, not in a month's worth of
 misclassified records.
@@ -79,13 +79,6 @@ _DISPATCH = re.compile(
 _SOCKET_SEND = re.compile(r"\|\s*(?:\\\s*)?nc\s+-U\b")
 _HOOK_ENVELOPE = '"hook_input"'
 _CONTROL_EVENT = '"_system"'
-
-#: A deliberate, reasoned exception, on the line before the command. A marked
-#: probe is never shown to a handler scoped MAIN or SUB
-#: (``core/handler_scope.py``), so a probe that exists to test one of those
-#: must go unmarked and be logged as real. The reason is required, and must be
-#: a sentence rather than a token, so the cost is stated where it is paid.
-_EXEMPTION = re.compile(r"unmarked-probe:\s*(?P<reason>\S.{19,})")
 
 #: A heredoc opener; its body is part of the command that opened it.
 _HEREDOC = re.compile(r"<<-?\s*(['\"]?)(?P<delimiter>\w+)\1")
@@ -147,18 +140,12 @@ def is_dispatch(line: str) -> bool:
 
 
 def unmarked_dispatches(text: str) -> list[tuple[int, str]]:
-    """Every dispatch whose command omits the marker and states no exemption."""
-    offenders = []
-    previous = ""
-    for number, line in logical_lines(text):
-        if (
-            is_dispatch(line)
-            and SYNTHETIC_SOURCE_FIELD not in line
-            and not _EXEMPTION.search(previous)
-        ):
-            offenders.append((number, line))
-        previous = line
-    return offenders
+    """Every dispatch whose command omits the marker."""
+    return [
+        (number, line)
+        for number, line in logical_lines(text)
+        if is_dispatch(line) and SYNTHETIC_SOURCE_FIELD not in line
+    ]
 
 
 def has_dispatch(text: str) -> bool:
@@ -214,31 +201,15 @@ class TestTheDetector:
     def test_text_that_sends_no_payload_is_not_a_dispatch(self, text: str) -> None:
         assert not has_dispatch(text)
 
-    def test_an_unmarked_probe_with_a_stated_reason_is_exempt(self) -> None:
-        """A marked probe is never shown to a MAIN- or SUB-scoped handler, so
-        testing one of those needs the probe unmarked, deliberately."""
+    def test_no_annotation_excuses_an_unmarked_probe(self) -> None:
+        """There is no escape hatch. A probe of a MAIN- or SUB-scoped handler
+        is marked AND names its thread with `probe_as`; an unmarked one would
+        put a fabricated stop in the record as a real agent's."""
         text = (
             "# unmarked-probe: auto_continue_stop is scoped MAIN and never sees a marked probe\n"
             'echo \'{"hook_event_name":"Stop"}\' | bash .claude/hooks/stop'
         )
-        assert has_dispatch(text)
-        assert not unmarked_dispatches(text)
-
-    @pytest.mark.parametrize(
-        "annotation",
-        ["# unmarked-probe:", "# unmarked-probe: ok", "# unmarked probe because"],
-    )
-    def test_an_exemption_without_a_real_reason_does_not_count(self, annotation: str) -> None:
-        text = f'{annotation}\necho \'{{"hook_event_name":"Stop"}}\' | bash .claude/hooks/stop'
         assert unmarked_dispatches(text)
-
-    def test_an_exemption_covers_only_the_next_command(self) -> None:
-        text = (
-            "# unmarked-probe: auto_continue_stop is scoped MAIN and never sees a marked probe\n"
-            'echo \'{"hook_event_name":"Stop"}\' | bash .claude/hooks/stop\n'
-            'echo \'{"hook_event_name":"Stop"}\' | bash .claude/hooks/stop'
-        )
-        assert [number for number, _ in unmarked_dispatches(text)] == [3]
 
 
 def test_the_corpus_is_not_empty() -> None:
@@ -258,9 +229,8 @@ def test_every_documented_raw_probe_sets_the_synthetic_marker() -> None:
         f"These documented commands send a hand-built payload to a hook entry point "
         f"without `{SYNTHETIC_SOURCE_FIELD}`, so verdicts.jsonl records the probe as a "
         f'real agent\'s traffic. Add `"{SYNTHETIC_SOURCE_FIELD}":"manual-probe"` to the '
-        f"payload, or use `{HELPER}`, which sets it. Only a probe that tests a "
-        f"MAIN- or SUB-scoped handler may stay unmarked, with "
-        f"`# unmarked-probe: <why>` on the line before it:\n" + "\n".join(offenders)
+        f"payload, or use `{HELPER}`, which sets it. A probe of a MAIN- or "
+        f'SUB-scoped handler also names its thread: `"probe_as":"main"`:\n' + "\n".join(offenders)
     )
 
 

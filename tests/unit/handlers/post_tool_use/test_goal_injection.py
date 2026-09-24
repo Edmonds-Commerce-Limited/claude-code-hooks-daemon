@@ -17,6 +17,7 @@ import pytest
 
 from claude_code_hooks_daemon.constants import HandlerID, Priority
 from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.daemon.synthetic_traffic import SYNTHETIC_SOURCE_FIELD
 from claude_code_hooks_daemon.handlers.post_tool_use.goal_injection import (
     _CLEAR_SUFFIX,
     _HEADER_TEXT,
@@ -32,6 +33,7 @@ from claude_code_hooks_daemon.handlers.post_tool_use.goal_injection import (
     render_goal_line,
     write_goal_signal,
 )
+from claude_code_hooks_daemon.utils.goal_ledger import LEDGER_FILENAME
 
 _PLAN_FOLDER = "00269-supervisor-goal-message-injection"
 _PLAN_NUMBER = "00269"
@@ -446,6 +448,21 @@ class TestGoalInjectionHandler:
 
         assert result.decision == Decision.ALLOW
         assert not self._signal_path().exists()
+
+    @pytest.mark.parametrize("source", ["manual-probe", "playbook-probe"])
+    def test_a_synthetic_event_emits_no_goal_and_records_no_ledger_entry(
+        self, handler: GoalInjectionHandler, source: str
+    ) -> None:
+        """Plan 00466 N12: the goal ledger is project-wide, so one probe of an
+        In Progress plan would have every real session's stop challenged on
+        that plan's behalf. A probe does not start work."""
+        plan = self._write_plan()
+
+        result = handler.handle({**self._hook_input(plan), SYNTHETIC_SOURCE_FIELD: source})
+
+        assert result.decision == Decision.ALLOW
+        assert not self._signal_path().exists()
+        assert not (self._untracked / LEDGER_FILENAME).exists()
 
     def test_matches_honours_non_default_plan_dir_from_facade(
         self, handler: GoalInjectionHandler

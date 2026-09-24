@@ -37,6 +37,7 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import BlockingResult, Decision, ProjectContext
 from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
 from claude_code_hooks_daemon.core.handler_bases import SubagentStopHandlerBase
+from claude_code_hooks_daemon.daemon.synthetic_traffic import is_synthetic_event
 from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
 
 logger = logging.getLogger(__name__)
@@ -128,7 +129,14 @@ class SubagentCacheAggregatorHandler(SubagentStopHandlerBase):
         )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        """Only a stop that names an agent transcript has anything to collect."""
+        """Only a real stop that names an agent transcript has anything to collect.
+
+        A synthetic stop is skipped (Plan 00466 N12): a probe standing for a
+        subagent is not a teammate, and its totals would join the status
+        line's real ones.
+        """
+        if is_synthetic_event(hook_input):
+            return False
         return bool(hook_input.get("agent_transcript_path"))
 
     def handle(self, hook_input: dict[str, Any]) -> BlockingResult:

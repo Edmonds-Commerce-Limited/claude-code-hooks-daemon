@@ -31,6 +31,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from claude_code_hooks_daemon.config.models import VerdictLogConfig
+from claude_code_hooks_daemon.constants import HandlerID
 from claude_code_hooks_daemon.constants.events import EventID
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.daemon.cli import cmd_probe
@@ -45,9 +46,15 @@ from claude_code_hooks_daemon.daemon.hook_probe import (
 )
 from claude_code_hooks_daemon.daemon.synthetic_traffic import (
     MANUAL_PROBE,
+    PROBE_AGENT_ID,
+    PROBE_AS_FIELD,
     SYNTHETIC_SOURCE_FIELD,
+    ProbeThread,
     record_synthetic_source,
 )
+
+_AUTO_CONTINUE_STOP = HandlerID.AUTO_CONTINUE_STOP.display_name
+_SUBAGENT_CRON_DELETE_BLOCKER = HandlerID.SUBAGENT_CRON_DELETE_BLOCKER.display_name
 
 _BASH_PAYLOAD: dict[str, Any] = {
     "tool_name": "Bash",
@@ -137,6 +144,76 @@ class TestBuildProbeEvent:
         with pytest.raises(ProbeInputError, match="JSON object"):
             self._build(["not", "an", "object"], tmp_path)
 
+    def test_a_scoped_event_is_probed_as_the_main_thread_by_default(self, tmp_path: Path) -> None:
+        event = self._build(dict(_BASH_PAYLOAD), tmp_path)
+        assert event[PROBE_AS_FIELD] == "main"
+        assert "agent_id" not in event
+
+    def test_probe_as_sub_carries_the_documented_probe_agent_id(self, tmp_path: Path) -> None:
+        event = build_probe_event(
+            dict(_BASH_PAYLOAD),
+            event=EventID.PRE_TOOL_USE,
+            project_root=tmp_path,
+            session_id="s",
+            probe_as=ProbeThread.SUB,
+        )
+        assert event[PROBE_AS_FIELD] == "sub"
+        assert event["agent_id"] == PROBE_AGENT_ID == "manual-probe-agent"
+
+    def test_a_payload_probe_as_is_used_when_no_thread_is_asked_for(self, tmp_path: Path) -> None:
+        event = self._build({**_BASH_PAYLOAD, PROBE_AS_FIELD: "sub"}, tmp_path)
+        assert event[PROBE_AS_FIELD] == "sub"
+        assert event["agent_id"] == PROBE_AGENT_ID
+
+    def test_a_payload_probe_as_contradicting_the_asked_thread_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        with pytest.raises(ProbeInputError, match=PROBE_AS_FIELD):
+            build_probe_event(
+                {**_BASH_PAYLOAD, PROBE_AS_FIELD: "sub"},
+                event=EventID.PRE_TOOL_USE,
+                project_root=tmp_path,
+                session_id="s",
+                probe_as=ProbeThread.MAIN,
+            )
+
+    @pytest.mark.parametrize("value", ["MAIN", "orchestrator", 1])
+    def test_an_unknown_probe_as_value_is_refused(self, value: object, tmp_path: Path) -> None:
+        with pytest.raises(ProbeInputError, match=PROBE_AS_FIELD):
+            self._build({**_BASH_PAYLOAD, PROBE_AS_FIELD: value}, tmp_path)
+
+    def test_a_real_looking_agent_id_is_refused(self, tmp_path: Path) -> None:
+        """A probe must never borrow a real teammate's identity."""
+        with pytest.raises(ProbeInputError, match="agent_id"):
+            self._build({**_BASH_PAYLOAD, "agent_id": "agent_01H9XQK2M4N7P"}, tmp_path)
+
+    def test_a_main_thread_probe_carrying_the_probe_agent_id_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        with pytest.raises(ProbeInputError, match="agent_id"):
+            self._build({**_BASH_PAYLOAD, "agent_id": PROBE_AGENT_ID}, tmp_path)
+
+    def test_an_event_that_carries_no_thread_gets_no_probe_as(self, tmp_path: Path) -> None:
+        event = build_probe_event(
+            {"source": "startup"},
+            event=EventID.SESSION_START,
+            project_root=tmp_path,
+            session_id="s",
+        )
+        assert PROBE_AS_FIELD not in event
+
+    def test_asking_for_a_thread_on_an_event_that_carries_none_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        with pytest.raises(ProbeInputError, match="SessionStart"):
+            build_probe_event(
+                {"source": "startup"},
+                event=EventID.SESSION_START,
+                project_root=tmp_path,
+                session_id="s",
+                probe_as=ProbeThread.SUB,
+            )
+
     def test_a_payload_naming_another_event_is_refused(self, tmp_path: Path) -> None:
         """It would reach the PreToolUse entry point claiming to be a Stop."""
         payload = {**_BASH_PAYLOAD, "hook_event_name": "Stop"}
@@ -215,21 +292,42 @@ class TestRenderVerdict:
         assert code == 1
         assert "not json" in text
 
-    def test_a_scoped_event_carries_the_note_that_scoped_handlers_did_not_answer(
-        self,
-    ) -> None:
-        """Measured: a marked Stop probe answered `{}` where the unmarked one
-        was blocked, because `auto_continue_stop` is scoped MAIN. An allow that
-        does not say so reads as a working handler passing."""
-        code, text = self._render(ProbeOutcome(0, "{}", ""), event=EventID.STOP)
+    def test_the_thread_the_probe_stood_for_is_reported(self) -> None:
+        """Which scoped handlers answered depends on it, so the reader needs it."""
+        event = {**_RENDERED_EVENT, PROBE_AS_FIELD: "sub", "agent_id": PROBE_AGENT_ID}
+        code, text = render_verdict(
+            event=EventID.PRE_TOOL_USE,
+            entry_point=Path("/p/.claude/hooks/pre-tool-use"),
+            hook_event=event,
+            outcome=ProbeOutcome(0, "{}", ""),
+        )
         assert code == 0
-        assert "MAIN" in text
-        assert "SUB" in text
+        assert f"{PROBE_AS_FIELD}: sub" in text
 
-    def test_an_event_without_agent_scope_carries_no_note(self) -> None:
-        code, text = self._render(ProbeOutcome(0, "{}", ""), event=EventID.SESSION_START)
+    def test_a_non_probe_source_on_a_scoped_event_is_warned_about(self) -> None:
+        """Measured: a Stop probe no scoped handler sees answers `{}` where the
+        real stop is blocked. An allow that does not say so reads as a pass."""
+        event = {**_RENDERED_EVENT, SYNTHETIC_SOURCE_FIELD: "plugin-audit", PROBE_AS_FIELD: "main"}
+        code, text = render_verdict(
+            event=EventID.STOP,
+            entry_point=Path("/p/.claude/hooks/stop"),
+            hook_event=event,
+            outcome=ProbeOutcome(0, "{}", ""),
+        )
         assert code == 0
-        assert "MAIN" not in text
+        assert "note:" in text
+        assert "MAIN" in text
+
+    def test_a_probe_class_source_carries_no_warning(self) -> None:
+        event = {**_RENDERED_EVENT, PROBE_AS_FIELD: "main"}
+        code, text = render_verdict(
+            event=EventID.STOP,
+            entry_point=Path("/p/.claude/hooks/stop"),
+            hook_event=event,
+            outcome=ProbeOutcome(0, "{}", ""),
+        )
+        assert code == 0
+        assert "note:" not in text
 
     def test_a_raw_stdout_event_prints_its_raw_answer(self) -> None:
         code, text = self._render(ProbeOutcome(0, "Opus | 42%", ""), event=EventID.STATUS_LINE)
@@ -246,6 +344,7 @@ class TestCmdProbe:
             "event": "PreToolUse",
             "json": json.dumps(_BASH_PAYLOAD),
             "file": None,
+            "probe_as": None,
         }
         values.update(overrides)
         return argparse.Namespace(**values)
@@ -282,6 +381,16 @@ class TestCmdProbe:
 
         sent = json.loads((entry.parent / "captured.json").read_text(encoding="utf-8"))
         assert sent[SYNTHETIC_SOURCE_FIELD] == "plugin-audit"
+
+    def test_as_sub_sends_the_probe_agent_identity(self, tmp_path: Path) -> None:
+        entry = _project_with_entry_point(tmp_path, "pre-tool-use", _CAPTURING_ENTRY_POINT)
+
+        assert cmd_probe(self._args(tmp_path, probe_as="sub")) == 0
+
+        sent = json.loads((entry.parent / "captured.json").read_text(encoding="utf-8"))
+        assert sent[PROBE_AS_FIELD] == "sub"
+        assert sent["agent_id"] == PROBE_AGENT_ID
+        assert sent[SYNTHETIC_SOURCE_FIELD] == MANUAL_PROBE
 
     def test_invalid_json_is_a_usage_error_and_sends_nothing(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -337,9 +446,12 @@ class TestTheVerdictLogRecordsTheProbe:
             controller.initialise(workspace_root=workspace_root, verdict_log=VerdictLogConfig())
         return controller
 
-    def _records(self, workspace_root: Path, hook_input: dict[str, Any]) -> list[dict[str, Any]]:
+    def _dispatch(
+        self, workspace_root: Path, event: str, hook_input: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        """Every verdict record this one dispatch wrote (none is a valid answer)."""
         controller = self._controller(workspace_root)
-        controller.process_request({"event": "PreToolUse", "hook_input": hook_input})
+        controller.process_request({"event": event, "hook_input": hook_input})
         log = (
             workspace_root
             / ".claude"
@@ -349,9 +461,89 @@ class TestTheVerdictLogRecordsTheProbe:
             / "hooks"
             / "verdicts.jsonl"
         )
-        records = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+        if not log.exists():
+            return []
+        return [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+
+    def _records(self, workspace_root: Path, hook_input: dict[str, Any]) -> list[dict[str, Any]]:
+        records = self._dispatch(workspace_root, "PreToolUse", hook_input)
         assert records, "the probe matched no handler, so the test proves nothing"
         return records
+
+    def _stop_probe(self, workspace_root: Path, **fields: Any) -> dict[str, Any]:
+        """The documented Stop probe: no transcript, so auto_continue_stop's
+        force-explanation branch denies a MAIN-thread stop."""
+        return {
+            "hook_event_name": "Stop",
+            "stop_hook_active": False,
+            "session_id": "manual-probe-stop",
+            "cwd": str(workspace_root),
+            **fields,
+        }
+
+    @staticmethod
+    def _denied_by(records: list[dict[str, Any]], handler: str) -> bool:
+        return any(r["handler"] == handler and r["verdict"] == "deny" for r in records)
+
+    def test_a_probe_as_main_stop_is_blocked_by_auto_continue_stop(
+        self, workspace_root: Path
+    ) -> None:
+        records = self._dispatch(
+            workspace_root,
+            "Stop",
+            self._stop_probe(
+                workspace_root, **{SYNTHETIC_SOURCE_FIELD: MANUAL_PROBE, PROBE_AS_FIELD: "main"}
+            ),
+        )
+        assert self._denied_by(records, _AUTO_CONTINUE_STOP)
+        assert {record_synthetic_source(r) for r in records} == {MANUAL_PROBE}
+
+    def test_a_marked_stop_with_no_probe_as_is_still_refused_by_main_scope(
+        self, workspace_root: Path
+    ) -> None:
+        records = self._dispatch(
+            workspace_root,
+            "Stop",
+            self._stop_probe(workspace_root, **{SYNTHETIC_SOURCE_FIELD: MANUAL_PROBE}),
+        )
+        assert not self._denied_by(records, _AUTO_CONTINUE_STOP)
+        assert all(record_synthetic_source(r) == MANUAL_PROBE for r in records)
+
+    def test_a_non_probe_source_carrying_probe_as_is_ignored(self, workspace_root: Path) -> None:
+        records = self._dispatch(
+            workspace_root,
+            "Stop",
+            self._stop_probe(
+                workspace_root, **{SYNTHETIC_SOURCE_FIELD: "playbook-probe", PROBE_AS_FIELD: "main"}
+            ),
+        )
+        assert not self._denied_by(records, _AUTO_CONTINUE_STOP)
+        assert all(record_synthetic_source(r) == "playbook-probe" for r in records)
+
+    def test_a_probe_as_sub_cron_delete_reaches_the_sub_scoped_blocker(
+        self, workspace_root: Path
+    ) -> None:
+        hook_input = build_probe_event(
+            {"tool_name": "CronDelete", "tool_input": {"id": "abc123"}},
+            event=EventID.PRE_TOOL_USE,
+            project_root=workspace_root,
+            session_id="manual-probe-sub",
+            probe_as=ProbeThread.SUB,
+        )
+        records = self._dispatch(workspace_root, "PreToolUse", hook_input)
+        assert self._denied_by(records, _SUBAGENT_CRON_DELETE_BLOCKER)
+        assert {record_synthetic_source(r) for r in records} == {MANUAL_PROBE}
+
+    def test_the_same_cron_delete_probed_as_main_is_not_denied(self, workspace_root: Path) -> None:
+        """The pair that proves the SUB admission, not some other handler, denied."""
+        hook_input = build_probe_event(
+            {"tool_name": "CronDelete", "tool_input": {"id": "abc123"}},
+            event=EventID.PRE_TOOL_USE,
+            project_root=workspace_root,
+            session_id="manual-probe-main",
+        )
+        records = self._dispatch(workspace_root, "PreToolUse", hook_input)
+        assert not self._denied_by(records, _SUBAGENT_CRON_DELETE_BLOCKER)
 
     def test_a_helper_built_event_is_recorded_as_synthetic(self, workspace_root: Path) -> None:
         hook_input = build_probe_event(

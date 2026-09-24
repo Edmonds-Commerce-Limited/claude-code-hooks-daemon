@@ -183,20 +183,21 @@ for i, line in enumerate(lines):
 
 ### Test the Hook Script (Layer 1)
 
-**The Stop probes in this document are deliberately UNMARKED.** Probing
-normally means setting `"synthetic_source":"manual-probe"`, or using
-`./bin/hooks-daemon probe`, which sets it. Otherwise `verdicts.jsonl` records
-the probe as a real agent's stop (see
-[DEBUGGING_HOOKS.md](DEBUGGING_HOOKS.md#probing-a-handler-by-hand-hooks-daemon-probe)).
-Here that would defeat the test. `auto_continue_stop` is scoped `MAIN`, and a
-marked probe is never shown to a `MAIN`- or `SUB`-scoped handler, so a marked
-Stop probe answers `{}` whether the hook works or not. Each probe below
-therefore goes unmarked and is logged as real, and says so on the line
-before it.
+Every Stop probe in this document carries two fields.
+`"synthetic_source":"manual-probe"` keeps it out of the verdict log's real
+traffic. `"probe_as":"main"` is needed because `auto_continue_stop` is scoped
+`MAIN`: a marked probe that names no thread is never shown to it, and answers
+`{}` whether the hook works or not. The helper sets both fields for you (see
+[DEBUGGING_HOOKS.md](DEBUGGING_HOOKS.md#probing-a-handler-by-hand-hooks-daemon-probe)):
 
 ```bash
-# unmarked-probe: auto_continue_stop is scoped MAIN, so a marked probe would never reach it
-echo '{"hook_event_name":"Stop","stop_hook_active":false}' | /workspace/.claude/hooks/stop
+./bin/hooks-daemon probe Stop --json '{"stop_hook_active":false}'
+```
+
+The same probe as a raw payload:
+
+```bash
+echo '{"hook_event_name":"Stop","stop_hook_active":false,"synthetic_source":"manual-probe","probe_as":"main"}' | /workspace/.claude/hooks/stop
 ```
 
 Working output:
@@ -215,8 +216,7 @@ Broken outputs and their meanings:
 
 ```bash
 SOCK=$(ls /workspace/untracked/daemon-*.sock 2>/dev/null | head -1)
-# unmarked-probe: auto_continue_stop is scoped MAIN, so a marked probe would never reach it
-echo '{"event":"Stop","hook_input":{"hook_event_name":"Stop","stop_hook_active":false}}' \
+echo '{"event":"Stop","hook_input":{"hook_event_name":"Stop","stop_hook_active":false,"synthetic_source":"manual-probe","probe_as":"main"}}' \
     | nc -U "$SOCK"
 ```
 
@@ -245,6 +245,9 @@ Each entry:
 ```json
 {"timestamp":"2026-03-30T10:00:00+00:00","decision":"deny","reason_prefix":"You stopped without...","stop_hook_active":false}
 ```
+
+An entry written for one of your probes also carries
+`"synthetic":"manual-probe"`, so it is never mistaken for a real stop.
 
 Cross-reference with the transcript:
 
@@ -305,8 +308,7 @@ If the event name reaching the dispatcher is not the exact PascalCase token (e.g
 To verify: the event name is not constructed anywhere in Python — it is the `hook_event_name` field Claude Code puts in the payload, forwarded verbatim by `.claude/hooks/stop` and routed by `EventRouter` (`src/claude_code_hooks_daemon/core/router.py`). Probe the live daemon and read back what it thinks the event was:
 
 ```bash
-# unmarked-probe: auto_continue_stop is scoped MAIN, so a marked probe would never reach it
-echo '{"hook_event_name":"Stop","stop_hook_active":false}' | bash .claude/hooks/stop
+echo '{"hook_event_name":"Stop","stop_hook_active":false,"synthetic_source":"manual-probe","probe_as":"main"}' | bash .claude/hooks/stop
 ```
 
 ### 5. ALLOW Decision Returned by Handler
@@ -334,14 +336,12 @@ Run these in order and stop at the first failure:
 ./bin/hooks-daemon status
 
 # 2. Does the hook script produce a block response?
-# unmarked-probe: auto_continue_stop is scoped MAIN, so a marked probe would never reach it
-echo '{"hook_event_name":"Stop","stop_hook_active":false}' | /workspace/.claude/hooks/stop
+echo '{"hook_event_name":"Stop","stop_hook_active":false,"synthetic_source":"manual-probe","probe_as":"main"}' | /workspace/.claude/hooks/stop
 # Expected: {"decision":"block","reason":"..."}
 
 # 3. Does the socket return a deny decision?
 SOCK=$(ls /workspace/untracked/daemon-*.sock | head -1)
-# unmarked-probe: auto_continue_stop is scoped MAIN, so a marked probe would never reach it
-echo '{"event":"Stop","hook_input":{"hook_event_name":"Stop","stop_hook_active":false}}' | nc -U "$SOCK"
+echo '{"event":"Stop","hook_input":{"hook_event_name":"Stop","stop_hook_active":false,"synthetic_source":"manual-probe","probe_as":"main"}}' | nc -U "$SOCK"
 # Expected: {"result":{"decision":"deny",...},"handlers_matched":["auto_continue_stop"]}
 
 # 4. Does the internal log show deny entries?
@@ -368,8 +368,7 @@ After any code change to the stop hook chain:
 2. Run the hook script test:
 
    ```bash
-   # unmarked-probe: auto_continue_stop is scoped MAIN, so a marked probe would never reach it
-   echo '{"hook_event_name":"Stop","stop_hook_active":false}' | /workspace/.claude/hooks/stop
+   echo '{"hook_event_name":"Stop","stop_hook_active":false,"synthetic_source":"manual-probe","probe_as":"main"}' | /workspace/.claude/hooks/stop
    ```
 
 3. Run the unit tests:

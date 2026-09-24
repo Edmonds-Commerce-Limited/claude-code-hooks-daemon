@@ -5431,7 +5431,9 @@ def cmd_probe(args: argparse.Namespace) -> int:
     Plan 00466 N12: a probe piped into ``.claude/hooks/<event>`` by hand is
     recorded in ``verdicts.jsonl`` as a real agent's traffic unless it carries
     ``synthetic_source``. This verb sets it (``manual-probe``) unless the
-    payload already names its own producer, then prints the verdict.
+    payload already names its own producer, then prints the verdict. ``--as``
+    names the thread the probe stands for (main by default), so MAIN- and
+    SUB-scoped handlers judge it too.
 
     Returns:
         0 when the daemon answered, whatever it decided; 1 when it gave no
@@ -5448,6 +5450,7 @@ def cmd_probe(args: argparse.Namespace) -> int:
         render_verdict,
         resolve_probe_event,
     )
+    from claude_code_hooks_daemon.daemon.synthetic_traffic import ProbeThread
 
     override = getattr(args, "project_root", None)
     project_root = Path(override) if override else Path(get_project_path(None))
@@ -5458,8 +5461,13 @@ def cmd_probe(args: argparse.Namespace) -> int:
         except json.JSONDecodeError as exc:
             raise ProbeInputError(f"the payload is not valid JSON: {exc}") from exc
         event = resolve_probe_event(args.event)
+        asked = getattr(args, "probe_as", None)
         hook_event = build_probe_event(
-            payload, event=event, project_root=project_root, session_id=probe_session_id()
+            payload,
+            event=event,
+            project_root=project_root,
+            session_id=probe_session_id(),
+            probe_as=ProbeThread(asked) if asked else None,
         )
         entry_point = entry_point_for(project_root, event)
     except (ProbeInputError, OSError) as exc:
@@ -10043,6 +10051,14 @@ def main() -> int:
     probe_payload = parser_probe.add_mutually_exclusive_group(required=True)
     probe_payload.add_argument("--json", help="The payload as a JSON object")
     probe_payload.add_argument("--file", type=Path, help="A file holding the JSON payload")
+    parser_probe.add_argument(
+        "--as",
+        dest="probe_as",
+        choices=["main", "sub"],
+        default=None,
+        help="Thread the probe stands for, so MAIN/SUB-scoped handlers judge it "
+        "(default: main; sub also sends agent_id=manual-probe-agent)",
+    )
     parser_probe.add_argument(
         "--project-root",
         type=Path,

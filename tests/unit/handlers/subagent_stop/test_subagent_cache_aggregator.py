@@ -25,6 +25,11 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.daemon.synthetic_traffic import (
+    MANUAL_PROBE,
+    PROBE_AGENT_ID,
+    SYNTHETIC_SOURCE_FIELD,
+)
 from claude_code_hooks_daemon.handlers.subagent_stop.subagent_cache_aggregator import (
     SubagentCacheAggregatorHandler,
     read_subagent_cache_totals,
@@ -79,6 +84,15 @@ class TestSubagentCacheAggregatorHandler:
 
     def test_it_does_not_match_without_an_agent_transcript(self, handler):
         assert handler.matches({"agent_id": "a1"}) is False
+
+    def test_it_does_not_count_a_probe_as_an_agent(self, handler, transcript):
+        """Plan 00466 N12: a probe's totals would join the status line's real ones."""
+        hook_input = {
+            "agent_transcript_path": str(transcript),
+            "agent_id": PROBE_AGENT_ID,
+            SYNTHETIC_SOURCE_FIELD: MANUAL_PROBE,
+        }
+        assert handler.matches(hook_input) is False
 
     # --- parsing ---
 

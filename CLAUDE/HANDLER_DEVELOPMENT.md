@@ -776,19 +776,35 @@ point, and **mark it as a probe**. The daemon records every decision in
 `verdicts.jsonl`. An unmarked probe is logged as a real agent's traffic.
 
 ```bash
-# The helper sets synthetic_source=manual-probe for you:
+# The helper sets synthetic_source=manual-probe and probe_as=main for you:
 ./bin/hooks-daemon probe PreToolUse --json '{"tool_name":"Bash","tool_input":{"command":"ls -la"}}'
 
-# Piping a raw payload instead, with the field set by hand:
-echo '{"tool_name":"Bash","tool_input":{"command":"ls -la"},"synthetic_source":"manual-probe"}' \
+# Piping a raw payload instead, with the fields set by hand:
+echo '{"tool_name":"Bash","tool_input":{"command":"ls -la"},"synthetic_source":"manual-probe","probe_as":"main"}' \
   | bash .claude/hooks/pre-tool-use
 ```
 
-A handler scoped `MAIN` or `SUB` is never shown a marked probe, so a marked
-probe of one answers as if the handler were absent. The rest is described in
+**The design, in brief.** A probe answers two questions:
+
+- `synthetic_source` says whether it belongs in the real record. A probe does
+  not.
+- `probe_as` says which thread a scoped handler should judge it as.
+
+A synthetic event is otherwise neither a main thread nor a subagent, so a
+handler scoped `MAIN` or `SUB` never sees it. `probe_as: main|sub` (the
+helper's `--as`) lets it through. This is honoured only for a probe-class
+source (`manual-probe`), never for a harness, a cron tick or a supervisor
+event. `probe_as: sub` carries the fixed `agent_id` `manual-probe-agent`,
+which no consumer mistakes for a real teammate.
+
+If your handler RECORDS something about real agents or sessions, it should
+decline a synthetic event, as report persistence and the goal ledger do.
+Otherwise a probe writes into state that real sessions then act on.
+
+The rest is described in
 [DEBUGGING_HOOKS.md](DEBUGGING_HOOKS.md#probing-a-handler-by-hand-hooks-daemon-probe):
-how to probe a scoped handler, the fields the helper fills in, its exit codes,
-and why a guarded command belongs in a `--file` payload.
+the fields the helper fills in, its exit codes, and why a guarded command
+belongs in a `--file` payload.
 
 ## Common Patterns
 

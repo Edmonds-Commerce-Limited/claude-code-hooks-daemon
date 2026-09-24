@@ -59,6 +59,7 @@ from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
 from claude_code_hooks_daemon.core.utils import get_file_path
+from claude_code_hooks_daemon.daemon.synthetic_traffic import is_synthetic_event
 from claude_code_hooks_daemon.plan_qa.model import TERMINAL_STATUSES, PlanDoc
 from claude_code_hooks_daemon.utils.ccy_supervisor import supervisor_relevance
 from claude_code_hooks_daemon.utils.goal_ledger import LEDGER_FILENAME, GoalLedger, LivePlanRef
@@ -597,7 +598,13 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         re-renders the combined signal too, so a completing plan drops out
         of the `/goal` text promptly rather than only on the next
         UNRELATED plan's write.
+
+        A synthetic event writes nothing (Plan 00466 N12). The ledger is
+        project-wide, so one probe of an In Progress plan would have every
+        real session's stop challenged on that plan's behalf.
         """
+        if is_synthetic_event(hook_input):
+            return BlockingResult(decision=Decision.ALLOW)
         file_path = get_file_path(hook_input) or ""
         normalized = file_path.replace("\\", "/")
         match = self._plan_path_pattern().search(normalized)

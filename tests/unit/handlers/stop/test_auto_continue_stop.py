@@ -14,6 +14,11 @@ import pytest
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision, HookResult
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
+from claude_code_hooks_daemon.daemon.synthetic_traffic import (
+    MANUAL_PROBE,
+    PROBE_AS_FIELD,
+    SYNTHETIC_SOURCE_FIELD,
+)
 from claude_code_hooks_daemon.handlers.stop import auto_continue_stop
 from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import (
     AutoContinueStopHandler,
@@ -97,6 +102,20 @@ class TestStopEventDiscriminators:
     def test_transcript_bytes_is_omitted_when_no_path_is_given(self, tmp_path: Path) -> None:
         records = self._log(tmp_path, {"stop_hook_active": False})
         assert "transcript_bytes" not in records[0]
+
+    def test_a_probe_is_recorded_as_synthetic(self, tmp_path: Path) -> None:
+        """Plan 00466 N12: `probe_as: main` lets a probe reach this handler, so
+        this debugging log must tell its lines apart from real stops, as
+        verdicts.jsonl does."""
+        records = self._log(
+            tmp_path, {"stop_hook_active": False, SYNTHETIC_SOURCE_FIELD: MANUAL_PROBE}
+        )
+        assert records[0]["synthetic"] == MANUAL_PROBE
+
+    def test_a_real_stop_carries_no_synthetic_field(self, tmp_path: Path) -> None:
+        """Omitted, not null: the idiom this record already uses."""
+        records = self._log(tmp_path, {"stop_hook_active": False})
+        assert "synthetic" not in records[0]
 
     def test_a_missing_transcript_omits_the_field_rather_than_breaking_the_line(
         self, tmp_path: Path
@@ -3488,6 +3507,37 @@ class TestHumanBlockedMarker:
         marker = read_marker(marker_dir / MARKER_FILENAME)
         assert marker is not None
         assert marker.session_id == "sess-1"
+
+    def test_a_probe_never_writes_the_marker(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """Plan 00466 N12: a `probe_as: main` Stop probe now reaches this
+        handler, and the marker silences a session's failsafe cron. A probe
+        must not be able to switch recovery off, for its own session or any
+        real one it names."""
+        transcript = tmp_path / "t.jsonl"
+        self._write_assistant_text(
+            transcript,
+            "STOPPING BECAUSE: failsafe cron tick, nothing to resume, "
+            "blocked only on human input. Waiting.",
+        )
+        marker_dir = tmp_path / "untracked"
+        hook_input = {
+            "transcript_path": str(transcript),
+            "stop_hook_active": False,
+            "session_id": "sess-1",
+            SYNTHETIC_SOURCE_FIELD: MANUAL_PROBE,
+            PROBE_AS_FIELD: "main",
+        }
+        with patch(
+            "claude_code_hooks_daemon.handlers.stop.auto_continue_stop."
+            "ProjectContext.daemon_untracked_dir",
+            return_value=marker_dir,
+        ):
+            result = handler.handle(hook_input)
+
+        assert result.decision == Decision.ALLOW
+        assert not self._marker_path(marker_dir).exists()
 
     def test_ordinary_stopping_because_does_not_write_marker(
         self, handler: AutoContinueStopHandler, tmp_path: Path

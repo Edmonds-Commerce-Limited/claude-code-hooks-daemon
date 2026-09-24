@@ -114,6 +114,7 @@ classifier lives in `src/claude_code_hooks_daemon/daemon/synthetic_traffic.py`.
 ```bash
 bin/hooks-daemon probe PreToolUse --json '{"tool_name":"Bash","tool_input":{"command":"ls -la"}}'
 bin/hooks-daemon probe PreToolUse --file untracked/scratch/payload.json
+bin/hooks-daemon probe PreToolUse --as sub --json '{"tool_name":"CronDelete","tool_input":{"id":"x"}}'
 ```
 
 It sends the payload through the project's own entry point
@@ -121,6 +122,9 @@ It sends the payload through the project's own entry point
 response. Before sending, it fills in anything the payload leaves out:
 
 - `synthetic_source: manual-probe`
+- `probe_as`, the thread the probe stands for (see below). It is set only on
+  an event that can carry `agent_id`, and is `main` unless you pass
+  `--as sub`.
 - `hook_event_name`
 - `cwd`, set to the project root
 - a fresh `session_id` (`manual-probe-<hex>`), so a handler with a
@@ -140,35 +144,48 @@ the payload or event was wrong, and nothing was sent.
 argument that spells out `git reset --hard` is therefore denied before the
 probe ever runs.
 
-**A marked probe cannot test a `MAIN`- or `SUB`-scoped handler.** The
-marker does more than label the log line. `core/handler_scope.py`'s
-`scope_admits` refuses a synthetic event for any handler scoped `MAIN` or
-`SUB`, because a fabricated event is neither a real main thread nor a
-subagent. The handlers scoped that way today are `auto_continue_stop`,
-`cron_stop_enforcer` and `teammate_reap_advisor` (`MAIN`), and
-`subagent_cron_delete_blocker` (`SUB`). The `orchestrator_simulate` project
-handler declines synthetic events itself. A marked probe aimed at any of
-these is answered as if the handler were not there. Measured: a marked Stop
-probe answers `{}`, and the same payload unmarked is blocked with
-`R-STOP-NO-REASON`. For events that can carry `agent_id` (PreToolUse,
-PostToolUse, Stop, SubagentStop, SubagentStart), the helper prints a note
-saying so. To test one of these handlers, send the probe unmarked and accept
-that it is logged as real. A document that teaches such a probe says why on
-the line before it, as `# unmarked-probe: <reason>`; the guard below accepts
-nothing less.
+**`probe_as`: the thread a probe stands for.** A fabricated event is neither
+a real main thread nor a subagent. So `core/handler_scope.py`'s
+`scope_admits` refuses a synthetic event for every handler scoped `MAIN` or
+`SUB` unless the event names its thread:
 
-**Piping a raw payload instead:** set the field yourself.
+- `"probe_as":"main"` stands for the main thread, and carries no `agent_id`.
+- `"probe_as":"sub"` stands for a subagent, and carries
+  `"agent_id":"manual-probe-agent"` (`PROBE_AGENT_ID`). That is the one fixed
+  identity for a probe, deliberately not the shape of a real agent id. A
+  probe carrying a real teammate's id is refused.
+
+The scoped handlers today are `auto_continue_stop`, `cron_stop_enforcer` and
+`teammate_reap_advisor` (`MAIN`), and `subagent_cron_delete_blocker` (`SUB`).
+The `orchestrator_simulate` project handler applies the same rule through
+`acts_as_main_thread`. Without `probe_as`, a probe of one of these is answered
+as if the handler were not there. Measured: a marked Stop probe with no
+`probe_as` answers `{}`, and with `"probe_as":"main"` it is blocked with
+`R-STOP-NO-REASON`.
+
+`probe_as` is honoured only when `synthetic_source` is a probe source
+(`PROBE_CLASS_SOURCES`, today just `manual-probe`). A harness run, a cron tick
+or a supervisor-generated event cannot claim a thread. It keeps the refusal
+whatever it carries, and the helper warns when a caller-supplied source makes
+`probe_as` inert. Handlers that record state about real agents ignore
+synthetic events entirely: sub-agent report persistence, the status-line cache
+aggregator, the goal ledger and goal signal, and the human-blocked marker
+that silences a session's failsafe cron. `auto_continue_stop`'s own
+`stop-events.jsonl` tags a probe's line with `"synthetic"`.
+
+**Piping a raw payload instead:** set the fields yourself.
 
 ```bash
-echo '{"tool_name":"Bash","tool_input":{"command":"ls -la"},"synthetic_source":"manual-probe"}' \
+echo '{"tool_name":"Bash","tool_input":{"command":"ls -la"},"synthetic_source":"manual-probe","probe_as":"main"}' \
   | bash .claude/hooks/pre-tool-use
 ```
 
 `tests/integration/test_documented_hook_probes_are_marked.py` fails in two
-cases. The first is a document that sends a payload to a hook entry point or
-to the daemon socket without the field and without an `unmarked-probe:`
-reason. The second is a document that teaches such a probe but never shows
-the helper.
+cases: a document sends a payload to a hook entry point or to the daemon
+socket without `synthetic_source`, or it teaches such a probe but never shows
+the helper. There is no exemption. `tests/acceptance/test_documented_stop_probe.py`
+sends the Stop probe the debugging docs teach through the live entry point,
+and asserts that it is blocked.
 
 ## Workflow: From Scenario to Handler
 

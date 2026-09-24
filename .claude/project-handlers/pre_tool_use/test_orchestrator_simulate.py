@@ -26,6 +26,11 @@ from orchestrator_simulate import (
 )
 
 from claude_code_hooks_daemon.core.hook_result import Decision
+from claude_code_hooks_daemon.daemon.synthetic_traffic import (
+    MANUAL_PROBE,
+    PROBE_AS_FIELD,
+    SYNTHETIC_SOURCE_FIELD,
+)
 
 
 class TestOrchestratorSimulateHandlerInit:
@@ -594,3 +599,23 @@ class TestASyntheticProbeIsNeverDenied:
         hook_input = write_hook_input("/workspace/src/thing.py", "x")
         hook_input["session_id"] = "9679b063-1111-2222"
         assert self.handler.handle(hook_input).decision == Decision.DENY
+
+    def test_a_manual_probe_standing_for_the_main_thread_is_judged(
+        self, write_hook_input: Any
+    ) -> None:
+        """Plan 00466 N12: `hooks-daemon probe --as main` is how this handler is
+        probed without the probe being logged as a real main-thread write. The
+        same `probe_as` rule the scope gate uses decides here."""
+        hook_input = write_hook_input("/workspace/src/thing.py", "x")
+        hook_input[SYNTHETIC_SOURCE_FIELD] = MANUAL_PROBE
+        hook_input[PROBE_AS_FIELD] = "main"
+        assert self.handler.handle(hook_input).decision == Decision.DENY
+
+    def test_a_harness_probe_claiming_the_main_thread_is_still_allowed(
+        self, write_hook_input: Any
+    ) -> None:
+        """Only a probe-class source may name a thread; the harness keeps today's pass."""
+        hook_input = write_hook_input("/workspace/src/thing.py", "x")
+        hook_input[SYNTHETIC_SOURCE_FIELD] = "playbook-probe"
+        hook_input[PROBE_AS_FIELD] = "main"
+        assert self.handler.handle(hook_input).decision == Decision.ALLOW
