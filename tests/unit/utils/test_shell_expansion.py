@@ -14,6 +14,8 @@ a smaller-but-still-eager computation.
 
 from __future__ import annotations
 
+import errno
+import os
 import time
 from pathlib import Path
 
@@ -198,3 +200,48 @@ class TestBoundedRecursiveGlob:
                     deadline=past_deadline,
                 )
             )
+
+    def test_a_subdirectory_that_vanishes_mid_walk_is_skipped(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """ENOENT on a directory ENTERED during the walk (a race with a
+        deletion, or a prefix that plain does not exist) proves there is
+        nothing under it -- the walk continues and still finds a real match
+        elsewhere (n466-n24 review 4)."""
+        (tmp_path / "gone").mkdir()
+        (tmp_path / "real.zzz-marker-9f2c").touch()
+        real_scandir = os.scandir
+
+        def _fake_scandir(path: str | os.PathLike[str]) -> os.ScandirIterator[str]:
+            if Path(path) == tmp_path / "gone":
+                raise FileNotFoundError(errno.ENOENT, "No such file or directory")
+            return real_scandir(path)
+
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.utils.shell_expansion.os.scandir", _fake_scandir
+        )
+        matches = list(
+            bounded_recursive_glob(tmp_path, "**/*.zzz-marker-9f2c", max_entries_visited=100)
+        )
+        assert any(match.name == "real.zzz-marker-9f2c" for match in matches)
+
+    def test_a_permission_denied_subdirectory_raises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A directory that could not be READ (not merely absent) is NOT
+        proof of a non-match -- it must propagate, not be treated as
+        "contributes nothing" (n466-n24 review 4)."""
+        (tmp_path / "locked").mkdir()
+        (tmp_path / "real.zzz-marker-9f2c").touch()
+        real_scandir = os.scandir
+
+        def _fake_scandir(path: str | os.PathLike[str]) -> os.ScandirIterator[str]:
+            if Path(path) == tmp_path / "locked":
+                raise PermissionError(errno.EACCES, "Permission denied")
+            return real_scandir(path)
+
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.utils.shell_expansion.os.scandir", _fake_scandir
+        )
+        with pytest.raises(PermissionError):
+            list(bounded_recursive_glob(tmp_path, "**/*.zzz-marker-9f2c", max_entries_visited=100))

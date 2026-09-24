@@ -223,17 +223,58 @@ volume content, under 1s.
 **Disclosed trade-off**: `_expand_glob_token` is also called (via
 `find_protected_mention_strict`) by `quarantine_artefact_read_guard.py`,
 which has no local fail-closed wrapper of its own around `matches()`/
-`handle()`. Making `_expand_glob_token` propagate instead of swallowing
-changes that handler's behaviour on a failing base from "silently returns
-None" to "may raise, caught by the chain's default non-strict dispatch —
-still effectively ALLOW, but now a surfaced/logged exception rather than a
-silent pass". Left as-is rather than expanding scope to add a wrapper there:
+`handle()`. Making `_expand_glob_token` propagate on a non-ENOENT error
+(see the review-4 refinement below) instead of swallowing changes that
+handler's behaviour on such a failure from "silently returns None" to "may
+raise, caught by the chain's default non-strict dispatch — still
+effectively ALLOW, but now a surfaced/logged exception rather than a silent
+pass". Left as-is rather than expanding scope to add a wrapper there:
 team-lead's instruction was specific to `_expand_glob_token`; that handler
 ships disabled by default; and giving it its own fail-closed posture is
 already n24's separate "24 SAFETY+BLOCKING handlers fail closed" workstream.
 Verified no regression: `test_quarantine_artefact_read_guard.py`,
 `test_project_containment.py` and `test_enforce_llm_qa.py` all still pass
 (223 tests) with the change in place.
+
+## Addendum 2: review 4 — narrow the fail-close to ENOENT only
+
+Review 4 flagged that my initial fix (propagate ANY `OSError`/`ValueError`
+from `_expand_glob_token`'s consumption loop) was too blunt in the other
+direction: a genuinely proven negative — a literal directory prefix that
+simply does not exist (`ENOENT`) — does not need to deny, it can safely
+prove "no match" and let the scan continue to the next base. Only an error
+that means the expansion could not be COMPLETED (permission denied, an I/O
+error, …) must deny, because THAT case cannot rule out a match hiding behind
+whatever raised.
+
+`_expand_glob_token`'s consumption loop now catches `OSError` narrowly:
+`exc.errno == errno.ENOENT` logs at DEBUG and continues to the next base
+(filesystem truth, not a masked failure); any other `errno` re-raises
+unchanged, propagating to the caller's fail-closed wrapper as before.
+`ValueError` (a malformed pattern) is never a proof of absence either way,
+so it still always propagates uncaught.
+
+The same conflation existed one level down, inside
+`shell_expansion.bounded_recursive_glob`'s own `os.scandir` catch (used for
+`**`-carrying patterns): it treated "the directory disappeared" and "the
+directory could not be read" identically ("contributes nothing, skip it"),
+which silently fails open on a permission-denied directory ENCOUNTERED MID-
+WALK — a case `_expand_glob_token`'s own try/except cannot see, because this
+generator never propagated it out. Applied the identical ENOENT-narrow
+split there too: `ENOENT` continues (logged DEBUG), anything else re-raises
+out of the generator to whichever caller is consuming it (currently always
+`_expand_glob_token`, itself uncaught there, reaching the SAFETY guard's own
+fail-closed wrapper).
+
+New tests (TDD, RED before the fix): `TestExpandGlobTokenErrorHandling` in
+`test_secret_file_matching.py` (a missing directory prefix returns `None`,
+both naturally and via a forced `ENOENT`; a forced `PermissionError`
+propagates; a forced `ValueError` propagates) and two additions to
+`TestBoundedRecursiveGlob` in `test_shell_expansion.py` (a subdirectory that
+vanishes mid-walk is skipped and a real match elsewhere is still found; a
+permission-denied subdirectory propagates). All via `monkeypatch` on
+`Path.glob`/`os.scandir` — real filesystem permission enforcement is
+unreliable to test against as root, which this container runs as.
 
 ## QA
 
@@ -242,12 +283,10 @@ Verified no regression: `test_quarantine_artefact_read_guard.py`,
   the `_expand_glob_token` exclusion entry removed, no new entries added.
 - `python scripts/qa/llm_qa.py lint / type_check / security / magic_values / error_hiding / fail_open_inventory / declared_invariant_pairs` — all
   PASSED, 0 issues each.
-- `pytest tests/unit/utils/test_secret_file_matching.py tests/unit/utils/test_shell_expansion.py tests/unit/handlers/pre_tool_use/test_secret_file_guard.py` —
-  361 passed.
-- `pytest tests/unit/handlers/pre_tool_use/test_quarantine_artefact_read_guard.py tests/unit/handlers/pre_tool_use/test_project_containment.py .claude/project-handlers/pre_tool_use/test_enforce_llm_qa.py` —
-  223 passed (the two other callers of the touched code paths).
+- `pytest tests/unit/utils/test_secret_file_matching.py tests/unit/utils/test_shell_expansion.py tests/unit/handlers/pre_tool_use/test_secret_file_guard.py tests/unit/handlers/pre_tool_use/test_quarantine_artefact_read_guard.py tests/unit/handlers/pre_tool_use/test_project_containment.py .claude/project-handlers/pre_tool_use/test_enforce_llm_qa.py` —
+  590 passed.
 - Review 3's `probe_guards_v3_timing.pyprobe` re-run live against this
-  round's code: every shape still denies well under 1s (max eval 0.587s),
+  round's code: every shape still denies well under 1s (max eval 0.608s),
   confirming no regression from the timing-cut changes.
 - Daemon restarted before this commit.
 

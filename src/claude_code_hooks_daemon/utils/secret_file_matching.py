@@ -22,6 +22,7 @@ scripts that open the file internally are NOT detectable at command-text
 level — see the plan's RESEARCH-read-routes.md class-(d) rows.
 """
 
+import errno
 import fnmatch
 import itertools
 import logging
@@ -1585,27 +1586,40 @@ def _expand_glob_token(
             # the exception escape and fail the calling security handler
             # open). Consumed lazily, still.
             matches_iter = base.glob(pattern_str)
-        # Fail CLOSED (team-lead's 1 MB timing follow-up to review 3): this
-        # used to catch OSError/ValueError here and `continue` to the next
-        # base, on the theory that one unusable base/pattern combination
-        # should not stop the others from being tried. That is still true
-        # in spirit, but "silently keep searching, and if every base fails
-        # just answer no mention" is exactly the class this whole review
-        # round has been closing everywhere else: an exception during
-        # evaluation is not a decision this function actually made, and
-        # letting it degrade to "no mention" risks masking a genuine one
-        # behind whatever raised. Deliberately NOT caught here any more --
-        # it propagates to the caller's own fail-closed wrapper (secret_
-        # file_guard's N11 net for the Bash-mention route this function
-        # backs). No longer registered in error_hiding_exclusions.json.
-        for match in matches_iter:
-            examined += 1
-            match_str = str(match)
-            for pattern in patterns:
-                if path_matches_globs(match_str, (pattern,), project_root=project_root):
-                    return pattern
-            if max_expansions is not None and examined >= max_expansions:
-                return None
+        # Fail CLOSED (team-lead's review-4 refinement): a blanket
+        # `except (OSError, ValueError): continue` here would mean ANY
+        # expansion failure degrades to "no mention", which is exactly the
+        # class this whole review round has been closing everywhere else --
+        # an exception during evaluation is not a decision this function
+        # actually made. But NOT every OSError means the same thing: ENOENT
+        # is filesystem TRUTH ("this directory prefix does not exist, so
+        # nothing under it can be a mention"), narrow enough to prove a
+        # negative and continue searching other bases. Anything else
+        # (permission denied, an I/O error, ...) means the expansion could
+        # not be COMPLETED -- this function cannot rule out a match hiding
+        # behind whatever raised, so it must NOT be treated as "expands to
+        # nothing"; it propagates uncaught to the caller's own fail-closed
+        # wrapper (secret_file_guard's N11 net for the Bash-mention route
+        # this function backs). `ValueError` (a malformed pattern) is never
+        # a proof of absence either way, so it always propagates.
+        try:
+            for match in matches_iter:
+                examined += 1
+                match_str = str(match)
+                for pattern in patterns:
+                    if path_matches_globs(match_str, (pattern,), project_root=project_root):
+                        return pattern
+                if max_expansions is not None and examined >= max_expansions:
+                    return None
+        except OSError as exc:
+            if exc.errno != errno.ENOENT:
+                raise
+            logger.debug(
+                "secret_file_matching: %r under %s does not exist, no match possible: %s",
+                pattern_str,
+                base,
+                exc,
+            )
     return None
 
 

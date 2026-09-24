@@ -7,7 +7,9 @@ realpath), and Bash path-mention detection with its two narrow exemptions
 position).
 """
 
+import errno
 import time
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -1741,6 +1743,75 @@ class TestBothEdgesFilesystemTruthRoute:
             "cat demo.se?ret", sfm.DEFAULT_PROTECTED_PATTERNS, cwd=str(tmp_path)
         )
         assert result is None
+
+
+class TestExpandGlobTokenErrorHandling:
+    """n466-n24 review 4: ``_expand_glob_token`` must fail CLOSED (propagate)
+    on an expansion failure it cannot prove is a non-match -- except the one
+    narrow case that genuinely proves a negative: ENOENT on a directory
+    prefix that simply is not there."""
+
+    def test_a_missing_directory_prefix_allows(self, tmp_path: Path) -> None:
+        """A literal directory prefix that does not exist on disk proves,
+        by itself, that nothing under it can be a mention -- no exception
+        needed to reach that verdict, but it must still return ``None``
+        rather than raise."""
+        result = sfm._expand_glob_token(
+            "nonexistent_prefix_xyz/secret.txt",
+            sfm.DEFAULT_PROTECTED_PATTERNS,
+            None,
+            cwd=str(tmp_path),
+        )
+        assert result is None
+
+    def test_enoent_raised_mid_expansion_allows(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Forcing an ENOENT (rather than relying on it never firing) pins
+        the actual except-branch: it must be swallowed, not propagated."""
+
+        def _raise_enoent(self: Path, pattern: str) -> Iterator[Path]:
+            raise OSError(errno.ENOENT, "No such file or directory")
+            yield  # pragma: no cover -- makes this a generator function
+
+        monkeypatch.setattr(Path, "glob", _raise_enoent)
+        result = sfm._expand_glob_token(
+            "somefile.secret", sfm.DEFAULT_PROTECTED_PATTERNS, None, cwd=str(tmp_path)
+        )
+        assert result is None
+
+    def test_permission_denied_directory_in_the_glob_path_denies(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A directory that could not be READ (permission denied) is NOT
+        proof of a non-match -- it must propagate, not degrade to
+        "no mention", so the caller's fail-closed wrapper denies."""
+
+        def _raise_eacces(self: Path, pattern: str) -> Iterator[Path]:
+            raise PermissionError(errno.EACCES, "Permission denied")
+            yield  # pragma: no cover -- makes this a generator function
+
+        monkeypatch.setattr(Path, "glob", _raise_eacces)
+        with pytest.raises(PermissionError):
+            sfm._expand_glob_token(
+                "somefile.secret", sfm.DEFAULT_PROTECTED_PATTERNS, None, cwd=str(tmp_path)
+            )
+
+    def test_a_malformed_pattern_value_error_always_denies(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A ``ValueError`` (a malformed glob pattern) is never a proof of
+        absence -- always propagates, with no ENOENT-style exception."""
+
+        def _raise_value_error(self: Path, pattern: str) -> Iterator[Path]:
+            raise ValueError("malformed glob pattern")
+            yield  # pragma: no cover -- makes this a generator function
+
+        monkeypatch.setattr(Path, "glob", _raise_value_error)
+        with pytest.raises(ValueError):
+            sfm._expand_glob_token(
+                "somefile.secret", sfm.DEFAULT_PROTECTED_PATTERNS, None, cwd=str(tmp_path)
+            )
 
 
 _CWD = "/proj"

@@ -22,6 +22,7 @@ way ``iter_protected_mentions`` already treats its own ``TimeoutError``.
 
 from __future__ import annotations
 
+import errno
 import fnmatch
 import itertools
 import logging
@@ -262,13 +263,13 @@ def bounded_recursive_glob(
         # No recursive component: a single directory listing bounds the
         # cost naturally (the pre-existing, non-flagged behaviour).
         # `base.glob(pattern)` is a generator: a malformed pattern raises
-        # ValueError, an unreadable directory raises OSError, both on
-        # first iteration -- deliberately NOT caught here. Every caller of
+        # ValueError, an unreadable directory raises OSError, both on first
+        # iteration -- deliberately NOT caught here. Every current caller of
         # this function reaches it through `_expand_glob_token`'s own
-        # `try/except (OSError, ValueError): continue` around consuming
-        # this same iterator (Plan 00272/00357, already registered in
-        # error_hiding_exclusions.json), so catching a second time here
-        # would only duplicate that decision, not add one.
+        # ENOENT-narrow fail-closed wrapper around consuming this same
+        # iterator (Plan 00272/00357, Plan 00466 n466-n24 review 4), so
+        # catching a second time here would only duplicate that decision,
+        # not add one.
         yield from base.glob(pattern)
         return
 
@@ -300,11 +301,22 @@ def bounded_recursive_glob(
         try:
             entries = list(os.scandir(current))
         except OSError as exc:
-            # An unreadable directory (permissions, a race with a deletion)
-            # contributes nothing to the walk -- skip it, the same
-            # "expands to nothing" direction the non-recursive branch above
-            # takes for the same class of failure.
-            logger.debug("shell_expansion: could not scan %r: %s", current, exc)
+            if exc.errno != errno.ENOENT:
+                # A directory that could not be READ (permission denied, an
+                # I/O error, ...) is not proof there is nothing inside it --
+                # this walk cannot rule out a protected-path mention hiding
+                # behind whatever raised, so it must NOT be silently treated
+                # as "contributes nothing" (Plan 00466 n466-n24 review 4).
+                # Propagates out of this generator to whichever caller is
+                # consuming it -- currently always `_expand_glob_token`,
+                # itself uncaught there, reaching the SAFETY guard's own
+                # fail-closed wrapper.
+                raise
+            # ENOENT is filesystem TRUTH: the directory was removed between
+            # being found as an entry and being scanned (a race), or never
+            # existed -- either way there is nothing under it to find, so
+            # skipping it proves a negative rather than masking a failure.
+            logger.debug("shell_expansion: %r no longer exists: %s", current, exc)
             continue
         for entry in entries:
             if deadline is not None and time.monotonic() > deadline:
