@@ -21,9 +21,17 @@ from typing import Any
 
 from claude_code_hooks_daemon.constants import DaemonPath
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
-from claude_code_hooks_daemon.strategies.lsp_noise.php_strategy import PhpLspNoiseStrategy
+from claude_code_hooks_daemon.strategies.lsp_noise.php_strategy import (
+    PhpLspNoiseStrategy,
+    _harmful_root_excludes,
+    _substitute_dependency_roots,
+)
 
 _REQUIRED = frozenset({DaemonPath.UNTRACKED_DIR, "CLAUDE/Plan", "remote-docs"})
+#: `_REQUIRED` plus PHP's dependency root - the entry `required_excludes()`
+#: puts in the shared set for every language (Plan 00462).
+_REQUIRED_VENDOR = frozenset(_REQUIRED | {"**/vendor"})
+_VENDOR_NESTED_EXCLUDES = ("**/vendor/**/{Tests,tests}/**", "**/vendor/**/vendor/**")
 
 
 def _write_lsp_json(root: Path, plugin_name: str, exclude: list[str] | None) -> Path:
@@ -140,6 +148,89 @@ class TestExcludeFinding:
         assert '"extensionToLanguage"' in text
         for entry in _REQUIRED:
             assert f'"{entry}"' in text
+
+
+class TestDependencyRootSubstitution:
+    """Plan 00462: `**/vendor` must never reach intelephense's exclude list.
+
+    intelephense's `files.exclude` removes files from its INDEX, not just
+    its diagnostics (verified: `gettingStarted.md`), so the bare any-depth
+    entry `required_excludes()` puts in the shared set for every language
+    would undefine every Composer-installed type. PHP substitutes it for
+    intelephense's own nested defaults instead.
+    """
+
+    def test_no_override_snippet_has_no_bare_vendor(self, tmp_path: Path) -> None:
+        lines, _ = PhpLspNoiseStrategy().exclude_finding(tmp_path, _REQUIRED_VENDOR)
+        assert not any(line.strip() in ('"**/vendor",', '"**/vendor"') for line in lines)
+
+    def test_no_override_snippet_has_the_nested_entries(self, tmp_path: Path) -> None:
+        lines, _ = PhpLspNoiseStrategy().exclude_finding(tmp_path, _REQUIRED_VENDOR)
+        text = "\n".join(lines)
+        for entry in _VENDOR_NESTED_EXCLUDES:
+            assert entry in text
+
+    def test_override_with_intelephenses_own_defaults_is_silent(self, tmp_path: Path) -> None:
+        exclude = sorted({*_REQUIRED, *_VENDOR_NESTED_EXCLUDES})
+        _write_lsp_json(tmp_path, "lsp-noise-php-exclude", exclude)
+        lines, _ = PhpLspNoiseStrategy().exclude_finding(tmp_path, _REQUIRED_VENDOR)
+        assert lines == []
+
+    def test_override_excluding_whole_vendor_is_flagged_harmful(self, tmp_path: Path) -> None:
+        exclude = sorted({*_REQUIRED, "**/vendor"})
+        _write_lsp_json(tmp_path, "lsp-noise-php-exclude", exclude)
+        lines, _ = PhpLspNoiseStrategy().exclude_finding(tmp_path, _REQUIRED_VENDOR)
+        text = "\n".join(lines)
+        assert "harmful" in text.lower()
+        assert "**/vendor" in text
+        assert "remove" in text.lower()
+
+    def test_override_excluding_vendor_with_wildcard_suffix_is_flagged_harmful(
+        self, tmp_path: Path
+    ) -> None:
+        exclude = sorted({*_REQUIRED, "**/vendor/**"})
+        _write_lsp_json(tmp_path, "lsp-noise-php-exclude", exclude)
+        lines, _ = PhpLspNoiseStrategy().exclude_finding(tmp_path, _REQUIRED_VENDOR)
+        text = "\n".join(lines)
+        assert "harmful" in text.lower()
+
+    def test_harmful_entry_is_still_reported_alongside_missing_entries(
+        self, tmp_path: Path
+    ) -> None:
+        exclude = ["**/vendor"]
+        _write_lsp_json(tmp_path, "lsp-noise-php-exclude", exclude)
+        lines, _ = PhpLspNoiseStrategy().exclude_finding(tmp_path, _REQUIRED_VENDOR)
+        text = "\n".join(lines)
+        assert "harmful" in text.lower()
+        assert DaemonPath.UNTRACKED_DIR in text
+
+
+class TestSubstitutionIsTableDriven:
+    """The `**/vendor` swap is keyed off a declared name, not a literal check."""
+
+    def test_substitute_dependency_roots_uses_the_table_not_a_hardcoded_name(self) -> None:
+        required = frozenset({"**/pods", "CLAUDE/Plan"})
+        replacements = {"pods": ("**/pods/**/spec/**",)}
+        wanted = _substitute_dependency_roots(required, replacements)
+        assert "**/pods" not in wanted
+        assert "**/pods/**/spec/**" in wanted
+        assert "CLAUDE/Plan" in wanted
+
+    def test_substitute_dependency_roots_leaves_unrelated_entries_alone(self) -> None:
+        required = frozenset({"**/node_modules", "CLAUDE/Plan"})
+        replacements = {"pods": ("**/pods/**/spec/**",)}
+        wanted = _substitute_dependency_roots(required, replacements)
+        assert wanted == sorted(required)
+
+    def test_harmful_root_excludes_uses_the_table_not_a_hardcoded_name(self) -> None:
+        present = ["**/pods", "CLAUDE/Plan"]
+        replacements = {"pods": ("**/pods/**/spec/**",)}
+        assert _harmful_root_excludes(present, replacements) == [("**/pods", "pods")]
+
+    def test_harmful_root_excludes_ignores_an_unrelated_bare_entry(self) -> None:
+        present = ["CLAUDE/Plan"]
+        replacements = {"pods": ("**/pods/**/spec/**",)}
+        assert _harmful_root_excludes(present, replacements) == []
 
 
 class TestAcceptanceTests:

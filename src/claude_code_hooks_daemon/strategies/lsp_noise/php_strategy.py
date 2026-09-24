@@ -22,6 +22,22 @@ scans every ``.lsp.json`` (or ``plugin.json`` ``lspServers`` block) under
 ``.claude/plugins/*/`` for one that registers ``.php`` and carries a
 complete ``intelephense.files.exclude``; when none does, it prints that
 exact file, ready to drop in - never "unsupported".
+
+Plan 00462: ``intelephense.files.exclude`` removes files from intelephense's
+INDEX, not just its diagnostics - confirmed by the same docs page: the
+setting excludes files "you do not want [] indexed by Intelephense". The
+shared ``required`` set every ``LspNoiseStrategy`` receives carries a bare
+``**/vendor`` (``CORE_VENDORED_BUILD_DIR_NAMES``, daemon-wide, not this
+language's to change), but Composer installs every dependency INTO
+``vendor/`` - excluding it wholesale undefines every installed type
+(PHPUnit, Doctrine, Symfony, ...). intelephense's own default exclude list
+(same docs page) proves the fix: it removes only ``vendor/``'s nested test
+trees (``**/vendor/**/{Tests,tests}/**``) and nested vendor trees
+(``**/vendor/**/vendor/**``), never the whole tree. ``_DEPENDENCY_ROOT_REPLACEMENTS``
+below is PHP's declaration of which shared required names are dependency
+roots it must keep indexed, and what to ask for in each one's place - the
+handler and ``required_excludes()`` stay language-free; only this strategy
+knows Composer's ``vendor/`` needs this treatment.
 """
 
 from __future__ import annotations
@@ -53,6 +69,20 @@ _SETTINGS_KEY: Final[str] = "settings"
 _INTELEPHENSE_SERVER_NAME: Final[str] = "intelephense"
 _FLAT_EXCLUDE_KEY: Final[str] = "intelephense.files.exclude"
 _SUGGESTED_PLUGIN_DIR: Final[str] = "lsp-noise-php-exclude"
+_ANY_DEPTH_PREFIX: Final[str] = "**/"
+
+#: PHP's dependency root(s) in the shared `required` set, mapped to what
+#: intelephense's own default exclude asks for in their place instead of the
+#: bare any-depth name (verified against `intelephense-docs/gettingStarted.md`
+#: - see module docstring). Composer's `vendor/` is the only one today; a
+#: second PHP dependency-management convention would add a second entry here,
+#: never a second special case in the functions that read this table.
+_DEPENDENCY_ROOT_REPLACEMENTS: Final[dict[str, tuple[str, ...]]] = {
+    "vendor": (
+        "**/vendor/**/{Tests,tests}/**",
+        "**/vendor/**/vendor/**",
+    ),
+}
 
 
 class PhpLspNoiseStrategy:
@@ -73,30 +103,53 @@ class PhpLspNoiseStrategy:
         self, root: Path, required: frozenset[str]
     ) -> tuple[list[str], Path | None]:
         view = self._best_override(root)
-        wanted = sorted(required)
+        wanted = _substitute_dependency_roots(required, _DEPENDENCY_ROOT_REPLACEMENTS)
 
         if view.path is None:
             return self._no_override_finding(wanted), None
 
         present = view.exclude if view.exclude is not None else []
+        harmful = _harmful_root_excludes(present, _DEPENDENCY_ROOT_REPLACEMENTS)
         missing = [want for want in wanted if not any(entry_covers(e, want) for e in present)]
-        if not missing:
+        if not missing and not harmful:
             return [], view.path
 
-        return [
+        lines = [
             f"⚠️  LSP NOISE [{RuleID.LSP_CONFIG_EXCLUDE}] ({_LANGUAGE_NAME}): the project-scope "
-            f"LSP plugin at {view.path} is missing `{_FLAT_EXCLUDE_KEY}` for "
-            f"{len(missing)} tree(s) that are not this project's code:",
+            f"LSP plugin at {view.path} needs a fix in `{_FLAT_EXCLUDE_KEY}`:",
             "",
-            *(f"  ❌ {entry}" for entry in missing),
-            "",
-            "Fix: add these to that plugin's `settings.intelephense.files.exclude` (paste-ready):",
-            *json_list(missing),
-            "",
-            "then end the running language server so it re-reads the config. LSP output "
-            "must be signal: fix the noise source, never skim the stream.",
-            "",
-        ], view.path
+        ]
+        for entry, name in harmful:
+            lines.extend(
+                [
+                    f"  ☠️  `{entry}` is a harmful entry: it excludes the whole of `{name}/` "
+                    "from intelephense's INDEX, not just its diagnostics, so every type "
+                    f"Composer installed under `{name}/` becomes undefined. Remove it.",
+                ]
+            )
+        if harmful:
+            lines.append("")
+        if missing:
+            lines.extend(
+                [
+                    f"Missing {len(missing)} tree(s) that are not this project's code:",
+                    "",
+                    *(f"  ❌ {entry}" for entry in missing),
+                    "",
+                    "Fix: add these to that plugin's `settings.intelephense.files.exclude` "
+                    "(paste-ready):",
+                    *json_list(missing),
+                    "",
+                ]
+            )
+        lines.extend(
+            [
+                "then end the running language server so it re-reads the config. LSP output "
+                "must be signal: fix the noise source, never skim the stream.",
+                "",
+            ]
+        )
+        return lines, view.path
 
     def _no_override_finding(self, wanted: list[str]) -> list[str]:
         snippet = json.dumps(
@@ -205,6 +258,48 @@ class PhpLspNoiseStrategy:
                 requires_main_thread=True,
             ),
         ]
+
+
+def _substitute_dependency_roots(
+    required: frozenset[str], replacements: dict[str, tuple[str, ...]]
+) -> list[str]:
+    """`required`, with each declared dependency root's bare entry replaced.
+
+    `replacements` maps a bare name (e.g. ``"vendor"``) to the entries its
+    tool wants instead of ``**/<name>``. Only entries whose any-depth form
+    (``**/<name>``) is an exact key in `replacements` are substituted - every
+    other required entry (the plain trees, the other vendored/build names)
+    passes through unchanged. Table-driven so a second dependency root, or a
+    second language reusing this shape, never needs a second `if` branch.
+    """
+    wanted = set(required)
+    for name, entries in replacements.items():
+        bare = f"{_ANY_DEPTH_PREFIX}{name}"
+        if bare in wanted:
+            wanted.discard(bare)
+            wanted.update(entries)
+    return sorted(wanted)
+
+
+def _harmful_root_excludes(
+    present: list[str], replacements: dict[str, tuple[str, ...]]
+) -> list[tuple[str, str]]:
+    """Present entries that exclude an entire declared dependency root outright.
+
+    Returns ``(entry, root_name)`` pairs. A bare root name, its any-depth
+    glob, or that glob with a trailing wildcard segment (``vendor``,
+    ``**/vendor``, ``**/vendor/**``) all remove the root from intelephense's
+    INDEX entirely - keyed off `replacements`' declared names, never a
+    literal ``"vendor"`` check.
+    """
+    harmful: list[tuple[str, str]] = []
+    for entry in present:
+        stripped = entry.rstrip("/")
+        for name in replacements:
+            whole_root = {name, f"{_ANY_DEPTH_PREFIX}{name}", f"{_ANY_DEPTH_PREFIX}{name}/**"}
+            if stripped in whole_root:
+                harmful.append((entry, name))
+    return harmful
 
 
 def _load_json_object(path: Path) -> dict[str, Any] | None:
