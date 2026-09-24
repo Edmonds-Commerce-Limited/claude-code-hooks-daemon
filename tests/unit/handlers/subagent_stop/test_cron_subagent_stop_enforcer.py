@@ -10,6 +10,7 @@ rationale; this file pins the same behaviour on the SubagentStop event.
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,11 @@ from claude_code_hooks_daemon.handlers.subagent_stop.cron_subagent_stop_enforcer
     CronSubagentStopEnforcerHandler,
 )
 from claude_code_hooks_daemon.utils.cron_enforcement import PROMPT_DELIVERY_CAP
+from claude_code_hooks_daemon.utils.cron_pause import (
+    CRON_PAUSES_FILENAME,
+    CronPause,
+    record_pause,
+)
 
 
 class _RootedCronSubagentStopEnforcerHandler(CronSubagentStopEnforcerHandler):
@@ -150,6 +156,55 @@ class TestALongDeclaredPromptStillMatchesItsTruncatedForm:
         result = handler.handle(payload)
 
         assert result.decision is Decision.ALLOW
+
+
+class TestASessionPausedJobIsAcceptedVisibly:
+    """Same session-scoped pause as the Stop twin (ledger 00422 N4)."""
+
+    _SESSION = "paused-session"
+
+    def _paused_handler(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> CronSubagentStopEnforcerHandler:
+        handler = _handler(monkeypatch, _config(_JOB))
+        monkeypatch.setattr(handler, "_pauses_path", lambda: tmp_path / CRON_PAUSES_FILENAME)
+        return handler
+
+    def _pause(self, tmp_path: Path, *, session_id: str = _SESSION) -> None:
+        record_pause(
+            tmp_path / CRON_PAUSES_FILENAME,
+            CronPause(
+                job_id=_JOB.id,
+                session_id=session_id,
+                reason="owner paused it",
+                recorded_at=time.time(),
+            ),
+            now=time.time(),
+        )
+
+    def test_a_paused_missing_job_allows_and_says_so(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        handler = self._paused_handler(monkeypatch, tmp_path)
+        self._pause(tmp_path)
+
+        result = handler.handle({"session_id": self._SESSION, "session_crons": []})
+
+        assert result.decision is Decision.ALLOW
+        text = "\n".join(result.context)
+        assert _JOB.id in text
+        assert "owner paused it" in text
+        assert "expires" in text
+
+    def test_another_sessions_pause_does_not_apply(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        handler = self._paused_handler(monkeypatch, tmp_path)
+        self._pause(tmp_path, session_id="another-session")
+
+        result = handler.handle({"session_id": self._SESSION, "session_crons": []})
+
+        assert result.decision is Decision.DENY
 
 
 class TestHandlerWiring:

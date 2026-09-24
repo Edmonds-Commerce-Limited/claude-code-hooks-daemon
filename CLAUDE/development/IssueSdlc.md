@@ -379,3 +379,15 @@ Stop and report, rather than pressing on, when:
 A tick that stops with a recorded reason is a **successful** tick. A tick that
 guesses in order to look productive is the failure this runbook exists to
 prevent.
+
+## Pausing the hourly cron for one session
+
+When the owner says to stop the `issue-sdlc` cron for now, pause it rather
+than only deleting it. `cron_stop_enforcer` refuses a stop while a declared job
+is missing, so a bare `CronDelete` leaves the session unable to stop. Run
+`hooks-daemon cron-pause issue-sdlc --reason "<the owner's words>"`, then
+`CronDelete` the job from the main session. The pause belongs to this session
+only. It expires within 24 hours, `hooks-daemon cron-resume issue-sdlc` ends it
+early, and every stop that finds the job missing names the pause. To stop the
+job in every session, edit `persistent_crons` in `.claude/hooks-daemon.yaml`;
+that is the only permanent switch.
