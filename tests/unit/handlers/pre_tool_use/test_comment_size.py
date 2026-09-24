@@ -11,6 +11,9 @@ from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.pre_tool_use.comment_size import (
     CommentSizeHandler,
 )
+from claude_code_hooks_daemon.strategies.comments.common import (
+    DEFAULT_SKIP_DIRECTORIES,
+)
 
 
 def _make_write_input(file_path: str, content: str) -> dict[str, Any]:
@@ -122,6 +125,33 @@ class TestMatchesGating:
             f"{root}/untracked/scratch/acceptance-test-qa-python/sample.py", content
         )
         assert handler.matches(hook_input) is True
+
+
+class TestCommentSizeEverySkipListEntry:
+    """Every entry of the shared comment-strategy skip list, not just venv/ --
+    per review feedback on Plan 00458: the bare substring bug applied
+    identically to build/, dist/, vendor/, node_modules/ and migrations/, and
+    a fix proven against one entry does not prove it against the others."""
+
+    @pytest.mark.parametrize("entry", DEFAULT_SKIP_DIRECTORIES)
+    def test_a_directory_merely_ending_in_the_entry_is_not_skipped(
+        self, handler: CommentSizeHandler, entry: str
+    ) -> None:
+        content = "x = 1  # " + ("y" * 60) + "\n"
+        # "x" prefixed directly onto the entry: the whole entry string is
+        # still present as a substring, but its start is preceded by "x",
+        # not "/" -- the exact boundary a bare `in` test cannot see.
+        collision_dir = f"x{entry}".rstrip("/")
+        hook_input = _make_write_input(f"/workspace/{collision_dir}/mod.py", content)
+        assert handler.matches(hook_input) is True
+
+    @pytest.mark.parametrize("entry", DEFAULT_SKIP_DIRECTORIES)
+    def test_the_entry_directly_under_the_project_root_is_still_skipped(
+        self, handler: CommentSizeHandler, entry: str
+    ) -> None:
+        content = "x = 1  # " + ("y" * 60) + "\n"
+        hook_input = _make_write_input(f"/workspace/{entry}mod.py", content)
+        assert handler.matches(hook_input) is False
 
 
 class TestDocstringExemption:

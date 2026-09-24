@@ -66,6 +66,24 @@ def test_a_project_living_under_a_directory_named_tests_is_still_guarded(
     assert is_in_common_test_directory(f"{root}/src/main.py") is False
 
 
+@pytest.mark.parametrize("entry", COMMON_TEST_DIRECTORIES)
+def test_every_entry_a_directory_merely_ending_in_it_is_not_a_match(entry: str) -> None:
+    """Every entry of COMMON_TEST_DIRECTORIES, not just tests/ -- per review
+    feedback on Plan 00458: the bare substring bug applied identically to
+    test/, __tests__/ and spec/, and a fix proven against one entry does not
+    prove it against the others."""
+    # "x" prefixed directly onto the entry: the whole entry string is still
+    # present as a substring, but its start is preceded by "x", not "/" --
+    # the exact boundary a bare `in` test cannot see.
+    collision = f"x{entry}".rstrip("/")
+    assert is_in_common_test_directory(f"/workspace/{collision}/file.py") is False
+
+
+@pytest.mark.parametrize("entry", COMMON_TEST_DIRECTORIES)
+def test_every_entry_directly_present_is_still_a_match(entry: str) -> None:
+    assert is_in_common_test_directory(f"/workspace/{entry}file.py") is True
+
+
 def test_matches_directory_with_leading_slash() -> None:
     """Directory patterns with leading slash should match."""
     directories = ("/vendor/", "/node_modules/")

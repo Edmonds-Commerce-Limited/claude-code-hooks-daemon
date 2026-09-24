@@ -237,6 +237,37 @@ class TestBritishEnglishHandler:
         }
         assert handler.matches(hook_input) is False
 
+    @pytest.mark.parametrize("entry", ["private_html", "docs", "CLAUDE"])
+    def test_every_check_directory_entry_a_merely_ending_directory_is_not_matched(
+        self, handler, entry
+    ):
+        """Every entry of CHECK_DIRECTORIES, not just docs -- per review
+        feedback on Plan 00458: the bare substring bug applied identically to
+        private_html and CLAUDE, and a fix proven against one entry does not
+        prove it against the others."""
+        # "x" prefixed directly onto the entry: the whole entry string is
+        # still present as a substring, but its start is preceded by "x",
+        # not "/" -- the exact boundary a bare `in` test cannot see.
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": f"/workspace/x{entry}/component.md",
+                "content": "This has the word color.",
+            },
+        }
+        assert handler.matches(hook_input) is False
+
+    @pytest.mark.parametrize("entry", ["private_html", "docs", "CLAUDE"])
+    def test_every_check_directory_entry_directly_present_is_still_matched(self, handler, entry):
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": f"/workspace/{entry}/component.md",
+                "content": "This has the word color.",
+            },
+        }
+        assert handler.matches(hook_input) is True
+
     def test_matches_british_spelling_returns_false(self, handler):
         """Should not match when only British spellings present."""
         hook_input = {
