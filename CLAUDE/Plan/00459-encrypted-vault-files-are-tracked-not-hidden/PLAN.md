@@ -1,6 +1,6 @@
 # Plan 00459: encrypted vault files are tracked not hidden
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-24
 **Owner**: dev
 **Priority**: High
@@ -64,7 +64,7 @@ protection must return on the very next check.
 
 ### Phase 1: TDD in a worktree
 
-- [ ] ⬜ **Task 1.1**: One shared detector, e.g.
+- [x] ✅ **Task 1.1**: One shared detector, e.g.
   `utils/encrypted_at_rest.py`. It reads a bounded prefix of the file,
   never the whole file, and returns whether the content is a whole-file
   Ansible Vault payload. The rule comes from the format specification:
@@ -72,7 +72,7 @@ protection must return on the very next check.
   file, a symlink out of the project, a non-regular file or a malformed
   header means NOT encrypted, so protection stays on. Tests include a
   decrypted-in-place file and a lookalike header.
-- [ ] ⬜ **Task 1.2**: Decide, with evidence, two adjacent formats. (a) YAML
+- [x] ✅ **Task 1.2**: Decide, with evidence, two adjacent formats. (a) YAML
   with inline `!vault |` values: plaintext keys, and possibly plaintext
   values beside the vaulted ones. The daemon cannot prove every secret is
   vaulted, so the recommendation is to keep read protection but replace the
@@ -80,11 +80,11 @@ protection must return on the very next check.
   secret value is vaulted. (b) SOPS files (a top-level `sops:` metadata
   block): include them only if detection is unambiguous. Record both
   decisions in the journal.
-- [ ] ⬜ **Task 1.3**: `secret_file_hygiene_checker` uses the detector. It
+- [x] ✅ **Task 1.3**: `secret_file_hygiene_checker` uses the detector. It
   gives no gitignore or untrack findings for an encrypted file, and reports
   it as "encrypted at rest, tracking is correct". Existing findings for
   plaintext protected files are unchanged.
-- [ ] ⬜ **Task 1.4**: `secret_file_guard` uses the detector on every
+- [x] ✅ **Task 1.4**: `secret_file_guard` uses the detector on every
   surface it guards (Read/Grep/Edit, the Bash mention check, script
   authoring). An encrypted file is allowed through, and so is `git add` or
   `git commit` naming it. The guard's explicit denials of `ansible-vault view|decrypt` and of `--vault-password-file` misuse are unchanged, because
@@ -104,11 +104,11 @@ protection must return on the very next check.
 
 ## Success Criteria
 
-- [ ] Test: an encrypted `vault_passwords.yml` under `group_vars/` yields no
+- [x] Test: an encrypted `vault_passwords.yml` under `group_vars/` yields no
   hygiene finding, can be Read, and `git add` naming it is allowed.
-- [ ] Test: the same path decrypted in place is denied on Read and on a Bash
+- [x] Test: the same path decrypted in place is denied on Read and on a Bash
   mention, and gets the hygiene advice.
-- [ ] Test: a plaintext `.vault_pass` is protected exactly as before.
+- [x] Test: a plaintext `.vault_pass` is protected exactly as before.
 - [ ] Full QA passes and CI is green.
 
 ## Delivery & Milestones

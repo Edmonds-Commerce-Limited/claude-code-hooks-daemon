@@ -4,7 +4,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00459: encrypted vault files are tracked not hidden](00459-encrypted-vault-files-are-tracked-not-hidden/PLAN.md) - Not Started (owner report: the secret-file globs select by name, so an Ansible Vault ENCRYPTED vars file is told to be untracked and `git add` naming it is denied; a content check made at each use separates ciphertext from the plaintext password file)
+- [00459: encrypted vault files are tracked not hidden](00459-encrypted-vault-files-are-tracked-not-hidden/PLAN.md) - In Progress (owner report: the secret-file globs select by name, so an Ansible Vault ENCRYPTED vars file is told to be untracked and `git add` naming it is denied; a content check made at each use separates ciphertext from the plaintext password file)
 
 - [00458: skip lists match path segments relative to the project](00458-skip-lists-match-path-segments-relative-to-the-project/PLAN.md) - Not Started (from 00422 N20: six guards test `skip_dir in file_path` as a bare substring, so a directory merely ending in `venv`/`build`/`vendor` switches them off for everything beneath it; lint was already fixed, its siblings were not)
 

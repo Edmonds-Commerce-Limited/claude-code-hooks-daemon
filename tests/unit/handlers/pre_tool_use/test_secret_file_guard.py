@@ -522,9 +522,15 @@ class TestEncryptedFileOnPathTools:
         assert _verdict(_in(project, "Read", {"file_path": str(outside)})) == Decision.DENY
 
     def test_plaintext_vault_password_file_is_protected_as_before(self, project: Path) -> None:
-        _put(project, ".vault-pass", b"not-a-real-secret\n")
-        assert _verdict(_in(project, "Read", {"file_path": ".vault-pass"})) == Decision.DENY
-        assert _verdict(_in(project, "Bash", {"command": "cat .vault-pass"})) == Decision.DENY
+        for name in (".vault_pass", ".vault-pass", "vault_pass.txt"):
+            _put(project, name, b"not-a-real-secret\n")
+            for hook_input in (
+                _in(project, "Read", {"file_path": name}),
+                _in(project, "Grep", {"pattern": "x", "path": str(project / name)}),
+                _in(project, "Bash", {"command": f"cat {name}"}),
+                _in(project, "Bash", {"command": f"git add {name}"}),
+            ):
+                assert _verdict(hook_input) == Decision.DENY, (name, hook_input)
 
 
 class TestEncryptedFileOnBash:
