@@ -12,8 +12,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00463: full qa is a main thread gate](00463-full-qa-is-a-main-thread-gate/PLAN.md) - Not Started (owner request after five worktree agents ran the ~18-minute full suite at once: a `scope: SUB` guard denies configured full-QA commands in sub-agents and names the targeted forms; the coordinator runs the full gate serially on each branch before merge)
 
-- [00462: php lsp advice keeps composer dependencies indexed](00462-php-lsp-advice-keeps-composer-dependencies-indexed/PLAN.md) - In Progress (#56: `lsp_noise_checker` tells a PHP project to exclude all of `**/vendor` from intelephense, which removes every Composer dependency from the index, so every library type is undefined; Phase 1 implemented and QA-green, Phase 2 merge/close pending)
-
 - [00461: journal entries only through the stamping tool](00461-journal-entries-only-through-the-stamping-tool/PLAN.md) - In Progress (owner directive after a session of hand-stamped entries, one 40 minutes in the future: an Edit/Write/Bash append to a plan `JOURNAL/` day-file is DENIED and pointed at `mkplan.bash --journal`, which shipped in v3.66.0 and was never used)
 
 - [00460: report size blocker gives read only agents a way out](00460-report-size-blocker-gives-read-only-agents-a-way-out/PLAN.md) - In Progress (owner report: the SubagentStop size blocker tells every agent to write its report to a file, so a read-only type either cannot comply or writes it through a Bash heredoc that no content guard sees)
@@ -177,6 +175,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00462: php lsp advice keeps composer dependencies indexed](Completed/00462-php-lsp-advice-keeps-composer-dependencies-indexed/PLAN.md) - Complete at `830363e5` + the archiving commit (from #56: the PHP advice asked intelephense to exclude all of `**/vendor`, which drops every Composer dependency from its index; the strategy now keeps dependency roots indexed and asks only for intelephense's nested excludes, and flags an override that excludes the whole tree)
+
 - [00456: missing venv self heals and repair runs without one](Completed/00456-missing-venv-self-heals-and-repair-runs-without-one/PLAN.md) - Complete at `9e2f74cd` + the archiving commit (the rest of #53: a hook with no venv starts one detached, locked build; `repair` runs without a venv; the skill never auto-forces and a `--force` keeps other environments' venvs; carries Plan 00100 Phase 3.5)
 
 - [00459: encrypted vault files are tracked not hidden](Completed/00459-encrypted-vault-files-are-tracked-not-hidden/PLAN.md) - Complete at `2a6a9b84` + the archiving commit (owner report: secret-file globs select by NAME, so Ansible Vault ciphertext was told to be untracked; a whole-file content check at each use, failing closed, now separates it from the plaintext password file)
@@ -235,8 +235,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00419: niggles ledger fourteen](Completed/00419-niggles-ledger-fourteen/PLAN.md) - Complete at `6a6f9a43`…`2778206f` + the archiving commit (fifteen entries, eleven terminal; the four that were not are re-filed into 00422 rather than counted as closed, because nothing downstream re-reads a closed plan. N1: `debug_hooks.sh` could not run in the repository that dogfoods it)
 
-- [00418: orchestrator only mode greenfield](Completed/00418-orchestrator-only-mode-greenfield/PLAN.md) - Complete at `0f03ef83`…`8011858b` + the archiving commit (restrict the MAIN THREAD to coordination tools; built once and deleted because hooks could not tell which agent fired an event, and `agent_id` now can. Greenfield by ruling, project-level handler, simulate-only before ever blocking. From issue #14)
-
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -290,15 +288,15 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 466 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 399 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 400 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 44 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 43 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
 - **Cancelled/Abandoned**: 13 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00108 superseded by 00117, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213, 00135 superseded by the supervisor workstream)
 
-- **Folder-to-number reconciliation**: 44 + 399 + 13 = **456 folders**, spanning
+- **Folder-to-number reconciliation**: 43 + 400 + 13 = **456 folders**, spanning
   **453 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
