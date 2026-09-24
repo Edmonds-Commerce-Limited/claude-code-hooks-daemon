@@ -143,7 +143,7 @@ write-up saying otherwise would be a tidy story pointing the wrong way.
   which costs more than the bug it repairs. Guarded by
   `test_keystrokes_without_the_whole_word_are_not_a_compact`.
 - [ ] Full QA passes and CI is green.
-- [x] Release note: `CLAUDE/UPGRADES/UNRELEASED/release-notes/50-a-tab-completed-compact-is-recognised-from-the-daemon-record.md`.
+- [x] Release note: `CLAUDE/UPGRADES/UNRELEASED/release-notes/18-a-tab-completed-compact-is-recognised-from-the-daemon-record.md`.
 
 ## Delivery & Milestones
 
