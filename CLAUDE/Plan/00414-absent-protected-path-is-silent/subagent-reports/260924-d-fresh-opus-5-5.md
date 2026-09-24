@@ -92,12 +92,15 @@ silent.
   `utils/secret_file_matching.py`. The hygiene checker only calls
   `resolve_configured_patterns`/`path_is_protected` read-only, and neither
   signature changed.
-- Files that may overlap with n466-guard-defects:
-  `handlers/session_start/secret_file_hygiene_checker.py` and its test,
-  `handlers/pre_tool_use/sensitive_content.py` (one guidance sentence in
-  `get_claude_md`), and `scripts/qa/error_hiding_exclusions.json` (three
-  entries added). I asked n466-guard-defects which files it touches and had no
-  reply before committing.
+- n466-guard-defects replied after my commits (its branch HEAD `dd73b459`).
+  It changed `utils/secret_file_matching.py` (private helpers only),
+  `secret_file_guard.py`, `project_containment.py`, `utils/path_exclusion.py`
+  and `constants/rule_ids.py`. None of those is in this branch. It confirmed
+  that `resolve_configured_patterns()` and `path_is_protected()` are unchanged,
+  and that it did not touch the hygiene checker or its test. The file lists
+  are disjoint. One file could still conflict textually: it did not mention
+  `scripts/qa/error_hiding_exclusions.json`, where this branch adds three
+  entries.
 
 ## Files changed
 
