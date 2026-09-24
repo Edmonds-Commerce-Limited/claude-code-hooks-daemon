@@ -902,18 +902,18 @@
     {
       "file": "scripts/upgrade_version.sh",
       "lines": [
-        514
+        641
       ],
       "rule": "shell-|| true",
-      "reason": "Plan 00200 Task 5.4: `run_pre_install_checks ... \"false\" || true`. The function's own documented contract (fail_on_error=false): 'returns non-zero but doesn't exit', and it already prints any warnings found. The trailing `|| true` exists only to stop `set -e` treating that documented non-fatal return as script-terminating -- the function's own visible warnings are the diagnostic, not this line. Realigned by Plan 00455 (the ensure_normal_mode_only argument-fix comment shifted this line down from 511); previously realigned by Plan 00291 from 450."
+      "reason": "Plan 00200 Task 5.4: `run_pre_install_checks ... \"false\" || true`. The function's own documented contract (fail_on_error=false): 'returns non-zero but doesn't exit', and it already prints any warnings found. The trailing `|| true` exists only to stop `set -e` treating that documented non-fatal return as script-terminating -- the function's own visible warnings are the diagnostic, not this line. Realigned by Plan 00376 Task 1.1 (run_pre_deploy_phase defined above it, from 514); previously by Plan 00455 (the ensure_normal_mode_only argument-fix comment shifted this line down from 511); previously realigned by Plan 00291 from 450."
     },
     {
       "file": "scripts/upgrade_version.sh",
       "lines": [
-        876
+        796
       ],
       "rule": "shell-&>/dev/null",
-      "reason": "Plan 00200 Task 5.4: `if ! git ... rev-parse \"$TARGET_VERSION\" &>/dev/null; then fail_fast \"Version $TARGET_VERSION not found...\"` -- exit code explicitly checked, specific error printed on failure. Realigned by Plan 00455 (the ensure_normal_mode_only argument-fix comment shifted this line down from 873); previously realigned by Plan 00291 from 812."
+      "reason": "Plan 00200 Task 5.4: `if ! git ... rev-parse \"$TARGET_VERSION\" &>/dev/null; then fail_fast \"Version $TARGET_VERSION not found...\"` -- exit code explicitly checked, specific error printed on failure. Realigned by Plan 00376 Task 1.1 (the pre-checkout compat and guide blocks moved out, from 876); previously by Plan 00455 (the ensure_normal_mode_only argument-fix comment shifted this line down from 873); previously realigned by Plan 00291 from 812."
     },
     {
       "file": "scripts/validate_worktrees.sh",

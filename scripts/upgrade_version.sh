@@ -119,6 +119,129 @@ _resolve_install_stamp() {
     print_branch_install_banner "$TRACK_REF" "$TRACK_REASON" "$INSTALL_STAMP"
 }
 
+# run_pre_deploy_phase() - Config compatibility and the upgrade-guide reading
+# list, run once the daemon dir sits on the target and its venv is ready, but
+# before anything is deployed into the project (Plan 00376 Task 1.1).
+#
+# That is the one point every route shares with the target's own code: Layer 1
+# checks the target out before it calls this script, so it arrives on the
+# idempotent path; a direct call arrives after Step 7. Run any earlier, on the
+# pre-checkout tree, and the guide for the version being installed does not
+# exist yet. The FROM side is CURRENT_VERSION (Layer 1 hands the pre-checkout
+# version over); the TARGET side is the release part of INSTALL_STAMP, which
+# for a branch install is the pyproject version the branch carries.
+#
+# Report only. It never stops the upgrade: nothing decides yet what an abort
+# at this point would restore (Task 1.2), and the proceed/abort gate that acts
+# on this report is the plan's Phase 3.
+#
+# Every value reaches Python as an ARGV entry, never spliced into its source.
+# Exported so a direct call's second pass does not repeat it.
+run_pre_deploy_phase() {
+    if [ -n "${HOOKS_DAEMON_PRE_DEPLOY_PHASE_DONE:-}" ]; then
+        return 0
+    fi
+    if [ "$CURRENT_VERSION" = "unknown" ] || [ -z "$VENV_PYTHON" ]; then
+        print_info "Previous version unknown: skipping the config compatibility check and the upgrade-guide list"
+        return 0
+    fi
+
+    local target_semver="${INSTALL_STAMP%%+*}"
+    local include_unreleased=""
+    if [ "$BRANCH_INSTALL_STATE" = "armed" ]; then
+        include_unreleased="1"
+    fi
+
+    local compat_exit=0
+    if [ -f "$TARGET_CONFIG" ]; then
+        print_info "Checking config compatibility with target version..."
+        "$VENV_PYTHON" - "$DAEMON_DIR" "$TARGET_CONFIG" "$CURRENT_VERSION" "$target_semver" \
+            <<'COMPAT_CHECK_PY' || compat_exit=$?
+import sys
+from pathlib import Path
+
+import yaml
+
+from claude_code_hooks_daemon.install.upgrade_compatibility import CompatibilityChecker
+
+daemon_dir = Path(sys.argv[1])
+target_config = Path(sys.argv[2])
+current_version = sys.argv[3]
+target_version = sys.argv[4]
+
+changelog_path = daemon_dir / "CHANGELOG.md"
+if not changelog_path.exists():
+    print("WARNING: CHANGELOG.md not found, skipping compatibility check", file=sys.stderr)
+    sys.exit(0)
+
+with target_config.open() as handle:
+    user_config = yaml.safe_load(handle)
+
+checker = CompatibilityChecker(
+    changelog_path=changelog_path,
+    current_version=current_version,
+    target_version=target_version,
+)
+report = checker.check_compatibility(user_config)
+
+if report.is_compatible:
+    print("✓ All handlers compatible with target version", file=sys.stderr)
+else:
+    print(checker.generate_user_friendly_report(report), file=sys.stderr)
+    print(
+        f"Your config references handlers that are incompatible with {target_version}. "
+        "The upgrade continues; fix these in .claude/hooks-daemon.yaml once it completes.",
+        file=sys.stderr,
+    )
+COMPAT_CHECK_PY
+        if [ "$compat_exit" -ne 0 ]; then
+            print_error "Config compatibility check crashed (exit $compat_exit) - traceback above."
+            print_warning "Continuing without a compatibility verdict; review $TARGET_CONFIG after the upgrade."
+        fi
+    fi
+
+    local guide_exit=0
+    print_info "Checking for upgrade guides between $CURRENT_VERSION and $target_semver..."
+    "$VENV_PYTHON" - "$DAEMON_DIR" "$CURRENT_VERSION" "$target_semver" "$include_unreleased" \
+        <<'GUIDE_CHECK_PY' || guide_exit=$?
+import sys
+from pathlib import Path
+
+from claude_code_hooks_daemon.install.upgrade_compatibility import CompatibilityChecker
+
+daemon_dir = Path(sys.argv[1])
+current_version = sys.argv[2]
+target_version = sys.argv[3]
+include_unreleased = sys.argv[4] == "1"
+
+checker = CompatibilityChecker(
+    changelog_path=daemon_dir / "CHANGELOG.md",
+    current_version=current_version,
+    target_version=target_version,
+)
+guides = checker.suggest_upgrade_guides(daemon_dir, include_unreleased=include_unreleased)
+
+if not guides:
+    print("✓ No upgrade guides for this version range", file=sys.stderr)
+    sys.exit(0)
+
+print("", file=sys.stderr)
+print("📚 REQUIRED READING: Upgrade Guides", file=sys.stderr)
+print("=" * 70, file=sys.stderr)
+print(f"Upgrading from v{current_version.lstrip('vV')} to v{target_version.lstrip('vV')}", file=sys.stderr)
+print(f"{len(guides)} document(s) describe what this upgrade changes:", file=sys.stderr)
+for guide in guides:
+    print(f"  • {guide}", file=sys.stderr)
+print("", file=sys.stderr)
+GUIDE_CHECK_PY
+    if [ "$guide_exit" -ne 0 ]; then
+        print_error "Upgrade-guide check crashed (exit $guide_exit) - traceback above."
+        print_warning "Continuing without a guide list; review $DAEMON_DIR/CLAUDE/UPGRADES/ manually."
+    fi
+
+    export HOOKS_DAEMON_PRE_DEPLOY_PHASE_DONE=1
+}
+
 # Derived paths
 # v3.7.0+ venvs are fingerprint-keyed; v3.8.1 added a scan-fallback for the
 # fingerprint-mismatch case (installer used python3.13, resolver's python3
@@ -354,6 +477,10 @@ if [ "$ROLLBACK_REF" = "$TARGET_VERSION" ] || { [ -n "$TARGET_COMMIT" ] && [ "$T
         fail_fast "Virtual environment verification failed"
     fi
 
+    # Every Layer 1 upgrade arrives here, so this is where the target's own
+    # compatibility check and guide list must run: before the first deploy.
+    run_pre_deploy_phase
+
     # Plan 00099: clean up pre-v3.7.0 legacy venv on idempotent re-runs too.
     # The full upgrade path (Step 7) already does this, but multi-host projects
     # hit the fast path on every host after the first upgrade — so the legacy
@@ -514,96 +641,10 @@ if [ -f "$VENV_PYTHON" ]; then
     run_pre_install_checks "$PROJECT_ROOT" "$VENV_PYTHON" "$DAEMON_DIR" "false" || true
 fi
 
-# Pre-upgrade compatibility check (validates BEFORE any changes)
-#
-# The checker writes its whole report to stderr, so nothing here captures its
-# output — it streams straight to the operator. The previous shape captured it
-# with `2>&1` into a variable that was only echoed on failure, and under
-# `set -e` a non-zero exit from that command substitution killed the script
-# before the echo ever ran: an incompatible config aborted the upgrade with no
-# explanation at all, and the --force branch below was unreachable.
-#
-# Every value the checker needs arrives as an ARGV entry, never spliced into
-# the generated Python source (a quote in any path or version string produced
-# a SyntaxError, which the blanket `except Exception` then reported as a vague
-# one-line warning).
-#
-# Exit codes from the embedded checker:
-#   0                          - compatible, or nothing to check
-#   COMPAT_INCOMPATIBLE_STATUS - incompatibilities found; honour --force
-#   anything else              - the checker itself crashed. Its traceback is
-#                                already on stderr; warn loudly and continue,
-#                                preserving the long-standing contract that a
-#                                broken check must not block an upgrade.
-COMPAT_INCOMPATIBLE_STATUS=3
-if [ -f "$TARGET_CONFIG" ] && [ -f "$VENV_PYTHON" ]; then
-    print_info "Checking config compatibility with target version..."
-
-    COMPAT_EXIT=0
-    "$VENV_PYTHON" - "$DAEMON_DIR" "$TARGET_CONFIG" "$CURRENT_VERSION" "$TARGET_VERSION" \
-        "$COMPAT_INCOMPATIBLE_STATUS" <<'COMPAT_CHECK_PY' || COMPAT_EXIT=$?
-import sys
-from pathlib import Path
-
-import yaml
-
-from claude_code_hooks_daemon.install.upgrade_compatibility import CompatibilityChecker
-
-daemon_dir = Path(sys.argv[1])
-target_config = Path(sys.argv[2])
-current_version = sys.argv[3]
-target_version = sys.argv[4]
-incompatible_status = int(sys.argv[5])
-
-changelog_path = daemon_dir / "CHANGELOG.md"
-if not changelog_path.exists():
-    print("WARNING: CHANGELOG.md not found, skipping compatibility check", file=sys.stderr)
-    sys.exit(0)
-
-with target_config.open() as handle:
-    user_config = yaml.safe_load(handle)
-
-checker = CompatibilityChecker(
-    changelog_path=changelog_path,
-    current_version=current_version,
-    target_version=target_version,
-)
-
-report = checker.check_compatibility(user_config)
-
-if report.is_compatible:
-    print("✓ All handlers compatible with target version", file=sys.stderr)
-    sys.exit(0)
-
-print(checker.generate_user_friendly_report(report), file=sys.stderr)
-print("", file=sys.stderr)
-print("INCOMPATIBILITIES DETECTED", file=sys.stderr)
-print("", file=sys.stderr)
-print(
-    f"Your config references handlers that are incompatible with {target_version}.",
-    file=sys.stderr,
-)
-print("", file=sys.stderr)
-print("OPTIONS:", file=sys.stderr)
-print("  1. Fix config issues manually and re-run upgrade", file=sys.stderr)
-print("  2. Use --force to proceed anyway (config will be updated automatically)", file=sys.stderr)
-print("", file=sys.stderr)
-sys.exit(incompatible_status)
-COMPAT_CHECK_PY
-
-    if [ "$COMPAT_EXIT" -eq "$COMPAT_INCOMPATIBLE_STATUS" ]; then
-        # --force is accepted from either channel the old code honoured: the
-        # script's own arguments, and the UPGRADE_FLAGS env var Layer 1 sets.
-        if [[ "$*" == *"--force"* ]] || [[ "${UPGRADE_FLAGS:-}" == *"--force"* ]]; then
-            print_warning "Proceeding despite incompatibilities (--force detected)"
-        else
-            fail_fast "Config compatibility check failed. Use --force to proceed anyway."
-        fi
-    elif [ "$COMPAT_EXIT" -ne 0 ]; then
-        print_error "Config compatibility check crashed (exit $COMPAT_EXIT) - traceback above."
-        print_warning "Continuing without a compatibility verdict; review $TARGET_CONFIG after the upgrade."
-    fi
-fi
+# The config compatibility check and the upgrade-guide list are NOT run here:
+# this tree is still the version being replaced on a direct call, so neither
+# the target's handlers nor its guides exist yet. run_pre_deploy_phase runs
+# both once the target is checked out and before anything is deployed.
 
 # ============================================================
 # Step 3: Create state snapshot
@@ -733,135 +774,14 @@ BREAKING_CHANGES_PY
 fi
 
 # ============================================================
-# Step 5a: Upgrade guide reading enforcement
+# Step 5a: Upgrade-guide reading list -- see run_pre_deploy_phase
 # ============================================================
 
-# Detect version jump and list required upgrade guides.
-#
-# Nothing is captured here: the checker's report goes to stderr and streams
-# straight to the operator. The previous shape captured stdout+stderr into
-# GUIDE_CHECK purely to grep it for a sentinel string, which meant the
-# "REQUIRED READING" report the user was meant to act on was swallowed by the
-# capture and never printed. The sentinel is now an EXIT CODE, and every value
-# the checker needs is an ARGV entry rather than text spliced into the
-# generated Python source.
-GUIDES_FOUND_STATUS=4
-UPGRADE_GUIDES_LIST="/tmp/upgrade_guides_list.txt"
-if [ "$CURRENT_VERSION" != "unknown" ] && [ -f "$VENV_PYTHON" ]; then
-    print_info "Checking for required upgrade guides..."
-
-    GUIDE_CHECK_EXIT=0
-    "$VENV_PYTHON" - "$DAEMON_DIR" "$CURRENT_VERSION" "$TARGET_VERSION" \
-        "$UPGRADE_GUIDES_LIST" "$GUIDES_FOUND_STATUS" <<'GUIDE_CHECK_PY' || GUIDE_CHECK_EXIT=$?
-import sys
-from pathlib import Path
-
-from claude_code_hooks_daemon.install.upgrade_compatibility import CompatibilityChecker
-
-daemon_dir = Path(sys.argv[1])
-current_version = sys.argv[2]
-target_version = sys.argv[3]
-guides_list_path = Path(sys.argv[4])
-guides_found_status = int(sys.argv[5])
-
-changelog_path = daemon_dir / "CHANGELOG.md"
-if not changelog_path.exists():
-    sys.exit(0)
-
-checker = CompatibilityChecker(
-    changelog_path=changelog_path,
-    current_version=current_version,
-    target_version=target_version,
-)
-
-guides = checker.suggest_upgrade_guides(daemon_dir)
-
-if not guides:
-    sys.exit(0)
-
-print("", file=sys.stderr)
-print("📚 REQUIRED READING: Upgrade Guides", file=sys.stderr)
-print("=" * 70, file=sys.stderr)
-print(f"Upgrading from v{checker.current_version} to v{checker.target_version}", file=sys.stderr)
-print(f"{len(guides)} document(s) describe what this upgrade changes.", file=sys.stderr)
-print("", file=sys.stderr)
-print("Please review the following upgrade guides:", file=sys.stderr)
-for guide in guides:
-    print(f"  • {guide}", file=sys.stderr)
-print("", file=sys.stderr)
-
-# Hand the guide list to bash, which drives the interactive confirmation.
-with guides_list_path.open("w") as handle:
-    for guide in guides:
-        handle.write(str(guide) + "\n")
-
-sys.exit(guides_found_status)
-GUIDE_CHECK_PY
-
-    if [ "$GUIDE_CHECK_EXIT" -ne 0 ] && [ "$GUIDE_CHECK_EXIT" -ne "$GUIDES_FOUND_STATUS" ]; then
-        print_error "Upgrade-guide check crashed (exit $GUIDE_CHECK_EXIT) - traceback above."
-        print_warning "Continuing without a guide list; review $DAEMON_DIR/CLAUDE/UPGRADES/ manually."
-    fi
-
-    if [ "$GUIDE_CHECK_EXIT" -eq "$GUIDES_FOUND_STATUS" ]; then
-        # Skip interactive prompt when:
-        # - --skip-reading-confirmation flag is set, OR
-        # - stdin is not a terminal (non-interactive mode, e.g. run by CI or Claude Code agent)
-        #   Without this check, `read` hangs forever waiting for input that never arrives
-        if [[ "$*" == *"--skip-reading-confirmation"* ]] || [ ! -t 0 ]; then
-            if [ ! -t 0 ]; then
-                print_info "Non-interactive mode detected, skipping upgrade guide confirmation"
-            else
-                print_info "--skip-reading-confirmation flag detected, skipping guide confirmation"
-            fi
-            print_info "Review upgrade guides after upgrade: $DAEMON_DIR/CLAUDE/UPGRADES/"
-            rm -f "$UPGRADE_GUIDES_LIST"
-        else
-            echo ""
-            echo "Have you read all upgrade guides? (yes/no/show)"
-            read -r -p "> " response
-
-            while true; do
-                case "$response" in
-                    yes|y|Y)
-                        print_success "Proceeding with upgrade..."
-                        break
-                        ;;
-                    show|s|S)
-                        # Display guides using pager
-                        if [ -f "$UPGRADE_GUIDES_LIST" ]; then
-                            while IFS= read -r guide_path; do
-                                if [ -f "$guide_path" ]; then
-                                    echo ""
-                                    echo "========================================="
-                                    echo "Displaying: $guide_path"
-                                    echo "========================================="
-                                    ${PAGER:-less} "$guide_path"
-                                fi
-                            done < "$UPGRADE_GUIDES_LIST"
-                        fi
-                        echo ""
-                        echo "Have you read all upgrade guides? (yes/no/show)"
-                        read -r -p "> " response
-                        ;;
-                    no|n|N)
-                        echo ""
-                        print_warning "Please review upgrade guides before proceeding."
-                        print_info "Guides location: $DAEMON_DIR/CLAUDE/UPGRADES/"
-                        fail_fast "Upgrade aborted - read guides and try again"
-                        ;;
-                    *)
-                        echo "Please answer 'yes', 'no', or 'show'"
-                        read -r -p "> " response
-                        ;;
-                esac
-            done
-
-            # Cleanup temp file
-            rm -f "$UPGRADE_GUIDES_LIST"
-        fi
-    fi
-fi
+# The list, and the interactive "have you read them?" prompt that used to sit
+# here, read the PRE-checkout tree, which cannot hold a guide for the version
+# being installed, so the prompt could not fire. The list now runs from
+# run_pre_deploy_phase. A proceed/abort gate that also works for an agent is
+# Plan 00376 Phase 3; its site is that function.
 
 # ============================================================
 # Step 6: Checkout target version
@@ -926,6 +846,10 @@ VENV_PYTHON="$VENV_PATH/bin/python"
 if ! verify_venv "$VENV_PYTHON" "$DAEMON_DIR"; then
     fail_fast "Virtual environment verification failed"
 fi
+
+# A direct call reaches the target's tree here, after Step 6; nothing has been
+# deployed into the project yet.
+run_pre_deploy_phase
 
 # Plan 00099: clean up pre-v3.7.0 legacy venv to avoid confusion. Only remove
 # the legacy path if we successfully provisioned a fingerprint-keyed venv at a

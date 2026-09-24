@@ -1,6 +1,9 @@
 # Plan 00376: pre upgrade phase with migration and confirm gate
 
-**Status**: In Progress
+**Status**: Blocked
+**Blocked on**: the owner's go-ahead for Phases 2–3 (the `pre-upgrade-tasks/`
+surface and the agent-capable gate), which are features. Nothing else blocks
+it: the defects (Tasks 1.1, 4.2, 4.3) are delivered.
 **Created**: 2026-09-11
 **Owner**: joseph
 **Priority**: High
@@ -40,7 +43,8 @@ Three measured facts drive the remaining work:
   yes/no — but `:808` tests `[ ! -t 0 ]` and, on any non-interactive stdin,
   falls through at `:814` to "Review upgrade guides after upgrade". Every
   agent-driven upgrade takes that branch. The gate protects humans at a
-  terminal and nobody else.
+  terminal and nobody else. (Task 1.1 found it could not fire at all, and
+  removed it; the reading list now runs in `run_pre_deploy_phase`.)
 - **It would not be pre-install even if it fired.** Layer 1 checks the new
   version out at `scripts/upgrade.sh:550`, then delegates to Layer 2 at
   `:608-629`. By the time Step 5a runs, the new code is already on disk.
@@ -88,19 +92,27 @@ rather than only matching syntax.
 
 ### Phase 1: Establish where the phase runs
 
-- [ ] ⬜ **Task 1.1**: Site the phase alongside the existing compat check in
+- [x] ✅ **Task 1.1**: Site the phase alongside the existing compat check in
   Layer 2 (`scripts/upgrade_version.sh`, around the pre-install checks at
   `:511` and compat at `:536-603`), which is already after checkout and before
   any deploy. No new fetch mechanism is required — see the Overview.
-  **Re-verify first, measured while fixing 4.2 and 4.3**: on the supported
-  route that site never runs. Layer 1 checks the target out before it calls
-  Layer 2, so Layer 2's "already at target" test
-  (`scripts/upgrade_version.sh:339`) is always true, and the idempotent path
-  exits at `:509` before the compat check (`:511+`) and the Step 5a reading
-  list. Invoked directly, both run against the PRE-checkout tree, which holds
-  no guide for the version being installed. When this task moves the phase,
-  pass `include_unreleased` from `BRANCH_INSTALL_STATE`. The running venv is
-  the previous install's, so its stamp cannot answer the question.
+  **Measured while fixing 4.2 and 4.3**: on the supported route that site
+  never ran. Layer 1 checks the target out before it calls Layer 2, so the
+  "already at target" test was always true and the idempotent path exited
+  before the compat check and the Step 5a reading list. Invoked directly,
+  both read the PRE-checkout tree, which holds no guide for the version being
+  installed. **Done**: both now live in `run_pre_deploy_phase`
+  (`scripts/upgrade_version.sh`). It is called on the idempotent path right
+  after the target's venv is verified, and on the direct path after Step 7.
+  Either way that is before the first deploy. It compares `CURRENT_VERSION`
+  (the FROM side, handed over by Layer 1) against the release part of
+  `INSTALL_STAMP` and the target's guides, and passes `include_unreleased`
+  from `BRANCH_INSTALL_STATE`. The phase REPORTS and never stops the upgrade:
+  what an abort there must undo is Task 1.2, and the gate is Phase 3. The old
+  pre-checkout blocks and their TTY prompt are removed. Pinned end to end by
+  `tests/integration/test_upgrade_pre_deploy_phase_runs_on_layer1.py`, which
+  runs the real Layer 1 route on release and branch fixtures, and cheaply by
+  `test_upgrade_pre_deploy_phase_placement.py`.
 - [ ] ⬜ **Task 1.2**: Characterise what "abort" must undo at that point. The
   daemon dir is ALREADY on the target checkout (`upgrade.sh:550`) while nothing
   has been deployed — so an abort is not free, and the plan must define whether
@@ -130,7 +142,11 @@ rather than only matching syntax.
   skip paths and only ONE of them is the bug. The explicit flag is a deliberate
   opt-out a caller asked for and must survive; it is the `[ ! -t 0 ]` INFERENCE
   ("no terminal, therefore nobody to ask") that silently disarms the gate for
-  every agent. Remove the inference, keep the flag.
+  every agent. Remove the inference, keep the flag. **Note after Task 1.1**:
+  that prompt is gone. It read the pre-checkout tree, so it could not fire.
+  Build the gate inside `run_pre_deploy_phase`, which is where the report it
+  acts on now runs. `upgrade_version.sh` still ignores
+  `--skip-reading-confirmation` without error.
 - [ ] ⬜ **Task 3.2**: Define escalation: which changes an agent may accept on
   its own, and which require the owner. Breaking/MAJOR is the obvious
   escalation trigger. Reuse the existing one-shot approval-marker mechanism

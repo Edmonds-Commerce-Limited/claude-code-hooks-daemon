@@ -166,6 +166,10 @@ rm untracked/scratch/upgrade.sh
 - Stops the daemon safely
 - Checks out target version code
 - Recreates virtual environment (clean venv)
+- Before deploying anything, checks your config against the target's handlers
+  and prints "REQUIRED READING": the target's upgrade guides for every version
+  crossed (plus the staged `UNRELEASED/` documents on a branch install). It
+  reports only; it does not stop the upgrade
 - Deploys hook scripts and slash commands
 - Merges user customizations into new default config
 - Validates merged config
