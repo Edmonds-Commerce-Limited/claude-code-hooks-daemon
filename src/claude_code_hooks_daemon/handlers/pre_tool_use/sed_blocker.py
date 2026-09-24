@@ -15,9 +15,9 @@ from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command, get_file_content, get_file_path
-from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
-#: Scratch subdirectory for this handler's acceptance-test fixtures.
+#: Acceptance subdirectory for this handler's acceptance-test fixtures.
 _FIXTURE_DIR = "acceptance-test-sed"
 
 # Shared teaching content for the SINGLE deny concept this handler enforces
@@ -466,10 +466,10 @@ class SedBlockerHandler(PreToolUseHandlerBase):
         )
 
         # Stated once; the prose is rendered from it (Plan 00243). Built with
-        # `scratch_path` rather than an open-coded string: `untracked/` alone
-        # is not the sanctioned probe location, and this payload is now
+        # `acceptance_path` rather than an open-coded string: `untracked/`
+        # alone is not the sanctioned probe location, and this payload is now
         # DISPATCHED rather than read, so a regressed handler would leave the
-        # file behind outside the scratch directory.
+        # file behind outside the acceptance directory.
         #
         # The `.sh` extension is load-bearing -- this handler only inspects
         # content for `.sh`/`.bash` writes -- so it must survive any later
@@ -477,7 +477,7 @@ class SedBlockerHandler(PreToolUseHandlerBase):
         strict_mode_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": scratch_path(_FIXTURE_DIR, "test_sed_acceptance.sh"),
+                "file_path": acceptance_path(_FIXTURE_DIR, "test_sed_acceptance.sh"),
                 "content": '#!/bin/bash\nsed -i "s/foo/bar/g" file.txt',
             },
         )
@@ -485,7 +485,7 @@ class SedBlockerHandler(PreToolUseHandlerBase):
         return [
             AcceptanceTest(
                 title="sed -i with substitution",
-                command='sed -i "s/foo/bar/g" untracked/scratch/sed_test.txt',
+                command='sed -i "s/foo/bar/g" untracked/acceptance/sed_test.txt',
                 dispatch_as_bash=True,
                 description="Blocks sed -i (in-place editing) to prevent file destruction",
                 expected_decision=Decision.DENY,
@@ -493,16 +493,16 @@ class SedBlockerHandler(PreToolUseHandlerBase):
                     rf"BLOCKED \[{RuleID.SED_FILE_MODIFICATION}\]",
                     r"Edit tool",
                 ],
-                setup_commands=['echo "test content" > untracked/scratch/sed_test.txt'],
-                cleanup_commands=["rm -f untracked/scratch/sed_test.txt"],
-                safety_notes="Uses a test file inside the gitignored scratch directory - safe to test",
+                setup_commands=['echo "test content" > untracked/acceptance/sed_test.txt'],
+                cleanup_commands=["rm -f untracked/acceptance/sed_test.txt"],
+                safety_notes="Uses a test file inside the gitignored acceptance directory - safe to test",
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),
             AcceptanceTest(
                 title="sed -e command",
-                command='sed -e "s/old/new/" untracked/scratch/sed_test.txt',
+                command='sed -e "s/old/new/" untracked/acceptance/sed_test.txt',
                 dispatch_as_bash=True,
                 description="Blocks sed -e commands",
                 expected_decision=Decision.DENY,
@@ -510,7 +510,7 @@ class SedBlockerHandler(PreToolUseHandlerBase):
                     rf"BLOCKED \[{RuleID.SED_FILE_MODIFICATION}\]",
                     r"Edit tool",
                 ],
-                safety_notes="Uses a test file inside the gitignored scratch directory - safe to test",
+                safety_notes="Uses a test file inside the gitignored acceptance directory - safe to test",
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,

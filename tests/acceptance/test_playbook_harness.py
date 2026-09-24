@@ -32,6 +32,7 @@ from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.constants.paths import ProjectPath
 from claude_code_hooks_daemon.daemon.hook_probe import response_decision, response_text
 from claude_code_hooks_daemon.daemon.playbook_harness import (
     PROBE_DISPATCH_TIMEOUT_SECONDS,
@@ -165,12 +166,14 @@ def _is_removable_probe_target(target: Path) -> bool:
     The harness deletes a leftover target so a PreToolUse event is not
     describing a clobber, and a delete is the one thing here that could
     destroy work rather than merely misreport. So it is bounded to the two
-    sanctioned probe locations — gitignored scratch inside the repo, and the
-    system temp directory — rather than trusted to the playbook's own path.
+    sanctioned probe locations — the gitignored acceptance root inside the
+    repo, and the system temp directory — rather than trusted to the
+    playbook's own path. Never the human scratch directory (Plan 00422 N11),
+    where a delete could take an agent's working notes.
     """
-    scratch = REPO_ROOT / "untracked" / "scratch"
+    probe_root = REPO_ROOT / ProjectPath.ACCEPTANCE_DIR
     temp_root = Path(tempfile.gettempdir())
-    return target.is_relative_to(scratch) or target.is_relative_to(temp_root)
+    return target.is_relative_to(probe_root) or target.is_relative_to(temp_root)
 
 
 def _perform(actions: list[FixtureAction]) -> None:
@@ -178,7 +181,7 @@ def _perform(actions: list[FixtureAction]) -> None:
 
     No shell. `vet_probe_commands` has already translated each declared command
     into one of three operations and proved its path resolves inside
-    `untracked/scratch/`, so what arrives here is data rather than a string
+    `untracked/acceptance/`, so what arrives here is data rather than a string
     anything could interpret. That translation is the reason the permitted list
     is closed: a shape nobody has mapped to an operation is a shape nobody runs.
     """
@@ -227,7 +230,7 @@ def _run_probe(probe: ExecutableProbe, env: dict[str, str]) -> str | None:
         # Cleanup matters more here than tidiness: a fixture left behind is a
         # file the NEXT run's probe can pass on without having established it.
         # Measured, not hypothetical — #148 passed on an `authored.py` a human
-        # left in scratch two days earlier, because `lint_on_edit._is_lintable`
+        # left in the fixture tree two days earlier, because `lint_on_edit._is_lintable`
         # ends at `Path(file_path).exists()` and does not care who wrote it.
         _perform(probe.cleanup_actions)
 

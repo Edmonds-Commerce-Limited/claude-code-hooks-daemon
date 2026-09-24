@@ -13,10 +13,10 @@ from claude_code_hooks_daemon.strategies.comments.syntax import (
     HASH_SYNTAX,
     CommentSyntax,
 )
-from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
 _LANGUAGE_NAME = "Shell"
-#: Acceptance-test fixture directory, below the sanctioned scratch root.
+#: Acceptance-test fixture directory, below the gitignored acceptance root.
 _FIXTURE_DIR = "acceptance-test-comment-changelog-shell"
 _EXTENSIONS: tuple[str, ...] = (".sh", ".bash")
 
@@ -51,7 +51,7 @@ class ShellCommentStrategy:
             ToolPayload,
         )
 
-        fixture_root = scratch_path(_FIXTURE_DIR)
+        fixture_root = acceptance_path(_FIXTURE_DIR)
         # The hash marker and the dated/versioned history phrase below are
         # split across separate string-literal lines (same runtime value once
         # concatenated) so this SOURCE line does not itself read as a
@@ -61,7 +61,7 @@ class ShellCommentStrategy:
         probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": scratch_path(_FIXTURE_DIR, "example.sh"),
+                "file_path": acceptance_path(_FIXTURE_DIR, "example.sh"),
                 "content": (
                     'CCY_VERSION="3.27.1"  #'
                     " Patch: 3.27.0 was assigned. Prior 3.26.2: whitelisted the "
@@ -82,7 +82,7 @@ class ShellCommentStrategy:
                 expected_decision=Decision.DENY,
                 expected_message_patterns=["changelog", "comment", "BLOCKED"],
                 safety_notes=(
-                    "Inside the gitignored scratch directory - safe. Handler "
+                    "Inside the gitignored acceptance directory - safe. Handler "
                     "blocks Write before file is created."
                 ),
                 test_type=TestType.BLOCKING,

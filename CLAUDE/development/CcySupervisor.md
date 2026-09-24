@@ -48,6 +48,19 @@ picks is respected because it produces no such record. Do not re-add keystroke
 recognition to reach the restore: the picker types no text, so the inference has
 no safe setting.
 
+**`/compact` recognition from keystrokes is exact, and stays exact** (Plan
+00399). A `/compact` reached by typing `/comp` and pressing Tab is expanded
+inside Claude Code's input box and forwards no bytes that spell it, so the
+keystroke match never fires. That compaction is recognised instead from the
+daemon's `<session>.compacting` record, which `compaction_signal` writes at
+PreCompact with an `origin` (`human`, `supervisor` or `auto`), and the resume
+line in `decision.log` names it: `compaction detected (human /compact)`. Do not
+widen the keystroke match to prefixes: a false recognition parks the machine in
+a human-owned AWAIT for the whole await timeout, during which no band compacts.
+The record fires at compaction START, so a Tab-completed `/compact` QUEUED
+behind a streaming turn is still unseen until it runs, and the supervisor may
+type its own `/compact` in that window.
+
 ## How the reload is noticed, and the two ways it silently is not
 
 Noticing is **content-hash based, with an mtime pre-check** (`reload_if_stale` →

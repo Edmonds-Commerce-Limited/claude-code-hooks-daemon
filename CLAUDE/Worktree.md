@@ -104,6 +104,14 @@ block is regenerated on main, for the merged code, on the first restart after
 the merge. `./bin/hooks-daemon regenerate-docs` still writes it in a worktree
 when asked.
 
+**The worktree's daemon idles out while you work, and QA copes.** A session
+working in a worktree sends its hooks to the main checkout's daemon, so the
+worktree's own daemon sees no traffic and stops after `idle_timeout_seconds`.
+`llm_qa.py` starts it again, just before each check that probes it (every
+`ToolConfig` with `live_daemon=True`), and prints a `DAEMON STARTED` line; it
+never restarts a running one, so a stale daemon still fails `smoke_test`'s
+freshness check. No keep-alive loop is needed during a long run.
+
 **Never hand-build the venv** (e.g. `python3 -m venv untracked/venv`): that
 produces the retired pre-v3.7.0 layout, and the fingerprint-aware venv
 resolver refuses it — every `bin/hooks-daemon` call then exits telling you to

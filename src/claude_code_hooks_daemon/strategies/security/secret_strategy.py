@@ -4,10 +4,10 @@ from typing import Any
 
 from claude_code_hooks_daemon.strategies.security.common import UNIVERSAL_EXTENSION
 from claude_code_hooks_daemon.strategies.security.protocol import SecurityPattern
-from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
 _LANGUAGE_NAME = "Secrets"
-#: Acceptance-test fixture directory, below the sanctioned scratch root.
+#: Acceptance-test fixture directory, below the gitignored acceptance root.
 _FIXTURE_DIR = "acceptance-test-security-secrets"
 _EXTENSIONS: tuple[str, ...] = (UNIVERSAL_EXTENSION,)
 
@@ -88,14 +88,14 @@ class SecretDetectionStrategy:
         aws_key_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": scratch_path(_FIXTURE_DIR, "config.ts"),
+                "file_path": acceptance_path(_FIXTURE_DIR, "config.ts"),
                 "content": 'const key = "AKIAIOSFODNN7EXAMPLE1";',
             },
         )
         fixture_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": scratch_path(_FIXTURE_DIR, "tests", "fixtures", "security_test.py"),
+                "file_path": acceptance_path(_FIXTURE_DIR, "tests", "fixtures", "security_test.py"),
                 "content": 'AWS_KEY = "AKIAIOSFODNN7EXAMPLE1"',
             },
         )

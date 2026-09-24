@@ -1186,7 +1186,10 @@ See existing handlers for reference:
   container icon from the runtime `ProjectContext` detected, so the detection itself
   lives in `ProjectContext` and the handler stays a thin reader of it
 
-## Plugin Configuration
+## Daemon Plugin Configuration
+
+A daemon plugin (handler module) is unrelated to a Claude Code plugin; see
+[ClaudeCodePlugins.md](ClaudeCodePlugins.md#two-meanings-of-plugin).
 
 ### Registering Project-Level Handlers
 

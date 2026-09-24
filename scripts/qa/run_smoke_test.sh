@@ -52,7 +52,12 @@ result = {
     "tool": "smoke_test",
     "summary": {"total_probes": 3, "passed_probes": 0, "failed_probes": 3, "passed": False},
     "probes": [],
-    "error": "Daemon not running — no socket found. Run: ./bin/hooks-daemon restart",
+    "error": (
+        "Daemon not running — no socket found. It stops after idle_timeout_seconds "
+        "without hook traffic; llm_qa.py starts it before this check, so under llm_qa "
+        "this means that start failed (see its DAEMON START FAILED line). "
+        "Run: ./bin/hooks-daemon restart"
+    ),
 }
 json.dump(result, sys.stdout, indent=2)
 print()

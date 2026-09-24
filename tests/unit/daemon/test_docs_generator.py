@@ -968,8 +968,25 @@ class TestDocsGeneratorPluginHandlerEventDir:
         gen = DocsGenerator(config={}, registry=registry, plugins=[handler_instance])
         output = gen.generate_markdown()
         assert "Plugin with unknown event type" in output
-        # The heading will be "Plugin" (extra_key branch)
-        assert "Plugin" in output
+        assert "### Daemon Plugin (1 handler)" in output
+
+    def test_plugin_section_heading_is_never_the_bare_word_plugin(self) -> None:
+        """The section names a daemon plugin, never a bare "Plugin" a reader
+        could take for a Claude Code plugin (Plan 00468 G5)."""
+        from claude_code_hooks_daemon.daemon.docs_generator import DocsGenerator
+
+        handler_instance = _make_handler_instance_without_event_type(
+            name="unknown-plugin",
+            priority=5,
+            tags=["advisory"],
+            docstring="Plugin with unknown event type.",
+            module_name="plugins.unknown.handler",
+        )
+
+        registry = _make_registry()
+        gen = DocsGenerator(config={}, registry=registry, plugins=[handler_instance])
+        output = gen.generate_markdown()
+        assert "### Plugin (" not in output
 
 
 class TestDocsGeneratorProjectHandlerEventDirFallback:

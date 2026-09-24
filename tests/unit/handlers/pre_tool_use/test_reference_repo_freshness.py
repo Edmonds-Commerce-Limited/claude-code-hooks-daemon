@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 from pydantic import ValidationError
@@ -392,6 +392,35 @@ class TestBlockOnce:
 
         assert second.context
 
+    def test_the_allowed_retry_never_carries_the_deny_headline(
+        self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
+    ) -> None:
+        """Plan 00466 N8: a call that RAN must never say it was BLOCKED."""
+        repo = _repo(tmp_path)
+        write_cache(tmp_path, [_state(repo, behind=4)])
+
+        handler.handle(_read(repo / "x.py"))
+        second = handler.handle(_read(repo / "y.py"))
+
+        assert second.decision == Decision.ALLOW
+        joined = "\n".join(second.context or [])
+        assert "BLOCKED [" not in joined
+
+    def test_the_allowed_retry_still_names_the_fix_command(
+        self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
+    ) -> None:
+        """Same detail and fix line as the deny -- only the headline differs."""
+        repo = _repo(tmp_path)
+        write_cache(tmp_path, [_state(repo, behind=4)])
+
+        first = handler.handle(_read(repo / "x.py"))
+        second = handler.handle(_read(repo / "y.py"))
+
+        command = remediation_command(_state(repo, behind=4))
+        assert command is not None
+        assert command in _reason(first)
+        assert command in "\n".join(second.context or [])
+
     def test_a_different_repo_still_blocks_once(
         self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
     ) -> None:
@@ -459,6 +488,67 @@ class TestConfiguredModes:
 
         assert second.context
 
+    def test_advise_mode_never_carries_the_deny_headline(
+        self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
+    ) -> None:
+        """Plan 00466 N8: `advise` mode ALLOWS every call -- its own context
+        must never open with the verbose DENY rendering."""
+        repo = _repo(tmp_path)
+        handler._reference_repos = ReferenceReposConfig(mode="advise")
+        write_cache(tmp_path, [_state(repo, behind=4)])
+
+        result = handler.handle(_read(repo / "x.py"))
+
+        assert result.decision == Decision.ALLOW
+        joined = "\n".join(result.context or [])
+        assert "BLOCKED [" not in joined
+
+    def test_advise_mode_still_names_the_fix_command(
+        self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
+    ) -> None:
+        repo = _repo(tmp_path)
+        handler._reference_repos = ReferenceReposConfig(mode="advise")
+        write_cache(tmp_path, [_state(repo, behind=4)])
+
+        result = handler.handle(_read(repo / "x.py"))
+
+        command = remediation_command(_state(repo, behind=4))
+        assert command is not None
+        assert command in "\n".join(result.context or [])
+
+
+class TestIsBlockingMatchesVerdict:
+    """`_is_blocking` previews the SAME decision `_verdict` makes -- Plan
+    00466 N8 needed it as a separate preview because the message must be
+    rendered before `_verdict` runs, so nothing enforces the two agree
+    except a test that drives both and compares."""
+
+    @pytest.mark.parametrize("mode", ["advise", "block", "block_once"])
+    def test_first_occurrence_matches(
+        self,
+        tmp_path: Path,
+        handler: ReferenceRepoFreshnessHandler,
+        mode: Literal["advise", "block", "block_once"],
+    ) -> None:
+        repo = _repo(tmp_path)
+        handler._reference_repos = ReferenceReposConfig(mode=mode)
+
+        predicted = handler._is_blocking("session-x", repo, mode)
+        actual = handler._verdict("message", "session-x", repo, mode)
+
+        assert predicted == (actual.decision == Decision.DENY)
+
+    def test_block_once_repeat_matches(
+        self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
+    ) -> None:
+        repo = _repo(tmp_path)
+        handler._verdict("first", "session-x", repo, "block_once")
+
+        predicted = handler._is_blocking("session-x", repo, "block_once")
+        actual = handler._verdict("message", "session-x", repo, "block_once")
+
+        assert predicted == (actual.decision == Decision.DENY)
+
 
 class TestNotVerified:
     def test_a_missing_cache_reads_as_not_verified(
@@ -481,6 +571,34 @@ class TestNotVerified:
 
         assert first.decision == Decision.DENY
         assert second.decision == Decision.ALLOW
+
+    def test_not_verified_allowed_retry_never_carries_the_deny_headline(
+        self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
+    ) -> None:
+        """Plan 00466 N8, the NOT VERIFIED half: `_not_verified` builds its
+        own message via the same verbose-formatter call `_stale` does."""
+        repo = _repo(tmp_path)
+
+        handler.handle(_read(repo / "x.py"))
+        second = handler.handle(_read(repo / "y.py"))
+
+        assert second.decision == Decision.ALLOW
+        joined = "\n".join(second.context or [])
+        assert "BLOCKED [" not in joined
+        assert NOT_VERIFIED_HEADLINE in joined
+
+    def test_not_verified_advise_mode_never_carries_the_deny_headline(
+        self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler
+    ) -> None:
+        repo = _repo(tmp_path)
+        handler._reference_repos = ReferenceReposConfig(mode="advise")
+
+        result = handler.handle(_read(repo / "x.py"))
+
+        assert result.decision == Decision.ALLOW
+        joined = "\n".join(result.context or [])
+        assert "BLOCKED [" not in joined
+        assert NOT_VERIFIED_HEADLINE in joined
 
     def test_an_expired_cache_reads_as_not_verified(
         self, tmp_path: Path, handler: ReferenceRepoFreshnessHandler

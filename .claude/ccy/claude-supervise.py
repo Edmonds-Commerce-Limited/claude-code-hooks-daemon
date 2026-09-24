@@ -1175,6 +1175,16 @@ _DEFAULT_COMPACTION_SIGNAL_TTL_SECONDS = 600.0
 # ``<session>.compacting`` -- deliberately NOT ``*.json`` so they are never
 # mistaken for a context sidecar by ``load_freshest_sidecar``.
 _COMPACTION_SIGNAL_GLOB = "*.compacting"
+# Plan 00399: the record's ``origin`` (who started the compaction, attributed by
+# the daemon from PreCompact) and the phrase each adds to the resume decision.
+# This is how a human `/compact` the keystroke match cannot see (a Tab-completed
+# `/comp`) is still recognised. An absent or unrecognised origin adds nothing.
+_COMPACTION_ORIGIN_KEY = "origin"
+_COMPACTION_ORIGIN_LABELS: dict[str, str] = {
+    "human": "human /compact",
+    "supervisor": "supervisor /compact",
+    "auto": "auto-compact",
+}
 
 # Goal-intent signal files (Plan 00269) are written by the daemon's
 # goal_injection PostToolUse handler (or `hooks-daemon inject-goal`) as
@@ -1668,6 +1678,9 @@ class SidecarReading:
     # effort-restore family. Defaults cover sidecars predating the fields.
     model_id: str = ""
     effort: str | None = None
+    # Plan 00399: who started the compaction, from the daemon's record ("" when
+    # no record or an unattributed one). Meaningful only while ``compacting``.
+    compaction_origin: str = ""
 
 
 @dataclass(frozen=True)
@@ -2513,6 +2526,23 @@ def load_compaction_signal(
         if (now - ts) <= ttl_seconds:
             return path
     return None
+
+
+def load_compaction_origin(path: Path) -> str:
+    """Return the ``origin`` recorded in a compaction signal, or "" if none.
+
+    Plan 00399. A record from a daemon predating the field, or one that cannot
+    be read, is unattributed -- never a reason to doubt that a compaction is
+    under way, which ``load_compaction_signal`` alone decides.
+    """
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    if not isinstance(data, dict):
+        return ""
+    origin = data.get(_COMPACTION_ORIGIN_KEY)
+    return origin if isinstance(origin, str) else ""
 
 
 # ---------------------------------------------------------------------------
@@ -4388,10 +4418,13 @@ class CompactStateMachine:
             # wedged session's failed injections MUST keep accumulating).
             self._injections = 0
             self._enter_monitor()
-            return Evaluation(
-                Decision.WOULD_CONTINUE,
-                "compaction detected -> would inject continue",
-            )
+            # Plan 00399: name whose compaction this was when the daemon's
+            # record says, so a human `/compact` the keystrokes missed is
+            # visible in the decision log as recognised.
+            origin = reading.compaction_origin if reading is not None else ""
+            label = _COMPACTION_ORIGIN_LABELS.get(origin)
+            detected = f"compaction detected ({label})" if label else "compaction detected"
+            return Evaluation(Decision.WOULD_CONTINUE, f"{detected} -> would inject continue")
 
         # No compaction under way: reset the latch and run normal logic.
         self._compaction_handled = False
@@ -5103,8 +5136,9 @@ def decide_once(
         own_sessions=own_sessions,
     )
     if signal_path is not None:
+        origin = load_compaction_origin(signal_path)
         reading = (
-            replace(reading, compacting=True)
+            replace(reading, compacting=True, compaction_origin=origin)
             if reading is not None
             else SidecarReading(
                 red=False,
@@ -5118,6 +5152,7 @@ def decide_once(
                 writer_pid=0,
                 compacting=True,
                 stale=False,
+                compaction_origin=origin,
             )
         )
     # Empty-input-box guard: the machine only ever decides to inject when its
