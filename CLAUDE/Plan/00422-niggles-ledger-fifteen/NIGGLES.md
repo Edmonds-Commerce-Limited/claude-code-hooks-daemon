@@ -1604,6 +1604,76 @@ That gap is real and is accepted, not overlooked: content quality is not
 checkable from here, and a guard that pretended otherwise would be the same
 false-assurance failure this ledger keeps recording.
 
+### N20 — the acceptance probes cannot pass in a worktree whose daemon is running
+
+**Found**: Plan 00456's final QA in `untracked/worktrees/worktree-issue-53-venv`
+scored 34/35. Both failing tests are the acceptance-probe checks
+(`test_playbook_harness.py::TestTheDeclaredProbesBehaveAsDeclared` and
+`test_acceptance_contract.py::TestEveryDeclaredInputProducesItsDeclaredVerdict`).
+Fourteen DENY probes got no decision at all: `QaSuppressionHandler` and
+`CommentChangelogHandler` writes to `<worktree>/untracked/scratch/acceptance-test-*/`.
+
+**Evidence so far.** From the implementation agent: an A/B that changes only
+the path flips `QaSuppressionHandler.matches()` from False (this worktree's
+path) to True (`/tmp/elsewhere-project/`). The same 14 probes fail at the
+merge base `46f5c5b1` in that worktree, and the branch diff over the
+handlers, core and project config is empty. Checked by the coordinator: the
+same two tests pass on `main` in the main checkout (2 passed, 16.4s), and
+fail in the worktree with the same 14 probes.
+
+**Suspected mechanism, not yet confirmed.** A path exclusion for
+`untracked/worktrees/` (`core/worktree_paths.py` holds that prefix) is
+applied to the ABSOLUTE path, or to the path relative to the MAIN checkout.
+In a worktree, every probe fixture is under that prefix, so the handlers
+stand down. This would also explain why other worktrees passed today:
+where no worktree daemon was running, these tests skip rather than run
+(Plan 00443's skip reason), so a green worktree QA may simply never have
+run them.
+
+**Why it matters.** A worktree is where every plan in this project is
+built and gated. Its QA is either silently not running the acceptance
+probes, or failing them for a reason unrelated to the change, and the second
+case trains agents to wave a red gate through as "pre-existing". Related:
+N6 (a worktree could not run the gates at all; closed by 00431/00443/00445)
+and N11 (the probe fixtures live in the sanctioned scratch directory).
+
+**Candidate remedies:**
+
+1. Make the exclusion relative to the checkout being judged (the daemon's
+   own project root), so a worktree's own `untracked/scratch/` is judged
+   like the main checkout's. Test it from a worktree path.
+2. Move the probe fixtures out of any excluded prefix (overlaps N11).
+3. At minimum, make the worktree QA say that these probes were not
+   meaningfully run, rather than going green or failing unexplained.
+
+**Correction: the diagnosis above is wrong. It is not a worktree fault, and
+the real one is a guard failing open for clients.** The same two tests PASS
+in `worktree-n18-n19` with its own daemon running (2 passed, 14.3s), so
+"any worktree with a running daemon" is false. The distinguishing fact is
+the failing worktree's NAME: `worktree-issue-53-venv/`. The guards' skip
+lists hold `"venv/"`, and they are matched as a bare substring
+(`skip_dir in file_path`), so `…-venv/` matches and every file beneath it
+is skipped. This is the exact defect `strategies/lint/common.py:58`
+(`matches_skip_path`) already documents and fixes for lint (`"venv/"`
+inside `"myvenv/"`, `"build/"` inside `"rebuild/"`). Six sites were never
+moved onto it:
+
+- `handlers/pre_tool_use/qa_suppression.py:162`
+- `handlers/pre_tool_use/comment_changelog.py:316`
+- `handlers/pre_tool_use/comment_size.py:280`
+- `strategies/security/common.py:23` (security_antipattern)
+- `strategies/tdd/common.py:14` (test-directory detection, the reverse
+  direction: `mytests/` would read as a test directory)
+- `handlers/pre_tool_use/british_english.py:108` (check directories)
+
+For a CLIENT, any project whose absolute path has a directory named like
+`rebuild`, `myvenv` or `notvendor` silently loses those guards. Even a
+segment-bounded match on the ABSOLUTE path would still skip a project that
+lives under a directory named exactly `venv` or `build`, so the match must
+be made against the path relative to the project root. The mechanism
+suspected above (`core/worktree_paths.py`) is not involved. Candidate
+remedies 1-3 above are withdrawn. Graduated to its own plan.
+
 ### N19 — the Python nested-install check can never fire in a real client
 
 **Found**: reviewing Plan 00455 (issue #54). Its implementation agent copied
@@ -1652,6 +1722,21 @@ and the "false positive" was a true positive, explained away.
 Deduped: the only related entries are this ledger's N5 rows on install
 validation (closed) and Plan 00455, which found it and deliberately did not
 widen its scope.
+
+**Remedied**: remedy (1). The `pyproject.toml` exemption is deleted;
+`check_for_nested_installation` now cleans up the nested path unconditionally
+whenever it exists. Tests cover a real outer clone with the inner path
+present (must clean up) and the self-install repo layout, which has no outer
+clone and so never reaches the nested path at all (must leave everything
+alone). The destructive branch also got safer while it was open: a nested
+path that is itself a symlink is unlinked rather than handed to
+`shutil.rmtree` (which refuses a symlink path outright), and a symlink found
+while removing a genuine nested directory only has the link removed, never
+its target. `install.py`'s `_validate_not_nested` was checked and carries no
+copy of the exemption (it raises unconditionally already); the OTHER
+`_project_root_is_daemon_repo` check inside `validate_installation_target`'s
+step 1 is a different, correct use of the same pyproject-name detection and
+was left alone.
 
 ### N18 — LSP.md relies on an `untracked/venv` symlink that nothing creates and the code calls legacy
 
@@ -1713,6 +1798,22 @@ Deduped before filing: no plan in the tree matches `pyright`, `pyrightconfig`
 or `language server`; the two `LSP` matches (00075, 00368) are Complete; the
 ledger has no entry. Plan 00368 is the likely origin of the symlink design and
 is where to look first.
+
+**Remedied**: a variant of remedy (2), with a new name rather than reusing
+`untracked/venv` — `untracked/lsp-venv`, which collides with neither the
+`LEGACY_VENV` meaning of the old path nor the `venv-*` glob the skill and the
+eager-cleanup/prune-venvs code scan, so no cleanup exemption was needed
+anywhere. `ProjectContext.initialize()`'s self-install branch now creates and
+(unlike the CLI symlink) repoints the link on every daemon start, derived
+from `sys.prefix`, restricted to when the running interpreter's venv lives
+directly under this project's own `untracked/`. `pyrightconfig.json`'s
+`venv` key now names it. LSP.md's three checked claims are corrected in
+place, including the "exists only in the main checkout" line, which is now
+false in the other direction: it exists in ANY self-install checkout whose
+daemon has started at least once, worktrees included. Checked and confirmed
+by reading: none of the upgrade's legacy-venv removal, the eager
+stale-venv sweep, or `_enumerate_venvs`' venv listing matches or touches
+`lsp-venv` (their glob/prefix checks are `venv` exact or `venv-*` prefix).
 
 ### N17 — a stale docstring in `paths.py` produced a confident wrong verdict in a live investigation
 

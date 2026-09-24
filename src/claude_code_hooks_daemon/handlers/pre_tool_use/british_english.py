@@ -14,6 +14,8 @@ from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_file_content, get_file_path
+from claude_code_hooks_daemon.utils.path_exclusion import resolve_project_root
+from claude_code_hooks_daemon.utils.path_segments import matches_path_segment
 from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 
 # Fallback doc-tree dirs, used only when no ProjectLayout facade was
@@ -104,8 +106,13 @@ class BritishEnglishHandler(PreToolUseHandlerBase):
         if not any(file_path.endswith(ext) for ext in self.CHECK_EXTENSIONS):
             return False
 
-        # Only check certain directories
-        if not any(dir in file_path for dir in self.CHECK_DIRECTORIES):
+        # Only check certain directories, segment-bounded against the path
+        # relative to the project root (Plan 00458 / 00422 N20): a bare
+        # substring test also matched e.g. "autodocs/" for "docs", or a
+        # worktree merely named "...-docs/", silently changing which files
+        # this advisory fires on.
+        check_patterns = tuple(f"{directory}/" for directory in self.CHECK_DIRECTORIES)
+        if not matches_path_segment(file_path, check_patterns, project_root=resolve_project_root()):
             return False
 
         content = get_file_content(hook_input)

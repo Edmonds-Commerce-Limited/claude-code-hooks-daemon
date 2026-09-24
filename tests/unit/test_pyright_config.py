@@ -64,7 +64,7 @@ class TestImportResolutionIsUnchanged:
     def test_the_venv_symlink_and_source_path_are_still_pinned(self) -> None:
         config = _config()
         assert config["venvPath"] == "untracked"
-        assert config["venv"] == "venv"
+        assert config["venv"] == "lsp-venv"
         extra_paths = config["extraPaths"]
         assert isinstance(extra_paths, list)
         assert "src" in extra_paths

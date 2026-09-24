@@ -11,11 +11,16 @@ Python import resolution, for BOTH the CLI (`pyright --project /workspace`)
 and the long-running `pyright-langserver` that editors and Claude Code's LSP
 integration spawn:
 
-- `venvPath: untracked` + `venv: venv` — resolves through the stable
-  `untracked/venv` symlink, which points at the current fingerprint-keyed venv
-  (see the venv layout section in [SELF_INSTALL.md](../SELF_INSTALL.md)).
+- `venvPath: untracked` + `venv: lsp-venv` — resolves through the stable
+  `untracked/lsp-venv` symlink, which points at the current fingerprint-keyed
+  venv (see the venv layout section in [SELF_INSTALL.md](../SELF_INSTALL.md)).
   Never replace this with a hardcoded fingerprint path; the fingerprint
-  changes and the symlink is maintained to track it.
+  changes and the symlink is maintained to track it. The link is created (and
+  repointed when stale) by `ProjectContext.initialize()`'s self-install
+  branch on every daemon start, derived from `sys.prefix` — so it exists in
+  ANY self-install checkout whose daemon has started at least once,
+  including a linked worktree's own daemon against its own `untracked/`, not
+  only the main checkout.
 - `extraPaths: ["src"]` — first-party imports resolve from source, not from
   an installed package.
 - `exclude` — `untracked/` (every linked worktree, venv, fixture install and
@@ -31,10 +36,12 @@ integration spawn:
 `scripts/qa/run_pyright_check.py` (the `pyright` tool in `llm_qa.py`, Plan
 00368\) runs the same CLI over the same config and fails on ANY error, so a
 clean gate means a clean diagnostics stream. It passes the QA venv's
-interpreter as `--pythonpath`: the `untracked/venv` symlink above exists only
-in the main checkout, and in a worktree or on a CI runner a bare
-`pyright --project .` resolves no site-packages and reports every third-party
-import missing. Use the script, not the bare command, when the count matters.
+interpreter as `--pythonpath` rather than relying on the `untracked/lsp-venv`
+symlink: the link is created by a running self-install daemon, so a checkout
+whose daemon has never started (a fresh worktree before its first run, a CI
+runner that never starts one) has none, and a bare `pyright --project .`
+there resolves no site-packages and reports every third-party import
+missing. Use the script, not the bare command, when the count matters.
 The `lsp_noise_checker` SessionStart advisory reports an `exclude` entry the
 config is missing, and a language server older than the config file.
 
@@ -51,8 +58,9 @@ pyright --project /workspace src/claude_code_hooks_daemon/daemon/cli.py
   symlink was created) and never re-read its environment. This is the common
   case — a long-lived server survives config changes made after it started.
 - **CLI also fails** → the config or the venv is genuinely broken: check the
-  `untracked/venv` symlink resolves (`ls -la untracked/venv`) and that its
-  interpreter imports the missing package.
+  `untracked/lsp-venv` symlink resolves (`ls -la untracked/lsp-venv`) and that
+  its interpreter imports the missing package. If it is missing entirely,
+  start (or restart) this checkout's own daemon — that is what creates it.
 
 ## Fixing a stale server
 
@@ -71,7 +79,7 @@ import, or re-run the CLI.
 window reload. `.vscode/` is git-ignored here (per-developer preference), so
 pin your interpreter locally if your editor needs it:
 `.vscode/settings.json` with `python.defaultInterpreterPath` set to
-`${workspaceFolder}/untracked/venv/bin/python`. <!-- python-var-guidance-exempt: editor interpreter pinning via the stable venv symlink, not shell-invocation guidance -->
+`${workspaceFolder}/untracked/lsp-venv/bin/python`. <!-- python-var-guidance-exempt: editor interpreter pinning via the stable venv symlink, not shell-invocation guidance -->
 
 ## Known non-issues
 

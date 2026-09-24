@@ -396,6 +396,50 @@ quiet way for a registry to under-cover.
 - Defence: `0311a782`, committed deliberately red, naming `SKIPPED`.
 - Fix: `54368a76`.
 
+**The worktree that shared a suffix with a skip list** —
+`handlers/pre_tool_use/qa_suppression.py`, `comment_changelog.py`,
+`comment_size.py`, `british_english.py`, `strategies/security/common.py` and
+`strategies/tdd/common.py`, against `strategies/lint/common.py`'s
+`matches_skip_path`. Found via 00422 N20: 14 acceptance DENY probes lost
+their decision entirely inside a worktree named `worktree-issue-53-venv`.
+
+What it allowed: each site tested a skip/exclude-list entry against a path
+with `entry in file_path` — a bare SUBSTRING test, not a segment test — so
+`"venv/" in file_path` was also true for a directory that merely ENDS in
+`venv`, silently standing the guard down for everything beneath it. The
+lint strategy's own docstring names this exact failure (`"venv/"` inside
+`"myvenv/"`, `"build/"` inside `"rebuild/"`) and had already fixed it with
+a boundary-checked walk; six siblings never moved onto it.
+
+**A second, compounding failure sat underneath the first and only surfaces
+once the first is fixed**: even a segment-bounded match against the
+ABSOLUTE path still skips every file of a project that happens to live
+under a directory named exactly `venv` or `build` — the match has to be
+made against the path RELATIVE to the project root. Fixing only the
+substring half would have left that case open.
+
+The fix is a single shared matcher, `utils/path_segments.py::matches_path_segment`,
+segment-bounded and project-relative (`project_root=resolve_project_root()`,
+the same best-effort accessor `handler_excludes_path` already used for
+`daemon.exclude_paths`), with `strategies/lint/common.py::matches_skip_path`
+reduced to a thin re-export under its original name.
+
+**Why no registry row.** Every other instance in this section is closed by
+`check_declared_invariant_pairs.py` asserting a named RELATION between two
+specific symbols. This class is not "two sites disagree" — it is "a bare
+substring test against a skip/exclude list", a SHAPE that can recur at a
+site with no sibling to compare against. A `reaches` row asserting each
+handler calls `matches_path_segment` would prove the six known sites were
+fixed and say nothing about a seventh. The Defence chosen instead is a
+standalone AST detector, `scripts/qa/check_skip_list_substring.py`, that
+flags the SHAPE itself — a comprehension's (or a `for`'s) own loop variable
+compared unchanged, via bare `in`, against something that looks like a
+path — wherever it next appears, not just at these six coordinates.
+
+- Defence: `d693e13c`, committed deliberately red over the six sites named
+  above.
+- Fix: `25c4573e` (the shared matcher), `ebb31e61` (all six sites moved).
+
 Nine further table rows are recorded in
 [the consolidated worklist](../Plan/Completed/00412-jobs-recurring-work-and-security-review/subagent-reports/260915-consolidated-defence-worklist.md),
 with the registry's design notes in

@@ -94,6 +94,35 @@ class TestMatchesGating:
         hook_input = _make_write_input("/workspace/vendor/mod.py", content)
         assert handler.matches(hook_input) is False
 
+    def test_does_not_ignore_a_directory_merely_ending_in_vendor(
+        self, handler: CommentSizeHandler
+    ) -> None:
+        """A directory merely ending in "vendor/" is not a skip match
+        (Plan 00458 / 00422 N20)."""
+        content = "x = 1  # " + ("y" * 60) + "\n"
+        hook_input = _make_write_input("/workspace/myvendor/mod.py", content)
+        assert handler.matches(hook_input) is True
+
+    def test_does_not_ignore_a_worktree_named_with_a_venv_suffix(
+        self, handler: CommentSizeHandler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """00422 N20's reproduction, for CommentSizeHandler."""
+        from pathlib import Path
+
+        from claude_code_hooks_daemon.core import project_context as pc
+
+        root = "/workspace/untracked/worktrees/worktree-issue-53-venv"
+        monkeypatch.setattr(pc.ProjectContext, "_initialized", True, raising=False)
+        monkeypatch.setattr(
+            pc.ProjectContext, "project_root", classmethod(lambda cls: Path(root)), raising=False
+        )
+
+        content = "x = 1  # " + ("y" * 60) + "\n"
+        hook_input = _make_write_input(
+            f"{root}/untracked/scratch/acceptance-test-qa-python/sample.py", content
+        )
+        assert handler.matches(hook_input) is True
+
 
 class TestDocstringExemption:
     def test_python_docstring_over_limit_does_not_match(self, handler: CommentSizeHandler) -> None:
