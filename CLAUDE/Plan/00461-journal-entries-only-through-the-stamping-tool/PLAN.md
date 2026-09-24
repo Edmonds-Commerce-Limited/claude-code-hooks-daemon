@@ -73,7 +73,7 @@ plan in question.
   handler guidance and the plan-workflow core docs clients receive, so
   that `--journal` is THE way and not merely the preferred one. Release
   note: a client-facing behaviour change.
-- [ ] 🔄 **Task 1.4**: Full QA green. Every journal entry this plan writes
+- [x] ✅ **Task 1.4**: Full QA green. Every journal entry this plan writes
   goes through `--journal`.
 
 ### Phase 2: Deliver
