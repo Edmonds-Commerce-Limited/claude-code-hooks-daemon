@@ -15,7 +15,9 @@ import pytest
 from claude_code_hooks_daemon.utils.claude_config import (
     CLAUDE_CONFIG_DIR_ENV,
     claude_config_dir,
+    claude_project_dir,
     config_dir_within,
+    project_dir_name,
 )
 
 
@@ -74,3 +76,66 @@ class TestConfigDirWithin:
         """A config dir equal to the root would make every project file
         'config' — never a sensible answer, so it is refused."""
         assert config_dir_within(tmp_path, config_dir=tmp_path) is None
+
+
+class TestProjectDirName:
+    """Claude Code's name for a project's transcripts directory (00466 N27).
+
+    Pinned to Claude Code's own rule, read from its shipped bundle: every
+    UTF-16 code unit outside ``[a-zA-Z0-9]`` becomes ``-``; a name longer than
+    200 characters is cut to 200 and suffixed with ``-`` and the base-36
+    absolute value of the path's 32-bit Java-style string hash. The expected
+    values below were computed by running that JavaScript under node.
+    """
+
+    def test_dots_underscores_and_hyphens_all_become_hyphens(self) -> None:
+        assert project_dir_name("/home/me/my_app.v2/sub-dir") == "-home-me-my-app-v2-sub-dir"
+
+    def test_the_workspace_root_matches_the_real_directory(self) -> None:
+        assert project_dir_name("/workspace") == "-workspace"
+
+    def test_a_long_path_is_truncated_and_hashed(self) -> None:
+        long_path = "/srv/" + "deep_dir.v2/" * 20 + "proj-x"
+        expected = "-srv" + "-deep-dir-v2" * 16 + "-dee-2zml51"
+        assert project_dir_name(long_path) == expected
+
+    def test_non_ascii_is_replaced_per_utf16_code_unit(self) -> None:
+        path = "/tmp/café \U0001f600" + "x" * 200
+        name = project_dir_name(path)
+        assert name.startswith("-tmp-caf----xxx")
+        assert name.endswith("-irosb")
+
+
+class TestClaudeProjectDir:
+    def test_it_is_under_projects_in_the_config_dir(self, tmp_path: Path) -> None:
+        root = tmp_path / "my_app.v2"
+        root.mkdir()
+        config = tmp_path / "cfg"
+        expected = config / "projects" / project_dir_name(str(root.resolve()))
+        assert claude_project_dir(root, config_dir=config) == expected
+
+    def test_a_symlinked_project_uses_its_real_path(self, tmp_path: Path) -> None:
+        real = tmp_path / "real"
+        real.mkdir()
+        link = tmp_path / "link"
+        link.symlink_to(real)
+        config = tmp_path / "cfg"
+        assert claude_project_dir(link, config_dir=config) == claude_project_dir(
+            real, config_dir=config
+        )
+
+    def test_the_default_config_dir_honours_the_variable(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.setenv(CLAUDE_CONFIG_DIR_ENV, str(tmp_path / "cfg"))
+        assert claude_project_dir(tmp_path).parent == tmp_path / "cfg" / "projects"
+
+    def test_a_missing_directory_raises_when_required(self, tmp_path: Path) -> None:
+        with pytest.raises(FileNotFoundError, match="projects"):
+            claude_project_dir(tmp_path, config_dir=tmp_path / "cfg", must_exist=True)
+
+    def test_an_existing_directory_is_returned_when_required(self, tmp_path: Path) -> None:
+        config = tmp_path / "cfg"
+        expected = claude_project_dir(tmp_path, config_dir=config)
+        expected.mkdir(parents=True)
+        assert claude_project_dir(tmp_path, config_dir=config, must_exist=True) == expected

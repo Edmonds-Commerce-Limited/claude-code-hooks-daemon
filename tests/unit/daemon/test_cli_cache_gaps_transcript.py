@@ -17,6 +17,7 @@ import pytest
 
 from claude_code_hooks_daemon.daemon import cli
 from claude_code_hooks_daemon.daemon.cli import _resolve_transcript
+from claude_code_hooks_daemon.utils.claude_config import project_dir_name
 
 
 def _pin_project(monkeypatch: pytest.MonkeyPatch, project: Path) -> argparse.Namespace:
@@ -41,9 +42,9 @@ def test_auto_discovery_looks_under_claude_config_dir(
     home = tmp_path / "home"
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
     monkeypatch.setenv("HOME", str(home))
-    slug = str(project).replace("/", "-")
-    _write_transcript(home / ".claude" / "projects" / slug, "home.jsonl", 2_000)
-    expected = _write_transcript(config_dir / "projects" / slug, "config.jsonl", 1_000)
+    name = project_dir_name(str(project.resolve()))
+    _write_transcript(home / ".claude" / "projects" / name, "home.jsonl", 2_000)
+    expected = _write_transcript(config_dir / "projects" / name, "config.jsonl", 1_000)
 
     resolved = _resolve_transcript(_pin_project(monkeypatch, project))
 
@@ -57,10 +58,27 @@ def test_auto_discovery_picks_the_newest_transcript(
     (project / ".claude").mkdir(parents=True)
     config_dir = tmp_path / "config"
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
-    session_dir = config_dir / "projects" / str(project).replace("/", "-")
+    session_dir = config_dir / "projects" / project_dir_name(str(project.resolve()))
     _write_transcript(session_dir, "older.jsonl", 1_000)
     newest = _write_transcript(session_dir, "newer.jsonl", 2_000)
 
     resolved = _resolve_transcript(_pin_project(monkeypatch, project))
 
     assert resolved == newest
+
+
+def test_a_missing_directory_is_named_in_the_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """00466 N27: "no transcript found" names the directory it looked in."""
+    project = tmp_path / "project"
+    (project / ".claude").mkdir(parents=True)
+    config_dir = tmp_path / "config"
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
+
+    exit_code = cli.cmd_cache_gaps(_pin_project(monkeypatch, project))
+
+    assert exit_code == 2
+    assert str(config_dir / "projects" / project_dir_name(str(project.resolve()))) in (
+        capsys.readouterr().err
+    )

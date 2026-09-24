@@ -15,7 +15,6 @@ import time
 from pathlib import Path
 
 from claude_code_hooks_daemon.skill_scan.constants import (
-    CLAUDE_PROJECTS_DIRNAME,
     EXCLUDE_CONTENT_MARKERS,
     EXCLUDE_FLAGS,
     SECONDS_PER_DAY,
@@ -23,7 +22,7 @@ from claude_code_hooks_daemon.skill_scan.constants import (
     USER_RECORD_TYPE,
 )
 from claude_code_hooks_daemon.skill_scan.models import Prompt, ScanStats
-from claude_code_hooks_daemon.utils.claude_config import claude_config_dir
+from claude_code_hooks_daemon.utils.claude_config import claude_project_dir
 
 logger = logging.getLogger(__name__)
 
@@ -31,21 +30,16 @@ _MESSAGE_FIELD = "message"
 _CONTENT_FIELD = "content"
 _TYPE_FIELD = "type"
 _SESSION_ID_FIELD = "sessionId"
-_SLUG_SEPARATOR = "-"
-_PATH_SEPARATOR = "/"
 
 
 def derive_transcript_dir(project_root: Path, *, config_dir: Path | None = None) -> Path:
     """Claude Code's transcript directory for ``project_root``.
 
-    Claude Code slugs a project path by replacing every path separator with
-    ``-`` (so ``/workspace`` becomes ``-workspace``) under
-    ``<config dir>/projects/``; the config dir defaults to
+    Delegates to :func:`claude_project_dir`, the one derivation every
+    transcript reader shares (00466 N27); the config dir defaults to
     :func:`claude_config_dir` (Plan 00468 G13).
     """
-    base = config_dir if config_dir is not None else claude_config_dir()
-    slug = str(project_root).replace(_PATH_SEPARATOR, _SLUG_SEPARATOR)
-    return base / CLAUDE_PROJECTS_DIRNAME / slug
+    return claude_project_dir(project_root, config_dir=config_dir)
 
 
 def _is_genuine_text(text: str, markers: tuple[str, ...]) -> bool:

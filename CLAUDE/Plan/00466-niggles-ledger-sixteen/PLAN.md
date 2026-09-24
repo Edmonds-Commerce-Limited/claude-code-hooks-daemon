@@ -57,7 +57,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N24 | `daemon.strict_mode` never reaches the live daemon, so every guard fails open on a handler exception      | guards review 2    | 🔄 In progress        |
 | N25 | A slow handler runs out the client's budget, and a timeout ALLOWs the whole PreToolUse chain              | guards review 2    | 🔄 In progress        |
 | N26 | `check_skill_references.py` scans zero files when run from a worktree, and passes                         | 00468 core agent   | ⬜ Open               |
-| N27 | `skill_scan` and `tool_report` build the transcript directory name two different ways                     | 00468 core agent   | ⬜ Open               |
+| N27 | `skill_scan` and `tool_report` build the transcript directory name two different ways                     | 00468 core agent   | ✅ Remedied           |
 
 ## Tasks
 

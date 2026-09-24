@@ -9,12 +9,13 @@ import pytest
 from tests.claude_plugin_fixture import install_fake_plugin
 
 from claude_code_hooks_daemon.daemon.cli import cmd_tool_report
+from claude_code_hooks_daemon.utils.claude_config import claude_project_dir
 
 
-def _args(project_root: Path, transcripts_dir: Path, **overrides: Any) -> argparse.Namespace:
+def _args(project_root: Path, transcripts_dir: Path | None, **overrides: Any) -> argparse.Namespace:
     values: dict[str, Any] = {
         "project_root": str(project_root),
-        "transcripts_dir": str(transcripts_dir),
+        "transcripts_dir": None if transcripts_dir is None else str(transcripts_dir),
         "json_output": False,
         "no_write": False,
     }
@@ -111,6 +112,19 @@ class TestCmdToolReport:
         exit_code = cmd_tool_report(_args(root, root / "nope", no_write=True))
         assert exit_code == 0
         assert "0 transcript" in capsys.readouterr().out
+
+    def test_a_missing_derived_directory_is_named_on_stderr(
+        self,
+        project: tuple[Path, Path],
+        claude_config: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """00466 N27: an absent derived directory must not read as "no usage"
+        without saying where the report looked."""
+        root, _ = project
+        assert cmd_tool_report(_args(root, None, no_write=True)) == 0
+        err = capsys.readouterr().err
+        assert str(claude_project_dir(root, config_dir=claude_config)) in err
 
     def test_enabled_plugins_listing_cost_is_reported(
         self,

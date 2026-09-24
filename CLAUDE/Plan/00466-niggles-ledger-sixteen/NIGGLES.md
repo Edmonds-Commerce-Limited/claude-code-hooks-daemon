@@ -3,7 +3,7 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
-### N27 — `skill_scan` and `tool_report` build the transcript directory name two different ways
+### N27 — ✅ Remedied — `skill_scan` and `tool_report` build the transcript directory name two different ways
 
 **Found by the 00468 core agent** (report on its branch,
 `subagent-reports/260924-p468-core-opus-5-5.md`). Claude Code keeps a
@@ -20,6 +20,28 @@ and every other derivation site use it (sweep for the other derivations).
 The helper raises, not returns empty, when the directory does not exist and
 the caller asked for it. RED test: a project path with `.` and `_` resolves
 to the same directory from both commands.
+
+**Remedy** (branch `worktree-p468-core`): Claude Code's real rule was read
+from its shipped bundle. The per-project directory is
+`join(<config dir>, "projects", uC(realpath(cwd)))`. `uC` replaces each UTF-16
+code unit outside `[a-zA-Z0-9]` with `-`, and a name over 200 characters is
+cut to 200 and suffixed with `-` plus the base-36 absolute value of a 32-bit
+Java-style string hash. No real `projects/` entry for a path with `.` or `_`
+exists in this container (only `-workspace`). So the expected values in the
+tests were computed by running that JavaScript under node.
+
+- `utils/claude_config.project_dir_name()` and `claude_project_dir(project_root, *, config_dir=None, must_exist=False)`
+  implement it. `must_exist` raises `FileNotFoundError` naming the directory.
+- Every derivation site delegates: `skill_scan.extraction.derive_transcript_dir`,
+  `tool_report.analyser.transcripts_root_for` (which `block_report` re-exports),
+  and the `cache-gaps` auto-discovery.
+- `cache-gaps` names the directory it looked in. `tool-report` and
+  `block-report` name a missing derived directory on stderr.
+- Tests: `tests/unit/utils/test_transcript_dir_derivations_agree.py` (RED:
+  skill_scan named the wrong directory), `TestProjectDirName`,
+  `TestClaudeProjectDir`, and a
+  `test_a_missing_derived_directory_is_named_on_stderr` test in both cli
+  report test files. Release note 36.
 
 ### N26 — `check_skill_references.py` scans zero files when run from a worktree
 

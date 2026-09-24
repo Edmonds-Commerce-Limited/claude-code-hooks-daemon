@@ -3677,16 +3677,20 @@ def _resolve_transcript(args: argparse.Namespace) -> Path | None:
     Auto-discovery is a convenience, never a guess made silently — the caller
     prints which file was chosen, because analysing the wrong session produces
     a perfectly plausible report about somebody else's work.
+
+    Raises:
+        FileNotFoundError: auto-discovery found no project directory; the
+            message names the directory looked in (00466 N27).
     """
     named = getattr(args, "transcript", None)
     if named:
         candidate = Path(named)
         return candidate if candidate.is_file() else None
 
-    from claude_code_hooks_daemon.skill_scan.extraction import derive_transcript_dir
+    from claude_code_hooks_daemon.utils.claude_config import claude_project_dir
 
     project_path = get_project_path(getattr(args, "project_root", None))
-    session_dir = derive_transcript_dir(project_path)
+    session_dir = claude_project_dir(project_path, must_exist=True)
     try:
         transcripts = sorted(
             session_dir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True
@@ -3737,7 +3741,11 @@ def cmd_cache_gaps(args: argparse.Namespace) -> int:
     """
     from claude_code_hooks_daemon.daemon.cache_gap_analysis import analyse_transcript
 
-    transcript = _resolve_transcript(args)
+    try:
+        transcript = _resolve_transcript(args)
+    except FileNotFoundError as e:
+        print(f"ERROR: {e}. Pass --transcript PATH explicitly.", file=sys.stderr)
+        return 2
     if transcript is None:
         print(
             "ERROR: no transcript found. Pass --transcript PATH explicitly.",
@@ -7034,6 +7042,25 @@ def cmd_housekeeping(args: argparse.Namespace) -> int:
     return 0
 
 
+def _report_transcripts_root(args: argparse.Namespace, project_root: Path) -> Path:
+    """The transcripts directory a report reads: ``--transcripts-dir``, else derived.
+
+    A derived directory that does not exist is named on stderr. The report
+    still runs (a fresh project has no transcripts yet), but an empty report
+    must never hide WHERE it looked (00466 N27).
+    """
+    from claude_code_hooks_daemon.utils.claude_config import claude_project_dir
+
+    override = getattr(args, "transcripts_dir", None)
+    if override:
+        return Path(override)
+    try:
+        return claude_project_dir(project_root, must_exist=True)
+    except FileNotFoundError as e:
+        print(f"NOTE: {e}; reporting no transcripts.", file=sys.stderr)
+        return claude_project_dir(project_root)
+
+
 def cmd_tool_report(args: argparse.Namespace) -> int:
     """Produce the tools-vs-tokens usage report (Plan 00293).
 
@@ -7053,10 +7080,7 @@ def cmd_tool_report(args: argparse.Namespace) -> int:
         2 on operational errors.
     """
     from claude_code_hooks_daemon.config.models import Config
-    from claude_code_hooks_daemon.tool_report.analyser import (
-        analyse_transcripts,
-        transcripts_root_for,
-    )
+    from claude_code_hooks_daemon.tool_report.analyser import analyse_transcripts
     from claude_code_hooks_daemon.tool_report.plugin_costs import plugin_listing_costs
     from claude_code_hooks_daemon.tool_report.report import (
         build_report,
@@ -7071,8 +7095,7 @@ def cmd_tool_report(args: argparse.Namespace) -> int:
     project_root = resolved_root
     config = Config.load_or_default(project_root / ".claude" / "hooks-daemon.yaml")
 
-    override = getattr(args, "transcripts_dir", None)
-    transcripts_root = Path(override) if override else transcripts_root_for(project_root)
+    transcripts_root = _report_transcripts_root(args, project_root)
 
     summary = analyse_transcripts(transcripts_root)
     report = build_report(
@@ -7127,10 +7150,7 @@ def cmd_block_report(args: argparse.Namespace) -> int:
         0 on success (a project with no transcripts yet still reports),
         2 on operational errors.
     """
-    from claude_code_hooks_daemon.block_report.analyser import (
-        analyse_transcripts,
-        transcripts_root_for,
-    )
+    from claude_code_hooks_daemon.block_report.analyser import analyse_transcripts
     from claude_code_hooks_daemon.block_report.report import (
         build_report,
         render_markdown,
@@ -7153,8 +7173,7 @@ def cmd_block_report(args: argparse.Namespace) -> int:
     # _init_project_context_for_cli's own docstring for the failure modes.
     _init_project_context_for_cli(args)
 
-    override = getattr(args, "transcripts_dir", None)
-    transcripts_root = Path(override) if override else transcripts_root_for(project_root)
+    transcripts_root = _report_transcripts_root(args, project_root)
 
     summary = analyse_transcripts(transcripts_root)
     report = build_report(
