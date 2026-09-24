@@ -383,3 +383,226 @@ is supported. The stated mechanism is refuted. See I5.
 [ ] APPROVE
 [x] REQUEST CHANGES: fix B1 and B2, each with a regression test. File I1 to I6 and S1 to S7 as plan tasks.
 [ ] REJECT
+
+---
+
+## Addendum: re-review of the fixes (`9607ea07..303f75c4`)
+
+Reviewer: Opus 5.5, read-only, with probes in tmp dirs only. Scope: commits
+`271040e7`, `b868330e`, `696a6fdf` and `303f75c4`, which touch 24 files
+(+1366/-148).
+
+The branch's test files now pass: 154 passed and 1 skipped, in 69s. The
+skip is the existing root-only chmod skip. The files run were the 9 from the
+first review plus `tests/unit/daemon/test_bootstrap_decision.py`.
+
+The deployed copies still match their templates byte for byte: the wrapper,
+and the skill's `install.sh`.
+
+New probes, kept in the worktree's `untracked/scratch/`:
+
+- `review456_stranded_order_probe.py`: N1.
+- `review456_term_probe.py`: N2.
+- `review456_macos_like_probe.py`: runs with no `timeout`, `setsid` or `flock` on PATH.
+
+**Verdict: APPROVE.** Both blocking findings are fixed and pinned by tests. No
+new finding is blocking. The new findings below (N1 to N6) are non-blocking,
+and each is to be filed as a plan task.
+
+### Original findings: is each fix real?
+
+| Finding | Verified how | Result |
+| ------- | ------------ | ------ |
+| B1 | Re-ran `review456_ci_probe.py` at HEAD. Under CI=true, both hooks report `disabled`, and `repair` exits 0 with one uv call. With the opt-out set, the hook reports `disabled`, `repair` exits 0 with one uv call, and no marker is left. Pinned by `TestSwitchedOffMeansSwitchedOff`, which includes a build child that is switched off and writes no marker, and by init.sh's `test_ci_true_is_named_never_reported_as_a_failed_build`. The CI and opt-out logic is now defined once, in `venv_bootstrap_switched_off_by`, and ensure_venv and the driver both use it. | Fixed |
+| B2 | Re-ran `review456_uv_home_probe.py` at HEAD: `repair` exits 0 with "Venv repaired successfully". `find_uv()` looks in `~/.local/bin` first and then PATH, the same order `venv.sh` prepends in. The gate, the inputs signature and `cmd_repair` all use it. Pinned by `test_uv_only_in_uv_home_repairs_cleanly`, `TestFindUv` and `TestCmdRepairUsesTheBuildsUv`. | Fixed |
+| I1 | Pinned by `test_a_build_past_its_bound_ends_failed_and_is_reported`: with a 2s bound and a 30s uv, the build ends failed, the log says "timed out", and it is not respawned. `test_running_names_the_live_build_pid_and_its_age` checks that the pid is alive with `os.kill(pid, 0)`. On Linux, `timeout` signals its whole process group, so uv dies along with the build. | Fixed with GNU `timeout`. See N2 for a TERM that is not the timeout, and N3 for macOS |
+| I2 | The heartbeat touches the lock dir every 60s while its owner lives. Release now removes the lock dir only when its `pid` file matches this process. Pinned by `TestTheMkdirLockSurvivesALongBuild`: a build older than a 3s stale age is still reported running, and release leaves alone a lock owned by another pid. I checked the pid bookkeeping through the handoff: the parent writes `$$`, the child's adopt overwrites it with the child's `$$`, and the child's release compares against that, so they match. Inside `$(ensure_venv ...)`, the write and the compare both use the top-level `$$`, which is also consistent. | Fixed. See N3 for the macOS trade-off, and N6 for a cost |
+| I3 | The aside dir now gets a `.gitignore` of `*`, and every run adopts stranded aside dirs and restores them from its EXIT trap. Pinned by `TestVenvsStrandedByAKilledForceAreRecovered`, whose fake installer really sends `kill -KILL $PPID`. | Fixed for the tested case. The fix introduced N1, and N4 and N5 are left open |
+| I4 | `_venv_lock_wait_bound` stretches the wait to the recorded build's remaining time (bound plus the 30s KILL grace), and says so. Pinned by `test_repair_outwaits_the_generic_lock_bound`: with a 1s generic lock bound and a 4s build, `repair` succeeds with one uv call. | Fixed |
+| I6 | The marker is now read after `try_acquire`, and the lock is released before reporting `failed`. Pinned by `test_a_marker_written_just_before_the_acquire_is_honoured`: a fake `flock` plants the marker at the moment of acquire. | Fixed |
+
+The original fixes to the suggestions also hold up:
+
+- **S1:** the uv identity is now its path, size and mtime.
+- **S3:** `_subcommand_of` finds the verb past global options, and `repair --help` builds nothing.
+- **S4:** a missing driver is now named.
+- **S5:** the mkdir spec must equal this daemon's lock dir. The flock fd is checked against `/proc` where `/proc` exists, and skipped where it does not (macOS). The variable is unset after adoption.
+
+### The declined suggestions
+
+- **S2 (source-shape tests): sound to defer.** The test pins the extension
+  point the lead asked for, and behavioural tests sit beside it. Plan 00457
+  owns replacing it with per-arm behaviour tests. Carry it as a named task in
+  00457.
+- **S6 (cost of the gate): sound.** The measured median is about 0.1s per
+  hook, and only while the daemon is down anyway. The evidence is
+  `untracked/scratch/s6_measure.py`.
+- **S7 (three version.py readers): sound.** The skill's `install.sh` runs
+  standalone, and init.sh is a per-project copy. Moving the driver's reader
+  into a clone library would still leave three regexes, so it would buy
+  nothing.
+
+### New findings introduced by the fixes (non-blocking, each to be filed)
+
+#### N1. Recovering a stranded aside dir during a `--force` run keeps the OLD venv and deletes the NEWER one of the same name (confidence 95%)
+
+**Location:** `.claude/skills/hooks-daemon/scripts/install.sh`, in
+`_adopt_stranded_venvs` and in `_restore_venvs`'s loop over `KEPT_VENVS_DIRS`
+(and the template).
+
+**Problem:** Stranded dirs are appended to `KEPT_VENVS_DIRS` first, and this
+run's own aside dir is appended after them. Restore walks the list in that
+order. The failure sequence:
+
+1. A `--force` run is KILLed, stranding the other view's venv in dir A.
+2. The other view's hooks self-heal, which builds a NEWER venv with the same
+   name.
+3. The next `--force` run moves that newer venv into dir B.
+4. Restore puts A's OLD copy back first. When it reaches B, it finds the
+   name taken and deletes the NEWER copy, while printing "rebuilt for this
+   environment and already in place". That message is false.
+
+**Evidence** (`review456_stranded_order_probe.py`):
+
+```
+  |   restored: venv-home_dev_project_claude_hooks-daemon-py311-0badc0de
+  |   venv-home_dev_project_claude_hooks-daemon-py311-0badc0de: rebuilt for this environment and already in place; the kept copy is discarded
+surviving generation: OLD
+```
+
+**Impact:** A working venv is replaced by its pre-kill copy, which may be
+stale. The lost copy is a rebuildable cache, not user data. But this breaks
+the fix's own "the new one wins" rule.
+
+**Fix:**
+- Restore this run's own aside dir before any adopted stranded dir. Or, on a
+  name collision, keep the copy with the newer `.daemon-metadata.json` or
+  mtime.
+- Make the message say which copy was kept and why.
+- Test: a stranded dir plus a newer venv of the same name, then `--force`.
+  The newer venv must survive.
+
+#### N2. Any TERM is recorded as "timed out after 900s", and that blocks automatic retries (confidence 90%)
+
+**Location:** `scripts/venv_bootstrap.sh`, in `_vb_build` (`trap _vb_build_timed_out TERM`) and in `_vb_build_timed_out`.
+
+**Problem:** The trap assumes every TERM comes from `timeout`. But a host
+shutdown or reboot, or a user running `kill <pid>` on the pid that the new
+`running` message shows, also sends TERM. Each writes a failed marker with
+unchanged inputs, and logs "the build timed out after 900s". After that,
+hooks report "THE LAST AUTOMATIC BUILD FAILED" and never retry until someone
+runs `repair`.
+
+Bash also defers the trap until its current foreground command finishes. So
+a TERM to the build process alone can let uv finish and the venv resolve,
+and a false failure is still logged.
+
+**Evidence** (`review456_term_probe.py`, TERM sent 1s into the build):
+
+```
+state after TERM : ['failed']
+venv resolves    : True
+log says         : ['✗ venv bootstrap FAILED: the build timed out after 900s (HOOKS_DAEMON_VENV_BUILD_TIMEOUT) and was stopped.']
+```
+
+**Fix:** In the trap, compare the time elapsed since the record's
+`started=` with `bound`:
+
+- If the bound has passed, it really is a timeout: write the marker, as now.
+- If not, log "stopped by a signal", write no marker, and exit, so the next
+  hook retries.
+
+Also skip the marker if the venv already resolves.
+
+Test: send TERM to the build pid inside its bound, and assert no marker and
+a retry on the next hook.
+
+#### N3. On stock macOS a hung build now holds the lock indefinitely, while the messages claim it is bounded (confidence 80%)
+
+**Location:**
+- `scripts/venv_bootstrap.sh`, `_vb_hook`: the no-`timeout` branch only warns, on the hook's stderr.
+- `scripts/install/venv.sh`, `_venv_lock_start_heartbeat`.
+- `init.sh`, the `running` remedy: "A background build is stopped and reported as failed if it outlives its bound".
+- `docs/guides/TROUBLESHOOTING.md`, the first row: "stopped and reported failed".
+
+**Problem:** Stock macOS has no `timeout`, no `setsid` and no `flock`, so it
+uses the mkdir backend. The macOS-like probe shows that the start and
+running paths work there. But the only bound a hung mkdir-lock build ever
+had was the 600s staleness age, and the I2 heartbeat now keeps a live holder
+fresh indefinitely. So on macOS a hung build wedges the lock until someone
+kills it, and the hook message tells the user the opposite.
+
+`SELF_INSTALL.md` does say the build is unbounded without `timeout`. The
+message the user actually sees says otherwise. The pid is shown, which does
+give the user a recovery path.
+
+**Fix:** Add a bash-native watchdog for when `timeout` is absent. For
+example, a background `sleep "$bound"; kill -TERM <child>`, followed by
+`kill -KILL` after the grace period, with the watchdog itself detached from
+the hook's streams. Or add `unbounded=1` to the record, and word the
+`running` message and the TROUBLESHOOTING row conditionally. Test: remove
+`timeout` from the tool dir, run a sleeping uv past a short bound, and
+assert `failed`.
+
+#### N4. Adopting an aside dir does not check that it is really stranded (confidence 60%)
+
+**Location:** skill `install.sh`, `_adopt_stranded_venvs`.
+
+**Problem:** Any `.hooks-daemon-venvs.*` dir is treated as stranded. If two
+skill runs overlap (say, from the host and from the container), the second
+run adopts the first run's live aside dir. It restores those venvs when it
+exits, which can land them in a daemon dir that the first run's installer
+is about to `rm -rf`. The window is short, but the loss is exactly the one
+this plan prevents.
+
+**Fix:** Write the owning pid and a hostname into the aside dir, and adopt
+it only when that holder is gone. Or take a skill-level lock around the
+keep, install and restore sequence.
+
+#### N5. An adopted stranded dir is restored even when this run fails before installing (confidence 70%)
+
+**Location:** skill `install.sh`, `_restore_venvs` runs `mkdir -p "$DAEMON_DIR/untracked"`.
+
+**Problem:** If the killed run had already removed the daemon dir, and the
+next plain run then fails early (for example, the network fetch fails), the
+restore creates a daemon dir that holds only venvs. From then on:
+
+- the root installer refuses with "already installed";
+- the skill reports "not a complete clone";
+- only an explicit `--force` recovers.
+
+**Fix:** When `$DAEMON_DIR` has no clone, leave adopted stranded dirs in
+place rather than restoring them into a new, empty daemon dir.
+
+#### N6. In the `failed` state under the mkdir backend, every hook starts and kills a heartbeat, which leaves a `sleep 60` behind (confidence 70%)
+
+**Location:** `scripts/install/venv.sh`, `_venv_lock_try_once` starts
+`_venv_lock_start_heartbeat`, and `_venv_lock_stop_heartbeat` kills only
+the subshell.
+
+**Problem:** The I6 fix takes the lock on every `failed` hook. Under the
+mkdir backend, each of those spawns a heartbeat subshell. Killing that
+subshell orphans its `sleep`, which lives on for up to the interval. The
+hook's own streams are not held, but a busy session accumulates up to one
+stray `sleep` per hook per minute.
+
+**Fix:** Start the heartbeat only when the lock is kept past the call:
+after a successful adopt, or in `acquire_venv_lock`, not in the
+`_vb_hook` try-then-release path. Or kill the heartbeat's whole process
+group.
+
+### Things I checked that hold up
+
+- **A lock deleted by the wrong holder:** release now checks the pid. The
+  handoff, the adopt and the command-substitution callers all keep `$$`
+  consistent, so no holder removes another's lock.
+- **The TERM trap:** it releases correctly, through the EXIT trap after
+  `exit 124`. What it gets wrong is the reason it records (N2).
+- **`/proc` absent:** the check is guarded by `[ -e /proc/$$/fd/$fd ]`.
+  The macOS path uses the mkdir backend, which never needs `/proc`.
+- **`timeout` absent:** the build still starts, completes and resolves, the
+  lock is cleaned up, and the pid is shown (macOS-like probe). The gap that
+  remains is N3.
+- **`setsid` plus `timeout`:** `setsid` execs `timeout`, which runs the
+  build in its own process group. The heartbeat and uv are both in that
+  group, so the KILL grace ends every one of them.
