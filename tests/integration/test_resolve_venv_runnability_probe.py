@@ -70,13 +70,30 @@ def _make_hanging_candidate(venv_dir: Path) -> Path:
     return py
 
 
+def _make_hanging_candidate_without_path(venv_dir: Path) -> Path:
+    """Never exits on its own, and needs nothing from ``PATH`` to hang."""
+    sleep_bin = shutil.which("sleep")
+    assert sleep_bin is not None, "the host needs a sleep binary to build this fixture"
+    bin_dir = venv_dir / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    py = bin_dir / "python"
+    py.write_text(f"#!/bin/bash\nexec {sleep_bin} 100\n")
+    py.chmod(0o755)
+    return py
+
+
 def _run_pick_python(
-    daemon_dir: Path, *, probe_timeout: float | None = None
+    daemon_dir: Path,
+    *,
+    probe_timeout: float | None = None,
+    path: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Source the library and call ``_rv_pick_python`` directly."""
     env_prelude = ""
     if probe_timeout is not None:
         env_prelude = f'export HOOKS_DAEMON_VENV_PROBE_TIMEOUT="{probe_timeout}"\n'
+    if path is not None:
+        env_prelude += f'export PATH="{path}"\n'
     harness = textwrap.dedent(f"""\
         {env_prelude}unset HOOKS_DAEMON_PYTHON HOOKS_DAEMON_VENV_PATH
         . "{RESOLVE_VENV_SH}"
@@ -150,6 +167,39 @@ def test_all_candidates_bad_reports_miss(tmp_path: Path) -> None:
 
     assert result.returncode != 0
     assert result.stdout.strip() == ""
+
+
+def test_good_candidate_resolves_when_path_has_no_sleep(tmp_path: Path) -> None:
+    """A hostile or stripped PATH must not turn the probe's bound into a kill.
+
+    The v3.9.1 field case: PATH holds nothing usable. A watchdog that looks
+    ``sleep`` up on PATH fails at once and kills a working candidate, so the
+    resolver rejects the only venv there is.
+    """
+    daemon_dir = tmp_path / "daemon"
+    good = _make_good_candidate(daemon_dir / "untracked" / "venv-py999-ok")
+    empty_path = tmp_path / "empty-path"
+    empty_path.mkdir()
+
+    result = _run_pick_python(daemon_dir, path=empty_path)
+
+    assert result.returncode == 0, f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    assert result.stdout.strip() == str(good)
+
+
+def test_hanging_candidate_is_bounded_when_path_has_no_sleep(tmp_path: Path) -> None:
+    daemon_dir = tmp_path / "daemon"
+    _make_hanging_candidate_without_path(daemon_dir / "untracked" / "venv-py999-hangs")
+    empty_path = tmp_path / "empty-path"
+    empty_path.mkdir()
+
+    started = time.monotonic()
+    result = _run_pick_python(daemon_dir, probe_timeout=1, path=empty_path)
+    elapsed = time.monotonic() - started
+
+    assert result.returncode != 0, f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    assert "timed out after 1s" in result.stderr
+    assert elapsed < 10.0, f"probe must respect its bound; took {elapsed:.2f}s"
 
 
 def test_good_candidate_alone_is_unaffected(tmp_path: Path) -> None:

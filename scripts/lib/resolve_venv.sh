@@ -150,6 +150,22 @@ _rv_dir_mtime() {
 # steady-state per-hook path.
 _RV_PROBE_TIMEOUT_SECS="${HOOKS_DAEMON_VENV_PROBE_TIMEOUT:-5}"
 _RV_PROBE_OUTPUT=""
+
+# Waits the given seconds; succeeds only if the full bound elapsed. `sleep`
+# is looked up on PATH, and the hostile or stripped PATH this resolver
+# exists to survive may not have one: a watchdog whose `sleep` fails at once
+# would kill a WORKING candidate straight away. So with no `sleep`, wait on
+# `read -t` against a process-substitution pipe opened read-write, which
+# never delivers data or EOF and needs no PATH lookup at all.
+_rv_wait_secs() {
+    if command -v sleep > /dev/null; then
+        sleep "$1"
+        return
+    fi
+    read -r -t "$1" <> <(:)
+    [ "$?" -gt 128 ]
+}
+
 _rv_candidate_runs() {
     local candidate="$1" pid watchdog rc logfile
     logfile="$(mktemp "${TMPDIR:-/tmp}/rv-probe.XXXXXX" 2>/dev/null)" || logfile=""
@@ -162,7 +178,7 @@ _rv_candidate_runs() {
         "$candidate" -c 'import sys' > /dev/null 2>/dev/null &
     fi
     pid=$!
-    ( sleep "$_RV_PROBE_TIMEOUT_SECS"; kill -KILL "$pid" 2>/dev/null ) &
+    ( _rv_wait_secs "$_RV_PROBE_TIMEOUT_SECS" && kill -KILL "$pid" 2>/dev/null ) &
     watchdog=$!
     wait "$pid"
     rc=$?
