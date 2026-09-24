@@ -1241,6 +1241,18 @@
       "function": "record",
       "rule": "log-and-continue",
       "reason": "Plan 00452: this is a SENSOR on a blocking event. The sidecar write is the last thing that happens before a sub-agent stops, and the only two failures reachable here are a daemon with no ProjectContext (RuntimeError, a standalone entry point or a unit test) and an unwritable untracked directory (OSError) -- neither of which is a reason to strand a stopping agent, which is what propagating would risk. The figure is advisory, purely cosmetic (a `sub NN%` fragment on the status line), and the next agent's stop records again, so nothing is lost permanently. Both branches log at WARNING, so the failure is visible rather than concealed. The write itself is atomic (tmp + Path.replace), so a failure can never leave a half-written document for the status-line reader. Covered by test_a_missing_project_context_does_not_raise and test_an_unwritable_root_does_not_raise."
+    },
+    {
+      "file": "utils/markdown_format.py",
+      "function": "parse_frontmatter_yaml",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00460: parses arbitrary `.claude/agents/*.md` frontmatter -- external, hand-editable data this module does not own. Malformed YAML, or YAML that parses to a non-mapping, is a legitimate 'nothing safe to act on' outcome, not a fault: its only caller (the Plan 00460 subagent-tool resolver) treats None identically to 'no frontmatter block found', which is the correct reading of unparseable frontmatter. Raising would take down a PreToolUse/SubagentStop hook dispatch over a hand-edited agent file, which is a strictly worse outcome than silently falling back to 'unknown, keep today's behaviour' -- the documented fail-safe default this resolver is built around. remote_docs/provenance.py has its own, separate frontmatter loader with ProvenanceError-based reporting rather than calling this function. Covered by test_returns_none_on_invalid_yaml and test_returns_none_when_frontmatter_is_not_a_mapping."
+    },
+    {
+      "file": "utils/subagent_tool_resolution.py",
+      "function": "_find_agent_frontmatter",
+      "rule": "silent-continue",
+      "reason": "Plan 00460: the loop is a FILTER over a directory of hand-edited `.claude/agents/*.md` files, matching by the `name:` frontmatter field. A file that has been deleted, had its permissions changed, or otherwise becomes unreadable between `rglob` listing it and the read is not an error in the search -- it simply is not a match, the same way a file lacking the requested `name:` field is not a match a few lines later in the same loop (and is not flagged, because returning None there is this same function's normal control flow, not an exception). Raising would let one unreadable sibling agent file break Write-capability resolution for every OTHER agent type in the directory, including the one actually being looked up. The directory scan itself (matching by name, not filename; nested subfolders; malformed frontmatter) is exercised end to end by TestProjectAgents/TestUserAgents in tests/unit/utils/test_subagent_tool_resolution.py; the specific OSError-on-read branch has no dedicated test (it needs an unreadable-but-listed file, awkward to construct portably) and is deliberately narrow -- the same shape as OSError guards elsewhere in this exclusions file."
     }
   ]
 }
