@@ -70,24 +70,24 @@ as normal.
 
 ### Phase 1: TDD in a worktree
 
-- [ ] ⬜ **Task 1.1**: `repair` works before venv resolution in
+- [x] ✅ **Task 1.1**: `repair` works before venv resolution in
   `bin/hooks-daemon`. With no venv for this path, it runs `ensure_venv`
   (under the lock), then continues to the Python repair. With a venv
   present, nothing changes. Precedent: Plan 00431 moved a preflight ahead of
   venv resolution.
-- [ ] ⬜ **Task 1.2**: Background bootstrap from `init.sh`'s venv-missing
+- [x] ✅ **Task 1.2**: Background bootstrap from `init.sh`'s venv-missing
   branch, gated on the five conditions. A detached build under the venv
   lock; while the lock is held, no second build starts. The hook returns
   within its timeout with a "building, log at …" message. On a failed
   build, the next hook reports the failure and its log rather than
   retrying in a loop.
-- [ ] ⬜ **Task 1.3**: Guided fallback when any condition fails, with zero
+- [x] ✅ **Task 1.3**: Guided fallback when any condition fails, with zero
   changes made. Each failed condition is named with its fix, extending the
   existing venv-missing message rather than adding a second one. Decide
   whether Plan 00100's separate SessionStart `venv_missing_advisor` handler
   is still needed, given that this message already reaches the session, and
   record the decision.
-- [ ] ⬜ **Task 1.4**: The skill's `install.sh` stops escalating to
+- [x] ✅ **Task 1.4**: The skill's `install.sh` stops escalating to
   `--force` by itself. With a clone present and a readable version, it
   repairs the venv in place. An explicit `--force` keeps other
   environments' `untracked/venv-*`. The same change goes in the deployed
@@ -105,17 +105,24 @@ as normal.
 
 ## Success Criteria
 
-- [ ] Integration test: a clone with no venv for the path, a fake `uv`,
+- [x] Integration test: a clone with no venv for the path, a fake `uv`,
   and all five conditions met. A hook starts exactly one build, even with
   concurrent hooks. The next hook after it finishes starts the daemon. A
   second environment's `venv-*` is byte-for-byte untouched.
-- [ ] Integration test: with `uv` missing, a hook changes nothing, names
+  (`tests/integration/test_init_sh_venv_self_heal.py`,
+  `tests/integration/test_venv_bootstrap_driver.py`)
+- [x] Integration test: with `uv` missing, a hook changes nothing, names
   the missing condition, and never suggests install or `--force`.
-- [ ] Integration test: `bin/hooks-daemon repair` with no venv builds one
+- [x] Integration test: `bin/hooks-daemon repair` with no venv builds one
   and does not exit 5.
-- [ ] Test: the skill's `install.sh` never escalates to `--force` without
+  (`tests/integration/test_bin_hooks_daemon_repair_without_venv.py`)
+- [x] Test: the skill's `install.sh` never escalates to `--force` without
   the flag, and a flagged `--force` keeps another environment's `venv-*`.
+  (`tests/integration/test_skill_install_never_auto_forces.py`)
 - [ ] Full QA passes and CI is green.
+- [x] Every release-bound consequence is in the pending-release holding
+  area: `UNRELEASED/release-notes/06-a-missing-venv-now-builds-itself-and-repair-works-without-one.md`
+  (no post-upgrade task: nothing an upgrading client must act on).
 
 ## Delivery & Milestones
 

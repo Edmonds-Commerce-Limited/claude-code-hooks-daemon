@@ -64,7 +64,14 @@ refuses it and every wrapper call exits 5.
 
 Pre-v3.7.0 all installs shared a single `untracked/venv/`. That corrupts when the same project directory is opened in two different Python environments — e.g. inside a YOLO container (Fedora `/usr/bin/python3`) **and** directly on the desktop host (pyenv, homebrew, distro, or different arch).
 
-v3.7.0 introduced the fingerprint suffix; v3.19.1 added the project-path slug. The daemon auto-detects stamp mismatches and rebuilds on first use in a new environment. CI sets `HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP=1` (or relies on `CI=true`) to bypass bootstrap.
+v3.7.0 introduced the fingerprint suffix; v3.19.1 added the project-path slug. CI sets `HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP=1` (or relies on `CI=true`) to bypass bootstrap.
+
+What rebuilds a venv, and when:
+
+- **A venv that is MISSING for this project path is built on first use, from the hook path.** The usual case is the second view (host vs container) of a bind-mounted project, which shares the clone but not its per-path venv. The first hook that finds a real clone with a readable version and no venv for its path runs the clone's `scripts/venv_bootstrap.sh`. That script checks five conditions without a venv: `uv` on PATH (or in `~/.local/bin`), a parseable `pyproject.toml`, a `uv.lock`, a Python meeting `requires-python`, and a writable `untracked/`. If all five hold, it starts ONE detached `ensure_venv` build under the venv build lock, and the hook returns at once with the build's log path (`untracked/.venv-bootstrap-<fingerprint>.log`). Hooks time out at 60s and a `uv sync` can take longer, which is why the build is detached. Concurrent hooks start no second build. The next hook after the build finishes starts the daemon. If a condition does not hold, nothing is changed, and the hook message names each failed condition with its fix.
+- **A failed automatic build is not retried on every hook.** It leaves `untracked/.venv-bootstrap-<fingerprint>.failed`. Hooks report "the last build failed" with the log, and retry only after `pyproject.toml`, `uv.lock`, the interpreter or `uv` changes. `bin/hooks-daemon repair` retries at once, in the foreground: it builds the venv even when none exists, then runs the normal repair.
+- **A venv that exists but is stale** (its `lock_hash` no longer matches `pyproject.toml` + `uv.lock`) is rebuilt by `ensure_venv` on install, upgrade and `repair`, not by a hook. A stale venv still resolves, so the daemon still starts from it.
+- **The automatic build and `repair` never touch another environment's venv.** A version-CHANGING upgrade is different: it deliberately removes every other `venv-*` (Plan 00100's eager cleanup), and each other environment's next hook then builds its own again. `HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP=1` switches the automatic build off. The hook message then says so and names `repair`.
 
 Manage venvs with:
 
