@@ -6,26 +6,20 @@ the SESSION-START half: for every protected path (the effective
 secret_file_guard globs) that EXISTS on disk, advise -- never block -- when
 it is (a) not gitignored, (b) git-tracked, or (c) group/world-readable.
 
-Content never enters the advisory. Files are found with ``git ls-files``
-(three cheap, index-backed enumerations, no filesystem walk) and judged with
-``stat()``, plus ONE content check that runs inside the daemon and returns
-only a format name: ``utils.encrypted_at_rest`` (Plan 00459). A file that is
-a whole-file Ansible Vault payload is ciphertext, and tracking it is the
-point of Vault, so it gets no gitignore, untrack or permissions finding. A
-YAML file with inline ``!vault`` values gets a conditional statement instead
-of the untrack advice, because only its owner knows whether every secret in
-it is vaulted.
+Content never enters the advisory. Files are found and classified by
+``utils.git_file_states`` (``git ls-files`` per state, no filesystem walk)
+and judged with ``stat()``, plus ONE content check that runs inside the
+daemon and returns only a format name: ``utils.encrypted_at_rest`` (Plan
+00459).
 
-**File enumeration is git-native, not a blind ``os.walk``** (Plan 00272 code
-review): an unfiltered directory walk with an entry cap can exhaust its cap
-inside an unrelated large subtree (``tests/``, ``node_modules/``) before ever
-reaching the directory a protected file actually lives in, and would then
-silently report the tree clean -- worse than not scanning at all, because it
-looks like a real answer. ``git ls-files`` answers tracked/ignored/untracked
-status directly from the index, which is exactly the three states this
-handler needs, so enumeration and classification collapse into ONE cheap
-call per state instead of a walk plus a `check-ignore`/`ls-files` pair per
-candidate file.
+A file that is a whole-file Ansible Vault payload is ciphertext, and
+tracking it is the point of Vault, so it gets no gitignore, untrack or
+permissions finding. The reverse is advised instead: ciphertext that is
+untracked, or that an ignore rule matches, is told how to come back under
+version control -- the state a project is left in by following this
+handler's own earlier advice. A YAML file with inline ``!vault`` values gets
+a conditional statement instead of the untrack advice, because only its
+owner knows whether every secret in it is vaulted.
 
 **Not a git repository** (or ``git`` unavailable): falls back to a bounded
 ``os.walk`` for PERMISSIONS-only checking (gitignore/tracked status is
@@ -35,7 +29,6 @@ in the advisory -- a truncated scan must never present as a clean one.
 
 import os
 import stat
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
@@ -46,7 +39,11 @@ from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.encrypted_at_rest import AtRestFormat, classify_at_rest
-from claude_code_hooks_daemon.utils.git_repo import run_git
+from claude_code_hooks_daemon.utils.git_file_states import (
+    GitFileStates,
+    scan_git_file_states,
+    unignore_advice,
+)
 from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 
 _CHMOD_HINT: Final[str] = "chmod 600 <path> (owner read/write only)"
@@ -59,6 +56,11 @@ _ISSUE_INLINE_VAULT: Final[str] = (
     "has inline `!vault` values -- tracking it is correct ONLY if every secret "
     "value in it is vaulted; the daemon cannot verify that, so reads stay denied"
 )
+
+_ENCRYPTED_SHOULD_BE_TRACKED: Final[str] = (
+    "encrypted at rest (whole-file Ansible Vault) and SHOULD be tracked"
+)
+_ADD_STEP: Final[str] = "`git add {relpath}`"
 
 _ENCRYPTED_HEADING: Final[str] = (
     "Encrypted at rest (whole-file Ansible Vault) -- tracking is correct, no action. "
@@ -82,19 +84,16 @@ _TRUNCATED_NOTICE: Final[str] = (
 )
 
 
-@dataclass(frozen=True)
-class _RepoScan:
-    """The three git-native file-state sets this handler needs.
-
-    ``all_paths`` is the union -- every path git knows about at all
-    (tracked, or untracked-and-visible, or untracked-and-ignored) -- so
-    membership in ``tracked``/``ignored`` directly answers both hygiene
-    questions without a second git call per candidate file.
-    """
-
-    tracked: frozenset[str]
-    ignored: frozenset[str]
-    all_paths: frozenset[str]
+def _encrypted_recovery(relpath: str, *, tracked: bool, ignored: bool) -> str | None:
+    """How to bring ciphertext back under version control, or None if it is."""
+    steps: list[str] = []
+    if ignored:
+        steps.append(unignore_advice(relpath))
+    if not tracked:
+        steps.append(_ADD_STEP.format(relpath=relpath))
+    if not steps:
+        return None
+    return f"{_ENCRYPTED_SHOULD_BE_TRACKED} -- " + ", then ".join(steps)
 
 
 class SecretFileHygieneCheckerHandler(SessionStartHandlerBase):
@@ -119,7 +118,7 @@ class SecretFileHygieneCheckerHandler(SessionStartHandlerBase):
     def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         project_root = ProjectContext.project_root()
         patterns = sfm.resolve_configured_patterns()
-        scan = self._scan_repo(project_root)
+        scan = scan_git_file_states(project_root)
 
         if scan is not None:
             findings, encrypted = self._collect_findings_git(project_root, patterns, scan)
@@ -151,35 +150,15 @@ class SecretFileHygieneCheckerHandler(SessionStartHandlerBase):
     # git-native path (primary)
     # ------------------------------------------------------------------
 
-    def _scan_repo(self, project_root: Path) -> _RepoScan | None:
-        """The three git file-state sets, or ``None`` if git enumeration failed.
-
-        A ``None`` result (not a repository, or git is unavailable) tells the
-        caller to fall back rather than to silently treat "git failed" as
-        "nothing is ignored" -- a non-git directory must never be reported as
-        a pile of ungitignored secrets.
-        """
-        tracked = self._git_paths(project_root, "--cached")
-        if tracked is None:
-            return None
-        others = self._git_paths(project_root, "--others", "--exclude-standard")
-        if others is None:
-            return None
-        ignored = self._git_paths(project_root, "--others", "--ignored", "--exclude-standard")
-        if ignored is None:
-            return None
-        return _RepoScan(tracked=tracked, ignored=ignored, all_paths=tracked | others | ignored)
-
-    def _git_paths(self, project_root: Path, *flags: str) -> frozenset[str] | None:
-        result = run_git(project_root, "ls-files", *flags)
-        if result.returncode != 0:
-            return None
-        return frozenset(line for line in result.stdout.splitlines() if line)
-
     def _collect_findings_git(
-        self, project_root: Path, patterns: tuple[str, ...], scan: _RepoScan
+        self, project_root: Path, patterns: tuple[str, ...], scan: GitFileStates
     ) -> tuple[list[_Finding], list[str]]:
-        """``(findings, encrypted relpaths)`` for every protected path git knows."""
+        """``(findings, encrypted relpaths)`` for every protected path git knows.
+
+        ``scan`` is ``None``-checked by the caller: a failed git enumeration
+        falls back rather than reading as "nothing is ignored", so a non-git
+        directory is never reported as a pile of ungitignored secrets.
+        """
         findings: list[_Finding] = []
         encrypted: list[str] = []
         for relpath in sorted(scan.all_paths):
@@ -187,14 +166,20 @@ class SecretFileHygieneCheckerHandler(SessionStartHandlerBase):
                 continue
             at_rest = classify_at_rest(project_root / relpath, project_root)
             if at_rest is AtRestFormat.ANSIBLE_VAULT:
-                encrypted.append(relpath)
+                recovery = _encrypted_recovery(
+                    relpath, tracked=relpath in scan.tracked, ignored=scan.is_ignored(relpath)
+                )
+                if recovery is None:
+                    encrypted.append(relpath)
+                else:
+                    findings.append((relpath, [recovery]))
                 continue
             issues: list[str] = []
             if at_rest is AtRestFormat.ANSIBLE_VAULT_INLINE:
-                if relpath not in scan.ignored or relpath in scan.tracked:
+                if relpath not in scan.ignored_untracked or relpath in scan.tracked:
                     issues.append(_ISSUE_INLINE_VAULT)
             else:
-                if relpath not in scan.ignored:
+                if relpath not in scan.ignored_untracked:
                     issues.append(_ISSUE_NOT_GITIGNORED)
                 if relpath in scan.tracked:
                     issues.append(_ISSUE_TRACKED)
@@ -265,7 +250,7 @@ class SecretFileHygieneCheckerHandler(SessionStartHandlerBase):
         truncated: bool = False,
     ) -> list[str]:
         lines = [
-            "⚠️  SECRET FILE HYGIENE: a protected path has an unsafe on-disk state",
+            "⚠️  SECRET FILE HYGIENE: protected paths need attention",
             "",
         ]
         for relpath, issues in findings:
@@ -300,8 +285,12 @@ class SecretFileHygieneCheckerHandler(SessionStartHandlerBase):
             "is a whole-file Ansible Vault payload (`$ANSIBLE_VAULT;...` header "
             "and hex armour, checked every session), it is ciphertext and "
             "committing it is the point of Vault: it gets none of the findings "
-            "above, and the advisory stays silent if nothing else is wrong. The "
-            "same file decrypted in place gets the full advice again. A YAML "
+            "above, and the advisory stays silent if nothing else is wrong. "
+            "Ciphertext that is untracked or gitignored -- the state an earlier "
+            "version of this advice left projects in -- is told to come back: "
+            "remove the ignore rule or add `!/<path>` after it, then "
+            "`git add <path>`. The same file decrypted in place gets the full "
+            "untrack advice again. A YAML "
             "file with inline `!vault |` values gets one statement instead: "
             "tracking it is correct only if EVERY secret value in it is vaulted, "
             "which the daemon cannot verify.\n\n"

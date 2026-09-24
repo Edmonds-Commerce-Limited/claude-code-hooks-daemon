@@ -19,7 +19,11 @@ truth_changes:
       decrypt it (`ansible-vault view|decrypt`, any `ansible*`,
       `git diff|log|show`) stay denied, and the content is re-checked on every
       call, so the same file decrypted in place is fully protected again. The
-      hygiene advisory gives an encrypted file no gitignore or untrack advice.
+      hygiene advisory gives an encrypted file no gitignore or untrack advice;
+      an encrypted file that is untracked or gitignored is told to come back
+      (remove the ignore rule or add `!/<path>` after it, then `git add
+      <path>`). The gitignore safety advisory follows any protected glob it
+      asks for with a `!/<path>` negation for each existing encrypted file.
       Everything else is unchanged: a plaintext vault password file, the
       word list and key material stay unreadable by any route; do not open
       the `sensitive_content` word list — ask the user what entry N covers;

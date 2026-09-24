@@ -1,17 +1,23 @@
 """Tests for GitignoreSafetyCheckerHandler."""
 
 import json
+import subprocess
+from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from tests.vault_payloads import vault_file_bytes
 
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.handlers.session_start import gitignore_safety_checker as gsc_module
 from claude_code_hooks_daemon.handlers.session_start.gitignore_safety_checker import (
     GitignoreSafetyCheckerHandler,
     _required_gitignore_patterns,
 )
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
+from claude_code_hooks_daemon.utils.git_file_states import scan_git_file_states
 from claude_code_hooks_daemon.utils.secret_file_matching import DEFAULT_PROTECTED_PATTERNS
 
 
@@ -657,3 +663,137 @@ class TestEveryProtectedPatternIsAlsoGitignored:
         assert ".claude/worktrees" in required
         assert ".CLAUDE.md.pre-inject" in required
         assert ".claude/scheduled_tasks.lock" in required
+
+
+# ── Plan 00459: an ignore line must never swallow an encrypted vault file ────
+
+_GLOB = "*.dummy-fixture-glob"
+_VAULT = "group/all/vars.dummy-fixture-glob"
+
+
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(  # nosec B603 B607 - trusted git binary, fixed argv, test fixture only
+        ["git", "-C", str(repo), *args],
+        capture_output=True,
+        check=True,
+        timeout=Timeout.GIT_CONTEXT,
+    )
+
+
+@pytest.fixture()
+def git_repo(tmp_path: Path) -> Iterator[Path]:
+    """A repository whose only protected glob is a dummy one, with the static
+    daemon entries already ignored so only the Plan 00459 behaviour shows."""
+    root = tmp_path / "repo"
+    root.mkdir()
+    _git(root, "init")
+    _git(root, "config", "user.email", "t@example.com")
+    _git(root, "config", "user.name", "T")
+    (root / "README.md").write_text("# repo\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-m", "initial")
+    with patch.object(gsc_module, "resolve_configured_patterns", return_value=(_GLOB,)):
+        yield root
+
+
+def _static_lines() -> str:
+    return "".join(f"{root}\n" for root, _, _ in gsc_module._STATIC_GITIGNORE_PATTERNS)
+
+
+def _run(repo: Path, cache: Path | None = None) -> str:
+    handler = GitignoreSafetyCheckerHandler()
+    cache_file = cache or repo.parent / "cache.json"
+    with (
+        patch.object(handler, "_get_project_root", return_value=repo),
+        patch.object(handler, "_get_cache_file", return_value=cache_file),
+    ):
+        result = handler.handle({})
+    assert result.decision == "allow"
+    return "\n".join(result.context)
+
+
+def _put(repo: Path, relpath: str, data: bytes) -> None:
+    target = repo / relpath
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(data)
+
+
+class TestMissingGlobLineNeverSwallowsCiphertext:
+    def test_advised_glob_is_followed_by_a_negation_for_existing_ciphertext(
+        self, git_repo: Path
+    ) -> None:
+        (git_repo / ".gitignore").write_text(_static_lines())
+        _put(git_repo, _VAULT, vault_file_bytes())
+        _git(git_repo, "add", _VAULT)
+        _git(git_repo, "commit", "-m", "vault")
+        lines = _run(git_repo).splitlines()
+        glob_line = lines.index(f"  {_GLOB}")
+        assert lines[glob_line + 1] == f"  !/{_VAULT}"
+
+    def test_following_the_advice_leaves_the_ciphertext_unignored(self, git_repo: Path) -> None:
+        """Apply the advised lines verbatim and ask git: nothing swallowed."""
+        (git_repo / ".gitignore").write_text(_static_lines())
+        _put(git_repo, _VAULT, vault_file_bytes())
+        _put(git_repo, "plain.dummy-fixture-glob", b"not-a-real-secret\n")
+        advised = [
+            line.strip()
+            for line in _run(git_repo).splitlines()
+            if line.strip() in {_GLOB, f"!/{_VAULT}"}
+        ]
+        (git_repo / ".gitignore").write_text(_static_lines() + "\n".join(advised) + "\n")
+        states = scan_git_file_states(git_repo)
+        assert states is not None
+        assert not states.is_ignored(_VAULT)
+        assert states.is_ignored("plain.dummy-fixture-glob")
+
+    def test_no_file_yet_gets_the_one_line_caveat(self, git_repo: Path) -> None:
+        (git_repo / ".gitignore").write_text(_static_lines())
+        rendered = _run(git_repo)
+        assert f"  {_GLOB}" in rendered
+        assert gsc_module._NEGATION_CAVEAT in rendered
+        assert "  !/" not in rendered
+
+    def test_plaintext_file_gets_no_negation(self, git_repo: Path) -> None:
+        (git_repo / ".gitignore").write_text(_static_lines())
+        _put(git_repo, _VAULT, b"db_password: not-a-real-secret\n")
+        assert f"  !/{_VAULT}" not in _run(git_repo).splitlines()
+
+
+class TestPresentRuleSwallowingCiphertext:
+    def test_ignored_ciphertext_is_reported_with_its_negation(self, git_repo: Path) -> None:
+        (git_repo / ".gitignore").write_text(_static_lines() + f"{_GLOB}\n")
+        _put(git_repo, _VAULT, vault_file_bytes())
+        rendered = _run(git_repo)
+        assert gsc_module._SWALLOWED_HEADING in rendered
+        assert f"`!/{_VAULT}`" in rendered
+
+    def test_tracked_ciphertext_matched_by_the_rule_is_reported(self, git_repo: Path) -> None:
+        _put(git_repo, _VAULT, vault_file_bytes())
+        _git(git_repo, "add", _VAULT)
+        _git(git_repo, "commit", "-m", "vault")
+        (git_repo / ".gitignore").write_text(_static_lines() + f"{_GLOB}\n")
+        assert gsc_module._SWALLOWED_HEADING in _run(git_repo)
+
+    def test_negated_ciphertext_is_silent(self, git_repo: Path) -> None:
+        (git_repo / ".gitignore").write_text(_static_lines() + f"{_GLOB}\n!/{_VAULT}\n")
+        _put(git_repo, _VAULT, vault_file_bytes())
+        assert _run(git_repo) == ""
+
+    def test_ignored_plaintext_stays_ignored_silently(self, git_repo: Path) -> None:
+        (git_repo / ".gitignore").write_text(_static_lines() + f"{_GLOB}\n")
+        _put(git_repo, _VAULT, b"db_password: not-a-real-secret\n")
+        assert _run(git_repo) == ""
+
+    def test_the_cache_never_hides_a_file_encrypted_since(self, git_repo: Path) -> None:
+        """The cache key is the .gitignore content; file state is checked every time."""
+        (git_repo / ".gitignore").write_text(_static_lines() + f"{_GLOB}\n")
+        _put(git_repo, _VAULT, b"db_password: not-a-real-secret\n")
+        cache = git_repo.parent / "cache.json"
+        assert _run(git_repo, cache) == ""
+        _put(git_repo, _VAULT, vault_file_bytes())
+        assert gsc_module._SWALLOWED_HEADING in _run(git_repo, cache)
+
+    def test_armour_never_reaches_the_advisory(self, git_repo: Path) -> None:
+        (git_repo / ".gitignore").write_text(_static_lines() + f"{_GLOB}\n")
+        _put(git_repo, _VAULT, vault_file_bytes())
+        assert "ANSIBLE_VAULT" not in _run(git_repo)

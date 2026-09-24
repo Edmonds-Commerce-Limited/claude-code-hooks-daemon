@@ -1,10 +1,12 @@
 # Plan 00459 Phase 1 implementation report
 
 **Branch**: `worktree-plan-459-vault` (not pushed, not merged)
-**Commits**: `5d76a94e`, `7d955396`, `c11eaf66`, `4adf4083`, `9f6c4065`, plus
-the commit carrying this report
-**QA**: `QA: 35/35 PASSED` (tests `25654 passed, 0 failed, 24 skipped`,
-coverage 95.1%), worktree daemon RUNNING during the run.
+**Commits**: `5d76a94e`, `7d955396`, `c11eaf66`, `4adf4083`, `9f6c4065`,
+`ac696f0e`, plus the follow-up-round commit carrying this revision
+**QA**: first round `QA: 35/35 PASSED` (tests `25654 passed, 0 failed, 24 skipped`, coverage 95.1%), worktree daemon RUNNING. The follow-up round's QA
+runs in the foreground on the commit carrying this revision, with nothing
+committed after it, so its result is in the reply to the lead rather than
+here.
 
 ## What was built
 
@@ -202,27 +204,44 @@ Acceptance probes:
   the Bash tool, because it names a protected path that does not exist yet.
   The probe's `safety_notes` say so.
 
+## Follow-up round (lead's request): both open ends fixed on this branch
+
+- **`gitignore_safety_checker` is content-aware** (it previously asked for a
+  bare `.gitignore` line per protected glob, which would ignore every NEW
+  encrypted vars file at a matching name).
+  - Every session, uncached, it checks the protected files git knows about
+    with the same detector.
+  - A protected glob it advises is followed by a `!/<path>` negation for
+    each existing ciphertext file that glob would catch.
+  - Ciphertext that a present rule already ignores is reported with its
+    negation.
+  - Plaintext stays required-ignored.
+  - With no file yet, the advice carries a one-line caveat.
+  - A test applies the advised lines verbatim and asks git that the
+    ciphertext is not ignored and the plaintext is.
+- **Recovery.** `secret_file_hygiene_checker` tells untracked and/or ignored
+  ciphertext that it SHOULD be tracked: remove the rule or add `!/<path>`,
+  then `git add <path>`. The release note says so plainly for projects that
+  followed the old advice.
+- **Shared code.** `utils/git_file_states.py` is the one `git ls-files`
+  scan (now including tracked files an ignore rule matches). It also holds
+  `gitignore_negation()` (root-anchored, pattern characters escaped, proven
+  against git) and `unignore_advice()`, the one wording both handlers use,
+  including git's limit on re-including a file under an ignored directory.
+- **Truth-change filename: kept `v3.67.0.yaml`.** The README and
+  `RELEASING.md` require version-named files. The loader skips any stem that
+  is not `N.N.N`, so `vUNRELEASED.yaml` would be ignored. Plan 00427 staged
+  `v3.66.0.yaml` four days before that release. Evidence is in the 13:19
+  journal entry.
+
 ## Out of scope, for the lead
 
-- **`gitignore_safety_checker`** asks for one `.gitignore` line per
-  protected glob, including `*vault_pass*`. Git keeps tracking files that are
-  already tracked, so the owner's files are unaffected, but a NEW encrypted
-  vars file at a matching name would be ignored (`git add` needs `-f`). This
-  is the same name-not-content root cause, and a candidate follow-up.
-- **Task 2.2 note for the owner.** A project that already FOLLOWED the old
-  advice (gitignored and `git rm --cached` its vault files) has to re-track
-  them itself: remove the ignore line, or `git add -f`. The release note's
-  "nothing a project tracked needs to change" is true only for a project
-  that did not follow the advice.
 - **Payload capture and `lint_on_edit`/`staged_lint_gate`** still exclude an
   encrypted file as protected. This is harmless over-exclusion and was left
   alone.
 - **Deny message.** It names the FIRST mention, which may be the encrypted
   file when the plaintext one is later in the command. This is a UX nicety
   only.
-- **Truth-change filename.** It is staged as
-  `UNRELEASED/truth-changes/v3.67.0.yaml`; rename it if the next release
-  number differs.
 - **Vendored source path.** The Ansible source capture sits under a path
   containing `lib/`, which the root `.gitignore` rule `lib/` catches, so it
   was force-added. Anchoring that rule is a possible tidy-up.

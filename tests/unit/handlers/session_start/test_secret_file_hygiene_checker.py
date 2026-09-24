@@ -332,6 +332,76 @@ class TestEncryptedAtRest:
         assert "encrypted at rest" in text.lower()
 
 
+class TestEncryptedFileRecovery:
+    """Plan 00459 (b): a project that FOLLOWED the old untrack advice is told
+    how to put its ciphertext back under version control."""
+
+    _NAME = "vars.dummy-fixture-glob"
+
+    def _rendered(self, handler: Any, repo: Path) -> str:
+        with _patched_root(repo), _patched_patterns():
+            result = handler.handle({"source": "startup"})
+        assert result.decision == Decision.ALLOW
+        return "\n".join(result.context)
+
+    def _ignore(self, repo: Path) -> None:
+        (repo / ".gitignore").write_text("*.dummy-fixture-glob\n")
+        _git(repo, "add", ".gitignore")
+        _git(repo, "commit", "-m", "ignore")
+
+    def test_ignored_and_untracked_ciphertext_is_told_to_come_back(
+        self, handler: Any, repo: Path
+    ) -> None:
+        """Exactly the state the old advice left behind."""
+        self._ignore(repo)
+        (repo / self._NAME).write_bytes(vault_file_bytes())
+        rendered = self._rendered(handler, repo)
+        assert hygiene_module._ENCRYPTED_SHOULD_BE_TRACKED in rendered
+        assert f"!/{self._NAME}" in rendered
+        assert f"git add {self._NAME}" in rendered
+        assert "git rm --cached" not in rendered
+
+    def test_untracked_but_not_ignored_ciphertext_is_told_to_add_it(
+        self, handler: Any, repo: Path
+    ) -> None:
+        (repo / self._NAME).write_bytes(vault_file_bytes())
+        rendered = self._rendered(handler, repo)
+        assert hygiene_module._ENCRYPTED_SHOULD_BE_TRACKED in rendered
+        assert f"git add {self._NAME}" in rendered
+        assert f"!/{self._NAME}" not in rendered
+
+    def test_tracked_ciphertext_matched_by_an_ignore_rule_needs_a_negation(
+        self, handler: Any, repo: Path
+    ) -> None:
+        target = repo / self._NAME
+        target.write_bytes(vault_file_bytes())
+        _git(repo, "add", self._NAME)
+        _git(repo, "commit", "-m", "vault")
+        self._ignore(repo)
+        rendered = self._rendered(handler, repo)
+        assert f"!/{self._NAME}" in rendered
+        assert f"git add {self._NAME}" not in rendered
+
+    def test_a_negation_in_place_makes_it_silent(self, handler: Any, repo: Path) -> None:
+        target = repo / self._NAME
+        target.write_bytes(vault_file_bytes())
+        _git(repo, "add", self._NAME)
+        _git(repo, "commit", "-m", "vault")
+        (repo / ".gitignore").write_text(f"*.dummy-fixture-glob\n!/{self._NAME}\n")
+        _git(repo, "add", ".gitignore")
+        _git(repo, "commit", "-m", "negate")
+        assert self._rendered(handler, repo) == ""
+
+    def test_nested_path_is_anchored_from_the_root(self, handler: Any, repo: Path) -> None:
+        self._ignore(repo)
+        nested = repo / "group" / "all" / self._NAME
+        nested.parent.mkdir(parents=True)
+        nested.write_bytes(vault_file_bytes())
+        rendered = self._rendered(handler, repo)
+        assert f"!/group/all/{self._NAME}" in rendered
+        assert f"git add group/all/{self._NAME}" in rendered
+
+
 class TestGitNativeEnumeration:
     """The enumeration route itself: git-native, not a blind ``os.walk``."""
 
