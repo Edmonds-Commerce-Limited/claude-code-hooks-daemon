@@ -102,6 +102,55 @@ OPTIONAL_PATH = r"(?:\S*/)?"
 # `VAR=value cmd` (no `env`) is covered by the same run of assignments.
 ENV_PREFIX = r"(?:env\s+)?(?:\w+=\S*\s+)*"
 
+# Shell reserved words that can stand in front of a command without being it
+# (Plan 00422 N25). Splitting `for f in a; do git commit; done` on `;` yields
+# ` do git commit`, and a site reading its first word judged `do`. In
+# `pipe_blocker` that denied a whitelisted `grep` and suggested whitelisting
+# `^do\b`, which would have exempted every loop body; at a dozen other sites it
+# hid the command from a guard. `process_probe._COMMAND_POSITION_MARKERS` is the
+# reference reading. `(` is deliberately absent: it is an operator, and a
+# subshell does not carry `set -e` out to the statements after it.
+SHELL_RESERVED_COMMAND_PREFIXES: Final[tuple[str, ...]] = (
+    "do",
+    "then",
+    "else",
+    "elif",
+    "if",
+    "while",
+    "until",
+    "!",
+    "{",
+    "time",
+)
+
+# Any run of those words, each followed by whitespace, as bash requires. `time`
+# may carry its one option, `-p`. Put this at a segment-start anchor, before
+# `ENV_PREFIX`: `^\s*{RESERVED_WORD_PREFIX}{ENV_PREFIX}git\s+commit`.
+RESERVED_WORD_PREFIX = (
+    r"(?:(?:time\s+-p|"
+    + "|".join(re.escape(word) for word in SHELL_RESERVED_COMMAND_PREFIXES)
+    + r")\s+)*"
+)
+
+# The start of a segment up to its command word: leading whitespace, reserved
+# words, then `env` and assignments. Every pattern answering "is this segment an
+# invocation of X?" starts here.
+COMMAND_POSITION = rf"^\s*{RESERVED_WORD_PREFIX}{ENV_PREFIX}"
+
+_RESERVED_WORD_HEAD: Final[re.Pattern[str]] = re.compile(rf"^\s*{RESERVED_WORD_PREFIX}")
+
+
+def strip_reserved_word_prefix(segment: str) -> str:
+    """``segment`` from its command word on, past leading whitespace and reserved words.
+
+    For a site that reads a segment's first word as the command it runs:
+    ``" do git commit -m x"`` -> ``"git commit -m x"``. A quoted ``"do"`` is not
+    a reserved word to bash and is not removed, and neither is a word that
+    merely starts with one (``dog``). A segment that is only a closing word
+    (``done``, ``fi``) is returned unchanged: it runs no command of its own.
+    """
+    return _RESERVED_WORD_HEAD.sub("", segment, count=1)
+
 # Git global options that take their value as a SEPARATE token. Everything else
 # is either self-contained (`--git-dir=<path>`) or valueless (`--no-pager`), so
 # these are the only ones whose value could be mistaken for the subcommand —
