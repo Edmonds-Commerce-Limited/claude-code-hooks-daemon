@@ -91,7 +91,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
 
-from claude_code_hooks_daemon.utils.git_repo import git_visible_paths
+from claude_code_hooks_daemon.utils.git_repo import git_visible_paths, project_path_is_protected
 
 _PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 _QA_OUTPUT_DIR_PARTS: Final[tuple[str, str]] = ("untracked", "qa")
@@ -498,9 +498,11 @@ def _iter_markdown(root: Path) -> list[Path]:
     """Every documentation markdown file under ``root``, noise directories
     aside, and further filtered to what ``git`` considers part of the
     project (Plan 00466 N9). ``None`` from :func:`git_visible_paths` (``root``
-    is not a git repository) means no filtering: every fixture this checker's
-    own test suite builds under a plain ``tmp_path`` must keep scanning
-    everything it writes.
+    is not a git repository) means no git-based filtering: every fixture this
+    checker's own test suite builds under a plain ``tmp_path`` must keep
+    scanning everything it writes -- EXCEPT a path matching a protected glob
+    (:func:`project_path_is_protected`, Plan 00412), which is excluded on
+    both branches, git-backed or not.
 
     The noise names are matched below ``root`` only: an agent's checkout
     lives at ``untracked/worktrees/<name>/``, and matching the absolute path
@@ -512,9 +514,15 @@ def _iter_markdown(root: Path) -> list[Path]:
         for path in root.rglob(_MARKDOWN_GLOB)
         if not _UNSCANNED_DIR_NAMES.intersection(path.relative_to(root).parts)
     )
-    if git_visible is None:
-        return sorted(candidates)
-    return sorted(path for path in candidates if path.relative_to(root).as_posix() in git_visible)
+    kept: list[Path] = []
+    for path in candidates:
+        rel = path.relative_to(root).as_posix()
+        if git_visible is not None and rel not in git_visible:
+            continue
+        if project_path_is_protected(rel):
+            continue
+        kept.append(path)
+    return sorted(kept)
 
 
 def _check_shell_fences(

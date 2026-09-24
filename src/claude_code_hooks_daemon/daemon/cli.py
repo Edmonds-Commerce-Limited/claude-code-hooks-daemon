@@ -101,6 +101,7 @@ from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
 from claude_code_hooks_daemon.utils.git_repo import (
     git_visible_ancestor_dirs,
     git_visible_paths,
+    project_path_is_protected,
     run_git,
 )
 from claude_code_hooks_daemon.utils.hook_registration import (
@@ -5408,6 +5409,11 @@ def _iter_markdown_candidates(
       of its own — nothing else here would ever notice it is not this
       project's content. See :func:`utils.git_repo.git_visible_paths` for
       the single git call this costs and its not-a-repository fallback.
+    - A path matching a protected glob (Plan 00412) is excluded
+      unconditionally, via :func:`utils.git_repo.project_path_is_protected`
+      -- even when ``project_root`` is not a git repository and the filter
+      above is inert, so ``format-markdown`` never rewrites (or reports a
+      would-reformat finding for) a protected file's content.
     """
     from claude_code_hooks_daemon.utils.path_exclusion import is_path_excluded
 
@@ -5441,6 +5447,21 @@ def _iter_markdown_candidates(
             if git_visible is not None and not _rel_is_git_visible(
                 candidate, project_root, git_visible
             ):
+                continue
+            try:
+                candidate_rel = candidate.relative_to(project_root).as_posix()
+            except ValueError:
+                # Should not occur (see `_rel_is_git_visible`'s docstring):
+                # fall back to the candidate's own string form so the
+                # protected check below still has something to judge.
+                logger.debug(
+                    "_iter_markdown_candidates: %s is not under project_root %s; "
+                    "using its raw string form for the protected-path check",
+                    candidate,
+                    project_root,
+                )
+                candidate_rel = str(candidate)
+            if project_path_is_protected(candidate_rel):
                 continue
             yield candidate
 

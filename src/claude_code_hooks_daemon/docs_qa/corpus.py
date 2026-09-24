@@ -53,7 +53,11 @@ from claude_code_hooks_daemon.utils.authored_paths import (
     authored_path,
     contained_authored_path,
 )
-from claude_code_hooks_daemon.utils.git_repo import git_visible_ancestor_dirs, git_visible_paths
+from claude_code_hooks_daemon.utils.git_repo import (
+    git_visible_ancestor_dirs,
+    git_visible_paths,
+    project_path_is_protected,
+)
 from claude_code_hooks_daemon.utils.markdown_links import extract_link_targets
 from claude_code_hooks_daemon.utils.path_exclusion import is_path_excluded
 from claude_code_hooks_daemon.utils.vendor_paths import (
@@ -353,6 +357,8 @@ def iter_markdown_paths(
                 and rel_path not in _GITIGNORED_MARKDOWN_INCLUDES
             ):
                 continue
+            if project_path_is_protected(rel_path):
+                continue
             matches.append(rel_path)
     return sorted(matches)
 
@@ -489,6 +495,11 @@ def iter_corpus_paths(project_root: Path, policy: DocumentationPolicy) -> list[P
     directory-level pruning to add here; the git-visibility test is applied
     once per candidate instead, from the SAME single ``git ls-files`` call
     :func:`utils.git_repo.git_visible_paths` makes.
+
+    Also filtered through :func:`utils.git_repo.project_path_is_protected`
+    (Plan 00412) -- unconditionally, not just when ``git_visible`` is
+    available, so a protected file is excluded even when ``project_root`` is
+    not a git repository.
     """
     candidates: set[Path] = set()
     for entry in project_root.glob("*.md"):
@@ -507,12 +518,17 @@ def iter_corpus_paths(project_root: Path, policy: DocumentationPolicy) -> list[P
         if satellite_dir.is_dir():
             candidates.update(p for p in satellite_dir.rglob("*.md") if p.is_file())
     git_visible = git_visible_paths(project_root)
-    return sorted(
-        p
-        for p in candidates
-        if is_in_scope(p, project_root, policy)
-        and (git_visible is None or str(p.relative_to(project_root)) in git_visible)
-    )
+    kept: list[Path] = []
+    for p in candidates:
+        if not is_in_scope(p, project_root, policy):
+            continue
+        rel = str(p.relative_to(project_root))
+        if git_visible is not None and rel not in git_visible:
+            continue
+        if project_path_is_protected(rel):
+            continue
+        kept.append(p)
+    return sorted(kept)
 
 
 @dataclass(frozen=True)

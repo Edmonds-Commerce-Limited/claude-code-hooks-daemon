@@ -455,6 +455,24 @@ class TestIterCorpusPathsGitIgnore:
 
         assert "CLAUDE/Foo.md" in rel
 
+    def test_outside_a_git_repo_protected_file_is_still_excluded(self, tmp_path: Path) -> None:
+        """Plan 00412: closing the non-git fallback residual."""
+        from claude_code_hooks_daemon.utils import secret_file_matching as sfm
+
+        both_edges_pattern = next(p for p in sfm.DEFAULT_PROTECTED_PATTERNS if p.count("*") == 2)
+        protected_name = f"{both_edges_pattern.replace('*', 'x')}.md"
+
+        (tmp_path / "CLAUDE").mkdir()
+        (tmp_path / "CLAUDE" / "Foo.md").write_text("# foo\n")
+        (tmp_path / "CLAUDE" / protected_name).write_text("protected content")
+
+        rel = {
+            str(p.relative_to(tmp_path)) for p in iter_corpus_paths(tmp_path, DocumentationPolicy())
+        }
+
+        assert "CLAUDE/Foo.md" in rel
+        assert f"CLAUDE/{protected_name}" not in rel
+
 
 class TestBuildAndSaveCorpus:
     def test_builds_records_for_every_in_scope_file(self, tmp_path: Path) -> None:
@@ -1384,6 +1402,25 @@ class TestIterMarkdownPathsGitIgnore:
         (tmp_path / ".claude" / "ccy" / "CLAUDE.md").write_text("module doc")
 
         assert iter_markdown_paths(tmp_path, vendor_scopes=()) == [".claude/ccy/CLAUDE.md"]
+
+
+class TestIterMarkdownPathsProtectedPath:
+    """Plan 00412: closing the non-git fallback residual -- a protected file
+    must be excluded even when ``project_root`` is not a git repository, so
+    ``git_visible_paths`` returns ``None`` and this walk has no git truth to
+    filter by on its own."""
+
+    def test_outside_a_git_repo_protected_file_is_still_excluded(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.utils import secret_file_matching as sfm
+
+        both_edges_pattern = next(p for p in sfm.DEFAULT_PROTECTED_PATTERNS if p.count("*") == 2)
+        protected_name = f"{both_edges_pattern.replace('*', 'x')}.md"
+
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "NOTES.md").write_text("real")
+        (tmp_path / "src" / protected_name).write_text("protected content")
+
+        assert iter_markdown_paths(tmp_path, vendor_scopes=()) == ["src/NOTES.md"]
 
 
 class TestProjectExcludePaths:

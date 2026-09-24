@@ -377,6 +377,27 @@ def test_does_not_scan_a_gitignored_vendored_plugin_install(tmp_path: Path) -> N
     )
 
 
+def test_does_not_scan_a_protected_pattern_file_outside_a_git_repo(tmp_path: Path) -> None:
+    """Plan 00412: closing the non-git fallback residual -- ``root`` here is
+    never a git repository, so ``_iter_markdown``'s ``git_visible_paths``
+    call returns ``None`` and has no git truth to filter by; the protected
+    file must still be excluded on its own."""
+    from claude_code_hooks_daemon.utils import secret_file_matching as sfm
+
+    both_edges_pattern = next(p for p in sfm.DEFAULT_PROTECTED_PATTERNS if p.count("*") == 2)
+    protected_name = f"{both_edges_pattern.replace('*', 'x')}.md"
+
+    root = _make_docs(tmp_path, "## Fine\n\nAccurate prose only.\n")
+    protected = root / protected_name
+    protected.write_text("## Usage\n\n```bash\n/release\n```\n", encoding="utf-8")
+
+    exit_code, report = _run_checker(root)
+
+    assert exit_code == 0, (
+        "a violation inside a protected-pattern file was scanned: " f"{report['violations']}"
+    )
+
+
 def test_real_repository_docs_are_truthful() -> None:
     """The gate itself: this repository's prose must match generated truth."""
     exit_code, report = _run_checker(REPO_ROOT)

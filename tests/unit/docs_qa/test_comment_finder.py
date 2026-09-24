@@ -212,3 +212,24 @@ class TestFindLongCommentBlocksProtectedPath:
         found_paths = {finding.path for finding in findings}
         assert safe in found_paths
         assert protected not in found_paths
+
+    def test_protected_pattern_file_is_not_found_outside_a_git_repo(self, tmp_path: Path) -> None:
+        """Plan 00412: closing the non-git fallback residual -- no ``_init_repo``
+        here, so ``_iter_dir_files_git_filtered`` has no git truth to filter
+        by and must still exclude the protected file on its own."""
+        from claude_code_hooks_daemon.utils import secret_file_matching as sfm
+
+        both_edges_pattern = next(p for p in sfm.DEFAULT_PROTECTED_PATTERNS if p.count("*") == 2)
+        protected_name = f"{both_edges_pattern.replace('*', 'x')}.py"
+
+        body = "\n".join(f"# line {i}" for i in range(20))
+        safe = tmp_path / "safe.py"
+        safe.write_text(f"{body}\ncode = 1\n")
+        protected = tmp_path / protected_name
+        protected.write_text(f"{body}\ncode = 1\n")
+
+        findings = find_long_comment_blocks([tmp_path], min_lines=15)
+
+        found_paths = {finding.path for finding in findings}
+        assert safe in found_paths
+        assert protected not in found_paths

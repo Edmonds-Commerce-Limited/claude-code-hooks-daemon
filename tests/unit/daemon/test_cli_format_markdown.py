@@ -421,6 +421,25 @@ class TestCmdFormatMarkdownGitIgnore:
         assert result == 0
         assert _ALIGNED_MARKER in own_file.read_text()
 
+    def test_outside_a_git_repo_protected_file_is_not_rewritten(self, tmp_path: Path) -> None:
+        """Plan 00412: closing the non-git fallback residual."""
+        from claude_code_hooks_daemon.utils import secret_file_matching as sfm
+
+        both_edges_pattern = next(p for p in sfm.DEFAULT_PROTECTED_PATTERNS if p.count("*") == 2)
+        protected_name = f"{both_edges_pattern.replace('*', 'x')}.md"
+
+        own_file = tmp_path / "own.md"
+        own_file.write_text(_UNALIGNED_TABLE)
+        protected_file = tmp_path / protected_name
+        protected_file.write_text(_UNALIGNED_TABLE)
+
+        args = argparse.Namespace(path=tmp_path, check=False)
+        result = cmd_format_markdown(args)
+
+        assert result == 0
+        assert _ALIGNED_MARKER in own_file.read_text()
+        assert protected_file.read_text() == _UNALIGNED_TABLE
+
 
 class TestCmdFormatMarkdownExcludePaths:
     """Plan 00429: the directory walk honours ``daemon.exclude_paths``."""
