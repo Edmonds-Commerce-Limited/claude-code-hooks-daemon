@@ -31,6 +31,7 @@ from tests.venv_bootstrap_sandbox import (
     OTHER_VIEW_VENV,
     REPO_ROOT,
     Sandbox,
+    fake_clock_ahead,
     snapshot,
 )
 
@@ -410,6 +411,77 @@ class TestALiveAsideDirIsNotTaken:
         aside = self._aside_owned_by(sandbox, _dead_pid())
         stale = time.time() - 10
         os.utime(aside, (stale, stale))
+
+        result = _skill_install(sandbox)
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert (sandbox.clone / "untracked" / OTHER_VIEW_VENV).is_dir()
+        assert not aside.exists()
+
+
+class TestAnAsideDirIsOwnedFromTheMomentItAppears:
+    """Final review N8: an aside dir with no owner file reads as released. So a
+    run creating one must never let it be seen under the adoption glob before
+    its owner file is in it, or a second run can adopt it mid-reinstall."""
+
+    def test_no_aside_dir_is_ever_visible_without_its_owner(self, sandbox: Sandbox) -> None:
+        sandbox.other_view_venv()
+        ownerless = sandbox.root / "ownerless-aside-dirs.log"
+        # The claim asks for the host name while writing the owner file, which
+        # is exactly the window: record any aside dir visible without one.
+        hostname = sandbox.root / "tools" / "hostname"
+        hostname.unlink()
+        hostname.write_text(
+            "#!/bin/bash\n"
+            f'for dir in "{sandbox.project}/.claude/.hooks-daemon-venvs."*; do\n'
+            '    if [ -d "$dir" ] && [ ! -f "$dir/owner" ]; then\n'
+            f'        echo "$dir" >> "{ownerless}"\n'
+            "    fi\n"
+            "done\n"
+            f'echo "{_this_host()}"\n'
+        )
+        hostname.chmod(0o755)
+
+        result = _skill_install(sandbox, "--force")
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert not ownerless.exists(), ownerless.read_text()
+        assert not list((sandbox.project / ".claude").glob(".hooks-daemon-venvs*"))
+
+
+class TestAsideStalenessIsJudgedByTheFilesystemClock:
+    """Final review N9: the other view's aside dir is judged live or stale by
+    its heartbeat's age. A reader whose clock runs ahead must not read a fresh
+    heartbeat as silence."""
+
+    def _aside_of_another_host(self, sandbox: Sandbox) -> Path:
+        aside = sandbox.project / ".claude" / ".hooks-daemon-venvs.OtHeR1"
+        (aside / OTHER_VIEW_VENV / "bin").mkdir(parents=True)
+        (aside / ".gitignore").write_text("*\n")
+        (aside / "owner").write_text("pid=4242\nhost=the-other-view\n")
+        return aside
+
+    def test_a_fresh_heartbeat_is_live_to_a_reader_whose_clock_runs_ahead(
+        self, sandbox: Sandbox
+    ) -> None:
+        sandbox.stub_uv()
+        aside = self._aside_of_another_host(sandbox)
+        before = snapshot(aside)
+        fake_clock_ahead(sandbox.root / "tools", 1000)
+
+        result = _skill_install(sandbox)
+
+        output = result.stdout + result.stderr
+        assert result.returncode == 0, output
+        assert snapshot(aside) == before, "a live heartbeat must not be read as silence"
+        assert "may still be running" in output.lower(), output
+        assert not list((sandbox.project / ".claude").glob(".hooks-daemon-clock*"))
+
+    def test_a_heartbeat_silent_past_the_stale_age_is_adopted(self, sandbox: Sandbox) -> None:
+        sandbox.stub_uv()
+        aside = self._aside_of_another_host(sandbox)
+        silent_since = time.time() - 1000
+        os.utime(aside, (silent_since, silent_since))
 
         result = _skill_install(sandbox)
 

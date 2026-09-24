@@ -89,6 +89,9 @@ DISCOVERY_TMP="/tmp/hooks-daemon-precheck-python-discovery.sh.$$"
 #     none (the install failed after removing it), they stay aside, released
 #     for the next run, which puts them back.
 KEPT_VENVS_PREFIX="$PROJECT_ROOT/.claude/.hooks-daemon-venvs."
+# Where a new aside directory is made and claimed; the adoption glob
+# ("$KEPT_VENVS_PREFIX"*) never matches it.
+ASIDE_STAGING_PREFIX="$PROJECT_ROOT/.claude/.hooks-daemon-venvs-staging."
 ASIDE_OWNER_FILE="owner"
 ASIDE_HEARTBEAT_LOG=".heartbeat.log"
 KEPT_VENVS_DIR=""
@@ -131,6 +134,24 @@ _mtime() {
     return 1
 }
 
+# Seconds since a path's mtime, measured by the filesystem's clock: a probe
+# touched beside it, never this reader's `date`. The host and container views
+# can run clocks minutes apart. This mirrors _venv_fs_age in the clone's
+# scripts/install/venv.sh, which this script cannot source (it runs before a
+# clone exists).
+_fs_age() {
+    local path="$1" probe now stamp
+    probe="${path%/*}/.hooks-daemon-clock-probe.$$"
+    touch "$probe" || return 1
+    if ! now="$(_mtime "$probe")"; then
+        rm -f "$probe"
+        return 1
+    fi
+    rm -f "$probe"
+    stamp="$(_mtime "$path")" || return 1
+    echo $((now - stamp))
+}
+
 _owner_field() {
     local file="$1/$ASIDE_OWNER_FILE" wanted="$2" key value
     [ -f "$file" ] || return 1
@@ -150,12 +171,11 @@ _owner_field() {
 # heartbeats: yes. The pid alone is not enough, because a container on the
 # host network shares the hostname but not the pid namespace. Anything else,
 # including a pid this host cannot see (the other view's run), counts as live
-# until it goes stale.
+# until it goes stale. An age that cannot be measured counts as live.
 _aside_is_stranded() {
-    local dir="$1" mtime age pid host probe
+    local dir="$1" age pid host probe
     [ -f "$dir/$ASIDE_OWNER_FILE" ] || return 0
-    mtime="$(_mtime "$dir")" || return 1
-    age=$(($(date +%s) - mtime))
+    age="$(_fs_age "$dir")" || return 1
     [ "$age" -lt "$(_stale_seconds)" ] || return 0
     pid="$(_owner_field "$dir" pid)" || return 1
     host="$(_owner_field "$dir" host)" || return 1
@@ -172,6 +192,27 @@ _aside_is_stranded() {
 
 _claim_aside() {
     printf 'pid=%s\nhost=%s\n' "$$" "$(_this_host)" > "$1/$ASIDE_OWNER_FILE"
+}
+
+# _new_aside_dir() - Make an aside directory that is owned from the moment it is visible.
+#
+# A directory under the prefix with no owner file reads as released, so a new
+# one must never be seen there before its claim. Otherwise a second run could
+# adopt it mid-reinstall (final review N8). It is made, ignored and claimed
+# under a name the adoption glob does not match, then renamed into place.
+_new_aside_dir() {
+    local staged final
+    staged="$(mktemp -d "${ASIDE_STAGING_PREFIX}XXXXXX")"
+    echo '*' > "$staged/.gitignore"
+    _claim_aside "$staged"
+    final="${KEPT_VENVS_PREFIX}${staged##*.}"
+    if [ -e "$final" ]; then
+        rm -r "$staged"
+        echo "ERROR: $final already exists, so the venvs cannot be kept aside safely; nothing was moved." >&2
+        return 1
+    fi
+    mv "$staged" "$final"
+    echo "$final"
 }
 
 _stop_aside_heartbeat() {
@@ -239,9 +280,7 @@ _keep_venvs_aside() {
     for venv in "$daemon_dir"/untracked/venv-*; do
         [ -d "$venv" ] || continue
         if [ -z "$KEPT_VENVS_DIR" ]; then
-            KEPT_VENVS_DIR="$(mktemp -d "${KEPT_VENVS_PREFIX}XXXXXX")"
-            echo '*' > "$KEPT_VENVS_DIR/.gitignore"
-            _claim_aside "$KEPT_VENVS_DIR"
+            KEPT_VENVS_DIR="$(_new_aside_dir)" || exit 1
             echo "Keeping every environment's venv aside in $KEPT_VENVS_DIR during the reinstall:"
         fi
         mv "$venv" "$KEPT_VENVS_DIR/"

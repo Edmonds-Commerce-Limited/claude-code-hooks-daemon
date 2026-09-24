@@ -37,6 +37,8 @@ from typing import Final
 
 import pytest
 
+from tests.venv_bootstrap_sandbox import fake_clock_ahead
+
 REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 DRIVER: Final[Path] = REPO_ROOT / "scripts" / "venv_bootstrap.sh"
 BASH: Final[str] = shutil.which("bash") or "/bin/bash"
@@ -735,6 +737,123 @@ class TestNoStrayHeartbeats:
 
         assert result.returncode == 0, result.stderr
         assert _strays("sleep 89") == []
+
+
+def _build_processes(daemon_dir: Path) -> list[int]:
+    """Live (non-zombie) processes of this daemon dir's detached build, read from /proc."""
+    found: list[int] = []
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            argv = (entry / "cmdline").read_bytes().split(b"\0")
+            state = (entry / "stat").read_text().rsplit(")", 1)[1].split()[0]
+        except (FileNotFoundError, ProcessLookupError):
+            continue  # it exited between the listing and the read
+        if state != "Z" and b"build" in argv and any(bytes(daemon_dir) in a for a in argv):
+            found.append(int(entry.name))
+    return found
+
+
+#: The watchdog checks on its build process once a second.
+_WATCHDOG_POLL_SECONDS: Final[float] = 1.0
+
+
+@pytest.mark.skipif(not Path("/proc/self/cmdline").is_file(), reason="reads /proc")
+class TestTheWatchdogNeverOutlivesItsBuild:
+    """Final review N7: a KILL of the build process runs no trap. Its watchdog
+    must notice within one poll and exit having signalled nothing, because by
+    the bound the build's process group id may belong to someone else."""
+
+    def test_a_killed_build_process_takes_its_watchdog_with_it(self, tmp_path: Path) -> None:
+        daemon_dir = _daemon_dir(tmp_path)
+        env = _env(
+            tmp_path,
+            with_uv=_stub_uv(tmp_path, sleep=2),
+            extra={"HOOKS_DAEMON_VENV_BUILD_TIMEOUT": "6"},
+        )
+        started = time.monotonic()
+        first = _fields(_run("hook", daemon_dir, env).stdout)
+        time.sleep(0.7)
+        build_pid = int(_fields(_run("hook", daemon_dir, env).stdout)["pid"][0])
+
+        os.kill(build_pid, signal.SIGKILL)
+
+        # The orphaned job finishes its 2s uv run; the watchdog must be gone
+        # one poll after the KILL, well inside the 6s bound.
+        deadline = time.monotonic() + 2 + _WATCHDOG_POLL_SECONDS + 1.5
+        while _build_processes(daemon_dir) and time.monotonic() < deadline:
+            time.sleep(0.1)
+        assert _build_processes(daemon_dir) == []
+        assert time.monotonic() - started < 6, "the check must land before the bound"
+
+        time.sleep(max(0.0, started + 7.5 - time.monotonic()))
+        log = Path(first["log"][0]).read_text()
+        assert "reached its" not in log, log
+        assert _resolves(daemon_dir, env)
+
+    def test_a_build_that_ignores_term_is_killed_after_the_grace(self, tmp_path: Path) -> None:
+        stopped = subprocess.run(  # nosec B603 - fixed argv, no shell
+            [
+                BASH,
+                "-c",
+                f'source "{DRIVER}"\n'
+                "set -m\n"
+                '( trap "" TERM; sleep 30 ) < /dev/null &\n'
+                'job="$!"\n'
+                "set +m\n"
+                "sleep 0.3\n"
+                'echo "job=$job"\n'
+                "status=0\n"
+                '_vb_stop_job "$job" 1 || status=$?\n'
+                'echo "status=$status"',
+            ],
+            capture_output=True,
+            text=True,
+            env=_env(tmp_path, with_uv=None),
+            timeout=_TIMEOUT_SECONDS,
+            check=False,
+        )
+
+        fields = _fields(stopped.stdout)
+        assert fields["status"] == ["137"], stopped.stderr
+        with pytest.raises(ProcessLookupError):
+            os.killpg(int(fields["job"][0]), 0)
+
+
+class TestStalenessIsJudgedByTheFilesystemClock:
+    """Final review N9: a host and a container (or VM) sharing the lock can run
+    clocks minutes apart. A reader whose clock runs ahead must not read a live
+    holder's fresh lock as stale."""
+
+    _PROBE: Final[str] = (
+        'if age="$(_venv_mkdir_lock_is_stale "{lock}")"; then echo "stale=$age"; '
+        'else echo "stale=no"; fi'
+    )
+
+    def _judge(self, tmp_path: Path, lock_dir: Path) -> str:
+        env = _env(tmp_path, with_uv=None, extra={"HOOKS_DAEMON_VENV_LOCK_STALE_SECONDS": "600"})
+        fake_clock_ahead(tmp_path / "tools", 1000)
+        result = _source_venv_sh(self._PROBE.format(lock=lock_dir), env)
+        assert result.returncode == 0, result.stderr
+        return _fields(result.stdout)["stale"][0]
+
+    def test_a_fresh_lock_is_live_to_a_reader_whose_clock_runs_ahead(self, tmp_path: Path) -> None:
+        lock_dir = tmp_path / "untracked" / ".venv-bootstrap.lock.d"
+        lock_dir.mkdir(parents=True)
+
+        assert self._judge(tmp_path, lock_dir) == "no"
+        assert [p.name for p in lock_dir.parent.iterdir()] == [lock_dir.name], "probe left behind"
+
+    def test_a_silent_lock_is_still_stale(self, tmp_path: Path) -> None:
+        lock_dir = tmp_path / "untracked" / ".venv-bootstrap.lock.d"
+        lock_dir.mkdir(parents=True)
+        silent_since = time.time() - 1000
+        os.utime(lock_dir, (silent_since, silent_since))
+
+        age = self._judge(tmp_path, lock_dir)
+
+        assert age != "no" and int(age) >= 1000
 
 
 class TestRepairWaitsOutAHookStartedBuild:

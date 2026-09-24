@@ -52,8 +52,9 @@
 #                                 lock now (venv.sh VENV_BUILD_RECORD_NAME)
 #
 # A detached build is bounded on every platform: HOOKS_DAEMON_VENV_BUILD_TIMEOUT
-# seconds (900) from the hook that started it, after which the child's own
-# watchdog sends the build's process group TERM, then KILL. Only that is
+# seconds (900) from the hook that started it. At that point the child's own
+# watchdog tells the child, which sends the build's process group TERM, then
+# KILL after VENV_BUILD_KILL_GRACE_SECONDS. Only that is
 # recorded as "timed out". Any other stop (a shutdown, someone ending the
 # running state's pid) records nothing, so the next hook retries, and no stop
 # is a failure when this path's venv resolves anyway.
@@ -366,6 +367,8 @@ _VB_CHILD_BOUND=""
 # Process groups: the build job, and the watchdog that bounds it.
 _VB_CHILD_JOB=""
 _VB_CHILD_WATCHDOG=""
+# How often the watchdog checks that the build process is still there.
+VENV_BUILD_WATCHDOG_POLL_SECONDS=1
 
 #
 # _vb_signal_group() - Send a signal to a whole process group, reporting a miss.
@@ -378,21 +381,75 @@ _vb_signal_group() {
 }
 
 #
-# _vb_watchdog() - Stop the build job's whole process group at its bound.
+# _vb_job_running() - Is this job still running, by this shell's own job table?
 #
-# Runs as its own job (process group), so stopping the watchdog takes its
-# sleep with it. TERM first, then KILL after the grace, which is how the bound
-# holds on every platform, with or without a `timeout` command (re-review N3):
-# the lock heartbeat keeps a LIVE holder fresh, so without this a hung build
-# would hold the lock for ever.
+# The job table is what proves a job's process group is still ours: its
+# leader holds the group id while it runs, and once bash has seen it exit,
+# that id is free for any new process to take.
+#
+_vb_job_running() {
+    local pid
+    for pid in $(jobs -rp); do
+        [ "$pid" = "$1" ] && return 0
+    done
+    return 1
+}
+
+#
+# _vb_signal_job() - Signal a job's process group, only while it is still ours.
+#
+_vb_signal_job() {
+    if _vb_job_running "$2"; then
+        _vb_signal_group "$1" "$2"
+    fi
+}
+
+#
+# _vb_stop_job() - TERM a job's process group, KILL it after the grace, reap it.
+#
+# Args: $1 the job's pid (its group id), $2 the grace in seconds.
+# Returns the job's exit status.
+#
+_vb_stop_job() {
+    local job="$1" grace="$2" waited=0 status=0
+    _vb_signal_job TERM "$job"
+    while _vb_job_running "$job" && [ "$waited" -lt "$grace" ]; do
+        sleep 1
+        waited=$((waited + 1))
+    done
+    _vb_signal_job KILL "$job"
+    wait "$job" || status=$?
+    return "$status"
+}
+
+#
+# _vb_watchdog() - Tell the build process when its bound has passed.
+#
+# This is how the bound holds on every platform, with or without a `timeout`
+# command (re-review N3). The lock heartbeat keeps a LIVE holder fresh, so
+# without it a hung build would hold the lock for ever. The watchdog signals
+# only the build process, and only just after confirming it is still there.
+# The build process then stops its own job, because it alone knows whether it
+# has reaped that job yet. A KILLed build process runs no trap: the watchdog
+# sees it gone within one poll and exits having signalled nothing. By the
+# bound, the build's process group id may belong to someone else (final
+# review N7).
+#
+# Args: $1 the build process's pid, $2 the bound as an epoch deadline.
 #
 _vb_watchdog() {
-    local job="$1" wait_for="$2" grace="$3"
-    sleep "$wait_for"
-    print_warning "venv bootstrap: the build reached its ${_VB_CHILD_BOUND}s bound; stopping it"
-    _vb_signal_group TERM "$job"
-    sleep "$grace"
-    _vb_signal_group KILL "$job"
+    local owner="$1" deadline="$2" probe out
+    while probe="$(kill -0 "$owner" 2>&1)"; do
+        if [ "$(date +%s)" -ge "$deadline" ]; then
+            print_warning "venv bootstrap: the build reached its ${_VB_CHILD_BOUND}s bound; stopping it"
+            if ! out="$(kill -TERM "$owner" 2>&1)"; then
+                print_verbose "venv bootstrap: the build process $owner ended first ($out)"
+            fi
+            return 0
+        fi
+        sleep "$VENV_BUILD_WATCHDOG_POLL_SECONDS"
+    done
+    print_verbose "venv bootstrap: the build process $owner is gone ($probe); the watchdog stops"
 }
 
 #
@@ -433,8 +490,8 @@ _vb_build_stop() {
     trap - TERM HUP INT
     local status=143
     if [ -n "$_VB_CHILD_JOB" ]; then
-        _vb_signal_group TERM "$_VB_CHILD_JOB"
-        wait "$_VB_CHILD_JOB" || status=$?
+        status=0
+        _vb_stop_job "$_VB_CHILD_JOB" "$VENV_BUILD_KILL_GRACE_SECONDS" || status=$?
         _VB_CHILD_JOB=""
     fi
     local verdict=0
@@ -447,10 +504,10 @@ _vb_build_stop() {
 #
 _vb_build_exit() {
     if [ -n "$_VB_CHILD_WATCHDOG" ]; then
-        _vb_signal_group TERM "$_VB_CHILD_WATCHDOG"
+        _vb_signal_job TERM "$_VB_CHILD_WATCHDOG"
     fi
     if [ -n "$_VB_CHILD_JOB" ]; then
-        _vb_signal_group KILL "$_VB_CHILD_JOB"
+        _vb_signal_job KILL "$_VB_CHILD_JOB"
     fi
     release_venv_lock
     local recorded
@@ -472,7 +529,7 @@ _vb_build() {
     trap _vb_build_stop TERM HUP INT
 
     # The bound runs from when the hook started the build (its record).
-    local now remaining
+    local now
     now="$(date +%s)"
     if ! _VB_CHILD_STARTED="$(venv_build_record_field "$daemon_dir" started)" \
             || [[ ! "$_VB_CHILD_STARTED" =~ ^[0-9]+$ ]]; then
@@ -482,20 +539,18 @@ _vb_build() {
             || [[ ! "$_VB_CHILD_BOUND" =~ ^[1-9][0-9]*$ ]]; then
         _VB_CHILD_BOUND="$(venv_build_timeout)"
     fi
-    remaining=$((_VB_CHILD_STARTED + _VB_CHILD_BOUND - now))
-    [ "$remaining" -ge 1 ] || remaining=1
 
     print_info "venv bootstrap: build pid $$, bound ${_VB_CHILD_BOUND}s"
     printf 'pid=%s\n' "$$" >> "$(_vb_record_path "$daemon_dir")"
 
     # Job control gives the build and the watchdog a process group each, so
-    # the watchdog, a stop, or this process's exit can end uv and everything
-    # it started, never touching whatever group this process was started in.
+    # a stop, or this process's exit, can end uv and everything it started,
+    # never touching whatever group this process was started in.
     local status=0
     set -m
     _vb_build_under_lock "$daemon_dir" "$python" "$fingerprint" "$inputs" &
     _VB_CHILD_JOB="$!"
-    _vb_watchdog "$_VB_CHILD_JOB" "$remaining" "$VENV_BUILD_KILL_GRACE_SECONDS" < /dev/null &
+    _vb_watchdog "$$" $((_VB_CHILD_STARTED + _VB_CHILD_BOUND)) < /dev/null &
     _VB_CHILD_WATCHDOG="$!"
     set +m
     wait "$_VB_CHILD_JOB" || status=$?

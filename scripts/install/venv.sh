@@ -331,7 +331,9 @@ venv_lock_hash_matches() {
 # A mkdir lock's staleness is judged by age alone: a pid cannot be checked
 # across the host and container views that share this directory. So every
 # mkdir holder runs a heartbeat that keeps the lock's age below the stale
-# threshold for as long as the holder lives (Plan 00456 review I2).
+# threshold for as long as the holder lives (Plan 00456 review I2). The age is
+# measured against a probe touched beside the lock, not against this reader's
+# clock (_venv_fs_age).
 #
 VENV_LOCK_FILE_NAME=".venv-bootstrap.lock"
 VENV_LOCK_TIMEOUT_DEFAULT=120
@@ -565,16 +567,41 @@ _venv_lock_dir_mtime() {
 }
 
 #
+# _venv_fs_age() - Seconds since a path's mtime, measured by the filesystem's clock.
+#
+# Touches a probe file beside the path and subtracts the path's mtime from the
+# probe's, so this reader's own clock is never used. A host and a container or
+# VM that share the directory can run clocks minutes apart (a Docker Desktop VM
+# after the host sleeps). Reading `date` against a stamp the other side wrote
+# would then show a live holder as stale (final review N9). On a share whose
+# server applies the timestamps, both stamps come from the server's clock.
+#
+# Args: $1 path. Echoes the age; returns 1 if it cannot be measured.
+#
+_venv_fs_age() {
+    local path="$1" probe now stamp
+    probe="$(dirname "$path")/.venv-bootstrap.clock-probe.$$"
+    touch "$probe" || return 1
+    if ! now="$(_venv_lock_dir_mtime "$probe")"; then
+        rm -f "$probe"
+        return 1
+    fi
+    rm -f "$probe"
+    stamp="$(_venv_lock_dir_mtime "$path")" || return 1
+    echo $((now - stamp))
+}
+
+#
 # _venv_mkdir_lock_is_stale() - Has a mkdir lock outlived its holder?
 #
 # Args: $1 lock_dir. Echoes the lock's age in seconds and returns 0 when it is
-# at least HOOKS_DAEMON_VENV_LOCK_STALE_SECONDS old; returns 1 otherwise.
+# at least HOOKS_DAEMON_VENV_LOCK_STALE_SECONDS old; returns 1 otherwise,
+# including when the age cannot be measured.
 #
 _venv_mkdir_lock_is_stale() {
-    local lock_dir="$1" mtime age
+    local lock_dir="$1" age
     local stale="${HOOKS_DAEMON_VENV_LOCK_STALE_SECONDS:-$VENV_LOCK_STALE_SECONDS_DEFAULT}"
-    mtime="$(_venv_lock_dir_mtime "$lock_dir")" || return 1
-    age=$(( $(date +%s) - mtime ))
+    age="$(_venv_fs_age "$lock_dir")" || return 1
     [ "$age" -ge "$stale" ] || return 1
     echo "$age"
 }

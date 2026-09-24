@@ -304,6 +304,29 @@ def snapshot(root: Path) -> dict[str, str]:
     return state
 
 
+def fake_clock_ahead(tools: Path, seconds: int) -> None:
+    """Make ``date +%s`` in ``tools`` read ``seconds`` ahead of this host's clock.
+
+    It stands in for a reader whose clock has drifted ahead of the writer's,
+    such as a host and a Docker Desktop VM after the host sleeps. ``touch``
+    and ``stat`` are left alone, so file timestamps still come from the real
+    clock.
+    """
+    real = shutil.which("date")
+    assert real is not None, "the tests need a date command"
+    fake = tools / "date"
+    fake.unlink(missing_ok=True)
+    fake.write_text(
+        "#!/bin/bash\n"
+        'if [ "$#" -eq 1 ] && [ "$1" = "+%s" ]; then\n'
+        f'    echo $(( $("{real}" +%s) + {seconds} ))\n'
+        "else\n"
+        f'    exec "{real}" "$@"\n'
+        "fi\n"
+    )
+    fake.chmod(0o755)
+
+
 def assert_never_suggests_install_or_force(text: str) -> None:
     """#53's invariant: this state's advice never names install or --force."""
     lowered = text.lower()
