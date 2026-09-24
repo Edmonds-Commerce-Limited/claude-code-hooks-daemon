@@ -20,6 +20,10 @@ So this ledger opens with four entries already in it, and collects the rest as
 they are found. Their diagnoses are not reopened — what is inherited is the
 unfinished remedy, not the finding.
 
+**Closed to new entries.** From N30 on, niggles go to ledger sixteen
+([00466](../00466-niggles-ledger-sixteen/PLAN.md)). This PLAN.md passed its
+size warning with N29.
+
 **Blocked, not in progress.** Eleven of the fifteen rows are terminal. Every
 one of the remaining four ⏸ rows is an owner question that has been stated and
 is waiting for an answer (N1 scope, N4 A/B/C, N7, N11), and both 🔄 rows have
