@@ -126,6 +126,17 @@ class TestAdvisoryMode:
         assert "subagent-reports" in result.context[0]
         assert "plan folder" in result.context[0].lower()
 
+    def test_contract_mentions_the_daemon_auto_saves_a_safety_net(
+        self, handler: DispatchDeclarationHandler
+    ) -> None:
+        """Plan 00460 Task 1.6: the daemon persists every reply regardless of
+        a declaration, so the contract text says so rather than implying
+        the declared destination is the only way a reply survives."""
+        result = handler.handle(_task_input("refactor the config loader"))
+
+        assert result.context[0] is not None
+        assert "auto-sav" in result.context[0].lower()
+
     def test_not_plan_work_alone_without_destination_is_not_a_declaration(
         self, handler: DispatchDeclarationHandler
     ) -> None:
@@ -194,6 +205,18 @@ class TestReadOnlyDispatchAdvisory:
         assert len(result.context) == 1
         assert "Explore" in result.context[0]
         assert "no `Write` tool" in result.context[0]
+
+    def test_read_only_mismatch_mentions_the_auto_saved_path(
+        self, handler: DispatchDeclarationHandler
+    ) -> None:
+        """Plan 00460 Task 1.6: since the daemon now auto-saves every reply
+        regardless of Write access, the mismatch advisory should say so
+        rather than only suggesting a writable type or an inline summary."""
+        hook_input = _task_input(_DECLARED_PROMPT, subagent_type="Explore")
+
+        result = handler.handle(hook_input)
+
+        assert "agent-reports" in result.context[0]
 
     def test_silent_when_writable_type_dispatched_with_declaration(
         self, handler: DispatchDeclarationHandler

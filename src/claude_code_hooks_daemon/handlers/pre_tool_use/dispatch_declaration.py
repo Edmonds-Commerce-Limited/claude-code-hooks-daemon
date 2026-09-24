@@ -38,14 +38,22 @@ from claude_code_hooks_daemon.constants import (
 from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.utils.option_coercion import coerce_bool_option
+from claude_code_hooks_daemon.utils.subagent_report_paths import (
+    DEFAULT_REPORT_DIR,
+)
 from claude_code_hooks_daemon.utils.subagent_tool_resolution import (
     resolve_agent_can_write,
     resolve_lookup_root,
 )
 
 # Fallback location for dispatches that are genuinely plan-less. Configurable
-# via dispatch_declaration.options.fallback_report_dir.
-_DEFAULT_FALLBACK_REPORT_DIR = "untracked/agent-reports/"
+# via dispatch_declaration.options.fallback_report_dir. Same default as
+# subagent_report_persistence's auto-save target (DEFAULT_REPORT_DIR) --
+# not the same setting (this one is user-declarable per dispatch prompt,
+# that one is the daemon's own unconditional safety net), but sharing a
+# default keeps the two mentions in `_contract_text()` pointing at the same
+# place when a project has not overridden either.
+_DEFAULT_FALLBACK_REPORT_DIR = DEFAULT_REPORT_DIR
 
 # Fallback plan directory, used only when no ProjectLayout facade was
 # injected (e.g. a handler constructed directly in a unit test). Mirrors
@@ -167,7 +175,13 @@ class DispatchDeclarationHandler(PreToolUseHandlerBase):
             "Either way: long-form output goes to a FILE, never inline. The "
             "agent's final message should be a short completion summary plus "
             "the file path — a subagent's return travels over a bounded-size "
-            "channel that silently elides an oversized inline report."
+            "channel that silently elides an oversized inline report.\n\n"
+            "Safety net either way (Plan 00460): the daemon auto-saves this "
+            "agent's full final reply to a gitignored file under "
+            f"`{DEFAULT_REPORT_DIR}` when it stops, regardless of what is "
+            "declared above — but that is a fallback for recovering an "
+            "oversized reply, not a substitute for declaring the real "
+            "destination its work belongs at."
         )
 
     def _read_only_mismatch_text(self, agent_type: str) -> str:
@@ -177,12 +191,16 @@ class DispatchDeclarationHandler(PreToolUseHandlerBase):
             f"⚠️ READ-ONLY AGENT DISPATCH (Plan 00460): `{agent_type}` has no "
             "`Write` tool, but this prompt declares a report destination. It "
             "cannot write a report file there.\n\n"
-            "Either ask for its report inline (a short summary, condensed "
-            "under the size threshold) and read it from the reply rather "
-            "than a file, or dispatch a writable agent type instead. Do NOT "
-            "let it fall back to a Bash heredoc/redirect/`tee` to work "
-            "around this — that reaches disk unexamined by the content "
-            "guards a `Write` tool call would get."
+            "That destination is not this agent's only route to safety, "
+            "though: the daemon auto-saves its full final reply to a "
+            f"gitignored file under `{DEFAULT_REPORT_DIR}` when it stops, "
+            "no `Write` tool required. Ask for a short completion summary "
+            "and read the saved path back from its reply, or dispatch a "
+            "writable agent type instead if the declared destination is "
+            "the one that actually needs the report. Do NOT let it fall "
+            "back to a Bash heredoc/redirect/`tee` to work around this — "
+            "that reaches disk unexamined by the content guards a `Write` "
+            "tool call would get."
         )
 
     def _read_only_dispatch_mismatch(self, hook_input: dict[str, Any], prompt: str) -> str | None:
@@ -259,12 +277,19 @@ class DispatchDeclarationHandler(PreToolUseHandlerBase):
             "Advisory by default (context injected when the declaration is "
             "missing); a project may opt into strict mode, which denies an "
             "undeclared dispatch.\n\n"
-            "**Separately (Plan 00460):** when the dispatch DOES declare a "
-            "report destination but `subagent_type` resolves to an agent "
-            "with no `Write` tool (a documented read-only built-in, or a "
-            "project/user agent whose frontmatter omits `Write`), an "
-            "ADVISORY fires — never a deny — telling the coordinator to ask "
-            "for the report inline instead, and warning against a Bash "
+            "**Safety net (Plan 00460 Task 1.6):** whatever is declared or "
+            "not, the daemon separately auto-saves every dispatched agent's "
+            f"full final reply to a gitignored file under `{DEFAULT_REPORT_DIR}` "
+            "at SubagentStop, regardless of agent type or `Write` access. "
+            "That is a fallback for recovering an oversized reply, not a "
+            "substitute for declaring the real destination the work "
+            "belongs at.\n\n"
+            "**Separately (Plan 00460 Task 1.4):** when the dispatch DOES "
+            "declare a report destination but `subagent_type` resolves to "
+            "an agent with no `Write` tool (a documented read-only "
+            "built-in, or a project/user agent whose frontmatter omits "
+            "`Write`), an ADVISORY fires — never a deny — pointing at the "
+            "daemon's auto-saved path above and warning against a Bash "
             "write-around."
         )
 
