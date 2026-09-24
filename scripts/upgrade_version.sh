@@ -242,8 +242,11 @@ print_info "Target version: $TARGET_VERSION"
 
 log_step "1" "Safety checks"
 
-# CRITICAL: Abort if running in self-install mode
-ensure_normal_mode_only "$DAEMON_DIR"
+# CRITICAL: Abort if running in self-install mode. detect_self_install_mode
+# asks about the PROJECT root (self-install IS the project checkout), not
+# the daemon directory beneath it -- pass PROJECT_ROOT, the argument that
+# question is actually about (Plan 00455).
+ensure_normal_mode_only "$PROJECT_ROOT"
 
 # Validate project structure
 validate_project_structure "$PROJECT_ROOT" "true"
