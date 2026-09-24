@@ -58,6 +58,12 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N25 | A slow handler runs out the client's budget, and a timeout ALLOWs the whole PreToolUse chain              | guards review 2    | 🔄 In progress        |
 | N26 | `check_skill_references.py` scans zero files when run from a worktree, and passes                         | 00468 core agent   | ✅ Remedied           |
 | N27 | `skill_scan` and `tool_report` build the transcript directory name two different ways                     | 00468 core agent   | ✅ Remedied           |
+| N28 | `project_containment` resolves a relative target against the payload cwd, ignoring a same-command `cd`    | Plan 00464 agent   | 🔄 In progress        |
+| N29 | `error_hiding`'s return-None-in-except check is evaded by returning a local assigned in the handler       | Coordinator        | ⬜ Open               |
+| N30 | More shell code that must survive a hostile PATH depends on a PATH command (`date`, `pgrep`)              | 00467 dogfood      | ⬜ Open               |
+| N31 | The dispatch-declaration advisory does not recognise "File to write to: <path>"                           | 00467 dogfood      | ⬜ Open               |
+| N32 | `pipe_blocker` splits at a `\|` inside double quotes and reads the next word as a pipe stage              | Plan 00463 agent   | ⬜ Open               |
+| N33 | A worktree agent's `secret_file_guard.exclude_paths` change had no effect after a daemon restart          | Integration B2 fix | ⬜ Open               |
 
 ## Tasks
 
