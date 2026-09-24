@@ -109,6 +109,49 @@ Deciding *when* to raise a signal, actually performing the reboot, and
 restoring sessions afterwards are all host-side responsibilities outside this
 command's scope — it only ever writes the signal file.
 
+### Runs without a venv (Plan 00457, #55)
+
+`--all-sessions` is the host-reachable form above, and the host is not
+guaranteed to have a working venv for this project — a container-only
+deployment builds its venv inside the container, so its interpreter cannot
+run on the host at all, and every other `hooks-daemon` verb refuses with
+exit 5 in that state. `signal` is handled before venv resolution instead
+(`_run_venv_free_verb` in `bin/hooks-daemon`, the same mechanism `repair`
+uses for the missing-venv case itself, Plan 00456/#53):
+
+- `bin/hooks-daemon signal ...` first checks for a system `python3` on
+  `PATH`, gated at **Python >= 3.8** (the floor `typing.Final`, used in
+  `utils/operator_signal.py`, needs). Older or missing gets a clear message
+  and exit 5, not a raw `ImportError`.
+- It then execs `daemon/signal_standalone.py` directly by file path under
+  that interpreter — never `-m`, never `PYTHONPATH`. That module is
+  standard-library-only and loads its few dependencies
+  (`utils/operator_signal.py`, `utils/temp_names.py`,
+  `daemon/install_layout.py` — NOT the much larger `daemon/paths.py`,
+  which would otherwise raise the floor for reasons unrelated to signalling)
+  by file path too, so importing it never pulls in `pydantic` or anything
+  else `claude_code_hooks_daemon/__init__.py` would otherwise initialise.
+  It resolves the untracked/sidecar directory itself
+  (`install_layout.get_untracked_dir`) rather than through
+  `ProjectContext`, and so needs `--project-root` explicitly — there is no
+  venv-backed CWD walk-up to fall back on.
+- When a venv DOES resolve for the project, nothing about `signal` changes:
+  it goes through the normal `cmd_signal` path in `daemon/cli.py`, which
+  shares the same `validate_signal_request`/`run_signal_cli` the
+  venv-free entry point calls — one implementation, two ways to reach it.
+
+**Known caveat**: the venv-free dispatch above depends on
+`resolve_venv_python` correctly reporting "no venv resolves". Today it
+accepts a `venv-*/bin/python` fallback candidate on its executable bit
+alone, so a venv that is *present* but cannot actually run on this host
+(built for a different architecture/libc inside a container, say) may be
+reported "resolved" instead of falling through to the venv-free path here
+— surfacing as a raw exec failure rather than this section's clean
+dispatch. Tracked as
+[00466 N1](../Plan/00466-niggles-ledger-sixteen/NIGGLES.md), being fixed on
+another branch; this affects `repair` identically, since both share
+`_run_venv_free_verb`'s reliance on the same resolver.
+
 ## Out of scope (Phase 1)
 
 Whether a session should be able to answer "not yet" — for example, mid-way
