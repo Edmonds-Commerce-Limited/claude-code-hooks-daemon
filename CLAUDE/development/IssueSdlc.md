@@ -311,10 +311,14 @@ code.
 
 ## Step 5 — QA
 
-Inside the worktree, on the head the sub-agent reported:
-`./scripts/qa/llm_qa.py all`. This is the full gate, and it is the
-coordinator's: run it here, on this thread, never delegated to a sub-agent,
-one worktree at a time. The sub-agent has already run targeted QA.
+`./scripts/qa/llm_qa.py all` is the full gate, and it is the coordinator's:
+run it on this thread, never delegated to a sub-agent. The sub-agent has
+already run targeted QA. It runs as the batched integration gate in
+[../QA.md](../QA.md), "The Batched Integration Gate". Create an integration
+worktree from current `main` and merge the reported head `--no-ff` into it,
+together with any other branch that is ready. Then run the suite once on the
+combined head. When it is red, find which branch broke it before
+blaming this issue's branch.
 
 Read the suite's **own** exit line, not the wrapper's. Chaining with `;` gives
 the exit status of the last command in the chain, which has silently reported a
@@ -336,12 +340,18 @@ Red QA ends the tick: report, leave `agent-working` on, do not merge.
 
 ## Step 7 — merge
 
-From the main checkout, on the default branch:
+The branch was already merged `--no-ff` in the integration worktree at Step 5,
+and that head is what passed. From the main checkout, on the default branch,
+fast-forward to it:
 
 ```bash
-git merge --no-ff worktree-issue-<N>-<short-name>
+git merge --ff-only <integration-branch>
 git push
 ```
+
+If `--ff-only` refuses, `main` moved after the integration worktree was
+created: the green run no longer covers what would land, so rebuild the
+integration worktree from the new `main` and run Step 5 again.
 
 Never `--squash`, never `--rebase` — both sever ancestry and are blocked here.
 Never force-push. If `worktree.merge_to_main_requires_human_approval` is ever

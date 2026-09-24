@@ -31,10 +31,21 @@ QA for a real reason. Cross-cutting checks break from changes far away:
 handler-guidance coverage, docs QA, plan QA, the handler reference, and
 the acceptance probes. If the first full run happens on `main`, every
 such break lands on `main`, and merges queued behind it build on a red
-tree. So the gate stays BEFORE the merge, but it moves to the coordinator.
-The coordinator runs full QA on the agent's branch head, in that worktree,
-one run at a time. An agent delivers "targeted QA green plus a commit". The
-coordinator's gate then runs once per delivery, not once per fix round.
+tree. So the gate stays BEFORE `main` moves, but it moves to the coordinator.
+An agent delivers "targeted QA green plus a commit".
+
+**The coordinator's gate is batched, not per branch** (owner's instruction).
+One full run per branch, one at a time, only turns five concurrent runs into a
+queue of five. Instead the coordinator merges every ready branch, each
+`--no-ff`, into ONE integration worktree created from current `main`, and runs
+`llm_qa.py all` once on that combined head. Green: `main` is fast-forwarded to
+the integration head, so there is one push and one CI run. Red: the coordinator
+bisects to the branch whose change broke it, sends it back to be fixed or drops
+it from the batch, and re-runs. The combined head is also the only place a
+break that needs two branches together can show before `main`. Any lock the
+coordinator holds around the gate must be released when the run exits, even if
+a daemon started under it lives on (the lock-fd finding in the journal).
+Canonical description: `CLAUDE/QA.md`, "The Batched Integration Gate".
 
 **Enforcement reuses what exists.** The main-thread/sub-agent
 discriminator is already solved: `core/handler_scope.py` uses the absence
@@ -62,8 +73,12 @@ commands that ARE allowed, and they must exist.
   pytest on tests mapped from the files changed since the merge base.
 - Coordinator workflow: the dispatch-brief guidance, `IssueSdlc.md`,
   `AgentTeam.md` and `Worktree.md` say agents run targeted QA and the
-  coordinator runs the full gate, serially, on the branch head before
-  merging.
+  coordinator runs the full gate once per batch, on an integration worktree
+  holding every ready branch, before `main` moves. `scripts/setup_worktree.sh`
+  tells a worktree agent the same (ledger 00466 N2).
+- 00463 ships NO gate tooling and no lock of its own. `llm_qa.py`'s existing
+  run lock is non-inheritable, and a test pins that a daemon started during a
+  run does not keep it after the run exits.
 - Dogfooded: enabled in this repo's `.claude/hooks-daemon.yaml`, and
   confirmed live. A sub-agent's `llm_qa.py all` is denied, and the
   coordinator's is allowed.
@@ -120,8 +135,10 @@ commands that ARE allowed, and they must exist.
 
 ### Phase 2: Deliver
 
-- [ ] ⬜ **Task 2.1**: The coordinator runs full QA on the branch head,
-  merges `--no-ff`, verifies ancestry and CI, and restarts the daemon.
+- [ ] ⬜ **Task 2.1**: The batched integration gate: the coordinator merges
+  this branch `--no-ff` with the other ready branches into an integration
+  worktree from `main`, runs full QA once there, fast-forwards `main` on green,
+  verifies ancestry and CI, and restarts the daemon.
 - [ ] ⬜ **Task 2.2**: Live dogfood check: a sub-agent's `llm_qa.py all`
   in the main checkout is denied with the targeted forms named, and the
   coordinator's same command runs.

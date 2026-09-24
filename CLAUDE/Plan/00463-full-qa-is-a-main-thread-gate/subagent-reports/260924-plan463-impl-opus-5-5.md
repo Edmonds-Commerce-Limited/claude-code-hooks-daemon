@@ -125,6 +125,31 @@ all six failed there.
 - **N9**: "never denied" and the guidance's Bash sentence are derived from `_BLOCKED_TOOLS`.
 - **N10**: untracked files are hashed streamed (`hashlib.file_digest`), never read whole.
 
+## Batched gate, lock finding and setup_worktree (00466 N2)
+
+- **Batched integration gate** (owner's instruction; journal `decision`). The gate is
+  documented in CLAUDE/QA.md under "The Batched Integration Gate":
+
+  - every ready branch is merged `--no-ff` into ONE integration worktree from `main`;
+  - `llm_qa.py all` runs once on the combined head;
+  - green: `main` is fast-forwarded;
+  - red: the breaking branch is bisected out, fixed or dropped, and the gate re-runs.
+
+  AgentTeam.md, Worktree.md, IssueSdlc.md (Steps 5 and 7), PLAN.md, the handler's deny,
+  `why`, guidance and docstring, HANDLER_REFERENCE, release note 13, the manifest and the
+  config comment all now say the same. The AgentTeam merge procedure no longer runs the
+  full suite after each child merge or again in main. `test_it_describes_the_batched_gate_not_one_run_per_branch`
+  pins the deny and the guidance (RED first).
+
+- **Lock finding** (journal `finding`). 00463 ships no gate lock and no gate tooling.
+  `llm_qa.py`'s own run lock is non-inheritable. `TestADaemonStartedUnderTheRunDoesNotHoldTheLock`
+  pins that a daemon started during a run does not hold it after the run exits, with a
+  leaking control. The `9>&-` rule for any gate lock is in CLAUDE/QA.md.
+
+- **setup_worktree.sh** (journal `action`, ref 00466 N2). The template, the Run QA hint and
+  Step 7 name `llm_qa.py` and targeted QA. `tests/unit/scripts/test_setup_worktree_qa_guidance.py`
+  was RED first and checks every printed command against the live `full_qa_patterns`.
+
 ## Task 1.1 measurements
 
 - **In-process teammate: `agent_id` is present.** Measured live on this teammate's own
@@ -218,5 +243,6 @@ all six failed there.
 
 ## For the coordinator
 
-- Run the full gate on this branch head in this worktree (Task 2.1).
+- Put this branch through the batched integration gate with the other ready branches
+  (Task 2.1).
 - The Workflow-tool probe is the only open measurement.

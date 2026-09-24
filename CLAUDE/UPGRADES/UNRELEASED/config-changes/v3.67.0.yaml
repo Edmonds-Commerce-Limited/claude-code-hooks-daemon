@@ -15,7 +15,7 @@ config_changes:
         one per worktree, each re-run after every fix round and run again by
         the coordinator before merging. With this handler, a sub-agent runs
         targeted QA and hands over a commit, and the coordinator runs the full
-        gate on that branch head, one run at a time. `scope: SUB`, so the main
+        gate once over every ready branch merged together. `scope: SUB`, so the main
         thread's own run draws nothing. Commands are parsed and resolved to the
         program they run, through wrappers, interpreters and `bash -c`, so a
         commit message, `grep` or `echo` that mentions a full-QA command is
@@ -41,8 +41,9 @@ config_changes:
         default. Enabled with no usable patterns, `hooks-daemon check` reports
         it as unable to fire. Worth enabling where several agents share one
         host. Declare every command that runs your whole suite, including
-        wrapper scripts, and have the coordinator run the full gate before it
-        merges each delivery. Keep `scope` at its default, SUB: any other scope
+        wrapper scripts. Have the coordinator merge every ready branch into one
+        integration worktree and run the full gate once there, before the main
+        branch moves. Keep `scope` at its default, SUB: any other scope
         denies the coordinator's own run, and `check` reports it.
       recommended: false
       dormant: true

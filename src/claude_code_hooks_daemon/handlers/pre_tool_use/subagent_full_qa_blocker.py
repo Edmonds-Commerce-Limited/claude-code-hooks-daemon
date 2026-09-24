@@ -3,11 +3,12 @@
 Plan 00463. When the owner asked for this, five full-suite runs were executing
 at once, one per worktree. Each took 15-20 minutes on an eight-core host. Each
 agent then re-ran the suite after every fix round, and the coordinator ran it
-again before merging. The full gate stays BEFORE the merge, because
-cross-cutting checks break from changes far away and a first full run on the
-main branch would land every such break there. It moves to the coordinator,
-which runs it on the delivered branch head, one run at a time: once per
-delivery rather than once per fix round.
+again before merging. The full gate stays BEFORE the main branch moves,
+because cross-cutting checks break from changes far away and a first full run
+on the main branch would land every such break there. It moves to the
+coordinator, which batches it: every ready branch merged into one integration
+worktree, and one run on the combined head, rather than one run per branch or
+per fix round.
 
 **What "full" means is the project's to declare.** ``full_qa_patterns`` names
 commands by the program they RUN (basename of the script, binary or
@@ -42,7 +43,7 @@ turns out to carry it the guard covers it with no change.
 This is a resource guard for cooperating agents, not a security boundary.
 Spellings the scanner cannot see through, such as a substitution inside
 double quotes or a script that runs the suite under another name, are not
-chased: the coordinator's full gate still runs before every merge, and the cost
+chased: the coordinator's full gate still runs before the main branch moves, and the cost
 of a miss is one wasted run.
 """
 
@@ -1003,14 +1004,14 @@ def _changed_directory(current: Path | None, arguments: Sequence[str]) -> Path |
 _RULE: Final[Rule] = Rule(
     rule_id=RuleID.SUBAGENT_FULL_QA,
     blocked="a full-suite QA run inside a sub-agent (a declared `full_qa_patterns` command)",
-    why="Concurrent full runs across agents exhaust the host, and the coordinator runs the full gate before every merge anyway",
+    why="Concurrent full runs across agents exhaust the host, and the coordinator runs the full gate over every ready branch anyway",
     fix="Run targeted QA on what you changed, commit, and hand the commit to the coordinator",
     verbose=(
         "WHY BLOCKED:\n"
-        "The full QA suite is the COORDINATOR's gate. It runs once per delivery,\n"
-        "on your branch head, one run at a time. Several agents each running the\n"
-        "whole suite exhaust the host, and the coordinator repeats every one of\n"
-        "those runs before the merge anyway.\n\n"
+        "The full QA suite is the COORDINATOR's gate. It merges every ready branch\n"
+        "into one integration worktree and runs the suite ONCE over all of them.\n"
+        "Several agents each running the whole suite exhaust the host, and the\n"
+        "coordinator's run covers your branch anyway.\n\n"
         "DO INSTEAD:\n"
         "  1. Run targeted QA: the checks and tests that cover what you changed.\n"
         "  2. Commit, then send the coordinator the commit hash and your targeted\n"
@@ -1217,8 +1218,8 @@ class SubagentFullQaBlockerHandler(PreToolUseHandlerBase):
             "## subagent_full_qa_blocker — full QA is the coordinator's gate\n\n"
             "Inside a SUB-AGENT, a Bash command that would run a declared full-suite "
             "QA command (`full_qa_patterns`) is DENIED. The coordinator runs the full "
-            "gate once per delivery, on the branch head, one run at a time. The main "
-            "thread is never affected. Enforcement is proven for Agent-tool sub-agents and "
+            "gate as a batch: every ready branch merged into one integration worktree, "
+            "then one run on the combined head. The main thread is never affected. Enforcement is proven for Agent-tool sub-agents and "
             "in-process teammates; a Workflow-tool agent is unmeasured, so follow the "
             "split there whether or not a deny arrives.\n\n"
             "**As a sub-agent**: run targeted QA (the checks and tests covering what you "

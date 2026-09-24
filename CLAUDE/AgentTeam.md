@@ -55,9 +55,11 @@ To prevent false completion claims discovered in Wave 2 audit, all agent teams M
 
 **Every role below is a sub-agent, and every sub-agent runs TARGETED QA.** The
 full suite (`llm_qa.py all`, `run_tests.sh`, a whole-tree `pytest`) is the team
-lead's gate. The lead runs it on the delivered branch head, one worktree at a
-time, before merging, and `subagent_full_qa_blocker` denies it to a sub-agent.
-The split and its reasons: [QA.md](QA.md), "Full QA Is the Coordinator's Gate".
+lead's gate, and `subagent_full_qa_blocker` denies it to a sub-agent. The lead
+runs it ONCE per batch: every ready branch merged `--no-ff` into one
+integration worktree from the parent, then one run on the combined head. The
+split, its reasons and the red-batch procedure: [QA.md](QA.md), "Full QA Is the
+Coordinator's Gate" and "The Batched Integration Gate".
 
 **1. Developer Agents** (Implementation)
 
@@ -245,12 +247,14 @@ The team lead (operating from `/workspace/`) is responsible for orchestrating th
 
 **Team Lead Decision:**
 
-- If all 4 gates pass: run the FULL gate yourself (`./scripts/qa/llm_qa.py all`
-  in the child worktree, on the delivered head, one worktree at a time). It
-  covers every check and 95%+ coverage.
-- If the full gate passes: Merge child → parent
-- If the full gate fails: send the failing checks to the developer, who fixes
-  them with targeted runs and hands back a new commit; re-run the full gate
+- If all 4 gates pass: the branch is READY. Run the FULL gate yourself as the
+  batched integration gate: merge every ready child `--no-ff` into one
+  integration worktree from the parent, and run `./scripts/qa/llm_qa.py all`
+  once there. It covers every check and 95%+ coverage.
+- If the full gate passes: fast-forward the parent to the integration head
+- If the full gate fails: find the child whose change broke it, send its
+  failing checks to that developer (who fixes them with targeted runs and hands
+  back a new commit) or drop it from the batch, and re-run the gate
 - If any gate fails: Developer fixes and restarts from Gate 1
 - If Honesty Checker vetoes: Entire branch rejected, back to planning
 
@@ -1149,8 +1153,8 @@ cd /workspace/untracked/worktrees/worktree-plan-NNNNN
 # 2. Review child changes
 git log worktree-child-plan-NNNNN-task-a --oneline
 
-# 3. Merge child into parent
-git merge worktree-child-plan-NNNNN-task-a
+# 3. Merge child into parent (the parent is the integration worktree)
+git merge --no-ff worktree-child-plan-NNNNN-task-a
 
 # 4. Stop child daemon BEFORE removing worktree
 CHILD_WT=/workspace/untracked/worktrees/worktree-child-plan-NNNNN-task-a
@@ -1169,11 +1173,14 @@ SendMessage(type="shutdown_request", recipient="reviewer-task-a", content="Task 
 SendMessage(type="shutdown_request", recipient="honesty-checker-task-a", content="Task merged")
 ```
 
-**QA after each merge:**
+**QA once per batch, not after each merge:** merge EVERY ready child first, then
+run the full gate once on the combined head (see [QA.md](QA.md), "The Batched
+Integration Gate"). If it is red, find the child that broke it and send it back
+or drop it, rather than fixing it in the parent.
 
 ```bash
 cd /workspace/untracked/worktrees/worktree-plan-NNNNN
-./scripts/qa/llm_qa.py all  # Verify integration works
+./scripts/qa/llm_qa.py all  # Once, after the last ready child is merged
 ```
 
 ### Parent → Main Project (REQUIRES FINAL HONESTY CHECK; HUMAN APPROVAL IS OPT-IN)
@@ -1192,6 +1199,8 @@ git fetch origin
 git merge main --no-edit
 # ⚠️ Resolve conflicts HERE in the worktree (isolated, safe)
 
+# The batched integration gate: the parent now holds current main plus every
+# ready child, so this ONE run is the gate for all of them.
 ./scripts/qa/llm_qa.py all  # QA MUST pass after sync
 ./bin/hooks-daemon restart
 ./bin/hooks-daemon status
@@ -1248,19 +1257,18 @@ git status  # MUST show "nothing to commit, working tree clean"
 # STEP 5: MERGE PARENT TO MAIN
 # ===================================================================
 git log worktree-plan-NNNNN --oneline  # Review changes
-git merge worktree-plan-NNNNN --no-edit
+# Fast-forward only: main becomes exactly the head that passed the gate.
+# If it refuses, main moved since STEP 1: go back to STEP 1 and re-run the gate.
+git merge --ff-only worktree-plan-NNNNN
 
 # ===================================================================
 # STEP 6: VERIFY MERGE SUCCEEDED IN MAIN
 # ===================================================================
 git status  # Should show clean state
-./scripts/qa/llm_qa.py all  # All QA MUST pass in main workspace
+# No second full run: main's tree IS the tree the gate passed. CI runs once.
 ./bin/hooks-daemon restart
 ./bin/hooks-daemon status
 # Expected: Status: RUNNING
-
-# If QA fails in main: REVERT MERGE IMMEDIATELY
-git reset --hard HEAD~1
 
 # ===================================================================
 # STEP 7: PUSH TO ORIGIN
@@ -1417,13 +1425,13 @@ git status  # Confirm everything clean
 
 **Solution**:
 
-- Full QA runs on the team lead's thread only, one worktree at a time
-  (`subagent_full_qa_blocker` denies it to sub-agents; see
-  [QA.md](QA.md), "Full QA Is the Coordinator's Gate")
+- Full QA runs on the team lead's thread only, once per batch, in one
+  integration worktree holding every ready branch (`subagent_full_qa_blocker`
+  denies it to sub-agents; see [QA.md](QA.md), "The Batched Integration Gate")
 - Sub-agents run targeted QA (`./scripts/qa/llm_qa.py changed`) in their OWN
   worktree, which is cheap and does not contend
-- `scripts/validate_worktrees.sh` runs the full suite sequentially across
-  worktrees, for the lead
+- `scripts/validate_worktrees.sh` runs one full suite PER worktree, so it is
+  not the gate; the batched run replaces it
 
 **Prevention**: Don't run QA in same worktree from multiple processes, and
 don't run more than one full suite at a time on one host.
@@ -1676,7 +1684,7 @@ Task(subagent_type="general-purpose", team_name="plan-00028", name="honesty-chec
 # Team lead merges child A to parent
 
 cd /workspace/untracked/worktrees/worktree-plan-00028
-git merge worktree-child-plan-00028-handler-a
+git merge --no-ff worktree-child-plan-00028-handler-a
 
 # Stop daemon, cleanup child A
 CHILD=/workspace/untracked/worktrees/worktree-child-plan-00028-handler-a
@@ -1699,15 +1707,15 @@ SendMessage(type="shutdown_request", recipient="honesty-checker-handler-a", cont
 
 ```bash
 # All 4 handlers merged to parent worktree
-# Run full QA in parent
 cd /workspace/untracked/worktrees/worktree-plan-00028
-./scripts/qa/llm_qa.py all
-./bin/hooks-daemon restart
-./bin/hooks-daemon status
 
 # Sync worktree with main FIRST
 git merge main --no-edit
-./scripts/qa/llm_qa.py all  # Verify still passes after sync
+
+# The batched integration gate: ONE full run covers main plus all 4 handlers
+./scripts/qa/llm_qa.py all
+./bin/hooks-daemon restart
+./bin/hooks-daemon status
 
 # CRITICAL: Final Honesty Check on integrated code
 Task(subagent_type="general-purpose", team_name="plan-00028", name="final-honesty-checker",
@@ -1727,16 +1735,11 @@ Task(subagent_type="general-purpose", team_name="plan-00028", name="final-honest
 # With `worktree.merge_to_main_requires_human_approval: true`, the merge
 # below is denied until a human runs `hooks-daemon approve-merge <branch>`.
 
-# Merge to main
+# Fast-forward main to the head that passed the gate (no second full run)
 cd /workspace
-git merge worktree-plan-00028 --no-edit
-
-# Verify QA in main
-./scripts/qa/llm_qa.py all
+git merge --ff-only worktree-plan-00028
 ./bin/hooks-daemon restart
 ./bin/hooks-daemon status
-
-# If QA fails: git reset --hard HEAD~1 (REVERT IMMEDIATELY)
 
 # Push to origin
 git push
@@ -1795,10 +1798,11 @@ Wave 2 audit revealed 50% of merged work was incomplete with false claims. The m
 - [ ] **Gate 2**: Tester reports "tests verified" → Spawn QA agent
 - [ ] **Gate 3**: QA reports "QA verified" → Spawn Senior Reviewer agent
 - [ ] **Gate 4**: Reviewer reports "approved" → Spawn Honesty Checker agent
-- [ ] **Full gate (yours)**: Honesty Checker reports "genuine" → run
-  `./scripts/qa/llm_qa.py all` in the child worktree on the delivered head,
-  one worktree at a time
-- [ ] **Merge Decision**: full gate green → Merge child to parent
+- [ ] **Full gate (yours)**: Honesty Checker reports "genuine" → the branch is
+  ready; merge every ready child `--no-ff` into one integration worktree from
+  the parent and run `./scripts/qa/llm_qa.py all` once there
+- [ ] **Merge Decision**: full gate green → fast-forward the parent to the
+  integration head
 - [ ] If ANY gate fails → Send back to developer, restart from Gate 1
 
 **Per Task - Integration (After All 4 Gates Pass):**

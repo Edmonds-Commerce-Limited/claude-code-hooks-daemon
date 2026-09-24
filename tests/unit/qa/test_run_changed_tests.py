@@ -1,7 +1,7 @@
 """The targeted test runner behind ``llm_qa.py changed`` (Plan 00463).
 
 Sub-agents run targeted QA; the coordinator runs the full suite, once per
-delivery. The allowed path has to be ONE command rather than a judgement call,
+batch of ready branches. The allowed path has to be ONE command rather than a judgement call,
 or each agent reinvents its own subset and some reinvent nothing. This runner
 is that command's test half: pytest on the tests mapped from what changed
 since the merge base.

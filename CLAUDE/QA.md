@@ -37,8 +37,9 @@ the human-at-a-terminal entry point and runs the same suite with verbose output.
 
 ### Full QA Is the Coordinator's Gate; Sub-Agents Run Targeted QA
 
-The full suite runs **once per delivery, on the coordinator's thread, one run
-at a time**. A sub-agent never runs it. This is enforced: in a sub-agent,
+The full suite runs **once per batch, on the coordinator's thread**: every
+ready branch is merged into one integration worktree, and one run covers them
+all. A sub-agent never runs it. This is enforced: in a sub-agent,
 `subagent_full_qa_blocker` (Plan 00463) denies every command this repository
 declares as full, which is `llm_qa.py all`, `llm_qa.py tests`, `run_all.sh`,
 `run_tests.sh`, `scripts/validate_worktrees.sh`, and a `pytest` with no path or
@@ -55,19 +56,46 @@ split below applies to every kind of sub-agent all the same.
 per worktree, each about 25,700 tests over 15-20 minutes on eight cores. Each
 agent re-ran the suite after every fix round, and the coordinator ran it again
 before merging. The per-checkout run lock (Plan 00262) cannot help across
-worktrees.
+worktrees. A coordinator gate that still ran once per branch, one at a time,
+only moved the queue: N ready branches cost N full runs, N pushes and N CI runs.
 
-**Why the gate stays BEFORE the merge.** Cross-cutting checks break from
+**Why the gate stays BEFORE `main` moves.** Cross-cutting checks break from
 changes far away: guidance coverage, docs QA, plan QA, the handler reference and
 the acceptance probes. A first full run on `main` would land every such break
-there, and merges queued behind it would build on a red tree.
+there, and merges queued behind it would build on a red tree. The integration
+worktree is where those breaks surface instead, including the ones that only
+exist when two branches meet.
+
+### The Batched Integration Gate
+
+The coordinator, never a sub-agent:
+
+1. Creates ONE integration worktree from current `main`.
+2. Merges every ready branch into it, each with `git merge --no-ff`, so each
+   branch stays one revertable merge commit and `git branch -d` still works.
+3. Runs `./scripts/qa/llm_qa.py all` once, on the combined head.
+4. **Green:** fast-forwards `main` to the integration head. One push, one CI run.
+5. **Red:** finds the branch whose change broke it, by bisecting the merge
+   commits (`git bisect` over the first-parent chain, or rebuilding the
+   integration head without one branch at a time). That branch goes back to its
+   agent to fix, or is dropped from the batch; the rest are merged again and the
+   run is repeated. A branch is never fixed inside the integration worktree.
+
+**Any lock held around the gate must be released when the run exits**, even if
+something the run started is still alive. A daemon restarted under the gate
+inherits every inheritable descriptor, so a shell `flock` on fd 9 must close it
+for the long-lived children: `hooks-daemon restart 9>&-`, and `exec 9>&-` before
+a keepalive. Otherwise the daemon holds the lock and the next gate waits for
+ever. `llm_qa.py`'s own run lock is opened non-inheritable, and
+`tests/unit/qa/test_llm_qa_run_lock.py` pins that a daemon started during a run
+does not keep it.
 
 **The split:**
 
-| Who                  | Runs                                                                                                                                                                                              | Hands over                                      |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
-| Sub-agent (any kind) | `./scripts/qa/llm_qa.py changed`, plus named tools the change calls for (`llm_qa.py handler_reference docs_qa ...`) and `pytest` on explicit test files or directories narrower than `tests/unit` | A commit hash and the targeted results          |
-| Coordinator          | `./scripts/qa/llm_qa.py all` in the agent's worktree, on the delivered branch head, one worktree at a time, before merging                                                                        | A merge, or the failures sent back to the agent |
+| Who                  | Runs                                                                                                                                                                                              | Hands over                                                                |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Sub-agent (any kind) | `./scripts/qa/llm_qa.py changed`, plus named tools the change calls for (`llm_qa.py handler_reference docs_qa ...`) and `pytest` on explicit test files or directories narrower than `tests/unit` | A commit hash and the targeted results                                    |
+| Coordinator          | `./scripts/qa/llm_qa.py all` once, in an integration worktree from `main` with every ready branch merged `--no-ff`, before `main` moves                                                           | A fast-forward of `main`, or the failures sent back to the branch's agent |
 
 `llm_qa.py changed` runs the fast static tools, the project handlers' own
 tests, `docs_qa`, `plan_qa`, `shell_check`, `declared_invariant_pairs`, and
@@ -582,9 +610,10 @@ Senior Reviewer (GATE 3) - Completeness verified
     ↓
 Honesty Checker (GATE 4) - Value verified
     ↓
-Coordinator - FULL gate: llm_qa.py all on the branch head, one worktree at a time
+Coordinator - batched integration gate: every ready branch merged --no-ff into
+              one worktree from main, llm_qa.py all once on the combined head
     ↓
-Merge (ONLY after all 4 gates AND the full gate pass)
+Fast-forward main (ONLY after all 4 gates AND the integration gate pass)
 ```
 
 **See `CLAUDE/AgentTeam.md` for complete agent team workflow details.**

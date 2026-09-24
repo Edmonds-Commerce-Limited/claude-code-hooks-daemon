@@ -4,8 +4,8 @@ The owner's measurement was the whole case for this handler: five
 ``llm_qa.py all`` runs executing at once, one per worktree, each about 25,700
 tests over 15-20 minutes on eight cores. Each agent then re-ran the suite after
 every fix round, and the coordinator ran it again before merging. The full gate
-stays BEFORE the merge, but it moves to the coordinator, which runs it once per
-delivery rather than once per fix round.
+stays BEFORE the main branch moves, but it moves to the coordinator, which runs
+it once over every ready branch merged together.
 
 Three properties are pinned here, and each is a way the guard could fail
 without looking broken:
@@ -567,6 +567,23 @@ class TestTheDenial:
 
     def test_the_reason_says_the_coordinator_runs_the_full_gate(self) -> None:
         assert "coordinator" in self._reason("./scripts/qa/llm_qa.py all").lower()
+
+    @pytest.mark.parametrize("surface", ["reason", "guidance"])
+    def test_it_describes_the_batched_gate_not_one_run_per_branch(self, surface: str) -> None:
+        """Owner's instruction: one full run over every ready branch merged together.
+
+        A deny or resident guidance that still said "once per delivery, one run
+        at a time" would teach the per-branch queue the owner ruled out.
+        """
+        handler = _handler()
+        text = (
+            self._reason("./scripts/qa/llm_qa.py all")
+            if surface == "reason"
+            else handler.get_claude_md() or ""
+        )
+        assert "every ready branch" in text
+        assert "once per delivery" not in text
+        assert "one run at a time" not in text
 
     def test_the_reason_names_every_configured_targeted_form(self) -> None:
         reason = self._reason("./scripts/qa/llm_qa.py all")

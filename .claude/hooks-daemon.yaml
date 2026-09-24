@@ -453,8 +453,8 @@ handlers:
     # asked: five whole-suite runs at once, one per worktree, each re-run after
     # every fix round and again by the coordinator before merging. A sub-agent
     # runs targeted QA and hands over a commit; the coordinator runs the full
-    # gate on that branch head, one run at a time. scope=SUB, so the main
-    # thread's own run draws nothing.
+    # gate once over every ready branch merged into one integration worktree
+    # (CLAUDE/QA.md). scope=SUB, so the main thread's own run draws nothing.
     subagent_full_qa_blocker:
       enabled: true
       priority: 32

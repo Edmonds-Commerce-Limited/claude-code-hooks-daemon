@@ -120,13 +120,15 @@ concrete command in this repository depends on who is running it:
 
 ```bash
 ./scripts/qa/llm_qa.py changed   # the sub-agent working in the worktree: targeted QA
-./scripts/qa/llm_qa.py all       # the coordinator, on the delivered head, before merging
+./scripts/qa/llm_qa.py all       # the coordinator, once, in the integration worktree
 ```
 
 A sub-agent hands over targeted results and a commit hash. The coordinator then
-runs the full gate in that worktree, one worktree at a time. Running full
-suites one after another is also what stops the collisions below. Why, and
-what the deny says, is in [QA.md](QA.md), "Full QA Is the Coordinator's Gate".
+merges every ready branch `--no-ff` into ONE integration worktree created from
+current `main`, and runs the full gate once there. `main` is fast-forwarded to
+that head when it is green. One full run at a time is also what stops the
+collisions below. The whole procedure, including what to do when the batch is
+red, is in [QA.md](QA.md), "The Batched Integration Gate".
 
 ## Concurrent QA Limitation (Critical)
 

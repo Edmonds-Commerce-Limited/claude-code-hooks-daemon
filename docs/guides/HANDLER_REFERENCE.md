@@ -1396,7 +1396,7 @@ handlers:
 | **Scope**      | `SUB` (sub-agents only)                         |
 | **Default**    | Disabled, and inert until patterns are declared |
 
-**Description:** Denies a full-suite QA run when the caller is a **sub-agent**. The full gate belongs to the coordinator, which runs it once per delivery, on the branch head, one run at a time. Several agents each running the whole suite exhaust the host, and the coordinator repeats those runs before merging anyway. The deny names the targeted commands the project declares.
+**Description:** Denies a full-suite QA run when the caller is a **sub-agent**. The full gate belongs to the coordinator, which merges every ready branch into one integration worktree and runs the suite once on the combined head. Several agents each running the whole suite exhaust the host, and the coordinator's run covers their branches anyway. The deny names the targeted commands the project declares.
 
 **What it matches:** a Bash command that would RUN a declared `full_qa_patterns` entry. The command is split into commands, and each is resolved to the program it starts, through:
 
@@ -1446,7 +1446,7 @@ A malformed entry is skipped and logged. `hooks-daemon check` reports a handler 
 - arguments supplied by `xargs`;
 - a `cd` target the shell would expand (`cd $DIR`). After one, words are judged by shape alone.
 
-The coordinator's full gate still runs before every merge.
+The coordinator's full gate still runs before the main branch moves.
 
 **Config example:**
 

@@ -128,6 +128,80 @@ class TestSecondRunIsRefused:
         assert llm_qa.try_acquire_run_lock(str(lock_path)) is True
 
 
+_GRANDCHILD_LIFETIME_SECONDS = 60
+
+
+def _run_that_starts_a_daemon(lock_path: Path, *, leak_the_lock: bool) -> int:
+    """A QA run that takes the lock, starts a long-lived child, and exits.
+
+    The child is started the way a daemon restart starts one: its own session,
+    and ``close_fds=False``, so it inherits every descriptor that CAN be
+    inherited. ``leak_the_lock`` marks the lock descriptor inheritable, the
+    shape of the defect, so the probe is shown able to see a leak.
+
+    Returns:
+        The pid of the child, still running after the run has exited.
+    """
+    script = (
+        "import os, subprocess, sys, importlib.util;"
+        f"spec = importlib.util.spec_from_file_location('m', {str(PROJECT_ROOT / 'scripts' / 'qa' / 'llm_qa.py')!r});"
+        "m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m);"
+        f"fd = m._open_lock_fd({str(lock_path)!r});"
+        "import fcntl; fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB);"
+        f"os.set_inheritable(fd, {leak_the_lock!r});"
+        "child = subprocess.Popen(['sleep', "
+        f"'{_GRANDCHILD_LIFETIME_SECONDS}'], close_fds=False, start_new_session=True,"
+        " stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL);"
+        "print(child.pid)"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=Timeout.QA_TEST_TIMEOUT,
+        check=True,
+    )
+    return int(result.stdout.strip())
+
+
+class TestADaemonStartedUnderTheRunDoesNotHoldTheLock:
+    """Plan 00463 lock-fd finding: a lock held across a command that daemonises.
+
+    The coordinator's serial gate held an ``flock`` around ``hooks-daemon
+    restart`` plus ``llm_qa.py all``. The restarted daemon inherited the lock's
+    descriptor, outlived the gate, and held the lock, so the next gate waited
+    forever. ``llm_qa.py``'s own run lock is opened with ``os.open``, which is
+    non-inheritable (PEP 446), so a daemon a tool starts during the run cannot
+    keep it. Pinned end to end, with a control that shows the probe sees a leak.
+    """
+
+    @pytest.mark.parametrize(
+        ("leak_the_lock", "released"), [(False, True), (True, False)], ids=["real", "control"]
+    )
+    def test_the_lock_is_released_when_the_run_exits_while_its_child_lives_on(
+        self, tmp_path: Path, leak_the_lock: bool, released: bool
+    ) -> None:
+        lock_path = tmp_path / "qa.lock"
+        child = _run_that_starts_a_daemon(lock_path, leak_the_lock=leak_the_lock)
+        try:
+            os.kill(child, 0)
+            probe = subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    "import fcntl, os;"
+                    f"fd = os.open({str(lock_path)!r}, os.O_RDWR);"
+                    "fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)",
+                ],
+                capture_output=True,
+                timeout=Timeout.QA_TEST_TIMEOUT,
+                check=False,
+            )
+            assert (probe.returncode == 0) is released, probe.stderr
+        finally:
+            os.kill(child, 9)
+
+
 class TestHolderIsIdentified:
     """A refusal must be actionable, not merely a refusal."""
 

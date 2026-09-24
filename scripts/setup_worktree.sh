@@ -339,8 +339,8 @@ else
     exit 1
 fi
 
-# Step 7: Verify QA scripts are accessible
-if [[ -x "${WORKTREE_DIR}/scripts/qa/run_all.sh" ]]; then
+# Step 7: Verify the QA entry point is accessible
+if [[ -x "${WORKTREE_DIR}/scripts/qa/llm_qa.py" ]]; then
     echo -e "${GREEN}✓${NC} QA scripts accessible"
 else
     echo -e "${YELLOW}⚠${NC}  QA scripts may not be executable (run chmod +x if needed)"
@@ -385,8 +385,8 @@ echo ""
 echo "Quick start:"
 echo "  cd ${WORKTREE_DIR}"
 echo ""
-echo "Run QA:"
-echo "  cd ${WORKTREE_DIR} && ./scripts/qa/run_all.sh"
+echo "Run QA (targeted; full QA is the coordinator's batched integration gate):"
+echo "  cd ${WORKTREE_DIR} && ./scripts/qa/llm_qa.py changed"
 echo ""
 echo "Verify daemon (run from INSIDE the worktree — ./bin/hooks-daemon anchors"
 echo "to its own location, so it resolves this worktree's venv, not the main one):"
@@ -397,4 +397,7 @@ echo "Agent prompt template:"
 echo "  You are working in a git worktree at ${WORKTREE_DIR}/"
 echo "  DO NOT work in /workspace - only work in YOUR worktree directory."
 echo "  Run the daemon CLI as ./bin/hooks-daemon from that worktree."
-echo "  Run ./scripts/qa/run_all.sh before committing."
+echo "  Before committing, run TARGETED QA: ./scripts/qa/llm_qa.py changed, plus"
+echo "  ./scripts/qa/llm_qa.py <tool> and pytest on the test files you touched."
+echo "  Do not run full QA: it is the coordinator's batched integration gate,"
+echo "  run once over every ready branch merged together. Hand over a commit hash."
