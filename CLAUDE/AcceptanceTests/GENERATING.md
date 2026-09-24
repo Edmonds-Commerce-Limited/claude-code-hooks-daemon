@@ -29,7 +29,7 @@ Every handler implements `get_acceptance_tests()` which returns structured test 
 - ✅ Type-safe (AcceptanceTest dataclass)
 - ✅ Always reflects current handlers
 - ✅ Config-aware (only enabled handlers)
-- ✅ Includes custom plugin handlers
+- ✅ Includes daemon plugin handlers
 
 ---
 
@@ -364,9 +364,9 @@ This approach dramatically reduces wall-clock time for acceptance testing compar
 
 ---
 
-## 🔌 PLUGIN HANDLERS
+## 🔌 DAEMON PLUGIN HANDLERS
 
-**Custom project-level plugins are automatically included!**
+**Daemon plugins (handler modules loaded from the `plugins:` block, not Claude Code plugins) are automatically included!**
 
 ### Verifying Plugin Tests
 
