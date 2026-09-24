@@ -52,11 +52,6 @@ class Handler:
             del self._fired[next(iter(self._fired.keys()))]  # EXPECT-HIT
         self._fired[key] = True
 
-    def record_via_list(self, key: tuple[str, str]) -> None:
-        if len(self._fired) >= _CAP:
-            del self._fired[list(self._fired)[0]]  # EXPECT-HIT
-        self._fired[key] = True
-
     def record_two_step(self, session: str, journal: Any) -> None:
         """command_hints / standing_authorisations: select, work, then delete."""
         if len(self._state) >= _CAP:

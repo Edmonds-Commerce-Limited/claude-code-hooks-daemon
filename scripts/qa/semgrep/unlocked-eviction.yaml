@@ -39,13 +39,12 @@ rules:
       scripts/qa/semgrep/unlocked-eviction.yaml.
     patterns:
       - pattern-either:
-          # One statement: select and delete inline.
+          # One statement: select and delete inline. `list($M)[0]` is not
+          # listed: ruff's RUF015 already rewrites it to next(iter($M)).
           - pattern: del $M[next(iter($M))]
           - pattern: del $M[next(iter($M.keys()))]
-          - pattern: del $M[list($M)[0]]
           - pattern: $M.pop(next(iter($M)), ...)
           - pattern: $M.pop(next(iter($M.keys())), ...)
-          - pattern: $M.pop(list($M)[0], ...)
           # Two statements: bind the victim, then act on it — possibly with
           # other work (a journal snapshot) in between, which widens the window.
           - pattern: |
@@ -56,10 +55,6 @@ rules:
               $K = next(iter($M))
               ...
               $M.pop($K, ...)
-          - pattern: |
-              $K = list($M)[0]
-              ...
-              del $M[$K]
           - pattern: |
               $K = min($M, ...)
               ...

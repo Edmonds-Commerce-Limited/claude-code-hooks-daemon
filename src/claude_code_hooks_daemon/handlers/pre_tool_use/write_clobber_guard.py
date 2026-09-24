@@ -35,6 +35,7 @@ from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
+from claude_code_hooks_daemon.handlers.utils.bounded_fifo_map import BoundedFifoMap
 from claude_code_hooks_daemon.utils.path_predicates import path_is_file
 
 _RULE = Rule(
@@ -94,8 +95,14 @@ class WriteClobberGuardHandler(PreToolUseHandlerBase):
             # a warning where they will meet a wall.
             tags=[HandlerTag.SAFETY, HandlerTag.FILE_OPS, HandlerTag.BLOCKING],
         )
-        # session id -> paths whose contents this session has seen.
-        self._known_paths: dict[str, set[str]] = {}
+        # session id -> paths whose contents this session has seen. Evicting
+        # the oldest session only ever costs an extra Read, never safety --
+        # and the eviction is atomic, so contention cannot raise out of a Read
+        # (Plan 00449): an exception here is the guard vanishing, not failing
+        # closed.
+        self._known_paths: BoundedFifoMap[str, set[str]] = BoundedFifoMap(
+            max_entries=_MAX_TRACKED_SESSIONS
+        )
 
     @staticmethod
     def _session_id(hook_input: dict[str, Any]) -> str:
@@ -118,12 +125,7 @@ class WriteClobberGuardHandler(PreToolUseHandlerBase):
 
     def _record(self, hook_input: dict[str, Any], path: str) -> None:
         """Remember that this session knows the contents of ``path``."""
-        session = self._session_id(hook_input)
-        if session not in self._known_paths and len(self._known_paths) >= _MAX_TRACKED_SESSIONS:
-            # Evict the oldest tracked session. Losing state only ever costs an
-            # extra Read, never safety -- the guard fails CLOSED.
-            self._known_paths.pop(next(iter(self._known_paths)))
-        known = self._known_paths.setdefault(session, set())
+        known = self._known_paths.setdefault(self._session_id(hook_input), set())
         if len(known) < _MAX_PATHS_PER_SESSION:
             known.add(path)
 
