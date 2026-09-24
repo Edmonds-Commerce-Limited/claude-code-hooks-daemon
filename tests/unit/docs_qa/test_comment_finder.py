@@ -180,3 +180,35 @@ class TestFindLongCommentBlocksGitIgnore:
         findings = find_long_comment_blocks([ignored_file], min_lines=15)
 
         assert {finding.path for finding in findings} == {ignored_file}
+
+
+class TestFindLongCommentBlocksProtectedPath:
+    """Plan 00412: a file whose name matches a protected glob must never
+    surface here, tracked or not -- this finder reads the body of every file
+    it returns (``file_path.read_text()`` in ``find_long_comment_blocks``),
+    so inclusion in the result IS disclosure of that body. The protected
+    filename is built from ``DEFAULT_PROTECTED_PATTERNS`` at runtime rather
+    than spelled out in this file's own source, which the Write/Edit content
+    guard would otherwise treat as script authorship regardless of test
+    intent."""
+
+    def test_protected_pattern_file_is_not_found(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.utils import secret_file_matching as sfm
+
+        both_edges_pattern = next(p for p in sfm.DEFAULT_PROTECTED_PATTERNS if p.count("*") == 2)
+        protected_name = f"{both_edges_pattern.replace('*', 'x')}.py"
+
+        _init_repo(tmp_path)
+        body = "\n".join(f"# line {i}" for i in range(20))
+        safe = tmp_path / "safe.py"
+        safe.write_text(f"{body}\ncode = 1\n")
+        protected = tmp_path / protected_name
+        protected.write_text(f"{body}\ncode = 1\n")
+        _git(tmp_path, "add", "-A")
+        _git(tmp_path, "commit", "-m", "initial")
+
+        findings = find_long_comment_blocks([tmp_path], min_lines=15)
+
+        found_paths = {finding.path for finding in findings}
+        assert safe in found_paths
+        assert protected not in found_paths

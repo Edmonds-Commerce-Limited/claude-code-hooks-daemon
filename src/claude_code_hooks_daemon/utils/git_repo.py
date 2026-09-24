@@ -13,6 +13,16 @@ SOLID:
 - **Dependency Inversion**: handlers and utilities depend on this typed
   surface, not on subprocess internals. Typed facades (e.g. a plan-number
   counter that returns ``int``) layer on top of ``read_config`` → ``str | None``.
+
+:func:`git_visible_paths` additionally filters its result through the
+protected-path set (Plan 00412) — see its own docstring. Known residual:
+when ``project_root`` is not a git repository, callers fall back to an
+UNFILTERED plain filesystem walk (this module returns ``None`` and does no
+walking itself, so there is no path set here to filter). That fallback
+existed before this fix and is unchanged by it; closing it would mean
+teaching every one of those non-git walks its own protected-path check,
+which is a larger, separate change than making the git-enumerated path this
+module owns safe.
 """
 
 from __future__ import annotations
@@ -26,6 +36,10 @@ from pathlib import Path
 from typing import Final
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.utils.secret_file_matching import (
+    path_is_protected,
+    resolve_configured_patterns,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +149,7 @@ def run_git(
 def git_visible_paths(project_root: Path) -> frozenset[str] | None:
     """Every project-relative path ``git`` would add right now: tracked
     files, plus untracked files no ``.gitignore`` rule excludes (Plan 00466
-    N9).
+    N9), MINUS any path matching a protected glob (Plan 00412).
 
     The single shared "what counts as part of the project" answer for every
     QA corpus that enumerates files from disk rather than reading the
@@ -145,17 +159,29 @@ def git_visible_paths(project_root: Path) -> frozenset[str] | None:
     apart. ONE combined ``git ls-files --cached --others --exclude-standard``
     call, never one per file: cheap enough to run once per corpus build.
 
+    The protected-set filter closes a disclosure this enumeration otherwise
+    opens: every caller (``docs_qa``, ``comment_finder``, ``format-markdown``,
+    ``doc_truth``) goes on to READ the content of what comes back, and git
+    tracking a file — or merely not ignoring it — says nothing about whether
+    it is safe to read. Filtering here, once, protects every caller without
+    any of them re-implementing the check; a path is protected whether or
+    not it is tracked, so a committed protected-looking file is excluded
+    exactly like an untracked one.
+
     Returns ``None`` when ``project_root`` is not a git repository (or git
     is unavailable): callers fall back to their pre-existing unfiltered walk
     rather than guessing either "nothing is ignored" or "everything is" —
     the fixture trees this daemon's own test suite builds under ``tmp_path``
     are not git repositories unless a test opts in, and must keep scanning
-    everything they write.
+    everything they write. That fallback does not itself pass every
+    resulting path through this same filter -- see the module docstring.
     """
     result = run_git(project_root, "ls-files", "--cached", "--others", "--exclude-standard", "-z")
     if result.returncode != 0:
         return None
-    return frozenset(token for token in result.stdout.split("\0") if token)
+    paths = frozenset(token for token in result.stdout.split("\0") if token)
+    patterns = resolve_configured_patterns()
+    return frozenset(path for path in paths if not path_is_protected(path, patterns))
 
 
 def git_visible_ancestor_dirs(rel_paths: frozenset[str]) -> frozenset[str]:

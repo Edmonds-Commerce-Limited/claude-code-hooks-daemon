@@ -305,6 +305,11 @@ handlers:
           - 'tests/unit/utils/test_secret_file_matching.py'
           - 'tests/unit/utils/test_secret_meta.py'
           - 'tests/unit/daemon/test_cli_secret_meta.py'
+          # Plan 00412: git_visible_paths() now filters through the
+          # protected set, so these regression tests necessarily NAME
+          # protected-looking filenames to prove the filter excludes them.
+          - 'tests/unit/utils/test_git_repo.py'
+          - 'tests/unit/docs_qa/test_comment_finder.py'
 
     # Plan 00278 Phase 3d.1: dogfood-enabled here with the flaggable path
     # pointed at the cyber-flag test fixture (ships disabled upstream via
