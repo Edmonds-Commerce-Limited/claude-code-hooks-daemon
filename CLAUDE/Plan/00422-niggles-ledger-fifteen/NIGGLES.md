@@ -1646,6 +1646,34 @@ and N11 (the probe fixtures live in the sanctioned scratch directory).
 3. At minimum, make the worktree QA say that these probes were not
    meaningfully run, rather than going green or failing unexplained.
 
+**Correction: the diagnosis above is wrong. It is not a worktree fault, and
+the real one is a guard failing open for clients.** The same two tests PASS
+in `worktree-n18-n19` with its own daemon running (2 passed, 14.3s), so
+"any worktree with a running daemon" is false. The distinguishing fact is
+the failing worktree's NAME: `worktree-issue-53-venv/`. The guards' skip
+lists hold `"venv/"`, and they are matched as a bare substring
+(`skip_dir in file_path`), so `…-venv/` matches and every file beneath it
+is skipped. This is the exact defect `strategies/lint/common.py:58`
+(`matches_skip_path`) already documents and fixes for lint (`"venv/"`
+inside `"myvenv/"`, `"build/"` inside `"rebuild/"`). Six sites were never
+moved onto it:
+
+- `handlers/pre_tool_use/qa_suppression.py:162`
+- `handlers/pre_tool_use/comment_changelog.py:316`
+- `handlers/pre_tool_use/comment_size.py:280`
+- `strategies/security/common.py:23` (security_antipattern)
+- `strategies/tdd/common.py:14` (test-directory detection, the reverse
+  direction: `mytests/` would read as a test directory)
+- `handlers/pre_tool_use/british_english.py:108` (check directories)
+
+For a CLIENT, any project whose absolute path has a directory named like
+`rebuild`, `myvenv` or `notvendor` silently loses those guards. Even a
+segment-bounded match on the ABSOLUTE path would still skip a project that
+lives under a directory named exactly `venv` or `build`, so the match must
+be made against the path relative to the project root. The mechanism
+suspected above (`core/worktree_paths.py`) is not involved. Candidate
+remedies 1-3 above are withdrawn. Graduated to its own plan.
+
 ### N19 — the Python nested-install check can never fire in a real client
 
 **Found**: reviewing Plan 00455 (issue #54). Its implementation agent copied
