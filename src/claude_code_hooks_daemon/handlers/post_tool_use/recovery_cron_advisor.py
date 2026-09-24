@@ -34,10 +34,14 @@ Decision D4 (PLAN.md): this is a PostToolUse handler, not an extension of the
 PreToolUse plan_workflow handler.
 """
 
+import logging
 import re
 from enum import Enum
 from typing import Any, ClassVar, Final
 
+from pydantic import ValidationError
+
+from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.constants import (
     HandlerID,
     HandlerTag,
@@ -49,10 +53,15 @@ from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.chain import is_restrictive
 from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
+from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.side_effect_journal import SideEffectJournal
 from claude_code_hooks_daemon.core.utils import get_bash_command, get_file_path
 from claude_code_hooks_daemon.handlers.utils.bounded_fifo_map import BoundedFifoMap
+from claude_code_hooks_daemon.utils.config_cache import load_config_cached
+from claude_code_hooks_daemon.utils.cron_tick import TickKind, classify_tick, tick_sentinel
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
+
+logger = logging.getLogger(__name__)
 
 # ─── Lifecycle phase ──────────────────────────────────────────────────────────
 
@@ -162,12 +171,17 @@ _MKPLAN_SENTINEL_KEY: Final[str] = "__mkplan__"
 # Stable substring identifying a delivered canonical-cron-prompt tick, shared
 # with any handler that needs to recognise one without matching the whole
 # verbatim text (Plan 00298: failsafe_cron_blockage_suppressor). This module
-# authors _CANONICAL_CRON_PROMPT, so it is the single source of truth for the
+# authors CANONICAL_CRON_PROMPT, so it is the single source of truth for the
 # marker too -- a test pins that the marker is genuinely a substring of it.
+# Crons created before the tick sentinel existed carry only this, so it stays
+# recognised alongside ``[tick:failsafe]`` (Plan 00388).
 CANONICAL_CRON_PROMPT_MARKER: Final[str] = "FAILSAFE RECOVERY CHECK"
 
-# Verbatim from PLAN.md "Canonical recovery-cron prompt" section.
-_CANONICAL_CRON_PROMPT: Final[str] = (
+# Verbatim from PLAN.md "Canonical recovery-cron prompt" section, led by the
+# daemon tick sentinel (Plan 00388). Shared with the SessionStart counterpart
+# (Plan 00394), so every surface hands the agent the same text.
+CANONICAL_CRON_PROMPT: Final[str] = (
+    f"{tick_sentinel(TickKind.FAILSAFE)}\n"
     "**FAILSAFE RECOVERY CHECK (automated hourly safety net — NOT a heartbeat).**\n"
     "If your most recent work on the active plan/task was interrupted by an\n"
     "*external* factor (Claude API error/overload, rate limit, 5-hour usage limit,\n"
@@ -207,7 +221,7 @@ _CREATION_GUIDANCE: Final[str] = (
     "pace itself to the cron. Work proceeds at full speed until an external\n"
     "factor (API error, rate limit, usage limit) actually stops it.\n\n"
     "Paste the following text verbatim as the cron prompt:\n\n"
-    f"{_CANONICAL_CRON_PROMPT}"
+    f"{CANONICAL_CRON_PROMPT}"
 )
 
 _PROGRESS_GUIDANCE: Final[str] = (
@@ -235,6 +249,38 @@ _COMPLETION_GUIDANCE: Final[str] = (
     "    run CronDelete with the cron ID you recorded (CronList to locate it if\n"
     "    unrecorded)."
 )
+
+# Replaces the delete branch above when the project declares the failsafe cron
+# (Plan 00394): a declared job is required by cron_stop_enforcer, so deleting
+# it only earns a blocked stop and a re-create.
+_DECLARED_COMPLETION_NOTE: Final[str] = (
+    "This plan is complete. Keep its failsafe recovery cron: this project\n"
+    "DECLARES it under persistent_crons, so do NOT CronDelete it, even at the end\n"
+    "of the session. cron_stop_enforcer blocks a stop while a declared cron is\n"
+    "missing, and the cron ends with the session anyway."
+)
+
+
+def is_failsafe_prompt(prompt: str) -> bool:
+    """Whether ``prompt`` is the failsafe recovery cron's.
+
+    By its ``[tick:failsafe]`` sentinel, or by the heading literal that a
+    prompt written before the sentinel existed carries alone (Plan 00388).
+    """
+    tick = classify_tick(prompt)
+    if tick is not None and tick.kind is TickKind.FAILSAFE:
+        return True
+    return CANONICAL_CRON_PROMPT_MARKER in prompt
+
+
+def declares_failsafe_cron(config: Config) -> bool:
+    """Whether ``config`` declares the failsafe cron as an active persistent job.
+
+    One predicate for every surface that has to know (Plan 00394): the
+    SessionStart advisor leaves a declared failsafe to ``persistent_cron_assertor``,
+    and the completion guidance stops advising its deletion.
+    """
+    return any(is_failsafe_prompt(job.prompt) for job in config.persistent_crons.active_jobs())
 
 
 # ─── Phase detection helper ───────────────────────────────────────────────────
@@ -444,6 +490,19 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
         """
         return True
 
+    def _load_config(self) -> Config:
+        """The project's daemon config; defaults when it cannot be read.
+
+        Defaults mean "not declared", which keeps today's completion guidance --
+        the warn-first, delete-only-when-finished advice.
+        """
+        try:
+            config_path = ProjectContext.project_root() / ".claude" / "hooks-daemon.yaml"
+            return load_config_cached(config_path)
+        except (ValidationError, OSError, ValueError, RuntimeError) as exc:
+            logger.debug("recovery_cron_advisor: config unavailable: %s", exc)
+            return Config()
+
     def _plan_dir(self) -> str:
         """Configured plan directory (facade, or the matching default)."""
         layout = self._project_layout
@@ -546,6 +605,8 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
             plan_folder = self._resolve_plan_folder(hook_input)
             if not self._should_advise_once(self._completion_seen, plan_folder):
                 return BlockingResult(decision=Decision.ALLOW)
+            if declares_failsafe_cron(self._load_config()):
+                return BlockingResult(decision=Decision.ALLOW, context=[_DECLARED_COMPLETION_NOTE])
             return BlockingResult(decision=Decision.ALLOW, context=[_COMPLETION_GUIDANCE])
 
         # PROGRESS — advise on every Nth progress edit for this plan.
@@ -594,7 +655,7 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
             "  safety net into an artificial hourly throttle.\n\n"
             "### Canonical recovery-cron prompt\n\n"
             "Use this verbatim as the CronCreate prompt:\n\n"
-            f"```\n{_CANONICAL_CRON_PROMPT}\n```\n\n"
+            f"```\n{CANONICAL_CRON_PROMPT}\n```\n\n"
             "### Configuration\n\n"
             "This handler is **on by default** (opt-out).  Disable with:\n\n"
             "```yaml\n"

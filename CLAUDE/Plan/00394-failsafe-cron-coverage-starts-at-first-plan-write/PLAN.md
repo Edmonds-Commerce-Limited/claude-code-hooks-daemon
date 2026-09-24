@@ -1,6 +1,6 @@
 # Plan 00394: failsafe cron coverage starts at first plan write
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-13
 **Owner**: joseph
 **Priority**: High
@@ -86,6 +86,28 @@ product change every client receives:
 Option 1 is not exclusive with 2 or 3; it is the cheap local mitigation that
 could ship first. Recorded as options, not a recommendation.
 
+**Decided (unattended, 2026-09-24)**: options 1 and 2, not option 3. Option 1
+gives this repository coverage from session start through config, option 2 gives
+every client project the same coverage through a SessionStart advisory, and
+option 3 would impose a default cron on every client. Assumption: the owner's
+'no known defects' instruction; the owner can reverse this with one message.
+
+**As built, and the two interactions the ruling had to settle.**
+
+- `failsafe_cron_session_advisor` (SessionStart, new sessions only) shares
+  `CANONICAL_CRON_PROMPT` and the CronList-first reconcile. It follows
+  `recovery_cron_advisor`'s switch, and it is silent when the failsafe cron is
+  declared under an enabled `persistent_crons`. In that case
+  `persistent_cron_assertor` states the cron, so exactly one SessionStart surface
+  speaks about it.
+- Declaring the failsafe cron makes `cron_stop_enforcer` require it, and the
+  completion advice used to say to `CronDelete` it once the session was
+  finished. The two would have fought at every clean session end, as
+  `fable-blast-radius-policy-decision.md` warned. Where the failsafe cron is
+  declared, the completion advice now says to keep it. This repository declares
+  it at `47 * * * *`, the minute its live failsafe crons already use, because the
+  enforcer matches the schedule exactly.
+
 ## Goals
 
 - A session has failsafe recovery coverage from its start, not from its first
@@ -100,39 +122,47 @@ could ship first. Recorded as options, not a recommendation.
 - Making crons genuinely durable. `CronCreate` cannot do it; this plan works
   within that limit rather than fighting it.
 - Changing the failsafe prompt's wording or its no-op semantics.
-- The background watchdog's prompt, which is deliberately agent-composed — see
-  Plan 00388's provenance table. Declaring it would mean fixing wording the
-  daemon currently leaves open on purpose, so it is a separate decision.
+- Declaring the background watchdog cron. Plan 00388 now supplies its prompt
+  verbatim, but it exists only while background work does, so it is not a
+  standing declaration.
 
 ## Tasks
 
 ### Phase 1: Owner decision
 
-- [ ] ⬜ **Task 1.1**: Owner picks option 1, 2, 3, a combination, or names
-  another. Nothing below starts until then — the choice decides whether the
-  work is a config edit or a new handler with its own test matrix.
+- [x] ✅ **Task 1.1**: Owner picks option 1, 2, 3, a combination, or names
+  another. Decided: options 1 and 2 (see the ruling above).
 
 ### Phase 2: Fix, once decided
 
-- [ ] ⬜ **Task 2.1**: A failing test first, pinning that a session with NO
+- [x] ✅ **Task 2.1**: A failing test first, pinning that a session with NO
   plan-file activity is still told to establish the failsafe cron.
-- [ ] ⬜ **Task 2.2**: Implement the chosen option.
-- [ ] ⬜ **Task 2.3**: Pin that the advice cannot produce two failsafe crons
-  when every relevant surface speaks in one session.
-- [ ] ⬜ **Task 2.4**: Correct the equivalence claim in Plan 00384's archived
-  PLAN.md, or record the correction where a reader of it will find it.
+- [x] ✅ **Task 2.2**: Implement the chosen option. Option 1: the
+  `failsafe-recovery` job in `.claude/hooks-daemon.yaml`. Option 2:
+  `failsafe_cron_session_advisor`.
+- [x] ✅ **Task 2.3**: Pin that the advice cannot produce two failsafe crons
+  when every relevant surface speaks in one session. Every surface says CronList
+  first and hands over the same prompt. At most one SessionStart surface speaks.
+  The declared prompt is pinned byte-identical to the canonical one, and a cron
+  made from any surface satisfies the Stop enforcer.
+- [x] ✅ **Task 2.4**: Correct the equivalence claim in Plan 00384's archived
+  PLAN.md, or record the correction where a reader of it will find it. A
+  correction note sits directly under the claim. Plan 00393 already quotes it as
+  half-true.
 
 ## Success Criteria
 
-- [ ] A session that never touches a plan file is still told to establish the
+- [x] A session that never touches a plan file is still told to establish the
   failsafe recovery cron.
-- [ ] Exactly one failsafe cron results when every relevant surface fires in one
+- [x] Exactly one failsafe cron results when every relevant surface fires in one
   session.
-- [ ] The claim that `recovery_cron_advisor` "already establishes this shape" is
+- [x] The claim that `recovery_cron_advisor` "already establishes this shape" is
   corrected wherever it is written down.
-- [ ] Every release-bound consequence is in the pending-release holding area, or
-  this plan records why it has none.
-- [ ] Full QA passes and CI is green.
+- [x] Every release-bound consequence is in the pending-release holding area, or
+  this plan records why it has none. Release note 49, a config-changes entry and
+  a truth-change entry.
+- [ ] Full QA passes and CI is green. Targeted QA only on the branch; the
+  coordinator runs the full gate over the merged batch.
 
 ## Delivery & Milestones
 

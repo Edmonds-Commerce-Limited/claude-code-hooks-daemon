@@ -81,3 +81,30 @@ truth_changes:
 
       IF YOUR PROJECT'S DOCS SAY ENCRYPTED VAULT FILES CANNOT BE STAGED BY AN
       AGENT, OR THAT THEY MUST BE UNTRACKED, THOSE INSTRUCTIONS ARE NOW FALSE.
+  - topic: plan-workflow
+    was: >
+      A `STOPPING BECAUSE: [awaiting-human]` stop turns the failsafe recovery
+      cron off until a real message arrives, and only that cron. Any other
+      prompt, including another cron's tick, counts as the owner replying. The
+      background watchdog cron's prompt is written by the agent from a
+      description.
+    now: >
+      Every cron prompt the daemon supplies starts with a sentinel line:
+      `[tick:failsafe]`, `[tick:watchdog]` or `[tick:job:<id>]` for a
+      `persistent_crons` job (Plan 00388). A tick carrying one never counts as
+      the owner, so the marker and the failsafe cadence survive other crons.
+      While the marker is live, declared jobs' ticks are dropped too; the
+      watchdog's are not. The watchdog prompt is now supplied verbatim. Paste
+      every daemon-supplied cron prompt verbatim, first line included. A prompt
+      you compose yourself still counts as the owner.
+  - topic: plan-workflow
+    was: >
+      A session is told to create the failsafe recovery cron at its first plan
+      write (plan creation, progress or completion), and not before.
+    now: >
+      A new session is told at SessionStart as well, by
+      `failsafe_cron_session_advisor`, with the same CronList-first reconcile
+      and canonical prompt (Plan 00394). It is silent on a resumed session,
+      when `recovery_cron_advisor` is disabled, and when the failsafe cron is
+      declared under `persistent_crons`. A declared failsafe cron is never
+      advised for deletion at plan completion.

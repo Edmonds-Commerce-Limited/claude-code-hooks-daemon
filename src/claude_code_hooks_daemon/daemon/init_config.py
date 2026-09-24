@@ -342,6 +342,7 @@ class ConfigTemplate:
             "    config_optimisation_reminder: {enabled: true, priority: 67}  # Remind to re-run the config-optimisation review after an upgrade; silent once a run is recorded against the current version\n"
             "    lsp_noise_checker: {enabled: true, priority: 69}  # Every supported language (Python, TypeScript/JavaScript, Go, Rust, PHP): advise when its server isn't told to exclude a tree that is not project code, or its process predates that check\n"
             "    persistent_cron_assertor: {enabled: true, priority: 70}  # Re-state crons declared under persistent_crons so a new session can re-create them (Claude Code crons are session-only: durable has no effect and recurring jobs expire after 7 days). Inert until persistent_crons.enabled is true AND a job is declared, so this ships silent\n"
+            "    failsafe_cron_session_advisor: {enabled: true, priority: 70}  # New sessions: reconcile the failsafe recovery cron from the start, not from the first plan write. Follows recovery_cron_advisor's switch; silent when the failsafe is declared under persistent_crons\n"
             "\n"
             "  # SessionEnd - no handlers ship today (cleanup removed in Plan 00237)\n"
             "  session_end: {}\n"

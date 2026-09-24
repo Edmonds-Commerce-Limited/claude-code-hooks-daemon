@@ -37,6 +37,7 @@ from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision, ProjectContext
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
+from claude_code_hooks_daemon.utils.cron_enforcement import declared_tick_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +106,7 @@ class PersistentCronAssertorHandler(SessionStartHandlerBase):
         if job.description:
             heading = f"{heading} — {job.description}"
         lines = [heading, f"    schedule (recurring): {job.schedule}", "    prompt:"]
-        lines.extend(f"      {line}" for line in job.prompt.splitlines() or [""])
+        lines.extend(f"      {line}" for line in declared_tick_prompt(job).splitlines())
         return lines
 
     def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:

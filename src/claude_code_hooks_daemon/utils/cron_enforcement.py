@@ -47,6 +47,12 @@ from typing import Any, Final
 
 from claude_code_hooks_daemon.config.models import PersistentCronConfig
 from claude_code_hooks_daemon.constants.protocol import HookInputField
+from claude_code_hooks_daemon.utils.cron_tick import (
+    TickKind,
+    strip_tick_sentinels,
+    tick_sentinel,
+    with_tick_sentinel,
+)
 
 #: The delivered ``prompt`` (and, per the contract, ``description``/
 #: ``command`` on other capped fields) is truncated to this many characters.
@@ -158,8 +164,11 @@ def _prompts_match(declared: str, delivered: str) -> bool:
     that survives both transformations at once.
     """
     without_marker = _strip_truncation_marker(delivered)
-    delivered_norm = _normalise_whitespace(without_marker)
-    declared_norm = _normalise_whitespace(declared)
+    # The tick sentinel is stripped from both sides (Plan 00388): a cron
+    # created from today's advisory carries it and one created before it
+    # existed does not, and both are the same declared job.
+    delivered_norm = _normalise_whitespace(strip_tick_sentinels(without_marker))
+    declared_norm = _normalise_whitespace(strip_tick_sentinels(declared))
     if _was_truncated(delivered, without_marker):
         # An EMPTY prefix is not a short prefix, it is no evidence at all:
         # every declaration starts with it, so a delivery of nothing but a
@@ -215,6 +224,18 @@ def find_missing_crons(
     return [job for job in declared_jobs if not cron_is_asserted(job, session_crons)]
 
 
+def declared_tick_prompt(job: PersistentCronConfig) -> str:
+    """The prompt the agent is told to paste for a declared job.
+
+    The declared text led by ``[tick:job:<id>]`` (Plan 00388), so the job's
+    ticks are recognisably the daemon's and never read as the owner replying.
+    A prompt that already carries a sentinel -- a declared failsafe job pastes
+    the canonical prompt -- is rendered unchanged. Every surface that hands a
+    declared prompt to an agent renders it through here.
+    """
+    return with_tick_sentinel(job.prompt, tick_sentinel(TickKind.DECLARED, job.id))
+
+
 def render_missing_crons_reason(missing: list[PersistentCronConfig]) -> str:
     """The Stop-block DENY reason naming the exact ``CronCreate`` to run.
 
@@ -245,7 +266,7 @@ def render_missing_crons_reason(missing: list[PersistentCronConfig]) -> str:
         lines.append(heading)
         lines.append(f"    schedule (recurring): {job.schedule}")
         lines.append("    prompt:")
-        lines.extend(f"      {line}" for line in job.prompt.splitlines() or [""])
+        lines.extend(f"      {line}" for line in declared_tick_prompt(job).splitlines())
     lines.append("")
     lines.append("Once CronCreate has been called for every job above, stopping is safe again.")
     return "\n".join(lines)

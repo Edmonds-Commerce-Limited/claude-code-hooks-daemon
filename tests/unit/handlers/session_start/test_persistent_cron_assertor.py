@@ -191,3 +191,15 @@ class TestTheHandlerIsTagged:
         and it carries WORKFLOW, PLANNING, ADVISORY and NON_TERMINAL.
         """
         assert expected in PersistentCronAssertorHandler().tags
+
+
+class TestTheDeclaredPromptCarriesItsTickSentinel:
+    """Plan 00388 option 2': the prompt the agent pastes is the daemon's text,
+    so the daemon adds the line that lets a later tick be told from the owner.
+    Without it an `issue-sdlc` tick wiped the `[awaiting-human]` marker."""
+
+    def test_the_job_prompt_is_led_by_its_sentinel(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        context = _handler(monkeypatch, _config(_JOB)).handle({}).context
+        prompt_start = context.index("    prompt:") + 1
+        assert context[prompt_start].strip() == "[tick:job:gh-issue-sdlc]"
+        assert context[prompt_start + 1].strip() == _JOB.prompt

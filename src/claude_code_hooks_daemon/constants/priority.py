@@ -409,6 +409,9 @@ class Priority:
     # again. Deliberately last: re-establishing crons is session housekeeping,
     # and it must not push a finding about the code ahead of it off the top.
     PERSISTENT_CRON_ASSERTOR = 70
+    # Plan 00394: same slot as its sibling above -- both re-establish a cron
+    # at session start, and at most one of them speaks about the failsafe.
+    FAILSAFE_CRON_SESSION_ADVISOR = 70
     # Plan 00401 Task 3.1: reference-repo freshness sweep -- next free
     # SessionStart priority after persistent_cron_assertor (70), so
     # ADVISORY_MAX widens by one again. Last deliberately: this is the only

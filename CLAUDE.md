@@ -332,7 +332,7 @@ Some tool errors require an explicit recovery action, not a halt. The most commo
 
 **On Stop hook re-entry (the hook fires again after a prior block)**: your next response is treated like any other — it must either prefix with `STOPPING BECAUSE:` or continue the work. Re-entry does not exempt you from the explanation rule.
 
-**If you are stopping because you are blocked ONLY on the human, declare it — it turns the failsafe cron off**. Put the token immediately after the prefix:
+**If you are stopping because you are blocked ONLY on the human, declare it — it turns the failsafe cron and every declared `persistent_crons` job off**. Put the token immediately after the prefix:
 
 ```
 STOPPING BECAUSE: [awaiting-human] the owner has to choose between A and B before anything else can move.
@@ -345,7 +345,7 @@ The token is matched exactly, so any wording after it works. These older phrasin
 - `need user input`
 - `waiting on the user's decision`
 
-Either form in your `STOPPING BECAUSE:` line records a marker that makes the daemon drop the next hourly failsafe-cron tick before it reaches you, at zero token cost. Without one, every tick costs a full turn to read and answer with nothing. The next real user message clears the marker and hourly ticks resume; it also expires on its own, so a mistake here costs you at most a day of ticks.
+Either form in your `STOPPING BECAUSE:` line records a marker that makes the daemon drop the next hourly failsafe-cron tick, and every declared job's tick, before it reaches you, at zero token cost. Another cron's tick never clears it, provided its prompt still carries the daemon's `[tick:...]` first line. Without one, every tick costs a full turn to read and answer with nothing. The next real user message clears the marker and hourly ticks resume; it also expires on its own, so a mistake here costs you at most a day of ticks.
 
 **Only when it is the ONLY thing blocking you.** A stop that merely mentions waiting on someone while other work remains must not use these shapes — that would silence a tick you could have used. If there is work you could still do, do it instead of stopping.
 
@@ -529,6 +529,7 @@ Either form in your `STOPPING BECAUSE:` line records a marker that makes the dae
 | R-LSP-SERVER-STALE                 | a running language server older than the config file its check is anchored to                                                                        | It is still analysing the scope the OLD config declared                                                                                                                                           | End the named process (the harness respawns it on the next LSP use)                                                                                                                                                   |
 | R-FAILSAFE-CRON-SUPPRESSED         | A delivered failsafe-cron tick, while a 'blocked only on human input' marker is live                                                                 | Every tick against a session blocked only on human input is a guaranteed no-op model turn                                                                                                         | Nothing to do -- this is expected. Send a real message to clear the marker and resume ticks                                                                                                                           |
 | R-FAILSAFE-CRON-BACKED-OFF         | A delivered failsafe-cron tick, while this session is producing nothing and owes no ledgered work                                                    | An hourly tick against a session with nothing to recover costs a full model turn and finds nothing                                                                                                | Nothing to do -- ticks continue, just less often. Any real user message restores hourly cadence                                                                                                                       |
+| R-DECLARED-CRON-SUPPRESSED         | A delivered persistent_crons tick, while a 'blocked only on human input' marker is live                                                              | A declared job's tick against a session blocked only on human input costs a full model turn                                                                                                       | Nothing to do -- this is expected. Send a real message to clear the marker and resume ticks                                                                                                                           |
 
 ## Advisories and other active handlers
 
@@ -614,13 +615,13 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - git_upstream_checker — additive fetch + pull/cleanup advice on session start
 
+<!-- handler: hook-registration-checker -->
+
+- hook_registration_checker — hooks configuration policy
+
 <!-- handler: model-fallback-detector -->
 
 - model_fallback_detector — silent model substitution is surfaced
-
-<!-- handler: persistent-cron-assertor -->
-
-- persistent_cron_assertor — declared crons are re-established each session
 
 <!-- handler: plan-qa-sweep -->
 
@@ -630,25 +631,13 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - plan_workflow_asset_checker — plan tooling provisioning alert
 
-<!-- handler: reference-repo-sweep -->
-
-- reference_repo_sweep — reference clones are made fresh before you read them
-
-<!-- handler: tool-disable-advisor -->
-
-- tool_disable_advisor — declared never-want tools are checked at session start
-
 <!-- handler: project-handler-load-checker -->
 
 - project_handler_load_checker — project protection degraded alert
 
-<!-- handler: hook-registration-checker -->
+<!-- handler: reference-repo-sweep -->
 
-- hook_registration_checker — hooks configuration policy
-
-<!-- handler: session-actions-directive -->
-
-- session_actions_directive — the must-do list is delivered as a turn
+- reference_repo_sweep — reference clones are made fresh before you read them
 
 <!-- handler: routine-qa-sweep -->
 
@@ -658,13 +647,29 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - secret_file_hygiene_checker -- on-disk hygiene for protected paths
 
-<!-- handler: idle-housekeeping-advisory -->
+<!-- handler: session-actions-directive -->
 
-- idle_housekeeping_advisory — report-first idle housekeeping (beta, opt-in)
+- session_actions_directive — the must-do list is delivered as a turn
+
+<!-- handler: tool-disable-advisor -->
+
+- tool_disable_advisor — declared never-want tools are checked at session start
+
+<!-- handler: persistent-cron-assertor -->
+
+- persistent_cron_assertor — declared crons are re-established each session
+
+<!-- handler: failsafe-cron-session-advisor -->
+
+- failsafe_cron_session_advisor — the failsafe cron from session start
 
 <!-- handler: standing-authorisations -->
 
 - standing_authorisations — a project can record a standing request
+
+<!-- handler: idle-housekeeping-advisory -->
+
+- idle_housekeeping_advisory — report-first idle housekeeping (beta, opt-in)
 
 <!-- handler: auto-approve-reads -->
 

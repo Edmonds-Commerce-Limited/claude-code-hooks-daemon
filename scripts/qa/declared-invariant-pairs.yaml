@@ -125,6 +125,21 @@
     file: src/claude_code_hooks_daemon/handlers/pre_tool_use/github_auto_close_keywords.py
     function: _message_file_texts
 
+- id: automated-prompt-classifiers-reach-the-tick-classifier
+  relation: reaches
+  helper: classify_tick
+  reason: >
+    both decide whether a UserPromptSubmit prompt is the human or a daemon
+    cron tick, so a classifier that knows only the failsafe literal reads
+    every other cron's tick as the owner -- the defect that wiped the
+    `[awaiting-human]` marker in multi-cron sessions (Plan 00388).
+  left:
+    file: src/claude_code_hooks_daemon/handlers/user_prompt_submit/failsafe_cron_blockage_suppressor.py
+    function: handle
+  right:
+    file: src/claude_code_hooks_daemon/handlers/user_prompt_submit/standing_authorisations.py
+    function: _is_automated_prompt
+
 - id: installer-file-writers-reach-the-backup-helper
   relation: reaches
   helper: _free_backup_path

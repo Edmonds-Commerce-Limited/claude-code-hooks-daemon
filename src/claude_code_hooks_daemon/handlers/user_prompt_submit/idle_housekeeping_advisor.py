@@ -29,9 +29,10 @@ from claude_code_hooks_daemon.handlers.utils.bounded_fifo_map import BoundedFifo
 
 logger = logging.getLogger(__name__)
 
-# The stable marker every failsafe-recovery-cron prompt begins with. Mirrors the
-# first line of ``recovery_cron_advisor._CANONICAL_CRON_PROMPT`` -- matching it is
-# exact, not heuristic (the daemon authors the prompt).
+# The stable marker every failsafe-recovery-cron prompt carries, including ones
+# created before the ``[tick:failsafe]`` sentinel line. Mirrors the heading of
+# ``recovery_cron_advisor.CANONICAL_CRON_PROMPT`` -- matching it is exact, not
+# heuristic (the daemon authors the prompt).
 _RECOVERY_MARKER: Final[str] = "FAILSAFE RECOVERY CHECK"
 
 # Defaults (overridable via handler options in hooks-daemon.yaml).
