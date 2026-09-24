@@ -399,6 +399,8 @@ Either form in your `STOPPING BECAUSE:` line records a marker that makes the dae
 
 <!-- handler: block-ask-user-question -->
 
+<!-- handler: plan-journal-guard -->
+
 <!-- handler: block-comment-size -->
 
 <!-- handler: verification-result-gate -->
@@ -489,6 +491,7 @@ Either form in your `STOPPING BECAUSE:` line records a marker that makes the dae
 | R-PIP-BREAK-SYSTEM-PACKAGES        | `pip install --break-system-packages`                                                                                                                | Bypasses PEP 668 protection and can corrupt the system Python installation                                                                                                                        | Use a virtual environment or `pip install --user` instead                                                                                                                                                             |
 | R-SUDO-PIP-INSTALL                 | `sudo pip install`                                                                                                                                   | Conflicts with the OS package manager and can corrupt system Python                                                                                                                               | Use a virtual environment or `pip install --user` instead                                                                                                                                                             |
 | R-ASK-USER-QUESTION-UNJUSTIFIED    | AskUserQuestion while running unattended                                                                                                             | Nobody is reading this session, so a question waits for an answer that never comes                                                                                                                | Choose the option you would have recommended, state the assumption in your output text, and continue                                                                                                                  |
+| R-JOURNAL-HAND-WRITTEN-ENTRY       | a plan journal entry written by hand (Edit/Write/Bash into a JOURNAL/ day-file)                                                                      | Only `mkplan.bash --journal` stamps the real UTC time; hand-typed stamps have landed 40 minutes in the future                                                                                     | Write the entry body to a fresh file under untracked/scratch/, then run `mkplan.bash --journal <plan> <category> <body-file>`                                                                                         |
 | R-COMMENT-SIZE                     | a comment growing past its configured size limit                                                                                                     | Comments should describe current state, not accumulate                                                                                                                                            | Shorten the comment, or declare MUST_EXCEED_COMMENT_SIZE_BECAUSE                                                                                                                                                      |
 | R-VERIFICATION-RESULT-NOT-CONSUMED | a verifier followed by a mutator with nothing consuming the result                                                                                   | The verifier can fail and the mutator would still run                                                                                                                                             | Gate with `&&`, an explicit exit-code check, or `set -euo pipefail`                                                                                                                                                   |
 | R-BASH-SAFE-MODE-PRELUDE-MISSING   | a sequenced Bash invocation with no `set` safety prelude                                                                                             | Errors in earlier statements can be silently ignored                                                                                                                                              | Add `set -euo pipefail` at the top, or gate explicitly with `&&`/\`                                                                                                                                                   |
@@ -643,6 +646,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - routine_qa_sweep — recurring work that has stopped recurring
 
+<!-- handler: secret-file-hygiene-checker -->
+
+- secret_file_hygiene_checker -- on-disk hygiene for protected paths
+
 <!-- handler: session-actions-directive -->
 
 - session_actions_directive — the must-do list is delivered as a turn
@@ -650,10 +657,6 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 <!-- handler: tool-disable-advisor -->
 
 - tool_disable_advisor — declared never-want tools are checked at session start
-
-<!-- handler: secret-file-hygiene-checker -->
-
-- secret_file_hygiene_checker -- on-disk hygiene for protected paths
 
 <!-- handler: idle-housekeeping-advisory -->
 
