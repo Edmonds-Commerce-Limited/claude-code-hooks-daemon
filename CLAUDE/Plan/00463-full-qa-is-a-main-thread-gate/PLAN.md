@@ -126,8 +126,9 @@ commands that ARE allowed, and they must exist.
 
 ## Success Criteria
 
-- [ ] A sub-agent cannot start a full QA run, and the deny tells it
-  exactly what to run instead.
+- [ ] An Agent-tool sub-agent or in-process teammate cannot start a full
+  QA run, and the deny tells it exactly what to run instead. A
+  Workflow-tool agent is unmeasured, so it is not claimed.
 - [ ] The main thread's full QA and every targeted form are unaffected.
 - [ ] The coordinator workflow docs describe the new split, and the next
   dispatch after merge follows it.

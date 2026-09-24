@@ -35,16 +35,53 @@ Phase 2 is untouched.
 ## The targeted entry point
 
 `./scripts/qa/llm_qa.py changed` runs magic_values, format, lint, type_check, pyright,
-error_hiding, project_handlers and `changed_tests`. `changed_tests`
-(`scripts/qa/run_changed_tests.py`) collects the files changed since the merge base with
-`main`, plus untracked files. It maps each file to tests:
+error_hiding, project_handlers, docs_qa, plan_qa, shell_check, declared_invariant_pairs and
+`changed_tests`. `changed_tests` (`scripts/qa/run_changed_tests.py`) collects the files
+changed since the merge base, plus untracked files, with renames split into a deletion and
+an addition. It maps each file to tests in this order:
 
-- a test file selects itself;
-- `module.py` selects `test_module.py` and `test_module_*.py`;
-- a file with no mapped test is reported as unmapped.
+1. a declared rule in `scripts/qa/changed_tests_map.yaml`, for files with no test of their
+   own name, such as the config, the release notes and the markdown;
+2. a test file selects itself;
+3. the mirror, `tests/unit/<path>/test_<stem>*.py`;
+4. a test of the same name anywhere;
+5. tests that import the module, capped at 40 before a match counts as too broad;
+6. a deleted file that nothing still references.
 
-It runs pytest on the selection and writes `untracked/qa/changed_tests.json`.
-`changed_tests` is excluded from `all`.
+A file that none of these maps fails the run and is named. `--allow-unmapped` is the
+explicit escape. `--base` overrides the merge base, which defaults to origin/HEAD and
+falls back to `main`. The run refuses to start on the base branch or with no changes. It
+writes `untracked/qa/changed_tests.json`, and `changed_tests` is excluded from `all`.
+
+## Review fixes (every finding except 15, which is the coordinator's review of the range)
+
+- **M1**: an unmapped file fails the run, as described above. The two tests that pinned
+  the silent pass are gone. Deleted and non-Python files are listed in the report.
+- **M2**: `option_grammar: pytest` merges `PYTEST_VALUE_OPTIONS`, which covers pytest core,
+  cov, xdist, timeout, randomly, rerunfailures, asyncio and html. A test pins the set
+  against the installed pytest's argparse actions. Only a path-like operand narrows a run.
+  An operand is path-like if it contains `/` or `::`, ends in `.py`, or exists under the
+  event's `cwd`. So `pytest --cov . tests/unit/x.py` is allowed and `pytest --cov src` is
+  denied.
+- **M3**: `llm_qa.py` writes `untracked/qa/provenance.json`, with HEAD and a working-tree
+  digest for each tool. It records "changed-during-run" when the tree moved mid-run.
+  `--read-only` marks a mismatched result STALE and fails it.
+- **Evasions**:
+  - project runners are resolved through their own flag grammar: `uv run --frozen`,
+    `uv run --`, `uvx`, `uv tool run`, poetry, pipenv, pdm and hatch;
+  - attached redirects (`all>out.txt`) are split off;
+  - `$PWD/` and `${PWD}/` prefixes are normalised;
+  - `env -C`/`--chdir` take a value.
+- **Minors**:
+  - `hooks-daemon check` builds the handler through the shared `apply_handler_config`,
+    so the options it reports are the ones dispatch uses. It reports a `scope` other
+    than SUB.
+  - The handler and evasion tests load patterns from the live YAML.
+  - The flag constants are shared from `shell_segmentation`.
+  - The `enforce_llm_qa` deny is role-aware.
+  - The tautology test is gone.
+  - QA.md warns about bare pytest.
+  - The success criterion names only the two measured agent kinds.
 
 ## Task 1.1 measurements
 
@@ -113,8 +150,10 @@ It runs pytest on the selection and writes `untracked/qa/changed_tests.json`.
 
 ## Verification (targeted only, under this plan's rule)
 
-- `./scripts/qa/llm_qa.py changed` passed 8/8: 2338 tests from 107 test files, mapped from
-  43 changed files, with 0 unmapped.
+- After the review fixes, `./scripts/qa/llm_qa.py changed` passed 12/12: 2616 tests from
+  107 test files, mapped from 57 changed files, with 0 unmapped. A further targeted run of
+  the handler, evasion, shell utility, QA-script, CLI status, registry and doc/config
+  integration tests passed 2058.
 - docs_qa, plan_qa, doc_truth, repo_hygiene, british_english, handler_reference,
   declared_invariant_pairs and security were clean.
 - The broader targeted pytest runs all passed:

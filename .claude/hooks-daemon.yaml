@@ -476,8 +476,9 @@ handlers:
             command: pytest
             full_args: [tests, tests/unit, .]
             bare_is_full: true
-            value_flags: [-k, -m, -n, -p, -c, -o, -W, --maxfail, --deselect, --ignore,
-                          --ignore-glob, --rootdir, --tb, --durations, --basetemp, --junitxml]
+            # pytest's own value-taking options (and common plugins'), so a
+            # flag's value is never read as a path.
+            option_grammar: pytest
             read_only_flags: [--collect-only, --co, --help, -h, --version]
         targeted_qa_commands:
           - "./scripts/qa/llm_qa.py changed"

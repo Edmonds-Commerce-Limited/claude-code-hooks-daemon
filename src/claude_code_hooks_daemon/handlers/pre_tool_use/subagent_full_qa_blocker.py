@@ -69,6 +69,9 @@ from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.command_evasion import normalise_line_continuations
 from claude_code_hooks_daemon.utils.shell_segmentation import (
+    END_OF_OPTIONS,
+    FLAG_PREFIX,
+    LONE_DASH,
     command_word,
     peel_command_wrappers,
     split_unquoted,
@@ -85,6 +88,7 @@ _KEY_FULL_ARGS: Final[str] = "full_args"
 _KEY_BARE_IS_FULL: Final[str] = "bare_is_full"
 _KEY_READ_ONLY_FLAGS: Final[str] = "read_only_flags"
 _KEY_VALUE_FLAGS: Final[str] = "value_flags"
+_KEY_OPTION_GRAMMAR: Final[str] = "option_grammar"
 
 _KNOWN_KEYS: Final[frozenset[str]] = frozenset(
     {
@@ -94,8 +98,105 @@ _KNOWN_KEYS: Final[frozenset[str]] = frozenset(
         _KEY_BARE_IS_FULL,
         _KEY_READ_ONLY_FLAGS,
         _KEY_VALUE_FLAGS,
+        _KEY_OPTION_GRAMMAR,
     }
 )
+
+#: Every pytest option that takes a value: pytest's own, pytest-cov's, and
+#: those of the plugins most often installed beside it (xdist, timeout,
+#: randomly, rerunfailures, asyncio, html). A value can look like a path
+#: (``--basetemp /tmp/x``, ``--cov src``), so the grammar has to consume it
+#: before the operand test sees it. ``test_subagent_full_qa_blocker`` pins
+#: this set against the parser of the pytest actually installed.
+PYTEST_VALUE_OPTIONS: Final[frozenset[str]] = frozenset(
+    {
+        # pytest core
+        "-c",
+        "-k",
+        "-m",
+        "-o",
+        "-p",
+        "-r",
+        "-W",
+        "--assert",
+        "--basetemp",
+        "--cache-show",
+        "--capture",
+        "--code-highlight",
+        "--color",
+        "--confcutdir",
+        "--config-file",
+        "--debug",
+        "--deselect",
+        "--doctest-glob",
+        "--doctest-report",
+        "--durations",
+        "--durations-min",
+        "--ignore",
+        "--ignore-glob",
+        "--import-mode",
+        "--junit-prefix",
+        "--junit-xml",
+        "--junitprefix",
+        "--junitxml",
+        "--last-failed-no-failures",
+        "--lfnf",
+        "--log-auto-indent",
+        "--log-cli-date-format",
+        "--log-cli-format",
+        "--log-cli-level",
+        "--log-date-format",
+        "--log-disable",
+        "--log-file",
+        "--log-file-date-format",
+        "--log-file-format",
+        "--log-file-level",
+        "--log-file-mode",
+        "--log-format",
+        "--log-level",
+        "--maxfail",
+        "--override-ini",
+        "--pastebin",
+        "--pdbcls",
+        "--pythonwarnings",
+        "--rootdir",
+        "--show-capture",
+        "--tb",
+        "--verbosity",
+        # pytest-cov
+        "--cov",
+        "--cov-config",
+        "--cov-context",
+        "--cov-fail-under",
+        "--cov-precision",
+        "--cov-report",
+        # pytest-xdist
+        "-n",
+        "--numprocesses",
+        "--maxprocesses",
+        "--max-worker-restart",
+        "--dist",
+        "--tx",
+        "--rsyncdir",
+        "--rsyncignore",
+        "--maxschedchunk",
+        # pytest-timeout
+        "--timeout",
+        "--timeout-method",
+        "--timeout_method",
+        # pytest-randomly, pytest-rerunfailures, pytest-asyncio, pytest-html
+        "--randomly-seed",
+        "--reruns",
+        "--reruns-delay",
+        "--only-rerun",
+        "--asyncio-mode",
+        "--html",
+        "--css",
+    }
+)
+
+#: Named grammars a pattern can adopt with ``option_grammar``.
+_OPTION_GRAMMARS: Final[Mapping[str, frozenset[str]]] = {"pytest": PYTEST_VALUE_OPTIONS}
 _REQUIRED_TEXT_KEYS: Final[tuple[str, ...]] = (_KEY_ID, _KEY_COMMAND)
 _WORD_LIST_KEYS: Final[tuple[str, ...]] = (_KEY_FULL_ARGS, _KEY_READ_ONLY_FLAGS, _KEY_VALUE_FLAGS)
 
@@ -112,13 +213,16 @@ class FullQaPattern:
             declaration it hit.
         command: The basename of the program the command runs.
         full_args: Operands that make the program run the whole suite. None
-            means every run of it is full.
+            means every run of it is full. Any other operand targets the run
+            only when it is path-like: it contains ``/`` or ``::``, ends in
+            ``.py``, or exists under the event's working directory.
         bare_is_full: With ``full_args`` set, a run naming no operand at all
             is full too (``pytest`` with no path collects the whole suite).
         read_only_flags: Flags that make the run a read rather than a run
             (``--read-only``, ``--collect-only``).
         value_flags: Flags whose next word is their value, so that word is not
-            mistaken for an operand (``pytest -k expr``).
+            mistaken for an operand (``pytest -k expr``). A declared
+            ``option_grammar`` is merged in here.
     """
 
     pattern_id: str
@@ -204,6 +308,14 @@ def _parse_entry(position: int, entry: object) -> tuple[FullQaPattern | None, st
     if not isinstance(bare_is_full, bool):
         return None, f"entry {position}: `{_KEY_BARE_IS_FULL}` must be true or false"
 
+    grammar_name = entry.get(_KEY_OPTION_GRAMMAR)
+    grammar: frozenset[str] = frozenset()
+    if grammar_name is not None:
+        if grammar_name not in _OPTION_GRAMMARS:
+            known = ", ".join(sorted(_OPTION_GRAMMARS))
+            return None, f"entry {position}: `{_KEY_OPTION_GRAMMAR}` must be one of: {known}"
+        grammar = _OPTION_GRAMMARS[grammar_name]
+
     full_args = word_lists[_KEY_FULL_ARGS]
     return (
         FullQaPattern(
@@ -214,7 +326,7 @@ def _parse_entry(position: int, entry: object) -> tuple[FullQaPattern | None, st
             ),
             bare_is_full=bare_is_full,
             read_only_flags=word_lists[_KEY_READ_ONLY_FLAGS] or frozenset(),
-            value_flags=word_lists[_KEY_VALUE_FLAGS] or frozenset(),
+            value_flags=(word_lists[_KEY_VALUE_FLAGS] or frozenset()) | grammar,
         ),
         None,
     )
@@ -254,22 +366,100 @@ _SHELL_INTERPRETERS: Final[frozenset[str]] = frozenset({"bash", "sh", "zsh", "da
 _SHELL_VALUE_FLAGS: Final[frozenset[str]] = frozenset({"-o", "+o", "-O", "+O"})
 _SHELL_CODE_LETTER: Final[str] = "c"
 
+
+@dataclass(frozen=True, slots=True)
+class _Runner:
+    """A project runner: ``<runner> [global flags] run [run flags] [--] <command>``.
+
+    Each flag table lists the flags whose NEXT word is their value, so the
+    value is never mistaken for the subcommand or the command.
+    """
+
+    global_value_flags: frozenset[str]
+    run_value_flags: frozenset[str]
+
+
+#: What ``uv run``, ``uv tool run`` and ``uvx`` take a value for.
+_UV_RUN_VALUE_FLAGS: Final[frozenset[str]] = frozenset(
+    {
+        "--with",
+        "--with-editable",
+        "--with-requirements",
+        "--from",
+        "--python",
+        "-p",
+        "--package",
+        "--extra",
+        "--group",
+        "--only-group",
+        "--no-group",
+        "--env-file",
+        "--directory",
+        "--project",
+        "--index",
+        "--default-index",
+        "--index-url",
+        "--extra-index-url",
+        "--find-links",
+        "-f",
+        "--python-platform",
+        "--config-file",
+        "--cache-dir",
+    }
+)
+
 #: Project runners whose ``run`` subcommand starts the command after it.
-_PROJECT_RUNNERS: Final[frozenset[str]] = frozenset({"uv", "poetry", "pipenv", "pdm", "hatch"})
+_PROJECT_RUNNERS: Final[Mapping[str, _Runner]] = {
+    "uv": _Runner(
+        global_value_flags=frozenset(
+            {
+                "--directory",
+                "--project",
+                "--config-file",
+                "--cache-dir",
+                "--python",
+                "-p",
+                "--color",
+                "--allow-insecure-host",
+            }
+        ),
+        run_value_flags=_UV_RUN_VALUE_FLAGS,
+    ),
+    "poetry": _Runner(
+        global_value_flags=frozenset({"-C", "--directory", "-P", "--project"}),
+        run_value_flags=frozenset(),
+    ),
+    "pipenv": _Runner(global_value_flags=frozenset(), run_value_flags=frozenset()),
+    "pdm": _Runner(global_value_flags=frozenset({"-p", "--project"}), run_value_flags=frozenset()),
+    "hatch": _Runner(global_value_flags=frozenset({"-e", "--env"}), run_value_flags=frozenset()),
+}
 _RUNNER_SUBCOMMAND: Final[str] = "run"
+#: ``uv tool run`` and its alias ``uvx`` run a tool directly.
+_UV: Final[str] = "uv"
+_UV_TOOL_SUBCOMMAND: Final[str] = "tool"
+_UVX: Final[str] = "uvx"
 
 #: How deep ``bash -c '...'`` is followed. Deeper nesting is not a way anyone
 #: runs a test suite by accident.
 _MAX_NESTING: Final[int] = 3
 
-_FLAG_PREFIX: Final[str] = "-"
 _LONG_FLAG_PREFIX: Final[str] = "--"
-_END_OF_OPTIONS: Final[str] = "--"
-_LONE_DASH: Final[str] = "-"
 _FLAG_VALUE_SEPARATOR: Final[str] = "="
 _CURRENT_DIR: Final[str] = "."
 _CURRENT_DIR_PREFIX: Final[str] = "./"
 _PATH_SEPARATOR: Final[str] = "/"
+_NODE_ID_SEPARATOR: Final[str] = "::"
+_PYTHON_SUFFIX: Final[str] = ".py"
+
+#: ``$PWD/tests`` and ``${PWD}/tests`` are ``./tests``.
+_CWD_VARIABLE_PREFIXES: Final[tuple[str, ...]] = ("$PWD/", "${PWD}/")
+_CWD_VARIABLES: Final[frozenset[str]] = frozenset({"$PWD", "${PWD}"})
+
+#: The first redirection character inside a word: ``all>out.txt`` is the
+#: operand ``all`` and a redirect, because shlex does not split at ``>``.
+_ATTACHED_REDIRECT_START: Final[re.Pattern[str]] = re.compile(r"[<>]")
+#: A redirection operator with its target in the NEXT word.
+_BARE_REDIRECT_OPERATOR: Final[re.Pattern[str]] = re.compile(r"^(?:>>?|<<?<?|>&|<&|>\|)$")
 
 
 def _words(segment: str) -> list[str]:
@@ -335,10 +525,13 @@ def _resolve(words: list[str], segment: str, depth: int) -> Iterator[tuple[str, 
     if not name:
         return
 
-    if name in _PROJECT_RUNNERS:
-        operands = [word for word in rest if not word.startswith(_FLAG_PREFIX)]
-        if operands and operands[0] == _RUNNER_SUBCOMMAND:
-            yield from _resolve(rest[rest.index(_RUNNER_SUBCOMMAND) + 1 :], segment, depth)
+    if name == _UVX:
+        yield from _resolve(rest[_skip_flags(rest, _UV_RUN_VALUE_FLAGS, 0) :], segment, depth)
+        return
+
+    runner = _PROJECT_RUNNERS.get(name)
+    if runner is not None:
+        yield from _resolve_runner(name, runner, rest, segment, depth)
         return
 
     if _PYTHON_INTERPRETER.match(name):
@@ -350,6 +543,44 @@ def _resolve(words: list[str], segment: str, depth: int) -> Iterator[tuple[str, 
         return
 
     yield name, rest, segment
+
+
+def _skip_flags(words: Sequence[str], value_flags: frozenset[str], start: int) -> int:
+    """The index of the first word from ``start`` that is not a flag or a flag's value.
+
+    A ``--`` ends the flags and is consumed; a ``--flag=value`` carries its
+    value with it.
+    """
+    index = start
+    while index < len(words):
+        word = words[index]
+        if word == END_OF_OPTIONS:
+            return index + 1
+        if not word.startswith(FLAG_PREFIX) or word == LONE_DASH:
+            return index
+        index += 2 if word in value_flags else 1
+    return index
+
+
+def _resolve_runner(
+    name: str, runner: _Runner, rest: list[str], segment: str, depth: int
+) -> Iterator[tuple[str, list[str], str]]:
+    """``uv [flags] run [flags] [--] cmd`` and its siblings run ``cmd``."""
+    index = _skip_flags(rest, runner.global_value_flags, 0)
+    if index >= len(rest):
+        return
+    if rest[index] == _RUNNER_SUBCOMMAND:
+        start = _skip_flags(rest, runner.run_value_flags, index + 1)
+        yield from _resolve(rest[start:], segment, depth)
+        return
+    if (
+        name == _UV
+        and rest[index] == _UV_TOOL_SUBCOMMAND
+        and index + 1 < len(rest)
+        and rest[index + 1] == _RUNNER_SUBCOMMAND
+    ):
+        start = _skip_flags(rest, _UV_RUN_VALUE_FLAGS, index + 2)
+        yield from _resolve(rest[start:], segment, depth)
 
 
 def _resolve_python(rest: list[str], segment: str) -> Iterator[tuple[str, list[str], str]]:
@@ -370,7 +601,7 @@ def _resolve_python(rest: list[str], segment: str) -> Iterator[tuple[str, list[s
         if argument in _PYTHON_VALUE_FLAGS:
             index += 2
             continue
-        if argument.startswith(_FLAG_PREFIX):
+        if argument.startswith(FLAG_PREFIX):
             index += 1
             continue
         yield command_word(argument), rest[index + 1 :], segment
@@ -388,7 +619,7 @@ def _resolve_shell(
         if argument in _SHELL_VALUE_FLAGS:
             index += 2
             continue
-        if argument.startswith(_FLAG_PREFIX) and not argument.startswith(_LONG_FLAG_PREFIX):
+        if argument.startswith(FLAG_PREFIX) and not argument.startswith(_LONG_FLAG_PREFIX):
             runs_code = runs_code or _SHELL_CODE_LETTER in argument[1:]
             index += 1
             continue
@@ -404,13 +635,54 @@ def _resolve_shell(
 
 
 def _normalise_operand(value: str) -> str:
-    """Spell a path operand one way: ``./tests/`` and ``tests`` are the same run."""
+    """Spell a path operand one way: ``./tests/``, ``$PWD/tests`` and ``tests`` are one run."""
+    if value in _CWD_VARIABLES:
+        return _CURRENT_DIR
+    for prefix in _CWD_VARIABLE_PREFIXES:
+        if value.startswith(prefix):
+            value = value[len(prefix) :]
+            break
     if value.startswith(_PATH_SEPARATOR):
         return value.rstrip(_PATH_SEPARATOR) or _PATH_SEPARATOR
     normalised = value
     while normalised.startswith(_CURRENT_DIR_PREFIX):
         normalised = normalised[len(_CURRENT_DIR_PREFIX) :]
     return normalised.rstrip(_PATH_SEPARATOR) or _CURRENT_DIR
+
+
+def _is_path_like(operand: str, cwd: Path | None) -> bool:
+    """Whether a non-flag word names what to test, rather than being a flag's value.
+
+    A word after an undeclared flag is that flag's value far more often than
+    a path (``--timeout 60``, ``--log-level DEBUG``). So only a word shaped
+    like a path, or naming something that exists under ``cwd``, targets the
+    run. Everything else is ignored, which judges the run by its real paths.
+    """
+    if _PATH_SEPARATOR in operand or _NODE_ID_SEPARATOR in operand:
+        return True
+    if operand.endswith(_PYTHON_SUFFIX):
+        return True
+    if cwd is None:
+        return False
+    try:
+        return (cwd / operand).exists()
+    except (OSError, ValueError):
+        # Unrepresentable as a path (an embedded NUL, an over-long name): it
+        # names nothing on disk, so it cannot be what the run targets.
+        return False
+
+
+def _split_attached_redirect(argument: str) -> tuple[str, bool]:
+    """``all>out.txt`` is the word ``all`` and a redirect; shlex does not split at ``>``.
+
+    Returns:
+        ``(word, target_follows)``: the word before the redirect, and whether
+        the redirect's target is the NEXT word (``all>`` then ``out.txt``).
+    """
+    found = _ATTACHED_REDIRECT_START.search(argument)
+    if found is None or found.start() == 0:
+        return argument, False
+    return argument[: found.start()], bool(_BARE_REDIRECT_OPERATOR.match(argument[found.start() :]))
 
 
 def _operand_is_full(operand: str, full_args: frozenset[str]) -> bool:
@@ -424,9 +696,15 @@ def _operand_is_full(operand: str, full_args: frozenset[str]) -> bool:
     )
 
 
-def _is_full_run(pattern: FullQaPattern, arguments: Sequence[str]) -> bool:
-    """Whether these arguments make ``pattern.command`` run the whole suite."""
-    operands: list[str] = []
+def _is_full_run(pattern: FullQaPattern, arguments: Sequence[str], cwd: Path | None) -> bool:
+    """Whether these arguments make ``pattern.command`` run the whole suite.
+
+    A word naming the whole suite (``full_args``) makes the run full wherever
+    it sits. Otherwise the run is targeted only by a PATH-LIKE operand; any
+    other word is a flag's value and is ignored (see :func:`_is_path_like`).
+    """
+    names_full_suite = False
+    targets: list[str] = []
     index = 0
     options_ended = False
     while index < len(arguments):
@@ -437,31 +715,44 @@ def _is_full_run(pattern: FullQaPattern, arguments: Sequence[str]) -> bool:
             if not redirect.group("target"):
                 index += 1
             continue
-        if not options_ended and argument == _END_OF_OPTIONS:
+        if not options_ended and argument == END_OF_OPTIONS:
             options_ended = True
             continue
-        if not options_ended and argument.startswith(_FLAG_PREFIX) and argument != _LONE_DASH:
+        if not options_ended and argument.startswith(FLAG_PREFIX) and argument != LONE_DASH:
             if argument.split(_FLAG_VALUE_SEPARATOR, 1)[0] in pattern.read_only_flags:
                 return False
-            if argument in pattern.value_flags:
+            if (
+                argument in pattern.value_flags
+                and index < len(arguments)
+                and not arguments[index].startswith(FLAG_PREFIX)
+            ):
                 index += 1
             continue
-        operands.append(_normalise_operand(argument))
+        word, target_follows = _split_attached_redirect(argument)
+        if target_follows:
+            index += 1
+        operand = _normalise_operand(word)
+        if pattern.full_args is not None and _operand_is_full(operand, pattern.full_args):
+            names_full_suite = True
+        elif _is_path_like(operand, cwd):
+            targets.append(operand)
 
-    if pattern.full_args is None:
+    if pattern.full_args is None or names_full_suite:
         return True
-    if any(_operand_is_full(operand, pattern.full_args) for operand in operands):
-        return True
-    return not operands and pattern.bare_is_full
+    return not targets and pattern.bare_is_full
 
 
-def find_full_qa_invocation(command: str, patterns: Sequence[FullQaPattern]) -> FullQaMatch | None:
+def find_full_qa_invocation(
+    command: str, patterns: Sequence[FullQaPattern], *, cwd: Path | None = None
+) -> FullQaMatch | None:
     """The first full-suite run in ``command``, or None.
 
     Args:
         command: The Bash command as the tool received it (line continuations
             already joined by ``get_bash_command``).
         patterns: The validated declaration.
+        cwd: The directory the command runs in, so a bare word naming a
+            directory there counts as a path. None judges by shape alone.
 
     Returns:
         The pattern that matched and the command segment it matched in.
@@ -470,7 +761,7 @@ def find_full_qa_invocation(command: str, patterns: Sequence[FullQaPattern]) -> 
         return None
     for program, arguments, segment in _invocations(command):
         for pattern in patterns:
-            if pattern.command == program and _is_full_run(pattern, arguments):
+            if pattern.command == program and _is_full_run(pattern, arguments, cwd):
                 return FullQaMatch(pattern_id=pattern.pattern_id, segment=segment.strip())
     return None
 
@@ -499,6 +790,9 @@ _RULE: Final[Rule] = Rule(
     ),
 )
 
+#: The hook payload field naming the directory the command runs in.
+_CWD_FIELD: Final[str] = "cwd"
+
 _GENERIC_TARGETED_FORM: Final[str] = (
     "  - the same tools scoped to what you changed: named checks rather than the\n"
     "    whole suite, and tests on explicit test files or directories"
@@ -514,7 +808,8 @@ class SubagentFullQaBlockerHandler(PreToolUseHandlerBase):
 
     Options (``handlers.pre_tool_use.subagent_full_qa_blocker.options``):
         full_qa_patterns: list of ``{id, command, full_args?, bare_is_full?,
-            read_only_flags?, value_flags?}``. Default empty, which is inert.
+            read_only_flags?, value_flags?, option_grammar?}``. Default empty,
+            which is inert.
         targeted_qa_commands: list of command strings the deny names as the
             allowed path. Default empty, which names the generic form.
     """
@@ -563,7 +858,12 @@ class SubagentFullQaBlockerHandler(PreToolUseHandlerBase):
         command = get_bash_command(hook_input)
         if not command:
             return None
-        return find_full_qa_invocation(command, self._patterns())
+        cwd = hook_input.get(_CWD_FIELD)
+        return find_full_qa_invocation(
+            command,
+            self._patterns(),
+            cwd=Path(cwd) if isinstance(cwd, str) and cwd else None,
+        )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """True when the Bash command would run a declared full suite."""
@@ -604,6 +904,12 @@ class SubagentFullQaBlockerHandler(PreToolUseHandlerBase):
         lines = [
             f"subagent_full_qa_blocker: `{_OPTION_PATTERNS}` {problem}" for problem in problems
         ]
+        if self.scope is not HandlerScope.SUB:
+            lines.append(
+                f"subagent_full_qa_blocker runs with scope {self.scope.value}, but it must be "
+                f"{HandlerScope.SUB.value}: any other scope denies the coordinator's own full "
+                "QA gate, and then nobody can run it. Remove the `scope:` override."
+            )
         if not patterns:
             lines.append(
                 "subagent_full_qa_blocker is enabled but declares no usable "
@@ -693,8 +999,12 @@ class SubagentFullQaBlockerHandler(PreToolUseHandlerBase):
             "declares that flag.\n\n"
             "**Configure** under `handlers.pre_tool_use.subagent_full_qa_blocker.options`: "
             "`full_qa_patterns` entries are `{id, command, full_args?, bare_is_full?, "
-            "read_only_flags?, value_flags?}`, where `command` is the program's basename "
-            "and `full_args` are the operands that make it run the whole suite (omit it "
-            "and every run is full). Ships off with no patterns; enabled with none, "
-            "`hooks-daemon check` reports it as unable to fire."
+            "read_only_flags?, value_flags?, option_grammar?}`, where `command` is the "
+            "program's basename and `full_args` are the operands that make it run the "
+            "whole suite (omit it and every run is full). Any other operand narrows the "
+            "run only if it is path-like; `option_grammar: pytest` supplies pytest's "
+            "value-taking options so a flag's value is never read as a path. Ships off "
+            "with no patterns; enabled with none, `hooks-daemon check` reports it as "
+            "unable to fire. Keep `scope` at SUB: any other scope denies the "
+            "coordinator's own run."
         )

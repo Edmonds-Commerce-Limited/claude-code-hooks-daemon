@@ -2042,6 +2042,7 @@ def _collect_enforcement_status_lines(project_path: Path) -> list[str]:
         at every evaluated root.
     """
     from claude_code_hooks_daemon.constants import EventID, HandlerID
+    from claude_code_hooks_daemon.constants.config import ConfigKey
     from claude_code_hooks_daemon.core.workspace import ProjectRegistry
     from claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit import LintOnEditHandler
     from claude_code_hooks_daemon.handlers.post_tool_use.validate_eslint_on_write import (
@@ -2051,6 +2052,7 @@ def _collect_enforcement_status_lines(project_path: Path) -> list[str]:
     from claude_code_hooks_daemon.handlers.pre_tool_use.subagent_full_qa_blocker import (
         SubagentFullQaBlockerHandler,
     )
+    from claude_code_hooks_daemon.handlers.registry import apply_handler_config
 
     config_file = project_path / ".claude" / "hooks-daemon.yaml"
     registry: ProjectRegistry
@@ -2085,11 +2087,13 @@ def _collect_enforcement_status_lines(project_path: Path) -> list[str]:
         handler._project_registry = registry
 
     # Asked only when ENABLED: off is its shipped default (Plan 00463), not a
-    # degraded state. Its posture comes from its declaration, not from disk, so
-    # the configured patterns are handed over the way the registry would.
-    if full_qa_settings.get("enabled"):
+    # degraded state. Its posture comes from its declaration (patterns AND
+    # scope), not from disk, so it is configured by the registry's own injector.
+    if full_qa_settings.get(ConfigKey.ENABLED):
         full_qa = SubagentFullQaBlockerHandler()
-        full_qa._full_qa_patterns = (full_qa_settings.get("options") or {}).get("full_qa_patterns")
+        apply_handler_config(
+            full_qa, full_qa_settings, full_qa_settings.get(ConfigKey.OPTIONS) or {}
+        )
         handlers.append(full_qa)
 
     statuses: list[str] = []

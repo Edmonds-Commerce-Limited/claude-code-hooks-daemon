@@ -69,17 +69,39 @@ there, and merges queued behind it would build on a red tree.
 | Sub-agent (any kind) | `./scripts/qa/llm_qa.py changed`, plus named tools the change calls for (`llm_qa.py handler_reference docs_qa ...`) and `pytest` on explicit test files or directories narrower than `tests/unit` | A commit hash and the targeted results          |
 | Coordinator          | `./scripts/qa/llm_qa.py all` in the agent's worktree, on the delivered branch head, one worktree at a time, before merging                                                                        | A merge, or the failures sent back to the agent |
 
-`llm_qa.py changed` runs the fast static tools (`magic_values`, `format`,
-`lint`, `type_check`, `pyright`, `error_hiding`), the project handlers' own
-tests, and `changed_tests`: pytest on the tests mapped by module NAME from
-every file changed since the merge base with `main`, uncommitted and untracked
-files included. The mapping is a heuristic, and the coordinator's full run is
-the backstop for what a name cannot see. When nothing maps, the summary says
-`no tests ran` rather than `0 failed`, and `changed_tests.json` lists each
-changed source file with no mapped test under `unmapped`.
+`llm_qa.py changed` runs the fast static tools, the project handlers' own
+tests, `docs_qa`, `plan_qa`, `shell_check`, `declared_invariant_pairs`, and
+`changed_tests`: pytest on the tests mapped from every file changed since the
+merge base, uncommitted and untracked files included. The runner's docstring
+(`scripts/qa/run_changed_tests.py`) owns the mapping order. In short:
 
-`llm_qa.py --read-only all` summarises the last run's JSON without running
+- A declared rule in `scripts/qa/changed_tests_map.yaml` names the tests or the
+  `changed` tools that cover a file. Markdown, shell, the dogfood config and the
+  upgrade manifests are declared there.
+- Otherwise a test file selects itself, and a module maps to its MIRRORED
+  tests (`src/<pkg>/a/b.py` maps to `tests/unit/a/test_b*.py`). With no mirror,
+  the same names anywhere under `tests/` count, and then the tests that import it.
+- A deleted module maps to the tests that still name or import it.
+
+**A changed file that maps to nothing FAILS the run**, and is named in the
+summary. So does an empty change set. The mapping is a heuristic, and the
+coordinator's full run is the backstop for what it cannot see. The remedy for
+an unmapped file is, in order: add the test it lacks; add a rule to the map;
+or pass `--allow-unmapped`, which passes and records that the full gate must
+cover it. `--base REF` changes the base, which defaults to the branch
+`origin/HEAD` names. `changed` refuses to run on the base branch itself,
+because there the merge base is HEAD.
+
+**A targeted `pytest` names its paths.** Bare `pytest` is the whole suite
+wherever it is typed, including from `cd tests/unit/handlers`, so it is denied
+there too. Write `pytest tests/unit/handlers/` instead.
+
+`llm_qa.py --read-only all` summarises the recorded results without running
 anything, so a sub-agent may use it to read a result the coordinator produced.
+Each run records the tree it judged (HEAD plus a digest of the uncommitted
+changes) in `untracked/qa/provenance.json`. A read-only summary **fails** any
+result recorded for a different tree, marked `STALE`, so an old green run
+never reads as a pass for the current code.
 
 ### The Automated Checks
 

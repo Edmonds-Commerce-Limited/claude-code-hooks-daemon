@@ -139,7 +139,9 @@ Acceptance Testing → Find Bug → Fix with TDD → Run QA → Restart FROM TES
 2. Find failing test during acceptance testing
 3. **STOP acceptance testing immediately**
 4. Fix bug using TDD (write failing test, implement fix, verify)
-5. Run FULL QA: `./scripts/qa/llm_qa.py all` (must pass 100%)
+5. Run QA (must pass 100%): main Claude runs FULL QA, `./scripts/qa/llm_qa.py all`; a
+   sub-agent runs `./scripts/qa/llm_qa.py changed`, and the coordinator runs the full gate
+   (see [QA.md](../QA.md), "Full QA Is the Coordinator's Gate")
 6. Restart daemon: `./bin/hooks-daemon restart`
 7. **Regenerate playbook** (to reflect fix)
 8. **RESTART acceptance testing FROM TEST 1.1** (not from where you left off)

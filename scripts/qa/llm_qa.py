@@ -19,12 +19,13 @@ from __future__ import annotations
 
 import fcntl
 import functools
+import hashlib
 import json
 import os
 import re
 import subprocess
 import sys
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Final, NamedTuple, TypeAlias
@@ -245,6 +246,111 @@ def run_lock(path: Path | str) -> Generator[None]:
         yield
     finally:
         os.close(fd)
+
+
+# ── Provenance: which tree a result judged ─────────────────────────
+# Plan 00463, review finding 3. `--read-only` is how a sub-agent reads the
+# coordinator's full run without running it, and nothing tied the JSON to a
+# commit: a green result from an older commit, or from before later edits,
+# read as a pass. Each run now records the tree it judged, and a read-only
+# summary FAILS a result recorded for any other tree.
+
+#: Per-tool record of the tree each result was produced from.
+PROVENANCE_FILE: Final[str] = "provenance.json"
+
+#: What a run records when the tree changed while it ran: matches no tree.
+_TREE_CHANGED_DURING_RUN: Final[str] = "changed-during-run"
+
+_STATE_HEAD: Final[str] = "head"
+_STATE_DIGEST: Final[str] = "tree_digest"
+_SHORT_SHA: Final[int] = 12
+_GIT_STATE_TIMEOUT_SECONDS: Final[int] = 60
+
+#: (exit code, stdout bytes) for one git call; injected in tests.
+GitBytesRunner = Callable[[list[str], Path], tuple[int, bytes]]
+
+
+def _run_git_bytes(args: list[str], root: Path) -> tuple[int, bytes]:
+    """One git call in ``root``; a failure to run is a non-zero result."""
+    try:
+        completed = subprocess.run(
+            ["git", *args],
+            capture_output=True,
+            cwd=str(root),
+            timeout=_GIT_STATE_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return 1, str(exc).encode()
+    return completed.returncode, completed.stdout
+
+
+def worktree_state(root: Path, *, git: GitBytesRunner = _run_git_bytes) -> dict[str, str] | None:
+    """HEAD plus a digest of every uncommitted change, or None when unreadable.
+
+    Two results match only when both the commit and the working tree do:
+    tracked edits through ``git diff HEAD``, new files through their names and
+    contents. Ignored files (``untracked/``, where results live) are not part
+    of it.
+    """
+    code, head = git(["rev-parse", "HEAD"], root)
+    if code != 0:
+        return None
+    code, diff = git(["diff", "HEAD", "--binary"], root)
+    if code != 0:
+        return None
+    code, untracked = git(["ls-files", "--others", "--exclude-standard", "-z"], root)
+    if code != 0:
+        return None
+    digest = hashlib.sha256(diff)
+    for name in sorted(entry for entry in untracked.split(b"\0") if entry):
+        digest.update(b"\0" + name + b"\0")
+        try:
+            digest.update((root / name.decode()).read_bytes())
+        except (OSError, UnicodeDecodeError) as exc:
+            # Still part of the digest, as its failure: a file that cannot be
+            # read now and could later must not match its readable self.
+            digest.update(type(exc).__name__.encode())
+    return {_STATE_HEAD: head.decode().strip(), _STATE_DIGEST: digest.hexdigest()}
+
+
+def stale_reason(recorded: dict[str, str] | None, current: dict[str, str] | None) -> str | None:
+    """Why a recorded result does not describe the current tree, or None when it does."""
+    if current is None:
+        return "the working tree cannot be read (git failed), so no result can be tied to it"
+    if not recorded:
+        return "no record of which tree this result judged; re-run the tool"
+    recorded_head = recorded.get(_STATE_HEAD, "")
+    current_head = current[_STATE_HEAD]
+    if recorded_head != current_head:
+        return (
+            f"recorded at {recorded_head[:_SHORT_SHA]}, but HEAD is "
+            f"{current_head[:_SHORT_SHA]}; re-run the tool"
+        )
+    if recorded.get(_STATE_DIGEST) != current[_STATE_DIGEST]:
+        return (
+            f"recorded at {current_head[:_SHORT_SHA]} with different uncommitted changes "
+            "(or the tree changed during that run); re-run the tool"
+        )
+    return None
+
+
+def read_provenance(qa_dir: Path) -> dict[str, dict[str, str]]:
+    """The per-tool record; missing or unreadable reads as no record at all."""
+    try:
+        data = json.loads((qa_dir / PROVENANCE_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def record_provenance(qa_dir: Path, tools: list[str], state: dict[str, str]) -> None:
+    """Record ``state`` as the tree each of ``tools`` judged, keeping the others."""
+    recorded = read_provenance(qa_dir)
+    for tool in tools:
+        recorded[tool] = dict(state)
+    qa_dir.mkdir(parents=True, exist_ok=True)
+    (qa_dir / PROVENANCE_FILE).write_text(json.dumps(recorded, indent=2), encoding="utf-8")
 
 
 # A QA tool's parsed JSON report. Every tool writes its own schema, so the
@@ -514,8 +620,9 @@ _TARGETED_ONLY_TOOLS: Final[frozenset[str]] = frozenset({"changed_tests"})
 ALL_TOOL_NAMES = [name for name in TOOL_REGISTRY if name not in _TARGETED_ONLY_TOOLS]
 
 #: `changed`: what a sub-agent runs before handing a commit to the coordinator.
-#: The fast static tools, the project handlers' own suite (seconds), and the
-#: tests mapped from the change set. Never `tests`, which is the whole suite.
+#: The fast static tools, the project handlers' own suite (seconds), the tools
+#: `changed_tests_map.yaml` names as covering non-Python files, and the tests
+#: mapped from the change set. Never `tests`, which is the whole suite.
 CHANGED_TOOL_NAMES: Final[list[str]] = [
     "magic_values",
     "format",
@@ -524,6 +631,10 @@ CHANGED_TOOL_NAMES: Final[list[str]] = [
     "pyright",
     "error_hiding",
     "project_handlers",
+    "docs_qa",
+    "plan_qa",
+    "shell_check",
+    "declared_invariant_pairs",
     "changed_tests",
 ]
 
@@ -603,27 +714,44 @@ def _named_failures(data: QaReport, json_file: str) -> str:
 
 
 def _summarize_changed_tests(data: QaReport) -> str:
-    """The targeted run, saying outright when it ran nothing.
+    """The targeted run, saying outright when it ran nothing and what it could not map.
 
     ``0 failed`` from an empty selection reads as a pass, and a sub-agent
-    handing that to the coordinator as evidence would be overstating it.
+    handing that to the coordinator as evidence would be overstating it. An
+    unmapped file is NAMED, because a count is what agents skim past.
     """
     s = data.get("summary", {})
     considered = s.get("files_considered", 0)
     selected = s.get("test_files_selected", 0)
-    unmapped = len(data.get("unmapped", []))
-    scope = f"{selected} test files from {considered} changed files ({unmapped} unmapped)"
+    unmapped_files = [str(name) for name in data.get("unmapped", [])]
+    unmapped = len(unmapped_files)
     if selected == 0:
-        return (
+        line = (
             f"no tests ran: no test files mapped from {considered} changed files "
             f"({unmapped} unmapped)"
         )
-    errors = s.get("errors", 0)
-    error_part = f", {errors} errored" if errors else ""
-    line = (
-        f"{s.get('passed', 0)} passed, {s.get('failed', 0)} failed{error_part}, "
-        f"{s.get('skipped', 0)} skipped | {scope}"
-    )
+    else:
+        errors = s.get("errors", 0)
+        error_part = f", {errors} errored" if errors else ""
+        line = (
+            f"{s.get('passed', 0)} passed, {s.get('failed', 0)} failed{error_part}, "
+            f"{s.get('skipped', 0)} skipped | {selected} test files from {considered} "
+            f"changed files ({unmapped} unmapped)"
+        )
+    if unmapped_files:
+        verdict = (
+            "allowed, the full gate must cover them"
+            if data.get("unmapped_allowed")
+            else (
+                "each FAILS the run: add a test, a changed_tests_map.yaml rule, "
+                "or pass --allow-unmapped"
+            )
+        )
+        shown = unmapped_files[:_MAX_NAMED_FAILURES]
+        more = unmapped - len(shown)
+        line += f"\n   unmapped ({verdict}): " + ", ".join(shown)
+        if more:
+            line += f" ... and {more} more (see changed_tests.json)"
     return line + _named_failures(data, "changed_tests.json")
 
 
@@ -823,6 +951,9 @@ _DETAIL_MISSING_WARNING: Final[str] = "⚠️  DETAIL MISSING:"
 # Prefix for an explanation the tool itself recorded.
 _REPORT_ERROR_LABEL: Final[str] = "⚠️  TOOL ERROR:"
 
+# Prefix for a `--read-only` result recorded for a different tree (Plan 00463).
+_STALE_LABEL: Final[str] = "⚠️  STALE:"
+
 # Where a tool may record why it could not run. Two locations because the
 # shipped scripts genuinely use both: run_smoke_test.sh writes a top-level
 # `error`, run_shell_check.sh nests one inside `summary`.
@@ -916,11 +1047,16 @@ def resolved_command(config: ToolConfig) -> list[str]:
     ]
 
 
-def run_tool(name: str) -> int:
+def tool_command(name: str, extra_args: Sequence[str] = ()) -> list[str]:
+    """A tool's registered command with ``extra_args`` appended, placeholder unfilled."""
+    return [*TOOL_REGISTRY[name].command, *extra_args]
+
+
+def run_tool(name: str, extra_args: Sequence[str] = ()) -> int:
     """Run a QA tool, suppressing its stdout/stderr. Returns exit code."""
     config = TOOL_REGISTRY[name]
     result = subprocess.run(
-        resolved_command(config),
+        [*resolved_command(config), *extra_args],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         cwd=str(PROJECT_ROOT),
@@ -928,16 +1064,29 @@ def run_tool(name: str) -> int:
     return result.returncode
 
 
-def summarize_tool(name: str, exit_code: int | None = None) -> tuple[bool, str]:
+def summarize_tool(
+    name: str, exit_code: int | None = None, *, stale: str | None = None
+) -> tuple[bool, str]:
     """Read JSON output and produce a 2-line summary.
 
     Args:
         name: Tool name from TOOL_REGISTRY.
         exit_code: Exit code from running the tool. If non-zero, overrides
             JSON pass/fail (catches cases where JSON lies about results).
+        stale: Why the recorded result does not describe the current tree
+            (``--read-only`` only). A stale result FAILS, however green.
 
     Returns (passed, formatted_summary_string).
     """
+    passed, text = _summarize_recorded(name, exit_code)
+    if stale is None:
+        return passed, text
+    marked = text.replace("✅", "❌", 1)
+    return False, f"{marked}   {_STALE_LABEL} {stale}\n"
+
+
+def _summarize_recorded(name: str, exit_code: int | None) -> tuple[bool, str]:
+    """The summary of the JSON on disk, before any provenance judgement."""
     config = TOOL_REGISTRY[name]
     json_path = QA_OUTPUT_DIR / config.json_file
 
@@ -1020,6 +1169,50 @@ def resolve_tools(names: list[str]) -> tuple[list[str], list[str]]:
     return tools, unknown
 
 
+#: Options `changed` forwards to `run_changed_tests.py` (Plan 00463).
+_BASE_OPTION: Final[str] = "--base"
+_ALLOW_UNMAPPED_OPTION: Final[str] = "--allow-unmapped"
+_CHANGED_TESTS_TOOL: Final[str] = "changed_tests"
+
+
+def split_changed_options(args: list[str]) -> tuple[list[str], list[str], str | None]:
+    """Take ``--base REF`` and ``--allow-unmapped`` out of ``args`` for ``changed_tests``.
+
+    Returns:
+        ``(remaining, forwarded, error)``. An option given without a tool
+        that uses it is an error rather than a silently ignored flag.
+    """
+    remaining: list[str] = []
+    forwarded: list[str] = []
+    index = 0
+    while index < len(args):
+        argument = args[index]
+        index += 1
+        if argument == _ALLOW_UNMAPPED_OPTION:
+            forwarded.append(argument)
+        elif argument == _BASE_OPTION:
+            if index >= len(args) or args[index].startswith("-"):
+                return args, [], f"{_BASE_OPTION} needs a ref"
+            forwarded.extend([_BASE_OPTION, args[index]])
+            index += 1
+        elif argument.startswith(f"{_BASE_OPTION}="):
+            forwarded.extend([_BASE_OPTION, argument.split("=", 1)[1]])
+        else:
+            remaining.append(argument)
+    if forwarded:
+        tools, _ = resolve_tools(remaining)
+        if _CHANGED_TESTS_TOOL not in tools:
+            return (
+                args,
+                [],
+                (
+                    f"{_BASE_OPTION} and {_ALLOW_UNMAPPED_OPTION} apply to "
+                    f"`{_SELECTION_CHANGED}` (changed_tests) only"
+                ),
+            )
+    return remaining, forwarded, None
+
+
 def main() -> int:
     """Entry point."""
     args = sys.argv[1:]
@@ -1030,11 +1223,21 @@ def main() -> int:
         args.remove("--read-only")
 
     if not args or "--help" in args or "-h" in args:
-        print("Usage: llm_qa.py [--read-only] <tool|all|changed> [tool ...]")
+        print(
+            "Usage: llm_qa.py [--read-only] <tool|all|changed> [tool ...] "
+            f"[{_BASE_OPTION} REF] [{_ALLOW_UNMAPPED_OPTION}]"
+        )
         print(f"  {_SELECTION_ALL}: the full suite (the coordinator's gate)")
         print(f"  {_SELECTION_CHANGED}: targeted, {', '.join(CHANGED_TOOL_NAMES)}")
+        print(f"  {_BASE_OPTION}, {_ALLOW_UNMAPPED_OPTION}: passed to changed_tests")
+        print("  --read-only: summarise; a result recorded for another tree FAILS")
         print(f"Tools: {', '.join(TOOL_REGISTRY)}")
         return EXIT_SUCCESS
+
+    args, forwarded, option_error = split_changed_options(args)
+    if option_error is not None:
+        print(f"llm_qa: {option_error}", file=sys.stderr)
+        return EXIT_FAILURE
 
     tools, unknown = resolve_tools(args)
     if unknown:
@@ -1064,26 +1267,42 @@ def main() -> int:
         print(busy_message(str(lock_file)), file=sys.stderr)
         return EXIT_BUSY
 
-    return _run_tools(tools, read_only=False)
+    return _run_tools(tools, read_only=False, forwarded=forwarded)
 
 
-def _run_tools(tools: list[str], *, read_only: bool) -> int:
-    """Run (or merely summarize) each tool and print the overall verdict."""
+def _run_tools(tools: list[str], *, read_only: bool, forwarded: Sequence[str] = ()) -> int:
+    """Run (or merely summarize) each tool and print the overall verdict.
+
+    A run records the tree it judged (before and after must agree, or the
+    record matches no tree). A read-only summary checks each result against
+    that record and fails one recorded for another tree.
+    """
     all_passed = True
     tool_results: dict[str, tuple[bool, str]] = {}
+    before = worktree_state(PROJECT_ROOT)
+    recorded = read_provenance(QA_OUTPUT_DIR) if read_only else {}
 
     for name in tools:
         # Run the tool (unless read-only)
         exit_code: int | None = None
-        if not read_only:
-            exit_code = run_tool(name)
+        stale: str | None = None
+        if read_only:
+            stale = stale_reason(recorded.get(name), before)
+        else:
+            extra = forwarded if name == _CHANGED_TESTS_TOOL else ()
+            exit_code = run_tool(name, extra)
 
         # Summarize from JSON, passing exit code for cross-check
-        passed, summary = summarize_tool(name, exit_code=exit_code)
+        passed, summary = summarize_tool(name, exit_code=exit_code, stale=stale)
         tool_results[name] = (passed, summary)
         print(summary, end="")
         if not passed:
             all_passed = False
+
+    if not read_only and before is not None:
+        after = worktree_state(PROJECT_ROOT)
+        state = before if after == before else {**before, _STATE_DIGEST: _TREE_CHANGED_DURING_RUN}
+        record_provenance(QA_OUTPUT_DIR, tools, state)
 
     # Overall summary
     total = len(tools)

@@ -23,10 +23,12 @@ without looking broken:
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
 
+from claude_code_hooks_daemon.config.loader import ConfigLoader
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.handler_scope import HandlerScope, scope_admits
@@ -35,59 +37,29 @@ from claude_code_hooks_daemon.daemon.synthetic_traffic import (
     SYNTHETIC_SOURCE_FIELD,
 )
 from claude_code_hooks_daemon.handlers.pre_tool_use.subagent_full_qa_blocker import (
+    PYTEST_VALUE_OPTIONS,
     FullQaPattern,
     SubagentFullQaBlockerHandler,
     find_full_qa_invocation,
     parse_full_qa_patterns,
 )
 
-#: This repository's own declaration, restated so the unit suite does not
-#: depend on the YAML. The dogfood config is checked separately, by the
-#: integration suites that load it.
-_PYTEST_VALUE_FLAGS = [
-    "-k",
-    "-m",
-    "-n",
-    "-p",
-    "-c",
-    "-o",
-    "-W",
-    "--maxfail",
-    "--deselect",
-    "--ignore",
-    "--ignore-glob",
-    "--rootdir",
-    "--tb",
-    "--durations",
-    "--basetemp",
-    "--junitxml",
-]
 
-_REPO_PATTERNS: list[dict[str, Any]] = [
-    {
-        "id": "llm-qa-whole-suite",
-        "command": "llm_qa.py",
-        "full_args": ["all", "tests"],
-        "read_only_flags": ["--read-only", "--help", "-h"],
-    },
-    {"id": "run-all", "command": "run_all.sh"},
-    {"id": "run-tests", "command": "run_tests.sh"},
-    {"id": "validate-worktrees", "command": "validate_worktrees.sh"},
-    {
-        "id": "pytest-whole-suite",
-        "command": "pytest",
-        "full_args": ["tests", "tests/unit", "."],
-        "bare_is_full": True,
-        "value_flags": _PYTEST_VALUE_FLAGS,
-        "read_only_flags": ["--collect-only", "--co", "--help", "-h", "--version"],
-    },
-]
+def _live_options() -> dict[str, Any]:
+    """This repository's REAL declaration, read from the dogfood config.
 
-_TARGETED = [
-    "./scripts/qa/llm_qa.py changed",
-    "./scripts/qa/llm_qa.py <tool> [<tool> ...]",
-    "pytest <explicit test files or directories>",
-]
+    Read rather than restated: a restated copy stays green while the YAML the
+    live guard runs on drifts (review finding 12 on Plan 00463).
+    """
+    config = ConfigLoader.load(_REPO_ROOT / ".claude" / "hooks-daemon.yaml")
+    options = config["handlers"]["pre_tool_use"]["subagent_full_qa_blocker"]["options"]
+    assert isinstance(options, dict)
+    return options
+
+
+_REPO_ROOT = Path(__file__).resolve().parents[4]
+_REPO_PATTERNS: list[dict[str, Any]] = _live_options()["full_qa_patterns"]
+_TARGETED: list[str] = _live_options()["targeted_qa_commands"]
 
 
 def _handler(
@@ -161,6 +133,34 @@ _FULL_RUNS: list[tuple[str, str]] = [
     ("env PYTHONPATH=src pytest", "pytest-whole-suite"),
     ("uv run pytest", "pytest-whole-suite"),
     ("sudo -E pytest tests/", "pytest-whole-suite"),
+    # A flag's value is not a path (review finding 2): pytest's real grammar.
+    ("pytest --timeout 60", "pytest-whole-suite"),
+    ("pytest --cov src", "pytest-whole-suite"),
+    ("pytest --numprocesses 8", "pytest-whole-suite"),
+    ("pytest --log-level DEBUG", "pytest-whole-suite"),
+    ("pytest --override-ini addopts=", "pytest-whole-suite"),
+    ("pytest --tb short", "pytest-whole-suite"),
+    ("pytest -p no:randomly", "pytest-whole-suite"),
+    ("pytest --maxfail 1", "pytest-whole-suite"),
+    ("pytest --basetemp /tmp/pt", "pytest-whole-suite"),
+    # `--cov` takes an optional value, so argparse consumes the next word.
+    ("pytest --cov tests/unit/handlers/test_x.py", "pytest-whole-suite"),
+    # Project runners with their own flags (review finding 4).
+    ("uv run --frozen pytest", "pytest-whole-suite"),
+    ("uv run -- pytest", "pytest-whole-suite"),
+    ("uv run -q pytest", "pytest-whole-suite"),
+    ("uv --directory x run pytest", "pytest-whole-suite"),
+    ("uv run --directory x pytest", "pytest-whole-suite"),
+    ("uv run --with pytest-xdist pytest", "pytest-whole-suite"),
+    ("poetry run -- pytest", "pytest-whole-suite"),
+    ("uvx pytest", "pytest-whole-suite"),
+    # Smaller evasions (review finding 5).
+    ("./scripts/qa/llm_qa.py all>out.txt", "llm-qa-whole-suite"),
+    ("./scripts/qa/llm_qa.py all>>out.txt 2>&1", "llm-qa-whole-suite"),
+    ("pytest $PWD/tests", "pytest-whole-suite"),
+    ("pytest ${PWD}/tests", "pytest-whole-suite"),
+    ("env -C /srv/wt pytest", "pytest-whole-suite"),
+    ("env --chdir=/srv/wt pytest", "pytest-whole-suite"),
 ]
 
 _NOT_FULL_RUNS: list[str] = [
@@ -179,6 +179,15 @@ _NOT_FULL_RUNS: list[str] = [
     "pytest -k handler tests/unit/handlers",
     "pytest --collect-only -q",
     "pytest --co",
+    # A value flag's `.` is its value, not the whole-suite operand (finding 2).
+    "pytest --cov . tests/unit/handlers/x.py",
+    "pytest --confcutdir . tests/unit/x.py",
+    "pytest --rootdir . tests/unit/x.py",
+    "pytest --cov=src tests/unit/x.py",
+    "pytest --timeout 60 tests/unit/handlers/test_x.py",
+    "uv run --frozen pytest tests/unit/handlers/test_x.py",
+    "uv run -- pytest tests/unit/core",
+    "./scripts/qa/llm_qa.py changed>out.txt",
     # Mentions, not invocations: the guard parses, it does not substring-match.
     'grep -rn "llm_qa.py all" CLAUDE/',
     "grep -rn llm_qa.py all",
@@ -245,6 +254,89 @@ class TestThePatternShapes:
         assert (
             find_full_qa_invocation("pytest --ignore=tests/slow tests/unit/x.py", patterns) is None
         )
+
+
+class TestOperandsArePaths:
+    """Review finding 2: only a path-like word targets a run.
+
+    A word after an undeclared flag is that flag's value far more often than a
+    path, and pytest and its plugins have more value flags than any list will
+    hold. So a non-flag word counts as a targeting operand only when it looks
+    like a path, and anything else is ignored.
+    """
+
+    @staticmethod
+    def _patterns() -> list[FullQaPattern]:
+        patterns, problems = parse_full_qa_patterns(
+            [{"id": "p", "command": "pytest", "full_args": ["tests"], "bare_is_full": True}]
+        )
+        assert not problems
+        return patterns
+
+    @pytest.mark.parametrize(
+        "operand",
+        ["tests/unit/test_x.py", "test_x.py", "tests/unit/test_x.py::TestA", "sub/dir"],
+    )
+    def test_a_path_like_word_targets_the_run(self, operand: str) -> None:
+        assert find_full_qa_invocation(f"pytest {operand}", self._patterns()) is None
+
+    @pytest.mark.parametrize("value", ["60", "DEBUG", "short", "addopts=", "8"])
+    def test_a_bare_word_after_an_unknown_flag_is_its_value(self, value: str) -> None:
+        match = find_full_qa_invocation(f"pytest --some-plugin-flag {value}", self._patterns())
+        assert match is not None
+
+    def test_a_word_naming_a_directory_under_cwd_targets_the_run(self, tmp_path: Path) -> None:
+        (tmp_path / "handlers").mkdir()
+        assert find_full_qa_invocation("pytest handlers", self._patterns(), cwd=tmp_path) is None
+
+    def test_a_word_naming_nothing_under_cwd_does_not(self, tmp_path: Path) -> None:
+        assert (
+            find_full_qa_invocation("pytest handlers", self._patterns(), cwd=tmp_path) is not None
+        )
+
+
+class TestThePytestOptionGrammar:
+    """``option_grammar: pytest`` brings pytest's real value-taking options."""
+
+    def test_every_value_option_of_the_running_pytest_is_known(
+        self, pytestconfig: pytest.Config
+    ) -> None:
+        """Pinned to the parser of THIS pytest and its installed plugins.
+
+        ``optparser`` is pytest's private argparse parser. It is read here
+        because it is the grammar itself: a hand-kept list checked against
+        nothing is how the holes in review finding 2 came about.
+        """
+        parser = pytestconfig._parser.optparser
+        takes_value = {
+            option
+            for action in parser._actions
+            if action.nargs != 0
+            for option in action.option_strings
+        }
+        assert takes_value, "the parser exposed no options; this test would prove nothing"
+        assert takes_value <= PYTEST_VALUE_OPTIONS, sorted(takes_value - PYTEST_VALUE_OPTIONS)
+
+    def test_the_grammar_consumes_a_value_that_looks_like_a_path(self) -> None:
+        patterns, _ = parse_full_qa_patterns(
+            [
+                {
+                    "id": "p",
+                    "command": "pytest",
+                    "full_args": ["tests"],
+                    "bare_is_full": True,
+                    "option_grammar": "pytest",
+                }
+            ]
+        )
+        assert find_full_qa_invocation("pytest --basetemp /tmp/x", patterns) is not None
+
+    def test_an_unknown_grammar_is_reported(self) -> None:
+        patterns, problems = parse_full_qa_patterns(
+            [{"id": "p", "command": "pytest", "option_grammar": "nose"}]
+        )
+        assert patterns == []
+        assert any("option_grammar" in problem for problem in problems)
 
 
 class TestConfigParsing:
@@ -351,6 +443,11 @@ class TestWhatTheHandlerMatches:
     def test_an_unconfigured_handler_matches_nothing(self) -> None:
         assert _handler(patterns=[]).matches(_bash("./scripts/qa/llm_qa.py all")) is False
 
+    def test_the_events_cwd_decides_whether_a_bare_word_is_a_path(self, tmp_path: Path) -> None:
+        (tmp_path / "handlers").mkdir()
+        assert _handler().matches(_bash("pytest handlers", cwd=str(tmp_path))) is False
+        assert _handler().matches(_bash("pytest nothing_here", cwd=str(tmp_path))) is True
+
     def test_a_config_change_after_first_use_is_honoured(self) -> None:
         """Options arrive by setattr after construction; parsing must not freeze the first view."""
         handler = _handler(patterns=[])
@@ -409,6 +506,14 @@ class TestDefaultsAndPosture:
 
     def test_a_clean_declaration_reports_nothing(self, tmp_path: Any) -> None:
         assert _handler().get_enforcement_status(tmp_path) == []
+
+    @pytest.mark.parametrize("scope", [HandlerScope.ALL, HandlerScope.MAIN])
+    def test_a_scope_other_than_sub_is_reported(self, tmp_path: Any, scope: HandlerScope) -> None:
+        """Review finding 7: `scope: ALL` from config denies the coordinator's own gate."""
+        handler = _handler()
+        handler.scope = scope
+        status = handler.get_enforcement_status(tmp_path)
+        assert any("scope" in line and "SUB" in line for line in status), status
 
 
 class TestTheAcceptanceTestsRunInASubagentContext:

@@ -47,12 +47,14 @@ Run these checks in order:
 
 2. **QA checks** (ALL must pass): `./scripts/qa/llm_qa.py --read-only all`
 
-   - Reads the recorded results of main Claude's full run (RELEASING.md
-     Step 8) without re-running anything. This agent is a sub-agent, so it
-     never starts the full suite itself; see `CLAUDE/QA.md`, "Full QA Is the
-     Coordinator's Gate"
-   - **ABORT if any check fails or has no recorded result**: User must run
-     the full gate on the main thread, fix issues, and re-run release
+   - Reads the results of the full run main Claude makes on this clean HEAD
+     before dispatching this agent (RELEASING.md Step 1b), without re-running
+     anything. This agent is a sub-agent, so it never starts the full suite
+     itself; see `CLAUDE/QA.md`, "Full QA Is the Coordinator's Gate"
+   - A result recorded for any other tree reads `STALE` and fails, so an old
+     green run cannot pass this gate
+   - **ABORT if any check fails, is STALE, or has no recorded result**: main
+     Claude must run the full gate on this HEAD, fix issues, and re-run release
 
 3. **Version consistency**: All version strings in files match current version
 

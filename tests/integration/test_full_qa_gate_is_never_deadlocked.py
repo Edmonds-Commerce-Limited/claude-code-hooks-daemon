@@ -147,3 +147,35 @@ class TestTheControlsProveTheChainIsArmed:
         assert result.result.decision == Decision.DENY
         guard = HandlerID.SUBAGENT_FULL_QA_BLOCKER.display_name
         assert _verdict(result, guard) == Decision.DENY
+
+
+class TestTheLiveDeclarationThroughTheRegistry:
+    """Review finding 12: this repository's YAML, configured by the registry.
+
+    A restated copy of the patterns stays green while the YAML the daemon
+    loads drifts, so these go through ``register_all()`` on the real config.
+    """
+
+    _GUARD = HandlerID.SUBAGENT_FULL_QA_BLOCKER.display_name
+
+    @pytest.mark.parametrize(
+        "command",
+        [_FULL_GATE, "pytest", "./scripts/qa/run_all.sh", "pytest --cov src"],
+    )
+    def test_a_subagents_full_run_is_denied(self, armed_router: EventRouter, command: str) -> None:
+        result = _route(armed_router, _event("Bash", {"command": command}, agent_id=_SUBAGENT_ID))
+        assert _verdict(result, self._GUARD) == Decision.DENY, command
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "./scripts/qa/llm_qa.py changed",
+            "./scripts/qa/llm_qa.py --read-only all",
+            "pytest tests/unit/handlers/pre_tool_use/test_subagent_full_qa_blocker.py",
+        ],
+    )
+    def test_a_subagents_targeted_run_is_allowed(
+        self, armed_router: EventRouter, command: str
+    ) -> None:
+        result = _route(armed_router, _event("Bash", {"command": command}, agent_id=_SUBAGENT_ID))
+        assert _verdict(result, self._GUARD) is None, command

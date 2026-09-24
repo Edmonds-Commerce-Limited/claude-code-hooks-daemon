@@ -1606,7 +1606,7 @@ Each developer agent in their worktree:
 1. Marks task `in_progress`
 2. Writes failing tests FIRST (TDD)
 3. Implements handler to make tests pass
-4. Runs `./scripts/qa/llm_qa.py all`
+4. Runs `./scripts/qa/llm_qa.py changed` (targeted; the lead runs the full gate)
 5. Verifies daemon restarts successfully
 6. Commits with "Plan 00028: " prefix
 7. Updates task to `ready_for_testing` (NOT completed)

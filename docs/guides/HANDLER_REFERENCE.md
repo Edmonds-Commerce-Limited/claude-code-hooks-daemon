@@ -1398,22 +1398,24 @@ handlers:
 
 **Description:** Denies a full-suite QA run when the caller is a **sub-agent**. The full gate belongs to the coordinator, which runs it once per delivery, on the branch head, one run at a time. Several agents each running the whole suite exhaust the host, and the coordinator repeats those runs before merging anyway. The deny names the targeted commands the project declares.
 
-**What it matches:** a Bash command that would RUN a declared `full_qa_patterns` entry. The command is split into commands, and each is resolved through wrappers (`timeout`, `env`, `nohup`, `sudo`), interpreters (`python3 x.py`, `python -m pytest`, `bash -c '...'`), grouping, and `uv run`/`poetry run` to the program it starts.
+**What it matches:** a Bash command that would RUN a declared `full_qa_patterns` entry. The command is split into commands, and each is resolved through wrappers (`timeout`, `env`, `nohup`, `sudo`), interpreters (`python3 x.py`, `python -m pytest`, `bash -c '...'`), grouping, `uv run`/`poetry run`/`pdm run`/`hatch run` (their own flags skipped), and `uvx`/`uv tool run` to the program it starts.
 
-**Always allowed:** the main thread's own run; a mention in a commit message, `grep`, `echo` or `cat`; a run carrying one of the pattern's `read_only_flags`; and any run whose operands do not name the whole suite.
+**Always allowed:** the main thread's own run; a mention in a commit message, `grep`, `echo` or `cat`; a run carrying one of the pattern's `read_only_flags`; and any run that targets a path narrower than the whole suite.
 
 **Options:**
 
-| Option                 | Default | Meaning                                                                            |
-| ---------------------- | ------- | ---------------------------------------------------------------------------------- |
-| `full_qa_patterns`     | `[]`    | Entries `{id, command, full_args?, bare_is_full?, read_only_flags?, value_flags?}` |
-| `targeted_qa_commands` | `[]`    | Commands the deny lists under "RUN INSTEAD"; empty names the generic form          |
+| Option                 | Default | Meaning                                                                                             |
+| ---------------------- | ------- | --------------------------------------------------------------------------------------------------- |
+| `full_qa_patterns`     | `[]`    | Entries `{id, command, full_args?, bare_is_full?, read_only_flags?, value_flags?, option_grammar?}` |
+| `targeted_qa_commands` | `[]`    | Commands the deny lists under "RUN INSTEAD"; empty names the generic form                           |
 
-In a pattern, `command` is the program's basename. `full_args` lists the operands that make it the whole suite; omit it and every run is full. `bare_is_full` makes a run with no operand full. `value_flags` are flags whose next word is a value rather than an operand (`pytest -k expr`). A malformed entry is skipped and logged, and enabling the handler with no usable pattern is reported by `hooks-daemon check`.
+In a pattern, `command` is the program's basename. `full_args` lists the operands that make it the whole suite; omit it and every run is full. `bare_is_full` makes a run that targets no path full. Only a PATH-LIKE word targets a run: one containing `/` or `::`, ending in `.py`, or naming something that exists in the command's directory. Any other word is taken as a flag's value (`--timeout 60`, `--log-level DEBUG`), so an unlisted flag cannot make a full run look targeted. `value_flags` lists flags whose value can look like a path (`--rootdir .`), and `option_grammar: pytest` adds every value-taking option of pytest and its common plugins. A malformed entry is skipped and logged, and enabling the handler with no usable pattern is reported by `hooks-daemon check`.
+
+**Scope must stay `SUB`.** Any other `scope:` override makes the handler deny the coordinator's own full gate, so nobody can run it. `hooks-daemon check` reports that as a misconfiguration.
 
 **Coverage:** proven for Agent-tool sub-agents and in-process teammates, whose payloads carry `agent_id`. A Workflow-tool agent's payload is unmeasured, so the handler is not claimed to see one. It keys only on `agent_id` being present, so no change is needed if Workflow agents turn out to carry it.
 
-**Limit:** a resource guard for cooperating agents, not a security boundary. A substitution inside double quotes, or a script that runs the suite under an undeclared name, is not seen. The coordinator's full gate still runs before every merge.
+**Limit:** a resource guard for cooperating agents, not a security boundary. Not seen: a substitution inside double quotes, a script that runs the suite under an undeclared name, arguments supplied by `xargs`, and `env -S`. The coordinator's full gate still runs before every merge.
 
 **Config example:**
 
@@ -1429,7 +1431,7 @@ handlers:
             command: pytest
             full_args: [tests, .]
             bare_is_full: true
-            value_flags: [-k, -m, -n]
+            option_grammar: pytest
             read_only_flags: [--collect-only]
         targeted_qa_commands:
           - "pytest <explicit test files or directories>"

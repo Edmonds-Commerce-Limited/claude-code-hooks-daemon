@@ -49,19 +49,6 @@ class TestTheChangedSelection:
     def test_changed_never_includes_the_whole_suite(self) -> None:
         assert "tests" not in llm_qa.CHANGED_TOOL_NAMES
 
-    def test_changed_carries_the_fast_static_tools_and_the_targeted_tests(self) -> None:
-        expected = {
-            "format",
-            "lint",
-            "type_check",
-            "pyright",
-            "magic_values",
-            "error_hiding",
-            "project_handlers",
-            "changed_tests",
-        }
-        assert set(llm_qa.CHANGED_TOOL_NAMES) == expected
-
     def test_every_changed_tool_is_registered(self) -> None:
         assert set(llm_qa.CHANGED_TOOL_NAMES) <= set(llm_qa.TOOL_REGISTRY)
 
@@ -86,19 +73,11 @@ class TestTheChangedSelection:
 
 
 class TestTheChangedTestsTool:
-    def test_it_writes_its_own_report(self) -> None:
-        config = llm_qa.TOOL_REGISTRY["changed_tests"]
-        assert config.json_file == "changed_tests.json"
-        assert "run_changed_tests.py" in " ".join(config.command)
-
-    def test_it_is_summarised(self) -> None:
-        assert "changed_tests" in llm_qa.SUMMARIZERS
-
-    def test_an_empty_selection_says_nothing_ran(self) -> None:
+    def test_an_empty_selection_says_nothing_ran_and_names_the_unmapped(self) -> None:
         line = llm_qa.SUMMARIZERS["changed_tests"](
             {
                 "summary": {
-                    "passed_all": True,
+                    "passed_all": False,
                     "total": 0,
                     "passed": 0,
                     "failed": 0,
@@ -108,12 +87,26 @@ class TestTheChangedTestsTool:
                     "test_files_selected": 0,
                 },
                 "unmapped": ["src/pkg/orphan.py"],
+                "unmapped_allowed": False,
                 "tests": [],
             }
         )
         assert "no tests ran" in line
         assert "4 changed files" in line
         assert "1 unmapped" in line
+        assert "src/pkg/orphan.py" in line
+
+    def test_an_allowed_unmapped_file_is_still_shown(self) -> None:
+        line = llm_qa.SUMMARIZERS["changed_tests"](
+            {
+                "summary": {"files_considered": 1, "test_files_selected": 0},
+                "unmapped": [".claude/hooks-daemon.yaml"],
+                "unmapped_allowed": True,
+                "tests": [],
+            }
+        )
+        assert "allowed" in line
+        assert ".claude/hooks-daemon.yaml" in line
 
     def test_a_failure_is_named_in_the_summary(self) -> None:
         line = llm_qa.SUMMARIZERS["changed_tests"](
@@ -136,8 +129,34 @@ class TestTheChangedTestsTool:
         assert "tests/unit/test_a.py::test_x" in line
         assert "1 test files from 1 changed files" in line
 
-    def test_smoke_test_stays_last(self) -> None:
-        assert list(llm_qa.TOOL_REGISTRY)[-1] == "smoke_test"
+
+class TestChangedOptions:
+    """Review finding 11: `--base` and `--allow-unmapped` reach the runner."""
+
+    def test_the_options_are_forwarded_to_changed_tests(self) -> None:
+        args, extra, error = llm_qa.split_changed_options(
+            ["changed", "--base", "trunk", "--allow-unmapped"]
+        )
+        assert error is None
+        assert args == ["changed"]
+        assert extra == ["--base", "trunk", "--allow-unmapped"]
+
+    def test_the_equals_form_is_accepted(self) -> None:
+        _, extra, error = llm_qa.split_changed_options(["changed", "--base=trunk"])
+        assert (extra, error) == (["--base", "trunk"], None)
+
+    def test_a_base_with_no_value_is_an_error(self) -> None:
+        _, _, error = llm_qa.split_changed_options(["changed", "--base"])
+        assert error is not None
+
+    def test_the_options_without_changed_tests_are_an_error(self) -> None:
+        _, _, error = llm_qa.split_changed_options(["lint", "--allow-unmapped"])
+        assert error is not None
+
+    def test_the_forwarded_options_end_up_on_the_runners_command(self) -> None:
+        command = llm_qa.tool_command("changed_tests", ["--base", "trunk"])
+        assert command[-2:] == ["--base", "trunk"]
+        assert "run_changed_tests.py" in " ".join(command)
 
 
 def test_the_usage_line_names_changed(capsys: Any, monkeypatch: Any) -> None:

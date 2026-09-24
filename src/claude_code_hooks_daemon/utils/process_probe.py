@@ -73,6 +73,9 @@ from typing import Final
 
 from claude_code_hooks_daemon.utils.command_evasion import normalise_line_continuations
 from claude_code_hooks_daemon.utils.shell_segmentation import (
+    END_OF_OPTIONS,
+    FLAG_PREFIX,
+    LONE_DASH,
     peel_command_wrappers,
     strip_quoted_heredoc_bodies,
 )
@@ -741,10 +744,6 @@ _SIGNAL_ZERO: Final = "-0"
 _OWN_PID: Final = "$$"
 
 _SHORT_CLUSTER: Final[re.Pattern[str]] = re.compile(r"^-[A-Za-z0-9]+$")
-_END_OF_OPTIONS: Final = "--"
-_DASH: Final = "-"
-#: A lone dash is an OPERAND meaning stdin, never a flag.
-_LONE_DASH: Final = "-"
 
 
 #: Punctuation bash strips off the front of a command word while deciding what
@@ -838,10 +837,10 @@ def _resolve(span: _Span) -> tuple[list[_Word], _Invocation] | None:
         if _is_redirect(argument):
             index += 2 if _is_bare_redirect(argument) else 1
             continue
-        if argument == _END_OF_OPTIONS:
+        if argument == END_OF_OPTIONS:
             index += 1
             continue
-        if argument.startswith(_DASH) and argument != _LONE_DASH:
+        if argument.startswith(FLAG_PREFIX) and argument != LONE_DASH:
             flags.append(argument)
             if _takes_a_value(argument):
                 index += 2
@@ -1389,10 +1388,10 @@ def _skip_wrapper_operands(
 
     while index < len(words):
         argument = words[index].text
-        if argument == _END_OF_OPTIONS:
+        if argument == END_OF_OPTIONS:
             index += 1
             continue
-        if argument.startswith(_DASH) and argument != _LONE_DASH:
+        if argument.startswith(FLAG_PREFIX) and argument != LONE_DASH:
             transparent = transparent or argument in spec.transparent_flags
             index += 2 if argument in spec.value_flags else 1
             continue
@@ -1416,7 +1415,7 @@ def _shell_script_head(words: list[_Word], index: int) -> str | None:
     if name not in _INTERPRETERS:
         return None
     for word in words[index + 1 :]:
-        if not word.text.startswith(_DASH):
+        if not word.text.startswith(FLAG_PREFIX):
             return None
         if word.text == _INTERPRETER_SCRIPT_FLAG or (
             _SHORT_CLUSTER.match(word.text) is not None

@@ -45,10 +45,12 @@ import importlib
 import inspect
 import pkgutil
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import pytest
 
+from claude_code_hooks_daemon.config.loader import ConfigLoader
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.handlers import pre_tool_use
 
@@ -578,27 +580,22 @@ _CONFIGURATORS: dict[str, Callable[[Handler], None]] = {
         handler, "_flaggable_path_globs", ["firewall/**"]
     ),
     # Ships with no patterns (Plan 00463): a client's full-QA commands cannot
-    # be known in advance, so it matches nothing until they are declared.
+    # be known in advance, so it matches nothing until they are declared. This
+    # repository's real declaration is used rather than a restated copy.
     "SubagentFullQaBlockerHandler": lambda handler: setattr(
-        handler,
-        "_full_qa_patterns",
-        [
-            {
-                "id": "llm-qa-whole-suite",
-                "command": "llm_qa.py",
-                "full_args": ["all", "tests"],
-                "read_only_flags": ["--read-only"],
-            },
-            {"id": "run-all", "command": "run_all.sh"},
-            {
-                "id": "pytest-whole-suite",
-                "command": "pytest",
-                "full_args": ["tests"],
-                "bare_is_full": True,
-            },
-        ],
+        handler, "_full_qa_patterns", _dogfood_full_qa_patterns()
     ),
 }
+
+
+def _dogfood_full_qa_patterns() -> object:
+    """``full_qa_patterns`` exactly as this repository's config declares them."""
+    config = ConfigLoader.load(
+        Path(__file__).resolve().parents[4] / ".claude" / "hooks-daemon.yaml"
+    )
+    return config["handlers"]["pre_tool_use"]["subagent_full_qa_blocker"]["options"][
+        "full_qa_patterns"
+    ]
 
 
 def _discover_handler_classes() -> dict[str, type[Handler]]:

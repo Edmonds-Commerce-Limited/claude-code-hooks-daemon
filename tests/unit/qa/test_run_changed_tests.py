@@ -6,11 +6,10 @@ or each agent reinvents its own subset and some reinvent nothing. This runner
 is that command's test half: pytest on the tests mapped from what changed
 since the merge base.
 
-It is a heuristic by design. The mapping is by module NAME, not by import
-graph, because the coordinator's full gate is the backstop for everything a
-name cannot see. What the report must never do is overstate: a run that
-selected nothing says so, and a source file with no mapped test is listed
-rather than quietly dropped.
+The mapping is a heuristic, and the coordinator's full gate is the backstop
+for what it cannot see. What the runner must never do is PASS having verified
+nothing (review finding 1): every changed file maps to tests, to a declared
+fallback, or is listed as unmapped and fails the run.
 """
 
 from __future__ import annotations
@@ -39,19 +38,27 @@ def _load(script: str, name: str) -> Any:
 
 
 changed_tests = _load("run_changed_tests.py", "run_changed_tests_under_test")
+llm_qa = _load("llm_qa.py", "llm_qa_for_changed_tests_map")
 
 _MERGE_BASE = "0" * 40
 
 
-def _touch(root: Path, *relative: str) -> None:
+def _touch(root: Path, *relative: str, text: str = "") -> None:
     for path in relative:
         target = root / path
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text("", encoding="utf-8")
+        target.write_text(text, encoding="utf-8")
 
 
-def _git_answering(diff: str = "", untracked: str = "", merge_base_code: int = 0) -> Any:
-    """A ``run_git`` stand-in that answers the three calls the runner makes."""
+def _git_answering(
+    diff: str = "",
+    untracked: str = "",
+    merge_base_code: int = 0,
+    branch: str = "worktree-x",
+    origin_head: str | None = "origin/main",
+    local_branches: tuple[str, ...] = ("main",),
+) -> Any:
+    """A ``run_git`` stand-in answering every call the runner makes."""
 
     def run(args: list[str], root: Path) -> tuple[int, str, str]:
         assert root.is_absolute()
@@ -60,13 +67,33 @@ def _git_answering(diff: str = "", untracked: str = "", merge_base_code: int = 0
                 return merge_base_code, "", "fatal: Not a valid object name main"
             return 0, f"{_MERGE_BASE}\n", ""
         if args[0] == "diff":
+            assert "--no-renames" in args, "a rename must list the old path too"
             assert args[-1] == _MERGE_BASE, "the diff must be taken against the merge base"
             return 0, diff, ""
         if args[0] == "ls-files":
             return 0, untracked, ""
+        if args[:2] == ["symbolic-ref", "--quiet"] and args[-1] == "HEAD":
+            return (0, f"{branch}\n", "") if branch else (1, "", "")
+        if args[:2] == ["symbolic-ref", "--quiet"]:
+            return (0, f"{origin_head}\n", "") if origin_head else (1, "", "")
+        if args[:3] == ["rev-parse", "--verify", "--quiet"]:
+            name = args[3].removeprefix("refs/heads/")
+            return (0, "abc\n", "") if name in local_branches else (1, "", "")
         raise AssertionError(f"unexpected git call: {args}")
 
     return run
+
+
+def _rules(*entries: dict[str, Any]) -> list[Any]:
+    rules, problems = changed_tests.parse_declared_rules({"rules": list(entries)})
+    assert problems == [], problems
+    return rules
+
+
+def _select(root: Path, changed: list[str], rules: list[Any] | None = None) -> Any:
+    return changed_tests.select_tests(
+        changed, changed_tests.build_test_index(root), root, rules or []
+    )
 
 
 class TestChangedFiles:
@@ -88,97 +115,235 @@ class TestChangedFiles:
         assert "main" in error
 
 
-class TestSelection:
-    def test_a_changed_test_file_selects_itself(self, tmp_path: Path) -> None:
-        _touch(tmp_path, "tests/unit/test_thing.py")
-        index = changed_tests.build_test_index(tmp_path)
-        selected, unmapped = changed_tests.select_tests(
-            ["tests/unit/test_thing.py"], index, tmp_path
-        )
-        assert selected == ["tests/unit/test_thing.py"]
-        assert unmapped == []
+class TestTheBase:
+    """Review finding 11: a clone with no local `main` must still work."""
 
-    def test_a_source_module_selects_its_named_tests_and_their_variants(
-        self, tmp_path: Path
-    ) -> None:
+    def test_origin_head_names_the_local_default_branch(self, tmp_path: Path) -> None:
+        base, error = changed_tests.resolve_base(
+            tmp_path,
+            None,
+            git=_git_answering(origin_head="origin/trunk", local_branches=("trunk",)),
+        )
+        assert (base, error) == ("trunk", None)
+
+    def test_without_the_local_branch_the_remote_one_is_used(self, tmp_path: Path) -> None:
+        base, _ = changed_tests.resolve_base(
+            tmp_path, None, git=_git_answering(origin_head="origin/trunk", local_branches=())
+        )
+        assert base == "origin/trunk"
+
+    def test_without_origin_head_a_local_main_is_used(self, tmp_path: Path) -> None:
+        base, _ = changed_tests.resolve_base(tmp_path, None, git=_git_answering(origin_head=None))
+        assert base == "main"
+
+    def test_nothing_to_diff_against_is_an_error(self, tmp_path: Path) -> None:
+        base, error = changed_tests.resolve_base(
+            tmp_path, None, git=_git_answering(origin_head=None, local_branches=())
+        )
+        assert base is None
+        assert error is not None
+        assert "--base" in error
+
+    def test_an_explicit_base_wins(self, tmp_path: Path) -> None:
+        assert changed_tests.resolve_base(tmp_path, "release", git=_git_answering()) == (
+            "release",
+            None,
+        )
+
+
+class TestMirroredSelection:
+    """Review finding 10: the mirrored location first, a global name search second."""
+
+    def test_the_mirror_wins_over_same_named_tests_elsewhere(self, tmp_path: Path) -> None:
+        _touch(
+            tmp_path,
+            "src/pkg/strategies/pipe_blocker/common.py",
+            "tests/unit/strategies/pipe_blocker/test_common.py",
+            "tests/unit/plan_qa/test_common.py",
+            "tests/unit/lint/test_common.py",
+        )
+        selection = _select(tmp_path, ["src/pkg/strategies/pipe_blocker/common.py"])
+        assert selection.selected == ["tests/unit/strategies/pipe_blocker/test_common.py"]
+        assert selection.mapping[0]["rule"] == "mirror"
+
+    def test_variants_in_the_mirror_are_selected(self, tmp_path: Path) -> None:
         _touch(
             tmp_path,
             "src/pkg/utils/shell_segmentation.py",
             "tests/unit/utils/test_shell_segmentation.py",
-            "tests/unit/handlers/test_shell_segmentation_heredocs.py",
+            "tests/unit/utils/test_shell_segmentation_heredocs.py",
             "tests/unit/utils/test_shell.py",
         )
-        index = changed_tests.build_test_index(tmp_path)
-        selected, unmapped = changed_tests.select_tests(
-            ["src/pkg/utils/shell_segmentation.py"], index, tmp_path
-        )
-        assert selected == [
-            "tests/unit/handlers/test_shell_segmentation_heredocs.py",
+        selection = _select(tmp_path, ["src/pkg/utils/shell_segmentation.py"])
+        assert selection.selected == [
             "tests/unit/utils/test_shell_segmentation.py",
+            "tests/unit/utils/test_shell_segmentation_heredocs.py",
         ]
-        assert unmapped == []
 
-    def test_a_script_maps_the_same_way(self, tmp_path: Path) -> None:
+    def test_a_script_mirrors_under_tests_unit(self, tmp_path: Path) -> None:
         _touch(tmp_path, "scripts/qa/llm_qa.py", "tests/unit/qa/test_llm_qa_run_lock.py")
-        index = changed_tests.build_test_index(tmp_path)
-        selected, _ = changed_tests.select_tests(["scripts/qa/llm_qa.py"], index, tmp_path)
-        assert selected == ["tests/unit/qa/test_llm_qa_run_lock.py"]
+        selection = _select(tmp_path, ["scripts/qa/llm_qa.py"])
+        assert selection.selected == ["tests/unit/qa/test_llm_qa_run_lock.py"]
 
-    def test_a_module_with_no_named_test_is_listed_as_unmapped(self, tmp_path: Path) -> None:
-        _touch(tmp_path, "src/pkg/orphan.py")
-        index = changed_tests.build_test_index(tmp_path)
-        selected, unmapped = changed_tests.select_tests(["src/pkg/orphan.py"], index, tmp_path)
-        assert selected == []
-        assert unmapped == ["src/pkg/orphan.py"]
+    def test_with_no_mirror_a_global_name_search_is_the_fallback(self, tmp_path: Path) -> None:
+        _touch(tmp_path, "src/pkg/core/thing.py", "tests/integration/test_thing.py")
+        selection = _select(tmp_path, ["src/pkg/core/thing.py"])
+        assert selection.selected == ["tests/integration/test_thing.py"]
+        assert selection.mapping[0]["rule"] == "name"
 
-    def test_a_package_init_is_unmapped_rather_than_matched_by_name(self, tmp_path: Path) -> None:
-        _touch(tmp_path, "src/pkg/__init__.py", "tests/unit/test___init__.py")
-        index = changed_tests.build_test_index(tmp_path)
-        _, unmapped = changed_tests.select_tests(["src/pkg/__init__.py"], index, tmp_path)
-        assert unmapped == ["src/pkg/__init__.py"]
+    def test_a_changed_test_file_selects_itself(self, tmp_path: Path) -> None:
+        _touch(tmp_path, "tests/unit/test_thing.py")
+        selection = _select(tmp_path, ["tests/unit/test_thing.py"])
+        assert selection.selected == ["tests/unit/test_thing.py"]
+        assert selection.unmapped == []
 
-    def test_a_non_test_file_under_tests_is_unmapped(self, tmp_path: Path) -> None:
-        """A conftest or helper change can affect any test, so it is not silently skipped."""
-        _touch(tmp_path, "tests/conftest.py")
-        index = changed_tests.build_test_index(tmp_path)
-        selected, unmapped = changed_tests.select_tests(["tests/conftest.py"], index, tmp_path)
-        assert selected == []
-        assert unmapped == ["tests/conftest.py"]
 
-    def test_non_python_and_deleted_files_are_not_candidates(self, tmp_path: Path) -> None:
-        _touch(tmp_path, "CLAUDE/QA.md")
-        index = changed_tests.build_test_index(tmp_path)
-        selected, unmapped = changed_tests.select_tests(
-            ["CLAUDE/QA.md", "src/pkg/deleted.py"], index, tmp_path
-        )
-        assert (selected, unmapped) == ([], [])
-
-    def test_project_handler_files_are_left_to_the_project_handler_tool(
+class TestImportReferences:
+    def test_a_module_with_no_named_test_maps_to_the_tests_that_import_it(
         self, tmp_path: Path
     ) -> None:
-        _touch(tmp_path, ".claude/project-handlers/pre_tool_use/enforce_llm_qa.py")
-        index = changed_tests.build_test_index(tmp_path)
-        selected, unmapped = changed_tests.select_tests(
-            [".claude/project-handlers/pre_tool_use/enforce_llm_qa.py"], index, tmp_path
+        _touch(tmp_path, "src/claude_code_hooks_daemon/core/orphan.py")
+        _touch(
+            tmp_path,
+            "tests/unit/test_user.py",
+            text="from claude_code_hooks_daemon.core.orphan import thing\n",
         )
-        assert (selected, unmapped) == ([], [])
+        _touch(
+            tmp_path,
+            "tests/unit/test_other.py",
+            text="from claude_code_hooks_daemon.core import (\n    orphan,\n)\n",
+        )
+        _touch(tmp_path, "tests/unit/test_unrelated.py", text="import os\n")
+        selection = _select(tmp_path, ["src/claude_code_hooks_daemon/core/orphan.py"])
+        assert selection.selected == ["tests/unit/test_other.py", "tests/unit/test_user.py"]
+        assert selection.mapping[0]["rule"] == "import"
+
+    def test_a_reach_too_broad_to_target_is_unmapped(self, tmp_path: Path) -> None:
+        """Every test importing a package is the full suite by another name."""
+        _touch(tmp_path, "src/claude_code_hooks_daemon/__init__.py")
+        for number in range(changed_tests.MAX_IMPORT_SELECTION + 1):
+            _touch(
+                tmp_path,
+                f"tests/unit/test_n{number}.py",
+                text="from claude_code_hooks_daemon.core import x\n",
+            )
+        selection = _select(tmp_path, ["src/claude_code_hooks_daemon/__init__.py"])
+        assert selection.selected == []
+        assert selection.unmapped == ["src/claude_code_hooks_daemon/__init__.py"]
+
+
+class TestNothingPassesSilently:
+    """Review finding 1: each case that used to pass having run nothing."""
+
+    def test_a_source_module_with_no_test_is_unmapped(self, tmp_path: Path) -> None:
+        _touch(tmp_path, "src/claude_code_hooks_daemon/orphan.py")
+        selection = _select(tmp_path, ["src/claude_code_hooks_daemon/orphan.py"])
+        assert selection.unmapped == ["src/claude_code_hooks_daemon/orphan.py"]
+
+    def test_a_deleted_module_selects_the_tests_that_will_now_break(self, tmp_path: Path) -> None:
+        _touch(
+            tmp_path,
+            "tests/unit/core/test_gone.py",
+            text="from claude_code_hooks_daemon.core.gone import x\n",
+        )
+        selection = _select(tmp_path, ["src/claude_code_hooks_daemon/core/gone.py"])
+        assert selection.selected == ["tests/unit/core/test_gone.py"]
+        assert selection.deleted == ["src/claude_code_hooks_daemon/core/gone.py"]
+
+    def test_a_deleted_module_nothing_references_is_verified_not_skipped(
+        self, tmp_path: Path
+    ) -> None:
+        _touch(tmp_path, "tests/unit/test_x.py", text="import os\n")
+        selection = _select(tmp_path, ["src/claude_code_hooks_daemon/core/gone.py"])
+        assert selection.unmapped == []
+        assert selection.deleted == ["src/claude_code_hooks_daemon/core/gone.py"]
+        assert selection.mapping[0]["rule"] == "deleted-unreferenced"
+
+    def test_a_non_python_file_with_no_declared_rule_is_unmapped_and_listed(
+        self, tmp_path: Path
+    ) -> None:
+        _touch(tmp_path, ".claude/hooks-daemon.yaml", "scripts/qa/run_x.sh")
+        selection = _select(tmp_path, [".claude/hooks-daemon.yaml", "scripts/qa/run_x.sh"])
+        assert selection.unmapped == [".claude/hooks-daemon.yaml", "scripts/qa/run_x.sh"]
+        assert selection.non_python == [".claude/hooks-daemon.yaml", "scripts/qa/run_x.sh"]
+
+    def test_a_declared_rule_maps_a_non_python_file_to_tests(self, tmp_path: Path) -> None:
+        _touch(tmp_path, ".claude/hooks-daemon.yaml", "tests/integration/test_dogfood.py")
+        rules = _rules(
+            {
+                "glob": ".claude/hooks-daemon.yaml",
+                "tests": ["tests/integration/test_dogfood.py"],
+                "why": "the dogfood config",
+            }
+        )
+        selection = _select(tmp_path, [".claude/hooks-daemon.yaml"], rules)
+        assert selection.selected == ["tests/integration/test_dogfood.py"]
+        assert selection.unmapped == []
+        assert selection.mapping[0]["rule"] == "declared"
+
+    def test_a_declared_rule_can_name_the_tools_that_cover_a_file(self, tmp_path: Path) -> None:
+        _touch(tmp_path, "CLAUDE/QA.md")
+        rules = _rules({"glob": "*.md", "tools": ["docs_qa"], "why": "docs QA checks markdown"})
+        selection = _select(tmp_path, ["CLAUDE/QA.md"], rules)
+        assert selection.unmapped == []
+        assert selection.mapping[0]["tools"] == ["docs_qa"]
+
+    def test_a_conftest_is_unmapped(self, tmp_path: Path) -> None:
+        """Its reach is its whole directory, which a targeted run cannot cover."""
+        _touch(tmp_path, "tests/conftest.py")
+        assert _select(tmp_path, ["tests/conftest.py"]).unmapped == ["tests/conftest.py"]
+
+
+class TestDeclaredRules:
+    @pytest.mark.parametrize(
+        "entry",
+        [
+            {"tests": ["x"], "why": "w"},
+            {"glob": "*.md", "why": "w"},
+            {"glob": "*.md", "tools": ["docs_qa"]},
+            {"glob": "*.md", "tools": "docs_qa", "why": "w"},
+            {"glob": "*.md", "tools": ["docs_qa"], "tests": ["x"], "why": "w"},
+            {"glob": "*.md", "tools": ["docs_qa"], "why": "w", "surprise": 1},
+        ],
+    )
+    def test_a_malformed_rule_is_reported(self, entry: dict[str, Any]) -> None:
+        _, problems = changed_tests.parse_declared_rules({"rules": [entry]})
+        assert problems
+
+    def test_this_repositorys_map_is_valid_and_honest(self) -> None:
+        """Every tool it names is one `changed` runs; every test it names exists."""
+        rules, problems = changed_tests.load_declared_rules(changed_tests.DEFAULT_RULES_PATH)
+        assert problems == []
+        assert rules
+        for rule in rules:
+            for tool in rule.tools:
+                assert tool in llm_qa.CHANGED_TOOL_NAMES, (rule.glob, tool)
+            for test in rule.tests:
+                assert (PROJECT_ROOT / test).is_file(), (rule.glob, test)
 
 
 class TestTheReport:
     def test_a_green_run_passes_and_counts_its_inputs(self) -> None:
         report = changed_tests.build_report(
-            base=_MERGE_BASE,
+            base="main",
             changed=["src/pkg/a.py", "README.md"],
-            selected=["tests/unit/test_a.py"],
-            unmapped=[],
+            selection=changed_tests.Selection(
+                selected=["tests/unit/test_a.py"],
+                mapping=[],
+                unmapped=[],
+                deleted=[],
+                non_python=["README.md"],
+            ),
             exit_code=0,
             output="3 passed in 0.10s\n",
+            allow_unmapped=False,
         )
         summary = report["summary"]
         assert summary["passed_all"] is True
         assert summary["passed"] == 3
         assert summary["files_considered"] == 2
         assert summary["test_files_selected"] == 1
+        assert report["non_python"] == ["README.md"]
 
     def test_a_failure_is_named(self) -> None:
         output = (
@@ -187,40 +352,50 @@ class TestTheReport:
             "1 failed, 2 passed in 0.10s\n"
         )
         report = changed_tests.build_report(
-            base=_MERGE_BASE,
+            base="main",
             changed=["src/pkg/a.py"],
-            selected=["tests/unit/test_a.py"],
-            unmapped=[],
+            selection=changed_tests.Selection(selected=["tests/unit/test_a.py"]),
             exit_code=1,
             output=output,
+            allow_unmapped=False,
         )
         assert report["summary"]["passed_all"] is False
         assert report["tests"] == [{"name": "tests/unit/test_a.py::test_x", "outcome": "failed"}]
 
     def test_selected_tests_that_collected_nothing_is_a_failure(self) -> None:
-        """Zero tests from a non-empty selection has not passed; it has not run."""
         report = changed_tests.build_report(
-            base=_MERGE_BASE,
+            base="main",
             changed=["src/pkg/a.py"],
-            selected=["tests/unit/test_a.py"],
-            unmapped=[],
+            selection=changed_tests.Selection(selected=["tests/unit/test_a.py"]),
             exit_code=5,
             output="no tests ran in 0.01s\n",
+            allow_unmapped=False,
         )
         assert report["summary"]["passed_all"] is False
 
-    def test_nothing_selected_passes_but_says_nothing_ran(self) -> None:
+    def test_an_unmapped_file_fails_the_run(self) -> None:
         report = changed_tests.build_report(
-            base=_MERGE_BASE,
-            changed=["CLAUDE/QA.md"],
-            selected=[],
-            unmapped=["src/pkg/orphan.py"],
+            base="main",
+            changed=["src/pkg/orphan.py"],
+            selection=changed_tests.Selection(unmapped=["src/pkg/orphan.py"]),
             exit_code=None,
             output="",
+            allow_unmapped=False,
+        )
+        assert report["summary"]["passed_all"] is False
+        assert report["unmapped"] == ["src/pkg/orphan.py"]
+
+    def test_an_explicit_allowance_passes_but_records_it(self) -> None:
+        report = changed_tests.build_report(
+            base="main",
+            changed=["src/pkg/orphan.py"],
+            selection=changed_tests.Selection(unmapped=["src/pkg/orphan.py"]),
+            exit_code=None,
+            output="",
+            allow_unmapped=True,
         )
         assert report["summary"]["passed_all"] is True
-        assert report["summary"]["test_files_selected"] == 0
-        assert report["unmapped"] == ["src/pkg/orphan.py"]
+        assert report["unmapped_allowed"] is True
 
     def test_a_failure_report_never_passes(self) -> None:
         report = changed_tests.failure_report("no merge base")
@@ -234,7 +409,9 @@ class TestMain:
         tmp_path: Path,
         *,
         git: Any,
+        extra: list[str] | None = None,
         pytest_result: tuple[int, str] = (0, "1 passed in 0.01s\n"),
+        rules: str = "rules: []\n",
     ) -> tuple[int, dict[str, Any], list[list[str]]]:
         calls: list[list[str]] = []
 
@@ -242,8 +419,12 @@ class TestMain:
             calls.append(paths)
             return pytest_result
 
+        rules_file = tmp_path / "rules.yaml"
+        rules_file.write_text(rules, encoding="utf-8")
         code = changed_tests.main(
-            ["--json", "--root", str(tmp_path)], run_git=git, run_pytest=run_pytest
+            ["--json", "--root", str(tmp_path), "--rules", str(rules_file), *(extra or [])],
+            run_git=git,
+            run_pytest=run_pytest,
         )
         report = json.loads((tmp_path / "untracked" / "qa" / "changed_tests.json").read_text())
         return code, report, calls
@@ -264,10 +445,52 @@ class TestMain:
         )
         assert code == changed_tests.EXIT_ISSUES
 
-    def test_nothing_selected_runs_no_pytest(self, tmp_path: Path) -> None:
-        _touch(tmp_path, "CLAUDE/QA.md")
-        code, _, calls = self._run(tmp_path, git=_git_answering(diff="CLAUDE/QA.md\n"))
+    def test_an_unmapped_change_fails_without_running_pytest(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _touch(tmp_path, ".claude/hooks-daemon.yaml")
+        code, report, calls = self._run(
+            tmp_path, git=_git_answering(diff=".claude/hooks-daemon.yaml\n")
+        )
+        assert code == changed_tests.EXIT_ISSUES
+        assert calls == []
+        assert report["unmapped"] == [".claude/hooks-daemon.yaml"]
+        assert "no tests ran" in capsys.readouterr().out
+
+    def test_allow_unmapped_passes_a_change_that_maps_to_nothing(self, tmp_path: Path) -> None:
+        _touch(tmp_path, ".claude/hooks-daemon.yaml")
+        code, report, _ = self._run(
+            tmp_path,
+            git=_git_answering(diff=".claude/hooks-daemon.yaml\n"),
+            extra=["--allow-unmapped"],
+        )
         assert code == changed_tests.EXIT_SUCCESS
+        assert report["unmapped_allowed"] is True
+
+    def test_a_change_covered_only_by_declared_tools_passes(self, tmp_path: Path) -> None:
+        _touch(tmp_path, "CLAUDE/QA.md")
+        code, _, calls = self._run(
+            tmp_path,
+            git=_git_answering(diff="CLAUDE/QA.md\n"),
+            rules="rules:\n  - glob: '*.md'\n    tools: [docs_qa]\n    why: docs QA\n",
+        )
+        assert code == changed_tests.EXIT_SUCCESS
+        assert calls == []
+
+    def test_an_empty_change_set_verifies_nothing_and_fails(self, tmp_path: Path) -> None:
+        code, report, calls = self._run(tmp_path, git=_git_answering())
+        assert code == changed_tests.EXIT_ISSUES
+        assert report["summary"]["passed_all"] is False
+        assert calls == []
+
+    def test_running_on_the_base_branch_itself_is_refused(self, tmp_path: Path) -> None:
+        """On `main`, the merge base is HEAD, so committed work vanishes from the set."""
+        _touch(tmp_path, "src/pkg/a.py", "tests/unit/test_a.py")
+        code, report, calls = self._run(
+            tmp_path, git=_git_answering(diff="src/pkg/a.py\n", branch="main")
+        )
+        assert code == changed_tests.EXIT_OPERATIONAL
+        assert "--base" in report["summary"]["error"]
         assert calls == []
 
     def test_an_unresolvable_base_is_an_operational_failure(self, tmp_path: Path) -> None:
@@ -277,6 +500,6 @@ class TestMain:
         assert calls == []
 
 
-@pytest.mark.parametrize("flag", ["--base", "--root"])
+@pytest.mark.parametrize("flag", ["--base", "--root", "--allow-unmapped", "--rules"])
 def test_the_cli_documents_its_options(flag: str) -> None:
     assert flag in (changed_tests.__doc__ or "")

@@ -390,16 +390,16 @@ COMMAND_WRAPPERS: Final[dict[str, CommandWrapper]] = {
     ),
     "nohup": CommandWrapper(value_flags=frozenset()),
     "sudo": CommandWrapper(value_flags=frozenset({"-u", "-g", "-p"})),
-    "env": CommandWrapper(value_flags=frozenset({"-u", "--unset"})),
+    "env": CommandWrapper(value_flags=frozenset({"-u", "--unset", "-C", "--chdir"})),
     "nice": CommandWrapper(value_flags=frozenset({"-n", "--adjustment"})),
     "stdbuf": CommandWrapper(value_flags=frozenset({"-i", "-o", "-e"})),
     "command": CommandWrapper(value_flags=frozenset()),
 }
 
 #: A flag starts with this, except the two spellings below that are operands.
-_FLAG_PREFIX: Final[str] = "-"
-_LONE_DASH: Final[str] = "-"
-_END_OF_OPTIONS: Final[str] = "--"
+FLAG_PREFIX: Final[str] = "-"
+LONE_DASH: Final[str] = "-"
+END_OF_OPTIONS: Final[str] = "--"
 
 
 def peel_command_wrappers(argv: Sequence[str]) -> tuple[tuple[str, ...], int]:
@@ -433,9 +433,9 @@ def peel_command_wrappers(argv: Sequence[str]) -> tuple[tuple[str, ...], int]:
         positionals = wrapper.positional_operands
         while index < len(argv):
             argument = argv[index]
-            is_flag = argument.startswith(_FLAG_PREFIX) and argument not in (
-                _LONE_DASH,
-                _END_OF_OPTIONS,
+            is_flag = argument.startswith(FLAG_PREFIX) and argument not in (
+                LONE_DASH,
+                END_OF_OPTIONS,
             )
             if is_flag:
                 index += 1

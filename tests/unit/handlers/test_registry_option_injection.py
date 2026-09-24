@@ -28,7 +28,11 @@ from typing import Any
 import pytest
 
 from claude_code_hooks_daemon.core import EventRouter, EventType
-from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
+from claude_code_hooks_daemon.core.handler_scope import HandlerScope
+from claude_code_hooks_daemon.handlers.pre_tool_use.subagent_full_qa_blocker import (
+    SubagentFullQaBlockerHandler,
+)
+from claude_code_hooks_daemon.handlers.registry import HandlerRegistry, apply_handler_config
 
 HANDLERS_DIR = Path(__file__).resolve().parents[3] / "src/claude_code_hooks_daemon/handlers"
 
@@ -190,3 +194,25 @@ def test_handler_init_never_reads_its_options_argument(module_path: Path) -> Non
         f"{module_path.name}: {', '.join(offenders)}.__init__ reads its `options` argument, "
         "which the registry never passes. Read `self._<option_key>` at use time instead."
     )
+
+
+class TestApplyHandlerConfig:
+    """The one injector, shared by dispatch and `hooks-daemon check` (Plan 00463)."""
+
+    def test_priority_scope_and_options_are_all_applied(self) -> None:
+        handler = SubagentFullQaBlockerHandler()
+        apply_handler_config(
+            handler,
+            {"priority": 7, "scope": "ALL"},
+            {"full_qa_patterns": [{"id": "x", "command": "run_all.sh"}]},
+        )
+        assert handler.priority == 7
+        assert handler.scope is HandlerScope.ALL
+        assert handler._full_qa_patterns == [{"id": "x", "command": "run_all.sh"}]
+
+    def test_absent_keys_keep_the_handlers_own_defaults(self) -> None:
+        handler = SubagentFullQaBlockerHandler()
+        default_priority = handler.priority
+        apply_handler_config(handler, {}, {})
+        assert handler.priority == default_priority
+        assert handler.scope is HandlerScope.SUB

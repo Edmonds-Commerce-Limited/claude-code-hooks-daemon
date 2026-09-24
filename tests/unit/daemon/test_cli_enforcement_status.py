@@ -130,3 +130,21 @@ class TestTheFullQaGuardReportsAnInertDeclaration:
         _write_full_qa_config(tmp_path, "      enabled: false\n")
         statuses = _collect_enforcement_status_lines(tmp_path)
         assert not any("subagent_full_qa_blocker" in s for s in statuses)
+
+    def test_a_scope_override_is_reported(self, tmp_path: Path) -> None:
+        """Review finding 7: `scope: ALL` would deny the coordinator's own gate.
+
+        `check` must apply config exactly as dispatch does, scope included,
+        or it reports a guard the daemon is not running.
+        """
+        _write_full_qa_config(
+            tmp_path,
+            "      enabled: true\n"
+            "      scope: ALL\n"
+            "      options:\n"
+            "        full_qa_patterns:\n"
+            "          - id: run-all\n"
+            "            command: run_all.sh\n",
+        )
+        statuses = _collect_enforcement_status_lines(tmp_path)
+        assert any("scope ALL" in s for s in statuses), statuses

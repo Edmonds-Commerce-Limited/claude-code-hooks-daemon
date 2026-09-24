@@ -41,8 +41,11 @@ defined in `CLAUDE/QA.md`, "Full QA Is the Coordinator's Gate".
 ./scripts/qa/llm_qa.py lint type_check security
 
 # Summarise the coordinator's last FULL run without running anything
+# (a result recorded for another tree reads STALE and fails)
 ./scripts/qa/llm_qa.py --read-only all
 ```
+
+Report an unmapped file or a STALE result as the failure it is, never as a pass.
 
 `llm_qa.py` prints about two lines per check and writes the detail to
 `untracked/qa/*.json`, so no separate log capture is needed.

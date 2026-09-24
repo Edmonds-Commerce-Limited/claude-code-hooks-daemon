@@ -194,9 +194,11 @@ This skill orchestrates a multi-stage release process through main Claude. The r
 
 ### Stage 1: Release Agent Preparation (RELEASING.md Steps 1-6)
 
-Main Claude invokes the Release Agent (`.claude/agents/release-agent.md`) to:
+Main Claude first runs the full QA gate on the clean HEAD (RELEASING.md Step 1b;
+the agent is a sub-agent and cannot), then invokes the Release Agent
+(`.claude/agents/release-agent.md`) to:
 
-- Validate environment (git state, QA, GitHub CLI)
+- Validate environment (git state, QA via `--read-only`, GitHub CLI)
 - Detect/confirm version bump
 - Update version files
 - Generate CHANGELOG.md entry
