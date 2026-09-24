@@ -242,7 +242,10 @@ branch, and this branch does not cause them. The stated mechanism is
   to the session's orchestrator-simulate mode, fails on the same 14
   probes. It is the same cause.
 
-The journal's 11:37 correction entry records this.
+The journal's 11:37 correction entry records this. One more correction to
+the QA section above: the 14 probes are CommentChangelog in **12**
+languages, not 13, plus one QaSuppression and one CommentSize probe
+(counted from the 11:58 re-run).
 
 ## Review findings and their resolution
 
@@ -272,4 +275,22 @@ Of the earlier "Unresolved" items, one is now resolved by I1: the hook's
 driver has a bound on its BUILD. The gate's own `python3` spawn is still
 unbounded; it takes about 0.1s.
 
-**Full QA after the review fixes:** QA_REVIEW_PLACEHOLDER
+**Full QA after the review fixes**, on `696a6fdf`. It was one run,
+11:40 to 11:57, polled in the foreground, with no daemon restarts and no
+commits during it. This worktree's own daemon was restarted just before
+the run, because the smoke test needs it running.
+
+```
+❌ tests: 25630 passed, 2 failed, 24 skipped | coverage: 95.1%
+QA: 34/35 PASSED, 1/35 FAILED
+```
+
+The two failures are `test_acceptance_contract.py` and
+`test_playbook_harness.py`. Both fail on the same 14 probes (12
+CommentChangelog, 1 QaSuppression, 1 CommentSize). That is the review
+I5 cause, this worktree's name containing `venv/`, which is Plan 00458's
+to fix. Every other check passes: the other 34 tools, and the other
+25630 tests.
+
+This paragraph and its journal entry are the only change after that run,
+and they touch only plan markdown.
