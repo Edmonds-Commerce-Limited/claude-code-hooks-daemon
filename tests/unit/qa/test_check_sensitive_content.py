@@ -392,3 +392,70 @@ class TestAScopedScanNeverPublishesTheRepositoryVerdict:
         _run_checker(tmp_path, config)
 
         assert (tmp_path / _ARTEFACT_NAME).is_file()
+
+
+# Assembled at runtime so this file's own text never matches the dogfood
+# session-uuid public pattern: an upstream documentation example UUID.
+_DOC_UUID = "-".join(("550e8400", "e29b", "41d4", "a716", "446655440000"))
+_UUID_REGEX = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+_VENDORED_REL = Path("remote-docs") / "example.com" / "docs" / "hooks.md"
+
+
+def _vendored(body: str) -> str:
+    """A document exactly as ``remote-docs add`` writes it."""
+    from datetime import UTC, datetime
+
+    from claude_code_hooks_daemon.remote_docs.capture import capture
+
+    return capture(
+        "https://example.com/docs/hooks",
+        fetch_fn=lambda _url: body.encode("utf-8"),
+        now=datetime(2026, 9, 24, tzinfo=UTC),
+    ).content
+
+
+class TestFaithfulVendoredCopiesStandPublicPatternsDown:
+    """Plan 00468: the tree scan agrees with the handler about vendored copies.
+
+    Public patterns stand down for the body of a remote-docs file whose
+    provenance is valid and whose body still hashes to ``source_sha256``. An
+    edited copy, a non-vendored file and the secret word list are unaffected.
+    """
+
+    def _scan(self, tmp_path: Path, relpath: Path, content: str) -> dict[str, Any]:
+        terms_file = tmp_path / "temporary-terms.txt"
+        terms_file.write_text("zzqx-nonsense-term\n")
+        config = tmp_path / "hooks-daemon.yaml"
+        _write_config(
+            config,
+            public_patterns=[{"name": "session-uuid", "pattern": _UUID_REGEX}],
+            secret_word_list_path=terms_file.name,
+        )
+        target = tmp_path / relpath
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+        return _run_checker(tmp_path, config)
+
+    def test_a_faithful_vendored_file_is_not_flagged(self, tmp_path: Path) -> None:
+        data = self._scan(tmp_path, _VENDORED_REL, _vendored(f"# Hooks\n\nid {_DOC_UUID}\n"))
+
+        assert data["summary"]["passed"] is True, data["violations"]
+
+    def test_a_vendored_file_edited_after_capture_is_flagged(self, tmp_path: Path) -> None:
+        content = _vendored("# Hooks\n\nupstream\n") + f"ours {_DOC_UUID}\n"
+
+        data = self._scan(tmp_path, _VENDORED_REL, content)
+
+        assert [v["rule"] for v in data["violations"]] == ["public-pattern:session-uuid"]
+
+    def test_a_faithful_vendored_file_with_a_secret_term_is_flagged(self, tmp_path: Path) -> None:
+        data = self._scan(tmp_path, _VENDORED_REL, _vendored("# Hooks\n\nzzqx-nonsense-term\n"))
+
+        assert [v["rule"] for v in data["violations"]] == ["secret-word-list"]
+
+    def test_a_non_vendored_markdown_file_is_flagged(self, tmp_path: Path) -> None:
+        content = _vendored(f"# Hooks\n\nid {_DOC_UUID}\n")
+
+        data = self._scan(tmp_path, Path("docs") / "hooks.md", content)
+
+        assert [v["rule"] for v in data["violations"]] == ["public-pattern:session-uuid"]

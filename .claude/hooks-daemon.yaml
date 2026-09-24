@@ -278,11 +278,6 @@ handlers:
           # data, they do not contain a real session UUID.
           - 'tests/unit/handlers/status_line/test_thread_registry.py'
           - 'tests/unit/supervise/test_session_identity.py'
-          # Vendored upstream Claude Code hooks reference (Plan 00468 G3). Its
-          # example payloads carry documentation UUIDs such as
-          # 550e8400-..., not a session of ours, and a vendored document
-          # cannot be edited without falsifying its recorded fidelity.
-          - 'remote-docs/code.claude.com/docs/en/hooks.md'
           # This handler's own source/tests necessarily demonstrate the
           # public patterns they implement (e.g. the vhosts-path example in
           # get_acceptance_tests() and unit-test fixtures) — self-referential
