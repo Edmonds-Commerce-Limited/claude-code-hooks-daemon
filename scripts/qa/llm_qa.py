@@ -463,6 +463,13 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
         json_file="handler_reference.json",
         jq_hint="jq '.violations[] | {rule, file, line, message}'",
     ),
+    # Plan 00402: a restart never rewrites .claude/HOOKS-DAEMON.md, so this is
+    # what catches a handler change that left it stale.
+    "generated_doc_drift": ToolConfig(
+        command=_python("check_generated_doc_drift.py", "--json"),
+        json_file="generated_doc_drift.json",
+        jq_hint="jq '.violations[] | {rule, file, line, message}'",
+    ),
     "british_english": ToolConfig(
         command=_python("check_british_english.py", "--json"),
         json_file="british_english.json",
@@ -745,6 +752,7 @@ SUMMARIZERS: dict[str, Summarizer] = {
     "sensitive_content": _summarize_sensitive_content,
     "git_history": _summarize_git_history,
     "handler_reference": _summarize_violations,
+    "generated_doc_drift": _summarize_violations,
     "british_english": _summarize_violations,
     "semgrep": _summarize_violations,
     "project_handlers": _summarize_project_handlers,
