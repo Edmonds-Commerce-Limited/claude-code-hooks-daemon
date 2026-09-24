@@ -49,6 +49,12 @@ _OPTIONS_KEY = "options"
 #: widening the lookup to every wired event would find nothing more.
 _PLAN_MODE_EVENT_KEYS: tuple[str, ...] = ("post_tool_use", "pre_tool_use")
 
+# Section key for daemon plugin handlers whose event type is not recognised.
+# Its heading is spelled out so a reader never mistakes the section for a
+# Claude Code plugin (Plan 00468 G5).
+_PLUGIN_SECTION_KEY = "plugin"
+_EXTRA_SECTION_HEADINGS: dict[str, str] = {_PLUGIN_SECTION_KEY: "Daemon Plugin"}
+
 # Type alias for collected handler data:
 # (handler_name, config_key, event_type_str, priority, behavior, description, is_enabled)
 CollectedHandler = tuple[str, str, str, int, str, str, bool]
@@ -183,7 +189,9 @@ class DocsGenerator:
         for extra_key in sorted(handlers_by_event.keys() - rendered_keys):
             extra_handlers = handlers_by_event[extra_key]
             if extra_handlers:
-                heading = extra_key.replace("_", " ").title()
+                heading = _EXTRA_SECTION_HEADINGS.get(
+                    extra_key, extra_key.replace("_", " ").title()
+                )
                 self._render_handler_table(lines, heading, extra_handlers)
 
         return "\n".join(lines)
@@ -353,7 +361,7 @@ class DocsGenerator:
                 handler_name = plugin_handler.__class__.__name__
                 event_type_str = self._extract_event_type_str(plugin_handler)
                 # Find matching event dir name
-                event_dir = self._event_type_to_dir(event_type_str) or "plugin"
+                event_dir = self._event_type_to_dir(event_type_str) or _PLUGIN_SECTION_KEY
                 behavior = self._detect_behavior(plugin_handler)
                 description = self._get_description(type(plugin_handler))
 

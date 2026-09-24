@@ -37,7 +37,7 @@ from claude_code_hooks_daemon.utils.guides import get_llm_command_guide_path
 from claude_code_hooks_daemon.utils.npm import has_llm_commands_in_package_json
 from claude_code_hooks_daemon.utils.path_exclusion import resolve_project_root
 from claude_code_hooks_daemon.utils.path_predicates import path_exists
-from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
 # Where a Node workspace keeps its tool binaries. Used as a FALLBACK when the
 # resolver yields no bin dirs (no manifest found), so a pinned workspace_root
@@ -51,7 +51,7 @@ _INTERPRETER_NAME: Final[str] = "tsx"
 _WRAPPER_RELATIVE_PATH: Final[str] = "scripts/eslint-wrapper.ts"
 
 #: Acceptance-test fixture directory for the Write-tool test, below the
-#: sanctioned scratch root. The sibling Bash-route test below uses its own
+#: gitignored acceptance root. The sibling Bash-route test below uses its own
 #: literal directory since that command is a real shell invocation, not
 #: prose an agent renders through the Write tool.
 _FIXTURE_DIR: Final[str] = "acceptance-test-eslint"
@@ -474,7 +474,7 @@ is not evidence that a `.ts` file is clean."""
         probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": scratch_path(_FIXTURE_DIR, "test.ts"),
+                "file_path": acceptance_path(_FIXTURE_DIR, "test.ts"),
                 "content": "const x = 1;",
             },
         )
@@ -493,11 +493,11 @@ is not evidence that a `.ts` file is clean."""
                 expected_message_patterns=[r"ESLint", r"test\.ts"],
                 safety_notes=(
                     "Creates a temporary TypeScript file inside the gitignored "
-                    "scratch directory for validation testing"
+                    "acceptance directory for validation testing"
                 ),
                 test_type=TestType.ADVISORY,
-                setup_commands=[f"mkdir -p untracked/scratch/{_FIXTURE_DIR}"],
-                cleanup_commands=[f"rm -rf untracked/scratch/{_FIXTURE_DIR}"],
+                setup_commands=[f"mkdir -p untracked/acceptance/{_FIXTURE_DIR}"],
+                cleanup_commands=[f"rm -rf untracked/acceptance/{_FIXTURE_DIR}"],
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=False,
                 # This handler only reaches real ESLint when package.json
@@ -516,8 +516,8 @@ is not evidence that a `.ts` file is clean."""
                 # because it exercises the Write TOOL, which no shell command
                 # can express.
                 command=(
-                    "mkdir -p untracked/scratch/acceptance-test-eslint-bash && "
-                    "cat > untracked/scratch/acceptance-test-eslint-bash/broken.ts <<'EOF'\n"
+                    "mkdir -p untracked/acceptance/acceptance-test-eslint-bash && "
+                    "cat > untracked/acceptance/acceptance-test-eslint-bash/broken.ts <<'EOF'\n"
                     "const x: number = ;\n"
                     "EOF"
                 ),
@@ -543,12 +543,12 @@ is not evidence that a `.ts` file is clean."""
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"broken\.ts"],
                 safety_notes=(
-                    "Writes a temporary TypeScript file inside the gitignored scratch "
+                    "Writes a temporary TypeScript file inside the gitignored acceptance "
                     "directory; removed by cleanup"
                 ),
                 test_type=TestType.BLOCKING,
-                setup_commands=["mkdir -p untracked/scratch/acceptance-test-eslint-bash"],
-                cleanup_commands=["rm -rf untracked/scratch/acceptance-test-eslint-bash"],
+                setup_commands=["mkdir -p untracked/acceptance/acceptance-test-eslint-bash"],
+                cleanup_commands=["rm -rf untracked/acceptance/acceptance-test-eslint-bash"],
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=False,
             ),

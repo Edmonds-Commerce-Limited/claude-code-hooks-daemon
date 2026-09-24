@@ -28,10 +28,10 @@ from pathlib import Path
 from typing import Any, Final
 
 from claude_code_hooks_daemon.strategies.lint.common import COMMON_SKIP_PATHS
-from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
 _LANGUAGE_NAME: Final = "Ansible"
-#: Acceptance-test fixture directory, below the sanctioned scratch root.
+#: Acceptance-test fixture directory, below the gitignored acceptance root.
 _FIXTURE_DIR: Final = "acceptance-test-lint-ansible"
 _EXTENSIONS: Final[tuple[str, ...]] = (".yml", ".yaml")
 
@@ -149,18 +149,18 @@ class AnsibleLintStrategy:
             ToolPayload,
         )
 
-        fixture_root = scratch_path(_FIXTURE_DIR)
+        fixture_root = acceptance_path(_FIXTURE_DIR)
         probe_valid = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": scratch_path(_FIXTURE_DIR, "playbooks", "valid.yml"),
+                "file_path": acceptance_path(_FIXTURE_DIR, "playbooks", "valid.yml"),
                 "content": "---\n- hosts: all\n  tasks: []\n",
             },
         )
         probe_broken = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": scratch_path(_FIXTURE_DIR, "playbooks", "broken.yml"),
+                "file_path": acceptance_path(_FIXTURE_DIR, "playbooks", "broken.yml"),
                 "content": (
                     "---\n- hosts: all\n  tasks:\n    - name: report\n"
                     '      ansible.builtin.shell: echo "it is broken\n'
@@ -170,7 +170,7 @@ class AnsibleLintStrategy:
         probe_workflow = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": scratch_path(_FIXTURE_DIR, ".github", "workflows", "ci.yml"),
+                "file_path": acceptance_path(_FIXTURE_DIR, ".github", "workflows", "ci.yml"),
                 "content": "---\non:\n  push:\njobs: {}\n",
             },
         )
@@ -184,7 +184,7 @@ class AnsibleLintStrategy:
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
                 safety_notes=(
-                    "Inside the gitignored scratch directory - safe. Creates a temporary playbook."
+                    "Inside the gitignored acceptance directory - safe. Creates a temporary playbook."
                 ),
                 test_type=TestType.ADVISORY,
                 setup_commands=[f"mkdir -p {fixture_root}/playbooks"],
@@ -210,7 +210,7 @@ class AnsibleLintStrategy:
                 # missing toolchain. Every sibling lint strategy declares one.
                 required_tools=["ansible-playbook"],
                 safety_notes=(
-                    "Inside the gitignored scratch directory - safe. "
+                    "Inside the gitignored acceptance directory - safe. "
                     "Creates a temporary broken playbook."
                 ),
                 test_type=TestType.BLOCKING,
@@ -230,7 +230,7 @@ class AnsibleLintStrategy:
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
                 safety_notes=(
-                    "Inside the gitignored scratch directory - safe. "
+                    "Inside the gitignored acceptance directory - safe. "
                     "Creates a temporary workflow file."
                 ),
                 test_type=TestType.ADVISORY,

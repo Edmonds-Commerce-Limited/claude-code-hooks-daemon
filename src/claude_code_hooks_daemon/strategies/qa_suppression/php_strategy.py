@@ -2,11 +2,11 @@
 
 from typing import Any
 
-from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
 # ── Language-specific constants ──────────────────────────────────
 _LANGUAGE_NAME = "PHP"
-#: Acceptance-test fixture directory, below the sanctioned scratch root.
+#: Acceptance-test fixture directory, below the gitignored acceptance root.
 _FIXTURE_DIR = "acceptance-test-qa-php"
 _EXTENSIONS: tuple[str, ...] = (".php",)
 _FORBIDDEN_PATTERNS: tuple[str, ...] = (
@@ -77,25 +77,25 @@ class PhpQaSuppressionStrategy:
             ToolPayload,
         )
 
-        fixture_root = scratch_path(_FIXTURE_DIR)
+        fixture_root = acceptance_path(_FIXTURE_DIR)
         probe_ignore_next_line = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": scratch_path(_FIXTURE_DIR, "phpstan-next-line.php"),
+                "file_path": acceptance_path(_FIXTURE_DIR, "phpstan-next-line.php"),
                 "content": "<?php /** @phpstan-" + "ignore-next-line" + " */ $x = 1;",
             },
         )
         probe_ignore = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": scratch_path(_FIXTURE_DIR, "phpstan-ignore.php"),
+                "file_path": acceptance_path(_FIXTURE_DIR, "phpstan-ignore.php"),
                 "content": "<?php /** @phpstan-" + "ignore" + " argument.type */ $x = 1;",
             },
         )
         probe_phpcs_disable = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": scratch_path(_FIXTURE_DIR, "phpcs-disable.php"),
+                "file_path": acceptance_path(_FIXTURE_DIR, "phpcs-disable.php"),
                 "content": "<?php // phpcs:" + "disable" + "\n$x = 1;",
             },
         )
@@ -109,7 +109,7 @@ class PhpQaSuppressionStrategy:
                 expected_decision=Decision.DENY,
                 expected_message_patterns=["suppression", "BLOCKED", "PHP"],
                 test_type=TestType.BLOCKING,
-                safety_notes="Inside the gitignored scratch directory - safe",
+                safety_notes="Inside the gitignored acceptance directory - safe",
                 setup_commands=[f"mkdir -p {fixture_root}"],
                 cleanup_commands=[f"rm -rf {fixture_root}"],
                 recommended_model=RecommendedModel.HAIKU,
@@ -123,7 +123,7 @@ class PhpQaSuppressionStrategy:
                 expected_decision=Decision.DENY,
                 expected_message_patterns=["suppression", "BLOCKED", "PHP"],
                 test_type=TestType.BLOCKING,
-                safety_notes="Inside the gitignored scratch directory - safe",
+                safety_notes="Inside the gitignored acceptance directory - safe",
                 setup_commands=[f"mkdir -p {fixture_root}"],
                 cleanup_commands=[f"rm -rf {fixture_root}"],
                 recommended_model=RecommendedModel.HAIKU,
@@ -137,7 +137,7 @@ class PhpQaSuppressionStrategy:
                 expected_decision=Decision.DENY,
                 expected_message_patterns=["suppression", "BLOCKED", "PHP"],
                 test_type=TestType.BLOCKING,
-                safety_notes="Inside the gitignored scratch directory - safe",
+                safety_notes="Inside the gitignored acceptance directory - safe",
                 setup_commands=[f"mkdir -p {fixture_root}"],
                 cleanup_commands=[f"rm -rf {fixture_root}"],
                 recommended_model=RecommendedModel.HAIKU,
