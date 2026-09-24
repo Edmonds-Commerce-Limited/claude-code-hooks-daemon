@@ -122,3 +122,86 @@ def test_matches_directory_complex_patterns() -> None:
     )
     assert matches_directory("/app/migrations/001_initial.sql", directories) is True
     assert matches_directory("/workspace/tests/unit/test_file.py", directories) is False
+
+
+class TestMatchesDirectoryIsProjectRelative:
+    """``matches_directory`` used to match against the ABSOLUTE path even
+    though it was already segment-bounded, so it did not share the
+    substring-collision half of Plan 00458's defect, only the project-
+    relativity half: a project living under an ancestor directory sharing a
+    pattern's name had every file misclassified. Follow-up per the owner's
+    "no half measures" rule -- extends the Plan 00458 fix to every
+    per-language TDD strategy's ``_SOURCE_DIRECTORIES``/``_SKIP_DIRECTORIES``,
+    which all share this one function."""
+
+    def test_a_real_skip_dir_inside_the_project_is_still_skipped(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from pathlib import Path
+
+        from claude_code_hooks_daemon.core import project_context as pc
+
+        root = "/proj"
+        monkeypatch.setattr(pc.ProjectContext, "_initialized", True, raising=False)
+        monkeypatch.setattr(
+            pc.ProjectContext, "project_root", classmethod(lambda cls: Path(root)), raising=False
+        )
+
+        assert matches_directory(f"{root}/vendor/lib.py", ("vendor/",)) is True
+
+    def test_a_project_living_under_an_ancestor_named_like_a_skip_dir_is_still_tdd_gated(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The team-lead's own example: a project cloned under
+        ``/srv/vendor/app/`` must not have its own ``src/`` files
+        misclassified as vendored just because ``vendor`` sits in an
+        ANCESTOR directory -- TDD enforcement must still see them as
+        ordinary source, not silently skipped."""
+        from pathlib import Path
+
+        from claude_code_hooks_daemon.core import project_context as pc
+
+        root = "/srv/vendor/app"
+        monkeypatch.setattr(pc.ProjectContext, "_initialized", True, raising=False)
+        monkeypatch.setattr(
+            pc.ProjectContext, "project_root", classmethod(lambda cls: Path(root)), raising=False
+        )
+
+        assert matches_directory(f"{root}/src/main.py", ("vendor/",)) is False
+
+    def test_source_directory_classification_still_works_inside_the_project(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The other direction: ``_SOURCE_DIRECTORIES`` entries carry a
+        leading slash by convention (``"/src/"``) -- still classified
+        correctly once stripped and resolved relative to the project."""
+        from pathlib import Path
+
+        from claude_code_hooks_daemon.core import project_context as pc
+
+        root = "/proj"
+        monkeypatch.setattr(pc.ProjectContext, "_initialized", True, raising=False)
+        monkeypatch.setattr(
+            pc.ProjectContext, "project_root", classmethod(lambda cls: Path(root)), raising=False
+        )
+
+        assert matches_directory(f"{root}/src/main.py", ("/src/",)) is True
+
+    def test_a_project_living_under_an_ancestor_named_like_a_source_dir_is_not_misclassified(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The team-lead's other example (``/home/u/build/proj/``, applied
+        here to a source-directory pattern): a file that is NOT under the
+        project's own ``src/`` must not be classified as one merely because
+        ``src`` sits in an ancestor directory."""
+        from pathlib import Path
+
+        from claude_code_hooks_daemon.core import project_context as pc
+
+        root = "/home/u/src/proj"
+        monkeypatch.setattr(pc.ProjectContext, "_initialized", True, raising=False)
+        monkeypatch.setattr(
+            pc.ProjectContext, "project_root", classmethod(lambda cls: Path(root)), raising=False
+        )
+
+        assert matches_directory(f"{root}/lib/thing.py", ("/src/",)) is False

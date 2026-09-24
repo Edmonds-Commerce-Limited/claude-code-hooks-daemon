@@ -30,12 +30,19 @@ def is_in_common_test_directory(file_path: str) -> bool:
 def matches_directory(file_path: str, directories: tuple[str, ...]) -> bool:
     """Check if file path matches any directory pattern.
 
-    Handles normalization: ensures patterns have leading / and trailing /.
+    Segment-bounded against the path relative to the project root (Plan
+    00458 follow-up): a leading slash is stripped from each pattern rather
+    than enforced, because a leading slash would never land at the start of
+    a project-relative path's first segment -- exactly the fix already
+    applied to :func:`is_in_common_test_directory` and to the shared skip-
+    list sites, extended here to every per-language TDD strategy's
+    ``_SOURCE_DIRECTORIES``/``_SKIP_DIRECTORIES`` (11 languages share this
+    one function). Without ``project_root``, a project living under an
+    ancestor directory sharing a pattern's name (``/srv/vendor/app/``,
+    ``/home/u/build/proj/``) had every file inside it misclassified as
+    vendored/skip or as already-a-source-directory -- the absolute path
+    contained the pattern even though the pattern never appears relative to
+    the project.
     """
-    for directory in directories:
-        pattern = directory if directory.startswith("/") else f"/{directory}"
-        if not pattern.endswith("/"):
-            pattern += "/"
-        if pattern in file_path:
-            return True
-    return False
+    patterns = tuple(f"{directory.lstrip('/').rstrip('/')}/" for directory in directories)
+    return matches_path_segment(file_path, patterns, project_root=resolve_project_root())

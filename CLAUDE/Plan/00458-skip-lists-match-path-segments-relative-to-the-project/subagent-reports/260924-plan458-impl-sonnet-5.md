@@ -183,15 +183,43 @@ restarted again and the suite re-run in full:
 QA: 36/36 PASSED
 ```
 
-## Out of scope / follow-up for the owner
+## Follow-up: `matches_directory` (owner's "no half measures" instruction)
 
-- `strategies/tdd/common.py::matches_directory` (used by all 11 per-language
-  TDD strategies' `_SOURCE_DIRECTORIES`/`_SKIP_DIRECTORIES`) still matches
-  against the ABSOLUTE path — not project-relative. It is already segment-
-  bounded, so it does not share the N20 substring-collision bug, but a
-  project living under a directory named e.g. `src` would still be
-  mis-classified. Converting it touches far more call sites than this plan
-  scoped and has no existing regression coverage for that case.
+`strategies/tdd/common.py::matches_directory` was initially left as a
+documented follow-up (see the audit table above) because it is already
+segment-bounded and so does not share the substring-collision half of the
+defect — only the project-relativity half. The owner asked for it to be
+fixed here rather than left open.
+
+Fix: strips any leading `/` from each pattern (a leading slash never lands
+at the start of a project-relative path's first segment, same reasoning as
+`is_in_common_test_directory`) and delegates to
+`matches_path_segment(file_path, patterns, project_root=resolve_project_root())`.
+Public signature unchanged — none of the ~22 per-language call sites
+(`_SOURCE_DIRECTORIES`/`_SKIP_DIRECTORIES` across 11 languages) needed
+touching. 338 tests in `tests/unit/strategies/tdd/` and 194 in
+`tests/unit/handlers/test_tdd_enforcement.py` pass unchanged (`project_root`
+resolves to `None` in those tests, same absolute-path fallback as before).
+
+New tests reproduce the owner's exact scenario in both directions: a real
+skip/source dir inside the project still matches; a project living under an
+ANCESTOR directory sharing the pattern's name (`/srv/vendor/app/`,
+`/home/u/src/proj/`) is no longer misclassified either way.
+
+**Detector question, answered**: `check_skip_list_substring.py` correctly
+never flagged this site — `matches_directory` built its own `/{directory}/`
+before testing `in`, so the loop variable was reassigned, not raw, which is
+exactly the shape the detector is designed to stay quiet on (see
+`TestTheRuleStaysQuiet::test_a_normalised_loop_variable_is_not_reported`).
+It carried only the project-relativity half of the defect, which is not a
+bare-substring-collision AST shape at all — it is a data-flow question ("was
+`project_root` threaded through this call"), which an AST pattern rule
+cannot answer without a fundamentally different (and much noisier) design.
+Not extended; still green after the fix, because there is no `in` test left
+at this site to see.
+
+Commit: `<pending>` (see Commits below).
+
 - `handlers/post_tool_use/validate_eslint_on_write.py`'s `is_worktree` flag
   has the same bare-`in`-over-a-tuple shape but only feeds a log line.
 
