@@ -10,13 +10,17 @@ guard silently stands down for any path that merely ENDS in the skipped name
 ``matches_skip_path`` had already fixed it once and was never reached by the
 other six.
 
-The distinguishing property is that the comprehension's OWN loop variable is
-compared directly, unmodified, against something that looks like a path. A
-site that first NORMALISES the loop variable (adds slash boundaries, as
-``strategies/tdd/common.py``'s ``matches_directory`` already does before its
-own ``in`` test) no longer carries the hazard and must stay quiet, which is
-what keeps this rule from re-litigating a shape that was already fixed by
-another route.
+The distinguishing property is that the comprehension's OWN loop variable --
+or a name simply DERIVED from it (an f-string, a ``+`` concatenation, or a
+``.rstrip``/``.lstrip``/``.strip`` call, however many statements later) -- is
+compared against something that looks like a path. ``matches_directory``'s
+own shape (``pattern = f"/{directory}/"`` then ``if pattern in file_path``)
+is exactly this: a DERIVED name still carries the un-bounded hazard, it just
+wears a different name at the comparison. Only these specific, common
+normalisation idioms are followed; anything else (a dict/list lookup,
+``%``-formatting, ``.format()``, an unrelated method call) is deliberately
+NOT tracked, which is what keeps this rule from guessing at arbitrary data
+flow and crying wolf.
 """
 
 from __future__ import annotations
@@ -116,18 +120,79 @@ class TestTheRuleFires:
         assert violations[0].line == 2
 
 
+class TestTheRuleFollowsDerivation:
+    """A name simply DERIVED from the loop variable carries the same hazard --
+    these used to be the rule's blind spot, and each was a real site."""
+
+    def test_the_original_matches_directory_body_is_reported(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        """The exact pre-fix body of ``strategies/tdd/common.py::matches_directory``:
+        a ternary derivation, then an augmented-assign inside a nested ``if``,
+        then the bare ``in`` test three statements after the loop variable was
+        last seen directly. This is the shape the rule originally missed."""
+        source = (
+            "def matches_directory(file_path, directories):\n"
+            "    for directory in directories:\n"
+            "        pattern = directory if directory.startswith('/') else f'/{directory}'\n"
+            "        if not pattern.endswith('/'):\n"
+            "            pattern += '/'\n"
+            "        if pattern in file_path:\n"
+            "            return True\n"
+            "    return False\n"
+        )
+
+        assert _scan(checker, tmp_path, source) == ["unbounded-skip-list-membership"]
+
+    def test_an_fstring_wrapped_loop_variable_inline_is_reported(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        """``validate_eslint_on_write.py``'s pre-fix shape: an f-string wrapping
+        the loop variable directly in the comprehension, not a bare Name."""
+        source = (
+            "def f(file_path, prefixes):\n"
+            "    return any(f'{prefix}/' in file_path for prefix in prefixes)\n"
+        )
+
+        assert _scan(checker, tmp_path, source) == ["unbounded-skip-list-membership"]
+
+    def test_a_plus_concatenation_is_reported(self, checker: ModuleType, tmp_path: Path) -> None:
+        source = (
+            "def f(file_path, entries):\n"
+            "    for entry in entries:\n"
+            "        pattern = entry + '/'\n"
+            "        if pattern in file_path:\n"
+            "            return True\n"
+            "    return False\n"
+        )
+
+        assert _scan(checker, tmp_path, source) == ["unbounded-skip-list-membership"]
+
+    def test_a_strip_call_is_reported(self, checker: ModuleType, tmp_path: Path) -> None:
+        source = (
+            "def f(file_path, entries):\n"
+            "    for entry in entries:\n"
+            "        pattern = entry.strip('/')\n"
+            "        if pattern in file_path:\n"
+            "            return True\n"
+            "    return False\n"
+        )
+
+        assert _scan(checker, tmp_path, source) == ["unbounded-skip-list-membership"]
+
+
 class TestTheRuleStaysQuiet:
     """The false positives that would get it suppressed."""
 
-    def test_a_normalised_loop_variable_is_not_reported(
+    def test_a_dict_lookup_derivation_is_not_tracked(
         self, checker: ModuleType, tmp_path: Path
     ) -> None:
-        """``matches_directory``'s shape: the loop var is reassigned before the
-        ``in`` test, so it no longer carries the un-bounded hazard."""
+        """Only the specific listed idioms are followed -- a dict/list lookup
+        is a different, untracked shape, deliberately."""
         source = (
-            "def f(file_path, directories):\n"
-            "    for directory in directories:\n"
-            "        pattern = f'/{directory}/'\n"
+            "def f(file_path, entries, aliases):\n"
+            "    for entry in entries:\n"
+            "        pattern = aliases[entry]\n"
             "        if pattern in file_path:\n"
             "            return True\n"
             "    return False\n"
@@ -135,13 +200,46 @@ class TestTheRuleStaysQuiet:
 
         assert _scan(checker, tmp_path, source) == []
 
-    def test_an_fstring_wrapped_loop_variable_is_not_reported(
+    def test_a_format_call_derivation_is_not_tracked(
         self, checker: ModuleType, tmp_path: Path
     ) -> None:
-        """``validate_eslint_on_write.py``'s shape: an f-string, not a bare Name."""
         source = (
-            "def f(file_path, prefixes):\n"
-            "    return any(f'{prefix}/' in file_path for prefix in prefixes)\n"
+            "def f(file_path, entries):\n"
+            "    for entry in entries:\n"
+            "        pattern = '{}/'.format(entry)\n"
+            "        if pattern in file_path:\n"
+            "            return True\n"
+            "    return False\n"
+        )
+
+        assert _scan(checker, tmp_path, source) == []
+
+    def test_an_unrelated_method_call_derivation_is_not_tracked(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        source = (
+            "def f(file_path, entries):\n"
+            "    for entry in entries:\n"
+            "        pattern = entry.upper()\n"
+            "        if pattern in file_path:\n"
+            "            return True\n"
+            "    return False\n"
+        )
+
+        assert _scan(checker, tmp_path, source) == []
+
+    def test_a_strip_call_on_an_unrelated_name_is_not_tracked(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        """``.strip()`` is only tracked when its RECEIVER is itself derived --
+        a strip of some unrelated string must not launder it into "derived"."""
+        source = (
+            "def f(file_path, entries, other):\n"
+            "    for entry in entries:\n"
+            "        pattern = other.strip('/')\n"
+            "        if pattern in file_path:\n"
+            "            return True\n"
+            "    return False\n"
         )
 
         assert _scan(checker, tmp_path, source) == []
