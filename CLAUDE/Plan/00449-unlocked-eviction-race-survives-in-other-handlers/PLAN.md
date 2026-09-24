@@ -145,7 +145,7 @@ can reverse this with one message.
   failing gates in this project before.
 - [x] Release-bound consequence recorded in the holding area, or an explicit
   statement that there is none:
-  `CLAUDE/UPGRADES/UNRELEASED/release-notes/54-concurrent-requests-no-longer-crash-handler-bookkeeping.md`.
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/23-concurrent-requests-no-longer-crash-handler-bookkeeping.md`.
 
 ## Delivery & Milestones
 
