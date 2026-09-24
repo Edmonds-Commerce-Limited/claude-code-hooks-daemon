@@ -30,7 +30,7 @@ import time
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Final
 
@@ -77,7 +77,20 @@ def resolve_plan_dir(project_root: Path, configured: str | None) -> Path:
 
 @dataclass
 class GoalLedgerEntry:
-    """One recorded goal emission and its lifecycle markers."""
+    """One recorded goal emission and its lifecycle markers.
+
+    ``session_id`` names the session that produced the most recent real
+    emission (:meth:`GoalLedger.record_emission`) — display/debugging only.
+    Ownership for every read that decides "does THIS session have a stake
+    in this plan's goal" is ``sessions`` instead (review RV-M1): the set of
+    every session ever handed this plan's goal, additive from both a real
+    emission and a resumed-session reassertion. A single-valued transfer
+    (the pre-fix shape) let a later session's reassertion strip the
+    original flipping session of the only fact that let it retract its OWN
+    signal when the plan went terminal; additive membership means BOTH
+    sessions keep their claim, and a terminal write can refresh/clear every
+    one of them, not just whichever session's write happened to trigger it.
+    """
 
     plan_number: str
     session_id: str
@@ -87,6 +100,7 @@ class GoalLedgerEntry:
     displaced_at: float | None = None
     retired_at: float | None = None
     retired_reason: str | None = None
+    sessions: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -224,12 +238,21 @@ class GoalLedger:
     # ── persistence ────────────────────────────────────────────────────────
 
     def entries(self) -> list[GoalLedgerEntry]:
-        """Load all entries; an unreadable or corrupt ledger yields ``[]``."""
+        """Load all entries; an unreadable or corrupt ledger yields ``[]``.
+
+        Review RV-m5: ``ValueError`` (not just ``json.JSONDecodeError``) is
+        caught alongside ``OSError`` so a ledger file that is valid bytes but
+        not valid UTF-8 (``read_text``'s ``UnicodeDecodeError``, itself a
+        ``ValueError`` subclass) is treated as corrupt like any other
+        unreadable ledger, rather than raising past this fail-open API. This
+        repo runs the daemon in ``strict_mode``, where an uncaught exception
+        here would DENY every PLAN.md edit with a system error.
+        """
         try:
             raw = json.loads(self._path.read_text(encoding="utf-8"))
         except FileNotFoundError:
             return []
-        except (OSError, json.JSONDecodeError) as e:
+        except (OSError, ValueError) as e:
             logger.warning("goal_ledger: unreadable ledger %s: %s", self._path, e)
             return []
         raw_entries = raw.get(_ENTRIES_KEY) if isinstance(raw, dict) else None
@@ -248,15 +271,27 @@ class GoalLedger:
         if not isinstance(item, dict):
             return None
         try:
+            session_id = str(item.get("session_id", ""))
+            raw_sessions = item.get("sessions")
+            if isinstance(raw_sessions, list) and raw_sessions:
+                sessions = [str(s) for s in raw_sessions]
+            elif session_id:
+                # Pre-RV-M1 ledger on disk: back-fill from the single owner
+                # field so an entry written before this schema change is not
+                # silently treated as ownerless.
+                sessions = [session_id]
+            else:
+                sessions = []
             return GoalLedgerEntry(
                 plan_number=str(item["plan_number"]),
-                session_id=str(item.get("session_id", "")),
+                session_id=session_id,
                 rendered_line=str(item.get("rendered_line", "")),
                 emitted_at=float(item.get("emitted_at", 0.0)),
                 displaced_by=_optional_str(item.get("displaced_by")),
                 displaced_at=_optional_float(item.get("displaced_at")),
                 retired_at=_optional_float(item.get("retired_at")),
                 retired_reason=_optional_str(item.get("retired_reason")),
+                sessions=sessions,
             )
         except (KeyError, TypeError, ValueError) as e:
             logger.warning("goal_ledger: skipping malformed entry: %s", e)
@@ -372,6 +407,8 @@ class GoalLedger:
                 # A re-emission re-arms the /goal slot for this plan.
                 existing.displaced_by = None
                 existing.displaced_at = None
+                if session_id not in existing.sessions:
+                    existing.sessions.append(session_id)
             else:
                 entries.append(
                     GoalLedgerEntry(
@@ -379,13 +416,14 @@ class GoalLedger:
                         session_id=session_id,
                         rendered_line=rendered_line,
                         emitted_at=now,
+                        sessions=[session_id],
                     )
                 )
             self._save(entries)
         return sorted(displaced)
 
     def has_live_entry(self, session_id: str, plan_number: str) -> bool:
-        """True when a not-yet-retired entry exists for THIS (session, plan).
+        """True when a not-yet-retired entry exists that THIS session owns.
 
         Read-only, no reconciliation, no lock. Review M2: a caller deciding
         whether ITS session is responsible for a plan needs an answer that
@@ -394,11 +432,38 @@ class GoalLedger:
         written before a restart is still on disk, unaffected by the
         restart, so this is the question to ask instead of any in-memory
         state.
+
+        Review RV-M1: ownership is membership in ``sessions``, not equality
+        against the single ``session_id`` field -- a session that later
+        reasserted the SAME plan must not make the original flipping
+        session's own membership disappear.
         """
         return any(
-            e.plan_number == plan_number and e.session_id == session_id and e.retired_at is None
+            e.plan_number == plan_number and session_id in e.sessions and e.retired_at is None
             for e in self.entries()
         )
+
+    def owning_sessions(self, plan_number: str) -> list[str]:
+        """Every session with a stake in this plan's goal right now.
+
+        Review RV-M1/RV-m2: feeds a terminal-write caller that must refresh
+        or clear EACH owning session's own signal, not just whichever
+        session's write happened to trigger the check -- the pre-fix
+        single-owner design meant a session that reasserted ownership away
+        from the original flipping session left that session's own goal
+        stuck forever. An entry retired a moment ago with
+        ``RETIRED_TERMINAL_STATUS`` is included too (not just a still-live
+        one): a concurrent reconciliation racing between this plan's
+        terminal write landing on disk and this read must not silently
+        suppress every owning session's retraction just because it won the
+        race to reconcile first.
+        """
+        for e in self.entries():
+            if e.plan_number == plan_number and (
+                e.retired_at is None or e.retired_reason == RETIRED_TERMINAL_STATUS
+            ):
+                return list(e.sessions)
+        return []
 
     def session_has_entries(self, session_id: str) -> bool:
         """True when the ledger has EVER recorded an emission for this session.
@@ -413,7 +478,7 @@ class GoalLedger:
         return any(e.session_id == session_id for e in self.entries())
 
     def reassert_session(self, session_id: str, plan_number: str) -> bool:
-        """Transfer a still-live entry's ownership to ``session_id``.
+        """Add ``session_id`` to a still-live entry's set of owning sessions.
 
         Review M3: restores Plan 00269's "the goal survives a session
         restart" intent for a session that resumes an already-ledgered plan
@@ -424,6 +489,17 @@ class GoalLedger:
         entry) only when a not-yet-retired entry for ``plan_number`` exists;
         ``False`` means there is nothing this ledger can vouch for, and the
         caller must not treat the touch as a resumed goal.
+
+        Review RV-M1: this is ADDITIVE, not a transfer — ``session_id`` is
+        added to ``sessions`` alongside whoever already owns the entry,
+        never replacing them. A transfer (the pre-fix shape) broke the
+        original flipping session's own retraction the moment a second
+        session touched the plan: ``has_live_entry``'s ownership check
+        stopped matching it, so its own goal signal could never be cleared
+        when the plan went terminal. The idempotent no-op here (calling this
+        again for a session already in ``sessions``) is deliberate: the
+        caller latches in memory to avoid the redundant write, not this
+        method, which stays simple and safe to call repeatedly.
         """
         with self._locked():
             entries = self.entries()
@@ -433,7 +509,8 @@ class GoalLedger:
             )
             if existing is None:
                 return False
-            existing.session_id = session_id
+            if session_id not in existing.sessions:
+                existing.sessions.append(session_id)
             existing.emitted_at = time.time()
             self._save(entries)
         return True

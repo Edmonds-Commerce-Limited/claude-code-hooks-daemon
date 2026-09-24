@@ -680,18 +680,23 @@ class ClaudeMdInjector:
         # Deterministic total order depending ONLY on the handler set
         # (ledger 00466 N7): self._handlers is whatever order the caller
         # passed in, and that caller chain ultimately bottoms out at
-        # HandlerRegistry.discover()'s pkgutil.walk_packages() filesystem
-        # scan (now itself sorted at the source too — review m6), whose
-        # directory-entry order was not otherwise guaranteed stable across
-        # processes or machines. Two daemons over the identical handler set
-        # could therefore emit a differently-ordered <hooksdaemon> block,
-        # causing a spurious restart commit and cross-branch merge conflicts
-        # on pure reordering. Handler name alone is sufficient for the
-        # progressive/fallback tiers: within one tier, name IS a unique key
-        # (two active handlers never share a name), so it is already a
-        # complete total order — priority is not consulted because handlers
-        # from different event chains are mixed into one flat tier and
-        # priority carries no meaningful ordering across event types.
+        # HandlerRegistry.register_all()'s two event_dir.glob("*.py")
+        # passes — now wrapped in sorted() (review m6/RV-n1). The true
+        # source of the nondeterminism was THAT unsorted glob, not
+        # pkgutil.walk_packages() upstream of it, which already sorts its
+        # own directory scan internally; an earlier version of this comment
+        # named pkgutil, which review RV-n1 found still misattributed the
+        # cause here. Before the glob fix, directory-entry order was not
+        # guaranteed stable across processes or machines, so two daemons
+        # over the identical handler set could emit a differently-ordered
+        # <hooksdaemon> block, causing a spurious restart commit and
+        # cross-branch merge conflicts on pure reordering. Handler name
+        # alone is sufficient for the progressive/fallback tiers: within
+        # one tier, name IS a unique key (two active handlers never share a
+        # name), so it is already a complete total order — priority is not
+        # consulted because handlers from different event chains are mixed
+        # into one flat tier and priority carries no meaningful ordering
+        # across event types.
         #
         # PROMOTED is the one exception (review nit n6): alphabetical would
         # lose the reason a handler is promoted at all -- the config

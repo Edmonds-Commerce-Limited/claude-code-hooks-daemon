@@ -1688,13 +1688,17 @@ class TestGuidanceOrderIsIndependentOfDiscoveryOrder:
     """Ledger 00466 N7: the generated block is a pure function of the
     handler SET, never of caller iteration order.
 
-    ``HandlerRegistry.discover()`` walks the filesystem
-    (``pkgutil.walk_packages``), whose directory-entry order is not
-    guaranteed identical across checkouts or even across runs on the same
-    tree. Two daemons over the SAME handler set (e.g. main and an
-    integration worktree) could therefore emit a differently-ORDERED but
-    otherwise identical ``<hooksdaemon>`` block -- a spurious restart
-    auto-commit, and a merge conflict on pure reordering.
+    ``HandlerRegistry.register_all()`` walked the filesystem via two
+    ``event_dir.glob("*.py")`` passes, unsorted before review m6/RV-n1 --
+    NOT ``pkgutil.walk_packages()``, which sits upstream of the registry and
+    already sorts its own directory scan internally; an earlier version of
+    this docstring named pkgutil, which review RV-n1 found still
+    misattributed the cause. Before the glob fix, directory-entry order was
+    not guaranteed identical across checkouts or even across runs on the
+    same tree, so two daemons over the SAME handler set (e.g. main and an
+    integration worktree) could emit a differently-ORDERED but otherwise
+    identical ``<hooksdaemon>`` block -- a spurious restart auto-commit, and
+    a merge conflict on pure reordering.
     """
 
     @staticmethod

@@ -548,20 +548,40 @@ class TestRegisterAll:
         def reversed_glob(self: Path, pattern: str, *args: Any, **kwargs: Any) -> list[Path]:
             return list(reversed(list(original_glob(self, pattern, *args, **kwargs))))
 
+        # Review RV-n3: reading ``._handlers`` (private, pre-sort) is only a
+        # test of register_all's OWN insertion order if the chain's public
+        # ``.handlers`` property has not been accessed first -- that lazy
+        # sort (priority, then name) caches over ``._handlers`` on its FIRST
+        # read and would make this assertion pass trivially regardless of
+        # what register_all itself produced, silently stopping being a test
+        # of the thing it claims to pin. Asserting the precondition makes a
+        # future accidental ``.handlers`` access (e.g. a refactor that logs
+        # or inspects the chain before this read) fail LOUDLY here instead
+        # of just going quiet.
         normal_registry = HandlerRegistry()
         normal_registry.discover()
         normal_router = EventRouter()
         normal_registry.register_all(normal_router)
-        normal_order = [h.name for h in normal_router.get_chain(EventType.PRE_TOOL_USE)._handlers]
+        normal_chain = normal_router.get_chain(EventType.PRE_TOOL_USE)
+        assert normal_chain._sorted is False, (
+            "precondition violated: .handlers was already accessed on the "
+            "normal-glob-order chain, which would sort ._handlers and mask "
+            "whatever order register_all itself produced"
+        )
+        normal_order = [h.name for h in normal_chain._handlers]
 
         with patch.object(Path, "glob", reversed_glob):
             reversed_registry = HandlerRegistry()
             reversed_registry.discover()
             reversed_router = EventRouter()
             reversed_registry.register_all(reversed_router)
-        reversed_order = [
-            h.name for h in reversed_router.get_chain(EventType.PRE_TOOL_USE)._handlers
-        ]
+        reversed_chain = reversed_router.get_chain(EventType.PRE_TOOL_USE)
+        assert reversed_chain._sorted is False, (
+            "precondition violated: .handlers was already accessed on the "
+            "reversed-glob-order chain, which would sort ._handlers and mask "
+            "whatever order register_all itself produced"
+        )
+        reversed_order = [h.name for h in reversed_chain._handlers]
 
         assert normal_order == reversed_order
 

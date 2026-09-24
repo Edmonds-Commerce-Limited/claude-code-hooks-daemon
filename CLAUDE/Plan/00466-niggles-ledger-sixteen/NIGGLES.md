@@ -293,6 +293,86 @@ together on the same branch:
 `TestProjectRelativeHeadText` and the new `GoalLedger` test classes all
 pass; 518 tests across every touched handler/utils/core/daemon test file.
 
+**Third review pass (major RV-M1, minors RV-m1 through RV-m5, nits RV-n1
+through RV-n3)**: the second pass's M3 re-assert and M2 retraction worked
+AGAINST each other — fixed together with an ownership schema change:
+
+- **RV-M1 — `reassert_session`'s single-owner TRANSFER broke retraction the
+  moment a second session touched a plan.** Once TEAMMATE reasserted a plan
+  LEAD had flipped, `has_live_entry`'s exact `session_id` match stopped
+  matching LEAD, so LEAD's own signal could never be retracted again when
+  the plan completed — and a pre-existing gap on `main` meant a DIFFERENT
+  completing session never retracted the flipping session's stale signal
+  either. Fixed by making ownership ADDITIVE: `GoalLedgerEntry` gained a
+  `sessions: list[str]` field that `record_emission`/`reassert_session` both
+  APPEND to, never overwrite; `has_live_entry` checks membership in
+  `sessions`; a new `GoalLedger.owning_sessions(plan_number)` (accepting an
+  entry retired a moment ago for `RETIRED_TERMINAL_STATUS` too, subsuming
+  RV-m2 below) feeds `_maybe_refresh_on_retirement`, which now refreshes
+  EVERY owning session's own combined signal on a terminal write, not just
+  whichever session's write triggered the check. Pinned by
+  `TestOwnershipSurvivesASecondSession` (single plan, two plans, a second
+  session owning a plan it never flipped — all RED against the pre-fix
+  code) plus `TestReassertSession`/`TestOwningSessions` in
+  `test_goal_ledger.py`.
+- **RV-m2 — subsumed by RV-M1's fix.** `owning_sessions`' terminal-status
+  grace window (live OR just-retired-as-terminal) means a concurrent
+  reconciliation racing between a terminal write landing and this read
+  cannot suppress a real owner's retraction.
+- **RV-m3 — a SAME-session-id resume (`--resume`/`--continue`) never got
+  its `/goal` back**, because the M3 gate (`session_has_entries`) reads the
+  PERSISTED ledger, which still "knows" the session from its OWN earlier
+  real flip even after its signal FILE was lost across a restart. Fixed
+  with a second in-memory latch, `self._reasserted: dict[(session_id, plan_number), bool]`, reset every daemon lifetime and independent of
+  `self._fired` — "have I, this process, already confirmed a signal for
+  this pair" answers both a genuinely new session id and a same-id resume
+  identically. The busy-session contract (a session that already
+  real-flipped a DIFFERENT plan must not implicitly absorb an unrelated
+  one) still holds via `session_has_entries`, now checked only when the
+  session is NOT already a stakeholder of THIS specific plan
+  (`has_live_entry`). Pinned by
+  `test_same_session_id_after_a_restart_gets_its_signal_rewritten` (RED
+  against the pre-fix code).
+- **RV-m1 — the m4 reconstruction reversed the FIRST occurrence of
+  `new_string`, not necessarily the actual edit site.** A table cell or
+  title sharing the same text as the Status VALUE (e.g. "In Progress")
+  could reconstruct the wrong span and report a false flip. Fixed:
+  `_is_flip_via_reconstruction` now tries every occurrence of `new_string`
+  as a candidate, keeps only candidates whose reversal leaves `old_string`
+  unique (the Edit tool's own precondition for a non-`replace_all` edit),
+  and reports a flip only when every surviving candidate agrees; disagreement
+  or no viable candidate reads conservatively as "not a flip".
+  `replace_all` has no uniqueness precondition to exploit, so it instead
+  requires `old_string` to be ABSENT from the post-edit text (a clean
+  application leaves none behind) before reversing every occurrence at
+  once — otherwise conservatively "not a flip", the same trade-off as a
+  contrived title-collision missed-flip case this review accepted as
+  out of scope. Pinned by two RED tests (a table-cell collision, its
+  `replace_all` variant) plus a regression control.
+- **RV-n1 — the m6 fix narrative still blamed `pkgutil.walk_packages()`**,
+  which already sorts its own directory scan; the real (now fixed) source
+  was `HandlerRegistry.register_all`'s two previously-unsorted
+  `event_dir.glob("*.py")` passes. Corrected in `claude_md_injector.py`,
+  `docs_generator.py`, and both files' test docstrings.
+- **RV-n2 — the fail-open convention split flagged by the first review's n4
+  was read as unresolved, not intentional.** Unified behind one helper,
+  `_open_ledger()`, that every ledger-opening call site in the class now
+  goes through — catching `RuntimeError` and logging, matching
+  `_write_combined_signal`/`_ledger_record`'s pre-existing convention
+  rather than the unguarded propagation the retirement-refresh/reassert
+  paths used before.
+- **RV-n3 — no test covered the RV-M1 scenarios or RV-m1's collision case
+  (now fixed above); a registry test read the chain's PRIVATE
+  `._handlers` list, which only worked because the lazy `.handlers` sort
+  had not run yet.** Made the precondition explicit: the test now asserts
+  `chain._sorted is False` before reading `._handlers`, so an accidental
+  earlier `.handlers` access fails loudly instead of silently passing for
+  the wrong reason.
+
+Release note 13 and the module/class docstrings corrected again to
+describe the ADDITIVE ownership and per-daemon-lifetime reassert latch
+instead of the second pass's (now superseded) single-owner transfer.
+
 ### N2 — `setup_worktree.sh` tells every agent to run the full suite through `run_all.sh`
 
 **Found by the coordinator** when it set up an integration worktree.

@@ -377,10 +377,16 @@ class TestSessionHasEntries:
 
 
 class TestReassertSession:
-    """Review M3: transfers ownership of a still-live entry with NONE of
-    ``record_emission``'s displacement side effects."""
+    """Review M3/RV-M1: ADDS a session to a still-live entry's ownership set
+    (never a single-owner transfer) with NONE of ``record_emission``'s
+    displacement side effects."""
 
-    def test_transfers_ownership_of_a_live_entry(self, tmp_path: Path) -> None:
+    def test_adds_the_reasserting_session_without_dropping_the_original_owner(
+        self, tmp_path: Path
+    ) -> None:
+        """RV-M1's core defect: a transfer stripped the flipping session's
+        own membership the moment a second session reasserted, so it could
+        never retract its own signal again."""
         plan_dir = tmp_path / "CLAUDE" / "Plan"
         _make_plan(plan_dir, _PLAN_A, _STATUS_IN_PROGRESS)
         ledger = GoalLedger(tmp_path / LEDGER_FILENAME)
@@ -388,7 +394,21 @@ class TestReassertSession:
 
         assert ledger.reassert_session(_OTHER_SESSION, _PLAN_A) is True
         entry = next(e for e in ledger.entries() if e.plan_number == _PLAN_A)
-        assert entry.session_id == _OTHER_SESSION
+        assert set(entry.sessions) == {_SESSION, _OTHER_SESSION}
+        assert ledger.has_live_entry(_SESSION, _PLAN_A) is True
+        assert ledger.has_live_entry(_OTHER_SESSION, _PLAN_A) is True
+
+    def test_reasserting_the_same_session_twice_does_not_duplicate_it(self, tmp_path: Path) -> None:
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        _make_plan(plan_dir, _PLAN_A, _STATUS_IN_PROGRESS)
+        ledger = GoalLedger(tmp_path / LEDGER_FILENAME)
+        ledger.record_emission(_SESSION, _PLAN_A, _GOAL_LINE, plan_dir)
+
+        ledger.reassert_session(_OTHER_SESSION, _PLAN_A)
+        ledger.reassert_session(_OTHER_SESSION, _PLAN_A)
+
+        entry = next(e for e in ledger.entries() if e.plan_number == _PLAN_A)
+        assert entry.sessions.count(_OTHER_SESSION) == 1
 
     def test_false_when_no_live_entry_exists(self, tmp_path: Path) -> None:
         ledger = GoalLedger(tmp_path / LEDGER_FILENAME)
@@ -409,3 +429,65 @@ class TestReassertSession:
 
         entry_b = next(e for e in ledger.entries() if e.plan_number == _PLAN_B)
         assert entry_b.displaced_by is None
+
+
+class TestOwningSessions:
+    """Review RV-M1/RV-m2: every session a terminal write must refresh."""
+
+    def test_lists_every_session_ever_handed_the_goal(self, tmp_path: Path) -> None:
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        _make_plan(plan_dir, _PLAN_A, _STATUS_IN_PROGRESS)
+        ledger = GoalLedger(tmp_path / LEDGER_FILENAME)
+        ledger.record_emission(_SESSION, _PLAN_A, _GOAL_LINE, plan_dir)
+        ledger.reassert_session(_OTHER_SESSION, _PLAN_A)
+
+        assert set(ledger.owning_sessions(_PLAN_A)) == {_SESSION, _OTHER_SESSION}
+
+    def test_empty_for_a_plan_the_ledger_has_never_heard_of(self, tmp_path: Path) -> None:
+        ledger = GoalLedger(tmp_path / LEDGER_FILENAME)
+
+        assert ledger.owning_sessions(_PLAN_A) == []
+
+    def test_still_lists_owners_of_an_entry_retired_for_terminal_status(
+        self, tmp_path: Path
+    ) -> None:
+        """RV-m2: a concurrent reconciliation may retire the entry moments
+        before this read; the just-retired owners must still be answered,
+        not silently dropped by a race."""
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        folder = _make_plan(plan_dir, _PLAN_A, _STATUS_IN_PROGRESS)
+        ledger = GoalLedger(tmp_path / LEDGER_FILENAME)
+        ledger.record_emission(_SESSION, _PLAN_A, _GOAL_LINE, plan_dir)
+        ledger.reassert_session(_OTHER_SESSION, _PLAN_A)
+        (folder / "PLAN.md").write_text(
+            f"# Plan {_PLAN_A}: example plan\n\n**Status**: Complete\n", encoding="utf-8"
+        )
+        ledger.live_plan_numbers(plan_dir)  # reconciles + retires the entry
+
+        assert set(ledger.owning_sessions(_PLAN_A)) == {_SESSION, _OTHER_SESSION}
+
+    def test_empty_for_an_entry_retired_as_archived(self, tmp_path: Path) -> None:
+        """Only a TERMINAL-status retirement gets the race-window grace; an
+        archived (moved out of the plan dir) entry is genuinely gone."""
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        folder = _make_plan(plan_dir, _PLAN_A, _STATUS_IN_PROGRESS)
+        ledger = GoalLedger(tmp_path / LEDGER_FILENAME)
+        ledger.record_emission(_SESSION, _PLAN_A, _GOAL_LINE, plan_dir)
+        archive = plan_dir / "Completed"
+        archive.mkdir(parents=True, exist_ok=True)
+        folder.rename(archive / folder.name)
+        ledger.live_plan_numbers(plan_dir)
+
+        assert ledger.owning_sessions(_PLAN_A) == []
+
+
+class TestUnreadableEncoding:
+    """Review RV-m5: a non-UTF-8 ledger file must be treated as corrupt,
+    not raise past this fail-open API."""
+
+    def test_non_utf8_ledger_is_tolerated_like_any_other_corrupt_file(self, tmp_path: Path) -> None:
+        ledger_path = tmp_path / LEDGER_FILENAME
+        ledger_path.write_bytes(b"\xff\xfe\x00\x01not valid utf-8")
+        ledger = GoalLedger(ledger_path)
+
+        assert ledger.entries() == []

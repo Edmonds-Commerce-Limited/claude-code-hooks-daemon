@@ -1092,6 +1092,76 @@ class TestStatusFlipDetection:
         assert result.decision == Decision.ALLOW
         assert not self._signal_path().exists()
 
+    def test_new_string_colliding_with_unrelated_text_does_not_falsely_flip(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """Review RV-m1: the plan is ALREADY In Progress, and a table cell
+        elsewhere reads "Not Started". Undoing the FIRST occurrence of
+        ``new_string`` ("In Progress") in the post-edit text lands on the
+        REAL Status line (the table cell comes first in this fixture's
+        layout only by coincidence of where it is placed) unless every
+        occurrence is tried and filtered to the one reversal that leaves
+        ``old_string`` unique -- the actual edit here never touched the
+        Status line at all."""
+        plan = self._plan_path()
+        plan.write_text(
+            "# Plan 00269: supervisor goal message injection\n\n"
+            "**Status**: In Progress\n\n"
+            "| Task | State |\n| --- | --- |\n| A | Not Started |\n",
+            encoding="utf-8",
+        )
+
+        result = handler.handle(
+            self._edit_hook_input(plan, old_string="Not Started", new_string="In Progress")
+        )
+
+        assert result.decision == Decision.ALLOW
+        assert not self._signal_path().exists()
+
+    def test_replace_all_colliding_with_unrelated_text_does_not_falsely_flip(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """Same collision, via ``replace_all`` -- every occurrence of
+        ``new_string`` is reversed at once, so this exercises the
+        ``replace_all`` branch of the reconstruction rather than the
+        candidate-enumeration branch."""
+        plan = self._plan_path()
+        plan.write_text(
+            "# Plan 00269: supervisor goal message injection\n\n"
+            "**Status**: In Progress\n\n"
+            "| Task | State |\n| --- | --- |\n| A | Not Started |\n",
+            encoding="utf-8",
+        )
+
+        edit = self._edit_hook_input(plan, old_string="Not Started", new_string="In Progress")
+        edit["tool_input"]["replace_all"] = True
+
+        result = handler.handle(edit)
+
+        assert result.decision == Decision.ALLOW
+        assert not self._signal_path().exists()
+
+    def test_genuine_flip_still_detected_when_new_string_is_unambiguous(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """The regression control for RV-m1's fix: when ``new_string``
+        occurs exactly once, the (now candidate-based) reconstruction must
+        still detect a real flip -- this is the pre-existing m4 contract."""
+        plan = self._plan_path()
+        plan.write_text(
+            "# Plan 00269: supervisor goal message injection\n\n"
+            "**Status**: In Progress\n\n"
+            "Body.\n",
+            encoding="utf-8",
+        )
+
+        result = handler.handle(
+            self._edit_hook_input(plan, old_string="Not Started", new_string="In Progress")
+        )
+
+        assert result.decision == Decision.ALLOW
+        assert self._signal_path().exists()
+
     # ---- Write: the transition is read against git HEAD -------------------
 
     def test_write_creating_a_brand_new_in_progress_plan_emits(
@@ -1311,3 +1381,124 @@ class TestNewSessionReassertion:
         ledger = GoalLedger(self._untracked / LEDGER_FILENAME)
         entry_b = next(e for e in ledger.entries() if e.plan_number == "00298")
         assert entry_b.displaced_by is None
+
+
+class TestOwnershipSurvivesASecondSession(TestNewSessionReassertion):
+    """Review RV-M1: the ORIGINAL flipping session's own retraction must
+    keep working after a SECOND session reasserts the same (or another)
+    live plan -- the pre-fix single-owner ``reassert_session`` transfer
+    broke this the moment a second session touched the plan. Inherits the
+    fixture plumbing from ``TestNewSessionReassertion``.
+    """
+
+    def test_original_session_still_retracts_after_a_second_session_reasserts(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """Single plan: LEAD flips it, TEAMMATE ticks it (reasserts), LEAD
+        completes it -- LEAD's OWN signal must drop the plan."""
+        plan = self._plan_path("00296-single")
+        plan.write_text(_plan_md("In Progress"), encoding="utf-8")
+        handler.handle(
+            self._edit_input(plan, "LEAD", "**Status**: Not Started", "**Status**: In Progress")
+        )
+        handler.handle(self._edit_input(plan, "TEAMMATE", "- [ ] a", "- [x] a"))
+
+        plan.write_text(_plan_md("Complete"), encoding="utf-8")
+        handler.handle(
+            self._edit_input(plan, "LEAD", "**Status**: In Progress", "**Status**: Complete")
+        )
+
+        lead_signal_path = self._untracked / _SIGNAL_SUBDIR / f"LEAD{_SIGNAL_SUFFIX}"
+        assert not lead_signal_path.exists(), (
+            "LEAD's own signal survived after LEAD completed the only plan it "
+            "(and TEAMMATE) ever held -- a transfer-based reassert would have "
+            "stripped LEAD's ownership the moment TEAMMATE touched the plan"
+        )
+
+    def test_original_session_retracts_one_of_two_plans_after_reassertion(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """Two plans: LEAD flips both, TEAMMATE ticks one, LEAD completes
+        that one -- LEAD's OWN combined signal must drop it but keep the
+        other."""
+        first = self._plan_path("00296-a")
+        first.write_text(_plan_md("In Progress"), encoding="utf-8")
+        second = self._plan_path("00298-b")
+        second.write_text(_plan_md("In Progress"), encoding="utf-8")
+        handler.handle(
+            self._edit_input(first, "LEAD", "**Status**: Not Started", "**Status**: In Progress")
+        )
+        handler.handle(
+            self._edit_input(second, "LEAD", "**Status**: Not Started", "**Status**: In Progress")
+        )
+        handler.handle(self._edit_input(first, "TEAMMATE", "- [ ] a", "- [x] a"))
+
+        first.write_text(_plan_md("Complete"), encoding="utf-8")
+        handler.handle(
+            self._edit_input(first, "LEAD", "**Status**: In Progress", "**Status**: Complete")
+        )
+
+        joined = self._signal("LEAD")["rendered_lines"][0]
+        assert "00296" not in joined
+        assert "00298" in joined
+
+    def test_second_session_can_own_a_second_plan_it_never_flipped(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """A session with no plan of its OWN (never real-flipped anything)
+        touching a SECOND already-live plan must also become a stakeholder
+        of it -- not just the first plan it happened to touch."""
+        first = self._plan_path("00296-a")
+        first.write_text(_plan_md("In Progress"), encoding="utf-8")
+        second = self._plan_path("00298-b")
+        second.write_text(_plan_md("In Progress"), encoding="utf-8")
+        handler.handle(
+            self._edit_input(first, "LEAD", "**Status**: Not Started", "**Status**: In Progress")
+        )
+        handler.handle(
+            self._edit_input(second, "LEAD", "**Status**: Not Started", "**Status**: In Progress")
+        )
+
+        handler.handle(self._edit_input(first, "S2", "- [ ] a", "- [x] a"))
+        handler.handle(self._edit_input(second, "S2", "- [ ] a", "- [x] a"))
+        second.write_text(_plan_md("Complete"), encoding="utf-8")
+        handler.handle(
+            self._edit_input(second, "S2", "**Status**: In Progress", "**Status**: Complete")
+        )
+
+        joined = self._signal("S2")["rendered_lines"][0]
+        assert "00298" not in joined
+        assert "00296" in joined
+
+
+class TestResumedSameSessionReassertion(TestNewSessionReassertion):
+    """Review RV-m3: a SAME-session-id resume (Claude Code's --resume /
+    --continue) must also get its own signal restored, not just a
+    genuinely new session id -- Plan 00269's own motivating case was a
+    session resuming after a restart, which keeps its session id."""
+
+    def test_same_session_id_after_a_restart_gets_its_signal_rewritten(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        plan = self._plan_path("00296-first")
+        plan.write_text(_plan_md("In Progress"), encoding="utf-8")
+        daemon_one = GoalInjectionHandler()
+        daemon_one.handle(
+            self._edit_input(plan, "S1", "**Status**: Not Started", "**Status**: In Progress")
+        )
+        signal_path = self._untracked / _SIGNAL_SUBDIR / f"S1{_SIGNAL_SUFFIX}"
+        assert signal_path.exists(), "precondition: the real flip wrote S1's own signal"
+        signal_path.unlink()  # simulate the supervisor consuming it
+
+        # Fresh handler instance simulates a daemon restart -- _fired and
+        # the new in-memory reassert latch are both empty, but the SAME
+        # session id (a --resume) touches the plan again with a non-flip
+        # edit.
+        daemon_two = GoalInjectionHandler()
+        daemon_two.handle(self._edit_input(plan, "S1", "- [ ] a", "- [x] a"))
+
+        assert signal_path.exists(), (
+            "a resumed session with the SAME session id never got its own "
+            "signal file rewritten after a restart consumed it"
+        )
+        assert "00296" in json.loads(signal_path.read_text(encoding="utf-8"))["rendered_lines"][0]

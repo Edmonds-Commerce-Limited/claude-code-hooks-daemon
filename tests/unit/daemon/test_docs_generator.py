@@ -249,8 +249,10 @@ class TestDocsGeneratorHandlerCollection:
         """Ledger 00466 N7 sibling: _render_handler_table() sorted only by
         priority (`key=lambda h: h[3]`), with no tiebreaker. Two handlers
         sharing a priority then kept whatever order
-        HandlerRegistry.list_handlers() happened to hand back -- itself
-        driven by pkgutil.walk_packages()'s unordered filesystem scan -- so
+        HandlerRegistry.list_handlers() happened to hand back -- driven by
+        register_all()'s two unsorted event_dir.glob("*.py") passes, now
+        wrapped in sorted() (review m6/RV-n1) -- not pkgutil.walk_packages()
+        upstream of it, which already sorts its own scan internally -- so
         two daemons over the identical handler set could render a
         differently-ordered table row pair."""
         from claude_code_hooks_daemon.daemon.docs_generator import DocsGenerator

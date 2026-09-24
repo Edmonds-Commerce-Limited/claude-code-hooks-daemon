@@ -19,25 +19,37 @@ pre-edit text from disk when the span carried only the bare status value,
 with no `**Status**:` prefix) or, for a Write, git HEAD read from the
 file's OWN enclosing repository (not necessarily the project root's — a
 nested worktree checkout is a separate repo); `recovery_cron_advisor`'s
-Write path shares that same HEAD comparison. An edit or rewrite that leaves
-an already-In-Progress or already-Complete status unchanged emits nothing
-from either handler.
+Write path shares that same HEAD comparison. An edit or rewrite whose
+replaced/compared span never touched the Status line emits nothing from
+either handler THROUGH THE FLIP PATH (no new ledger record, no
+displacement advisory) — a session touching an already-live plan without
+flipping it can still cause its OWN `/goal` signal to be (re)written, see
+below.
 
 **Two behaviours from Plan 00276/00269 are preserved, not just "no action
 needed":**
 
-- **A plan completing after a daemon restart still drops out of the
-  combined `/goal` text.** The retirement refresh used to key on an
-  in-memory latch that a restart empties; it now asks the persistent goal
-  ledger instead, so a plan flipped in one daemon process and completed in
-  the next is still retracted promptly.
-- **A resumed session still gets its `/goal` back.** Plan 00269 relied on
-  "the first edit to an already-In-Progress plan in a NEW session re-fires"
-  to survive a session restart. A session with NO ledger entries of its own
-  yet that touches an already-live plan (without itself producing a real
-  flip) now has that plan's ledger entry re-assigned to it and gets its own
-  signal written — with none of a real flip's side effects (no new ledger
-  record, no displacement of any other live plan, no "GOAL DISPLACED"
-  advisory). A session that already has its own live goal is unaffected.
+- **A plan going terminal drops it from every owning session's combined
+  `/goal` text, however it reaches that state.** The retirement refresh
+  used to key on an in-memory latch that a daemon restart empties; it now
+  asks the persistent goal ledger instead, so a plan flipped in one daemon
+  process and completed in the next is still retracted promptly. The
+  ledger now records EVERY session ever handed a plan's goal, not just the
+  most recent one, so a plan completing under a DIFFERENT session than the
+  one that flipped it still drops out of the flipping session's own
+  `/goal` too.
+- **A resumed session still gets its `/goal` back — including a resume
+  with the SAME session id.** Plan 00269 relied on "the first edit to an
+  already-In-Progress plan re-fires" to survive a session restart. A
+  session touching an already-live plan without itself producing a real
+  flip is added to that plan's ledger entry (alongside whoever already
+  owns it, never replacing them) and gets its own signal (re)written —
+  with none of a real flip's side effects (no new ledger record, no
+  displacement of any other live plan, no "GOAL DISPLACED" advisory). This
+  fires once per `(session, plan)` per daemon lifetime, so a resumed
+  session whose signal file was lost across a restart gets it back even
+  though its session id and ledger history are unchanged. A session that
+  already real-flipped a DIFFERENT plan of its own does not implicitly
+  absorb an unrelated plan it merely happens to touch.
 
 No other action is needed — everything above is automatic.
