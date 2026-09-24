@@ -1604,6 +1604,46 @@ That gap is real and is accepted, not overlooked: content quality is not
 checkable from here, and a guard that pretended otherwise would be the same
 false-assurance failure this ledger keeps recording.
 
+### N25 — `pipe_blocker` names the loop keyword `do` as a pipe's producer
+
+**Found**: the coordinator ran
+`for x in $f; do grep -n "…" $x | head -30; done`. `R-PIPE-TO-HEAD`
+denied it with `COMMAND: … do unrecognized` and suggested whitelisting
+`^do\b`. The producer of that pipe is `grep`, which is on the whitelist.
+The segmenter kept the shell keyword `do` in front of the command. The
+suggested fix is worse than the false positive: whitelisting `^do\b` would
+exempt every loop body's pipe, including `do pytest … | tail`.
+
+**Candidate remedy:** strip shell reserved words (`do`, `then`, `else`,
+`elif`, `{`, `!`, `time`) from the front of a segment before choosing the
+producer, as the command-wrapper peeling already does for `env`/`nohup`.
+Add a test showing `do pytest x | head` is still judged on `pytest`, and
+make the whitelist suggestion never offer a reserved word.
+
+### N24 — orchestrator simulate reports denials its blocking mode would never make
+
+**Found**: every main-thread Bash call this session drew
+`SIMULATED orchestrator-only mode (Plan 00418 — record only, never blocks): main thread would have been denied — Bash: …`.
+The coordinator took that at face value and told Plan 00463's agent that
+going live would deny the coordinator's own `llm_qa.py all` (a deadlock).
+The 00463 code review read the real handler
+(`.claude/project-handlers/pre_tool_use/orchestrator_simulate.py`).
+Simulate mode judges `tool_name not in _COORDINATION_TOOLS` (line 299),
+while blocking mode denies only `_BLOCKED_TOOLS = {Write, Edit, NotebookEdit}`
+(lines 183 and 320). Bash is "would have been denied" in simulate and
+never denied when live.
+
+**Why it matters.** The simulate record exists to preview what enforcement
+would cost before it is switched on. A preview that overstates enforcement
+misleads that decision and anyone reasoning from it, as it did here, and
+cost an agent a round of edits it then had to revert.
+
+**Candidate remedies:** simulate records exactly what blocking would
+deny, from ONE shared predicate, and a test pins the two modes to the same
+verdict for every tool. If the broader "not a coordination tool" count is
+still wanted as telemetry, it gets its own clearly different wording,
+never "would have been denied".
+
 ### N23 — a worktree commit is judged against the main checkout's staged tree
 
 **Found**: Plan 00462's agent ran `git commit` in its worktree and was
