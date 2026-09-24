@@ -280,8 +280,56 @@ class TestRuleFormatterVerbose:
         assert len(formatter.verbose(sample_rule)) > len(formatter.terse(sample_rule))
 
 
+class TestRuleFormatterAdvisory:
+    """RuleFormatter.advisory() renders an ALLOW-path report for a rule.
+
+    Plan 00466 N8: an ALLOW result must never carry the deny headline
+    ("BLOCKED [rule_id]: ...") -- a handler whose call already ran (an
+    `advise`-mode result, or a `block_once` repeat) told the reader the
+    call was blocked when it was not. advisory() is the reusable rendering
+    every such handler should use instead of verbose()/terse().
+    """
+
+    def test_advisory_returns_string(self, formatter: RuleFormatter, sample_rule: Rule) -> None:
+        msg = formatter.advisory(sample_rule)
+        assert isinstance(msg, str)
+
+    def test_advisory_contains_rule_id(self, formatter: RuleFormatter, sample_rule: Rule) -> None:
+        msg = formatter.advisory(sample_rule)
+        assert sample_rule.rule_id in msg
+
+    def test_advisory_contains_blocked_literal(
+        self, formatter: RuleFormatter, sample_rule: Rule
+    ) -> None:
+        """Same detail as verbose(): the load-bearing literal is not lost."""
+        msg = formatter.advisory(sample_rule)
+        assert "git reset --hard" in msg
+
+    def test_advisory_contains_rule_verbose_field(
+        self, formatter: RuleFormatter, sample_rule: Rule
+    ) -> None:
+        """Same teaching content as verbose() -- only the headline differs."""
+        msg = formatter.advisory(sample_rule)
+        assert "permanently destroys" in msg.lower()
+
+    def test_advisory_never_contains_the_deny_headline(
+        self, formatter: RuleFormatter, sample_rule: Rule
+    ) -> None:
+        """The exact defect N8 found: an ALLOW result reading as BLOCKED."""
+        msg = formatter.advisory(sample_rule)
+        assert "BLOCKED [" not in msg
+
+    def test_advisory_differs_from_verbose(
+        self, formatter: RuleFormatter, sample_rule: Rule
+    ) -> None:
+        assert formatter.advisory(sample_rule) != formatter.verbose(sample_rule)
+
+    def test_advisory_differs_from_terse(self, formatter: RuleFormatter, sample_rule: Rule) -> None:
+        assert formatter.advisory(sample_rule) != formatter.terse(sample_rule)
+
+
 class TestRuleFormatterConsistency:
-    """All three formats are generated from the same Rule source — no drift."""
+    """All four formats are generated from the same Rule source — no drift."""
 
     def test_rule_id_consistent_across_formats(
         self, formatter: RuleFormatter, sample_rule: Rule
