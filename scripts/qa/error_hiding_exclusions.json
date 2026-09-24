@@ -237,6 +237,12 @@
       "reason": "Reading the just-written PLAN.md is advisory sensing (Plan 00269): an unreadable file means no goal signal, never a broken Write/Edit tool call. Narrow except OSError is logged at warning; the single caller treats None as 'do not fire'."
     },
     {
+      "file": "handlers/post_tool_use/goal_injection.py",
+      "function": "_head_plan_text",
+      "rule": "return-none-on-error",
+      "reason": "Ledger 00466 N3: reading a plan's git-HEAD content to detect a real Status transition is advisory sensing, same contract as _read_plan. An unresolvable project root (RuntimeError) or a path outside it (ValueError/OSError) means there is nothing to diff against, never a broken Write/Edit tool call. Narrow excepts are logged at warning (the RuntimeError case) or silently expected (a plan path genuinely outside the project, already handled elsewhere); the single caller (_is_real_flip_to_in_progress) treats None as 'nothing to flip FROM', which correctly reads as a genuine flip."
+    },
+    {
       "file": "daemon/cli.py",
       "function": "send_daemon_request",
       "rule": "return-none-on-error",

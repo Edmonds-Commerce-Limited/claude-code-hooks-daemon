@@ -1,21 +1,26 @@
 """Unit tests for the GoalInjectionHandler (Plan 00269).
 
-RED-first TDD file. The handler detects a ``PLAN.md`` Write/Edit whose
-resulting ``**Status**:`` reads ``In Progress`` (active plan dir only, never
-``Completed/``), renders the configured goal lines with validated
-placeholders, joins them into ONE physical line, and atomically writes a
-``<session>.goal-intent`` signal for the ccy PTY supervisor. Latched once per
-``(plan, session)`` per daemon process. Never blocks. Opt-in
+RED-first TDD file. The handler detects a ``PLAN.md`` Write/Edit that is a
+REAL TRANSITION to ``**Status**: In Progress`` (ledger 00466 N3) -- an Edit
+whose replaced span never touched the Status line, or a Write that merely
+rewrites an already-In-Progress plan, must emit nothing even though the
+post-write file still reads In Progress (active plan dir only, never
+``Completed/``). A genuine flip renders the configured goal lines with
+validated placeholders, joins them into ONE physical line, and atomically
+writes a ``<session>.goal-intent`` signal for the ccy PTY supervisor. Latched
+once per ``(plan, session)`` per daemon process. Never blocks. Opt-in
 (``get_default_enabled() -> False``).
 """
 
 import json
+import subprocess
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from claude_code_hooks_daemon.constants import HandlerID, Priority
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.post_tool_use.goal_injection import (
     _CLEAR_SUFFIX,
@@ -42,6 +47,16 @@ def _plan_md(status: str = "In Progress") -> str:
     return (
         "# Plan 00269: supervisor goal message injection\n\n"
         f"**Status**: {status}\n**Created**: 2026-08-26\n\n## Overview\n\nBody.\n"
+    )
+
+
+def _git(root: Path, *args: str) -> None:
+    """Run a real git command against ``root`` (mirrors test_git_facts.py)."""
+    subprocess.run(  # nosec B603 B607 - trusted system tool, list form
+        ["git", "-C", str(root), *args],
+        check=True,
+        capture_output=True,
+        timeout=Timeout.GIT_CONTEXT,
     )
 
 
@@ -888,3 +903,213 @@ class TestCombinedGoalSignal:
 
         assert signal_path.exists(), "a still-live plan must keep its signal"
         assert "00298" in self._signal()["rendered_lines"][0]
+
+
+class TestStatusFlipDetection:
+    """N3 (ledger 00466): fire only on a REAL transition to In Progress.
+
+    The handler previously matched the post-write STATE ("does the file now
+    read In Progress"), so the first Write/Edit in a session to any plan that
+    was ALREADY In Progress fired -- a table row, a task tick, a typo fix.
+    These tests pin the transition contract: an Edit whose replaced span
+    never touched the Status line, or a Write that merely rewrites an
+    already-In-Progress plan, must emit nothing -- no signal, no ledger
+    record, no displacement advisory -- even though the post-write file
+    still reads In Progress.
+    """
+
+    @pytest.fixture(autouse=True)
+    def mock_project_context(self, tmp_path: Path):
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                "claude_code_hooks_daemon.handlers.post_tool_use.goal_injection."
+                "ProjectContext.daemon_untracked_dir",
+                classmethod(lambda cls: tmp_path / "untracked"),
+            )
+            mp.setattr(
+                "claude_code_hooks_daemon.handlers.post_tool_use.goal_injection."
+                "ProjectContext.project_root",
+                classmethod(lambda cls: tmp_path),
+            )
+            self._untracked = tmp_path / "untracked"
+            self._project = tmp_path
+            yield
+
+    @pytest.fixture
+    def handler(self) -> GoalInjectionHandler:
+        return GoalInjectionHandler()
+
+    def _plan_path(self, folder: str = _PLAN_FOLDER) -> Path:
+        plan_dir = self._project / "CLAUDE" / "Plan" / folder
+        plan_dir.mkdir(parents=True, exist_ok=True)
+        return plan_dir / "PLAN.md"
+
+    def _signal_path(self, session: str = _SESSION) -> Path:
+        return self._untracked / _SIGNAL_SUBDIR / f"{session}{_SIGNAL_SUFFIX}"
+
+    def _edit_hook_input(self, file_path: Path, old_string: str, new_string: str) -> dict[str, Any]:
+        return {
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": str(file_path),
+                "old_string": old_string,
+                "new_string": new_string,
+            },
+            "session_id": _SESSION,
+        }
+
+    def _write_hook_input(self, file_path: Path) -> dict[str, Any]:
+        return {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(file_path)},
+            "session_id": _SESSION,
+        }
+
+    def _init_repo(self) -> None:
+        _git(self._project, "init")
+        _git(self._project, "config", "user.email", "t@example.com")
+        _git(self._project, "config", "user.name", "T")
+
+    # ---- Edit: the transition is read from old_string/new_string alone ---
+
+    def test_edit_unrelated_to_status_line_on_in_progress_plan_emits_nothing(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """A table-row/typo edit to an already-In-Progress plan is silent."""
+        plan = self._plan_path()
+        plan.write_text(_plan_md("In Progress"), encoding="utf-8")
+
+        result = handler.handle(
+            self._edit_hook_input(
+                plan,
+                old_string="## Overview\n\nBody.",
+                new_string="## Overview\n\nBody.\n\n| a | b |\n| - | - |",
+            )
+        )
+
+        assert result.decision == Decision.ALLOW
+        assert result.context == []
+        assert not self._signal_path().exists()
+
+    def test_edit_flipping_status_line_to_in_progress_emits(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """The old contract, pinned: a real Not Started -> In Progress flip."""
+        plan = self._plan_path()
+        plan.write_text(_plan_md("In Progress"), encoding="utf-8")
+
+        result = handler.handle(
+            self._edit_hook_input(
+                plan,
+                old_string="**Status**: Not Started",
+                new_string="**Status**: In Progress",
+            )
+        )
+
+        assert result.decision == Decision.ALLOW
+        assert self._signal_path().exists()
+
+    def test_edit_whose_replaced_span_already_read_in_progress_emits_nothing(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """The replaced span itself proves the line was already In Progress
+        -- e.g. correcting the Created date in the same replaced chunk."""
+        plan = self._plan_path()
+        plan.write_text(_plan_md("In Progress"), encoding="utf-8")
+
+        result = handler.handle(
+            self._edit_hook_input(
+                plan,
+                old_string="**Status**: In Progress\n**Created**: 2026-08-26",
+                new_string="**Status**: In Progress\n**Created**: 2026-08-27",
+            )
+        )
+
+        assert result.decision == Decision.ALLOW
+        assert not self._signal_path().exists()
+
+    # ---- Write: the transition is read against git HEAD -------------------
+
+    def test_write_creating_a_brand_new_in_progress_plan_emits(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """No repository at all: HEAD carries nothing, so this reads as a
+        genuine flip -- matches the pre-existing single-plan contract."""
+        plan = self._plan_path()
+        plan.write_text(_plan_md("In Progress"), encoding="utf-8")
+
+        result = handler.handle(self._write_hook_input(plan))
+
+        assert result.decision == Decision.ALLOW
+        assert self._signal_path().exists()
+
+    def test_write_rewriting_an_already_committed_in_progress_plan_emits_nothing(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """The exact live scenario (ledger 00466 N3): the plan was already
+        In Progress at HEAD; this Write only adds a section."""
+        self._init_repo()
+        plan = self._plan_path()
+        plan.write_text(_plan_md("In Progress"), encoding="utf-8")
+        _git(self._project, "add", "-A")
+        _git(self._project, "commit", "-m", "flip to in progress")
+
+        plan.write_text(_plan_md("In Progress") + "\n## Notes\n\nMore.\n", encoding="utf-8")
+
+        result = handler.handle(self._write_hook_input(plan))
+
+        assert result.decision == Decision.ALLOW
+        assert result.context == []
+        assert not self._signal_path().exists()
+
+    def test_write_rewriting_an_uncommitted_plan_to_in_progress_emits(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """A real repo exists, but this path was never committed: HEAD has
+        nothing for it, so the write still reads as a genuine flip."""
+        self._init_repo()
+        plan = self._plan_path()
+        plan.write_text(_plan_md("In Progress"), encoding="utf-8")
+
+        result = handler.handle(self._write_hook_input(plan))
+
+        assert result.decision == Decision.ALLOW
+        assert self._signal_path().exists()
+
+    def test_write_rewriting_a_committed_not_started_plan_to_in_progress_emits(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        self._init_repo()
+        plan = self._plan_path()
+        plan.write_text(_plan_md("Not Started"), encoding="utf-8")
+        _git(self._project, "add", "-A")
+        _git(self._project, "commit", "-m", "create plan")
+
+        plan.write_text(_plan_md("In Progress"), encoding="utf-8")
+
+        result = handler.handle(self._write_hook_input(plan))
+
+        assert result.decision == Decision.ALLOW
+        assert self._signal_path().exists()
+
+    # ---- Terminal flip refresh/retract path is unaffected ------------------
+
+    def test_terminal_flip_still_refreshes_combined_signal(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """The retirement-refresh path never runs through the new gate (it
+        only applies to a still-In-Progress result) and must keep working."""
+        first = self._plan_path("00296-first")
+        first.write_text("# Plan 00296: first\n\n**Status**: In Progress\n", encoding="utf-8")
+        second = self._plan_path("00298-second")
+        second.write_text("# Plan 00298: second\n\n**Status**: In Progress\n", encoding="utf-8")
+        handler.handle(self._write_hook_input(first))
+        handler.handle(self._write_hook_input(second))
+
+        first.write_text("# Plan 00296: first\n\n**Status**: Complete\n", encoding="utf-8")
+        handler.handle(self._write_hook_input(first))
+
+        data = json.loads(self._signal_path().read_text(encoding="utf-8"))
+        joined = data["rendered_lines"][0]
+        assert "00296" not in joined
+        assert "00298" in joined

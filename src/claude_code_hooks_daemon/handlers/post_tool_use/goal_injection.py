@@ -23,10 +23,19 @@ Safety model (PLAN.md Decisions 2 and 3):
   than asserting fresh consent; enabling one is the same deliberate
   repository-owner act as enabling a standing authorisation entry.
 
-Trigger semantics are STATE-based, not transition-based (PLAN.md Task 2.1):
-the handler observes single writes and its once-per-``(plan, session)`` latch
-is in-memory, so the first qualifying write in a NEW session re-fires — which
-is what re-establishes the goal after a session restart.
+Trigger semantics are TRANSITION-based (ledger 00466 N3): the handler fires
+only when THIS Write/Edit is what moved the Status line to In Progress, never
+merely because the post-write file happens to already read In Progress. An
+Edit's transition is read from its own ``old_string``/``new_string`` — when
+the replaced span never touched the Status line, the line reads now exactly
+what it already read, so nothing fires. A Write has already landed on disk by
+the time PostToolUse runs, so there is no unmodified copy left on disk to
+diff against; the file's content at git HEAD stands in for "before" instead
+(``_head_plan_text``), and a path absent at HEAD (new or never committed)
+correctly reads as nothing to flip FROM. The once-per-``(plan, session)``
+latch (in-memory) still applies on top of the transition check and still
+resets per session, so a genuine flip re-fires in a new session exactly as
+before.
 
 **Multi-plan combined signal (Plan 00299)**: the upstream `/goal` slot is a
 single, last-writer-wins value, so under concurrent plans the goal ledger
@@ -59,8 +68,9 @@ from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
 from claude_code_hooks_daemon.core.utils import get_file_path
-from claude_code_hooks_daemon.plan_qa.model import TERMINAL_STATUSES, PlanDoc
+from claude_code_hooks_daemon.plan_qa.model import TERMINAL_STATUSES, PlanDoc, PlanStatus
 from claude_code_hooks_daemon.utils.ccy_supervisor import supervisor_relevance
+from claude_code_hooks_daemon.utils.git_facts import GitFactsBase
 from claude_code_hooks_daemon.utils.goal_ledger import LEDGER_FILENAME, GoalLedger, LivePlanRef
 from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
 
@@ -184,6 +194,12 @@ _TITLE_HEADING_PREFIX: Final[str] = "# "
 # Strips a redundant "Plan NNNNN: " lead-in from the heading text, since the
 # work line already states the plan number.
 _TITLE_PLAN_PREFIX_RE: Final[re.Pattern[str]] = re.compile(r"^Plan\s+\d+\s*:\s*")
+
+# ── Transition detection (ledger 00466 N3) ─────────────────────────────────
+# Matches the Edit tool_input field carrying the pre-edit span. Not in
+# HookInputField: old_string/new_string are Edit-specific, not a general
+# hook-envelope field like tool_name/session_id.
+_FIELD_OLD_STRING: Final[str] = "old_string"
 
 # Bound the (session_id, plan_number) latch map (FIFO eviction) so a
 # long-lived daemon cannot leak memory across many sessions.
@@ -502,7 +518,13 @@ def extract_plan_title(plan_text: str) -> str:
 
 
 class GoalInjectionHandler(PostToolUseHandlerBase):
-    """Write a goal-intent signal when a plan flips to In Progress.
+    """Write a goal-intent signal when a plan TRANSITIONS to In Progress.
+
+    Fires only when THIS Write/Edit is what moved the Status line to In
+    Progress (see ``_is_real_flip_to_in_progress``) — never merely because
+    the post-write file happens to already read In Progress (ledger 00466
+    N3). An edit unrelated to the Status line, or a Write that rewrites an
+    already-In-Progress plan, emits nothing.
 
     Sensor only: the daemon never types; the ccy PTY supervisor consumes the
     signal at its injection choke point. ADVISORY: never blocks, never denies.
@@ -575,6 +597,67 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
             return False
         return True
 
+    def _is_real_flip_to_in_progress(self, hook_input: dict[str, Any], file_path: Path) -> bool:
+        """True only when THIS Write/Edit is what set Status to In Progress.
+
+        The caller already knows the post-write file reads In Progress; this
+        decides whether that is NEW (a real flip) or PRE-EXISTING (the file
+        already read In Progress before this call landed) — ledger 00466 N3.
+
+        Edit: ``old_string`` is the only witness of the pre-edit text
+        available without reconstructing the whole file, and it is enough.
+        When it carries a ``**Status**:`` line, that line's prior value
+        settles the question directly. When it does not, this edit's
+        replaced span never touched the Status line at all, so the line
+        reads now exactly what it already read — not a flip, regardless of
+        what changed elsewhere in the file.
+
+        Write: the file has already landed on disk by the time PostToolUse
+        runs, so there is no unmodified copy left to compare against. git
+        HEAD stands in for "before" instead of the Write's ``tool_response``
+        deliberately: this codebase's own
+        ``CLAUDE/Plan/Completed/001-test-fixture-validation/
+        POSTTOOLUSE_FIXTURE_VERIFICATION.md`` records a handler that
+        silently never matched real events because of an unverified
+        ``tool_response`` shape, and no fixture or vendored doc in this repo
+        pins what a Write/Edit ``tool_response`` actually carries — while
+        HEAD is a stable interface this project already relies on elsewhere
+        (``utils.git_facts``). A path absent at HEAD (brand new, or never
+        committed) correctly reads as "nothing to flip FROM": a fresh
+        In-Progress PLAN.md is a genuine flip, not noise.
+        """
+        tool_name = hook_input.get(HookInputField.TOOL_NAME)
+        if tool_name == ToolName.EDIT:
+            tool_input = hook_input.get(HookInputField.TOOL_INPUT, {}) or {}
+            old_string = str(tool_input.get(_FIELD_OLD_STRING, ""))
+            before = PlanDoc.parse(old_string)
+            if not before.status_line_present:
+                return False
+            return before.status != PlanStatus.IN_PROGRESS
+        before_text = self._head_plan_text(file_path)
+        if before_text is None:
+            return True
+        return PlanDoc.parse(before_text).status != PlanStatus.IN_PROGRESS
+
+    def _head_plan_text(self, file_path: Path) -> str | None:
+        """``file_path``'s content at git HEAD, or None (see caller's note).
+
+        None covers every "nothing to compare against" case alike: no
+        repository, an unresolvable path, or a path HEAD has never seen —
+        the caller treats all three as "this write cannot be anything but a
+        flip", which is the correct reading for each.
+        """
+        try:
+            root = ProjectContext.project_root().resolve()
+        except (RuntimeError, OSError) as e:
+            logger.warning("goal_injection: HEAD lookup skipped (no project root): %s", e)
+            return None
+        try:
+            relative = Path(file_path).resolve().relative_to(root).as_posix()
+        except (ValueError, OSError):
+            return None
+        return GitFactsBase(root).head_file_text(relative)
+
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """True for a Write/Edit landing on an ACTIVE plan's PLAN.md."""
         if hook_input.get(HookInputField.TOOL_NAME) not in (ToolName.WRITE, ToolName.EDIT):
@@ -590,7 +673,8 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
     def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
         """Render and write the goal-intent signal; always ALLOW.
 
-        An In-Progress flip renders+records this plan then writes the
+        A REAL transition to In Progress (see ``_is_real_flip_to_in_progress``
+        — ledger 00466 N3) renders+records this plan then writes the
         COMBINED signal for every live ledgered plan (Plan 00299) — a
         single live plan degrades byte-for-byte to the pre-00299 text. A
         flip to a TERMINAL status for a plan this session already ledgered
@@ -614,6 +698,9 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
 
         if not _STATUS_IN_PROGRESS_RE.search(plan_text):
             self._maybe_refresh_on_retirement(session_id, plan_number, Path(file_path), plan_text)
+            return BlockingResult(decision=Decision.ALLOW)
+
+        if not self._is_real_flip_to_in_progress(hook_input, Path(file_path)):
             return BlockingResult(decision=Decision.ALLOW)
 
         latch_key = (session_id, plan_number)
@@ -767,15 +854,21 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         return (
             "## goal_injection — plan-start goal signal for the ccy supervisor\n\n"
             "PostToolUse advisory (never blocks; ships disabled). When a `PLAN.md` "
-            "Write/Edit under `CLAUDE/Plan/` (never `Completed/`) results in "
-            "`**Status**: In Progress`, the daemon writes a `<session>.goal-intent` "
-            "signal; the ccy PTY supervisor — if armed and watching — types a "
-            "single-line `/goal 🤖 [ccy-supervisor] ...` message into the foreground "
-            "chat. Fires once per plan per session (state-based: the first "
-            "qualifying edit in a NEW session re-fires, re-establishing the goal "
-            "after a restart). Manual fallback / debug tool: "
-            "`bin/hooks-daemon inject-goal NNNNN` (requires `CLAUDE_CODE_SESSION_ID` "
-            "in the environment, i.e. run it from the session to be targeted).\n\n"
+            "Write/Edit under `CLAUDE/Plan/` (never `Completed/`) is a REAL "
+            "TRANSITION to `**Status**: In Progress` — not merely a write that "
+            "lands on a plan already reading In Progress — the daemon writes a "
+            "`<session>.goal-intent` signal; the ccy PTY supervisor — if armed and "
+            "watching — types a single-line `/goal 🤖 [ccy-supervisor] ...` message "
+            "into the foreground chat. An Edit whose replaced span never touches "
+            "the Status line, or a Write that rewrites an already-In-Progress plan "
+            "(checked against git HEAD), emits nothing: no signal, no ledger "
+            "record, no displacement advisory (ledger 00466 N3). Fires once per "
+            "plan per session thereafter (the latch is in-memory and resets on a "
+            "new session, so a genuine flip in a fresh session still fires). "
+            "Manual fallback / debug tool for re-establishing a goal without a "
+            "qualifying flip (e.g. after a restart): `bin/hooks-daemon inject-goal "
+            "NNNNN` (requires `CLAUDE_CODE_SESSION_ID` in the environment, i.e. run "
+            "it from the session to be targeted).\n\n"
             "**An injected goal is machine-generated** — it always opens with the "
             "machine-origin marker and a 'NOT human authorisation' clause, and can "
             "never satisfy any human-gated rule (release publishing, artefact "
@@ -838,9 +931,11 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
                     "tests/unit/handlers/post_tool_use/test_goal_injection.py."
                 ),
                 description=(
-                    "With goal_injection enabled, an active PLAN.md write whose "
-                    "resulting status reads In Progress produces exactly one "
-                    "goal-intent signal for this session."
+                    "With goal_injection enabled, an Edit that FLIPS an active "
+                    "PLAN.md's Status line to In Progress produces exactly one "
+                    "goal-intent signal for this session (ledger 00466 N3: an "
+                    "edit that merely lands on an ALREADY In-Progress plan must "
+                    "not)."
                 ),
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
