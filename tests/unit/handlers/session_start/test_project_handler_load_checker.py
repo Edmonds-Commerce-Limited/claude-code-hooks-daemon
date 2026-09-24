@@ -94,6 +94,47 @@ class TestHandle:
         assert result.context == []
 
 
+_OPTION_FAILURES = {"PreToolUse.destructive_git": "RuntimeError: injected"}
+
+
+def _with_option_failures() -> ProjectHandlerLoadCheckerHandler:
+    """A checker as the registry leaves it after a pass-1 failure (Plan 00466 N19)."""
+    handler = ProjectHandlerLoadCheckerHandler()
+    handler._option_failures = dict(_OPTION_FAILURES)
+    return handler
+
+
+class TestOptionFailures:
+    """``health`` is only seen when someone runs it, so session start says it too."""
+
+    def test_matches_when_a_handler_runs_on_defaults(self) -> None:
+        with patch(_READ, return_value=_healthy()):
+            assert _with_option_failures().matches({}) is True
+
+    def test_still_needed_while_a_handler_runs_on_defaults(self) -> None:
+        with patch(_READ, return_value=_healthy()):
+            assert _with_option_failures().verify_still_needed() is True
+
+    def test_names_each_handler_key_and_that_it_runs_on_defaults(self) -> None:
+        with patch(_READ, return_value=_healthy()):
+            text = "\n".join(_with_option_failures().handle({}).context)
+        assert "PreToolUse.destructive_git" in text
+        assert "RuntimeError: injected" in text
+        assert "defaults" in text
+        # Project handlers all loaded, so their alert stays out of it.
+        assert "PROJECT PROTECTION DEGRADED" not in text
+
+    def test_both_alerts_when_both_are_degraded(self) -> None:
+        with patch(_READ, return_value=_degraded()):
+            text = "\n".join(_with_option_failures().handle({}).context)
+        assert "PROJECT PROTECTION DEGRADED" in text
+        assert "PreToolUse.destructive_git" in text
+
+    def test_no_option_failures_by_default(self) -> None:
+        with patch(_READ, return_value=_healthy()):
+            assert ProjectHandlerLoadCheckerHandler().verify_still_needed() is False
+
+
 class TestGetClaudeMd:
     def test_returns_guidance(self) -> None:
         handler = ProjectHandlerLoadCheckerHandler()

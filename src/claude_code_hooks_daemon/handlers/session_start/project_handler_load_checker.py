@@ -20,6 +20,7 @@ the remediation the alert asks for. Advisory only — it never blocks.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
@@ -40,6 +41,7 @@ from claude_code_hooks_daemon.utils.cli_command import (
 #: choice belongs to the destination.
 _RESTART_SUBCOMMAND: Final[str] = "restart"
 _VALIDATE_SUBCOMMAND: Final[str] = "validate-project-handlers"
+_HEALTH_SUBCOMMAND: Final[str] = "health"
 
 
 def _restart_cmd() -> str:
@@ -83,6 +85,10 @@ class ProjectHandlerLoadCheckerHandler(SessionStartVerifiable, SessionStartHandl
                 HandlerTag.ENVIRONMENT,
             ],
         )
+        # Built-in handlers whose options the registry could not collect,
+        # keyed `<EventType>.<config_key>`. Injected by `register_all` (Plan
+        # 00466 N19), which selects this handler by declaring the attribute.
+        self._option_failures: Mapping[str, str] = {}
 
     @staticmethod
     def _read_state() -> Any:
@@ -111,10 +117,17 @@ class ProjectHandlerLoadCheckerHandler(SessionStartVerifiable, SessionStartHandl
         computed by `hooks-daemon session-actions`, which a human runs to
         inspect a session without changing it.
 
+        A built-in handler running on its defaults because its options could
+        not be collected is the same kind of broken session, so it counts too.
+
         Returns:
-            True iff one or more project handlers failed to load.
+            True iff a project handler failed to load or a built-in handler
+            is running without its configured options.
         """
-        return bool(self._read_state().is_degraded)
+        return self._is_degraded()
+
+    def _is_degraded(self) -> bool:
+        return bool(self._option_failures) or bool(self._read_state().is_degraded)
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Only fire when project-handler loading is degraded.
@@ -127,9 +140,10 @@ class ProjectHandlerLoadCheckerHandler(SessionStartVerifiable, SessionStartHandl
             hook_input: Hook input dictionary (unused — state is on disk)
 
         Returns:
-            True iff one or more project handlers failed to load.
+            True iff a project handler failed to load or a built-in handler
+            is running without its configured options.
         """
-        return bool(self._read_state().is_degraded)
+        return self._is_degraded()
 
     def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         """Inject the loud degraded-protection alert.
@@ -140,10 +154,31 @@ class ProjectHandlerLoadCheckerHandler(SessionStartVerifiable, SessionStartHandl
         Returns:
             AdvisoryResult with ALLOW decision and the alert as advisory context.
         """
+        # Lean SessionStart: each part says nothing when it is healthy.
+        lines = self._project_handler_lines() + self._option_failure_lines()
+        return AdvisoryResult(decision=Decision.ALLOW, context=lines)
+
+    def _option_failure_lines(self) -> list[str]:
+        """Name each built-in handler running on its defaults (Plan 00466 N19)."""
+        if not self._option_failures:
+            return []
+        lines = [
+            f"⚠️ HANDLER OPTIONS NOT APPLIED: {len(self._option_failures)} handler(s) "
+            "are running on their defaults, ignoring the options configured for them:",
+        ]
+        for handler_key, reason in self._option_failures.items():
+            lines.append(f"  - {handler_key} ({reason})")
+        lines.append(
+            "This is a daemon defect, not a config mistake. The daemon log has the "
+            f"traceback, and `{daemon_cli_command(_HEALTH_SUBCOMMAND)}` lists the same handlers."
+        )
+        return lines
+
+    def _project_handler_lines(self) -> list[str]:
+        """The project-handler load-failure alert, or nothing when all loaded."""
         state = self._read_state()
         if not state.is_degraded:
-            # Lean SessionStart: say nothing on a healthy project.
-            return AdvisoryResult(decision=Decision.ALLOW, context=[])
+            return []
 
         failed_count = state.failed_count
         lines: list[str] = [
@@ -165,8 +200,7 @@ class ProjectHandlerLoadCheckerHandler(SessionStartVerifiable, SessionStartHandl
                 f"Diagnose each failure with: `{_validate_cmd()}`",
             ]
         )
-
-        return AdvisoryResult(decision=Decision.ALLOW, context=lines)
+        return lines
 
     def get_claude_md(self) -> str | None:
         """Return agent-facing guidance for the degraded-protection alert."""
@@ -193,8 +227,15 @@ class ProjectHandlerLoadCheckerHandler(SessionStartVerifiable, SessionStartHandl
             "the *running* daemon, so it clears only after a restart reloads the "
             "fixed handlers — fixing the file alone is not enough.\n"
             "\n"
-            "The handler is silent when every project handler loads, so seeing "
-            "this alert always means real action is required.\n"
+            "### When you see `⚠️ HANDLER OPTIONS NOT APPLIED`\n"
+            "\n"
+            "The named built-in handlers are running on their defaults, so the "
+            "options configured for them are not in force. This is a daemon "
+            "defect: report it with the traceback from the daemon log.\n"
+            "\n"
+            "The handler is silent when every project handler loads and every "
+            "built-in handler has its options, so seeing either alert always "
+            "means real action is required.\n"
         )
 
     def get_acceptance_tests(self) -> list[Any]:

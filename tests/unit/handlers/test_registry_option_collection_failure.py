@@ -23,6 +23,9 @@ from claude_code_hooks_daemon.daemon.project_handler_health import ProjectHandle
 from claude_code_hooks_daemon.handlers import registry as registry_module
 from claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker import PipeBlockerHandler
 from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
+from claude_code_hooks_daemon.handlers.session_start.project_handler_load_checker import (
+    ProjectHandlerLoadCheckerHandler,
+)
 
 _POISON = "zzqx_poison"
 _POISONED_KEY = "PreToolUse.destructive_git"
@@ -88,6 +91,34 @@ class TestRegistry:
         registry.discover()
         registry.register_all(EventRouter(), config=_CONFIG)
         assert registry.option_failures == {}
+
+
+class TestSessionStartAdvisory:
+    """The registry hands the failures to the session-start checker it builds."""
+
+    def _checker(self, router: EventRouter) -> ProjectHandlerLoadCheckerHandler:
+        for handler in router.get_chain(EventType.SESSION_START).handlers:
+            if isinstance(handler, ProjectHandlerLoadCheckerHandler):
+                return handler
+        raise AssertionError("ProjectHandlerLoadCheckerHandler was not registered")
+
+    def test_the_checker_names_the_failed_handler_at_session_start(self) -> None:
+        router = EventRouter()
+        _register(HandlerRegistry(), router)
+        checker = self._checker(router)
+        with patch.object(checker, "_read_state", return_value=ProjectHandlerHealthState()):
+            assert checker.matches({}) is True
+            text = "\n".join(checker.handle({}).context)
+        assert _POISONED_KEY in text
+
+    def test_the_checker_is_silent_after_a_clean_registration(self) -> None:
+        registry = HandlerRegistry()
+        registry.discover()
+        router = EventRouter()
+        registry.register_all(router, config=_CONFIG)
+        checker = self._checker(router)
+        with patch.object(checker, "_read_state", return_value=ProjectHandlerHealthState()):
+            assert checker.matches({}) is False
 
 
 class TestControllerHealth:

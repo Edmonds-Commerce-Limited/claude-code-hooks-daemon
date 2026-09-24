@@ -105,7 +105,8 @@ Handler options:
 ```
 
 The daemon could not collect that handler's configured options, so the
-handler runs on its defaults and `health` exits non-zero. This is a daemon
+handler runs on its defaults and `health` exits non-zero. Each session also
+opens with a `HANDLER OPTIONS NOT APPLIED` advisory naming it. This is a daemon
 defect rather than a config mistake. Report it with the traceback from
 `.claude/hooks-daemon/bin/hooks-daemon logs`.
 

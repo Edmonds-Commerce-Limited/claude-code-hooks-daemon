@@ -685,6 +685,13 @@ class HandlerRegistry:
                             ):
                                 setattr(instance, reference_repos_attr_name, reference_repos)
 
+                            # Pass-1 option failures (Plan 00466 N19), for the
+                            # session-start alert. Same declared-attribute
+                            # selection as `_reference_repos` above.
+                            option_failures_attr_name = "_option_failures"
+                            if hasattr(instance, option_failures_attr_name):
+                                setattr(instance, option_failures_attr_name, self.option_failures)
+
                             # Inject the worktree merge-gate toggle for git-tagged
                             # handlers (Plan 00367 Phase 4) -- same DI idiom as
                             # plan_workflow above; absent config means gate off.
