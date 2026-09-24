@@ -75,9 +75,9 @@ All status line handlers are **non-terminal** (`terminal=False`). They all retur
 
 | Priority | Handler                       | Config Key              | Output Example                                     | Data Source                                                          |
 | -------- | ----------------------------- | ----------------------- | -------------------------------------------------- | -------------------------------------------------------------------- |
+| 4        | `EnvironmentIndicatorHandler` | `environment_indicator` | `\| 💻 desktop` / `\| 🐳 docker` / `\| 📦 podman`  | `ProjectContext.container_runtime()` (cached at startup)             |
 | 5        | `AccountDisplayHandler`       | `account_display`       | `username \|`                                      | `~/.claude/.last-launch.conf`                                        |
 | 10       | `ModelContextHandler`         | `model_context`         | `Claude Opus 4.5 \| Ctx: [colored]12.3%[/colored]` | `hook_input.model`, `hook_input.context_window`, `hook_input.effort` |
-| 11       | `EnvironmentIndicatorHandler` | `environment_indicator` | `\| 💻 desktop` / `\| 🐳 docker` / `\| 📦 podman`  | `ProjectContext.container_runtime()` (cached at startup)             |
 | 20       | `GitBranchHandler`            | `git_branch`            | `\| main`                                          | `git branch --show-current` subprocess                               |
 | 30       | `DaemonStatsHandler`          | `daemon_stats`          | `\| hook-icon 5.2m 34MB \| INFO`                   | `DaemonController.get_stats()`, `psutil`                             |
 | 32       | `UpgradeNotifierHandler`      | `upgrade_notifier`      | `\| 📦 v3.41.0 → v3.42.0`                          | `version_check_cache.json` (written by `version_check` SessionStart) |

@@ -189,14 +189,16 @@ below as they were put: each is ONE question, with what each answer costs.
 
 ### Phase 2: the release-review carry-over
 
-- [ ] 🔄 **Task 2.1**: N5 — work the twelve-row table in
+- [x] ✅ **Task 2.1**: N5 — work the twelve-row table in
   [NIGGLES.md](NIGGLES.md). Rows (a) and (d) are done by Plan 00435, which also
   found a third disagreement in the same table and left a test behind so it
   cannot drift silently again. Row (f) is corrected rather than built: the class
   it names is already guarded by the integration test that reads the real
   config. All three rows the reviewers flagged as having teeth are done: (g) by Plan
-  00436, (c) by 00437 and (i) by 00438. Six rows remain, and every one of them
-  is a correctness-of-documentation or tidiness item rather than a defect.
+  00436, (c) by 00437 and (i) by 00438. The other rows are done too: (b) by
+  Plan 00440, (e) by 00442, (h) by 00439, and (j), (k) and (l) by 00441. Every
+  row is terminal, each checked against the code by the owner-a agent
+  ([report](subagent-reports/260924-n422-owner-a-opus-5-5.md)).
 
 - [ ] ⬜ **Task 2.2**: N5 remedy (2), owner-gated — decide whether a review
   dispatch should default to a TRACKED report destination, so a reviewer's

@@ -2685,16 +2685,18 @@ handlers:
 
 **Description:** On a `Task` tool dispatch, checks the prompt for a file-handoff declaration — either the plan folder the subagent is working in, or an explicit "not plan work" statement paired with a declared file destination. A subagent's final message travels back over a bounded-size wire channel that can silently elide an oversized inline report in the MIDDLE, so a coordinator can receive what looks like a complete report while content is missing (Plan 00307). Declaring a file destination up front is the dispatch-time half of the fix; [`subagent_report_size_blocker`](#subagent_report_size_blocker) is the return-time half.
 
-**Fires when:** the dispatched prompt names neither a plan-folder path (`CLAUDE/Plan/NNNNN-name/`, or the project's configured plan directory) nor the `not plan work` phrase plus a declared write/save/report/output/store destination.
+**Default destination:** the dispatching plan's folder. Its `subagent-reports/{yymmdd}-{agent-name}-{model}.md` is tracked by git and committed with the plan. `fallback_report_dir` is gitignored, so it is the fallback only when no plan applies: a report written there is lost when the container goes.
 
-**Enforcement mode:** advisory by default — injects the contract as `additionalContext` and still allows the dispatch. `options.strict: true` denies an undeclared dispatch instead.
+**Fires when:** the dispatched prompt names neither a plan-folder path (`CLAUDE/Plan/NNNNN-name/`, or the project's configured plan directory) nor the `not plan work` phrase plus a declared write/save/report/output/store destination. Separately, a prompt that names a plan folder but declares a destination under `fallback_report_dir` gets an advisory naming that plan's `subagent-reports/` instead.
+
+**Enforcement mode:** advisory by default — injects the contract as `additionalContext` and still allows the dispatch. `options.strict: true` denies an undeclared dispatch instead. The plan-work-to-fallback advisory is never a deny, in either mode.
 
 **Options:**
 
-| Option                | Type   | Default                    | Description                                                           |
-| --------------------- | ------ | -------------------------- | --------------------------------------------------------------------- |
-| `strict`              | `bool` | `false`                    | When true, denies a dispatch that declares neither destination shape. |
-| `fallback_report_dir` | `str`  | `untracked/agent-reports/` | Directory named in the contract text for non-plan-work dispatches.    |
+| Option                | Type   | Default                    | Description                                                                       |
+| --------------------- | ------ | -------------------------- | --------------------------------------------------------------------------------- |
+| `strict`              | `bool` | `false`                    | When true, denies a dispatch that declares neither destination shape.             |
+| `fallback_report_dir` | `str`  | `untracked/agent-reports/` | Gitignored directory for dispatches with no plan; plan work sent here is advised. |
 
 **Config example:**
 

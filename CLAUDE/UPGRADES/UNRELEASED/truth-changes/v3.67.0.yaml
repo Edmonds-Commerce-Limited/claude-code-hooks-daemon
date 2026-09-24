@@ -1,5 +1,53 @@
 version: "3.67.0"
 truth_changes:
+  - topic: tool-controls
+    id: subagent-report-destination
+    was: >
+      `dispatch_declaration` offers two equal ways to declare where a
+      dispatched subagent's long-form report goes: a plan folder's
+      `subagent-reports/{yymmdd}-{agent-name}-{model}.md`, or an explicit
+      "not plan work" destination falling back to `untracked/agent-reports/`.
+      A dispatch that names a plan folder but writes its report to the
+      gitignored fallback draws nothing.
+    now: >
+      A subagent's final message travels over a bounded-size channel that
+      can silently elide the MIDDLE of an oversized inline report, so
+      long-form output goes to a FILE and the reply is a short summary plus
+      the path (`subagent_report_size_blocker` denies an oversized reply).
+      `dispatch_declaration` asks every dispatch to declare where that file
+      goes, and the DEFAULT is the dispatching plan's folder:
+      `<plan-folder>/subagent-reports/{yymmdd}-{agent-name}-{model}.md`, which
+      is tracked and is committed with the plan (ledger 00422 N5). The
+      gitignored `untracked/agent-reports/` (`fallback_report_dir`) is only
+      for dispatches with no plan, declared as "not plan work". A report
+      written there is lost when the container goes. A dispatch that names a
+      plan folder but declares a destination under the fallback now gets an
+      advisory naming the plan's `subagent-reports/`. It is never a deny.
+      IF YOUR PROJECT'S DOCS OR AGENT BRIEFS SEND PLAN WORK'S REPORTS TO
+      `untracked/agent-reports/`, POINT THEM AT THE PLAN FOLDER INSTEAD.
+  - topic: plan-journalling
+    id: journal-correction-entry
+    was: >
+      The journal entry grammar has six categories (`action`, `finding`,
+      `decision`, `thought`, `blocker`, `handoff`), and `mkplan.bash
+      --journal` rejects any other. A correction is an ordinary new entry,
+      usually a `finding`, and nothing marks it as a correction. A correction
+      of a future-dated entry is stamped earlier than the entry it corrects,
+      so `journal-entry-ordering` reports it as out of order and no legal
+      move clears that.
+    now: >
+      The grammar has a seventh category, `correction` (ledger 00422 N3).
+      Append one with `mkplan.bash --journal <plan-number> correction
+      <body-file> --ref <HH:MM>` for an entry in today's day-file, or
+      `--ref <YY-MM-DD/HH:MM>` for one in an earlier day-file. The `--ref` is
+      required and must name an entry that exists. Otherwise the script
+      refuses and writes nothing. The corrected entry is never edited or
+      moved. An entry that a correction in the same day-file names no longer
+      counts for `journal-entry-ordering`, so a future-dated stamp can be
+      corrected at the honest time with no ordering finding. Only a
+      `correction` does this. A `--ref` on any other category is still a task
+      reference. IF YOUR PROJECT'S DOCS OR AGENT BRIEFS LIST SIX JOURNAL
+      CATEGORIES, OR SAY TO CORRECT AN ENTRY WITH A `finding`, UPDATE THEM.
   - topic: blocking-handlers
     id: protected-file-contents
     was: >
