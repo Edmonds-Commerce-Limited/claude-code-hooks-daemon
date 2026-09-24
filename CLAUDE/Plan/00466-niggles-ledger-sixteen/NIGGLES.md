@@ -3,6 +3,88 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
+### N33 — a worktree agent's `secret_file_guard.exclude_paths` change had no effect after a daemon restart
+
+**Found by the integration-B2 fix agent.** The agent was writing tests in
+`worktree-integration-b2` that must name protected-looking filenames.
+R-SECRET-SCRIPT-AUTHOR kept denying the writes. It added the two test files
+to `secret_file_guard.options.exclude_paths` in the WORKTREE's
+`.claude/hooks-daemon.yaml` and restarted the worktree's daemon. The denials
+continued. It worked around it by building the filenames at runtime.
+
+**Why (unverified):** the likeliest cause is that a sub-agent's hook calls
+are served by the daemon of the Claude Code session's project root (the
+main checkout), not by the worktree's own daemon. If so, a worktree config
+change cannot affect that agent's own enforcement until it lands on main.
+The docs say "restart the daemon" without saying WHICH daemon enforces a
+worktree agent's tool calls, so the agent could not diagnose it.
+
+**Candidate remedy:** first reproduce it and establish which daemon served
+the denial (the hook log's project root and socket). Then either make the
+deny reason name the config file it was judged against, or document
+worktree-agent enforcement in CLAUDE/Worktree.md. Also consider an advisory
+when a worktree's handler config differs from the enforcing daemon's.
+
+### N32 — `pipe_blocker` splits at a `\|` inside double quotes and reads the next word as a pipe stage
+
+**Found by the Plan 00463 agent.** The command
+`grep -n "a\|--finish\|head-moved\|^#" CLAUDE/QA.md | bin/echd-capture --head 80`
+was denied as R-PIPE-TO-HEAD. The only real pipe goes to the whitelisted
+`bin/echd-capture`. The `\|` alternations inside the double-quoted grep
+pattern were split as pipes, and the "stage" `head-moved` was read as `head`.
+Two defects: a quoted `|` is not a pipe, and `head-moved` is not the
+command `head`.
+
+**Candidate remedy:** move pipe_blocker onto the shared shell lexer from
+Plan 00464 (the shell-parser consolidation), so pipe boundaries come from
+real tokenisation. Match a stage's command by whole word. RED tests: the
+command above is allowed; `pytest | head -1` is still denied; and
+`grep "x|y" f | head` is judged on `grep` (whitelisted), not on `y`.
+
+### N31 — the dispatch-declaration advisory does not recognise "File to write to: <path>"
+
+**Found by the 00467 dogfood agent.** A dispatch brief that named its report
+path as `File to write to: <path>` still drew the Plan 00307
+dispatch-declaration advisory saying no report destination was declared.
+The advisory matches a narrower set of phrasings than briefs actually use,
+so it nags on a correct dispatch, and a nag that is often wrong teaches
+people to skim it.
+
+**Candidate remedy:** recognise any phrasing that pairs a write verb or noun
+("write", "report", "file", "output", "save") with a path in the brief, not
+only fixed phrases. RED tests: the phrasing above is recognised, and a brief
+with no path at all still draws the advisory.
+
+### N30 — more shell code that must survive a hostile PATH depends on a PATH command
+
+**Found by the 00467 dogfood agent**, applying the Defence Before Fix method
+to the watchdog defect fixed at 766677c1 (00466 N1's follow-up). An
+independent search for the same class ("shell code that must survive a
+hostile or stripped `PATH` runs a command looked up on `PATH`, and its
+absence silently takes a wrong branch") found four more candidates:
+
+- `scripts/venv_bootstrap.sh:443` and `:474` (`date`). The agent reproduced
+  this idiom.
+- `scripts/install/venv.sh:427` (`date`).
+- `scripts/install/daemon_control.sh:40-43` (`pgrep`).
+
+These are the venv and install paths, which exist to work when the host's
+tools are broken, exactly as `resolve_venv.sh` does.
+
+**Candidate remedy:**
+
+1. Fix each instance: use a bash builtin (`printf '%(...)T'` for dates,
+   `/proc` or `kill -0` for process checks). Where there is no builtin,
+   make the missing command a loud, explicit failure rather than a silent
+   wrong branch.
+2. The detector the method asks for: a check over the scripts that must
+   survive a hostile PATH (`resolve_venv.sh`, `venv_bootstrap.sh`,
+   `scripts/install/*.sh`, the `bin/` wrappers) that flags an external
+   command whose failure is not handled. It could be a `shell_audit` rule, or
+   a test that runs each such script's functions under an empty `PATH`. It
+   must catch the original watchdog shape, verified by reverting 766677c1 in
+   a scratch copy.
+
 ### N29 — `error_hiding`'s return-None-in-except check is evaded by returning a local assigned in the handler
 
 **Found by the coordinator** reading the goal-flip agent's report. To clear the
