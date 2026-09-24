@@ -52,6 +52,9 @@ _GITHUB_REPO_URL: Final[str] = (
 #: github.com gets no upgrade advisory rather than a wrong one.
 _REMOTE_ONLY_CWD: Final[Path] = Path("/")
 
+_DEFAULT_CACHE_TTL_HOURS: Final[int] = 24
+_SECONDS_PER_HOUR: Final[int] = 3600
+
 
 class VersionCheckHandler(SessionStartHandlerBase):
     """Check daemon version against latest GitHub release on new sessions.
@@ -75,10 +78,10 @@ class VersionCheckHandler(SessionStartHandlerBase):
             ],
         )
 
-        self.config: dict[str, Any] = {
-            "enabled": True,
-            "cache_ttl_hours": 24,
-        }
+        self.config: dict[str, Any] = {"enabled": True}
+        # Injected by the registry as self._cache_ttl_hours (Plan 00466 N17:
+        # it was read from a configure() dict production never fills).
+        self._cache_ttl_hours: object = _DEFAULT_CACHE_TTL_HOURS
 
     def configure(self, config: dict[str, Any]) -> None:
         """Apply configuration."""
@@ -105,7 +108,10 @@ class VersionCheckHandler(SessionStartHandlerBase):
                 cache_data = json.load(f)
 
             cached_at = float(cache_data.get("cached_at", 0))
-            ttl_seconds = int(self.config.get("cache_ttl_hours", 24)) * 3600
+            ttl_hours = self._cache_ttl_hours
+            if not isinstance(ttl_hours, int | float | str):
+                ttl_hours = _DEFAULT_CACHE_TTL_HOURS
+            ttl_seconds = int(ttl_hours) * _SECONDS_PER_HOUR
 
             return bool((time.time() - cached_at) < ttl_seconds)
         except (OSError, json.JSONDecodeError, ValueError, KeyError):

@@ -3295,7 +3295,13 @@ handlers:
 | **Type**       | Advisory        |
 | **Event**      | SessionStart    |
 
-**Description:** Checks if the daemon is up-to-date with the latest GitHub release on new sessions. Uses a 24-hour cache to avoid excessive git operations. Only runs on new sessions (not resumes).
+**Description:** Checks if the daemon is up-to-date with the latest GitHub release on new sessions. Caches the result (24 hours by default) to avoid excessive git operations. Only runs on new sessions (not resumes).
+
+**Options:**
+
+| Option            | Default | Description                                         |
+| ----------------- | ------- | --------------------------------------------------- |
+| `cache_ttl_hours` | `24`    | How long a version-check result is reused, in hours |
 
 **Config example:**
 
@@ -3305,6 +3311,8 @@ handlers:
     version_check:
       enabled: true
       priority: 55
+      options:
+        cache_ttl_hours: 24
 ```
 
 ---
