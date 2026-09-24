@@ -90,7 +90,7 @@ first, and the other fixes build on it.
 - [ ] ⬜ **Task 3.1**: `format-markdown`, `housekeeping` and
   `find-comment-blocks` walk git-visible files through the shared helper from
   00466 N9, and always exclude an in-project config dir (P3).
-- [ ] ⬜ **Task 3.2**: `markdown_organization` classifies the raw path
+- [x] ✅ **Task 3.2**: `markdown_organization` classifies the raw path
   before resolving it: the Claude config dir is exempt from the project
   layout rules, and the memory policy is unchanged (P4). A plugin root is
   recognised by `.claude-plugin/plugin.json` or `marketplace.json`, and its

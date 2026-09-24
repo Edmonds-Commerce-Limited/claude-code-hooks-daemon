@@ -29,6 +29,7 @@ from claude_code_hooks_daemon.handlers.utils.plan_numbering import (
     next_plan_number_for_target,
     record_plan_allocation,
 )
+from claude_code_hooks_daemon.utils.claude_config import claude_config_dir
 from claude_code_hooks_daemon.utils.path_predicates import path_is_file
 from claude_code_hooks_daemon.utils.scratch_dir import project_dir_path
 
@@ -52,12 +53,16 @@ _RULE_WRONG_LOCATION = Rule(
         "3. ./eslint-rules/ - ESLint rule documentation\n"
         "4. ./untracked/ - Ad-hoc temporary docs\n"
         "5. ./RELEASES/ - Release notes\n"
-        "6. ./.claude/commands/, ./.claude/agents/, ./.claude/rules/ - "
-        "Claude Code command/agent/rules definitions\n"
+        "6. ./.claude/commands/, ./.claude/agents/, ./.claude/rules/, ./.claude/skills/ - "
+        "Claude Code command/agent/rules/skill definitions\n"
         "7. ./vendor/, ./node_modules/ - Third-party dependencies\n"
         "8. Standard repo-root files (exact root only): README.md, CHANGELOG.md,\n"
         "   CONTRIBUTING.md, LICENSE.md, SECURITY.md, CODE_OF_CONDUCT.md,\n"
-        "   AUTHORS.md, NOTICE.md, MAINTAINERS.md\n\n"
+        "   AUTHORS.md, NOTICE.md, MAINTAINERS.md\n"
+        "9. A Claude Code plugin's agents/, commands/, skills/ and output-styles/,\n"
+        "   under a directory holding .claude-plugin/plugin.json or marketplace.json\n"
+        "10. Claude Code's own config dir ($CLAUDE_CONFIG_DIR, else ~/.claude),\n"
+        "   apart from auto-memory, which has its own policy\n\n"
         "CHOOSE THE RIGHT LOCATION:\n"
         "- Is this for LLMs/agents? -> CLAUDE/\n"
         "- Is this for the current plan? -> CLAUDE/Plan/{plan-number}-*/\n"
@@ -179,6 +184,15 @@ DEFAULT_ALLOW_UNTRACKED_CLAUDE_MEMORY: Final[bool] = False
 # (e.g. ~/.claude/projects/<slug>/memory/MEMORY.md and per-fact files).
 _CLAUDE_MEMORY_PATH_MARKERS: Final[tuple[str, str]] = ("/.claude/projects/", "/memory/")
 
+# A Claude Code plugin root holds one of these manifests under `.claude-plugin/`,
+# and keeps its markdown components in these directories (plugins-reference,
+# "File locations reference"). Plan 00468 G8.
+_PLUGIN_META_DIRNAME: Final[str] = ".claude-plugin"
+_PLUGIN_ROOT_MANIFESTS: Final[tuple[str, str]] = ("plugin.json", "marketplace.json")
+_PLUGIN_MARKDOWN_COMPONENT_DIRS: Final[frozenset[str]] = frozenset(
+    {"agents", "commands", "skills", "output-styles"}
+)
+
 # Shell write-to-file patterns used to close the bash side-door to memory paths.
 # Redirect (> / >>) and tee targets are WRITES; reads (cat/grep/less path) have no
 # such operator and are intentionally NOT matched (reads stay allowed for migration).
@@ -248,6 +262,8 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
         # knowledge belongs in tracked, reviewed project docs, not per-checkout memory.
         # Set allow_untracked_claude_memory: true to opt out and restore the old behaviour.
         self._allow_untracked_claude_memory: bool = DEFAULT_ALLOW_UNTRACKED_CLAUDE_MEMORY
+        # Claude Code's config dir; None means claude_config_dir() (test seam).
+        self._config_dir: Path | None = None
 
     def _agent_docs_dir(self) -> str:
         """Root of the agent-facing doc tree (facade, or the matching default)."""
@@ -356,7 +372,13 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
         return normalized
 
     def is_adhoc_instruction_file(self, file_path: str) -> bool:
-        """Check if this is CLAUDE.md, README.md, CHANGELOG.md, SKILL.md, agent, command, or rules file (allowed anywhere)."""
+        """Is this an instruction file allowed wherever it is written?
+
+        CLAUDE.md, README.md and CHANGELOG.md are allowed anywhere. Markdown
+        under a ``.claude/skills/``, ``.claude/commands/``, ``.claude/rules/``
+        or ``.claude/agents/`` directory is allowed at any depth. A SKILL.md
+        elsewhere is not; a plugin root's is (see ``_is_plugin_component``).
+        """
         filename = Path(file_path).name.lower()
 
         # CLAUDE.md, README.md, and CHANGELOG.md allowed anywhere
@@ -1014,6 +1036,17 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
         if self._is_claude_memory_path(file_path):
             return not self._allow_untracked_claude_memory
 
+        # Claude Code's own config dir holds user agents, skills and plugin
+        # data, not project docs, even when it is symlinked into the project
+        # (Plan 00468 P4). Judged before any resolve() re-roots the path.
+        if self._is_in_claude_config_dir(file_path):
+            return False
+
+        # A Claude Code plugin's component markdown, judged on the path as
+        # written, before worktree re-rooting below (Plan 00468 G8).
+        if self._is_plugin_component(file_path):
+            return False
+
         # CRITICAL: Only enforce rules for files WITHIN the project root
         # Files outside project root (like Claude Code auto memory) should be allowed
         # Only check absolute paths - relative paths are always within project
@@ -1106,6 +1139,41 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
         """The on-disk path a Write/Edit names: absolute as given, else under the workspace."""
         candidate = Path(file_path)
         return candidate if candidate.is_absolute() else self._workspace_root / candidate
+
+    def _is_in_claude_config_dir(self, file_path: str) -> bool:
+        """Is the target inside Claude Code's config dir, by either spelling?
+
+        Both the path as written and its resolved form are compared, so a
+        home symlinked into the project (ccy) is recognised whichever way the
+        write names it. A config dir that contains the project would exempt
+        the whole project, so it exempts nothing.
+        """
+        config = self._config_dir if self._config_dir is not None else claude_config_dir()
+        resolved_config = config.resolve()
+        if self._workspace_root.resolve().is_relative_to(resolved_config):
+            return False
+        candidate = self._candidate_on_disk(file_path)
+        return candidate.is_relative_to(config) or candidate.resolve().is_relative_to(
+            resolved_config
+        )
+
+    def _is_plugin_component(self, file_path: str) -> bool:
+        """Is the target component markdown of a Claude Code plugin root?
+
+        The nearest ancestor holding ``.claude-plugin/plugin.json`` or
+        ``.claude-plugin/marketplace.json`` is the plugin root; markdown under
+        its ``agents/``, ``commands/``, ``skills/`` or ``output-styles/`` is
+        where Claude Code loads it from. The walk stops at the workspace root.
+        """
+        candidate = self._candidate_on_disk(file_path)
+        for directory in candidate.parents:
+            meta = directory / _PLUGIN_META_DIRNAME
+            if any((meta / name).is_file() for name in _PLUGIN_ROOT_MANIFESTS):
+                parts = candidate.relative_to(directory).parts
+                return len(parts) > 1 and parts[0] in _PLUGIN_MARKDOWN_COMPONENT_DIRS
+            if directory == self._workspace_root:
+                break
+        return False
 
     def _is_invalid_location(self, normalized: str, *, repo_relative: str | None = None) -> bool:
         """Check if a normalized path is in an invalid markdown location.
@@ -1412,6 +1480,12 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
             "apply (e.g. `vendor/acme/lib/docs/guide.md` is allowed, "
             "`vendor/acme/lib/random/notes.md` is blocked), at every nesting level "
             "(`vendor/a/b/vendor/c/d/docs/x.md` is judged as `docs/x.md`).\n\n"
+            "**Claude Code's own files are not project docs.** Markdown under Claude Code's "
+            "config dir (`$CLAUDE_CONFIG_DIR`, else `~/.claude`, even when symlinked into the "
+            "project) is never judged by these rules; auto-memory keeps its own policy. Nor is "
+            "a Claude Code plugin's `agents/`, `commands/`, `skills/` or `output-styles/` "
+            "markdown, under a directory holding `.claude-plugin/plugin.json` or "
+            "`marketplace.json`.\n\n"
             "**A declared project wins.** A `projects:` entry may name ANY directory as its "
             "`root` — under `vendor/`, inside another declared project, at any depth — and is "
             "consulted before the dependency inference, so a first-party clone that Composer "
