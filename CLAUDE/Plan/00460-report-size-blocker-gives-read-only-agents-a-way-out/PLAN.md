@@ -74,7 +74,7 @@ when the dispatched type cannot write.
 - [x] ✅ **Task 1.4**: `dispatch_declaration` advises when the dispatched
   `subagent_type` cannot write but the prompt declares a report path.
   Update the handler guidance (`get_claude_md`) for both handlers.
-- [ ] ⬜ **Task 1.5**: Release note. Full QA green.
+- [x] ✅ **Task 1.5**: Release note. Full QA green.
 
 ### Phase 2: Deliver
 
@@ -90,7 +90,7 @@ when the dispatched type cannot write.
   treated as read-only; one with no `tools:` line is not.
 - [x] Test: `dispatch_declaration` advises on a read-only type with a
   declared report path.
-- [ ] Full QA passes and CI is green.
+- [x] Full QA passes and CI is green.
 
 ## Delivery & Milestones
 
