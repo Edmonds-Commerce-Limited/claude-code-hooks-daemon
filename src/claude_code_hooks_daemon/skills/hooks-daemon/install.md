@@ -61,8 +61,10 @@ Without `--force`, install never deletes an existing daemon directory on its own
 
 Use `--force` to reinstall over an existing installation deliberately (it backs
 up config first). The daemon directory is re-cloned, but every environment's
-`untracked/venv-*` is moved aside first and put back afterwards, even if the
-install fails. So another view's venv survives a forced reinstall.
+`untracked/venv-*` is moved aside first (into `.claude/.hooks-daemon-venvs.*`,
+which git ignores) and put back afterwards, even if the install fails. If the
+run is killed outright, the next `install` finds that directory and puts the
+venvs back. So another view's venv survives a forced reinstall.
 
 ## Troubleshooting
 

@@ -53,6 +53,12 @@ if [ -d "$daemon_dir" ]; then
         exit 1
     fi
 fi
+if [ -f "{box.root / 'installer-killed'}" ]; then
+    # What the Bash tool's timeout does to a long forced reinstall: KILL,
+    # which runs no trap in the skill script.
+    kill -KILL "$PPID"
+    exit 9
+fi
 if [ -f "{box.root / 'installer-fails'}" ]; then
     echo "ERR simulated clone failure" >&2
     exit 3
@@ -225,6 +231,43 @@ class TestAnExplicitForceKeepsEveryVenv:
         assert result.returncode != 0
         assert snapshot(sandbox.clone / "untracked" / OTHER_VIEW_VENV) == before
         assert not list((sandbox.project / ".claude").glob(".hooks-daemon-venvs.*"))
+
+
+class TestVenvsStrandedByAKilledForceAreRecovered:
+    """Review I3: the restore runs from the EXIT trap, and KILL runs no trap.
+    The aside directory must never be committable, and the next run must put
+    what it holds back."""
+
+    def _strand(self, sandbox: Sandbox) -> Path:
+        (sandbox.root / "installer-killed").touch()
+        result = _skill_install(sandbox, "--force")
+        assert result.returncode != 0
+        (sandbox.root / "installer-killed").unlink()
+        [aside] = list((sandbox.project / ".claude").glob(".hooks-daemon-venvs.*"))
+        return aside
+
+    def test_the_aside_directory_ignores_itself(self, sandbox: Sandbox) -> None:
+        sandbox.other_view_venv()
+
+        aside = self._strand(sandbox)
+
+        assert (aside / ".gitignore").read_text() == "*\n"
+        assert (aside / OTHER_VIEW_VENV).is_dir()
+
+    def test_the_next_run_restores_them(self, sandbox: Sandbox) -> None:
+        sandbox.stub_uv()
+        other = sandbox.other_view_venv()
+        before = snapshot(other)
+        aside = self._strand(sandbox)
+        assert not other.exists(), "precondition: the killed run left it aside"
+
+        result = _skill_install(sandbox)
+
+        output = result.stdout + result.stderr
+        assert result.returncode == 0, output
+        assert snapshot(other) == before
+        assert not aside.exists()
+        assert str(aside) in output, "the recovery must be announced"
 
 
 class TestTheDeployedCopyMatchesItsTemplate:

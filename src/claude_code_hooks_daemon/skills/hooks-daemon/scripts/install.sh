@@ -73,45 +73,66 @@ DISCOVERY_TMP="/tmp/hooks-daemon-precheck-python-discovery.sh.$$"
 # and afterwards moved back to the SAME path, which its absolute paths need.
 # A name the fresh install rebuilt is this environment's own venv: the new
 # one wins. Restoring runs from the EXIT trap, so a failed install restores too.
-KEPT_VENVS_DIR=""
+#
+# KILL runs no trap (the Bash tool's timeout sends it to a long reinstall), so
+# the aside directory ignores itself (a .gitignore of "*": `git add -A` never
+# commits a venv from it), and every run first adopts any directory a killed
+# run left behind, restoring it when this run ends.
+KEPT_VENVS_PREFIX="$PROJECT_ROOT/.claude/.hooks-daemon-venvs."
+KEPT_VENVS_DIRS=()
+
+_adopt_stranded_venvs() {
+    local dir
+    for dir in "$KEPT_VENVS_PREFIX"*; do
+        [ -d "$dir" ] || continue
+        echo "Found venvs an interrupted reinstall kept aside in $dir;"
+        echo "they are put back into the daemon directory when this run ends."
+        KEPT_VENVS_DIRS+=("$dir")
+    done
+}
 
 _keep_venvs_aside() {
-    local daemon_dir="$1" venv
+    local daemon_dir="$1" venv aside=""
     for venv in "$daemon_dir"/untracked/venv-*; do
         [ -d "$venv" ] || continue
-        if [ -z "$KEPT_VENVS_DIR" ]; then
-            KEPT_VENVS_DIR="$(mktemp -d "$PROJECT_ROOT/.claude/.hooks-daemon-venvs.XXXXXX")"
-            echo "Keeping every environment's venv aside in $KEPT_VENVS_DIR during the reinstall:"
+        if [ -z "$aside" ]; then
+            aside="$(mktemp -d "${KEPT_VENVS_PREFIX}XXXXXX")"
+            echo '*' > "$aside/.gitignore"
+            KEPT_VENVS_DIRS+=("$aside")
+            echo "Keeping every environment's venv aside in $aside during the reinstall:"
         fi
-        mv "$venv" "$KEPT_VENVS_DIR/"
+        mv "$venv" "$aside/"
         echo "  kept: ${venv##*/}"
     done
 }
 
 _restore_venvs() {
-    [ -n "$KEPT_VENVS_DIR" ] || return 0
-    local target="$DAEMON_DIR/untracked" venv name
+    [ "${#KEPT_VENVS_DIRS[@]}" -gt 0 ] || return 0
+    local target="$DAEMON_DIR/untracked" aside venv name rc=0
     mkdir -p "$target"
-    echo "Restoring the kept venvs into $target:"
-    for venv in "$KEPT_VENVS_DIR"/venv-*; do
-        [ -d "$venv" ] || continue
-        name="${venv##*/}"
-        if [ -e "$target/$name" ]; then
-            echo "  $name: rebuilt by this install for this environment; its old copy is discarded"
-            rm -rf "$venv"
-        else
-            mv "$venv" "$target/"
-            echo "  restored: $name"
+    for aside in "${KEPT_VENVS_DIRS[@]}"; do
+        echo "Restoring the venvs kept in $aside into $target:"
+        for venv in "$aside"/venv-*; do
+            [ -d "$venv" ] || continue
+            name="${venv##*/}"
+            if [ -e "$target/$name" ]; then
+                echo "  $name: rebuilt for this environment and already in place; the kept copy is discarded"
+                rm -rf "$venv"
+            else
+                mv "$venv" "$target/"
+                echo "  restored: $name"
+            fi
+        done
+        rm -f "$aside/.gitignore"
+        # rmdir, never rm -rf: anything still in here is a venv that did not
+        # move back, and it must be kept for a human rather than deleted.
+        if ! rmdir "$aside"; then
+            echo "WARNING: $aside is not empty; what is left in it was kept for you to inspect." >&2
+            rc=1
         fi
     done
-    # rmdir, never rm -rf: anything still in here is a venv that did not move
-    # back, and it must be kept for a human rather than deleted.
-    if ! rmdir "$KEPT_VENVS_DIR"; then
-        echo "WARNING: $KEPT_VENVS_DIR is not empty; what is left in it was kept for you to inspect." >&2
-        KEPT_VENVS_DIR=""
-        return 1
-    fi
-    KEPT_VENVS_DIR=""
+    KEPT_VENVS_DIRS=()
+    return "$rc"
 }
 
 _on_exit() {
@@ -119,6 +140,7 @@ _on_exit() {
     rm -f "$PYPROJECT_TMP" "$DISCOVERY_TMP"
 }
 trap _on_exit EXIT
+_adopt_stranded_venvs
 
 if ! curl -sSL "$PYPROJECT_URL" -o "$PYPROJECT_TMP" || [ ! -s "$PYPROJECT_TMP" ]; then
     echo "Error: Failed to fetch pyproject.toml from $PYPROJECT_URL"
