@@ -94,6 +94,95 @@ _rv_dir_mtime() {
     stat -c %Y "$path" 2>/dev/null || stat -f %m "$path" 2>/dev/null
 }
 
+# ------------------------------------------------------------
+# _rv_candidate_runs <candidate> — Plan 00466 N1: probe runnability, not
+# just the executable bit.
+# ------------------------------------------------------------
+# `[ -x "$candidate" ]` proves the file is marked executable; it does not
+# prove the file can actually run on THIS host. A venv built inside a
+# container can be present, +x, and still fail at exec time -- wrong
+# architecture/libc, or a symlink into a container-only path (first
+# observed in #55, Plan 00457's JOURNAL). Launches the candidate on a
+# tiny stdlib-only probe and requires a clean exit, backgrounded so a
+# hung interpreter can be killed after a bound instead of stalling
+# resolution forever. `HOOKS_DAEMON_VENV_PROBE_TIMEOUT` overrides the
+# bound (seconds); 5s mirrors `Timeout.VALIDATION_CHECK`, the same probe
+# `client_validator.py::validate_daemon_can_start` already runs before it
+# executes a resolved venv python.
+#
+# Output is captured to a private temp file, not discarded and not left on
+# the shell's inherited stdout/stderr. That is a correctness requirement,
+# not a hiding choice: this script has no job control (`set -m` is not on),
+# so backgrounding the candidate does not give it its own process group,
+# and `kill -KILL "$pid"` on timeout reaches only the immediate candidate
+# process -- a descendant it spawned (e.g. a shell candidate whose last
+# command is a further child process) survives the kill as an orphan. If
+# that orphan inherited the CALLER's own stdout/stderr (as it would with no
+# redirect, or with `2>&1` pointing back at an inherited fd), the orphan
+# can hold that fd open long past our bound, and a caller reading our
+# output via a pipe (command substitution, `subprocess.run(capture_output=
+# True)`) blocks until the orphan eventually exits on its own -- the exact
+# hang this bound exists to prevent. Redirecting to an unshared regular
+# file sidesteps it: an orphan may still hold that file open, but nothing
+# we or our caller read from blocks on it. The file's content is kept
+# only long enough to fold a snippet into the caller's diagnostic on a
+# non-timeout failure, via `_RV_PROBE_OUTPUT`.
+#
+# `HOOKS_DAEMON_VENV_PROBE_TIMEOUT` overrides the bound (seconds); 5s
+# mirrors `Timeout.VALIDATION_CHECK`, the same probe
+# `client_validator.py::validate_daemon_can_start` already runs before it
+# executes a resolved venv python.
+#
+# A WATCHDOG subprocess enforces the bound, not a `sleep`-poll loop on the
+# main path: `wait "$pid"` blocks until the candidate exits (or the
+# watchdog kills it) and returns AS SOON AS THAT HAPPENS, with no polling
+# granularity to wait out. A first cut here polled `kill -0 "$pid"` in a
+# `sleep 1` loop, which is `sleep`-granularity-bound: a candidate that
+# exits in 20ms still cost >=1000ms, because the first poll almost always
+# lands before it has exited and the loop always sleeps a full second
+# before checking again. Measured: a real venv's `bin/python` (this
+# repo's own) went from ~1005ms/candidate under the poll loop to ~15ms
+# under the watchdog -- see the release note for the full measurement.
+#
+# Only reached on a resolver-cache MISS (the caller checks the hot-path
+# cache before calling `_rv_pick_python` at all — see
+# `_rv_resolve_python_impl` below), so this never lands on the
+# steady-state per-hook path.
+_RV_PROBE_TIMEOUT_SECS="${HOOKS_DAEMON_VENV_PROBE_TIMEOUT:-5}"
+_RV_PROBE_OUTPUT=""
+_rv_candidate_runs() {
+    local candidate="$1" pid watchdog rc logfile
+    logfile="$(mktemp "${TMPDIR:-/tmp}/rv-probe.XXXXXX" 2>/dev/null)" || logfile=""
+    if [ -n "$logfile" ]; then
+        "$candidate" -c 'import sys' > "$logfile" 2>&1 &
+    else
+        # mktemp itself is missing/failing (unusual, minimal image): fall
+        # back to /dev/null rather than leak the caller's own fds to a
+        # descendant -- correctness over a diagnostic snippet.
+        "$candidate" -c 'import sys' > /dev/null 2>/dev/null &
+    fi
+    pid=$!
+    ( sleep "$_RV_PROBE_TIMEOUT_SECS"; kill -KILL "$pid" 2>/dev/null ) &
+    watchdog=$!
+    wait "$pid"
+    rc=$?
+    kill "$watchdog" 2>/dev/null
+    wait "$watchdog" 2>/dev/null
+    _RV_PROBE_OUTPUT=""
+    if [ "$rc" -gt 128 ]; then
+        # Killed by a signal -- almost certainly our own watchdog's KILL,
+        # since nothing else in this probe's process group sends one.
+        [ -n "$logfile" ] && rm -f "$logfile"
+        _RV_PROBE_OUTPUT="timed out after ${_RV_PROBE_TIMEOUT_SECS}s"
+        return 1
+    fi
+    if [ -n "$logfile" ]; then
+        [ "$rc" -ne 0 ] && _RV_PROBE_OUTPUT="$(head -c 200 "$logfile" 2>/dev/null)"
+        rm -f "$logfile"
+    fi
+    return "$rc"
+}
+
 # Echoes ONE usable interpreter to invoke paths.py with, following the
 # precedence above. Returns 0 on success, 1 on miss (caller decides
 # whether to error or use --fallback-target's bare-python3 path).
@@ -120,16 +209,32 @@ _rv_pick_python() {
             return 0
         fi
     fi
+    # Plan 00466 N1: `[ -x ]` alone accepts a candidate that cannot actually
+    # run on this host (container-built, wrong arch/libc). `_rv_candidate_runs`
+    # probes it; a candidate that fails is reported (not silently dropped)
+    # and skipped, so the caller falls through to the next candidate and
+    # ultimately to the venv-free path instead of crashing on a raw exec
+    # error. `_RV_PROBE_OUTPUT` is read here, in the same shell that set it
+    # -- `_rv_pick_python` itself normally runs inside a caller's `$(...)`
+    # subshell, so nothing downstream of this function could read it back.
     for candidate in "${daemon_dir}"/untracked/venv-*/bin/python; do
         if [ -x "$candidate" ]; then
-            echo "$candidate"
-            return 0
+            if _rv_candidate_runs "$candidate"; then
+                echo "$candidate"
+                return 0
+            fi
+            echo "resolve_venv: candidate $candidate is executable but failed to run" \
+                "(${_RV_PROBE_OUTPUT:-no output}) -- skipping" >&2
         fi
     done
     for candidate in "${daemon_dir}"/untracked/venv-*/bin/python3; do
         if [ -x "$candidate" ]; then
-            echo "$candidate"
-            return 0
+            if _rv_candidate_runs "$candidate"; then
+                echo "$candidate"
+                return 0
+            fi
+            echo "resolve_venv: candidate $candidate is executable but failed to run" \
+                "(${_RV_PROBE_OUTPUT:-no output}) -- skipping" >&2
         fi
     done
     # Fresh-clone bootstrap: no venv exists yet, but paths.py only needs

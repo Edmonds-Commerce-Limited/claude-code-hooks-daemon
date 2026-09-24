@@ -90,3 +90,57 @@ either side of #53 or #55.
    dangling symlink.
 2. At minimum, a candidate that fails at exec time produces a message
    naming the venv it tried and the `repair` command, not a raw exec error.
+
+**Remedy** (remedy 1, plus remedy 2's diagnostic): every implementation
+that trusted a venv interpreter's executable bit alone now proves it RUNS
+first.
+
+- Bash: `scripts/lib/resolve_venv.sh::_rv_pick_python`'s two glob loops
+  (`venv-*/bin/python`, `venv-*/bin/python3`) probe each candidate with a
+  new `_rv_candidate_runs` helper (`"$candidate" -c 'import sys'`) before
+  accepting it, falling through to the next candidate — and eventually to
+  `bin/hooks-daemon`'s venv-free path — on failure. The bound is enforced
+  by a watchdog subprocess (`( sleep N; kill -KILL "$pid" )  &` + a
+  blocking `wait "$pid"`), not a `sleep`-poll loop: a poll loop always
+  costs at least one full poll interval even for a candidate that exits
+  in milliseconds, because the first check almost always lands before the
+  process has exited. Measured on this repo's own real venv `bin/python`:
+  ~1005ms/candidate under an earlier `sleep 1`-poll draft, ~15-40ms/candidate
+  under the watchdog. `HOOKS_DAEMON_VENV_PROBE_TIMEOUT` overrides the
+  5-second default bound (mirrors `Timeout.VALIDATION_CHECK`). Both glob
+  loops now report which candidate they rejected and why on stderr before
+  moving on, closing remedy 2 for the bash side.
+- Python: `resolve_existing_venv_python_with_diagnostics`'s shared
+  `_pick_interpreter` closure (used by steps 3, 4 and 5) and step 2's
+  metadata `python_path` check now all route through a new
+  `_venv_interpreter_runs` helper before accepting a candidate — the SAME
+  `-c 'import sys'` probe, via `subprocess.run(..., timeout=5)`. Steps 3
+  and 5 (single-candidate) and step 4 (scan) each report which candidate(s)
+  were executable-but-unrunnable and name the `repair` command, closing
+  remedy 2 there too. The "slug-exact" fingerprint-keyed venv (step 3) is
+  probed too, not exempted — #55 already showed an exact-fingerprint match
+  can be container-built and still unrunnable (e.g. a shared/NFS-mounted
+  `untracked/`), and this resolver only runs on a bash-side resolver-cache
+  MISS, so the extra spawn never lands on the per-hook hot path.
+- `resolve_existing_venv_python` (the simpler, no-diagnostics function)
+  deliberately stays un-probed: it is called fresh on every user turn by
+  `daemon_upgrade_detector`, which only reads `.daemon-metadata.json` next
+  to the returned path and never executes it, so probing there would add
+  a real hot-path cost for no correctness gain.
+  `client_validator.py::validate_daemon_can_start` — the other caller,
+  which DOES execute the result — already ran its own
+  `subprocess.run(..., timeout=Timeout.VALIDATION_CHECK)` probe before
+  doing so, so it needed no change. Both are recorded in the sibling audit
+  in the delivery report.
+- `check_canonical_callers.sh` was already the sibling-audit backstop for
+  the bash side: it denies any OTHER shell script that iterates
+  `untracked/venv-*` directly, so `_rv_pick_python` is the only bash glob
+  site that needed the fix.
+
+TDD: RED tests confirmed failing against the pre-fix code first, in both
+`tests/unit/daemon/test_paths_resolve_venv_diagnostics.py::TestRunnabilityProbe`
+and the new `tests/integration/test_resolve_venv_runnability_probe.py`,
+covering a fake executable that exits non-zero, a dangling symlink, a
+hanging candidate (bound respected), fall-through to a good second
+candidate, all-candidates-bad reaching the venv-free path, and the
+slug-exact venv unaffected when it genuinely works.
