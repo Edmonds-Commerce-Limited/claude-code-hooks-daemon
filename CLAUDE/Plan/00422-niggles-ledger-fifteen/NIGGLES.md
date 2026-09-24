@@ -1633,6 +1633,23 @@ current code.
 2. Until then, briefs that say "full QA" add `run_shell_check.sh` whenever
    a shell file changed.
 
+**Remedied**: remedy (1). `TOOL_REGISTRY` gained a `shell_check` entry
+wrapping `run_shell_check.sh`, in run_all.sh's step-8 position, with a
+summariser reporting the issue count and files checked. The nested
+`summary.error` shape `run_shell_check.sh` writes when shellcheck is not
+installed was already handled generically by `_report_error` (it names both
+JSON shapes shipped scripts use), so a missing binary still fails the tool
+visibly rather than passing — verified by temporarily hiding shellcheck from
+`PATH` and re-running the tool in isolation.
+
+`tests/unit/qa/test_llm_qa_run_all_wiring.py` is the class test: it parses
+every `"${SCRIPT_DIR}/<script>"` invocation out of `run_all.sh` and asserts
+each has a `TOOL_REGISTRY` entry running that same script, or is named with a
+reason in a `_KNOWN_GAPS` map (empty today — every invoked script is now
+registered). It failed on exactly `run_shell_check.sh` before the fix and
+passes after. `CLAUDE/QA.md` already states no check count, so it needed no
+edit.
+
 ### N21 — nothing points a journal append at the tool that stamps the time
 
 **Found**: the owner asked whether "the journal command that enforces proper
