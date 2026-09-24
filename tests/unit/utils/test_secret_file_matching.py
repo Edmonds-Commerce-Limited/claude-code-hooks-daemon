@@ -1397,6 +1397,94 @@ class TestInteriorWildcardDpIsBounded:
             )
 
 
+class TestOrdinaryVolumeContentCompletesFast:
+    """Team-lead's follow-up to review 3: n466-n24 measured
+    ``secret_file_guard`` at 12.3s for 1 MB and 49s for 4 MB (linear, ~12
+    us/byte) -- a 4 MB input exceeds the client's 30s timeout on its own,
+    independent of any single pathological token. Profiling (cProfile on a
+    1 MB Bash command and a 1 MB Write payload) found the constant factor
+    itself needed cutting, not just another cap: a real ``os.stat`` syscall
+    per token (``_realpath_if_resolvable``, unconditional even for a
+    glob-shaped token that could not plausibly BE a literal symlink name),
+    six unconditional regex ``.sub()`` calls per DP-intersection pair (most
+    of them no-ops on ordinary text), a fresh 2D list allocated per DP call,
+    and no memoisation despite a scan's token stream being heavily
+    repetitive for real content (source code, logs -- a bounded local
+    vocabulary reused throughout a file, not a fresh unique token every
+    time). Fixed: a per-token verdict cache scoped to one scan, the
+    ``os.stat`` skipped for glob-shaped tokens, the regex subs gated on a
+    cheap substring check, and the DP grid replaced by a two-row rolling
+    array. n24 is separately adding a whole-chain deadline and an input
+    size cap as a backstop for the residual case this cannot fully solve
+    (content with NO repetition at all, i.e. a fresh unique token every
+    time) -- these tests pin the COMMON case, which is now fast on its own
+    merits rather than merely bounded by hitting a timeout.
+    """
+
+    _BUDGET_SECONDS = 1.0
+
+    @staticmethod
+    def _vocabulary_command(target_bytes: int) -> str:
+        """A ~target_bytes command built from a small, realistic local
+        vocabulary of glob-shaped-looking short tokens, reused throughout --
+        the way an actual source file or log reuses identifiers, keywords
+        and punctuation, rather than a fresh unique token every time."""
+        vocabulary = [
+            f"{prefix}{index}{suffix}"
+            for prefix in ("tok", "var", "fn", "obj", "self.", "ctx.", "req.")
+            for index in range(40)
+            for suffix in ("", "*", "a", "b", "_id", "()")
+        ][:400]
+        words: list[str] = []
+        size = 0
+        index = 0
+        while size < target_bytes:
+            word = vocabulary[index % len(vocabulary)]
+            words.append(word)
+            size += len(word) + 1
+            index += 1
+        return " ".join(words)[:target_bytes]
+
+    def test_one_megabyte_bash_command_completes_well_under_a_second(self) -> None:
+        command = self._vocabulary_command(1024 * 1024)
+        start = time.perf_counter()
+        sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS)
+        elapsed = time.perf_counter() - start
+        assert elapsed < self._BUDGET_SECONDS, f"took {elapsed:.3f}s"
+
+    def test_one_megabyte_write_content_completes_well_under_a_second(self) -> None:
+        # The script-content route (Write/Edit to a .py/.sh/...) scans
+        # CONTENT the identical way the Bash route scans a command line --
+        # same `find_protected_mention_detail` call, same cost profile.
+        content = self._vocabulary_command(1024 * 1024)
+        start = time.perf_counter()
+        sfm.find_protected_mention_detail(content, sfm.DEFAULT_PROTECTED_PATTERNS)
+        elapsed = time.perf_counter() - start
+        assert elapsed < self._BUDGET_SECONDS, f"took {elapsed:.3f}s"
+
+    def test_repeated_identical_tokens_benefit_from_the_per_scan_cache(self) -> None:
+        """The review's own pre-existing 'a*b ' x 250000 shape -- now fast
+        enough to answer within budget WITHOUT needing the deadline at all
+        (contrast ``test_ordinary_one_megabyte_write_content_stays_bounded_
+        by_the_deadline`` above, which still accepts a TimeoutError
+        outcome)."""
+        content = "a*b " * 250_000
+        start = time.perf_counter()
+        sfm.find_protected_mention_detail(content, sfm.DEFAULT_PROTECTED_PATTERNS)
+        elapsed = time.perf_counter() - start
+        assert elapsed < self._BUDGET_SECONDS, f"took {elapsed:.3f}s"
+
+    def test_a_genuine_mention_is_still_found_in_realistic_volume_content(self) -> None:
+        """The speed-up must not cost detection: a real mention placed at
+        the END of a large ordinary-vocabulary command is still found, fast."""
+        command = self._vocabulary_command(1024 * 1024) + " cat .vault-password"
+        start = time.perf_counter()
+        result = sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS)
+        elapsed = time.perf_counter() - start
+        assert elapsed < self._BUDGET_SECONDS, f"took {elapsed:.3f}s"
+        assert result is not None
+
+
 class TestBraceAndFsWalkAreBounded:
     """B1-R3 / M-1 (Plan 00466 review 3): review 2's own B1 fix, and its own
     new M2 sub-fixes, EACH independently reintroduced B1's own defect class

@@ -131,26 +131,126 @@ shell-parsing consolidation (the queue names it alongside 464's
 handler onto this branch's `utils/shell_expansion` primitive too, rather
 than leaving a third independent brace expander in the codebase.
 
+## Addendum: n466-n24's 1 MB timing follow-up
+
+n466-n24 separately measured `secret_file_guard` at 12.3s for a 1 MB payload
+and 49s for 4 MB (linear, ~12 µs/byte) — a 4 MB input exceeds the 30s client
+timeout, a fail-open. Team-lead asked for the constant factor cut while this
+same file was already being rewritten, target under 1s for 1 MB, pinned by a
+timing test. Separately, the coordinator queue asked for
+`_expand_glob_token`'s silent `except (OSError, ValueError): continue` to be
+made genuinely fail-closed and its `error_hiding_exclusions.json` entry
+removed.
+
+Profiled a 1 MB Bash command and a 1 MB Write-to-`.py` payload with cProfile
+(scratch: `untracked/scratch/profile_sfg_1mb.py`,
+`profile_sfg_1mb_unique.py`, `profile_sfg_1mb_realistic.py`). Four changes to
+`secret_file_matching.py`, no change to the public API or the security
+surface:
+
+- **Per-scan memoization** (`iter_protected_mentions`) — every input to
+  `_token_mention` other than the token TEXT is fixed for the whole call
+  (`patterns`, `stem_pairs`, `project_root`, `cwd`,
+  `both_edges_patterns`/`_stems`), so the verdict for a given token can never
+  differ between two occurrences of it in the same command. A local
+  `dict[str, str | None]` cache keyed by token text turns a scan that redid
+  the full DP/bracket/filesystem work per occurrence into one that pays for
+  each DISTINCT token once — realistic content (source, logs, minified code)
+  is dominated by a small reused vocabulary, so this is the single largest
+  win for realistic payloads.
+- **Realpath-skip for glob-shaped tokens** (`_token_mention`) — the trailing
+  `_realpath_if_resolvable(token)` call (a real `os.stat`) exists only for
+  the `worktree_create` symlink-alias case, which needs the token to
+  plausibly BE a literal filename. Gated it on `not _is_glob_shaped(token)`:
+  a real on-disk symlink literally named with an unescaped `*`/`?`/bracket
+  expression is not a shape any genuine alias uses, and this syscall was the
+  single biggest per-token cost at volume for glob-shaped content.
+- **Cheap regex-skip guards + rolling-array DP** (`_globs_can_intersect`) —
+  the three `.sub()` calls per operand (POSIX class, bracket expression,
+  star-run) ran unconditionally even when the operand had none of the
+  trigger characters; guarded each behind a cheap `in` substring check
+  first. Replaced the full `len_a+1 × len_b+1` grid with a two-row rolling
+  array (`prev`/`curr`) — the recurrence only ever reads the immediately
+  previous row plus the current row's own previous cell — avoiding
+  `O(len_a)` list allocations per call at high call volume.
+- **`_expand_glob_token` fail-closed** — removed the
+  `try/except (OSError, ValueError): continue` around the match-consumption
+  loop. It used to catch a failure on one expansion base and silently try
+  the next, degrading to "no mention" if every base failed — exactly the
+  silent-degrade class the rest of this review round has been closing
+  everywhere else. The exception now propagates to the caller's own
+  fail-closed wrapper. Removed the now-obsolete
+  `error_hiding_exclusions.json` entry for it (a pre-existing Plan
+  00272/00357 entry, not one added by this branch).
+
+**Measured** (raw wall-clock, not cProfile — cProfile's own per-call
+instrumentation overhead measurably inflates `tottime` at these call
+volumes, confirmed by cross-checking a profiled run against a raw
+`time.perf_counter()` run of the same workload):
+
+- Realistic 1 MB content (400-word local vocabulary, moderate repetition,
+  the way real source/log content behaves): ~0.08–0.09 µs/byte for both the
+  Bash-command route and the Write-to-`.py` script-content route (down from
+  the ~12 µs/byte baseline — roughly 130–150x). A genuine mention appended
+  after 1 MB of ordinary content is still found, at the same speed —
+  detection is not weakened.
+- The pre-existing fully-repeated `"a*b " * 250_000` test shape (previously
+  deadline-truncated at 5s+) now completes unconditionally under 1s with no
+  deadline needed at all.
+- The fully-adversarial worst case (≈90K MOSTLY-UNIQUE tokens, no
+  repetition to memoize) is essentially unchanged at ~11.4 µs/byte — a raw
+  microbenchmark of `_globs_can_intersect` alone
+  (`untracked/scratch/microbench_dp.py`) puts ~14 µs/call at roughly the
+  Python-interpreter floor for this DP at current problem sizes. This
+  residual case is explicitly left to n24's own separate whole-chain
+  deadline + input-size-cap backstop, not claimed fixed here.
+
+**Considered and rejected**: a literal-substring overlap pre-filter before
+invoking the DP in `_glob_intersection_mention`, to skip the DP entirely for
+token/pattern pairs sharing no literal text. Found a genuine correctness
+counterexample for glob-language intersection with interleaved segments —
+`A="ab*"` and `B="*ba*"` can intersect via a longer string like `"abba"`
+that satisfies both, even though neither's literal segment is a substring of
+the other — so this class of shortcut is unsound in general. Not
+implemented; the adversarial residual case relies on n24's backstop instead.
+
+Pinned with a new `TestOrdinaryVolumeContentCompletesFast` class (4 tests)
+in `test_secret_file_matching.py`: the 1 MB Bash-command and Write-content
+routes each under 1s with no deadline, the repeated-`"a*b "` shape under 1s
+unconditionally, and a genuine mention still found in 1 MB of realistic
+volume content, under 1s.
+
+**Disclosed trade-off**: `_expand_glob_token` is also called (via
+`find_protected_mention_strict`) by `quarantine_artefact_read_guard.py`,
+which has no local fail-closed wrapper of its own around `matches()`/
+`handle()`. Making `_expand_glob_token` propagate instead of swallowing
+changes that handler's behaviour on a failing base from "silently returns
+None" to "may raise, caught by the chain's default non-strict dispatch —
+still effectively ALLOW, but now a surfaced/logged exception rather than a
+silent pass". Left as-is rather than expanding scope to add a wrapper there:
+team-lead's instruction was specific to `_expand_glob_token`; that handler
+ships disabled by default; and giving it its own fail-closed posture is
+already n24's separate "24 SAFETY+BLOCKING handlers fail closed" workstream.
+Verified no regression: `test_quarantine_artefact_read_guard.py`,
+`test_project_containment.py` and `test_enforce_llm_qa.py` all still pass
+(223 tests) with the change in place.
+
 ## QA
 
-- `scripts/qa/run_format_check.sh` — clean (4 files auto-fixed by black,
-  re-verified clean).
-- `python scripts/qa/audit_error_hiding.py` (whole-project, not
-  file-scoped — the CLI args are advisory only) — 0 violations, no new
-  exclusion entries added (`git diff` on `error_hiding_exclusions.json` is
-  empty).
+- `scripts/qa/run_format_check.sh` — clean (0 files needing formatting).
+- `python scripts/qa/audit_error_hiding.py` (whole-project) — 0 violations;
+  the `_expand_glob_token` exclusion entry removed, no new entries added.
 - `python scripts/qa/llm_qa.py lint / type_check / security / magic_values / error_hiding / fail_open_inventory / declared_invariant_pairs` — all
   PASSED, 0 issues each.
-- `pytest tests/unit/utils/ tests/unit/handlers/pre_tool_use/` — 6003
-  passed, 2 pre-existing xfails (Plan 00408, unrelated to this fix, both
-  present before this branch started).
-- Review 3's own probe scripts re-run live against the fixed code:
-  `probe_guards_v3_timing.pyprobe` (every shape now denies well under 1s,
-  down from 8s–killed-past-90s), `probe_guards_v3_llmqa_timing.pyprobe`
-  (every shape 0.001s–0.82s, down from 15s–killed-past-45s),
-  `probe_gd_llmqa.py` (`regressions_vs_main=0`, matching review 3's own
-  confirmed result).
+- `pytest tests/unit/utils/test_secret_file_matching.py tests/unit/utils/test_shell_expansion.py tests/unit/handlers/pre_tool_use/test_secret_file_guard.py` —
+  361 passed.
+- `pytest tests/unit/handlers/pre_tool_use/test_quarantine_artefact_read_guard.py tests/unit/handlers/pre_tool_use/test_project_containment.py .claude/project-handlers/pre_tool_use/test_enforce_llm_qa.py` —
+  223 passed (the two other callers of the touched code paths).
+- Review 3's `probe_guards_v3_timing.pyprobe` re-run live against this
+  round's code: every shape still denies well under 1s (max eval 0.587s),
+  confirming no regression from the timing-cut changes.
 - Daemon restarted before this commit.
 
-No new QA exclusions or config changes. Release note added:
+No new QA exclusions or config changes (one pre-existing exclusion entry
+removed). Release note added:
 `CLAUDE/UPGRADES/UNRELEASED/release-notes/37-a-slow-secret-file-guard-or-enforce-llm-qa-scan-is-no-longer-a-fail-open.md`.

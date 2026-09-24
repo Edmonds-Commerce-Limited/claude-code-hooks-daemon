@@ -105,12 +105,6 @@
       "reason": "Plan 00272: shell-token symlink probe. A candidate token is arbitrary text sliced out of a Bash command, so Path(token).is_symlink() can raise OSError for shapes that are simply not paths (over-long prose fragments). The except body assigns is_symlink = False — the documented answer for a non-path token, not a hidden error: the raw token is still matched against the protected globs, so nothing is concealed and the guard can only get STRICTER by continuing. Raising would let a crafted token crash the deny path — failing open."
     },
     {
-      "file": "utils/secret_file_matching.py",
-      "function": "_expand_glob_token",
-      "rule": "silent-continue",
-      "reason": "Plan 00272 filesystem-truth glob expansion: tries a candidate token against MULTIPLE search bases (project root, then process cwd) in a loop, because a relative token could plausibly resolve against either. Iterating base.glob(pattern_str) raises OSError for an unreadable directory and ValueError for a malformed glob pattern (e.g. a mid-component `**` sliced out of arbitrary Bash-command text). Path.glob is a generator function, so these fire on the FIRST ITERATION, never at the call — the try therefore wraps the consuming loop (Plan 00357: a guard around the call alone let the ValueError escape and fail the calling guard open) — the standard batch-iteration pattern (matching scripts/qa/check_skill_references.py::scan_directory and check_sensitive_content.py::_compile_public_patterns in this same file): one unusable base/pattern combination must not abort trying the remaining ones. Every base is still tried, so this can only make the guard MISS an expansion (fail toward the stricter heuristic stem-overlap match in find_protected_mention, never toward silently allowing something through), and no exception here ever conceals a genuine glob match."
-    },
-    {
       "file": "config/models.py",
       "function": "load_or_default",
       "rule": "silent-pass",

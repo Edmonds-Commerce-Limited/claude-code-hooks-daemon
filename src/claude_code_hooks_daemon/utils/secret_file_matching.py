@@ -878,34 +878,58 @@ def _globs_can_intersect(a: str, b: str) -> bool:
     # `[^\]]*\]` stops at the class's OWN closing `]` (`[:alpha:]`), one
     # character short of the outer bracket expression's real close, and
     # would otherwise leave that outer `]` behind as a stray literal.
-    a = _POSIX_NAMED_CLASS_RE.sub("?", a)
-    b = _POSIX_NAMED_CLASS_RE.sub("?", b)
-    a = _BRACKET_EXPRESSION_RE.sub("?", a)
-    b = _BRACKET_EXPRESSION_RE.sub("?", b)
-    a = _STAR_RUN_RE.sub("*", a)
-    b = _STAR_RUN_RE.sub("*", b)
+    # Cut the constant factor (team-lead's 1 MB timing follow-up to review
+    # 3): a regex `.sub()` call costs real overhead even on a NO-OP match --
+    # for the common case of a short ordinary token, calling all three
+    # substitutions unconditionally was paying that cost six times (three
+    # per operand) for patterns that never contain a POSIX class, a bracket
+    # expression, or a star run at all. A cheap substring/character check
+    # first skips the regex engine entirely when there is nothing for it to
+    # do -- semantically identical, since each `.sub()` is a no-op exactly
+    # when its trigger character(s) are absent.
+    if "[:" in a:
+        a = _POSIX_NAMED_CLASS_RE.sub("?", a)
+    if "[:" in b:
+        b = _POSIX_NAMED_CLASS_RE.sub("?", b)
+    if "[" in a:
+        a = _BRACKET_EXPRESSION_RE.sub("?", a)
+    if "[" in b:
+        b = _BRACKET_EXPRESSION_RE.sub("?", b)
+    if "**" in a:
+        a = _STAR_RUN_RE.sub("*", a)
+    if "**" in b:
+        b = _STAR_RUN_RE.sub("*", b)
     len_a, len_b = len(a), len(b)
     if len_a * len_b > _DP_MAX_CELLS:
         return True
-    dp = [[False] * (len_b + 1) for _ in range(len_a + 1)]
-    dp[0][0] = True
-    for i in range(1, len_a + 1):
-        dp[i][0] = a[i - 1] == "*" and dp[i - 1][0]
+    # Rolling two-row DP instead of a full (len_a+1) x (len_b+1) grid: the
+    # transition for row `i` only ever reads row `i-1` and the CURRENT
+    # row's own previous cell, so one full grid's worth of list-of-lists
+    # allocation per call (the dominant constant-factor cost at these
+    # problem sizes -- most tokens and patterns here are a few dozen
+    # characters at most) is unnecessary. Semantically identical to the
+    # grid version; `prev`/`curr` alternate which physical list plays which
+    # role instead of copying.
+    prev = [False] * (len_b + 1)
+    curr = [False] * (len_b + 1)
+    prev[0] = True
     for j in range(1, len_b + 1):
-        dp[0][j] = b[j - 1] == "*" and dp[0][j - 1]
+        prev[j] = b[j - 1] == "*" and prev[j - 1]
     for i in range(1, len_a + 1):
         char_a = a[i - 1]
+        curr[0] = char_a == "*" and prev[0]
         for j in range(1, len_b + 1):
             char_b = b[j - 1]
             if char_a == "*":
-                dp[i][j] = dp[i - 1][j] or dp[i][j - 1]
+                curr[j] = prev[j] or curr[j - 1]
             elif char_b == "*":
-                dp[i][j] = dp[i][j - 1] or dp[i - 1][j]
+                curr[j] = curr[j - 1] or prev[j]
             elif char_a == "?" or char_b == "?" or char_a == char_b:
-                dp[i][j] = dp[i - 1][j - 1]
+                curr[j] = prev[j - 1]
             else:
-                dp[i][j] = False
-    return dp[len_a][len_b]
+                curr[j] = False
+        prev, curr = curr, prev
+    return prev[len_b]
 
 
 def _glob_intersection_mention(
@@ -1233,19 +1257,32 @@ def iter_protected_mentions(
         _tokenise(_without_import_module_paths(command)),
         _brace_expansion_tokens(command),
     )
+    # Own live finding (team-lead's 1 MB timing follow-up to review 3): real
+    # content is full of REPEATED short tokens (log lines, minified code,
+    # boilerplate) -- every one of `patterns`/`stem_pairs`/`project_root`/
+    # `cwd`/`both_edges_patterns`/`both_edges_stems` is fixed for the WHOLE
+    # call, so the verdict for a given token text can never differ between
+    # two occurrences of it in the same command. Caching by token text turns
+    # a scan that redid the full DP/bracket/filesystem work for every
+    # occurrence into one that pays for each DISTINCT token once.
+    mention_cache: dict[str, str | None] = {}
     for token in tokens:
         if deadline is not None and time.monotonic() > deadline:
             raise TimeoutError("secret_file_guard mention scan exceeded its deadline")
-        pattern = _token_mention(
-            token,
-            patterns,
-            stem_pairs,
-            project_root,
-            cwd=cwd,
-            deadline=deadline,
-            both_edges_patterns=both_edges_patterns,
-            both_edges_stems=both_edges_stems,
-        )
+        if token in mention_cache:
+            pattern = mention_cache[token]
+        else:
+            pattern = _token_mention(
+                token,
+                patterns,
+                stem_pairs,
+                project_root,
+                cwd=cwd,
+                deadline=deadline,
+                both_edges_patterns=both_edges_patterns,
+                both_edges_stems=both_edges_stems,
+            )
+            mention_cache[token] = pattern
         if pattern is not None:
             yield (pattern, token)
 
@@ -1396,11 +1433,23 @@ def _token_mention(
             )
             if match is not None:
                 return match
-    real = _realpath_if_resolvable(token)
-    if real is not None:
-        for pattern in patterns:
-            if path_matches_globs(real, (pattern,), project_root=project_root):
-                return pattern
+    # Own live finding (team-lead's 1 MB timing follow-up to review 3): the
+    # symlink-alias check exists for the `worktree_create` seeding case --
+    # an innocuous LINK name pointing at a protected TARGET -- which is
+    # only a plausible shape for a token that could itself BE a literal
+    # filename. A glob-shaped token (`a*b`, `id[0-9]`) would need a real
+    # on-disk symlink literally named with an unescaped `*`/`?`/bracket
+    # expression to matter here -- legal on most filesystems but not a
+    # shape any genuine alias uses, and skipping the `os.stat` syscall for
+    # it is the single biggest per-token cost this scan pays at volume (a
+    # 1 MB command built of ordinary glob-shaped tokens did one real
+    # syscall per token for no security benefit).
+    if not _is_glob_shaped(token):
+        real = _realpath_if_resolvable(token)
+        if real is not None:
+            for pattern in patterns:
+                if path_matches_globs(real, (pattern,), project_root=project_root):
+                    return pattern
     return None
 
 
@@ -1536,20 +1585,27 @@ def _expand_glob_token(
             # the exception escape and fail the calling security handler
             # open). Consumed lazily, still.
             matches_iter = base.glob(pattern_str)
-        try:
-            for match in matches_iter:
-                examined += 1
-                match_str = str(match)
-                for pattern in patterns:
-                    if path_matches_globs(match_str, (pattern,), project_root=project_root):
-                        return pattern
-                if max_expansions is not None and examined >= max_expansions:
-                    return None
-        except (OSError, ValueError):
-            # A token the filesystem cannot expand names nothing on disk, which
-            # is exactly the "expands to nothing" case: no mention. Registered
-            # in error_hiding_exclusions.json.
-            continue
+        # Fail CLOSED (team-lead's 1 MB timing follow-up to review 3): this
+        # used to catch OSError/ValueError here and `continue` to the next
+        # base, on the theory that one unusable base/pattern combination
+        # should not stop the others from being tried. That is still true
+        # in spirit, but "silently keep searching, and if every base fails
+        # just answer no mention" is exactly the class this whole review
+        # round has been closing everywhere else: an exception during
+        # evaluation is not a decision this function actually made, and
+        # letting it degrade to "no mention" risks masking a genuine one
+        # behind whatever raised. Deliberately NOT caught here any more --
+        # it propagates to the caller's own fail-closed wrapper (secret_
+        # file_guard's N11 net for the Bash-mention route this function
+        # backs). No longer registered in error_hiding_exclusions.json.
+        for match in matches_iter:
+            examined += 1
+            match_str = str(match)
+            for pattern in patterns:
+                if path_matches_globs(match_str, (pattern,), project_root=project_root):
+                    return pattern
+            if max_expansions is not None and examined >= max_expansions:
+                return None
     return None
 
 
