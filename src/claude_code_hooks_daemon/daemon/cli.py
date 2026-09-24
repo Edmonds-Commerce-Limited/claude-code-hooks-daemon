@@ -3683,9 +3683,10 @@ def _resolve_transcript(args: argparse.Namespace) -> Path | None:
         candidate = Path(named)
         return candidate if candidate.is_file() else None
 
+    from claude_code_hooks_daemon.skill_scan.extraction import derive_transcript_dir
+
     project_path = get_project_path(getattr(args, "project_root", None))
-    slug = str(project_path).replace("/", "-")
-    session_dir = Path.home() / ".claude" / "projects" / slug
+    session_dir = derive_transcript_dir(project_path)
     try:
         transcripts = sorted(
             session_dir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True
