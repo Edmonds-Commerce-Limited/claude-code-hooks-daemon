@@ -25,8 +25,10 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import SubagentStopHandlerBase
 from claude_code_hooks_daemon.utils.option_coercion import coerce_int_option
-from claude_code_hooks_daemon.utils.path_exclusion import resolve_project_root
-from claude_code_hooks_daemon.utils.subagent_tool_resolution import resolve_agent_can_write
+from claude_code_hooks_daemon.utils.subagent_tool_resolution import (
+    resolve_agent_can_write,
+    resolve_lookup_root,
+)
 
 # Task 1.1's reproduction measured harmful truncation at a ~24k-token
 # (roughly 96k-character) final message. A subagent's final message should be
@@ -110,22 +112,6 @@ class SubagentReportSizeBlockerHandler(SubagentStopHandlerBase):
         )
         return f"{self._fallback_report_dir}{yymmdd}-{agent_name}-{_MODEL_PLACEHOLDER}.md"
 
-    def _root(self) -> Path:
-        """The checkout an `agent_type`'s `.claude/agents/` lookup is rooted at.
-
-        An injected test override wins, then the registry's ``workspace_root``
-        option, then :func:`resolve_project_root` (None when ``ProjectContext``
-        is not initialised, e.g. a bare unit test), falling back to the
-        process cwd so this always returns a concrete path.
-        """
-        if self._project_root is not None:
-            return self._project_root
-        workspace_root = getattr(self, "_workspace_root", None)
-        if workspace_root is not None:
-            return Path(workspace_root)
-        resolved = resolve_project_root()
-        return Path(resolved) if resolved is not None else Path.cwd()
-
     def _agent_can_write(self, hook_input: dict[str, Any]) -> bool | None:
         """Plan 00460 Task 1.1: whether the stopping agent has a `Write` tool.
 
@@ -134,9 +120,8 @@ class SubagentReportSizeBlockerHandler(SubagentStopHandlerBase):
         today's behaviour, never guess).
         """
         agent_type = hook_input.get("agent_type")
-        return resolve_agent_can_write(
-            agent_type if isinstance(agent_type, str) else None, self._root()
-        )
+        root = resolve_lookup_root(self._project_root, getattr(self, "_workspace_root", None))
+        return resolve_agent_can_write(agent_type if isinstance(agent_type, str) else None, root)
 
     @staticmethod
     def _deny_read_only(agent_type: str, length: int, threshold: int) -> BlockingResult:

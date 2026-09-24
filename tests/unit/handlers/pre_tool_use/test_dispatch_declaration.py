@@ -37,6 +37,12 @@ def _task_input(prompt: str, **extra: Any) -> dict[str, Any]:
     return {"tool_name": "Task", "tool_input": payload}
 
 
+_DECLARED_PROMPT = (
+    "This is Plan 00307 work: /workspace/CLAUDE/Plan/00307-subagent-file-based"
+    "-report-handoff/. Write your findings there."
+)
+
+
 @pytest.fixture
 def handler() -> DispatchDeclarationHandler:
     return DispatchDeclarationHandler()
@@ -169,6 +175,85 @@ class TestStrictMode:
         result = handler.handle(_task_input("refactor the config loader"))
 
         assert result.decision == Decision.DENY
+
+
+class TestReadOnlyDispatchAdvisory:
+    """Plan 00460 Task 1.4: an ADVISORY, never a deny, when the dispatched
+    `subagent_type` resolves read-only AND the prompt declares a report
+    path -- the coordinator brief that told a Write-less agent to write a
+    file was the other half of the original bug report."""
+
+    def test_advises_when_read_only_type_dispatched_with_declaration(
+        self, handler: DispatchDeclarationHandler
+    ) -> None:
+        hook_input = _task_input(_DECLARED_PROMPT, subagent_type="Explore")
+
+        result = handler.handle(hook_input)
+
+        assert result.decision == Decision.ALLOW
+        assert len(result.context) == 1
+        assert "Explore" in result.context[0]
+        assert "no `Write` tool" in result.context[0]
+
+    def test_silent_when_writable_type_dispatched_with_declaration(
+        self, handler: DispatchDeclarationHandler
+    ) -> None:
+        hook_input = _task_input(_DECLARED_PROMPT, subagent_type="general-purpose")
+
+        result = handler.handle(hook_input)
+
+        assert result.decision == Decision.ALLOW
+        assert result.context == []
+
+    def test_silent_when_subagent_type_missing(self, handler: DispatchDeclarationHandler) -> None:
+        """No `subagent_type` on the dispatch resolves unknown -- never guessed."""
+        result = handler.handle(_task_input(_DECLARED_PROMPT))
+
+        assert result.decision == Decision.ALLOW
+        assert result.context == []
+
+    def test_no_advisory_when_read_only_type_dispatched_without_declaration(
+        self, handler: DispatchDeclarationHandler
+    ) -> None:
+        """Task 1.4 is scoped to a DECLARED report path -- an undeclared
+        dispatch already gets the standard contract-injection advisory, and
+        does not additionally get the read-only mismatch one."""
+        hook_input = _task_input("refactor the config loader", subagent_type="Explore")
+
+        result = handler.handle(hook_input)
+
+        assert result.decision == Decision.ALLOW
+        assert len(result.context) == 1
+        assert "DISPATCH DECLARATION" in result.context[0]
+
+    def test_advisory_fires_even_in_strict_mode_and_never_denies(
+        self, strict_handler: DispatchDeclarationHandler
+    ) -> None:
+        hook_input = _task_input(_DECLARED_PROMPT, subagent_type="Explore")
+
+        result = strict_handler.handle(hook_input)
+
+        assert result.decision == Decision.ALLOW
+        assert len(result.context) == 1
+        assert "no `Write` tool" in result.context[0]
+
+    def test_project_agent_without_write_tool_is_advised(
+        self, handler: DispatchDeclarationHandler, tmp_path: Any
+    ) -> None:
+        agents_dir = tmp_path / ".claude" / "agents"
+        agents_dir.mkdir(parents=True)
+        (agents_dir / "code-reviewer.md").write_text(
+            "---\nname: code-reviewer\ndescription: reviews code\n"
+            "tools: Read, Glob, Grep, Bash\n---\n\nBody.\n"
+        )
+        handler._project_root = tmp_path
+        hook_input = _task_input(_DECLARED_PROMPT, subagent_type="code-reviewer")
+
+        result = handler.handle(hook_input)
+
+        assert result.decision == Decision.ALLOW
+        assert len(result.context) == 1
+        assert "code-reviewer" in result.context[0]
 
 
 class TestConfiguredPlanDirectory:

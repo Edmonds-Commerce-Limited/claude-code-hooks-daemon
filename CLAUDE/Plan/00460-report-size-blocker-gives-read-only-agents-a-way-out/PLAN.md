@@ -54,24 +54,24 @@ when the dispatched type cannot write.
 
 ### Phase 1: TDD in a worktree
 
-- [ ] ⬜ **Task 1.1**: Resolve an agent type's tools. Built-in types come
+- [x] ✅ **Task 1.1**: Resolve an agent type's tools. Built-in types come
   from a constant table: verify each type's tools from Claude Code's own
   documentation (vendor via `remote-docs` if fetched) and cite it.
   Project, user and plugin agents come from `tools:` in their
   `.claude/agents/*.md` frontmatter; no `tools:` means every tool. Unknown
   types keep today's behaviour. There is ONE resolver, used by both
   handlers.
-- [ ] ⬜ **Task 1.2**: Decide (a) vs (b) with evidence. Check what the
+- [x] ✅ **Task 1.2**: Decide (a) vs (b) with evidence. Check what the
   SubagentStop payload carries: whether the full final message is
   available to the daemon, or only a transcript path. For (a), the saved
   file must pass the same checks a `Write` to that path would: sensitive
   content, secret-file rules and markdown location. It must also land
   where the prescribed path already points, and must never overwrite.
   Record the decision in the journal.
-- [ ] ⬜ **Task 1.3**: Implement it in the blocker, with a
+- [x] ✅ **Task 1.3**: Implement it in the blocker, with a
   read-only-specific message that names what to do and forbids Bash
   writes. Writable agents are unchanged. Update the acceptance tests.
-- [ ] ⬜ **Task 1.4**: `dispatch_declaration` advises when the dispatched
+- [x] ✅ **Task 1.4**: `dispatch_declaration` advises when the dispatched
   `subagent_type` cannot write but the prompt declares a report path.
   Update the handler guidance (`get_claude_md`) for both handlers.
 - [ ] ⬜ **Task 1.5**: Release note. Full QA green.

@@ -40,6 +40,7 @@ from pathlib import Path
 from typing import Any, Final
 
 from claude_code_hooks_daemon.utils.markdown_format import parse_frontmatter_yaml
+from claude_code_hooks_daemon.utils.path_exclusion import resolve_project_root
 
 # Citation: remote-docs/code.claude.com/docs/en/sub-agents.md,
 # "Built-in subagents" section — "Tools: read-only tools; Write and Edit are
@@ -165,3 +166,24 @@ def resolve_agent_can_write(
     # depends on marketplace/plugin configuration this module does not
     # track (Plan 00460 Task 1.1 scope decision).
     return None
+
+
+def resolve_lookup_root(
+    project_root_override: Path | None, workspace_root: Path | str | None
+) -> Path:
+    """The directory an ``agent_type``'s `.claude/agents/` lookup is rooted at.
+
+    Shared by every handler that calls :func:`resolve_agent_can_write`
+    (``subagent_report_size_blocker`` and ``dispatch_declaration``) so the
+    two never resolve a different root for the same agent type. An injected
+    TEST override wins, then the registry's ``workspace_root`` option, then
+    :func:`resolve_project_root` (None when ``ProjectContext`` is not
+    initialised, e.g. a bare unit test), falling back to the process cwd so
+    this always returns a concrete path.
+    """
+    if project_root_override is not None:
+        return project_root_override
+    if workspace_root is not None:
+        return Path(workspace_root)
+    resolved = resolve_project_root()
+    return Path(resolved) if resolved is not None else Path.cwd()

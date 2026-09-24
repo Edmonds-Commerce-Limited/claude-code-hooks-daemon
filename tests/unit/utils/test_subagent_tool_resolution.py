@@ -25,7 +25,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from claude_code_hooks_daemon.utils.subagent_tool_resolution import resolve_agent_can_write
+from claude_code_hooks_daemon.utils.subagent_tool_resolution import (
+    resolve_agent_can_write,
+    resolve_lookup_root,
+)
 
 
 def _write_agent(agents_dir: Path, filename: str, frontmatter: str) -> None:
@@ -177,7 +180,9 @@ class TestUserAgents:
             "personal-reviewer.md",
             "name: personal-reviewer\ndescription: user-scoped\ntools: Read, Grep",
         )
-        assert resolve_agent_can_write("personal-reviewer", project_root, home_dir=home_dir) is False
+        assert (
+            resolve_agent_can_write("personal-reviewer", project_root, home_dir=home_dir) is False
+        )
 
     def test_project_agent_takes_precedence_over_home_agent(self, tmp_path: Path) -> None:
         project_root = tmp_path / "project"
@@ -193,3 +198,23 @@ class TestUserAgents:
             "name: shared-name\ndescription: user scoped\ntools: Read",
         )
         assert resolve_agent_can_write("shared-name", project_root, home_dir=home_dir) is True
+
+
+class TestResolveLookupRoot:
+    """Shared by every handler that calls ``resolve_agent_can_write`` (Plan
+    00460): a test override wins, then the registry's ``workspace_root``
+    option, then :func:`resolve_project_root`, then the process cwd."""
+
+    def test_project_root_override_wins(self, tmp_path: Path) -> None:
+        override = tmp_path / "override"
+        assert resolve_lookup_root(override, tmp_path / "workspace") == override
+
+    def test_workspace_root_used_when_no_override(self, tmp_path: Path) -> None:
+        workspace = tmp_path / "workspace"
+        assert resolve_lookup_root(None, workspace) == workspace
+
+    def test_falls_back_to_cwd_when_nothing_else_resolves(self) -> None:
+        # ProjectContext is not initialised in a bare unit test, so
+        # resolve_project_root() returns None and this falls all the way
+        # through to the process cwd.
+        assert resolve_lookup_root(None, None) == Path.cwd()
