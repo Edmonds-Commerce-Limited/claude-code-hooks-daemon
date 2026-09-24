@@ -14,8 +14,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00457: signal runs without a venv](00457-signal-runs-without-a-venv/PLAN.md) - Not Started (from #55: the host-side reboot warning is refused where the only venv was built in a container; a standard-library-only entry point, handled before venv resolution using 00456's mechanism, so it starts after 00456 merges)
 
-- [00456: missing venv self heals and repair runs without one](00456-missing-venv-self-heals-and-repair-runs-without-one/PLAN.md) - In Progress (the rest of #53: `repair` gated behind the venv it repairs, the documented self-heal never wired (Plan 00100 Decision 9, built as a background build since hooks time out at 60s), and the skill's own `--force` deleting other environments' venvs)
-
 - [00453: supervisor modal overlay](00453-supervisor-modal-overlay/PLAN.md) - Not Started (the status-line banner from Plan 00173/00318 is a one-line TTL notification and structurally cannot hold history; this adds a hotkey-summoned inspection surface costing no model turn, no transcript entry and no status-line space — gated on the owner choosing a hotkey, F12 and F3 already rejected)
 
 - [00452: prompt cache observability and invalidation protection](00452-prompt-cache-observability-and-invalidation-protection/PLAN.md) - Blocked on owner input (status segment shipped as main, sub and token-weighted total; what remains needs `/usage` run in-session and a gap profile from a human-paced project, Task 2.4)
@@ -173,6 +171,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00456: missing venv self heals and repair runs without one](Completed/00456-missing-venv-self-heals-and-repair-runs-without-one/PLAN.md) - Complete at `9e2f74cd` + the archiving commit (the rest of #53: a hook with no venv starts one detached, locked build; `repair` runs without a venv; the skill never auto-forces and a `--force` keeps other environments' venvs; carries Plan 00100 Phase 3.5)
+
 - [00459: encrypted vault files are tracked not hidden](Completed/00459-encrypted-vault-files-are-tracked-not-hidden/PLAN.md) - Complete at `2a6a9b84` + the archiving commit (owner report: secret-file globs select by NAME, so Ansible Vault ciphertext was told to be untracked; a whole-file content check at each use, failing closed, now separates it from the plaintext password file)
 
 - [00458: skip lists match path segments relative to the project](Completed/00458-skip-lists-match-path-segments-relative-to-the-project/PLAN.md) - Complete at `b8ce4b49`…`47999859` + the archiving commit (from 00422 N20: six guards matched skip lists as a bare substring, so a worktree named `…-venv` switched them off; they now match project-relative segments, and a QA detector keeps the class out)
@@ -231,8 +231,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00418: orchestrator only mode greenfield](Completed/00418-orchestrator-only-mode-greenfield/PLAN.md) - Complete at `0f03ef83`…`8011858b` + the archiving commit (restrict the MAIN THREAD to coordination tools; built once and deleted because hooks could not tell which agent fired an event, and `agent_id` now can. Greenfield by ruling, project-level handler, simulate-only before ever blocking. From issue #14)
 
-- [00417: supervisor operator signals](Completed/00417-supervisor-operator-signals/PLAN.md) - Complete at `5237f62a`…`3edc1ba4` + the archiving commit (a closed channel letting a host warn every session that the machine reboots in N minutes; fixed kinds, integer payload, no free text, because a channel from outside the container is a prompt-injection surface by default. From issue #39)
-
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
 ## Blocked / On Hold Plans
@@ -286,15 +284,15 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 463 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 398 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 399 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 42 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 41 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
 - **Cancelled/Abandoned**: 13 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00108 superseded by 00117, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213, 00135 superseded by the supervisor workstream)
 
-- **Folder-to-number reconciliation**: 42 + 398 + 13 = **453 folders**, spanning
+- **Folder-to-number reconciliation**: 41 + 399 + 13 = **453 folders**, spanning
   **450 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
