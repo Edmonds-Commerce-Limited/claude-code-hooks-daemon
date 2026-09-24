@@ -69,18 +69,22 @@ keeping the defect.
   path against a directory list in handlers, strategies, core and utils.
   List each with the direction in which it fails. See JOURNAL 11:22 and
   the subagent report for the full table.
-- [ ] ⬜ **Task 1.2**: Detector first. Add a QA check (or a semgrep rule, if
+- [x] ✅ **Task 1.2**: Detector first. Add a QA check (or a semgrep rule, if
   the project routes this class that way) that flags a substring
   membership test between a path variable and a skip/exclude/directory
   list. Show that it fires on the current tree, RED.
-- [ ] ⬜ **Task 1.3**: Move the shared matcher to a neutral home (not
+  `scripts/qa/check_skip_list_substring.py`; RED on exactly the six sites
+  (`d693e13c`).
+- [x] ✅ **Task 1.3**: Move the shared matcher to a neutral home (not
   `strategies/lint/`), make it match on the path relative to the project
   root, and put every site on it. Tests per site: `myvenv/`, `rebuild/`
   and `worktree-x-venv/` are NOT skipped; `venv/` and `vendor/` directly
   under the project ARE skipped; a project that lives under a directory
   named `venv` is still guarded. Where the handler has an acceptance
   probe, reproduce the original worktree case.
-- [ ] ⬜ **Task 1.4**: Record the instance in
+  `utils/path_segments.py::matches_path_segment` (`25c4573e`); all six
+  sites moved (`ebb31e61`); detector green.
+- [x] ✅ **Task 1.4**: Record the instance in
   `CLAUDE/Security/AsymmetricSiblingProtection.md` (or the matching
   class doc), naming the detector as the defence. Release note. Full QA
   green.
