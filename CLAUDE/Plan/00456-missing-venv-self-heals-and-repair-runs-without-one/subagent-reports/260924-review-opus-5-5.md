@@ -606,3 +606,150 @@ group.
 - **`setsid` plus `timeout`:** `setsid` execs `timeout`, which runs the
   build in its own process group. The heartbeat and uv are both in that
   group, so the KILL grace ends every one of them.
+
+---
+
+## Addendum 2: final pass on the N1-N6 fixes (`c9a55fa0`, with the report in `cb95eaea` and `25715f99`)
+
+Reviewer: Opus 5.5, read-only, with probes in tmp dirs only.
+
+**HEAD moved during this pass.** Merge `17024e79` brought `main` in,
+including Plan 00458. I checked that the merge changed none of the 00456
+files:
+
+- init.sh
+- the wrapper and its template
+- `scripts/venv_bootstrap.sh` and `scripts/install/venv.sh`
+- the skill's `install.sh` and its template
+- `cli.py` and `paths.py`
+
+I reviewed `c9a55fa0`, and ran the tests and probes at `17024e79`. The four
+changed integration test files pass: 84 passed in 100s.
+
+A side effect of that merge: the I5 path probe (`probe_path_ab.py`) now
+returns True both for this worktree and for `/tmp/myvenv`. Plan 00458 fixed
+the substring skip, so the 14 acceptance probes should now pass from this
+worktree too.
+
+**Verdict: APPROVE.** N1 to N6 are fixed. One new non-blocking finding (N7)
+and two residual notes (N8, N9) are below, and each is to be filed.
+
+### The probes re-run at HEAD
+
+| Probe | Result at HEAD |
+| ----- | -------------- |
+| `review456_stranded_order_probe.py` (N1) | The NEWER self-healed venv survives. The stranded dir, created only seconds earlier, is left alone as possibly live, because it is within 2 heartbeats. A later run adopts it, and its copy gives way to the newer one. Fixed. |
+| `review456_term_probe.py` (N2) | A TERM 1s into the build records no failure. The next hook reports `started` (a retry), and the log has no false "timed out". Fixed. |
+| `review456_macos_like_probe.py` (N3) | With no `timeout`, `setsid` or `flock`, the build starts, finishes and resolves, and the lock dir is released. The "unbounded" warning is gone. |
+| new `review456_macos_bound_probe.py` (N3) | The same tool set, with a 30s uv under a 2s bound: the lock is released after 2.2s, the state is `failed`, the log says "timed out", and there is no job-control noise ("Terminated", "Killed", "Stopped") in the log. The bound now holds without a `timeout` binary. |
+| `review456_ci_probe.py`, `review456_uv_home_probe.py` (B1, B2) | Still fixed. |
+
+### N3's process control: what I hunted for, and what I found
+
+- **Does the build get its own process group?** Yes, under both `setsid`
+  and `nohup`. `set -m` gives each `&` job its own pgid, whatever group the
+  child itself is in. I confirmed empirically that the parent's TERM trap
+  and EXIT trap are not active in the job. A group TERM kills the job with
+  status 143, and the job never runs the parent's EXIT trap, so the lock is
+  never released twice.
+- **SIGTTOU, SIGTTIN, and job-control messages.** The child's stdin is
+  `/dev/null`, and its stdout and stderr go to the log. So bash's job
+  control has no terminal to touch, even when `nohup` leaves the child in a
+  session that has a terminal. The bound probe found no job-control notices
+  in the log.
+- **Does the watchdog outlive a normal build?** No. After a normal build,
+  no process carrying the daemon dir in its argv is left (checked through
+  `/proc`). The EXIT trap TERMs the watchdog's whole group, which takes its
+  `sleep` with it.
+- **The build finishing just as the watchdog fires.** Benign.
+  - Until the parent's `wait` reaps the job, a signal to its pgid hits a
+    zombie and does nothing.
+  - The parent's EXIT trap kills the watchdog before anything else.
+  - If the job ignores TERM, the watchdog's KILL after the grace period
+    releases the parent's `wait`, so a stop is bounded too.
+  - In `_vb_judge_stop`, elapsed is always at least the bound when the
+    watchdog is what fired, because both are computed from the same
+    `started` value, in whole seconds.
+
+### N4's owner file across host and container: holds
+
+A live owner on another host is never read as dead. The only ways it can be
+adopted are:
+
+- its owner file is gone, meaning it was released; or
+- it has been silent for the lock's full stale age (600s), which its
+  60-second heartbeat prevents.
+
+For the same hostname with a different pid namespace, adoption additionally
+requires two missed heartbeats (120s), and `kill -0` must fail with ESRCH.
+An EPERM result, or a reused pid that is alive, counts as live, so both
+fail safe. The residual edge cases are N8 and N9.
+
+### N7. A watchdog outlives a KILLed build child and later signals a pgid that may have been reused (confidence 90%, non-blocking)
+
+**Location:** `scripts/venv_bootstrap.sh`, `_vb_watchdog`.
+
+**Problem:** The watchdog never checks whether its owner, the build child,
+is still alive. Suppose the child is sent KILL: a `kill -9` of the pid that
+the `running` message names, or the OOM killer. Then no EXIT trap runs,
+and three things follow:
+
+- the build job keeps running as an orphan in its own group;
+- the watchdog keeps sleeping until the bound;
+- the watchdog then sends TERM, and 30s later KILL, to the job's pgid.
+
+With the default bound that is up to 930s after the pgid was freed. Linux
+and macOS both reuse pids (macOS caps them near 99,999). So, rarely, this
+could TERM and then KILL an unrelated process group belonging to the same
+user.
+
+**Evidence** (`review456_watchdog_orphan_probe.py`, bound 6s, uv 2s, the
+child sent KILL at 0.7s): the build job finishes, and the venv resolves.
+The watchdog, pgid 3013564, is still alive at 4s and at 8s, and at the
+bound it signals the finished job's pgid 3013563: the log contains "reached
+its ... bound".
+
+**Fix:** Give the watchdog the heartbeat's owner check. Pass it the
+child's `$$`, sleep in slices (for example, the heartbeat interval), and
+exit as soon as `kill -0 <owner>` fails. Also check `kill -0 -<pgid>`
+before each signal.
+
+Test: send KILL to the child, and assert the watchdog is gone within one
+slice. That is `build_procs()` in the probe returning `[]`.
+
+### N8. Two runs can race to create and adopt an aside dir (confidence 60%, suggestion)
+
+**Location:** the skill's `install.sh`: `_keep_venvs_aside` runs `mktemp -d`,
+then writes `.gitignore`, then calls `_claim_aside`; and
+`_aside_is_stranded`'s `[ -f owner ] || return 0`.
+
+**Problem:** For a brief moment after `mktemp -d`, the new dir has no owner
+file, and a dir without an owner file reads as "released". A second run
+starting in that window adopts it, and the creator then moves its venvs in.
+The second run restores those venvs when it exits, which could be while the
+creator's installer is about to `rm -rf` the daemon dir. The window is a few
+microseconds wide, but the loss would be exactly the one this plan exists
+to prevent.
+
+**Fix:** Write the owner file before the dir becomes visible under the
+prefix. For example, `mktemp -d` under a non-matching name, claim it, then
+`mv` it to the prefix name. Or treat a dir without an owner file that is
+younger than one heartbeat as live.
+
+### N9. Adoption and lock staleness both trust mtime across a VM boundary (confidence 50%, residual note)
+
+**Problem:** On Docker Desktop, the host and container clocks can drift
+apart, for example after the host sleeps. If the reader's clock runs more
+than 600s ahead of the writer's, a live aside dir, or a live mkdir lock,
+reads as stale. This is the same design choice the venv build lock already
+made, and it is documented there.
+
+**What to do:** Record it where the staleness rule is explained
+(`SELF_INSTALL.md`), and consider having the heartbeat write the writer's
+epoch into the owner file, so readers can compare clocks rather than trust
+mtime.
+
+### New probes (kept in the worktree's `untracked/scratch/`)
+
+- `review456_macos_bound_probe.py`: shows the bound holds without `timeout`, `setsid` or `flock`.
+- `review456_watchdog_orphan_probe.py`: N7.
