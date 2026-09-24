@@ -65,6 +65,12 @@ _SURFACE_REF_NAME: Final[str] = "ref-name"
 _SURFACE_TAG_MESSAGE: Final[str] = "tag-message"
 # Not a git surface: a finding about the CHECKER's own configuration.
 _SURFACE_CONFIG: Final[str] = "config"
+# Not a git surface either: git itself (or the config it reads) failed to
+# let this check run at all -- reported as a violation so the failure counts
+# and carries detail, rather than a silently clean sweep of nothing.
+_SURFACE_SCAN_ERROR: Final[str] = "scan-error"
+_SCAN_ERROR_RULE: Final[str] = "git-scan-failed"
+_CONFIG_ERROR_RULE: Final[str] = "config-unparseable"
 
 _PATTERN_KEY_NAME: Final[str] = "name"
 _PATTERN_KEY_PATTERN: Final[str] = "pattern"
@@ -113,27 +119,86 @@ class Violation:
         }
 
 
-def _git(repo: Path, *args: str) -> str | None:
-    """Run a git command in ``repo``; ``None`` when git itself refuses.
+class GitScanError(RuntimeError):
+    """git failed on the repository actually being swept.
 
-    A non-zero status here means "not a repo", "no such ref", "no refs yet" —
-    all legitimately empty rather than errors, and each is reported by the
-    CALLER as an absence of data, never as a clean result.
+    Distinct from "this path is not a git repository", which is a legitimate
+    absence of anything to sweep. A repository that IS a repository but whose
+    git commands fail — dubious ownership, a corrupt object, a permission
+    error — must never be read as "nothing to sweep, clean": that reading is
+    exactly how a git malfunction became an unnoticed clean bill.
+    """
+
+
+_NOT_A_REPO_MARKER: Final[str] = "not a git repository"
+
+
+def _run_git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    """Run a git command in ``repo`` and return the raw result.
+
+    Never raises. Callers decide what a non-zero exit means for their own
+    surface: ``is_git_repo`` reads "not a git repository" out of stderr to
+    treat a genuinely absent repo as an absence; ``grandfathered_commits``
+    treats ANY failure of an unresolvable baseline ref as fail-safe (exempts
+    nothing, by design — see its own docstring). Every caller that queries
+    the repository actually being SWEPT raises :class:`GitScanError` on any
+    other failure, so a git malfunction is reported as the hard failure it
+    is, never silently read as "zero matches, so passed".
     """
     # SECURITY: list-form subprocess, no shell=True, trusted system tool (git).
-    result = subprocess.run(
+    return subprocess.run(
         ["git", "-C", str(repo), *args],
         capture_output=True,
         text=True,
         check=False,
     )
+
+
+def _git(repo: Path, *args: str) -> str | None:
+    """Run a git command in ``repo``; ``None`` when git itself refuses.
+
+    Used ONLY by :func:`grandfathered_commits`, whose own docstring commits
+    to failing safe (an unresolvable baseline exempts NOTHING) rather than
+    failing the whole gate — a typo'd baseline ref is a config mistake to
+    report elsewhere, not proof the repository's history is unscannable.
+    """
+    result = _run_git(repo, *args)
     if result.returncode != 0:
         return None
     return result.stdout
 
 
 def is_git_repo(repo: Path) -> bool:
-    return repo.is_dir() and _git(repo, "rev-parse", "--git-dir") is not None
+    """True when ``repo`` is a real git repository.
+
+    Raises:
+        GitScanError: when git itself failed for a reason OTHER than "not a
+            git repository" — dubious ownership, a corrupt object, a
+            permission error. Reading that as "not a repo" would silently
+            turn a git malfunction into a clean sweep of nothing.
+    """
+    if not repo.is_dir():
+        return False
+    result = _run_git(repo, "rev-parse", "--git-dir")
+    if result.returncode == 0:
+        return True
+    if _NOT_A_REPO_MARKER in result.stderr.lower():
+        return False
+    raise GitScanError(
+        f"git rev-parse --git-dir failed for {repo} (exit {result.returncode}): "
+        f"{result.stderr.strip()}"
+    )
+
+
+class ConfigError(RuntimeError):
+    """The QA config file exists but could not be parsed as YAML.
+
+    Distinct from a MISSING config file, which legitimately means "nothing
+    configured" and stays inert. A file that fails to parse is different:
+    whatever it was meant to configure — public patterns, the secret-word-
+    list path, grandfather lists — silently becomes empty, so the checker
+    would otherwise report a clean sweep after tacitly checking nothing.
+    """
 
 
 def _load_config(config_path: Path) -> dict[str, Any]:
@@ -141,8 +206,8 @@ def _load_config(config_path: Path) -> dict[str, Any]:
         return {}
     try:
         loaded = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    except yaml.YAMLError:
-        return {}
+    except yaml.YAMLError as exc:
+        raise ConfigError(f"{config_path} is not valid YAML: {exc}") from exc
     return loaded if isinstance(loaded, dict) else {}
 
 
@@ -360,20 +425,51 @@ def _findings(
     return violations
 
 
+def _total_commit_count(repo: Path) -> int:
+    """The TRUE number of commits in ``repo``, ignoring baseline exemption.
+
+    ``sweep``'s own ``commits_scanned`` counts commits actually CHECKED,
+    which is legitimately zero when every commit is grandfathered by the
+    baseline (``TestHistoryBaseline.test_contamination_at_or_before_the_
+    baseline_is_exempt``). This counts every commit that exists regardless
+    of exemption, so "the sweep scanned nothing because git failed or the
+    repo truly has no history" has a signal exemption cannot zero out.
+
+    Raises:
+        GitScanError: ``git rev-list`` failed on this (already-confirmed)
+            repo.
+    """
+    result = _run_git(repo, "rev-list", "--all", "--count")
+    if result.returncode != 0:
+        raise GitScanError(
+            f"git rev-list --all --count failed for {repo} (exit {result.returncode}): "
+            f"{result.stderr.strip()}"
+        )
+    return int(result.stdout.strip() or "0")
+
+
 def _commit_records(repo: Path, exempt: set[str]) -> list[tuple[str, str, str]]:
     """``(sha, message, identity)`` for every commit not grandfathered.
 
     ``--all`` rather than HEAD: a term on an unmerged branch is published the
     moment that branch is pushed.
+
+    Raises:
+        GitScanError: ``git log`` failed on this (already-confirmed) repo —
+            never read as "zero commits, clean".
     """
-    raw = _git(
+    result = _run_git(
         repo,
         "log",
         "--all",
         f"--format=%H{_UNIT_SEPARATOR}%B{_UNIT_SEPARATOR}%an %ae %cn %ce{_RECORD_SEPARATOR}",
     )
-    if raw is None:
-        return []
+    if result.returncode != 0:
+        raise GitScanError(
+            f"git log --all failed for {repo} (exit {result.returncode}): "
+            f"{result.stderr.strip()}"
+        )
+    raw = result.stdout
 
     records: list[tuple[str, str, str]] = []
     for chunk in raw.split(_RECORD_SEPARATOR):
@@ -407,8 +503,12 @@ def _ref_records(repo: Path) -> list[tuple[str, str]]:
     surface AND launders it past the baseline exemption, since a ref is never
     grandfathered. Only ``%(objecttype) == "tag"`` (an annotated tag) has a
     message of its own; everything else is already covered by the commit sweep.
+
+    Raises:
+        GitScanError: ``git for-each-ref`` failed on this (already-confirmed)
+            repo — never read as "zero refs, clean".
     """
-    raw = _git(
+    result = _run_git(
         repo,
         "for-each-ref",
         "--format=%(refname:short)"
@@ -421,8 +521,12 @@ def _ref_records(repo: Path) -> list[tuple[str, str]]:
         "refs/tags",
         "refs/remotes",
     )
-    if raw is None:
-        return []
+    if result.returncode != 0:
+        raise GitScanError(
+            f"git for-each-ref failed for {repo} (exit {result.returncode}): "
+            f"{result.stderr.strip()}"
+        )
+    raw = result.stdout
 
     records: list[tuple[str, str]] = []
     for chunk in raw.split(_RECORD_SEPARATOR):
@@ -515,22 +619,76 @@ def main() -> int:
     violations: list[Violation] = []
     commits_scanned = 0
     refs_scanned = 0
-    repo_present = is_git_repo(repo)
 
-    if repo_present:
-        compiled_patterns, invalid_patterns = _compile_public_patterns(
-            _public_patterns(config_path)
+    try:
+        repo_present = is_git_repo(repo)
+    except GitScanError as exc:
+        repo_present = False
+        violations.append(
+            Violation(
+                surface=_SURFACE_SCAN_ERROR,
+                locator=str(repo),
+                rule=_SCAN_ERROR_RULE,
+                message=str(exc),
+            )
         )
-        secret_terms = resolve_secret_terms(config_path, repo)
-        violations, commits_scanned, refs_scanned = sweep(
-            repo,
-            compiled_patterns,
-            secret_terms,
-            resolve_term_matcher(),
-            grandfathered_commits(repo, config_path),
-            grandfathered_refs(config_path),
-        )
-        violations = invalid_patterns + violations
+
+    if repo_present and not violations:
+        try:
+            compiled_patterns, invalid_patterns = _compile_public_patterns(
+                _public_patterns(config_path)
+            )
+            secret_terms = resolve_secret_terms(config_path, repo)
+            total_commits = _total_commit_count(repo)
+            sweep_violations, commits_scanned, refs_scanned = sweep(
+                repo,
+                compiled_patterns,
+                secret_terms,
+                resolve_term_matcher(),
+                grandfathered_commits(repo, config_path),
+                grandfathered_refs(config_path),
+            )
+        except GitScanError as exc:
+            violations.append(
+                Violation(
+                    surface=_SURFACE_SCAN_ERROR,
+                    locator=str(repo),
+                    rule=_SCAN_ERROR_RULE,
+                    message=str(exc),
+                )
+            )
+        except ConfigError as exc:
+            violations.append(
+                Violation(
+                    surface=_SURFACE_CONFIG,
+                    locator=str(config_path),
+                    rule=_CONFIG_ERROR_RULE,
+                    message=str(exc),
+                )
+            )
+        else:
+            violations = invalid_patterns + sweep_violations
+            # git succeeding with ZERO total commits is indistinguishable from
+            # a query that silently failed, and every self-scan of a real
+            # repo has at least one commit. Checked against the UNFILTERED
+            # total, not `commits_scanned` — which is legitimately zero when
+            # every commit is grandfathered by the baseline, and that must
+            # stay a pass.
+            if total_commits == 0:
+                violations.append(
+                    Violation(
+                        surface=_SURFACE_SCAN_ERROR,
+                        locator=str(repo),
+                        rule=_SCAN_ERROR_RULE,
+                        message=(
+                            f"git rev-list --all --count reported zero commits for "
+                            f"{repo} — either the repository genuinely has no history "
+                            "yet, or the query silently failed. A sweep that scanned "
+                            "no commits cannot vouch for the history, so this is "
+                            "reported as a failure rather than a clean result."
+                        ),
+                    )
+                )
 
     output = {
         "tool": _TOOL_NAME,

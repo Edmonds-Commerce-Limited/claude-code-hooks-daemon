@@ -222,6 +222,53 @@ class TestJsonOutput:
         assert data["violations"] == []
 
 
+class TestScansWhatItClaims:
+    """00466 N21: a sweep must look at files, and must say how many it looked at."""
+
+    def _run(self, scan_dir: Path, output_json: Path) -> tuple[int, dict]:
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(AUDIT_SHELL_SCRIPT),
+                "--json",
+                "--scan-dir",
+                str(scan_dir),
+                "--output",
+                str(output_json),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        return result.returncode, json.loads(output_json.read_text())
+
+    def test_a_scan_root_below_an_excluded_name_is_still_audited(self, tmp_path: Path) -> None:
+        """A linked worktree lives under untracked/worktrees/<name>, and "untracked"
+        is an excluded directory name. Matching the root's own ancestors against
+        it dropped every script: a worktree audit of nothing, reported clean."""
+        scripts_dir = tmp_path / "untracked" / "worktrees" / "checkout" / "scripts"
+        scripts_dir.mkdir(parents=True)
+        (scripts_dir / "violator.sh").write_text(
+            "#!/bin/bash\nchmod +x target 2>/dev/null || true\n"
+        )
+
+        code, data = self._run(scripts_dir, tmp_path / "shell_audit.json")
+
+        assert code == 1
+        assert data["summary"]["files_scanned"] == 1
+        assert data["summary"]["total_violations"] == 1
+
+    def test_a_scan_of_no_scripts_fails(self, tmp_path: Path) -> None:
+        scripts_dir = tmp_path / "scripts"
+        scripts_dir.mkdir()
+
+        code, data = self._run(scripts_dir, tmp_path / "shell_audit.json")
+
+        assert code == 1
+        assert data["summary"]["passed"] is False
+        assert data["summary"]["files_scanned"] == 0
+        assert any(v["rule"] == "nothing-scanned" for v in data["violations"])
+
+
 class TestRealRepoScan:
     """Self-scan: once markers are added, the repo's own scripts must pass.
 

@@ -785,12 +785,6 @@
       "reason": "Plan 00200 Task 5.4: Path.relative_to() raising ValueError when a path is outside the repo root falls back to using the path as-is for prefix matching -- the same relative-path-fallback shape as plan_qa/paths.py::_outside above."
     },
     {
-      "file": "scripts/qa/check_skill_references.py",
-      "function": "scan_directory",
-      "rule": "silent-continue",
-      "reason": "Plan 00200 Task 5.4: batch scanner over many files; an individual file's OSError (broken symlink, permission error) must not abort the whole scan. Documented inline: 'Skip unreadable files (broken symlinks, permission errors)'."
-    },
-    {
       "file": "scripts/qa/measure_instruction_footprint.py",
       "function": "_load_all_handler_instances",
       "rule": "log-and-continue",
@@ -929,12 +923,6 @@
       "function": "resolve_secret_word_list_file",
       "rule": "return-none-on-error",
       "reason": "Plan 00200 Task 5.4: ImportError when the daemon package isn't importable in whatever interpreter ran this QA script -- documented inline as matching audit_error_hiding.py's own precedent of importing the daemon package from a QA script (see this file's docstrings, and this exclusions file's daemon/cli.py::cmd_start entry for the general shape)."
-    },
-    {
-      "file": "scripts/qa/check_sensitive_content.py",
-      "function": "_compile_public_patterns",
-      "rule": "silent-continue",
-      "reason": "Plan 00200 Task 5.4: re.error compiling one client-configured public_pattern while building a list of several -- skips the invalid entry and continues with the rest. Same shape as handlers/pre_tool_use/sensitive_content.py::_compiled_public_pattern above."
     },
     {
       "file": "daemon/controller.py",

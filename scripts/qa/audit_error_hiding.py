@@ -52,6 +52,10 @@ VIOLATION_TYPES = {
         "Exception handler assigns a fallback value with no logging or "
         "re-raise - failure becomes indistinguishable from success"
     ),
+    "unauditable-file": (
+        "The file could not be opened or decoded, so it was never checked "
+        "for error-hiding patterns - reported rather than silently skipped"
+    ),
 }
 
 # Directories audited recursively for BOTH Python (*.py) and shell (*.sh,
@@ -264,9 +268,23 @@ def audit_file(filepath: Path) -> list[dict[str, Any]]:
     except SyntaxError:
         # Skip files with syntax errors
         return []
-    except Exception as e:
-        print(f"Error auditing {filepath}: {e}", file=sys.stderr)
-        return []
+    except (OSError, UnicodeDecodeError) as exc:
+        # The file could not be opened or decoded at all — reported as a
+        # finding rather than silently contributing zero violations, which
+        # was indistinguishable from "this file is clean". A bare
+        # `except Exception: print(...); return []` here used to be the
+        # exact shape this auditor exists to catch, committed by the
+        # auditor itself.
+        return [
+            {
+                "file": str(filepath),
+                "line": 0,
+                "function": None,
+                "rule": "unauditable-file",
+                "message": f"Could not read {filepath} for error-hiding audit: {exc}",
+                "description": VIOLATION_TYPES["unauditable-file"],
+            }
+        ]
 
 
 def audit_directory(

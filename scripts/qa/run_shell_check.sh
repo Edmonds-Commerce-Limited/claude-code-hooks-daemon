@@ -11,7 +11,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-OUTPUT_FILE="${PROJECT_ROOT}/untracked/qa/shell_check.json"
+OUTPUT_FILE="${QA_SHELL_CHECK_OUTPUT_DIR:-${PROJECT_ROOT}/untracked/qa}/shell_check.json"
 
 mkdir -p "$(dirname "${OUTPUT_FILE}")"
 
@@ -42,10 +42,20 @@ fi
 # Collect all shell scripts under scripts/ and src/.
 # Plan 00122 BUG 6: use a while-read loop instead of `mapfile` (bash 4+ only)
 # so this script — like the rest of the repo — runs under macOS /bin/bash 3.2.
+#
+# The QA_SHELL_CHECK_* overrides (TARGETS here, OUTPUT_DIR at the top) exist
+# so tests/unit/qa/test_run_shell_check.py can drive this exact wrapper against
+# a planted fixture without touching the real tree or the real untracked/qa/
+# output. Unset, they change nothing.
+SCAN_ROOTS=("${PROJECT_ROOT}/scripts" "${PROJECT_ROOT}/src")
+if [ -n "${QA_SHELL_CHECK_TARGETS:-}" ]; then
+    SCAN_ROOTS=("${QA_SHELL_CHECK_TARGETS}")
+fi
+
 SHELL_SCRIPTS=()
 while IFS= read -r _shell_script; do
     SHELL_SCRIPTS+=("${_shell_script}")
-done < <(find "${PROJECT_ROOT}/scripts" "${PROJECT_ROOT}/src" -name "*.sh" -o -name "*.bash" | sort)
+done < <(find "${SCAN_ROOTS[@]}" -name "*.sh" -o -name "*.bash" | sort)
 
 FILE_COUNT="${#SHELL_SCRIPTS[@]}"
 echo "Found ${FILE_COUNT} shell scripts"
@@ -117,13 +127,22 @@ for item in sc_output:
     })
 
 all_files = [f for f in Path("${OUTPUT_FILE}.files").read_text().strip().splitlines() if f]
+# 00466 N21: SC1091 ("Not following: <file> does not exist") is reported at
+# level "info", not "error"/"warning" -- shellcheck could not open or follow
+# a sourced file, meaning it never checked it, and only error/warning failed
+# the gate. That let an unresolvable source pass silently. SC1091 fails the
+# gate whatever severity shellcheck gave it.
+sc1091_hits = [i for i in issues if i["rule"] == "SC1091"]
 summary = {
     "total_files_checked": len(all_files),
     "total_issues": len(issues),
     "errors": sum(1 for i in issues if i["severity"] == "error"),
     "warnings": sum(1 for i in issues if i["severity"] == "warning"),
     "info": sum(1 for i in issues if i["severity"] == "info"),
-    "passed": sum(1 for i in issues if i["severity"] in ("error", "warning")) == 0,
+    "passed": (
+        sum(1 for i in issues if i["severity"] in ("error", "warning")) == 0
+        and not sc1091_hits
+    ),
 }
 
 json.dump({"tool": "shellcheck", "summary": summary, "issues": issues,

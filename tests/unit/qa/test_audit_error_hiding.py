@@ -564,6 +564,35 @@ class TestAnAuditThatCollectedNothingFailsLoudly:
         assert run_audit(tmp_path, json_mode=False) == 0
 
 
+class TestAuditFileFailsVisiblyRatherThanSwallowingReadErrors:
+    """``audit_file``'s broad ``except Exception: print(...); return []`` made
+    a file the auditor could not open or decode indistinguishable from a
+    clean file — zero violations either way. Fixed to report the failure as
+    a finding rather than silently contributing nothing.
+    """
+
+    def test_a_missing_file_is_reported_not_silently_skipped(self, tmp_path: Path) -> None:
+        missing = tmp_path / "does_not_exist.py"
+        violations = audit_file(missing)
+        assert violations != []
+        assert any(v["rule"] == "unauditable-file" for v in violations)
+
+    def test_an_undecodable_file_is_reported_not_silently_skipped(self, tmp_path: Path) -> None:
+        bad = tmp_path / "bad.py"
+        bad.write_bytes(b"\xff\xfe\x00\x01")
+        violations = audit_file(bad)
+        assert violations != []
+        assert any(v["rule"] == "unauditable-file" for v in violations)
+
+    def test_an_unreadable_file_is_still_counted_in_the_json_contract(self, tmp_path: Path) -> None:
+        """The failure must fail run_audit()'s JSON verdict too, with detail."""
+        (tmp_path / "scripts").mkdir()
+        bad = tmp_path / "scripts" / "bad.py"
+        bad.write_bytes(b"\xff\xfe\x00\x01")
+
+        assert run_audit(tmp_path, json_mode=False) != 0
+
+
 class TestTheTextReportSurvivesAStaleExclusion:
     """A stale-exclusion finding carries no ``description`` key.
 

@@ -290,10 +290,16 @@ def _scan_markdown(filepath: Path) -> list[_Violation]:
 # ── File discovery ────────────────────────────────────────────────
 
 
-def _should_exclude(path: Path, include_filter: str | None = None) -> bool:
-    """Check if a file should be excluded from scanning."""
+def _should_exclude(path: Path, root: Path, include_filter: str | None = None) -> bool:
+    """Check if a file should be excluded from scanning.
+
+    Directory names are judged BELOW ``root`` only (00466 N21): a linked
+    worktree lives at ``untracked/worktrees/<name>``, and matching the root's
+    own ancestors against ``untracked`` excluded every file in it.
+    """
+    below_root = path.relative_to(root).parts
     # Exclude by directory
-    for part in path.parts:
+    for part in below_root:
         if part in _EXCLUDED_DIRS:
             return True
 
@@ -306,7 +312,7 @@ def _should_exclude(path: Path, include_filter: str | None = None) -> bool:
         return True
 
     # Exclude self-referencing directories (skills, agents, install docs)
-    for part in path.parts:
+    for part in below_root:
         if part in _EXCLUDED_SELF_REFERENCING_DIRS:
             return True
 
@@ -325,12 +331,15 @@ _SCANNERS = {
 }
 
 
+def _is_project_root(directory: Path) -> bool:
+    return (directory / "pyproject.toml").exists() and (directory / "src").exists()
+
+
 def _collect_files(directory: Path, include_filter: str | None = None) -> list[Path]:
     """Collect scannable files, using _SCAN_DIRS when at project root."""
     files: list[Path] = []
-    is_project_root = (directory / "pyproject.toml").exists() and (directory / "src").exists()
 
-    if is_project_root:
+    if _is_project_root(directory):
         # At project root: scan focused directories + root-level files
         for scan_entry in _SCAN_DIRS:
             target = directory / scan_entry
@@ -350,7 +359,9 @@ def _collect_files(directory: Path, include_filter: str | None = None) -> list[P
     return [
         f
         for f in files
-        if not _should_exclude(f, include_filter) and not f.is_symlink() and f.suffix in _SCANNERS
+        if not _should_exclude(f, directory, include_filter)
+        and not f.is_symlink()
+        and f.suffix in _SCANNERS
     ]
 
 
@@ -372,10 +383,19 @@ def scan_directory(
         scanner = _SCANNERS[filepath.suffix]
         try:
             violations.extend(scanner(filepath))
-        except OSError:
-            # Skip unreadable files (broken symlinks, permission errors)
-            continue
-        files_scanned += 1
+        except OSError as exc:
+            # One unreadable file must not abort the sweep, and must not read
+            # as a clean one either (00466 N21): it is a finding of its own.
+            violations.append(
+                _Violation(
+                    str(filepath),
+                    0,
+                    "unreadable-file",
+                    f"could not be read, so it was never checked: {exc}",
+                )
+            )
+        else:
+            files_scanned += 1
 
     violations.sort(key=lambda v: (v.file, v.line))
     return violations, files_scanned
@@ -405,6 +425,18 @@ def main() -> int:
             i += 1
 
     violations, files_scanned = scan_directory(scan_path, include_filter)
+    # A whole-project sweep that found nothing to read is no evidence of a
+    # clean project (00466 N21). A scoped or filtered run may legitimately
+    # match nothing, so only the project sweep is held to this.
+    if files_scanned == 0 and include_filter is None and _is_project_root(scan_path):
+        violations.append(
+            _Violation(
+                str(scan_path),
+                0,
+                "nothing-scanned",
+                "no file in the project was a candidate, so nothing was checked",
+            )
+        )
 
     output = {
         "tool": "skill_references",

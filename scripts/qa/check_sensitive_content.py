@@ -51,6 +51,8 @@ _SECRET_RULE: Final[str] = "secret-word-list"
 # A filename violation belongs to no line of the file; 0 is never a real
 # 1-based line number, so it reads unambiguously as "the name, not the body".
 _FILENAME_LINE: Final[int] = 0
+_CONFIG_RULE: Final[str] = "config"
+_UNREADABLE_RULE: Final[str] = "unreadable-file"
 
 _PATTERN_KEY_NAME: Final[str] = "name"
 _PATTERN_KEY_PATTERN: Final[str] = "pattern"
@@ -91,13 +93,24 @@ def _tracked_files(repo_root: Path) -> list[Path]:
     return [repo_root / name for name in result.stdout.split("\0") if name]
 
 
+class ConfigError(RuntimeError):
+    """The QA config file exists but could not be parsed as YAML.
+
+    Distinct from a MISSING config file, which legitimately means "nothing
+    configured" and stays inert. A file that fails to parse is different:
+    whatever it was meant to configure — public patterns, the secret-word-
+    list path, exclude globs — silently becomes empty, so the checker would
+    otherwise report a clean sweep after tacitly checking nothing.
+    """
+
+
 def _load_config(config_path: Path) -> dict[str, Any]:
     if not config_path.is_file():
         return {}
     try:
         loaded = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    except yaml.YAMLError:
-        return {}
+    except yaml.YAMLError as exc:
+        raise ConfigError(f"{config_path} is not valid YAML: {exc}") from exc
     return loaded if isinstance(loaded, dict) else {}
 
 
@@ -185,17 +198,37 @@ def filter_excluded_files(
 
 def _compile_public_patterns(
     patterns: list[dict[str, str]],
-) -> list[tuple[dict[str, str], re.Pattern[str]]]:
+    config_path: Path,
+) -> tuple[list[tuple[dict[str, str], re.Pattern[str]]], list[Violation]]:
+    """Compiled patterns, plus a violation for each one that would not compile.
+
+    Mirrors check_git_history.py's sibling function: an unparseable pattern
+    is REPORTED, never silently dropped. Silently skipping it would turn
+    this into a guard that passes because it stopped looking.
+    """
     compiled: list[tuple[dict[str, str], re.Pattern[str]]] = []
+    invalid: list[Violation] = []
     for entry in patterns:
         pattern = entry.get(_PATTERN_KEY_PATTERN, "")
+        name = entry.get(_PATTERN_KEY_NAME, "unnamed")
         if not pattern:
             continue
         try:
             compiled.append((entry, re.compile(pattern, re.IGNORECASE)))
-        except re.error:
-            continue
-    return compiled
+        except re.error as exc:
+            invalid.append(
+                Violation(
+                    file=str(config_path),
+                    line=_FILENAME_LINE,
+                    rule=f"{_PUBLIC_RULE_PREFIX}:{name}",
+                    message=(
+                        f"Public pattern '{name}' is not a valid regex ({exc}) — it "
+                        "checked NOTHING. Fix the pattern; a rule that cannot compile "
+                        "is a guard that silently stopped guarding."
+                    ),
+                )
+            )
+    return compiled, invalid
 
 
 def _never_matches(_text: str, _term: str) -> bool:
@@ -293,17 +326,14 @@ def scan_file(
     scan_root: Path,
     exempt_public: Callable[[str, str], bool] = _never_exempt,
 ) -> list[Violation]:
-    """Every violation in one file — public patterns, then the secret list.
+    """Every violation in one file — the name checks, then content (if readable).
 
     ``exempt_public`` stands the public patterns down for the BODY of a
     faithful vendored copy. The file name and the secret list are always
-    judged.
+    judged, REGARDLESS of whether the body could be read: an unreadable file
+    still ships with its tracked name, and a term sitting there is exactly
+    as published as one sitting in the body.
     """
-    try:
-        content = path.read_text(encoding="utf-8")
-    except (UnicodeDecodeError, OSError):
-        return []
-
     violations: list[Violation] = []
     active_terms = [term for term in secret_terms if term]
 
@@ -356,6 +386,19 @@ def scan_file(
                     ),
                 )
             )
+
+    try:
+        content = path.read_text(encoding="utf-8")
+    except (UnicodeDecodeError, OSError) as exc:
+        violations.append(
+            Violation(
+                file=str(path),
+                line=_FILENAME_LINE,
+                rule=_UNREADABLE_RULE,
+                message=f"Could not read file for content scan: {exc}",
+            )
+        )
+        return violations
 
     body_patterns = (
         [] if exempt_public(path.relative_to(scan_root).as_posix(), content) else compiled_patterns
@@ -421,43 +464,59 @@ def main() -> int:
         files = _tracked_files(repo_root)
         scan_root_for_terms = repo_root
 
-    public_patterns = load_public_patterns(config_path)
-    compiled_patterns = _compile_public_patterns(public_patterns)
-    secret_word_list_file = resolve_secret_word_list_file(config_path, scan_root_for_terms)
-    secret_terms = resolve_secret_terms(config_path, scan_root_for_terms)
-
-    # Two files are structurally never scan TARGETS, regardless of scan mode:
-    # the secret word list itself (gitignored, but --path mode walks the raw
-    # filesystem so it must be excluded explicitly too), and the config file
-    # that DECLARES the public patterns/secret path — which otherwise matches
-    # its own `pattern: '...'` lines against the very patterns it defines.
-    excluded = {config_path}
-    if secret_word_list_file is not None:
-        excluded.add(secret_word_list_file)
-    files = [f for f in files if f.resolve() not in excluded]
-
-    files = _without_protected_paths(files)
-
-    exclude_globs = load_exclude_paths(config_path)
-    files = filter_excluded_files(files, exclude_globs, scan_root_for_terms)
-
-    # Resolved once, not per file: the predicate is shared with the live
-    # handler so both surfaces agree on what counts as a match.
-    term_matcher = resolve_term_matcher()
-    exempt_public = resolve_public_pattern_exemption(config_path)
-
     violations: list[Violation] = []
-    for file_path in files:
-        violations.extend(
-            scan_file(
-                file_path,
-                compiled_patterns,
-                secret_terms,
-                term_matcher,
-                scan_root_for_terms,
-                exempt_public,
+    compiled_patterns: list[tuple[dict[str, str], re.Pattern[str]]] = []
+    secret_terms: tuple[str, ...] = ()
+
+    try:
+        public_patterns = load_public_patterns(config_path)
+        compiled_patterns, invalid_patterns = _compile_public_patterns(public_patterns, config_path)
+        secret_word_list_file = resolve_secret_word_list_file(config_path, scan_root_for_terms)
+        secret_terms = resolve_secret_terms(config_path, scan_root_for_terms)
+        exclude_globs = load_exclude_paths(config_path)
+        exempt_public = resolve_public_pattern_exemption(config_path)
+    except ConfigError as exc:
+        violations.append(
+            Violation(
+                file=str(config_path),
+                line=_FILENAME_LINE,
+                rule=_CONFIG_RULE,
+                message=str(exc),
             )
         )
+        files = []
+    else:
+        violations.extend(invalid_patterns)
+
+        # Two files are structurally never scan TARGETS, regardless of scan
+        # mode: the secret word list itself (gitignored, but --path mode
+        # walks the raw filesystem so it must be excluded explicitly too),
+        # and the config file that DECLARES the public patterns/secret path
+        # — which otherwise matches its own `pattern: '...'` lines against
+        # the very patterns it defines.
+        excluded = {config_path}
+        if secret_word_list_file is not None:
+            excluded.add(secret_word_list_file)
+        files = [f for f in files if f.resolve() not in excluded]
+
+        files = _without_protected_paths(files)
+        files = filter_excluded_files(files, exclude_globs, scan_root_for_terms)
+
+        # Resolved once, not per file: the predicate is shared with the live
+        # handler so both surfaces agree on what counts as a match.
+        term_matcher = resolve_term_matcher()
+
+        for file_path in files:
+            violations.extend(
+                scan_file(
+                    file_path,
+                    compiled_patterns,
+                    secret_terms,
+                    term_matcher,
+                    scan_root_for_terms,
+                    exempt_public,
+                )
+            )
 
     output = {
         "tool": "sensitive_content",

@@ -180,6 +180,35 @@ class TestMarkdownFiles:
         assert data["summary"]["passed"]
 
 
+class TestScansWhatItClaims:
+    """00466 N21: exclusions judge paths BELOW the scan root, and an empty
+    project sweep fails rather than reading as clean."""
+
+    def test_a_root_below_an_excluded_name_is_still_scanned(self, tmp_path: Path) -> None:
+        """A linked worktree lives under untracked/worktrees/<name>; "untracked"
+        is an excluded name, and matching the root's ancestors against it made
+        every worktree sweep scan nothing."""
+        root = tmp_path / "untracked" / "worktrees" / "checkout"
+        root.mkdir(parents=True)
+        (root / "bad.py").write_text('msg = "Run /hooks-daemon restart to fix"\n')
+
+        data = _run_checker("--path", str(root))
+
+        assert data["summary"]["files_scanned"] == 1
+        assert not data["summary"]["passed"]
+
+    def test_a_project_sweep_that_scans_nothing_fails(self, tmp_path: Path) -> None:
+        root = tmp_path / "project"
+        (root / "src").mkdir(parents=True)
+        (root / "pyproject.toml").write_text("[project]\nname = 'x'\n")
+
+        data = _run_checker("--path", str(root))
+
+        assert data["summary"]["files_scanned"] == 0
+        assert not data["summary"]["passed"]
+        assert any(v["rule"] == "nothing-scanned" for v in data["violations"])
+
+
 class TestExclusions:
     """Verify certain files/dirs are excluded from scanning."""
 

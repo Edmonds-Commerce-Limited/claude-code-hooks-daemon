@@ -327,10 +327,33 @@ def test_does_not_scan_agent_worktrees(tmp_path: Path) -> None:
     )
 
 
+def test_a_root_below_an_unscanned_name_is_still_scanned(tmp_path: Path) -> None:
+    """00466 N21: the unscanned names judge paths BELOW the root.
+
+    A linked worktree lives under ``untracked/worktrees/<name>``. Matching the
+    root's own ancestors against the unscanned names made every sweep run from
+    a worktree walk nothing and report clean.
+    """
+    root = tmp_path / "untracked" / "worktrees" / "checkout"
+    (root / ".claude").mkdir(parents=True)
+    (root / ".claude" / "HOOKS-DAEMON.md").write_text(_GENERATED_DOC, encoding="utf-8")
+    (root / "README.md").write_text(
+        "## Usage\n\n```bash\nbin/hooks-daemon no-such-subcommand\n```\n",
+        encoding="utf-8",
+    )
+
+    exit_code, report = _run_checker(root)
+
+    assert report["summary"]["docs_scanned"] == 2
+    assert exit_code == 1, f"a worktree-rooted sweep read as clean: {report}"
+    assert "cli-subcommand-unknown" in _rules(report)
+
+
 def test_real_repository_docs_are_truthful() -> None:
     """The gate itself: this repository's prose must match generated truth."""
     exit_code, report = _run_checker(REPO_ROOT)
 
+    assert report["summary"]["docs_scanned"] > 0, "the gate walked no docs at all"
     assert exit_code == 0, "Doc claims contradict generated truth:\n" + "\n".join(
         f"  [{v['rule']}] {v['file']}:{v['line']}: {v['message']}" for v in report["violations"]
     )

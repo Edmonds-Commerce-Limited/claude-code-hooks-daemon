@@ -18,6 +18,9 @@ file that matters most. `test_a_hidden_directory_is_searched` pins that.
 from __future__ import annotations
 
 import importlib.util
+import json
+import subprocess  # nosec B404 - subprocess used for running the QA checker only
+import sys
 from pathlib import Path
 from types import ModuleType
 
@@ -266,3 +269,69 @@ def test_every_url_form_is_recognised(tmp_path: Path, url: str) -> None:
     _write(tmp_path, "docs/guide.md", f"{url}\n")
 
     assert len(checker.find_violations(tmp_path)) == 1
+
+
+class TestUnreadableFilesFailTheCheck:
+    """``unreadable_files`` used to be counted but never gated on: ``passed``
+    was ``not violations``, so a swathe of the tree could go unchecked (a
+    permissions mistake, an encoding change) and still report a clean sweep,
+    indistinguishable from a genuinely clean one."""
+
+    def test_an_unreadable_file_fails_the_check(self, tmp_path: Path) -> None:
+        (tmp_path / "docs").mkdir(parents=True)
+        (tmp_path / "docs" / "logo.png").write_bytes(b"\x89PNG\r\n\x1a\n\xff\xfe")
+
+        result = subprocess.run(  # nosec B603 - trusted first-party checker script
+            [sys.executable, str(_CHECKER), "--json", "--path", str(tmp_path)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 1
+        data = json.loads((tmp_path / "github_urls.json").read_text())
+        assert data["summary"]["passed"] is False
+        assert any(v["rule"] == "unreadable-file" for v in data["violations"])
+
+    def test_a_root_inside_a_skipped_directory_name_is_still_scanned(self, tmp_path: Path) -> None:
+        """00466 N21: the skip list must judge paths BELOW the root, not above it.
+
+        A linked worktree lives at ``untracked/worktrees/<name>``, and
+        ``worktrees`` is a skipped directory name. Matching it against the
+        root's own ancestors skipped every file, so the sweep scanned nothing
+        in any worktree and reported a clean pass.
+        """
+        root = tmp_path / "worktrees" / "checkout"
+        _write(root, "docs/guide.md", "https://github.com/someone-else/claude-code-hooks-daemon\n")
+
+        assert checker.find_violations(root)
+
+    def test_a_sweep_that_scanned_nothing_fails(self, tmp_path: Path) -> None:
+        """No files is no evidence: it must not read as a clean sweep."""
+        (tmp_path / "empty").mkdir()
+
+        result = subprocess.run(  # nosec B603 - trusted first-party checker script
+            [sys.executable, str(_CHECKER), "--json", "--path", str(tmp_path / "empty")],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 1
+        data = json.loads((tmp_path / "empty" / "github_urls.json").read_text())
+        assert data["summary"]["passed"] is False
+        assert any(v["rule"] == "nothing-scanned" for v in data["violations"])
+
+    def test_a_clean_readable_tree_still_passes(self, tmp_path: Path) -> None:
+        _write(tmp_path, "docs/guide.md", "nothing to see here\n")
+
+        result = subprocess.run(  # nosec B603 - trusted first-party checker script
+            [sys.executable, str(_CHECKER), "--json", "--path", str(tmp_path)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0
+        data = json.loads((tmp_path / "github_urls.json").read_text())
+        assert data["summary"]["passed"] is True

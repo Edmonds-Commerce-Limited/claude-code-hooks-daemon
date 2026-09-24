@@ -114,7 +114,11 @@ def _candidate_files(root: Path) -> list[Path]:
     """Every file worth reading, hidden directories INCLUDED."""
     found: list[Path] = []
     for path in sorted(root.rglob("*")):
-        if any(part in _SKIP_DIRS for part in path.parts):
+        # Judged BELOW the root only (00466 N21). A linked worktree lives at
+        # untracked/worktrees/<name>, and matching the root's own ancestors
+        # against the skip list dropped every file in it: a sweep of nothing,
+        # reported as clean.
+        if any(part in _SKIP_DIRS for part in path.relative_to(root).parts):
             continue
         if not path.is_file() or path.is_symlink():
             continue
@@ -182,6 +186,34 @@ def main() -> int:
     files_scanned = len(_candidate_files(root))
     unreadable: list[str] = []
     violations = find_violations(root, unreadable=unreadable)
+
+    # An unreadable file was counted but never gated on: `passed` read only
+    # `violations`, so a swathe of the tree going unreadable (a permissions
+    # mistake, an encoding change) still reported a clean sweep —
+    # indistinguishable from a genuinely clean one. Each unreadable file is
+    # now its own violation, so the failure both fails the gate and carries
+    # matching detail in `violations[]`.
+    for entry in unreadable:
+        relative, _, reason = entry.partition(": ")
+        violations.append(
+            {
+                "file": relative,
+                "line": 0,
+                "rule": "unreadable-file",
+                "message": f"could not be decoded, so it was never checked: {reason}",
+            }
+        )
+    # Zero candidates is no evidence of a clean tree: it is a sweep that looked
+    # at nothing (00466 N21), so it fails like any other finding.
+    if files_scanned == 0:
+        violations.append(
+            {
+                "file": str(root),
+                "line": 0,
+                "rule": "nothing-scanned",
+                "message": "no file under this root was a candidate, so nothing was checked",
+            }
+        )
 
     if args.json_output:
         # A --path scan answers "is this DIRECTORY clean", which is not the

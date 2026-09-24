@@ -48,38 +48,41 @@ if "${VENV_PYTHON}" -c "import pytest_json_report" 2>/dev/null; then
         EXIT_CODE=$?
     fi
 
-    # Transform pytest-json-report format to our format
-    python3 << 'EOF' > "${OUTPUT_FILE}"
+    # Transform pytest-json-report format to our format.
+    #
+    # Runs under VENV_PYTHON (not system python3) so
+    # claude_code_hooks_daemon.qa.pytest_text_report is importable: the
+    # verdict is built there, not re-derived here, so a runner that wrote no
+    # raw report at all (crashed before pytest-json-report could) and a
+    # runner that exited non-zero over a clean-looking summary are both
+    # caught the same way the text-fallback branch below catches them
+    # (00466 N21 -- build_json_report_summary / finalize_passed_all).
+    PYTEST_RUN_EXIT_CODE="${EXIT_CODE}" "${VENV_PYTHON}" << 'EOF' > "${OUTPUT_FILE}"
 import json
+import os
 import sys
 from pathlib import Path
 
+from claude_code_hooks_daemon.qa.pytest_text_report import build_json_report_summary
+
 raw_file = Path("untracked/qa/tests.json.raw")
-if raw_file.exists():
-    with open(raw_file) as f:
-        pytest_data = json.load(f)
-else:
-    pytest_data = {}
+# None (not {}) when the raw report never existed: a runner that crashed
+# before writing one produced no verdict at all, which must not be
+# conflated with a report that legitimately says "0 found".
+pytest_data = json.loads(raw_file.read_text()) if raw_file.exists() else None
+
+exit_code = int(os.environ["PYTEST_RUN_EXIT_CODE"])
+summary = build_json_report_summary(pytest_data, exit_code)
 
 # Extract test results
 tests = []
-for test in pytest_data.get("tests", []):
-    tests.append({
-        "name": test.get("nodeid", ""),
-        "outcome": test.get("outcome", ""),
-        "duration": test.get("call", {}).get("duration", 0),
-    })
-
-# Extract summary
-summary_data = pytest_data.get("summary", {})
-summary = {
-    "total": summary_data.get("total", 0),
-    "passed": summary_data.get("passed", 0),
-    "failed": summary_data.get("failed", 0),
-    "skipped": summary_data.get("skipped", 0),
-    "duration": pytest_data.get("duration", 0),
-    "passed_all": summary_data.get("failed", 0) == 0,
-}
+if pytest_data is not None:
+    for test in pytest_data.get("tests", []):
+        tests.append({
+            "name": test.get("nodeid", ""),
+            "outcome": test.get("outcome", ""),
+            "duration": test.get("call", {}).get("duration", 0),
+        })
 
 # Read coverage data
 coverage_file = Path("untracked/qa/coverage.json")
@@ -125,16 +128,27 @@ else
     # against real captured pytest output (Plan 00226) — scraping only the
     # counts here meant a red QA run reported "2 failed" without ever saying
     # WHICH, and one such failure was never identified.
-    "${VENV_PYTHON}" << 'EOF' > "${OUTPUT_FILE}"
+    #
+    # finalize_passed_all combines the parser's own verdict with pytest's
+    # process exit code (00466 N21): the parser only ever sees console text,
+    # so a runner that exits non-zero for a reason its summary line does not
+    # capture would otherwise still read green.
+    PYTEST_RUN_EXIT_CODE="${EXIT_CODE}" "${VENV_PYTHON}" << 'EOF' > "${OUTPUT_FILE}"
 import json
+import os
 import sys
 from pathlib import Path
 
-from claude_code_hooks_daemon.qa.pytest_text_report import parse_pytest_text_output
+from claude_code_hooks_daemon.qa.pytest_text_report import (
+    finalize_passed_all,
+    parse_pytest_text_output,
+)
 
 raw_file = Path("untracked/qa/tests.json.raw")
 content = raw_file.read_text() if raw_file.exists() else ""
 report = parse_pytest_text_output(content)
+
+exit_code = int(os.environ["PYTEST_RUN_EXIT_CODE"])
 
 # Same record shape as the pytest-json-report path above, so consumers do not
 # have to know which path produced the file. Only failures are listed: the text
@@ -150,7 +164,7 @@ summary = {
     # a fixture that blows up during setup or teardown is an ERROR, and
     # omitting it here let tests.json report a red run as green.
     "errors": report["errors"],
-    "passed_all": report["passed_all"],
+    "passed_all": finalize_passed_all(report["passed_all"], exit_code),
 }
 
 # Read coverage

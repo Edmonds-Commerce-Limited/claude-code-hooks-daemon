@@ -485,11 +485,15 @@ def known_slash_commands() -> frozenset[str]:
 
 
 def _iter_markdown(root: Path) -> list[Path]:
-    """Every documentation markdown file under ``root``, noise directories aside."""
+    """Every documentation markdown file under ``root``, noise directories aside.
+
+    Only the parts BELOW ``root`` are judged: a linked worktree's root sits
+    under ``untracked/worktrees/``, and matching its ancestors walked nothing.
+    """
     return sorted(
         path
         for path in root.rglob(_MARKDOWN_GLOB)
-        if not _UNSCANNED_DIR_NAMES.intersection(path.parts)
+        if not _UNSCANNED_DIR_NAMES.intersection(path.relative_to(root).parts)
     )
 
 

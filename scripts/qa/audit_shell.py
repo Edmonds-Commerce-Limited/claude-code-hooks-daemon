@@ -246,18 +246,30 @@ _EXCLUDE_DIR_PARTS = {
 }
 
 
-def _is_excluded(path: Path) -> bool:
-    return any(part in _EXCLUDE_DIR_PARTS for part in path.parts)
+def _is_excluded(path: Path, root: Path) -> bool:
+    """Judged on the parts BELOW ``root`` only (00466 N21).
+
+    A linked worktree lives at ``untracked/worktrees/<name>``, and matching the
+    root's own ancestors against ``untracked`` dropped every script in it.
+    """
+    return any(part in _EXCLUDE_DIR_PARTS for part in path.relative_to(root).parts)
+
+
+def scripts_under(root: Path) -> list[Path]:
+    """Every .sh / .bash file under root (recursively) that the audit covers."""
+    return [
+        script
+        for pattern in ("*.sh", "*.bash")
+        for script in sorted(root.rglob(pattern))
+        if not _is_excluded(script, root)
+    ]
 
 
 def audit_directory(root: Path) -> list[Violation]:
     """Audit every .sh / .bash file under root (recursively)."""
     violations: list[Violation] = []
-    for pattern in ("*.sh", "*.bash"):
-        for script in sorted(root.rglob(pattern)):
-            if _is_excluded(script):
-                continue
-            violations.extend(audit_file(script))
+    for script in scripts_under(root):
+        violations.extend(audit_file(script))
     return violations
 
 
@@ -270,12 +282,13 @@ def _format_text_report(violations: list[Violation]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _write_json(violations: list[Violation], output_path: Path) -> None:
+def _write_json(violations: list[Violation], output_path: Path, files_scanned: int) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     data = {
         "summary": {
             "passed": len(violations) == 0,
             "total_violations": len(violations),
+            "files_scanned": files_scanned,
         },
         "violations": [asdict(v) for v in violations],
     }
@@ -318,9 +331,20 @@ def main(argv: list[str] | None = None) -> int:
             return 1
 
     violations = [v for scan_dir in scan_dirs for v in audit_directory(scan_dir)]
+    files_scanned = sum(len(scripts_under(scan_dir)) for scan_dir in scan_dirs)
+    # An audit of no scripts is no evidence of clean scripts (00466 N21).
+    if files_scanned == 0:
+        violations.append(
+            Violation(
+                file=", ".join(str(scan_dir) for scan_dir in scan_dirs),
+                line=0,
+                rule="nothing-scanned",
+                message="no shell script was found to audit, so nothing was checked",
+            )
+        )
 
     if args.json:
-        _write_json(violations, args.output)
+        _write_json(violations, args.output, files_scanned)
     else:
         sys.stdout.write(_format_text_report(violations))
 
