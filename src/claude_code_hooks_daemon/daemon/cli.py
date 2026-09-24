@@ -69,7 +69,6 @@ from claude_code_hooks_daemon.daemon.paths import (
     cleanup_stale_session_dirs,
     get_pid_path,
     get_socket_path,
-    get_venv_path,
     python_venv_fingerprint,
     read_pid_file,
     read_socket_discovery_file,
@@ -1816,7 +1815,14 @@ def cmd_repair(args: argparse.Namespace) -> int:
     # Plan 00099: target the current Python-environment's fingerprint-keyed
     # venv so concurrent environments (container vs host, different Pythons)
     # each repair their own venv without clobbering the other.
-    venv_path = get_venv_path(project_root)
+    #
+    # Plan 00456: everything is keyed on the DAEMON dir, exactly as bash
+    # ensure_venv and the resolver key it. In a client install that is
+    # {project}/.claude/hooks-daemon, and keying on the project root instead
+    # took a different lock, named a venv the resolver's slug check refuses,
+    # and ran uv sync against the client's own project.
+    daemon_dir = _daemon_untracked_dir(project_root).parent
+    venv_path = daemon_dir / "untracked" / f"venv-{python_venv_fingerprint(daemon_dir)}"
     env = os.environ.copy()
     env["UV_PROJECT_ENVIRONMENT"] = str(venv_path)
 
@@ -1824,8 +1830,8 @@ def cmd_repair(args: argparse.Namespace) -> int:
     # ensure_venv, so a daemon starting alongside this repair waits for it
     # and reuses the result instead of rebuilding into the same directory.
     try:
-        with venv_lock(project_root, on_wait=print):
-            return _repair_venv_locked(project_root, venv_path, env)
+        with venv_lock(daemon_dir, on_wait=print):
+            return _repair_venv_locked(daemon_dir, venv_path, env)
     except VenvLockTimeout as exc:
         print(f"ERROR: {exc}")
         return 1
@@ -1846,12 +1852,12 @@ def cmd_repair(args: argparse.Namespace) -> int:
         return 1
 
 
-def _repair_venv_locked(project_root: Path, venv_path: Path, env: dict[str, str]) -> int:
+def _repair_venv_locked(daemon_dir: Path, venv_path: Path, env: dict[str, str]) -> int:
     """The mutating half of ``cmd_repair``; the caller holds the venv build lock."""
     try:
         result = subprocess.run(  # nosec B603 B607 - uv is trusted tool, no user input
             ["uv", "sync"],
-            cwd=str(project_root),
+            cwd=str(daemon_dir),
             env=env,
             capture_output=True,
             text=True,

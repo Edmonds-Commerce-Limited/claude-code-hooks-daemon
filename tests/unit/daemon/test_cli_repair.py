@@ -272,8 +272,10 @@ class TestCmdRepair:
         events: list[str] = []
 
         @contextmanager
-        def fake_lock(project_root: Path, **_kwargs: object) -> Iterator[None]:
-            assert project_root == tmp_path
+        def fake_lock(daemon_dir: Path, **_kwargs: object) -> Iterator[None]:
+            # tmp_path has no src/ tree, so it is a CLIENT layout: the lock
+            # belongs to the daemon dir beneath it (Plan 00456).
+            assert daemon_dir == tmp_path / ".claude" / "hooks-daemon"
             events.append("lock")
             yield
             events.append("unlock")
@@ -352,3 +354,80 @@ class TestCmdRepair:
             result = cmd_repair(args)
             assert result == 0
             mock_stop.assert_called_once_with(args)
+
+
+class TestCmdRepairTargetsTheDaemonDir:
+    """Plan 00456: the repair builds the venv the resolver will look for.
+
+    In a client install the daemon dir is ``{project}/.claude/hooks-daemon``,
+    not the project root. Bash ``ensure_venv`` and the resolver key the venv,
+    its lock and its ``uv sync`` on the DAEMON dir. A repair keyed on the
+    project root takes a different lock, names ``venv-<project-slug>-…`` (which
+    the resolver's slug check refuses, Plan 00313), and runs ``uv sync`` in
+    the client's own project. Self-install hides all three, because there the
+    two directories are one.
+    """
+
+    def _repair(self, project_root: Path) -> tuple[int, list[dict[str, object]], list[Path]]:
+        sync_calls: list[dict[str, object]] = []
+        locked: list[Path] = []
+
+        @contextmanager
+        def fake_lock(daemon_dir: Path, **_kwargs: object) -> Iterator[None]:
+            locked.append(daemon_dir)
+            yield
+
+        def fake_run(argv: list[str], **kwargs: object) -> MagicMock:
+            if argv[:2] == ["uv", "sync"]:
+                sync_calls.append({"argv": argv, **kwargs})
+            done = MagicMock()
+            done.returncode = 0
+            done.stderr = ""
+            done.stdout = "OK\n"
+            return done
+
+        with (
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.get_project_path",
+                return_value=project_root,
+            ),
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=None),
+            patch("claude_code_hooks_daemon.daemon.cli.venv_lock", fake_lock),
+            patch("subprocess.run", side_effect=fake_run),
+        ):
+            rc = cmd_repair(argparse.Namespace(project_root=project_root))
+        return rc, sync_calls, locked
+
+    def test_client_install_repairs_under_the_daemon_dir(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.daemon.paths import python_venv_fingerprint
+
+        project = tmp_path / "client"
+        daemon_dir = project / ".claude" / "hooks-daemon"
+        daemon_dir.mkdir(parents=True)
+
+        rc, sync_calls, locked = self._repair(project)
+
+        assert rc == 0
+        assert locked == [daemon_dir], "the lock must be the one bash ensure_venv takes"
+        assert len(sync_calls) == 1
+        assert sync_calls[0]["cwd"] == str(daemon_dir), "uv sync must sync the DAEMON's project"
+        env = sync_calls[0]["env"]
+        assert isinstance(env, dict)
+        expected = daemon_dir / "untracked" / f"venv-{python_venv_fingerprint(daemon_dir)}"
+        assert env["UV_PROJECT_ENVIRONMENT"] == str(expected)
+
+    def test_self_install_is_unchanged(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.daemon.paths import python_venv_fingerprint
+
+        project = tmp_path / "daemon-repo"
+        (project / "src" / "claude_code_hooks_daemon").mkdir(parents=True)
+
+        rc, sync_calls, locked = self._repair(project)
+
+        assert rc == 0
+        assert locked == [project]
+        assert sync_calls[0]["cwd"] == str(project)
+        env = sync_calls[0]["env"]
+        assert isinstance(env, dict)
+        expected = project / "untracked" / f"venv-{python_venv_fingerprint(project)}"
+        assert env["UV_PROJECT_ENVIRONMENT"] == str(expected)
