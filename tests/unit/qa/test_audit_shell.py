@@ -222,6 +222,72 @@ class TestJsonOutput:
         assert data["violations"] == []
 
 
+def _scan(scan_dir: Path, output: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            sys.executable,
+            str(AUDIT_SHELL_SCRIPT),
+            "--json",
+            "--scan-dir",
+            str(scan_dir),
+            "--output",
+            str(output),
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+
+class TestScansFromAnyCheckoutLocation:
+    """00466 N26: excluded names are judged below the scan root, never above it.
+
+    Matched against the absolute path, ``untracked`` excluded every script in a
+    checkout under ``untracked/worktrees/``, and the audit passed on nothing.
+    """
+
+    def test_a_scan_root_under_untracked_still_finds_its_scripts(self, tmp_path: Path) -> None:
+        scripts_dir = tmp_path / "untracked" / "worktrees" / "wt" / "scripts"
+        scripts_dir.mkdir(parents=True)
+        (scripts_dir / "violator.sh").write_text("#!/bin/bash\nchmod +x t 2>/dev/null || true\n")
+        output_json = tmp_path / "shell_audit.json"
+
+        result = _scan(scripts_dir, output_json)
+
+        summary = json.loads(output_json.read_text())["summary"]
+        assert result.returncode == 1
+        assert summary["total_violations"] == 1
+        assert summary["files_scanned"] == 1
+
+    def test_an_excluded_directory_below_the_root_is_still_skipped(self, tmp_path: Path) -> None:
+        scripts_dir = tmp_path / "scripts"
+        (scripts_dir / "untracked").mkdir(parents=True)
+        (scripts_dir / "untracked" / "violator.sh").write_text(
+            "#!/bin/bash\nchmod +x t 2>/dev/null || true\n"
+        )
+        (scripts_dir / "clean.sh").write_text("#!/bin/bash\nset -euo pipefail\n")
+        output_json = tmp_path / "shell_audit.json"
+
+        result = _scan(scripts_dir, output_json)
+
+        summary = json.loads(output_json.read_text())["summary"]
+        assert result.returncode == 0, result.stderr
+        assert summary["files_scanned"] == 1
+
+    def test_examining_nothing_where_scripts_exist_fails(self, tmp_path: Path) -> None:
+        scripts_dir = tmp_path / "scripts"
+        (scripts_dir / "untracked").mkdir(parents=True)
+        (scripts_dir / "untracked" / "only.sh").write_text("#!/bin/bash\nset -euo pipefail\n")
+        output_json = tmp_path / "shell_audit.json"
+
+        result = _scan(scripts_dir, output_json)
+
+        summary = json.loads(output_json.read_text())["summary"]
+        assert result.returncode == 1
+        assert summary["passed"] is False
+        assert summary["files_scanned"] == 0
+        assert summary["vacuous_scan"]
+
+
 class TestRealRepoScan:
     """Self-scan: once markers are added, the repo's own scripts must pass.
 

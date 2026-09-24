@@ -63,6 +63,15 @@ plus one missing-directory test for each CLI. The ledger row is marked Remedied.
   inputs, which raise when missing, and are listed as such.
 - From this worktree the checks now scan: skill_refs 699, doc_truth 1774,
   github_urls 4038, magic_values 1763.
+- **Follow-up (lead's heads-up)**: my first audit globbed only `check_*.py`
+  and so missed `audit_shell.py`, which had the same bug (0 scripts from a
+  worktree, PASS). It is fixed the same way. It now reports `files_scanned`
+  (62 here) and fails when it examines 0 of N scripts. The class pin now
+  covers `audit_*.py`. `audit_error_hiding` and `audit_capture_corruption`
+  were already safe and self-guarded; the pin requires their artefact from
+  the hostile location. RED: `TestScansFromAnyCheckoutLocation` in
+  `tests/unit/qa/test_audit_shell.py`. B2's `08c4be0e` (doc_truth) is to be
+  reconciled with this branch's doc_truth fix when B2 lands.
 
 The ledger row is marked Remedied.
 

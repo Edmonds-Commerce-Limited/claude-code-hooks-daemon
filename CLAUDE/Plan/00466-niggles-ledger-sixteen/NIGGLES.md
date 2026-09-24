@@ -210,6 +210,17 @@ class with a test that runs each check from a worktree fixture.
 The other 10 walkers are worktree-safe, and are pinned by the integration
 test rather than given their own zero guard.
 
+- **`audit_*.py` too.** The first audit globbed only `check_*.py`, so it
+  missed `audit_shell.py`, which had the same absolute-path exclusion
+  (`untracked`) and passed on 0 scripts from a worktree (the B2 integration
+  found it too). It now uses `relative_parts`, reports `files_scanned`
+  (62 from this worktree) and fails on examining 0 of N scripts. The pin
+  classifies `audit_*.py` as well. `audit_error_hiding.py` and
+  `audit_capture_corruption.py` were already relative, and already exit 1
+  when they collect nothing (Plan 00364 Task 5.4). They are pinned by
+  requiring their artefact from the hostile location. The B2 integration's
+  own doc_truth fix (08c4be0e) is reconciled when B2 lands on main.
+
 ### N25 — a slow handler runs out the client's 30 s budget, and a timeout is an ALLOW for the whole PreToolUse chain
 
 **Found by the guard-defects security review 2**

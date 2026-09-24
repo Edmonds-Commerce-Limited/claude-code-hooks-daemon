@@ -6,7 +6,7 @@
 Ledger entry N26. This affects contributors to this repository, and anyone
 who runs its QA from a git worktree.
 
-Three QA checks, `skill_refs`, `doc_truth` and `github_urls`, skipped any
+Four QA checks, `skill_refs`, `doc_truth`, `github_urls` and `shell_audit`, skipped any
 file whose absolute path contained a directory name they exclude, such as
 `untracked` or `worktrees`. Run from a worktree under `untracked/worktrees/`,
 they skipped every file, scanned nothing, and reported a pass. `magic_values`
@@ -19,5 +19,5 @@ checkout's location can no longer produce a pass.
 
 An integration test runs every tree-walking check from a copy of the tree
 placed under a path made of those directory names. It fails when any check
-examines nothing, and every `scripts/qa/check_*.py` must be listed in it as a
-walker or a fixed-input check.
+examines nothing. Every `scripts/qa/check_*.py` and `audit_*.py` must be
+listed in it as a walker or a fixed-input check.

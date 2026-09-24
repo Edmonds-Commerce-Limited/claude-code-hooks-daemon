@@ -43,6 +43,7 @@ HOSTILE_LOCATION = (
 
 #: Walkers: script -> (artefact under untracked/qa/, examined-count key).
 WALKERS: dict[str, tuple[str, str]] = {
+    "audit_shell.py": ("shell_audit.json", "files_scanned"),
     "check_authored_path_stat.py": ("authored_path_stat.json", "files_scanned"),
     "check_british_english.py": ("british_english.json", "files_scanned"),
     "check_doc_snippets.py": ("doc_snippets.json", "documents_scanned"),
@@ -73,6 +74,18 @@ FIXED_INPUT_CHECKS: frozenset[str] = frozenset(
         "check_project_handler_tests.py",
     }
 )
+
+#: Walkers that report no examined count but exit non-zero, writing no
+#: artefact, when they collect no file (Plan 00364 Task 5.4).
+SELF_GUARDED_WALKERS: frozenset[str] = frozenset(
+    {
+        "audit_capture_corruption.py",
+        "audit_error_hiding.py",
+    }
+)
+
+#: The QA scripts that judge the tree: every one must be classified above.
+_QA_CHECK_GLOBS = ("check_*.py", "audit_*.py")
 
 _RUN_TIMEOUT_SECONDS = 600
 
@@ -135,10 +148,38 @@ def test_a_walker_examines_files_from_a_hostile_location(
     assert summary[key] > 0, f"{script} examined nothing from {hostile_checkout}: {summary}"
 
 
+_SELF_GUARDED_ARTEFACTS: dict[str, str] = {
+    "audit_capture_corruption.py": "capture_corruption.json",
+    "audit_error_hiding.py": "error_hiding.json",
+}
+
+
+@pytest.mark.integration
+@pytest.mark.slow
+@pytest.mark.parametrize("script", sorted(SELF_GUARDED_WALKERS))
+def test_a_self_guarded_walker_collects_files_from_a_hostile_location(
+    script: str, hostile_checkout: Path
+) -> None:
+    """It writes its artefact only after collecting at least one file."""
+    artefact = hostile_checkout / "untracked" / "qa" / _SELF_GUARDED_ARTEFACTS[script]
+    artefact.unlink(missing_ok=True)
+    result = subprocess.run(
+        [sys.executable, str(hostile_checkout / "scripts" / "qa" / script), "--json"],
+        cwd=hostile_checkout,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=_RUN_TIMEOUT_SECONDS,
+    )
+    assert (
+        artefact.is_file()
+    ), f"{script} collected nothing from {hostile_checkout}: {result.stderr}"
+
+
 def test_every_check_is_classified() -> None:
     """A new check must say whether it walks the tree, so the pin above covers it."""
-    present = {path.name for path in QA_DIR.glob("check_*.py")}
-    classified = set(WALKERS) | FIXED_INPUT_CHECKS
+    present = {path.name for pattern in _QA_CHECK_GLOBS for path in QA_DIR.glob(pattern)}
+    classified = set(WALKERS) | FIXED_INPUT_CHECKS | SELF_GUARDED_WALKERS
     assert (
         present == classified
     ), f"unclassified: {sorted(present - classified)}; gone: {sorted(classified - present)}"
