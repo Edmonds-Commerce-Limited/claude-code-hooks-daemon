@@ -46,6 +46,8 @@ DEFAULT_JOURNAL_DIR_NAME: Final[str] = "JOURNAL"
 DEFAULT_JOURNAL_FRESHNESS_DAYS: Final[int] = 3
 DEFAULT_JOURNAL_MODE: Final[str] = "advise"
 DEFAULT_JOURNAL_TODAY_ONLY_MODE: Final[str] = "block"
+#: The `plan_workflow.qa.journal.mode` token that switches journalling off.
+JOURNAL_MODE_OFF: Final[str] = "off"
 
 # Plan-document size defaults (Plan 00190 Decision 2). Derived from READ COST,
 # not from percentiles of any one repo: the canonical unit is tokens, with

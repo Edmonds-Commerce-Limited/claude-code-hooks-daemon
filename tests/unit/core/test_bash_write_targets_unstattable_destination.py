@@ -1,6 +1,6 @@
 """A destination the daemon cannot stat must not crash the accessor.
 
-``_written_paths`` asks ``Path(destination).is_dir()`` to decide whether a copy
+``resolve_bash_write_destination`` asks ``Path(destination).is_dir()`` to decide whether a copy
 verb expands to ``dest/<basename>`` or writes ``dest`` itself. ``pathlib``
 swallows ``OSError`` for the *expected* stat failures — ENOENT, ENOTDIR, ELOOP,
 EBADF — and returns ``False``. ``EACCES`` is not in that set, so

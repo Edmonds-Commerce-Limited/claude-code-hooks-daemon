@@ -50,6 +50,13 @@ CLONE_FILES: Final[tuple[str, ...]] = (
     "scripts/lib/resolve_venv.sh",
     "scripts/lib/python_discovery.sh",
     "src/claude_code_hooks_daemon/daemon/paths.py",
+    # The venv-free `signal` verb (Plan 00457, #55) and its own dependencies,
+    # loaded by file path rather than package import -- see
+    # daemon/signal_standalone.py's module docstring.
+    "src/claude_code_hooks_daemon/daemon/signal_standalone.py",
+    "src/claude_code_hooks_daemon/daemon/install_layout.py",
+    "src/claude_code_hooks_daemon/utils/operator_signal.py",
+    "src/claude_code_hooks_daemon/utils/temp_names.py",
     "bin/hooks-daemon",
 )
 

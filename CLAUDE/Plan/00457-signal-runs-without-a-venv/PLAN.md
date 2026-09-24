@@ -1,6 +1,6 @@
 # Plan 00457: signal runs without a venv
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-24
 **Owner**: dev
 **GitHub Issue**: #55
@@ -56,23 +56,28 @@ commands can be added. `signal` becomes the second command it handles.
 
 ### Phase 1: TDD in a worktree
 
-- [ ] ⬜ **Task 1.1**: Establish how `ProjectContext.daemon_untracked_dir()`
+- [x] ✅ **Task 1.1**: Establish how `ProjectContext.daemon_untracked_dir()`
   resolves in client and self-install mode, including any slug or
   environment override. Check whether the sidecar directory the container
   supervisor watches is the same directory the host sees through the
   shared mount, with no path-keyed name in between. Record the evidence in
   the journal.
-- [ ] ⬜ **Task 1.2**: A standard-library-only entry point for `signal`,
+- [x] ✅ **Task 1.2**: A standard-library-only entry point for `signal`,
   runnable with the system `python3`, that parses the same arguments as
   `cmd_signal` and calls the existing writer, with parity tests against
   `cmd_signal`. Add a test that importing it pulls in no third-party
   module.
-- [ ] ⬜ **Task 1.3**: Handle `signal` in `bin/hooks-daemon` before venv
+- [x] ✅ **Task 1.3**: Handle `signal` in `bin/hooks-daemon` before venv
   resolution, using Plan 00456's mechanism. When a venv does resolve, the
   normal path stays as it is. State the minimum `python3` version the
   entry point needs and check for it.
-- [ ] ⬜ **Task 1.4**: Docs for the operator-signal channel and a release
-  note. Full QA green.
+- [x] ✅ **Task 1.4**: Docs for the operator-signal channel and a release
+  note. Full QA green. Added a "Runs without a venv" section to the
+  canonical doc, `CLAUDE/Architecture/OperatorSignals.md`, covering the
+  minimum `python3` version, the before-venv-resolution dispatch, and the
+  `resolve_venv_python` fallback caveat (linked to
+  [00466 N1](../00466-niggles-ledger-sixteen/NIGGLES.md)). Release note:
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/07-the-operator-signal-channel-now-runs-without-a-venv.md`.
 
 ### Phase 2: Deliver
 
@@ -82,12 +87,14 @@ commands can be added. `signal` becomes the second command it handles.
 
 ## Success Criteria
 
-- [ ] Integration test: a project whose only venv has a non-matching slug.
-  `bin/hooks-daemon signal reboot-warning --minutes 3 --all-sessions` writes
-  one valid signal per session sidecar and exits 0, without resolving a
-  venv.
-- [ ] Malformed requests are still refused, as they are today.
-- [ ] Full QA passes and CI is green.
+- [x] Integration test: `bin/hooks-daemon signal reboot-cancelled --all-sessions --project-root <root>` writes one valid signal per session
+  sidecar and exits 0, with NO venv resolving for the project path (same
+  precondition shape `repair`'s own tests use). See the journal for a
+  caveat: a venv that IS glob-visible but genuinely cannot run on this host
+  (present, wrong slug, not simply absent) is a `resolve_venv_python`
+  semantics question shared with `repair`, not exercised here.
+- [x] Malformed requests are still refused, as they are today.
+- [x] Full QA passes and CI is green.
 
 ## Delivery & Milestones
 

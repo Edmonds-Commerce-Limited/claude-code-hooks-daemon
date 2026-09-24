@@ -24,6 +24,7 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
     is_path_excluded,
     merge_exclude_patterns,
     path_matches_globs,
+    resolve_lookup_root,
     resolve_project_root,
     vendored_exclude_globs,
 )
@@ -364,6 +365,37 @@ class TestResolveProjectRoot:
             pc.ProjectContext, "project_root", classmethod(lambda cls: Path("/proj")), raising=False
         )
         assert resolve_project_root() == "/proj"
+
+
+class TestResolveLookupRoot:
+    """Plan 00460 review finding m5: the one definition of the "test
+    override, then workspace_root option, then resolve_project_root with a
+    cwd fallback" precedence that used to be duplicated across handlers.
+    Lives here, next to `resolve_project_root`; `subagent_tool_resolution`
+    re-exports it, and `tests/unit/utils/test_subagent_tool_resolution.py`'s
+    own `TestResolveLookupRoot` class covers that re-export still works."""
+
+    def test_project_root_override_wins(self, tmp_path: Path) -> None:
+        override = tmp_path / "override"
+        assert resolve_lookup_root(override, tmp_path / "workspace") == override
+
+    def test_workspace_root_used_when_no_override(self, tmp_path: Path) -> None:
+        workspace = tmp_path / "workspace"
+        assert resolve_lookup_root(None, workspace) == workspace
+
+    def test_falls_back_to_cwd_when_nothing_else_resolves(self) -> None:
+        assert resolve_lookup_root(None, None) == Path.cwd()
+
+    def test_falls_back_to_resolved_project_root_when_context_initialised(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from claude_code_hooks_daemon.core import project_context as pc
+
+        monkeypatch.setattr(pc.ProjectContext, "_initialized", True, raising=False)
+        monkeypatch.setattr(
+            pc.ProjectContext, "project_root", classmethod(lambda cls: Path("/proj")), raising=False
+        )
+        assert resolve_lookup_root(None, None) == Path("/proj")
 
 
 class TestHandlerExcludesPath:

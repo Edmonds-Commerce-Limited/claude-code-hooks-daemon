@@ -17,7 +17,11 @@ from claude_code_hooks_daemon.plan_qa.checks.common import (
     staged_plan_md_folder,
 )
 from claude_code_hooks_daemon.plan_qa.gitfacts import GitFacts, StagedChange
-from claude_code_hooks_daemon.plan_qa.model import PlanDoc
+from claude_code_hooks_daemon.plan_qa.model import (
+    JOURNAL_BODY_FILE_HINT,
+    PlanDoc,
+    journal_append_command,
+)
 from claude_code_hooks_daemon.plan_qa.types import (
     CheckContext,
     CheckSpec,
@@ -51,6 +55,14 @@ def _tasks_changed(gitfacts: GitFacts, change: StagedChange) -> bool:
     return PlanDoc.parse(head_text).tasks != staged_tasks
 
 
+def _remediation(plan_dir: str, plan_number: int | None) -> str:
+    return (
+        "Append an entry recording what changed with "
+        f"`{journal_append_command(plan_dir, plan_number)}` ({JOURNAL_BODY_FILE_HINT}), "
+        "and stage the day-file in this commit."
+    )
+
+
 def _run(context: CheckContext) -> list[Finding]:
     gitfacts = context.gitfacts
     if gitfacts is None:
@@ -78,11 +90,7 @@ def _run(context: CheckContext) -> list[Finding]:
                     f"Plan {plan_number:05d} changes its PLAN.md tasks in this "
                     "commit but stages no journal entry"
                 ),
-                remediation=(
-                    f"Append a `## HH:MM · category · REF` entry to "
-                    f"{folder}/{context.journal_dir_name}/ recording what changed, "
-                    "and stage it in this commit."
-                ),
+                remediation=_remediation(context.plan_dir_rel, plan_number),
                 path=change.path,
             )
         )

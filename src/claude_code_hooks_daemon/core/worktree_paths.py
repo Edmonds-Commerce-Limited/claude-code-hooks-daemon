@@ -46,12 +46,14 @@ def _worktree_subpath_start(relative_parts: tuple[str, ...]) -> int | None:
     return None
 
 
-def effective_project_relative_path(abs_path: str, project_root: Path) -> str | None:
-    """Classify ``abs_path`` relative to the nearest enclosing root.
+def enclosing_checkout(abs_path: str, project_root: Path) -> tuple[Path, Path] | None:
+    """The checkout ``abs_path`` belongs to, and the path relative to it.
 
-    If ``abs_path`` lives inside a worktree subtree under ``project_root``, the
-    returned path is relative to the WORKTREE root (e.g.
-    ``CLAUDE/LLM-UPDATE.md``). Otherwise it is relative to ``project_root``.
+    Returns ``(checkout_root, relative_path)``: the worktree root when
+    ``abs_path`` lives inside a worktree subtree under ``project_root``, else
+    ``project_root`` itself. Both are resolved. A handler that prints a remedy
+    command needs the ROOT as well as the relative path, so the command it names
+    acts on the checkout the file is in rather than on the main one.
 
     Returns ``None`` when ``abs_path`` is not inside ``project_root`` at all, or
     when it is a worktree marker path with no in-worktree subpath.
@@ -66,9 +68,25 @@ def effective_project_relative_path(abs_path: str, project_root: Path) -> str | 
     parts = relative.parts
     subpath_start = _worktree_subpath_start(parts)
     if subpath_start is None:
-        return str(relative)
+        return root, relative
 
     in_worktree_parts = parts[subpath_start:]
     if not in_worktree_parts:
         return None
-    return str(Path(*in_worktree_parts))
+    return root.joinpath(*parts[:subpath_start]), Path(*in_worktree_parts)
+
+
+def effective_project_relative_path(abs_path: str, project_root: Path) -> str | None:
+    """Classify ``abs_path`` relative to the nearest enclosing root.
+
+    If ``abs_path`` lives inside a worktree subtree under ``project_root``, the
+    returned path is relative to the WORKTREE root (e.g.
+    ``CLAUDE/LLM-UPDATE.md``). Otherwise it is relative to ``project_root``.
+
+    Returns ``None`` when ``abs_path`` is not inside ``project_root`` at all, or
+    when it is a worktree marker path with no in-worktree subpath.
+    """
+    located = enclosing_checkout(abs_path, project_root)
+    if located is None:
+        return None
+    return str(located[1])

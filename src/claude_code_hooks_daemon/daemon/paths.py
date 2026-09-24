@@ -12,6 +12,7 @@ import argparse
 import contextlib
 import functools
 import hashlib
+import importlib.util
 import json
 import logging
 import os
@@ -23,6 +24,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -1390,6 +1392,59 @@ def socket_path_diagnosis(project_path: Path, *, self_install: bool) -> str | No
     )
 
 
+_install_layout_module: ModuleType | None = None
+
+
+def _install_layout() -> ModuleType:
+    """Load ``install_layout.py`` (this file's sibling) by file path.
+
+    Deliberately NOT a ``from claude_code_hooks_daemon.daemon.install_layout
+    import ...`` statement: THIS file is itself run standalone by
+    ``resolve_venv.sh`` (``python3 paths.py resolve-venv ...``) during
+    fresh-clone bootstrap, when no venv exists yet and nothing puts ``src/``
+    on ``sys.path`` -- a dotted import would fail there exactly as it would
+    in the venv-free ``signal`` entry point this rule was extracted for
+    (Plan 00457, ``daemon/signal_standalone.py``, which loads this same
+    sibling file the same way). Cached after the first call; registers
+    under the module's real dotted name in ``sys.modules`` if nothing else
+    got there first, so a normal import of
+    ``claude_code_hooks_daemon.daemon.install_layout`` elsewhere in the same
+    process shares one module object instead of two.
+    """
+    global _install_layout_module
+    if _install_layout_module is not None:
+        return _install_layout_module
+    dotted_name = "claude_code_hooks_daemon.daemon.install_layout"
+    cached = sys.modules.get(dotted_name)
+    if cached is not None:
+        _install_layout_module = cached
+        return cached
+    spec = importlib.util.spec_from_file_location(
+        dotted_name, Path(__file__).resolve().parent / "install_layout.py"
+    )
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load {dotted_name!r} beside {__file__}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    sys.modules.setdefault(dotted_name, module)
+    _install_layout_module = module
+    return module
+
+
+def is_self_install_mode(project_path: Path) -> bool:
+    """Whether ``project_path`` is a self-install (dogfood) checkout.
+
+    True iff the daemon SOURCE tree is present at the project root
+    (``{project_path}/src/claude_code_hooks_daemon``). The ONE definition of
+    this test lives in ``install_layout.py`` (Plan 00457); this is a thin
+    wrapper so existing callers of ``paths.is_self_install_mode`` keep
+    working unchanged.
+    """
+    result = _install_layout().is_self_install_mode(project_path)
+    assert isinstance(result, bool)  # loaded dynamically -- see _install_layout
+    return result
+
+
 def _get_untracked_dir(project_path: Path) -> Path:
     """
     Get the untracked directory for daemon runtime files.
@@ -1404,10 +1459,9 @@ def _get_untracked_dir(project_path: Path) -> Path:
         - Self-install mode: {project}/untracked
         - Normal mode: {project}/.claude/hooks-daemon/untracked
     """
-    # Self-install mode: daemon source exists at project root
-    if (project_path / "src" / "claude_code_hooks_daemon").is_dir():
-        return project_path / "untracked"
-    return project_path / ".claude" / "hooks-daemon" / "untracked"
+    result = _install_layout().get_untracked_dir(project_path)
+    assert isinstance(result, Path)  # loaded dynamically -- see _install_layout
+    return result
 
 
 def get_socket_path(project_dir: Path | str) -> Path:

@@ -26,6 +26,7 @@ from __future__ import annotations
 import os
 import re
 from collections.abc import Iterable, Sequence
+from pathlib import Path
 from typing import Protocol
 
 from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
@@ -200,6 +201,34 @@ def resolve_project_root() -> str | None:
     if not getattr(ProjectContext, "_initialized", False):
         return None
     return str(ProjectContext.project_root())
+
+
+def resolve_lookup_root(
+    project_root_override: Path | None, workspace_root: Path | str | None
+) -> Path:
+    """The directory a handler's own on-disk lookup is rooted at.
+
+    Plan 00460 review finding m5: this exact three-step precedence (a test
+    override, then a registry ``workspace_root`` option, then
+    :func:`resolve_project_root` with a cwd fallback) was duplicated
+    line-for-line across several handlers that each needed "the project
+    root, but hermetically overridable in a test". Centralised here, next
+    to :func:`resolve_project_root`, as the one definition of that
+    precedence; ``subagent_tool_resolution`` re-exports it so its existing
+    callers (``dispatch_declaration``, ``subagent_report_size_blocker``)
+    need no import change.
+
+    An injected TEST override wins, then the registry's ``workspace_root``
+    option, then :func:`resolve_project_root` (None when ``ProjectContext``
+    is not initialised, e.g. a bare unit test), falling back to the process
+    cwd so this always returns a concrete path.
+    """
+    if project_root_override is not None:
+        return project_root_override
+    if workspace_root is not None:
+        return Path(workspace_root)
+    resolved = resolve_project_root()
+    return Path(resolved) if resolved is not None else Path.cwd()
 
 
 def path_matches_globs(
