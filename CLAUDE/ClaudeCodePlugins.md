@@ -165,7 +165,11 @@ one resolver, `utils/claude_plugins.resolve_enabled_plugins()`. It reads:
   environment, fixed when it starts; a hook payload carries neither
   `CLAUDE_CONFIG_DIR` nor `HOME`.
 - `plugins/installed_plugins.json` there. A `project` or `local` install counts
-  only when its `projectPath` is this project's root.
+  when its `projectPath` is this project, or lies in the same repository. Like
+  Claude Code, the daemon maps a linked git worktree to its main checkout, so
+  an install made in the main checkout also applies in every worktree of it
+  (`canonical_repo_root()`). `enabledPlugins` is still read from the
+  worktree's own `.claude/settings*.json`.
 - `enabledPlugins` from the four settings scopes, in the order managed, local,
   project, user. Only file-based managed settings are read. With no entry
   anywhere, the plugin's `defaultEnabled` applies.

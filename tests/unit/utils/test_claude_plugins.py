@@ -23,6 +23,7 @@ settings-reference, managed-settings):
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,7 @@ from claude_code_hooks_daemon.utils.claude_plugins import (
     PluginInventory,
     SettingsScope,
     SkillKind,
+    canonical_repo_root,
     default_managed_settings_dir,
     resolve_enabled_plugins,
 )
@@ -282,6 +284,93 @@ class TestInstallScope:
         env.enable(SettingsScope.USER, "p@mkt")
         _write(env.project / ".claude" / "settings.json", "{not json")
         assert _ids(env.resolve()) == ["p@mkt"]
+
+
+def _git(*args: str, cwd: Path) -> None:
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *args],
+        cwd=cwd,
+        check=True,
+        capture_output=True,
+    )
+
+
+def _repo_with_worktree(main: Path, worktree: Path) -> None:
+    """``main`` as a git repo with one commit, and ``worktree`` linked to it."""
+    main.mkdir(parents=True, exist_ok=True)
+    _git("init", "-q", cwd=main)
+    _write(main / "README.md", "x\n")
+    _git("add", "README.md", cwd=main)
+    _git("commit", "-q", "--no-verify", "-m", "init", cwd=main)
+    worktree.parent.mkdir(parents=True, exist_ok=True)
+    _git("worktree", "add", "-q", "--detach", str(worktree), cwd=main)
+
+
+class TestProjectInstallFromAWorktree:
+    """Claude Code applies a project or local install record in any linked
+    worktree of the same repository, not only at its ``projectPath``.
+
+    Read from Claude Code's shipped bundle: a record applies when its scope is
+    user or managed, when ``projectPath`` equals the session's project, or when
+    both paths have the same canonical repository root, which for a linked
+    worktree is the main checkout (``.git`` file -> ``gitdir`` -> ``commondir``,
+    with the ``gitdir`` back-pointer checked).
+    """
+
+    def test_a_main_checkout_install_is_active_in_its_worktree(self, env: _Env) -> None:
+        worktree = env.base / "untracked" / "worktrees" / "wt"
+        _repo_with_worktree(env.project, worktree)
+        env.install(
+            "p@mkt", env.plugin_root("p", {"name": "p"}), scope="project", project_path=env.project
+        )
+        _write_json(
+            worktree / ".claude" / "settings.local.json", {"enabledPlugins": {"p@mkt": True}}
+        )
+        inventory = resolve_enabled_plugins(
+            worktree, config_dir=env.config, managed_dir=env.managed
+        )
+        assert _ids(inventory) == ["p@mkt"]
+        assert inventory.enabled[0].enabled_by is SettingsScope.LOCAL
+
+    def test_a_separate_clone_is_still_another_project(self, env: _Env) -> None:
+        clone = env.base / "clone"
+        _repo_with_worktree(env.project, env.base / "wt")
+        clone.mkdir()
+        _git("init", "-q", cwd=clone)
+        env.install(
+            "p@mkt", env.plugin_root("p", {"name": "p"}), scope="project", project_path=env.project
+        )
+        _write_json(clone / ".claude" / "settings.local.json", {"enabledPlugins": {"p@mkt": True}})
+        inventory = resolve_enabled_plugins(clone, config_dir=env.config, managed_dir=env.managed)
+        assert _ids(inventory) == []
+
+
+class TestCanonicalRepoRoot:
+    def test_a_main_checkout_is_its_own_root(self, tmp_path: Path) -> None:
+        main = tmp_path / "main"
+        _repo_with_worktree(main, tmp_path / "wt")
+        assert canonical_repo_root(main / "sub" / "dir") == main.resolve()
+
+    def test_a_linked_worktree_maps_to_the_main_checkout(self, tmp_path: Path) -> None:
+        main = tmp_path / "main"
+        worktree = tmp_path / "untracked" / "worktrees" / "wt"
+        _repo_with_worktree(main, worktree)
+        assert canonical_repo_root(worktree) == main.resolve()
+
+    def test_outside_any_repository_there_is_none(self, tmp_path: Path) -> None:
+        assert canonical_repo_root(tmp_path) is None
+
+    def test_a_gitdir_that_does_not_point_back_is_not_followed(self, tmp_path: Path) -> None:
+        """A `.git` file naming another repository's worktree entry, whose
+        `gitdir` back-pointer is not this checkout, leaves this checkout its
+        own root: a planted file cannot borrow another project's installs."""
+        main = tmp_path / "main"
+        _repo_with_worktree(main, tmp_path / "wt")
+        impostor = tmp_path / "impostor"
+        impostor.mkdir()
+        entry = next((main / ".git" / "worktrees").iterdir())
+        (impostor / ".git").write_text(f"gitdir: {entry}\n")
+        assert canonical_repo_root(impostor) == impostor.resolve()
 
 
 # ── Agents ──────────────────────────────────────────────────────────

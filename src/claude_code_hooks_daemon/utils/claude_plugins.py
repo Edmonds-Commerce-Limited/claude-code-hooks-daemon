@@ -241,6 +241,12 @@ _COMPONENT_FIELDS: Final[tuple[str, ...]] = (
 #: Install scopes that apply only to the project named by ``projectPath``.
 _PROJECT_BOUND_INSTALL_SCOPES: Final[frozenset[str]] = frozenset({"project", "local"})
 
+_GIT_ENTRY: Final[str] = ".git"
+_GITDIR_PREFIX: Final[str] = "gitdir:"
+_COMMONDIR_FILE: Final[str] = "commondir"
+_GITDIR_FILE: Final[str] = "gitdir"
+_WORKTREES_DIR: Final[str] = "worktrees"
+
 _ID_SEPARATOR: Final[str] = "@"
 _SCOPED_NAME_SEPARATOR: Final[str] = ":"
 
@@ -353,22 +359,32 @@ def _choose_install(
 ) -> tuple[dict[str, Any] | None, str]:
     """The install that applies to this project, else why none does.
 
-    A project or local install for this project is preferred to a user one:
-    it is the more specific of the two.
+    Claude Code's rule: a project or local record applies when its
+    ``projectPath`` is this project, or has the same canonical repository
+    root, so a main checkout's install also applies in its linked worktrees
+    (see :func:`canonical_repo_root`). A record for this exact path is
+    preferred, then one for the same repository, then a user one.
     """
     resolved_root = project_root.resolve()
+    same_repository: dict[str, Any] | None = None
     general: dict[str, Any] | None = None
     for record in records:
         if record.get(_SCOPE_KEY) in _PROJECT_BOUND_INSTALL_SCOPES:
             project_path = record.get(_PROJECT_PATH_KEY)
-            if isinstance(project_path, str) and Path(project_path).resolve() == resolved_root:
+            if not isinstance(project_path, str):
+                continue
+            if Path(project_path).resolve() == resolved_root:
                 return record, ""
+            if same_repository is None and _same_repository(Path(project_path), project_root):
+                same_repository = record
         elif general is None:
             general = record
+    if same_repository is not None:
+        return same_repository, ""
     if general is not None:
         return general, ""
     if records:
-        return None, "installed only for another project (its projectPath differs)"
+        return None, "installed only for another project (its projectPath is in another repository)"
     return None, "not installed (no installed_plugins.json record)"
 
 
@@ -668,6 +684,73 @@ def _markdown_files(path: Path) -> list[Path]:
     if path.is_dir():
         return sorted(path.rglob(_MARKDOWN_GLOB))
     return []
+
+
+def _same_repository(first: Path, second: Path) -> bool:
+    root = canonical_repo_root(second)
+    return root is not None and canonical_repo_root(first) == root
+
+
+def canonical_repo_root(path: Path) -> Path | None:
+    """The repository root Claude Code keys project-bound installs on.
+
+    Ported from Claude Code's own bundle, because an install record's
+    ``projectPath`` applies wherever this answer matches. The git root is the
+    nearest ancestor holding a ``.git`` entry; a linked worktree's root maps
+    to its main checkout, but only when the chain is consistent: the ``.git``
+    file names a ``gitdir`` under ``<common>/worktrees/``, and that entry's
+    ``gitdir`` file points back at this checkout's ``.git``. Anything else
+    leaves the git root as its own canonical root.
+
+    Returns:
+        The canonical root, resolved; None outside any repository.
+    """
+    git_root = _git_root(path.resolve())
+    if git_root is None:
+        return None
+    return _main_checkout(git_root)
+
+
+def _git_root(start: Path) -> Path | None:
+    for candidate in (start, *start.parents):
+        if (candidate / _GIT_ENTRY).exists():
+            return candidate
+    return None
+
+
+def _main_checkout(git_root: Path) -> Path:
+    dot_git = git_root / _GIT_ENTRY
+    if not dot_git.is_file():
+        return git_root
+    pointer = _read_text(dot_git)
+    if pointer is None or not pointer.startswith(_GITDIR_PREFIX):
+        return git_root
+    entry = (git_root / pointer[len(_GITDIR_PREFIX) :].strip()).resolve()
+    common_text = _read_text(entry / _COMMONDIR_FILE)
+    back_pointer = _read_text(entry / _GITDIR_FILE)
+    if common_text is None or back_pointer is None:
+        return git_root
+    common = (entry / common_text).resolve()
+    if entry.parent != common / _WORKTREES_DIR:
+        return git_root
+    if (entry / back_pointer).resolve() != dot_git.resolve():
+        return git_root
+    if common.name != _GIT_ENTRY:
+        return git_root if (common / _GIT_ENTRY).exists() else common
+    return common.parent
+
+
+def _read_text(path: Path) -> str | None:
+    """A small git bookkeeping file, stripped; None when it cannot be read."""
+    text: str | None
+    try:
+        text = path.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeDecodeError) as exc:
+        # Claude Code falls back to the checkout's own root on any failure
+        # here; the caller does the same with None.
+        logger.debug("claude_plugins: cannot read %s: %s", path, exc)
+        text = None
+    return text
 
 
 def _read_json_object(path: Path) -> dict[str, Any] | None:

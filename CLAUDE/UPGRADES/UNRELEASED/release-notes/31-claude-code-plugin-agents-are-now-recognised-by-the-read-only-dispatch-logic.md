@@ -18,3 +18,8 @@ The path the size blocker tells an agent to write to now uses `_` in place
 of the `:` in a plugin agent's name. That matches the name the daemon uses
 for the reply it saves itself. User agents and plugins are looked up under
 `$CLAUDE_CONFIG_DIR` when it is set, not always under `~/.claude`.
+
+A plugin installed at project or local scope in a repository's main checkout
+counts as installed in every git worktree of that repository too, as it does
+in Claude Code. Whether it is enabled there is still read from the
+worktree's own settings files.
