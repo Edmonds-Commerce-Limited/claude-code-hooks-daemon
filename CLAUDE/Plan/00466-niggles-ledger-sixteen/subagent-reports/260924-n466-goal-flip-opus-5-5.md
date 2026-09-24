@@ -148,6 +148,120 @@ before each commit.
 2. `84085fa2` — ledger update: PLAN.md row → Remedied, NIGGLES.md N3 Remedy
    paragraph naming commit 1, and the release note.
 3. `04a7ae91` — journal entry for N3 (via `mkplan.bash --journal`).
-4. This report.
+4. `624f859b` — this report, first version.
+5. `6699fbbd` — follow-up 1 (below).
+6. `4813adc8` — follow-up 2 (below).
+7. `52e6d534` — ledger/release-note update for the follow-up.
 
-HEAD SHA at report time: see the commit that adds this file.
+## Follow-up after review
+
+The review accepted the flip-detection design but rejected two things:
+keeping the `error_hiding_exclusions.json` entry, and treating
+`recovery_cron_advisor`'s sibling defect as "only an advisory, leave it".
+
+### 1. Dropped the exclusion, restructured instead (commit `6699fbbd`)
+
+`_head_plan_text` caught `RuntimeError`/`OSError` around
+`ProjectContext.project_root()` and `ValueError`/`OSError` around
+`.relative_to()`, both `return None` on catch — exactly what
+`error_hiding`'s `return-none-on-error` check exists to flag, and my
+original report's own exclusion reason said one branch was "silently
+expected", which is the tell. Restructured per the review's three asks:
+
+- Path membership: `Path.is_relative_to()` instead of a caught
+  `ValueError` from `.relative_to()` — a plain boolean comparison, never an
+  exception.
+- `ProjectContext.project_root()`: called unguarded. It raises only when
+  `ProjectContext` was never initialised, which does not happen on the
+  normal handler-dispatch path (the daemon always initialises it before
+  dispatching any hook event) — so a `RuntimeError` here is a genuine
+  misconfiguration, not a routine "nothing to compare against". Verified
+  against `core/chain.py`'s dispatch loop: every `handler.matches()` /
+  `handler.handle()` call already sits inside a `try/except Exception` that
+  logs and either fails open (non-strict mode, the default) or fails closed
+  with a `SYSTEM ERROR` deny (strict mode) — so letting it propagate is
+  strictly safer than silently returning a wrong answer, and loses no
+  observability (`chain.py` already logs the exception).
+- The git read itself already returned a typed absent answer from git's
+  own exit code (`GitFactsBase.head_file_text`/`_git_output`), never a
+  caught exception — no change needed there.
+
+I extracted the whole lookup to
+`utils.git_facts.project_relative_head_text(file_path: Path) -> str | None`
+rather than leaving it as a `goal_injection`-private method, anticipating
+follow-up 2 needing the identical logic. `error_hiding` now reports 0
+violations for this code, with no exclusion.
+
+Added `TestProjectRelativeHeadText` (4 tests) to
+`tests/unit/utils/test_git_facts.py` for the extracted function itself
+(committed-path, never-committed-path, outside-project-root, and a nested
+path — the last matching `CLAUDE/Plan/NNNNN-name/PLAN.md`'s actual shape).
+
+### 2. Fixed the sibling instead of leaving it (commit `4813adc8`)
+
+`recovery_cron_advisor`'s Write-path completion check
+(`_STATUS_COMPLETE_RE.search(content)` against the whole new file) shared
+the identical state-vs-transition shape my original report described and
+declined to fix. Added `_write_is_real_completion(file_path)`, which calls
+`project_relative_head_text` (the function extracted in follow-up 1) and
+answers `True` only when the plan was NOT already `Complete[d]` at HEAD.
+`_detect_lifecycle_phase`'s Write branch now checks this before returning
+`LifecyclePhase.COMPLETION`; when the content reads Complete but the plan
+already was at HEAD, the event now matches **no phase at all** (it does not
+fall through to PROGRESS/CREATION — there is nothing lifecycle-relevant to
+report, matching `goal_injection`'s "not a flip, so nothing fires" answer
+for the equivalent case).
+
+RED-first: added `TestWriteCompletionIsTransitionBased` (4 tests) to
+`tests/unit/handlers/post_tool_use/test_recovery_cron_advisor.py`. The
+first — rewriting an already-committed Complete plan — failed against the
+pre-fix code (`LifecyclePhase.COMPLETION` instead of the expected `None`)
+and passes after the fix; the other 3 pin the no-repository/new-file and
+never-committed-transition cases, plus that the already-correct Edit path
+is untouched.
+
+This file's `_detect_lifecycle_phase` tests had never needed
+`ProjectContext` before (it is a pure function over `hook_input` in every
+existing test, using hardcoded `/workspace/...` paths with no real
+filesystem or git backing). Since the Write-COMPLETE branch now calls
+`project_relative_head_text`, which calls `ProjectContext.project_root()`
+unguarded, I added one module-level `autouse` fixture mocking
+`project_root` to `tmp_path` for the whole test file. None of the
+pre-existing hardcoded paths fall under that `tmp_path` root, so
+`Path.is_relative_to` answers `False` for every one of them —
+`project_relative_head_text` returns `None` exactly as it would with no
+mock and no repository at all — and every pre-existing assertion is
+unaffected. The real HEAD-comparison scenarios get their own git-backed
+fixture in the new test class, rooted at the same `tmp_path`.
+
+### Targeted QA after the follow-up
+
+```
+./scripts/qa/llm_qa.py format lint type_check pyright magic_values error_hiding docs_qa plan_qa
+```
+
+`QA: 8/8 PASSED` — `error_hiding` now 0 violations with the exclusion
+removed (an intermediate run surfaced one `ARG001` lint warning, an unused
+`new_content` parameter left over from an earlier draft of
+`_write_is_real_completion`; dropped the parameter and re-ran clean, and
+pyright separately flagged a fixture/attribute name collision in the new
+test class — `_root` naming both the fixture method and the instance
+attribute it set — renamed the fixture to `_capture_root`).
+
+Test runs after the follow-up:
+
+- `tests/unit/handlers/post_tool_use/` (whole directory) — 631 passed.
+- `tests/unit/utils/test_git_facts.py` — 18 passed (14 pre-existing + 4
+  new).
+- `tests/unit/handlers/stop/test_goal_ledger_stop_defence.py` +
+  `tests/unit/utils/test_goal_ledger.py` — 26 passed.
+- `tests/unit/plan_qa/test_gitfacts.py` +
+  `tests/integration/test_qa_package_dependency_direction.py` — 31 passed
+  (checked because `git_facts.py` gained a new import,
+  `core.project_context.ProjectContext`; confirms no forbidden `plan_qa`
+  edge and the plan-specific `GitFacts` subclass is unaffected).
+
+Daemon restarted and confirmed `Daemon: RUNNING` before each follow-up
+commit.
+
+HEAD SHA at report time: see the commit that adds this update.
