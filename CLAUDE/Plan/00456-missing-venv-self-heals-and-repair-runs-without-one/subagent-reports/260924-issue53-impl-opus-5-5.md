@@ -335,3 +335,17 @@ QaSuppression, 1 CommentSize), in `test_playbook_harness.py` and
 `test_acceptance_contract.py`. Everything else is green. The journal entry
 at 12:44 and this paragraph are the only changes after the run, and both
 are plan markdown.
+
+**Full QA after merging main (Plan 00458 included)**, on `17024e79`. It
+was one run, 12:46 to 13:08, polled in the foreground, after restarting
+this worktree's daemon, and with no commits or restarts during it.
+
+```
+✅ tests: 25704 passed, 0 failed, 24 skipped | coverage: 95.1%
+QA: 36/36 PASSED
+```
+
+Before the full run, I ran the two acceptance test files on their own
+from this `-venv`-named worktree. They gave 7 passed, which is the
+end-to-end proof that Plan 00458 fixes I5. Task 1.5 and the QA criterion
+are ticked.

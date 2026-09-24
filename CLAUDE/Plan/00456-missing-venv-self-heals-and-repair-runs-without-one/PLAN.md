@@ -93,7 +93,7 @@ as normal.
   environments' `untracked/venv-*`. The same change goes in the deployed
   copy (`.claude/skills/hooks-daemon/scripts/install.sh`) and its template
   (`src/claude_code_hooks_daemon/skills/hooks-daemon/scripts/install.sh`).
-- [ ] ⬜ **Task 1.5**: Docs: `SELF_INSTALL.md`'s self-heal claim, the
+- [x] ✅ **Task 1.5**: Docs: `SELF_INSTALL.md`'s self-heal claim, the
   venv-missing guidance, and a release note. Full QA green.
 
 ### Phase 2: Deliver
@@ -119,7 +119,9 @@ as normal.
 - [x] Test: the skill's `install.sh` never escalates to `--force` without
   the flag, and a flagged `--force` keeps another environment's `venv-*`.
   (`tests/integration/test_skill_install_never_auto_forces.py`)
-- [ ] Full QA passes and CI is green.
+- [x] Full QA passes and CI is green. (`llm_qa.py all` gave 36/36 on the
+  merged branch head `17024e79`; the branch CI is confirmed at the Task 2.1
+  merge.)
 - [x] Every release-bound consequence is in the pending-release holding
   area: `UNRELEASED/release-notes/06-a-missing-venv-now-builds-itself-and-repair-works-without-one.md`
   (no post-upgrade task: nothing an upgrading client must act on).
