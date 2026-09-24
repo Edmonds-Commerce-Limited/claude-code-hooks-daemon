@@ -1052,6 +1052,247 @@ class TestDirectoryContainsProtected:
         )
         assert result is None
 
+    def test_exempt_file_is_skipped(self, tmp_path: Path) -> None:
+        """Plan 00459: a protected file confirmed encrypted does not flag its tree."""
+        (tmp_path / "vault_passwords.yml").write_text("x\n")
+        exempt = str(tmp_path / "vault_passwords.yml")
+        result = sfm.directory_contains_protected(
+            str(tmp_path), sfm.DEFAULT_PROTECTED_PATTERNS, is_exempt=lambda p: p == exempt
+        )
+        assert result is None
+
+    def test_exempt_file_beside_a_plaintext_one_still_flags(self, tmp_path: Path) -> None:
+        (tmp_path / "vault_passwords.yml").write_text("x\n")
+        (tmp_path / ".vault-pass").write_text("x\n")
+        exempt = str(tmp_path / "vault_passwords.yml")
+        result = sfm.directory_contains_protected(
+            str(tmp_path), sfm.DEFAULT_PROTECTED_PATTERNS, is_exempt=lambda p: p == exempt
+        )
+        assert result == ".vault-pass*"
+
+
+class TestIterProtectedMentions:
+    """Plan 00459: every mention, not just the first, so each can be confirmed."""
+
+    def test_yields_every_mentioned_token_in_order(self) -> None:
+        command = "git add group_vars/all/vault_passwords.yml .vault-pass README.md"
+        mentions = list(sfm.iter_protected_mentions(command, sfm.DEFAULT_PROTECTED_PATTERNS))
+        assert [token for _pattern, token in mentions] == [
+            "group_vars/all/vault_passwords.yml",
+            ".vault-pass",
+        ]
+
+    def test_one_mention_per_token(self) -> None:
+        """A token matching two globs is still ONE mention to confirm."""
+        mentions = list(
+            sfm.iter_protected_mentions("cat x.secret.vault_pass", sfm.DEFAULT_PROTECTED_PATTERNS)
+        )
+        assert len(mentions) == 1
+
+    def test_detail_is_the_first_mention(self) -> None:
+        command = "cat .vault-pass group_vars/all/vault_passwords.yml"
+        first = next(sfm.iter_protected_mentions(command, sfm.DEFAULT_PROTECTED_PATTERNS))
+        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) == first
+
+    def test_no_mentions(self) -> None:
+        assert not list(sfm.iter_protected_mentions("git status", sfm.DEFAULT_PROTECTED_PATTERNS))
+
+
+_CWD = "/proj"
+_ENC = "group_vars/all/vault_passwords.yml"
+_ENC_TEMPLATE = "templates/app.secrets"
+_ENCRYPTED = frozenset({f"{_CWD}/{_ENC}", f"{_CWD}/{_ENC_TEMPLATE}"})
+
+
+def _encrypted_ok(command: str, *, cwd: str | None = _CWD) -> bool:
+    return sfm.is_encrypted_target_invocation(
+        command,
+        sfm.DEFAULT_PROTECTED_PATTERNS,
+        cwd=cwd,
+        is_encrypted=lambda path: path in _ENCRYPTED,
+    )
+
+
+class TestEncryptedTargetInvocationAllows:
+    """Plan 00459: naming a confirmed-encrypted file in a command that cannot decrypt it."""
+
+    def test_git_add(self) -> None:
+        assert _encrypted_ok(f"git add {_ENC}")
+
+    def test_git_add_two_encrypted_files(self) -> None:
+        assert _encrypted_ok(f"git add {_ENC} {_ENC_TEMPLATE}")
+
+    def test_git_commit_naming_it(self) -> None:
+        assert _encrypted_ok(f"git commit -m 'Rotate the database password' -- {_ENC}")
+
+    def test_git_status_mv_rm(self) -> None:
+        assert _encrypted_ok(f"git status --short {_ENC}")
+        assert _encrypted_ok(f"git mv {_ENC} group_vars/all/renamed.yml")
+        assert _encrypted_ok(f"git rm {_ENC}")
+
+    def test_git_add_force_flag(self) -> None:
+        assert _encrypted_ok(f"git add -f {_ENC}")
+
+    def test_git_commit_all_with_message(self) -> None:
+        assert _encrypted_ok(f"git commit -am 'x' {_ENC}")
+
+    def test_plain_readers(self) -> None:
+        for head in ("cat", "head -n 3", "tail -n 3", "wc -c", "ls -l", "stat", "file"):
+            assert _encrypted_ok(f"{head} {_ENC}"), head
+        assert _encrypted_ok(f"cp {_ENC} backup.yml")
+        assert _encrypted_ok(f"mv {_ENC} group_vars/all/renamed.yml")
+
+    def test_quoted_whole_word(self) -> None:
+        assert _encrypted_ok(f"cat '{_ENC}'")
+        assert _encrypted_ok(f'cat "{_ENC}"')
+
+    def test_plain_redirections(self) -> None:
+        assert _encrypted_ok(f"cat {_ENC} 2>&1")
+        assert _encrypted_ok(f"cat {_ENC} > copy.txt")
+
+    def test_absolute_path_needs_no_cwd(self) -> None:
+        assert _encrypted_ok(f"cat {_CWD}/{_ENC}", cwd=None)
+
+    def test_dot_slash_spelling(self) -> None:
+        assert _encrypted_ok(f"git add ./{_ENC}")
+
+
+class TestEncryptedTargetInvocationDenies:
+    """Every shape the exemption must NOT unlock."""
+
+    def test_no_mention_is_not_an_exemption(self) -> None:
+        assert not _encrypted_ok("git status")
+
+    def test_plaintext_protected_file_beside_the_encrypted_one(self) -> None:
+        assert not _encrypted_ok(f"git add {_ENC} .vault-pass")
+
+    def test_decrypted_or_missing_file(self) -> None:
+        assert not _encrypted_ok("cat group_vars/prod/vault_passwords.yml")
+
+    def test_relative_token_without_a_cwd(self) -> None:
+        assert not _encrypted_ok(f"cat {_ENC}", cwd=None)
+        assert not _encrypted_ok(f"cat {_ENC}", cwd="proj")
+
+    def test_commands_that_can_decrypt(self) -> None:
+        """Ansible finds the vault password from config without the command naming it."""
+        for command in (
+            f"ansible-vault view {_ENC}",
+            f"ansible-vault decrypt {_ENC}",
+            f"ansible-vault decrypt --output - {_ENC}",
+            f"ansible-vault edit {_ENC}",
+            f"EDITOR=cat ansible-vault edit {_ENC}",
+            f"ansible localhost -m debug -a var=db_password -e @{_ENC}",
+            f"ansible-playbook site.yml -e @{_ENC}",
+            f"ansible-inventory --list -e @{_ENC}",
+            f"python3 decrypt.py {_ENC}",
+            f"git diff {_ENC}",
+            f"git log -p {_ENC}",
+            f"git show HEAD:{_ENC}",
+            f"git blame {_ENC}",
+            f"git grep -e x -- {_ENC}",
+            f"git cat-file --textconv HEAD:{_ENC}",
+        ):
+            assert not _encrypted_ok(command), command
+
+    def test_wrappers_and_path_spelled_heads(self) -> None:
+        for command in (
+            f"sh -c 'cat {_ENC}'",
+            f"env cat {_ENC}",
+            f"command cat {_ENC}",
+            f"sudo cat {_ENC}",
+            f"xargs cat {_ENC}",
+            f"/bin/cat {_ENC}",
+            f"./cat {_ENC}",
+            f"LESSOPEN=x cat {_ENC}",
+        ):
+            assert not _encrypted_ok(command), command
+
+    def test_grep_is_not_covered(self) -> None:
+        """`grep -r` reads a whole tree; the named encrypted file must not vouch for it."""
+        assert not _encrypted_ok(f"grep -c ANSIBLE {_ENC}")
+        assert not _encrypted_ok(f"grep -r password {_ENC} .")
+
+    def test_git_global_options(self) -> None:
+        for command in (
+            f"git -C sub add {_ENC}",
+            f"git -c core.hooksPath=h add {_ENC}",
+            f"git --no-pager add {_ENC}",
+            f"git --git-dir=other/.git add {_ENC}",
+        ):
+            assert not _encrypted_ok(command), command
+
+    def test_git_flags_that_render_a_diff(self) -> None:
+        for command in (
+            f"git add -p {_ENC}",
+            f"git add --patch {_ENC}",
+            f"git add -i {_ENC}",
+            f"git add --interactive {_ENC}",
+            f"git add -e {_ENC}",
+            f"git commit -v -m x {_ENC}",
+            f"git commit --verbose -m x {_ENC}",
+            f"git commit -e -m x {_ENC}",
+            f"git status -v {_ENC}",
+            f"git commit -vm x {_ENC}",
+        ):
+            assert not _encrypted_ok(command), command
+
+    def test_compound_commands(self) -> None:
+        for command in (
+            f"git add {_ENC} && git commit -m x",
+            f"git add {_ENC}; cat .vault-pass",
+            f"cat {_ENC} | grep x",
+            f"cat {_ENC} || true",
+            f"cat {_ENC} & cat other",
+            f"(cat {_ENC})",
+            f"cat {_ENC}\ncat .vault-pass",
+            f"cat {_ENC} |& cat",
+        ):
+            assert not _encrypted_ok(command), command
+
+    def test_a_directory_change_before_the_read(self) -> None:
+        """The token resolves under cwd; the shell would open it somewhere else."""
+        assert not _encrypted_ok(f"cd inventories/staging && cat {_ENC}")
+        assert not _encrypted_ok(f"cd inventories/staging; cat {_ENC}")
+
+    def test_expansions_anywhere_in_the_command(self) -> None:
+        for command in (
+            f"cat $HOME/{_ENC}",
+            f'cat "$D"{_ENC}',
+            f"cat ${{D}}/{_ENC}",
+            f"cat `pwd`/{_ENC}",
+            f"cat $(pwd)/{_ENC}",
+            f"cat ~/{_ENC}",
+            f"cat \\\n {_ENC}",
+            f"cat {_ENC} other\\ file",
+            f"cat {{{_ENC},.vault-pass}}",
+            f"cat {_ENC} x*",
+            "cat group_vars/all/vault_pass*",
+            "cat group_vars/all/vault_passwords.y?l",
+            "cat group_vars/all/vault_passwords.[y]ml",
+        ):
+            assert not _encrypted_ok(command), command
+
+    def test_token_not_a_whole_shell_word(self) -> None:
+        for command in (
+            'cat "group_vars/"all/vault_passwords.yml',
+            f"cat x{_ENC}",
+            f"git commit -m 'update {_ENC}'",
+            f"git add --pathspec-from-file={_ENC}",
+            f"cat -{_ENC}",
+        ):
+            assert not _encrypted_ok(command), command
+
+    def test_process_substitution_and_here_strings(self) -> None:
+        assert not _encrypted_ok(f"cat <(cat {_ENC})")
+        assert not _encrypted_ok(f"cat {_ENC} >(cat)")
+        assert not _encrypted_ok(f"cat {_ENC} <<< x")
+
+    def test_redirect_into_a_plaintext_protected_name(self) -> None:
+        assert not _encrypted_ok(f"cat {_ENC} > copy.secret")
+
+    def test_unparseable_quoting(self) -> None:
+        assert not _encrypted_ok(f"cat '{_ENC}")
+
 
 class TestResolveConfiguredPatterns:
     """Plan 00272 Task 4-5: the shared cross-handler pattern resolver."""
