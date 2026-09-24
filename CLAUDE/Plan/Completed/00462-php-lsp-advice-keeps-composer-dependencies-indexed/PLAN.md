@@ -1,6 +1,6 @@
 # Plan 00462: php lsp advice keeps composer dependencies indexed
 
-**Status**: Not Started
+**Status**: Complete
 **Created**: 2026-09-24
 **Owner**: dev
 **Priority**: High
@@ -59,11 +59,11 @@ confirms this with sources rather than by assumption.
 
 ### Phase 1: TDD in a worktree
 
-- [ ] ⬜ **Task 1.1**: For each strategy, record with sources whether that
+- [x] ✅ **Task 1.1**: For each strategy, record with sources whether that
   server's exclude setting removes files from import/type resolution or
   only from checking. Record it in the journal. If another language has the
   same defect, add it to this plan's scope.
-- [ ] ⬜ **Task 1.2**: RED tests.
+- [x] ✅ **Task 1.2**: RED tests.
   - The PHP no-override snippet contains no bare `**/vendor`, and does
     contain the nested entries.
   - An override with intelephense's defaults plus the plain trees gives no
@@ -72,28 +72,31 @@ confirms this with sources rather than by assumption.
   - A test checks that the `**/vendor` substitution is keyed to that
     language's dependency directory and is not a hard-coded string
     special case.
-- [ ] ⬜ **Task 1.3**: Implementation. The language strategy decides which
+- [x] ✅ **Task 1.3**: Implementation. The language strategy decides which
   shared required names are dependency roots it must keep indexed (the
   handler stays language-free, per the module's CLAUDE.md). Update the
   PHP strategy docstring, handler guidance and `explain-handler` text.
   Write a release note that tells a PHP project to remove `**/vendor` from
   an override that followed the old advice.
-- [ ] ⬜ **Task 1.4**: Full QA green. Restart the worktree daemon first.
+- [x] ✅ **Task 1.4**: Full QA green. Restart the worktree daemon first.
 
 ### Phase 2: Deliver
 
-- [ ] ⬜ **Task 2.1**: Merge `--no-ff`, verify ancestry and CI, and restart
+- [x] ✅ **Task 2.1**: Merge `--no-ff`, verify ancestry and CI, and restart
   the daemon.
-- [ ] ⬜ **Task 2.2**: Comment on #56 with the fix and the client action,
+- [x] ✅ **Task 2.2**: Comment on #56 with the fix and the client action,
   and close it.
 
 ## Success Criteria
 
-- [ ] Following the PHP advice exactly leaves `vendor/` indexed, apart from
+- [x] Following the PHP advice exactly leaves `vendor/` indexed, apart from
   its nested test and vendor trees.
-- [ ] An override excluding the whole of `vendor/` is flagged, and the flag
+- [x] An override excluding the whole of `vendor/` is flagged, and the flag
   names the fix.
-- [ ] Full QA passes and CI is green.
+- [x] Full QA passes and CI is green.
+- [x] Every release-bound consequence is in the pending-release holding
+  area: `UNRELEASED/release-notes/12-php-lsp-advice-no-longer-tells-you-to-exclude-vendor.md`
+  and `UNRELEASED/post-upgrade-tasks/01-remove-vendor-from-a-php-intelephense-override.md`.
 
 ## Delivery & Milestones
 
@@ -101,4 +104,5 @@ confirms this with sources rather than by assumption.
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00462-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- Not yet delivered.
+- Delivered in merge `830363e5` (branch head `ec3282c5`, full QA 37/37);
+  CI green at `6359ad0c`. #56 closed with the client action.

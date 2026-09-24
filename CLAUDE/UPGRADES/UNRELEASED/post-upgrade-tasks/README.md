@@ -85,9 +85,9 @@ This file's lower half should list the tasks currently in this directory, so an 
 
 <!-- BEGIN TASK INDEX — regenerate when adding/removing tasks -->
 
-_No tasks are queued for the next release._ Add a row here when you add a task
-file beside this README; the release moves both out into the versioned upgrade
-guide and empties this table again.
+| File                                                   | Type  | Severity    | Applies to                                                                              | One-line summary                                                                                                                |
+| ------------------------------------------------------ | ----- | ----------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `01-remove-vendor-from-a-php-intelephense-override.md` | audit | recommended | PHP projects whose intelephense override followed the old `R-LSP-CONFIG-EXCLUDE` advice | Remove a bare `**/vendor` exclude entry, which undefines every Composer-installed type; use the printed nested entries instead. |
 
 <!-- END TASK INDEX -->
 
