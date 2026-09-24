@@ -3,6 +3,34 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
+### N11 — any exception in `secret_file_guard.matches()` lets the call through unless `strict_mode` is on
+
+**Found by the 00466 review** (major M4, `subagent-reports/260924-n466-review-opus-5-5.md`). N5's crash was the second time an exception in this guard's `matches()` skipped the guard entirely; Plan 00357 was the first. Under the default `strict_mode: false` the chain logs the exception and allows the call. This repository runs `strict_mode: true`, so here the crash denied, but a client on the defaults fails open. One raise path is still live after N5, though it isn't exploitable: a file path containing a NUL byte.
+
+**Candidate remedy:** make the guard structurally fail closed. A raise anywhere in its match or route computation becomes a deny naming the internal error, whatever the global `strict_mode`, because a protected-read guard that fails open is worse than a false deny. Pin it with a test that injects an exception at each stage. Then audit the other security guards that should behave the same (`sensitive_content`, `project_containment`, the destructive-git rules) and decide each one explicitly.
+
+### N10 — a wildcard in the middle of a protected filename gets past `secret_file_guard`
+
+**Found by the 00466 review** as a pre-existing problem on main, security-relevant. `cat .vault-pas?word` and `cat prod.vault-passw*rd` name a protected file through a glob the shell expands, and the guard does not deny them. The mention scan handles a leading or trailing wildcard (the N4 overlap logic), but not a `?`, `*` or `[...]` inside the name.
+
+**Candidate remedy:** treat any shell-glob token as a pattern, and deny when the pattern could match a protected name. Compare against the protected basenames and stems, or expand it against the directory when that exists. Keep it no looser than the N4 rule. RED tests: interior `?`, `*` and bracket globs of each shipped protected pattern are denied, while unrelated globs such as `*.py` and `src/*.md` are allowed.
+
+### N9 — `docs_qa` judges gitignored markdown, so installing a Claude Code plugin fails local full QA
+
+**Found by the coordinator** right after installing the Defence Before Fix plugin at project scope (Plan 00467). In this container Claude Code's config directory is `.claude/ccy/`, so the plugin's cache (`.claude/ccy/plugins/cache/...`) and marketplace clone (`.claude/ccy/plugins/marketplaces/...`) land inside the repository. Both are gitignored (`.claude/ccy/.gitignore:3: *`). `llm_qa.py docs_qa` then reported 12 `source-tree-markdown` findings, one per vendored spec file, and the tool FAILED. It reported 0 findings at batch A's gate, before the install. CI does not see this, because a fresh checkout has no `.claude/ccy/`. Every local full QA run, including the coordinator's integration gate, now fails on files that are not part of the project.
+
+The docs corpus walks the filesystem without honouring `.gitignore` (`docs_qa/corpus.py`; it already special-cases `.claude/ccy/CLAUDE.md`, lines 149 and 421).
+
+**Candidate remedy:** the corpus considers only tracked files plus untracked files that are NOT ignored, i.e. `git ls-files --cached --others --exclude-standard`, with a defined fallback outside a git repository. Keep any deliberate inclusion that is ignored but meant to be scanned explicit and named. RED test: a gitignored markdown file under a source-like directory produces no finding, and a tracked one still does. Audit the other QA corpora (plan_qa, doc_snippets, doc_truth, repo_hygiene, sensitive_content, british_english) for the same filesystem-walk assumption, and pin the class.
+
+### N8 — `reference_repo_freshness` says BLOCKED on a call it allows
+
+**Found by the coordinator.** A Read of a fresh clone under `untracked/repos/` was denied (`R-REFERENCE-REPO-NOT-VERIFIED`), as the default `block_once` posture intends. The next command that named that clone, a `mv` moving it to `untracked/work/`, RAN. Its hook context still opened with `BLOCKED [R-REFERENCE-REPO-NOT-VERIFIED]: a read of a governed reference clone...`.
+
+`_verdict()` (`handlers/pre_tool_use/reference_repo_freshness.py:575-576`) returns `GatingResult(decision=Decision.ALLOW, context=[message])` for a repeat in `block_once` mode, and for `advise` mode at :565. `message` is the verbose DENY rendering (`self._formatter.verbose(rule)`), which starts with `BLOCKED`. An agent reading its context is therefore told a call was blocked when it ran. It either retries something that already happened, or learns that "BLOCKED" means nothing.
+
+**Candidate remedy:** the allow paths render the advisory form of the rule (no `BLOCKED` prefix, same detail and fix line). Pin it with a test for each mode (`advise`, a `block_once` repeat): an ALLOW result's context never contains the deny headline. Then audit every other handler that returns `Decision.ALLOW` with a context built by the verbose deny formatter (`block_once` handlers especially, such as `lsp_enforcement`), and pin the class with a test that walks every handler's acceptance tests or allow paths.
+
 ### N7 — the regenerated CLAUDE.md guidance block is not deterministic, so every daemon restart can commit a reorder
 
 **Found by the coordinator** at the batch A merge. The integration worktree's daemon had just regenerated CLAUDE.md, and that result was committed. The main checkout's daemon then restarted on the same tree and auto-committed `ce31d6d8` ("Auto: hooks daemon regenerated CLAUDE.md handler guidance"). The commit changed 18 lines both ways. Every change is the same handler markers in a new order: `tool-disable-advisor`, `project-handler-load-checker`, `hook-registration-checker`, `routine-qa-sweep` and `secret-file-hygiene-checker` among them. The earlier 00462 merge restart committed `6359ad0c`, changing 83 lines both ways, with the same shape.
@@ -24,10 +52,8 @@ different event chains are mixed into one flat CLAUDE.md tier where
 priority carries no meaningful cross-event-type ordering. `daemon/ controller.py`'s handler collection was reading the chain's private,
 unsorted `_handlers` list instead of its public `handlers` property (which
 already sorts by `(priority, name)` on access, the same pattern
-`EventRouter.get_all_handlers()` uses) — fixed to use `chain.handlers`, a
-defence-in-depth fix at the layer the ordering actually originates from
-(`HandlerRegistry.discover()`'s `pkgutil.walk_packages()` filesystem scan,
-whose directory order is not guaranteed). `TestGuidanceOrderIsIndependentOfDiscoveryOrder`
+`EventRouter.get_all_handlers()` uses) — fixed to use `chain.handlers`.
+`TestGuidanceOrderIsIndependentOfDiscoveryOrder`
 (4 tests, RED against the pre-fix code) asserts forward- and
 reverse-ordered handler lists inject byte-identical `<hooksdaemon>`
 blocks. The sibling tie in `.claude/HOOKS-DAEMON.md` generation
@@ -37,6 +63,20 @@ sort by `(priority, config_key)`, pinned by
 `test_same_priority_handlers_are_order_independent` (1 test, RED against
 the pre-fix code). Verified idempotent: `regenerate-docs` run twice in a
 row produces the identical diff both times.
+
+**Correction (00466 review, minor m6):** the commit message and the
+paragraph above blamed `pkgutil.walk_packages()` for the unsorted input.
+That is wrong — `pkgutil` sorts `os.listdir` output internally
+(`_iter_file_finder_modules` calls `filenames.sort()`). The real unsorted
+source is `HandlerRegistry`'s two `event_dir.glob("*.py")` loops
+(`handlers/registry.py:467` and `:511`), which iterate in `os.scandir`
+order; a third loop in the same file (line 198) already wraps its glob in
+`sorted(...)`. The injector-level and docs_generator-level sorts above
+still make each rendered artefact a pure function of the handler set on
+their own — this correction is to the narrative, not to the fix's
+soundness. Both `registry.py` glob loops are now wrapped in `sorted(...)`
+too, so discovery order is deterministic at its source as well as at
+every rendering layer.
 
 ### N3 — `goal_injection` treats any edit of an In Progress plan as the plan starting, and displaces the live goal
 

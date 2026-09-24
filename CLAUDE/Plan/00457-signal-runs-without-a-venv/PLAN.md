@@ -71,8 +71,13 @@ commands can be added. `signal` becomes the second command it handles.
   resolution, using Plan 00456's mechanism. When a venv does resolve, the
   normal path stays as it is. State the minimum `python3` version the
   entry point needs and check for it.
-- [ ] ⬜ **Task 1.4**: Docs for the operator-signal channel and a release
-  note. Full QA green.
+- [x] ✅ **Task 1.4**: Docs for the operator-signal channel and a release
+  note. Full QA green. Added a "Runs without a venv" section to the
+  canonical doc, `CLAUDE/Architecture/OperatorSignals.md`, covering the
+  minimum `python3` version, the before-venv-resolution dispatch, and the
+  `resolve_venv_python` fallback caveat (linked to
+  [00466 N1](../00466-niggles-ledger-sixteen/NIGGLES.md)). Release note:
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/07-the-operator-signal-channel-now-runs-without-a-venv.md`.
 
 ### Phase 2: Deliver
 
