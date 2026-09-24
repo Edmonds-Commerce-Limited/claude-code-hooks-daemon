@@ -399,6 +399,8 @@ Either form in your `STOPPING BECAUSE:` line records a marker that makes the dae
 
 <!-- handler: block-ask-user-question -->
 
+<!-- handler: subagent-full-qa-blocker -->
+
 <!-- handler: block-comment-size -->
 
 <!-- handler: verification-result-gate -->
@@ -489,6 +491,7 @@ Either form in your `STOPPING BECAUSE:` line records a marker that makes the dae
 | R-PIP-BREAK-SYSTEM-PACKAGES        | `pip install --break-system-packages`                                                                                                                | Bypasses PEP 668 protection and can corrupt the system Python installation                                                                                                                        | Use a virtual environment or `pip install --user` instead                                                                |
 | R-SUDO-PIP-INSTALL                 | `sudo pip install`                                                                                                                                   | Conflicts with the OS package manager and can corrupt system Python                                                                                                                               | Use a virtual environment or `pip install --user` instead                                                                |
 | R-ASK-USER-QUESTION-UNJUSTIFIED    | AskUserQuestion while running unattended                                                                                                             | Nobody is reading this session, so a question waits for an answer that never comes                                                                                                                | Choose the option you would have recommended, state the assumption in your output text, and continue                     |
+| R-SUBAGENT-FULL-QA                 | a full-suite QA run inside a sub-agent (a declared `full_qa_patterns` command)                                                                       | Concurrent full runs across agents exhaust the host, and the coordinator runs the full gate before every merge anyway                                                                             | Run targeted QA on what you changed, commit, and hand the commit to the coordinator                                      |
 | R-COMMENT-SIZE                     | a comment growing past its configured size limit                                                                                                     | Comments should describe current state, not accumulate                                                                                                                                            | Shorten the comment, or declare MUST_EXCEED_COMMENT_SIZE_BECAUSE                                                         |
 | R-VERIFICATION-RESULT-NOT-CONSUMED | a verifier followed by a mutator with nothing consuming the result                                                                                   | The verifier can fail and the mutator would still run                                                                                                                                             | Gate with `&&`, an explicit exit-code check, or `set -euo pipefail`                                                      |
 | R-BASH-SAFE-MODE-PRELUDE-MISSING   | a sequenced Bash invocation with no `set` safety prelude                                                                                             | Errors in earlier statements can be silently ignored                                                                                                                                              | Add `set -euo pipefail` at the top, or gate explicitly with `&&`/\`                                                      |
@@ -555,6 +558,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - flaggable_work_advisor — delegate flaggable work BEFORE reading it
 
+<!-- handler: background-process-tracker -->
+
+- background_process_tracker — backgrounded processes are tracked
+
 <!-- handler: budget-exhaustion-detector -->
 
 - budget_exhaustion_detector — hidden agent budgets are surfaced
@@ -591,10 +598,6 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - recovery_cron_advisor — failsafe recovery cron lifecycle advisory
 
-<!-- handler: background-process-tracker -->
-
-- background_process_tracker — backgrounded processes are tracked
-
 <!-- handler: ccy-supervisor-integrity -->
 
 - ccy_supervisor_integrity — keep the ccy supervisor properly set up
@@ -610,6 +613,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 <!-- handler: git-upstream-checker -->
 
 - git_upstream_checker — additive fetch + pull/cleanup advice on session start
+
+<!-- handler: hook-registration-checker -->
+
+- hook_registration_checker — hooks configuration policy
 
 <!-- handler: model-fallback-detector -->
 
@@ -627,25 +634,13 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - plan_workflow_asset_checker — plan tooling provisioning alert
 
-<!-- handler: reference-repo-sweep -->
-
-- reference_repo_sweep — reference clones are made fresh before you read them
-
-<!-- handler: tool-disable-advisor -->
-
-- tool_disable_advisor — declared never-want tools are checked at session start
-
 <!-- handler: project-handler-load-checker -->
 
 - project_handler_load_checker — project protection degraded alert
 
-<!-- handler: hook-registration-checker -->
+<!-- handler: reference-repo-sweep -->
 
-- hook_registration_checker — hooks configuration policy
-
-<!-- handler: session-actions-directive -->
-
-- session_actions_directive — the must-do list is delivered as a turn
+- reference_repo_sweep — reference clones are made fresh before you read them
 
 <!-- handler: routine-qa-sweep -->
 
@@ -654,6 +649,14 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 <!-- handler: secret-file-hygiene-checker -->
 
 - secret_file_hygiene_checker -- on-disk hygiene for protected paths
+
+<!-- handler: session-actions-directive -->
+
+- session_actions_directive — the must-do list is delivered as a turn
+
+<!-- handler: tool-disable-advisor -->
+
+- tool_disable_advisor — declared never-want tools are checked at session start
 
 <!-- handler: idle-housekeeping-advisory -->
 
@@ -671,10 +674,6 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - cron_stop_enforcer — declared crons are verified, not just asked for
 
-<!-- handler: subagent-report-size-blocker -->
-
-- subagent_report_size_blocker — write large reports to a file
-
 <!-- handler: cron-subagent-stop-enforcer -->
 
 - cron_subagent_stop_enforcer — SubagentStop twin of `cron_stop_enforcer`
@@ -682,6 +681,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 <!-- handler: subagent-report-path-verifier -->
 
 - subagent_report_path_verifier — a claimed report path must exist
+
+<!-- handler: subagent-report-size-blocker -->
+
+- subagent_report_size_blocker — write large reports to a file
 
 <!-- handler: worktree-create -->
 
