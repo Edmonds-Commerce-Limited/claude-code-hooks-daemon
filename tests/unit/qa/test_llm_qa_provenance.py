@@ -100,11 +100,13 @@ class TestStaleReason:
 class TestTheRecord:
     def test_a_run_records_the_tree_each_tool_judged(self, tmp_path: Path) -> None:
         state = {"head": _HEAD, "tree_digest": "d1"}
-        output = tmp_path / "out.json"
-        first = llm_qa.run_record(state, exit_code=0, passed=True, output=output)
+        first = llm_qa.run_record(state, exit_code=0, passed=True, output_sha256=None)
         llm_qa.record_provenance(tmp_path, {"lint": first, "format": first})
         second = llm_qa.run_record(
-            {"head": _OTHER_HEAD, "tree_digest": "d2"}, exit_code=0, passed=True, output=output
+            {"head": _OTHER_HEAD, "tree_digest": "d2"},
+            exit_code=0,
+            passed=True,
+            output_sha256=None,
         )
         llm_qa.record_provenance(tmp_path, {"lint": second})
         recorded = llm_qa.read_provenance(tmp_path)
@@ -115,7 +117,10 @@ class TestTheRecord:
         output = tmp_path / "out.json"
         output.write_text("{}", encoding="utf-8")
         record = llm_qa.run_record(
-            {"head": _HEAD, "tree_digest": "d1"}, exit_code=3, passed=False, output=output
+            {"head": _HEAD, "tree_digest": "d1"},
+            exit_code=3,
+            passed=False,
+            output_sha256=llm_qa.output_digest(output),
         )
         assert record["exit_code"] == 3
         assert record["passed"] is False
@@ -240,6 +245,39 @@ class TestARunCertifiesOnlyWhatItProduced:
         capsys.readouterr()
         assert llm_qa._run_tools([_TOOL], read_only=True) != llm_qa.EXIT_SUCCESS
         assert "not the one that run wrote" in capsys.readouterr().out
+
+    def test_a_report_a_later_tool_rewrites_is_not_certified(
+        self, qa_dir: Path, monkeypatch: pytest.MonkeyPatch, capsys: Any
+    ) -> None:
+        """Review 3 R8: the hash was taken after EVERY tool, so a rewrite was certified."""
+        first_report = qa_dir / llm_qa.TOOL_REGISTRY[_TOOL].json_file
+
+        def run_tool(name: str, extra_args: Any = ()) -> int:
+            if name == _TOOL:
+                first_report.write_text(json.dumps(_GREEN), encoding="utf-8")
+            else:
+                first_report.write_text(json.dumps({**_GREEN, "rewritten": 1}), encoding="utf-8")
+                (qa_dir / llm_qa.TOOL_REGISTRY[name].json_file).write_text(
+                    json.dumps(_GREEN), encoding="utf-8"
+                )
+            return 0
+
+        monkeypatch.setattr(llm_qa, "run_tool", run_tool)
+        llm_qa._run_tools([_TOOL, "lint"], read_only=False)
+        capsys.readouterr()
+        assert llm_qa._run_tools([_TOOL], read_only=True) != llm_qa.EXIT_SUCCESS
+        assert "not the one that run wrote" in capsys.readouterr().out
+
+    def test_a_recorded_failure_never_reads_as_a_pass(self, qa_dir: Path, capsys: Any) -> None:
+        """Review 3 R8: ``passed`` was recorded and never read."""
+        report = qa_dir / llm_qa.TOOL_REGISTRY[_TOOL].json_file
+        report.write_text(json.dumps(_GREEN), encoding="utf-8")
+        record = llm_qa.run_record(
+            _run_state(), exit_code=0, passed=False, output_sha256=llm_qa.output_digest(report)
+        )
+        llm_qa.record_provenance(qa_dir, {_TOOL: record})
+        assert llm_qa._run_tools([_TOOL], read_only=True) != llm_qa.EXIT_SUCCESS
+        assert "did not pass" in capsys.readouterr().out
 
     def test_a_tree_that_changes_during_the_run_is_said_at_the_time(
         self, qa_dir: Path, monkeypatch: pytest.MonkeyPatch, capsys: Any

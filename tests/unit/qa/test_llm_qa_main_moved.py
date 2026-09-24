@@ -1,24 +1,32 @@
-"""``llm_qa.py main-moved``: may a batch skip a second full run? (Plan 00463).
+"""``llm_qa.py main-moved``: what must re-run when ``main`` moves during a batch (Plan 00463).
 
 The coordinator's batched gate runs the full suite once on an integration
 branch built from ``main``. If ``main`` moves before the fast-forward, the
-green run no longer covers what would land. Re-running twenty minutes of full
-QA because a ledger row landed on ``main`` is exactly the waste the owner
-asked to stop, so a DOCS-ONLY move re-runs only the cheap doc checks.
+green run no longer covers what would land, and re-running the whole suite
+for a ledger row is the waste the owner asked to stop. The verdict decides
+what must re-run instead, and it is a checked mechanism, not a judgement:
 
-What counts as docs-only must be a checked mechanism, not a judgement, so the
-path set lives in ``llm_qa.py`` alone and every boundary is pinned here:
+- ``docs-only``: every moved path is a document no test reads (the
+  ``changed_tests`` mapper, never a second copy of it, says which tests read
+  a file). Only the doc tools re-run.
+- ``targeted``: moved documents that tests DO read (review 3 R1: the plan
+  index, handler guide, lifecycle docs...). ``llm_qa.py changed`` re-runs
+  over exactly the moved range.
+- ``full-gate``: code, a symlink, anything the mapper cannot target, and the
+  runtime-read set (root ``CLAUDE.md``, ``CHANGELOG.md``, ``.claude/**``,
+  ``RELEASES/**``, ``CLAUDE/UPGRADES/**``), which runtime code reads.
 
-- a file inside a numbered plan folder, or
-- a ``.md`` file outside ``src/``, ``tests/`` and ``scripts/``.
-
-The plan directory's own root is NOT docs-only: ``mkplan.bash`` and
-``_planlib.inc.bash`` live there, and they are executed code with tests.
+The batch base is recorded durably in a git ref (review 3 R2: a shell
+variable does not survive between Bash calls), and it advances only when the
+recheck the verdict names has PASSED on the merged head, so the loop ends and
+the next check sees only newer movement.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import importlib.util
+import json
 import os
 import subprocess
 import sys
@@ -32,10 +40,10 @@ from claude_code_hooks_daemon.constants.timeout import Timeout
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
-def _load_llm_qa() -> Any:
-    """Import ``scripts/qa/llm_qa.py``, which is a script rather than a module."""
-    module_path = PROJECT_ROOT / "scripts" / "qa" / "llm_qa.py"
-    spec = importlib.util.spec_from_file_location("llm_qa_main_moved_under_test", module_path)
+def _load(script: str, name: str) -> Any:
+    """Import a file under ``scripts/qa/``, which is a script rather than a module."""
+    module_path = PROJECT_ROOT / "scripts" / "qa" / script
+    spec = importlib.util.spec_from_file_location(name, module_path)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"cannot load {module_path}")
     module = importlib.util.module_from_spec(spec)
@@ -44,77 +52,228 @@ def _load_llm_qa() -> Any:
     return module
 
 
-llm_qa = _load_llm_qa()
+llm_qa = _load("llm_qa.py", "llm_qa_main_moved_under_test")
+changed_tests = _load("run_changed_tests.py", "run_changed_tests_for_main_moved")
 
-_DOCS_ONLY_PATHS = [
-    "CLAUDE/Plan/00466-niggles-ledger-sixteen/PLAN.md",
-    "CLAUDE/Plan/00466-niggles-ledger-sixteen/JOURNAL/00466-Journal-26-09-24.md",
-    "CLAUDE/Plan/00463-full-qa-is-a-main-thread-gate/subagent-reports/r.md",
-    "CLAUDE/Plan/Completed/00462-php-lsp/PLAN.md",
-    "CLAUDE/Plan/Completed/00462-php-lsp/probe.py",
-    "CLAUDE/Plan/00471-a-plan/notes.json",
-    "CLAUDE/Plan/README.md",
-    "CLAUDE/Plan/Completed/README.md",
-    "CLAUDE/QA.md",
-    "CLAUDE/development/IssueSdlc.md",
-    "docs/guides/HANDLER_REFERENCE.md",
-    "README.md",
-    "RELEASES/v3.66.0.md",
-]
-
-_FULL_GATE_PATHS = [
-    "CLAUDE/Plan/mkplan.bash",
-    "CLAUDE/Plan/_planlib.inc.bash",
-    "CLAUDE/Plan/Completed/stray.py",
-    "CLAUDE/Plan/00466/PLAN.bash",
-    "src/claude_code_hooks_daemon/handlers/pre_tool_use/subagent_full_qa_blocker.py",
-    "src/CLAUDE.md",
-    "src/claude_code_hooks_daemon/guides/guide.md",
-    "tests/CLAUDE.md",
-    "scripts/qa/README.md",
-    ".claude/hooks-daemon.yaml",
-    "pyproject.toml",
-    "CLAUDE/QA.MD",
-    "docs/diagram.svg",
-]
+_DOCS = llm_qa.PATH_DOCS
+_TESTED = llm_qa.PATH_TESTED
+_FULL = llm_qa.PATH_FULL
 
 
-class TestWhichPathsAreDocsOnly:
-    @pytest.mark.parametrize("path", _DOCS_ONLY_PATHS)
-    def test_a_docs_only_path(self, path: str) -> None:
-        assert llm_qa.is_docs_only_path(path) is True
+def _payload(
+    mapping: list[dict[str, Any]] | None = None,
+    unmapped: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """A ``run_changed_tests --select-only`` payload."""
+    reasons = {path: {"reason": reason, "detail": "d"} for path, reason in (unmapped or {}).items()}
+    return {
+        "range": "a..b",
+        "mapping": mapping or [],
+        "unmapped": list(reasons),
+        "unmapped_reasons": reasons,
+    }
 
-    @pytest.mark.parametrize("path", _FULL_GATE_PATHS)
-    def test_a_path_that_needs_the_full_gate(self, path: str) -> None:
-        assert llm_qa.is_docs_only_path(path) is False
+
+def _judge(path: str, payload: dict[str, Any] | None = None, *, symlink: bool = False) -> str:
+    moved = llm_qa.MovedPath(path=path, symlink=symlink)
+    return str(llm_qa.judge_path(moved, payload or _payload()).kind)
+
+
+class TestTheRuntimeReadSet:
+    def test_the_set_is_defined_once_and_is_exactly_this(self) -> None:
+        """Runtime code reads each: the injector, release notes, upgrade guides, agents."""
+        assert llm_qa.RUNTIME_READ_FILES == frozenset({"CLAUDE.md", "CHANGELOG.md"})
+        assert llm_qa.RUNTIME_READ_ROOTS == (".claude/", "RELEASES/", "CLAUDE/UPGRADES/")
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "CLAUDE.md",
+            "CHANGELOG.md",
+            ".claude/agents/qa-runner.md",
+            ".claude/skills/release/SKILL.md",
+            ".claude/rules/agent-docs.md",
+            ".claude/hooks-daemon.yaml",
+            "RELEASES/v3.66.0.md",
+            "CLAUDE/UPGRADES/UNRELEASED/release-notes/13-x.md",
+        ],
+    )
+    def test_a_runtime_read_path_needs_the_full_gate_whatever_maps_to_it(self, path: str) -> None:
+        payload = _payload(mapping=[{"file": path, "rules": [], "tests": []}])
+        assert _judge(path, payload) == _FULL
+
+
+class TestJudgingOnePath:
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "CLAUDE/Plan/00463-x/conftest.py",
+            "CLAUDE/Plan/00463-x/run_me.sh",
+            "CLAUDE/Plan/mkplan.bash",
+            "CLAUDE/Plan/00471-a-plan/notes.json",
+            "src/CLAUDE.md",
+            "tests/CLAUDE.md",
+            "scripts/qa/README.md",
+            "docs/diagram.svg",
+            "CLAUDE/QA.MD",
+            "pyproject.toml",
+        ],
+    )
+    def test_anything_but_a_document_outside_the_code_roots_needs_the_full_gate(
+        self, path: str
+    ) -> None:
+        assert _judge(path) == _FULL
+
+    def test_a_symlinked_document_needs_the_full_gate(self) -> None:
+        """Review 3 R12: ``docs/app.md`` pointing at ``../src/app.py`` is code."""
+        payload = _payload(mapping=[{"file": "docs/app.md", "rules": [], "tests": []}])
+        assert _judge("docs/app.md", payload, symlink=True) == _FULL
+
+    def test_a_document_tests_read_is_targeted(self) -> None:
+        payload = _payload(
+            mapping=[{"file": "CLAUDE/Plan/README.md", "rules": ["reference"], "tests": ["t.py"]}]
+        )
+        assert _judge("CLAUDE/Plan/README.md", payload) == _TESTED
+
+    def test_a_document_only_the_doc_tools_cover_is_docs_only(self) -> None:
+        payload = _payload(
+            mapping=[
+                {"file": "docs/a.md", "rules": ["declared"], "tests": [], "tools": ["docs_qa"]}
+            ]
+        )
+        assert _judge("docs/a.md", payload) == _DOCS
+
+    def test_a_document_a_non_doc_tool_covers_is_targeted(self) -> None:
+        payload = _payload(
+            mapping=[{"file": "docs/a.md", "rules": [], "tests": [], "tools": ["shell_check"]}]
+        )
+        assert _judge("docs/a.md", payload) == _TESTED
+
+    def test_a_document_nothing_covers_is_docs_only(self) -> None:
+        assert _judge("docs/a.md", _payload(unmapped={"docs/a.md": "uncovered"})) == _DOCS
+
+    @pytest.mark.parametrize("reason", ["too-broad", "deleted-but-referenced"])
+    def test_a_document_the_mapper_cannot_target_needs_the_full_gate(self, reason: str) -> None:
+        assert _judge("docs/a.md", _payload(unmapped={"docs/a.md": reason})) == _FULL
+
+    def test_a_document_the_mapper_did_not_report_needs_the_full_gate(self) -> None:
+        assert _judge("docs/a.md", _payload()) == _FULL
 
 
 class TestTheVerdict:
-    def test_no_paths_means_main_has_not_moved(self) -> None:
-        assert llm_qa.classify_moved_paths([]) == llm_qa.VERDICT_UNMOVED
+    def _verdict(self, *kinds: str) -> str:
+        judged = [llm_qa.PathVerdict(f"p{i}", kind, "why") for i, kind in enumerate(kinds)]
+        return str(llm_qa.combine_verdicts(judged))
 
-    def test_only_docs_is_docs_only(self) -> None:
-        assert llm_qa.classify_moved_paths(_DOCS_ONLY_PATHS) == llm_qa.VERDICT_DOCS_ONLY
+    def test_new_commits_that_change_no_file_are_docs_only_not_unmoved(self) -> None:
+        """Review 3 R4: a commit and its revert, or --allow-empty. --ff-only still refuses."""
+        assert self._verdict() == llm_qa.VERDICT_DOCS_ONLY
 
-    @pytest.mark.parametrize("code_path", _FULL_GATE_PATHS)
-    def test_one_code_path_among_docs_needs_the_full_gate(self, code_path: str) -> None:
-        paths = [*_DOCS_ONLY_PATHS, code_path]
-        assert llm_qa.classify_moved_paths(paths) == llm_qa.VERDICT_FULL_GATE
+    def test_documents_only(self) -> None:
+        assert self._verdict(_DOCS, _DOCS) == llm_qa.VERDICT_DOCS_ONLY
+
+    def test_a_tested_document_makes_it_targeted(self) -> None:
+        assert self._verdict(_DOCS, _TESTED) == llm_qa.VERDICT_TARGETED
+
+    def test_one_full_path_anywhere_makes_it_the_full_gate(self) -> None:
+        assert self._verdict(_DOCS, _TESTED, _FULL) == llm_qa.VERDICT_FULL_GATE
 
 
-class TestTheDocsOnlyRecheck:
-    def test_it_is_the_cheap_doc_tools_and_every_one_is_registered(self) -> None:
-        assert llm_qa.DOCS_ONLY_TOOL_NAMES == [
-            "plan_qa",
-            "docs_qa",
-            "format",
-            "british_english",
-            "sensitive_content",
-        ]
+@pytest.fixture(scope="module")
+def this_repository_judges() -> Any:
+    """Judge paths against THIS repository's tests, through the real mapper.
+
+    This file is left out of the corpus: it names every path below as a
+    string, which the mapper would rightly read as a test that reads them.
+    """
+    tree, error = changed_tests.tree_files(PROJECT_ROOT)
+    assert tree is not None, error
+    this_file = Path(__file__).resolve().relative_to(PROJECT_ROOT).as_posix()
+    full = changed_tests.build_corpus(PROJECT_ROOT, tree)
+    corpus = dataclasses.replace(
+        full, tests={test: refs for test, refs in full.tests.items() if test != this_file}
+    )
+    rules, problems = changed_tests.load_declared_rules(changed_tests.DEFAULT_RULES_PATH)
+    assert problems == []
+
+    def judge(path: str) -> str:
+        selection = changed_tests.select_tests([path], corpus, PROJECT_ROOT, rules)
+        payload = changed_tests.selection_payload("a..b", [path], selection)
+        return str(llm_qa.judge_path(llm_qa.MovedPath(path, False), payload).kind)
+
+    return judge
+
+
+class TestTheReviewExamplesAgainstThisRepository:
+    """Review 3 R1: each path it names, judged by this repository's own mapper."""
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "CLAUDE/Plan/README.md",
+            "CLAUDE/HANDLER_DEVELOPMENT.md",
+            "CLAUDE/CodeLifecycle/General.md",
+            "CLAUDE/core/PlanWorkflow.core.md",
+            "BUG_REPORTING.md",
+        ],
+    )
+    def test_a_document_tests_read_is_targeted_not_docs_only(
+        self, path: str, this_repository_judges: Any
+    ) -> None:
+        assert this_repository_judges(path) == _TESTED
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "CLAUDE.md",
+            "CHANGELOG.md",
+            ".claude/agents/qa-runner.md",
+            ".claude/skills/release/SKILL.md",
+            ".claude/rules/agent-docs.md",
+            "CLAUDE/Plan/00463-full-qa-is-a-main-thread-gate/conftest.py",
+            "CLAUDE/Plan/00463-full-qa-is-a-main-thread-gate/run_me.sh",
+            # Read by over 40 test files, so the mapper cannot target it.
+            "README.md",
+        ],
+    )
+    def test_runtime_executable_and_untargetable_paths_need_the_full_gate(
+        self, path: str, this_repository_judges: Any
+    ) -> None:
+        assert this_repository_judges(path) == _FULL
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "CLAUDE/Plan/00466-niggles-ledger-sixteen/NIGGLES.md",
+            "docs/a-page-nothing-names-yet.md",
+        ],
+    )
+    def test_a_ledger_entry_or_a_new_page_is_docs_only(
+        self, path: str, this_repository_judges: Any
+    ) -> None:
+        assert this_repository_judges(path) == _DOCS
+
+
+class TestTheRecheck:
+    def test_the_docs_only_recheck_is_registered_doc_tools_that_rewrite_nothing(self) -> None:
+        """Review 3 R10: ``format`` is black; it checks Python and REWRITES files."""
         assert set(llm_qa.DOCS_ONLY_TOOL_NAMES) <= set(llm_qa.TOOL_REGISTRY)
+        assert "format" not in llm_qa.DOCS_ONLY_TOOL_NAMES
+
+    def test_each_verdict_names_what_must_have_passed(self) -> None:
+        required = llm_qa.required_tools
+        assert required(llm_qa.VERDICT_DOCS_ONLY) == llm_qa.DOCS_ONLY_TOOL_NAMES
+        targeted = required(llm_qa.VERDICT_TARGETED)
+        assert "changed_tests" in targeted
+        assert set(llm_qa.DOCS_ONLY_TOOL_NAMES) <= set(targeted)
+        assert required(llm_qa.VERDICT_FULL_GATE) == llm_qa.ALL_TOOL_NAMES
 
 
 # ── Against a real repository ─────────────────────────────────────────────
+
+_BRANCH = "integ"
+_GUIDE = "docs/guide.md"
+_LONELY = "docs/lonely.md"
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -136,119 +295,343 @@ def _git(repo: Path, *args: str) -> str:
     return result.stdout.strip()
 
 
-def _commit(repo: Path, files: dict[str, str], message: str) -> str:
+def _write(repo: Path, files: dict[str, str]) -> None:
     for relative, content in files.items():
         target = repo / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
+
+
+def _commit(repo: Path, files: dict[str, str], message: str) -> str:
+    _write(repo, files)
     _git(repo, "add", "-A")
-    _git(repo, "commit", "-q", "-m", message)
+    _git(repo, "commit", "-q", "--allow-empty", "-m", message)
     return _git(repo, "rev-parse", "HEAD")
+
+
+def _on_main(repo: Path, files: dict[str, str], message: str = "on main") -> str:
+    _git(repo, "checkout", "-q", "main")
+    sha = _commit(repo, files, message)
+    _git(repo, "checkout", "-q", _BRANCH)
+    return sha
+
+
+def _merge_main(repo: Path) -> None:
+    _git(repo, "merge", "-q", "--no-edit", "main")
 
 
 @pytest.fixture
 def repo(tmp_path: Path) -> Path:
-    """A repository whose ``main`` has one commit: the batch base."""
+    """``main`` with code, two documents (one a test reads), and an integration branch."""
     _git(tmp_path, "init", "-q", "-b", "main")
-    _commit(tmp_path, {"src/app.py": "x = 1\n", "CLAUDE/QA.md": "# QA\n"}, "base")
+    _commit(
+        tmp_path,
+        {
+            ".gitignore": "untracked/\n",
+            "src/app.py": "x = 1\n",
+            _GUIDE: "# Guide\n",
+            _LONELY: "# Lonely\n",
+            "tests/unit/test_guide.py": f'GUIDE = "{_GUIDE}"\n\n\ndef test_guide() -> None:\n    pass\n',
+        },
+        "base",
+    )
+    _git(tmp_path, "checkout", "-q", "-b", _BRANCH)
+    _commit(tmp_path, {"src/feature.py": "y = 1\n"}, "a ready branch, merged into the batch")
     return tmp_path
 
 
-class TestAgainstARealRepository:
-    def test_main_unmoved(self, repo: Path) -> None:
-        base = _git(repo, "rev-parse", "main")
-        outcome = llm_qa.main_moved(base, "main", repo)
-        assert outcome.verdict == llm_qa.VERDICT_UNMOVED
+def _qa_dir(repo: Path) -> Path:
+    return repo / "untracked" / "qa"
+
+
+def _certify(
+    repo: Path,
+    tools: list[str],
+    *,
+    passed: bool = True,
+    changed_range: str | None = None,
+) -> None:
+    """Record, as a run on the current tree would, that ``tools`` ran."""
+    qa_dir = _qa_dir(repo)
+    qa_dir.mkdir(parents=True, exist_ok=True)
+    state = llm_qa.worktree_state(repo)
+    assert state is not None
+    records = {}
+    for name in tools:
+        output = qa_dir / llm_qa.TOOL_REGISTRY[name].json_file
+        body: dict[str, Any] = {"tool": name}
+        if name == "changed_tests" and changed_range is not None:
+            body["range"] = changed_range
+        output.write_text(json.dumps(body), encoding="utf-8")
+        records[name] = llm_qa.run_record(
+            state,
+            exit_code=0 if passed else 1,
+            passed=passed,
+            output_sha256=llm_qa.output_digest(output),
+        )
+    llm_qa.record_provenance(qa_dir, records)
+
+
+def _base(repo: Path) -> str:
+    return _git(repo, "rev-parse", f"refs/integration/{_BRANCH}/base")
+
+
+class TestTheBatchBase:
+    def test_start_records_the_main_commit_the_batch_contains_in_a_ref(self, repo: Path) -> None:
+        recorded = llm_qa.start_batch(repo, "main")
+        assert recorded == _git(repo, "rev-parse", "main")
+        assert _base(repo) == recorded, "a fresh process reads the same base"
+
+    def test_start_after_main_moved_records_the_older_commit_the_batch_holds(
+        self, repo: Path
+    ) -> None:
+        contained = _git(repo, "rev-parse", "main")
+        _on_main(repo, {"src/app.py": "x = 2\n"})
+        assert llm_qa.start_batch(repo, "main") == contained
+
+    def test_a_check_with_no_recorded_base_is_an_error_not_a_verdict(self, repo: Path) -> None:
+        with pytest.raises(llm_qa.MainMovedError, match="--start"):
+            llm_qa.main_moved(repo, "main")
+
+    def test_a_detached_head_has_no_batch(self, repo: Path) -> None:
+        _git(repo, "checkout", "-q", "--detach")
+        with pytest.raises(llm_qa.MainMovedError):
+            llm_qa.start_batch(repo, "main")
+
+
+class TestTheCheck:
+    @pytest.fixture(autouse=True)
+    def _started(self, repo: Path) -> None:
+        llm_qa.start_batch(repo, "main")
+
+    def test_unmoved(self, repo: Path) -> None:
+        assert llm_qa.main_moved(repo, "main").verdict == llm_qa.VERDICT_UNMOVED
+
+    def test_a_document_nothing_reads_is_docs_only(self, repo: Path) -> None:
+        _on_main(repo, {_LONELY: "# Lonely 2\n"})
+        assert llm_qa.main_moved(repo, "main").verdict == llm_qa.VERDICT_DOCS_ONLY
+
+    def test_a_document_a_test_reads_is_targeted(self, repo: Path) -> None:
+        _on_main(repo, {_GUIDE: "# Guide 2\n", _LONELY: "# Lonely 2\n"})
+        outcome = llm_qa.main_moved(repo, "main")
+        assert outcome.verdict == llm_qa.VERDICT_TARGETED
+        kinds = {judged.path: judged.kind for judged in outcome.paths}
+        assert kinds == {_GUIDE: _TESTED, _LONELY: _DOCS}
+
+    def test_code_needs_the_full_gate(self, repo: Path) -> None:
+        _on_main(repo, {_LONELY: "# 2\n", "src/app.py": "x = 2\n"})
+        assert llm_qa.main_moved(repo, "main").verdict == llm_qa.VERDICT_FULL_GATE
+
+    def test_a_commit_and_its_revert_are_not_unmoved(self, repo: Path) -> None:
+        _on_main(repo, {"src/app.py": "x = 2\n"})
+        _on_main(repo, {"src/app.py": "x = 1\n"}, "revert")
+        outcome = llm_qa.main_moved(repo, "main")
+        assert outcome.verdict == llm_qa.VERDICT_DOCS_ONLY
         assert outcome.paths == []
 
-    def test_a_ledger_row_on_main_is_docs_only(self, repo: Path) -> None:
-        base = _git(repo, "rev-parse", "main")
-        _commit(repo, {"CLAUDE/Plan/00466-ledger/PLAN.md": "| N2 |\n"}, "ledger")
-        outcome = llm_qa.main_moved(base, "main", repo)
-        assert outcome.verdict == llm_qa.VERDICT_DOCS_ONLY
-        assert outcome.paths == ["CLAUDE/Plan/00466-ledger/PLAN.md"]
-
-    def test_a_code_change_on_main_needs_the_full_gate(self, repo: Path) -> None:
-        base = _git(repo, "rev-parse", "main")
-        _commit(repo, {"CLAUDE/QA.md": "# QA 2\n", "src/app.py": "x = 2\n"}, "code")
-        outcome = llm_qa.main_moved(base, "main", repo)
-        assert outcome.verdict == llm_qa.VERDICT_FULL_GATE
-        assert "src/app.py" in outcome.paths
-
-    def test_a_rename_out_of_src_is_seen_by_its_old_path(self, repo: Path) -> None:
-        """With rename detection, ``git diff --name-only`` prints only the NEW name.
-
-        Moving ``src/app.py`` to ``docs/app.md`` would then read as docs-only,
-        though the move deleted code.
-        """
-        base = _git(repo, "rev-parse", "main")
-        _git(repo, "mv", "src/app.py", "docs-app.md")
-        _git(repo, "commit", "-q", "-m", "move")
-        outcome = llm_qa.main_moved(base, "main", repo)
-        assert outcome.verdict == llm_qa.VERDICT_FULL_GATE
-        assert "src/app.py" in outcome.paths
-
-    def test_a_base_that_main_no_longer_contains_needs_the_full_gate(self, repo: Path) -> None:
-        """A rewritten main has no meaningful ``base..main`` diff to classify."""
-        _git(repo, "checkout", "-q", "-b", "side")
-        side = _commit(repo, {"CLAUDE/Plan/00466-ledger/PLAN.md": "x\n"}, "side")
+    def test_a_rename_out_of_src_is_judged_by_its_old_path(self, repo: Path) -> None:
         _git(repo, "checkout", "-q", "main")
-        outcome = llm_qa.main_moved(side, "main", repo)
+        _git(repo, "mv", "src/app.py", "docs/app.md")
+        _git(repo, "commit", "-q", "-m", "move")
+        _git(repo, "checkout", "-q", _BRANCH)
+        outcome = llm_qa.main_moved(repo, "main")
         assert outcome.verdict == llm_qa.VERDICT_FULL_GATE
-        assert outcome.reason
+        assert "src/app.py" in [judged.path for judged in outcome.paths]
 
-    def test_an_unknown_ref_fails_rather_than_passing(self, repo: Path) -> None:
+    def test_a_symlinked_document_needs_the_full_gate(self, repo: Path) -> None:
+        _git(repo, "checkout", "-q", "main")
+        (repo / "docs" / "app.md").symlink_to("../src/app.py")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "link")
+        _git(repo, "checkout", "-q", _BRANCH)
+        assert llm_qa.main_moved(repo, "main").verdict == llm_qa.VERDICT_FULL_GATE
+
+    def test_a_rewritten_main_needs_the_full_gate(self, repo: Path) -> None:
+        _git(repo, "checkout", "-q", "main")
+        _git(repo, "checkout", "-q", "--orphan", "rewritten")
+        _commit(repo, {"src/app.py": "z = 1\n"}, "rewritten")
+        _git(repo, "branch", "-f", "main", "rewritten")
+        _git(repo, "checkout", "-q", _BRANCH)
+        outcome = llm_qa.main_moved(repo, "main")
+        assert outcome.verdict == llm_qa.VERDICT_FULL_GATE
+        assert "rewritten" in outcome.reason
+
+    def test_an_unknown_main_ref_is_an_error(self, repo: Path) -> None:
         with pytest.raises(llm_qa.MainMovedError):
-            llm_qa.main_moved("no-such-ref", "main", repo)
+            llm_qa.main_moved(repo, "no-such-ref")
+
+
+class TestAdvancing:
+    """Review 3 R2: the base moves only when the verdict's recheck has passed."""
+
+    @pytest.fixture(autouse=True)
+    def _started(self, repo: Path) -> None:
+        llm_qa.start_batch(repo, "main")
+
+    def test_nothing_to_advance_before_main_is_merged_in(self, repo: Path) -> None:
+        _on_main(repo, {_LONELY: "# 2\n"})
+        with pytest.raises(llm_qa.MainMovedError, match="merge"):
+            llm_qa.advance_batch(repo, "main")
+
+    def test_a_merge_with_no_recheck_does_not_advance(self, repo: Path) -> None:
+        before = _base(repo)
+        _on_main(repo, {_LONELY: "# 2\n"})
+        _merge_main(repo)
+        with pytest.raises(llm_qa.MainMovedError, match="docs_qa"):
+            llm_qa.advance_batch(repo, "main")
+        assert _base(repo) == before
+
+    def test_a_passed_docs_recheck_advances_and_the_next_check_is_unmoved(self, repo: Path) -> None:
+        moved = _on_main(repo, {_LONELY: "# 2\n"})
+        _merge_main(repo)
+        _certify(repo, llm_qa.DOCS_ONLY_TOOL_NAMES)
+        assert llm_qa.advance_batch(repo, "main") == moved
+        assert _base(repo) == moved
+        assert llm_qa.main_moved(repo, "main").verdict == llm_qa.VERDICT_UNMOVED
+
+    def test_after_advancing_only_newer_movement_is_seen(self, repo: Path) -> None:
+        _on_main(repo, {_LONELY: "# 2\n"})
+        _merge_main(repo)
+        _certify(repo, llm_qa.DOCS_ONLY_TOOL_NAMES)
+        llm_qa.advance_batch(repo, "main")
+        _on_main(repo, {"src/app.py": "x = 3\n"})
+        outcome = llm_qa.main_moved(repo, "main")
+        assert outcome.verdict == llm_qa.VERDICT_FULL_GATE
+        assert [judged.path for judged in outcome.paths] == ["src/app.py"]
+
+    def test_a_failed_recheck_does_not_advance(self, repo: Path) -> None:
+        """Review 3 R8: a recorded ``passed: false`` is never a pass."""
+        _on_main(repo, {_LONELY: "# 2\n"})
+        _merge_main(repo)
+        _certify(repo, llm_qa.DOCS_ONLY_TOOL_NAMES, passed=False)
+        with pytest.raises(llm_qa.MainMovedError, match="did not pass"):
+            llm_qa.advance_batch(repo, "main")
+
+    def test_a_recheck_on_another_tree_does_not_advance(self, repo: Path) -> None:
+        _on_main(repo, {_LONELY: "# 2\n"})
+        _certify(repo, llm_qa.DOCS_ONLY_TOOL_NAMES)
+        _merge_main(repo)
+        with pytest.raises(llm_qa.MainMovedError, match="re-run"):
+            llm_qa.advance_batch(repo, "main")
+
+    def test_a_targeted_move_needs_the_changed_run_over_exactly_that_range(
+        self, repo: Path
+    ) -> None:
+        base = _base(repo)
+        moved = _on_main(repo, {_GUIDE: "# Guide 2\n"})
+        _merge_main(repo)
+        tools = llm_qa.required_tools(llm_qa.VERDICT_TARGETED)
+        _certify(repo, tools, changed_range=f"{base}..{base}")
+        with pytest.raises(llm_qa.MainMovedError, match="--range"):
+            llm_qa.advance_batch(repo, "main")
+        _certify(repo, tools, changed_range=f"{base}..{moved}")
+        assert llm_qa.advance_batch(repo, "main") == moved
+
+    def test_a_full_gate_move_needs_every_full_tool(self, repo: Path) -> None:
+        moved = _on_main(repo, {"src/app.py": "x = 2\n"})
+        _merge_main(repo)
+        _certify(repo, llm_qa.required_tools(llm_qa.VERDICT_TARGETED))
+        with pytest.raises(llm_qa.MainMovedError):
+            llm_qa.advance_batch(repo, "main")
+        _certify(repo, llm_qa.ALL_TOOL_NAMES)
+        assert llm_qa.advance_batch(repo, "main") == moved
 
 
 class TestTheCommand:
-    def test_docs_only_prints_the_verdict_and_the_recheck(
+    def _run(self, repo: Path, *args: str) -> int:
+        return int(llm_qa.main_moved_command(list(args), root=repo))
+
+    def test_start_then_unmoved_exits_zero(
         self, repo: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        base = _git(repo, "rev-parse", "main")
-        _commit(repo, {"CLAUDE/Plan/00466-ledger/PLAN.md": "| N2 |\n"}, "ledger")
-        exit_code = llm_qa.main_moved_command([base], root=repo)
+        assert self._run(repo, "--start") == llm_qa.EXIT_SUCCESS
+        assert self._run(repo) == llm_qa.EXIT_SUCCESS
         out = capsys.readouterr().out
-        assert exit_code == llm_qa.EXIT_SUCCESS
-        assert f"VERDICT: {llm_qa.VERDICT_DOCS_ONLY}" in out
-        assert "llm_qa.py " + " ".join(llm_qa.DOCS_ONLY_TOOL_NAMES) in out
+        assert f"VERDICT: {llm_qa.VERDICT_UNMOVED}" in out
+        assert "--ff-only" in out
 
-    def test_full_gate_exits_with_its_own_code_and_names_the_paths(
-        self, repo: Path, capsys: pytest.CaptureFixture[str]
+    @pytest.mark.parametrize(
+        ("files", "verdict", "exit_code"),
+        [
+            ({_LONELY: "# 2\n"}, "docs-only", 5),
+            ({_GUIDE: "# 2\n"}, "targeted", 6),
+            ({"src/app.py": "x = 2\n"}, "full-gate", 4),
+        ],
+    )
+    def test_each_verdict_has_its_own_exit_code_and_names_its_recheck(
+        self,
+        repo: Path,
+        capsys: pytest.CaptureFixture[str],
+        files: dict[str, str],
+        verdict: str,
+        exit_code: int,
     ) -> None:
-        base = _git(repo, "rev-parse", "main")
-        _commit(repo, {"src/app.py": "x = 3\n"}, "code")
-        exit_code = llm_qa.main_moved_command([base, "main"], root=repo)
+        """Review 3 R11: docs-only and unmoved shared exit 0."""
+        self._run(repo, "--start")
+        base = _base(repo)
+        moved = _on_main(repo, files)
+        capsys.readouterr()
+        assert self._run(repo) == exit_code
         out = capsys.readouterr().out
-        assert exit_code == llm_qa.EXIT_FULL_GATE
-        assert f"VERDICT: {llm_qa.VERDICT_FULL_GATE}" in out
-        assert "src/app.py" in out
+        assert f"VERDICT: {verdict}" in out
+        assert "--advance" in out
+        assert "second line" in out
+        recheck = {
+            "docs-only": "llm_qa.py " + " ".join(llm_qa.DOCS_ONLY_TOOL_NAMES),
+            "targeted": f"--range {base}..{moved}",
+            "full-gate": "llm_qa.py all",
+        }[verdict]
+        assert recheck in out
 
-    def test_unmoved_exits_zero(self, repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
-        base = _git(repo, "rev-parse", "main")
-        assert llm_qa.main_moved_command([base], root=repo) == llm_qa.EXIT_SUCCESS
-        assert f"VERDICT: {llm_qa.VERDICT_UNMOVED}" in capsys.readouterr().out
-
-    def test_a_git_failure_is_an_error_not_a_verdict(
+    def test_advance_through_the_command(
         self, repo: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        assert llm_qa.main_moved_command(["no-such-ref"], root=repo) == llm_qa.EXIT_FAILURE
+        self._run(repo, "--start")
+        moved = _on_main(repo, {_LONELY: "# 2\n"})
+        _merge_main(repo)
+        assert self._run(repo, "--advance") == llm_qa.EXIT_FAILURE
+        _certify(repo, llm_qa.DOCS_ONLY_TOOL_NAMES)
+        assert self._run(repo, "--advance") == llm_qa.EXIT_SUCCESS
+        assert moved in capsys.readouterr().out
+
+    def test_an_error_prints_no_verdict(
+        self, repo: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert self._run(repo) == llm_qa.EXIT_FAILURE
         assert "VERDICT" not in capsys.readouterr().out
 
-    @pytest.mark.parametrize("args", [[], ["a", "b", "c"], ["--base"]])
+    @pytest.mark.parametrize(
+        "args",
+        [["a", "b"], ["--start", "--advance"], ["--bogus"], ["--start", "main", "extra"]],
+    )
     def test_wrong_arguments_are_a_usage_error(
-        self, args: list[str], repo: Path, capsys: pytest.CaptureFixture[str]
+        self, repo: Path, args: list[str], capsys: pytest.CaptureFixture[str]
     ) -> None:
-        assert llm_qa.main_moved_command(args, root=repo) == llm_qa.EXIT_FAILURE
+        assert self._run(repo, *args) == llm_qa.EXIT_FAILURE
         assert "Usage" in capsys.readouterr().err
 
-    def test_main_dispatches_the_subcommand(
+
+class TestTheCliDispatch:
+    @pytest.mark.parametrize(
+        "argv",
+        [["main-moved", "--bogus"], ["--read-only", "main-moved", "--bogus"]],
+    )
+    def test_main_dispatches_the_subcommand_before_tool_resolution(
+        self,
+        argv: list[str],
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Review 3 R11: ``--read-only main-moved`` printed "Unknown tool: main-moved"."""
+        monkeypatch.setattr(sys, "argv", ["llm_qa.py", *argv])
+        assert llm_qa.main() == llm_qa.EXIT_FAILURE
+        err = capsys.readouterr()
+        assert "Usage" in err.err
+        assert "Unknown tool" not in err.out
+
+    def test_main_moved_after_a_tool_name_is_refused(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """Reached from the CLI, before tool resolution and without the run lock."""
-        monkeypatch.setattr(sys, "argv", ["llm_qa.py", llm_qa.MAIN_MOVED_COMMAND])
+        monkeypatch.setattr(sys, "argv", ["llm_qa.py", "lint", "main-moved"])
         assert llm_qa.main() == llm_qa.EXIT_FAILURE
-        err = capsys.readouterr().err
-        assert "Usage" in err
-        assert "Unknown tool" not in err
+        assert "main-moved" in capsys.readouterr().err

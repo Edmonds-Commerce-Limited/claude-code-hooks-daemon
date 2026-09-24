@@ -169,7 +169,91 @@ all six failed there.
 
 - **setup_worktree.sh** (journal `action`, ref 00466 N2). The template, the Run QA hint and
   Step 7 name `llm_qa.py` and targeted QA. `tests/unit/scripts/test_setup_worktree_qa_guidance.py`
-  was RED first and checks every printed command against the live `full_qa_patterns`.
+  was RED first. Review 3 (R3) showed it judged only command-shaped lines; see below.
+
+The `main-moved` design in the bullet above is superseded by the review 3 fixes below.
+
+## Review 3 fixes (`260924-plan463-review3-opus-5-5.md`)
+
+- **R1 (blocker): a hand-kept docs list let tested documents skip their tests.** The list
+  is gone. `llm_qa.py main-moved` judges each moved path (`git diff --raw --no-renames`):
+
+  - full gate: the runtime-read set, defined once as `RUNTIME_READ_FILES` (root
+    `CLAUDE.md`, `CHANGELOG.md`) and `RUNTIME_READ_ROOTS` (`.claude/`, `RELEASES/`,
+    `CLAUDE/UPGRADES/`); a symlink; anything that is not a `.md` outside `src/`, `tests/`
+    and `scripts/`; a document the mapper reports `too-broad` or does not report;
+  - otherwise the document goes through `run_changed_tests.py --range <base>..<main> --select-only`, the same mapper `changed` uses. No tests means docs; tests mean
+    `targeted`.
+
+  Verdicts and exits: `unmoved` 0, `docs-only` 5, `targeted` 6, `full-gate` 4; exit 1 is
+  no verdict. `targeted` re-runs `llm_qa.py changed british_english sensitive_content --range <base>..<main>`. `TestTheReviewExamplesAgainstThisRepository` runs the real
+  corpus over every path the review names: the plan README, HANDLER_DEVELOPMENT.md,
+  CodeLifecycle/General.md, core/PlanWorkflow.core.md and BUG_REPORTING.md are
+  `targeted`; CLAUDE.md, CHANGELOG.md, the qa-runner agent, the release skill,
+  `.claude/rules/agent-docs.md`, a plan `conftest.py` and `run_me.sh` are `full-gate`.
+  The root `README.md` reads `full-gate` too, because the mapper finds it `too-broad`.
+  QA.md now says CI is the second line because every test that reads a moved document has
+  already run in the recheck.
+
+- **R2 (major): the batch base lived in a shell variable.** `main-moved --start` writes it
+  to `refs/integration/<branch>/base`. `main-moved --advance` moves it to the merged main
+  commit, only when the recheck's provenance certifies a pass on this tree (for
+  `targeted`, a `changed_tests` report whose `range` is exactly `<base>..<merged>`). The
+  ref is updated with an old-value check. QA.md, AgentTeam.md, IssueSdlc.md and
+  Worktree.md document the loop, and what to do when `--ff-only` refuses.
+
+- **R3: the setup_worktree test missed prose, labels, printf and single quotes.**
+  Rewritten test first: every `echo`/`printf` text is judged at every place a command can
+  start. Nine injected RED cases, including every row of the review's table. The 00466 N2
+  paragraph is corrected on this branch; the Remedied row stays.
+
+- **R4: `unmoved` came from an empty diff.** `unmoved` now means `main` IS the base. New
+  commits that change no file (an empty commit, a commit and its revert) read
+  `docs-only`, whose loop merges `main` in, so the fast-forward can succeed.
+
+- **R5: AgentTeam.md is one model.** The parent IS the integration branch. There is no
+  gate at child to parent; the gate runs once in Parent to Main STEP 1, after
+  `main-moved --start`, and the ":1186" run is deleted. Children's worktrees and branches
+  are kept until the batch lands, so rejects (red gate or final honesty check) go back to
+  the child branch. STEP 5 and the worked example branch on `main-moved`'s exit code with
+  `case`. The review suggested passing the parent as `MAIN_REF` at child to parent; with no
+  gate there, the ref that must not move is `main`, so the default is right.
+
+- **R6: a nested conftest got past the 40-file cap.** `test_file_count` weighs a directory
+  entry by the test files under it, in `cover()` and `_reach()`.
+
+- **R7: full-suite forms the blocker missed.** Now denied: `py.test`,
+  `coverage run -m pytest`, `python -m` routed through the same resolver, unnormalised
+  operands (`tests/./unit`), and operands resolved against a `cd`, including the start
+  directory or above. Listed as limits with reasons, pinned by `TestTheDocumentedLimits` against
+  HANDLER_REFERENCE.md: `$(which pytest)`, tox, nox, `hatch test`, ionice, taskset,
+  xvfb-run, `script -c`, `pipx run` and ANSI-C quoting.
+
+- **R8: a report rewritten by a later tool, or a recorded failure, read as a pass.** The
+  digest is taken right after each tool runs, and `--read-only` fails a recorded
+  `passed: false`.
+
+- **R9: the undo used a denied command.** Before the push, `git reset --keep` to the base
+  ref (allowed; only `--hard` is denied). After a push: fix forward, or `git revert -m 1`
+  with the revert-the-revert caveat. Dropping a branch builds a new integration branch;
+  never `revert -m 1` to drop.
+
+- **R10: the docs recheck list.** `format` (black, Python-only, auto-fixing) is out of
+  `DOCS_ONLY_TOOL_NAMES`. The test asserts the list is a subset of `TOOL_REGISTRY` and that
+  the command prints it, not the literal list. QA.md says a `docs-only` or `targeted`
+  landing leaves other tools STALE, so a release still needs its own full run.
+
+- **R11: argument position and a shared exit code.** `--read-only` is stripped before
+  `main-moved` is dispatched, and `main-moved` anywhere but first is an error naming the
+  right form. Each verdict has its own exit code.
+
+- **N3 and N4 (partial in review 3):** closed by R6 (directory weighing) and R7 (operand
+  normalisation and `cd` resolution).
+
+- **R12 and R13:** symlinks (mode `120000`) and non-documents read `full-gate`, so a plan
+  folder no longer admits any file type. The orchestrator-simulate record says "recorded, not a would-be denial
+  (the call names no tool)" for a call with no `tool_name`; PLAN.md's long line is
+  rewrapped.
 
 ## Task 1.1 measurements
 
@@ -242,6 +326,19 @@ all six failed there.
   restart after merge, so a conflict there resolves by taking either side and restarting.
 
 ## Verification (targeted only, under this plan's rule)
+
+- After the review 3 fixes: `./scripts/qa/llm_qa.py changed --allow-unmapped` passed
+  12/12, with `changed_tests` at 7316 passed, 12 skipped, from 204 test files mapped from
+  66 changed files. The 11 unmapped files are `too-broad` and the full gate's. The named
+  tools (format, lint, type_check, pyright, magic_values, error_hiding, docs_qa, plan_qa,
+  handler_reference, british_english, shell_check, declared_invariant_pairs,
+  sensitive_content, project_handlers) passed; black reformatted five of the changed
+  Python files first. `tests/unit/qa`, the setup_worktree test, the blocker and evasion
+  tests, the orchestrator-simulate tests and the deadlock integration test: 1377 passed.
+  The guidance-coverage, documented-commands, handler-reference and doc-truth
+  integration tests: 337 passed.
+
+Earlier rounds:
 
 - After the delta review fixes, `./scripts/qa/llm_qa.py changed --allow-unmapped` passed
   12/12. That was 6979 tests from 196 test files, mapped from 59 changed files. The 11

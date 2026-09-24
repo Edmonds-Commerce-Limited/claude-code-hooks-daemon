@@ -1403,8 +1403,10 @@ handlers:
 - wrappers (`timeout`, `env`, `nohup`, `sudo`);
 - interpreters (`python3 x.py`, `python -m pytest`, `bash -c '...'`);
 - grouping;
-- `uv run`/`poetry run`/`pdm run`/`hatch run env:cmd`;
+- `uv run`/`poetry run`/`pdm run`/`hatch run env:cmd`, and `coverage run [-m] cmd`;
 - `uvx`/`uv tool run`, with any version pin such as `pytest@8`.
+
+`py.test` is read as `pytest`, its other name.
 
 A runner flag no table lists may take a value (`uv run --color never pytest`), so the word after it is tried both as that value and as the command.
 
@@ -1431,6 +1433,8 @@ Only a PATH-LIKE word targets a run. That is a word that:
 - ends in `.py`; or
 - names something that exists in the directory the command runs in. That is the event's working directory, moved by any `cd` earlier in the same command.
 
+A path operand is normalised (`tests/unit/../unit`, `tests//unit` and `tests/unit/qa/..` are what they name) and resolved from the directory the command runs in, then judged from the event's working directory. So `cd tests && pytest unit` is the `tests/unit` run, and an operand that reaches the whole starting directory or above it (`cd tests/unit && pytest ../..`) is full.
+
 Any other word is ignored, so a bare flag value such as `--timeout 60` cannot make a full run look targeted. A path-shaped value can: without a grammar, the word after an unlisted flag is still read as a target. With `option_grammar`, a flag the grammar does not know (a plugin's) is read as taking a value, so `--json-report-file out/r.json` does not target the run. To avoid a false deny, name the test paths before such a flag, or write it as `--flag=value`.
 
 A malformed entry is skipped and logged. `hooks-daemon check` reports a handler enabled with no usable pattern.
@@ -1439,10 +1443,12 @@ A malformed entry is skipped and logged. `hooks-daemon check` reports a handler 
 
 **Coverage:** proven for Agent-tool sub-agents and in-process teammates, whose payloads carry `agent_id`. A Workflow-tool agent's payload is unmeasured, so the handler is not claimed to see one. It keys only on `agent_id` being present, so no change is needed if Workflow agents turn out to carry it.
 
-**Limit:** a resource guard for cooperating agents, not a security boundary. Not seen:
+**Limit:** a resource guard for cooperating agents, not a security boundary. Not seen, with why:
 
-- a substitution inside double quotes;
-- a script that runs the suite under an undeclared name;
+- a substitution inside double quotes, or one in command position (`$(which pytest)`, `"$(command -v pytest)" tests`): the program is only known once the shell has run it;
+- a script that runs the suite under an undeclared name, and a project's own runner such as `tox`, `nox` or `hatch test`: the suite they run lives in the project's config, which the guard does not read. Declare them in `full_qa_patterns` if you use them;
+- a wrapper outside the shared wrapper table: `ionice`, `taskset`, `xvfb-run`, `script -c`, `pipx run`;
+- ANSI-C quoting such as `llm_qa.py $'all'`, which the parser keeps as literal text;
 - arguments supplied by `xargs`;
 - a `cd` target the shell would expand (`cd $DIR`). After one, words are judged by shape alone.
 

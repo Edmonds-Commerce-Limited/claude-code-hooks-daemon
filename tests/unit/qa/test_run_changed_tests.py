@@ -456,6 +456,44 @@ class TestNothingPassesSilently:
         assert selection.selected == ["tests/unit/qa"]
         assert selection.mapping[0]["rules"] == ["conftest-subtree"]
 
+    def test_a_nested_conftest_over_the_cap_is_too_broad(self, tmp_path: Path) -> None:
+        """Review 3 R6: a subtree was ONE entry, so 180 test files passed the cap of 40."""
+        tests = [
+            f"tests/unit/big/test_{index}.py"
+            for index in range(changed_tests.MAX_IMPORT_SELECTION + 1)
+        ]
+        _touch(tmp_path, "tests/unit/big/conftest.py", *tests)
+        selection = _select(tmp_path, ["tests/unit/big/conftest.py"])
+        assert selection.unmapped == ["tests/unit/big/conftest.py"]
+        assert selection.reasons["tests/unit/big/conftest.py"]["reason"] == "too-broad"
+        assert selection.selected == []
+
+    def test_a_nested_conftest_at_the_cap_still_runs_its_subtree(self, tmp_path: Path) -> None:
+        tests = [
+            f"tests/unit/big/test_{index}.py" for index in range(changed_tests.MAX_IMPORT_SELECTION)
+        ]
+        _touch(tmp_path, "tests/unit/big/conftest.py", *tests)
+        selection = _select(tmp_path, ["tests/unit/big/conftest.py"])
+        assert selection.unmapped == []
+        assert selection.selected == ["tests/unit/big"]
+
+    def test_a_module_a_big_conftest_imports_is_too_broad_through_it(self, tmp_path: Path) -> None:
+        """The dependent route reached the same subtree as one entry."""
+        tests = [
+            f"tests/integration/test_{index}.py"
+            for index in range(changed_tests.MAX_IMPORT_SELECTION + 1)
+        ]
+        _touch(tmp_path, *tests)
+        _touch(tmp_path, "src/claude_code_hooks_daemon/helper.py")
+        _touch(
+            tmp_path,
+            "tests/integration/conftest.py",
+            text="from claude_code_hooks_daemon.helper import thing\n",
+        )
+        selection = _select(tmp_path, ["src/claude_code_hooks_daemon/helper.py"])
+        assert selection.unmapped == ["src/claude_code_hooks_daemon/helper.py"]
+        assert selection.reasons["src/claude_code_hooks_daemon/helper.py"]["reason"] == "too-broad"
+
     def test_a_helper_modules_tests_are_its_importers(self, tmp_path: Path) -> None:
         _touch(tmp_path, "tests/unit/qa/helpers.py")
         _touch(
@@ -685,6 +723,97 @@ class TestMain:
         assert calls == []
 
 
-@pytest.mark.parametrize("flag", ["--base", "--root", "--allow-unmapped", "--rules"])
+_RANGE_START = "a" * 40
+_RANGE_END = "b" * 40
+_RANGE = f"{_RANGE_START}..{_RANGE_END}"
+
+
+def _range_git(diff: str) -> Any:
+    """A ``run_git`` stand-in for ``--range``: one diff between the two ends, nothing else."""
+
+    def run(args: list[str], root: Path) -> tuple[int, str, str]:
+        if args[0] == "diff":
+            assert "--no-renames" in args, "a rename must list the old path too"
+            assert args[-2:] == [_RANGE_START, _RANGE_END], args
+            return 0, diff, ""
+        if args[0] == "ls-files" and "--cached" in args:
+            return 0, "".join(f"{relative}\n" for relative in _tree(root)), ""
+        raise AssertionError(f"a range run makes no other git call: {args}")
+
+    return run
+
+
+class TestAnExplicitRange:
+    """``--range A..B``: what one span of history changed, judged in this tree.
+
+    The batched gate's recheck after ``main`` moves needs exactly what the
+    move brought in, not everything since the merge base (``llm_qa.py
+    main-moved``, review 3 R1).
+    """
+
+    def _main(self, tmp_path: Path, argv: list[str], git: Any, calls: list[list[str]]) -> int:
+        def run_pytest(paths: list[str], root: Path) -> tuple[int, str]:
+            calls.append(paths)
+            return 0, "1 passed in 0.01s\n"
+
+        rules_file = tmp_path / "rules.yaml"
+        rules_file.write_text("rules: []\n", encoding="utf-8")
+        return changed_tests.main(
+            ["--root", str(tmp_path), "--rules", str(rules_file), *argv],
+            run_git=git,
+            run_pytest=run_pytest,
+        )
+
+    def test_the_range_is_the_change_set_and_is_recorded(self, tmp_path: Path) -> None:
+        _touch(tmp_path, "src/pkg/a.py", "tests/unit/test_a.py")
+        calls: list[list[str]] = []
+        code = self._main(
+            tmp_path, ["--json", "--range", _RANGE], _range_git("src/pkg/a.py\n"), calls
+        )
+        report = json.loads((tmp_path / "untracked" / "qa" / "changed_tests.json").read_text())
+        assert code == changed_tests.EXIT_SUCCESS
+        assert calls == [["tests/unit/test_a.py"]]
+        assert report["range"] == _RANGE
+
+    @pytest.mark.parametrize("spec", ["aaa", "..bbb", "aaa..", "aaa...bbb", "a..b..c"])
+    def test_a_malformed_range_is_an_operational_failure(self, tmp_path: Path, spec: str) -> None:
+        calls: list[list[str]] = []
+        code = self._main(tmp_path, ["--range", spec], _range_git(""), calls)
+        assert code == changed_tests.EXIT_OPERATIONAL
+        assert calls == []
+
+    def test_range_and_base_cannot_both_be_given(self, tmp_path: Path) -> None:
+        with pytest.raises(SystemExit):
+            self._main(tmp_path, ["--range", _RANGE, "--base", "main"], _range_git(""), [])
+
+    def test_select_only_prints_the_selection_and_runs_nothing(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _touch(tmp_path, "src/pkg/a.py", "tests/unit/test_a.py", "src/pkg/orphan.py")
+        calls: list[list[str]] = []
+        code = self._main(
+            tmp_path,
+            ["--json", "--range", _RANGE, "--select-only"],
+            _range_git("src/pkg/a.py\nsrc/pkg/orphan.py\n"),
+            calls,
+        )
+        payload = json.loads(capsys.readouterr().out)
+        assert code == changed_tests.EXIT_SUCCESS
+        assert calls == []
+        assert not (tmp_path / "untracked" / "qa" / "changed_tests.json").exists()
+        assert payload["range"] == _RANGE
+        assert payload["selected"] == ["tests/unit/test_a.py"]
+        assert [entry["file"] for entry in payload["mapping"]] == ["src/pkg/a.py"]
+        assert payload["unmapped"] == ["src/pkg/orphan.py"]
+        assert payload["unmapped_reasons"]["src/pkg/orphan.py"]["reason"] == "uncovered"
+
+    def test_select_only_needs_a_range(self, tmp_path: Path) -> None:
+        with pytest.raises(SystemExit):
+            self._main(tmp_path, ["--select-only"], _range_git(""), [])
+
+
+@pytest.mark.parametrize(
+    "flag", ["--base", "--root", "--allow-unmapped", "--rules", "--range", "--select-only"]
+)
 def test_the_cli_documents_its_options(flag: str) -> None:
     assert flag in (changed_tests.__doc__ or "")

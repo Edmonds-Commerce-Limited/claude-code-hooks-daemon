@@ -536,6 +536,14 @@ class TestTheSimulatedRecordTellsTheTruth:
         guidance = OrchestratorSimulateHandler(blocking=False).get_claude_md() or ""
         assert "`Bash` is recorded but never" not in guidance
 
+    def test_a_call_with_no_tool_name_is_not_named_none(self) -> None:
+        """Review 3 R13: it read "None is never denied by this mode"."""
+        import orchestrator_simulate
+
+        verdict = orchestrator_simulate._recorded_verdict({})
+        assert "None" not in verdict
+        assert "never denied" not in verdict
+
     def test_the_simulated_claim_agrees_with_the_armed_verdict_across_the_surface(self) -> None:
         """ "would have been denied" appears exactly when blocking mode DENIES."""
         armed = OrchestratorSimulateHandler(blocking=True)

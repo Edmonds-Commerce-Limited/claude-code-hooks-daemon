@@ -37,14 +37,20 @@ An agent delivers "targeted QA green plus a commit".
 **The coordinator's gate is batched, not per branch** (owner's instruction).
 One full run per branch, one at a time, only turns five concurrent runs into a
 queue of five. Instead the coordinator merges every ready branch, each
-`--no-ff`, into ONE integration worktree created from current `main`, and runs
-`llm_qa.py all` once on that combined head. Green: `main` is fast-forwarded to
-the integration head, so there is one push and one CI run. `main` is frozen for
-code while a batch is in flight. If it moves anyway, `llm_qa.py main-moved <batch-base>` classifies the change mechanically. A docs-only move re-runs only
-the cheap doc checks before the fast-forward, and anything else re-runs the full
-gate. CI on the pushed head is the second line, not a substitute. Red: the coordinator
-bisects to the branch whose change broke it, sends it back to be fixed or drops
-it from the batch, and re-runs. The combined head is also the only place a
+`--no-ff`, into ONE integration branch holding current `main` (in an agent
+team, the plan's parent branch), records the batch base with
+`llm_qa.py main-moved --start` in a git ref, and runs `llm_qa.py all` once on
+that combined head. Green: `main` is fast-forwarded to the integration head, so
+there is one push and one CI run. `main` is frozen for code while a batch is in
+flight. If it moves anyway, `llm_qa.py main-moved` judges each moved path with
+the same test mapper `llm_qa.py changed` uses: a document no test reads
+re-runs the doc checks, a document tests read re-runs those tests
+(`targeted`), and code or a runtime-read path re-runs the full gate. After the
+recheck, `--advance` moves the base on, only when the recheck's provenance
+shows it passed. CI on the pushed head is the second line, not a substitute.
+Red: the coordinator bisects to the branch whose change broke it, sends it
+back to be fixed on that branch or rebuilds the batch without it, and re-runs.
+The combined head is also the only place a
 break that needs two branches together can show before `main`. Any lock the
 coordinator holds around the gate must be released when the run exits, even if
 a daemon started under it lives on (the lock-fd finding in the journal).
@@ -79,10 +85,13 @@ commands that ARE allowed, and they must exist.
   coordinator runs the full gate once per batch, on an integration worktree
   holding every ready branch, before `main` moves. `scripts/setup_worktree.sh`
   tells a worktree agent the same (ledger 00466 N2).
-- When `main` moves during a batch, a checked mechanism decides whether the
-  full gate re-runs: `llm_qa.py main-moved <batch-base>` prints `unmoved`,
-  `docs-only` or `full-gate`. The docs-only path set is defined once in
-  `llm_qa.py` and pinned by a test. It runs no tools and takes no lock.
+- When `main` moves during a batch, a checked mechanism decides what re-runs:
+  `llm_qa.py main-moved` reads the batch base from
+  `refs/integration/<branch>/base` (set by `--start`) and exits `unmoved` (0),
+  `docs-only` (5), `targeted` (6) or `full-gate` (4). A moved document is
+  judged by the `changed` test mapper, never a hand-kept list; the runtime-read
+  set is defined once in `llm_qa.py` and pinned by a test. `--advance` moves
+  the base only when the recheck's provenance certifies a pass on this tree.
 - 00463 ships no lock of its own. `llm_qa.py`'s existing run lock is
   non-inheritable, and a test pins that a daemon started during a run does not
   keep it after the run exits.
@@ -144,9 +153,10 @@ commands that ARE allowed, and they must exist.
 
 - [ ] ⬜ **Task 2.1**: The batched integration gate: the coordinator merges
   this branch `--no-ff` with the other ready branches into an integration
-  worktree from `main`, runs full QA once there, and on green follows
-  `llm_qa.py main-moved <batch-base>` to the fast-forward. Then it verifies
-  ancestry and CI, and restarts the daemon.
+  branch holding current `main`, runs `llm_qa.py main-moved --start` and full
+  QA once there, and on green loops `llm_qa.py main-moved` (recheck, then
+  `--advance`) until `unmoved`, then fast-forwards. It restarts the daemon
+  before the push, then verifies ancestry and CI.
 - [ ] ⬜ **Task 2.2**: Live dogfood check: a sub-agent's `llm_qa.py all`
   in the main checkout is denied with the targeted forms named, and the
   coordinator's same command runs.

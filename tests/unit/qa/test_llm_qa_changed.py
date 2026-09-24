@@ -23,6 +23,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
+
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
@@ -165,6 +167,24 @@ class TestChangedOptions:
 
     def test_the_options_without_changed_tests_are_an_error(self) -> None:
         _, _, error = llm_qa.split_changed_options(["lint", "--allow-unmapped"])
+        assert error is not None
+
+    def test_a_range_is_forwarded(self) -> None:
+        """The batched gate's targeted recheck: exactly what a move of main brought in."""
+        args, extra, error = llm_qa.split_changed_options(
+            ["changed", "british_english", "--range", "a..b"]
+        )
+        assert error is None
+        assert args == ["changed", "british_english"]
+        assert extra == ["--range", "a..b"]
+
+    def test_the_range_equals_form_is_accepted(self) -> None:
+        _, extra, error = llm_qa.split_changed_options(["changed", "--range=a..b"])
+        assert (extra, error) == (["--range", "a..b"], None)
+
+    @pytest.mark.parametrize("args", [["changed", "--range"], ["lint", "--range", "a..b"]])
+    def test_a_range_with_no_value_or_no_changed_is_an_error(self, args: list[str]) -> None:
+        _, _, error = llm_qa.split_changed_options(args)
         assert error is not None
 
     def test_run_tool_puts_the_forwarded_options_on_the_command_it_runs(

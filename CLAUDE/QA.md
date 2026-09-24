@@ -29,7 +29,7 @@ Complete quality assurance for the Claude Code Hooks Daemon consists of **three 
 ```bash
 ./scripts/qa/llm_qa.py all       # the FULL gate: the coordinator (main thread) runs this
 ./scripts/qa/llm_qa.py changed   # TARGETED: what a sub-agent runs before handing over
-./scripts/qa/llm_qa.py main-moved <batch-base>  # the coordinator: did main move in code?
+./scripts/qa/llm_qa.py main-moved  # the coordinator: what must re-run if main moved
 ```
 
 Agents MUST use `llm_qa.py`, never `run_all.sh`: the `enforce_llm_qa` project
@@ -71,50 +71,110 @@ exist when two branches meet.
 
 The coordinator, never a sub-agent:
 
-1. Creates ONE integration worktree from current `main`, and records that
-   commit as the **batch base**.
+1. Creates ONE integration branch and worktree from current `main`. In an
+   agent team the plan's parent branch IS the integration branch, with `main`
+   merged into it ([AgentTeam.md](AgentTeam.md), "Parent → Main").
 2. Merges every ready branch into it, each with `git merge --no-ff`, so each
-   branch stays one revertable merge commit and `git branch -d` still works.
-3. Runs `./scripts/qa/llm_qa.py all` once, on the combined head.
-4. **Green:** asks whether `main` moved, with
-   `./scripts/qa/llm_qa.py main-moved <batch-base>`, and follows its verdict
-   (below). The usual answer is `unmoved`: fast-forward `main` to the
-   integration head. One push, one CI run.
-5. **Red:** finds the branch whose change broke it, by bisecting the merge
-   commits (`git bisect` over the first-parent chain, or rebuilding the
-   integration head without one branch at a time). That branch goes back to its
-   agent to fix, or is dropped from the batch; the rest are merged again and the
-   run is repeated. A branch is never fixed inside the integration worktree.
+   branch lands as one merge commit and `git branch -d` still works.
+3. Records the **batch base** with `./scripts/qa/llm_qa.py main-moved --start`,
+   run on the integration branch. The base is the newest `main` commit the
+   branch contains, kept in the git ref `refs/integration/<branch>/base`, so it
+   survives between shell calls (a shell variable does not).
+4. Runs `./scripts/qa/llm_qa.py all` once, on the combined head.
+5. **Green:** runs `./scripts/qa/llm_qa.py main-moved` and follows its verdict
+   (below) until it says `unmoved`. Then, from the main checkout,
+   `git merge --ff-only <integration-branch>` and push. One push, one CI run.
+6. **Red:** see "A red batch" below.
 
 **While a batch is in flight, `main` is frozen for code.** The coordinator's
 own doc commits (ledger rows, journal entries, archival) either wait for the
 batch to land, or are committed onto the integration branch, where the full
 run covers them.
 
-**If `main` moves anyway, the verdict decides, not a judgement.**
-`llm_qa.py main-moved <batch-base> [<main-ref>]` classifies every path in
-`git diff --name-only --no-renames <batch-base>..main` and prints one of:
+**If `main` moves anyway, a checked verdict decides, not a judgement.**
+`llm_qa.py main-moved [<main-ref>]` judges every path that
+`git diff --no-renames <base> <main>` changed. A rename counts by both of its
+paths, so a file moved out of `src/` is judged by the path it left.
 
-| Verdict     | Meaning                                                     | Next step                                                                                                                                                  |
-| ----------- | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `unmoved`   | `main` is still the batch base                              | Fast-forward `main` to the integration head                                                                                                                |
-| `docs-only` | Every changed path is docs-only (below)                     | Merge `main` into the integration branch, run `llm_qa.py plan_qa docs_qa format british_english sensitive_content` on the result, then fast-forward `main` |
-| `full-gate` | At least one path is not docs-only, or `main` was rewritten | Merge `main` into the integration branch and run `llm_qa.py all` again                                                                                     |
+- **Full gate:** a path runtime code reads (root `CLAUDE.md`, `CHANGELOG.md`,
+  `.claude/**`, `RELEASES/**`, `CLAUDE/UPGRADES/**`), a symlink, anything that
+  is not a `.md` file outside `src/`, `tests/` and `scripts/`, and a document
+  the test mapper cannot target (`too-broad`, as the root `README.md` is).
+- **Tested:** a document the test mapper maps to tests. The mapper is
+  `run_changed_tests.py`, the one `llm_qa.py changed` runs, never a second copy.
+  It finds the tests that name the file, its declared rule and its dependents.
+- **Docs:** a document the mapper maps to no test.
 
-A path is **docs-only** when it is a file inside a numbered plan folder
-(`CLAUDE/Plan/NNNNN-name/…`, also under `Completed/` and the other buckets), or
-a `.md` file outside `src/`, `tests/` and `scripts/`. The plan directory's own
-root is NOT docs-only: `mkplan.bash` and `_planlib.inc.bash` are executed code.
-Renames count by both their old and new path, so a file moved out of `src/`
-still needs the full gate. The set is defined once, in `llm_qa.py`, and
-`tests/unit/qa/test_llm_qa_main_moved.py` pins every boundary. The command exits
-0 for `unmoved` and `docs-only`, 4 for `full-gate`, and 1 when git cannot answer.
+| Verdict     | Exit | When                                                 | Recheck, run exactly as printed                                              |
+| ----------- | ---- | ---------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `unmoved`   | 0    | `main` is still the batch base                       | None: fast-forward                                                           |
+| `docs-only` | 5    | Every path is docs, or new commits change no file    | The doc tools it names (`plan_qa docs_qa british_english sensitive_content`) |
+| `targeted`  | 6    | A tested document, and nothing needing the full gate | `llm_qa.py changed british_english sensitive_content --range <base>..<main>` |
+| `full-gate` | 4    | Any full-gate path, or `main` was rewritten          | `llm_qa.py all`                                                              |
 
-**CI on the pushed head is the second line, not a substitute.** A `docs-only`
-verdict skips a re-run of tests that a markdown change can still reach (some
-tests read `CLAUDE.md` and other docs). CI runs the whole suite on the head that
-was pushed, and a red CI there is a red `main`, handled at once. It is never a
-reason to skip the gate before the push.
+Exit 1 is no verdict: no base recorded, a bad ref, or git or the mapper failed.
+
+For every verdict but `unmoved`, follow the loop the command prints, in the
+integration worktree:
+
+1. `git merge --no-edit main`.
+2. The recheck.
+3. `./scripts/qa/llm_qa.py main-moved --advance`. This moves the base to the
+   newest `main` commit now merged in, but only if the recheck that range needs
+   PASSED on this exact tree, read from the same provenance `--read-only`
+   trusts. For `targeted`, `changed_tests` must have run over exactly
+   `<base>..<merged>`. Otherwise it refuses, says what is missing, and the base
+   stays put.
+4. `./scripts/qa/llm_qa.py main-moved` again. The base advanced, so it sees only
+   newer movement.
+
+**If `git merge --ff-only` refuses**, `main` moved after the last check: run
+`main-moved` again and follow the loop from there. It never re-runs anything
+the advanced base already covers.
+
+**A `docs-only` or `targeted` landing leaves most tools unrecorded for the new
+head.** Only the recheck's tools carry provenance for it, so a later
+`llm_qa.py --read-only all` reads the rest STALE, and a release still needs its
+own full run (RELEASING.md, step 1b).
+
+**CI on the pushed head is the second line, not a substitute.** Every test that
+reads a moved document has already run in the recheck, because the mapper names
+those tests. So a `docs-only` or `targeted` landing relies on nothing CI does.
+CI runs the whole suite on what was pushed, and a red CI is a red `main`,
+handled at once. It is never a reason to skip the gate.
+
+The path rules are defined once in `llm_qa.py` (`RUNTIME_READ_FILES`,
+`RUNTIME_READ_ROOTS`, `judge_path`), and `tests/unit/qa/test_llm_qa_main_moved.py`
+pins them, including every path the third review of Plan 00463 named.
+
+**A red batch.**
+
+- Find the branch that broke it: bisect the merge commits (`git bisect` over
+  the first-parent chain), or build a trial branch without one branch at a time.
+- A branch is never fixed inside the integration worktree. It goes back to its
+  agent, and the fix lands on that branch.
+- To take the fixed branch, merge it forward into the integration branch and
+  run the gate again. No revert is involved, so nothing is lost.
+- To DROP a branch, build a NEW integration branch from current `main`, merge
+  the other ready branches, then `--start` and run the gate. Never drop a
+  branch with `git revert -m 1` of its merge: once that lands, git treats the
+  branch's commits as merged, and merging the fixed branch later silently
+  leaves the reverted change out. The old integration branch is left for a
+  human to delete: `git branch -d` refuses an unmerged branch, and `-D` is not
+  an agent's to run.
+
+**After the fast-forward, before the push**, restart the daemon in the main
+checkout and check `bin/hooks-daemon status`. The gate ran under the integration
+worktree's venv, so a dependency the batch added may be missing from the main
+checkout's. If either step fails, **do not push**. The batch is still local, and
+`main` was the batch base when it fast-forwarded, so
+`git reset --keep "$(git rev-parse refs/integration/<branch>/base)"` puts local
+`main` back exactly where it was. `--keep` refuses rather than discard an
+uncommitted change, and it is not the denied `--hard`. Then fix the cause on a
+branch and batch again. After a push, `main` is never rewritten. Fix forward in
+a new batch, or `git revert -m 1 <merge>` each batch merge. A reverted branch
+can only come back by reverting that revert first, never by merging the branch
+again.
 
 **Any lock held around the gate must be released when the run exits**, even if
 something the run started is still alive. A daemon restarted under the gate

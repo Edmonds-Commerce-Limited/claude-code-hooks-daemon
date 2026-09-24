@@ -315,11 +315,13 @@ code.
 run it on this thread, never delegated to a sub-agent. The sub-agent has
 already run targeted QA. It runs as the batched integration gate in
 [../QA.md](../QA.md), "The Batched Integration Gate". Create an integration
-worktree from current `main`, and note that commit as the batch base. Merge the
-reported head `--no-ff` into it, together with any other branch that is ready.
-Then run the suite once on the combined head. When it is red, find which branch
-broke it before blaming this issue's branch. Until Step 7 lands, commit nothing
-but docs to `main`, and put even those on the integration branch where you can.
+branch and worktree from current `main`. Merge the reported head `--no-ff` into
+it, together with any other branch that is ready. Record the batch base there
+with `./scripts/qa/llm_qa.py main-moved --start`. Then run the suite once on the
+combined head. When it is red, find which branch broke it before blaming this
+issue's branch, and follow "A red batch" in QA.md. Until Step 7 lands, commit
+nothing but docs to `main`, and put even those on the integration branch where
+you can.
 
 Read the suite's **own** exit line, not the wrapper's. Chaining with `;` gives
 the exit status of the last command in the chain, which has silently reported a
@@ -342,24 +344,25 @@ Red QA ends the tick: report, leave `agent-working` on, do not merge.
 ## Step 7 — merge
 
 The branch was already merged `--no-ff` in the integration worktree at Step 5,
-and that head is what passed. First ask whether `main` moved since the batch
-base, and follow the verdict it prints:
+and that head is what passed. First ask, in the integration worktree, whether
+`main` moved since the recorded base:
 
 ```bash
-./scripts/qa/llm_qa.py main-moved <batch-base>
+./scripts/qa/llm_qa.py main-moved
 ```
 
-- `unmoved`: from the main checkout, on the default branch, fast-forward:
+- `unmoved` (exit 0): from the main checkout, on the default branch,
   `git merge --ff-only <integration-branch>`, then `git push`.
-- `docs-only`: merge `main` into the integration branch, run the doc checks the
-  verdict names (`plan_qa docs_qa format british_english sensitive_content`) on
-  the result, then fast-forward and push as above.
-- `full-gate`: merge `main` into the integration branch and run Step 5's full
-  suite again before fast-forwarding.
+- `docs-only` (5), `targeted` (6) or `full-gate` (4): run the four steps it
+  prints. Merge `main` in, run the named recheck exactly as printed, then
+  `main-moved --advance`, then `main-moved` again. Repeat until `unmoved`.
+- If `--ff-only` refuses, `main` moved after that check: run `main-moved` again.
+  The advanced base means only the newer movement is rechecked.
 
-The docs-only path set, and why it is safe, are in [../QA.md](../QA.md), "The
-Batched Integration Gate". CI on the pushed head is the second line, not a
-substitute for any of this.
+How each moved path is judged, and why CI on the pushed head is the second
+line and not a substitute, are in [../QA.md](../QA.md), "The Batched
+Integration Gate". So is what to do if the daemon fails in the main checkout
+after the fast-forward: do not push.
 
 Never `--squash`, never `--rebase` — both sever ancestry and are blocked here.
 Never force-push. If `worktree.merge_to_main_requires_human_approval` is ever

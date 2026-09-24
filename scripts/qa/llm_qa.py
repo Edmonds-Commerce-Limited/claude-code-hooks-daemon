@@ -375,14 +375,18 @@ def output_digest(path: Path) -> str | None:
 
 
 def run_record(
-    state: dict[str, str], *, exit_code: int, passed: bool, output: Path
+    state: dict[str, str], *, exit_code: int, passed: bool, output_sha256: str | None
 ) -> ProvenanceRecord:
-    """One tool's entry: the tree it judged, its live verdict and its report's hash."""
+    """One tool's entry: the tree it judged, its live verdict and its report's hash.
+
+    ``output_sha256`` is taken when the tool returns, not at the end of the
+    run, so a later tool that rewrites this report cannot be certified as it.
+    """
     return {
         **state,
         _RECORD_PASSED: passed,
         _RECORD_EXIT_CODE: exit_code,
-        _RECORD_OUTPUT_DIGEST: output_digest(output),
+        _RECORD_OUTPUT_DIGEST: output_sha256,
     }
 
 
@@ -1223,12 +1227,15 @@ def resolve_tools(names: list[str]) -> tuple[list[str], list[str]]:
 
 #: Options `changed` forwards to `run_changed_tests.py` (Plan 00463).
 _BASE_OPTION: Final[str] = "--base"
+_RANGE_OPTION: Final[str] = "--range"
 _ALLOW_UNMAPPED_OPTION: Final[str] = "--allow-unmapped"
 _CHANGED_TESTS_TOOL: Final[str] = "changed_tests"
+#: Forwarded options that take a value, spelt ``--opt VALUE`` or ``--opt=VALUE``.
+_CHANGED_VALUE_OPTIONS: Final[tuple[str, ...]] = (_BASE_OPTION, _RANGE_OPTION)
 
 
 def split_changed_options(args: list[str]) -> tuple[list[str], list[str], str | None]:
-    """Take ``--base REF`` and ``--allow-unmapped`` out of ``args`` for ``changed_tests``.
+    """Take ``--base REF``, ``--range A..B`` and ``--allow-unmapped`` out for ``changed_tests``.
 
     Returns:
         ``(remaining, forwarded, error)``. An option given without a tool
@@ -1240,15 +1247,16 @@ def split_changed_options(args: list[str]) -> tuple[list[str], list[str], str | 
     while index < len(args):
         argument = args[index]
         index += 1
+        option, separator, value = argument.partition("=")
         if argument == _ALLOW_UNMAPPED_OPTION:
             forwarded.append(argument)
-        elif argument == _BASE_OPTION:
+        elif argument in _CHANGED_VALUE_OPTIONS:
             if index >= len(args) or args[index].startswith("-"):
-                return args, [], f"{_BASE_OPTION} needs a ref"
-            forwarded.extend([_BASE_OPTION, args[index]])
+                return args, [], f"{argument} needs a value"
+            forwarded.extend([argument, args[index]])
             index += 1
-        elif argument.startswith(f"{_BASE_OPTION}="):
-            forwarded.extend([_BASE_OPTION, argument.split("=", 1)[1]])
+        elif separator and option in _CHANGED_VALUE_OPTIONS:
+            forwarded.extend([option, value])
         else:
             remaining.append(argument)
     if forwarded:
@@ -1258,158 +1266,500 @@ def split_changed_options(args: list[str]) -> tuple[list[str], list[str], str | 
                 args,
                 [],
                 (
-                    f"{_BASE_OPTION} and {_ALLOW_UNMAPPED_OPTION} apply to "
+                    f"{_BASE_OPTION}, {_RANGE_OPTION} and {_ALLOW_UNMAPPED_OPTION} apply to "
                     f"`{_SELECTION_CHANGED}` (changed_tests) only"
                 ),
             )
     return remaining, forwarded, None
 
 
-# ── main-moved: may the batched gate skip a second full run? ────────
+# ── main-moved: what must re-run when main moves during a batch ─────
 
-#: The subcommand, and what it answers (CLAUDE/QA.md, "The Batched Integration
-#: Gate"). ``main`` moved after the integration branch was cut from it; the
-#: verdict says whether the green full run still stands.
+#: The subcommand (CLAUDE/QA.md, "The Batched Integration Gate"). ``main``
+#: moved after the batch base; the verdict names the recheck that makes the
+#: green run cover what would land.
 MAIN_MOVED_COMMAND: Final[str] = "main-moved"
+_START_OPTION: Final[str] = "--start"
+_ADVANCE_OPTION: Final[str] = "--advance"
+_MAIN_MOVED_OPTIONS: Final[frozenset[str]] = frozenset({_START_OPTION, _ADVANCE_OPTION})
+_MAIN_MOVED_USAGE: Final[str] = (
+    f"Usage: llm_qa.py {MAIN_MOVED_COMMAND} [{_START_OPTION} | {_ADVANCE_OPTION}] [MAIN_REF]"
+    "  (MAIN_REF defaults to main)"
+)
+_DEFAULT_MAIN_REF: Final[str] = "main"
+
 VERDICT_UNMOVED: Final[str] = "unmoved"
 VERDICT_DOCS_ONLY: Final[str] = "docs-only"
+VERDICT_TARGETED: Final[str] = "targeted"
 VERDICT_FULL_GATE: Final[str] = "full-gate"
-#: A full-gate verdict is an answer, not a failure, so it has its own code.
+#: Each verdict is an answer, not a failure, so each has its own exit code and
+#: a script can branch on it.
 EXIT_FULL_GATE: Final[int] = 4
-_DEFAULT_MAIN_REF: Final[str] = "main"
-_MAX_MAIN_MOVED_ARGS: Final[int] = 2
+EXIT_DOCS_ONLY: Final[int] = 5
+EXIT_TARGETED: Final[int] = 6
+_VERDICT_EXIT: Final[Mapping[str, int]] = {
+    VERDICT_UNMOVED: EXIT_SUCCESS,
+    VERDICT_DOCS_ONLY: EXIT_DOCS_ONLY,
+    VERDICT_TARGETED: EXIT_TARGETED,
+    VERDICT_FULL_GATE: EXIT_FULL_GATE,
+}
 
-#: What a docs-only move re-runs instead of the full gate.
+#: What a docs-only move re-runs: checks that read documents and change nothing.
+#: ``format`` is black, which checks Python and rewrites files, so it is not here.
 DOCS_ONLY_TOOL_NAMES: Final[list[str]] = [
     "plan_qa",
     "docs_qa",
-    "format",
     "british_english",
     "sensitive_content",
 ]
 
-#: THE docs-only path set, and its only definition. A file inside a numbered
-#: plan folder (optionally under a bucket such as ``Completed/``), or a
-#: markdown file outside the code roots. The plan directory's own root is
-#: excluded on purpose: ``mkplan.bash`` and ``_planlib.inc.bash`` are executed
-#: code with tests of their own.
-_PLAN_FOLDER_FILE: Final[re.Pattern[str]] = re.compile(
-    r"^CLAUDE/Plan/(?:[A-Za-z][^/]*/)?\d{5}-[^/]+/.+"
-)
+#: THE runtime-read set, defined here only. Runtime code reads these, so no
+#: test mapping can clear a change to them: the guidance injector and every
+#: session read root ``CLAUDE.md``; the upgrade path reads ``CHANGELOG.md``,
+#: ``RELEASES/`` and ``CLAUDE/UPGRADES/``; Claude Code reads ``.claude/``
+#: (agents, skills, rules, settings, this project's config and handlers).
+RUNTIME_READ_FILES: Final[frozenset[str]] = frozenset({"CLAUDE.md", "CHANGELOG.md"})
+RUNTIME_READ_ROOTS: Final[tuple[str, ...]] = (".claude/", "RELEASES/", "CLAUDE/UPGRADES/")
 _DOCS_SUFFIX: Final[str] = ".md"
 _CODE_ROOTS: Final[tuple[str, ...]] = ("src/", "tests/", "scripts/")
+_SYMLINK_MODE: Final[str] = "120000"
+#: ``run_changed_tests``' reason for a file no test, rule or dependent covers.
+_UNCOVERED: Final[str] = "uncovered"
+
+#: How one moved path is judged.
+PATH_DOCS: Final[str] = "docs"
+PATH_TESTED: Final[str] = "tested"
+PATH_FULL: Final[str] = "full"
+_PATH_KINDS: Final[tuple[str, ...]] = (PATH_FULL, PATH_TESTED, PATH_DOCS)
+
+#: The batch base lives in a git ref, not a shell variable: it must survive
+#: between Bash calls, and refs are shared by every worktree of the checkout.
+_BASE_REF_TEMPLATE: Final[str] = "refs/integration/{branch}/base"
+_SELECT_TIMEOUT_SECONDS: Final[int] = 600
+_RANGE_REPORT_KEY: Final[str] = "range"
 
 
 class MainMovedError(RuntimeError):
-    """``base..main`` could not be read, so no verdict can be given."""
+    """No verdict can be given, or the base cannot advance; the message says why."""
+
+
+class MovedPath(NamedTuple):
+    """One path the move changed, and whether either side of it is a symlink."""
+
+    path: str
+    symlink: bool
+
+
+class PathVerdict(NamedTuple):
+    """How one moved path is judged (``PATH_DOCS``/``TESTED``/``FULL``), and why."""
+
+    path: str
+    kind: str
+    why: str
 
 
 class MainMoved(NamedTuple):
-    """The verdict, every path ``main`` changed since the base, and why."""
+    """The verdict for ``base..main``, each path's judgement, and the reason."""
 
     verdict: str
-    paths: list[str]
+    base: str
+    main: str
+    paths: list[PathVerdict]
     reason: str
 
 
-def is_docs_only_path(path: str) -> bool:
-    """True when a change to ``path`` cannot alter what the full gate proved."""
-    if _PLAN_FOLDER_FILE.match(path):
-        return True
+#: ``(root, "A..B")`` to the ``run_changed_tests --select-only`` payload.
+Selector = Callable[[Path, str], Mapping[str, Any]]
+
+
+def is_runtime_read(path: str) -> bool:
+    """Whether runtime code reads ``path``, so only the full gate can clear it."""
+    return path in RUNTIME_READ_FILES or path.startswith(RUNTIME_READ_ROOTS)
+
+
+def _is_document(path: str) -> bool:
     return path.endswith(_DOCS_SUFFIX) and not path.startswith(_CODE_ROOTS)
 
 
-def classify_moved_paths(paths: Sequence[str]) -> str:
-    """Unmoved, docs-only, or full-gate: one code path anywhere means the full gate."""
-    if not paths:
-        return VERDICT_UNMOVED
-    if all(is_docs_only_path(path) for path in paths):
-        return VERDICT_DOCS_ONLY
-    return VERDICT_FULL_GATE
+def _needs_mapping(moved: MovedPath) -> bool:
+    return not moved.symlink and not is_runtime_read(moved.path) and _is_document(moved.path)
+
+
+def judge_path(moved: MovedPath, selection: Mapping[str, Any]) -> PathVerdict:
+    """Judge one moved path; ``selection`` is the mapper's answer for the range.
+
+    Only a document the mapper covers with no test and no tool beyond the doc
+    tools is docs-only. A document tests read is targeted. Everything else,
+    and anything the mapper cannot target or did not report, is the full gate.
+    """
+    path = moved.path
+    if is_runtime_read(path):
+        return PathVerdict(path, PATH_FULL, "read at runtime")
+    if moved.symlink:
+        return PathVerdict(path, PATH_FULL, "a symlink, so judged as what it points at")
+    if not _is_document(path):
+        return PathVerdict(path, PATH_FULL, "not a document outside src/, tests/ and scripts/")
+    reasons: Mapping[str, Any] = selection.get("unmapped_reasons", {})
+    if path in reasons:
+        reason = str(reasons[path].get("reason", ""))
+        if reason == _UNCOVERED:
+            return PathVerdict(path, PATH_DOCS, "no test reads it")
+        return PathVerdict(path, PATH_FULL, f"the mapper cannot target it ({reason})")
+    entry = next((item for item in selection.get("mapping", []) if item.get("file") == path), None)
+    if entry is None:
+        return PathVerdict(path, PATH_FULL, "the mapper did not report it")
+    tests = list(entry.get("tests", []))
+    if tests:
+        return PathVerdict(path, PATH_TESTED, f"{len(tests)} test file(s) read it")
+    other_tools = [tool for tool in entry.get("tools", []) if tool not in DOCS_ONLY_TOOL_NAMES]
+    if other_tools:
+        return PathVerdict(path, PATH_TESTED, f"checked by {', '.join(other_tools)}")
+    return PathVerdict(path, PATH_DOCS, "no test reads it")
+
+
+def combine_verdicts(judged: Sequence[PathVerdict]) -> str:
+    """One full path means the full gate; one tested document means targeted.
+
+    New commits that change no file (a commit and its revert) are docs-only,
+    not unmoved: ``--ff-only`` refuses until ``main`` is merged in.
+    """
+    kinds = {verdict.kind for verdict in judged}
+    if PATH_FULL in kinds:
+        return VERDICT_FULL_GATE
+    if PATH_TESTED in kinds:
+        return VERDICT_TARGETED
+    return VERDICT_DOCS_ONLY
+
+
+def required_tools(verdict: str) -> list[str]:
+    """What must have passed on the merged head before the base may advance."""
+    if verdict == VERDICT_DOCS_ONLY:
+        return list(DOCS_ONLY_TOOL_NAMES)
+    if verdict == VERDICT_TARGETED:
+        extra = [tool for tool in DOCS_ONLY_TOOL_NAMES if tool not in CHANGED_TOOL_NAMES]
+        return [*CHANGED_TOOL_NAMES, *extra]
+    if verdict == VERDICT_FULL_GATE:
+        return list(ALL_TOOL_NAMES)
+    return []
+
+
+def _git_text(args: list[str], root: Path, git: GitBytesRunner, failure: str) -> str:
+    code, output = git(args, root)
+    if code != 0:
+        raise MainMovedError(f"{failure} (git {' '.join(args)} exited {code})")
+    return output.decode().strip()
+
+
+def _commit_of(ref: str, root: Path, git: GitBytesRunner) -> str:
+    return _git_text(
+        ["rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
+        root,
+        git,
+        f"`{ref}` does not name a commit",
+    )
+
+
+def integration_branch(root: Path, git: GitBytesRunner = _run_git_bytes) -> str:
+    """The checked-out branch, which the batch base is kept for."""
+    code, output = git(["symbolic-ref", "--quiet", "--short", "HEAD"], root)
+    branch = output.decode().strip()
+    if code != 0 or not branch:
+        raise MainMovedError(
+            "HEAD is detached: the batch base is kept per integration branch, so run "
+            "this on the integration branch"
+        )
+    return branch
+
+
+def batch_base_ref(root: Path, git: GitBytesRunner = _run_git_bytes) -> str:
+    """The ref holding this integration branch's batch base."""
+    return _BASE_REF_TEMPLATE.format(branch=integration_branch(root, git))
+
+
+def _is_ancestor(older: str, newer: str, root: Path, git: GitBytesRunner) -> bool:
+    code, _ = git(["merge-base", "--is-ancestor", older, newer], root)
+    if code not in (0, 1):
+        raise MainMovedError(f"git merge-base --is-ancestor {older} {newer} exited {code}")
+    return code == 0
+
+
+def _recorded_base(root: Path, git: GitBytesRunner) -> tuple[str, str]:
+    ref = batch_base_ref(root, git)
+    code, output = git(["rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"], root)
+    if code != 0:
+        raise MainMovedError(
+            f"no batch base is recorded in {ref}: run `llm_qa.py {MAIN_MOVED_COMMAND} "
+            f"{_START_OPTION}` on the integration branch when the batch is built"
+        )
+    return ref, output.decode().strip()
+
+
+def start_batch(
+    root: Path, main_ref: str = _DEFAULT_MAIN_REF, *, git: GitBytesRunner = _run_git_bytes
+) -> str:
+    """Record the newest ``main_ref`` commit this branch contains as the batch base."""
+    ref = batch_base_ref(root, git)
+    main = _commit_of(main_ref, root, git)
+    base = _git_text(
+        ["merge-base", "HEAD", main], root, git, f"this branch shares no history with {main_ref}"
+    )
+    _git_text(["update-ref", ref, base], root, git, f"could not record {ref}")
+    return base
+
+
+def moved_paths(
+    base: str, tip: str, root: Path, git: GitBytesRunner = _run_git_bytes
+) -> list[MovedPath]:
+    """Every path ``git diff base tip`` changed, a rename as both of its paths."""
+    code, output = git(["diff", "--raw", "--no-renames", "--no-abbrev", "-z", base, tip], root)
+    if code != 0:
+        raise MainMovedError(f"git diff {base} {tip} exited {code}")
+    fields = output.decode("utf-8", "surrogateescape").split("\0")
+    moved: list[MovedPath] = []
+    for header, path in zip(fields[0::2], fields[1::2], strict=False):
+        if not header.startswith(":") or not path:
+            continue
+        modes = header[1:].split()[:2]
+        moved.append(MovedPath(path, _SYMLINK_MODE in modes))
+    return moved
+
+
+def select_range(root: Path, spec: str) -> Mapping[str, Any]:
+    """Ask ``run_changed_tests`` which tests read each file ``spec`` changed."""
+    try:
+        command = [
+            str(venv_python()),
+            str(SCRIPTS_DIR / "run_changed_tests.py"),
+            "--root",
+            str(root),
+            "--range",
+            spec,
+            "--select-only",
+        ]
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            cwd=str(root),
+            timeout=_SELECT_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired, VenvResolutionError) as exc:
+        raise MainMovedError(f"run_changed_tests --select-only did not run: {exc}") from exc
+    if completed.returncode != 0:
+        raise MainMovedError(
+            f"run_changed_tests --select-only failed: {completed.stderr.strip() or 'no output'}"
+        )
+    try:
+        payload = json.loads(completed.stdout)
+    except ValueError as exc:
+        raise MainMovedError(f"run_changed_tests --select-only printed no JSON: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise MainMovedError("run_changed_tests --select-only printed no selection")
+    return payload
+
+
+def _judge_range(
+    base: str, tip: str, root: Path, git: GitBytesRunner, select: Selector
+) -> tuple[str, list[PathVerdict], str]:
+    if not _is_ancestor(base, tip, root, git):
+        return (
+            VERDICT_FULL_GATE,
+            [],
+            f"the base {base[:_SHORT_SHA]} is not an ancestor of {tip[:_SHORT_SHA]}: main "
+            "was rewritten, so there is no change set to judge",
+        )
+    moved = moved_paths(base, tip, root, git)
+    selection = select(root, f"{base}..{tip}") if any(map(_needs_mapping, moved)) else {}
+    judged = [judge_path(path, selection) for path in moved]
+    if not judged:
+        reason = "new commits that change no file; --ff-only still needs main merged in"
+    else:
+        counts = {kind: sum(1 for j in judged if j.kind == kind) for kind in _PATH_KINDS}
+        reason = (
+            f"{len(judged)} moved path(s): {counts[PATH_FULL]} need the full gate, "
+            f"{counts[PATH_TESTED]} are read by tests, {counts[PATH_DOCS]} are documents only"
+        )
+    return combine_verdicts(judged), judged, reason
 
 
 def main_moved(
-    base: str, main_ref: str, root: Path, *, git: GitBytesRunner = _run_git_bytes
+    root: Path,
+    main_ref: str = _DEFAULT_MAIN_REF,
+    *,
+    git: GitBytesRunner = _run_git_bytes,
+    select: Selector = select_range,
 ) -> MainMoved:
-    """Classify what ``main_ref`` changed since the batch was cut at ``base``.
-
-    Renames are split into a deletion and an addition (``--no-renames``), so a
-    file moved out of ``src/`` is judged by the path it left as well.
+    """The verdict for what ``main_ref`` changed since the recorded batch base.
 
     Raises:
-        MainMovedError: a ref does not resolve, or git cannot answer.
+        MainMovedError: no base is recorded, a ref does not resolve, or git or
+            the mapper cannot answer.
     """
-    ancestor, _ = git(["merge-base", "--is-ancestor", base, main_ref], root)
-    if ancestor == 1:
-        return MainMoved(
-            VERDICT_FULL_GATE,
-            [],
-            f"{base} is not an ancestor of {main_ref}: {main_ref} was rewritten, "
-            "so there is no change set to classify",
-        )
-    if ancestor != 0:
+    _, base = _recorded_base(root, git)
+    main = _commit_of(main_ref, root, git)
+    if main == base:
+        return MainMoved(VERDICT_UNMOVED, base, main, [], f"{main_ref} is still the batch base")
+    verdict, judged, reason = _judge_range(base, main, root, git, select)
+    return MainMoved(verdict, base, main, judged, reason)
+
+
+def certification_reason(
+    record: ProvenanceRecord | None, current: dict[str, str] | None, output: Path
+) -> str | None:
+    """Why a recorded result does not certify a PASS on the current tree, or None."""
+    stale = stale_reason(record, current)
+    if stale is not None or record is None:
+        return stale
+    return output_reason(record, output) or recorded_failure_reason(record)
+
+
+def recorded_failure_reason(record: ProvenanceRecord) -> str | None:
+    """Why the recorded run itself failed, or None when it passed."""
+    if record.get(_RECORD_PASSED) is not True or record.get(_RECORD_EXIT_CODE) != 0:
+        return "the recorded run did not pass; fix it and re-run the tool"
+    return None
+
+
+def _recorded_range(report: Path) -> str | None:
+    """The ``--range`` a ``changed_tests`` report was run over, or None for none."""
+    if not report.is_file():
+        return None
+    try:
+        data = json.loads(report.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise MainMovedError(f"{report} cannot be read as a report: {exc}") from exc
+    value = data.get(_RANGE_REPORT_KEY) if isinstance(data, dict) else None
+    return value if isinstance(value, str) else None
+
+
+def _uncertified(verdict: str, spec: str, root: Path, qa_dir: Path) -> list[str]:
+    current = worktree_state(root)
+    records = read_provenance(qa_dir)
+    problems = []
+    for name in required_tools(verdict):
+        output = qa_dir / TOOL_REGISTRY[name].json_file
+        reason = certification_reason(records.get(name), current, output)
+        if reason is not None:
+            problems.append(f"{name}: {reason}")
+    if verdict == VERDICT_TARGETED and not problems:
+        ran = _recorded_range(qa_dir / TOOL_REGISTRY[_CHANGED_TESTS_TOOL].json_file)
+        if ran != spec:
+            problems.append(
+                f"{_CHANGED_TESTS_TOOL} ran over {ran or 'no range'}; run it with "
+                f"{_RANGE_OPTION} {spec}"
+            )
+    return problems
+
+
+def advance_batch(
+    root: Path,
+    main_ref: str = _DEFAULT_MAIN_REF,
+    *,
+    git: GitBytesRunner = _run_git_bytes,
+    select: Selector = select_range,
+    qa_dir: Path | None = None,
+) -> str:
+    """Move the base to the newest ``main_ref`` commit merged in, once its recheck passed.
+
+    The recheck is the one the verdict for ``base..merged`` names, and it must
+    have PASSED on the current tree (the provenance ``--read-only`` trusts).
+
+    Raises:
+        MainMovedError: nothing new is merged in, or the recheck has not passed.
+    """
+    ref, base = _recorded_base(root, git)
+    main = _commit_of(main_ref, root, git)
+    merged = _git_text(
+        ["merge-base", "HEAD", main], root, git, f"this branch shares no history with {main_ref}"
+    )
+    if merged == base:
         raise MainMovedError(
-            f"git merge-base --is-ancestor {base} {main_ref} failed (exit {ancestor})"
+            f"nothing to advance: no {main_ref} commit after the base {base[:_SHORT_SHA]} is "
+            f"merged into this branch. Merge it in (git merge --no-edit {main_ref}), run the "
+            "recheck the verdict names, then advance"
         )
-    code, output = git(["diff", "--name-only", "--no-renames", "-z", base, main_ref], root)
-    if code != 0:
-        raise MainMovedError(f"git diff {base} {main_ref} failed (exit {code})")
-    paths = [path for path in output.decode("utf-8", "surrogateescape").split("\0") if path]
-    verdict = classify_moved_paths(paths)
-    code_paths = [path for path in paths if not is_docs_only_path(path)]
-    reason = {
-        VERDICT_UNMOVED: f"{main_ref} has not moved since {base}",
-        VERDICT_DOCS_ONLY: f"every path {main_ref} changed since {base} is docs-only",
-        VERDICT_FULL_GATE: f"{len(code_paths)} changed path(s) are not docs-only",
-    }[verdict]
-    return MainMoved(verdict, paths, reason)
+    verdict, _, _ = _judge_range(base, merged, root, git, select)
+    qa = qa_dir if qa_dir is not None else root / QA_OUTPUT_DIR.relative_to(PROJECT_ROOT)
+    problems = _uncertified(verdict, f"{base}..{merged}", root, qa)
+    if problems:
+        raise MainMovedError(
+            f"the base stays at {base[:_SHORT_SHA]}: the {verdict} recheck has not passed "
+            f"on this tree. " + "; ".join(problems)
+        )
+    _git_text(["update-ref", ref, merged, base], root, git, f"could not move {ref}")
+    return merged
 
 
-_MAIN_MOVED_NEXT: Final[dict[str, str]] = {
-    VERDICT_UNMOVED: "fast-forward main to the integration head",
-    VERDICT_DOCS_ONLY: (
-        "merge main into the integration branch, run "
-        f"./scripts/qa/llm_qa.py {' '.join(DOCS_ONLY_TOOL_NAMES)}, "
-        "then fast-forward main to the result"
-    ),
-    VERDICT_FULL_GATE: (
-        "merge main into the integration branch and run ./scripts/qa/llm_qa.py all again"
-    ),
-}
+def _recheck_command(outcome: MainMoved) -> str:
+    if outcome.verdict == VERDICT_DOCS_ONLY:
+        return f"./scripts/qa/llm_qa.py {' '.join(DOCS_ONLY_TOOL_NAMES)}"
+    if outcome.verdict == VERDICT_TARGETED:
+        extra = [tool for tool in DOCS_ONLY_TOOL_NAMES if tool not in CHANGED_TOOL_NAMES]
+        return (
+            f"./scripts/qa/llm_qa.py {_SELECTION_CHANGED} {' '.join(extra)} "
+            f"{_RANGE_OPTION} {outcome.base}..{outcome.main}"
+        )
+    return f"./scripts/qa/llm_qa.py {_SELECTION_ALL}"
+
+
+def _print_verdict(outcome: MainMoved, main_ref: str, root: Path) -> None:
+    print(f"VERDICT: {outcome.verdict}")
+    print(
+        f"  {outcome.reason} (base {outcome.base[:_SHORT_SHA]}, {main_ref} {outcome.main[:_SHORT_SHA]})"
+    )
+    for judged in outcome.paths:
+        print(f"  [{judged.kind}] {judged.path}: {judged.why}")
+    if outcome.verdict == VERDICT_UNMOVED:
+        branch = integration_branch(root)
+        print(
+            f"NEXT: from the main checkout, git merge --ff-only {branch}, then push. If "
+            f"--ff-only refuses, {main_ref} moved again: run this command again."
+        )
+    else:
+        print("NEXT, in this integration worktree:")
+        print(f"  1. git merge --no-edit {main_ref}")
+        print(f"  2. {_recheck_command(outcome)}")
+        print(f"  3. ./scripts/qa/llm_qa.py {MAIN_MOVED_COMMAND} {_ADVANCE_OPTION}")
+        print(f"  4. ./scripts/qa/llm_qa.py {MAIN_MOVED_COMMAND}   (again, until unmoved)")
+    print("CI on the pushed head is the second line, not a substitute for this gate.")
 
 
 def main_moved_command(args: Sequence[str], *, root: Path = PROJECT_ROOT) -> int:
-    """``llm_qa.py main-moved BASE [MAIN]``: print the verdict and the next step."""
-    if not args or len(args) > _MAX_MAIN_MOVED_ARGS or any(a.startswith("-") for a in args):
-        print(
-            f"Usage: llm_qa.py {MAIN_MOVED_COMMAND} BATCH_BASE [MAIN_REF]  "
-            f"(MAIN_REF defaults to {_DEFAULT_MAIN_REF})",
-            file=sys.stderr,
-        )
+    """``llm_qa.py main-moved [--start | --advance] [MAIN_REF]``."""
+    options = [arg for arg in args if arg.startswith("-")]
+    refs = [arg for arg in args if not arg.startswith("-")]
+    if len(options) > 1 or not set(options) <= _MAIN_MOVED_OPTIONS or len(refs) > 1:
+        print(_MAIN_MOVED_USAGE, file=sys.stderr)
         return EXIT_FAILURE
-    base = args[0]
-    main_ref = args[1] if len(args) == _MAX_MAIN_MOVED_ARGS else _DEFAULT_MAIN_REF
+    main_ref = refs[0] if refs else _DEFAULT_MAIN_REF
     try:
-        outcome = main_moved(base, main_ref, root)
+        if options == [_START_OPTION]:
+            base = start_batch(root, main_ref)
+            print(f"BATCH BASE: {base} recorded in {batch_base_ref(root)}")
+            return EXIT_SUCCESS
+        if options == [_ADVANCE_OPTION]:
+            advanced = advance_batch(root, main_ref)
+            print(f"BATCH BASE: advanced to {advanced}. Run {MAIN_MOVED_COMMAND} again.")
+            return EXIT_SUCCESS
+        outcome = main_moved(root, main_ref)
+        _print_verdict(outcome, main_ref, root)
     except MainMovedError as exc:
         print(f"llm_qa: {MAIN_MOVED_COMMAND}: {exc}", file=sys.stderr)
         return EXIT_FAILURE
-    print(f"VERDICT: {outcome.verdict}")
-    print(f"  {outcome.reason}")
-    for path in outcome.paths:
-        marker = "docs" if is_docs_only_path(path) else "CODE"
-        print(f"  [{marker}] {path}")
-    print(f"NEXT: {_MAIN_MOVED_NEXT[outcome.verdict]}")
-    print("CI on the pushed head is the second line, not a substitute for this gate.")
-    return EXIT_FULL_GATE if outcome.verdict == VERDICT_FULL_GATE else EXIT_SUCCESS
+    return _VERDICT_EXIT[outcome.verdict]
 
 
 def main() -> int:
     """Entry point."""
     args = sys.argv[1:]
 
-    if args[:1] == [MAIN_MOVED_COMMAND]:
-        return main_moved_command(args[1:])
+    command_args = [arg for arg in args if arg != "--read-only"]
+    if command_args[:1] == [MAIN_MOVED_COMMAND]:
+        return main_moved_command(command_args[1:])
+    if MAIN_MOVED_COMMAND in command_args:
+        print(f"llm_qa: {MAIN_MOVED_COMMAND} runs on its own. {_MAIN_MOVED_USAGE}", file=sys.stderr)
+        return EXIT_FAILURE
 
     read_only = False
     if "--read-only" in args:
@@ -1419,15 +1769,17 @@ def main() -> int:
     if not args or "--help" in args or "-h" in args:
         print(
             "Usage: llm_qa.py [--read-only] <tool|all|changed> [tool ...] "
-            f"[{_BASE_OPTION} REF] [{_ALLOW_UNMAPPED_OPTION}]"
+            f"[{_BASE_OPTION} REF | {_RANGE_OPTION} A..B] [{_ALLOW_UNMAPPED_OPTION}]"
         )
         print(f"  {_SELECTION_ALL}: the full suite (the coordinator's gate)")
         print(f"  {_SELECTION_CHANGED}: targeted, {', '.join(CHANGED_TOOL_NAMES)}")
-        print(f"  {_BASE_OPTION}, {_ALLOW_UNMAPPED_OPTION}: passed to changed_tests")
+        print(
+            f"  {_BASE_OPTION}, {_RANGE_OPTION}, {_ALLOW_UNMAPPED_OPTION}: passed to changed_tests"
+        )
         print("  --read-only: summarise; a result recorded for another tree FAILS")
         print(
-            f"  {MAIN_MOVED_COMMAND} BATCH_BASE [MAIN_REF]: may the batched gate skip "
-            "a second full run? (runs no tools)"
+            f"  {MAIN_MOVED_COMMAND} [{_START_OPTION} | {_ADVANCE_OPTION}] [MAIN_REF]: the "
+            "batched gate's check when main moves (runs no tools)"
         )
         print(f"Tools: {', '.join(TOOL_REGISTRY)}")
         return EXIT_SUCCESS
@@ -1468,7 +1820,11 @@ def main() -> int:
     return _run_tools(tools, read_only=False, forwarded=forwarded)
 
 
-def _record_run(run_records: Mapping[str, tuple[int, bool]], before: dict[str, str] | None) -> None:
+#: Per tool: the exit code, the live verdict, and the report hash taken on return.
+RunOutcome: TypeAlias = tuple[int, bool, str | None]
+
+
+def _record_run(run_records: Mapping[str, RunOutcome], before: dict[str, str] | None) -> None:
     """Record what this run certifies, and say at once when it certifies no tree."""
     if before is None:
         print(f"\n{_TREE_WARNING_LABEL} the working tree cannot be read, so nothing was recorded")
@@ -1485,13 +1841,8 @@ def _record_run(run_records: Mapping[str, tuple[int, bool]], before: dict[str, s
     record_provenance(
         QA_OUTPUT_DIR,
         {
-            name: run_record(
-                state,
-                exit_code=exit_code,
-                passed=passed,
-                output=QA_OUTPUT_DIR / TOOL_REGISTRY[name].json_file,
-            )
-            for name, (exit_code, passed) in run_records.items()
+            name: run_record(state, exit_code=exit_code, passed=passed, output_sha256=digest)
+            for name, (exit_code, passed, digest) in run_records.items()
         },
     )
 
@@ -1508,7 +1859,7 @@ def _run_tools(tools: list[str], *, read_only: bool, forwarded: Sequence[str] = 
     """
     all_passed = True
     tool_results: dict[str, tuple[bool, str]] = {}
-    run_records: dict[str, tuple[int, bool]] = {}
+    run_records: dict[str, RunOutcome] = {}
     before = worktree_state(PROJECT_ROOT)
     recorded = read_provenance(QA_OUTPUT_DIR) if read_only else {}
 
@@ -1516,6 +1867,8 @@ def _run_tools(tools: list[str], *, read_only: bool, forwarded: Sequence[str] = 
         output = QA_OUTPUT_DIR / TOOL_REGISTRY[name].json_file
         exit_code: int | None = None
         stale: str | None = None
+        digest: str | None = None
+        record: ProvenanceRecord | None = None
         if read_only:
             record = recorded.get(name)
             stale = stale_reason(record, before) or (
@@ -1529,12 +1882,17 @@ def _run_tools(tools: list[str], *, read_only: bool, forwarded: Sequence[str] = 
             output.unlink(missing_ok=True)
             extra = forwarded if name == _CHANGED_TESTS_TOOL else ()
             exit_code = run_tool(name, extra)
+            digest = output_digest(output)
 
         # Summarize from JSON, passing exit code for cross-check
         passed, summary = summarize_tool(name, exit_code=exit_code, stale=stale)
+        failed_as_recorded = recorded_failure_reason(record) if record and passed else None
+        if failed_as_recorded is not None:
+            passed = False
+            summary = summary.replace("✅", "❌", 1) + f"   {_STALE_LABEL} {failed_as_recorded}\n"
         tool_results[name] = (passed, summary)
         if exit_code is not None and not read_only:
-            run_records[name] = (exit_code, passed)
+            run_records[name] = (exit_code, passed, digest)
         print(summary, end="")
         if not passed:
             all_passed = False

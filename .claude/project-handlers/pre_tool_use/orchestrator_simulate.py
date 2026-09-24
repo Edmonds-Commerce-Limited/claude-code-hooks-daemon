@@ -257,6 +257,8 @@ def _recorded_verdict(hook_input: dict[str, Any]) -> str:
     so a tool that joins the blocked set stops being described that way.
     """
     tool_name = hook_input.get("tool_name")
+    if not tool_name:
+        return "recorded, not a would-be denial (the call names no tool)"
     if tool_name not in _BLOCKED_TOOLS:
         return f"recorded, not a would-be denial ({tool_name} is never denied by this mode)"
     return "recorded, not a would-be denial (allowed by the blocking policy)"

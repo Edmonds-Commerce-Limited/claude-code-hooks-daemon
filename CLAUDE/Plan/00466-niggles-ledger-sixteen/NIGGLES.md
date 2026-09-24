@@ -74,8 +74,20 @@ agent to run targeted QA (`llm_qa.py changed`, named `llm_qa.py` tools, and
 pytest on the test files it touched), and says full QA is the coordinator's
 batched integration gate. `tests/unit/scripts/test_setup_worktree_qa_guidance.py`
 was RED first. It checks that the script never names `run_all.sh`, and that no
-command the script prints is a full run under this repo's live
-`full_qa_patterns`, judged by `subagent_full_qa_blocker`'s own matcher.
+full run under this repo's live `full_qa_patterns` is printed, judged by
+`subagent_full_qa_blocker`'s own matcher.
+
+**Correction (Plan 00463 review 3, R3).** The first version of that test
+judged only the printed lines that were shaped like a command. So a full run
+inside prose (`then run ./scripts/qa/llm_qa.py all`), after a label
+(`QA: ...`), in a `printf`, or in single quotes passed it, and the earlier
+claim here that no printed command was a full run was not something the test
+proved. The rewritten test reads every `echo`/`printf` text the script prints
+and judges a candidate command at every place one can start in each line:
+the line start, after `run`, `&&`, `||`, `;`, `|` or a word ending in `:`, and
+at every word that starts like a path or an expansion. Each row of the
+review's table is an injected RED case. The row above stays Remedied: the
+script itself prints no full run, and the test now proves it.
 
 ### N1 — `resolve_venv_python`'s fallback accepts a venv interpreter that cannot run on this host
 

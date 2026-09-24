@@ -50,11 +50,12 @@ of a miss is one wasted run.
 from __future__ import annotations
 
 import logging
+import posixpath
 import re
 import shlex
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import (
@@ -540,8 +541,27 @@ _PROJECT_RUNNERS: Final[Mapping[str, _Runner]] = {
     "pipenv": _Runner(global_value_flags=frozenset(), run_value_flags=frozenset()),
     "pdm": _Runner(global_value_flags=frozenset({"-p", "--project"}), run_value_flags=frozenset()),
     "hatch": _Runner(global_value_flags=frozenset({"-e", "--env"}), run_value_flags=frozenset()),
+    # `coverage run [-m] cmd`: `-m` is a flag here, so the next word is tried
+    # both as its value and as the command, which is what it is.
+    "coverage": _Runner(
+        global_value_flags=frozenset(),
+        run_value_flags=frozenset(
+            {
+                "--rcfile",
+                "--source",
+                "--omit",
+                "--include",
+                "--context",
+                "--data-file",
+                "--concurrency",
+                "--debug",
+            }
+        ),
+    ),
 }
 _RUNNER_SUBCOMMAND: Final[str] = "run"
+#: Programs installed under a second name: `py.test` is pytest's older name.
+_PROGRAM_ALIASES: Final[Mapping[str, str]] = {"py.test": "pytest"}
 #: ``uv tool run`` and its alias ``uvx`` run a tool directly.
 _UV: Final[str] = "uv"
 _UV_TOOL_SUBCOMMAND: Final[str] = "tool"
@@ -572,6 +592,8 @@ _HOME_PREFIXES: Final[tuple[str, ...]] = ("~/", "$HOME/", "${HOME}/")
 #: ``cd`` moves the directory later words are looked up in; a target that
 #: starts with an expansion goes somewhere this cannot see.
 _CD: Final[str] = "cd"
+#: A path operand that lands above where the command started runs all of it.
+_ABOVE_START: Final[str] = "<above the starting directory>"
 _UNSEEN_CD_PREFIXES: Final[tuple[str, ...]] = ("$", "~", "`")
 #: ``-n`` of ``-n8``: a short option is a dash and one letter.
 _SHORT_OPTION: Final[int] = 2
@@ -656,14 +678,14 @@ def _resolve(words: list[str], segment: str, depth: int) -> Iterator[tuple[str, 
         return
 
     if _PYTHON_INTERPRETER.match(name):
-        yield from _resolve_python(rest, segment)
+        yield from _resolve_python(rest, segment, depth)
         return
 
     if name in _SHELL_INTERPRETERS:
         yield from _resolve_shell(rest, segment, depth)
         return
 
-    yield name, rest, segment
+    yield _PROGRAM_ALIASES.get(name, name), rest, segment
 
 
 def _is_flag(word: str) -> bool:
@@ -763,17 +785,24 @@ def _hatch_command(words: list[str]) -> list[str]:
     return words
 
 
-def _resolve_python(rest: list[str], segment: str) -> Iterator[tuple[str, list[str], str]]:
-    """``python [flags] script args`` or ``python [flags] -m module args``."""
+def _resolve_python(
+    rest: list[str], segment: str, depth: int
+) -> Iterator[tuple[str, list[str], str]]:
+    """``python [flags] script args`` or ``python [flags] -m module args``.
+
+    A module is resolved like a command, so ``python -m coverage run -m
+    pytest`` reaches pytest and ``python -m py.test`` is pytest.
+    """
     index = 0
     while index < len(rest):
         argument = rest[index]
         if argument == _PYTHON_MODULE_FLAG:
             if index + 1 < len(rest):
-                yield rest[index + 1], rest[index + 2 :], segment
+                yield from _resolve(rest[index + 1 :], segment, depth)
             return
         if argument.startswith(_PYTHON_MODULE_FLAG) and not argument.startswith(_LONG_FLAG_PREFIX):
-            yield argument[len(_PYTHON_MODULE_FLAG) :], rest[index + 1 :], segment
+            module = argument[len(_PYTHON_MODULE_FLAG) :]
+            yield from _resolve([module, *rest[index + 1 :]], segment, depth)
             return
         if argument == _PYTHON_CODE_FLAG:
             # Python source, not a shell command: nothing here is a program.
@@ -815,19 +844,46 @@ def _resolve_shell(
 
 
 def _normalise_operand(value: str) -> str:
-    """Spell a path operand one way: ``./tests/``, ``$PWD/tests`` and ``tests`` are one run."""
+    """Spell a path operand one way.
+
+    ``./tests/``, ``$PWD/tests``, ``tests//unit/..`` and ``tests`` are one
+    run: ``.``, ``..`` and repeated separators are folded as the filesystem
+    would fold them (review 3 R7).
+    """
     if value in _CWD_VARIABLES:
         return _CURRENT_DIR
     for prefix in _CWD_VARIABLE_PREFIXES:
         if value.startswith(prefix):
             value = value[len(prefix) :]
             break
-    if value.startswith(_PATH_SEPARATOR):
-        return value.rstrip(_PATH_SEPARATOR) or _PATH_SEPARATOR
-    normalised = value
-    while normalised.startswith(_CURRENT_DIR_PREFIX):
-        normalised = normalised[len(_CURRENT_DIR_PREFIX) :]
-    return normalised.rstrip(_PATH_SEPARATOR) or _CURRENT_DIR
+    if not value or _NODE_ID_SEPARATOR in value:
+        return value or _CURRENT_DIR
+    return posixpath.normpath(value)
+
+
+def _relative_to_start(operand: str, here: Path | None, start: Path | None) -> str | None:
+    """Where a path operand lands, relative to where the command started.
+
+    Returns ``.`` for the starting directory itself, ``_ABOVE_START`` for a
+    directory that contains it, or None when it cannot be placed (no
+    directory is known, it lies elsewhere, or the shell would expand it).
+    """
+    if start is None or operand.startswith(_UNSEEN_CD_PREFIXES):
+        return None
+    if operand.startswith(_PATH_SEPARATOR):
+        resolved = PurePosixPath(posixpath.normpath(operand))
+    elif here is not None:
+        resolved = PurePosixPath(posixpath.normpath(str(PurePosixPath(here) / operand)))
+    else:
+        return None
+    origin = PurePosixPath(posixpath.normpath(str(start)))
+    if resolved == origin:
+        return _CURRENT_DIR
+    if origin.is_relative_to(resolved):
+        return _ABOVE_START
+    if resolved.is_relative_to(origin):
+        return resolved.relative_to(origin).as_posix()
+    return None
 
 
 def _is_path_like(operand: str, cwd: Path | None) -> bool:
@@ -894,23 +950,44 @@ def _is_absolute(operand: str) -> bool:
     return operand.startswith((_PATH_SEPARATOR, *_HOME_PREFIXES))
 
 
-def _operand_is_full(operand: str, full_args: frozenset[str]) -> bool:
-    """An operand names a full run directly, or as an absolute path ending in one."""
+def _operand_is_full(
+    operand: str, full_args: frozenset[str], here: Path | None, start: Path | None
+) -> bool:
+    """Whether an operand names the whole suite.
+
+    Directly, as an absolute path ending in a ``full_args`` entry, or once
+    resolved from the directory the command runs in: at a ``full_args``
+    entry, at an ancestor of one, or at or above the starting directory.
+    """
     if operand in full_args:
         return True
-    if not _is_absolute(operand):
-        return False
-    return any(
+    if _is_absolute(operand) and any(
         operand.endswith(_PATH_SEPARATOR + entry) for entry in full_args if entry != _CURRENT_DIR
+    ):
+        return True
+    placed = _relative_to_start(operand, here, start)
+    if placed is None:
+        return False
+    if placed in (_CURRENT_DIR, _ABOVE_START):
+        return True
+    return placed in full_args or any(
+        entry.startswith(placed + _PATH_SEPARATOR) for entry in full_args
     )
 
 
-def _is_full_run(pattern: FullQaPattern, arguments: Sequence[str], cwd: Path | None) -> bool:
+def _is_full_run(
+    pattern: FullQaPattern,
+    arguments: Sequence[str],
+    cwd: Path | None,
+    start: Path | None = None,
+) -> bool:
     """Whether these arguments make ``pattern.command`` run the whole suite.
 
     A word naming the whole suite (``full_args``) makes the run full wherever
     it sits. Otherwise the run is targeted only by a PATH-LIKE operand; any
     other word is a flag's value and is ignored (see :func:`_is_path_like`).
+    ``cwd`` is where the command runs (moved by any ``cd``), ``start`` where
+    the event began, which ``full_args`` are relative to.
     """
     names_full_suite = False
     targets: list[str] = []
@@ -941,7 +1018,9 @@ def _is_full_run(pattern: FullQaPattern, arguments: Sequence[str], cwd: Path | N
         if target_follows:
             index += 1
         operand = _normalise_operand(word)
-        if pattern.full_args is not None and _operand_is_full(operand, pattern.full_args):
+        if pattern.full_args is not None and _operand_is_full(
+            operand, pattern.full_args, cwd, start
+        ):
             names_full_suite = True
         elif _is_path_like(operand, cwd):
             targets.append(operand)
@@ -975,7 +1054,7 @@ def find_full_qa_invocation(
             here = _changed_directory(here, arguments)
             continue
         for pattern in patterns:
-            if pattern.command == program and _is_full_run(pattern, arguments, here):
+            if pattern.command == program and _is_full_run(pattern, arguments, here, cwd):
                 return FullQaMatch(pattern_id=pattern.pattern_id, segment=segment.strip())
     return None
 

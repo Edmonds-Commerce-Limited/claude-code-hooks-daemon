@@ -182,6 +182,18 @@ _FULL_RUNS: list[tuple[str, str]] = [
     # its path-shaped value is not a target.
     ("pytest --json-report-file out/r.json", "pytest-whole-suite"),
     ("pytest --some-plugin out/x", "pytest-whole-suite"),
+    # Review 3 R7: pytest's other name, the coverage runner, unnormalised paths.
+    ("py.test", "pytest-whole-suite"),
+    ("py.test tests/", "pytest-whole-suite"),
+    ("python -m py.test", "pytest-whole-suite"),
+    ("coverage run -m pytest", "pytest-whole-suite"),
+    ("coverage run --source src -m pytest tests/", "pytest-whole-suite"),
+    ("python -m coverage run -m pytest", "pytest-whole-suite"),
+    ("uv run coverage run -m pytest", "pytest-whole-suite"),
+    ("pytest tests/unit/../unit", "pytest-whole-suite"),
+    ("pytest tests//unit", "pytest-whole-suite"),
+    ("pytest tests/./unit", "pytest-whole-suite"),
+    ("pytest tests/unit/qa/..", "pytest-whole-suite"),
 ]
 
 _NOT_FULL_RUNS: list[str] = [
@@ -221,6 +233,10 @@ _NOT_FULL_RUNS: list[str] = [
     "pytest --lf tests/unit/handlers/test_x.py",
     "pytest --json-report-file=out/r.json tests/unit/x.py",
     "pytest tests/unit/x.py --some-plugin-flag",
+    "py.test tests/unit/handlers/test_x.py",
+    "coverage run -m pytest tests/unit/handlers/test_x.py",
+    "coverage report",
+    "pytest tests/unit/qa/../qa/test_x.py",
     # Mentions, not invocations: the guard parses, it does not substring-match.
     'grep -rn "llm_qa.py all" CLAUDE/',
     "grep -rn llm_qa.py all",
@@ -235,6 +251,42 @@ _NOT_FULL_RUNS: list[str] = [
     "ls tests/",
     "mypy tests/",
 ]
+
+
+#: Review 3 R7: whole-suite spellings the guard does NOT deny, each listed with
+#: its reason as a limit in docs/guides/HANDLER_REFERENCE.md. Pinned here so a
+#: fix that closes one also updates that list.
+_DOCUMENTED_LIMITS: list[str] = [
+    "$(which pytest)",
+    '"$(command -v pytest)" tests',
+    "ionice -c3 pytest",
+    "taskset -c 0 pytest",
+    "xvfb-run pytest",
+    "script -c pytest",
+    "pipx run pytest",
+    "hatch test",
+    "tox",
+    "nox",
+    "./scripts/qa/llm_qa.py $'all'",
+]
+
+
+class TestTheDocumentedLimits:
+    @pytest.mark.parametrize("command", _DOCUMENTED_LIMITS)
+    def test_a_documented_limit_is_still_allowed(self, command: str) -> None:
+        assert find_full_qa_invocation(command, _patterns()) is None, command
+
+    def test_each_limit_is_named_in_the_handler_reference(self) -> None:
+        reference = (_REPO_ROOT / "docs" / "guides" / "HANDLER_REFERENCE.md").read_text(
+            encoding="utf-8"
+        )
+        start = reference.index("#### subagent_full_qa_blocker")
+        end = reference.find("\n#### ", start + 1)
+        section = reference[start : end if end != -1 else len(reference)]
+        for spelling in ("$(which pytest)", "ionice", "taskset", "xvfb-run", "script -c"):
+            assert spelling in section, spelling
+        for spelling in ("pipx run", "hatch test", "tox", "nox", "$'all'"):
+            assert spelling in section, spelling
 
 
 class TestWhatCountsAsAFullRun:
@@ -355,6 +407,39 @@ class TestTheDirectoryTheCommandCdsInto:
         root = self._tree(tmp_path)
         command = "cd tests/unit && pytest nothing_here"
         assert find_full_qa_invocation(command, _patterns(), cwd=root) is not None
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cd tests && pytest unit",
+            "cd tests/unit && pytest ../unit",
+            "cd tests/unit && pytest ..",
+            "cd tests/unit/handlers && pytest ../../../tests",
+            "cd tests/unit && pytest ../..",
+            "cd tests/unit && pytest ../../..",
+            "pytest ..",
+        ],
+    )
+    def test_an_operand_is_judged_where_it_resolves_from_the_start(
+        self, tmp_path: Path, command: str
+    ) -> None:
+        """Review 3 R7: the cd moved only the existence lookup, not the full-suite check.
+
+        An operand reaching the whole start directory, or above it, runs the
+        whole suite too.
+        """
+        root = self._tree(tmp_path)
+        assert find_full_qa_invocation(command, _patterns(), cwd=root) is not None, command
+
+    @pytest.mark.parametrize(
+        "command",
+        ["cd tests/unit && pytest handlers", "cd tests && pytest unit/handlers"],
+    )
+    def test_a_narrower_operand_from_a_cd_stays_targeted(
+        self, tmp_path: Path, command: str
+    ) -> None:
+        root = self._tree(tmp_path)
+        assert find_full_qa_invocation(command, _patterns(), cwd=root) is None, command
 
     def test_a_cd_it_cannot_resolve_falls_back_to_the_path_shape(self, tmp_path: Path) -> None:
         root = self._tree(tmp_path)

@@ -2,7 +2,7 @@
 """QA tool: pytest on the tests mapped from what changed since the merge base.
 
 The test half of ``llm_qa.py changed`` (Plan 00463). Sub-agents run targeted QA,
-and the coordinator runs the full suite once per delivery. The targeted path
+and the coordinator runs the full suite once per batch. The targeted path
 has to be ONE command, or each agent invents its own subset and some invent
 none.
 
@@ -26,7 +26,8 @@ mentions a file is not a dependency.
 
 A reach wider than ``MAX_IMPORT_SELECTION`` test files is the full suite by
 another name, and so is the root ``tests/conftest.py``: those are unmapped as
-``too-broad``. A DELETED file maps to the tests that still refer to it, which
+``too-broad``. A selected directory counts as every test file under it, so a
+nested conftest's subtree is weighed by its size, not as one entry. A DELETED file maps to the tests that still refer to it, which
 are exactly the ones that now break. One that a source still refers to is
 unmapped, and one nothing refers to is verified rather than skipped. An
 unmapped file fails the run unless ``--allow-unmapped`` says the
@@ -36,11 +37,15 @@ unmapped. A run that tested nothing never reads as a pass.
 "Changed" is everything that differs from the merge base with ``--base``:
 committed work on the branch, uncommitted edits, and new untracked files. On
 the base branch itself the merge base is HEAD and committed work vanishes, so
-that is refused.
+that is refused. ``--range A..B`` instead takes exactly what ``git diff A B``
+changed, judged in this tree: the batched gate's recheck of what a move of
+``main`` brought in (``llm_qa.py main-moved``). ``--select-only`` prints that
+selection as JSON and runs nothing; it is how ``main-moved`` asks this mapper,
+and never another copy of it, which moved documents tests read.
 
 Usage:
-    python scripts/qa/run_changed_tests.py [--json] [--root DIR] [--base REF]
-        [--rules FILE] [--allow-unmapped]
+    python scripts/qa/run_changed_tests.py [--json] [--root DIR]
+        [--base REF | --range A..B [--select-only]] [--rules FILE] [--allow-unmapped]
 
 ``--base`` defaults to the local branch ``origin/HEAD`` names, then to
 ``origin/<it>``, then to a local ``main``.
@@ -89,6 +94,7 @@ EXIT_OPERATIONAL: Final[int] = 2
 
 #: The base when ``origin/HEAD`` names none.
 FALLBACK_BASE: Final[str] = "main"
+_RANGE_SEPARATOR: Final[str] = ".."
 _REMOTE_PREFIX: Final[str] = "origin/"
 _ORIGIN_HEAD_REF: Final[str] = "refs/remotes/origin/HEAD"
 _LOCAL_BRANCH_PREFIX: Final[str] = "refs/heads/"
@@ -267,6 +273,32 @@ def changed_files(
         return None, f"git ls-files failed: {stderr.strip() or 'no output'}"
 
     return sorted(set(_lines(diffed)) | set(_lines(untracked))), None
+
+
+def parse_range(spec: str) -> tuple[str, str] | None:
+    """``A..B`` as ``(A, B)``, or None when it is not exactly two named ends."""
+    start, separator, end = spec.partition(_RANGE_SEPARATOR)
+    if not separator or not start or not end or _RANGE_SEPARATOR[0] in (start[-1], end[0]):
+        return None
+    if _RANGE_SEPARATOR in end:
+        return None
+    return start, end
+
+
+def range_files(
+    root: Path, spec: str, *, git: GitRunner = run_git
+) -> tuple[list[str] | None, str | None]:
+    """``(files, None)`` for what ``git diff A B`` changed, or ``(None, reason)``.
+
+    Renames are listed as both paths, as for a ``--base`` run.
+    """
+    ends = parse_range(spec)
+    if ends is None:
+        return None, f"--range needs exactly two refs, `A..B`: got `{spec}`"
+    code, stdout, stderr = git(["diff", "--name-only", "--no-renames", *ends], root)
+    if code != 0:
+        return None, f"git diff {spec} failed: {stderr.strip() or 'no output'}"
+    return sorted(set(_lines(stdout))), None
 
 
 def tree_files(root: Path, *, git: GitRunner = run_git) -> tuple[list[str] | None, str | None]:
@@ -666,8 +698,9 @@ class _Mapper:
         if own:
             cover.rules.append(RULE_SUBTREE if path.name == _CONFTEST else RULE_REFERENCE)
             cover.tests.update(own)
-        if len(cover.tests) > MAX_IMPORT_SELECTION:
-            cover.reason = (REASON_TOO_BROAD, self._too_broad(len(cover.tests), "its own tests"))
+        own_weight = self.test_file_count(cover.tests)
+        if own_weight > MAX_IMPORT_SELECTION:
+            cover.reason = (REASON_TOO_BROAD, self._too_broad(own_weight, "its own tests"))
             cover.tests.clear()
             return cover
 
@@ -707,9 +740,21 @@ class _Mapper:
             if broad is not None:
                 return reach, f"reached through {module}: {broad}"
             reach.update(tests)
-            if len(reach) > MAX_IMPORT_SELECTION:
-                return reach, self._too_broad(len(reach), f"its tests through {module}")
+            weight = self.test_file_count(reach)
+            if weight > MAX_IMPORT_SELECTION:
+                return reach, self._too_broad(weight, f"its tests through {module}")
         return reach, None
+
+    def test_file_count(self, entries: set[str]) -> int:
+        """How many test files ``entries`` runs: a directory counts every test under it."""
+        count = 0
+        for entry in entries:
+            if entry.endswith(_PYTHON_SUFFIX):
+                count += 1
+                continue
+            prefix = f"{entry}/"
+            count += sum(1 for test in self._corpus.tests if test.startswith(prefix))
+        return count
 
     @staticmethod
     def _too_broad(count: int, via: str) -> str:
@@ -845,10 +890,31 @@ def failure_report(message: str) -> dict[str, Any]:
     }
 
 
+def selection_payload(spec: str, changed: list[str], selection: Selection) -> dict[str, Any]:
+    """What ``--select-only`` prints: the selection for a range, with nothing run."""
+    return {
+        "range": spec,
+        "changed": changed,
+        "selected": selection.selected,
+        "mapping": selection.mapping,
+        "unmapped": selection.unmapped,
+        "unmapped_reasons": selection.reasons,
+    }
+
+
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the tests mapped from changed files.")
     parser.add_argument("--root", default=str(_PROJECT_ROOT), help="repository root")
-    parser.add_argument("--base", default=None, help="ref to diff against (merge base)")
+    change_set = parser.add_mutually_exclusive_group()
+    change_set.add_argument("--base", default=None, help="ref to diff against (merge base)")
+    change_set.add_argument(
+        "--range", default=None, help="`A..B`: exactly what git diff A B changed"
+    )
+    parser.add_argument(
+        "--select-only",
+        action="store_true",
+        help="print the --range selection as JSON and run nothing",
+    )
     parser.add_argument("--rules", default=str(DEFAULT_RULES_PATH), help="declared rules file")
     parser.add_argument(
         "--allow-unmapped",
@@ -856,7 +922,10 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help="pass with unmapped files; the coordinator's full gate must cover them",
     )
     parser.add_argument("--json", action="store_true", help="write the JSON artefact")
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.select_only and args.range is None:
+        parser.error("--select-only needs --range")
+    return args
 
 
 def _write_report(root: Path, report: dict[str, Any]) -> None:
@@ -865,40 +934,73 @@ def _write_report(root: Path, report: dict[str, Any]) -> None:
     (output_dir / _OUTPUT_FILENAME).write_text(json.dumps(report, indent=2), encoding="utf-8")
 
 
-def _verdict(
-    args: argparse.Namespace, root: Path, run_git: GitRunner, run_pytest: PytestRunner
-) -> tuple[dict[str, Any], int]:
+def _change_set(
+    args: argparse.Namespace, root: Path, run_git: GitRunner
+) -> tuple[str, list[str] | None, str | None]:
+    """``(label, files, error)``: the range as given, or the resolved ``--base``."""
+    if args.range is not None:
+        files, error = range_files(root, args.range, git=run_git)
+        return args.range, files, error
     base, error = resolve_base(root, args.base, git=run_git)
     if base is None:
-        return failure_report(error or "no base to diff against"), EXIT_OPERATIONAL
+        return "", None, error or "no base to diff against"
     if current_branch(root, git=run_git) == base:
         return (
-            failure_report(
-                f"HEAD is on `{base}`, the base itself: the merge base is HEAD, so "
-                "committed work cannot be told apart. Run from the worktree branch, "
-                "or pass --base <ref>."
-            ),
-            EXIT_OPERATIONAL,
+            base,
+            None,
+            f"HEAD is on `{base}`, the base itself: the merge base is HEAD, so "
+            "committed work cannot be told apart. Run from the worktree branch, "
+            "or pass --base <ref>.",
         )
+    files, error = changed_files(root, base, git=run_git)
+    return base, files, error
 
-    changed, error = changed_files(root, base, git=run_git)
+
+def _selection(
+    args: argparse.Namespace, root: Path, run_git: GitRunner
+) -> tuple[str, list[str], Selection | None, dict[str, Any] | None, int]:
+    """The change set and its selection, or the failure report that replaces them."""
+    label, changed, error = _change_set(args, root, run_git)
     if changed is None:
-        return failure_report(error or "the change set could not be read"), EXIT_OPERATIONAL
-    if not changed:
         return (
-            failure_report(f"nothing changed since the merge base with `{base}`: nothing verified"),
+            label,
+            [],
+            None,
+            failure_report(error or "the change set could not be read"),
+            (EXIT_OPERATIONAL),
+        )
+    if not changed and not args.select_only:
+        return (
+            label,
+            [],
+            None,
+            failure_report(f"nothing changed since `{label}`: nothing verified"),
             EXIT_ISSUES,
         )
 
     rules, problems = load_declared_rules(Path(args.rules))
     if problems:
-        return failure_report("; ".join(problems)), EXIT_OPERATIONAL
+        return label, changed, None, failure_report("; ".join(problems)), EXIT_OPERATIONAL
 
     tree, error = tree_files(root, git=run_git)
     if tree is None:
-        return failure_report(error or "the tree could not be listed"), EXIT_OPERATIONAL
+        return (
+            label,
+            changed,
+            None,
+            failure_report(error or "the tree could not be listed"),
+            (EXIT_OPERATIONAL),
+        )
+    return label, changed, select_tests(changed, build_corpus(root, tree), root, rules), None, 0
 
-    selection = select_tests(changed, build_corpus(root, tree), root, rules)
+
+def _verdict(
+    args: argparse.Namespace, root: Path, run_git: GitRunner, run_pytest: PytestRunner
+) -> tuple[dict[str, Any], int]:
+    base, changed, selection, failure, code = _selection(args, root, run_git)
+    if selection is None:
+        return failure or failure_report("no selection"), code
+
     exit_code, output = run_pytest(selection.selected, root) if selection.selected else (None, "")
     report = build_report(
         base=base,
@@ -908,6 +1010,8 @@ def _verdict(
         output=output,
         allow_unmapped=bool(args.allow_unmapped),
     )
+    if args.range is not None:
+        report["range"] = args.range
     return report, EXIT_SUCCESS if report["summary"]["passed_all"] else EXIT_ISSUES
 
 
@@ -943,6 +1047,14 @@ def main(
 ) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
     root = Path(args.root).resolve()
+    if args.select_only:
+        spec, changed, selection, failure, code = _selection(args, root, run_git)
+        if selection is None:
+            error = (failure or {}).get("summary", {}).get("error", "no selection")
+            print(f"{_TOOL_NAME}: FAILED — {error}", file=sys.stderr)
+            return code
+        print(json.dumps(selection_payload(spec, changed, selection), indent=2))
+        return EXIT_SUCCESS
     report, verdict = _verdict(args, root, run_git, run_pytest)
 
     if args.json:

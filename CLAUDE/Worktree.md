@@ -121,17 +121,21 @@ concrete command in this repository depends on who is running it:
 ```bash
 ./scripts/qa/llm_qa.py changed   # the sub-agent working in the worktree: targeted QA
 ./scripts/qa/llm_qa.py all       # the coordinator, once, in the integration worktree
-./scripts/qa/llm_qa.py main-moved <batch-base>  # the coordinator, before the fast-forward
+./scripts/qa/llm_qa.py main-moved --start  # the coordinator, once the batch is merged
+./scripts/qa/llm_qa.py main-moved  # the coordinator, before the fast-forward
 ```
 
 A sub-agent hands over targeted results and a commit hash. The coordinator then
 merges every ready branch `--no-ff` into ONE integration worktree created from
-current `main` (the batch base), and runs the full gate once there. While the
+current `main`, records the batch base with `main-moved --start` (a git ref, so
+it survives between shell calls), and runs the full gate once there. While the
 batch is in flight `main` is frozen for code. When the run is green,
-`main-moved` decides the last step: fast-forward, a docs-only recheck, or a
-second full run. One full run at a time is also what stops the collisions
-below. The whole procedure, including the docs-only path set and what to do
-when the batch is red, is in [QA.md](QA.md), "The Batched Integration Gate".
+`main-moved` decides the last step. It says `unmoved`, which means fast-forward,
+or it names a recheck (doc tools, the tests of what moved, or the full gate).
+After the recheck, `--advance` moves the base on, and the check repeats until
+`unmoved`. One full run at a time is also what stops the collisions below. The
+whole procedure, including how moved paths are judged and what to do when the
+batch is red, is in [QA.md](QA.md), "The Batched Integration Gate".
 
 ## Concurrent QA Limitation (Critical)
 
