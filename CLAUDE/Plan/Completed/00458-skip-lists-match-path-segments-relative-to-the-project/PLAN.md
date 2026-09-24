@@ -1,6 +1,6 @@
 # Plan 00458: skip lists match path segments relative to the project
 
-**Status**: Not Started
+**Status**: Complete
 **Created**: 2026-09-24
 **Owner**: dev
 **Priority**: High
@@ -64,38 +64,51 @@ keeping the defect.
 
 ### Phase 1: TDD in a worktree
 
-- [ ] ⬜ **Task 1.1**: Audit. Confirm the six sites and search for more:
+- [x] ✅ **Task 1.1**: Audit. Confirm the six sites and search for more:
   any `in file_path`, `in path`, `startswith` or `endswith` test on a
   path against a directory list in handlers, strategies, core and utils.
-  List each with the direction in which it fails.
-- [ ] ⬜ **Task 1.2**: Detector first. Add a QA check (or a semgrep rule, if
+  List each with the direction in which it fails. See JOURNAL 11:22 and
+  the subagent report for the full table.
+- [x] ✅ **Task 1.2**: Detector first. Add a QA check (or a semgrep rule, if
   the project routes this class that way) that flags a substring
   membership test between a path variable and a skip/exclude/directory
   list. Show that it fires on the current tree, RED.
-- [ ] ⬜ **Task 1.3**: Move the shared matcher to a neutral home (not
+  `scripts/qa/check_skip_list_substring.py`; RED on exactly the six sites
+  (`d693e13c`).
+- [x] ✅ **Task 1.3**: Move the shared matcher to a neutral home (not
   `strategies/lint/`), make it match on the path relative to the project
   root, and put every site on it. Tests per site: `myvenv/`, `rebuild/`
   and `worktree-x-venv/` are NOT skipped; `venv/` and `vendor/` directly
   under the project ARE skipped; a project that lives under a directory
   named `venv` is still guarded. Where the handler has an acceptance
   probe, reproduce the original worktree case.
-- [ ] ⬜ **Task 1.4**: Record the instance in
+  `utils/path_segments.py::matches_path_segment` (`25c4573e`); all six
+  sites moved (`ebb31e61`); detector green.
+- [x] ✅ **Task 1.4**: Record the instance in
   `CLAUDE/Security/AsymmetricSiblingProtection.md` (or the matching
   class doc), naming the detector as the defence. Release note. Full QA
   green.
 
 ### Phase 2: Deliver
 
-- [ ] ⬜ **Task 2.1**: Merge `--no-ff`, verify ancestry and CI, and restart
+- [x] ✅ **Task 2.1**: Merge `--no-ff`, verify ancestry and CI, and restart
   the daemon.
-- [ ] ⬜ **Task 2.2**: Mark 00422 N20 remedied.
+- [x] ✅ **Task 2.2**: Mark 00422 N20 remedied.
 
 ## Success Criteria
 
-- [ ] In a worktree whose name ends in `-venv`, the 14 acceptance DENY
-  probes produce their declared decisions.
-- [ ] The detector fails on the pre-fix tree and passes after.
-- [ ] Full QA passes and CI is green.
+- [x] In a worktree whose name ends in `-venv`, the 14 acceptance DENY
+  probes produce their declared decisions. Plan 00456's final QA in
+  `worktree-issue-53-venv` ran at `0686445d`, which contains the fix
+  merge `b8ce4b49`. It had 0 failing tests, including
+  `TestTheDeclaredProbesBehaveAsDeclared`.
+- [x] The detector fails on the pre-fix tree and passes after. It was RED on
+  exactly the six sites (`d693e13c`), and GREEN after `ebb31e61`.
+- [x] Full QA passes and CI is green. CI on main is green at `aeca4c04`
+  (run 36007636154), which contains all three merges.
+- [x] Every release-bound consequence is in the pending-release holding
+  area:
+  `UNRELEASED/release-notes/08-skip-lists-now-match-whole-path-segments-relative-to-your-project.md`
 
 ## Delivery & Milestones
 
@@ -103,4 +116,6 @@ keeping the defect.
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00458-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- Not yet delivered.
+- Merged to main at `b8ce4b49` (the fix), then `54f5c357`
+  (`matches_directory` is project-relative too) and `47999859` (the
+  detector follows derived loop variables), all `--no-ff`.

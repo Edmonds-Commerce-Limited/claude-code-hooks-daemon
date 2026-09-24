@@ -4,6 +4,7 @@ import tempfile
 from functools import lru_cache
 
 from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
+from claude_code_hooks_daemon.utils.path_segments import matches_path_segment
 
 #: Prefix for the per-process compiler-output directory, so a leftover is
 #: attributable to this daemon when someone goes looking in the temp dir.
@@ -52,13 +53,15 @@ def lint_output_dir() -> str:
 def matches_skip_path(file_path: str, skip_paths: tuple[str, ...]) -> bool:
     """Check if file path matches any skip path pattern, segment-bounded.
 
-    Each ``skip`` pattern (e.g. ``"build/"``) must land on a path-segment
-    boundary in ``file_path``: at the start of the string, or immediately
-    preceded by ``/``. A bare substring test would also match ``"build/"``
-    inside ``"rebuild/"`` or ``"venv/"`` inside ``"myvenv/"`` -- both
-    first-party directories that merely end with the same letters as a
-    vendor/build directory -- which would wrongly skip lint/ESLint checks
-    on real source files (fail-open).
+    A thin re-export of :func:`~claude_code_hooks_daemon.utils.path_segments.
+    matches_path_segment` (Plan 00458), which now holds the one
+    implementation every skip-list site shares -- this function's own
+    docstring is where the segment-vs-substring fix was first written, and
+    every other site was moved onto it rather than re-deriving it (see
+    ``CLAUDE/Security/AsymmetricSiblingProtection.md``). Kept under this name
+    because lint/ESLint strategies import it by this name; no
+    ``project_root`` is passed here, so behaviour is unchanged: segment-
+    bounded directly against ``file_path`` as given.
 
     Args:
         file_path: Full file path to check.
@@ -67,13 +70,4 @@ def matches_skip_path(file_path: str, skip_paths: tuple[str, ...]) -> bool:
     Returns:
         True if the file is in a skip path.
     """
-    for skip in skip_paths:
-        start = 0
-        while True:
-            index = file_path.find(skip, start)
-            if index == -1:
-                break
-            if index == 0 or file_path[index - 1] == "/":
-                return True
-            start = index + 1
-    return False
+    return matches_path_segment(file_path, skip_paths)

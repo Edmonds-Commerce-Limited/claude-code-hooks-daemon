@@ -45,6 +45,14 @@ name = not-closed
 """
 
 
+@pytest.fixture(autouse=True)
+def _isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``find_uv`` also searches ``$HOME/.local/bin``; keep this machine's out of it."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+
+
 @pytest.fixture
 def daemon_dir(tmp_path: Path) -> Path:
     """Set up a tmp daemon_dir with the three files a healthy install requires."""

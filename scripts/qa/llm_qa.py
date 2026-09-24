@@ -326,6 +326,16 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
         json_file="dependencies.json",
         jq_hint="jq '.issues[]'",
     ),
+    # N22: run_all.sh step 8 runs this, but no TOOL_REGISTRY entry ever did —
+    # so `llm_qa.py all`, the ONLY suite `enforce_llm_qa` lets an agent run,
+    # reported "full QA N/N" while shellcheck never ran. Only CI's separate
+    # `shellcheck` step (.github/workflows/qa.yml) caught a shell defect, and
+    # only after the merge. Pinned by test_llm_qa_run_all_wiring.py.
+    "shell_check": ToolConfig(
+        command=_bash("run_shell_check.sh"),
+        json_file="shell_check.json",
+        jq_hint="jq '.issues[] | {file, line, rule, message}'",
+    ),
     "error_hiding": ToolConfig(
         command=_python("audit_error_hiding.py", "--json"),
         json_file="error_hiding.json",
@@ -364,6 +374,11 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
     "authored_path_stat": ToolConfig(
         command=_python("check_authored_path_stat.py", "--json"),
         json_file="authored_path_stat.json",
+        jq_hint="jq '.violations[] | {file, line, rule, message}'",
+    ),
+    "skip_list_substring": ToolConfig(
+        command=_python("check_skip_list_substring.py", "--json"),
+        json_file="skip_list_substring.json",
         jq_hint="jq '.violations[] | {file, line, rule, message}'",
     ),
     "declared_invariant_pairs": ToolConfig(
@@ -558,6 +573,15 @@ def _summarize_dependencies(data: QaReport) -> str:
     return f"{total} issues"
 
 
+def _summarize_shell_check(data: QaReport) -> str:
+    """Issue count plus files checked — the same denominator shellcheck's own
+    console output leads with, so the summary line does not read as a smaller
+    claim than the tool itself makes."""
+    summary = data.get("summary", {})
+    total = summary.get("total_issues", 0)
+    return f"{total} issues{_denominators(summary)}"
+
+
 def _summarize_smoke_test(data: QaReport) -> str:
     s = data.get("summary", {})
     passed = s.get("passed_probes", 0)
@@ -688,6 +712,7 @@ SUMMARIZERS: dict[str, Summarizer] = {
     "tests": _summarize_tests,
     "security": _summarize_security,
     "dependencies": _summarize_dependencies,
+    "shell_check": _summarize_shell_check,
     "error_hiding": _summarize_violations,
     "shell_audit": _summarize_violations,
     "skill_refs": _summarize_violations,
@@ -697,6 +722,7 @@ SUMMARIZERS: dict[str, Summarizer] = {
     "python_var_guidance": _summarize_violations,
     "eacces_safe": _summarize_violations,
     "authored_path_stat": _summarize_violations,
+    "skip_list_substring": _summarize_violations,
     "declared_invariant_pairs": _summarize_violations,
     "fail_open_inventory": _summarize_violations,
     "dangerous_invocation_corpus": _summarize_violations,

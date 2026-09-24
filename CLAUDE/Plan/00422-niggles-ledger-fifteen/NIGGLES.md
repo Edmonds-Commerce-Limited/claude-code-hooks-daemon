@@ -1604,6 +1604,80 @@ That gap is real and is accepted, not overlooked: content quality is not
 checkable from here, and a guard that pretended otherwise would be the same
 false-assurance failure this ledger keeps recording.
 
+### N22 — the local "full QA" never runs shellcheck
+
+**Found**: Plan 00456's final QA was checked before merge. Every
+`untracked/qa/*.json` in the worktree was written between 13:23 and 13:41,
+after the last code commit, except `shell_check.json`, which was dated
+10:16. That is hours before the N7–N9 fixes that rewrote
+`scripts/venv_bootstrap.sh`, `scripts/install/venv.sh` and both copies of
+the skill's `install.sh`. Re-running `scripts/qa/run_shell_check.sh` by hand
+passed (67 files, 0 issues), so nothing was hidden this time.
+
+**Why it happens.** `scripts/qa/llm_qa.py`'s `TOOL_REGISTRY` has no
+shellcheck entry. `run_all.sh` calls `run_shell_check.sh`, but
+`enforce_llm_qa` denies `run_all.sh` and points at `llm_qa.py all`. So the
+QA every agent is told to run, and reports as "full QA N/N", never runs
+shellcheck. CI's `shellcheck` step (`.github/workflows/qa.yml`) is the only
+place it runs. A shell defect therefore reaches `main` and is caught only
+after the merge, when fixing it costs a second commit on `main`. The stale
+`shell_check.json` left in the tree also reads like a result for the
+current code.
+
+**Candidate remedies:**
+
+1. Add a `shell_check` tool to `llm_qa.py`'s registry, wrapping
+   `run_shell_check.sh` like the other script tools, with a wiring test
+   that every check `run_all.sh` runs is also in the registry. That class
+   test catches the next divergence too.
+2. Until then, briefs that say "full QA" add `run_shell_check.sh` whenever
+   a shell file changed.
+
+**Remedied**: remedy (1). `TOOL_REGISTRY` gained a `shell_check` entry
+wrapping `run_shell_check.sh`, in run_all.sh's step-8 position, with a
+summariser reporting the issue count and files checked. The nested
+`summary.error` shape `run_shell_check.sh` writes when shellcheck is not
+installed was already handled generically by `_report_error` (it names both
+JSON shapes shipped scripts use), so a missing binary still fails the tool
+visibly rather than passing — verified by temporarily hiding shellcheck from
+`PATH` and re-running the tool in isolation.
+
+`tests/unit/qa/test_llm_qa_run_all_wiring.py` is the class test: it parses
+every `"${SCRIPT_DIR}/<script>"` invocation out of `run_all.sh` and asserts
+each has a `TOOL_REGISTRY` entry running that same script, or is named with a
+reason in a `_KNOWN_GAPS` map (empty today — every invoked script is now
+registered). It failed on exactly `run_shell_check.sh` before the fix and
+passes after. `CLAUDE/QA.md` already states no check count, so it needed no
+edit.
+
+### N21 — nothing points a journal append at the tool that stamps the time
+
+**Found**: the owner asked whether "the journal command that enforces proper
+timestamp" had been released. It had: `mkplan.bash --journal <plan> <category> <body>` shipped in v3.66.0 (release note
+`v3.65.0-to-v3.66.0/release-notes/04-…`). Yet in one session the coordinator
+and five sub-agents appended every journal entry by hand. One entry was
+appended with a heredoc and stamped `09:50` at `09:11` (00422 N3's
+recurrence). All the others were Edit plus a manual `date -u`, because the
+coordinator's briefs prescribed exactly that.
+
+**Why it happens.** `CLAUDE/PlanJournalling.md` says to prefer
+`--journal`, but that sentence is only read by someone already reading the
+journal docs. At the moment of appending, nothing speaks up: an `Edit` or
+`Write` to a `JOURNAL/*.md` file, and a Bash redirect into one, draw no
+advisory that names the tool. The one guard that checks timestamps,
+`journal-entry-future-dated`, is Edit-only by design (see N3), so a heredoc
+append is never checked at all.
+
+**Candidate remedies:**
+
+1. A PreToolUse advisory, never a deny, on an `Edit`/`Write` that appends
+   a new `## HH:MM` entry to a plan `JOURNAL/` day-file, naming
+   `mkplan.bash --journal` and the exact command for that plan.
+2. The same advisory on a Bash command that redirects into a `JOURNAL/`
+   day-file, since that path is otherwise invisible (N3).
+3. The plan-workflow guidance that the coordinator copies into dispatch
+   briefs names `--journal` as THE way to append.
+
 ### N20 — the acceptance probes cannot pass in a worktree whose daemon is running
 
 **Found**: Plan 00456's final QA in `untracked/worktrees/worktree-issue-53-venv`
@@ -1673,6 +1747,15 @@ lives under a directory named exactly `venv` or `build`, so the match must
 be made against the path relative to the project root. The mechanism
 suspected above (`core/worktree_paths.py`) is not involved. Candidate
 remedies 1-3 above are withdrawn. Graduated to its own plan.
+
+**Remedied by Plan 00458.** All six sites (and `matches_directory`) use
+`utils/path_segments.py::matches_path_segment`. It matches whole segments
+of the project-relative path and returns False for a path outside the
+root, so a blocking guard fails closed. `scripts/qa/check_skip_list_substring.py`
+flags the class, including through derived loop variables. It is recorded
+in `CLAUDE/Security/AsymmetricSiblingProtection.md`. Plan 00456's final
+QA passed with 0 failures in `worktree-issue-53-venv`, the worktree
+where this was found.
 
 ### N19 — the Python nested-install check can never fire in a real client
 

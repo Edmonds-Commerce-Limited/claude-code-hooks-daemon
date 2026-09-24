@@ -324,10 +324,17 @@ class ValidateEslintOnWriteHandler(PostToolUseHandlerBase):
 
         logger.info("Running ESLint validation on %s...", file_path_obj.name)
 
-        # Check if this is a worktree file (either manually managed or Claude Code managed)
-        is_worktree = any(
-            f"{prefix}/" in file_path
-            for prefix in (ProjectPath.WORKTREES_DIR, ProjectPath.CLAUDE_WORKTREES_DIR)
+        # Check if this is a worktree file (either manually managed or Claude Code
+        # managed). Log-only signal (below), but segment-bounded regardless (Plan
+        # 00458 follow-up) rather than the bare substring match this used to be --
+        # "untracked/worktrees/" also matched a directory merely named
+        # "my-untracked/worktrees/".
+        is_worktree = matches_skip_path(
+            file_path,
+            tuple(
+                f"{prefix}/"
+                for prefix in (ProjectPath.WORKTREES_DIR, ProjectPath.CLAUDE_WORKTREES_DIR)
+            ),
         )
 
         # Both halves of the command are NAMED, never resolved by PATH lookup
