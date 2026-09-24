@@ -3,14 +3,14 @@
 from typing import Any
 
 from claude_code_hooks_daemon.strategies.lint.common import COMMON_SKIP_PATHS
-from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
 # Language-specific constants
 _LANGUAGE_NAME = "Ruby"
 _EXTENSIONS: tuple[str, ...] = (".rb",)
 _DEFAULT_LINT_COMMAND = "ruby -c {file}"
 _EXTENDED_LINT_COMMAND = "rubocop {file}"
-#: Acceptance-test fixture directory, below the sanctioned scratch root.
+#: Acceptance-test fixture directory, below the gitignored acceptance root.
 _FIXTURE_DIR = "acceptance-test-lint-ruby"
 
 
@@ -52,18 +52,18 @@ class RubyLintStrategy:
             ToolPayload,
         )
 
-        fixture_root = scratch_path(_FIXTURE_DIR)
+        fixture_root = acceptance_path(_FIXTURE_DIR)
         probe_valid = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": scratch_path(_FIXTURE_DIR, "valid.rb"),
+                "file_path": acceptance_path(_FIXTURE_DIR, "valid.rb"),
                 "content": "puts 'hello'",
             },
         )
         probe_invalid = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": scratch_path(_FIXTURE_DIR, "invalid.rb"),
+                "file_path": acceptance_path(_FIXTURE_DIR, "invalid.rb"),
                 "content": "def hello\n  puts 'missing end'",
             },
         )
@@ -77,7 +77,7 @@ class RubyLintStrategy:
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
                 safety_notes=(
-                    "Inside the gitignored scratch directory - safe. Creates temporary Ruby file."
+                    "Inside the gitignored acceptance directory - safe. Creates temporary Ruby file."
                 ),
                 test_type=TestType.ADVISORY,
                 setup_commands=[f"mkdir -p {fixture_root}"],
@@ -93,7 +93,7 @@ class RubyLintStrategy:
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"Ruby lint FAILED", r"invalid.rb"],
                 safety_notes=(
-                    "Inside the gitignored scratch directory - safe. "
+                    "Inside the gitignored acceptance directory - safe. "
                     "Creates temporary Ruby file with syntax error."
                 ),
                 test_type=TestType.BLOCKING,

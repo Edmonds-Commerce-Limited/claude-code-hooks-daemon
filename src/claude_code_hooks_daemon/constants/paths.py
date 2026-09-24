@@ -67,6 +67,13 @@ class ProjectPath:
     # daemon would advise what it then blocks.
     SCRATCH_DIR = f"{DaemonPath.UNTRACKED_DIR}/scratch"
 
+    # Where acceptance probes write their fixtures (Plan 00422 N11). A sibling
+    # of SCRATCH_DIR, never inside it: the two shared one namespace, so a
+    # `lint_on_edit` exclusion written for working notes also disabled the
+    # handler for its own DENY probes. In-repo and under the ignored
+    # `untracked/` for the same reasons as SCRATCH_DIR.
+    ACCEPTANCE_DIR = f"{DaemonPath.UNTRACKED_DIR}/acceptance"
+
     #: Absolute roots that are wiped between container runs (Plan 00333). The
     #: `project_containment` handler does not read this -- it is deny-by-default
     #: and needs no list of bad places. This exists for the Claude Code

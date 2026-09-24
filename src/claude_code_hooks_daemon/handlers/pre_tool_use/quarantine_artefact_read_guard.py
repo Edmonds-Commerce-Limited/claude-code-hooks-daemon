@@ -335,17 +335,17 @@ class QuarantineArtefactReadGuardHandler(PreToolUseHandlerBase):
         )
 
         # The seed globs key on the FILENAME (`*-opus-security-DETAIL*`), not on
-        # where the file sits, so the probe can name the sanctioned scratch
+        # where the file sits, so the probe can name the gitignored acceptance
         # directory and still exercise the guard. Neither file is created: the
         # decision is made from the path.
-        scratch = "$CLAUDE_PROJECT_DIR/untracked/scratch/acceptance-test-quarantine"
+        fixture_dir = "$CLAUDE_PROJECT_DIR/untracked/acceptance/acceptance-test-quarantine"
         detail_probe = ToolPayload(
             tool_name=ToolName.READ,
-            tool_input={"file_path": f"{scratch}/topic-opus-security-DETAIL.md"},
+            tool_input={"file_path": f"{fixture_dir}/topic-opus-security-DETAIL.md"},
         )
         summary_probe = ToolPayload(
             tool_name=ToolName.READ,
-            tool_input={"file_path": f"{scratch}/topic-opus-security-SUMMARY.md"},
+            tool_input={"file_path": f"{fixture_dir}/topic-opus-security-SUMMARY.md"},
         )
 
         return [

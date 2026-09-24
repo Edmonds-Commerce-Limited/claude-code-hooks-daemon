@@ -3,14 +3,14 @@
 from typing import Any
 
 from claude_code_hooks_daemon.strategies.lint.common import COMMON_SKIP_PATHS
-from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
 # Language-specific constants
 _LANGUAGE_NAME = "Go"
 _EXTENSIONS: tuple[str, ...] = (".go",)
 _DEFAULT_LINT_COMMAND = "go vet {file}"
 _EXTENDED_LINT_COMMAND = "golangci-lint run {file}"
-#: Acceptance-test fixture directory, below the sanctioned scratch root.
+#: Acceptance-test fixture directory, below the gitignored acceptance root.
 _FIXTURE_DIR = "acceptance-test-lint-go"
 # `go vet` resolves PACKAGES, so it needs a module. In a repository with no
 # `go.mod` -- any polyglot repo that merely contains a `.go` file -- it exits
@@ -74,18 +74,18 @@ class GoLintStrategy:
             ToolPayload,
         )
 
-        fixture_root = scratch_path(_FIXTURE_DIR)
+        fixture_root = acceptance_path(_FIXTURE_DIR)
         probe_valid = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": scratch_path(_FIXTURE_DIR, "valid.go"),
+                "file_path": acceptance_path(_FIXTURE_DIR, "valid.go"),
                 "content": "package main\nfunc main() {}",
             },
         )
         probe_invalid = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": scratch_path(_FIXTURE_DIR, "invalid.go"),
+                "file_path": acceptance_path(_FIXTURE_DIR, "invalid.go"),
                 "content": 'package main\nfunc main() {\n    x := "unclosed',
             },
         )
@@ -99,7 +99,7 @@ class GoLintStrategy:
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
                 safety_notes=(
-                    "Inside the gitignored scratch directory - safe. Creates temporary Go file."
+                    "Inside the gitignored acceptance directory - safe. Creates temporary Go file."
                 ),
                 test_type=TestType.ADVISORY,
                 setup_commands=[f"mkdir -p {fixture_root}"],
@@ -115,7 +115,7 @@ class GoLintStrategy:
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"Go lint FAILED", r"invalid.go"],
                 safety_notes=(
-                    "Inside the gitignored scratch directory - safe. "
+                    "Inside the gitignored acceptance directory - safe. "
                     "Creates temporary Go file with syntax error."
                 ),
                 test_type=TestType.BLOCKING,

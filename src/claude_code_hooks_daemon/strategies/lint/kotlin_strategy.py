@@ -3,7 +3,7 @@
 from typing import Any
 
 from claude_code_hooks_daemon.strategies.lint.common import COMMON_SKIP_PATHS, lint_output_dir
-from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
 # Language-specific constants
 _LANGUAGE_NAME = "Kotlin"
@@ -20,7 +20,7 @@ _EXTENSIONS: tuple[str, ...] = (".kt",)
 #: private to this process.
 _DEFAULT_LINT_COMMAND_TEMPLATE = "kotlinc -nowarn -d {out_dir} {{file}}"
 _EXTENDED_LINT_COMMAND = "ktlint {file}"
-#: Acceptance-test fixture directory, below the sanctioned scratch root.
+#: Acceptance-test fixture directory, below the gitignored acceptance root.
 _FIXTURE_DIR = "acceptance-test-lint-kotlin"
 
 
@@ -62,18 +62,18 @@ class KotlinLintStrategy:
             ToolPayload,
         )
 
-        fixture_root = scratch_path(_FIXTURE_DIR)
+        fixture_root = acceptance_path(_FIXTURE_DIR)
         probe_valid = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": scratch_path(_FIXTURE_DIR, "valid.kt"),
+                "file_path": acceptance_path(_FIXTURE_DIR, "valid.kt"),
                 "content": 'fun main() { println("hello") }',
             },
         )
         probe_invalid = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": scratch_path(_FIXTURE_DIR, "invalid.kt"),
+                "file_path": acceptance_path(_FIXTURE_DIR, "invalid.kt"),
                 "content": 'fun main( { println("hello") }',
             },
         )
@@ -87,7 +87,7 @@ class KotlinLintStrategy:
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
                 safety_notes=(
-                    "Inside the gitignored scratch directory - safe. Creates temporary Kotlin file."
+                    "Inside the gitignored acceptance directory - safe. Creates temporary Kotlin file."
                 ),
                 test_type=TestType.ADVISORY,
                 setup_commands=[f"mkdir -p {fixture_root}"],
@@ -103,7 +103,7 @@ class KotlinLintStrategy:
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"Kotlin lint FAILED", r"invalid.kt"],
                 safety_notes=(
-                    "Inside the gitignored scratch directory - safe. "
+                    "Inside the gitignored acceptance directory - safe. "
                     "Creates temporary Kotlin file with syntax error."
                 ),
                 test_type=TestType.BLOCKING,

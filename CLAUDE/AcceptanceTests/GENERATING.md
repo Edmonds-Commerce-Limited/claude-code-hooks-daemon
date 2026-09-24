@@ -181,6 +181,38 @@ All destructive commands use non-existent refs/paths/files that would fail harml
 
 **Even with these protections, ALWAYS use echo for destructive commands.**
 
+### Where probe fixtures live
+
+Every file an acceptance test writes, reads or cleans up goes under
+**`untracked/acceptance/`**. Build the path with
+`acceptance_path(<fixture-dir>, ...)` from `utils/scratch_dir.py`. It returns
+`$CLAUDE_PROJECT_DIR/untracked/acceptance/...`, which is absolute when the
+tester follows it and names no machine's root when rendered.
+
+- **In the repository, not `/tmp`.** `project_containment` denies a write
+  outside the repository root. A deny probe whose handler has regressed then
+  leaves its file somewhere gitignored and disposable.
+- **Not `untracked/scratch/`.** That directory is where agents are told to
+  put working notes. When the two shared it, an exclusion written for the
+  notes (`lint_on_edit.options.exclude_paths`) also covered the lint
+  fixtures, and eight DENY probes stopped matching their own input
+  (Plan 00422 N2 and N11).
+- **The harness enforces the boundary.** `playbook_harness.vet_probe_commands`
+  refuses any `setup_commands` or `cleanup_commands` that acts outside
+  `untracked/acceptance/`.
+  `test_no_probe_acts_on_the_human_scratch_directory` fails if any block's
+  command, payload, setup or cleanup names `untracked/scratch/`.
+- **Never exclude the acceptance root from a guard.** A probe that cannot be
+  denied proves nothing. `tests/integration/test_acceptance_contract.py`
+  drives every declared probe against this project's real config and fails
+  when one stops matching its input.
+
+The few probes whose contract needs a path outside this root are listed by
+name in `_OUTSIDE_ACCEPTANCE_ROOT_BY_CONTRACT`, in
+`tests/integration/test_acceptance_tool_payload_agrees_with_prose.py`, each
+with its reason — for example containment (outside the repository) and
+markdown location (outside `untracked/`).
+
 ---
 
 ## 🔧 BEFORE TESTING
