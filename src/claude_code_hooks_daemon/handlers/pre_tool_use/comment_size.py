@@ -49,8 +49,8 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
     resolve_project_root,
     vendored_exclude_globs,
 )
-from claude_code_hooks_daemon.utils.path_segments import matches_path_segment
 from claude_code_hooks_daemon.utils.path_predicates import path_is_file
+from claude_code_hooks_daemon.utils.path_segments import matches_path_segment
 from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 
 if TYPE_CHECKING:
