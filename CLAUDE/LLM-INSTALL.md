@@ -490,13 +490,28 @@ handlers:
 | `plan_number_helper`    | Provides the correct next plan number when agents search for it                                                                                                                 |
 | `markdown_organization` | Enforces markdown file placement rules in CLAUDE/ directory                                                                                                                     |
 
-**3. Restart daemon:**
+**3. Point Claude Code's plan mode at the plan directory.** Add this key to
+`.claude/settings.json` (or to `.claude/settings.local.json` for this checkout
+only), using your `plan_workflow.directory` if you changed it:
+
+```json
+{
+  "plansDirectory": "./CLAUDE/Plan"
+}
+```
+
+The installer does not set it, because the plan workflow is opt-in and its
+directory is configurable. Without it, plan mode writes its plans outside the
+project and `markdown_organization` cannot mirror them into numbered plan
+folders.
+
+**4. Restart daemon:**
 
 ```bash
 .claude/hooks-daemon/bin/hooks-daemon restart
 ```
 
-**4. Verify planning handlers loaded:**
+**5. Verify planning handlers loaded:**
 
 ```bash
 .claude/hooks-daemon/bin/hooks-daemon status

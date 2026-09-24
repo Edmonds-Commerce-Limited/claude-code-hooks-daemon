@@ -54,11 +54,13 @@ first, and the other fixes build on it.
   plugin keys are now in the tracked `.claude/settings.local.json`, which no
   installer ships, and `.claude/settings.json` is restored byte-for-byte to
   its content before the install.
-- [ ] ⬜ **Task 1.2**: A test fails when the shipped settings template carries
+- [x] ✅ **Task 1.2**: A test fails when the shipped settings template carries
   `enabledPlugins` or `extraKnownMarketplaces`, on every install and upgrade
   route (shell copy, three-way merge, Python generator). Review
   `plansDirectory` under the same rule. Add a SELF_INSTALL.md line saying
-  that `.claude/settings.json` ships to clients (G6).
+  that `.claude/settings.json` ships to clients (G6). `plansDirectory` was
+  dogfood-only, so it moved to `settings.local.json` and the test covers it
+  too.
 
 ### Phase 2: one resolver for the config dir and enabled plugins (G13, P2, P6, P7, G11, G12, G14, G15)
 

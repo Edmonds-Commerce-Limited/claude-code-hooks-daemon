@@ -133,6 +133,11 @@ _FALLBACK_REMOTE_DOCS_DIR: Final[str] = "remote-docs"
 _FALLBACK_PLAN_DIR: Final[str] = "CLAUDE/Plan"
 _FALLBACK_PLAN_ARCHIVE_DIRS: Final[tuple[str, ...]] = ("Completed",)
 
+# The two Claude Code settings files a checkout keeps under `.claude/`, in
+# precedence order, lowest first: the local file overrides the project file.
+_PROJECT_SETTINGS_FILENAME: Final[str] = "settings.json"
+_LOCAL_SETTINGS_FILENAME: Final[str] = "settings.local.json"
+
 # Legacy plan-archive subdirectory names that predate plan_workflow.qa's
 # completed_dir/cancelled_dir config and have no config home of their own —
 # kept as permanent additive extras alongside the facade's archive dir names.
@@ -653,7 +658,13 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
     def _check_claude_code_sync(
         self, hook_input: dict[str, Any] | None = None
     ) -> GatingResult | None:
-        """Check if plansDirectory in .claude/settings.json matches plan_workflow.directory.
+        """Check if the effective plansDirectory matches plan_workflow.directory.
+
+        The effective value is Claude Code's: ``.claude/settings.local.json``
+        overrides ``.claude/settings.json``. A checkout-specific value belongs
+        in the local file, because the project file is the one an installer
+        ships (Plan 00468 Task 1.2), so a check reading only the project file
+        would deny a correctly configured checkout.
 
         Args:
             hook_input: The originating hook event, used only to key the
@@ -667,11 +678,16 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
         if not self._enforce_claude_code_sync or not self._track_plans_in_project:
             return None
 
-        settings_path = self._workspace_root / ".claude" / "settings.json"
+        claude_dir = self._workspace_root / ".claude"
         expected_value = f"./{self._track_plans_in_project}"
 
-        # eacces-safe-exempt: the project's own .claude/settings.json.
-        if not settings_path.exists():
+        # eacces-safe-exempt: the project's own .claude/settings{,.local}.json.
+        present = [
+            claude_dir / name
+            for name in (_PROJECT_SETTINGS_FILENAME, _LOCAL_SETTINGS_FILENAME)
+            if (claude_dir / name).exists()
+        ]
+        if not present:
             return self._deny_plan_sync(
                 "settings.json not found.\n\n"
                 "Plan workflow requires plansDirectory to be configured.\n\n"
@@ -681,17 +697,22 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
                 hook_input,
             )
 
-        try:
-            settings_data = json.loads(settings_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError) as e:
-            logger.error(f"Failed to read .claude/settings.json: {e}")
-            return self._deny_plan_sync(
-                f"Cannot read .claude/settings.json.\n\nError: {e}\n\n"
-                "Fix the file and restart your session.",
-                hook_input,
-            )
+        plans_directory: Any = None
+        settings_name = _PROJECT_SETTINGS_FILENAME
+        for settings_path in present:
+            try:
+                settings_data = json.loads(settings_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError) as e:
+                logger.error(f"Failed to read .claude/{settings_path.name}: {e}")
+                return self._deny_plan_sync(
+                    f"Cannot read .claude/{settings_path.name}.\n\nError: {e}\n\n"
+                    "Fix the file and restart your session.",
+                    hook_input,
+                )
+            if isinstance(settings_data, dict) and "plansDirectory" in settings_data:
+                plans_directory = settings_data["plansDirectory"]
+                settings_name = settings_path.name
 
-        plans_directory = settings_data.get("plansDirectory")
         if plans_directory is None:
             return self._deny_plan_sync(
                 "plansDirectory not set in .claude/settings.json.\n\n"
@@ -703,16 +724,16 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
             )
 
         # Normalise for comparison: strip leading "./" from both
-        normalised_actual = plans_directory.lstrip("./")
+        normalised_actual = str(plans_directory).lstrip("./")
         normalised_expected = self._track_plans_in_project.lstrip("./")
 
         if normalised_actual != normalised_expected:
             return self._deny_plan_sync(
                 "plansDirectory mismatch.\n\n"
-                f'  .claude/settings.json: "{plans_directory}"\n'
-                f'  hooks daemon config:   "{self._track_plans_in_project}"\n\n'
+                f'  .claude/{settings_name}: "{plans_directory}"\n'
+                f'  hooks daemon config: "{self._track_plans_in_project}"\n\n'
                 "These must match for plan workflow to work correctly.\n\n"
-                "Fix: Update .claude/settings.json:\n"
+                f"Fix: Update .claude/{settings_name}:\n"
                 f'  "plansDirectory": "{expected_value}"\n\n'
                 "Then restart your session.",
                 hook_input,

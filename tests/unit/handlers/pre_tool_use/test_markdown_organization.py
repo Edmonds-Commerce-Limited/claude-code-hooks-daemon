@@ -2043,6 +2043,59 @@ class TestClaudeCodeSyncEnforcement:
         result = handler._check_claude_code_sync()
         assert result is None
 
+    # ── Local settings (Plan 00468 Task 1.2) ──
+    # Claude Code merges .claude/settings.local.json over .claude/settings.json,
+    # and a checkout-specific plansDirectory belongs there, because
+    # settings.json is what the installers ship to clients.
+
+    def test_passes_when_plans_directory_is_only_in_local_settings(
+        self, handler: MarkdownOrganizationHandler, settings_dir: Path
+    ) -> None:
+        (settings_dir / "settings.json").write_text('{"other_key": "value"}', encoding="utf-8")
+        (settings_dir / "settings.local.json").write_text(
+            '{"plansDirectory": "./CLAUDE/Plan"}', encoding="utf-8"
+        )
+        assert handler._check_claude_code_sync() is None
+
+    def test_passes_when_only_local_settings_exist(
+        self, handler: MarkdownOrganizationHandler, settings_dir: Path
+    ) -> None:
+        (settings_dir / "settings.local.json").write_text(
+            '{"plansDirectory": "CLAUDE/Plan"}', encoding="utf-8"
+        )
+        assert handler._check_claude_code_sync() is None
+
+    def test_local_value_overrides_the_project_value(
+        self, handler: MarkdownOrganizationHandler, settings_dir: Path
+    ) -> None:
+        """The local file wins in Claude Code, so a wrong local value is the
+        one that decides where plan mode writes, whatever settings.json says."""
+        (settings_dir / "settings.json").write_text(
+            '{"plansDirectory": "./CLAUDE/Plan"}', encoding="utf-8"
+        )
+        (settings_dir / "settings.local.json").write_text(
+            '{"plansDirectory": "./Other/Plans"}', encoding="utf-8"
+        )
+        result = handler._check_claude_code_sync()
+        assert result is not None
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "Other/Plans" in result.reason
+        assert "settings.local.json" in result.reason
+
+    def test_invalid_local_settings_deny(
+        self, handler: MarkdownOrganizationHandler, settings_dir: Path
+    ) -> None:
+        (settings_dir / "settings.json").write_text(
+            '{"plansDirectory": "./CLAUDE/Plan"}', encoding="utf-8"
+        )
+        (settings_dir / "settings.local.json").write_text("{invalid json", encoding="utf-8")
+        result = handler._check_claude_code_sync()
+        assert result is not None
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "Cannot read .claude/settings.local.json" in result.reason
+
     # ── Integration: sync check in handle_planning_mode_write ──
 
     def test_handle_planning_mode_write_denies_on_sync_failure(
