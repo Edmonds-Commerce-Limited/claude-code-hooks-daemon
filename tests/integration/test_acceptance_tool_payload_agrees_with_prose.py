@@ -80,19 +80,31 @@ def _looks_like_a_command(command: str) -> bool:
 # its cost tracks handler COUNT rather than the size of any one input.
 _GENERATE_TIMEOUT_SECONDS = 180
 
-# The sanctioned probe location (Plan 00333): inside the repo so
-# `project_containment` permits it, gitignored so nothing reaches review.
-_SCRATCH_MARKER = "untracked/scratch"
+# The sanctioned probe location: inside the repo so `project_containment`
+# permits it (Plan 00333), gitignored so nothing reaches review, and NOT the
+# human scratch directory (Plan 00422 N11).
+_ACCEPTANCE_MARKER = "untracked/acceptance"
+
+# Where agents are told to put working notes. A probe that writes here shares
+# a namespace with them, so an exclusion written for the notes silently
+# switches a handler off for its own probes -- which is what 00422 N2 did.
+_HUMAN_SCRATCH_MARKER = "untracked/scratch"
+
+# The block fields whose paths a tester or the harness ACTS on. Prose fields
+# (`harness_cannot_produce`, `expected_message_patterns`) may name the scratch
+# directory: `project_containment`'s deny message rightly does.
+_ACTED_ON_FIELDS = ("command", "tool_payload", "setup_commands", "cleanup_commands")
 
 # Real in this self-install checkout, false in every client install — the
 # property `test_generated_docs_are_path_agnostic.py` enforces for the other
 # two artefacts rendered from handler code (Plan 00244).
 _SELF_INSTALL_ROOT = "/workspace"
 
-# Handlers whose CONTRACT is a path outside the repository, so a scratch path
-# would not exercise them at all. Named individually rather than pattern-
-# matched: an exemption that cannot be read off a list is one nobody audits.
-_OUTSIDE_SCRATCH_BY_CONTRACT = frozenset(
+# Handlers whose CONTRACT is a path outside the acceptance root, so a path
+# inside it would not exercise them at all. Named individually rather than
+# pattern-matched: an exemption that cannot be read off a list is one nobody
+# audits.
+_OUTSIDE_ACCEPTANCE_ROOT_BY_CONTRACT = frozenset(
     {
         # Denies writes OUTSIDE the repository root, so its probe must target
         # one. It asks for the system temp directory, which is the least
@@ -101,15 +113,15 @@ _OUTSIDE_SCRATCH_BY_CONTRACT = frozenset(
         # definition rather than by a `/tmp` that may not be the temp dir.
         "ProjectContainmentHandler",
         # Denies markdown written to an UNRECOGNISED location -- and
-        # `untracked/` is a recognised one. A scratch path would therefore
-        # stop this probe exercising anything, which is a worse failure than
-        # the one the scratch rule prevents: a test that silently proves
-        # nothing, versus a stray `random-notes.md` at the repo root that a
-        # regressed handler would leave in plain sight and `git status` names
-        # immediately. It carries no code and no credential.
+        # `untracked/` is a recognised one. An acceptance-root path would
+        # therefore stop this probe exercising anything, which is a worse
+        # failure than the one the acceptance-root rule prevents: a test that
+        # silently proves nothing, versus a stray `random-notes.md` at the repo
+        # root that a regressed handler would leave in plain sight and
+        # `git status` names immediately. It carries no code and no credential.
         "MarkdownOrganizationHandler",
         # Judges the path STRUCTURALLY -- a "CLAUDE"/"Plan"/<folder>/PLAN.md
-        # segment sequence -- so a scratch-relocated probe would stop
+        # segment sequence -- so a relocated probe would stop
         # exercising it entirely, the same shape of exemption as
         # MarkdownOrganizationHandler above (Plan 00319 Task 4.6). It carries
         # no code and no credential.
@@ -269,12 +281,14 @@ class TestDeclaredPayloadsAgreeWithTheirProse:
         ]
         assert not unnamed, f"tool_payload with no tool_name: {unnamed}"
 
-    def test_every_declared_write_targets_the_scratch_directory(self, playbook: list[dict]) -> None:
+    def test_every_declared_write_targets_the_acceptance_directory(
+        self, playbook: list[dict]
+    ) -> None:
         """A dispatchable payload must not aim at the working tree.
 
         This is the risk the payload field ADDS, and it is the reverse of the
         one it removes. As prose, "write to $CLAUDE_PROJECT_DIR/src/config.ts"
-        is read by a human who would balk, or quietly substitute a scratch
+        is read by a human who would balk, or quietly substitute a throwaway
         path. As a declared payload it is dispatched verbatim.
 
         These are DENY tests, so in the healthy case the handler blocks the
@@ -284,8 +298,8 @@ class TestDeclaredPayloadsAgreeWithTheirProse:
         file carrying a dynamic-execution construct or a credential-shaped
         string into `src/`, precisely when the guard is not there to stop it.
 
-        `untracked/scratch/` is the sanctioned location (Plan 00333): inside
-        the repo so `project_containment` permits it, gitignored so nothing
+        `untracked/acceptance/` is the sanctioned location: inside the repo so
+        `project_containment` permits it (Plan 00333), gitignored so nothing
         reaches review, and wiped without consequence.
         """
         stray = []
@@ -297,15 +311,43 @@ class TestDeclaredPayloadsAgreeWithTheirProse:
             if not file_path:
                 continue
             handler = block.get("handler_name", "")
-            if handler in _OUTSIDE_SCRATCH_BY_CONTRACT:
+            if handler in _OUTSIDE_ACCEPTANCE_ROOT_BY_CONTRACT:
                 continue
-            if _SCRATCH_MARKER not in file_path:
+            if _ACCEPTANCE_MARKER not in file_path:
                 stray.append(f"#{block.get('test_number')} {handler}: {file_path}")
 
         assert not stray, (
             "a dispatchable payload targets a path outside "
-            f"{_SCRATCH_MARKER!r}, so a regressed handler would let the probe "
+            f"{_ACCEPTANCE_MARKER!r}, so a regressed handler would let the probe "
             "write into the working tree:\n" + "\n".join(stray)
+        )
+
+    def test_no_probe_acts_on_the_human_scratch_directory(self, playbook: list[dict]) -> None:
+        """Probe fixtures stay out of the directory agents put notes in.
+
+        Plan 00422 N11. The two uses shared `untracked/scratch/`, so the N2
+        `lint_on_edit` exclusion written for notes also covered the lint
+        strategies' own fixtures, and eight DENY probes stopped matching their
+        declared input. The repair then had to discriminate by DEPTH, which is
+        a coincidence of layout nobody declared.
+
+        Checked over every field a tester or the harness acts on, not only
+        `file_path`: a Bash probe names its target inside the command, and a
+        setup or cleanup command creates or deletes the directory itself.
+        """
+        shared = []
+        for block in playbook:
+            for field in _ACTED_ON_FIELDS:
+                if _HUMAN_SCRATCH_MARKER in json.dumps(block.get(field) or ""):
+                    shared.append(
+                        f"#{block.get('test_number')} {block.get('handler_name')} "
+                        f"[{field}]: {block.get('title')}"
+                    )
+
+        assert not shared, (
+            f"a probe acts on {_HUMAN_SCRATCH_MARKER!r}, the human scratch "
+            f"directory; probe fixtures belong under {_ACCEPTANCE_MARKER!r} "
+            "(`acceptance_path()`):\n" + "\n".join(shared)
         )
 
     def test_every_declared_file_path_is_absolute_or_project_rooted(
@@ -317,8 +359,8 @@ class TestDeclaredPayloadsAgreeWithTheirProse:
         other PreToolUse handler, so the probe reports on THAT guard instead:
         a DENY test passes for the wrong reason and an ALLOW test fails
         outright. Two `sensitive_content` payloads shipped this way and were
-        invisible to the scratch check above, because `untracked/scratch/...`
-        contains the marker whether or not it is rooted.
+        invisible to the location check above, because a relative
+        `untracked/...` path contains the marker whether or not it is rooted.
         """
         relative = []
         for block in playbook:

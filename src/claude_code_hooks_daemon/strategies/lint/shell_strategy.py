@@ -3,14 +3,14 @@
 from typing import Any
 
 from claude_code_hooks_daemon.strategies.lint.common import COMMON_SKIP_PATHS
-from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
 # Language-specific constants
 _LANGUAGE_NAME = "Shell"
 _EXTENSIONS: tuple[str, ...] = (".sh", ".bash")
 _DEFAULT_LINT_COMMAND = "bash -n {file}"
 _EXTENDED_LINT_COMMAND = "shellcheck -x {file}"
-#: Acceptance-test fixture directory, below the sanctioned scratch root.
+#: Acceptance-test fixture directory, below the gitignored acceptance root.
 _FIXTURE_DIR = "acceptance-test-lint-shell"
 
 
@@ -52,18 +52,18 @@ class ShellLintStrategy:
             ToolPayload,
         )
 
-        fixture_root = scratch_path(_FIXTURE_DIR)
+        fixture_root = acceptance_path(_FIXTURE_DIR)
         probe_valid = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": scratch_path(_FIXTURE_DIR, "valid.sh"),
+                "file_path": acceptance_path(_FIXTURE_DIR, "valid.sh"),
                 "content": "#!/bin/bash\necho hello",
             },
         )
         probe_invalid = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": scratch_path(_FIXTURE_DIR, "invalid.sh"),
+                "file_path": acceptance_path(_FIXTURE_DIR, "invalid.sh"),
                 "content": "#!/bin/bash\nif [ -f file ]; then\necho missing fi",
             },
         )
@@ -77,7 +77,7 @@ class ShellLintStrategy:
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
                 safety_notes=(
-                    "Inside the gitignored scratch directory - safe. "
+                    "Inside the gitignored acceptance directory - safe. "
                     "Creates temporary shell script."
                 ),
                 test_type=TestType.ADVISORY,
@@ -94,7 +94,7 @@ class ShellLintStrategy:
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"Shell lint FAILED", r"invalid.sh", r"syntax error"],
                 safety_notes=(
-                    "Inside the gitignored scratch directory - safe. "
+                    "Inside the gitignored acceptance directory - safe. "
                     "Creates temporary shell script with syntax error."
                 ),
                 test_type=TestType.BLOCKING,

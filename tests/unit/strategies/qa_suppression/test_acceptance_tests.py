@@ -147,14 +147,14 @@ class TestStrategyAcceptanceTests:
             assert isinstance(test.cleanup_commands, list)
             assert len(test.cleanup_commands) > 0
 
-    def test_uses_scratch_path(self, strategy_class: type) -> None:
-        """All tests use the sanctioned scratch directory for safety."""
+    def test_uses_the_acceptance_root(self, strategy_class: type) -> None:
+        """All tests use the gitignored acceptance fixture root for safety."""
         strategy = strategy_class()
         tests = strategy.get_acceptance_tests()
         for test in tests:
             assert (
-                f"{ProjectPath.SCRATCH_DIR}/" in test.command
-            ), f"{strategy_class.__name__} test doesn't use the scratch path: {test.command}"
+                f"{ProjectPath.ACCEPTANCE_DIR}/" in test.command
+            ), f"{strategy_class.__name__} test doesn't use the acceptance root: {test.command}"
 
     def test_has_safety_notes(self, strategy_class: type) -> None:
         """All tests have safety_notes explaining why they're safe."""

@@ -89,16 +89,16 @@ class TestItNeverDestroys:
         assert kept.read_text(encoding="utf-8") == "# in progress"
 
 
-class TestScratchPathResolvesAbsolutelyOnAnyMachine:
+class TestAcceptancePathResolvesAbsolutelyOnAnyMachine:
     """Two constraints pull opposite ways, and each was violated in turn.
 
     ABSOLUTE when executed: the playbook renders each ``AcceptanceTest.command``
     verbatim for a tester to follow, and a Write instruction spelled
-    ``untracked/scratch/x.py`` is denied by ``AbsolutePathHandler`` (priority
-    12, terminal) before the handler under test is consulted -- so the test
-    reports the wrong rule and can never pass. ``/tmp`` worked precisely
-    BECAUSE it was absolute; migrating in-repo has to keep that property, not
-    just change the location.
+    ``untracked/acceptance/x.py`` is denied by ``AbsolutePathHandler``
+    (priority 12, terminal) before the handler under test is consulted -- so
+    the test reports the wrong rule and can never pass. ``/tmp`` worked
+    precisely BECAUSE it was absolute; migrating in-repo has to keep that
+    property, not just change the location.
 
     But NOT the rendering machine's root: the playbook is followed in client
     installs too, so a baked-in ``/workspace/...`` instructs a tester to write
@@ -111,23 +111,23 @@ class TestScratchPathResolvesAbsolutelyOnAnyMachine:
     """
 
     def test_it_is_rooted_at_the_project_dir_variable(self) -> None:
-        from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+        from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
-        assert scratch_path("fixture", "x.py") == (
-            "$CLAUDE_PROJECT_DIR/untracked/scratch/fixture/x.py"
+        assert acceptance_path("fixture", "x.py") == (
+            "$CLAUDE_PROJECT_DIR/untracked/acceptance/fixture/x.py"
         )
 
     def test_the_bare_directory_is_available(self) -> None:
-        from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+        from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
-        assert scratch_path() == "$CLAUDE_PROJECT_DIR/untracked/scratch"
+        assert acceptance_path() == "$CLAUDE_PROJECT_DIR/untracked/acceptance"
 
     def test_it_never_names_a_concrete_machine_root(self) -> None:
         """The regression guard for the second constraint: no matter what the
         live ProjectContext says, the rendered text must not carry it."""
-        from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+        from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
-        rendered = scratch_path("fixture")
+        rendered = acceptance_path("fixture")
 
         assert "/workspace" not in rendered
         assert rendered.startswith("$")
@@ -141,11 +141,40 @@ class TestScratchPathResolvesAbsolutelyOnAnyMachine:
             raise RuntimeError("ProjectContext not initialised")
 
         from claude_code_hooks_daemon.core.project_context import ProjectContext
-        from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+        from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
         monkeypatch.setattr(ProjectContext, "project_root", staticmethod(_raise))
 
-        assert scratch_path("fixture") == "$CLAUDE_PROJECT_DIR/untracked/scratch/fixture"
+        assert acceptance_path("fixture") == "$CLAUDE_PROJECT_DIR/untracked/acceptance/fixture"
+
+
+class TestAcceptanceFixturesDoNotShareTheHumanScratchDirectory:
+    """Plan 00422 N11: probe fixtures and working notes are two namespaces.
+
+    They shared ``untracked/scratch/``, so a ``lint_on_edit`` exclusion written
+    for the human half switched the handler off for its own DENY probes (N2).
+    Separate roots make an exclusion of one unable to reach the other.
+    """
+
+    def test_the_acceptance_root_is_not_below_the_scratch_directory(self) -> None:
+        from claude_code_hooks_daemon.constants.paths import ProjectPath
+
+        assert not ProjectPath.ACCEPTANCE_DIR.startswith(f"{ProjectPath.SCRATCH_DIR}/")
+        assert not ProjectPath.SCRATCH_DIR.startswith(f"{ProjectPath.ACCEPTANCE_DIR}/")
+
+    def test_the_acceptance_root_is_under_the_ignored_untracked_directory(self) -> None:
+        """``ensure_scratch_dir`` ignores all of ``untracked/``, so a fixture
+        root inside it is gitignored in a client that has only that rule."""
+        from claude_code_hooks_daemon.constants.paths import DaemonPath, ProjectPath
+
+        assert ProjectPath.ACCEPTANCE_DIR.startswith(f"{DaemonPath.UNTRACKED_DIR}/")
+
+    def test_the_scratch_path_builder_is_gone(self) -> None:
+        """Every caller of the old builder was an acceptance fixture. Leaving
+        it importable invites the next probe back into the human namespace."""
+        from claude_code_hooks_daemon.utils import scratch_dir
+
+        assert not hasattr(scratch_dir, "scratch_path")
 
     def test_it_creates_the_ignore_file_when_only_the_directory_exists(
         self, tmp_path: Path

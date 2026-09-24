@@ -657,16 +657,25 @@ See `/workspace/CLAUDE/DEBUGGING_HOOKS.md` for the complete introspection guide 
 
 ## 6. Configuration
 
-### Settings File Locations
+### Hook Sources
 
-Hooks are configured in Claude Code settings files (JSON):
+Claude Code merges hooks from every source below and runs all matching hooks
+in parallel. The daemon's own registrations are ordinary `command` hooks in the
+project settings files:
 
-| File                          | Scope                         |
-| ----------------------------- | ----------------------------- |
-| `~/.claude/settings.json`     | User (all projects)           |
-| `.claude/settings.json`       | Project (committed)           |
-| `.claude/settings.local.json` | Local project (not committed) |
-| Managed policy settings       | Enterprise                    |
+| Source                                     | Scope                                 |
+| ------------------------------------------ | ------------------------------------- |
+| `~/.claude/settings.json`                  | User (all projects)                   |
+| `.claude/settings.json`                    | Project (committed)                   |
+| `.claude/settings.local.json`              | Local project (not committed)         |
+| Managed policy settings                    | Enterprise                            |
+| Claude Code plugin `hooks/hooks.json`      | While the plugin is enabled           |
+| Skill and subagent frontmatter (see below) | While the skill or subagent is active |
+
+A Claude Code plugin's hooks run beside the daemon's and are never seen by it.
+How that interacts with the daemon's verdicts, including a plugin `PreToolUse`
+hook's `updatedInput`, is in
+[ClaudeCodePlugins.md](../ClaudeCodePlugins.md#plugin-hooks-run-in-parallel-with-the-daemons).
 
 ### Configuration Structure
 
@@ -722,6 +731,11 @@ MCP tools follow the pattern `mcp__<server>__<tool>`:
 | `CLAUDE_ENV_FILE`    | SessionStart, Setup only | File path for persisting env vars      |
 | `CLAUDE_CODE_REMOTE` | All hooks                | `"true"` if remote/web, empty if local |
 | `CLAUDE_PLUGIN_ROOT` | Plugin hooks only        | Absolute path to plugin directory      |
+| `CLAUDE_PLUGIN_DATA` | Plugin hooks only        | Plugin's persistent data directory     |
+
+The two `CLAUDE_PLUGIN_*` variables belong to Claude Code plugins, so the
+daemon's own hooks never receive them. See
+[ClaudeCodePlugins.md](../ClaudeCodePlugins.md#plugin-environment-variables).
 
 ### Hooks in Skills and Agents
 

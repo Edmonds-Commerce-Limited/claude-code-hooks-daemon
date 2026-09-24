@@ -3,14 +3,14 @@
 from typing import Any
 
 from claude_code_hooks_daemon.strategies.lint.common import COMMON_SKIP_PATHS
-from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
 # Language-specific constants
 _LANGUAGE_NAME = "Swift"
 _EXTENSIONS: tuple[str, ...] = (".swift",)
 _DEFAULT_LINT_COMMAND = "swiftc -typecheck {file}"
 _EXTENDED_LINT_COMMAND = "swiftlint lint {file}"
-#: Acceptance-test fixture directory, below the sanctioned scratch root.
+#: Acceptance-test fixture directory, below the gitignored acceptance root.
 _FIXTURE_DIR = "acceptance-test-lint-swift"
 
 
@@ -52,18 +52,18 @@ class SwiftLintStrategy:
             ToolPayload,
         )
 
-        fixture_root = scratch_path(_FIXTURE_DIR)
+        fixture_root = acceptance_path(_FIXTURE_DIR)
         probe_valid = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": scratch_path(_FIXTURE_DIR, "valid.swift"),
+                "file_path": acceptance_path(_FIXTURE_DIR, "valid.swift"),
                 "content": 'print("hello")',
             },
         )
         probe_invalid = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": scratch_path(_FIXTURE_DIR, "invalid.swift"),
+                "file_path": acceptance_path(_FIXTURE_DIR, "invalid.swift"),
                 "content": 'print("hello',
             },
         )
@@ -77,7 +77,7 @@ class SwiftLintStrategy:
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
                 safety_notes=(
-                    "Inside the gitignored scratch directory - safe. Creates temporary Swift file."
+                    "Inside the gitignored acceptance directory - safe. Creates temporary Swift file."
                 ),
                 test_type=TestType.ADVISORY,
                 setup_commands=[f"mkdir -p {fixture_root}"],
@@ -93,7 +93,7 @@ class SwiftLintStrategy:
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"Swift lint FAILED", r"invalid.swift"],
                 safety_notes=(
-                    "Inside the gitignored scratch directory - safe. "
+                    "Inside the gitignored acceptance directory - safe. "
                     "Creates temporary Swift file with syntax error."
                 ),
                 test_type=TestType.BLOCKING,

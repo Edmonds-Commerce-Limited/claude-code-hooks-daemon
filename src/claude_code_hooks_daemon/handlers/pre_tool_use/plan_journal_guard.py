@@ -496,7 +496,7 @@ class PlanJournalGuardHandler(PreToolUseHandlerBase):
         )
 
         probe_dayfile = "CLAUDE/Plan/99999-acceptance-probe/JOURNAL/99999-Journal-26-01-01.md"
-        probe_body = f"{ProjectPath.SCRATCH_DIR}/journal-99999-acceptance-probe.md"
+        probe_body = f"{ProjectPath.ACCEPTANCE_DIR}/journal-99999-acceptance-probe.md"
         return [
             AcceptanceTest(
                 title="Block a hand-appended journal entry",

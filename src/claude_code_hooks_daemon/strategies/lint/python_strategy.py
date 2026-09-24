@@ -4,7 +4,7 @@ import sys
 from typing import Any
 
 from claude_code_hooks_daemon.strategies.lint.common import COMMON_SKIP_PATHS
-from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
 # Language-specific constants
 _LANGUAGE_NAME = "Python"
@@ -12,7 +12,7 @@ _EXTENSIONS: tuple[str, ...] = (".py",)
 # Use the same Python interpreter running the daemon (works in any environment)
 _DEFAULT_LINT_COMMAND = f"{sys.executable} -m py_compile {{file}}"
 _EXTENDED_LINT_COMMAND = "ruff check {file}"
-#: Acceptance-test fixture directory, below the sanctioned scratch root.
+#: Acceptance-test fixture directory, below the gitignored acceptance root.
 _FIXTURE_DIR = "acceptance-test-lint-python"
 
 
@@ -54,18 +54,18 @@ class PythonLintStrategy:
             ToolPayload,
         )
 
-        fixture_root = scratch_path(_FIXTURE_DIR)
+        fixture_root = acceptance_path(_FIXTURE_DIR)
         probe_valid = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": scratch_path(_FIXTURE_DIR, "valid.py"),
+                "file_path": acceptance_path(_FIXTURE_DIR, "valid.py"),
                 "content": "def hello():\n    print('hello')\n",
             },
         )
         probe_invalid = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": scratch_path(_FIXTURE_DIR, "invalid.py"),
+                "file_path": acceptance_path(_FIXTURE_DIR, "invalid.py"),
                 "content": "def hello(\n    print('hello')",
             },
         )
@@ -79,7 +79,7 @@ class PythonLintStrategy:
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
                 safety_notes=(
-                    "Inside the gitignored scratch directory - safe. Creates temporary Python file."
+                    "Inside the gitignored acceptance directory - safe. Creates temporary Python file."
                 ),
                 test_type=TestType.ADVISORY,
                 setup_commands=[f"mkdir -p {fixture_root}"],
@@ -95,7 +95,7 @@ class PythonLintStrategy:
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"Python lint FAILED", r"invalid.py", r"SyntaxError"],
                 safety_notes=(
-                    "Inside the gitignored scratch directory - safe. "
+                    "Inside the gitignored acceptance directory - safe. "
                     "Creates temporary Python file with syntax error."
                 ),
                 test_type=TestType.BLOCKING,

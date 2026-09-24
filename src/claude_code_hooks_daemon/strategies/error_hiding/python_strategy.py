@@ -3,10 +3,10 @@
 from typing import Any
 
 from claude_code_hooks_daemon.strategies.error_hiding.protocol import ErrorHidingPattern
-from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
 _LANGUAGE_NAME = "Python"
-#: Acceptance-test fixture directory, below the sanctioned scratch root.
+#: Acceptance-test fixture directory, below the gitignored acceptance root.
 _FIXTURE_DIR = "acceptance-test-error-hiding-python"
 _EXTENSIONS: tuple[str, ...] = (".py",)
 
@@ -64,7 +64,7 @@ class PythonErrorHidingStrategy:
             ToolPayload,
         )
 
-        fixture_root = scratch_path(_FIXTURE_DIR)
+        fixture_root = acceptance_path(_FIXTURE_DIR)
 
         # Stated once; the prose is rendered from it (Plan 00345 Phase 2).
         # A WRITE payload, not Bash: these read as `Write(...)` call syntax,
@@ -74,14 +74,14 @@ class PythonErrorHidingStrategy:
         bad_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": scratch_path(_FIXTURE_DIR, "bad.py"),
+                "file_path": acceptance_path(_FIXTURE_DIR, "bad.py"),
                 "content": "try:\n    do_something()\nexcept:\n    pass\n",
             },
         )
         good_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": scratch_path(_FIXTURE_DIR, "good.py"),
+                "file_path": acceptance_path(_FIXTURE_DIR, "good.py"),
                 "content": (
                     "import logging\n\n\n"
                     "def run(task):\n    try:\n        task()\n"
@@ -105,7 +105,7 @@ class PythonErrorHidingStrategy:
                     r"BLOCKED \[R-ERROR-HIDING\]",
                     r"bare except",
                 ],
-                safety_notes="Inside the gitignored scratch directory - safe",
+                safety_notes="Inside the gitignored acceptance directory - safe",
                 test_type=TestType.BLOCKING,
                 setup_commands=[f"mkdir -p {fixture_root}"],
                 cleanup_commands=[f"rm -rf {fixture_root}"],
@@ -119,7 +119,7 @@ class PythonErrorHidingStrategy:
                 description=("Allows Python file with proper exception handling via Write tool"),
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
-                safety_notes="Inside the gitignored scratch directory - safe",
+                safety_notes="Inside the gitignored acceptance directory - safe",
                 test_type=TestType.ADVISORY,
                 setup_commands=[f"mkdir -p {fixture_root}"],
                 cleanup_commands=[f"rm -rf {fixture_root}"],

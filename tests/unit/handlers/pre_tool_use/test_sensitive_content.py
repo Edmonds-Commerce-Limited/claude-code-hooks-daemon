@@ -1869,3 +1869,121 @@ class TestDeclaredAcceptancePatternsAreProducible:
         for pattern in declared.expected_message_patterns:
             assert re.search(pattern, reason or ""), f"{pattern!r} no longer appears in: {reason}"
         assert "zzqx-nonsense-term" not in (reason or "")
+
+
+# Built at runtime so this file's own text never matches the dogfood
+# session-uuid public pattern: an upstream documentation example, not a
+# session of ours.
+_DOC_UUID = "-".join(("550e8400", "e29b", "41d4", "a716", "446655440000"))
+_UUID_PATTERN = {
+    "name": "session-uuid",
+    "pattern": r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+    "description": "d",
+}
+_VENDORED_REL = "remote-docs/example.com/docs/hooks.md"
+
+
+def _vendored(body: str) -> str:
+    """A document exactly as ``remote-docs add`` writes it."""
+    from datetime import UTC, datetime
+
+    from claude_code_hooks_daemon.remote_docs.capture import capture
+
+    return capture(
+        "https://example.com/docs/hooks",
+        fetch_fn=lambda _url: body.encode("utf-8"),
+        now=datetime(2026, 9, 24, tzinfo=UTC),
+    ).content
+
+
+def _uuid_handler(tmp_path: Path, *terms: str) -> SensitiveContentHandler:
+    handler = _wordlist(tmp_path, *terms)
+    handler._public_patterns = [_UUID_PATTERN]
+    return handler
+
+
+class TestFaithfulVendoredCopiesStandPublicPatternsDown:
+    """Plan 00468: public patterns catch OUR material, and a faithful capture has none.
+
+    A remote-docs file whose provenance is valid and whose body still hashes
+    to the recorded ``source_sha256`` is upstream's bytes, so the public
+    patterns stand down for its body. A body edited after capture is ours
+    again and is scanned normally. The secret word list is never stood down:
+    those terms must not be in the repository whoever wrote them.
+    """
+
+    def _write(self, handler: SensitiveContentHandler, relpath: str, content: str) -> bool:
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content.resolve_project_root",
+            return_value="/workspace",
+        ):
+            return handler.matches(_write_input(f"/workspace/{relpath}", content))
+
+    def test_a_faithful_vendored_write_is_not_flagged(self, tmp_path: Path) -> None:
+        handler = _uuid_handler(tmp_path, "zzqx-nonsense-term")
+        content = _vendored(f"# Hooks\n\nprompt_id {_DOC_UUID}\n")
+
+        assert self._write(handler, _VENDORED_REL, content) is False
+
+    def test_a_vendored_write_edited_after_capture_is_flagged(self, tmp_path: Path) -> None:
+        handler = _uuid_handler(tmp_path, "zzqx-nonsense-term")
+        content = _vendored("# Hooks\n\nupstream text\n") + f"ours {_DOC_UUID}\n"
+
+        assert self._write(handler, _VENDORED_REL, content) is True
+
+    def test_a_faithful_vendored_write_with_a_secret_term_is_denied(self, tmp_path: Path) -> None:
+        handler = _uuid_handler(tmp_path, "zzqx-nonsense-term")
+        content = _vendored("# Hooks\n\nhost zzqx-nonsense-term\n")
+
+        assert self._write(handler, _VENDORED_REL, content) is True
+
+    def test_a_non_vendored_markdown_write_is_flagged(self, tmp_path: Path) -> None:
+        handler = _uuid_handler(tmp_path, "zzqx-nonsense-term")
+        content = _vendored(f"# Hooks\n\nprompt_id {_DOC_UUID}\n")
+
+        assert self._write(handler, "docs/hooks.md", content) is True
+
+    def test_an_edit_inside_the_tree_is_still_scanned(self, tmp_path: Path) -> None:
+        """An Edit carries a fragment, never a whole capture, so it is ours."""
+        handler = _uuid_handler(tmp_path, "zzqx-nonsense-term")
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content.resolve_project_root",
+            return_value="/workspace",
+        ):
+            hook_input = _edit_input(f"/workspace/{_VENDORED_REL}", f"id {_DOC_UUID}")
+            assert handler.matches(hook_input) is True
+
+    def test_a_staged_faithful_vendored_file_is_allowed(self, repo: Path, tmp_path: Path) -> None:
+        handler = _uuid_handler(tmp_path, "zzqx-nonsense-term")
+        _stage(repo, _VENDORED_REL, _vendored(f"# Hooks\n\nprompt_id {_DOC_UUID}\n"))
+
+        assert handler.matches(_commit_input(repo)) is False
+
+    def test_a_staged_vendored_file_edited_after_capture_is_denied(
+        self, repo: Path, tmp_path: Path
+    ) -> None:
+        handler = _uuid_handler(tmp_path, "zzqx-nonsense-term")
+        _stage(repo, _VENDORED_REL, _vendored("# Hooks\n\nupstream\n") + f"ours {_DOC_UUID}\n")
+
+        result = handler.handle(_commit_input(repo))
+        assert result.decision == Decision.DENY
+        assert "session-uuid" in (result.reason or "")
+
+    def test_a_staged_faithful_vendored_file_with_a_secret_term_is_denied(
+        self, repo: Path, tmp_path: Path
+    ) -> None:
+        handler = _uuid_handler(tmp_path, "zzqx-nonsense-term")
+        _stage(repo, _VENDORED_REL, _vendored("# Hooks\n\nhost zzqx-nonsense-term\n"))
+
+        result = handler.handle(_commit_input(repo))
+        assert result.decision == Decision.DENY
+        assert "zzqx-nonsense-term" not in (result.reason or "")
+
+    def test_the_index_is_judged_not_the_working_tree(self, repo: Path, tmp_path: Path) -> None:
+        """A faithful working copy cannot vouch for an edited staged blob."""
+        handler = _uuid_handler(tmp_path, "zzqx-nonsense-term")
+        faithful = _vendored(f"# Hooks\n\nprompt_id {_DOC_UUID}\n")
+        _stage(repo, _VENDORED_REL, faithful + f"ours {_DOC_UUID}\n")
+        (repo / _VENDORED_REL).write_text(faithful)
+
+        assert handler.handle(_commit_input(repo)).decision == Decision.DENY

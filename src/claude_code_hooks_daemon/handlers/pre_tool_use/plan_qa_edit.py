@@ -385,8 +385,8 @@ class PlanQaEditHandler(PreToolUseHandlerBase):
                 ),
                 harness_cannot_produce=(
                     "The lint is scoped to the configured plan directory, so no "
-                    "path under `untracked/scratch/` reaches it, and "
-                    "`test_every_declared_write_targets_the_scratch_directory` "
+                    "path under `untracked/acceptance/` reaches it, and "
+                    "`test_every_declared_write_targets_the_acceptance_directory` "
                     "forbids aiming a payload at the real tree. The cost here is "
                     "higher than a stray file: a regressed handler would let the "
                     "probe create a plan folder, and the plan index, the QA sweep "

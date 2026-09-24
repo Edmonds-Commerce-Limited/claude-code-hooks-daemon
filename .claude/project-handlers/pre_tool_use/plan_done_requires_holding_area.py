@@ -148,12 +148,12 @@ class PlanDoneRequiresHoldingAreaHandler(Handler):
         probe_payload = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                # $CLAUDE_PROJECT_DIR-rooted, not `untracked/scratch/`: this
-                # handler judges the path structurally (a "CLAUDE"/"Plan"
-                # segment pair), so a scratch-relocated probe would exercise
-                # nothing (Plan 00319 Task 4.6 -- see the matching entry in
+                # $CLAUDE_PROJECT_DIR-rooted, not `untracked/acceptance/`:
+                # this handler judges the path structurally (a "CLAUDE"/"Plan"
+                # segment pair), so a relocated probe would exercise nothing
+                # (Plan 00319 Task 4.6 -- see the matching entry in
                 # test_acceptance_tool_payload_agrees_with_prose.py's
-                # _OUTSIDE_SCRATCH_BY_CONTRACT).
+                # _OUTSIDE_ACCEPTANCE_ROOT_BY_CONTRACT).
                 "file_path": "$CLAUDE_PROJECT_DIR/CLAUDE/Plan/00000-acceptance-probe/PLAN.md",
                 "content": probe_content,
             },

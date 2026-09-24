@@ -16,6 +16,11 @@ Re-render the index: `bin/hooks-daemon remote-docs index`
 
 | Document | Source | Captured | Fresh until |
 | -------- | ------ | -------- | ----------- |
+| `code.claude.com/docs/en/discover-plugins.md` | https://code.claude.com/docs/en/discover-plugins.md | 2026-09-24 | 2026-12-23 |
+| `code.claude.com/docs/en/hooks.md` | https://code.claude.com/docs/en/hooks.md | 2026-09-24 | 2026-12-23 |
+| `code.claude.com/docs/en/plugin-marketplaces.md` | https://code.claude.com/docs/en/plugin-marketplaces.md | 2026-09-24 | 2026-12-23 |
+| `code.claude.com/docs/en/plugins-reference.md` | https://code.claude.com/docs/en/plugins-reference.md | 2026-09-24 | 2026-12-23 |
+| `code.claude.com/docs/en/plugins.md` | https://code.claude.com/docs/en/plugins.md | 2026-09-24 | 2026-12-23 |
 | `code.claude.com/docs/en/prompt-caching.md` | https://code.claude.com/docs/en/prompt-caching.md | 2026-09-22 | 2026-12-21 |
 | `code.claude.com/docs/en/sub-agents.md` | https://code.claude.com/docs/en/sub-agents.md | 2026-09-24 | 2026-12-23 |
 | `code.claude.com/docs/en/tools-reference.md` | https://code.claude.com/docs/en/tools-reference.md | 2026-09-24 | 2026-12-23 |

@@ -578,10 +578,6 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - goal_injection — plan-start goal signal for the ccy supervisor
 
-<!-- handler: markdown-table-formatter -->
-
-- markdown_table_formatter — markdown tables are auto-aligned
-
 <!-- handler: merge-qa-report -->
 
 - merge_qa_report — post-hoc plan/docs QA report after a merge
@@ -593,6 +589,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 <!-- handler: background-process-tracker -->
 
 - background_process_tracker — backgrounded processes are tracked
+
+<!-- handler: markdown-table-formatter -->
+
+- markdown_table_formatter — markdown tables are auto-aligned
 
 <!-- handler: recovery-cron-advisor -->
 

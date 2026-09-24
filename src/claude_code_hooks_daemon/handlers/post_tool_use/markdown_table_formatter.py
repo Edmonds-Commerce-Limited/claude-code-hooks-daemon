@@ -35,12 +35,12 @@ from claude_code_hooks_daemon.plan_qa.paths import is_journal_file
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.markdown_format import format_markdown_text
 from claude_code_hooks_daemon.utils.path_predicates import path_exists
-from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
 # Extensions treated as markdown (lowercase match).
 _MARKDOWN_EXTENSIONS: tuple[str, ...] = (".md", ".markdown")
 
-#: Acceptance-test fixture directory, below the sanctioned scratch root.
+#: Acceptance-test fixture directory, below the gitignored acceptance root.
 _FIXTURE_DIR: Final[str] = "acceptance-test-mdformat"
 
 # --- Advisory-message classification --------------------------------------
@@ -343,7 +343,7 @@ class MarkdownTableFormatterHandler(PostToolUseHandlerBase):
         probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": scratch_path(_FIXTURE_DIR, "doc.md"),
+                "file_path": acceptance_path(_FIXTURE_DIR, "doc.md"),
                 "content": (
                     "# Test\n\n| Name | Value |\n|---|---|\n| Short | x |\n| Very Long Name | y |\n"
                 ),
@@ -363,12 +363,12 @@ class MarkdownTableFormatterHandler(PostToolUseHandlerBase):
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[r"Reformatted markdown in doc\.md.*table pipes"],
                 safety_notes=(
-                    "Creates a temporary markdown file inside the gitignored scratch "
+                    "Creates a temporary markdown file inside the gitignored acceptance "
                     "directory for formatting test"
                 ),
                 test_type=TestType.ADVISORY,
-                setup_commands=[f"mkdir -p untracked/scratch/{_FIXTURE_DIR}"],
-                cleanup_commands=[f"rm -rf untracked/scratch/{_FIXTURE_DIR}"],
+                setup_commands=[f"mkdir -p untracked/acceptance/{_FIXTURE_DIR}"],
+                cleanup_commands=[f"rm -rf untracked/acceptance/{_FIXTURE_DIR}"],
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=True,
             ),

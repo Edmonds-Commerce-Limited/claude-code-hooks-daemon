@@ -198,7 +198,7 @@
 |----------|---------|----------|-------------|
 | 50 | worktree_remove | TERMINAL | Prune stale worktree registrations (and remove a named worktree) |
 
-### Plugin (1 handler)
+### Daemon Plugin (1 handler)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
