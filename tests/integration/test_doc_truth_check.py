@@ -327,6 +327,22 @@ def test_does_not_scan_agent_worktrees(tmp_path: Path) -> None:
     )
 
 
+def test_a_checkout_inside_a_worktrees_directory_is_still_scanned(tmp_path: Path) -> None:
+    """The noise-directory names are judged below ``--root``, never above it.
+
+    An agent's own checkout lives at ``untracked/worktrees/<name>/``. Judged on
+    the ABSOLUTE path, every file in it sits under ``untracked`` and
+    ``worktrees``, so the gate scanned nothing and passed on any prose.
+    """
+    root = _make_docs(tmp_path / "untracked" / "worktrees" / "wt", "## Usage\n\n")
+    (root / "README.md").write_text("## Usage\n\n```bash\n/release\n```\n", encoding="utf-8")
+
+    exit_code, report = _run_checker(root)
+
+    assert report["summary"]["docs_scanned"] > 0
+    assert exit_code == 1, "a violation in a checkout under untracked/worktrees/ passed unseen"
+
+
 def _git(repo: Path, *args: str) -> None:
     subprocess.run(  # nosec B603 B607 - trusted git binary, fixed argv, test fixture only
         ["git", "-C", str(repo), *args],

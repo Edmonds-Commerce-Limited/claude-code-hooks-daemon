@@ -501,12 +501,16 @@ def _iter_markdown(root: Path) -> list[Path]:
     is not a git repository) means no filtering: every fixture this checker's
     own test suite builds under a plain ``tmp_path`` must keep scanning
     everything it writes.
+
+    The noise names are matched below ``root`` only: an agent's checkout
+    lives at ``untracked/worktrees/<name>/``, and matching the absolute path
+    would drop every file in it.
     """
     git_visible = git_visible_paths(root)
     candidates = (
         path
         for path in root.rglob(_MARKDOWN_GLOB)
-        if not _UNSCANNED_DIR_NAMES.intersection(path.parts)
+        if not _UNSCANNED_DIR_NAMES.intersection(path.relative_to(root).parts)
     )
     if git_visible is None:
         return sorted(candidates)
