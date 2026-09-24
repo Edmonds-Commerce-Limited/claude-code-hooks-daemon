@@ -23,6 +23,7 @@ from claude_code_hooks_daemon.core import AcceptanceTest
 from claude_code_hooks_daemon.core.cli_acceptance_test import CliAcceptanceTest
 from claude_code_hooks_daemon.handlers.registry import (
     EVENT_TYPE_MAPPING,
+    apply_handler_options,
     event_dir_name_matches_module,
 )
 from claude_code_hooks_daemon.pseudo_events.registry import (
@@ -61,14 +62,13 @@ def _apply_configured_options(instance: object, handler_config: Any) -> None:
     these declarations against the live daemon, which does apply options. The
     two disagreed, and the harness reported it as the handler misbehaving.
 
-    Mirrors the registry's mechanism (``_``-prefixed attributes) deliberately,
-    so a handler reads its options the same way whoever built it. Option
-    INHERITANCE (``shares_options_with``) is not reproduced here: it needs the
-    registry's two-pass collection over every handler, and no handler currently
-    both inherits options and varies its declared tests by one.
+    Uses the registry's own ``apply_handler_options``, so a handler reads its
+    options the same way whoever built it. Option INHERITANCE
+    (``shares_options_with``) is not reproduced here: it needs the registry's
+    two-pass collection over every handler, and no handler currently both
+    inherits options and varies its declared tests by one.
     """
-    for option_key, option_value in handler_options(handler_config).items():
-        setattr(instance, f"_{option_key}", option_value)
+    apply_handler_options(instance, handler_options(handler_config))
 
 
 def _event_type_label(handler: object, default: str) -> str:

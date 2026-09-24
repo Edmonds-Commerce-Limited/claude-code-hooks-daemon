@@ -2045,9 +2045,11 @@ def _collect_enforcement_status_lines(project_path: Path) -> list[str]:
         ValidateEslintOnWriteHandler,
     )
     from claude_code_hooks_daemon.handlers.pre_tool_use.npm_command import NpmCommandHandler
+    from claude_code_hooks_daemon.handlers.registry import apply_handler_options
 
     config_file = project_path / ".claude" / "hooks-daemon.yaml"
     registry: ProjectRegistry
+    config: Config | None = None
     try:
         config_dict = ConfigLoader.load(config_file) if config_file.exists() else {}
         config = Config.model_validate(config_dict)
@@ -2064,13 +2066,20 @@ def _collect_enforcement_status_lines(project_path: Path) -> list[str]:
     # ProjectContext (that singleton is initialised at daemon startup, and
     # this CLI command talks to config files directly), so both handlers are
     # given `project_path` explicitly instead of relying on that singleton.
-    handlers: list[Any] = [
-        NpmCommandHandler(project_root=project_path),
-        LintOnEditHandler(),
-        ValidateEslintOnWriteHandler(workspace_root=project_path),
+    probes: list[tuple[str, Any]] = [
+        ("pre_tool_use", NpmCommandHandler(project_root=project_path)),
+        ("post_tool_use", LintOnEditHandler()),
+        ("post_tool_use", ValidateEslintOnWriteHandler(workspace_root=project_path)),
     ]
-    for handler in handlers:
+    handlers = [handler for _, handler in probes]
+    for event_key, handler in probes:
         handler._project_registry = registry
+        # Probed with its configured options, as the registry would run it
+        # (Plan 00466 N15): built bare, lint_on_edit probed every language.
+        if config is not None:
+            event_block = getattr(config.handlers, event_key)
+            apply_handler_options(handler, handler_options(event_block.get(handler.config_key)))
+            handler._project_languages = config.daemon.languages
 
     statuses: list[str] = []
     seen: set[str] = set()
@@ -6348,13 +6357,19 @@ def cmd_docs_qa(args: argparse.Namespace) -> int:
     return 1 if findings else 0
 
 
-def _sensitive_content_guard() -> Any:
+def _sensitive_content_guard(project_root: Path) -> Any:
     """The project's configured sensitive-content scanner, or None.
 
     A capture writes to disk from this CLI, so the ``Write``-tool hook that
     normally inspects content never fires. Reusing the handler's own matching
     keeps one definition of "sensitive" rather than a second, weaker copy
     (Plan 00326 Task 2.5).
+
+    The handler gets ``project_root``'s configured options exactly as the
+    registry would give them. Built bare it had no public patterns (Plan
+    00466 N15). The word list path is resolved to an absolute path here,
+    because this CLI need not have initialised the project context the
+    handler would otherwise resolve it against.
 
     Returns None when the handler cannot be built. Capture then proceeds
     UNSCANNED rather than failing, matching how the daemon degrades
@@ -6363,13 +6378,29 @@ def _sensitive_content_guard() -> Any:
     its secrets with nothing to show that the check was skipped, which is
     the one degradation in this subsystem worth interrupting someone over.
     """
+    import yaml
+
     try:
+        from claude_code_hooks_daemon.constants import HandlerID
         from claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content import (
             SensitiveContentHandler,
         )
+        from claude_code_hooks_daemon.handlers.registry import apply_handler_options
+        from claude_code_hooks_daemon.utils.secret_redaction import (
+            resolve_secret_word_list_path,
+        )
 
-        return SensitiveContentHandler().scan_text
-    except (ImportError, RuntimeError, OSError) as exc:
+        config = Config.load_or_default(project_root / ".claude" / "hooks-daemon.yaml")
+        options = handler_options(
+            config.handlers.pre_tool_use.get(HandlerID.SENSITIVE_CONTENT.config_key)
+        )
+        word_list = resolve_secret_word_list_path(
+            options.get("secret_word_list_path"), project_root
+        )
+        handler = SensitiveContentHandler()
+        apply_handler_options(handler, {**options, "secret_word_list_path": str(word_list)})
+        return handler.scan_text
+    except (ImportError, RuntimeError, OSError, ValueError, yaml.YAMLError) as exc:
         logger.warning("sensitive-content guard unavailable for capture: %s", exc)
         print(
             "remote-docs: WARNING — the sensitive-content scanner is "
@@ -6418,9 +6449,11 @@ def cmd_remote_docs(args: argparse.Namespace) -> int:
         print(fetcher.warning, file=sys.stderr)
 
     if action == "add":
-        code = _remote_docs_add(args, tree, fetcher, now, _remote_docs_policy(resolved_root))
+        code = _remote_docs_add(
+            args, resolved_root, tree, fetcher, now, _remote_docs_policy(resolved_root)
+        )
     else:
-        code = _remote_docs_refresh(args, tree, fetcher, now)
+        code = _remote_docs_refresh(args, resolved_root, tree, fetcher, now)
 
     # Regenerated on every capture and refresh, never on demand: an index
     # that silently goes stale answers "we don't have that" confidently and
@@ -6478,7 +6511,7 @@ def _resolve_remote_docs_fetcher(args: argparse.Namespace) -> Any:
 
 
 def _remote_docs_add(
-    args: argparse.Namespace, tree: Path, fetcher: Any, now: Any, policy: Any
+    args: argparse.Namespace, project_root: Path, tree: Path, fetcher: Any, now: Any, policy: Any
 ) -> int:
     from claude_code_hooks_daemon.remote_docs.capture import CaptureError, derive_relative_path
     from claude_code_hooks_daemon.remote_docs.provenance import UNREVIEWED
@@ -6516,7 +6549,8 @@ def _remote_docs_add(
             now=now,
             licence=licence,
             stale_after_days=stale_after_days,
-            content_guard=getattr(args, "content_guard", None) or _sensitive_content_guard(),
+            content_guard=getattr(args, "content_guard", None)
+            or _sensitive_content_guard(project_root),
             force=force,
         )
     except CaptureError as exc:
@@ -6652,7 +6686,9 @@ def _remote_docs_check(
     return 1
 
 
-def _remote_docs_refresh(args: argparse.Namespace, tree: Path, fetcher: Any, now: Any) -> int:
+def _remote_docs_refresh(
+    args: argparse.Namespace, project_root: Path, tree: Path, fetcher: Any, now: Any
+) -> int:
     from claude_code_hooks_daemon.remote_docs.store import (
         RefreshOutcome,
         list_documents,
@@ -6677,7 +6713,8 @@ def _remote_docs_refresh(args: argparse.Namespace, tree: Path, fetcher: Any, now
             now=now,
             # The same guard `remote-docs add` applies. A refresh writes from a
             # CLI just as a capture does, so it bypasses the same hook.
-            content_guard=getattr(args, "content_guard", None) or _sensitive_content_guard(),
+            content_guard=getattr(args, "content_guard", None)
+            or _sensitive_content_guard(project_root),
         )
         print(f"{target}: {outcome.value}")
         if outcome is RefreshOutcome.REFUSED:

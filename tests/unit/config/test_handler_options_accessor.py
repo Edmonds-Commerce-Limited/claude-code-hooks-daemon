@@ -7,6 +7,11 @@ and silently falls back to defaults. Log and payload redaction did exactly
 that, and ``secret_file_matching`` had done it before. The accessor tests pin
 both shapes; the source scan pins that nothing in ``src/`` reads the key by
 hand again.
+
+Plan 00466 N15 is the other face of the same class: a handler CONSTRUCTED
+outside the registry runs on its defaults unless its options are applied, which
+is how ``remote-docs add`` scanned captures with no public patterns. The last
+scan pins that shape.
 """
 
 import ast
@@ -149,6 +154,87 @@ def test_no_source_file_binds_a_local_that_shadows_the_accessor() -> None:
             if isinstance(node, ast.arg) and node.arg == _ACCESSOR_NAME:
                 offenders.append(f"{path.relative_to(_SRC_ROOT)}:{node.lineno}")
     assert offenders == [], f"rename these so they do not shadow the accessor: {offenders}"
+
+
+_APPLY_OPTIONS_NAME = "apply_handler_options"
+_REGISTRY_MODULE = "handlers/registry.py"
+
+#: Bare ``SomethingHandler()`` constructions that legitimately run on defaults.
+#: Every entry says why; a new construction must apply its options instead.
+_DEFAULTS_ARE_INTENDED: dict[tuple[str, str], str] = {
+    ("daemon/controller.py", "DestructiveGitHandler"): (
+        "degraded mode: the config is invalid by definition, and this guard is "
+        "the one that must still run without it"
+    ),
+    ("daemon/cli.py", "OptimalConfigCheckerHandler"): (
+        "declares no options; it reads the config it reports on itself"
+    ),
+    ("daemon/cli.py", "GitFilemodeCheckerHandler"): "declares no options",
+}
+
+
+def _bare_handler_constructions(tree: ast.AST) -> list[tuple[str, int, bool]]:
+    """``(class name, line, options applied in the same function)`` per bare construction."""
+    found: list[tuple[str, int, bool]] = []
+    for function in ast.walk(tree):
+        if not isinstance(function, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        calls = [node for node in ast.walk(function) if isinstance(node, ast.Call)]
+        applies = any(
+            isinstance(call.func, ast.Name | ast.Attribute)
+            and (call.func.id if isinstance(call.func, ast.Name) else call.func.attr)
+            == _APPLY_OPTIONS_NAME
+            for call in calls
+        )
+        for call in calls:
+            func = call.func
+            name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
+            if name.endswith("Handler") and name[:1].isupper() and not call.args:
+                if not call.keywords or all(kw.arg != "options" for kw in call.keywords):
+                    found.append((name, call.lineno, applies))
+    return found
+
+
+def _hook_handler_class_names() -> set[str]:
+    from claude_code_hooks_daemon.handlers.registry import iter_builtin_handler_classes
+
+    return {ref.handler_cls.__name__ for ref in iter_builtin_handler_classes()}
+
+
+def test_no_handler_is_constructed_outside_the_registry_without_its_options() -> None:
+    hook_handlers = _hook_handler_class_names()
+    offenders: list[str] = []
+    for path in sorted(_SRC_ROOT.rglob("*.py")):
+        rel = str(path.relative_to(_SRC_ROOT))
+        if rel == _REGISTRY_MODULE:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        seen: set[tuple[str, int]] = set()
+        for name, line, applies in _bare_handler_constructions(tree):
+            if (name, line) in seen:
+                continue
+            seen.add((name, line))
+            if name not in hook_handlers:
+                continue
+            if not applies and (rel, name) not in _DEFAULTS_ARE_INTENDED:
+                offenders.append(f"{rel}:{line} {name}()")
+    assert offenders == [], (
+        "A handler built outside the registry runs on its defaults. Apply its "
+        f"configured options with {_APPLY_OPTIONS_NAME}(handler, handler_options(...)), "
+        f"or record why defaults are intended: {offenders}"
+    )
+
+
+def test_the_construction_scan_sees_whether_options_are_applied() -> None:
+    source = (
+        "def bare():\n"
+        "    return SensitiveContentHandler().scan_text\n"
+        "def configured():\n"
+        "    handler = SensitiveContentHandler()\n"
+        "    apply_handler_options(handler, options)\n"
+    )
+    found = sorted(set(_bare_handler_constructions(ast.parse(source))))
+    assert found == [("SensitiveContentHandler", 2, False), ("SensitiveContentHandler", 4, True)]
 
 
 def test_the_scan_catches_each_hand_read_shape() -> None:

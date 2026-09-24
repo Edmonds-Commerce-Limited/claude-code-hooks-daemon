@@ -292,6 +292,18 @@ def handler_is_enabled(
     )
 
 
+def apply_handler_options(instance: object, options: Mapping[str, Any]) -> None:
+    """Give ``instance`` its options the way ``register_all`` does: ``self._<key>``.
+
+    Handlers are constructed with no arguments and read their options from
+    these attributes, so a handler built anywhere else without this call runs
+    on its defaults. That is how ``remote-docs add`` scanned captures with no
+    public patterns at all (Plan 00466 N15).
+    """
+    for option_key, option_value in options.items():
+        setattr(instance, f"_{option_key}", option_value)
+
+
 class HandlerRegistry:
     """Registry for discovering and managing handlers.
 
@@ -589,9 +601,7 @@ class HandlerRegistry:
                             else:
                                 merged_options = own_options
 
-                            # Apply all options as private attributes (generic for all handlers)
-                            for option_key, option_value in merged_options.items():
-                                setattr(instance, f"_{option_key}", option_value)
+                            apply_handler_options(instance, merged_options)
 
                             # Inject project-level language filter (via setattr like other options)
                             instance._project_languages = project_languages
