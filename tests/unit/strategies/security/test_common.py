@@ -102,6 +102,25 @@ class TestShouldSkip:
         assert should_skip(f"{root}/src/app.py") is False
 
 
+class TestEverySkipPatternEntry:
+    """Every entry of SKIP_PATTERNS, not just vendor/docs -- per review
+    feedback on Plan 00458: the bare substring bug applied identically to
+    every entry, and a fix proven against one does not prove it against the
+    others."""
+
+    @pytest.mark.parametrize("entry", SKIP_PATTERNS)
+    def test_a_path_merely_ending_in_the_entry_is_not_skipped(self, entry: str) -> None:
+        # "x" prefixed directly onto the entry: the whole entry string is
+        # still present as a substring, but its start is preceded by "x",
+        # not "/" -- the exact boundary a bare `in` test cannot see.
+        collision = f"x{entry}".rstrip("/")
+        assert should_skip(f"/workspace/{collision}/thing.py") is False
+
+    @pytest.mark.parametrize("entry", SKIP_PATTERNS)
+    def test_the_entry_directly_under_the_project_root_is_still_skipped(self, entry: str) -> None:
+        assert should_skip(f"/workspace/{entry}thing.py") is True
+
+
 class TestConstants:
     """Test module-level constants."""
 
