@@ -128,10 +128,12 @@ rather than only matching syntax.
   range and skip the gate that stopped it: the documented alternative would
   turn every stop into a one-time speed bump; (2) the old venv and the
   restored checkout match, so the previous daemon starts again on the next
-  hook event, and the install is exactly as it was. Layer 1 exports the
-  commit it moved from as `HOOKS_DAEMON_UPGRADE_PREVIOUS_REF`;
-  `abort_before_deploy` (`scripts/upgrade_version.sh`) resets a client clone
-  back to it. A direct Layer 2 call stops inside the existing snapshot rollback
+  hook event, and the install is exactly as it was. After review-00376:
+  "previous" means the INSTALLED version, on every route. `abort_before_deploy`
+  (`scripts/upgrade_version.sh`) resets the clone to the venv stamp's commit or
+  tag, else the tag `.claude/HOOKS-DAEMON.md` names, else the ref a genuine
+  Layer 1 handed over; with none it says so and exits non-zero. A direct Layer
+  2 call's slow path stops inside the existing snapshot rollback
   (`UPGRADE_STARTED=true` after Step 3), which already restores. Assumption:
   the owner's "no known defects" instruction; the owner can reverse this with
   one message.
@@ -154,9 +156,11 @@ rather than only matching syntax.
   keeps agents reading it rather than skimming it. **Decided (unattended,
   2026-09-24)**: a `**Detect**:` field holding one backticked Python regex (required for a pre-upgrade
   task, optional for a post-upgrade one) plus optional `**Detect in**:` fnmatch
-  globs, matched line by line; the scan skips VCS, dependency and cache
-  directories and the daemon's own clone, and caps the listing at 20 hits with
-  a count. A regex over lines rather than a script: a task is data, the gate
+  globs, matched line by line (the first 4096 characters of each); the scan
+  reads git's file list in a work tree (so `.gitignore` holds), skips VCS,
+  dependency and cache directories, top-level vendored/build/local roots and
+  the daemon's own clone, and caps the listing at 20 hits with a count. The
+  schema requires the backticks and rejects a nested quantifier. A regex over lines rather than a script: a task is data, the gate
   must run it before the target's venv exists, and a script shipped in a guide
   would be code the upgrade executes in the client's repository. The pattern
   finds candidates; the task's prose still decides. Assumption: the owner's
@@ -200,13 +204,18 @@ rather than only matching syntax.
   install, a pre-upgrade task with hits (or whose scan could not run), or an
   escalation. A pre-upgrade task that finds nothing is not shown, so an
   unaffected project that crosses no guide hears nothing. (b) A range the gate
-  cannot read (an unknown FROM, or a target that is not a release version)
-  needs acknowledgement rather than passing silently. (c) A downgrade crosses
-  no guide and passes. (d) A gate that crashes STOPS the upgrade (exit 1, with
+  cannot read (no venv stamp and no `HOOKS-DAEMON.md` version, or a target that
+  is not a release version) runs every pre-upgrade task up to the target and
+  needs the owner (review MINOR 2). (c) A downgrade crosses no guide and
+  passes; a venv already stamped with the target's exact stamp passes (NIT 3).
+  (d) A gate that crashes or runs past 300 s STOPS the upgrade (exit 1, with
   the same restore): an undecided gate that lets an upgrade through is the
-  fail-open shape this repository is removing everywhere else. Assumption: the
-  owner's "no known defects" instruction; the owner can reverse this with one
-  message.
+  fail-open shape this repository is removing everywhere else. (e) The FROM
+  side is the installed version, never the checkout (review MAJOR 1). (f) The
+  acknowledgement is `--skip-reading-confirmation=<digest>`, a hash of what
+  was listed (MINOR 6); no environment variable skips the gate (MAJOR 4).
+  Assumption: the owner's "no known defects" instruction; the owner can
+  reverse this with one message.
 - [x] ✅ **Task 3.2**: Define escalation: which changes an agent may accept on
   its own, and which require the owner. Breaking/MAJOR is the obvious
   escalation trigger. Reuse the existing one-shot approval-marker mechanism
@@ -220,24 +229,38 @@ rather than only matching syntax.
   task finds call sites in the project. The last trigger is what lets a
   breaking change that shipped in a minor, as 00375's did, still reach the
   owner, but only for the projects it actually breaks. The approval is a
-  `OneShotApprovalStore("upgrade-approvals")` marker keyed by the target
-  release (`X.Y.Z`), recorded by the new `hooks-daemon approve-upgrade <version>` in the project's daemon untracked dir (the same
-  `install_layout` rule the gate reads). It is consumed only by the
-  acknowledged run it lets through. An unacknowledged run leaves it in
-  place. The skill, LLM-UPDATE.md and the stop message all tell an agent to
-  report and stop, and never to record it. A daemon older than the command
-  is told the marker path to create by hand. Assumption: the owner's "no
-  known defects" instruction; the owner can reverse this with one message.
+  `OneShotApprovalStore("upgrade-approvals")` marker holding the from/to
+  versions and the daemon and project paths, written only by
+  `upgrade_gate.run_approval`: `hooks-daemon approve-upgrade <version> --from <installed>`,
+  or the standalone's `approve` run from the target's own code, which the stop
+  prints for an installed daemon too old to have the command. It needs a
+  terminal on stdin and the typed phrase `approve upgrade from vX to vY`, so an
+  agent's shell cannot run it; a marker that does not match is INVALID. Bash
+  removes it only once the upgrade it let through completes (NIT 5). The
+  `upgrade_approval_guard` handler denies an agent running either command,
+  writing under `upgrade-approvals/` or a venv stamp, or setting
+  `HOOKS_DAEMON_UPGRADE_HANDOFF` (Layer 1's one-shot handoff file, bound to
+  Layer 1's PID). **Decided (unattended, 2026-09-24), review MAJOR 3**:
+  v3.65.0's manifest said `breaking: true` while renaming, removing and
+  changing nothing, so it is corrected to `false`: a data error, not policy.
+  v3.58.0 stays breaking and gates only clients that cross it. A v3.64.x to
+  current hop exits 3 at most, never 4 (pinned by `TestTheRealTree`). Release
+  note 64 and RELEASING.md say who stops and how the owner approves.
+  Assumption: the owner's "no known defects" instruction; the owner can
+  reverse this with one message.
 - [x] ✅ **Task 3.3**: An abort must leave the install in a state the next run
   can proceed from, per Task 1.2 — the checkout has already happened, so
   "untouched" is not achievable without an explicit restore. **Done**:
-  `abort_before_deploy` restores the previous ref on the fast path; the slow
-  path exits into the snapshot rollback. Layer 1 now propagates Layer 2's exit
-  code (`if ! bash …; then LAYER2_EXIT=$?` captured the negation's status, so
-  Layer 1 exited 0 on every Layer 2 failure). Pinned end to end by
-  `tests/integration/test_upgrade_pre_deploy_phase_runs_on_layer1.py`: the
-  stopped runs exit 3 and 4, deploy nothing, and leave the clone on
-  `v{current}`, and the re-run passes.
+  `abort_before_deploy` restores the installed version on the fast path; the
+  slow path exits into the snapshot rollback. Layer 1 now propagates Layer 2's
+  exit code (`if ! bash …; then LAYER2_EXIT=$?` captured the negation's status,
+  so Layer 1 exited 0 on every Layer 2 failure). A pre-gate Layer 1 still has
+  that bug, so Layer 2 restores by itself and prints `THE UPGRADE DID NOT COMPLETE` with the command that runs the target's own Layer 1 (review MAJOR
+  2); the skill shim's offline recovery and LLM-UPDATE's manual route run the
+  target's Layer 1 too. Pinned end to end by
+  `tests/integration/test_upgrade_pre_deploy_phase_runs_on_layer1.py` on the
+  release, branch, MAJOR, fresh-clone, manual, environment-bypass, direct and
+  pre-gate-Layer-1 routes (all eight RED against 713a68c0).
 
 ### Phase 4: Fix what the survey exposed
 
@@ -289,8 +312,9 @@ rather than only matching syntax.
   v3.64.0: its tag, notes and version are published, and changing them is the
   owner's release decision, not a plan's. What this plan ships instead is
   `CLAUDE/UPGRADES/v3/v3.63.0-to-v3.64.0/pre-upgrade-tasks/01-rewrite-plan-qa-json-level-to-severity.md`,
-  a `critical` pre-upgrade task whose `**Detect**:` pattern matches any line naming
-  `plan-qa` (or `plan_qa`) and `json` together. Any
+  a `critical` pre-upgrade task whose `**Detect**:` pattern
+  (`plan[-_]qa\b[^\n]*--json`) matches an invocation with `--json`, not a
+  `plan_qa.json` file name (review MINOR 5). Any
   upgrade that crosses v3.64.0 (from v3.63 or earlier) to a target carrying
   the gate now names the project's `plan-qa --json` call sites at
   `file:line` before deploying. Where there are any, it needs the owner's

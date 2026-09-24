@@ -45,13 +45,14 @@ truth_changes:
       before anything is deployed (Plan 00376). When it lists something (the
       crossed upgrade guides, a pre-upgrade task whose Detect pattern found a
       call site in the project, a breaking change), the upgrade stops, puts
-      the daemon checkout back on the previous version, deploys nothing, and
+      the daemon checkout back on the installed version, deploys nothing, and
       exits 3. The caller reads the list, carries out the pre-upgrade tasks
-      it names, and re-runs with `--skip-reading-confirmation`. A MAJOR
-      version, a crossed `breaking: true` config-changes manifest or a
-      critical pre-upgrade task with hits exits 4 instead, and also needs the
-      project owner to run `hooks-daemon approve-upgrade <version>`; an agent
-      reports and stops, and never records that approval itself.
+      it names, and re-runs with `--skip-reading-confirmation=<digest>`, the
+      digest the stop printed. A MAJOR version, a crossed `breaking: true`
+      config-changes manifest, a critical pre-upgrade task with hits or an
+      unreadable installed version exits 4 instead, and also needs the
+      project owner's approval, given in their own terminal with a typed
+      phrase; an agent reports and stops, and cannot record that approval.
 
       IF YOUR PROJECT'S DOCS OR AUTOMATION SAY A DAEMON UPGRADE ALWAYS RUNS
       TO COMPLETION UNATTENDED, OR TREAT ANY NON-ZERO EXIT OF THE UPGRADE AS

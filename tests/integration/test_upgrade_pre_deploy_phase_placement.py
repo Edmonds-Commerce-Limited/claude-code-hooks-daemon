@@ -10,9 +10,10 @@ The cheap, always-run half of ``test_upgrade_pre_deploy_phase_runs_on_layer1``
 - call the report-only config compatibility check once the target's venv is
   verified and before the first deploy.
 
-The gate reads ``--skip-reading-confirmation`` from the arguments or
-``UPGRADE_FLAGS`` and never asks whether a terminal is attached, and its
-stop codes in bash are the ones the Python gate returns.
+The gate reads ``--skip-reading-confirmation=<digest>`` from the arguments, or
+from ``UPGRADE_FLAGS`` when a genuine Layer 1 handed over, and never asks
+whether a terminal is attached; its stop codes in bash are the ones the Python
+gate returns; and no environment variable switches it off.
 """
 
 from __future__ import annotations
@@ -92,7 +93,50 @@ def test_the_bash_stop_codes_are_the_gates_own() -> None:
         assert re.search(rf"^{name}={verdict.exit_code}$", text, re.MULTILINE), name
 
 
-def test_a_stop_on_the_idempotent_path_restores_the_previous_ref() -> None:
-    body = _function_body(_script(), "abort_before_deploy")
-    assert "HOOKS_DAEMON_UPGRADE_PREVIOUS_REF" in body
+def test_a_stop_restores_the_installed_version_not_a_handed_over_ref() -> None:
+    """Review MAJOR 1/2: the restore target is what is installed, on every route."""
+    text = _script()
+    body = _function_body(text, "abort_before_deploy")
+    assert "_restore_target" in body
     assert "reset --hard" in body
+    restore = _function_body(text, "_restore_target")
+    assert "INSTALLED_VERSION" in restore
+    assert "_installed_release_from_docs" in restore
+    assert "HOOKS_DAEMON_UPGRADE_PREVIOUS_REF" not in text
+
+
+def test_the_gate_reads_the_installed_version_not_the_checkouts() -> None:
+    body = _function_body(_script(), _GATE)
+    assert '--installed-stamp "$INSTALLED_VERSION"' in body
+    assert '--target-stamp "$INSTALL_STAMP"' in body
+    assert "--from" not in body
+
+
+def test_no_environment_variable_switches_the_gate_off() -> None:
+    """Review MAJOR 4: the exported phase-done sentinel turned the whole gate off."""
+    text = _script()
+    assert "HOOKS_DAEMON_PRE_DEPLOY_PHASE_DONE" not in text
+    body = _function_body(text, _GATE)
+    assert not re.search(r"^\s*if \[ -n \"\$\{HOOKS_DAEMON_\w+", body, re.MULTILINE), body
+
+
+def test_the_gate_runs_under_a_timeout_and_a_zero_exit_needs_its_verdict() -> None:
+    body = _function_body(_script(), _GATE)
+    assert 'timeout "$GATE_TIMEOUT_SECONDS"' in body
+    assert "gate-verdict=proceed" in body
+
+
+def test_the_used_approval_is_removed_only_on_success_on_both_paths() -> None:
+    text = _script()
+    calls = [m.start() for m in re.finditer(r"^\s*consume_used_approval\s*$", text, re.MULTILINE)]
+    assert len(calls) == 2, calls
+    fast_path_exit = text.index("exit 0\nfi", text.index(_FAST_PATH_START))
+    assert calls[0] < fast_path_exit
+    assert calls[1] > text.index('log_step "17"')
+
+
+def test_the_layer1_handoff_is_a_file_bound_to_the_parent_process() -> None:
+    body = _function_body(_script(), "_read_handoff")
+    assert '"$PPID"' in body
+    assert "-O" in body
+    assert 'rm -f -- "$path"' in body

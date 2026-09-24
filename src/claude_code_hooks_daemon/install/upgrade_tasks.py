@@ -26,6 +26,8 @@ from __future__ import annotations
 import fnmatch
 import os
 import re
+import shutil
+import subprocess
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -80,25 +82,43 @@ _REQUIRED_FIELDS: Final[tuple[str, ...]] = (
     _FIELD_IDEMPOTENT,
 )
 _BACKTICKED_RE: Final[re.Pattern[str]] = re.compile(r"`([^`]+)`")
+#: A group holding a quantifier, itself quantified: ``(x+)+``, ``(a*)*``,
+#: ``(a+){2,}``. The shape behind catastrophic backtracking.
+_NESTED_QUANTIFIER_RE: Final[re.Pattern[str]] = re.compile(
+    r"\((?:[^()\\]|\\.)*[+*](?:[^()\\]|\\.)*\)[+*{]"
+)
 _SECTION_PREFIX: Final[str] = "## "
-#: Directories a detection never descends into: version control, dependency
-#: and build caches, and the daemon's own clone, whose files are the daemon's
-#: and never the project's call sites.
+#: Directory names a detection never descends into at ANY depth: version
+#: control and tool caches, which never hold the project's own call sites.
 _SKIP_DIR_NAMES: Final[frozenset[str]] = frozenset(
     {
         ".git",
         "node_modules",
-        "untracked",
-        ".venv",
-        "venv",
         "__pycache__",
         ".mypy_cache",
         ".pytest_cache",
         ".ruff_cache",
     }
 )
+#: Top-level directories skipped as vendored, built or local-only copies;
+#: ``src/venv/`` is the project's own code and is scanned.
+_SKIP_ROOT_DIRS: Final[frozenset[str]] = frozenset(
+    {"untracked", "venv", ".venv", "vendor", "dist", "build", "target"}
+)
+#: The daemon's own clone: its files are the daemon's, never the project's.
 _DAEMON_CLONE_REL: Final[str] = ".claude/hooks-daemon"
 _MAX_SCANNED_BYTES: Final[int] = 1_048_576
+#: Only this much of each line is matched, so no pattern meets an unbounded
+#: input (a minified file is one very long line).
+MAX_SCANNED_LINE_CHARS: Final[int] = 4096
+_GIT_LIST_TIMEOUT_SECONDS: Final[int] = 60
+_GIT_LIST_ARGS: Final[tuple[str, ...]] = (
+    "ls-files",
+    "-z",
+    "--cached",
+    "--others",
+    "--exclude-standard",
+)
 #: A NUL byte marks a binary file, which has no lines to report.
 _NUL_BYTE: Final[bytes] = b"\x00"
 _HIT_TEXT_WIDTH: Final[int] = 160
@@ -230,11 +250,19 @@ def schema_errors(path: Path, kind: TaskKind) -> list[str]:
     detection = _detection(header)
     if detection is None and kind is TaskKind.PRE:
         errors.append("a pre-upgrade task must declare **Detect**: `<pattern>`")
+    raw_detect = _field(header, _FIELD_DETECT)
+    if raw_detect is not None and _BACKTICKED_RE.search(raw_detect) is None:
+        errors.append("**Detect** must hold one pattern in backticks: **Detect**: `<pattern>`")
     if detection is not None:
         try:
             re.compile(detection.pattern)
         except re.error as exc:
             errors.append(f"**Detect** pattern {detection.pattern!r} does not compile: {exc}")
+        if _NESTED_QUANTIFIER_RE.search(detection.pattern):
+            errors.append(
+                f"**Detect** pattern {detection.pattern!r} has a nested quantifier, which can "
+                "backtrack for ever on one long line"
+            )
     lines = set(text.splitlines())
     for section in REQUIRED_SECTIONS:
         if section not in lines:
@@ -242,22 +270,50 @@ def schema_errors(path: Path, kind: TaskKind) -> list[str]:
     return errors
 
 
-def _scanned_files(project_root: Path) -> list[tuple[str, Path]]:
-    found: list[tuple[str, Path]] = []
+def _is_skipped(rel: str) -> bool:
+    parts = rel.split("/")
+    return (
+        parts[0] in _SKIP_ROOT_DIRS
+        or rel == _DAEMON_CLONE_REL
+        or rel.startswith(f"{_DAEMON_CLONE_REL}/")
+        or any(part in _SKIP_DIR_NAMES for part in parts)
+    )
+
+
+def _git_listed_files(project_root: Path) -> list[str] | None:
+    """The files git would track or offer to track, or None outside a work tree."""
+    git = shutil.which("git")
+    if git is None:
+        return None
+    result = subprocess.run(
+        [git, "-C", str(project_root), *_GIT_LIST_ARGS],
+        capture_output=True,
+        check=False,
+        timeout=_GIT_LIST_TIMEOUT_SECONDS,
+    )
+    if result.returncode != 0:
+        return None
+    return sorted(
+        name for name in result.stdout.decode("utf-8", errors="replace").split("\0") if name
+    )
+
+
+def _walked_files(project_root: Path) -> list[str]:
+    found: list[str] = []
     for dirpath, dirnames, filenames in os.walk(project_root):
         current = Path(dirpath)
         rel_dir = current.relative_to(project_root).as_posix()
-        dirnames[:] = sorted(
-            name
-            for name in dirnames
-            if name not in _SKIP_DIR_NAMES
-            and (f"{rel_dir}/{name}" if rel_dir != "." else name) != _DAEMON_CLONE_REL
-        )
-        for name in sorted(filenames):
-            path = current / name
-            rel = path.relative_to(project_root).as_posix()
-            found.append((rel, path))
+        prefix = "" if rel_dir == "." else f"{rel_dir}/"
+        dirnames[:] = sorted(name for name in dirnames if not _is_skipped(f"{prefix}{name}"))
+        found.extend(f"{prefix}{name}" for name in sorted(filenames))
     return found
+
+
+def _scanned_files(project_root: Path) -> list[tuple[str, Path]]:
+    """The project's files, honouring ``.gitignore`` in a git work tree."""
+    listed = _git_listed_files(project_root)
+    names = listed if listed is not None else _walked_files(project_root)
+    return [(rel, project_root / rel) for rel in names if not _is_skipped(rel)]
 
 
 def detect(
@@ -269,7 +325,8 @@ def detect(
     ``fnmatch``, whose ``*`` crosses ``/``, so ``*.py`` means every Python
     file. Symlinks, files over 1 MiB, files this user cannot read and binary
     files (any NUL byte) are skipped; other bytes that are not UTF-8 decode as
-    replacement characters, so a Latin-1 file is still scanned.
+    replacement characters, so a Latin-1 file is still scanned. Only the first
+    :data:`MAX_SCANNED_LINE_CHARS` characters of a line are matched.
 
     Returns:
         Up to ``limit`` hits in path order, and the total number of hits.
@@ -292,7 +349,7 @@ def detect(
             continue
         text = data.decode("utf-8", errors="replace")
         for number, line in enumerate(text.splitlines(), start=1):
-            if compiled.search(line) is None:
+            if compiled.search(line[:MAX_SCANNED_LINE_CHARS]) is None:
                 continue
             total += 1
             if len(hits) < limit:
@@ -381,7 +438,12 @@ def format_findings_line(finding: TaskFinding) -> list[str]:
     """The lines one task contributes to a report."""
     task = finding.task
     lines = [f"  - [{task.severity}, {task.task_type}] {task.path}"]
-    if finding.applies is False:
+    if finding.applies is None and task.kind is TaskKind.PRE:
+        lines.append(
+            "      detection could not run (missing or invalid **Detect**): read it and "
+            "check by hand"
+        )
+    elif finding.applies is False:
         lines.append("      not detected in this project: skip unless you know better")
     elif finding.applies:
         lines.append(f"      detected at {finding.total_hits} place(s):")

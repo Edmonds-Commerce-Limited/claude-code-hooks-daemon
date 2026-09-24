@@ -41,6 +41,38 @@ config_changes:
       recommended: true
       dormant: false
 
+    - key: handlers.pre_tool_use.upgrade_approval_guard
+      description: >-
+        Denies an agent action that grants or bypasses the project owner's
+        one-shot upgrade approval (Plan 00376, review finding MAJOR 4). The
+        pre-deploy upgrade gate's escalation path is the owner's step --
+        `hooks-daemon approve-upgrade <version> --from <previous>` needs an
+        interactive TTY and a typed confirmation phrase, run in the owner's
+        own terminal. Denied: running `approve-upgrade` (or the standalone
+        gate's own `approve` subcommand) itself; writing or touching the
+        `<version>.approved` marker under an `upgrade-approvals/` directory by
+        any Bash route or with Write/Edit/NotebookEdit; assigning, exporting
+        or env-setting HOOKS_DAEMON_UPGRADE_HANDOFF, which impersonates the
+        upgrade's Layer 1; forging a venv's `.daemon-version`
+        stamp. Never denied: reading (ls/cat/stat/grep/find -print/test -f),
+        merely reading the env var, a git commit message, non-executing
+        echo/printf prose, a grep search, or a quoted-delimiter heredoc body
+        written to a file.
+      example_yaml: |
+        handlers:
+          pre_tool_use:
+            upgrade_approval_guard:
+              enabled: true
+              priority: 20
+      migration_note: >-
+        On by default; no project-side action needed. If this handler ever
+        blocks a call, report the gate's reasons to the user and stop -- the
+        owner runs `hooks-daemon approve-upgrade <version> --from <previous>`
+        themselves. Disable with
+        handlers.pre_tool_use.upgrade_approval_guard.enabled: false.
+      recommended: true
+      dormant: false
+
   renamed: []
 
   removed: []

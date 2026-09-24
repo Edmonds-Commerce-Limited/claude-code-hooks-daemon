@@ -4,7 +4,7 @@
 **Severity**: critical
 **Applies to**: upgrades from v3.63.x or earlier, in any project whose tooling parses `hooks-daemon plan-qa --json`
 **Idempotent**: yes
-**Detect**: `plan[-_]qa[^\n]*json`
+**Detect**: `plan[-_]qa\b[^\n]*--json`
 **Detect in**: `*.py`, `*.sh`, `*.bash`, `*.js`, `*.mjs`, `*.ts`, `*.yml`, `*.yaml`, `*Makefile`, `*.mk`, `*.just`, `*justfile`
 
 ## Why
@@ -29,7 +29,8 @@ predates the pre-deploy gate and carries the same substance.
 ## How to detect if this applies to you
 
 The gate has already run the **Detect** pattern and listed every line that
-mentions `plan-qa` (or `plan_qa`) and `json` together, at `file:line`. For each
+invokes `plan-qa` (or `plan_qa`) with `--json`, at `file:line`. A file name
+such as `plan_qa.json` is not an invocation and is not listed. For each
 hit, find the code that reads the parsed findings, which may be on a later
 line or in another file the output is handed to, and check whether it reads a
 `level` key: `["level"]`, `.get("level")`, `.level`, `jq '.findings[].level'`,
@@ -55,8 +56,10 @@ the key name moves.
   user rather than guessing.
 
 Because this task is `critical` and was detected, the gate also needs the
-project owner's one-shot approval for the upgrade (`hooks-daemon approve-upgrade <version>`). Report the call sites and the rewrite to the owner,
-and stop; do not record the approval yourself.
+project owner's one-shot approval for the upgrade. The stop message prints the
+exact command, which the owner runs in their own terminal. Report the call
+sites and the rewrite to the owner, and stop: an agent cannot record the
+approval.
 
 ## How to confirm
 

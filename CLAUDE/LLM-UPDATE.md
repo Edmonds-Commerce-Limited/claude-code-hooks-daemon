@@ -87,7 +87,7 @@ If no suitable Python is found, install Python 3.11+ before proceeding.
 
 The upgrade system uses a **two-layer architecture**:
 
-- **Layer 1** (`scripts/upgrade.sh`): Minimal curl-fetched script (~130 lines). Requires `--project-root PATH` to specify the project directory. Fetches tags, checks out target version first (checkout-first strategy), then delegates to Layer 2 via `exec`.
+- **Layer 1** (`scripts/upgrade.sh`): Minimal curl-fetched script (~130 lines). Requires `--project-root PATH` to specify the project directory. Fetches tags, checks out target version first (checkout-first strategy), then runs Layer 2 as a child process and exits with Layer 2's exit code.
 - **Layer 2** (`scripts/upgrade_version.sh`): Version-specific orchestrator implementing **"Upgrade = Clean Reinstall + Config Preservation"**. Sources a shared modular library (`scripts/install/*.sh`) for all operations.
 
 **Key principle**: Upgrade produces the same clean state as a fresh install, while preserving only user config customizations via a diff/merge/validate pipeline.
@@ -156,7 +156,8 @@ rm untracked/scratch/upgrade.sh
 - Fetches latest tags from remote
 - Determines target version (latest tag or specified argument)
 - Checks out target version first (checkout-first strategy)
-- Delegates to Layer 2 via `exec`
+- Runs Layer 2 as a child process, handing it a one-shot handoff file, and
+  exits with Layer 2's exit code
 
 **Layer 2** (version-specific orchestrator):
 
@@ -190,23 +191,48 @@ It prints `REQUIRED READING`, which lists:
 - every **pre-upgrade task** (`CLAUDE/UPGRADES/.../pre-upgrade-tasks/`) whose
   `**Detect**` pattern finds a call site in your project, at `file:line`. A
   task that finds nothing is not shown;
-- any reason the upgrade breaks this project: a MAJOR version, a crossed
-  config-changes manifest declaring `breaking: true`, or a `critical`
-  pre-upgrade task with hits.
+- any reason the upgrade needs the project owner: a MAJOR version, a crossed
+  config-changes manifest declaring `breaking: true`, a `critical`
+  pre-upgrade task with hits, or an installed version the gate cannot read.
 
-With nothing to list, the upgrade continues without comment. Otherwise it
-never infers consent from the absence of a terminal. It stops, puts the daemon
-checkout back on the previous version, deploys nothing, and exits:
+The gate's FROM side is the version this project has INSTALLED, never the
+daemon checkout: the venv's `.daemon-version` stamp, else the version in the
+project's committed `.claude/HOOKS-DAEMON.md`. A fresh clone, a manual
+checkout and a re-run therefore all see the real range. With neither, the gate
+cannot rule anything out: it lists every pre-upgrade task up to the target
+that applies to the project and needs the owner.
 
-| Exit | Meaning                 | What to do                                                                                                                                                                                                                                                 |
-| ---- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `3`  | Reading not confirmed   | Read every listed document. Carry out each listed pre-upgrade task in the project, as its file says. Then re-run with `--skip-reading-confirmation`                                                                                                        |
-| `4`  | Owner's approval needed | Report the printed reasons and stop. The project owner approves ONE upgrade with `.claude/hooks-daemon/bin/hooks-daemon approve-upgrade <version>`. An agent never records it. Then re-run with `--skip-reading-confirmation`, which consumes the approval |
+With nothing to list, the upgrade continues without comment, as it does when
+the venv already carries the target's exact stamp. Otherwise it never infers
+consent from the absence of a terminal. It stops, puts the daemon checkout back
+on the installed version, deploys nothing, and exits:
 
-A gate that cannot decide (it crashes) also stops the upgrade (exit `1`); report
-it as a daemon bug. A daemon older than the `approve-upgrade` command
-cannot record the approval that way. The owner then creates the marker file
-the stop message names.
+| Exit | Meaning                 | What to do                                                                                                                                                                                                                                                                                        |
+| ---- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `3`  | Reading not confirmed   | Read every listed document. Carry out each listed pre-upgrade task in the project, as its file says. Then re-run with `--skip-reading-confirmation=<digest>`, the digest the stop printed. A bare flag, or a digest from another listing, stops again                                             |
+| `4`  | Owner's approval needed | Report the printed reasons and stop. The project owner approves ONE upgrade in their own terminal with the command the stop printed. An agent cannot record it (see below). Then re-run with the same `--skip-reading-confirmation=<digest>`; the approval is removed once that upgrade completes |
+
+The owner's approval needs a terminal and a typed phrase naming both versions
+(`approve upgrade from v<installed> to v<target>`), and the marker it writes
+is bound to those versions and this install's paths. So an agent's shell,
+which has no terminal, cannot run it, and a marker made any other way does not
+count. The stop prints two commands for it:
+
+- `.claude/hooks-daemon/bin/hooks-daemon approve-upgrade <target> --from <installed>`,
+  for an installed daemon that has the command;
+- a command that runs the approval from the TARGET's own code in the clone
+  (`git archive` of the target's `src`, then `upgrade_gate_standalone.py approve`),
+  which works from any installed version. On the first gated upgrade the
+  installed daemon predates `approve-upgrade`, so this is the one to use.
+
+A gate that cannot decide also stops the upgrade (exit `1`): it crashed, or it
+did not decide within 300 seconds. Report it as a daemon bug.
+
+A Layer 1 that predates the gate (an installed daemon's own `upgrade.sh`, or a
+pinned `HOOKS_DAEMON_UPGRADE_REF` older than the gate) cannot pass the flag and
+reports a stop as success. Layer 2 still restores the checkout, and prints
+`THE UPGRADE DID NOT COMPLETE` with the command that runs the target's own
+Layer 1 instead.
 
 ### Why Fetch from GitHub?
 
@@ -239,43 +265,40 @@ cat .claude/hooks-daemon/src/claude_code_hooks_daemon/version.py
 cp .claude/hooks-daemon.yaml .claude/hooks-daemon.yaml.backup
 ```
 
-### 2. Fetch and Checkout Latest Version
+### 2. Fetch Tags and Choose the Target Version
 
 ```bash
-cd .claude/hooks-daemon
-
-# Fetch all tags
-git fetch --tags
+# Fetch all tags into the clone. Do NOT check anything out: the upgrade
+# does that itself, and its pre-deploy gate puts the clone back on the
+# installed version if it stops.
+git -C .claude/hooks-daemon fetch --tags
 
 # List available versions
-git tag -l | sort -V | tail -10
+git -C .claude/hooks-daemon tag -l | sort -V | tail -10
 
-# Get latest stable tag
-LATEST_TAG=$(git describe --tags $(git rev-list --tags --max-count=1) 2>/dev/null || echo "main")
-echo "Latest version: $LATEST_TAG"
-
-# Checkout latest version
-git checkout "$LATEST_TAG"
-
-# Verify new version
-cat src/claude_code_hooks_daemon/version.py
-
-# Return to project root
-cd ../..
+# Latest stable tag
+TARGET_VERSION=$(git -C .claude/hooks-daemon describe --tags "$(git -C .claude/hooks-daemon rev-list --tags --max-count=1)")
+echo "Target version: $TARGET_VERSION"
 ```
 
-### 3. Update Dependencies and Restart Daemon
+### 3. Run the Target's Own Layer 1
 
 ```bash
 # Rebuild the venv and reinstall the package for the target version.
 #
-# Use Layer 1 (upgrade.sh), NOT Layer 2 (upgrade_version.sh). Layer 1 checks
-# out the target and then runs Layer 2 as a fresh process, so the upgrade
-# executes the TARGET release's step list. Invoking Layer 2 directly makes it
-# check itself out half way through its own run, and every step after that
-# still comes from the release being replaced — so a step the new version
-# added does not run at all.
-bash .claude/hooks-daemon/scripts/upgrade.sh --project-root "$PWD" "$TARGET_VERSION"
+# Run the TARGET release's Layer 1 (upgrade.sh), read out of the clone, not
+# the installed one and not Layer 2 (upgrade_version.sh):
+# - the installed Layer 1 may predate the pre-deploy gate, and then reports a
+#   stopped upgrade as success and cannot pass --skip-reading-confirmation;
+# - Layer 1 checks out the target and then runs Layer 2 as a fresh process,
+#   so the upgrade executes the TARGET release's step list. Invoking Layer 2
+#   directly makes it check itself out half way through its own run.
+# The pre-deploy gate runs on this route exactly as on the recommended one:
+# when it stops, read what it lists and re-run with the digest it printed.
+tmp="$(mktemp)"
+git -C .claude/hooks-daemon show "$TARGET_VERSION:scripts/upgrade.sh" > "$tmp"
+bash "$tmp" --project-root "$PWD" "$TARGET_VERSION"
+# after a stop:  bash "$tmp" --project-root "$PWD" --skip-reading-confirmation=<digest> "$TARGET_VERSION"
 
 # Restart daemon
 .claude/hooks-daemon/bin/hooks-daemon restart || \

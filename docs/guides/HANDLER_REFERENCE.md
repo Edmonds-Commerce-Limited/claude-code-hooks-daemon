@@ -1049,6 +1049,31 @@ handlers:
 
 ---
 
+#### upgrade_approval_guard
+
+| Property       | Value                    |
+| -------------- | ------------------------ |
+| **Config key** | `upgrade_approval_guard` |
+| **Priority**   | 20                       |
+| **Type**       | Blocking                 |
+| **Event**      | PreToolUse               |
+
+**Description:** An agent cannot grant its own upgrade approval (Plan 00376, review finding MAJOR 4). The pre-deploy upgrade gate's escalation is the project OWNER's step -- `hooks-daemon approve-upgrade <version> --from <previous>` needs a TTY and a typed confirmation phrase. This handler denies every other route to the same outcome: running `approve-upgrade` (or the standalone gate's `approve` subcommand) itself; writing/touching the `<version>.approved` marker under `upgrade-approvals/` by any Bash route or with Write/Edit/NotebookEdit; assigning, exporting or `env`-setting `HOOKS_DAEMON_UPGRADE_HANDOFF`, which impersonates the upgrade's Layer 1; or forging a venv's `.daemon-version` stamp.
+
+**Never denied:** reading (`ls`/`cat`/`stat`/`grep`/`find ... -print`/`test -f`, or merely reading the env var), a `git commit` message or non-executing `echo`/`printf` mention, a `grep` search, or a quoted-delimiter heredoc body written to a file.
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    upgrade_approval_guard:
+      enabled: true
+      priority: 20
+```
+
+---
+
 #### project_containment
 
 | Property       | Value                 |

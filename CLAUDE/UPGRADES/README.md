@@ -227,7 +227,7 @@ Required sections:
 **pre-upgrade-tasks/** (optional):
 
 - Changes a project must hear about **before** the release is deployed into it, each carrying a `**Detect**` pattern (the detection contract: `CLAUDE/UPGRADES/UNRELEASED/pre-upgrade-tasks/README.md`). The schema is the one post-upgrade tasks use.
-- Read by the pre-deploy gate (`install/upgrade_gate.py`), which Layer 2 runs on every upgrade once the target is checked out: it names each hit at `file:line`, stays silent for a task that finds nothing, and stops the upgrade until the caller confirms with `--skip-reading-confirmation`. A `critical` task with hits also needs the owner's `hooks-daemon approve-upgrade <version>`. See `CLAUDE/LLM-UPDATE.md`, "The pre-deploy gate".
+- Read by the pre-deploy gate (`install/upgrade_gate.py`), which Layer 2 runs on every upgrade once the target is checked out: it names each hit at `file:line`, stays silent for a task that finds nothing, and stops the upgrade until the caller confirms with `--skip-reading-confirmation=<digest>`. A `critical` task with hits also needs the owner's approval, given in their own terminal. See `CLAUDE/LLM-UPDATE.md`, "The pre-deploy gate".
 - Authoring and release: as for `post-upgrade-tasks/`, through `CLAUDE/UPGRADES/UNRELEASED/pre-upgrade-tasks/`.
 
 ## Creating a New Upgrade Guide

@@ -298,6 +298,16 @@ class HandlerID:
         config_key="merge_to_main_approval",
         display_name="merge-to-main-approval",
     )
+    # Upgrade approval guard (Plan 00376, review finding MAJOR 4): the owner's
+    # one-shot `approve-upgrade` marker must be written by the owner's own
+    # `hooks-daemon approve-upgrade` run (TTY + typed phrase), never by an
+    # agent forging the marker, invoking the approval command itself, or
+    # exporting the env vars the upgrade script uses to skip the pre-deploy gate.
+    UPGRADE_APPROVAL_GUARD = HandlerIDMeta(
+        class_name="UpgradeApprovalGuardHandler",
+        config_key="upgrade_approval_guard",
+        display_name="upgrade-approval-guard",
+    )
     # Backtick substitution in a git message (Plan 00219): backticks inside a
     # DOUBLE-quoted -m are executed by bash, not quoted, so the span is
     # replaced by the command's stdout and the text is silently lost.

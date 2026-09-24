@@ -4245,29 +4245,32 @@ def cmd_approve_merge(args: argparse.Namespace) -> int:
 
 
 def cmd_approve_upgrade(args: argparse.Namespace) -> int:
-    """Record the owner's one-shot approval to upgrade to VERSION (Plan 00376 Task 3.2).
+    """The owner's one-shot approval of one upgrade (Plan 00376 Task 3.2).
 
     The owner's route through the upgrade gate's escalation (a MAJOR bump, a
-    crossed ``breaking: true`` manifest, or a ``critical`` pre-upgrade task
-    detected in the project): writes ``upgrade-approvals/<X.Y.Z>.approved``
-    under the project's daemon untracked directory, resolved by the same
-    ``install_layout`` rule the gate uses. The next upgrade to that release
-    run with ``--skip-reading-confirmation`` consumes it.
+    crossed ``breaking: true`` manifest, a ``critical`` pre-upgrade task
+    detected in the project, or an unknown installed version). Delegates to
+    ``upgrade_gate.run_approval``: it needs a terminal on stdin and the typed
+    phrase naming both versions, and writes a marker bound to the from/to
+    versions and this install's paths, which the next upgrade of exactly that
+    range uses and removes once it completes.
 
     Returns:
         0 on marker written, 1 on refusal.
     """
-    from claude_code_hooks_daemon.daemon.install_layout import get_untracked_dir
-    from claude_code_hooks_daemon.install.upgrade_gate import (
-        APPROVAL_SUBDIR,
-        SKIP_READING_FLAG,
-        approval_key,
+    from claude_code_hooks_daemon.daemon.install_layout import (
+        get_untracked_dir,
+        is_self_install_mode,
     )
-    from claude_code_hooks_daemon.utils.one_shot_approval import OneShotApprovalStore
+    from claude_code_hooks_daemon.install.upgrade_gate import (
+        UNKNOWN_VERSION,
+        approval_key,
+        run_approval,
+    )
 
     raw = str(args.version).strip()
     try:
-        key = approval_key(raw)
+        approval_key(raw)
     except ValueError:
         print(f"ERROR: {raw!r} is not a release version (e.g. 4.0.0 or v4.0.0)", file=sys.stderr)
         return 1
@@ -4276,14 +4279,21 @@ def cmd_approve_upgrade(args: argparse.Namespace) -> int:
         project_path = Path(args.project_root).resolve()
     else:
         project_path = get_project_path(None)
-
-    marker = OneShotApprovalStore(APPROVAL_SUBDIR).record(get_untracked_dir(project_path), key)
-    print(f"Approved one upgrade to v{key}; marker: {marker}")
-    print(
-        f"The next upgrade to v{key} run with {SKIP_READING_FLAG} consumes it; "
-        "the gate asks again for any later one."
+    daemon_dir = (
+        project_path
+        if is_self_install_mode(project_path)
+        else project_path / ".claude" / "hooks-daemon"
     )
-    return 0
+    from_version = str(args.from_version).strip()
+    return run_approval(
+        project_root=project_path,
+        daemon_dir=daemon_dir,
+        from_version=None if from_version == UNKNOWN_VERSION else from_version,
+        to_version=raw,
+        untracked_dir=get_untracked_dir(project_path),
+        stdin=sys.stdin,
+        stdout=sys.stdout,
+    )
 
 
 def cmd_inject_goal(args: argparse.Namespace) -> int:
@@ -9914,14 +9924,20 @@ def main() -> int:
     parser_approve_upgrade = subparsers.add_parser(
         "approve-upgrade",
         help=(
-            "Record the owner's one-shot approval for one upgrade to VERSION "
-            "(MAJOR, breaking, or a critical pre-upgrade task detected)"
+            "The project owner's one-shot approval of one upgrade the gate stopped "
+            "(needs a terminal and a typed confirmation phrase)"
         ),
     )
     parser_approve_upgrade.add_argument(
         "version",
         metavar="VERSION",
-        help="Target release whose next acknowledged upgrade is approved (e.g. 4.0.0)",
+        help="Target release of the upgrade being approved (e.g. 4.0.0)",
+    )
+    parser_approve_upgrade.add_argument(
+        "--from",
+        dest="from_version",
+        required=True,
+        help="The installed release the gate's stop message named (or 'unknown')",
     )
     parser_approve_upgrade.add_argument(
         "--project-root",

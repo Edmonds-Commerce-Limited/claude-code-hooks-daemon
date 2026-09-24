@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import ast
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -120,8 +121,8 @@ class TestEndToEndWithoutVenv:
             str(daemon_dir),
             "--project-root",
             str(project),
-            "--from",
-            "3.64.0",
+            "--installed-stamp",
+            "v3.64.0",
             "--to",
             "3.65.0",
         ]
@@ -130,7 +131,51 @@ class TestEndToEndWithoutVenv:
         )
         assert stopped.returncode == _NEEDS_ACKNOWLEDGEMENT, stopped.stderr
         assert "REQUIRED READING" in stopped.stderr
+        digest = re.search(r"--skip-reading-confirmation=(\w+)", stopped.stderr)
+        assert digest is not None, stopped.stderr
+        bare = subprocess.run(
+            [*argv, "--acknowledgement", ""],
+            capture_output=True,
+            text=True,
+            env=_clean_env(),
+            check=False,
+        )
+        assert bare.returncode == _NEEDS_ACKNOWLEDGEMENT, bare.stderr
         passed = subprocess.run(
-            [*argv, "--acknowledged"], capture_output=True, text=True, env=_clean_env(), check=False
+            [*argv, "--acknowledgement", digest.group(1)],
+            capture_output=True,
+            text=True,
+            env=_clean_env(),
+            check=False,
         )
         assert passed.returncode == 0, passed.stderr
+
+    def test_approve_refuses_without_a_terminal_and_writes_nothing(self, tmp_path: Path) -> None:
+        project = tmp_path / "project"
+        project.mkdir()
+        untracked = tmp_path / "untracked"
+        result = subprocess.run(
+            [
+                str(_SYSTEM_PYTHON),
+                str(SCRIPT_PATH),
+                "approve",
+                "--daemon-dir",
+                str(tmp_path / "daemon"),
+                "--project-root",
+                str(project),
+                "--from",
+                "3.66.0",
+                "--to",
+                "4.0.0",
+                "--untracked-dir",
+                str(untracked),
+            ],
+            input="approve upgrade from v3.66.0 to v4.0.0\n",
+            capture_output=True,
+            text=True,
+            env=_clean_env(),
+            check=False,
+        )
+        assert result.returncode == 1
+        assert "terminal" in result.stdout
+        assert not untracked.exists()

@@ -4,8 +4,16 @@ Run this file DIRECTLY with any python3 >= 3.11 -- do not ``import`` it and
 do not invoke it via ``-m``:
 
     python3 <daemon_dir>/src/claude_code_hooks_daemon/install/upgrade_gate_standalone.py \\
-        --daemon-dir <daemon_dir> --project-root <root> --from <prev> --to <target> \\
-        [--include-unreleased] [--acknowledged]
+        --daemon-dir <daemon_dir> --project-root <root> --to <target> \\
+        --installed-stamp <venv stamp> --target-stamp <stamp> --target-ref <ref> \\
+        [--include-unreleased] [--acknowledgement <digest>]
+
+    python3 .../upgrade_gate_standalone.py approve --daemon-dir <daemon_dir> \\
+        --project-root <root> --from <installed> --to <target>
+
+The second form is the project owner's approval, from the target's own code
+(an installed daemon older than the gate has no ``approve-upgrade``). It needs
+a terminal and a typed phrase, so an agent's shell cannot run it.
 
 Layer 2 (``scripts/upgrade_version.sh``) runs the gate BEFORE it builds the
 target's venv, so a stopped upgrade has changed nothing but the checkout,
@@ -82,5 +90,9 @@ else:
         upgrade_gate = _load_by_file_path(_dotted, _PACKAGE_ROOT / _relative)
 
 
+_APPROVE_SUBCOMMAND = "approve"
+
 if __name__ == "__main__":
+    if sys.argv[1:2] == [_APPROVE_SUBCOMMAND]:
+        sys.exit(upgrade_gate.approve_main(sys.argv[2:]))
     sys.exit(upgrade_gate.main())

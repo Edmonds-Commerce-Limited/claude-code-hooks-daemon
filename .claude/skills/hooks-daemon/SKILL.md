@@ -36,7 +36,7 @@ Update to a new version of the hooks daemon:
 ```claude-code
 /hooks-daemon upgrade          # Auto-detect and upgrade to latest version
 /hooks-daemon upgrade 2.14.0   # Upgrade to specific version
-/hooks-daemon upgrade --force  # Force reinstall current version
+/hooks-daemon upgrade --skip-reading-confirmation=<digest>  # after reading what the gate listed
 ```
 
 See [upgrade.md](upgrade.md) for detailed upgrade documentation.

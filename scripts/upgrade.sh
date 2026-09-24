@@ -38,11 +38,12 @@ while [ $# -gt 0 ]; do
             UPGRADE_FLAGS="$UPGRADE_FLAGS --skip-config-optimisation"
             shift
             ;;
-        --skip-reading-confirmation)
+        --skip-reading-confirmation=*|--skip-reading-confirmation)
             # Plan 00376: the caller confirms it has read what Layer 2's
-            # pre-deploy gate listed; without it, a gate with anything to
-            # show stops the upgrade before deploying.
-            UPGRADE_FLAGS="$UPGRADE_FLAGS --skip-reading-confirmation"
+            # pre-deploy gate listed, with the digest the gate's stop
+            # printed; without it, a gate with anything to show stops the
+            # upgrade before deploying. The bare flag matches no listing.
+            UPGRADE_FLAGS="$UPGRADE_FLAGS $1"
             shift
             ;;
         --project-root)
@@ -51,13 +52,13 @@ while [ $# -gt 0 ]; do
             shift 2
             ;;
         --help|-h)
-            echo "Usage: upgrade.sh --project-root PATH [VERSION]"
+            echo "Usage: upgrade.sh --project-root PATH [--skip-reading-confirmation=DIGEST] [--skip-config-optimisation] [VERSION]"
             echo ""
             echo "  --project-root PATH        Project root directory (REQUIRED)"
             echo "  --skip-config-optimisation Opt out of the mandatory post-upgrade config-optimisation review"
-            echo "  --skip-reading-confirmation"
-            echo "                             Confirm you have read what the pre-deploy gate listed"
-            echo "                             (it stops the upgrade until you do)"
+            echo "  --skip-reading-confirmation=DIGEST"
+            echo "                             Confirm you have read what the pre-deploy gate listed;"
+            echo "                             DIGEST is the value its stop printed for that listing"
             echo "  VERSION                    Git tag to upgrade to (default: latest)"
             exit 0
             ;;
@@ -74,7 +75,7 @@ while [ $# -gt 0 ]; do
             ;;
         -*)
             echo "ERR Unknown option: $1" >&2
-            echo "Usage: upgrade.sh --project-root PATH [VERSION]" >&2
+            echo "Usage: upgrade.sh --project-root PATH [--skip-reading-confirmation=DIGEST] [--skip-config-optimisation] [VERSION]" >&2
             exit 1
             ;;
         *)
@@ -183,7 +184,9 @@ _PRESERVED_OLD_DEFAULT_TMP=""
 # The settings baseline preserved at Step 3d, tracked for the same reason and
 # on the same terms: only ever a file this script created.
 _PRESERVED_OLD_DEFAULT_SETTINGS_TMP=""
-trap 'rm -f "$_PYTHON_DISCOVERY_FETCHED_TMP" "$_PRESERVED_OLD_DEFAULT_TMP" "$_PRESERVED_OLD_DEFAULT_SETTINGS_TMP"' EXIT
+# The private directory holding the one-shot handoff to Layer 2 (Step 8).
+_HANDOFF_DIR=""
+trap 'rm -f "$_PYTHON_DISCOVERY_FETCHED_TMP" "$_PRESERVED_OLD_DEFAULT_TMP" "$_PRESERVED_OLD_DEFAULT_SETTINGS_TMP"; if [ -n "$_HANDOFF_DIR" ]; then rm -rf -- "$_HANDOFF_DIR"; fi' EXIT
 
 _fetch_python_discovery_lib() {
     local ref base_url url tmp curl_path
@@ -645,12 +648,13 @@ fi
 # extracts the client invocation from this file and runs it against dirty
 # fixtures -- reverting to a plain checkout fails those tests.
 # Plan 00376 Task 1.2: the commit this checkout moves away from. Layer 2's
-# pre-deploy gate can stop the upgrade before anything is deployed, and then
-# puts a client's daemon dir back here, so the re-run derives the same FROM
-# version (Step 3b reads it from this checkout) and meets the same gate.
+# pre-deploy gate can stop the upgrade before anything is deployed and put
+# the daemon dir back on the INSTALLED version; this ref is its last resort
+# when neither the venv stamp nor HOOKS-DAEMON.md names one. Handed over in
+# the Step 8 handoff file, never in the environment.
+_PREVIOUS_REF=""
 if [ "$SELF_INSTALL" != "true" ]; then
-    HOOKS_DAEMON_UPGRADE_PREVIOUS_REF="$(git -C "$DAEMON_DIR" rev-parse HEAD)"
-    export HOOKS_DAEMON_UPGRADE_PREVIOUS_REF
+    _PREVIOUS_REF="$(git -C "$DAEMON_DIR" rev-parse HEAD)"
 fi
 
 _info "Checking out $TARGET_DISPLAY..."
@@ -695,6 +699,15 @@ Use a fresh install instead: see CLAUDE/LLM-INSTALL.md"
 fi
 
 _info "Delegating to version-specific upgrader..."
+# Plan 00376 review MAJOR 4: the handoff to Layer 2 is a one-shot file in a
+# private directory this run creates, holding this shell's PID and the
+# previous ref, passed by PATH. Layer 2 believes it only when its parent
+# wrote it, and deletes it on reading, so an exported variable naming some
+# other file hands nothing over. Only then does Layer 2 read UPGRADE_FLAGS.
+_HANDOFF_DIR="$(mktemp -d "${TMPDIR:-/tmp}/hooks_daemon_upgrade_handoff_XXXXXX")"
+HOOKS_DAEMON_UPGRADE_HANDOFF="$_HANDOFF_DIR/handoff"
+(umask 077 && printf '%s %s\n' "$$" "$_PREVIOUS_REF" > "$HOOKS_DAEMON_UPGRADE_HANDOFF")
+export HOOKS_DAEMON_UPGRADE_HANDOFF
 # Non-zero = abort without emitting metadata, with Layer 2's own exit code:
 # the pre-deploy gate's stop codes tell the caller WHY it stopped. Captured
 # with `||`, not inside `if !`, where $? is the negation's status (always 0).

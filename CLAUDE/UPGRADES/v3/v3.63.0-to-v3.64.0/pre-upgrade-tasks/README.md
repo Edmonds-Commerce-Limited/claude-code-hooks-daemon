@@ -10,8 +10,8 @@ Task files here describe changes a project must hear about **before** v3.64.0 is
 
 <!-- BEGIN TASK INDEX -->
 
-| File                                           | Type            | Severity | Applies to                                                   | Detect                 | One-line summary                                                                                               |
-| ---------------------------------------------- | --------------- | -------- | ------------------------------------------------------------ | ---------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `01-rewrite-plan-qa-json-level-to-severity.md` | workflow-change | critical | upgrades from ≤v3.63.x whose tooling parses `plan-qa --json` | `plan[-_]qa[^\n]*json` | `plan-qa --json` emits `severity`, not `level`: rewrite every consuming call site before the new version lands |
+| File                                           | Type            | Severity | Applies to                                                   | Detect                     | One-line summary                                                                                               |
+| ---------------------------------------------- | --------------- | -------- | ------------------------------------------------------------ | -------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `01-rewrite-plan-qa-json-level-to-severity.md` | workflow-change | critical | upgrades from ≤v3.63.x whose tooling parses `plan-qa --json` | `plan[-_]qa\b[^\n]*--json` | `plan-qa --json` emits `severity`, not `level`: rewrite every consuming call site before the new version lands |
 
 <!-- END TASK INDEX -->

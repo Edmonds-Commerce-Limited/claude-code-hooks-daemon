@@ -9,9 +9,8 @@ Upgrade the Claude Code Hooks Daemon and commit the result atomically.
    ```claude-code
    /hooks-daemon upgrade                              # latest
    /hooks-daemon upgrade 3.14.0                       # specific version
-   /hooks-daemon upgrade --force                      # reinstall current
    /hooks-daemon upgrade --skip-config-optimisation    # opt out of step 9
-   /hooks-daemon upgrade --skip-reading-confirmation   # after reading what the gate listed
+   /hooks-daemon upgrade --skip-reading-confirmation=<digest>   # after reading what the gate listed
    /hooks-daemon optimise                              # step 9 on its own
    ```
 
@@ -21,21 +20,25 @@ Upgrade the Claude Code Hooks Daemon and commit the result atomically.
    pre-upgrade task whose `**Detect**` pattern found a call site in this
    project, at `file:line`. When there is anything to read, the run stops
    with `UPGRADE STOPPED before anything was deployed`, puts the daemon
-   checkout back on the previous version, and exits non-zero:
+   checkout back on the installed version, and exits non-zero:
 
    - **Exit 3: read, act, re-run.** Read every listed document. Carry out each
      listed pre-upgrade task in the project as its file says (its `## How to handle`), and commit that work separately. Then re-run the same command with
-     `--skip-reading-confirmation`. Pass the flag only after doing this.
-   - **Exit 4: the owner must approve.** The upgrade is breaking for this
-     project: a MAJOR version, a manifest declaring `breaking: true`, or a
-     `critical` pre-upgrade task that found call sites. Report the reasons the
-     gate printed to the user and STOP. Only the project owner approves, by
-     running `.claude/hooks-daemon/bin/hooks-daemon approve-upgrade <version>`.
-     Never run it yourself. After the owner has approved, re-run with
-     `--skip-reading-confirmation`.
+     `--skip-reading-confirmation=<digest>`, the digest the stop printed. Pass
+     it only after doing this. The digest belongs to that listing: a bare flag,
+     or the digest of another listing, stops again.
+   - **Exit 4: the owner must approve.** The upgrade needs the project owner:
+     a MAJOR version, a manifest declaring `breaking: true`, a `critical`
+     pre-upgrade task that found call sites, or an installed version the gate
+     cannot read. Report the reasons and the approval command the gate printed
+     to the user and STOP. The approval needs the owner's own terminal and a
+     typed phrase, so you cannot record it; do not try. After the owner has
+     approved, re-run with the same `--skip-reading-confirmation=<digest>`.
 
    Any other non-zero exit is an upgrade failure; report it. No metadata block
-   is emitted on any stop.
+   is emitted on any stop. If the output says `THE UPGRADE DID NOT COMPLETE`,
+   the upgrade stopped even though the command exited 0: an old installed
+   upgrade script ran it. Run the command printed below that line.
 
 2. **Parse the metadata block** emitted on stdout between the
    `<<<UPGRADE_METADATA` and `UPGRADE_METADATA>>>` sentinels. Fields:
@@ -49,8 +52,8 @@ Upgrade the Claude Code Hooks Daemon and commit the result atomically.
    .claude/hooks-daemon/bin/hooks-daemon status
    ```
 
-4. **Reconcile project docs with truth-changes** (skip on `--force`
-   reinstall, where `from_version == to_version`). Some statements that were
+4. **Reconcile project docs with truth-changes** (skip when
+   `from_version == to_version`, a reinstall of the same release). Some statements that were
    true about working in this project may have changed across the upgrade.
    Load the truth-changes for the range you just crossed:
 
@@ -105,8 +108,8 @@ Upgrade the Claude Code Hooks Daemon and commit the result atomically.
    the whole report inline for a human reader, and `--report-dir` moves the
    files.
 
-5. **Surface newly-available / recommended config options** (skip on `--force`
-   reinstall, where `from_version == to_version`). Some releases add opt-in
+5. **Surface newly-available / recommended config options** (skip when
+   `from_version == to_version`, a reinstall of the same release). Some releases add opt-in
    protections or flip a default; this step reports what is now available or
    recommended for the range you crossed so a new feature never ships dormant:
 
@@ -146,8 +149,8 @@ Upgrade the Claude Code Hooks Daemon and commit the result atomically.
    daemon upgrade commit below.
 
 6. **Carry out the post-upgrade tasks for every version you crossed** —
-   MANDATORY (skip only on a `--force` reinstall, where
-   `from_version == to_version`). A release can ship work that a clean
+   MANDATORY (skip only when `from_version == to_version`, a reinstall of
+   the same release). A release can ship work that a clean
    upgrade does not do for you: auditing files a previous version's bug
    damaged, migrating a value or an interface this project consumes,
    retiring a workaround. That work lives in each crossed upgrade guide's

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -34,6 +35,7 @@ BASH = shutil.which("bash") or "/bin/bash"
 _TIMEOUT_SECONDS = 300
 _REF = "acceptance-branch"
 _REASON = "Plan 00291 acceptance test"
+_NEEDS_ACKNOWLEDGEMENT = 3
 
 _STAGED_MANIFEST = """\
 version: "99.0.0"
@@ -141,24 +143,37 @@ def test_guarded_branch_install_is_stamped_and_flagged_everywhere(tmp_path: Path
     foreign_cwd = tmp_path / "somewhere-else"
     foreign_cwd.mkdir()
 
+    # What the project last deployed, as its committed HOOKS-DAEMON.md records
+    # it: with no venv yet, the pre-deploy gate reads the installed version
+    # from here (Plan 00376), and a project with neither needs the owner.
+    installed = _pyproject_version(daemon_dir)
+    (project_root / ".claude" / "HOOKS-DAEMON.md").write_text(
+        f"> Generated on 2026-09-24 (v{installed}) by `generate-docs`\n"
+    )
+
     venv_python: Path | None = None
     try:
         # Layer 1 hands Layer 2 the resolved commit; the clone already sits on
         # it, which is the state every Layer-1-driven upgrade arrives in. A
         # branch install lists the staged UNRELEASED documents, so the
-        # pre-deploy gate stops it until the reading is confirmed (Plan 00376;
-        # the stop itself is pinned in test_upgrade_pre_deploy_phase_runs_on_layer1).
+        # pre-deploy gate stops it until the reading is confirmed with the
+        # digest the stop printed (Plan 00376; the stop itself is pinned in
+        # test_upgrade_pre_deploy_phase_runs_on_layer1).
+        argv = [BASH, str(UPGRADE_VERSION_SH), str(project_root), str(daemon_dir), short_sha]
+        stopped = _run(argv, cwd=foreign_cwd, env=env)
+        assert stopped.returncode == _NEEDS_ACKNOWLEDGEMENT, stopped.stdout + stopped.stderr
+        digest = re.search(r"--skip-reading-confirmation=(\w+)", stopped.stderr)
+        assert digest is not None, stopped.stderr
+        # The stop put the clone back on the installed release; Layer 1 would
+        # check the target out again before the re-run, and so does this.
+        subprocess.run(
+            ["git", "-C", str(daemon_dir), "checkout", "--quiet", short_sha],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
         result = _run(
-            [
-                BASH,
-                str(UPGRADE_VERSION_SH),
-                str(project_root),
-                str(daemon_dir),
-                short_sha,
-                "--skip-reading-confirmation",
-            ],
-            cwd=foreign_cwd,
-            env=env,
+            [*argv, f"--skip-reading-confirmation={digest.group(1)}"], cwd=foreign_cwd, env=env
         )
         assert result.returncode == 0, (
             f"upgrade_version.sh failed ({result.returncode})\n--- stdout ---\n"

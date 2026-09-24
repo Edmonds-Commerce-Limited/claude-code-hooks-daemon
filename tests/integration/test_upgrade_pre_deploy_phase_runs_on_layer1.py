@@ -1,4 +1,4 @@
-"""The pre-deploy phase and its gate run on the Layer 1 route (Plan 00376).
+"""The pre-deploy phase and its gate run on every upgrade route (Plan 00376).
 
 Every normal upgrade goes through Layer 1 (``scripts/upgrade.sh``), which
 checks the target out and only then runs the target's own Layer 2. Layer 2's
@@ -6,24 +6,38 @@ checks the target out and only then runs the target's own Layer 2. Layer 2's
 idempotent path used to exit before the config compatibility check and the
 upgrade-guide reading list, so neither ever ran for a real upgrade (Task 1.1).
 
-These tests drive the real route end to end in a scratch fixture: a daemon
+These tests drive the real routes end to end in a scratch fixture: a daemon
 origin whose ``v{current}`` tag is this working tree, whose next-minor tag
 adds an upgrade guide, a pre-upgrade task and a post-upgrade task, whose
 next-major tag sits on top of that, plus a branch carrying a task staged under
-``UNRELEASED/``. A project installed from ``v{current}`` -- holding one call
-site the pre-upgrade task detects -- is upgraded with the working tree's
-Layer 1, and:
+``UNRELEASED/``. A project installed from ``v{current}`` -- its committed
+``HOOKS-DAEMON.md`` says so, and it holds one call site the pre-upgrade task
+detects -- is upgraded with the working tree's Layer 1, and:
 
-* without ``--skip-reading-confirmation`` the gate stops the upgrade with the
-  reading list and the call site at ``file:line``, Layer 1 exits with the
-  gate's code, the daemon checkout is back on ``v{current}`` and nothing is
-  deployed (Tasks 1.2, 3.1, 3.3);
-* with the flag, the compatibility check and the reading list run BEFORE
+* without ``--skip-reading-confirmation=<digest>`` the gate stops the upgrade
+  with the reading list, the call site at ``file:line`` and the digest; Layer
+  1 exits with the gate's code, the daemon checkout is back on ``v{current}``
+  and nothing is deployed (Tasks 1.2, 3.1, 3.3); a bare flag does not match;
+* with the digest, the compatibility check and the reading list run BEFORE
   anything is deployed, and the post-upgrade task list names the target's
   task, with the call site the post-upgrade task detects (Task 4.1);
 * a branch install lists the staged ``UNRELEASED/`` task in both lists;
-* a MAJOR upgrade also needs the owner's one-shot approval, which the run it
-  lets through consumes (Task 3.2).
+* a MAJOR upgrade also needs the owner's approval, written by the owner's own
+  route and bound to this upgrade; a hand-made marker does not count, and the
+  run the approval lets through removes it (Task 3.2).
+
+And the routes review-00376 found open (MAJOR 1, 2 and 4):
+
+* a fresh clone (no daemon checkout, so Layer 1 clones one sitting on origin's
+  newest commit) still reads the installed version from ``HOOKS-DAEMON.md``,
+  stops, and is put back on it, so the re-run stops again;
+* LLM-UPDATE's manual route (the clone checked out to the target by hand)
+  still stops, and still needs the owner for a MAJOR target;
+* no environment variable switches the gate off, and an inherited handoff is
+  ignored;
+* a Layer 1 that predates the gate (v3.66.0's) cannot make a stop into a
+  partial install: Layer 2 restores the clone itself and says the caller's
+  exit status is wrong.
 """
 
 from __future__ import annotations
@@ -45,12 +59,16 @@ from claude_code_hooks_daemon.install.upgrade_gate import (
     APPROVAL_SUBDIR,
     SKIP_READING_FLAG,
     GateVerdict,
+    write_approval,
 )
 from claude_code_hooks_daemon.utils.one_shot_approval import OneShotApprovalStore
 from claude_code_hooks_daemon.version import __version__
 
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 _LAYER1: Final[Path] = _REPO_ROOT / "scripts" / "upgrade.sh"
+_LAYER2_REL: Final[str] = "scripts/upgrade_version.sh"
+#: The last release whose Layer 1 predates the gate (review MAJOR 2).
+_PRE_GATE_RELEASE: Final[str] = "v3.66.0"
 _BASH: Final[str] = shutil.which("bash") or "/bin/bash"
 _UPGRADE_TIMEOUT_SECONDS: Final[int] = 600
 _GIT_TIMEOUT_SECONDS: Final[int] = 120
@@ -68,9 +86,11 @@ _COMPAT_MARKER: Final[str] = "Checking config compatibility with target version"
 _READING_MARKER: Final[str] = "REQUIRED READING"
 _STOPPED_MARKER: Final[str] = "UPGRADE STOPPED before anything was deployed"
 _TASKS_MARKER: Final[str] = "Post-upgrade tasks to carry out"
+_PRE_GATE_WARNING: Final[str] = "THE UPGRADE DID NOT COMPLETE"
 #: The first deploy action on the idempotent path: nothing before it has
 #: touched the project.
 _FIRST_DEPLOY_MARKER: Final[str] = "Deploying hooks to project"
+_DIGEST_RE: Final[re.Pattern[str]] = re.compile(rf"{re.escape(SKIP_READING_FLAG)}=(\w+)")
 
 _TASK_BODY: Final[str] = """# Task: {title}
 
@@ -194,8 +214,12 @@ def _build_origin(root: Path, current: str, target: str, major: str) -> Path:
     return origin
 
 
-def _build_project(root: Path, origin: Path, current: str) -> tuple[Path, Path]:
-    """A client project whose daemon clone sits on ``v{current}``, with no venv yet."""
+def _build_project(root: Path, origin: Path, current: str, *, clone: bool = True) -> Path:
+    """A client project installed from ``v{current}``, with no venv yet.
+
+    ``clone=False`` is the fresh-clone state: config and generated docs are
+    committed, the daemon checkout is not.
+    """
     project = root / "project"
     (project / ".claude").mkdir(parents=True)
     _git(project, "init", "-q")
@@ -204,15 +228,24 @@ def _build_project(root: Path, origin: Path, current: str) -> tuple[Path, Path]:
     shutil.copy2(
         origin / ".claude" / "hooks-daemon.yaml.example", project / ".claude" / "hooks-daemon.yaml"
     )
+    _write(
+        project / ".claude" / "HOOKS-DAEMON.md",
+        f"> Generated on 2026-09-24 (v{current}) by `generate-docs`\n",
+    )
     _write(project / _CALL_SITE_FILE, f"set -e\n{_CALL_SITE} | jq .\n")
-    daemon_dir = project / ".claude" / "hooks-daemon"
-    _git(root, "clone", "-q", str(origin), str(daemon_dir))
-    _git(daemon_dir, "checkout", "-q", f"v{current}")
-    return project, daemon_dir
+    if clone:
+        daemon_dir = project / ".claude" / "hooks-daemon"
+        _git(root, "clone", "-q", str(origin), str(daemon_dir))
+        _git(daemon_dir, "checkout", "-q", f"v{current}")
+    return project
 
 
-def _stop_daemon(daemon_dir: Path, project: Path, env: dict[str, str]) -> None:
-    for venv_python in sorted((daemon_dir / "untracked").glob("venv-*py3*/bin/python")):
+def _daemon_dir(project: Path) -> Path:
+    return project / ".claude" / "hooks-daemon"
+
+
+def _stop_daemon(project: Path, env: dict[str, str]) -> None:
+    for venv_python in sorted((_daemon_dir(project) / "untracked").glob("venv-*py3*/bin/python")):
         subprocess.run(
             [str(venv_python), "-m", "claude_code_hooks_daemon.daemon.cli", "stop"],
             cwd=project,
@@ -224,11 +257,11 @@ def _stop_daemon(daemon_dir: Path, project: Path, env: dict[str, str]) -> None:
         )
 
 
-def _upgrade(project: Path, env: dict[str, str], *args: str) -> subprocess.CompletedProcess[str]:
-    """Run Layer 1 with stderr merged into stdout, so marker ORDER is real."""
+def _run(argv: list[str], cwd: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    """Run with stderr merged into stdout, so marker ORDER is real."""
     return subprocess.run(
-        [_BASH, str(_LAYER1), "--project-root", str(project), *args],
-        cwd=project,
+        argv,
+        cwd=cwd,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -236,6 +269,12 @@ def _upgrade(project: Path, env: dict[str, str], *args: str) -> subprocess.Compl
         env=env,
         timeout=_UPGRADE_TIMEOUT_SECONDS,
     )
+
+
+def _upgrade(
+    project: Path, env: dict[str, str], *args: str, layer1: Path = _LAYER1
+) -> subprocess.CompletedProcess[str]:
+    return _run([_BASH, str(layer1), "--project-root", str(project), *args], project, env)
 
 
 def _env(extra: dict[str, str] | None = None) -> dict[str, str]:
@@ -247,6 +286,8 @@ def _env(extra: dict[str, str] | None = None) -> dict[str, str]:
         "HOOKS_DAEMON_UNSAFE_TRACK_REF_BECAUSE",
         "HOOKS_DAEMON_UPGRADE_PREVIOUS_VERSION",
         "HOOKS_DAEMON_UPGRADE_SECOND_PASS",
+        "HOOKS_DAEMON_UPGRADE_HANDOFF",
+        "UPGRADE_FLAGS",
     ):
         env.pop(name, None)
     env["NO_COLOR"] = "1"
@@ -269,13 +310,30 @@ def _section(output: str, marker: str) -> str:
     return output[start : end if end != -1 else len(output)]
 
 
+def _digest(output: str) -> str:
+    found = _DIGEST_RE.search(output)
+    assert found is not None, f"the stop printed no digest:\n{output[-6000:]}"
+    return found.group(1)
+
+
+def _confirm(output: str) -> str:
+    return f"{SKIP_READING_FLAG}={_digest(output)}"
+
+
 @pytest.fixture
-def fixture_tree(tmp_path: Path) -> tuple[Path, Path, str, str]:
+def versions() -> tuple[str, str, str]:
     current = __version__
-    target = _next_minor(current)
-    origin = _build_origin(tmp_path, current, target, _next_major(current))
-    project, daemon_dir = _build_project(tmp_path, origin, current)
-    return project, daemon_dir, current, target
+    return current, _next_minor(current), _next_major(current)
+
+
+@pytest.fixture
+def origin(tmp_path: Path, versions: tuple[str, str, str]) -> Path:
+    return _build_origin(tmp_path, *versions)
+
+
+@pytest.fixture
+def project(tmp_path: Path, origin: Path, versions: tuple[str, str, str]) -> Path:
+    return _build_project(tmp_path, origin, versions[0])
 
 
 def _head(daemon_dir: Path) -> str:
@@ -290,42 +348,47 @@ def _assert_stopped_and_restored(
     result: subprocess.CompletedProcess[str],
     verdict: GateVerdict,
     project: Path,
-    daemon_dir: Path,
     current: str,
+    *,
+    exit_code: int | None = None,
 ) -> str:
     combined = result.stdout
-    assert result.returncode == verdict.exit_code, (
-        f"Layer 1 must exit with the gate's code {verdict.exit_code}, "
-        f"got {result.returncode}:\n{combined[-6000:]}"
-    )
+    expected = verdict.exit_code if exit_code is None else exit_code
+    assert (
+        result.returncode == expected
+    ), f"expected exit {expected}, got {result.returncode}:\n{combined[-6000:]}"
     assert _STOPPED_MARKER in combined, combined[-6000:]
     assert _FIRST_DEPLOY_MARKER not in combined, "a stopped upgrade must deploy nothing"
     assert not (project / ".claude" / "hooks").exists(), "no hook may reach the project"
+    daemon_dir = _daemon_dir(project)
     assert _head(daemon_dir) == _commit_of(
         daemon_dir, f"v{current}"
-    ), "the daemon checkout must be back on the previous version"
+    ), "the daemon checkout must be back on the installed version"
     return combined
 
 
 def test_release_route_stops_until_the_reading_is_confirmed(
-    fixture_tree: tuple[Path, Path, str, str],
+    project: Path, versions: tuple[str, str, str]
 ) -> None:
-    project, daemon_dir, current, target = fixture_tree
+    current, target, _major = versions
     env = _env()
     try:
         stopped = _upgrade(project, env, f"v{target}")
         combined = _assert_stopped_and_restored(
-            stopped, GateVerdict.NEEDS_ACKNOWLEDGEMENT, project, daemon_dir, current
+            stopped, GateVerdict.NEEDS_ACKNOWLEDGEMENT, project, current
         )
         reading = _section(combined, _READING_MARKER)
         assert f"v{current}-to-v{target}.md" in reading, reading
         assert _PRE_TASK in reading, reading
         assert f"{_CALL_SITE_FILE}:2" in reading, "the call site must be named at file:line"
-        assert SKIP_READING_FLAG in combined
 
-        result = _upgrade(project, env, f"v{target}", SKIP_READING_FLAG)
+        # Review MINOR 6: the bare flag is not bound to what was listed.
+        bare = _upgrade(project, env, f"v{target}", SKIP_READING_FLAG)
+        _assert_stopped_and_restored(bare, GateVerdict.NEEDS_ACKNOWLEDGEMENT, project, current)
+
+        result = _upgrade(project, env, f"v{target}", _confirm(combined))
     finally:
-        _stop_daemon(daemon_dir, project, env)
+        _stop_daemon(project, env)
     combined = result.stdout
     assert result.returncode == 0, f"upgrade failed ({result.returncode}):\n{combined[-6000:]}"
 
@@ -346,9 +409,9 @@ def test_release_route_stops_until_the_reading_is_confirmed(
 
 
 def test_branch_route_includes_the_staged_unreleased_task(
-    fixture_tree: tuple[Path, Path, str, str],
+    project: Path, versions: tuple[str, str, str]
 ) -> None:
-    project, daemon_dir, _current, _target = fixture_tree
+    current = versions[0]
     env = _env(
         {
             "HOOKS_DAEMON_UNSAFE_TRACK_REF": _BRANCH,
@@ -356,9 +419,11 @@ def test_branch_route_includes_the_staged_unreleased_task(
         }
     )
     try:
-        result = _upgrade(project, env, SKIP_READING_FLAG)
+        stopped = _upgrade(project, env)
+        _assert_stopped_and_restored(stopped, GateVerdict.NEEDS_ACKNOWLEDGEMENT, project, current)
+        result = _upgrade(project, env, _confirm(stopped.stdout))
     finally:
-        _stop_daemon(daemon_dir, project, env)
+        _stop_daemon(project, env)
     combined = result.stdout
     assert result.returncode == 0, f"upgrade failed ({result.returncode}):\n{combined[-6000:]}"
 
@@ -370,27 +435,130 @@ def test_branch_route_includes_the_staged_unreleased_task(
     assert _STAGED_TASK in tasks, tasks
 
 
-def test_major_route_needs_the_owners_one_shot_approval(
-    fixture_tree: tuple[Path, Path, str, str],
+def test_major_route_needs_the_owners_bound_approval(
+    project: Path, versions: tuple[str, str, str]
 ) -> None:
-    project, daemon_dir, current, _target = fixture_tree
-    major = _next_major(current)
+    current, _target, major = versions
     env = _env()
-    store = OneShotApprovalStore(APPROVAL_SUBDIR)
-    marker = store.path(get_untracked_dir(project), major)
+    untracked = get_untracked_dir(project)
+    marker = OneShotApprovalStore(APPROVAL_SUBDIR).path(untracked, major)
     try:
-        stopped = _upgrade(project, env, f"v{major}", SKIP_READING_FLAG)
+        unread = _upgrade(project, env, f"v{major}")
+        confirm = _confirm(unread.stdout)
+        stopped = _upgrade(project, env, f"v{major}", confirm)
         combined = _assert_stopped_and_restored(
-            stopped, GateVerdict.NEEDS_APPROVAL, project, daemon_dir, current
+            stopped, GateVerdict.NEEDS_APPROVAL, project, current
         )
         assert "MAJOR" in combined
-        assert f"approve-upgrade {major}" in combined
+        assert f"approve-upgrade {major} --from {current}" in combined
+        assert "upgrade_gate_standalone.py" in combined, "the new code's own approval route"
 
-        # The owner's step, as `hooks-daemon approve-upgrade` records it.
-        store.record(get_untracked_dir(project), major)
-        result = _upgrade(project, env, f"v{major}", SKIP_READING_FLAG)
+        # Review MAJOR 4: a marker nobody's approval wrote does not count.
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.touch()
+        touched = _upgrade(project, env, f"v{major}", confirm)
+        assert "not written by approve-upgrade" in _assert_stopped_and_restored(
+            touched, GateVerdict.NEEDS_APPROVAL, project, current
+        )
+
+        # The owner's step: what `approve-upgrade` writes once they have typed
+        # the phrase at their terminal.
+        write_approval(
+            untracked,
+            to_version=major,
+            from_version=current,
+            daemon_dir=_daemon_dir(project),
+            project_root=project,
+        )
+        result = _upgrade(project, env, f"v{major}", confirm)
     finally:
-        _stop_daemon(daemon_dir, project, env)
+        _stop_daemon(project, env)
     assert result.returncode == 0, f"upgrade failed ({result.returncode}):\n{result.stdout[-6000:]}"
-    assert not marker.exists(), "the approval is one-shot: the run it let through consumes it"
-    assert _head(daemon_dir) == _commit_of(daemon_dir, f"v{major}")
+    assert not marker.exists(), "one approval, one upgrade: the run it let through removes it"
+    assert _head(_daemon_dir(project)) == _commit_of(_daemon_dir(project), f"v{major}")
+
+
+def test_a_fresh_clone_reads_the_installed_version_and_stops_again_on_rerun(
+    tmp_path: Path, origin: Path, versions: tuple[str, str, str]
+) -> None:
+    """Review MAJOR 1: the clone Layer 1 makes already sits past the target."""
+    current, target, _major = versions
+    project = _build_project(tmp_path, origin, current, clone=False)
+    env = _env({"HOOKS_DAEMON_CLONE_URL": str(origin)})
+    first = _upgrade(project, env, f"v{target}")
+    _assert_stopped_and_restored(first, GateVerdict.NEEDS_ACKNOWLEDGEMENT, project, current)
+    rerun = _upgrade(project, env, f"v{target}")
+    _assert_stopped_and_restored(rerun, GateVerdict.NEEDS_ACKNOWLEDGEMENT, project, current)
+
+
+def test_the_manual_route_still_needs_the_reading_and_the_owner(
+    project: Path, versions: tuple[str, str, str]
+) -> None:
+    """Review MAJOR 1: LLM-UPDATE's manual checkout, then the local Layer 1."""
+    current, _target, major = versions
+    env = _env()
+    _git(_daemon_dir(project), "checkout", "-q", f"v{major}")
+    unread = _upgrade(project, env, f"v{major}")
+    _assert_stopped_and_restored(unread, GateVerdict.NEEDS_ACKNOWLEDGEMENT, project, current)
+
+    _git(_daemon_dir(project), "checkout", "-q", f"v{major}")
+    unapproved = _upgrade(project, env, f"v{major}", _confirm(unread.stdout))
+    _assert_stopped_and_restored(unapproved, GateVerdict.NEEDS_APPROVAL, project, current)
+
+
+def test_no_environment_variable_switches_the_gate_off(
+    tmp_path: Path, project: Path, versions: tuple[str, str, str]
+) -> None:
+    """Review MAJOR 4: the exported phase-done sentinel skipped the whole gate."""
+    current, _target, major = versions
+    forged = tmp_path / "forged-handoff"
+    forged.write_text(f"1 {_commit_of(_daemon_dir(project), f'v{major}')}\n")
+    env = _env(
+        {
+            "HOOKS_DAEMON_PRE_DEPLOY_PHASE_DONE": "1",
+            "HOOKS_DAEMON_COMPAT_CHECK_DONE": "1",
+            "HOOKS_DAEMON_UPGRADE_HANDOFF": str(forged),
+        }
+    )
+    result = _upgrade(project, env, f"v{major}")
+    _assert_stopped_and_restored(result, GateVerdict.NEEDS_ACKNOWLEDGEMENT, project, current)
+
+
+def test_a_direct_layer2_call_ignores_an_inherited_handoff_and_its_flags(
+    tmp_path: Path, project: Path, versions: tuple[str, str, str]
+) -> None:
+    """The handoff counts only when this script's parent wrote it."""
+    current, target, _major = versions
+    env = _env()
+    first = _upgrade(project, env, f"v{target}")
+    daemon_dir = _daemon_dir(project)
+    _git(daemon_dir, "checkout", "-q", f"v{target}")
+    forged = tmp_path / "inherited-handoff"
+    forged.write_text("1 \n")
+    env.update(
+        {"HOOKS_DAEMON_UPGRADE_HANDOFF": str(forged), "UPGRADE_FLAGS": _confirm(first.stdout)}
+    )
+    result = _run(
+        [_BASH, str(daemon_dir / _LAYER2_REL), str(project), str(daemon_dir), f"v{target}"],
+        project,
+        env,
+    )
+    combined = _assert_stopped_and_restored(
+        result, GateVerdict.NEEDS_ACKNOWLEDGEMENT, project, current
+    )
+    assert "Ignoring the upgrade handoff" in combined
+
+
+def test_a_pre_gate_layer1_cannot_turn_a_stop_into_a_partial_install(
+    tmp_path: Path, project: Path, versions: tuple[str, str, str]
+) -> None:
+    """Review MAJOR 2: v3.66.0's Layer 1 reports success whatever Layer 2 exits."""
+    current, target, _major = versions
+    old_layer1 = tmp_path / "old-upgrade.sh"
+    old_layer1.write_text(_git(_REPO_ROOT, "show", f"{_PRE_GATE_RELEASE}:scripts/upgrade.sh"))
+    result = _upgrade(project, _env(), f"v{target}", layer1=old_layer1)
+    combined = _assert_stopped_and_restored(
+        result, GateVerdict.NEEDS_ACKNOWLEDGEMENT, project, current, exit_code=0
+    )
+    warning = _section(combined, _PRE_GATE_WARNING)
+    assert f"v{target}:scripts/upgrade.sh" in combined, warning

@@ -9,6 +9,8 @@ report then says whether the task applies.
 
 from __future__ import annotations
 
+import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -18,6 +20,8 @@ from claude_code_hooks_daemon.install.upgrade_tasks import (
     Detection,
     TaskKind,
     detect,
+    evaluate,
+    format_findings_line,
     load_task,
     run_check_upgrade_tasks,
     schema_errors,
@@ -82,6 +86,15 @@ class TestSchema:
     def test_an_uncompilable_pattern_is_an_error(self, tmp_path: Path) -> None:
         path = _task(tmp_path / "01-bad.md", detect_block="**Detect**: `(unclosed`\n")
         assert any("pattern" in error for error in schema_errors(path, TaskKind.PRE))
+
+    def test_a_detect_pattern_without_backticks_is_an_error(self, tmp_path: Path) -> None:
+        path = _task(tmp_path / "01-bare.md", detect_block="**Detect**: plan-qa --json\n")
+        assert any("backticks" in error for error in schema_errors(path, TaskKind.PRE))
+
+    @pytest.mark.parametrize("pattern", ["(x+x+)+y", "(a*)*b", "(?:\\w+\\s?)+$", "(a+){2,}"])
+    def test_a_nested_quantifier_is_an_error(self, tmp_path: Path, pattern: str) -> None:
+        path = _task(tmp_path / "01-redos.md", detect_block=f"**Detect**: `{pattern}`\n")
+        assert any("nested quantifier" in error for error in schema_errors(path, TaskKind.PRE))
 
     @pytest.mark.parametrize(
         ("field", "value"),
@@ -170,6 +183,71 @@ class TestDetect:
         assert len(hits) == 5
         assert total == 50
 
+    def test_only_the_start_of_a_very_long_line_is_scanned(self, project: Path) -> None:
+        width = upgrade_tasks.MAX_SCANNED_LINE_CHARS
+        (project / "min.js").write_text("a" * width + "needle\n" + "needle" + "a" * width + "\n")
+        hits, _total = detect(Detection(pattern="needle", paths=("*.js",)), project)
+        assert [h.line for h in hits] == [2]
+
+    def test_venv_and_untracked_are_skipped_only_at_the_root(self, project: Path) -> None:
+        for rel in ("venv/x.sh", "untracked/x.sh", "src/venv/x.sh", "src/untracked/x.sh"):
+            (project / rel).parent.mkdir(parents=True, exist_ok=True)
+            (project / rel).write_text("plan-qa --json\n")
+        hits, _total = detect(Detection(pattern="plan-qa", paths=("*/x.sh",)), project)
+        assert {h.path for h in hits} == {"src/venv/x.sh", "src/untracked/x.sh"}
+
+    @pytest.mark.parametrize("root", ["vendor", "dist", "build", "target", "node_modules"])
+    def test_vendored_and_build_roots_are_skipped(self, project: Path, root: str) -> None:
+        (project / root / "lib").mkdir(parents=True)
+        (project / root / "lib" / "copy.sh").write_text("plan-qa --json\n")
+        hits, _total = detect(Detection(pattern="plan-qa", paths=("*.sh",)), project)
+        assert {h.path for h in hits} == {"tools/qa.sh"}
+
+    def test_a_git_work_tree_is_scanned_through_its_ignore_rules(self, tmp_path: Path) -> None:
+        root = tmp_path / "repo"
+        root.mkdir()
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        (root / ".gitignore").write_text("generated/\n")
+        (root / "generated").mkdir()
+        (root / "generated" / "out.sh").write_text("plan-qa --json\n")
+        (root / "new.sh").write_text("plan-qa --json\n")
+        (root / ".claude" / "hooks-daemon").mkdir(parents=True)
+        (root / ".claude" / "hooks-daemon" / "vendored.sh").write_text("plan-qa --json\n")
+        hits, _total = detect(Detection(pattern="plan-qa", paths=("*.sh",)), root)
+        assert {h.path for h in hits} == {"new.sh"}
+
+
+class TestShippedPlanQaTask:
+    """The shipped 00375 task is critical, so a false positive costs an owner approval."""
+
+    _PATH = (
+        Path(__file__).resolve().parents[3]
+        / "CLAUDE/UPGRADES/v3/v3.63.0-to-v3.64.0/pre-upgrade-tasks"
+        / "01-rewrite-plan-qa-json-level-to-severity.md"
+    )
+
+    def _pattern(self) -> str:
+        detection = load_task(self._PATH, "v3.63.0-to-v3.64.0", TaskKind.PRE).detection
+        assert detection is not None
+        return detection.pattern
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "hooks-daemon plan-qa --json | jq '.findings[].level'",
+            "subprocess.run(['bin/hooks-daemon', 'plan_qa', '--json'])",
+        ],
+    )
+    def test_it_finds_an_invocation(self, line: str) -> None:
+        assert re.search(self._pattern(), line)
+
+    @pytest.mark.parametrize(
+        "line",
+        ['report = cache_dir / "plan_qa.json"', "see untracked/qa/plan-qa.json for details"],
+    )
+    def test_it_ignores_a_file_name(self, line: str) -> None:
+        assert re.search(self._pattern(), line) is None
+
 
 class TestRange:
     @pytest.fixture
@@ -254,3 +332,13 @@ class TestReport:
         assert by_name["03-plain.md"]["applies"] is None
         assert "a.txt:1" in result["text"]
         assert "not detected" in result["text"]
+
+    def test_a_task_whose_scan_could_not_run_says_so(self, tmp_path: Path) -> None:
+        task = load_task(
+            _task(tmp_path / "01-broken.md", detect_block="**Detect**: `(unclosed`\n"),
+            "UNRELEASED",
+            TaskKind.PRE,
+        )
+        (finding,) = evaluate([task], tmp_path)
+        assert finding.applies is None
+        assert any("could not run" in line for line in format_findings_line(finding))
