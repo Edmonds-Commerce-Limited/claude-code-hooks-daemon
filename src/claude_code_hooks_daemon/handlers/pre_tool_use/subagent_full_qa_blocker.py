@@ -56,7 +56,7 @@ import re
 import shlex
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
-from itertools import pairwise
+from itertools import islice, pairwise
 from pathlib import Path, PurePosixPath
 from typing import Any, Final
 
@@ -523,8 +523,10 @@ _ANY_DEPTH: Final[str] = "**"
 _BRACE_OPEN: Final[str] = "{"
 _BRACE_CLOSE: Final[str] = "}"
 _BRACE_SEPARATOR: Final[str] = ","
-#: More alternatives than this is not how anyone names test paths.
+#: More alternatives than this is not how anyone names test paths; a word
+#: past either limit is judged as the whole suite.
 _MAX_BRACE_ALTERNATIVES: Final[int] = 64
+_MAX_BRACE_GROUPS: Final[int] = 32
 
 #: What marks the root of the repository an operand lies in.
 _REPOSITORY_MARKERS: Final[tuple[str, ...]] = (".git", "pyproject.toml")
@@ -1475,7 +1477,14 @@ def _operand_is_full(
     is found, the starting directory stands in for the root. At or above the
     starting directory is always full. An operand that cannot be placed at
     all is compared literally, or by its tail when absolute.
+
+    A plain-word entry (``all``, ``tests``) is matched literally FIRST, unless
+    it names something where the command stands: ``llm_qa.py all`` runs the
+    whole suite from any directory, because the script finds its project from
+    its own location (review 5 M1).
     """
+    if _is_subcommand_word(operand, full_args, here):
+        return True
     placed = _relative_to_start(operand, here, start)
     if placed == _ABOVE_START:
         return True
@@ -1492,6 +1501,19 @@ def _operand_is_full(
     )
 
 
+def _is_subcommand_word(operand: str, full_args: frozenset[str], here: Path | None) -> bool:
+    """A ``full_args`` word with no path in it, and nothing of that name where the command runs."""
+    if operand not in full_args or _PATH_SEPARATOR in operand or operand == _CURRENT_DIR:
+        return False
+    if here is None:
+        return True
+    try:
+        return not (here / operand).exists()
+    except OSError as error:
+        logger.debug("Cannot look up %r under %s (%s): read as a word", operand, here, error)
+        return True
+
+
 def _resolved(operand: str, here: Path | None) -> PurePosixPath | None:
     """The absolute path an operand names, or None when that cannot be known."""
     if operand.startswith(_UNSEEN_CD_PREFIXES):
@@ -1503,8 +1525,21 @@ def _resolved(operand: str, here: Path | None) -> PurePosixPath | None:
     return PurePosixPath(posixpath.normpath(str(PurePosixPath(here) / operand)))
 
 
-def _expand_braces(word: str) -> list[str]:
-    """Every word bash's brace expansion makes of ``word`` (``a/{b,c}`` is ``a/b a/c``)."""
+def _expand_braces(word: str) -> list[str] | None:
+    """Every word bash's brace expansion makes of ``word`` (``a/{b,c}`` is ``a/b a/c``).
+
+    None when there are more than the cap, or more groups than can be walked:
+    too many to judge, so the caller treats the word as the whole suite. The
+    work is bounded by the cap, never by the full expansion (review 5 M2).
+    """
+    if word.count(_BRACE_OPEN) > _MAX_BRACE_GROUPS:
+        return None
+    expanded = list(islice(_brace_alternatives(word), _MAX_BRACE_ALTERNATIVES + 1))
+    return None if len(expanded) > _MAX_BRACE_ALTERNATIVES else expanded
+
+
+def _brace_alternatives(word: str) -> Iterator[str]:
+    """Lazily, each word bash's brace expansion makes of ``word``."""
     open_at = word.find(_BRACE_OPEN)
     while open_at != -1:
         depth, index, commas = 0, open_at, []
@@ -1522,14 +1557,11 @@ def _expand_braces(word: str) -> list[str]:
         if index < len(word) and commas:
             bounds = [open_at, *commas, index]
             head, tail = word[:open_at], word[index + 1 :]
-            expanded = [
-                alternative
-                for left, right in pairwise(bounds)
-                for alternative in _expand_braces(head + word[left + 1 : right] + tail)
-            ]
-            return expanded[:_MAX_BRACE_ALTERNATIVES]
+            for left, right in pairwise(bounds):
+                yield from _brace_alternatives(head + word[left + 1 : right] + tail)
+            return
         open_at = word.find(_BRACE_OPEN, open_at + 1)
-    return [word]
+    yield word
 
 
 def _glob_reach(operand: str) -> str | None:
@@ -1593,7 +1625,11 @@ def _is_full_run(
         word, target_follows = _split_attached_redirect(argument)
         if target_follows:
             index += 1
-        for expanded in _expand_braces(word):
+        alternatives = _expand_braces(word)
+        if alternatives is None:
+            names_full_suite = True
+            continue
+        for expanded in alternatives:
             reach = _glob_reach(expanded)
             operand = _normalise_operand(expanded if reach is None else reach)
             if pattern.full_args is not None and _operand_is_full(

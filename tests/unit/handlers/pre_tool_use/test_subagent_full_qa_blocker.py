@@ -23,6 +23,7 @@ without looking broken:
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Any
 
@@ -733,6 +734,90 @@ class TestOperandsAreJudgedFromTheirRepository:
         self._checkout(tmp_path)
         command = "pytest untracked/worktrees/wt/tests/unit/handlers"
         assert find_full_qa_invocation(command, _patterns(), cwd=tmp_path) is None
+
+
+class TestSubcommandWordsAfterACd:
+    """Review 5 M1: `all` and `tests` were resolved as PATHS below the repository root.
+
+    ``llm_qa.py`` finds its project from its own location, so ``all`` runs the
+    whole suite wherever the command stands. A ``full_args`` entry that is a
+    plain word (no ``/``, not ``.``) and names nothing in the directory the
+    command runs in is matched literally, before any path resolution.
+    """
+
+    @staticmethod
+    def _repo(tmp_path: Path) -> Path:
+        for directory in ("scripts/qa", "CLAUDE", "tests/unit", "docs"):
+            (tmp_path / directory).mkdir(parents=True)
+        (tmp_path / ".git").mkdir()
+        (tmp_path / "scripts" / "qa" / "llm_qa.py").write_text("", encoding="utf-8")
+        return tmp_path
+
+    @pytest.mark.parametrize(
+        ("command", "start"),
+        [
+            ("cd scripts/qa && ./llm_qa.py all", "."),
+            ("cd scripts && qa/llm_qa.py all", "."),
+            ("cd CLAUDE && ../scripts/qa/llm_qa.py all", "."),
+            ("cd tests && ../scripts/qa/llm_qa.py tests", "."),
+            ("cd docs && python3 ../scripts/qa/llm_qa.py all", "."),
+            ("./llm_qa.py all", "scripts/qa"),
+            ("../scripts/qa/llm_qa.py all", "CLAUDE"),
+            ("cd scripts/qa && ./run_all.sh", "."),
+            ("./scripts/qa/llm_qa.py all", "."),
+        ],
+    )
+    def test_a_subcommand_word_is_full_wherever_the_command_stands(
+        self, tmp_path: Path, command: str, start: str
+    ) -> None:
+        root = self._repo(tmp_path)
+        assert find_full_qa_invocation(command, _patterns(), cwd=root / start), command
+
+    def test_a_read_only_run_after_a_cd_is_still_allowed(self, tmp_path: Path) -> None:
+        root = self._repo(tmp_path)
+        command = "cd tests && ../scripts/qa/llm_qa.py all --read-only"
+        assert find_full_qa_invocation(command, _patterns(), cwd=root) is None
+
+    def test_a_word_naming_a_directory_where_the_command_stands_is_a_path(
+        self, tmp_path: Path
+    ) -> None:
+        """``cd tests && pytest unit/x`` stays targeted; the literal match needs no such path."""
+        root = self._repo(tmp_path)
+        (root / "tests" / "unit" / "tests").mkdir()
+        command = "cd tests/unit && pytest tests"
+        assert find_full_qa_invocation(command, _patterns(), cwd=root) is None
+
+
+class TestBraceExpansionIsBounded:
+    """Review 5 M2: the expansion was built in full before the cap, so the work was 2^n.
+
+    A 139-character command with 23 groups took 18 s; past the client's 30 s
+    budget the whole PreToolUse chain fails open. The work is now bounded by
+    the cap, and a word with more alternatives than the cap is judged as the
+    whole suite: it cannot be judged, so it fails closed.
+    """
+
+    _BUDGET_SECONDS = 1.0
+
+    @pytest.mark.parametrize("groups", [24, 40, 200])
+    def test_many_groups_are_judged_within_a_second(self, groups: int) -> None:
+        command = "pytest " + "{a,b}" * groups + " --co; git status"
+        began = time.perf_counter()
+        find_full_qa_invocation(command, _patterns())
+        assert time.perf_counter() - began < self._BUDGET_SECONDS
+
+    @pytest.mark.parametrize("groups", [7, 24])
+    def test_more_alternatives_than_the_cap_fail_closed(self, groups: int) -> None:
+        command = "pytest tests/unit/qa/test_" + "{a,b}" * groups + ".py"
+        assert find_full_qa_invocation(command, _patterns()) is not None
+
+    def test_alternatives_within_the_cap_are_judged_one_by_one(self) -> None:
+        command = "pytest tests/unit/qa/test_" + "{a,b}" * 5 + ".py"
+        assert find_full_qa_invocation(command, _patterns()) is None
+
+    def test_deeply_nested_braces_fail_closed_without_recursing(self) -> None:
+        command = "pytest tests/unit/qa/" + "{a," * 2000 + "b" + "}" * 2000
+        assert find_full_qa_invocation(command, _patterns()) is not None
 
 
 class TestAnUnknownFlagUnderAGrammar:
