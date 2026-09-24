@@ -3,6 +3,39 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
+### N27 — `skill_scan` and `tool_report` build the transcript directory name two different ways
+
+**Found by the 00468 core agent** (report on its branch,
+`subagent-reports/260924-p468-core-opus-5-5.md`). Claude Code keeps a
+project's transcripts under a directory named after the project path, with
+characters it cannot use in a name replaced. `skill_scan` and `tool_report`
+each derive that name with their own code, and they disagree for a path
+containing `.` or `_`. So for such a project one of them reads the wrong
+directory, finds nothing, and reports "no data" rather than an error.
+
+**Candidate remedy:** one helper derives the transcript directory from the
+project path, pinned to Claude Code's real rule (checked against a real
+`~/.claude/projects/` entry for a path with `.`, `_` and `-`). Both commands
+and every other derivation site use it (sweep for the other derivations).
+The helper raises, not returns empty, when the directory does not exist and
+the caller asked for it. RED test: a project path with `.` and `_` resolves
+to the same directory from both commands.
+
+### N26 — `check_skill_references.py` scans zero files when run from a worktree
+
+**Found by the 00468 core agent.** Run from any worktree, the skill
+references QA check reports success after scanning 0 files. A check that
+examines nothing and passes is a fail-open gate: every sub-agent's targeted
+QA runs from a worktree, so the check has been silently vacuous exactly
+where branches are verified.
+
+**Candidate remedy:** find why the file discovery comes up empty in a
+worktree (a `.git` file rather than a directory, or a path anchored to the
+main checkout), and fix it. Separately, the check FAILS when it scans zero
+files where skills exist, so a vacuous pass cannot recur. Audit the other
+`scripts/qa/check_*.py` for the same "0 examined, PASS" shape and pin the
+class with a test that runs each check from a worktree fixture.
+
 ### N25 — a slow handler runs out the client's 30 s budget, and a timeout is an ALLOW for the whole PreToolUse chain
 
 **Found by the guard-defects security review 2**
