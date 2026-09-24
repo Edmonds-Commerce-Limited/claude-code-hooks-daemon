@@ -180,8 +180,9 @@ class TestInterpreterIsPassedExplicitly:
     def test_the_qa_interpreter_overrides_the_config_venv(
         self, checker: types.ModuleType, tmp_path: Path
     ) -> None:
-        """``pyrightconfig.json`` names ``untracked/venv``, a symlink only the
-        main checkout has; a worktree or a CI runner has the fingerprint-keyed
+        """``pyrightconfig.json`` names ``untracked/lsp-venv``, a symlink only
+        a checkout whose self-install daemon has started carries; a worktree
+        before its first daemon start or a CI runner has the fingerprint-keyed
         venv and no symlink, so without ``--pythonpath`` every third-party
         import is reported missing there (597 of them, measured)."""
         argv_log = tmp_path / "argv.txt"

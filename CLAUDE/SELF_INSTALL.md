@@ -22,6 +22,7 @@ When `self_install_mode: true` in `.claude/hooks-daemon.yaml`, the daemon runs f
 /workspace/
 ├── untracked/venv-{slug}-py{MM}-{fingerprint}/  # Virtual environment (see "Venv layout" below)
 ├── untracked/venv/              # Legacy (pre-v3.7.0) — auto-deleted on upgrade
+├── untracked/lsp-venv            # Symlink to the venv above, for pyrightconfig.json (see CLAUDE/development/LSP.md)
 ├── untracked/daemon-{host}.sock # Unix socket (hostname-scoped)
 ├── untracked/daemon-{host}.pid  # PID file (hostname-scoped)
 ├── src/claude_code_hooks_daemon/  # Source code (not pip package)
@@ -59,6 +60,12 @@ with machine, path and Python. Use the `bin/hooks-daemon` wrapper, or resolve
 the interpreter via `scripts/lib/resolve_venv.sh` (see "Daemon CLI" below). A
 hand-made `untracked/venv/` is the retired pre-v3.7.0 layout: `resolve_venv.sh`
 refuses it and every wrapper call exits 5.
+
+A separate `untracked/lsp-venv` symlink to this directory exists purely for
+`pyrightconfig.json`, which can only name a venv by a stable path, not a
+fingerprint-keyed one; it is created and repointed by the daemon itself
+(`ProjectContext`, not `resolve_venv.sh`) — see
+[development/LSP.md](development/LSP.md).
 
 ### Why the venv is fingerprint-keyed (v3.7.0+)
 

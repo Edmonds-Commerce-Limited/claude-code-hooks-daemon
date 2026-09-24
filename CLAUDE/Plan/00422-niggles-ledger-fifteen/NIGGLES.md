@@ -1723,6 +1723,21 @@ Deduped: the only related entries are this ledger's N5 rows on install
 validation (closed) and Plan 00455, which found it and deliberately did not
 widen its scope.
 
+**Remedied**: remedy (1). The `pyproject.toml` exemption is deleted;
+`check_for_nested_installation` now cleans up the nested path unconditionally
+whenever it exists. Tests cover a real outer clone with the inner path
+present (must clean up) and the self-install repo layout, which has no outer
+clone and so never reaches the nested path at all (must leave everything
+alone). The destructive branch also got safer while it was open: a nested
+path that is itself a symlink is unlinked rather than handed to
+`shutil.rmtree` (which refuses a symlink path outright), and a symlink found
+while removing a genuine nested directory only has the link removed, never
+its target. `install.py`'s `_validate_not_nested` was checked and carries no
+copy of the exemption (it raises unconditionally already); the OTHER
+`_project_root_is_daemon_repo` check inside `validate_installation_target`'s
+step 1 is a different, correct use of the same pyproject-name detection and
+was left alone.
+
 ### N18 — LSP.md relies on an `untracked/venv` symlink that nothing creates and the code calls legacy
 
 **Found**: chasing a Pyright `Import "pytest" could not be resolved` on a new
@@ -1783,6 +1798,22 @@ Deduped before filing: no plan in the tree matches `pyright`, `pyrightconfig`
 or `language server`; the two `LSP` matches (00075, 00368) are Complete; the
 ledger has no entry. Plan 00368 is the likely origin of the symlink design and
 is where to look first.
+
+**Remedied**: a variant of remedy (2), with a new name rather than reusing
+`untracked/venv` — `untracked/lsp-venv`, which collides with neither the
+`LEGACY_VENV` meaning of the old path nor the `venv-*` glob the skill and the
+eager-cleanup/prune-venvs code scan, so no cleanup exemption was needed
+anywhere. `ProjectContext.initialize()`'s self-install branch now creates and
+(unlike the CLI symlink) repoints the link on every daemon start, derived
+from `sys.prefix`, restricted to when the running interpreter's venv lives
+directly under this project's own `untracked/`. `pyrightconfig.json`'s
+`venv` key now names it. LSP.md's three checked claims are corrected in
+place, including the "exists only in the main checkout" line, which is now
+false in the other direction: it exists in ANY self-install checkout whose
+daemon has started at least once, worktrees included. Checked and confirmed
+by reading: none of the upgrade's legacy-venv removal, the eager
+stale-venv sweep, or `_enumerate_venvs`' venv listing matches or touches
+`lsp-venv` (their glob/prefix checks are `venv` exact or `venv-*` prefix).
 
 ### N17 — a stale docstring in `paths.py` produced a confident wrong verdict in a live investigation
 

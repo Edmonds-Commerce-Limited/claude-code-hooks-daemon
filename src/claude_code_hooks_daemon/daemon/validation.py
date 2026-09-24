@@ -267,8 +267,14 @@ def check_for_nested_installation(project_root: Path) -> str | None:
     """Check for nested installation and actively clean it up.
 
     If .claude/hooks-daemon/.claude/hooks-daemon exists, it is a nested install
-    artifact (runtime files created when daemon used the wrong project root).
-    This function removes it and allows startup to continue.
+    artifact: runtime files created when a daemon ran with its project root
+    wrongly set to the clone at .claude/hooks-daemon/ instead of the real
+    project root. Every real client clone has an outer .claude/hooks-daemon/
+    with its own pyproject.toml (that outer directory IS the cloned daemon),
+    so this is unconditional -- it does not check what the outer directory
+    contains. A self-install checkout (Plan 00455) has no outer clone at all,
+    only a bare .claude/hooks-daemon/bin/hooks-daemon symlink, so the nested
+    path this function looks for never exists there.
 
     Args:
         project_root: Project root to check
@@ -277,16 +283,20 @@ def check_for_nested_installation(project_root: Path) -> str | None:
         Error message string if cleanup fails, None otherwise
     """
     nested_install = project_root / ".claude" / "hooks-daemon" / ".claude" / "hooks-daemon"
-    if nested_install.exists():
-        # If the outer .claude/hooks-daemon IS the hooks-daemon repo itself
-        # (identified by having pyproject.toml), then the inner .claude/hooks-daemon
-        # is just the repo's own dogfooding config directory, not a genuine nested
-        # installation. Skip the false positive.
-        outer_hooks_daemon = project_root / ".claude" / "hooks-daemon"
-        if (outer_hooks_daemon / "pyproject.toml").is_file():
-            return None
 
-        # Actively remove the nested install artifacts
+    if nested_install.is_symlink():
+        # A symlink at the nested path (e.g. a prior cleanup left a dangling
+        # link, or something else placed one) must be unlinked directly --
+        # shutil.rmtree refuses to operate on a symlink path outright.
+        logger.warning("Removing nested install artifact (symlink): %s", nested_install)
+        nested_install.unlink()
+        return None
+
+    if nested_install.exists():
+        # Actively remove the nested install artifacts. shutil.rmtree does
+        # not follow symlinks it encounters while walking the tree, so a
+        # symlink inside the nested directory pointing elsewhere has only
+        # the link itself removed, never its target.
         import shutil
 
         logger.warning("Removing nested install artifacts: %s", nested_install)

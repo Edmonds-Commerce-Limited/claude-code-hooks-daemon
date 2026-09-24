@@ -1,11 +1,15 @@
 """Tests for ProjectContext singleton."""
 
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.core.project_context import (
+    ProjectContext,
+    _ensure_self_install_lsp_venv_symlink,
+)
 
 
 class TestProjectContextInitialization:
@@ -471,6 +475,162 @@ class TestSelfInstallCliSymlink:
 
         assert not real_wrapper.is_symlink()
         assert real_wrapper.read_text(encoding="utf-8") == "#!/bin/sh\necho not-a-symlink\n"
+
+
+class TestSelfInstallLspVenvSymlink:
+    """``untracked/lsp-venv`` gives pyrightconfig.json a stable path to the
+    venv the self-install daemon is currently running from (Ledger 00422
+    N18), derived from ``sys.prefix`` -- unlike the CLI symlink, this one is
+    repointed when it goes stale (the fingerprint-keyed target changes on
+    every upgrade).
+    """
+
+    def _make_venv(self, untracked_dir: Path, name: str) -> Path:
+        venv_dir = untracked_dir / name
+        (venv_dir / "bin").mkdir(parents=True)
+        return venv_dir
+
+    def test_creates_the_link_when_sys_prefix_is_under_untracked(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        project_root = tmp_path / "daemon-project"
+        untracked_dir = project_root / "untracked"
+        venv_dir = self._make_venv(untracked_dir, "venv-abc123")
+        monkeypatch.setattr(sys, "prefix", str(venv_dir))
+
+        _ensure_self_install_lsp_venv_symlink(project_root)
+
+        link = untracked_dir / "lsp-venv"
+        assert link.is_symlink()
+        assert link.resolve() == venv_dir.resolve()
+        assert not link.readlink().is_absolute()
+
+    def test_is_idempotent_when_already_correct(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        project_root = tmp_path / "daemon-project"
+        untracked_dir = project_root / "untracked"
+        venv_dir = self._make_venv(untracked_dir, "venv-abc123")
+        monkeypatch.setattr(sys, "prefix", str(venv_dir))
+
+        _ensure_self_install_lsp_venv_symlink(project_root)
+        link = untracked_dir / "lsp-venv"
+        first_target = link.readlink()
+
+        _ensure_self_install_lsp_venv_symlink(project_root)
+
+        assert link.is_symlink()
+        assert link.readlink() == first_target
+
+    def test_repoints_when_the_target_is_stale(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An upgrade changes the fingerprint-keyed venv name; the link must
+        follow it rather than keep pointing at the deleted old venv."""
+        project_root = tmp_path / "daemon-project"
+        untracked_dir = project_root / "untracked"
+        old_venv = self._make_venv(untracked_dir, "venv-old111")
+        new_venv = self._make_venv(untracked_dir, "venv-new222")
+
+        monkeypatch.setattr(sys, "prefix", str(old_venv))
+        _ensure_self_install_lsp_venv_symlink(project_root)
+        link = untracked_dir / "lsp-venv"
+        assert link.resolve() == old_venv.resolve()
+
+        monkeypatch.setattr(sys, "prefix", str(new_venv))
+        _ensure_self_install_lsp_venv_symlink(project_root)
+
+        assert link.is_symlink()
+        assert link.resolve() == new_venv.resolve()
+
+    def test_leaves_a_non_symlink_at_the_link_path_alone(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        project_root = tmp_path / "daemon-project"
+        untracked_dir = project_root / "untracked"
+        venv_dir = self._make_venv(untracked_dir, "venv-abc123")
+        monkeypatch.setattr(sys, "prefix", str(venv_dir))
+
+        link = untracked_dir / "lsp-venv"
+        link.mkdir(parents=True)
+        (link / "marker.txt").write_text("real directory, not a symlink")
+
+        _ensure_self_install_lsp_venv_symlink(project_root)
+
+        assert not link.is_symlink()
+        assert (link / "marker.txt").read_text() == "real directory, not a symlink"
+
+    def test_sys_prefix_outside_untracked_does_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        project_root = tmp_path / "daemon-project"
+        (project_root / "untracked").mkdir(parents=True)
+        elsewhere_venv = tmp_path / "some-other-venv"
+        elsewhere_venv.mkdir()
+        monkeypatch.setattr(sys, "prefix", str(elsewhere_venv))
+
+        _ensure_self_install_lsp_venv_symlink(project_root)
+
+        link = project_root / "untracked" / "lsp-venv"
+        assert not link.exists()
+        assert not link.is_symlink()
+
+    def test_client_mode_never_creates_the_lsp_venv_symlink(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Only the self-install branch of ProjectContext.initialize calls
+        this; a normal client install must never grow the link."""
+        project_root = tmp_path / "project"
+        claude_dir = project_root / ".claude"
+        claude_dir.mkdir(parents=True)
+        config_path = claude_dir / "hooks-daemon.yaml"
+        config_path.write_text("version: 1.0\n")
+
+        venv_dir = project_root / "untracked" / "venv-abc123"
+        (venv_dir / "bin").mkdir(parents=True)
+        monkeypatch.setattr(sys, "prefix", str(venv_dir))
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=0, stdout=f"{project_root}\n"),
+                MagicMock(returncode=0, stdout="git@github.com:user/test-repo.git\n"),
+                MagicMock(returncode=0, stdout=f"{project_root}\n"),
+            ]
+            ProjectContext.initialize(config_path)
+
+        ProjectContext.reset()
+        link = project_root / "untracked" / "lsp-venv"
+        assert not link.exists()
+        assert not link.is_symlink()
+
+    def test_self_install_mode_creates_the_link_via_initialize(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The end-to-end path: ProjectContext.initialize() in self-install
+        mode wires up the lsp-venv link, not just the standalone function."""
+        project_root = tmp_path / "daemon-project"
+        claude_dir = project_root / ".claude"
+        daemon_src = project_root / "src" / "claude_code_hooks_daemon"
+        daemon_src.mkdir(parents=True)
+        claude_dir.mkdir(parents=True)
+        config_path = claude_dir / "hooks-daemon.yaml"
+        config_path.write_text("version: 1.0\n")
+
+        venv_dir = project_root / "untracked" / "venv-abc123"
+        (venv_dir / "bin").mkdir(parents=True)
+        monkeypatch.setattr(sys, "prefix", str(venv_dir))
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=0, stdout=f"{project_root}\n"),
+                MagicMock(returncode=0, stdout="https://github.com/org/daemon.git\n"),
+                MagicMock(returncode=0, stdout=f"{project_root}\n"),
+            ]
+            ProjectContext.initialize(config_path)
+
+        link = project_root / "untracked" / "lsp-venv"
+        assert link.is_symlink()
+        assert link.resolve() == venv_dir.resolve()
 
 
 class TestProjectContextContainerRuntime:

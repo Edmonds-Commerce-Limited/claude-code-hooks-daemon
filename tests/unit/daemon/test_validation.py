@@ -520,28 +520,88 @@ class TestCheckForNestedInstallation:
         result = check_for_nested_installation(tmp_path)
         assert result is None
 
-    def test_returns_none_when_outer_hooks_daemon_is_the_repo(self, tmp_path: Path) -> None:
-        """Test returns None when .claude/hooks-daemon IS the hooks-daemon repo.
+    def test_cleans_up_nested_install_even_when_outer_has_pyproject(self, tmp_path: Path) -> None:
+        """A real outer clone (pyproject.toml present) still gets its inner
+        nested artifact cleaned up.
 
-        When the hooks-daemon repo is installed at .claude/hooks-daemon/ and it
-        has its own .claude/hooks-daemon/ subdirectory (for self-dogfooding),
-        this should NOT be flagged as a nested installation.
-
-        The repo is identified by having a pyproject.toml file.
+        Every real client clone has a pyproject.toml at
+        .claude/hooks-daemon/ (that outer directory IS the cloned daemon), so
+        exempting on its presence meant the check could never fire for a real
+        client (Ledger 00422 N19). The inner path is the wrong-root runtime
+        artifact regardless of what the outer directory contains.
         """
         hooks_daemon_repo = tmp_path / ".claude" / "hooks-daemon"
         hooks_daemon_repo.mkdir(parents=True)
-        # The outer .claude/hooks-daemon IS the hooks-daemon repo (has pyproject.toml)
         (hooks_daemon_repo / "pyproject.toml").write_text(
             "[project]\nname = 'claude-code-hooks-daemon'\n"
         )
         (hooks_daemon_repo / "src").mkdir()
-        # The repo has its own .claude/hooks-daemon subdirectory (dogfooding)
         inner_hooks_daemon = hooks_daemon_repo / ".claude" / "hooks-daemon"
         inner_hooks_daemon.mkdir(parents=True)
 
         result = check_for_nested_installation(tmp_path)
         assert result is None
+        assert not inner_hooks_daemon.exists()
+
+    def test_leaves_self_install_layout_alone(self, tmp_path: Path) -> None:
+        """The self-install repo layout (project root has pyproject.toml plus
+        a .claude/hooks-daemon/bin/hooks-daemon symlink, Plan 00455) has no
+        nested path to find, so nothing is touched.
+
+        In self-install mode project_root IS the repo root, so there is no
+        outer .claude/hooks-daemon/ clone at all -- only the bare CLI symlink
+        Plan 00455 creates.
+        """
+        (tmp_path / "pyproject.toml").write_text("[project]\nname = 'claude-code-hooks-daemon'\n")
+        (tmp_path / "src" / "claude_code_hooks_daemon").mkdir(parents=True)
+        bin_dir = tmp_path / ".claude" / "hooks-daemon" / "bin"
+        bin_dir.mkdir(parents=True)
+        (bin_dir / "hooks-daemon").symlink_to(Path("../../../bin/hooks-daemon"))
+
+        result = check_for_nested_installation(tmp_path)
+        assert result is None
+        assert (bin_dir / "hooks-daemon").is_symlink()
+
+    def test_unlinks_nested_install_when_it_is_itself_a_symlink(self, tmp_path: Path) -> None:
+        """If the nested path is a symlink, it is unlinked, never rmtree'd.
+
+        shutil.rmtree refuses a symlink path outright (raises); the fix must
+        detect this case before attempting removal.
+        """
+        outside_target = tmp_path / "outside-target"
+        outside_target.mkdir()
+        (outside_target / "marker.txt").write_text("must survive")
+
+        nested_install = tmp_path / ".claude" / "hooks-daemon" / ".claude" / "hooks-daemon"
+        nested_install.parent.mkdir(parents=True)
+        nested_install.symlink_to(outside_target)
+
+        result = check_for_nested_installation(tmp_path)
+        assert result is None
+        assert not nested_install.is_symlink()
+        assert not nested_install.exists()
+        # The symlink target itself was never touched.
+        assert outside_target.exists()
+        assert (outside_target / "marker.txt").read_text() == "must survive"
+
+    def test_rmtree_does_not_follow_a_symlink_inside_the_nested_dir(self, tmp_path: Path) -> None:
+        """A real nested directory containing a symlink to an outside
+        location is removed without deleting the symlink's target.
+        """
+        outside_target = tmp_path / "outside-target"
+        outside_target.mkdir()
+        (outside_target / "marker.txt").write_text("must survive")
+
+        nested_install = tmp_path / ".claude" / "hooks-daemon" / ".claude" / "hooks-daemon"
+        nested_install.mkdir(parents=True)
+        (nested_install / "link-to-outside").symlink_to(outside_target)
+
+        result = check_for_nested_installation(tmp_path)
+        assert result is None
+        assert not nested_install.exists()
+        # The directory the inner symlink pointed at survives untouched.
+        assert outside_target.exists()
+        assert (outside_target / "marker.txt").read_text() == "must survive"
 
     def test_cleans_up_genuine_nested_installation(self, tmp_path: Path) -> None:
         """Genuine nested install (outer is NOT the repo) is actively removed.
