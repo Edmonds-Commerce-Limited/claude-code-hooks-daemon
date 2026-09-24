@@ -3,6 +3,42 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
+### N25 — a slow handler runs out the client's 30 s budget, and a timeout is an ALLOW for the whole PreToolUse chain
+
+**Found by the guard-defects security review 2**
+([report](subagent-reports/260924-n466-guards-review2-opus-5-5.md), B1 and
+m3). `.claude/hooks/pre-tool-use` gives the daemon `--timeout-ms 30000`. On a
+read-side socket timeout, `.claude/init.sh` (about lines 1654-1661) emits
+`hookSpecificOutput` with context only, which is an ALLOW for every non-Stop
+event. So any handler that can be made slow enough bypasses every guard
+behind it, not just itself. Two instances are measured:
+
+- `destructive_git`'s `strip_inert_spans` takes 99 s on a 200 KB command.
+  That is already on main.
+- The guard-defects branch's interior-wildcard DP takes 31 s on a crafted
+  60 KB command. That one is fixed on its branch as review 2's B1.
+
+Fixing each slow handler one by one leaves the class open: the next
+super-linear regex or DP reopens it silently.
+
+**Candidate remedies (the class, not the instance):**
+
+1. The daemon enforces a per-event deadline well under the client budget
+   (for example 20 s for the whole chain). When it passes, the remaining
+   SAFETY+BLOCKING handlers are treated as having raised, which means DENY
+   with a "not judged in time" reason under N24's fail-closed rule.
+   Advisory handlers are skipped with a note.
+2. Fix the measured instance: `strip_inert_spans` becomes linear, with a
+   timing test at 200 KB.
+3. A test harness drives every SAFETY handler with large hostile inputs
+   (long runs of quotes, backslashes, wildcards and nesting) under a time
+   bound, so a super-linear path fails CI rather than a client.
+
+Deliberately NOT a remedy: making the client fail closed on timeout. A
+daemon that is merely slow (an overloaded host) would then block every tool
+call. The deadline belongs inside the daemon, where it can tell safety
+handlers from advisories.
+
 ### N24 — `daemon.strict_mode` never reaches the live daemon, so every guard fails OPEN on a handler exception
 
 **Found by the guard-defects security review 2**
