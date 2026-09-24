@@ -140,7 +140,8 @@ current `main`, records the batch base with `main-moved --start` (a git ref, so
 it survives between shell calls), and runs the full gate once there. A green
 run on a clean tree certifies that head. While the batch is in flight `main` is
 frozen for code. `main-moved` then decides the last step. It says `unmoved`,
-which means fast-forward, or `head-moved` when the head is not the certified
+which means fast-forward `main` to the certified head's SHA (never the branch
+name), or `head-moved` when the head is not the certified
 one, or it names a recheck (doc tools, the tests of what moved, or the full
 gate). After the recheck, `--advance` moves the base on, and the check repeats
 until `unmoved`. One full run at a time is also what stops the collisions below. The

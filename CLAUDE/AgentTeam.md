@@ -1278,24 +1278,30 @@ git log worktree-plan-NNNNN --oneline  # Review changes
 # the batch base? main-moved judges both in the PARENT worktree (it reads the
 # parent's batch refs) and the exit code decides (CLAUDE/QA.md, "The Batched
 # Integration Gate"). `|| rc=$?` keeps a non-zero verdict from ending a
-# `set -euo pipefail` script before the case runs.
+# `set -euo pipefail` script before the case runs; each non-zero branch then
+# exits with the verdict, so nothing below it runs.
 cd /workspace/untracked/worktrees/worktree-plan-NNNNN
 rc=0
 ./scripts/qa/llm_qa.py main-moved || rc=$?
 case $rc in
-  0) # unmoved: fast-forward only, so main becomes exactly the gated head
-     git -C /workspace merge --ff-only worktree-plan-NNNNN ;;
+  0) # unmoved: fast-forward main to EXACTLY the certified head, by its sha,
+     # never the branch name: a late commit on the branch was never gated
+     certified=$(git rev-parse refs/integration/certified/worktree-plan-NNNNN)
+     git -C /workspace merge --ff-only "$certified" ;;
   7) # head-moved: something was committed or merged after the gate passed,
-     # or the tree is dirty. Commit or remove it, run `llm_qa.py all` on a
-     # clean tree, then run STEP 5 again from the top
-     echo "head-moved: re-run the gate on a clean tree" ;;
-  4|5|6) # full-gate / docs-only / targeted: in THIS worktree, run the four
-     # printed steps (merge main, the recheck, main-moved --advance), then
-     # run STEP 5 again from the top
-     echo "main moved: run the printed recheck and --advance" ;;
+     # the tree is dirty, or the merge of main was backed out. Run the
+     # printed steps on a clean tree, then run STEP 5 again from the top
+     echo "head-moved: run the printed steps, then the gate on a clean tree"
+     exit "$rc" ;;
+  4|5|6) # full-gate / docs-only / targeted: in THIS worktree, run the
+     # printed steps (merge main, the recheck, main-moved --advance; only
+     # --advance when the recheck already passed), then STEP 5 again
+     echo "main moved: run the printed recheck and --advance"
+     exit "$rc" ;;
   *) # 1: no verdict (no base, bad ref, git or the mapper failed). STOP and
      # fix the cause; never fast-forward without a verdict
-     echo "no verdict: fix the cause before anything lands" ;;
+     echo "no verdict: fix the cause before anything lands"
+     exit "$rc" ;;
 esac
 # If --ff-only REFUSES, main moved after the check: run STEP 5 again. The
 # advanced base means nothing already covered is re-run.
@@ -1796,14 +1802,18 @@ cd /workspace/untracked/worktrees/worktree-plan-00028
 rc=0
 ./scripts/qa/llm_qa.py main-moved || rc=$?
 case $rc in
-  0) # unmoved: fast-forward main to the gated head (no second full run)
-     git -C /workspace merge --ff-only worktree-plan-00028 ;;
-  7) # head-moved: re-run the gate on a clean tree, then repeat this block
-     echo "head-moved: re-run the gate on a clean tree" ;;
-  4|5|6) # a recheck: run the four printed steps here, then repeat this block
-     echo "main moved: run the printed recheck and --advance" ;;
+  0) # unmoved: fast-forward main to the certified head's sha (no second run)
+     certified=$(git rev-parse refs/integration/certified/worktree-plan-00028)
+     git -C /workspace merge --ff-only "$certified" ;;
+  7) # head-moved: run the printed steps on a clean tree, then repeat this block
+     echo "head-moved: run the printed steps, then the gate on a clean tree"
+     exit "$rc" ;;
+  4|5|6) # a recheck: run the printed steps here, then repeat this block
+     echo "main moved: run the printed recheck and --advance"
+     exit "$rc" ;;
   *) # no verdict: STOP and fix the cause
-     echo "no verdict: fix the cause before anything lands" ;;
+     echo "no verdict: fix the cause before anything lands"
+     exit "$rc" ;;
 esac
 # --ff-only refused? main moved after the check: repeat this block.
 
@@ -1897,9 +1907,9 @@ Wave 2 audit revealed 50% of merged work was incomplete with false claims. The m
   which is merged in again, and the gate re-runs
 - [ ] **Spawn final Honesty Checker** to audit entire parent worktree
 - [ ] Final Honesty Checker approves → `llm_qa.py main-moved` in the parent,
-  branching on its exit code: 0 → `git merge --ff-only` from main; 7 → the
-  gate again on a clean tree; 4, 5 or 6 → the printed recheck, `--advance`,
-  and check again; anything else → stop
+  branching on its exit code: 0 → `git merge --ff-only <certified sha>` from
+  main; 7 → the printed steps and the gate again on a clean tree; 4, 5 or 6 →
+  the printed recheck, `--advance`, and check again; anything else → stop
   (if `worktree.merge_to_main_requires_human_approval` is on, report
   readiness and wait for a human to run
   `hooks-daemon approve-merge <branch>`)

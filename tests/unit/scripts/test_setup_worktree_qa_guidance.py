@@ -17,6 +17,11 @@ includes every word naming a declared program whatever verb precedes it, the
 body of a ``cat`` heredoc, and a ``$NAME`` the script assigned (review 4 N7).
 So a printed MENTION of a runner reads as an instruction too: name a path
 after it (``pytest tests/unit/qa/test_x.py``), or do not name it.
+
+That is deliberately conservative (review 5 n8): a line that FORBIDS the full
+run, such as "Never run ./scripts/qa/llm_qa.py all in a sub-agent", is flagged
+as well, because telling a prohibition from an instruction would need to read
+English. The script says what to run instead, which is the useful half.
 """
 
 from __future__ import annotations

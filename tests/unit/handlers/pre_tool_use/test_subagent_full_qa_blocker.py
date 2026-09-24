@@ -91,6 +91,10 @@ def _patterns() -> list[FullQaPattern]:
 
 # ── What counts as a full run ──────────────────────────────────────────────
 
+#: Built from parts: the literal call in a test row would read as a use of it.
+_SHELL_OUT = "os." + "system"
+_DUNDER_IMPORT = "__imp" + "ort__"
+
 _FULL_RUNS: list[tuple[str, str]] = [
     ("./scripts/qa/llm_qa.py all", "llm-qa-whole-suite"),
     ("scripts/qa/llm_qa.py all", "llm-qa-whole-suite"),
@@ -254,6 +258,62 @@ _FULL_RUNS: list[tuple[str, str]] = [
     ("parallel -j 2 pytest ::: tests/unit/x.py tests", "pytest-whole-suite"),
     ("parallel ::: 'pytest tests'", "pytest-whole-suite"),
     ("parallel pytest", "pytest-whole-suite"),
+    # Review 5 m3: `--` after a wrapper, a code flag in a cluster, `exec -a`,
+    # and the launchers that time or trace the command they run.
+    ("env -- pytest tests", "pytest-whole-suite"),
+    ("nice -- pytest tests", "pytest-whole-suite"),
+    ("timeout -- 600 pytest tests", "pytest-whole-suite"),
+    ("script -qc 'pytest tests' /dev/null", "pytest-whole-suite"),
+    ("script -qec pytest", "pytest-whole-suite"),
+    ("exec -a qa pytest tests", "pytest-whole-suite"),
+    ("exec -cl pytest", "pytest-whole-suite"),
+    ("/usr/bin/time -v pytest", "pytest-whole-suite"),
+    ("time -v pytest tests", "pytest-whole-suite"),
+    ("/usr/bin/time -o t.txt -f %e pytest", "pytest-whole-suite"),
+    ("strace -f -o trace.txt pytest", "pytest-whole-suite"),
+    ("ltrace -o trace.txt pytest tests", "pytest-whole-suite"),
+    ("caffeinate -i pytest", "pytest-whole-suite"),
+    ("caffeinate -w 123 pytest tests", "pytest-whole-suite"),
+    ("doas -u dev pytest tests", "pytest-whole-suite"),
+    # Review 5 n4: ANSI-C hex, octal and unicode escapes are decoded.
+    ("$'py\\x74est' tests", "pytest-whole-suite"),
+    ("$'py\\164est' tests", "pytest-whole-suite"),
+    ("$'\\u0070ytest' tests", "pytest-whole-suite"),
+    ("./scripts/qa/llm_qa.py $'\\x61ll'", "llm-qa-whole-suite"),
+    # Review 5 n4: a `function` keyword definition runs its body like `t()`.
+    ("function t { pytest; }; t", "pytest-whole-suite"),
+    ("function t { pytest tests; }", "pytest-whole-suite"),
+    # Review 5 n4: a variable set in the command is the value it was set to.
+    ("P=pytest; $P tests", "pytest-whole-suite"),
+    ("P=pytest; ${P} tests", "pytest-whole-suite"),
+    ("export P=pytest; $P", "pytest-whole-suite"),
+    ("QA=./scripts/qa/llm_qa.py; $QA all", "llm-qa-whole-suite"),
+    ("T=tests; pytest $T/unit", "pytest-whole-suite"),
+    ("for t in lint all; do ./scripts/qa/llm_qa.py $t; done", "llm-qa-whole-suite"),
+    # Review 5: a program named by a substitution is judged as that program.
+    ("$(which pytest)", "pytest-whole-suite"),
+    ('"$(command -v pytest)" tests', "pytest-whole-suite"),
+    ("`which pytest` tests", "pytest-whole-suite"),
+    ("X=$(which pytest); $X tests", "pytest-whole-suite"),
+    ("$PYTHON -m pytest", "pytest-whole-suite"),
+    # Review 5: an operand the shell only builds at run time may be the suite.
+    ("pytest tests/unit/x.py $(cat more.txt)", "pytest-whole-suite"),
+    ('pytest tests/unit/x.py "$EXTRA"', "pytest-whole-suite"),
+    # Review 5: `hatch test` is hatch's pytest.
+    ("hatch test", "pytest-whole-suite"),
+    ("hatch test -c tests", "pytest-whole-suite"),
+    ("hatch -e ci test --cover", "pytest-whole-suite"),
+    # Review 5 m2: Python code read from stdin is judged as `python -c` code is.
+    ("python3 - <<'PY'\nimport pytest\npytest.main(['tests'])\nPY", "pytest-whole-suite"),
+    (
+        "python3 <<'PY'\nimport pytest\nraise SystemExit(pytest.main([]))\nPY",
+        "pytest-whole-suite",
+    ),
+    ("python3 <<PY\nimport pytest; pytest.main()\nPY", "pytest-whole-suite"),
+    ("python3 <<-'PY'\n\timport pytest\n\tpytest.main()\n\tPY", "pytest-whole-suite"),
+    ("python3 <<< 'import pytest; pytest.main()'", "pytest-whole-suite"),
+    ("echo 'import pytest; pytest.main()' | python3", "pytest-whole-suite"),
+    (f"python3 -c 'import os; {_SHELL_OUT}(\"pytest tests\")'", "pytest-whole-suite"),
 ]
 
 _NOT_FULL_RUNS: list[str] = [
@@ -339,6 +399,39 @@ _NOT_FULL_RUNS: list[str] = [
     # Review 4 N10: a quoted delimiter with a blank is still a quoted delimiter.
     "cat > n.txt <<' EOF'\npytest tests\n EOF",
     "cat > n.txt <<'EOF X'\npytest tests\nEOF X",
+    # Review 5: the same constructs, running something narrow or nothing full.
+    "script -qc 'pytest tests/unit/x.py' /dev/null",
+    "exec -a qa pytest tests/unit/x.py",
+    "/usr/bin/time -v pytest tests/unit/x.py",
+    "strace -o trace.txt pytest tests/unit/x.py",
+    "caffeinate -i pytest tests/unit/x.py",
+    "P=pytest; $P tests/unit/x.py",
+    '"$(command -v pytest)" tests/unit/x.py',
+    "$EDITOR notes.txt",
+    "$PYTHON -m pytest tests/unit/x.py",
+    "for t in lint type_check; do ./scripts/qa/llm_qa.py $t; done",
+    'for f in tests/unit/qa/test_*.py; do pytest "$f"; done',
+    "hatch test tests/unit/x.py",
+    "hatch run lint",
+    "python3 - <<'PY'\nimport pytest\nprint(pytest.__version__)\nPY",
+    "python3 - <<'PY'\nimport pytest\npytest.main(['tests/unit/x.py'])\nPY",
+    "python3 <<< 'import pytest; print(pytest.__file__)'",
+    "python3 script.py <<'PY'\npytest.main()\nPY",
+    f"python3 -c 'import os; {_SHELL_OUT}(\"pytest tests/unit/x.py\")'",
+    # Review 5 m1: importing pytest, or printing its version, runs nothing.
+    'python -c "import pytest; print(pytest.__version__)"',
+    "python3 -c 'import pytest' && echo importable",
+    'python3 -c "import pytest, sys; print(pytest.__file__, sys.version)"',
+    "python -c 'import sys, pytest; sys.exit(pytest.main(sys.argv[1:]))' tests/unit/qa",
+    # Review 5 n3: the files a diff names are a targeted run.
+    "pytest $(git diff --name-only main -- tests)",
+    'pytest "$(git diff --name-only main -- tests)"',
+    "pytest `git diff --name-only HEAD~1 -- tests`",
+    "pytest $(git diff --name-only main -- tests | grep test_)",
+    "git diff --name-only main -- tests | xargs pytest",
+    "git diff --name-only main | grep '^tests/' | sort -u | xargs pytest",
+    # Review 5 m7 sibling: a here-string is not a heredoc opener.
+    "cat <<<'X'\nls\nX",
 ]
 
 
@@ -348,7 +441,7 @@ class TestWhatCannotBeParsed:
     def test_an_unparseable_command_naming_a_full_run_program_is_denied(self) -> None:
         match = find_full_qa_invocation('pytest tests/unit/x.py "unterminated', _patterns())
         assert match is not None
-        assert match.unparsed
+        assert match.fail_closed
 
     def test_the_deny_says_the_command_could_not_be_parsed(self) -> None:
         result = _handler().handle(_bash('pytest "unterminated'))
@@ -413,11 +506,17 @@ class TestTheParserEdges:
     def test_a_targeted_run_or_none_is_not(self, command: str) -> None:
         assert find_full_qa_invocation(command, _patterns()) is None, command
 
-    def test_nesting_is_followed_to_a_fixed_depth(self) -> None:
-        """Deeper than three levels is not how anyone runs a suite by accident."""
-        assert find_full_qa_invocation("eval 'eval \"eval pytest\"'", _patterns()) is not None
+    def test_nesting_is_followed_to_a_fixed_depth_then_fails_closed(self) -> None:
+        """Past three levels the code is not read, so naming a program denies (review 5)."""
+        three_deep = find_full_qa_invocation("eval 'eval \"eval pytest\"'", _patterns())
+        assert three_deep is not None
+        assert not three_deep.fail_closed
         four_deep = 'eval "eval \'eval \\"eval pytest\\"\'"'
-        assert find_full_qa_invocation(four_deep, _patterns()) is None
+        match = find_full_qa_invocation(four_deep, _patterns())
+        assert match is not None
+        assert "could not be parsed" in match.fail_closed
+        narrow = 'eval "eval \'eval \\"eval ls\\"\'"'
+        assert find_full_qa_invocation(narrow, _patterns()) is None
 
     def test_a_word_no_path_can_hold_names_nothing(self, tmp_path: Path) -> None:
         """An embedded NUL cannot be looked up, so it does not target the run."""
@@ -433,24 +532,28 @@ class TestTheParserEdges:
         assert handler._targeted_forms() == []
 
 
-#: Review 3 R7: whole-suite spellings the guard does NOT deny, each listed with
-#: its reason as a limit in docs/guides/HANDLER_REFERENCE.md. Pinned here so a
-#: fix that closes one also updates that list.
-_DOCUMENTED_LIMITS: list[str] = [
-    "$(which pytest)",
-    '"$(command -v pytest)" tests',
-    "hatch test",
-    "tox",
-    "nox",
-    "cat commands.txt | bash",
-    "bash < commands.txt",
+#: Review 5: every former "documented limit" that ALLOWED a full run is closed
+#: or fails closed. What remains is the declaration model: a program the
+#: project has not declared, including a script run by its own name, is not
+#: a full run. Each is named in docs/guides/HANDLER_REFERENCE.md.
+_UNDECLARED_PROGRAMS: list[str] = ["tox", "nox", "./my_checks.sh", "bash my_checks.sh"]
+
+#: Review 5 n3: the false denies the fail-closed rule accepts, also documented.
+_DOCUMENTED_FALSE_DENIES: list[str] = [
+    "pytest tests/unit/x.py $(cat more.txt)",
+    'pytest tests/unit/x.py "$EXTRA"',
+    "echo tests | xargs pytest",
 ]
 
 
 class TestTheDocumentedLimits:
-    @pytest.mark.parametrize("command", _DOCUMENTED_LIMITS)
-    def test_a_documented_limit_is_still_allowed(self, command: str) -> None:
+    @pytest.mark.parametrize("command", _UNDECLARED_PROGRAMS)
+    def test_an_undeclared_program_is_not_a_full_run(self, command: str) -> None:
         assert find_full_qa_invocation(command, _patterns()) is None, command
+
+    @pytest.mark.parametrize("command", _DOCUMENTED_FALSE_DENIES)
+    def test_an_operand_that_cannot_be_seen_fails_closed(self, command: str) -> None:
+        assert find_full_qa_invocation(command, _patterns()) is not None, command
 
     def test_each_limit_is_named_in_the_handler_reference(self) -> None:
         reference = (_REPO_ROOT / "docs" / "guides" / "HANDLER_REFERENCE.md").read_text(
@@ -459,16 +562,16 @@ class TestTheDocumentedLimits:
         start = reference.index("#### subagent_full_qa_blocker")
         end = reference.find("\n#### ", start + 1)
         section = reference[start : end if end != -1 else len(reference)]
-        for spelling in ("$(which pytest)", "hatch test", "tox", "nox", "| bash"):
+        for spelling in ("tox", "nox", "by its name", "$(cat more.txt)", '"$EXTRA"', "| xargs"):
             assert spelling in section, spelling
 
 
 class TestPythonCodeThatRunsPytest:
-    """The lead's direction after review 4: ``python -c`` naming pytest runs pytest.
+    """``python -c`` code that CALLS pytest runs pytest (review 4, narrowed by review 5 m1).
 
-    A LITERAL ``-c`` string of any Python interpreter that mentions ``pytest``
-    is judged as a pytest run. Its string literals are the run's operands, so
-    a literal path narrows it and no path at all is a bare, whole-suite run.
+    Its string literals are the run's operands, so a literal path narrows it
+    and no path at all is a bare, whole-suite run. Code that only imports
+    pytest, or reads its version, runs nothing.
     """
 
     @pytest.mark.parametrize(
@@ -818,6 +921,163 @@ class TestBraceExpansionIsBounded:
     def test_deeply_nested_braces_fail_closed_without_recursing(self) -> None:
         command = "pytest tests/unit/qa/" + "{a," * 2000 + "b" + "}" * 2000
         assert find_full_qa_invocation(command, _patterns()) is not None
+
+
+class TestEnvChdirIsACdForOneCommand:
+    """Review 5 n3: ``env -C DIR cmd`` runs ``cmd`` in DIR, and nothing after it."""
+
+    @pytest.mark.parametrize(
+        "command", ["env -C tests/unit/qa pytest", "env --chdir=tests/unit/qa pytest -q"]
+    )
+    def test_a_bare_run_in_a_narrow_directory_is_targeted(self, command: str) -> None:
+        assert find_full_qa_invocation(command, _patterns(), cwd=_REPO_ROOT) is None
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "env -C tests pytest",
+            "env -C tests/unit/qa pytest && pytest",
+            "env --chdir=tests/unit/qa pytest; pytest",
+            "env -C tests/unit/qa true; ./scripts/qa/llm_qa.py all",
+        ],
+    )
+    def test_the_directory_does_not_outlive_the_command(self, command: str) -> None:
+        assert find_full_qa_invocation(command, _patterns(), cwd=_REPO_ROOT), command
+
+
+class TestCodeAShellReadsFromAFile:
+    """Review 5: ``cat f | bash`` and ``bash < f`` were a documented limit.
+
+    The file is read, when it is a regular file of a bounded size, and its
+    lines are judged as the shell will run them. A file that cannot be read is
+    judged by its NAME, as ``bash f`` is, so a declared script still matches.
+    """
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cat commands.txt | bash",
+            "bash < commands.txt",
+            "sh <commands.txt",
+            "cat ./commands.txt | sh -s",
+            "python3 < code.py",
+            "cat code.py | python3 -",
+        ],
+    )
+    def test_a_file_that_runs_the_suite_is_full(self, tmp_path: Path, command: str) -> None:
+        (tmp_path / "commands.txt").write_text("echo start\npytest tests\n", encoding="utf-8")
+        (tmp_path / "code.py").write_text("import pytest\npytest.main([])\n", encoding="utf-8")
+        assert find_full_qa_invocation(command, _patterns(), cwd=tmp_path), command
+
+    @pytest.mark.parametrize(
+        "command", ["cat commands.txt | bash", "bash < commands.txt", "python3 < code.py"]
+    )
+    def test_a_file_that_runs_a_narrow_path_is_not(self, tmp_path: Path, command: str) -> None:
+        (tmp_path / "commands.txt").write_text("pytest tests/unit/x.py\n", encoding="utf-8")
+        (tmp_path / "code.py").write_text("print('pytest')\n", encoding="utf-8")
+        assert find_full_qa_invocation(command, _patterns(), cwd=tmp_path) is None, command
+
+    def test_a_missing_file_is_judged_by_its_name(self, tmp_path: Path) -> None:
+        assert find_full_qa_invocation("cat absent.txt | bash", _patterns(), cwd=tmp_path) is None
+        assert find_full_qa_invocation(
+            "cat scripts/qa/run_all.sh | bash", _patterns(), cwd=tmp_path
+        )
+
+    def test_a_file_past_the_size_cap_is_judged_by_its_name(self, tmp_path: Path) -> None:
+        big = "echo pad\n" * 20_000 + "pytest tests\n"
+        (tmp_path / "big.txt").write_text(big, encoding="utf-8")
+        assert find_full_qa_invocation("bash < big.txt", _patterns(), cwd=tmp_path) is None
+
+    def test_a_cd_inside_the_file_stays_inside_it(self, tmp_path: Path) -> None:
+        (tmp_path / "tests" / "unit" / "qa").mkdir(parents=True)
+        (tmp_path / ".git").mkdir()
+        (tmp_path / "commands.txt").write_text("cd tests/unit/qa\n", encoding="utf-8")
+        command = "bash < commands.txt; pytest"
+        assert find_full_qa_invocation(command, _patterns(), cwd=tmp_path)
+
+
+class TestWhatCannotBeSeenFailsClosed:
+    """Review 5: a construct whose run cannot be seen is denied when it may be the suite.
+
+    The deny says which construct it was, so a sub-agent can spell the run
+    out plainly instead.
+    """
+
+    def test_a_dynamic_import_that_calls_main_is_denied_as_opaque(self) -> None:
+        command = f"python -c \"{_DUNDER_IMPORT}('py'+'test').main()\""
+        match = find_full_qa_invocation(command, _patterns())
+        assert match is not None
+        assert match.pattern_id == "pytest-whole-suite"
+        assert "run time" in match.fail_closed
+
+    def test_a_dynamic_import_with_a_narrow_path_is_not(self) -> None:
+        command = f"python -c \"{_DUNDER_IMPORT}('py'+'test').main(['tests/unit/x.py'])\""
+        assert find_full_qa_invocation(command, _patterns()) is None
+
+    def test_a_program_named_by_a_substitution_says_so(self) -> None:
+        match = find_full_qa_invocation("$(which pytest) tests", _patterns())
+        assert match is not None
+        assert "run time" in match.fail_closed
+
+    def test_the_deny_carries_the_reason(self) -> None:
+        result = _handler().handle(_bash("$(which pytest) tests"))
+        assert "run time" in (result.reason or "")
+
+    def test_an_unparsed_command_says_it_could_not_be_parsed(self) -> None:
+        match = find_full_qa_invocation('pytest "unterminated', _patterns())
+        assert match is not None
+        assert "could not be parsed" in match.fail_closed
+
+
+class TestTheWorkIsBounded:
+    """Review 5 n5 and n6: a long command, or deep nesting, fails closed quickly."""
+
+    _BUDGET_SECONDS = 1.0
+
+    def test_a_command_past_the_size_cap_naming_a_program_is_denied(self) -> None:
+        command = "echo " + "a" * 400_000 + "; pytest tests/unit/x.py"
+        began = time.perf_counter()
+        match = find_full_qa_invocation(command, _patterns())
+        assert time.perf_counter() - began < self._BUDGET_SECONDS
+        assert match is not None
+        assert "too long" in match.fail_closed
+
+    def test_a_command_past_the_size_cap_naming_no_program_is_allowed(self) -> None:
+        assert find_full_qa_invocation("echo " + "a" * 400_000, _patterns()) is None
+
+    def test_a_long_prose_heredoc_within_the_cap_is_parsed(self) -> None:
+        prose = "Run pytest tests before merging.\n" * 600
+        command = f"cat > notes.md <<'EOF'\n{prose}EOF"
+        assert find_full_qa_invocation(command, _patterns()) is None
+
+    @pytest.mark.parametrize("launcher", ["setsid ", "uv run ", "xargs ", "python -m "])
+    def test_deep_launcher_nesting_fails_closed_without_recursion_error(
+        self, launcher: str
+    ) -> None:
+        match = find_full_qa_invocation(launcher * 1000 + "pytest tests/unit/x.py", _patterns())
+        assert match is not None
+        assert "could not be parsed" in match.fail_closed
+
+    def test_shallow_launcher_nesting_is_still_followed(self) -> None:
+        command = "setsid " * 10 + "pytest tests/unit/x.py"
+        assert find_full_qa_invocation(command, _patterns()) is None
+        assert find_full_qa_invocation("setsid " * 10 + "pytest", _patterns())
+
+
+class TestARunnerTheProjectDeclares:
+    """Review 5: ``tox`` and ``nox`` run whatever the project configures.
+
+    What they run is the project's to declare, as ``llm_qa.py`` is here: a
+    pattern naming the runner denies it.
+    """
+
+    def test_a_declared_runner_is_denied(self) -> None:
+        patterns, problems = parse_full_qa_patterns(
+            [{"id": "tox", "command": "tox"}, {"id": "nox", "command": "nox"}]
+        )
+        assert not problems
+        for command in ("tox", "tox -e py311", "uv run tox", "nox -s tests"):
+            assert find_full_qa_invocation(command, patterns), command
 
 
 class TestAnUnknownFlagUnderAGrammar:

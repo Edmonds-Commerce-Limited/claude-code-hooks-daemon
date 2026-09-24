@@ -812,6 +812,107 @@ class TestFinishing:
         assert llm_qa.certified_ref(repo) == "refs/integration/certified/feature/x"
 
 
+class TestExactlyTheCertifiedHeadLands:
+    """Review 5 m5 and n2: what lands is the head the gate passed, and nothing after it."""
+
+    def _late_child(self, repo: Path) -> str:
+        """A commit on the integration branch after the gate: never certified."""
+        return _commit(repo, {"src/late.py": "z = 1\n"}, "a late child")
+
+    def test_unmoved_names_the_certified_sha_not_the_branch(
+        self, repo: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _start(repo)
+        certified = _git(repo, "rev-parse", "HEAD")
+        assert llm_qa.main_moved_command([], root=repo) == llm_qa.EXIT_SUCCESS
+        out = capsys.readouterr().out
+        assert f"git merge --ff-only {certified}" in out
+        assert f"--ff-only {_BRANCH}" not in out
+
+    def test_the_verdict_carries_the_certified_head(self, repo: Path) -> None:
+        _start(repo)
+        outcome = llm_qa.main_moved(repo, "main")
+        assert outcome.head == _git(repo, "rev-parse", "HEAD")
+
+    def test_finish_refuses_a_descendant_of_the_certified_head(self, repo: Path) -> None:
+        _start(repo)
+        self._late_child(repo)
+        _git(repo, "branch", "-f", "main", _BRANCH)
+        with pytest.raises(llm_qa.MainMovedError, match="not the certified head"):
+            llm_qa.finish_batch(repo, "main")
+        assert _certified(repo) is not None, "the evidence stays"
+
+    def test_finish_accepts_a_merge_of_the_certified_head_with_its_tree(self, repo: Path) -> None:
+        _start(repo)
+        _git(repo, "checkout", "-q", "main")
+        _git(repo, "merge", "-q", "--no-ff", "--no-edit", _BRANCH)
+        _git(repo, "checkout", "-q", _BRANCH)
+        llm_qa.finish_batch(repo, "main")
+        assert _certified(repo) is None
+
+    def test_finish_refuses_a_merge_whose_tree_is_not_the_certified_tree(self, repo: Path) -> None:
+        _start(repo)
+        _git(repo, "checkout", "-q", "main")
+        _commit(repo, {_LONELY: "# moved on main\n"}, "main moved")
+        _git(repo, "merge", "-q", "--no-ff", "--no-edit", _BRANCH)
+        _git(repo, "checkout", "-q", _BRANCH)
+        with pytest.raises(llm_qa.MainMovedError, match="not the certified head"):
+            llm_qa.finish_batch(repo, "main")
+
+    def test_unmoved_needs_head_to_contain_main(
+        self, repo: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """n2 (S12): the base advanced, then the branch backed out the merge of main."""
+        _start(repo)
+        _on_main(repo, {_LONELY: "# 2\n"})
+        _merge_main(repo)
+        _certify(repo, llm_qa.DOCS_ONLY_TOOL_NAMES)
+        llm_qa.advance_batch(repo, "main")
+        _git(repo, "checkout", "-q", "-B", _BRANCH, "HEAD~1")
+        _gate(repo)
+        outcome = llm_qa.main_moved(repo, "main")
+        assert outcome.verdict == llm_qa.VERDICT_HEAD_MOVED
+        assert "does not contain" in outcome.reason
+        capsys.readouterr()
+        assert llm_qa.main_moved_command([], root=repo) == llm_qa.EXIT_HEAD_MOVED
+        assert "git merge --no-edit main" in capsys.readouterr().out
+
+
+class TestTheGateIsNotRunTwiceOnOneHead:
+    """Review 5 m6: after main was merged and the gate passed, only ``--advance`` is left."""
+
+    def test_a_passed_gate_on_the_merged_head_prints_only_advance(
+        self, repo: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _start(repo)
+        _on_main(repo, {"src/app.py": "x = 2\n"})
+        _merge_main(repo)
+        _gate(repo)
+        _certify(repo, llm_qa.ALL_TOOL_NAMES)
+        outcome = llm_qa.main_moved(repo, "main")
+        assert outcome.verdict == llm_qa.VERDICT_FULL_GATE
+        assert outcome.recheck_passed
+        assert llm_qa.main_moved_command([], root=repo) == llm_qa.EXIT_FULL_GATE
+        out = capsys.readouterr().out
+        assert "--advance" in out
+        assert "llm_qa.py all" not in out
+        assert "git merge --no-edit" not in out
+
+    def test_main_not_yet_merged_still_prints_the_recheck(self, repo: Path) -> None:
+        _start(repo)
+        _on_main(repo, {"src/app.py": "x = 2\n"})
+        _certify(repo, llm_qa.ALL_TOOL_NAMES)
+        assert not llm_qa.main_moved(repo, "main").recheck_passed
+
+    def test_a_merged_head_without_the_recheck_still_needs_it(self, repo: Path) -> None:
+        _start(repo)
+        _on_main(repo, {"src/app.py": "x = 2\n"})
+        _merge_main(repo)
+        _gate(repo)
+        _certify(repo, llm_qa.DOCS_ONLY_TOOL_NAMES)
+        assert not llm_qa.main_moved(repo, "main").recheck_passed
+
+
 class TestTheCommand:
     def _run(self, repo: Path, *args: str) -> int:
         return int(llm_qa.main_moved_command(list(args), root=repo))

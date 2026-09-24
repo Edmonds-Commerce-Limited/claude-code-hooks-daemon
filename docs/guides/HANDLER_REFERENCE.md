@@ -1400,20 +1400,29 @@ handlers:
 
 **What it matches:** a Bash command that would RUN a declared `full_qa_patterns` entry. The command is split into commands, and each is resolved to the program it starts, through:
 
-- wrappers (`timeout`, `env`, `nohup`, `sudo`);
-- launchers, each with its own flags and operands (`setsid`, `ionice`, `chrt`, `taskset`, `flock`, `xvfb-run`), the command a `-c` hands to `flock` or `script`, and `parallel cmd ::: args`;
+- wrappers (`timeout`, `env`, `nohup`, `sudo`, `nice`), including after `--` (`env -- pytest`); `env -C DIR cmd` runs `cmd` in DIR, and only `cmd`;
+- launchers, each with its own flags and operands (`setsid`, `ionice`, `chrt`, `taskset`, `flock`, `xvfb-run`, `time`, `exec -a`, `strace`, `ltrace`, `caffeinate`, `doas`), the command a `-c` hands to `flock` or `script` (also in a cluster, `script -qc`), and `parallel cmd ::: args`;
 - interpreters (`python3 x.py`, `python -m pytest`, `bash -c '...'`);
-- a `python -c` string that mentions `pytest` (`import pytest; pytest.main()`, or `"-m", "pytest"` in a subprocess call), judged as a pytest run whose words are the string's quoted literals;
-- grouping;
-- `uv run`/`poetry run`/`pdm run`/`pipx run`/`hatch run env:cmd`, and `coverage run [-m] cmd`;
+- Python code that CALLS pytest: `pytest.main(...)`, `from pytest import main` then `main()`, a `"pytest"` process argv, or a command line handed to a process. It is judged as a pytest run whose words are the code's quoted literals, plus the words after the code when it reads `sys.argv`. Importing pytest, or printing its version, runs nothing. The code may come from `-c`, a heredoc, a here-string, a pipe or a file on stdin;
+- grouping, and a function defined with or without the `function` keyword;
+- `uv run`/`poetry run`/`pdm run`/`pipx run`/`hatch run env:cmd`, `hatch test` (hatch's pytest), and `coverage run [-m] cmd`;
 - `uvx`/`uv tool run`, with any version pin such as `pytest@8`;
 - code a shell runs from a string: `eval`, `bash <<< '...'`, `source`/`.` of a script, and `echo`/`printf` output piped into a shell (`echo 'pytest' | bash`, `bash < <(echo pytest)`);
+- code a shell reads from a FILE on stdin (`cat commands.txt | bash`, `bash < commands.txt`): the file is read when it is a regular file of at most 64 KiB, and judged by its name as `bash commands.txt` would be either way;
 - a `$(...)` or backtick substitution, including one inside double quotes (`x="$(pytest tests)"`);
-- `xargs cmd` (judged by its explicit arguments, since those from stdin cannot be seen), `time -p` and `builtin`.
+- a variable the command sets (`P=pytest; $P tests`, `export P=...`), and a `for` loop's variable, which takes each listed value;
+- `xargs cmd` and `builtin`.
 
-`py.test` is read as `pytest`, its other name. ANSI-C quoting (`$'...'`) is decoded as bash decodes it, so `llm_qa.py $'all'` is `llm_qa.py all`.
+`py.test` is read as `pytest`, its other name. ANSI-C quoting (`$'...'`) is decoded as bash decodes it, including `\xHH`, octal `\NNN`, `\uHHHH` and `\UHHHHHHHH`, so `llm_qa.py $'all'` is `llm_qa.py all` and `$'py\x74est'` is `pytest`.
 
-**A command that cannot be parsed** (an unbalanced quote) but names a declared program is denied, and the reason says it could not be parsed.
+**What cannot be seen fails closed.** Each such deny carries a `JUDGED UNSEEN` line saying why:
+
+- a command that cannot be parsed (an unbalanced quote), nests deeper than three levels of code, or chains more than 32 launchers, and names a declared program;
+- a command longer than 32 KiB that names a declared program;
+- a program named at run time: `$(which pytest)`, `"$(command -v pytest)" tests`, or a variable the command does not set, judged as each declared program the substitution names (for a variable, that the whole command names);
+- Python that imports or runs a module by a computed name (`importlib.import_module(name).main()`), or runs a computed string, judged as pytest.
+
+An OPERAND built at run time may be the whole suite, so a run with one is full: `pytest tests/unit/x.py $(cat more.txt)` and `pytest tests/unit/x.py "$EXTRA"` are denied. The exception is a listing of changed files: `pytest $(git diff --name-only main -- tests)`, and `git diff --name-only main -- tests | xargs pytest`, optionally filtered through `grep`, `sort` or `uniq`, are targeted runs. Arguments `xargs` reads from any other producer cannot be seen, so `echo tests | xargs pytest` is judged as bare, which is full.
 
 A runner flag no table lists may take a value (`uv run --color never pytest`), so the word after it is tried both as that value and as the command.
 
@@ -1452,13 +1461,13 @@ A malformed entry is skipped and logged. `hooks-daemon check` reports a handler 
 
 **Coverage:** proven for Agent-tool sub-agents and in-process teammates, whose payloads carry `agent_id`. A Workflow-tool agent's payload is unmeasured, so the handler is not claimed to see one. It keys only on `agent_id` being present, so no change is needed if Workflow agents turn out to carry it.
 
-**Limit:** a resource guard for cooperating agents, not a security boundary. Not seen, with why:
+**What "full" covers is what the project declares.** A resource guard for cooperating agents, not a security boundary:
 
-- a substitution in command position (`$(which pytest)`, `"$(command -v pytest)" tests`): the program is only known once the shell has run it;
-- a script that runs the suite under an undeclared name, and a project's own runner such as `tox`, `nox` or `hatch test`: the suite they run lives in the project's config, which the guard does not read. Declare them in `full_qa_patterns` if you use them;
-- a wrapper or launcher not listed above: each has its own grammar, so an unknown one is judged as the program it names;
-- code a shell reads from a file or any producer other than `echo`/`printf` (`cat commands.txt | bash`, `bash < commands.txt`): its content is not in the command;
-- a `cd` target the shell would expand (`cd $DIR`). After one, words are judged by shape alone. Every `cd` is followed in order, including one inside a subshell or after `||`.
+- a program the project has not declared is not a full run. A script RUN by its own name (`./my_checks.sh`, `bash my_checks.sh`) is judged by that name, and a project runner such as `tox` or `nox` runs whatever the project's config says. Declare each one that runs the whole suite in `full_qa_patterns` (for example `{id: tox, command: tox}`);
+- a wrapper or launcher not listed above has its own grammar, so an unknown one is judged as the program it names. Add it to the handler's tables when one is found;
+- a `cd` target the shell would expand (`cd $DIR`) leads somewhere unseen. After one, words are judged by shape alone. Every `cd` is followed in order, including one inside a subshell or after `||`.
+
+The false denies the fail-closed rules accept: an operand built at run time other than a changed-files listing (`$(cat more.txt)`, `"$EXTRA"`), arguments `xargs` reads from a producer other than such a listing (`echo tests | xargs pytest`), and a command over 32 KiB that mentions a declared program. Spell the paths out literally instead.
 
 The coordinator's full gate still runs before the main branch moves.
 

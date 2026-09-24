@@ -91,8 +91,10 @@ _QUOTED_HEREDOC_PATTERN = re.compile(
 # and `'END.MD'` are ordinary and legal, and an unmatched delimiter exposes the
 # whole body. The closer then needs the lookahead: without it `EOF` is closed
 # by a body line reading `EOFDATA`, ending the body early and scanning the rest.
+# The lookbehind keeps a here-string (`<<<'X'`) from reading as an opener: bash
+# runs the lines after it, so blanking them would hide real commands.
 _QUOTED_HEREDOC_BODY_PATTERN = re.compile(
-    r"(?P<opener><<-?\s*(?P<quote>['\"])(?P<delim>[^'\"\n]+)(?P=quote))"
+    r"(?P<opener>(?<!<)<<-?\s*(?P<quote>['\"])(?P<delim>[^'\"\n]+)(?P=quote))"
     r"(?P<opener_tail>[^\n]*)\n.*?\n"
     r"(?P<closer>[ \t]*(?P=delim)(?![\w.\-]))",
     re.DOTALL,
@@ -431,11 +433,17 @@ def peel_command_wrappers(argv: Sequence[str]) -> tuple[tuple[str, ...], int]:
         names.append(name)
         index += 1
         positionals = wrapper.positional_operands
+        options_ended = False
         while index < len(argv):
             argument = argv[index]
-            is_flag = argument.startswith(FLAG_PREFIX) and argument not in (
-                LONE_DASH,
-                END_OF_OPTIONS,
+            if argument == END_OF_OPTIONS and not options_ended:
+                # ``env -- pytest`` runs pytest: ``--`` ends the wrapper's
+                # options and is never the wrapped command.
+                options_ended = True
+                index += 1
+                continue
+            is_flag = (
+                not options_ended and argument.startswith(FLAG_PREFIX) and argument != LONE_DASH
             )
             if is_flag:
                 index += 1

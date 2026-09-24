@@ -375,6 +375,98 @@ evading `error_hiding`, and this branch had just done that in the blocker's `_wo
 That code is reshaped: the shlex failure is caught where the unparsed verdict is
 produced, and no None-returning helper remains.
 
+## Review 5 fixes (`260924-plan463-review5-opus-5-5.md`)
+
+Every finding is fixed, none deferred, each with the reviewer's probe as a RED test
+first. The reviewer's corpus (`probe_463v5_blocker.py`, 266 rows) now gives 0 false
+denies and 0 false allows (it gave 6 and 17), and its 12 extra `cd` rows all match
+their expectation.
+
+**Majors (`39d56b24`).**
+
+- **M1.** A `full_args` entry with no `/` (`all`, `tests`) is matched literally BEFORE
+  path resolution, unless something of that name exists where the command stands.
+  `TestSubcommandWordsAfterACd` holds the reviewer's 9 `cd` rows, a read-only control and
+  the `tests`-exists-here case.
+- **M2.** Brace expansion is a lazy generator cut by `islice` at the cap, with a limit
+  on the number of groups. Past either limit the word fails closed.
+  `TestBraceExpansionIsBounded` holds 24, 40 and 200 groups each under 1 s, and 2000
+  nested braces.
+
+**The 17 false allows, and what each became.** Each "documented limit" is either FIXED
+(read and judged) or FAILS CLOSED (denied, with a `JUDGED UNSEEN` line saying why):
+
+| Row(s)                                                   | Now                                                                                              |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `env --`, `nice --`, `timeout -- 600`                    | Fixed in the shared `peel_command_wrappers`, which skips `--` for every guard                    |
+| `script -qc`                                             | Fixed: a code flag's letter is found inside a short cluster                                      |
+| `exec -a qa`, `/usr/bin/time -v`, `strace`, `caffeinate` | Fixed: launchers with their own grammars (also `ltrace`, `doas`)                                 |
+| `$'py\x74est'`, `$'py\164est'`                           | Fixed: `\x`, octal, `\u` and `\U` are decoded                                                    |
+| `function t { pytest; }; t`                              | Fixed: the `function` keyword and name are skipped like `t()`                                    |
+| `P=pytest; $P tests`, `QA=...; $QA all`                  | Fixed: variables the command sets (and `for` loop values) are expanded                           |
+| Python heredoc (two rows)                                | Fixed: heredoc, here-string, pipe and file code for Python go through the same judgement as `-c` |
+| M1's `cd scripts/qa && ./llm_qa.py all`                  | Fixed (M1)                                                                                       |
+| `$(which pytest)`, `"$(command -v pytest)" tests`        | Fail closed: judged as each declared program the substitution names                              |
+| an unset `$VAR` in command position                      | Fail closed: judged as each declared program the whole command names                             |
+| `cat commands.txt \| bash`, `bash < commands.txt`        | Fixed: a regular file up to 64 KiB is read and judged; otherwise judged by its name              |
+| `hatch test`                                             | Fixed: hatch's pytest, its own options dropped                                                   |
+| `tox`, `nox`                                             | The declaration model: a project declares them (`TestARunnerTheProjectDeclares`)                 |
+| `__import__('py'+'test').main()` (obfuscation)           | Fail closed: a module imported or run by a computed name, or a computed `exec`/`eval`            |
+
+An unquoted `$(...)` or backtick span is kept as one word while the command is split, so
+a substitution in command position is no longer lost to the `(` boundary. Its code is
+still judged one level down. Nesting past three levels, and more than 32 launcher hops,
+now fail closed (n6) instead of being skipped or raising `RecursionError`.
+
+**The 6 false denies.**
+
+- Three import and version probes (m1): Python code is a run only when it CALLS pytest
+  (`pytest.main(`, `from pytest import main` then `main(`, a `"pytest"` literal in a
+  process call, or an import of the literal module). The words after `-c` code that
+  reads `sys.argv` are the run's operands.
+- `env -C tests/unit/qa pytest` (n3): `env -C`/`--chdir` is a `cd` for that one command,
+  pushed and popped, so a later command is judged from where it started.
+- `pytest $(git diff --name-only …)` and `git diff --name-only … | xargs pytest` (n3): a
+  `git diff|show|log --name-only` listing, optionally through `grep`/`sort`/`uniq`, is a
+  targeted run.
+
+Any OTHER operand built at run time (`$(cat more.txt)`, `"$EXTRA"`) now fails closed. The
+handler reference lists those false denies, and `echo tests | xargs pytest`, as the price
+of that rule.
+
+**Minors.**
+
+- **m4.** The guard also compares each reader's literal root-relative markdown globs with
+  the rules naming it (the reviewer's `CLAUDE/Architecture/*.md` reproduction is
+  `TestEveryPatternOfAReaderIsDeclared`). The scanner now sees `.iterdir()`,
+  `os.listdir`/`scandir`, `glob.glob`/`iglob` and a `git ls-files` run on the repository,
+  in a test that reads markdown. It found no new undeclared reader; one false positive
+  (a `git ls-files` in a `tmp_path` repository) is pinned as not a reader.
+- **m5.** `unmoved` prints `git merge --ff-only <certified sha>`, and both AgentTeam.md
+  fences merge `$(git rev-parse refs/integration/certified/<branch>)`. `--finish`
+  accepts only `main` equal to the certified head, or a merge with it as a parent and
+  the same tree; a descendant is refused and the refs stay.
+- **m6.** When `main` is already merged into the certified head and the verdict's
+  recheck already passed on the tree, `main-moved` prints only `--advance` and the
+  recheck.
+- **m7.** The shared heredoc opener has a `(?<!<)` lookbehind, so the lines after
+  `cat <<<'X'` are judged.
+
+**Nits.** n1: each non-zero fence branch exits with the verdict, and the errexit test
+checks the exit code, the branch message and that nothing after it ran. n2: `unmoved`
+needs HEAD to contain `main`; otherwise `head-moved`, with a printed "merge main back
+in" step. n3 and n4: documented and fixed as above. n5: a command over 32 KiB is not
+parsed; it is denied only when it names a declared program. The cap is on the raw text,
+because blanking heredoc bodies is itself quadratic in unclosed openers (10,000 of them
+took 7 s). n7: QA.md records that a file created and deleted during a run still
+certifies. n8: the guidance test's docstring states its conservative flag.
+
+**Verification of this round.** The reviewer's timing probe: its slowest row is now
+0.13 s (it was 18 s for braces, 36 s for 1 MB). Its S9c, S12 and S13 scenarios are unit
+tests in `test_llm_qa_main_moved.py` (`TestExactlyTheCertifiedHeadLands`,
+`TestTheGateIsNotRunTwiceOnOneHead`); the clone-based `probe_463v5_n2b.sh` was not
+re-run, as its clone holds the old code.
+
 ## Task 1.1 measurements
 
 - **In-process teammate: `agent_id` is present.** Measured live on this teammate's own
@@ -448,18 +540,29 @@ produced, and no None-returning helper remains.
 
 ## Verification (targeted only, under this plan's rule)
 
+- After the review 5 fixes: format, lint, type_check, pyright, magic_values,
+  error_hiding, docs_qa, plan_qa, british_english, sensitive_content, repo_hygiene,
+  doc_truth, doc_snippets and handler_reference all passed. A targeted pytest run passed
+  2545, with 1 skipped and 1 xfailed. It covered the blocker, shell segmentation and
+  every handler using the shared helpers, `tests/unit/qa/test_llm_qa_*`, the glob-reader
+  guard, the mapper, the errexit, documented-commands, deadlock and dogfood-config
+  integration tests, and the setup_worktree guidance test.
+
 - After the review 4 fixes, before the merge: `./scripts/qa/llm_qa.py changed --allow-unmapped` passed 12/12, with `changed_tests` at 7550 passed, 12 skipped, from
   207 test files mapped from 68 changed files (11 unmapped, all `too-broad`). Named
   tools passed: format, lint, type_check, pyright, magic_values, error_hiding,
   shell_check, docs_qa, plan_qa, british_english, sensitive_content, handler_reference,
   doc_truth, doc_snippets, repo_hygiene.
+
 - After the merge of main: the same static tools plus `generated_doc_drift` passed. A
   targeted pytest run passed 2101, with 1 skipped. It covered:
+
   - `tests/unit/qa`;
   - the blocker, evasion and shell-segmentation tests;
   - the setup_worktree test;
   - the errexit, deadlock, documented-commands, doc-truth, guidance-coverage and
     repo-hygiene integration tests.
+
 - The worktree daemon was restarted and reported RUNNING before each commit.
 
 Review 3 round:
@@ -502,6 +605,12 @@ Earlier rounds:
   `grep -n "a\|--finish\|head-moved\|^#" CLAUDE/QA.md | bin/echd-capture --head 80` as
   R-PIPE-TO-HEAD. It split at `\|` inside the double-quoted pattern, then read the stage
   starting `head-moved` as `head`. The 00463 journal has the finding.
+
+- Review 5 n9, for the open ledger and not filed from this branch: an UNESCAPED `|`
+  inside double quotes also trips `pipe_blocker` (`grep -n -E "exit (code )?[0-9]|head-moved"`),
+  which widens 00466 N32; a `grep` for the literal text of a force branch-delete was
+  denied as R-GIT-BRANCH-FORCE-DELETE; and a redirect to `../x.txt` after a `cd` into a
+  clone was denied as outside the project (00466 N28).
 
 - Put this branch through the batched integration gate with the other ready branches
   (Task 2.1).

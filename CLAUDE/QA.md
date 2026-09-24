@@ -87,13 +87,20 @@ The coordinator, never a sub-agent:
 4. Runs `./scripts/qa/llm_qa.py all` once, on the combined head, on a clean
    tree. A run in which every tool passes records that head as the
    **certified head**, in `refs/integration/certified/<branch>`. Nothing else
-   writes it except a successful `--advance`.
+   writes it except a successful `--advance`. The tree is compared before and
+   after the run, so an edit that is still there fails the certification. A
+   file created and deleted again DURING the run leaves the two equal, and is
+   not caught: that is a limit of comparing states.
 5. **Green:** runs `./scripts/qa/llm_qa.py main-moved` and follows its verdict
    (below) until it says `unmoved`. Then, from the main checkout,
-   `git merge --ff-only <integration-branch>`, restarts the daemon, and pushes.
-   One push, one CI run. Last, `./scripts/qa/llm_qa.py main-moved --finish` in
-   the integration worktree deletes both batch refs. It refuses until `main`
-   holds the certified head.
+   `git merge --ff-only <certified sha>`, restarts the daemon, and pushes. The
+   sha is the one `unmoved` prints, or
+   `$(git rev-parse refs/integration/certified/<branch>)`. Never merge the
+   branch NAME: a commit that reached the branch after the check was never
+   gated. One push, one CI run. Last, `./scripts/qa/llm_qa.py main-moved --finish` in the integration worktree deletes both batch refs. It refuses
+   unless `main` IS the certified head, or a merge of it with the certified
+   tree. A descendant carrying anything more is refused, and the refs stay as
+   the evidence.
 6. **Red:** see "A red batch" below.
 
 **While a batch is in flight, `main` is frozen for code.** The coordinator's
@@ -117,21 +124,28 @@ paths, so a file moved out of `src/` is judged by the path it left.
   A test that finds documents by globbing a directory never names the file, so
   it is declared in `scripts/qa/changed_tests_map.yaml` with a `path_glob`
   rule, and `tests/unit/qa/test_glob_readers_are_declared.py` fails while such
-  a test is undeclared.
+  a test is undeclared, or while a literal glob it writes from the repository
+  root (a `DOCUMENT_GLOBS` entry) matches a path no rule naming it covers. The
+  guard sees `.glob`/`.rglob`, `os.walk`, and, in a test that reads markdown,
+  `.iterdir()`, `os.listdir`/`os.scandir`, `glob.glob` and `git ls-files`. A
+  pattern it cannot place from the root (one built at run time, or relative
+  to a subdirectory) is not compared, so declare such a reader's paths by hand.
 - **Docs:** a document the mapper maps to no test.
 
 The integration head is judged FIRST. Unless `HEAD` is the certified head and
 the tree is clean, the verdict is `head-moved`, whatever `main` did: a commit or
 merge after the gate, or an uncommitted change `--ff-only` would not land, has
-not been through the gate.
+not been through the gate. It is also `head-moved` when `main` is still the
+base but `HEAD` does not contain it (the merge of `main` was backed out):
+`--ff-only` would refuse, so the printed steps merge `main` back in first.
 
-| Verdict      | Exit | When                                                   | Recheck, run exactly as printed                                                                           |
-| ------------ | ---- | ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------- |
-| `head-moved` | 7    | `HEAD` is not the certified head, or the tree is dirty | `llm_qa.py all` on a clean tree, then `main-moved` again                                                  |
-| `unmoved`    | 0    | `main` is still the batch base                         | None: fast-forward                                                                                        |
-| `docs-only`  | 5    | Every path is docs, or new commits change no file      | `plan_qa docs_qa british_english sensitive_content repo_hygiene doc_truth doc_snippets handler_reference` |
-| `targeted`   | 6    | A tested document, and nothing needing the full gate   | `llm_qa.py changed` plus the docs-only tools `changed` does not run, with `--range <base>..<main>`        |
-| `full-gate`  | 4    | Any full-gate path, or `main` was rewritten            | `llm_qa.py all`                                                                                           |
+| Verdict      | Exit | When                                                                        | Recheck, run exactly as printed                                                                           |
+| ------------ | ---- | --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `head-moved` | 7    | `HEAD` is not the certified head, the tree is dirty, or `HEAD` lacks `main` | `llm_qa.py all` on a clean tree (after merging `main` when it is missing), then `main-moved` again        |
+| `unmoved`    | 0    | `main` is still the batch base                                              | None: fast-forward                                                                                        |
+| `docs-only`  | 5    | Every path is docs, or new commits change no file                           | `plan_qa docs_qa british_english sensitive_content repo_hygiene doc_truth doc_snippets handler_reference` |
+| `targeted`   | 6    | A tested document, and nothing needing the full gate                        | `llm_qa.py changed` plus the docs-only tools `changed` does not run, with `--range <base>..<main>`        |
+| `full-gate`  | 4    | Any full-gate path, or `main` was rewritten                                 | `llm_qa.py all`                                                                                           |
 
 Exit 1 is no verdict: no base recorded, a bad ref, or git or the mapper failed.
 
@@ -160,9 +174,15 @@ in the integration worktree:
 4. `./scripts/qa/llm_qa.py main-moved` again. The base advanced, so it sees only
    newer movement.
 
+When `main` is ALREADY merged into the certified head and the recheck already
+passed on this tree, the command prints only steps 3 and 4. That is the path
+after a red batch: `main` was merged before the gate re-ran, so the gate that
+certified the head already covers `main`, and a second `llm_qa.py all` on the
+same head would repeat it.
+
 **If `git merge --ff-only` refuses**, `main` moved after the last check: run
 `main-moved` again and follow the loop from there. It never re-runs anything
-the advanced base already covers.
+the advanced base, or a gate on the same tree, already covers.
 
 **A `docs-only` or `targeted` landing leaves most tools unrecorded for the new
 head.** Only the recheck's tools carry provenance for it, so a later

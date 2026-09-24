@@ -40,12 +40,16 @@ this guard is not claimed to see one. Nothing here keys on the agent's kind or
 on the id's shape, only on the field being non-empty, so if a Workflow agent
 turns out to carry it the guard covers it with no change.
 
-This is a resource guard for cooperating agents, not a security boundary.
-Code the shell only builds at run time (a program named by a substitution,
-commands read from a file) is not chased: the
-coordinator's full gate still runs before the main branch moves, and the cost
-of a miss is one wasted run. A command that cannot be PARSED at all, but names
-a declared program, is denied and told so, rather than allowed unseen.
+This is a resource guard for cooperating agents, not a security boundary, and
+it FAILS CLOSED on what it cannot see (review 5). A command that cannot be
+parsed, is too long to parse, or nests past the depth followed is denied when
+it names a declared program. A program named by a variable or a substitution
+is judged as each program the command names; an operand built at run time may
+be the suite, so it is judged as one; Python that imports a module by a
+computed name is judged as pytest. Each such deny says why. Code a shell or
+Python reads from a file on stdin is read (up to a size cap); a script RUN by
+its own name is judged by that name, which is why a project declares its
+full-suite scripts.
 """
 
 from __future__ import annotations
@@ -54,7 +58,8 @@ import logging
 import posixpath
 import re
 import shlex
-from collections.abc import Iterator, Mapping, Sequence
+import sys
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from itertools import islice, pairwise
 from pathlib import Path, PurePosixPath
@@ -346,13 +351,15 @@ class FullQaPattern:
 class FullQaMatch:
     """The first full-suite invocation found in a command.
 
-    ``unparsed`` marks a command that could not be parsed but names the
-    pattern's program: it is judged as the full run it may be (fail closed).
+    ``fail_closed`` says why a run that could not be SEEN was judged as the
+    full run it may be: a command that could not be parsed, one too long to
+    parse, or one whose program or operands are only built at run time. It is
+    empty for a run that was read in full.
     """
 
     pattern_id: str
     segment: str
-    unparsed: bool = False
+    fail_closed: str = ""
 
 
 def parse_full_qa_patterns(raw: object) -> tuple[list[FullQaPattern], list[str]]:
@@ -466,10 +473,53 @@ _ASSIGNMENT: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z_]\w*=")
 
 #: Shell keywords that can sit in front of a command without being it.
 _SHELL_KEYWORDS: Final[frozenset[str]] = frozenset(
-    {"if", "then", "else", "elif", "do", "while", "until", "!", "{", "}", "time", "exec", "builtin"}
+    {"if", "then", "else", "elif", "do", "while", "until", "!", "{", "}", "builtin"}
 )
-#: A keyword's own flags, which sit between it and the command (``time -p``).
-_KEYWORD_FLAGS: Final[Mapping[str, frozenset[str]]] = {"time": frozenset({"-p"})}
+#: ``function t { ...; }`` defines ``t``: the keyword and the name precede the body.
+_FUNCTION: Final[str] = "function"
+_FUNCTION_HEADER_WORDS: Final[int] = 2
+
+#: Builtins that set a variable rather than run a command (``export P=pytest``).
+_DECLARATIONS: Final[frozenset[str]] = frozenset(
+    {"export", "declare", "local", "readonly", "typeset"}
+)
+#: ``for NAME in a b; do ... $NAME ...; done`` gives ``$NAME`` each word in turn.
+_FOR: Final[str] = "for"
+_FOR_IN: Final[str] = "in"
+_FOR_HEADER_WORDS: Final[int] = 3
+#: ``$NAME`` and ``${NAME}``: a variable, expanded when the command sets it.
+_VARIABLE: Final[re.Pattern[str]] = re.compile(r"\$(?:\{(\w+)\}|(\w+))")
+_VALUE_SEPARATOR: Final[str] = "="
+#: Characters that stop a list of values being written as one brace group.
+_BRACE_UNSAFE: Final[re.Pattern[str]] = re.compile(r"[{},\s]")
+
+#: What a word the shell only builds at run time starts with.
+_RUN_TIME_PREFIXES: Final[tuple[str, ...]] = ("$", "`")
+_SUBSTITUTION_OPENER: Final[str] = "$("
+_ARITHMETIC_OPENER: Final[str] = "$(("
+_BACKTICK: Final[str] = "`"
+#: Characters that mean a path's last part is itself still to be built.
+_UNBUILT_CHARACTERS: Final[frozenset[str]] = frozenset("$`()")
+#: An unquoted substitution is replaced by this while the command is split,
+#: so ``$(which pytest) tests`` stays one command word and one operand.
+_PLACEHOLDER_OPEN: Final[str] = ""
+_PLACEHOLDER_CLOSE: Final[str] = ""
+_PLACEHOLDER: Final[re.Pattern[str]] = re.compile(f"{_PLACEHOLDER_OPEN}(\\d+){_PLACEHOLDER_CLOSE}")
+
+#: ``git diff --name-only`` (and ``show``/``log``) lists the files a change
+#: touches. Such a list, filtered or not, is a targeted run's operands.
+_GIT: Final[str] = "git"
+_GIT_LISTING_SUBCOMMANDS: Final[frozenset[str]] = frozenset({"diff", "show", "log"})
+_GIT_NAME_ONLY: Final[str] = "--name-only"
+_LIST_FILTERS: Final[frozenset[str]] = frozenset({"grep", "sort", "uniq"})
+#: The operand standing for the files such a list names. Private-use
+#: characters, not ``<...>``, which would read as a redirection.
+_CHANGED_FILES: Final[str] = "the files a git listing names"
+
+#: ``env -C DIR`` and ``env --chdir=DIR`` run the command in DIR.
+_ENV: Final[str] = "env"
+_ENV_SHORT_CHDIR: Final[str] = "-C"
+_ENV_CHDIR_FLAGS: Final[frozenset[str]] = frozenset({_ENV_SHORT_CHDIR, "--chdir"})
 
 #: ``command -v x`` and ``command -V x`` look ``x`` up without running it.
 _COMMAND: Final[str] = "command"
@@ -533,6 +583,47 @@ _REPOSITORY_MARKERS: Final[tuple[str, ...]] = (".git", "pyproject.toml")
 
 #: What ``_invocations`` yields for a command it could not split into words.
 _UNPARSED: Final[str] = "<unparsed>"
+#: What it yields for a command word the shell only builds at run time; the
+#: first argument is that word, the rest are the command's arguments.
+_OPAQUE: Final[str] = "<built at run time>"
+#: What it yields for code an interpreter reads from a FILE on stdin; the
+#: arguments are the interpreter kind, the path and the code's own argv.
+_CODE_FILE: Final[str] = "<code read from a file>"
+_SHELL_CODE: Final[str] = "shell"
+_PYTHON_CODE: Final[str] = "python"
+#: ``env -C DIR cmd``: DIR is the directory for ``cmd`` alone.
+_CD_PUSH: Final[str] = "<enter a directory for one command>"
+_CD_POP: Final[str] = "<leave that directory>"
+
+#: Why a match was judged without being seen, as the deny states it.
+_UNPARSED_REASON: Final[str] = (
+    "this command could not be parsed (an unbalanced quote, or nesting deeper than is "
+    "followed), and it names a full-suite program, so it is judged as the full run it may be. "
+    "Quote it plainly, or split it into simpler commands."
+)
+_OPAQUE_REASON: Final[str] = (
+    "part of this command is only built at run time (a program named by a variable or a "
+    "substitution, or a module imported by a computed name), and the run it makes may be the "
+    "whole suite, so it is judged as one. Spell the program and its test paths out literally."
+)
+_OVERSIZED_REASON: Final[str] = (
+    "this command is too long to parse, and it names a full-suite program, so it is judged "
+    "as the full run it may be. Split it into smaller commands."
+)
+
+#: Past this many characters a command is not parsed (review 5 n5): shlex
+#: builds each token a character at a time, and a 1 MB word took 36 s. The
+#: cap is on the raw text, because blanking a heredoc body is itself
+#: quadratic in the number of unclosed openers.
+_MAX_COMMAND_LENGTH: Final[int] = 32 * 1024
+#: A file of code fed to an interpreter is read only up to this size.
+_MAX_CODE_FILE_BYTES: Final[int] = 64 * 1024
+#: How many launchers, runners and ``python -m`` hops are followed in one
+#: command (review 5 n6). Past it the command is judged as unparsed.
+_MAX_HOPS: Final[int] = 32
+#: How much of an unparsed long command the deny quotes.
+_QUOTED_SEGMENT_LENGTH: Final[int] = 200
+_ELLIPSIS: Final[str] = "..."
 
 #: ANSI-C quoting (``$'...'``): the escapes bash decodes inside it.
 _ANSI_C_OPENER: Final[str] = "$'"
@@ -551,6 +642,18 @@ _ANSI_C_ESCAPES: Final[Mapping[str, str]] = {
     "e": "\x1b",
     "E": "\x1b",
 }
+#: Numeric ANSI-C escapes: ``\xHH``, ``\uHHHH`` and ``\UHHHHHHHH`` by letter,
+#: each with its digits, base and most digits read; ``\NNN`` is octal.
+_HEX_DIGITS: Final[str] = "0123456789abcdefABCDEF"
+_HEX_BASE: Final[int] = 16
+_ANSI_C_NUMERIC: Final[Mapping[str, tuple[str, int, int]]] = {
+    "x": (_HEX_DIGITS, _HEX_BASE, 2),
+    "u": (_HEX_DIGITS, _HEX_BASE, 4),
+    "U": (_HEX_DIGITS, _HEX_BASE, 8),
+}
+_OCTAL_DIGITS: Final[str] = "01234567"
+_OCTAL_BASE: Final[int] = 8
+_OCTAL_WIDTH: Final[int] = 3
 
 #: A redirection word. When nothing follows the operator, the target is the
 #: next word (``> log``); otherwise it is attached (``2>&1``, ``>log``).
@@ -560,13 +663,48 @@ _PYTHON_INTERPRETER: Final[re.Pattern[str]] = re.compile(r"^python(?:\d+(?:\.\d+
 _PYTHON_VALUE_FLAGS: Final[frozenset[str]] = frozenset({"-X", "-W"})
 _PYTHON_MODULE_FLAG: Final[str] = "-m"
 _PYTHON_CODE_FLAG: Final[str] = "-c"
-#: The runner a ``python -c`` string runs when it names it anywhere.
 _PYTEST: Final[str] = "pytest"
-_PYTEST_IN_CODE: Final[re.Pattern[str]] = re.compile(rf"\b{_PYTEST}\b")
+#: Python code CALLS pytest (review 5 m1): importing it, or reading its
+#: version, runs nothing. The dunder spelling of the import builtin is
+#: written ``_{2}import_{2}`` so this module does not read as a use of it.
+_PYTEST_CALLS: Final[tuple[re.Pattern[str], ...]] = (
+    re.compile(rf"\b{_PYTEST}\s*\.\s*(?:main|console_main)\s*\("),
+    re.compile(rf"\b(?:_{{2}}import_{{2}}|import_module|run_module)\s*\(\s*(['\"]){_PYTEST}\1"),
+)
+_PYTEST_MAIN_IMPORT: Final[re.Pattern[str]] = re.compile(
+    rf"\bfrom\s+{_PYTEST}\s+import\b[^\n;]*\b(?:main|console_main)\b"
+)
+_MAIN_CALL: Final[re.Pattern[str]] = re.compile(r"\b(?:main|console_main)\s*\(")
+#: Code that imports or runs a module named only at run time, or runs a
+#: string: which program it starts cannot be read from the code.
+_DYNAMIC_EXECUTION: Final[tuple[re.Pattern[str], ...]] = (
+    re.compile(r"\b(?:_{2}import_{2}|import_module)\s*\((?!\s*(['\"])[\w.]+\1\s*[,)])[^)]*\)\s*\."),
+    re.compile(r"\brun_module\s*\((?!\s*(['\"])[\w.]+\1\s*[,)])"),
+    re.compile(r"(?<![\w.])(?:[e]xec|[e]val)\s*\((?!\s*(['\"])[^'\"]*\1\s*\))"),
+)
+#: Code that starts a process: its string literals may be shell commands.
+_PROCESS_CALL: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:os\s*\.\s*(?:system|popen|exec\w*|spawn\w*)|subprocess\s*\.\s*\w+)\s*\("
+)
+#: ``sys.argv`` in the code: the words after the code string reach it.
+_SYS_ARGV: Final[re.Pattern[str]] = re.compile(r"\bsys\s*\.\s*argv\b")
 #: A quoted string in Python code: its content is one word of the run.
 _PYTHON_STRING_LITERAL: Final[re.Pattern[str]] = re.compile(r"'([^'\\]*)'|\"([^\"\\]*)\"")
 
 _SHELL_INTERPRETERS: Final[frozenset[str]] = frozenset({"bash", "sh", "zsh", "dash", "ksh"})
+#: Cheap pre-check before looking for code fed to an interpreter on stdin.
+_INTERPRETER_WORD: Final[re.Pattern[str]] = re.compile(
+    r"(?<![\w.-])(?:bash|sh|zsh|dash|ksh|python[\d.]*)(?![\w.-])"
+)
+#: ``cat FILE | bash``: the producer that passes a file through unchanged.
+_CAT: Final[str] = "cat"
+#: A redirection of stdin from a file: ``< f``, ``<f``, ``0< f``.
+_STDIN_REDIRECT: Final[re.Pattern[str]] = re.compile(r"^0?<(?P<target>[^<&(].*)?$")
+#: A heredoc opener; the body runs to a line holding only the delimiter.
+_HEREDOC_OPENER: Final[re.Pattern[str]] = re.compile(
+    r"(?<!<)<<(?P<strip>-?)[ \t]*(?P<quote>['\"]?)(?P<delim>[^\s'\"<>|&;()]+)(?P=quote)"
+)
+_TAB: Final[str] = "\t"
 _SHELL_VALUE_FLAGS: Final[frozenset[str]] = frozenset({"-o", "+o", "-O", "+O"})
 _SHELL_CODE_LETTER: Final[str] = "c"
 
@@ -721,6 +859,24 @@ _LAUNCHERS: Final[Mapping[str, _Launcher]] = {
         code_flags=frozenset({"-c", "--command"}),
         runs_tail=False,
     ),
+    # `/usr/bin/time -v cmd` and the `time -p` keyword alike.
+    "time": _Launcher(value_flags=frozenset({"-o", "--output", "-f", "--format"})),
+    # `exec -a NAME cmd` runs cmd under the name NAME.
+    "exec": _Launcher(value_flags=frozenset({"-a"})),
+    "strace": _Launcher(
+        value_flags=frozenset(
+            {"-a", "-b", "-e", "-E", "-I", "-o", "-O", "-p", "-P", "-s", "-S", "-u", "-U", "-X"}
+            | {"--output", "--attach", "--string-limit", "--user", "--env", "--trace-path"}
+        )
+    ),
+    "ltrace": _Launcher(
+        value_flags=frozenset(
+            {"-a", "-A", "-D", "-e", "-F", "-l", "-n", "-o", "-p", "-s", "-u", "-w", "-x"}
+            | {"--output", "--library", "--indent", "--align"}
+        )
+    ),
+    "caffeinate": _Launcher(value_flags=frozenset({"-t", "-w"})),
+    "doas": _Launcher(value_flags=frozenset({"-u", "-C"})),
 }
 #: ``parallel [options] cmd ::: a b`` runs ``cmd a`` and ``cmd b``; the words
 #: after ``::::`` are files the arguments are read from, which cannot be seen.
@@ -764,6 +920,15 @@ _VERSION_PIN: Final[str] = "@"
 #: ``hatch run env:command`` runs ``command`` in ``env``.
 _HATCH: Final[str] = "hatch"
 _HATCH_ENV_SEPARATOR: Final[str] = ":"
+#: ``hatch test [options] [args]`` runs pytest with ``args``; these are its own.
+_HATCH_TEST_SUBCOMMAND: Final[str] = "test"
+_HATCH_TEST_VALUE_FLAGS: Final[frozenset[str]] = frozenset(
+    {"-py", "--python", "-i", "--include", "-x", "--exclude"}
+)
+_HATCH_TEST_FLAGS: Final[frozenset[str]] = frozenset(
+    {"-r", "--randomize", "-d", "--dist", "-p", "--parallel", "-c", "--cover"}
+    | {"--cover-quiet", "-a", "--all", "-s", "--show"}
+)
 
 #: How deep ``bash -c '...'`` is followed. Deeper nesting is not a way anyone
 #: runs a test suite by accident.
@@ -835,6 +1000,11 @@ def _decode_ansi_c(text: str, index: int) -> tuple[str, int]:
         if char == "'":
             return "".join(decoded), index + 1
         if char == "\\" and index + 1 < len(text):
+            numeric = _ansi_c_number(text, index + 1)
+            if numeric is not None:
+                value, index = numeric
+                decoded.append(value)
+                continue
             escaped = text[index + 1]
             decoded.append(_ANSI_C_ESCAPES.get(escaped, "\\" + escaped))
             index += 2
@@ -842,6 +1012,32 @@ def _decode_ansi_c(text: str, index: int) -> tuple[str, int]:
         decoded.append(char)
         index += 1
     return "".join(decoded), index
+
+
+def _ansi_c_number(text: str, at: int) -> tuple[str, int] | None:
+    """Decode a numeric escape whose letter or first digit is at ``at``.
+
+    ``$'py\\x74est'`` and ``$'py\\164est'`` are both ``pytest`` (review 5 n4).
+    Returns the character and the index after the digits, or None when no
+    digits follow or the value is no character.
+    """
+    letter = text[at]
+    if letter in _ANSI_C_NUMERIC:
+        digits, base, width = _ANSI_C_NUMERIC[letter]
+        start = at + 1
+    elif letter in _OCTAL_DIGITS:
+        digits, base, width, start = _OCTAL_DIGITS, _OCTAL_BASE, _OCTAL_WIDTH, at
+    else:
+        return None
+    end = start
+    while end < len(text) and end - start < width and text[end] in digits:
+        end += 1
+    if end == start:
+        return None
+    value = int(text[start:end], base)
+    if value > sys.maxunicode:
+        return None
+    return chr(value), end
 
 
 def _closing_paren(text: str, index: int) -> int:
@@ -923,20 +1119,147 @@ def _invocations(command: str, depth: int = 0) -> Iterator[tuple[str, list[str],
     """
     text = _ansi_c_to_single_quoted(normalise_line_continuations(command))
     scan_target = strip_inert_spans(text)
-    if depth < _MAX_NESTING:
-        for code in _double_quoted_substitutions(scan_target):
-            yield from _invocations(code, depth + 1)
-        for code in _code_fed_to_a_shell(scan_target):
-            yield from _invocations(code, depth + 1)
-    for segment in split_unquoted(scan_target, _COMMAND_BOUNDARIES):
+    protected, substitutions = _protect_substitutions(scan_target)
+    nested = _double_quoted_substitutions(scan_target) + [
+        _substitution_code(original) for original in substitutions
+    ]
+    for code in nested:
+        yield from _nested(code, code, depth)
+    if _INTERPRETER_WORD.search(scan_target) is not None:
+        yield from _code_on_stdin(scan_target, depth)
+    fed_a_listing = _consumers_of_a_listing(protected)
+    parsed: list[tuple[str, list[str] | None]] = []
+    for segment in split_unquoted(protected, _COMMAND_BOUNDARIES):
+        restored = _restore(segment, substitutions)
         try:
-            words = shlex.split(segment)
+            words = [_restore(word, substitutions) for word in shlex.split(segment)]
         except ValueError:
             # An unbalanced quote: judged as unparsed, never guessed at.
+            parsed.append((restored, None))
+            continue
+        if segment.strip() in fed_a_listing:
+            words.append(_CHANGED_FILES)
+        parsed.append((restored, words))
+    variables = _variables(split for _, split in parsed if split)
+    for segment, split in parsed:
+        if split is None:
             yield _UNPARSED, [], segment
             continue
-        for background in _split_background(words):
+        for background in _split_background(_expand_variables(split, variables)):
             yield from _resolve(background, segment, depth)
+
+
+def _nested(code: str, segment: str, depth: int) -> Iterator[tuple[str, list[str], str]]:
+    """The invocations of code the shell runs one level down, or unparsed past the depth."""
+    if depth < _MAX_NESTING:
+        yield from _invocations(code, depth + 1)
+    else:
+        yield _UNPARSED, [], segment
+
+
+def _protect_substitutions(text: str) -> tuple[str, list[str]]:
+    """Replace each unquoted ``$(...)`` and backtick span with a placeholder.
+
+    Parentheses and backticks split commands, so ``$(which pytest) tests``
+    fell apart into ``$``, ``which pytest`` and ``tests``: the command word
+    was lost. A placeholder keeps the span one word while the command is
+    split, and :func:`_restore` puts the original back into that word.
+
+    Returns:
+        The text with placeholders, and the originals in placeholder order.
+    """
+    out: list[str] = []
+    originals: list[str] = []
+    index = 0
+    in_single = in_double = False
+    while index < len(text):
+        char = text[index]
+        if char == "\\" and not in_single:
+            out.append(text[index : index + 2])
+            index += 2
+            continue
+        end = -1
+        if not in_single and not in_double:
+            if text.startswith(_SUBSTITUTION_OPENER, index) and not text.startswith(
+                _ARITHMETIC_OPENER, index
+            ):
+                end = _closing_paren(text, index + len(_SUBSTITUTION_OPENER))
+            elif char == _BACKTICK:
+                end = text.find(_BACKTICK, index + 1)
+        if end != -1:
+            originals.append(text[index : end + 1])
+            out.append(f"{_PLACEHOLDER_OPEN}{len(originals) - 1}{_PLACEHOLDER_CLOSE}")
+            index = end + 1
+            continue
+        if char == "'" and not in_double:
+            in_single = not in_single
+        elif char == '"' and not in_single:
+            in_double = not in_double
+        out.append(char)
+        index += 1
+    return "".join(out), originals
+
+
+def _restore(text: str, originals: Sequence[str]) -> str:
+    """Put each substitution :func:`_protect_substitutions` replaced back."""
+    return _PLACEHOLDER.sub(lambda found: originals[int(found.group(1))], text)
+
+
+def _substitution_code(word: str) -> str:
+    """The code inside a ``$(...)`` or backtick substitution word."""
+    if word.startswith(_SUBSTITUTION_OPENER):
+        return word[len(_SUBSTITUTION_OPENER) :].removesuffix(")")
+    return word.strip(_BACKTICK)
+
+
+def _variables(word_lists: Iterable[list[str]]) -> dict[str, list[str]]:
+    """The values each variable the command sets can take.
+
+    ``P=pytest`` and ``export P=pytest`` give one value; ``for t in a b``
+    gives each word in turn (review 5 n4). Only a command that consists of
+    assignments sets a variable: ``FOO=1 pytest`` sets FOO for pytest alone.
+    """
+    found: dict[str, list[str]] = {}
+    for words in word_lists:
+        if len(words) >= _FOR_HEADER_WORDS and words[0] == _FOR and words[2] == _FOR_IN:
+            found[words[1]] = words[_FOR_HEADER_WORDS:]
+            continue
+        body = [w for w in words[1:] if not _is_flag(w)] if words[0] in _DECLARATIONS else words
+        if body and all(_ASSIGNMENT.match(word) for word in body):
+            for word in body:
+                name, _, value = word.partition(_VALUE_SEPARATOR)
+                found[name] = [value]
+    return found
+
+
+def _expand_variables(words: list[str], variables: Mapping[str, list[str]]) -> list[str]:
+    """Each word with the variables the command sets expanded.
+
+    A whole-word ``$P`` is split as bash splits an unquoted expansion; one
+    with several values becomes a brace group, so each value is judged. A
+    variable the command does not set is left as written.
+    """
+    expanded: list[str] = []
+    for word in words:
+        whole = _VARIABLE.fullmatch(word)
+        values = variables.get(whole.group(1) or whole.group(2)) if whole else None
+        if values is None:
+            expanded.append(_VARIABLE.sub(lambda found: _single_value(found, variables), word))
+        elif len(values) == 1:
+            value = values[0]
+            built = value.startswith(_RUN_TIME_PREFIXES)
+            expanded.extend([value] if built else value.split())
+        elif not any(_BRACE_UNSAFE.search(value) for value in values):
+            expanded.append(_BRACE_OPEN + _BRACE_SEPARATOR.join(values) + _BRACE_CLOSE)
+        else:
+            expanded.append(word)
+    return expanded
+
+
+def _single_value(found: re.Match[str], variables: Mapping[str, list[str]]) -> str:
+    """The one value of a variable inside a word, or the variable as written."""
+    values = variables.get(found.group(1) or found.group(2))
+    return values[0] if values is not None and len(values) == 1 else found.group(0)
 
 
 def _literal_output(words: list[str]) -> str | None:
@@ -974,14 +1297,106 @@ def _reads_code_from_stdin(words: list[str]) -> bool:
     return True
 
 
-def _code_fed_to_a_shell(text: str) -> list[str]:
-    """Code a shell reads on stdin from ``echo``/``printf``: a pipe or ``< <(...)``.
+def _is_a_listing(stages: Sequence[str]) -> bool:
+    """Whether a pipeline writes the files a change touches (review 5 n3).
 
-    Output of any other producer (a file, a download) cannot be read here,
-    which is a documented limit. Text that cannot be split into words is left
-    to :func:`_invocations`, which judges the same segment as unparsed.
+    ``git diff --name-only`` (or ``show``/``log``), optionally filtered by
+    ``grep``, ``sort`` or ``uniq``: its output is a set of changed files,
+    which is the targeted run the guidance asks for.
     """
-    code: list[str] = []
+    try:
+        words = [shlex.split(stage) for stage in stages]
+    except ValueError as error:
+        logger.debug("Listing not recognised, unsplittable (%s)", error)
+        return False
+    if not words or not all(words):
+        return False
+    first = _strip_prefixes(words[0])
+    subcommands = [word for word in first[1:] if not _is_flag(word)]
+    return (
+        bool(first)
+        and command_word(first[0]) == _GIT
+        and bool(subcommands)
+        and subcommands[0] in _GIT_LISTING_SUBCOMMANDS
+        and _GIT_NAME_ONLY in first
+        and all(command_word(stage[0]) in _LIST_FILTERS for stage in words[1:])
+    )
+
+
+def _lists_changed_files(word: str) -> bool:
+    """Whether a substitution operand is a listing of changed files."""
+    return _is_a_listing(split_unquoted(_substitution_code(word), _PIPE))
+
+
+def _consumers_of_a_listing(text: str) -> frozenset[str]:
+    """Each ``xargs`` stage whose stdin is a listing of changed files, as written."""
+    consumers: set[str] = set()
+    for pipeline in split_unquoted(text, _PIPELINE_BOUNDARIES):
+        stages = split_unquoted(pipeline, _PIPE)
+        for position in range(1, len(stages)):
+            try:
+                consumer = _strip_prefixes(shlex.split(stages[position]))
+            except ValueError as error:
+                logger.debug("Consumer left to the unparsed check (%s)", error)
+                continue
+            if consumer and consumer[0] == _XARGS and _is_a_listing(stages[:position]):
+                consumers.add(stages[position].strip())
+    return frozenset(consumers)
+
+
+def _python_stdin_argv(words: list[str]) -> list[str] | None:
+    """The argv of Python code read from stdin (no script, ``-c`` or ``-m``), else None.
+
+    ``python3 - a b`` reads code from stdin with ``sys.argv[1:]`` of
+    ``['a', 'b']``; ``python3 script.py`` reads DATA from stdin.
+    """
+    argv = _strip_prefixes(words)
+    if not argv or _PYTHON_INTERPRETER.match(command_word(argv[0])) is None:
+        return None
+    rest = argv[1:]
+    index = 0
+    while index < len(rest):
+        argument = rest[index]
+        redirect = _REDIRECT.match(argument)
+        if redirect is not None:
+            index += 1 if redirect.group("target") else 2
+            continue
+        if argument == LONE_DASH:
+            return [word for word in rest[index + 1 :] if _REDIRECT.match(word) is None]
+        if argument in _PYTHON_VALUE_FLAGS:
+            index += 2
+            continue
+        if not _is_flag(argument) or argument.startswith((_PYTHON_MODULE_FLAG, _PYTHON_CODE_FLAG)):
+            return None
+        index += 1
+    return []
+
+
+def _producer_output(words: list[str]) -> tuple[str | None, str | None]:
+    """What a pipe producer writes: ``(literal text, None)``, ``(None, file)`` or neither.
+
+    ``echo``/``printf`` write their arguments; ``cat FILE`` writes one file.
+    """
+    printed = _literal_output(words)
+    if printed is not None:
+        return printed, None
+    argv = _strip_prefixes(words)
+    operands = [word for word in argv[1:] if not _is_flag(word)]
+    if argv and command_word(argv[0]) == _CAT and len(operands) == 1:
+        return None, operands[0]
+    return None, None
+
+
+def _code_on_stdin(text: str, depth: int) -> Iterator[tuple[str, list[str], str]]:
+    """Code a shell or Python reads on stdin: piped, from ``< <(...)``, or a Python heredoc.
+
+    Literal code (from ``echo``/``printf``) is judged here; a file (``cat
+    f | bash``) is yielded as ``_CODE_FILE`` for the caller, which knows the
+    directory, to read. A shell heredoc needs nothing here: its body is not
+    blanked, so its lines are judged as commands already. Text that cannot
+    be split into words is left to :func:`_invocations`, which judges the
+    same segment as unparsed.
+    """
     for pipeline in split_unquoted(text, _PIPELINE_BOUNDARIES):
         try:
             stages = [shlex.split(stage) for stage in split_unquoted(pipeline, _PIPE)]
@@ -989,9 +1404,7 @@ def _code_fed_to_a_shell(text: str) -> list[str]:
             logger.debug("Pipeline left to the unparsed check (%s): %r", error, pipeline)
             continue
         for producer, consumer in pairwise(stages):
-            printed = _literal_output(producer) if _reads_code_from_stdin(consumer) else None
-            if printed is not None:
-                code.append(printed)
+            yield from _fed(_producer_output(producer), consumer, pipeline, depth)
     for found in _STDIN_PROCESS_SUBSTITUTION.finditer(text):
         end = _closing_paren(text, found.end())
         try:
@@ -999,53 +1412,175 @@ def _code_fed_to_a_shell(text: str) -> list[str]:
         except ValueError as error:
             logger.debug("Substitution left to the unparsed check (%s)", error)
             continue
-        printed = _literal_output(producer)
+        yield from _fed(_producer_output(producer), [found.group("shell")], found.group(0), depth)
+    for receiver, body in _heredoc_bodies(text):
+        argv = _python_stdin_argv(receiver)
+        if argv is not None:
+            yield from _python_code_runs(body, argv, body, depth)
+
+
+def _fed(
+    output: tuple[str | None, str | None], consumer: list[str], segment: str, depth: int
+) -> Iterator[tuple[str, list[str], str]]:
+    """What a consumer runs when a producer's output is its code."""
+    printed, path = output
+    python_argv = _python_stdin_argv(consumer)
+    if python_argv is not None:
         if printed is not None:
-            code.append(printed)
-    return code
+            yield from _python_code_runs(printed, python_argv, segment, depth)
+        elif path is not None:
+            yield _CODE_FILE, [_PYTHON_CODE, path, *python_argv], segment
+    elif _reads_code_from_stdin(consumer):
+        if printed is not None:
+            yield from _nested(printed, segment, depth)
+        elif path is not None:
+            yield _CODE_FILE, [_SHELL_CODE, path], segment
+
+
+def _heredoc_bodies(text: str) -> Iterator[tuple[list[str], str]]:
+    """Each heredoc's receiving command words and its body.
+
+    Quoted or not: whether the OUTER shell expands the body does not change
+    what the receiver does with it. A receiver that cannot be split is
+    skipped; its line is judged as unparsed by :func:`_invocations`.
+    """
+    for found in _HEREDOC_OPENER.finditer(text):
+        line_start = text.rfind("\n", 0, found.start()) + 1
+        body_start = text.find("\n", found.end())
+        if body_start == -1:
+            continue
+        delimiter = found.group("delim")
+        body: list[str] = []
+        for line in text[body_start + 1 :].split("\n"):
+            candidate = line.lstrip(_TAB) if found.group("strip") else line
+            if candidate == delimiter:
+                break
+            body.append(candidate)
+        stages = split_unquoted(text[line_start : found.start()], (*_PIPELINE_BOUNDARIES, *_PIPE))
+        try:
+            receiver = shlex.split(stages[-1]) if stages else []
+        except ValueError as error:
+            logger.debug("Heredoc receiver left to the unparsed check (%s)", error)
+            continue
+        yield receiver, "\n".join(body)
 
 
 def _strip_prefixes(argv: list[str]) -> list[str]:
     """Drop assignments, keywords and wrappers until the command word leads."""
+    return _peel(argv)[0]
+
+
+def _peel(argv: list[str]) -> tuple[list[str], str | None]:
+    """Drop assignments, keywords and wrappers; also return an ``env -C`` directory.
+
+    ``env -C DIR cmd`` runs ``cmd`` in DIR (review 5 n3), so the directory
+    is returned for the caller to apply to that command alone.
+    """
+    directory: str | None = None
     while True:
         start = 0
-        while start < len(argv) and (
-            _ASSIGNMENT.match(argv[start]) or argv[start] in _SHELL_KEYWORDS
-        ):
-            keyword_flags = _KEYWORD_FLAGS.get(argv[start], frozenset())
-            start += 1
-            while start < len(argv) and argv[start] in keyword_flags:
+        while start < len(argv):
+            if _ASSIGNMENT.match(argv[start]) or argv[start] in _SHELL_KEYWORDS:
                 start += 1
+            elif argv[start] == _FUNCTION:
+                # `function t { pytest; }`: the body is judged as `t() { ...; }` is.
+                start += _FUNCTION_HEADER_WORDS
+            else:
+                break
         if (
             start + 1 < len(argv)
             and argv[start] == _COMMAND
             and argv[start + 1] in _COMMAND_LOOKUP_FLAGS
         ):
             # `command -v pytest` prints where pytest is; it runs nothing.
-            return argv[start:]
+            return argv[start:], directory
         _, peeled = peel_command_wrappers(argv[start:])
         if start == 0 and peeled == 0:
-            return argv
+            return argv, directory
+        directory = _env_directory(argv[start : start + peeled]) or directory
         argv = argv[start + peeled :]
 
 
-def _resolve(words: list[str], segment: str, depth: int) -> Iterator[tuple[str, list[str], str]]:
-    """Resolve one word list to the program it starts."""
-    argv = _strip_prefixes(words)
+def _env_directory(wrapper_words: Sequence[str]) -> str | None:
+    """The directory ``env -C DIR`` / ``env --chdir=DIR`` moves to, among peeled words."""
+    in_env = False
+    for index, word in enumerate(wrapper_words):
+        if command_word(word) == _ENV:
+            in_env = True
+            continue
+        if not in_env:
+            continue
+        if word in _ENV_CHDIR_FLAGS and index + 1 < len(wrapper_words):
+            return wrapper_words[index + 1]
+        flag, separator, value = word.partition(_FLAG_VALUE_SEPARATOR)
+        if separator and flag in _ENV_CHDIR_FLAGS:
+            return value
+        if word.startswith(_ENV_SHORT_CHDIR) and len(word) > len(_ENV_SHORT_CHDIR):
+            return word[len(_ENV_SHORT_CHDIR) :]
+    return None
+
+
+def _resolve(
+    words: list[str], segment: str, depth: int, hops: int = 0
+) -> Iterator[tuple[str, list[str], str]]:
+    """Resolve one word list to the program it starts.
+
+    ``hops`` counts the launchers, runners and modules already followed to
+    get here; past ``_MAX_HOPS`` the command is judged as unparsed (fail
+    closed) rather than followed until the interpreter's stack runs out.
+    """
+    if hops > _MAX_HOPS:
+        yield _UNPARSED, [], segment
+        return
+    argv, directory = _peel(words)
+    if directory is None:
+        yield from _resolve_command(argv, segment, depth, hops)
+        return
+    yield _CD_PUSH, [directory], segment
+    yield from _resolve_command(argv, segment, depth, hops)
+    yield _CD_POP, [], segment
+
+
+def _is_built_at_run_time(word: str) -> bool:
+    """A command word naming its program by a variable or a substitution.
+
+    ``$P``, ``$(which pytest)`` and a backtick span are; ``$HOME/bin/pytest``
+    and ``$(dirname "$0")/run.sh`` are not, as their last part is literal.
+    """
+    if not word.startswith(_RUN_TIME_PREFIXES):
+        return False
+    if _PATH_SEPARATOR not in word:
+        return True
+    return any(char in _UNBUILT_CHARACTERS for char in word.rsplit(_PATH_SEPARATOR, 1)[-1])
+
+
+def _resolve_command(
+    argv: list[str], segment: str, depth: int, hops: int
+) -> Iterator[tuple[str, list[str], str]]:
+    """Resolve a word list whose first word is the command."""
     if not argv:
         return
-    name = command_word(argv[0])
     rest = argv[1:]
+    unquoted = argv[0].replace('"', "").replace("'", "")
+    if _is_built_at_run_time(unquoted):
+        yield _OPAQUE, [unquoted, *rest], segment
+        return
+    alternatives = _expand_braces(unquoted) if _BRACE_OPEN in unquoted else None
+    if alternatives is not None and len(alternatives) > 1:
+        # `for p in pytest ruff; do $p tests; done` runs each in turn.
+        for alternative in alternatives:
+            yield from _resolve([alternative, *rest], segment, depth, hops + 1)
+        return
+    name = command_word(argv[0])
     if not name:
         return
 
     if name == _UVX:
-        yield from _resolve_run_tail(rest, 0, _UV_RUN_VALUE_FLAGS, segment, depth, tool=True)
+        yield from _resolve_run_tail(rest, 0, _UV_RUN_VALUE_FLAGS, segment, depth, hops, tool=True)
         return
 
     if name == _EVAL:
-        if depth < _MAX_NESTING:
-            yield from _invocations(" ".join(rest), depth + 1)
+        yield from _nested(" ".join(rest), segment, depth)
         return
 
     if name in _SOURCE_COMMANDS:
@@ -1054,25 +1589,25 @@ def _resolve(words: list[str], segment: str, depth: int) -> Iterator[tuple[str, 
         return
 
     if name == _XARGS:
-        yield from _resolve_run_tail(rest, 0, _XARGS_VALUE_FLAGS, segment, depth)
+        yield from _resolve_run_tail(rest, 0, _XARGS_VALUE_FLAGS, segment, depth, hops)
         return
 
     launcher = _LAUNCHERS.get(name)
     if launcher is not None:
-        yield from _resolve_launcher(launcher, rest, segment, depth)
+        yield from _resolve_launcher(launcher, rest, segment, depth, hops)
         return
 
     if name == _PARALLEL:
-        yield from _resolve_parallel(rest, segment, depth)
+        yield from _resolve_parallel(rest, segment, depth, hops)
         return
 
     runner = _PROJECT_RUNNERS.get(name)
     if runner is not None:
-        yield from _resolve_runner(name, runner, rest, segment, depth)
+        yield from _resolve_runner(name, runner, rest, segment, depth, hops)
         return
 
     if _PYTHON_INTERPRETER.match(name):
-        yield from _resolve_python(rest, segment, depth)
+        yield from _resolve_python(rest, segment, depth, hops)
         return
 
     if name in _SHELL_INTERPRETERS:
@@ -1122,6 +1657,7 @@ def _resolve_run_tail(
     value_flags: frozenset[str],
     segment: str,
     depth: int,
+    hops: int,
     *,
     tool: bool = False,
 ) -> Iterator[tuple[str, list[str], str]]:
@@ -1135,21 +1671,42 @@ def _resolve_run_tail(
         tail = list(words[index:])
         if tool and tail:
             tail[0] = tail[0].split(_VERSION_PIN, 1)[0]
-        yield from _resolve(tail, segment, depth)
+        yield from _resolve(tail, segment, depth, hops + 1)
+
+
+def _code_flag_value(launcher: _Launcher, words: list[str], index: int) -> str | None:
+    """The code a launcher's code flag at ``index`` carries, or None when it is no code flag.
+
+    ``-c 'cmd'``, ``--command='cmd'`` and a short cluster ending in the code
+    letter (``script -qc 'cmd'``, review 5 m3) all carry it.
+    """
+    word = words[index]
+    following = words[index + 1] if index + 1 < len(words) else ""
+    flag, separator, attached = word.partition(_FLAG_VALUE_SEPARATOR)
+    if flag in launcher.code_flags:
+        return attached if separator else following
+    if not _is_flag(word) or word.startswith(_LONG_FLAG_PREFIX):
+        return None
+    for code_flag in launcher.code_flags:
+        if len(code_flag) != _SHORT_OPTION or code_flag.startswith(_LONG_FLAG_PREFIX):
+            continue
+        position = word.find(code_flag[1], 1)
+        if position != -1:
+            return word[position + 1 :] or following
+    return None
 
 
 def _resolve_launcher(
-    launcher: _Launcher, words: list[str], segment: str, depth: int
+    launcher: _Launcher, words: list[str], segment: str, depth: int, hops: int
 ) -> Iterator[tuple[str, list[str], str]]:
     """``<launcher> [flags] [operands] <command>`` runs ``<command>``, or a code flag's value."""
     index, operands = 0, launcher.operands
     while index < len(words):
         word = words[index]
-        flag, _, attached = word.partition(_FLAG_VALUE_SEPARATOR)
-        if flag in launcher.code_flags:
-            code = attached or (words[index + 1] if index + 1 < len(words) else "")
-            if code and depth < _MAX_NESTING:
-                yield from _invocations(code, depth + 1)
+        code = _code_flag_value(launcher, words, index)
+        if code is not None:
+            if code:
+                yield from _nested(code, segment, depth)
             return
         if word == END_OF_OPTIONS:
             index += 1 + operands
@@ -1162,7 +1719,7 @@ def _resolve_launcher(
         operands -= 1
         index += 1
     if launcher.runs_tail:
-        yield from _resolve(words[index:], segment, depth)
+        yield from _resolve(words[index:], segment, depth, hops + 1)
 
 
 def _parallel_inputs(words: Sequence[str]) -> list[str]:
@@ -1178,7 +1735,7 @@ def _parallel_inputs(words: Sequence[str]) -> list[str]:
 
 
 def _resolve_parallel(
-    words: list[str], segment: str, depth: int
+    words: list[str], segment: str, depth: int, hops: int
 ) -> Iterator[tuple[str, list[str], str]]:
     """``parallel [options] cmd ::: a b`` runs ``cmd a`` and ``cmd b``.
 
@@ -1194,18 +1751,17 @@ def _resolve_parallel(
         )
         command, inputs = tail[:split], _parallel_inputs(tail[split:])
         if not command:
-            if depth < _MAX_NESTING:
-                for code in inputs:
-                    yield from _invocations(code, depth + 1)
+            for code in inputs:
+                yield from _nested(code, segment, depth)
         elif not inputs:
-            yield from _resolve(command, segment, depth)
+            yield from _resolve(command, segment, depth, hops + 1)
         else:
             for value in inputs:
-                yield from _resolve([*command, value], segment, depth)
+                yield from _resolve([*command, value], segment, depth, hops + 1)
 
 
 def _resolve_runner(
-    name: str, runner: _Runner, rest: list[str], segment: str, depth: int
+    name: str, runner: _Runner, rest: list[str], segment: str, depth: int, hops: int
 ) -> Iterator[tuple[str, list[str], str]]:
     """``uv [flags] run [flags] [--] cmd`` and its siblings run ``cmd``.
 
@@ -1217,7 +1773,12 @@ def _resolve_runner(
             return
         if rest[index] == _RUNNER_SUBCOMMAND:
             tail = rest[: index + 1] + _hatch_command(rest[index + 1 :]) if name == _HATCH else rest
-            yield from _resolve_run_tail(tail, index + 1, runner.run_value_flags, segment, depth)
+            yield from _resolve_run_tail(
+                tail, index + 1, runner.run_value_flags, segment, depth, hops
+            )
+            return
+        if name == _HATCH and rest[index] == _HATCH_TEST_SUBCOMMAND:
+            yield _PYTEST, _hatch_test_arguments(rest[index + 1 :]), segment
             return
         if (
             name == _UV
@@ -1226,9 +1787,27 @@ def _resolve_runner(
             and rest[index + 1] == _RUNNER_SUBCOMMAND
         ):
             yield from _resolve_run_tail(
-                rest, index + 2, _UV_RUN_VALUE_FLAGS, segment, depth, tool=True
+                rest, index + 2, _UV_RUN_VALUE_FLAGS, segment, depth, hops, tool=True
             )
             return
+
+
+def _hatch_test_arguments(words: list[str]) -> list[str]:
+    """The pytest arguments of ``hatch test``: its own options dropped, the rest passed on."""
+    passed: list[str] = []
+    index = 0
+    while index < len(words):
+        word = words[index]
+        if word == END_OF_OPTIONS:
+            passed.extend(words[index + 1 :])
+            break
+        if word in _HATCH_TEST_VALUE_FLAGS:
+            index += 2
+            continue
+        if word not in _HATCH_TEST_FLAGS:
+            passed.append(word)
+        index += 1
+    return passed
 
 
 def _hatch_command(words: list[str]) -> list[str]:
@@ -1245,81 +1824,141 @@ def _hatch_command(words: list[str]) -> list[str]:
     return words
 
 
-def _pytest_in_code(code: str) -> list[str] | None:
-    """The operands of the pytest run a ``python -c`` string makes, or None when it names none.
+def _string_literals(code: str) -> list[str]:
+    """The content of each quoted string in Python code, in order."""
+    return [single or double for single, double in _PYTHON_STRING_LITERAL.findall(code)]
 
-    Code is not a shell command, so what it runs is judged by a substring test
-    on the literal: any mention of ``pytest`` (``import pytest``,
-    ``pytest.main(...)``, ``"-m", "pytest"`` in a subprocess call) makes it a
-    pytest run. Its string literals are the run's words, so ``pytest.main(
-    ["tests/unit/x.py"])`` is targeted and ``pytest.main()`` is a bare run.
-    The ``"-m"`` before a ``"pytest"`` literal selects the module and is dropped.
+
+def _pytest_in_code(code: str, argv: Sequence[str] = ()) -> list[str] | None:
+    """The operands of the pytest run Python code makes, or None when it makes none.
+
+    Code runs pytest when it CALLS it (review 5 m1): ``pytest.main(...)``,
+    ``from pytest import main`` then ``main(...)``, an import of the literal
+    module ``pytest`` by function, or a ``"pytest"`` string literal (a
+    process argv, or the module after ``"-m"``). Importing pytest, or
+    reading its version, runs nothing.
+
+    The string literals are the run's words, so ``pytest.main(
+    ["tests/unit/x.py"])`` is targeted and ``pytest.main()`` is a bare run;
+    a ``"-m"`` before ``"pytest"`` selects the module and is dropped. When the
+    code reads ``sys.argv``, the words after the code (``argv``) are words of
+    the run too.
     """
-    if _PYTEST_IN_CODE.search(code) is None:
+    literals = _string_literals(code)
+    calls = any(pattern.search(code) for pattern in _PYTEST_CALLS) or (
+        _PYTEST_MAIN_IMPORT.search(code) is not None and _MAIN_CALL.search(code) is not None
+    )
+    starts_pytest = _PYTEST in literals and _PROCESS_CALL.search(code) is not None
+    if not calls and not starts_pytest:
         return None
     operands: list[str] = []
-    for single, double in _PYTHON_STRING_LITERAL.findall(code):
-        literal = single or double
+    for literal in literals:
         if literal == _PYTEST:
             if operands and operands[-1] == _PYTHON_MODULE_FLAG:
                 operands.pop()
             continue
         operands.append(literal)
+    if _SYS_ARGV.search(code) is not None:
+        operands.extend(argv)
     return operands
 
 
-def _resolve_python(
-    rest: list[str], segment: str, depth: int
+def _python_code_runs(
+    code: str, argv: Sequence[str], segment: str, depth: int
 ) -> Iterator[tuple[str, list[str], str]]:
-    """``python [flags] script args``, ``-m module args`` or ``-c code``.
+    """What Python code runs: pytest, a shell command it hands to a process, or neither.
+
+    When the code starts a process, a string literal holding a command line
+    is judged as shell code. Code that imports or runs a module named only
+    at run time is yielded as ``_OPAQUE``, so the caller can fail closed.
+    """
+    if _PROCESS_CALL.search(code) is not None:
+        for literal in _string_literals(code):
+            if literal.split(maxsplit=1)[1:]:
+                yield from _nested(literal, segment, depth)
+    operands = _pytest_in_code(code, argv)
+    if operands is not None:
+        yield _PYTEST, operands, segment
+    elif any(pattern.search(code) for pattern in _DYNAMIC_EXECUTION):
+        yield _OPAQUE, [_PYTEST, *_string_literals(code), *argv], segment
+
+
+def _resolve_python(
+    rest: list[str], segment: str, depth: int, hops: int
+) -> Iterator[tuple[str, list[str], str]]:
+    """``python [flags] script args``, ``-m module args``, ``-c code`` or code on stdin.
 
     A module is resolved like a command, so ``python -m coverage run -m
-    pytest`` reaches pytest and ``python -m py.test`` is pytest. Code that
-    mentions pytest is judged as a pytest run (see :func:`_pytest_in_code`).
+    pytest`` reaches pytest and ``python -m py.test`` is pytest. Code is
+    judged by :func:`_python_code_runs`, whether it comes from ``-c``, a
+    here-string, or a file on stdin (``python3 < f.py``, which the caller
+    reads).
     """
     index = 0
+    stdin_file: str | None = None
     while index < len(rest):
         argument = rest[index]
+        following = rest[index + 1] if index + 1 < len(rest) else ""
+        if argument.startswith(_HERE_STRING):
+            code = argument[len(_HERE_STRING) :] or following
+            yield from _python_code_runs(code, [], segment, depth)
+            return
+        stdin = _STDIN_REDIRECT.match(argument)
+        if stdin is not None:
+            stdin_file = stdin.group("target") or following
+            index += 1 if stdin.group("target") else 2
+            continue
+        redirect = _REDIRECT.match(argument)
+        if redirect is not None:
+            index += 1 if redirect.group("target") else 2
+            continue
         if argument == _PYTHON_MODULE_FLAG:
-            if index + 1 < len(rest):
-                yield from _resolve(rest[index + 1 :], segment, depth)
+            if following:
+                yield from _resolve(rest[index + 1 :], segment, depth, hops + 1)
             return
         if argument.startswith(_PYTHON_MODULE_FLAG) and not argument.startswith(_LONG_FLAG_PREFIX):
             module = argument[len(_PYTHON_MODULE_FLAG) :]
-            yield from _resolve([module, *rest[index + 1 :]], segment, depth)
+            yield from _resolve([module, *rest[index + 1 :]], segment, depth, hops + 1)
             return
         if argument.startswith(_PYTHON_CODE_FLAG) and not argument.startswith(_LONG_FLAG_PREFIX):
             attached = argument[len(_PYTHON_CODE_FLAG) :]
-            code = attached or (rest[index + 1] if index + 1 < len(rest) else "")
-            operands = _pytest_in_code(code)
-            if operands is not None:
-                yield _PYTEST, operands, segment
+            code_at = index if attached else index + 1
+            code = attached or following
+            yield from _python_code_runs(code, rest[code_at + 1 :], segment, depth)
             return
         if argument in _PYTHON_VALUE_FLAGS:
             index += 2
             continue
+        if argument == LONE_DASH:
+            break
         if argument.startswith(FLAG_PREFIX):
             index += 1
             continue
         yield command_word(argument), rest[index + 1 :], segment
         return
+    if stdin_file:
+        yield _CODE_FILE, [_PYTHON_CODE, stdin_file], segment
 
 
 def _resolve_shell(
     rest: list[str], segment: str, depth: int
 ) -> Iterator[tuple[str, list[str], str]]:
-    """``bash script args`` runs the script; ``bash -c 'code'`` and ``bash <<< 'code'`` run the code."""
+    """``bash script args`` runs the script; ``-c 'code'``, ``<<< 'code'`` and ``< file`` run code."""
     index = 0
     runs_code = False
+    stdin_file = ""
     while index < len(rest):
         argument = rest[index]
+        following = rest[index + 1] if index + 1 < len(rest) else ""
         if argument.startswith(_HERE_STRING):
-            code = argument[len(_HERE_STRING) :] or (
-                rest[index + 1] if index + 1 < len(rest) else ""
-            )
-            if depth < _MAX_NESTING:
-                yield from _invocations(code, depth + 1)
+            code = argument[len(_HERE_STRING) :] or following
+            yield from _nested(code, segment, depth)
             return
+        stdin = _STDIN_REDIRECT.match(argument)
+        if stdin is not None:
+            stdin_file = stdin.group("target") or following
+            index += 1 if stdin.group("target") else 2
+            continue
         redirect = _REDIRECT.match(argument)
         if redirect is not None:
             index += 1 if redirect.group("target") else 2
@@ -1335,11 +1974,12 @@ def _resolve_shell(
             index += 1
             continue
         if runs_code:
-            if depth < _MAX_NESTING:
-                yield from _invocations(argument, depth + 1)
+            yield from _nested(argument, segment, depth)
             return
         yield command_word(argument), rest[index + 1 :], segment
         return
+    if stdin_file and not runs_code:
+        yield _CODE_FILE, [_SHELL_CODE, stdin_file], segment
 
 
 def _normalise_operand(value: str) -> str:
@@ -1564,6 +2204,15 @@ def _brace_alternatives(word: str) -> Iterator[str]:
     yield word
 
 
+def _is_run_time_operand(word: str) -> bool:
+    """An operand from a variable or a substitution, other than the cwd and home forms."""
+    return (
+        word.startswith(_RUN_TIME_PREFIXES)
+        and word not in _CWD_VARIABLES
+        and not word.startswith((*_CWD_VARIABLE_PREFIXES, *_HOME_PREFIXES))
+    )
+
+
 def _glob_reach(operand: str) -> str | None:
     """The directory a glob can reach all of, or None when it names files in one place.
 
@@ -1625,6 +2274,15 @@ def _is_full_run(
         word, target_follows = _split_attached_redirect(argument)
         if target_follows:
             index += 1
+        if word == _CHANGED_FILES or (
+            word.startswith((_SUBSTITUTION_OPENER, _BACKTICK)) and _lists_changed_files(word)
+        ):
+            targets.append(word)
+            continue
+        if _is_run_time_operand(word):
+            # Built only when the command runs, so it may be the suite (review 5).
+            names_full_suite = True
+            continue
         alternatives = _expand_braces(word)
         if alternatives is None:
             names_full_suite = True
@@ -1666,20 +2324,135 @@ def find_full_qa_invocation(
     """
     if not patterns:
         return None
-    here = cwd
-    for program, arguments, segment in _invocations(command):
-        if program == _UNPARSED:
-            named = next((p for p in patterns if _names_program(segment, p.command)), None)
-            if named is not None:
-                return FullQaMatch(named.pattern_id, segment.strip(), unparsed=True)
-            continue
+    if len(command) > _MAX_COMMAND_LENGTH:
+        named = next((p for p in patterns if _names_program(command, p.command)), None)
+        if named is None:
+            return None
+        quoted = command[:_QUOTED_SEGMENT_LENGTH] + _ELLIPSIS
+        return FullQaMatch(named.pattern_id, quoted, fail_closed=_OVERSIZED_REASON)
+    return _first_full_run(_invocations(command), patterns, command, cwd, cwd, 0)
+
+
+def _first_full_run(
+    invocations: Iterable[tuple[str, list[str], str]],
+    patterns: Sequence[FullQaPattern],
+    command: str,
+    here: Path | None,
+    start: Path | None,
+    files_deep: int,
+) -> FullQaMatch | None:
+    """The first full run among ``invocations``, following each ``cd`` in order.
+
+    ``command`` is the whole Bash command, searched for a program when a
+    command word is a variable the command does not set. ``files_deep``
+    counts code files already read on the way here, so a file that feeds
+    itself to a shell is not read for ever.
+    """
+    directories: list[Path | None] = []
+    for program, arguments, segment in invocations:
         if program == _CD:
             here = _changed_directory(here, arguments)
-            continue
-        for pattern in patterns:
-            if pattern.command == program and _is_full_run(pattern, arguments, here, cwd):
-                return FullQaMatch(pattern_id=pattern.pattern_id, segment=segment.strip())
+        elif program == _CD_PUSH:
+            directories.append(here)
+            here = _changed_directory(here, arguments)
+        elif program == _CD_POP:
+            here = directories.pop() if directories else here
+        elif program == _CODE_FILE:
+            found = _full_run_in_code_file(
+                arguments, segment, patterns, command, here, start, files_deep
+            )
+            if found is not None:
+                return found
+        else:
+            found = _full_run_of(program, arguments, segment, patterns, command, here, start)
+            if found is not None:
+                return found
     return None
+
+
+def _full_run_of(
+    program: str,
+    arguments: list[str],
+    segment: str,
+    patterns: Sequence[FullQaPattern],
+    command: str,
+    here: Path | None,
+    start: Path | None,
+) -> FullQaMatch | None:
+    """Whether one invocation is a declared full run, read or judged unseen."""
+    if program == _UNPARSED:
+        named = next((p for p in patterns if _names_program(segment, p.command)), None)
+        if named is None:
+            return None
+        return FullQaMatch(named.pattern_id, segment.strip(), fail_closed=_UNPARSED_REASON)
+    if program == _OPAQUE:
+        word, rest = arguments[0], arguments[1:]
+        # A variable the command does not set may hold any program the command
+        # names; a substitution names its program in its own text.
+        haystack = command if _VARIABLE.fullmatch(word) else word
+        for pattern in patterns:
+            if _names_program(haystack, pattern.command) and _is_full_run(
+                pattern, rest, here, start
+            ):
+                return FullQaMatch(pattern.pattern_id, segment.strip(), fail_closed=_OPAQUE_REASON)
+        return None
+    for pattern in patterns:
+        if pattern.command == program and _is_full_run(pattern, arguments, here, start):
+            return FullQaMatch(pattern_id=pattern.pattern_id, segment=segment.strip())
+    return None
+
+
+def _full_run_in_code_file(
+    arguments: list[str],
+    segment: str,
+    patterns: Sequence[FullQaPattern],
+    command: str,
+    here: Path | None,
+    start: Path | None,
+    files_deep: int,
+) -> FullQaMatch | None:
+    """A full run in code an interpreter reads from a file, or in the file's own name.
+
+    The name is judged as ``bash FILE`` would be, so a declared script
+    matches whatever the file holds. The content is read when the file is a
+    regular file within the size cap; a cd inside it stays inside it.
+    """
+    kind, path, argv = arguments[0], arguments[1], arguments[2:]
+    by_name = _full_run_of(command_word(path), [], segment, patterns, command, here, start)
+    if by_name is not None or files_deep >= _MAX_NESTING:
+        return by_name
+    content = _read_code_file(path, here)
+    if content is None:
+        return None
+    invocations = (
+        _invocations(content)
+        if kind == _SHELL_CODE
+        else _python_code_runs(content, argv, segment, 0)
+    )
+    found = _first_full_run(invocations, patterns, command, here, start, files_deep + 1)
+    # The deny quotes the command that fed the file, never the file's own text.
+    return (
+        None if found is None else FullQaMatch(found.pattern_id, segment.strip(), found.fail_closed)
+    )
+
+
+def _read_code_file(path: str, here: Path | None) -> str | None:
+    """The text of a code file within the size cap, or None when there is none to read.
+
+    None for no known directory, no regular file, or a file past the cap:
+    the file is then judged by its name alone. A file that exists but cannot
+    be read raises ``OSError``, which the daemon turns into a deny: the code
+    may be a run, and it could not be seen.
+    """
+    if path.startswith(_PATH_SEPARATOR):
+        target = Path(path)
+    elif here is not None:
+        target = here / path
+    else:
+        return None
+    if not target.is_file() or target.stat().st_size > _MAX_CODE_FILE_BYTES:
+        return None
+    return target.read_bytes().decode("utf-8", errors="replace")
 
 
 def _names_program(text: str, program: str) -> bool:
@@ -1828,16 +2601,10 @@ class SubagentFullQaBlockerHandler(PreToolUseHandlerBase):
         instead = (
             "\n".join(f"  - {form}" for form in declared) if declared else _GENERIC_TARGETED_FORM
         )
-        unparsed = (
-            "\n\nUNPARSED: this command could not be parsed (an unbalanced quote), and it names a "
-            "full-suite program, so it is judged as the full run it may be. Quote it "
-            "plainly, or split it into simpler commands."
-            if match.unparsed
-            else ""
-        )
+        unseen = f"\n\nJUDGED UNSEEN: {match.fail_closed}" if match.fail_closed else ""
         return GatingResult.deny(
             f"{RuleFormatter().verbose(_RULE)}\n\n"
-            f"MATCHED: `{match.pattern_id}` in `{match.segment}`{unparsed}\n\n"
+            f"MATCHED: `{match.pattern_id}` in `{match.segment}`{unseen}\n\n"
             f"RUN INSTEAD:\n{instead}"
         )
 

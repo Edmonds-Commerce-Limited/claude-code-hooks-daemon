@@ -10,14 +10,19 @@ worktree, and the suite runs once on the combined head, not once per agent per
 fix round. The main thread is never affected. You declare which commands
 count as full (`full_qa_patterns`). Commands are parsed, not substring-matched,
 so a commit message or `grep` that mentions one is never denied. It follows
-substitutions (including inside double quotes), `eval`, code piped into a
-shell, launchers such as `setsid` and `flock`, globs and brace expansion. Only
-a path-like word targets a run, and it is normalised, resolved against any
-`cd`, and judged against the repository that contains it, so
-`pytest tests/./unit`, `cd tests && pytest unit` and a worktree's `tests/`
-named from the main checkout are full runs. A command it cannot parse but that
-names a declared program is denied, and the reason says so. The handler
-reference lists the forms it does not see, with the reason for each.
+substitutions (including inside double quotes), `eval`, variables the command
+sets, code piped or read from a file into a shell or Python, Python code that
+calls `pytest.main`, launchers such as `setsid`, `flock` and `time`, globs and
+brace expansion. Only a path-like word targets a run, and it is normalised,
+resolved against any `cd`, and judged against the repository that contains it,
+so `pytest tests/./unit`, `cd tests && pytest unit` and a worktree's `tests/`
+named from the main checkout are full runs. What it cannot see FAILS CLOSED:
+a command it cannot parse, one too long to parse, a program named only at run
+time (`$(which pytest)`) and an operand built at run time are denied when they
+may be the suite, and the reason says which. A listing of changed files
+(`pytest $(git diff --name-only main -- tests)`) is a targeted run. The handler
+reference lists what "full" does not cover (a program you have not declared)
+and the false denies the fail-closed rules accept.
 `option_grammar: pytest` supplies pytest's complete option set, so a flag's
 value is never mistaken for a path. A plugin flag the grammar does not know is
 read as taking a value. Nothing ships by default. `hooks-daemon check`
@@ -49,8 +54,9 @@ pass.
 clean tree records the head it judged in
 `refs/integration/certified/<branch>`. `llm_qa.py main-moved` then answers
 what must re-run before the fast-forward, with an exit code to branch on:
-`head-moved` (7) when the head is not the certified one or the tree is dirty;
-`unmoved` (0) fast-forwards; `docs-only` (5) re-runs the doc checks;
+`head-moved` (7) when the head is not the certified one, the tree is dirty, or
+the head lacks `main`; `unmoved` (0) fast-forwards `main` to the certified
+head's SHA, which it prints; `docs-only` (5) re-runs the doc checks;
 `targeted` (6) runs `llm_qa.py changed` over exactly the moved range, because
 a moved document that tests read is judged by the same test mapper `changed`
 uses; `full-gate` (4) runs the whole suite. A runtime-read path (`CLAUDE.md`,
@@ -58,5 +64,9 @@ uses; `full-gate` (4) runs the whole suite. A runtime-read path (`CLAUDE.md`,
 target always means the full gate. After the recheck, `main-moved --advance`
 moves the base on and certifies the head. It refuses a dirty tree, a head
 holding anything but `main` merged in since the certified head, and a recheck
-whose recorded provenance does not show it passed on the current tree. Once
-the batch has landed, `main-moved --finish` deletes both refs.
+whose recorded provenance does not show it passed on the current tree. When
+`main` is already merged into the certified head and its recheck already
+passed, the verdict prints only `--advance`, so the suite never runs twice on
+one head. Once the batch has landed, `main-moved --finish` deletes both refs;
+it refuses unless `main` is exactly the certified head (or a merge of it with
+the same tree).

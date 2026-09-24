@@ -31,6 +31,16 @@ _FIXTURES = _TESTS / "fixtures"
 _GLOB_METHODS = frozenset({"glob", "rglob"})
 _MARKDOWN = ".md"
 _WILDCARD = "*"
+_SEPARATOR = "/"
+_ANY_DEPTH = "**"
+_SAMPLE_NAME = "sample"
+#: The other ways a test enumerates files (review 5 m4).
+_ITERDIR = "iterdir"
+_GLOB_MODULE = "glob"
+_PATH_LISTERS = frozenset(
+    {("listdir", "os"), ("scandir", "os"), ("glob", _GLOB_MODULE), ("iglob", _GLOB_MODULE)}
+)
+_GIT_LISTING = frozenset({"git", "ls-files"})
 
 
 def _load(script: str, name: str) -> Any:
@@ -109,21 +119,70 @@ def _is_markdown_pattern(argument: ast.expr, module_has_md_globs: bool) -> bool:
     return module_has_md_globs
 
 
+def _reads_markdown(tree: ast.Module) -> bool:
+    """Whether the module filters by the markdown suffix or names a markdown glob."""
+    return _markdown_constants(tree) or any(
+        isinstance(node, ast.Constant) and node.value == _MARKDOWN for node in ast.walk(tree)
+    )
+
+
+def _is_repo_path(node: ast.expr, repo: set[str]) -> bool:
+    return bool(_names(node) & repo) or _mentions_file(node)
+
+
+def _is_git_listing(node: ast.Call, repo: set[str]) -> bool:
+    """A process call running ``git ls-files`` in, or on, the repository."""
+    listing = any(
+        isinstance(argument, (ast.List, ast.Tuple))
+        and _GIT_LISTING
+        <= {
+            element.value
+            for element in argument.elts
+            if isinstance(element, ast.Constant) and isinstance(element.value, str)
+        }
+        for argument in node.args
+    )
+    return listing and (
+        any(_is_repo_path(argument, repo) for argument in node.args)
+        or any(_is_repo_path(keyword.value, repo) for keyword in node.keywords)
+    )
+
+
 def glob_readers(source: str) -> list[int]:
-    """Lines where ``source`` reads repository markdown by glob or walk."""
+    """Lines where ``source`` enumerates repository markdown.
+
+    ``.glob``/``.rglob`` with a markdown pattern, ``os.walk``, and (in a module
+    that reads markdown) ``.iterdir()``, ``os.listdir``, ``glob.glob`` and
+    ``git ls-files`` (review 5 m4), each over a path from the repository root.
+    """
     tree = ast.parse(source)
     repo = _repo_names(tree)
     has_md_globs = _markdown_constants(tree)
+    reads_markdown = _reads_markdown(tree)
     lines = []
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+        if not isinstance(node, ast.Call):
+            continue
+        if reads_markdown and _is_git_listing(node, repo):
+            lines.append(node.lineno)
+            continue
+        if not isinstance(node.func, ast.Attribute):
             continue
         method, receiver = node.func.attr, node.func.value
-        if method in _GLOB_METHODS and node.args:
-            if _names(receiver) & repo and _is_markdown_pattern(node.args[0], has_md_globs):
+        module = ast.unparse(receiver)
+        first = node.args[0] if node.args else None
+        if method in _GLOB_METHODS and first is not None and module != _GLOB_MODULE:
+            if _names(receiver) & repo and _is_markdown_pattern(first, has_md_globs):
                 lines.append(node.lineno)
-        elif method == "walk" and ast.unparse(receiver) == "os" and node.args:
-            if _names(node.args[0]) & repo or _mentions_file(node.args[0]):
+        elif method == "walk" and module == "os" and first is not None:
+            if _is_repo_path(first, repo):
+                lines.append(node.lineno)
+        elif not reads_markdown:
+            continue
+        elif method == _ITERDIR and _names(receiver) & repo:
+            lines.append(node.lineno)
+        elif (method, module) in _PATH_LISTERS and first is not None:
+            if _is_repo_path(first, repo):
                 lines.append(node.lineno)
     return lines
 
@@ -139,10 +198,48 @@ def _glob_reader_files() -> dict[str, list[int]]:
     return found
 
 
-def _declared_tests() -> set[str]:
+def _declared_rules() -> list[Any]:
     rules, problems = changed_tests.load_declared_rules(changed_tests.DEFAULT_RULES_PATH)
     assert problems == []
-    return {test for rule in rules for test in rule.tests}
+    return list(rules)
+
+
+def _declared_tests() -> set[str]:
+    return {test for rule in _declared_rules() for test in rule.tests}
+
+
+def _root_patterns(tree: ast.Module) -> list[str]:
+    """Literal markdown globs written from the repository root (``docs/**/*.md``)."""
+    return sorted(
+        {
+            node.value
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and node.value.endswith(_MARKDOWN)
+            and _WILDCARD in node.value
+            and _SEPARATOR in node.value
+            # A leading `/` anchors a gitignore line or names an absolute path.
+            and not node.value.startswith(_SEPARATOR)
+        }
+    )
+
+
+def _samples(pattern: str) -> list[str]:
+    """Paths a glob matches: ``**`` as zero and as one directory, each wildcard as a name."""
+    shallow = pattern.replace(_ANY_DEPTH + _SEPARATOR, "").replace(_WILDCARD, _SAMPLE_NAME)
+    deep = pattern.replace(_ANY_DEPTH, _SAMPLE_NAME).replace(_WILDCARD, _SAMPLE_NAME)
+    return sorted({shallow, deep})
+
+
+def undeclared_patterns(source: str, reader: str, rules: list[Any]) -> list[str]:
+    """Each root-relative markdown glob in ``source`` no rule naming ``reader`` covers."""
+    own = [rule for rule in rules if reader in rule.tests]
+    return [
+        pattern
+        for pattern in _root_patterns(ast.parse(source))
+        if not all(any(rule.matches(path) for rule in own) for path in _samples(pattern))
+    ]
 
 
 class TestTheScanner:
@@ -175,7 +272,8 @@ class TestTheScanner:
             "    for skill in [s for r in ROOTS for s in r.iterdir()]:\n"
             "        list(skill.rglob('*.md'))\n"
         )
-        assert glob_readers(source) == [5]
+        # The directory listing is an enumeration of its own (review 5 m4).
+        assert glob_readers(source) == [4, 5]
 
     @pytest.mark.parametrize(
         "body",
@@ -188,6 +286,98 @@ class TestTheScanner:
     )
     def test_anything_else_is_not(self, body: str) -> None:
         assert glob_readers("from pathlib import Path\n" + body) == []
+
+    @pytest.mark.parametrize(
+        ("body", "line"),
+        [
+            (
+                "def test_x():\n"
+                "    for p in ROOT.iterdir():\n"
+                "        if p.suffix == '.md':\n"
+                "            p.read_text()\n",
+                4,
+            ),
+            (
+                "import os\n"
+                "def test_x():\n"
+                "    for name in os.listdir(ROOT / 'docs'):\n"
+                "        assert name.endswith('.md')\n",
+                5,
+            ),
+            (
+                "import glob\n"
+                "def test_x():\n"
+                "    assert glob.glob(str(ROOT / 'docs/**/*.md'), recursive=True)\n",
+                5,
+            ),
+            (
+                "import subprocess\n"
+                "def test_x():\n"
+                "    out = subprocess.run(['git', 'ls-files', '*.md'], cwd=ROOT, check=True)\n",
+                5,
+            ),
+        ],
+        ids=["iterdir", "os-listdir", "glob-glob", "git-ls-files"],
+    )
+    def test_the_other_enumeration_idioms_are_readers(self, body: str, line: int) -> None:
+        """Review 5 m4: only ``.glob``/``.rglob``/``os.walk`` were seen."""
+        source = "from pathlib import Path\nROOT = Path(__file__).parents[2]\n" + body
+        assert glob_readers(source) == [line]
+
+    def test_an_enumeration_that_reads_no_markdown_is_not_a_reader(self) -> None:
+        source = (
+            "from pathlib import Path\nimport os\nROOT = Path(__file__).parents[2]\n"
+            "def test_x():\n    assert os.listdir(ROOT / 'src')\n"
+        )
+        assert glob_readers(source) == []
+
+    def test_a_git_listing_of_a_temporary_repository_is_not_a_reader(self) -> None:
+        source = (
+            "import subprocess\n"
+            "def test_x(tmp_path):\n"
+            "    subprocess.run(['git', 'ls-files', 'CLAUDE.md'], cwd=tmp_path, check=True)\n"
+        )
+        assert glob_readers(source) == []
+
+
+#: The review 5 m4 reproduction: a NEW pattern in a reader the rules already name.
+_READER_WITH_A_NEW_PATTERN = (
+    "from pathlib import Path\n"
+    "REPO_ROOT = Path(__file__).resolve().parents[2]\n"
+    "DOCUMENT_GLOBS = ('CLAUDE/*.md', 'docs/**/*.md', 'CLAUDE/Architecture/*.md')\n"
+    "def pages():\n"
+    "    return [p for g in DOCUMENT_GLOBS for p in REPO_ROOT.glob(g)]\n"
+)
+_COMMAND_CHECKER = "tests/integration/test_documented_commands_are_not_self_denied.py"
+
+
+class TestEveryPatternOfAReaderIsDeclared:
+    """Review 5 m4: the guard checked reader FILES, so a new pattern in one passed.
+
+    Each literal markdown glob a reader writes from the repository root must be
+    covered by a rule naming that reader: a path it reads must select it.
+    """
+
+    def test_a_new_pattern_in_a_declared_reader_is_found(self) -> None:
+        rules = _declared_rules()
+        missing = undeclared_patterns(_READER_WITH_A_NEW_PATTERN, _COMMAND_CHECKER, rules)
+        assert missing == ["CLAUDE/Architecture/*.md"]
+
+    def test_every_pattern_of_every_reader_is_declared(self) -> None:
+        rules = _declared_rules()
+        missing = {
+            reader: found
+            for reader in _glob_reader_files()
+            if (
+                found := undeclared_patterns(
+                    (PROJECT_ROOT / reader).read_text(encoding="utf-8"), reader, rules
+                )
+            )
+        }
+        assert missing == {}, (
+            "these readers glob markdown no declared rule sends them: add or widen a "
+            f"`path_glob` rule in scripts/qa/changed_tests_map.yaml: {missing}"
+        )
 
 
 class TestEveryGlobReaderIsDeclared:

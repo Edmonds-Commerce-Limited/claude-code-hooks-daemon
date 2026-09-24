@@ -353,14 +353,19 @@ and that head is what passed. First ask, in the integration worktree, whether
 ```
 
 - `unmoved` (exit 0): from the main checkout, on the default branch,
-  `git merge --ff-only <integration-branch>`, then `git push`. Then, in the
-  integration worktree, `main-moved --finish` removes the batch refs.
-- `head-moved` (7): the integration head is not the one the suite passed on, or
-  the tree is dirty. Commit or remove the change, run the suite again on a clean
-  tree, then `main-moved` again.
-- `docs-only` (5), `targeted` (6) or `full-gate` (4): run the four steps it
-  prints. Merge `main` in, run the named recheck exactly as printed, then
-  `main-moved --advance`, then `main-moved` again. Repeat until `unmoved`.
+  `git merge --ff-only <certified sha>` (the SHA it prints, never the branch
+  name), then `git push`. Then, in the integration worktree,
+  `main-moved --finish` removes the batch refs; it refuses unless `main` is
+  exactly that head.
+- `head-moved` (7): the integration head is not the one the suite passed on,
+  the tree is dirty, or the merge of `main` was backed out. Run the printed
+  steps on a clean tree (merge `main` back in first, when it says so), then
+  `main-moved` again.
+- `docs-only` (5), `targeted` (6) or `full-gate` (4): run the steps it prints.
+  Merge `main` in, run the named recheck exactly as printed, then
+  `main-moved --advance`, then `main-moved` again. When `main` is already
+  merged and the recheck already passed on this tree, it prints only
+  `--advance`. Repeat until `unmoved`.
 - If `--ff-only` refuses, `main` moved after that check: run `main-moved` again.
   The advanced base means only the newer movement is rechecked.
 

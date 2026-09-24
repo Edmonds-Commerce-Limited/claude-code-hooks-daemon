@@ -314,6 +314,23 @@ class TestDelimitersThatAreNotPlainWords:
         assert "run_all.sh" not in strip_quoted_heredoc_bodies(command)
 
 
+class TestAHereStringIsNotAHeredocOpener:
+    """Plan 00463 review 5 m7: the tail of ``<<<'X'`` read as a ``<<'X'`` opener.
+
+    bash RUNS the lines after a here-string; blanking them as a heredoc body
+    hid them from every guard that reads the stripped text.
+    """
+
+    @pytest.mark.parametrize("delimiter", ["X", "EOF", "E F", " EOF"])
+    def test_lines_after_a_here_string_are_not_blanked(self, delimiter: str) -> None:
+        command = f"cat <<<'{delimiter}'\ngit reset --hard HEAD~1\n{delimiter}"
+        assert "git reset --hard" in strip_quoted_heredoc_bodies(command)
+
+    def test_a_real_heredoc_is_still_blanked(self) -> None:
+        command = "cat > n.txt <<'EOF'\nprose mentioning run_all.sh\nEOF"
+        assert "run_all.sh" not in strip_quoted_heredoc_bodies(command)
+
+
 class TestABodyIsOnlyInertIfItsRECEIVERTreatsItAsData:
     """A quoted delimiter says what the OUTER shell expands, not who runs it.
 
@@ -687,6 +704,22 @@ class TestPeelCommandWrappers:
 
     def test_an_empty_argv_is_nothing_to_peel(self) -> None:
         assert peel_command_wrappers([]) == ((), 0)
+
+    @pytest.mark.parametrize(
+        ("argv", "expected"),
+        [
+            (["env", "--", "pytest", "tests"], (("env",), 2)),
+            (["nice", "--", "pytest"], (("nice",), 2)),
+            (["timeout", "--", "600", "pytest"], (("timeout",), 3)),
+            (["timeout", "-k", "5", "--", "600", "pytest"], (("timeout",), 5)),
+            (["env", "--", "-x"], (("env",), 2)),
+        ],
+    )
+    def test_end_of_options_is_skipped_and_positionals_still_consumed(
+        self, argv: list[str], expected: tuple[tuple[str, ...], int]
+    ) -> None:
+        """Plan 00463 review 5 m3: ``--`` was returned as the wrapped command."""
+        assert peel_command_wrappers(argv) == expected
 
     def test_the_table_holds_the_wrappers_process_probe_relies_on(self) -> None:
         """Guard the move: every name the wait classifier peeled is still here."""
