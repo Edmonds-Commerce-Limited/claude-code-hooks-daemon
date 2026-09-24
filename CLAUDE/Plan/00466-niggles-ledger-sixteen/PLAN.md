@@ -48,6 +48,9 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N13 | The plan-index statistics arithmetic is checked only by full QA, so a wrong count reaches main            | Coordinator        | ⬜ Open               |
 | N14 | Log and payload redaction ignore a configured secret word list path                                       | 00414 agent        | 🔄 In progress        |
 | N15 | `remote-docs add` scans a capture with an unconfigured `sensitive_content` handler                        | 00468 docs agent   | 🔄 In progress        |
+| N17 | `skill_opportunity_detector` never receives its configured options                                        | N13/N14 agent      | 🔄 In progress        |
+| N18 | PlanWorkflow.core.md says the plan index is linted against one rule                                       | N13/N14 agent      | 🔄 In progress        |
+| N19 | The registry's options-collection failure is logged at debug level                                        | N13/N14 agent      | 🔄 In progress        |
 
 ## Tasks
 
