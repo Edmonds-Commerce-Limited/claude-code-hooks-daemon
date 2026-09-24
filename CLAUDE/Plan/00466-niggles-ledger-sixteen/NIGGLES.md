@@ -3,6 +3,40 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
+### N24 — `daemon.strict_mode` never reaches the live daemon, so every guard fails OPEN on a handler exception
+
+**Found by the guard-defects security review 2**
+([report](subagent-reports/260924-n466-guards-review2-opus-5-5.md), M3), with a
+live probe against this repository's own daemon. `.claude/hooks-daemon.yaml`
+sets `strict_mode: true`. A Write payload that makes a handler raise
+(`ValueError: no path specified`, the still-live N5 shape) came back as
+`additionalContext: "Handler exception: ..."`: an ALLOW, not the strict-mode
+`SYSTEM ERROR ... blocking for safety` deny.
+
+`daemon/controller.py:959` reads `self._config.strict_mode if self._config else False`. The constructor's own comment (`:162-166`) says the `config`
+parameter "is not populated by the real daemon startup path", and
+`get_controller()` (`:1210`) builds `DaemonController()` with no config. So
+`strict_mode` is inert in every install. Every SAFETY guard treats its own
+crash as "no match". The per-guard wrapper that N11 adds to `secret_file_guard`
+is the only thing between a crash and a bypass, and no other guard has one.
+The N5 and N11 entries' claim that "this repository runs `strict_mode: true`,
+so here the crash denied" is false.
+
+**Candidate remedy (both halves):**
+
+1. Plumb `config.daemon.strict_mode` into the controller's real startup path,
+   through the same narrow-slice injection already used for `ChainConfig`.
+   Test it through `get_controller()` and a real daemon start, not by
+   constructing the controller with a config the daemon never passes.
+2. Independently of `strict_mode`, the chain denies when a handler tagged
+   SAFETY and BLOCKING raises, because a safety guard that crashes has not
+   judged the call. That closes the class for every guard at once, including
+   the review's m1 (`handle()` outside the fail-closed wrapper).
+
+RED tests: a live-path daemon with `strict_mode: true` denies on a raising
+handler; a SAFETY+BLOCKING handler that raises denies even with `strict_mode`
+off; a non-safety advisory handler that raises still allows, and says so.
+
 ### N22 — `lsp_enforcement` takes another command's argument for a grep symbol lookup
 
 **Found by the coordinator**, live. The command was `python scripts/qa/llm_qa.py format lint ... plan_qa docs_qa ... > out.txt; grep -E '^(✅|❌)|^QA:' out.txt`. It was denied with `BLOCKED [R-LSP-SYMBOL-LOOKUP]: ... pattern 'plan_qa' looks like a symbol search`. `plan_qa` is a positional argument to `llm_qa.py`, not to `grep`. The grep's real pattern, `^(✅|❌)|^QA:`, is not symbol-shaped at all. The handler found a `grep` somewhere in the command and then took a symbol-like word from elsewhere in it. `block_once` let the identical retry through, so the cost was one wasted turn. But every "run a QA tool, then grep its capture" command is the everyday shape here, and each one is a coin toss on which word gets picked.
