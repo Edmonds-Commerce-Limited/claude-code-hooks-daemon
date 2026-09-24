@@ -89,6 +89,12 @@ class HookInputField:
     # still listed with status "running".
     BACKGROUND_TASKS = "background_tasks"
 
+    # PreCompact fields (contracts/claude-code-hooks/PreCompact.json). TRIGGER
+    # is "manual" for a `/compact` or "auto"; CUSTOM_INSTRUCTIONS is the
+    # `/compact` argument, null when none was given.
+    TRIGGER = "trigger"
+    CUSTOM_INSTRUCTIONS = "custom_instructions"
+
     # Notification fields
     NOTIFICATION_TYPE = "notification_type"
     NOTIFICATION_DATA = "notification_data"

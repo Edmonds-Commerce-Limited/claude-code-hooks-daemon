@@ -80,6 +80,69 @@ class TestCompactionSignalHandler:
         handler.handle({"session_id": "abc"})
         assert self._signal("abc")["ts"] == 4242.0
 
+    # ---- origin attribution (Plan 00399) ---------------------------------
+    #
+    # The supervisor recognises a compaction, and whose it is, from this record
+    # rather than from the keystrokes it forwarded: a Tab-completed `/compact`
+    # emits none of the bytes a keystroke match needs.
+
+    def test_manual_without_instructions_is_human(self, handler: CompactionSignalHandler) -> None:
+        # `/comp` + Tab + Enter: Claude Code reports a manual compaction with
+        # no custom instructions, exactly as for a fully typed `/compact`.
+        handler.handle({"session_id": "abc", "trigger": "manual", "custom_instructions": None})
+        data = self._signal("abc")
+        assert data["trigger"] == "manual"
+        assert data["origin"] == "human"
+
+    def test_manual_with_human_instructions_is_human(
+        self, handler: CompactionSignalHandler
+    ) -> None:
+        handler.handle(
+            {"session_id": "abc", "trigger": "manual", "custom_instructions": "prep for release"}
+        )
+        assert self._signal("abc")["origin"] == "human"
+
+    def test_manual_with_supervisor_prefix_is_supervisor(
+        self, handler: CompactionSignalHandler
+    ) -> None:
+        handler.handle(
+            {
+                "session_id": "abc",
+                "trigger": "manual",
+                "custom_instructions": (
+                    "🤖 [ccy-supervisor 2026-09-24 15:52:20] After compacting, "
+                    "immediately resume and continue the work that was in progress."
+                ),
+            }
+        )
+        assert self._signal("abc")["origin"] == "supervisor"
+
+    def test_auto_trigger_is_auto(self, handler: CompactionSignalHandler) -> None:
+        handler.handle({"session_id": "abc", "trigger": "auto", "custom_instructions": None})
+        data = self._signal("abc")
+        assert data["trigger"] == "auto"
+        assert data["origin"] == "auto"
+
+    def test_missing_trigger_is_unknown(self, handler: CompactionSignalHandler) -> None:
+        handler.handle({"session_id": "abc"})
+        data = self._signal("abc")
+        assert data["trigger"] is None
+        assert data["origin"] == "unknown"
+
+    def test_unrecognised_trigger_is_unknown(self, handler: CompactionSignalHandler) -> None:
+        handler.handle({"session_id": "abc", "trigger": "scheduled"})
+        assert self._signal("abc")["origin"] == "unknown"
+
+    def test_human_instructions_are_not_written(self, handler: CompactionSignalHandler) -> None:
+        # The record carries WHO, never the human's own text.
+        handler.handle(
+            {"session_id": "abc", "trigger": "manual", "custom_instructions": "prep for release"}
+        )
+        raw = (self._untracked / _SIGNAL_SUBDIR / f"abc{_SIGNAL_SUFFIX}").read_text(
+            encoding="utf-8"
+        )
+        assert "prep for release" not in raw
+
     def test_missing_session_id_uses_fallback(self, handler: CompactionSignalHandler) -> None:
         handler.handle({})
         assert (self._untracked / _SIGNAL_SUBDIR / f"unknown{_SIGNAL_SUFFIX}").exists()
