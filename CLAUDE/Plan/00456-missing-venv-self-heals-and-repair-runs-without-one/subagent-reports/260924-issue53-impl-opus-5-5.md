@@ -349,3 +349,22 @@ Before the full run, I ran the two acceptance test files on their own
 from this `-venv`-named worktree. They gave 7 passed, which is the
 end-to-end proof that Plan 00458 fixes I5. Task 1.5 and the QA criterion
 are ticked.
+
+## Final-review findings N7-N9 and their resolution
+
+The final review's Addendum 2 is in `subagent-reports/260924-review-opus-5-5.md`,
+committed as delivered at `73c66ea6`. It approves N1-N6. All three new
+findings are fixed in `12af8304`, each with a RED test first; RED and GREEN
+are quoted in the journal at 13:22. N7 changes the N3 mechanism: the
+watchdog now signals only the build process, never a process group.
+
+| Finding                                                                    | Resolution                                                                                                                                                                                                                                                                                                                               | Commit     | Test (RED first)                                                                                                                                                                                      |
+| -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| N7: the watchdog outlives a KILLed build process and signals a reused pgid | The watchdog polls `kill -0` on the build process each second and exits silently once it is gone. At the bound it TERMs only that process, just after confirming it is alive. The build process stops its own job (`_vb_stop_job`: TERM, grace, KILL, reap), and it and the EXIT trap signal a group only while `jobs -rp` lists the job | `12af8304` | driver `TestTheWatchdogNeverOutlivesItsBuild` (2: a KILLed build process leaves no watchdog and nothing fires at the bound; a job ignoring TERM is KILLed after the grace)                            |
+| N8: a new aside dir is ownerless until claimed, so it can be adopted       | `_new_aside_dir` makes, ignores and claims it under `.hooks-daemon-venvs-staging.*` (not matched by the adoption glob), then renames it into place. An existing target name stops the run before anything moves                                                                                                                          | `12af8304` | skill `TestAnAsideDirIsOwnedFromTheMomentItAppears` (a fake `hostname`, called inside the claim, records any aside dir visible without an owner)                                                      |
+| N9: staleness trusts the reader's clock across a VM boundary               | `_venv_fs_age` (venv.sh), mirrored as `_fs_age` in the skill, touches a probe beside the lock or aside dir and subtracts the target's mtime from the probe's. The reader's `date` is never used, and an age that cannot be measured counts as live                                                                                       | `12af8304` | driver `TestStalenessIsJudgedByTheFilesystemClock` (2), skill `TestAsideStalenessIsJudgedByTheFilesystemClock` (2): a `date` 1000s ahead leaves a fresh lock or dir live; a silent one is still stale |
+
+The reviewer's probes after the fix: `review456_watchdog_orphan_probe.py`
+finds no build processes at 4s or at 8s, and "watchdog fired after its
+owner died: False". `review456_macos_bound_probe.py` still shows the lock
+released after 2.2s, `failed`, "timed out", and no job-control noise.
