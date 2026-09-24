@@ -4,6 +4,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00460: report size blocker gives read only agents a way out](00460-report-size-blocker-gives-read-only-agents-a-way-out/PLAN.md) - Not Started (owner report: the SubagentStop size blocker tells every agent to write its report to a file, so a read-only type either cannot comply or writes it through a Bash heredoc that no content guard sees)
+
+- [00459: encrypted vault files are tracked not hidden](00459-encrypted-vault-files-are-tracked-not-hidden/PLAN.md) - Not Started (owner report: the secret-file globs select by name, so an Ansible Vault ENCRYPTED vars file is told to be untracked and `git add` naming it is denied; a content check made at each use separates ciphertext from the plaintext password file)
+
 - [00458: skip lists match path segments relative to the project](00458-skip-lists-match-path-segments-relative-to-the-project/PLAN.md) - Not Started (from 00422 N20: six guards test `skip_dir in file_path` as a bare substring, so a directory merely ending in `venv`/`build`/`vendor` switches them off for everything beneath it; lint was already fixed, its siblings were not)
 
 - [00457: signal runs without a venv](00457-signal-runs-without-a-venv/PLAN.md) - Not Started (from #55: the host-side reboot warning is refused where the only venv was built in a container; a standard-library-only entry point, handled before venv resolution using 00456's mechanism, so it starts after 00456 merges)
@@ -278,27 +282,27 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 ## Plan Statistics
 
-- **Total Plans Created**: 458 (count = `hooksdaemon.latestPlanNumber` git counter)
+- **Total Plans Created**: 460 (count = `hooksdaemon.latestPlanNumber` git counter)
 
 - **Completed**: 396 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 39 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 41 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
 - **Cancelled/Abandoned**: 13 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00108 superseded by 00117, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213, 00135 superseded by the supervisor workstream)
 
-- **Folder-to-number reconciliation**: 39 + 396 + 13 = **448 folders**, spanning
-  **445 distinct plan numbers** — three numbers carry two folders each, the
+- **Folder-to-number reconciliation**: 41 + 396 + 13 = **450 folders**, spanning
+  **447 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
   (`001-`, `002-`, `003-`), so they count as present. That leaves **13** of the
-  458 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
+  460 allocated numbers with no folder: 00005, 00015, 00036, 00073, 00074,
   00145, 00191, 00195, 00210, 00258, 00300, 00303, 00325 — abandoned drafts, numbers
   burned by transient probes (00195 during the v3.51.0 acceptance run, 00258
   during the v3.54.0 one), and one withdrawn duplicate (00210, scaffolded by a
   sub-agent that then found Plan 00208 already covered the work).
-  445 + 13 = 458. ✅
+  447 + 13 = 460. ✅
 
   Note on **00191**: it stays folderless deliberately. The number was claimed
   by a branch that renumbered itself and was never merged; Plan 00267
