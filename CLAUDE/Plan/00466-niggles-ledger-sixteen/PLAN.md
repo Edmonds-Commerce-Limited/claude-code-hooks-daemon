@@ -45,8 +45,9 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N7  | The regenerated CLAUDE.md guidance block is not deterministic, so a restart commits a reorder                            | Coordinator        | 🔄 In progress        |
 | N8  | `reference_repo_freshness` says BLOCKED on a call it allows                                                              | Coordinator        | ⬜ Open               |
 | N9  | `docs_qa` judges gitignored markdown, so installing a Claude Code plugin fails local full QA                             | Coordinator        | 🔄 In progress        |
-| N10 | A wildcard in the middle of a protected filename gets past `secret_file_guard`                                           | 00466 review       | 🔄 In progress        |
-| N11 | Any exception in `secret_file_guard.matches()` lets the call through unless `strict_mode` is on                          | 00466 review       | 🔄 In progress        |
+| N10 | A wildcard in the middle of a protected filename gets past `secret_file_guard`                                           | 00466 review       | ✅ Remedied           |
+| N11 | Any exception in `secret_file_guard.matches()` lets the call through unless `strict_mode` is on                          | 00466 review       | ✅ Remedied           |
+| N12 | `secret_file_guard`'s N4 splat exemption still false-positives against a both-edges pattern (`*vault_pass*`)             | 00466 review       | ⬜ Open               |
 
 ## Tasks
 

@@ -592,6 +592,38 @@ def _has_trailing_wildcard(basename: str) -> bool:
     return any(match.end() == len(basename) for match in _BRACKET_EXPRESSION_RE.finditer(basename))
 
 
+def _has_wildcard_after_leading(basename: str) -> bool:
+    """True when ``basename`` carries a genuine wildcard SOMEWHERE AFTER its
+    own leading one (Plan 00466 review, minor m1).
+
+    The N4 fix's stricter ``stem_basename.endswith(residue)`` requirement in
+    ``_glob_token_overlaps_stem`` is only correct for the simple splat shape
+    it was built for -- a token that is a leading wildcard followed by pure
+    literal text (``*words[position``, ``*wordlist``), where fnmatch has
+    nothing left to expand once the leading ``*`` is consumed. A token that
+    carries ANOTHER wildcard too (``*rd*rd``, project-configured
+    ``*on*.json``) is a different shape entirely: fnmatch expands the
+    INTERNAL wildcard as well, so the token can glob-match a protected name
+    without its residue being anywhere near a literal suffix of the stem
+    (``*rd*rd`` matches ``rd.vault-password`` -- contains ``rd``, then later
+    another ``rd``, with an arbitrary run in between). Applying the splat
+    fix's stricter requirement to this shape silently dropped that
+    detection; this predicate lets the caller skip the requirement instead
+    for any token where it does not apply, restoring the pre-N4 overlap-only
+    behaviour for genuinely multi-wildcard tokens.
+
+    Only ``*``/``?`` after the leading marker count, matching
+    ``_is_glob_shaped``'s own rule that a lone unmatched ``[`` is literal to
+    fnmatch, not a wildcard.
+    """
+    if basename[:1] in ("*", "?"):
+        rest = basename[1:]
+    else:
+        leading_bracket = _BRACKET_EXPRESSION_RE.match(basename)
+        rest = basename[leading_bracket.end() :] if leading_bracket else basename
+    return _is_glob_shaped(rest)
+
+
 def _token_literal_residue(token: str) -> str:
     """The literal text left after removing glob syntax from ``token``.
 
@@ -696,6 +728,7 @@ def _glob_token_overlaps_stem(
     leading_wildcard: bool,
     trailing_wildcard: bool,
     pattern_has_trailing_wildcard: bool,
+    token_has_wildcard_after_leading: bool,
 ) -> bool:
     """True when ``residue``'s literal edge could directly join ``stem_basename``.
 
@@ -729,7 +762,13 @@ def _glob_token_overlaps_stem(
       leaving ``sposition`` with nowhere to go). The pre-existing
       substring+fnmatch check above already denies every FULL-suffix case,
       so this branch is never the sole route to a genuine positive here —
-      only to this false one.
+      only to this false one. This stricter requirement is scoped to a token
+      shaped ``*literal`` with NO further wildcard (m1, Plan 00466 review):
+      a token that ALSO carries an internal wildcard (``*rd*rd``) is not the
+      splat shape at all — fnmatch expands that wildcard too, so the token
+      can still glob-match the stem without a literal-suffix residue — and
+      for that shape the requirement is skipped, restoring the pre-N4
+      overlap-only behaviour (see ``_has_wildcard_after_leading``).
 
     A token whose wildcard sits INTERNALLY (``assert.*x``, ``secret*.py``) has
     neither edge open, so neither direction applies. Gated at
@@ -753,10 +792,106 @@ def _glob_token_overlaps_stem(
     if (
         leading_wildcard
         and _suffix_prefix_overlap_length(stem_basename, residue) >= _MIN_GLOB_OVERLAP_CHARS
-        and (pattern_has_trailing_wildcard or stem_basename.endswith(residue))
+        and (
+            pattern_has_trailing_wildcard
+            or token_has_wildcard_after_leading
+            or stem_basename.endswith(residue)
+        )
     ):
         return True
     return False
+
+
+def _globs_can_intersect(a: str, b: str) -> bool:
+    """True when some single string could be matched by BOTH ``a`` and ``b``,
+    each read as a ``*``/``?`` glob (N10, Plan 00466 review).
+
+    A genuine two-glob language-intersection test, not another edge
+    heuristic: the leading/trailing overlap checks above answer "is the
+    wildcard at an EDGE", so a token whose wildcard sits in the MIDDLE
+    (``.vault-pas?word``, ``prod.vault-passw*rd``) has neither edge open and
+    is invisible to every check above it, even though it can glob-expand to
+    a real protected filename. Standard sequence-alignment DP, O(len(a) *
+    len(b)): ``dp[i][j]`` is True when the length-``i`` prefix of ``a`` and
+    the length-``j`` prefix of ``b`` can produce an identical output prefix.
+    A ``*`` matches zero or more characters, so it can either contribute
+    nothing new (fall back to the shorter prefix on its own side) or absorb
+    one more character the OTHER side is currently offering; a ``?`` or a
+    literal must line up one-for-one with the other side's ``?``/matching
+    literal. ``dp[len(a)][len(b)]`` is the answer for the full patterns.
+
+    Callers are responsible for expanding any bracket expression first (see
+    ``_expand_bracket_expressions``) -- this function only understands the
+    two characters above, matching the scope ``fnmatch`` needs once a finite
+    class has already been reduced to its concrete members.
+    """
+    len_a, len_b = len(a), len(b)
+    dp = [[False] * (len_b + 1) for _ in range(len_a + 1)]
+    dp[0][0] = True
+    for i in range(1, len_a + 1):
+        dp[i][0] = a[i - 1] == "*" and dp[i - 1][0]
+    for j in range(1, len_b + 1):
+        dp[0][j] = b[j - 1] == "*" and dp[0][j - 1]
+    for i in range(1, len_a + 1):
+        char_a = a[i - 1]
+        for j in range(1, len_b + 1):
+            char_b = b[j - 1]
+            if char_a == "*":
+                dp[i][j] = dp[i - 1][j] or dp[i][j - 1]
+            elif char_b == "*":
+                dp[i][j] = dp[i][j - 1] or dp[i - 1][j]
+            elif char_a == "?" or char_b == "?" or char_a == char_b:
+                dp[i][j] = dp[i - 1][j - 1]
+            else:
+                dp[i][j] = False
+    return dp[len_a][len_b]
+
+
+def _interior_wildcard_mention(
+    expansions: list[str], stem_pairs: list[tuple[str, str]]
+) -> str | None:
+    """First protected pattern an interior-wildcard token could glob-expand
+    to, else ``None`` (N10, Plan 00466 review).
+
+    A wildcard sitting in the MIDDLE of a token (``.vault-pas?word``,
+    ``prod.vault-passw*rd``) has neither edge open, so the leading/trailing
+    overlap check never sees it (that check is gated on an open edge by
+    construction, exactly so it does not re-litigate the N4/m1 false
+    positives) and the substring+fnmatch check needs the residue to already
+    be a literal substring of the stem, which a truncation that drops an
+    INTERIOR character never is.
+
+    Run over ``expansions``, not gated on the individual form still being
+    glob-shaped: a finite bracket expression (``.vault-pa[sz]word``) resolves
+    to plain literals that no longer carry a wildcard of their own, yet one
+    of those literals can still be exactly this shape of truncation. The
+    caller gates the call itself on ``_is_glob_shaped(raw_form)`` so an
+    ordinary non-glob word never reaches this at all -- once here, a fully
+    literal expansion is simply the degenerate case of the same intersection
+    test (no ``*``/``?`` on either side reduces it to plain equality).
+
+    Excludes a pattern with wildcards on BOTH edges (``*.secret*``,
+    ``*vault_pass*``): full glob intersection against a "contains this text
+    anywhere" pattern is nearly always satisfiable by any token that has its
+    own wildcard somewhere -- ``report-[0-9]*.txt`` and ``secret*.py``
+    genuinely do glob-intersect with ``*.secret*`` (a real
+    ``report-0.secret.txt`` would satisfy both), but neither is evidence of
+    a protected file. This is the identical over-promiscuity
+    ``_both_edges_residue_is_near_total_stem_match`` already exists to guard
+    against for the edge-based checks; a both-edges pattern needs that
+    near-total-match discipline, not blanket intersection, so it is left to
+    the substring+fnmatch check rather than folded in here.
+    """
+    for form in expansions:
+        basename = form.rsplit("/", maxsplit=1)[-1]
+        if _has_leading_wildcard(basename) or _has_trailing_wildcard(basename):
+            continue
+        for _stem, pattern in stem_pairs:
+            if _has_leading_wildcard(pattern) and _has_trailing_wildcard(pattern):
+                continue
+            if _globs_can_intersect(basename, pattern):
+                return pattern
+    return None
 
 
 def find_protected_mention(command: str, patterns: tuple[str, ...]) -> str | None:
@@ -911,8 +1046,13 @@ def _token_mention(
                     leading_wildcard=has_leading_wildcard,
                     trailing_wildcard=has_trailing_wildcard,
                     pattern_has_trailing_wildcard=_has_trailing_wildcard(pattern),
+                    token_has_wildcard_after_leading=_has_wildcard_after_leading(basename),
                 ):
                     return pattern
+        if _is_glob_shaped(raw_form):
+            match = _interior_wildcard_mention(expansions, stem_pairs)
+            if match is not None:
+                return match
     real = _realpath_if_resolvable(token)
     if real is not None:
         for pattern in patterns:

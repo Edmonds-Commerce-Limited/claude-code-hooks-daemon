@@ -3,17 +3,33 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
+### N12 — `secret_file_guard`'s N4 splat exemption still false-positives against a BOTH-EDGES pattern
+
+**Found by the 00466 review** (nit n2, `subagent-reports/260924-n466-review-opus-5-5.md`), out of scope for the N10/N11 fix turn. N4 fixed the Python unpacking splat false positive (`*words[position + 1 :]`, `*wordlist`) against `*.vault-password` — the ONE shipped pattern with a leading wildcard and NO trailing one. The same splat shape is still denied against `*vault_pass*`, which has a wildcard on BOTH edges: `f(*assets)`, `f(*ssh_args)`, `f(*passthrough)` and `f(*assertions)` are each denied live, because the N4 fix's `pattern_has_trailing_wildcard` escape only widens the gate for a pattern with NO trailing wildcard — `*vault_pass*` has one, so the gate's stricter requirement never applies and the pre-N4 overlap-only behaviour (which is what produces this false positive) is untouched. `*assets`/`*args`-style splats are common Python, so this is a live nuisance, not a rare shape.
+
+**Candidate remedy:** the both-edges branch of `_glob_token_overlaps_stem` already has a stricter "near-total-match" discriminator (`_both_edges_residue_is_near_total_stem_match`) for exactly this over-promiscuity — a leading-wildcard-only token (no trailing wildcard of its own) matched against a both-edges pattern is presently routed through the SAME lenient overlap check as a genuine `*passXXX`-style truncation, rather than through that stricter discriminator. Route a token with no trailing wildcard of its own through the near-total-match test regardless of which edge(s) the PATTERN has open, and keep the existing near-total-match behaviour for tokens that themselves have a trailing wildcard too. RED tests: each `f(*assets)`-style splat against `*vault_pass*` is allowed; a genuine both-edges truncation (`*vault_pass*` reached via, e.g., `*zzz-passwd*`-shaped tokens) still denies.
+
 ### N11 — any exception in `secret_file_guard.matches()` lets the call through unless `strict_mode` is on
 
 **Found by the 00466 review** (major M4, `subagent-reports/260924-n466-review-opus-5-5.md`). N5's crash was the second time an exception in this guard's `matches()` skipped the guard entirely; Plan 00357 was the first. Under the default `strict_mode: false` the chain logs the exception and allows the call. This repository runs `strict_mode: true`, so here the crash denied, but a client on the defaults fails open. One raise path is still live after N5, though it isn't exploitable: a file path containing a NUL byte.
 
 **Candidate remedy:** make the guard structurally fail closed. A raise anywhere in its match or route computation becomes a deny naming the internal error, whatever the global `strict_mode`, because a protected-read guard that fails open is worse than a false deny. Pin it with a test that injects an exception at each stage. Then audit the other security guards that should behave the same (`sensitive_content`, `project_containment`, the destructive-git rules) and decide each one explicitly.
 
+**Remedy (implemented) — `secret_file_guard`:** the pattern-matching body of `_matched_pattern_and_route` was renamed to `_evaluate`; the public method is now a thin try/except wrapper that NEVER raises — any exception, from any stage of route or pattern computation, resolves to a new internal `_ERROR_ROUTE` naming the raised exception's type and message. `handle()` checks for that route first and denies through a new `_deny_for_evaluation_error` method with a dedicated `RuleID.SECRET_EVALUATION_ERROR`, added to `get_rules()`. Because the guard itself never raises, the chain's `strict_mode` branch (`core/chain.py`) is never reached for this failure mode at all — the guard's behaviour is now independent of that global setting, closing the class of bug N5 was one instance of (a raise anywhere in `matches()`/`handle()` used to fall through to `strict_mode`'s allow-on-default). Pinned with `TestFailsClosedOnEvaluationError` (6 tests), including the live NUL-byte path with no monkeypatch — a genuine crash, now caught. 82 tests pass.
+
+**Audit — the three named sibling guards, each decided explicitly:**
+
+- **`project_containment`: genuine gap found and fixed.** `_resolved_root()` calls `ProjectContext.project_root()`, which raises `RuntimeError` when uninitialised — an unguarded raise inside `matches()`/`handle()`'s pre-existing `_offending_targets()` call, and a SECOND independent call site inside `handle()`'s own deny-message construction (fixed by threading the resolved `root` through as a parameter instead of re-resolving it, so closing the first call site could not silently leave the second exposed). Given the identical treatment: `_offending_targets` now takes `root: Path` as a parameter; a new `_offending_targets_or_error` wrapper never raises; a new `RuleID.PROJECT_CONTAINMENT_EVALUATION_ERROR` rule and `_deny_for_evaluation_error` method mirror the shape above. Pinned with `TestFailsClosedOnEvaluationError` (3 tests). 96 tests pass.
+- **`sensitive_content`: audited, no fix needed.** Already defensively coded throughout: `_relative_path_text` wraps `.resolve().relative_to()` in try/except `ValueError`, `_is_secret_list_itself` wraps its file check in try/except `OSError`/`ValueError`, `_compiled_public_pattern` wraps `re.compile` in try/except `re.error` (docstring: "never crashes"), and `get_active_secret_terms`/`find_first_match_index`/`term_matches` do plain literal substring matching via `re.escape`, never a raw regex over untrusted input. No raise path found.
+- **`destructive_git`: audited, negligible risk, no fix needed.** Pure regex matching over the Bash command string (`get_bash_command` plus a compiled pattern's `.search()`) — no file I/O, no path resolution, no `ProjectContext` call anywhere in the handler. The one route a regex engine could raise through (a pattern rejecting its own input) applies only to a pattern this project itself compiles at import time, not to attacker-controlled input, so this is a design defect it would have shipped broken from day one, not a live fail-open risk worth hardening defensively.
+
 ### N10 — a wildcard in the middle of a protected filename gets past `secret_file_guard`
 
 **Found by the 00466 review** as a pre-existing problem on main, security-relevant. `cat .vault-pas?word` and `cat prod.vault-passw*rd` name a protected file through a glob the shell expands, and the guard does not deny them. The mention scan handles a leading or trailing wildcard (the N4 overlap logic), but not a `?`, `*` or `[...]` inside the name.
 
 **Candidate remedy:** treat any shell-glob token as a pattern, and deny when the pattern could match a protected name. Compare against the protected basenames and stems, or expand it against the directory when that exists. Keep it no looser than the N4 rule. RED tests: interior `?`, `*` and bracket globs of each shipped protected pattern are denied, while unrelated globs such as `*.py` and `src/*.md` are allowed.
+
+**Remedy (implemented):** `secret_file_matching.py` gained `_globs_can_intersect(a, b)`, a real two-glob language-intersection test (standard sequence-alignment DP over `*`/`?`, O(len(a) · len(b))) — not another edge heuristic, because an interior wildcard has no edge for the existing leading/trailing overlap check to key on. A new `_interior_wildcard_mention` runs it for every token whose raw spelling carries glob syntax (`_is_glob_shaped(raw_form)`), over each of its bracket-expanded forms — so a finite bracket class (`.vault-pa[sz]word`) is covered too, even after expansion strips its wildcard-ness down to a plain literal, since the intersection test degenerates correctly to exact-match in that case. Scoped narrowly to keep N4 intact: only a token with NEITHER a leading NOR a trailing wildcard reaches it (an open-edge token is already handled by the pre-existing checks, N4/m1 fixes and all), and a pattern with wildcards on BOTH edges (`*.secret*`, `*vault_pass*`) is excluded — full intersection against a "contains this text anywhere" pattern is satisfiable by nearly any token carrying its own wildcard (`report-[0-9]*.txt` and `secret*.py` genuinely glob-intersect with `*.secret*`, live-verified as new false positives during implementation, neither is evidence of a protected file), the same over-promiscuity `_both_edges_residue_is_near_total_stem_match` already exists to guard against elsewhere in this module. RED tests (confirmed failing pre-fix, passing after) in `TestBashMentionsProtectedPath`: `test_interior_question_mark_truncation_is_matched`, `test_interior_star_with_unrelated_prefix_is_matched`, `test_interior_bracket_expression_truncation_is_matched`, plus `test_unrelated_interior_wildcard_tokens_are_not_matched` and `test_splat_false_positive_from_n4_still_allowed` pinning the N4 fix stays intact. Full `test_secret_file_matching.py` (203 tests) and `test_secret_file_guard.py` (82 tests) pass.
 
 ### N9 — `docs_qa` judges gitignored markdown, so installing a Claude Code plugin fails local full QA
 
@@ -45,8 +61,7 @@ The docs corpus walks the filesystem without honouring `.gitignore` (`docs_qa/co
 
 ### N6 — `enforce_llm_qa` denies a PROSE mention of `run_all.sh` inside an unrelated command's own argument
 
-**Found by the coordinator**, live: a `CLAUDE/Plan/mkplan.bash --journal ... --title "..."` journal entry was denied under `R-NPM...`-style project-handler
-enforcement, naming `run_all.sh`, even though the runner's name appeared only
+**Found by the coordinator**, live: a `CLAUDE/Plan/mkplan.bash --journal ... --title "..."` journal entry was denied by `enforce_llm_qa` (a project-handler; it has no rule ID), naming `run_all.sh`, even though the runner's name appeared only
 inside the quoted `--title` prose, not as anything the command would execute.
 
 **Cause** (`.claude/project-handlers/pre_tool_use/enforce_llm_qa.py`,
@@ -65,19 +80,30 @@ DIFFERENT script's wrapper plus unrelated prose in the next segment).
 `_segment_executes_script`), reusing this project's already-established
 `shlex.split()` + `try/except ValueError` tokenisation pattern
 (`project_containment.py`'s `_tokenise`) rather than a third hand-rolled
-parser. A segment now matches only when the script is named at the command's
-own HEAD, or as an argument to a wrapper (`bash`/`sh`/`env`/`timeout`/`nice`/
-`exec`) — recursing into a wrapper's `-c` subshell argument and into any
-`$(...)`/backtick substitution's inner text, since bash runs both before the
-rest of the line. A prose word that merely CONTAINS the script's name inside a
-longer shlex token (a whole quoted `--title "..."` phrase is ONE token) is no
-longer conflated with a token that IS the script's path. This also let the
-old `_INSPECTION_COMMANDS`/`_VCS_COMMANDS` allowlists be deleted outright
-(YAGNI): a command whose head is not a wrapper and does not itself name the
-script now correctly can't execute it, with no enumerated list of safe verbs
-needed. A segment that can't be tokenised safely falls back to the prior
-conservative substring check (deny), so an unparsed edge case still fails
-closed rather than opening a bypass.
+parser. A segment matches only when the script is named at the command's own
+HEAD, or as an argument to a wrapper — recursing into a wrapper's `-c`
+subshell argument and into any `$(...)`/backtick substitution's inner text,
+since bash runs both before the rest of the line. A prose word that merely
+CONTAINS the script's name inside a longer shlex token (a whole quoted
+`--title "..."` phrase is ONE token) is no longer conflated with a token that
+IS the script's path.
+
+**First cut (M1, found by the 00466 review) turned this ALLOW-by-default**:
+gating on a fixed list of "wrapper" heads meant every OTHER real invocation
+shape — `source`/`.`, `time`, a `VAR=1` prefix, `(subshell)`, `{ group; }`,
+`!`, `if`/`for`, `nohup`/`sudo`/`command`/`setsid`/`stdbuf`, `... | xargs bash` — passed through unexamined; 16 such shapes that main correctly denied
+were allowed on the branch. **Fixed by restoring deny-by-default**: a segment
+is now denied whenever ANY shlex word — at any position, not just the head —
+equals the script or ends in `/` + the script, UNLESS the segment's head is a
+recognised data consumer (an inspection command such as `cat`/`grep`/`head`,
+or `git`/`gh`) that could not execute it. Only the WORD SPLITTING changed
+from the naive substring check: `shlex.shlex(..., punctuation_chars="(){}!")`
+with `whitespace_split = True` so `(`, `)`, `{`, `!` split off a word with no
+surrounding whitespace, and a leading `VAR=value` assignment is skipped when
+finding the segment's head — so a quoted multi-word argument
+(`--title "... run_all.sh ..."`) stays ONE word and is never mistaken for the
+script's own path. The `_INSPECTION_COMMANDS`/`_VCS_COMMANDS` head allowlist
+from before M1 stays in place under the new name `_DATA_CONSUMERS`.
 
 One pre-existing acceptance-test fixture (`get_acceptance_tests()`, "Block
 run_all.sh") turned out to be the SAME false-positive class in miniature: it
@@ -90,11 +116,19 @@ the block ever regresses).
 RED tests (confirmed failing pre-fix, passing after), added to
 `.claude/project-handlers/pre_tool_use/test_enforce_llm_qa.py`:
 `test_does_not_match_a_prose_mention_in_a_quoted_title_flag` (the exact live
-shape) and `test_does_not_match_an_unrelated_wrapper_invocation`. Four
-companion "must still deny" regression guards were written alongside (already
-passing pre-fix, kept as pins): a `gh --body` prose mention, `cd ... && ./run_all.sh`, `sh -c './scripts/qa/run_all.sh'`, and a bare `$(./run_all.sh)`
-substitution. All 41 tests in that file pass, and all 198 project-handler
-tests pass (`bin/hooks-daemon test-project-handlers --verbose`).
+shape) and `test_does_not_match_an_unrelated_wrapper_invocation`, plus (M1)
+`test_still_matches_shell_prefix_and_process_control_forms`,
+`test_still_matches_subshell_and_control_flow_forms`,
+`test_still_matches_a_bare_path_piped_into_xargs_bash` covering all 16 of the
+review's cases, and `test_does_not_match_further_prose_and_data_consumer_shapes`
+pinning the prose-mention fix stays intact. A companion "must still deny"
+regression guard was written alongside (already passing pre-fix, kept as a
+pin): `cd ... && ./run_all.sh`, `sh -c './scripts/qa/run_all.sh'`, and a bare
+`$(./run_all.sh)` substitution — `gh issue comment --body "... run_all.sh ..."` is NOT one of these: `gh` was already VCS-exempt on main (`_VCS_COMMANDS`,
+now `_DATA_CONSUMERS`), so a `gh --body` prose mention was ALLOW before this
+fix too, and `test_does_not_match_a_prose_mention_in_a_gh_body` was never RED.
+All 45 tests in that file pass, and all project-handler tests pass
+(`bin/hooks-daemon test-project-handlers --verbose`).
 
 ### N5 — SECURITY FAIL-OPEN: an empty path-mention token crashes `secret_file_guard.matches()`, skipping the whole guard for that write
 
@@ -123,17 +157,21 @@ delimiter), `token[len(prefix):]` on a token exactly as long as the prefix is
 `""`. That empty spelling then reached the glob matcher, which had never been
 asked to answer for an empty path before.
 
-**Severity — this is a fail-OPEN, not noise.** The exception is raised inside
-`matches()`, not `handle()`. The daemon's per-handler catch
-(`core/chain.py`) is non-strict by default for this path: it logs the
-exception as context and moves on to the NEXT handler, treating this one as
-"did not match". So a Write/Edit whose content contains an empty-yielding
-operand token SKIPS `secret_file_guard` ENTIRELY for that call — including
-any genuine protected-path mention elsewhere in the same content. An agent
-could not have engineered this to bypass the guard (nothing here is a
-crafted evasion — `~/`, `$PWD/` and friends are ordinary path-handling
-vocabulary), but a real protected mention sitting anywhere in the same
-Write/Edit as one of these operands would have gone undetected.
+**Severity — this is a fail-OPEN under the default config, not noise.** The
+exception is raised inside `matches()`, not `handle()`. The daemon's
+per-handler catch (`core/chain.py`) branches on `daemon.strict_mode`: under
+the default `false` it logs the exception as context and moves on to the NEXT
+handler, treating this one as "did not match", so a Write/Edit whose content
+contains an empty-yielding token SKIPS `secret_file_guard` ENTIRELY for that
+call — including any genuine protected-path mention elsewhere in the same
+content. This repository runs `strict_mode: true`
+(`.claude/hooks-daemon.yaml:8`), so here the crash was a fail-CLOSED SYSTEM
+ERROR deny, not a bypass; the fail-open applies to a client install left on
+the default `false`. The trigger was a bare `~/` only — `$` is a tokeniser
+delimiter (`_TOKEN_DELIMITERS`), so `"$PWD/"`/`"${PWD}/"` never reach the
+prefix-stripping branch at all (they tokenise to `PWD/`/`{PWD}/`, neither of
+which equals a configured prefix). Both surfaces were affected: the
+Write/Edit content scan above, and the Bash command scan (`ls ~/ && cat <protected>` crashed the same way pre-fix).
 
 **Remedy (implemented), both layers per the coordinator's instruction:**
 
@@ -160,6 +198,14 @@ RED tests: `tests/unit/utils/test_path_exclusion.py ::TestEmptyAndNoMatch::test_
 and `tests/unit/utils/test_secret_file_matching.py ::TestBareHomePrefixTokenDoesNotCrash` (6 tests). Full
 `test_secret_file_matching.py` (196), `test_path_exclusion.py` (55) and
 `test_secret_file_guard.py` (76) pass — 327 total.
+
+**Nit fixed (n1, 00466 review):** `_candidate_paths`'s docstring said an empty
+`file_path` yields "an empty candidate list that matches nothing", but the
+code returned `[""]` — a list holding one empty string, which DOES match
+`*`/`**` (`fnmatch("", "*")` is True). Not a regression (main behaved the
+same with no `project_root`), but worth aligning: it now returns `[]`, so the
+code matches its own documented contract. RED test:
+`test_empty_file_path_does_not_match_a_bare_wildcard`.
 
 ### N4 — `secret_file_guard`'s leading-wildcard overlap check denies an unrelated Python splat expression as `*.vault-password`
 
@@ -203,6 +249,8 @@ leading-only pattern needing the overlap branch specifically) — so the overlap
 branch contributed nothing there but this false positive.
 
 **Remedy** (implemented): `_glob_token_overlaps_stem` takes a new `pattern_has_trailing_wildcard` parameter; its leading-wildcard branch now also requires `pattern_has_trailing_wildcard or stem_basename.endswith(residue)` before counting the overlap as a mention. The call site passes `_has_trailing_wildcard(pattern)` — a function already used elsewhere in the same module for the token's own edges, reused here for the pattern's. This is parametrised on the pattern's own shape, not special-cased to `.vault-password`, so any future or project-configured leading-wildcard-only glob is covered the same way. RED tests (confirmed failing pre-fix, passing after): `TestBashMentionsProtectedPath::test_leading_wildcard_python_splat_operator_is_not_matched` (the reported shape plus the bracket-free forms) and a paired `..._full_suffix_of_anchored_stem_still_matched` regression guard proving a genuine truncation of an anchored pattern (`*password`, `*ult-password` against `*.vault-password`) still denies. Full `test_secret_file_matching.py` (190 tests) and `test_secret_file_guard.py` (76 tests) pass.
+
+**Correction (m1, found by the 00466 review):** the `stem_basename.endswith(residue)` requirement above is only correct for the simple splat shape (`*identifier`, nothing else) — a token that carries ANOTHER wildcard besides its leading one (`*rd*rd`, project-configured `*on*.json`) is not that shape, since fnmatch expands the internal wildcard too and can still glob-match a protected name without its residue being a literal suffix of the stem at all (`*rd*rd` matches `rd.vault-password`). Applying the stricter requirement there silently dropped that detection. Fixed with a new `_has_wildcard_after_leading` predicate and a `token_has_wildcard_after_leading` parameter: the stricter requirement is now scoped to a token with NO wildcard after its leading one, restoring the pre-N4 overlap-only behaviour for genuinely multi-wildcard tokens. RED tests: `test_leading_wildcard_with_an_internal_wildcard_too_still_matched` (`*rd*rd`, `*word*word`) and `test_leading_wildcard_project_pattern_with_an_internal_wildcard_still_matched` (`*on*.json` against a project `*secret*.json` pattern). Full `test_secret_file_matching.py` (198 tests at the time) and `test_secret_file_guard.py` (82 tests) pass.
 
 ### N3 — `goal_injection` treats any edit of an In Progress plan as the plan starting
 

@@ -263,13 +263,17 @@ class RuleID:
     WORKTREE_FILE_COPY: str = "R-WORKTREE-FILE-COPY"
 
     # ------------------------------------------------------------------
-    # project_containment handler
+    # project_containment handler — 2 rules
     # ------------------------------------------------------------------
 
     #: A write whose target is named outside the repository root. Every other
     #: path rule is expressed in repo-relative coordinates, so such a target
     #: escapes them all rather than violating any one of them.
     WRITE_OUTSIDE_PROJECT_ROOT: str = "R-WRITE-OUTSIDE-PROJECT-ROOT"
+
+    #: A call this guard could not finish evaluating (Plan 00466 N11): denied
+    #: structurally, independent of the daemon's global strict_mode.
+    PROJECT_CONTAINMENT_EVALUATION_ERROR: str = "R-PROJECT-CONTAINMENT-EVALUATION-ERROR"
 
     # ------------------------------------------------------------------
     # plan_number_helper handler — 2 rules
@@ -409,7 +413,8 @@ class RuleID:
     ESLINT_RUN_FAILURE: str = "R-ESLINT-RUN-FAILURE"
 
     # ------------------------------------------------------------------
-    # secret_file_guard handler — 3 rules (Decision B: per-route granularity)
+    # secret_file_guard handler — 4 rules (Decision B: per-route granularity,
+    # plus the evaluation-error rule added by Plan 00466 N11)
     # ------------------------------------------------------------------
 
     #: Read/Write/Edit/NotebookEdit/Grep targeting a protected path directly.
@@ -420,6 +425,10 @@ class RuleID:
 
     #: A script authored via Write/Edit whose content references a protected path.
     SECRET_SCRIPT_AUTHOR: str = "R-SECRET-SCRIPT-AUTHOR"
+
+    #: A call this guard could not finish evaluating (Plan 00466 N11): denied
+    #: structurally, independent of the daemon's global strict_mode.
+    SECRET_EVALUATION_ERROR: str = "R-SECRET-EVALUATION-ERROR"
 
     # ------------------------------------------------------------------
     # sensitive_content handler — 2 rules (two independent sources)

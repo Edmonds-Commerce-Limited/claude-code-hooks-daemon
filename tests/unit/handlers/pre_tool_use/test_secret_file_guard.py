@@ -333,21 +333,131 @@ class TestGuidance:
 
 
 class TestGetRules:
-    """get_rules() declares the 3 Rule objects backing this handler (Plan 00116)."""
+    """get_rules() declares the 4 Rule objects backing this handler (Plan 00116,
+    plus the evaluation-error rule added by Plan 00466 N11)."""
 
-    def test_returns_three_rules(self) -> None:
+    def test_returns_four_rules(self) -> None:
         rules = _handler().get_rules()
-        assert len(rules) == 3
+        assert len(rules) == 4
         assert all(isinstance(rule, Rule) for rule in rules)
 
     def test_rule_ids_match_constants(self) -> None:
-        expected = {RuleID.SECRET_READ, RuleID.SECRET_BASH_MENTION, RuleID.SECRET_SCRIPT_AUTHOR}
+        expected = {
+            RuleID.SECRET_READ,
+            RuleID.SECRET_BASH_MENTION,
+            RuleID.SECRET_SCRIPT_AUTHOR,
+            RuleID.SECRET_EVALUATION_ERROR,
+        }
         actual = {rule.rule_id for rule in _handler().get_rules()}
         assert actual == expected
 
     def test_every_rule_has_non_empty_verbose(self) -> None:
         for rule in _handler().get_rules():
             assert rule.verbose, f"{rule.rule_id} has empty verbose content"
+
+
+class TestFailsClosedOnEvaluationError:
+    """Plan 00466 N11 (major M4): any exception during evaluation is a DENY,
+    structurally -- independent of the daemon's global `strict_mode`.
+
+    N5 fixed the one raise path the coordinator found; this pins the CLASS.
+    `matches()`/`handle()` must never propagate an exception at all, since a
+    propagated exception is exactly what `core/chain.py`'s non-strict
+    default (every client install unless `strict_mode: true`) treats as "no
+    match" -- silently disabling this guard for that call, including any
+    genuine protected-path mention elsewhere in the same input.
+    """
+
+    def test_bash_route_exception_still_denies(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def _raise(*_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("synthetic failure injected by the test")
+
+        monkeypatch.setattr(guard_module.sfm, "find_protected_mention_detail", _raise)
+        handler = _handler()
+        hook_input = _hook_input("Bash", {"command": "echo hello"})
+
+        assert handler.matches(hook_input) is True
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "RuntimeError" in result.reason
+        assert "synthetic failure injected by the test" in result.reason
+
+    def test_read_route_exception_still_denies(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def _raise(*_args: object, **_kwargs: object) -> bool:
+            raise ValueError("synthetic path_is_protected failure")
+
+        monkeypatch.setattr(guard_module.sfm, "path_is_protected", _raise)
+        handler = _handler()
+        hook_input = _hook_input("Read", {"file_path": "/proj/ordinary.py"})
+
+        assert handler.matches(hook_input) is True
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "ValueError" in result.reason
+
+    def test_grep_directory_route_exception_still_denies(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(guard_module.sfm, "path_is_protected", lambda *_a, **_k: False)
+
+        def _raise(*_args: object, **_kwargs: object) -> None:
+            raise OSError("synthetic directory-walk failure")
+
+        monkeypatch.setattr(guard_module.sfm, "directory_contains_protected", _raise)
+        handler = _handler()
+        hook_input = _hook_input("Grep", {"path": "/proj/some-dir", "pattern": "x"})
+
+        assert handler.matches(hook_input) is True
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "OSError" in result.reason
+
+    def test_script_content_route_exception_still_denies(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _raise(*_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("synthetic script-content-scan failure")
+
+        monkeypatch.setattr(guard_module.sfm, "find_protected_mention_detail", _raise)
+        handler = _handler()
+        hook_input = _hook_input(
+            "Write", {"file_path": "scripts/x.py", "content": "print('hello')"}
+        )
+
+        assert handler.matches(hook_input) is True
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "RuntimeError" in result.reason
+
+    def test_the_live_nul_byte_path_still_denies(self) -> None:
+        """The one raise path the review found still live after N5: a file
+        path containing a NUL byte raises `ValueError: embedded null byte`
+        out of `os.path.realpath`/`os.path.relpath`. Not exploitable for
+        disclosure (no tool can open a NUL path), but the class fix must
+        cover it without a dedicated patch."""
+        handler = _handler()
+        hook_input = _hook_input("Read", {"file_path": "/proj/a\x00b"})
+
+        assert handler.matches(hook_input) is True
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+
+    def test_an_evaluation_error_denial_uses_its_own_rule_id(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _raise(*_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("synthetic")
+
+        monkeypatch.setattr(guard_module.sfm, "find_protected_mention_detail", _raise)
+        handler = _handler()
+        result = handler.handle(_hook_input("Bash", {"command": "echo hello"}))
+
+        assert result.reason is not None
+        assert result.reason.startswith(f"BLOCKED [{RuleID.SECRET_EVALUATION_ERROR}]")
 
 
 class TestDisclosureLadder:
@@ -624,7 +734,14 @@ class TestEncryptedFileGuidance:
         assert "ansible-vault view|decrypt" in text
 
     def test_deny_text_explains_the_encrypted_exemption(self) -> None:
+        """The three content-policy rules (read/bash/script) all teach the
+        encrypted-at-rest exemption. The evaluation-error rule (Plan 00466
+        N11) is a different failure mode entirely -- the guard crashed, it
+        never reached a content verdict -- so mentioning an exemption that
+        was never evaluated would mislead, not help."""
         for rule in _handler().get_rules():
+            if rule.rule_id == RuleID.SECRET_EVALUATION_ERROR:
+                continue
             assert "encrypted" in rule.verbose.lower(), rule.rule_id
 
 

@@ -76,7 +76,10 @@ class TestHandlerIdentity:
         assert handler.terminal is True
 
     def test_it_exposes_its_rule(self, handler: ProjectContainmentHandler) -> None:
-        assert [rule.rule_id for rule in handler.get_rules()] == [RuleID.WRITE_OUTSIDE_PROJECT_ROOT]
+        assert [rule.rule_id for rule in handler.get_rules()] == [
+            RuleID.WRITE_OUTSIDE_PROJECT_ROOT,
+            RuleID.PROJECT_CONTAINMENT_EVALUATION_ERROR,
+        ]
 
 
 class TestTheWriteEditSurface:
@@ -439,6 +442,57 @@ class TestTheDenial:
     def test_a_non_matching_input_is_allowed(self, handler: ProjectContainmentHandler) -> None:
         """Defensive: handle() must not deny what matches() would not select."""
         assert handler.handle(_write("/repo/README.md")).decision == Decision.ALLOW
+
+
+class TestFailsClosedOnEvaluationError:
+    """Plan 00466 N11 (major M4): audited alongside secret_file_guard.
+
+    `_resolved_root()` calls `ProjectContext.project_root()` directly with no
+    try/except -- an uninitialised `ProjectContext` raises `RuntimeError`
+    there, uncaught, which `core/chain.py`'s per-handler catch treats as "did
+    not match" under the daemon's default (non-strict) `strict_mode`,
+    fail-opening this SAFETY+BLOCKING guard for that call. Fixed the same way
+    as `secret_file_guard`: `matches()`/`handle()` never propagate.
+    """
+
+    def test_an_uninitialised_project_root_still_denies(
+        self, handler: ProjectContainmentHandler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _raise() -> Path:
+            raise RuntimeError("ProjectContext not initialized")
+
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.core.project_context.ProjectContext.project_root",
+            classmethod(lambda cls: _raise()),
+        )
+        hook_input = _write("/tmp/notes.md")
+
+        assert handler.matches(hook_input) is True
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "RuntimeError" in result.reason
+
+    def test_an_evaluation_error_denial_uses_its_own_rule_id(
+        self, handler: ProjectContainmentHandler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _raise() -> Path:
+            raise RuntimeError("synthetic")
+
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.core.project_context.ProjectContext.project_root",
+            classmethod(lambda cls: _raise()),
+        )
+        result = handler.handle(_write("/tmp/notes.md"))
+
+        assert result.reason is not None
+        assert result.reason.startswith(f"BLOCKED [{RuleID.PROJECT_CONTAINMENT_EVALUATION_ERROR}]")
+
+    def test_get_rules_includes_the_evaluation_error_rule(
+        self, handler: ProjectContainmentHandler
+    ) -> None:
+        rule_ids = {rule.rule_id for rule in handler.get_rules()}
+        assert RuleID.PROJECT_CONTAINMENT_EVALUATION_ERROR in rule_ids
 
 
 class TestTheAllowlist:

@@ -294,6 +294,78 @@ class TestBashMentionsProtectedPath:
         assert self._match("cat *password") is not None
         assert self._match("cat *ult-password") is not None
 
+    def test_leading_wildcard_with_an_internal_wildcard_too_still_matched(self) -> None:
+        """Regression (m1, Plan 00466 review): the N4 gate applies its
+        stricter ``stem_basename.endswith(residue)`` requirement to EVERY
+        leading-wildcard token, but that requirement is only correct for the
+        simple splat shape (``*identifier``, nothing else). A token that
+        carries ANOTHER wildcard besides its leading one -- ``*rd*rd``,
+        ``*word*word`` -- is not that shape: fnmatch expands the internal
+        ``*`` too, so the token can glob-match a protected name (``*rd*rd``
+        matches ``rd.vault-password``: contains ``rd``, then later another
+        ``rd``) without its residue needing to be a literal suffix of the
+        stem at all. Only the pre-existing overlap-length check should gate
+        this shape, exactly as before N4."""
+        assert self._match("cat *rd*rd") is not None
+        assert self._match("cat *word*word") is not None
+
+    def test_leading_wildcard_project_pattern_with_an_internal_wildcard_still_matched(
+        self,
+    ) -> None:
+        """The same regression against a PROJECT-configured pattern with its
+        own internal wildcard (``*secret*.json``): a token shaped
+        ``*on*.json`` can still glob-expand to a protected name
+        (``on-secret.json``) and must stay denied."""
+        patterns = ("*secret*.json",)
+        assert sfm.find_protected_mention("cat *on*.json", patterns) is not None
+
+    def test_interior_question_mark_truncation_is_matched(self) -> None:
+        """N10 (Plan 00466 review): a wildcard sitting in the MIDDLE of a
+        protected name is invisible to the edge-based checks above -- this
+        token has neither a leading nor a trailing wildcard, so it never
+        reached ``_glob_token_overlaps_stem`` at all, and its residue
+        (``.vault-pasword``, one ``s`` short of the real stem) is not a
+        substring of ``.vault-password`` either, so the pre-existing
+        substring+fnmatch check missed it too. ``fnmatch('.vault-password',
+        '.vault-pas?word')`` is True (the ``?`` absorbs the missing ``s``),
+        so a real protected file is reachable through this exact token."""
+        assert self._match("cat .vault-pas?word") is not None
+        assert self._match("cat .vault-p?ss") is not None
+
+    def test_interior_star_with_unrelated_prefix_is_matched(self) -> None:
+        """A second interior-wildcard shape: an unrelated literal PREFIX in
+        front of the token (``prod.``) does not save it, because the
+        protected pattern (``*.vault-password``) itself has an open leading
+        edge -- the two open edges can absorb each other's slack, and a real
+        file named ``prod.vault-password`` would match both."""
+        assert self._match("cat prod.vault-passw*rd") is not None
+
+    def test_interior_bracket_expression_truncation_is_matched(self) -> None:
+        """The interior wildcard can also be a bracket expression, not just
+        ``?``/``*``. ``[sz]`` expands to two concrete spellings
+        (``.vault-password`` and ``.vault-paszword``) -- the first is the
+        real protected stem exactly, so it must be caught even though its
+        sibling expansion is a genuine non-match."""
+        assert self._match("cat .vault-pas[sz]word") is not None
+
+    def test_unrelated_interior_wildcard_tokens_are_not_matched(self) -> None:
+        """The new interior-wildcard check must not become a blanket
+        "any glob token" denial -- ordinary, unrelated glob-shaped tokens
+        stay allowed."""
+        assert self._match("ls *.py") is None
+        assert self._match("ls src/*.md") is None
+        assert self._match("cat file?.txt") is None
+        assert self._match("cat repo[12].json") is None
+
+    def test_splat_false_positive_from_n4_still_allowed(self) -> None:
+        """The N10 fix must keep the N4 false-positive fix intact: it is
+        scoped to tokens with NEITHER a leading NOR a trailing wildcard, so
+        the Python unpacking splat shapes (leading-wildcard, no trailing)
+        that N4 fixed must still be allowed."""
+        assert self._match("rest = [words[0], *words[position + 1 :]]") is None
+        assert self._match("def f(*wordlist): pass") is None
+        assert self._match("call(*wordlist)") is None
+
     def test_python_list_literal_is_not_matched(self) -> None:
         """Regression (Plan 00305 Task 2.5, clippy-shim-fix agent report): an
         Edit whose added content was the literal Python list

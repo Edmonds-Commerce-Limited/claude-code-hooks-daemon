@@ -26,24 +26,57 @@ _LLM_SCRIPT = "./scripts/qa/llm_qa.py all"
 # character handles both without a second rule.
 _SEGMENT_SEPARATORS = (";", "|", "&", "\n")
 
-# Commands that hand a following argument to a shell to run, rather than
-# treating it as data: `bash scripts/qa/run_all.sh`, `env ./run_all.sh`,
-# `timeout 30 ./run_all.sh`. A command whose head is none of these, and whose
-# head does not itself name the script, never runs it — no allowlist of
-# read-only commands is needed, since anything not on THIS list already
-# cannot execute anything (Plan 00466 N6).
-_WRAPPER_COMMANDS = ("bash", "sh", "env", "timeout", "nice", "exec")
-
-# The flag that hands a wrapper an entire command LINE as a single argument
-# (`sh -c '...'`, `bash -c "..."`) rather than a script path. Its value is
-# itself a shell command and must be re-scanned, not treated as a path.
-_SUBSHELL_FLAG = "-c"
+# Commands that read/inspect a file WITHOUT executing it, or record its path
+# as DATA (a VCS message, a staged pathspec). This is the ONLY exemption from
+# deny-by-default (Plan 00466 review, M1): a command whose head is not one of
+# these, and does not itself name the script, is treated as a candidate
+# invocation regardless of what verb it is -- `source`, `time`, `sudo`,
+# `nohup`, `command`, `setsid`, `stdbuf`, a bare `CI=1 ./run_all.sh`, none of
+# these was ever a "wrapper" in any enumerable sense, and an earlier
+# allow-by-default redesign (which flipped the default to require an
+# executing-wrapper allowlist instead) missed exactly those 16 shapes. See
+# `_word_names_the_script` for how the N6 false positive (a prose mention
+# inside a quoted argument to an unrelated command) stays fixed without an
+# allow-by-default policy: it is fixed by TOKENISATION, not by widening what
+# is allowed to execute.
+_INSPECTION_COMMANDS = (
+    "cat",
+    "less",
+    "more",
+    "head",
+    "tail",
+    "grep",
+    "rg",
+    "wc",
+    "bat",
+    "shellcheck",
+    "shfmt",
+    "diff",
+    "stat",
+    "file",
+)
+_VCS_COMMANDS = ("git", "gh")
+_DATA_CONSUMERS = _INSPECTION_COMMANDS + _VCS_COMMANDS
 
 # `$(...)` and `` `...` `` both run their inner text as a command before the
 # rest of the line runs (Plan 00466 N6, `test_still_matches_a_bare_command_substitution`
 # and the pre-existing UNQUOTED-heredoc regression). Matched non-greedily and
 # with one level of nested parens so `$(echo $(x))` still finds `echo $(x)`.
 _SUBSTITUTION_PATTERN = re.compile(r"\$\(([^()]*(?:\([^()]*\)[^()]*)*)\)|`([^`]*)`")
+
+# `(`, `{` and `!` introduce a subshell, a group, or negation and need to
+# split off as their own token even when glued to the next word with no
+# whitespace (`(./run_all.sh)`) -- plain whitespace-splitting would otherwise
+# hand back one token `(./run_all.sh)` that names no real path (Plan 00466
+# review M1). shlex's `punctuation_chars` support does exactly this, and
+# also protects `~-./*?=` as wordchars so a path is never split mid-token.
+_PUNCTUATION_CHARS = "(){}!"
+
+# A leading `VAR=value` assignment before the real command (`CI=1 ./run_all.sh`)
+# is not itself a command word, and must be skipped when resolving the
+# segment's HEAD -- otherwise `VAR=value cat run_all.sh` would resolve to a
+# head that matches no data-consumer and wrongly deny an inspection.
+_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
 
 def _split_top_level(command: str) -> list[str]:
@@ -77,16 +110,32 @@ def _split_top_level(command: str) -> list[str]:
 
 
 def _tokenise(segment: str) -> list[str] | None:
-    """Quote-aware split of one shell segment, or ``None`` if it can't be split safely.
+    """Quote- and punctuation-aware split of one shell segment, or ``None`` if
+    it can't be split safely.
 
     Mirrors the established pattern in ``project_containment.py``
     (``shlex.split`` wrapped in try/except) rather than hand-rolling a new
-    tokeniser — this project already has one way to do this.
+    tokeniser — this project already has one way to do this — extended with
+    ``punctuation_chars`` so ``(``/``{``/``!`` split off even glued to the
+    next word (Plan 00466 review M1).
     """
     try:
-        return shlex.split(segment)
+        lexer = shlex.shlex(segment, posix=True, punctuation_chars=_PUNCTUATION_CHARS)
+        lexer.whitespace_split = True
+        return list(lexer)
     except ValueError:
         return None
+
+
+def _segment_head(tokens: list[str]) -> str | None:
+    """The first real command word: skips punctuation tokens and ``VAR=value``
+    assignments (Plan 00466 review M1) so ``CI=1 cat run_all.sh`` still
+    resolves its head to ``cat``, not to the assignment."""
+    for token in tokens:
+        if token in _PUNCTUATION_CHARS or _ASSIGNMENT_RE.match(token):
+            continue
+        return token
+    return None
 
 
 def _word_names_the_script(word: str) -> bool:
@@ -114,13 +163,22 @@ def _substitution_inner_segments(text: str) -> list[str]:
 def _segment_executes_script(segment: str) -> bool:
     """True when ``segment`` is a REAL invocation of the blocked script.
 
-    A real invocation is: the script named at the segment's command head, or
-    named as an argument to a wrapper (``bash``/``sh``/``env``/``timeout``/
-    ``nice``/``exec``) that will run it — recursing into a wrapper's ``-c``
-    subshell argument, since that argument IS a command line the wrapper
-    hands off to a shell, not a path. A substitution's inner text is checked
-    first, unconditionally, since bash runs it before running anything else
-    on the line regardless of what the surrounding command's head is.
+    Deny-by-default (Plan 00466 review M1): the script is a real invocation
+    the moment it is named as its own shell WORD anywhere in the segment
+    (``_word_names_the_script`` — exact name, or a path ending in it), UNLESS
+    the segment's own HEAD is a data consumer (``_DATA_CONSUMERS`` — a reader
+    or a VCS command), which only ever takes the path as data. There is no
+    "known wrapper" allowlist: a leading ``VAR=value``, ``source``/``.``,
+    ``time``, ``nohup``/``sudo``/``command``/``setsid``/``stdbuf``, and every
+    other verb that is not a data consumer, is a candidate invocation by
+    default. This also covers a quoted ``-c``/``-lc`` argument to a real
+    shell without any special-casing: shlex hands the whole quoted string
+    back as ONE word, and that word still ends in ``/run_all.sh`` whenever
+    the invocation is the last thing on it (``bash -lc 'cd x && ./run_all.sh'``).
+
+    A substitution's inner text is checked first, unconditionally, since bash
+    runs it before running anything else on the line regardless of the
+    surrounding command's head.
 
     A segment that can't be tokenised safely (unbalanced quoting) falls back
     to the old conservative substring check — deny rather than silently wave
@@ -136,22 +194,12 @@ def _segment_executes_script(segment: str) -> bool:
     if not tokens:
         return False
 
-    if _word_names_the_script(tokens[0]):
-        return True
-
-    head = tokens[0].rsplit("/", 1)[-1]
-    if head not in _WRAPPER_COMMANDS:
+    head = _segment_head(tokens)
+    head_name = head.rsplit("/", 1)[-1] if head else ""
+    if head_name in _DATA_CONSUMERS:
         return False
 
-    for word in tokens[1:]:
-        if _word_names_the_script(word):
-            return True
-        if word == _SUBSHELL_FLAG:
-            continue
-        for inner_segment in _split_top_level(word):
-            if _segment_executes_script(inner_segment):
-                return True
-    return False
+    return any(_word_names_the_script(token) for token in tokens)
 
 
 def _has_real_invocation(command: str) -> bool:

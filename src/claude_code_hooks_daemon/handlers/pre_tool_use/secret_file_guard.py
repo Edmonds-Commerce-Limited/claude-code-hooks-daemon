@@ -27,6 +27,7 @@ ownership) the project must set independently — see the plan's
 RESEARCH-read-routes.md for the class-(b)/(c)/(d) route classification.
 """
 
+import logging
 from typing import Any, ClassVar, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
@@ -42,6 +43,8 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
     handler_excludes_path,
     resolve_project_root,
 )
+
+logger = logging.getLogger(__name__)
 
 # One Rule per distinct deny ROUTE (Plan 00116, Decision B). The underlying
 # deny message is the same shape for all three -- only the "what was
@@ -84,6 +87,12 @@ _VERBOSE: Final[str] = (
     "command is itself a mention, and is denied."
 )
 
+# The route a raise during evaluation is filed under (Plan 00466 N11). Not in
+# `_RULES_BY_ROUTE`'s three real routes -- its Rule needs its own `why`/`fix`,
+# distinct from "a protected path was mentioned", and `handle()` renders it
+# separately rather than looking it up there.
+_ERROR_ROUTE: Final[str] = "error"
+
 _RULES_BY_ROUTE: Final[dict[str, Rule]] = {
     "read": Rule(
         rule_id=RuleID.SECRET_READ,
@@ -107,6 +116,34 @@ _RULES_BY_ROUTE: Final[dict[str, Rule]] = {
         verbose=_VERBOSE,
     ),
 }
+
+# Plan 00466 N11 (major M4): a raise anywhere in evaluation is not a decision
+# this guard made -- `core/chain.py`'s per-handler catch treats a propagated
+# exception as "did not match" whenever the daemon's global `strict_mode` is
+# the client default (`false`), fail-opening a SAFETY+BLOCKING guard. N5
+# fixed the one raise path found live; this rule and the wrapper below make
+# the whole CLASS structurally fail closed, independent of `strict_mode`.
+_ERROR_RULE: Final[Rule] = Rule(
+    rule_id=RuleID.SECRET_EVALUATION_ERROR,
+    blocked="a call this guard could not finish evaluating",
+    why=(
+        "An exception during evaluation is not a decision the guard actually made "
+        '-- treating it as "no match" would let a genuine protected-path mention '
+        "through unexamined whenever the SAME defect crashed the scan"
+    ),
+    fix=(
+        "This is a bug in the guard itself, not something to work around -- "
+        "report it via the hooks-daemon skill (issue-report)"
+    ),
+    verbose=(
+        "secret_file_guard could not finish evaluating this call and is denying "
+        'it for safety rather than treating the crash as "no match" (Plan 00466 '
+        "N11 -- this guard fails CLOSED on any internal error, independent of the "
+        "daemon's global strict_mode). This is a bug in the guard itself: report "
+        "it via the hooks-daemon skill (issue-report) rather than retrying -- "
+        "retrying the same call will crash the same way."
+    ),
+)
 
 # Routes whose deny message names the matched token (Plan 00356). Both scan a
 # HAYSTACK the caller supplied -- a whole command line, a whole authored file
@@ -222,12 +259,36 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         """``(pattern, token, route)`` for this tool call, or ``None``.
 
         The single dispatch point shared by ``matches()`` and ``handle()`` so
-        the two can never disagree about what was inspected. ``route`` is one
-        of ``"read"`` (a direct Read/Write/Edit/NotebookEdit/Grep target, or a
-        Grep rooted at a directory containing a protected file), ``"bash"``
-        (a Bash command mentioning a protected path) or ``"script"`` (a
-        Write/Edit authoring a script whose content references one) — the
-        three Decision B rule granularities (Plan 00116).
+        the two can never disagree about what was inspected. Wraps
+        ``_evaluate`` so this method — and therefore ``matches()``/``handle()``
+        — NEVER raises (Plan 00466 N11, major M4): an exception anywhere in
+        evaluation is filed under ``_ERROR_ROUTE`` and denied, rather than
+        propagating to ``core/chain.py``'s per-handler catch, which treats a
+        propagated exception as "did not match" under the daemon's default
+        (non-strict) ``strict_mode`` — fail-opening this SAFETY+BLOCKING guard
+        for that call, including any genuine protected-path mention elsewhere
+        in the same input. This guard fails closed structurally, independent
+        of the global setting.
+        """
+        try:
+            return self._evaluate(hook_input)
+        except Exception as exc:
+            # Deliberately broad: ANY exception during evaluation must deny,
+            # never propagate (Plan 00466 N11) -- see the docstring above.
+            logger.exception(
+                "secret_file_guard: evaluation raised; denying for safety (Plan 00466 N11)"
+            )
+            return ("<internal-error>", f"{type(exc).__name__}: {exc}", _ERROR_ROUTE)
+
+    def _evaluate(self, hook_input: dict[str, Any]) -> tuple[str, str, str] | None:
+        """The real evaluation ``_matched_pattern_and_route`` wraps.
+
+        ``route`` is one of ``"read"`` (a direct Read/Write/Edit/NotebookEdit/
+        Grep target, or a Grep rooted at a directory containing a protected
+        file), ``"bash"`` (a Bash command mentioning a protected path) or
+        ``"script"`` (a Write/Edit authoring a script whose content
+        references one) — the three Decision B rule granularities (Plan
+        00116).
 
         ``token`` is the specific span that matched, so the deny message can
         name it (Plan 00356). For the ``read`` routes it is the path argument
@@ -332,8 +393,8 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         return self._matched_pattern(hook_input) is not None
 
     def get_rules(self) -> list[Rule]:
-        """Return the 3 Rule objects backing this handler's blocking behaviour."""
-        return list(_RULES_BY_ROUTE.values())
+        """Return the 4 Rule objects backing this handler's blocking behaviour."""
+        return [*_RULES_BY_ROUTE.values(), _ERROR_RULE]
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Deny with a verbose-first/terse-after explanation.
@@ -347,6 +408,8 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         if matched is None:
             return GatingResult(decision=Decision.ALLOW)
         pattern, token, route = matched
+        if route == _ERROR_ROUTE:
+            return self._deny_for_evaluation_error(hook_input, token)
         rule = _RULES_BY_ROUTE[route]
 
         transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
@@ -373,6 +436,28 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         if route in _TOKEN_ECHO_ROUTES and token and token != pattern:
             message += f"\nMatched on this token from your input: `{token}`"
 
+        return GatingResult(decision=Decision.DENY, reason=message)
+
+    def _deny_for_evaluation_error(self, hook_input: dict[str, Any], detail: str) -> GatingResult:
+        """Deny for the ``_ERROR_ROUTE`` case (Plan 00466 N11): the guard
+        raised rather than reaching a real verdict. Same verbose-first/
+        terse-after disclosure ladder as the three real routes, keyed on
+        ``_ERROR_RULE``'s own rule_id, plus the exception detail so the
+        report that fixes the underlying bug does not need to reproduce it
+        from scratch.
+        """
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+        tracker = get_data_layer().disclosure
+        formatter = RuleFormatter()
+
+        if transcript_path and tracker.was_disclosed(transcript_path, _ERROR_RULE.rule_id):
+            message = formatter.terse(_ERROR_RULE)
+        else:
+            if transcript_path:
+                tracker.mark_disclosed(transcript_path, _ERROR_RULE.rule_id)
+            message = formatter.verbose(_ERROR_RULE)
+
+        message += f"\n\nInternal error: {detail}"
         return GatingResult(decision=Decision.DENY, reason=message)
 
     def get_default_enabled(self) -> bool:

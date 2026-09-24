@@ -338,6 +338,74 @@ class TestEnforceLlmQaHandler:
         command = 'bash scripts/qa/run_tests.sh; echo "see run_all.sh notes"'
         assert handler.matches(bash_hook_input(command)) is False
 
+    # ── matches() — M1 regression (Plan 00466 review): restore deny-by-default ──
+    #
+    # The shlex-based redesign above (N6) replaced a substring-plus-allowlist
+    # check with a small allowlist of WRAPPER commands, which made every head
+    # NOT on that list an ALLOW by default -- 16 genuine invocation shapes the
+    # review found now pass unblocked. The fix restores deny-by-default (an
+    # inspection/VCS head is the ONLY exemption); these tests pin each shape
+    # the review listed as still denied.
+
+    def test_still_matches_shell_prefix_and_process_control_forms(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        """`source`/`.`, `time`, a leading `VAR=value`, and process-control
+        wrappers (`nohup`/`sudo`/`command`/`setsid`/`stdbuf`) all still hand
+        the script to a shell to execute -- none of them was ever on any
+        read-only allowlist, so deny-by-default must catch every one."""
+        for command in (
+            "source scripts/qa/run_all.sh",
+            ". scripts/qa/run_all.sh",
+            "time ./scripts/qa/run_all.sh",
+            "CI=1 ./scripts/qa/run_all.sh",
+            "nohup ./scripts/qa/run_all.sh > /tmp/x.log",
+            "sudo ./scripts/qa/run_all.sh",
+            "command ./scripts/qa/run_all.sh",
+            "setsid ./scripts/qa/run_all.sh",
+            "stdbuf -oL ./scripts/qa/run_all.sh",
+        ):
+            assert handler.matches(bash_hook_input(command)) is True, command
+
+    def test_still_matches_subshell_and_control_flow_forms(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        """A `(...)` subshell, a `{...}` group, `!`, and `if`/`for` control
+        flow all still run the script; none is whitespace-separated from an
+        adjacent `(`/`{`/`!`, which plain whitespace-splitting would glue
+        onto the next word and hide."""
+        for command in (
+            "(cd scripts/qa && ./run_all.sh)",
+            "(./scripts/qa/run_all.sh)",
+            "{ ./scripts/qa/run_all.sh; }",
+            "! ./scripts/qa/run_all.sh",
+            "if true; then ./scripts/qa/run_all.sh; fi",
+            "for i in 1; do ./scripts/qa/run_all.sh; done",
+        ):
+            assert handler.matches(bash_hook_input(command)) is True, command
+
+    def test_still_matches_a_bare_path_piped_into_xargs_bash(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        """`echo <path> | xargs bash` feeds the bare path to xargs, which
+        hands it to bash to run -- the echo segment alone names the script
+        as its own unquoted word, so deny-by-default catches it before
+        xargs even enters the picture."""
+        assert handler.matches(bash_hook_input("echo scripts/qa/run_all.sh | xargs bash")) is True
+
+    def test_does_not_match_further_prose_and_data_consumer_shapes(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        """Companion ALLOW cases from the review's probe file: a bare prose
+        echo, a git-commit prose mention with single quotes, and shellcheck
+        as a static-analysis data consumer."""
+        for command in (
+            'echo "use llm_qa instead of run_all.sh"',
+            "git commit -m 'mention run_all.sh in prose'",
+            "shellcheck scripts/qa/run_all.sh",
+        ):
+            assert handler.matches(bash_hook_input(command)) is False, command
+
     # ── Acceptance tests ──
 
     def test_has_acceptance_tests(self, handler: EnforceLlmQaHandler) -> None:

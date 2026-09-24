@@ -174,6 +174,37 @@ _RULE = Rule(
     ),
 )
 
+# Plan 00466 N11 (major M4, audited alongside secret_file_guard): a raise
+# anywhere in evaluation (`_resolved_root()` calls `ProjectContext.project_root()`
+# with no try/except -- an uninitialised context raises `RuntimeError` there)
+# is not a decision this guard made. `core/chain.py`'s per-handler catch treats
+# a propagated exception as "did not match" whenever the daemon's global
+# `strict_mode` is the client default (`false`), fail-opening this
+# SAFETY+BLOCKING guard. This rule and the wrapper below make evaluation
+# structurally fail closed, independent of `strict_mode`.
+_ERROR_RULE = Rule(
+    rule_id=RuleID.PROJECT_CONTAINMENT_EVALUATION_ERROR,
+    blocked="a call this guard could not finish evaluating",
+    why=(
+        "An exception during evaluation is not a decision the guard actually made "
+        '-- treating it as "no match" would let a genuine out-of-root write '
+        "through unexamined whenever the SAME defect crashed the check"
+    ),
+    fix=(
+        "This is a bug in the guard itself, not something to work around -- "
+        "report it via the hooks-daemon skill (issue-report)"
+    ),
+    verbose=(
+        "project_containment could not finish evaluating this call and is "
+        'denying it for safety rather than treating the crash as "no match" '
+        "(Plan 00466 N11 -- this guard fails CLOSED on any internal error, "
+        "independent of the daemon's global strict_mode). This is a bug in "
+        "the guard itself: report it via the hooks-daemon skill "
+        "(issue-report) rather than retrying -- retrying the same call will "
+        "crash the same way."
+    ),
+)
+
 
 class ProjectContainmentHandler(PreToolUseHandlerBase):
     """Deny a write to a path named outside the repository root.
@@ -215,18 +246,21 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
             return Path(configured)
         return Path.home() / _DEFAULT_CLAUDE_HOME
 
-    def _offending_targets(self, hook_input: dict[str, Any]) -> list[str]:
-        """Every named write target that lies outside the repository root.
+    def _offending_targets(self, hook_input: dict[str, Any], root: Path) -> list[str]:
+        """Every named write target in ``hook_input`` that lies outside ``root``.
 
         Args:
             hook_input: The PreToolUse hook input.
+            root: The already-resolved repository root (Plan 00466 N11: taken
+                as a parameter rather than re-resolved, so a caller that
+                already has it — ``handle()``, after ``matches()`` succeeded —
+                never risks a SECOND unguarded raise from re-resolving it).
 
         Returns:
             The offending paths in the order they were named, de-duplicated. A
             command that writes two files reports both — naming one would send
             the reader back for a second denial.
         """
-        root = self._resolved_root()
         scratchpad = self._harness_scratchpad(hook_input)
         offending: list[str] = []
 
@@ -237,6 +271,29 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
                 offending.append(candidate)
 
         return offending
+
+    def _offending_targets_or_error(
+        self, hook_input: dict[str, Any]
+    ) -> tuple[list[str], Path | None, Exception | None]:
+        """``(offending, root, error)`` — never raises (Plan 00466 N11).
+
+        The single dispatch point shared by ``matches()`` and ``handle()``, so
+        the two can never disagree, and so ``handle()`` can build its message
+        from the SAME resolved ``root`` rather than re-resolving it (which
+        would reopen the exact raise this wrapper closes). On exception,
+        returns an empty target list, no root, and the exception itself,
+        rather than propagating — see ``_ERROR_RULE`` for why.
+        """
+        try:
+            root = self._resolved_root()
+            return self._offending_targets(hook_input, root), root, None
+        except Exception as exc:
+            # Deliberately broad: ANY exception during evaluation must deny,
+            # never propagate (Plan 00466 N11) -- see the docstring above.
+            logger.exception(
+                "project_containment: evaluation raised; denying for safety (Plan 00466 N11)"
+            )
+            return [], None, exc
 
     @staticmethod
     def _harness_scratchpad(hook_input: dict[str, Any]) -> Path | None:
@@ -494,17 +551,22 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
         )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        """True when this call names at least one out-of-root write target."""
-        return bool(self._offending_targets(hook_input))
+        """True when this call names at least one out-of-root write target,
+        or (Plan 00466 N11) evaluation could not be completed at all."""
+        offending, _root, error = self._offending_targets_or_error(hook_input)
+        return bool(offending) or error is not None
 
     def get_rules(self) -> list[Rule]:
-        return [_RULE]
+        return [_RULE, _ERROR_RULE]
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Deny, naming every offending path and the sanctioned location."""
-        offending = self._offending_targets(hook_input)
+        offending, root, error = self._offending_targets_or_error(hook_input)
+        if error is not None:
+            return self._deny_for_evaluation_error(hook_input, error)
         if not offending:
             return GatingResult(decision=Decision.ALLOW)
+        assert root is not None  # error is None here, so _resolved_root() succeeded
 
         transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
         tracker = get_data_layer().disclosure
@@ -522,8 +584,8 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
         listed = "\n".join(f"  - {path}" for path in offending)
         message += (
             f"\n\nOUTSIDE THE REPOSITORY:\n{listed}"
-            f"\n\nREPOSITORY ROOT: {self._resolved_root()}"
-            f"\nWRITE IT HERE INSTEAD: {self._resolved_root() / SCRATCH_DIR}/"
+            f"\n\nREPOSITORY ROOT: {root}"
+            f"\nWRITE IT HERE INSTEAD: {root / SCRATCH_DIR}/"
         )
         scratchpad = self._harness_scratchpad(hook_input)
         if scratchpad is not None:
@@ -534,6 +596,30 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
             )
 
         return GatingResult(decision=Decision.DENY, reason=message, context=[], guidance=None)
+
+    def _deny_for_evaluation_error(
+        self, hook_input: dict[str, Any], error: Exception
+    ) -> GatingResult:
+        """Deny for the evaluation-error case (Plan 00466 N11): the guard
+        raised rather than reaching a real verdict. Same verbose-first/
+        terse-after disclosure ladder as the real rule, keyed on
+        ``_ERROR_RULE``'s own rule_id, plus the exception detail so the
+        report that fixes the underlying bug does not need to reproduce it
+        from scratch.
+        """
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+        tracker = get_data_layer().disclosure
+        formatter = RuleFormatter()
+
+        if transcript_path and tracker.was_disclosed(transcript_path, _ERROR_RULE.rule_id):
+            message = formatter.terse(_ERROR_RULE)
+        else:
+            if transcript_path:
+                tracker.mark_disclosed(transcript_path, _ERROR_RULE.rule_id)
+            message = formatter.verbose(_ERROR_RULE)
+
+        message += f"\n\nInternal error: {type(error).__name__}: {error}"
+        return GatingResult(decision=Decision.DENY, reason=message)
 
     def get_claude_md(self) -> str | None:
         return (

@@ -127,7 +127,7 @@ def _candidate_paths(file_path: str, project_root: str | os.PathLike[str] | None
     """
     raw = file_path.replace("\\", "/")
     if not raw:
-        return [raw]
+        return []
     candidates = [raw.lstrip("/")]
     if project_root is not None:
         root = str(project_root).replace("\\", "/")
