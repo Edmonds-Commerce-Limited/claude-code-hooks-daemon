@@ -14,10 +14,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00463: full qa is a main thread gate](00463-full-qa-is-a-main-thread-gate/PLAN.md) - Not Started (owner request after five worktree agents ran the ~18-minute full suite at once: a `scope: SUB` guard denies configured full-QA commands in sub-agents and names the targeted forms; the coordinator runs the full gate serially on each branch before merge)
 
-- [00461: journal entries only through the stamping tool](00461-journal-entries-only-through-the-stamping-tool/PLAN.md) - In Progress (owner directive after a session of hand-stamped entries, one 40 minutes in the future: an Edit/Write/Bash append to a plan `JOURNAL/` day-file is DENIED and pointed at `mkplan.bash --journal`, which shipped in v3.66.0 and was never used)
-
-- [00460: report size blocker gives read only agents a way out](00460-report-size-blocker-gives-read-only-agents-a-way-out/PLAN.md) - In Progress (owner report: the SubagentStop size blocker tells every agent to write its report to a file, so a read-only type either cannot comply or writes it through a Bash heredoc that no content guard sees)
-
 - [00457: signal runs without a venv](00457-signal-runs-without-a-venv/PLAN.md) - Not Started (from #55: the host-side reboot warning is refused where the only venv was built in a container; a standard-library-only entry point, handled before venv resolution using 00456's mechanism, so it starts after 00456 merges)
 
 - [00453: supervisor modal overlay](00453-supervisor-modal-overlay/PLAN.md) - Not Started (the status-line banner from Plan 00173/00318 is a one-line TTL notification and structurally cannot hold history; this adds a hotkey-summoned inspection surface costing no model turn, no transcript entry and no status-line space — gated on the owner choosing a hotkey, F12 and F3 already rejected)
@@ -177,6 +173,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00461: journal entries only through the stamping tool](Completed/00461-journal-entries-only-through-the-stamping-tool/PLAN.md) - Complete at `e3f03f3e` + the archiving commit (owner directive after a session of hand-stamped entries, one 40 minutes in the future: an Edit/Write/Bash append to a plan `JOURNAL/` day-file, in the main checkout or a worktree, is DENIED and pointed at `mkplan.bash --journal`; remedies 00422 N21)
+
+- [00460: report size blocker gives read only agents a way out](Completed/00460-report-size-blocker-gives-read-only-agents-a-way-out/PLAN.md) - Complete at `ca2b1ba5` + the archiving commit (owner report: the size blocker told every agent to write its report to a file, which a read-only type cannot do; the daemon now saves every stopping sub-agent's reply to a pruned file and the blocker points at it)
+
 - [00462: php lsp advice keeps composer dependencies indexed](Completed/00462-php-lsp-advice-keeps-composer-dependencies-indexed/PLAN.md) - Complete at `830363e5` + the archiving commit (from #56: the PHP advice asked intelephense to exclude all of `**/vendor`, which drops every Composer dependency from its index; the strategy now keeps dependency roots indexed and asks only for intelephense's nested excludes, and flags an override that excludes the whole tree)
 
 - [00456: missing venv self heals and repair runs without one](Completed/00456-missing-venv-self-heals-and-repair-runs-without-one/PLAN.md) - Complete at `9e2f74cd` + the archiving commit (the rest of #53: a hook with no venv starts one detached, locked build; `repair` runs without a venv; the skill never auto-forces and a `--force` keeps other environments' venvs; carries Plan 00100 Phase 3.5)
@@ -225,8 +225,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00429: format markdown crosses repo boundaries](Completed/00429-format-markdown-crosses-repo-boundaries/PLAN.md) - Complete at `50c27581`…`cd15122c` + the archiving commit (from issue #47: the walk applied no exclusion at all, so `format-markdown .` rewrote markdown inside vendored nested checkouts; review caught the config being read from the WALK root, which made every exclusion match nothing below it)
 
-- [00423: per handler scope main sub](Completed/00423-per-handler-scope-main-sub/PLAN.md) - Complete at `93f2a1c0`…`48733f1b` + the archiving commit (from issues #40/#41: handlers declare `scope: ALL|MAIN|SUB`, keyed on `agent_id` presence because `agent_type` was measured empty in 4 of 5 subagent stops; #41's three destructive controls are scoped but deliberately not built)
-
 - [00427: journal timestamps agent authored and timezone naive](Completed/00427-journal-timestamps-agent-authored-and-timezone-naive/PLAN.md) - Complete at `c631d4dc`…`a208959e` + the archiving commit (from issue #45: a correct writer was not enough — `--journal` stamps UTC, but the future-dated check still read a naive LOCAL clock, so a correct entry looked 239 minutes ahead on `America/New_York`)
 
 - [00426: shipped plugins examples do not validate](Completed/00426-shipped-plugins-examples-do-not-validate/PLAN.md) - Complete at `904d63ed`…`fd414e5e` + the archiving commit (from issue #44, which asked which of two documented `plugins:` schemas is real: neither, because the required `event_type` appears in no example — and both YAML copies are commented out, so no config-loading test could ever have seen them)
@@ -234,8 +232,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00425: remote docs index goes stale on delete](Completed/00425-remote-docs-index-goes-stale-on-delete/PLAN.md) - Complete at `edd91533`…`9282c9ea` + the archiving commit (from issue #43: `rm` is the one tree mutation that runs no daemon command, so `check` called the corpus fresh while the index named a deleted file. `check` now detects and reports; the network-free `remote-docs index` repairs)
 
 - [00424: remote docs add overwrites existing capture](Completed/00424-remote-docs-add-overwrites-existing-capture/PLAN.md) - Complete at `ad8e79b3`…`08f8b9c9` + the archiving commit (from issue #42: a second `add` of one URL silently replaced the first capture. The catch the report could not see is that `check` PRINTS plain `add` as the licence-drift remedy, so the refusal and that remedy moved together, welded by a test — nothing pinned that line before, in either direction)
-
-- [00419: niggles ledger fourteen](Completed/00419-niggles-ledger-fourteen/PLAN.md) - Complete at `6a6f9a43`…`2778206f` + the archiving commit (fifteen entries, eleven terminal; the four that were not are re-filed into 00422 rather than counted as closed, because nothing downstream re-reads a closed plan. N1: `debug_hooks.sh` could not run in the repository that dogfoods it)
 
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
@@ -290,15 +286,15 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 467 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 400 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 402 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 44 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 42 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
 - **Cancelled/Abandoned**: 13 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00108 superseded by 00117, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213, 00135 superseded by the supervisor workstream)
 
-- **Folder-to-number reconciliation**: 44 + 400 + 13 = **457 folders**, spanning
+- **Folder-to-number reconciliation**: 42 + 402 + 13 = **457 folders**, spanning
   **454 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names
