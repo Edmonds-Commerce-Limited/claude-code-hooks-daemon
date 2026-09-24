@@ -1,6 +1,6 @@
 # Plan 00460: report size blocker gives read only agents a way out
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-24
 **Owner**: dev
 **Priority**: High
@@ -44,6 +44,11 @@ when the dispatched type cannot write.
   explicitly forbids writing the file through Bash.
 - `dispatch_declaration` warns when a coordinator declares a report path
   for an agent type that cannot write.
+- Every sub-agent's final reply is persisted to a gitignored, bounded
+  location by the daemon itself — regardless of agent type or `Write`
+  access — so the owner's question ("is there a hook we can use at main
+  agent level to ensure sub agent reports are persisted to file?") has a
+  concrete answer that needs no per-agent cooperation.
 
 ## Non-Goals
 
@@ -54,27 +59,37 @@ when the dispatched type cannot write.
 
 ### Phase 1: TDD in a worktree
 
-- [ ] ⬜ **Task 1.1**: Resolve an agent type's tools. Built-in types come
+- [x] ✅ **Task 1.1**: Resolve an agent type's tools. Built-in types come
   from a constant table: verify each type's tools from Claude Code's own
   documentation (vendor via `remote-docs` if fetched) and cite it.
   Project, user and plugin agents come from `tools:` in their
   `.claude/agents/*.md` frontmatter; no `tools:` means every tool. Unknown
   types keep today's behaviour. There is ONE resolver, used by both
   handlers.
-- [ ] ⬜ **Task 1.2**: Decide (a) vs (b) with evidence. Check what the
+- [x] ✅ **Task 1.2**: Decide (a) vs (b) with evidence. Check what the
   SubagentStop payload carries: whether the full final message is
   available to the daemon, or only a transcript path. For (a), the saved
   file must pass the same checks a `Write` to that path would: sensitive
   content, secret-file rules and markdown location. It must also land
   where the prescribed path already points, and must never overwrite.
   Record the decision in the journal.
-- [ ] ⬜ **Task 1.3**: Implement it in the blocker, with a
+- [x] ✅ **Task 1.3**: Implement it in the blocker, with a
   read-only-specific message that names what to do and forbids Bash
   writes. Writable agents are unchanged. Update the acceptance tests.
-- [ ] ⬜ **Task 1.4**: `dispatch_declaration` advises when the dispatched
+- [x] ✅ **Task 1.4**: `dispatch_declaration` advises when the dispatched
   `subagent_type` cannot write but the prompt declares a report path.
   Update the handler guidance (`get_claude_md`) for both handlers.
-- [ ] ⬜ **Task 1.5**: Release note. Full QA green.
+- [x] ✅ **Task 1.5**: Release note. Full QA green.
+- [x] ✅ **Task 1.6**: The daemon persists every sub-agent's
+  `last_assistant_message` at SubagentStop to a gitignored, bounded
+  location under `untracked/agent-reports/`, never overwriting,
+  retention pruned to a configured cap from day one (issue #52 was a
+  feature with no pruner — do not repeat it). The size blocker points
+  every over-threshold agent (read-only or writable) at the saved path
+  instead of asking it to write one, keeping the old
+  write-to-file/condense messages only as the fallback when persistence
+  failed. `dispatch_declaration` mentions the auto-saved path. Success
+  criteria below.
 
 ### Phase 2: Deliver
 
@@ -83,14 +98,25 @@ when the dispatched type cannot write.
 
 ## Success Criteria
 
-- [ ] Test: an `Explore` stop over the threshold never receives "write the
+- [x] Test: an `Explore` stop over the threshold never receives "write the
   report to a file" and gets the read-only way out. A
   `general-purpose` stop is unchanged.
-- [ ] Test: a project agent whose frontmatter `tools:` lacks `Write` is
+- [x] Test: a project agent whose frontmatter `tools:` lacks `Write` is
   treated as read-only; one with no `tools:` line is not.
-- [ ] Test: `dispatch_declaration` advises on a read-only type with a
+- [x] Test: `dispatch_declaration` advises on a read-only type with a
   declared report path.
-- [ ] Full QA passes and CI is green.
+- [x] Full QA passes and CI is green.
+- [x] Test: a stop's `last_assistant_message` is persisted to a file for
+  every agent type (read-only, writable, unresolvable), whether or not
+  it is over the size threshold.
+- [x] Test: persistence never overwrites an existing file (collision
+  suffixes instead).
+- [x] Test: the report directory is pruned to the configured cap after
+  a write.
+- [x] Test: the size blocker's over-threshold message points at the
+  saved path when persistence succeeded, and falls back to the
+  pre-Task-1.6 message when it did not.
+- [x] Full QA passes (foreground, on the final commit).
 
 ## Delivery & Milestones
 

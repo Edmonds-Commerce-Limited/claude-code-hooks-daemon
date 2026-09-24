@@ -6,7 +6,10 @@ format-markdown CLI command, and the CLAUDE.md injector. These tests pin
 its behaviour so all three call sites stay identical.
 """
 
-from claude_code_hooks_daemon.utils.markdown_format import format_markdown_text
+from claude_code_hooks_daemon.utils.markdown_format import (
+    format_markdown_text,
+    parse_frontmatter_yaml,
+)
 
 
 class TestFormatMarkdownText:
@@ -49,3 +52,24 @@ class TestFormatMarkdownText:
         assert "1. first" in result
         assert "2. second" in result
         assert "3. third" in result
+
+
+class TestParseFrontmatterYaml:
+    """``parse_frontmatter_yaml`` — the project's single frontmatter-to-dict
+    parser (Plan 00460), reusing ``split_frontmatter`` rather than a second,
+    subtly different splitter."""
+
+    def test_parses_a_simple_mapping(self) -> None:
+        doc = "---\nname: code-reviewer\ntools: Read, Grep\n---\n\nBody text.\n"
+        assert parse_frontmatter_yaml(doc) == {"name": "code-reviewer", "tools": "Read, Grep"}
+
+    def test_returns_none_when_no_frontmatter(self) -> None:
+        assert parse_frontmatter_yaml("# Just a heading\n\nNo frontmatter here.\n") is None
+
+    def test_returns_none_on_invalid_yaml(self) -> None:
+        doc = "---\nname: [unclosed\n---\n\nBody.\n"
+        assert parse_frontmatter_yaml(doc) is None
+
+    def test_returns_none_when_frontmatter_is_not_a_mapping(self) -> None:
+        doc = "---\n- just\n- a\n- list\n---\n\nBody.\n"
+        assert parse_frontmatter_yaml(doc) is None

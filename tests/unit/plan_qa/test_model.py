@@ -16,6 +16,7 @@ from claude_code_hooks_daemon.plan_qa.model import (
     PlanLocation,
     PlanStatus,
     PlanTree,
+    journal_entry_headings,
     parse_journal_dayfile_name,
 )
 from claude_code_hooks_daemon.utils.markdown_format import format_markdown_text
@@ -495,6 +496,37 @@ class TestParseJournalDayfileName:
         non_leap = parse_journal_dayfile_name("00001-Journal-26-02-29.md")
         assert leap is not None and leap.is_valid_date is True  # 2024 is a leap year
         assert non_leap is not None and non_leap.is_valid_date is False  # 2026 is not
+
+
+class TestJournalEntryHeadings:
+    """Plan 00461: the ONE entry-heading parser every journal consumer shares."""
+
+    def test_headings_in_file_order(self) -> None:
+        content = "## 09:05 · action · —\n\nbody\n\n## 10:30 · finding · T1.1 — title\n"
+        headings = journal_entry_headings(content)
+        assert [(h.hour, h.minute) for h in headings] == [(9, 5), (10, 30)]
+        assert [h.label for h in headings] == ["09:05", "10:30"]
+        assert [h.minutes for h in headings] == [9 * 60 + 5, 10 * 60 + 30]
+
+    def test_blockquoted_grammar_in_the_preamble_is_not_an_entry(self) -> None:
+        content = "> ```\n> ## HH:MM · category · REF\n> ```\n> ## 10:00 · quoted\n"
+        assert journal_entry_headings(content) == []
+
+    def test_heading_inside_a_fence_is_not_an_entry(self) -> None:
+        content = "## 09:00 · action · —\n\n```\n## 23:59 · quoted from a log\n```\n"
+        assert [h.label for h in journal_entry_headings(content)] == ["09:00"]
+
+    def test_tilde_fence_is_a_fence_too(self) -> None:
+        content = "~~~\n## 23:59 · quoted\n~~~\n## 08:00 · action · —\n"
+        assert [h.label for h in journal_entry_headings(content)] == ["08:00"]
+
+    def test_a_fence_closes_only_on_its_own_marker(self) -> None:
+        """A `~~~` inside a backtick fence is fence content, not its close."""
+        content = "```\n~~~\n## 23:59 · still quoted\n```\n## 08:00 · action · —\n"
+        assert [h.label for h in journal_entry_headings(content)] == ["08:00"]
+
+    def test_empty_content_has_no_entries(self) -> None:
+        assert journal_entry_headings("") == []
 
 
 def _write_journal_day(

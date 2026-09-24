@@ -287,3 +287,21 @@ class TestReadTextOrReason:
         target.write_text("x: 1\n", encoding="utf-8")
 
         assert read_text_or_reason(str(target)).text == read_text_or_reason(target).text
+
+    def test_a_decode_policy_can_be_chosen_so_bad_bytes_cannot_raise(self, tmp_path: Path) -> None:
+        """Plan 00461: a caller counting ASCII markers passes `errors="replace"`,
+        so one undecodable byte neither raises nor hides the rest of the file."""
+        target = tmp_path / "journal.md"
+        target.write_bytes(b"\xff\n## 10:00 \xc2\xb7 action\n")
+
+        attempt = read_text_or_reason(target, errors="replace")
+
+        assert attempt.reason is None
+        assert attempt.text == "�\n## 10:00 · action\n"
+
+    def test_the_default_decode_policy_is_strict(self, tmp_path: Path) -> None:
+        target = tmp_path / "journal.md"
+        target.write_bytes(b"\xff")
+
+        with pytest.raises(UnicodeDecodeError):
+            read_text_or_reason(target)

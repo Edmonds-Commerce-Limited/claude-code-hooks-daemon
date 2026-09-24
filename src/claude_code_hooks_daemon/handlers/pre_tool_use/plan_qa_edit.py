@@ -39,7 +39,7 @@ from claude_code_hooks_daemon.plan_qa.model import PLAN_DOC_FILENAME, README_FIL
 from claude_code_hooks_daemon.plan_qa.remedy import remedy_sentence
 from claude_code_hooks_daemon.plan_qa.report import format_advisory, format_block_reason
 from claude_code_hooks_daemon.plan_qa.runner import run_stage
-from claude_code_hooks_daemon.plan_qa.types import Finding, Level, Stage
+from claude_code_hooks_daemon.plan_qa.types import JOURNAL_MODE_OFF, Finding, Level, Stage
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.path_exclusion import handler_excludes_path
 from claude_code_hooks_daemon.utils.path_predicates import path_is_file
@@ -69,7 +69,6 @@ _EDIT_MODE_OFF: Final[str] = "off"
 _FIELD_FILE_PATH: Final[str] = "file_path"
 
 _MARKDOWN_SUFFIX: Final[str] = ".md"
-_JOURNAL_MODE_OFF: Final[str] = "off"
 
 
 class PlanQaEditHandler(PreToolUseHandlerBase):
@@ -144,7 +143,7 @@ class PlanQaEditHandler(PreToolUseHandlerBase):
         if self._is_plan_index(path):
             return True
         journal = getattr(policy, "journal", None)
-        if journal is None or not journal.enabled or journal.mode == _JOURNAL_MODE_OFF:
+        if journal is None or not journal.enabled or journal.mode == JOURNAL_MODE_OFF:
             return False
         return path.suffix == _MARKDOWN_SUFFIX and path.parent.name == journal.dir_name
 
@@ -345,14 +344,15 @@ class PlanQaEditHandler(PreToolUseHandlerBase):
             "linted: the name must match the grammar and the enclosing plan\n"
             "number (`journal-dayfile-naming`, ADVISE), and edits must APPEND —\n"
             "never rewrite or remove earlier entries (`journal-append-only`,\n"
-            "ADVISE). Corrections are new dated entries at the bottom, not edits\n"
-            "to old ones.\n"
+            "ADVISE). Corrections are new entries, not edits to old ones, and\n"
+            "every entry is appended with `mkplan.bash --journal`\n"
+            "(`plan_journal_guard` denies one written by hand).\n"
             "\n"
             "**A Write/Edit to a journal day-file dated anything other than\n"
             "TODAY is BLOCKED by default** (`journal-dayfile-is-today`) — this\n"
             "includes yesterday's date. A session that spans midnight must start\n"
-            "TODAY's day-file, not keep appending to yesterday's; the block\n"
-            "message names the exact today-dated filename to write instead.\n"
+            "TODAY's day-file, not keep appending to yesterday's; `--journal`\n"
+            "always writes to today's, creating it when there is none.\n"
             "Controlled independently of the other journal checks via\n"
             "`plan_workflow.qa.journal.today_only_mode` (advise | block | off;\n"
             "default block).\n"

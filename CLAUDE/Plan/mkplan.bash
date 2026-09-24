@@ -89,6 +89,7 @@ die() {
 usage() {
     cat >&2 <<'USAGE'
 Usage: mkplan.bash "descriptive-kebab-name"
+       mkplan.bash --journal <plan-number> <category> <body-file> [--ref R] [--title T]
 
 Creates the next sequentially-numbered plan folder (in this script's own
 directory, or $MKPLAN_PLAN_DIR if set) and scaffolds its PLAN.md.
@@ -106,7 +107,9 @@ Environment:
 Examples:
   mkplan.bash "wsdl-patch-pipeline-hardening"
   mkplan.bash "Order despatch retries"   # -> 000NN-Order-despatch-retries
+
 USAGE
+    journal_usage
 }
 
 # Release the plan-dir lock. Only removes the lock if THIS process took it
@@ -217,6 +220,11 @@ script reads the clock itself (UTC) -- it never accepts a time from the
 caller. Never rewrites: the day-file is created from _JOURNAL_TEMPLATE_.md
 when absent, then the entry is appended.
 
+This is THE way to add a journal entry. The hooks daemon denies an entry
+written by hand (Edit, Write, a heredoc or a redirect into a day-file),
+because a hand-typed time can be wrong and an append-only journal cannot
+correct it until the clock has passed the wrong time.
+
 Arguments:
   plan-number  Required. The plan's number, e.g. 427 or 00427.
   category     Required. One of: action, finding, decision, thought,
@@ -227,6 +235,10 @@ Options:
   --ref R      Optional task/phase reference (e.g. T2.1, P1). Defaults to
                the grammar's "no ref" marker (an em dash).
   --title T    Optional short title appended to the heading.
+
+Example (write the BODY first, e.g. with the Write tool; the script writes
+the "## HH:MM · category · REF" heading itself):
+  mkplan.bash --journal 427 finding untracked/scratch/entry.md --title "short title"
 USAGE
 }
 
@@ -347,6 +359,11 @@ run_journal_mode() {
         if ! journal_body="$(cat "$journal_template_file")"; then
             die "could not read journal template '$journal_template_file'"
         fi
+        # The template ends with a seeded `## {{TIME}} · action` entry that
+        # records plan CREATION. A day-file opened here is not a creation, so
+        # only the preamble above that entry is kept (Plan 00461).
+        journal_body="${journal_body%%$'\n'"## {{TIME}}"*}"
+        journal_body="${journal_body%$'\n'}"
         journal_body="${journal_body//\{\{PLAN_NUMBER\}\}/$padded_number}"
         journal_body="${journal_body//\{\{PLAN_TITLE\}\}/$plan_title}"
         journal_body="${journal_body//\{\{DATE\}\}/$journal_day}"

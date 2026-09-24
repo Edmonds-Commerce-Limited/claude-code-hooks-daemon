@@ -25,7 +25,6 @@ to ignore the check" failure its sibling was careful to avoid. At EDIT time the
 entry has not landed, and fixing it costs one keystroke.
 """
 
-import re
 from datetime import UTC, datetime
 from typing import Final
 
@@ -34,7 +33,12 @@ from claude_code_hooks_daemon.plan_qa.checks.common import (
     journal_edit_target,
     journal_level,
 )
-from claude_code_hooks_daemon.plan_qa.model import parse_journal_dayfile_name
+from claude_code_hooks_daemon.plan_qa.model import (
+    JOURNAL_BODY_FILE_HINT,
+    journal_append_command,
+    journal_entry_headings,
+    parse_journal_dayfile_name,
+)
 from claude_code_hooks_daemon.plan_qa.types import CheckContext, CheckSpec, Finding, Level, Stage
 
 CHECK_ID: Final[str] = "journal-entry-future-dated"
@@ -54,21 +58,16 @@ _TOLERANCE_MINUTES: Final[int] = 30
 #: check just goes back to the local clock.
 _UTC_SENTINEL: Final[str] = "timestamps in this file are UTC"
 
-#: An entry heading at the START of a line. Anchored with no leading whitespace
-#: because the preamble quotes the grammar inside a blockquote, which is
-#: documentation rather than an entry.
-_ENTRY_HEADING: Final[re.Pattern[str]] = re.compile(r"^## (\d{2}):(\d{2})\b")
 
-#: Fenced bodies may quote entry-shaped lines from elsewhere; tracking the
-#: fence state stops a quoted heading being read as this file's own entry.
-_FENCE: Final[re.Pattern[str]] = re.compile(r"^\s*(```|~~~)")
-
-_REMEDIATION: Final[str] = (
-    "Read the clock rather than estimating it, and correct the timestamp before "
-    "this write lands — once the entry is committed the journal is append-only, "
-    "so the reading can never be fixed, only annotated by a later entry. If the "
-    "entry genuinely belongs to a different day, write it to that day's file."
-)
+def _remediation(plan_dir: str, plan_number: int | None) -> str:
+    return (
+        "The time was typed rather than read from the clock. Take this entry out "
+        "of the write and append it with "
+        f"`{journal_append_command(plan_dir, plan_number)}` ({JOURNAL_BODY_FILE_HINT}). "
+        "Once an entry is committed the journal is append-only, so a wrong "
+        "reading can never be fixed, only annotated by a later entry appended "
+        "the same way."
+    )
 
 
 def _now() -> datetime:
@@ -96,26 +95,6 @@ def _is_utc_dayfile(content: str) -> bool:
     return _UTC_SENTINEL in content
 
 
-def _latest_entry(content: str) -> tuple[int, int, str] | None:
-    """The highest ``(hour, minute, label)`` among real entry headings."""
-    latest: tuple[int, int, str] | None = None
-    in_fence = False
-    for line in content.splitlines():
-        if _FENCE.match(line):
-            in_fence = not in_fence
-            continue
-        if in_fence:
-            continue
-        match = _ENTRY_HEADING.match(line)
-        if match is None:
-            continue
-        hour, minute = int(match.group(1)), int(match.group(2))
-        label = f"{match.group(1)}:{match.group(2)}"
-        if latest is None or (hour, minute) > (latest[0], latest[1]):
-            latest = (hour, minute, label)
-    return latest
-
-
 def _rule(context: CheckContext, target: JournalEditTarget, content: str) -> list[Finding]:
     parsed = parse_journal_dayfile_name(target.basename)
     if parsed is None:
@@ -123,13 +102,14 @@ def _rule(context: CheckContext, target: JournalEditTarget, content: str) -> lis
         # a date there is nothing to compare a time against.
         return []
 
-    latest = _latest_entry(content)
-    if latest is None:
+    headings = journal_entry_headings(content)
+    if not headings:
         return []
 
-    hour, minute, label = latest
+    latest = max(headings, key=lambda heading: heading.minutes)
+    label = latest.label
     try:
-        entry_at = datetime(parsed.year, parsed.month, parsed.day, hour, minute)
+        entry_at = datetime(parsed.year, parsed.month, parsed.day, latest.hour, latest.minute)
     except ValueError:
         # An impossible clock reading (25:61) is a grammar defect, not a
         # drift one; reporting it here would put it under the wrong check.
@@ -151,7 +131,7 @@ def _rule(context: CheckContext, target: JournalEditTarget, content: str) -> lis
                 "and once committed it cannot be corrected — the journal is "
                 "append-only."
             ),
-            remediation=_REMEDIATION,
+            remediation=_remediation(context.plan_dir_rel, target.plan_number),
             path=target.rel_path,
         )
     ]

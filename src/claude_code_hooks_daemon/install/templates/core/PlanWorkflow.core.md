@@ -206,6 +206,35 @@ work should instead declare an explicit destination (falling back to
 `subagent-reports/` is a recognised plan-folder member for plan QA purposes —
 its presence never triggers a stray-file or unexpected-content finding.
 
+### Journal entries: `mkplan.bash --journal` is the only way
+
+A `JOURNAL/` entry is appended with the scaffolder, never by hand. It reads the
+real UTC clock and writes the `## HH:MM · category · REF` heading itself:
+
+```bash
+# 1. Write the entry BODY (no heading) with the Write tool to a FRESH file, e.g.
+#    untracked/scratch/journal-<plan-number>-<yymmdd-hhmmss>.md
+# 2. Append it:
+CLAUDE/Plan/mkplan.bash --journal <plan-number> <category> untracked/scratch/journal-<plan-number>-<yymmdd-hhmmss>.md --title "short title"
+```
+
+`<category>` is one of `action`, `finding`, `decision`, `thought`, `blocker`,
+`handoff`; add `--ref T1.2` for a task reference. The script creates today's
+day-file from the template when there is none. Use a new body-file name for
+every entry (a reused one is refused by the clobber guard), your configured
+plan directory if it is not `CLAUDE/Plan/`, and, in a worktree, that
+worktree's own `mkplan.bash`.
+
+Hand-typed timestamps have landed 40 minutes in the future, and an
+append-only journal cannot correct one until the clock passes it. So the
+`plan_journal_guard` handler DENIES, in every checkout, an `Edit`/`Write` that
+adds any line to a day-file, a `Write` that creates one, and a Bash command
+that writes into one by any route (a redirect, `tee`, a heredoc, a copy or
+link, an in-place editor, a patch, an interpreter program, a wrapper, or a name
+the shell builds at run time). **A coordinator's dispatch brief that asks for
+journalling must carry this two-step pattern**, not "append with Edit and
+`date -u`".
+
 ### Plan Numbering
 
 - Plans are numbered sequentially with 5-digit zero-padding: `00001-`, `00002-`, `00003-`, etc. (`NNNNN` in templates)
@@ -933,7 +962,8 @@ Use this template when improving existing code without changing behaviour.
 3. **After completing**: Mark ✅, run QA, commit with reference
 4. **Regularly**: Review the plan and edit it IN PLACE so it states current
    truth. Append the narrative of what happened to the plan's `JOURNAL/`
-   day-file — never to `PLAN.md`. See [CLAUDE/PlanJournalling.md](../PlanJournalling.md).
+   day-file with `mkplan.bash --journal` (see "Journal entries" above) —
+   never to `PLAN.md`. See [CLAUDE/PlanJournalling.md](../PlanJournalling.md).
 
 ### Handling Changes
 
@@ -941,8 +971,9 @@ When requirements change mid-plan:
 
 1. **Document Change**: Edit `PLAN.md` in place to state the new truth
    (revise Goals/Tasks, record the reasoning under Technical Decisions), and
-   append a dated entry to the plan's `JOURNAL/` recording what changed and
-   why. Do NOT append a change-log section to `PLAN.md`.
+   append an entry to the plan's `JOURNAL/` with `mkplan.bash --journal`
+   recording what changed and why. Do NOT append a change-log section to
+   `PLAN.md`.
 2. **Update Tasks**: Revise task list as needed
 3. **Assess Impact**: Update estimates, dependencies
 4. **Communicate**: Ensure stakeholders are aware
@@ -1098,7 +1129,7 @@ Agent:
    - Implement handler
    - Run this project's QA suite
 8. Commits with "Plan 00001: Add changelog-reminder project handler"
-9. Ticks the task in PLAN.md and appends the narrative to the plan's JOURNAL/
+9. Ticks the task in PLAN.md and appends the narrative to the plan's JOURNAL/ with `mkplan.bash --journal`
 10. Marks complete when all QA passes
 ```
 

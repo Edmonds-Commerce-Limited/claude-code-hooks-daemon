@@ -25,6 +25,9 @@ from claude_code_hooks_daemon.install.agent_assets import (
     spec_source_path,
 )
 
+# Re-exported: the installer and several handlers name the scaffolder from here.
+from claude_code_hooks_daemon.plan_qa.model import MKPLAN_SCRIPT_NAME as MKPLAN_SCRIPT_NAME
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_PLAN_DIR_NAME: Final[str] = "CLAUDE/Plan"
@@ -32,7 +35,6 @@ _DEFAULT_PLAN_DIR_NAME: Final[str] = "CLAUDE/Plan"
 _COMPLETED_DIR_NAME: Final[str] = "Completed"
 
 _TEMPLATES_DIR_NAME: Final[str] = "templates"
-MKPLAN_SCRIPT_NAME: Final[str] = "mkplan.bash"
 # Owner rwx, group/other rx — least-privilege executable (matches deploy_skills).
 _MKPLAN_MODE: Final[int] = 0o755
 

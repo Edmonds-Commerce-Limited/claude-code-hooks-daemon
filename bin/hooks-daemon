@@ -58,15 +58,19 @@
 #    commands like `plan-qa --lint` and fails closed in offline containers.
 # 3. It fails loudly. A wrapper that silently degrades would recreate the exact
 #    confusion this script exists to eliminate.
-# 4. `repair` works with NO venv for this project path (Plan 00456, GitHub
-#    issue #53). Every other verb needs the interpreter resolved below, so
-#    without a venv each of them exits 5 — and so did `repair`, the one verb
-#    whose job is fixing that. It is caught before the refusal: the clone's
-#    own scripts/venv_bootstrap.sh builds the venv in the foreground, under the
-#    same lock as every other builder, and the normal Python repair then runs.
-#    With a venv present, `repair` is untouched. Plan 00431 is the precedent
-#    for moving a check ahead of venv resolution. `_run_venv_free_verb` is the
-#    one place such verbs are listed, so `signal` (Plan 00457) is one more arm.
+# 4. `repair` and `signal` both work with NO venv for this project path
+#    (Plan 00456 #53, Plan 00457 #55). Every other verb needs the interpreter
+#    resolved below, so without a venv each of them exits 5 — and so did
+#    these two, before this. Both are caught ahead of that refusal, but
+#    differently: `repair`'s job IS fixing the missing venv, so the clone's
+#    own scripts/venv_bootstrap.sh builds one in the foreground (under the
+#    same lock as every other builder) and the normal Python repair then
+#    runs, unaffected once a venv exists. `signal` needs no venv at all —
+#    daemon/signal_standalone.py is standard-library-only, so its arm execs
+#    it directly under a system python3 and never touches venv_bootstrap.sh.
+#    Plan 00431 is the precedent for moving a check ahead of venv resolution.
+#    `_run_venv_free_verb` is the one place such verbs are listed; a new
+#    venv-free verb is a new arm there.
 
 set -euo pipefail
 
@@ -101,24 +105,34 @@ source "$RESOLVE_LIB"
 
 BOOTSTRAP="$DAEMON_DIR/scripts/venv_bootstrap.sh"
 
+# Global options that take a value, below. `_subcommand_of` and the `signal`
+# arm's own reconstruction loop (it must drop the "signal" token before
+# argparse ever sees it) each need to recognise the same set -- ONE array, so
+# the two can never list it differently and drift apart.
+_VALUE_TAKING_GLOBAL_OPTS=(--project-root --pid-file --socket)
+
+# True (0) iff $1 is one of the options above.
+_is_value_taking_global_opt() {
+    local opt
+    for opt in "${_VALUE_TAKING_GLOBAL_OPTS[@]}"; do
+        [ "$1" = "$opt" ] && return 0
+    done
+    return 1
+}
+
 # _subcommand_of() - The subcommand in "$@": the first word that is neither a
-# global option nor the value of one (the CLI's --project-root, --pid-file and
-# --socket each take one). Returns 1 when there is none.
+# global option nor the value of one. Returns 1 when there is none.
 _subcommand_of() {
     while [ "$#" -gt 0 ]; do
-        case "$1" in
-            --project-root | --pid-file | --socket)
-                [ "$#" -ge 2 ] || return 1
-                shift 2
-                ;;
-            -*)
-                shift
-                ;;
-            *)
-                printf '%s' "$1"
-                return 0
-                ;;
-        esac
+        if _is_value_taking_global_opt "$1"; then
+            [ "$#" -ge 2 ] || return 1
+            shift 2
+        elif [[ "$1" == -* ]]; then
+            shift
+        else
+            printf '%s' "$1"
+            return 0
+        fi
     done
     return 1
 }
@@ -158,6 +172,86 @@ _run_venv_free_verb() {
                 echo "❌ hooks-daemon repair: a venv was built but still does not resolve under $DAEMON_DIR" >&2
                 exit 1
             fi
+            ;;
+        signal)
+            # Unlike repair, this never builds a venv -- it execs the
+            # standard-library-only daemon/signal_standalone.py (Plan 00457,
+            # #55) directly under a system python3, so a host whose only
+            # venv for this project was built inside a container (wrong
+            # slug, wrong interpreter) can still reach the operator-signal
+            # channel. `--help` needs no special case here: argparse
+            # handles it inside the script itself, unlike repair's own
+            # --help which needs a working venv.
+            local signal_script system_python
+            signal_script="$DAEMON_DIR/src/claude_code_hooks_daemon/daemon/signal_standalone.py"
+            if [ ! -f "$signal_script" ]; then
+                echo "❌ hooks-daemon signal: entry point missing at $signal_script" >&2
+                echo "   The clone is incomplete. A same-version upgrade (hooks-daemon skill: upgrade)" >&2
+                echo "   restores its tracked files." >&2
+                exit 5
+            fi
+            if ! system_python="$(command -v python3)"; then
+                echo "❌ hooks-daemon signal: no system python3 on PATH; the venv-free signal channel" >&2
+                echo "   needs one." >&2
+                exit 5
+            fi
+            # No stderr redirect: if this probe itself crashes (a corrupt
+            # interpreter, a bad shebang -- anything other than a clean
+            # "too old"), the real reason must reach the caller, not be
+            # thrown away in favour of a generic "too old" message.
+            if ! "$system_python" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)'; then
+                echo "❌ hooks-daemon signal: $system_python is older than the Python 3.8 this entry" >&2
+                echo "   point needs. Use a newer system python3, or set up a venv for this project" >&2
+                echo "   ($BIN_DIR/hooks-daemon repair)." >&2
+                exit 5
+            fi
+            # Unlike cli.py's argparse subparsers (which consume "repair" as
+            # their own subcommand token below), signal_standalone.py takes
+            # <kind> directly as its first positional -- it has no verb
+            # prefix to swallow. Drop the "signal" token from wherever
+            # `_subcommand_of` found it among the global options, so it is
+            # never mistaken for <kind>.
+            #
+            # `_run_venv_free_verb` is itself called as `if ! ... ; then`,
+            # and bash suspends `set -e` for every command run inside a
+            # function invoked as an `if`/`while` condition -- not just the
+            # function's own top-level exit status. An unconditional
+            # `shift 2` here when one of these value-taking global options is
+            # the LAST argument (no value follows) would therefore fail
+            # WITHOUT stopping the script, leaving `$#` unchanged and this
+            # loop spinning forever. Each branch below checks it has a value
+            # before shifting past it; a missing value is passed through
+            # as a bare flag for signal_standalone.py's own argparse to
+            # report clearly, instead of looping or dying unexplained.
+            local rest=() matched_verb=0
+            while [ "$#" -gt 0 ]; do
+                if _is_value_taking_global_opt "$1"; then
+                    if [ "$#" -ge 2 ]; then
+                        rest+=("$1" "$2")
+                        shift 2
+                    else
+                        rest+=("$1")
+                        shift
+                    fi
+                elif [[ "$1" == -* ]]; then
+                    rest+=("$1")
+                    shift
+                else
+                    if [ "$matched_verb" -eq 0 ]; then
+                        matched_verb=1
+                    else
+                        rest+=("$1")
+                    fi
+                    shift
+                fi
+            done
+            # ${rest[@]+"${rest[@]}"} rather than a bare "${rest[@]}": under
+            # `set -u`, bash <4.4 (macOS ships 3.2.57) raises "unbound
+            # variable" expanding an EMPTY array -- e.g. `hooks-daemon
+            # signal` with no other args. This idiom expands to nothing in
+            # that case instead of erroring before argparse's own clearer
+            # "--project-root required" message ever runs.
+            exec "$system_python" "$signal_script" ${rest[@]+"${rest[@]}"}
             ;;
         *)
             return 1

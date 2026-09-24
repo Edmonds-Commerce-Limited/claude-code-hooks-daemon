@@ -16,6 +16,7 @@ import re
 from typing import Any, Final
 
 import mdformat
+import yaml
 
 # mdformat extensions: enable GFM tables, strikethrough, task lists, autolinks.
 _MDFORMAT_EXTENSIONS: Final[set[str]] = {"gfm"}
@@ -64,6 +65,32 @@ def split_frontmatter(content: str) -> tuple[str, str]:
     if match is None:
         return "", content
     return match.group(1), match.group(2)
+
+
+def parse_frontmatter_yaml(content: str) -> dict[str, Any] | None:
+    """Parse ``content``'s leading YAML frontmatter into a dict, or None.
+
+    Public because more than one caller needs a frontmatter MAPPING rather
+    than the raw block :func:`split_frontmatter` returns — Plan 00460's
+    subagent tool resolver reads a `.claude/agents/*.md` file's `tools`/
+    `disallowedTools` fields this way. Reuses :func:`split_frontmatter` (the
+    project's one splitter) rather than adding a second one.
+
+    Returns None whenever there is nothing safe to act on: no frontmatter
+    block, invalid YAML, or YAML that parses to something other than a
+    mapping (a list, a scalar). A caller that cannot tell "absent" from
+    "malformed" apart from None would have to guess; every caller here wants
+    the same fail-safe answer for both.
+    """
+    block, _body = split_frontmatter(content)
+    if not block:
+        return None
+    inner = block.split("\n", 1)[1].rsplit("---", 1)[0]
+    try:
+        loaded = yaml.safe_load(inner)
+    except yaml.YAMLError:
+        return None
+    return loaded if isinstance(loaded, dict) else None
 
 
 def format_markdown_text(content: str) -> str:

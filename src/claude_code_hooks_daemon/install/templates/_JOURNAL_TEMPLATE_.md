@@ -8,8 +8,10 @@ _Scaffolded by `mkplan.bash`; timestamps in this file are UTC._
 > findings, decisions, dead-ends, hand-off state — the linear lifecycle a plan
 > document structurally cannot carry.
 >
-> **Entry grammar** — append new entries at the BOTTOM; NEVER edit earlier
-> entries (corrections are new entries):
+> **Entry grammar** — append new entries at the BOTTOM, ONLY with
+> `mkplan.bash --journal <plan-number> <category> <body-file>` (it stamps the
+> real UTC time; a hand-written entry is denied); NEVER edit earlier entries
+> (corrections are new entries):
 >
 > ```
 > ## HH:MM · category · REF   — optional short title
@@ -28,4 +30,4 @@ _Scaffolded by `mkplan.bash`; timestamps in this file are UTC._
 ## {{TIME}} · action · — — plan scaffolded
 
 Plan {{PLAN_NUMBER}} created via `mkplan.bash`; `JOURNAL/` initialised. Next:
-fill in `PLAN.md`, then log progress here as it happens.
+fill in `PLAN.md`, then log progress with `mkplan.bash --journal` as it happens.

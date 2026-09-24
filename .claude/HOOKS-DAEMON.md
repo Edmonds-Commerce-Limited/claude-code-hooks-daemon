@@ -40,7 +40,7 @@
 | 23 | ask_user_question_blocker | TERMINAL | Allow AskUserQuestion only when every question is prefix-justified |
 | 30 | qa_suppression | BLOCKING | Block QA suppression comments across all supported languages |
 | 31 | comment_changelog | BLOCKING | Block Write/Edit content that writes historical narrative into a comment |
-| 32 | subagent_full_qa_blocker | BLOCKING | Deny a declared full-suite QA run inside a sub-agent; the coordinator runs it |
+| 31 | plan_journal_guard | BLOCKING | Deny a journal entry written by hand rather than through `mkplan.bash --journal` |
 | 33 | comment_size | BLOCKING | Block/advise on over-long comments, tiered like plan-doc-size |
 | 33 | plan_number_helper | BLOCKING | Detect bash commands attempting to discover plan numbers and provide correct answer |
 | 34 | verification_result_gate | NON-TERMINAL | Advise when a verifier's exit status is never consumed before a mutator |
@@ -155,13 +155,14 @@
 | 9 | teammate_reap_advisor | ADVISORY | Report the Stop payload's ``background_tasks`` count and name ``TaskStop`` |
 | 10 | auto_continue_stop | TERMINAL | Intercept Stop events and enforce explicit stop reasons or auto-continue |
 
-### SubagentStop (4 handlers)
+### SubagentStop (5 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
 | 7 | cron_subagent_stop_enforcer | BLOCKING | Block a SubagentStop while a declared persistent cron is missing |
 | 8 | subagent_report_path_verifier | BLOCKING | Block a SubagentStop whose claimed report file does not exist |
 | 9 | subagent_cache_aggregator | NON-TERMINAL | Record a stopping sub-agent's prompt-cache totals for the status line |
+| 10 | subagent_report_persistence | NON-TERMINAL | Persist every stopping sub-agent's final reply to a gitignored file |
 | 15 | subagent_report_size_blocker | TERMINAL | Block a SubagentStop whose ``last_assistant_message`` is oversized |
 
 ### Status (16 handlers)

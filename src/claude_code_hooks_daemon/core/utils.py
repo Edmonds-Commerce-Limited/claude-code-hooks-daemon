@@ -39,7 +39,7 @@ _TEE: Final[str] = "tee"
 #: Write their LAST operand -- UNLESS `-t`/`--target-directory` is present,
 #: which moves the destination to the FRONT and makes that rule name a SOURCE.
 #: Either way the destination may be a directory, in which case the file really
-#: written is `dest/<basename of each source>`; see `_written_paths`.
+#: written is `dest/<basename of each source>`; see `resolve_bash_write_destination`.
 _COPY_VERBS: Final[frozenset[str]] = frozenset({"cp", "mv", "install"})
 
 #: `dd`'s destination is an `of=` operand rather than a redirect.
@@ -60,7 +60,7 @@ _MIN_COPY_OPERANDS: Final[int] = 2
 #: "the last operand is the destination" becomes false and would name a SOURCE
 #: -- a file the command READS. Differential-testing against a real shell caught
 #: exactly that. The flag also declares the destination to be a directory, which
-#: is what `_TargetCandidate.directory_only` records: the written files are
+#: is what `BashWriteDestination.directory_only` records: the written files are
 #: `DEST/<basename>` per source, and if DEST is not a real directory the shell
 #: refuses the command, so nothing is reported.
 _TARGET_DIRECTORY_FLAGS: Final[tuple[str, ...]] = ("-t", "--target-directory")
@@ -94,8 +94,13 @@ _HEREDOC_DELIMITER_GROUP: Final[int] = 2
 _WRITE_INDICATOR_RE: Final[re.Pattern[str]] = re.compile(r">|of=|\b(?:tee|cp|mv|install|dd)\b")
 
 
-class _TargetCandidate(NamedTuple):
+class BashWriteDestination(NamedTuple):
     """One destination, before resolution, with what it needs to be judged.
+
+    PUBLIC so a DENY guard can see a destination the resolver declines
+    (``> "$OUT"``, a glob) and fail closed on it; see
+    :func:`bash_write_destinations`. ``destination`` is the raw token as the
+    shell lexer produced it.
 
     ``sources`` supply the basename when ``destination`` turns out to be a
     directory (`cp a.py somedir` writes `somedir/a.py`). They are empty for
@@ -279,25 +284,48 @@ def get_bash_write_targets(
     if not command:
         return []
 
-    outside_bodies, bodies = _split_heredoc_bodies(command)
+    cwd = hook_input.get(HookInputField.CWD)
+    found: list[str] = []
+    for candidate in bash_write_destinations(
+        command, include_heredoc_bodies=include_heredoc_bodies
+    ):
+        if authored_only and not candidate.authored:
+            continue
+        for resolved in resolve_bash_write_destination(candidate, cwd):
+            if resolved not in found:
+                found.append(resolved)
+    return found
+
+
+def bash_write_destinations(
+    command: str, *, include_heredoc_bodies: bool = False
+) -> list[BashWriteDestination]:
+    """Every destination ``command`` names as written, UNRESOLVED.
+
+    The raw half of :func:`get_bash_write_targets`, from the same parser. That
+    accessor drops a destination it cannot resolve, which is right for a guard
+    that acts on a path; a DENY guard also needs the ones it could NOT place
+    (``> "$OUT"``, ``> dir/*.md``, ``> name-$(date).md``) so it can fail closed
+    when such a token visibly names what it protects. A token needing
+    expansion is kept exactly as the lexer produced it, cut at the first shell
+    punctuation character.
+
+    ``include_heredoc_bodies`` has the meaning, and the caveats, documented on
+    :func:`get_bash_write_targets`.
+    """
+    outside_bodies, heredocs = split_heredocs(command)
     segments = [outside_bodies]
     if include_heredoc_bodies:
         # A body with no redirect and no write verb cannot name a target, so it
         # is never tokenised. Purely an optimisation, and a load-bearing one:
         # tokenising is per-character Python, a 40 KB prose body measured ~25 ms,
         # and a dispatched event pays it twice.
-        segments.extend(body for body in bodies if _WRITE_INDICATOR_RE.search(body))
-
-    cwd = hook_input.get(HookInputField.CWD)
-    found: list[str] = []
-    for segment in segments:
-        for candidate in _write_target_tokens(_tokenise(segment)):
-            if authored_only and not candidate.authored:
-                continue
-            for resolved in _written_paths(candidate, cwd):
-                if resolved not in found:
-                    found.append(resolved)
-    return found
+        segments.extend(
+            heredoc.body for heredoc in heredocs if _WRITE_INDICATOR_RE.search(heredoc.body)
+        )
+    return [
+        candidate for segment in segments for candidate in _write_target_tokens(_tokenise(segment))
+    ]
 
 
 def get_written_file_paths(hook_input: dict[str, Any]) -> list[str]:
@@ -336,8 +364,11 @@ def get_written_file_paths(hook_input: dict[str, Any]) -> list[str]:
     return get_bash_write_targets(hook_input, authored_only=True)
 
 
-def _written_paths(candidate: _TargetCandidate, cwd: Any) -> list[str]:
+def resolve_bash_write_destination(candidate: BashWriteDestination, cwd: Any) -> list[str]:
     """Every file this one candidate actually writes. Usually zero or one.
+
+    The resolved half of :func:`bash_write_destinations`; empty when the token
+    needs an expansion the daemon cannot perform.
 
     A destination that is an existing DIRECTORY is not itself written -- but
     for a copy verb the written files are still nameable exactly, as
@@ -437,12 +468,25 @@ def _tokenise(text: str) -> list[str]:
         return []
 
 
-def _split_heredoc_bodies(command: str) -> tuple[str, list[str]]:
+class HeredocBody(NamedTuple):
+    """One heredoc body, with the line that introduced it.
+
+    ``opener_line`` is where the RECEIVER is named (``python3 - <<'PY'``), so a
+    caller can tell a body that is data (fed to ``cat``) from one that is a
+    program (fed to an interpreter).
+    """
+
+    opener_line: str
+    body: str
+    delimiter: str
+
+
+def split_heredocs(command: str) -> tuple[str, list[HeredocBody]]:
     """Separate the shell being RUN from the heredoc bodies being WRITTEN.
 
-    Returns ``(command_without_bodies, bodies)``. The introducing line stays
+    Returns ``(command_without_bodies, heredocs)``. The introducing line stays
     with the command because the real target lives on it
-    (``cat > out.md <<'EOF'``); the body is data.
+    (``cat > out.md <<'EOF'``); the body is data to that line's receiver.
 
     They are returned apart rather than as one string so each can be tokenised
     on its own — see :func:`_tokenise` for why that matters, and
@@ -450,7 +494,7 @@ def _split_heredoc_bodies(command: str) -> tuple[str, list[str]]:
     """
     lines = command.split("\n")
     kept: list[str] = []
-    bodies: list[str] = []
+    heredocs: list[HeredocBody] = []
     index = 0
     while index < len(lines):
         line = lines[index]
@@ -461,25 +505,25 @@ def _split_heredoc_bodies(command: str) -> tuple[str, list[str]]:
             start = index
             while index < len(lines) and lines[index].strip() != delimiter:
                 index += 1
-            bodies.append("\n".join(lines[start:index]))
+            heredocs.append(HeredocBody(line, "\n".join(lines[start:index]), delimiter))
             index += 1  # step past the closing delimiter itself
-    return "\n".join(kept), bodies
+    return "\n".join(kept), heredocs
 
 
-def _write_target_tokens(tokens: list[str]) -> list[_TargetCandidate]:
+def _write_target_tokens(tokens: list[str]) -> list[BashWriteDestination]:
     """Candidate targets, in command order, before quoting or path resolution.
 
     Each candidate carries the SOURCE operands that would supply a basename if
     the destination turns out to be a directory. Only copy verbs have any --
     ``cp a.py somedir`` writes ``somedir/a.py``, a path nothing else can name.
     """
-    targets: list[_TargetCandidate] = []
+    targets: list[BashWriteDestination] = []
     index = 0
     while index < len(tokens):
         token = tokens[index]
 
         if token in _REDIRECT_OPERATORS and index + 1 < len(tokens):
-            targets.append(_TargetCandidate(tokens[index + 1]))
+            targets.append(BashWriteDestination(tokens[index + 1]))
             index += 2
             continue
 
@@ -494,7 +538,7 @@ def _write_target_tokens(tokens: list[str]) -> list[_TargetCandidate]:
             continue
 
         if token.startswith(_DD_OUTPUT_PREFIX):
-            targets.append(_TargetCandidate(token[len(_DD_OUTPUT_PREFIX) :], authored=False))
+            targets.append(BashWriteDestination(token[len(_DD_OUTPUT_PREFIX) :], authored=False))
             index += 1
             continue
 
@@ -505,7 +549,7 @@ def _write_target_tokens(tokens: list[str]) -> list[_TargetCandidate]:
 def _collect_trailing_operands(
     tokens: list[str],
     start: int,
-    targets: list[_TargetCandidate],
+    targets: list[BashWriteDestination],
     *,
     keep_all: bool,
     authored: bool = True,
@@ -541,16 +585,16 @@ def _collect_trailing_operands(
         index += 1
 
     if keep_all:
-        targets.extend(_TargetCandidate(operand, authored=authored) for operand in operands)
+        targets.extend(BashWriteDestination(operand, authored=authored) for operand in operands)
     elif target_directory is not None:
         # Destination first: every remaining operand is a SOURCE.
         targets.append(
-            _TargetCandidate(
+            BashWriteDestination(
                 target_directory, tuple(operands), directory_only=True, authored=authored
             )
         )
     elif len(operands) >= _MIN_COPY_OPERANDS:
-        targets.append(_TargetCandidate(operands[-1], tuple(operands[:-1]), authored=authored))
+        targets.append(BashWriteDestination(operands[-1], tuple(operands[:-1]), authored=authored))
     return index
 
 
@@ -590,7 +634,7 @@ def _resolve_write_target(target: str, cwd: Any) -> str | None:
     Declines rather than guesses. A directory destination is declined too: the
     written file is ``dest/<basename>``, so reporting ``dest`` would name a
     path no path-keyed guard matches -- failing safe (a missed write) instead
-    of dangerously (the wrong file judged). ``_written_paths`` is where that
+    of dangerously (the wrong file judged). ``resolve_bash_write_destination`` is where that
     decline actually happens (via ``is_dir()`` and ``candidate.directory_only``)
     -- this function's job is only to produce the path to test, which is why a
     trailing slash is stripped here rather than declined outright.

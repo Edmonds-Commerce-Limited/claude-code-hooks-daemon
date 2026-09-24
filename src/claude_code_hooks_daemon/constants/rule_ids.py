@@ -282,6 +282,13 @@ class RuleID:
     PLAN_FOLDER_MKDIR: str = "R-PLAN-FOLDER-MKDIR"
 
     # ------------------------------------------------------------------
+    # plan_journal_guard handler
+    # ------------------------------------------------------------------
+
+    #: A journal entry written by hand rather than through mkplan.bash --journal.
+    JOURNAL_HAND_WRITTEN_ENTRY: str = "R-JOURNAL-HAND-WRITTEN-ENTRY"
+
+    # ------------------------------------------------------------------
     # tdd_enforcement handler
     # ------------------------------------------------------------------
 

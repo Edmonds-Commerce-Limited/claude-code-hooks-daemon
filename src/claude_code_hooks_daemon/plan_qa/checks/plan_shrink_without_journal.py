@@ -32,6 +32,7 @@ from claude_code_hooks_daemon.plan_qa.checks.common import (
     plan_number_for_folder,
     staged_plan_md_folder,
 )
+from claude_code_hooks_daemon.plan_qa.model import JOURNAL_BODY_FILE_HINT, journal_append_command
 from claude_code_hooks_daemon.plan_qa.types import (
     CheckContext,
     CheckSpec,
@@ -47,6 +48,20 @@ _MODIFY_STATUS: Final[str] = "M"
 # Ordinary editing churn (rewording a task, dropping a stale bullet) removes a
 # few hundred bytes. Losing this much at once is a different kind of event.
 _SIGNIFICANT_SHRINK_BYTES: Final[int] = 2_000
+
+
+def _remediation(plan_dir: str, folder: str, journal_dir: str, plan_number: int | None) -> str:
+    return (
+        "If that content was dated narrative — progress notes, incident "
+        f"write-ups, hand-off prose — it belongs in {folder}/{journal_dir}/, which "
+        "is append-only and unbounded by design; append it with "
+        f"`{journal_append_command(plan_dir, plan_number)}` ({JOURNAL_BODY_FILE_HINT}) "
+        "and stage the day-file in this commit. If it was durable-but-current "
+        "detail — research output, findings, decisions and their reasoning, "
+        "evidence tables — EXTRACT it into a named supporting document in "
+        f"{folder}/ instead and stage it in this commit. If the content is "
+        "genuinely obsolete, this is fine as it stands: git keeps the history."
+    )
 
 
 def _run(context: CheckContext) -> list[Finding]:
@@ -85,17 +100,8 @@ def _run(context: CheckContext) -> list[Finding]:
                     "supporting document — content may have been DELETED rather "
                     "than relocated or extracted"
                 ),
-                remediation=(
-                    "If that content was dated narrative — progress notes, "
-                    "incident write-ups, hand-off prose — it belongs in "
-                    f"{folder}/{context.journal_dir_name}/, which is append-only and "
-                    "unbounded by design; append it there and stage it in this "
-                    "commit. If it was durable-but-current detail — research "
-                    "output, findings, decisions and their reasoning, evidence "
-                    f"tables — EXTRACT it into a named supporting document in "
-                    f"{folder}/ instead and stage it in this commit. If the "
-                    "content is genuinely obsolete, this is fine as it stands: "
-                    "git keeps the history."
+                remediation=_remediation(
+                    context.plan_dir_rel, folder, context.journal_dir_name, plan_number
                 ),
                 path=change.path,
             )
