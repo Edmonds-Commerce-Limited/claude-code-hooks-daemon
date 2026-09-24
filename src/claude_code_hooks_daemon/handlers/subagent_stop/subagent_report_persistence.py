@@ -11,17 +11,32 @@ Task 1.2 ruled out an EARLIER, similarly-shaped idea (the daemon saving an
 over-long reply to the coordinator's DECLARED, tracked plan-folder path) on
 the grounds that the daemon cannot cheaply replicate the live,
 per-project-configured content checks a real ``Write`` call would get. That
-reasoning holds for a TRACKED destination; it does not apply here. This
-handler ONLY ever writes under a gitignored path (default
-``untracked/agent-reports/``, confirmed gitignored by
-``test_report_dir_is_gitignored``). ``last_assistant_message`` already
-reaches the coordinator's context and Claude Code's own on-disk transcript,
-so saving it to a path git never sees discloses nothing new — no
-sensitive-content, secret-file or markdown-location check is needed.
+reasoning holds for a TRACKED destination; it does not apply here, because
+this handler ONLY ever writes under a gitignored path (default
+``untracked/agent-reports/auto/``) — but "gitignored" is now a GUARANTEE
+this code enforces at runtime (a code review found the earlier version's
+only evidence was a test against THIS repo's own ``.gitignore``, which said
+nothing about a client project with no matching rule):
+``write_new_file_never_overwrite`` drops a self-ignoring ``*`` ``.gitignore``
+into the report directory the first time it creates it, so the guarantee
+travels WITH the directory into every project. No sensitive-content,
+secret-file or markdown-location check runs on the content itself — a
+persisted reply is NOT vetted the way a real ``Write`` call would be, only
+kept out of git's view.
+
+``.../auto/`` is a subdirectory the daemon exclusively writes into, distinct
+from the ``untracked/agent-reports/`` a coordinator or agent may be
+told to hand-author a non-plan report into (``dispatch_declaration``'s
+fallback). Retention (below) only ever prunes ``.../auto/`` — an earlier
+version pruned the shared parent directory too, which deleted
+deliberately-authored reports a review found still sitting there.
 
 Never blocks (a sensor, like ``subagent_cache_aggregator``): persistence
 failing must never strand a stopping agent. Never overwrites (each write is
-a NEW file; a same-second collision still gets a numeric suffix). Bounded
+a NEW file; a same-second collision still gets a numeric suffix). Matches
+EVERY SubagentStop, including a re-entry after another handler's block —
+there is no deny loop to guard against here, and skipping a re-entry would
+mean the agent's real, corrected final reply is never the one saved. Bounded
 from day one via ``utils.retention.prune_directory`` — Plan 00181's
 retention primitive, built specifically because an earlier untracked writer
 with no pruner grew to 14 GB unnoticed (issue #52).
@@ -47,8 +62,9 @@ from claude_code_hooks_daemon.utils.option_coercion import coerce_int_option
 from claude_code_hooks_daemon.utils.path_exclusion import resolve_project_root
 from claude_code_hooks_daemon.utils.retention import prune_directory
 from claude_code_hooks_daemon.utils.subagent_report_paths import (
-    DEFAULT_REPORT_DIR,
+    DEFAULT_PERSISTED_REPORT_DIR,
     report_filename,
+    resolve_confined_report_dir,
     write_new_file_never_overwrite,
 )
 
@@ -71,8 +87,10 @@ class SubagentReportPersistenceHandler(SubagentStopHandlerBase):
     """Persist every stopping sub-agent's final reply to a gitignored file.
 
     Fails open on any missing/empty/non-string ``last_assistant_message``
-    (nothing to persist) and never re-fires on ``stop_hook_active``
-    re-entry, mirroring its sibling SubagentStop handlers.
+    (nothing to persist) and on an unsafe ``report_dir`` (empty, ``.``,
+    absolute or ``..``-escaping). Matches every SubagentStop, INCLUDING a
+    re-entry (review M2) -- unlike its BLOCKING sibling handlers, this one
+    never denies, so there is no deny loop to guard against.
     """
 
     def __init__(self) -> None:
@@ -88,7 +106,7 @@ class SubagentReportPersistenceHandler(SubagentStopHandlerBase):
         # a string value is a real runtime possibility `_max_*()` guards
         # against via the shared `coerce_int_option` helper (same idiom as
         # subagent_report_size_blocker's `_threshold_chars: Any`).
-        self._report_dir: str = DEFAULT_REPORT_DIR
+        self._report_dir: str = DEFAULT_PERSISTED_REPORT_DIR
         self._max_kept_reports: Any = _DEFAULT_MAX_KEPT_REPORTS
         self._max_report_age_days: Any = _DEFAULT_MAX_REPORT_AGE_DAYS
         # Test-only override (mirrors subagent_report_size_blocker's
@@ -98,8 +116,16 @@ class SubagentReportPersistenceHandler(SubagentStopHandlerBase):
         self._project_root: Path | None = None
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        """True for every SubagentStop except a re-entry (loop guard)."""
-        return not bool(hook_input.get("stop_hook_active", False))
+        """True for every SubagentStop, including a re-entry.
+
+        Review M2: the ``stop_hook_active`` skip other SubagentStop
+        handlers use guards against a BLOCKING handler looping on its own
+        deny. This handler never denies, so there is no loop to guard
+        against -- and dropping a re-entry stop would mean the agent's
+        real, corrected final reply (the one that survived a block from
+        another handler and kept working) is never the one persisted.
+        """
+        return True
 
     def _root(self) -> Path:
         """The checkout the report directory is resolved under.
@@ -118,8 +144,16 @@ class SubagentReportPersistenceHandler(SubagentStopHandlerBase):
         resolved = resolve_project_root()
         return Path(resolved) if resolved is not None else Path.cwd()
 
-    def _target_dir(self) -> Path:
-        return self._root() / self._report_dir
+    def _target_dir(self) -> Path | None:
+        """The validated, confined write target, or ``None`` when unsafe.
+
+        Review M1: ``report_dir`` arrives from YAML unvalidated; an empty,
+        ``.``, absolute or ``..``-escaping value would otherwise write (and
+        let retention prune) somewhere far wider than intended. Delegates
+        the actual check to :func:`resolve_confined_report_dir` so the
+        persister and any future caller share one definition of "safe".
+        """
+        return resolve_confined_report_dir(self._root(), self._report_dir)
 
     def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
         """Persist ``last_assistant_message`` to a new gitignored file, then ALLOW.
@@ -136,6 +170,15 @@ class SubagentReportPersistenceHandler(SubagentStopHandlerBase):
             )
             return BlockingResult(decision=Decision.ALLOW)
 
+        target_dir = self._target_dir()
+        if target_dir is None:
+            _LOGGER.warning(
+                "subagent_report_persistence: report_dir %r is empty, '.', "
+                "absolute or escapes the project root -- skipping persistence",
+                self._report_dir,
+            )
+            return BlockingResult(decision=Decision.ALLOW)
+
         agent_type = hook_input.get("agent_type")
         agent_id = hook_input.get("agent_id")
         filename = report_filename(
@@ -143,7 +186,6 @@ class SubagentReportPersistenceHandler(SubagentStopHandlerBase):
             agent_id if isinstance(agent_id, str) else "",
             when=datetime.now(UTC),
         )
-        target_dir = self._target_dir()
         written = write_new_file_never_overwrite(target_dir, filename, message)
         if written is not None:
             prune_directory(
@@ -168,19 +210,32 @@ class SubagentReportPersistenceHandler(SubagentStopHandlerBase):
     def get_claude_md(self) -> str | None:
         return (
             "## subagent_report_persistence — every sub-agent reply is saved to a file\n\n"
-            "At every SubagentStop, the daemon saves the stopping agent's final "
-            "message to a gitignored file under "
-            f"`{DEFAULT_REPORT_DIR}` (`<yymmdd>-<HHMMSS>-<agent_type>-<agent_id>.md`), "
-            "regardless of agent type or `Write` access — so persistence never "
-            "depends on the agent's own cooperation. Never overwrites (a "
-            "collision gets a numeric suffix); pruned to a configured cap "
-            "(default 500 files / 30 days, `options.max_kept_reports` / "
-            "`options.max_report_age_days`) after every write. Never blocks "
-            "a stop — persistence failing is logged, not fatal.\n\n"
+            "At every SubagentStop, including a re-entry, the daemon saves the "
+            "stopping agent's final message to a file under "
+            f"`{DEFAULT_PERSISTED_REPORT_DIR}` "
+            "(`<yymmdd>-<HHMMSS>-<agent_type>-<agent_id>.md`), regardless of "
+            "agent type or `Write` access — so persistence never depends on "
+            "the agent's own cooperation. That directory is exclusively the "
+            "daemon's own: never the shared `untracked/agent-reports/` a "
+            "coordinator may separately declare as a hand-authored, non-plan "
+            "report destination.\n\n"
+            "Genuinely gitignored, not just conventionally so: a `*` "
+            "`.gitignore` is written into the directory the first time it is "
+            "created, so the guarantee holds even in a project whose own "
+            "ignore rules do not mention it. The content itself is NOT "
+            "vetted — no sensitive-content, secret-file or markdown-location "
+            "check runs, only kept out of git's view.\n\n"
+            "Never overwrites (a collision gets a numeric suffix); pruned to "
+            "a configured cap (default 500 files / 30 days, "
+            "`options.max_kept_reports` / `options.max_report_age_days`) "
+            "after every write — pruning only ever touches this directory, "
+            "never a hand-authored report elsewhere. Never blocks a stop — "
+            "persistence failing, or an unsafe `report_dir`, is logged, not "
+            "fatal.\n\n"
             "`subagent_report_size_blocker` looks up what this handler already "
-            "saved (by agent type/id, not an exact filename) and points an "
-            "over-threshold agent at that path instead of asking it to write "
-            "one itself."
+            "saved (by agent type/id AND matching content, not an exact "
+            "filename) and points an over-threshold agent at that path "
+            "instead of asking it to write one itself."
         )
 
     def get_acceptance_tests(self) -> list[Any]:
@@ -192,8 +247,8 @@ class SubagentReportPersistenceHandler(SubagentStopHandlerBase):
                 title="Subagent stop persists the final reply to a gitignored file",
                 command="Dispatch any subagent and let it finish with a short reply",
                 description=(
-                    "Every SubagentStop saves last_assistant_message to "
-                    "untracked/agent-reports/, whether or not the reply is "
+                    f"Every SubagentStop saves last_assistant_message to "
+                    f"{DEFAULT_PERSISTED_REPORT_DIR}, whether or not the reply is "
                     "over the size threshold and regardless of agent type"
                 ),
                 expected_decision=Decision.ALLOW,
