@@ -1,6 +1,6 @@
 # Plan 00456: missing venv self heals and repair runs without one
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-24
 **Owner**: dev
 **GitHub Issue**: #53
@@ -98,9 +98,9 @@ as normal.
 
 ### Phase 2: Deliver
 
-- [ ] ⬜ **Task 2.1**: Merge `--no-ff`, verify ancestry and CI, restart the
+- [x] ✅ **Task 2.1**: Merge `--no-ff`, verify ancestry and CI, restart the
   daemon.
-- [ ] ⬜ **Task 2.2**: Mark Plan 00100's Phase 3.5 as carried here, comment
+- [x] ✅ **Task 2.2**: Mark Plan 00100's Phase 3.5 as carried here, comment
   on #53 and close it.
 
 ## Success Criteria
@@ -120,7 +120,10 @@ as normal.
   the flag, and a flagged `--force` keeps another environment's `venv-*`.
   (`tests/integration/test_skill_install_never_auto_forces.py`)
 - [x] Full QA passes and CI is green. (`llm_qa.py all` gave 36/36 on the
-  merged branch head `17024e79`; the branch CI is confirmed at the Task 2.1
+  merged branch head `17024e79`, and 36/36 again on `0686445d` after the
+  final review fixes N7–N9. Shellcheck was re-run by hand on the final code
+  (0 issues), because `llm_qa.py` did not yet include it (00422 N22). CI
+  on main is green at `3dd38a8b` (run 36010213492), which contains the
   merge.)
 - [x] Every release-bound consequence is in the pending-release holding
   area: `UNRELEASED/release-notes/06-a-missing-venv-now-builds-itself-and-repair-works-without-one.md`
@@ -132,4 +135,4 @@ as normal.
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00456-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- Not yet delivered.
+- Merged to main at `9e2f74cd` (`--no-ff`, from `f1fd1e3a`).
