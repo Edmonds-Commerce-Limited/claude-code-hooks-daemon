@@ -67,6 +67,14 @@ _GH_PR_MERGE_RE: Final[re.Pattern[str]] = re.compile(
     rf"\bgh\s+pr\s+merge(?=\s|$)({_SEGMENT})",
     re.IGNORECASE,
 )
+# `git pull <repository> <refspec>` merges that refspec into the checked-out
+# branch, so `git pull . feature/x` is a merge of `feature/x` (Plan 00408 Task
+# 3.7). A pull naming no refspec updates from the configured upstream instead,
+# which is not a merge of anybody's work and is left alone.
+_GIT_PULL_RE: Final[re.Pattern[str]] = re.compile(
+    rf"{GIT_INVOCATION}pull(?=\s|$)({_SEGMENT})",
+    re.IGNORECASE,
+)
 
 #: Merge flags that take a separate value; the value is not the branch.
 _VALUED_FLAGS: Final[frozenset[str]] = frozenset(
@@ -90,11 +98,41 @@ _VALUED_FLAGS: Final[frozenset[str]] = frozenset(
         "--match-head-commit",
     }
 )
+#: `git pull` flags that take a separate value; the value is not a positional.
+_PULL_VALUED_FLAGS: Final[frozenset[str]] = frozenset(
+    {
+        "-s",
+        "-X",
+        "-S",
+        "-j",
+        "-o",
+        "--strategy",
+        "--strategy-option",
+        "--gpg-sign",
+        "--jobs",
+        "--depth",
+        "--deepen",
+        "--shallow-since",
+        "--shallow-exclude",
+        "--upload-pack",
+        "--server-option",
+        "--negotiation-tip",
+        "--refmap",
+        "--cleanup",
+    }
+)
 #: A merge in one of these states is not a merge of a branch at all.
 _NON_MERGE_FLAGS: Final[frozenset[str]] = frozenset({"--abort", "--continue", "--quit"})
 #: Placeholder key when `gh pr merge` names no PR (it merges the current
 #: branch's PR); a human approves it under this name.
 _GH_CURRENT_PR: Final[str] = "gh-pr"
+#: Placeholder key when `git merge` names no branch in the command text: the
+#: branch arrives on stdin (`... | xargs git merge`) or git merges the
+#: configured upstream. Either way it IS a merge, so it is gated under this name
+#: rather than answered "not a merge" (Plan 00408 Task 3.7).
+UNNAMED_MERGE_TARGET: Final[str] = "unnamed-branch"
+#: A pull needs a repository AND a refspec before it names a branch to merge.
+_PULL_POSITIONALS_NAMING_A_BRANCH: Final[int] = 2
 
 _RULE_WHY = (
     "This project requires a human to approve the parent-to-main merge; the "
@@ -168,27 +206,49 @@ def _segment_tokens(segment: str) -> list[str]:
     return [token.strip("\"'") for token in segment.split()]
 
 
-def _first_positional(tokens: list[str]) -> str | None:
+def _positionals(tokens: list[str], valued_flags: frozenset[str]) -> list[str]:
+    """The non-option words, skipping the value of each flag that takes one."""
+    positionals: list[str] = []
     skip_value = False
     for token in tokens:
         if skip_value:
             skip_value = False
             continue
-        if token in _VALUED_FLAGS:
+        if token in valued_flags:
             skip_value = True
             continue
         if token.startswith("-"):
             continue
-        return token
-    return None
+        positionals.append(token)
+    return positionals
+
+
+def _first_positional(tokens: list[str]) -> str | None:
+    positionals = _positionals(tokens, _VALUED_FLAGS)
+    return positionals[0] if positionals else None
+
+
+def _pulled_branch(tokens: list[str]) -> str | None:
+    """The branch a ``git pull <repository> <refspec>`` merges, else ``None``.
+
+    The refspec's SOURCE side is the branch merged: ``+feature/x:feature/x``
+    merges ``feature/x``.
+    """
+    positionals = _positionals(tokens, _PULL_VALUED_FLAGS)
+    if len(positionals) < _PULL_POSITIONALS_NAMING_A_BRANCH:
+        return None
+    source = positionals[1].removeprefix("+").split(":", 1)[0]
+    return source or None
 
 
 def merge_target(command: str) -> str | None:
     """The branch (or PR) a merge command would merge, or ``None`` if it is not one.
 
     ``git merge --abort``/``--continue``/``--quit`` end or resume a merge
-    rather than start one; a ``git merge`` with no branch is left to git to
-    refuse. Values of flags such as ``-m`` are skipped so a commit message
+    rather than start one. A ``git merge`` naming no branch is still a merge --
+    of stdin's branch under ``xargs``, or of the upstream -- and answers
+    :data:`UNNAMED_MERGE_TARGET`; a ``git pull`` is a merge only when it names
+    a refspec. Values of flags such as ``-m`` are skipped so a commit message
     can never be read as the branch.
 
     Matching is scoped to what the shell will EXECUTE by a single pass,
@@ -239,11 +299,14 @@ def merge_target(command: str) -> str | None:
         tokens = _segment_tokens(executable[git.start(1) : git.end(1)])
         if any(token in _NON_MERGE_FLAGS for token in tokens):
             return None
-        return _first_positional(tokens)
+        return _first_positional(tokens) or UNNAMED_MERGE_TARGET
     gh = _GH_PR_MERGE_RE.search(executable)
     if gh is not None:
         segment = executable[gh.start(1) : gh.end(1)]
         return _first_positional(_segment_tokens(segment)) or _GH_CURRENT_PR
+    pull = _GIT_PULL_RE.search(executable)
+    if pull is not None:
+        return _pulled_branch(_segment_tokens(executable[pull.start(1) : pull.end(1)]))
     return None
 
 
@@ -267,7 +330,8 @@ class MergeToMainApprovalHandler(PreToolUseHandlerBase):
         self._rule = Rule(
             rule_id=RuleID.MERGE_TO_MAIN_APPROVAL,
             blocked=(
-                "a `git merge`/`gh pr merge` in the main checkout on the default branch "
+                "a `git merge`/`git pull <remote> <branch>`/`gh pr merge` in the main "
+                "checkout on the default branch "
                 f"while `{_CONFIG_KEY}` is on and no human has approved that branch"
             ),
             why=_RULE_WHY,
@@ -289,15 +353,22 @@ class MergeToMainApprovalHandler(PreToolUseHandlerBase):
         if not self._merge_to_main_requires_human_approval:
             return False
         command = get_bash_command(hook_input)
-        if not command or merge_target(command) is None:
+        target = merge_target(command) if command else None
+        if target is None:
             return False
         cwd = hook_input.get(HookInputField.CWD)
         if not cwd:
             return False
-        return self._is_main_checkout_on_default_branch(Path(str(cwd)))
+        return self._merges_into_main_checkout_default_branch(Path(str(cwd)), target)
 
     @staticmethod
-    def _is_main_checkout_on_default_branch(cwd: Path) -> bool:
+    def _merges_into_main_checkout_default_branch(cwd: Path, target: str) -> bool:
+        """Whether ``target`` would land on the main checkout's default branch.
+
+        Merging the default branch into itself -- ``git pull origin main`` on
+        ``main``, the ordinary update -- brings in nobody's work, so there is
+        nothing for a human to approve.
+        """
         repo = GitRepo.resolve_for(cwd)
         root = repo.root if repo is not None else cwd
         if is_linked_worktree(root):
@@ -305,7 +376,8 @@ class MergeToMainApprovalHandler(PreToolUseHandlerBase):
         branch = current_branch(cwd)
         if branch is None:
             return False
-        return branch == default_branch(cwd)
+        default = default_branch(cwd)
+        return branch == default and target != default
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         target = merge_target(str(get_bash_command(hook_input)))
@@ -355,7 +427,10 @@ class MergeToMainApprovalHandler(PreToolUseHandlerBase):
             "a `git merge <branch>` (or `gh pr merge`) run in the MAIN checkout while\n"
             "it is on the default branch is DENIED until a human has approved that\n"
             "branch. A merge inside a linked worktree (child into parent) is never\n"
-            "gated.\n"
+            "gated. `git pull <remote> <branch>` merges that branch and is gated the\n"
+            "same way; a pull naming no branch, or naming the default branch itself,\n"
+            "is an ordinary update and is not. A `git merge` whose branch is not in\n"
+            f"the command (`... | xargs git merge`) is gated as `{UNNAMED_MERGE_TARGET}`.\n"
             "\n"
             "**The human's route** (not yours): run\n"
             f"`{daemon_cli_command_for_docs(_APPROVE_SUBCOMMAND, '<branch>')}`, which\n"

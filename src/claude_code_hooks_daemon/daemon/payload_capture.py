@@ -23,6 +23,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from claude_code_hooks_daemon.constants import HookInputField
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.private_io import make_private_dir, open_private_append
 from claude_code_hooks_daemon.utils.repo_relative_path import normalise_repo_relative_path
@@ -43,7 +44,6 @@ _DEFAULT_SUBDIR = "payload-capture"
 # file's path -- let alone its content -- verbatim in this dogfooding
 # capture.
 _TOOL_INPUT_PATH_FIELDS: tuple[str, ...] = ("file_path", "notebook_path", "path")
-_TOOL_INPUT_KEY = "tool_input"
 _COMMAND_KEY = "command"
 
 logger = logging.getLogger(__name__)
@@ -59,7 +59,7 @@ def _touches_protected_path(hook_input: dict[str, Any], patterns: tuple[str, ...
     """
     if not patterns:
         return False
-    tool_input = hook_input.get(_TOOL_INPUT_KEY)
+    tool_input = hook_input.get(HookInputField.TOOL_INPUT)
     if not isinstance(tool_input, dict):
         return False
     for field in _TOOL_INPUT_PATH_FIELDS:

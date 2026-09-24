@@ -336,21 +336,68 @@ class TestAQuotedStringCanItselfBeACommand:
 
         assert handler.matches({"tool_name": "Bash", "tool_input": {"command": command}}) is True
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "Known BEHAVIOUR gap, Plan 00408 Task 3.5: the pattern anchors on `\\bcd`, "
-            "so `pushd` changes directory without matching. It is NOT this release's "
-            "regression -- `git show v3.63.0:` carries the same anchor, so the shipped "
-            "version never matched it either, which is why it was graduated rather than "
-            "fixed inside a release being cut (the same call made for Plan 00407 N8). "
-            "Found by probing sixteen spellings a shell really executes: fifteen were "
-            "denied and this one was not. Flips to a plain pass when 00408 lands; fails "
-            "loudly if 'fixed' by accident."
-        ),
-    )
     def test_pushd_into_the_daemon_dir_is_matched(self) -> None:
+        """Plan 00408 Task 3.5: `pushd` changes directory exactly as `cd` does."""
         handler = DaemonLocationGuardHandler()
         command = "pushd .claude/hooks-daemon"
 
         assert handler.matches({"tool_name": "Bash", "tool_input": {"command": command}}) is True
+
+
+def _guard_matches(command: str) -> bool:
+    return DaemonLocationGuardHandler().matches(
+        {"tool_name": "Bash", "tool_input": {"command": command}}
+    )
+
+
+class TestEverySpellingThatReallyChangesDirectory:
+    """Plan 00408 Tasks 3.5 and 3.9: seven spellings walked past the rule.
+
+    Each was verified `matches=False` through the live handler before the fix,
+    and each really changes directory: options before the path, quoting or an
+    escape INSIDE the path, a doubled separator, and `pushd`.
+    """
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "pushd .claude/hooks-daemon",
+            "pushd .claude/hooks-daemon && bin/hooks-daemon status",
+            "cd -- .claude/hooks-daemon",
+            "cd -P .claude/hooks-daemon",
+            "cd -L -P .claude/hooks-daemon/src",
+            "cd .claude/'hooks-daemon'",
+            'cd .claude/"hooks-daemon"',
+            "cd .claude//hooks-daemon",
+            r"cd .cl\aude/hooks-daemon",
+            "cd .claude/./hooks-daemon",
+            "bash -c 'cd .claude/\"hooks-daemon\" && ls'",
+            "(cd .claude/hooks-daemon)",
+            "x=`cd .claude/hooks-daemon`",
+        ],
+    )
+    def test_the_spelling_is_matched(self, command: str) -> None:
+        assert _guard_matches(command) is True
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "popd",
+            "cd -",
+            "cd .claude/hooks-daemon.yaml.example-dir",
+            "pushd .claude && cat hooks-daemon.yaml",
+            "cd .claude/'hooks-daemon.yaml'",
+            "cat .claude/hooks-daemon/config.yaml",
+        ],
+    )
+    def test_a_command_that_does_not_enter_the_daemon_dir_is_not(self, command: str) -> None:
+        """`popd` and `cd -` name no path: the directory they return to was
+        entered by an earlier command, which this rule already judged."""
+        assert _guard_matches(command) is False
+
+
+class TestTheDenyMessageNamesBothVerbs:
+    def test_the_rule_names_pushd_as_well_as_cd(self) -> None:
+        (rule,) = DaemonLocationGuardHandler().get_rules()
+
+        assert "pushd" in rule.blocked

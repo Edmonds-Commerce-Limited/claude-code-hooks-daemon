@@ -1658,6 +1658,8 @@ def _print_mode_advisory(pre_mode: dict[str, Any]) -> None:
 #: importable package, and the daemon must not grow a dependency on the QA
 #: harness to print an advisory.
 _QA_RUN_LOCK_RELPATH: Final[str] = "untracked/qa/.llm_qa.lock"
+#: Reported when a run holds the lock but its pid cannot be read.
+_UNNAMED_HOLDER: Final[str] = "unknown"
 
 
 def _qa_run_lock_holder(project_root: Path) -> str | None:
@@ -1705,18 +1707,19 @@ def _qa_run_lock_holder(project_root: Path) -> str | None:
             # Only this errno means held; reading the pid may still fail, and an
             # unnamed holder is better than no warning at all.
             try:
-                recorded = lock_path.read_text(encoding="utf-8").strip() or "unknown"
+                recorded = lock_path.read_text(encoding="utf-8").strip() or _UNNAMED_HOLDER
             except OSError as exc:
                 logger.debug("QA run lock is held but unreadable (%s)", exc)
-                holder = None
+                holder = _UNNAMED_HOLDER
             else:
                 holder = recorded.removeprefix("pid=")
         except OSError as exc:
             logger.debug("QA run lock could not be tested (%s); reporting no holder", exc)
             holder = None
-        else:
-            fcntl.flock(fd, fcntl.LOCK_UN)
     finally:
+        # Closing the descriptor releases an flock we acquired, so there is no
+        # explicit LOCK_UN: one sat outside every handler here and could end
+        # `restart` with a traceback (Plan 00408 Task 3.10).
         os.close(fd)
     return holder
 

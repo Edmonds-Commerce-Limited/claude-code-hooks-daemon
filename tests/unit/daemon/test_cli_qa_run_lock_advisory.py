@@ -68,13 +68,33 @@ class TestTheAdvisoryNeverRaises:
         ):
             assert _qa_run_lock_holder(tmp_path) is None
 
-    def test_an_unreadable_lock_body_is_survived(self, tmp_path: Path) -> None:
-        """Contention is the answer, but reading the pid can still fail."""
+    def test_an_unreadable_lock_body_still_warns_with_an_unnamed_holder(
+        self, tmp_path: Path
+    ) -> None:
+        """Contention is the answer, and reading the pid failing does not change it.
+
+        Plan 00408 Task 3.10: this answered None, dropping the warning, beside a
+        comment saying an unnamed holder beats no warning at all.
+        """
         _lock_file(tmp_path)
 
         with (
             patch("claude_code_hooks_daemon.daemon.cli.fcntl.flock", side_effect=BlockingIOError),
             patch.object(Path, "read_text", side_effect=OSError),
+        ):
+            assert _qa_run_lock_holder(tmp_path) == "unknown"
+
+    def test_a_failing_unlock_is_survived(self, tmp_path: Path) -> None:
+        """Plan 00408 Task 3.10: the explicit unlock sat outside every handler.
+
+        Closing the descriptor releases an ``flock`` anyway, so the lock was
+        acquired, nothing holds it, and the answer is "no holder".
+        """
+        _lock_file(tmp_path)
+
+        with patch(
+            "claude_code_hooks_daemon.daemon.cli.fcntl.flock",
+            side_effect=[None, OSError("unlock failed")],
         ):
             assert _qa_run_lock_holder(tmp_path) is None
 

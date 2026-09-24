@@ -20,7 +20,7 @@ import logging
 from pathlib import Path
 from typing import Any, Final
 
-from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.core import BlockingResult, Decision, ProjectContext
 from claude_code_hooks_daemon.core.handler_bases import UserPromptSubmitHandlerBase
 from claude_code_hooks_daemon.core.transcript_reader import TranscriptMessage, TranscriptReader
@@ -121,15 +121,15 @@ class IdleHousekeepingAdvisoryHandler(UserPromptSubmitHandlerBase):
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Match any string prompt (branching happens in handle)."""
-        return isinstance(hook_input.get("prompt"), str)
+        return isinstance(hook_input.get(HookInputField.PROMPT), str)
 
     def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
         """Fire housekeeping guidance once the idle-tick threshold is reached."""
-        prompt = hook_input.get("prompt")
+        prompt = hook_input.get(HookInputField.PROMPT)
         if not isinstance(prompt, str):
             return BlockingResult(decision=Decision.ALLOW)
 
-        session_id = str(hook_input.get("session_id", ""))
+        session_id = str(hook_input.get(HookInputField.SESSION_ID, ""))
 
         # A real (non-tick) user prompt means new work is starting: reset this
         # session's housekeeping budget and get out of the way.
@@ -141,7 +141,7 @@ class IdleHousekeepingAdvisoryHandler(UserPromptSubmitHandlerBase):
         if self._passes_by_session.get(session_id, 0) >= self._max_passes_per_session:
             return BlockingResult(decision=Decision.ALLOW)
 
-        transcript_path = hook_input.get("transcript_path")
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
         if not isinstance(transcript_path, str) or not transcript_path:
             return BlockingResult(decision=Decision.ALLOW)
 

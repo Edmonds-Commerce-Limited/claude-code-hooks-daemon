@@ -267,7 +267,7 @@ class VerificationResultGateHandler(PreToolUseHandlerBase):
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Cheap pre-filter: a Bash command that could contain a mutator."""
-        if hook_input.get("tool_name") != ToolName.BASH:
+        if hook_input.get(HookInputField.TOOL_NAME) != ToolName.BASH:
             return False
         command = get_bash_command(hook_input)
         if not command:

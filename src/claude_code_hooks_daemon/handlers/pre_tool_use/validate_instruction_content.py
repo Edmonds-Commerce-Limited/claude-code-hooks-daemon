@@ -186,11 +186,11 @@ class ValidateInstructionContentHandler(PreToolUseHandlerBase):
 
         Applies to Write and Edit tools operating on CLAUDE.md or README.md files.
         """
-        tool_name = hook_input.get("tool_name", "")
+        tool_name = hook_input.get(HookInputField.TOOL_NAME, "")
         if tool_name not in (ToolName.WRITE, ToolName.EDIT):
             return False
 
-        tool_input = hook_input.get("tool_input", {})
+        tool_input = hook_input.get(HookInputField.TOOL_INPUT, {})
         file_path: str = tool_input.get("file_path", "")
 
         # Check if file is CLAUDE.md or README.md (case-insensitive, any directory)
@@ -208,8 +208,8 @@ class ValidateInstructionContentHandler(PreToolUseHandlerBase):
         per (transcript_path, rule_id). Returns ALLOW if content is clean or
         patterns are only in code blocks.
         """
-        tool_input = hook_input.get("tool_input", {})
-        tool_name = hook_input.get("tool_name", "")
+        tool_input = hook_input.get(HookInputField.TOOL_INPUT, {})
+        tool_name = hook_input.get(HookInputField.TOOL_NAME, "")
 
         # Get content to check based on tool type
         if tool_name == ToolName.WRITE:

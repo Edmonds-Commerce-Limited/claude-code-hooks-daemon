@@ -258,10 +258,10 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
         """Paths this tool call plainly names as a write target."""
         targets: list[str] = []
 
-        tool_name = hook_input.get("tool_name", "")
+        tool_name = hook_input.get(HookInputField.TOOL_NAME, "")
         key = _WRITE_TARGET_KEYS.get(tool_name)
         if key is not None:
-            named = hook_input.get("tool_input", {}).get(key)
+            named = hook_input.get(HookInputField.TOOL_INPUT, {}).get(key)
             if named:
                 targets.append(str(named))
 

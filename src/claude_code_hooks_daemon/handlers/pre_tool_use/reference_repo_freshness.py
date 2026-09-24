@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Any, Final
 
 from claude_code_hooks_daemon.config.models import ReferenceReposConfig
-from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.core import Decision, GatingResult
@@ -261,8 +261,8 @@ class ReferenceRepoFreshnessHandler(PreToolUseHandlerBase):
         contributes nothing — that is the exemption, applied where the command
         words are still attached to their own arguments.
         """
-        tool_input = hook_input.get("tool_input") or {}
-        tool_name = hook_input.get("tool_name", "")
+        tool_input = hook_input.get(HookInputField.TOOL_INPUT) or {}
+        tool_name = hook_input.get(HookInputField.TOOL_NAME, "")
 
         field = _PATH_FIELD_BY_TOOL.get(tool_name)
         if field is not None:
@@ -474,7 +474,7 @@ class ReferenceRepoFreshnessHandler(PreToolUseHandlerBase):
         """
         config = self._reference_repos
         project_root = self.project_root_reader()
-        session_id = str(hook_input.get("session_id") or "")
+        session_id = str(hook_input.get(HookInputField.SESSION_ID) or "")
 
         known = cached_states(project_root, ttl_seconds=config.cache_ttl_minutes * 60)
 

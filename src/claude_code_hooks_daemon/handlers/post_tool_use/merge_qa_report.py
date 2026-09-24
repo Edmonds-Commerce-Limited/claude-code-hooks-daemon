@@ -38,6 +38,7 @@ project-relative.
 
 from __future__ import annotations
 
+import logging
 from datetime import date
 from pathlib import Path
 from typing import Any, Final
@@ -74,8 +75,9 @@ from claude_code_hooks_daemon.utils.merge_scope import changed_paths as _changed
 from claude_code_hooks_daemon.utils.merge_scope import (
     is_git_merge_pull_rebase_command as _is_git_merge_pull_rebase_command,
 )
+from claude_code_hooks_daemon.utils.path_predicates import path_is_file
 
-_CWD_FIELD: Final[str] = "cwd"
+logger = logging.getLogger(__name__)
 
 _SWEEP_MODE_ADVISE: Final[str] = "advise"
 _MARKDOWN_SUFFIX: Final[str] = ".md"
@@ -251,6 +253,16 @@ class MergeQaReportHandler(PostToolUseHandlerBase):
         if policy is None or not policy.enabled or policy.qa.sweep_mode != _SWEEP_MODE_ADVISE:
             return []
         index_path = ProjectContext.daemon_untracked_dir() / _INDEX_DIR_NAME / _INDEX_FILE_NAME
+        # The cold-index rule `docs_qa_edit` states, applied here too (Plan
+        # 00408 Task 2.1): refreshing a WARM index is cheap and this only runs
+        # after a history-moving git command, but building one from nothing is
+        # a SessionStart/CLI job. Measured on this repository: 0.19s warm, 3.7s
+        # cold, against a 5s handler budget. The next sweep reports the rest.
+        if not path_is_file(index_path, unreadable_means=False):
+            logger.debug(
+                "docs QA index is cold at %s; skipping the post-merge docs report", index_path
+            )
+            return []
         corpus = build_and_save_corpus(project_root, policy, index_path)
         context = docs_sweep_context(
             project_root=project_root, policy=policy, corpus=corpus, layout=self._project_layout
@@ -270,7 +282,7 @@ class MergeQaReportHandler(PostToolUseHandlerBase):
         Mirrors `staged_lint_gate._is_foreign_repo`: nested/vendor repos and
         other worktrees own their own history.
         """
-        cwd_raw = hook_input.get(_CWD_FIELD)
+        cwd_raw = hook_input.get(HookInputField.CWD)
         if not cwd_raw:
             return False
         repo = GitRepo.resolve_for(Path(cwd_raw))

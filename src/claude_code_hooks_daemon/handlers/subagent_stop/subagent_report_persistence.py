@@ -55,7 +55,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import SubagentStopHandlerBase
 from claude_code_hooks_daemon.utils.option_coercion import coerce_int_option
@@ -173,8 +173,8 @@ class SubagentReportPersistenceHandler(SubagentStopHandlerBase):
             )
             return BlockingResult(decision=Decision.ALLOW)
 
-        agent_type = hook_input.get("agent_type")
-        agent_id = hook_input.get("agent_id")
+        agent_type = hook_input.get(HookInputField.AGENT_TYPE)
+        agent_id = hook_input.get(HookInputField.AGENT_ID)
         filename = report_filename(
             agent_type if isinstance(agent_type, str) else "",
             agent_id if isinstance(agent_id, str) else "",

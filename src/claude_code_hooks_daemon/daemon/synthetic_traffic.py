@@ -34,6 +34,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, Final
 
+from claude_code_hooks_daemon.constants.protocol import HookInputField
+
 #: Field a producer sets on its own hook events to declare them synthetic.
 #: The VALUE names the producer, so the report can attribute what it set aside.
 SYNTHETIC_SOURCE_FIELD: Final[str] = "synthetic_source"
@@ -95,7 +97,7 @@ def event_synthetic_source(hook_input: Mapping[str, Any]) -> str | None:
     """Classify a raw hook-event payload. See :func:`classify_synthetic`."""
     return classify_synthetic(
         marker=hook_input.get(SYNTHETIC_SOURCE_FIELD),
-        session_id=hook_input.get("session_id"),
+        session_id=hook_input.get(HookInputField.SESSION_ID),
     )
 
 

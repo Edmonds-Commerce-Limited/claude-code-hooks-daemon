@@ -12,6 +12,7 @@ documentation can be generated from it.
 """
 
 from claude_code_hooks_daemon.plan_qa.checks import (
+    archival_links_resolve,
     archive_immutability,
     archived_status_coherence,
     claim_spotcheck_queue,
@@ -99,6 +100,9 @@ def all_checks() -> tuple[CheckSpec, ...]:
         journal_entry_with_progress.CHECK,
         journal_completion_entry.CHECK,
         plan_shrink_without_journal.CHECK,
+        # The archival commit is the only moment an archived plan's links are
+        # checked: the sweep exempts the record by design (Plan 00408).
+        archival_links_resolve.CHECK,
         # Stage 3 — sweep-only checks
         # plan-link-resolves is SWEEP-only by design (Plan 00419 N2): docs QA's
         # `pointer-resolves` already blocks a NEW dead link at edit and commit.

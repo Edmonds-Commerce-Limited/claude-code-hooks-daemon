@@ -627,7 +627,7 @@ class AutoContinueStopHandler(StopHandlerBase):
         #   Claude Code spuriously set the flag after a tool error or empty turn.
         #   Treat as a normal Stop and run the routing logic.
         if is_stop_hook_active(hook_input):
-            transcript_path = hook_input.get("transcript_path")
+            transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
             if has_recent_stop_hook_block(transcript_path):
                 logger.debug("Stop hook re-entry confirmed by transcript block marker - skipping")
                 return False
@@ -783,7 +783,7 @@ class AutoContinueStopHandler(StopHandlerBase):
         event with no transcript_path fails toward verbose every time.
         """
         rule = self._rules_by_id[rule_id]
-        transcript_path = hook_input.get("transcript_path")
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
         tracker = get_data_layer().disclosure
 
         if transcript_path and tracker.was_disclosed(transcript_path, rule_id):

@@ -99,7 +99,7 @@ class WriteClobberGuardHandler(PreToolUseHandlerBase):
 
     @staticmethod
     def _session_id(hook_input: dict[str, Any]) -> str:
-        session = hook_input.get("session_id")
+        session = hook_input.get(HookInputField.SESSION_ID)
         return session if isinstance(session, str) and session else _UNKNOWN_SESSION
 
     @staticmethod
@@ -110,7 +110,7 @@ class WriteClobberGuardHandler(PreToolUseHandlerBase):
         Write/Edit, which would make a Read invisible here -- the exact gating
         Plan 00260 Task 3.1b is about. This handler needs the Read.
         """
-        tool_input = hook_input.get("tool_input")
+        tool_input = hook_input.get(HookInputField.TOOL_INPUT)
         if not isinstance(tool_input, dict):
             return None
         path = tool_input.get("file_path")
@@ -140,7 +140,7 @@ class WriteClobberGuardHandler(PreToolUseHandlerBase):
             True for a Read carrying a path, or a Write that would replace an
             existing file this session has not read.
         """
-        tool_name = hook_input.get("tool_name")
+        tool_name = hook_input.get(HookInputField.TOOL_NAME)
         path = self._file_path(hook_input)
         if path is None:
             return False
@@ -189,14 +189,14 @@ class WriteClobberGuardHandler(PreToolUseHandlerBase):
         if path is None:
             return GatingResult(decision=Decision.ALLOW)
 
-        if hook_input.get("tool_name") == ToolName.READ:
+        if hook_input.get(HookInputField.TOOL_NAME) == ToolName.READ:
             self._record(hook_input, path)
             return GatingResult(decision=Decision.ALLOW)
 
         if not self.matches(hook_input):
             # A Write we are not blocking still teaches this session the file's
             # contents, so a later rewrite of the same path is not blocked.
-            if hook_input.get("tool_name") == ToolName.WRITE:
+            if hook_input.get(HookInputField.TOOL_NAME) == ToolName.WRITE:
                 self._record(hook_input, path)
             return GatingResult(decision=Decision.ALLOW)
 

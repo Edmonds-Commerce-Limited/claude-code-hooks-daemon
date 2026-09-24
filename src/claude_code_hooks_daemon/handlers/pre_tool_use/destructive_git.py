@@ -12,6 +12,7 @@ from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.command_evasion import (
     GIT_INVOCATION,
     SUBCOMMAND_SEPARATOR_CHARS,
+    remove_word_quoting,
 )
 from claude_code_hooks_daemon.utils.shell_segmentation import strip_inert_spans
 
@@ -409,8 +410,14 @@ class DestructiveGitHandler(PreToolUseHandlerBase):
         RUN is blanked — a substituting value (`-m "$(...)"`) and an UNQUOTED
         `<<EOF` body are both left intact, because bash really does execute
         them.
+
+        What survives then has its in-word quoting removed, because bash removes
+        it too: `git checkout "--" f.txt` hands git a bare `--`, and every rule
+        anchored on a leading token missed the quoted spelling (Plan 00408 Task
+        3.0). Blanking runs FIRST so a message value is gone before unquoting
+        could expose anything inside it.
         """
-        return strip_inert_spans(command)
+        return remove_word_quoting(strip_inert_spans(command))
 
     def _match_reason(self, command: str) -> str | None:
         """Return the reason for the first matching destructive pattern, or None."""

@@ -49,6 +49,9 @@ _GIT_UNAVAILABLE: Final[int] = 127
 #: Shared here rather than per-module so the two callers cannot drift apart.
 HEADS_PREFIX: Final[str] = "refs/heads/"
 
+#: ``git config --get-regexp`` key pattern for every remote's URL.
+_REMOTE_URL_KEY_PATTERN: Final[str] = r"^remote\..*\.url$"
+
 
 def branch_ref(name: str) -> str:
     """The fully-qualified ref for local branch ``name``.
@@ -210,6 +213,22 @@ class GitRepo:
         the caller's responsibility.
         """
         return _git_output(self.root, "config", "--local", "--get", key)
+
+    def remote_urls(self) -> tuple[str, ...]:
+        """The URL of every configured remote, whatever it is named.
+
+        Empty when there are none or git cannot answer. ``gh`` picks its base
+        repository from this whole SET, so a caller asking "does this checkout
+        point at X?" must not read ``origin`` alone (Plan 00408 Task 3.8).
+        """
+        output = _git_output(
+            self.root, "config", "--local", "--get-regexp", _REMOTE_URL_KEY_PATTERN
+        )
+        if output is None:
+            return ()
+        # Each line is `<key> <value>`; a URL never contains the separator.
+        urls = (line.partition(" ")[2].strip() for line in output.splitlines())
+        return tuple(url for url in urls if url)
 
     def write_config(self, key: str, value: str) -> None:
         """Set a ``--local`` config value.

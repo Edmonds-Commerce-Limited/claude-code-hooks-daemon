@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final
 
+from claude_code_hooks_daemon.constants.protocol import HookInputField
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.daemon.synthetic_traffic import (
     PLAYBOOK_PROBE,
@@ -308,7 +309,7 @@ def plan_probe(block: PlaybookBlock, project_root: Path) -> ExecutableProbe | Sk
     if not payload:
         return _skip(block, "declares no tool payload, so it is prose a human runs")
 
-    tool_input = _expand(dict(payload.get("tool_input") or {}), project_root)
+    tool_input = _expand(dict(payload.get(HookInputField.TOOL_INPUT) or {}), project_root)
 
     # An event states WHEN it fires relative to the tool call, so the world
     # has to match that claim or the handler answers a different question.
@@ -342,7 +343,7 @@ def plan_probe(block: PlaybookBlock, project_root: Path) -> ExecutableProbe | Sk
         handler_name=block.get("handler_name", "unknown"),
         title=block.get("title", ""),
         event_type=event_type,
-        tool_name=str(payload.get("tool_name") or ""),
+        tool_name=str(payload.get(HookInputField.TOOL_NAME) or ""),
         tool_input=tool_input,
         expected_decision=str(block.get("expected_decision") or "").lower(),
         project_root=project_root,
@@ -483,7 +484,7 @@ def build_event(probe: ExecutableProbe, run_id: str) -> dict[str, Any]:
         # handler runs. Minimal rather than tool-specific: no handler reached
         # by a declared payload reads it, and inventing a richer shape per
         # tool would be fabricating detail the playbook never declared.
-        event["tool_response"] = {"success": True}
+        event[HookInputField.TOOL_RESPONSE] = {"success": True}
     return event
 
 
