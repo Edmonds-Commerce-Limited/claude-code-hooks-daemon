@@ -331,16 +331,45 @@ expect 2. Verified via `pytest tests/unit/handlers/pre_tool_use/test_quarantine_
 (81 passed) and the full related suite (619 passed, listed above plus
 `test_rule_ids.py`).
 
+## Addendum 4: review 4 follow-up — malformed tool_input, mirroring M-2
+
+Team-lead's follow-up (crossed in transit with the Addendum 3 reply) asked
+for the wrapper to also cover `_dispatch_key`/`tool_input` `None`/list/str
+handling, the same M-2 shape secret_file_guard/project_containment needed
+(Plan 00466 review 3): a malformed `tool_input` must never let an exception
+escape `matches()`/`handle()` uncaught, since an uncaught exception is an
+ALLOW in a non-strict chain.
+
+Checked directly rather than assuming: `quarantine_artefact_read_guard` has
+no `_dispatch_key`/caching layer at all -- `matches()`/`handle()` each call
+`_matched_pattern` fresh, unlike secret_file_guard/project_containment's
+per-call cache keyed by a SEPARATE `_dispatch_key()` call sitting outside
+the wrapper. So the specific M-2 defect class (a caching key computed
+outside the fail-closed wrapper, raising before the wrapper's own return)
+cannot occur here structurally -- there is nothing outside the wrapper to
+leave unguarded. `_evaluate_matched_pattern` itself already isinstance-
+guards both `hook_input` and `tool_input` and returns `None` for all three
+malformed shapes (a genuine, correct ALLOW -- there is no command or path
+to search), rather than raising in the first place.
+
+New `TestMalformedToolInputNeverRaises` (mirroring secret_file_guard's own
+`TestDispatchKeyMalformedToolInput` naming/parametrize convention) pins
+this directly for `tool_input` in `[None, [], "not-a-dict"]`: `matches()`
+returns `False` and `handle()` ALLOWs without raising, both when preceded
+by `matches()` and called alone. `TestFailClosedOnEvaluationError` (added
+in Addendum 3) separately pins the other half: IF evaluation ever did
+raise for any reason, the wrapper denies naming the exception type.
+
 ## QA (review 4, quarantine wrapper)
 
-- `scripts/qa/run_format_check.sh` — clean (2 files auto-fixed by black,
-  re-verified clean).
+- `scripts/qa/run_format_check.sh` — clean (0 files needing formatting).
 - `python scripts/qa/audit_error_hiding.py` (whole-project) — 0 violations.
 - `python scripts/qa/llm_qa.py lint / type_check / security / magic_values / error_hiding / fail_open_inventory / declared_invariant_pairs` — all
   PASSED, 0 issues each.
 - `pytest tests/unit/handlers/pre_tool_use/test_quarantine_artefact_read_guard.py tests/unit/constants/test_rule_ids.py` —
-  81 passed.
+  65 + 25 = 90 collected (65 in the handler file alone, up from 56 before
+  this addendum's 9 new tests).
 - `pytest` across every related suite touched this round (secret_file_matching,
   shell_expansion, secret_file_guard, quarantine_artefact_read_guard,
-  project_containment, enforce_llm_qa, rule_ids) — 619 passed.
+  project_containment, enforce_llm_qa, rule_ids) — 628 passed.
 - Daemon restarted before this commit.

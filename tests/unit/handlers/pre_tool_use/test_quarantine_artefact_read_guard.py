@@ -423,6 +423,58 @@ class TestFailClosedOnEvaluationError:
         assert result.decision == Decision.DENY
 
 
+class TestMalformedToolInputNeverRaises:
+    """n466-n24 review 4 (mirroring secret_file_guard's own M-2, Plan 00466
+    review 3): a malformed `tool_input` (`None`, a list, a bare string
+    instead of the expected dict) must never let an exception escape
+    `matches()`/`handle()` uncaught -- an uncaught exception is an ALLOW in
+    a non-strict chain.
+
+    Unlike `secret_file_guard`/`project_containment`, this handler has no
+    separate `_dispatch_key`/caching layer at all (`matches()`/`handle()`
+    each call `_matched_pattern` fresh) -- so the specific M-2 defect class
+    (a caching key computed OUTSIDE the fail-closed wrapper) cannot occur
+    here structurally; there is nothing outside the wrapper to leave
+    unguarded. `_evaluate_matched_pattern` itself already isinstance-guards
+    both `hook_input` and `tool_input` and returns `None` -- a genuine,
+    correct ALLOW, since there is no command or path to search -- rather
+    than raising, for all three malformed shapes. These tests pin that
+    directly; `TestFailClosedOnEvaluationError` above separately pins that
+    IF evaluation ever did raise, the wrapper denies.
+    """
+
+    @staticmethod
+    def _payload(bad_tool_input: Any) -> dict[str, Any]:
+        return {
+            "hook_event_name": "PreToolUse",
+            "session_id": "s1",
+            "tool_name": "Bash",
+            "tool_input": bad_tool_input,
+        }
+
+    @pytest.mark.parametrize("bad_tool_input", [None, [], "not-a-dict"])
+    def test_matches_does_not_raise(
+        self, handler: QuarantineArtefactReadGuardHandler, bad_tool_input: Any
+    ) -> None:
+        assert handler.matches(self._payload(bad_tool_input)) is False
+
+    @pytest.mark.parametrize("bad_tool_input", [None, [], "not-a-dict"])
+    def test_handle_does_not_raise_and_allows(
+        self, handler: QuarantineArtefactReadGuardHandler, bad_tool_input: Any
+    ) -> None:
+        result = handler.handle(self._payload(bad_tool_input))
+        assert result.decision == Decision.ALLOW
+
+    @pytest.mark.parametrize("bad_tool_input", [None, [], "not-a-dict"])
+    def test_handle_alone_also_does_not_raise(
+        self, handler: QuarantineArtefactReadGuardHandler, bad_tool_input: Any
+    ) -> None:
+        """`handle()` called with no preceding `matches()` for the SAME
+        input must independently survive too."""
+        result = handler.handle(self._payload(bad_tool_input))
+        assert result.decision == Decision.ALLOW
+
+
 class TestGuidanceSurfaces:
     def test_get_claude_md(self, handler: QuarantineArtefactReadGuardHandler) -> None:
         guidance = handler.get_claude_md()
