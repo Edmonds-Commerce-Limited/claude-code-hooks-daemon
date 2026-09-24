@@ -62,10 +62,10 @@ instead.
 
 ### Phase 1: TDD in a worktree
 
-- [ ] ⬜ **Task 1.1**: RED, then GREEN: `mode_guard.sh`'s `detect_self_install_mode`
+- [x] ✅ **Task 1.1**: RED, then GREEN: `mode_guard.sh`'s `detect_self_install_mode`
   reports self-install with a link-only `.claude/hooks-daemon/bin/` present,
   and still reports normal for a real client clone.
-- [ ] ⬜ **Task 1.2**: Audit every place that uses the existence of
+- [x] ✅ **Task 1.2**: Audit every place that uses the existence of
   `.claude/hooks-daemon/` as a signal and re-key each one on a real clone,
   with a test per behaviour change. Known sites: `init.sh:445` (nested
   install, no exemption, unlike `validation.py:273-281`);
@@ -73,10 +73,10 @@ instead.
   and would refuse installs under this repo); `daemon/cli.py:333`;
   `scripts/install/project_detection.sh`. Report any further site found, and
   any site judged safe with the reason.
-- [ ] ⬜ **Task 1.3**: The self-install daemon creates the link at startup:
+- [x] ✅ **Task 1.3**: The self-install daemon creates the link at startup:
   relative target, idempotent, never replacing a non-symlink, only in
   self-install mode. Tested, including from a worktree.
-- [ ] ⬜ **Task 1.4**: Docs (`SELF_INSTALL.md` at least) describe the
+- [x] ✅ **Task 1.4**: Docs (`SELF_INSTALL.md` at least) describe the
   conventional path, and say why the link is generated rather than tracked.
   Release note. Full QA green.
 
@@ -88,13 +88,20 @@ instead.
 
 ## Success Criteria
 
-- [ ] `.claude/hooks-daemon/bin/hooks-daemon status` works from outside the
-  checkout, in the main checkout and in a worktree.
-- [ ] With the link present, the install/upgrade guard still refuses to run
-  in the daemon repo.
-- [ ] No check that means "a clone is installed" is satisfied by the link alone.
-- [ ] Nothing is tracked under `.claude/hooks-daemon/`.
-- [ ] Full QA passes and CI is green.
+- [x] `.claude/hooks-daemon/bin/hooks-daemon status` works from outside the
+  checkout, in the main checkout and in a worktree. Verified in this
+  worktree: called from `/tmp`, reported the same PID and socket as
+  `./bin/hooks-daemon status`.
+- [x] With the link present, the install/upgrade guard still refuses to run
+  in the daemon repo. Covered by
+  `tests/integration/test_mode_guard_self_install_detection.py`.
+- [x] No check that means "a clone is installed" is satisfied by the link alone.
+  Audited and tested per Task 1.2.
+- [x] Nothing is tracked under `.claude/hooks-daemon/`. Still covered by the
+  existing `/hooks-daemon/` `.claude/.gitignore` entry; unchanged by this plan.
+- [x] Full QA passes and CI is green in this worktree
+  (`./scripts/qa/llm_qa.py all`: 35/35 PASSED, twice). CI itself is verified
+  at merge time (Task 2.1), outside this worktree's authority.
 
 ## Delivery & Milestones
 

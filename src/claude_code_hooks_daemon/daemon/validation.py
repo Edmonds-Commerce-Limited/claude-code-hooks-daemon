@@ -205,9 +205,15 @@ def validate_installation_target(project_root: Path, self_install_requested: boo
     Raises:
         InstallationError: If installation would create invalid state
     """
-    # 1. Check not inside existing hooks-daemon installation
+    # 1. Check not inside existing hooks-daemon installation. Keyed on a REAL
+    # clone (project_root_is_daemon_repo), not merely on the directory
+    # existing: a self-install checkout generates a bare bin/hooks-daemon
+    # symlink under its own .claude/hooks-daemon/ (Plan 00455), and worktrees
+    # and client-mode test fixtures live UNDER this repo -- treating that
+    # link-only marker as "an installation" would refuse them all.
     for parent in project_root.parents:
-        if (parent / ".claude" / "hooks-daemon").exists():
+        candidate = parent / ".claude" / "hooks-daemon"
+        if candidate.exists() and project_root_is_daemon_repo(candidate):
             raise InstallationError(
                 f"Cannot install: {project_root} is inside an existing installation at {parent}"
             )

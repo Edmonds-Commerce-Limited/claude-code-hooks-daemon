@@ -196,10 +196,15 @@ class TestValidateInstallationTarget:
     """Tests for validate_installation_target function."""
 
     def test_raises_for_inside_existing_installation(self, tmp_path: Path) -> None:
-        """Test raises when project is inside existing hooks-daemon installation."""
-        # Create parent with hooks-daemon installation
+        """Test raises when project is inside a REAL hooks-daemon installation."""
+        # Create parent with a real hooks-daemon installation (a genuine
+        # client clone, identified the same way _project_root_is_daemon_repo
+        # identifies one: pyproject.toml declaring the daemon package).
         parent_install = tmp_path / "parent" / ".claude" / "hooks-daemon"
         parent_install.mkdir(parents=True)
+        (parent_install / "pyproject.toml").write_text(
+            '[project]\nname = "claude-code-hooks-daemon"\nversion = "1.0.0"\n'
+        )
 
         # Try to install in subdirectory
         project_root = tmp_path / "parent" / "subproject"
@@ -209,6 +214,22 @@ class TestValidateInstallationTarget:
             validate_installation_target(project_root)
 
         assert "inside an existing installation" in str(exc_info.value)
+
+    def test_allows_a_link_only_self_install_marker_in_a_parent(self, tmp_path: Path) -> None:
+        """A self-install checkout's OWN generated symlink must not look like
+        an installation to trees living under it (worktrees, client-mode test
+        fixtures) -- Plan 00455. Unlike a real clone, the marker has no
+        pyproject.toml: it is a bare bin/hooks-daemon symlink.
+        """
+        parent_link_only = tmp_path / "parent" / ".claude" / "hooks-daemon" / "bin"
+        parent_link_only.mkdir(parents=True)
+        (parent_link_only / "hooks-daemon").symlink_to(tmp_path / "parent" / "bin" / "hooks-daemon")
+
+        project_root = tmp_path / "parent" / "subproject"
+        project_root.mkdir(parents=True)
+
+        # Should not raise
+        validate_installation_target(project_root)
 
     def test_raises_for_hooks_daemon_repo_without_flag(self, tmp_path: Path) -> None:
         """Test raises for hooks-daemon repo without self-install flag."""

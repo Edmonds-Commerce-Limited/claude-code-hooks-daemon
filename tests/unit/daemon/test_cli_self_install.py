@@ -139,6 +139,37 @@ class TestSelfInstallMode:
             _validate_installation(tmp_path)
 
 
+class TestValidationUnaffectedByTheGeneratedCliSymlink:
+    """Plan 00455 site audit: cli.py's ``hooks_daemon_dir.is_dir()`` check (only
+    reached ``if not self_install``) is gated on the CONFIG's
+    ``self_install_mode`` flag, not on ``.claude/hooks-daemon/`` existing --
+    so the self-install daemon's generated CLI symlink under that same path
+    cannot make this check believe a normal install is missing its directory.
+    Locks the "confirmed safe" audit finding in place as a regression test.
+    """
+
+    def test_self_install_with_the_generated_symlink_still_succeeds(self, tmp_path: Path) -> None:
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        (tmp_path / "src" / "claude_code_hooks_daemon").mkdir(parents=True)
+
+        config_file = claude_dir / "hooks-daemon.yaml"
+        config_file.write_text(
+            "version: '1.0'\ndaemon:\n  log_level: INFO\n  self_install_mode: true\n"
+        )
+
+        # ProjectContext.initialize (invoked by _validate_installation below)
+        # creates exactly this symlink as a side effect once self-install mode
+        # is detected -- present it up front so this test does not depend on
+        # that ordering.
+        link = claude_dir / "hooks-daemon" / "bin" / "hooks-daemon"
+        link.parent.mkdir(parents=True)
+        link.symlink_to(Path("../../../bin/hooks-daemon"))
+
+        result = _validate_installation(tmp_path)
+        assert result == tmp_path
+
+
 class TestNestedInstallationDetection:
     """Tests for nested installation detection in CLI validation."""
 

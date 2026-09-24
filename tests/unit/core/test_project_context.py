@@ -358,6 +358,121 @@ class TestGitRepoNameParsing:
         assert result is None
 
 
+class TestSelfInstallCliSymlink:
+    """The self-install checkout exposes bin/hooks-daemon at the conventional
+    client path (Plan 00455): ``.claude/hooks-daemon/bin/hooks-daemon`` ->
+    a relative symlink to the project root's own ``bin/hooks-daemon``.
+    """
+
+    def teardown_method(self) -> None:
+        ProjectContext.reset()
+
+    def _init_self_install(self, tmp_path: Path) -> Path:
+        project_root = tmp_path / "daemon-project"
+        claude_dir = project_root / ".claude"
+        daemon_src = project_root / "src" / "claude_code_hooks_daemon"
+        daemon_src.mkdir(parents=True)
+        claude_dir.mkdir(parents=True)
+        config_path = claude_dir / "hooks-daemon.yaml"
+        config_path.write_text("version: 1.0\n")
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=0, stdout=f"{project_root}\n"),
+                MagicMock(returncode=0, stdout="https://github.com/org/daemon.git\n"),
+                MagicMock(returncode=0, stdout=f"{project_root}\n"),
+            ]
+            ProjectContext.initialize(config_path)
+
+        return project_root
+
+    def _init_normal(self, tmp_path: Path) -> Path:
+        project_root = tmp_path / "project"
+        claude_dir = project_root / ".claude"
+        claude_dir.mkdir(parents=True)
+        config_path = claude_dir / "hooks-daemon.yaml"
+        config_path.write_text("version: 1.0\n")
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=0, stdout=f"{project_root}\n"),
+                MagicMock(returncode=0, stdout="git@github.com:user/test-repo.git\n"),
+                MagicMock(returncode=0, stdout=f"{project_root}\n"),
+            ]
+            ProjectContext.initialize(config_path)
+
+        return project_root
+
+    def test_creates_the_conventional_symlink_in_self_install_mode(self, tmp_path: Path) -> None:
+        project_root = self._init_self_install(tmp_path)
+        link = project_root / ".claude" / "hooks-daemon" / "bin" / "hooks-daemon"
+        assert link.is_symlink()
+        assert link.resolve() == (project_root / "bin" / "hooks-daemon").resolve()
+
+    def test_symlink_target_is_relative_not_absolute(self, tmp_path: Path) -> None:
+        """A relative target survives the checkout being moved or cloned again."""
+        project_root = self._init_self_install(tmp_path)
+        link = project_root / ".claude" / "hooks-daemon" / "bin" / "hooks-daemon"
+        assert not link.readlink().is_absolute()
+
+    def test_normal_mode_never_creates_the_symlink(self, tmp_path: Path) -> None:
+        """Normal mode has no bin/hooks-daemon at the project root to link to."""
+        project_root = self._init_normal(tmp_path)
+        link = project_root / ".claude" / "hooks-daemon" / "bin" / "hooks-daemon"
+        assert not link.exists()
+        assert not link.is_symlink()
+
+    def test_is_idempotent_when_the_symlink_already_exists(self, tmp_path: Path) -> None:
+        """A second daemon start (e.g. restart) must not error or recreate it."""
+        project_root = tmp_path / "daemon-project"
+        claude_dir = project_root / ".claude"
+        daemon_src = project_root / "src" / "claude_code_hooks_daemon"
+        daemon_src.mkdir(parents=True)
+        claude_dir.mkdir(parents=True)
+        config_path = claude_dir / "hooks-daemon.yaml"
+        config_path.write_text("version: 1.0\n")
+
+        link = claude_dir / "hooks-daemon" / "bin" / "hooks-daemon"
+        link.parent.mkdir(parents=True)
+        link.symlink_to(Path("../../../bin/hooks-daemon"))
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=0, stdout=f"{project_root}\n"),
+                MagicMock(returncode=0, stdout="https://github.com/org/daemon.git\n"),
+                MagicMock(returncode=0, stdout=f"{project_root}\n"),
+            ]
+            ProjectContext.initialize(config_path)
+
+        assert link.is_symlink()
+        assert link.resolve() == (project_root / "bin" / "hooks-daemon").resolve()
+
+    def test_never_replaces_a_real_file_at_the_link_path(self, tmp_path: Path) -> None:
+        """A genuine client-style wrapper file must never be clobbered."""
+        project_root = tmp_path / "daemon-project"
+        claude_dir = project_root / ".claude"
+        daemon_src = project_root / "src" / "claude_code_hooks_daemon"
+        daemon_src.mkdir(parents=True)
+        claude_dir.mkdir(parents=True)
+        config_path = claude_dir / "hooks-daemon.yaml"
+        config_path.write_text("version: 1.0\n")
+
+        real_wrapper = claude_dir / "hooks-daemon" / "bin" / "hooks-daemon"
+        real_wrapper.parent.mkdir(parents=True)
+        real_wrapper.write_text("#!/bin/sh\necho not-a-symlink\n", encoding="utf-8")
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=0, stdout=f"{project_root}\n"),
+                MagicMock(returncode=0, stdout="https://github.com/org/daemon.git\n"),
+                MagicMock(returncode=0, stdout=f"{project_root}\n"),
+            ]
+            ProjectContext.initialize(config_path)
+
+        assert not real_wrapper.is_symlink()
+        assert real_wrapper.read_text(encoding="utf-8") == "#!/bin/sh\necho not-a-symlink\n"
+
+
 class TestProjectContextContainerRuntime:
     """The container runtime is detected ONCE at startup and cached (Plan 00126)."""
 

@@ -26,6 +26,48 @@ from claude_code_hooks_daemon.constants import Timeout
 
 logger = logging.getLogger(__name__)
 
+# Relative from .claude/hooks-daemon/bin/ back to the self-install checkout's
+# own bin/hooks-daemon: .claude/hooks-daemon/bin -> .claude/hooks-daemon ->
+# .claude -> project root -> bin/hooks-daemon.
+_SELF_INSTALL_CLI_SYMLINK_TARGET = Path("../../../bin/hooks-daemon")
+
+
+def _ensure_self_install_cli_symlink(project_root: Path) -> None:
+    """Expose ``bin/hooks-daemon`` at the conventional client path (Plan 00455).
+
+    Every hooks-daemon project should have the daemon CLI at
+    ``.claude/hooks-daemon/bin/hooks-daemon`` -- external session managers look
+    for it there. In a normal client install that path already resolves,
+    because ``.claude/hooks-daemon/`` there IS the cloned daemon. A self-install
+    checkout has no such clone: the CLI is ``bin/hooks-daemon`` at the project
+    root instead, so this creates a RELATIVE symlink exposing it at the
+    conventional path too. ``.claude/hooks-daemon/`` is already gitignored
+    (``.claude/.gitignore``), so the link is never tracked.
+
+    Idempotent and defensive: a path that is ALREADY a symlink (this link from
+    a prior run, or anything else) or that exists as a real file/directory
+    (a genuine client-style wrapper someone placed there) is left untouched --
+    this only ever creates the link into empty space. A failure to create it
+    is logged, not raised: the daemon must still start without the
+    conventional path if the filesystem refuses the symlink (e.g. unsupported
+    filesystem, permissions).
+
+    Args:
+        project_root: The self-install checkout's own root (== the project).
+    """
+    link_path = project_root / ".claude" / "hooks-daemon" / "bin" / "hooks-daemon"
+    if link_path.is_symlink() or link_path.exists():
+        return
+    try:
+        link_path.parent.mkdir(parents=True, exist_ok=True)
+        link_path.symlink_to(_SELF_INSTALL_CLI_SYMLINK_TARGET)
+    except OSError as exc:
+        logger.warning(
+            "ProjectContext: could not create conventional CLI symlink at %s: %s",
+            link_path,
+            exc,
+        )
+
 
 @dataclass(frozen=True)
 class _ProjectContextData:
@@ -130,6 +172,7 @@ class ProjectContext:
             logger.info(
                 "ProjectContext: Self-install mode detected (daemon source at project root)"
             )
+            _ensure_self_install_cli_symlink(project_root)
         else:
             project_root = project_root_candidate
             logger.info("ProjectContext: Normal install mode (daemon in .claude/hooks-daemon/)")
