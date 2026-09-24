@@ -295,9 +295,26 @@ class TestTheScopeCarriesTheRoleTest:
     def test_the_handler_is_scoped_to_sub(self) -> None:
         assert SubagentFullQaBlockerHandler().scope is HandlerScope.SUB
 
-    def test_a_subagent_event_is_admitted(self) -> None:
-        event = _bash("./scripts/qa/llm_qa.py all", agent_id="aplan463-impl-84165102c3e9edf0")
+    @pytest.mark.parametrize(
+        "agent_id",
+        [
+            pytest.param("a1b2c3d4e5f6a7b8c", id="agent-tool-17-chars"),
+            pytest.param("aplan463-impl-84165102c3e9edf0", id="in-process-teammate-30-chars"),
+            pytest.param("w", id="unmeasured-kind-any-non-empty-id"),
+        ],
+    )
+    def test_a_subagent_event_is_admitted_whatever_the_ids_shape(self, agent_id: str) -> None:
+        """Both measured kinds, plus one no one has measured (a Workflow-tool agent).
+
+        Admission keys on a non-empty ``agent_id`` alone, so a kind that turns
+        out to carry the field is covered with no change here.
+        """
+        event = _bash("./scripts/qa/llm_qa.py all", agent_id=agent_id)
         assert scope_admits(SubagentFullQaBlockerHandler().scope, event) is True
+
+    def test_an_empty_agent_id_is_not_a_subagent(self) -> None:
+        event = _bash("./scripts/qa/llm_qa.py all", agent_id="")
+        assert scope_admits(SubagentFullQaBlockerHandler().scope, event) is False
 
     def test_a_main_thread_event_is_not_admitted(self) -> None:
         """The coordinator's full gate must draw nothing at all."""

@@ -32,6 +32,13 @@ RUN ``grep`` and ``git``.
 and the event is not synthetic (``core.handler_scope``). The coordinator's own
 full run therefore draws nothing, and neither does the acceptance harness.
 
+**Coverage is proven for two agent kinds, not claimed for a third.** Agent-tool
+subagents carry ``agent_id`` (Plan 00423), and so do in-process teammates
+(measured by Plan 00463). A Workflow-tool agent's payload is UNMEASURED, so
+this guard is not claimed to see one. Nothing here keys on the agent's kind or
+on the id's shape, only on the field being non-empty, so if a Workflow agent
+turns out to carry it the guard covers it with no change.
+
 This is a resource guard for cooperating agents, not a security boundary.
 Spellings the scanner cannot see through, such as a substitution inside
 double quotes or a script that runs the suite under another name, are not
@@ -673,7 +680,9 @@ class SubagentFullQaBlockerHandler(PreToolUseHandlerBase):
             "Inside a SUB-AGENT, a Bash command that would run a declared full-suite "
             "QA command (`full_qa_patterns`) is DENIED. The coordinator runs the full "
             "gate once per delivery, on the branch head, one run at a time. The main "
-            "thread is never affected.\n\n"
+            "thread is never affected. Enforcement is proven for Agent-tool sub-agents and "
+            "in-process teammates; a Workflow-tool agent is unmeasured, so follow the "
+            "split there whether or not a deny arrives.\n\n"
             "**As a sub-agent**: run targeted QA (the checks and tests covering what you "
             "changed), commit, and hand the commit hash to the coordinator. The deny "
             "lists the targeted commands this project declares "

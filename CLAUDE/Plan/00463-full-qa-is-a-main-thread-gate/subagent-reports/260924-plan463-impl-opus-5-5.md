@@ -53,12 +53,14 @@ It runs pytest on the selection and writes `untracked/qa/changed_tests.json`.
   records it as a finding with ref T1.1.
 - **Agent-tool sub-agent: `agent_id` is present.** The evidence is from Plans 00418 and
   00423 (17 characters).
-- **Workflow-tool agent: NOT MEASURED.** A probe request went to the lead. It asks for a
-  Workflow agent to run a Bash command that carries the marker `PLAN463WFPROBE5519`, and
-  for the daemon log to be captured to `untracked/scratch/probe463-workflow.log` in this
-  worktree. No result had arrived when this commit was made. Task 1.1 stays unticked
-  until it does. If the payload has no `agent_id`, the plan must record that this guard
-  cannot see Workflow agents.
+- **Workflow-tool agent: UNMEASURED.** The probe needs the owner's explicit opt-in to the
+  Workflow tool, and the lead has asked the owner for it. The handler's docstring and
+  guidance, HANDLER_REFERENCE.md, CLAUDE/QA.md and release note 13 claim coverage only for
+  Agent-tool sub-agents and teammates. Admission keys only on a non-empty `agent_id`, so
+  nothing changes if Workflow agents turn out to carry it. A parametrised scope test pins
+  this: ids of 17, 30 and 1 characters are admitted, and an empty id is not. The
+  `handler_scope.py` docstring records the 30-character teammate measurement. Task 1.1 is
+  ticked with the Workflow point recorded as unmeasured.
 - **Default:** disabled, with empty patterns. Client QA commands vary, so a default
   populated from this repo's commands would never fire in a client project.
 - **Orchestrator-only mode (00418):** it denies only Write, Edit and NotebookEdit on the

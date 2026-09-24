@@ -80,7 +80,11 @@ commands that ARE allowed, and they must exist.
 
 ### Phase 1: TDD in a worktree
 
-- [ ] ⬜ **Task 1.1**: Decide and record in the journal:
+- [x] ✅ **Task 1.1**: Decide and record in the journal. Outcome: an in-process
+  teammate carries `agent_id` (measured). A Workflow-tool agent is UNMEASURED,
+  because the probe needs the owner's opt-in, so the guard's docs claim coverage
+  only for Agent-tool sub-agents and teammates. The default is off with no
+  patterns. There is no deadlock with orchestrator-only mode. The questions were:
   - Does an in-process teammate's PreToolUse payload carry `agent_id`,
     like an Agent-tool sub-agent's? Measure it live, not from docs. Do
     the same for a Workflow-tool agent. If either lacks it, the guard

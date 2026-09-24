@@ -45,6 +45,12 @@ declares as full, which is `llm_qa.py all`, `llm_qa.py tests`, `run_all.sh`,
 with `tests/`, `tests/unit` or `.` as its path. The deny lists the targeted
 forms. The main thread is never affected.
 
+**Which sub-agents the deny reaches.** The guard recognises a sub-agent by the
+`agent_id` field in its hook payload. That field is proven present for
+Agent-tool sub-agents (Plan 00423) and in-process teammates (Plan 00463). A
+Workflow-tool agent's payload is UNMEASURED, so no deny is promised there. The
+split below applies to every kind of sub-agent all the same.
+
 **Why.** When the rule was made, five full runs were executing at once, one
 per worktree, each about 25,700 tests over 15-20 minutes on eight cores. Each
 agent re-ran the suite after every fix round, and the coordinator ran it again

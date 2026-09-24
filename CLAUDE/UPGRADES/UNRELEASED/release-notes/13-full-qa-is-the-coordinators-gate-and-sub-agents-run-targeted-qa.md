@@ -13,6 +13,11 @@ mentions one is never denied. Nothing ships by default, and enabling the
 handler with no patterns is reported by `hooks-daemon check` instead of passing
 silently.
 
+The handler recognises a sub-agent by the `agent_id` field in its hook
+payload. That is proven for Agent-tool sub-agents and in-process teammates. A
+Workflow-tool agent's payload has not been measured, so the handler is not
+claimed to cover one.
+
 In this repository, `./scripts/qa/llm_qa.py changed` is the new targeted
 command. It runs the fast static tools, the project handlers' own tests, and
 pytest on the tests mapped from files changed since the merge base. When

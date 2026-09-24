@@ -1411,6 +1411,8 @@ handlers:
 
 In a pattern, `command` is the program's basename. `full_args` lists the operands that make it the whole suite; omit it and every run is full. `bare_is_full` makes a run with no operand full. `value_flags` are flags whose next word is a value rather than an operand (`pytest -k expr`). A malformed entry is skipped and logged, and enabling the handler with no usable pattern is reported by `hooks-daemon check`.
 
+**Coverage:** proven for Agent-tool sub-agents and in-process teammates, whose payloads carry `agent_id`. A Workflow-tool agent's payload is unmeasured, so the handler is not claimed to see one. It keys only on `agent_id` being present, so no change is needed if Workflow agents turn out to carry it.
+
 **Limit:** a resource guard for cooperating agents, not a security boundary. A substitution inside double quotes, or a script that runs the suite under an undeclared name, is not seen. The coordinator's full gate still runs before every merge.
 
 **Config example:**
