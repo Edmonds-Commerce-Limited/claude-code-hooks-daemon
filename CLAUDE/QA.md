@@ -444,11 +444,11 @@ def get_acceptance_tests(self) -> list[AcceptanceTest]:
     ]
 ```
 
-### Plugin Handlers
+### Daemon Plugin Handlers
 
-**Custom plugins are automatically included** in generated playbooks.
+**Daemon plugins (handler modules) are automatically included** in generated playbooks.
 
-All plugin handlers MUST implement `get_acceptance_tests()` - empty arrays are rejected.
+All daemon plugin handlers MUST implement `get_acceptance_tests()` - empty arrays are rejected.
 
 **See `CLAUDE/AcceptanceTests/GENERATING.md` for complete documentation.**
 

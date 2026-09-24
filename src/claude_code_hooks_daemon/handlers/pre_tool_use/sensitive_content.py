@@ -47,6 +47,10 @@ from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
+from claude_code_hooks_daemon.remote_docs.provenance import (
+    is_faithful_vendored_copy,
+    is_remote_tree_document,
+)
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils import secret_redaction as sr
 from claude_code_hooks_daemon.utils.command_evasion import OPTIONAL_PATH, git_subcommand_index
@@ -158,6 +162,11 @@ MAX_STAGED_TOTAL_BYTES: Final[int] = 4 * 1024 * 1024
 # so only the ADDED lines (`+`) are ever read -- removing a term must never
 # be blocked, and unchanged neighbours are not this commit's doing.
 _DIFF_FILTER: Final[str] = "ACM"
+
+# What a commit records, as a `git diff` target: the index for a plain
+# commit, the working tree against HEAD for `git commit -a`.
+_INDEX_TARGET: Final[str] = "--cached"
+_WORKING_TREE_TARGET: Final[str] = "HEAD"
 _DIFF_HEADER_PREFIX: Final[str] = "diff --git "
 _DIFF_ADDED_PREFIX: Final[str] = "+"
 _DIFF_FILE_HEADER_PREFIX: Final[str] = "+++ "
@@ -338,10 +347,16 @@ class _Haystack(NamedTuple):
     command line can carry the term), and it is NEVER the text -- for a
     staged blob or a body file the text stays where it is and only the path
     is cited.
+
+    ``public_patterns_apply`` is False only for the body of a faithful
+    vendored copy (``is_faithful_vendored_copy``): upstream's bytes cannot
+    carry this project's material. The secret word list judges every
+    haystack regardless.
     """
 
     subject: str
     text: str
+    public_patterns_apply: bool = True
 
 
 def _shell_tokens(command: str) -> list[str]:
@@ -649,7 +664,11 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         if not haystacks:
             return False
 
-        if any(self._find_public_pattern_match(hay.text) is not None for hay in haystacks):
+        if any(
+            self._find_public_pattern_match(hay.text) is not None
+            for hay in haystacks
+            if hay.public_patterns_apply
+        ):
             return True
 
         terms = self._secret_terms()
@@ -819,7 +838,7 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         repo_root = self._commit_repo_root(hook_input)
         if repo_root is None:
             return []
-        target = "HEAD" if commits_all else "--cached"
+        target = _WORKING_TREE_TARGET if commits_all else _INDEX_TARGET
         return self._scan_staged_paths(
             repo_root, target, self._select_staged_paths(repo_root, target)
         )
@@ -939,7 +958,15 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
                 stood_down_at = relpath
                 break
             total += size
-            haystacks.append(_Haystack(subject=f"staged content of {relpath}", text=added))
+            haystacks.append(
+                _Haystack(
+                    subject=f"staged content of {relpath}",
+                    text=added,
+                    public_patterns_apply=not self._records_faithful_copy(
+                        repo_root, target, relpath
+                    ),
+                )
+            )
         if stood_down_at is not None:
             _LOGGER.info(
                 "sensitive_content: staged content past %s exceeds the commit bound; "
@@ -947,6 +974,31 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
                 stood_down_at,
             )
         return haystacks
+
+    def _records_faithful_copy(self, repo_root: Path, target: str, relpath: str) -> bool:
+        """Whether the version of ``relpath`` this commit records is a faithful vendored copy.
+
+        Judged on the WHOLE recorded file, never the added lines: the hash
+        covers the body, and a faithful working copy cannot vouch for an
+        edited index blob. Only a markdown file in the remote tree costs a
+        read. A read that fails answers False, so the file is scanned.
+        """
+        remote_tree = self.layout_for(str(repo_root / relpath)).remote_docs_dir
+        if not is_remote_tree_document(relpath, remote_tree):
+            return False
+        if target == _WORKING_TREE_TARGET:
+            try:
+                content = (repo_root / relpath).read_text(encoding=_BODY_FILE_ENCODING)
+            except (OSError, UnicodeDecodeError) as error:
+                _LOGGER.debug("sensitive_content: %s could not be read: %s", relpath, error)
+                return False
+        else:
+            result = run_git(repo_root, "show", f":{relpath}")
+            if result.returncode != 0:
+                _LOGGER.debug("sensitive_content: staged %s could not be read", relpath)
+                return False
+            content = result.stdout
+        return is_faithful_vendored_copy(relpath, content, remote_tree)
 
     @staticmethod
     def _commit_repo_root(hook_input: dict[str, Any]) -> Path | None:
@@ -1001,12 +1053,27 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         carried an identifier — ``--replace-text`` never touches a filename,
         and neither did this handler, so a file could be created with an
         identifier in its name and sail through on a clean body.
+
+        Only a ``Write`` can be a faithful vendored copy: it carries the whole
+        file, where an ``Edit`` carries a fragment this project authored.
         """
-        return [
-            _Haystack(subject=file_path, text=text)
-            for text in (self._relative_path_text(file_path), self._get_content(hook_input))
-            if text
-        ]
+        relative = self._relative_path_text(file_path)
+        body = self._get_content(hook_input)
+        haystacks: list[_Haystack] = []
+        if relative:
+            haystacks.append(_Haystack(subject=file_path, text=relative))
+        if body:
+            faithful = (
+                hook_input.get(HookInputField.TOOL_NAME) == ToolName.WRITE
+                and bool(relative)
+                and is_faithful_vendored_copy(
+                    relative, body, self.layout_for(file_path).remote_docs_dir
+                )
+            )
+            haystacks.append(
+                _Haystack(subject=file_path, text=body, public_patterns_apply=not faithful)
+            )
+        return haystacks
 
     @staticmethod
     def _relative_path_text(file_path: str) -> str:
@@ -1090,6 +1157,8 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
 
         for hay in haystacks:
+            if not hay.public_patterns_apply:
+                continue
             public_match = self._find_public_pattern_match(hay.text)
             if public_match is not None:
                 return self._deny_public_pattern(transcript_path, hay.subject, public_match)
