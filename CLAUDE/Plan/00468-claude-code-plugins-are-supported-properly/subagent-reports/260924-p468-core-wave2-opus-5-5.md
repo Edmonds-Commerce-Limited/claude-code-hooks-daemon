@@ -10,20 +10,22 @@ config-dir exclusion in the P3 walkers) was done after B2 landed.
 
 ## Commits
 
-| Commit     | What                                                                           | Release note |
-| ---------- | ------------------------------------------------------------------------------ | ------------ |
-| `0daefa88` | Merge main `3507fbfe` (00466 N26/N27 entries, 00468 T2.4)                      |              |
-| `13bd2b94` | 00466 N27: one derivation of Claude Code's per-project directory               | 36           |
-| `446fcd5a` | 00466 N26: QA walkers judge excluded names below the scan root                 | 37           |
-| `e1cdcac8` | Worktree question: a main checkout's plugin install applies in its worktrees   | 31 (edited)  |
-| `bb88b686` | Task 3.2: the Claude config dir and plugin roots are not project docs          | 38           |
-| `e3d26e60` | Task 3.3: installed-plugin edit advisory; the session config dir is in bounds  | 39           |
-| `4d58dd04` | Task 4.1: plugins that ship hooks, at session start and in `health`            | 41           |
-| `11bf4c5e` | Task 4.3: `lsp_enforcement` judges LSP from enabled plugins; integration fixes | 42           |
-| `738c4e5e` | Merge main `3104434b` (B1 archive, 00466 N28-N33); ledger conflicts, both kept |              |
-| `fbb8becf` | 00466 N26: `audit_shell` gets the same fix; the class pin covers `audit_*.py`  | 37 (edited)  |
-| `dc8869db` | Merge main `455ee636` (B2); one scan-scope mechanism kept                      |              |
-| `bba3a5ab` | Task 3.1 / item 4: P3 walkers always skip an in-project Claude config dir      | 25 (edited)  |
+| Commit     | What                                                                            | Release note |
+| ---------- | ------------------------------------------------------------------------------- | ------------ |
+| `0daefa88` | Merge main `3507fbfe` (00466 N26/N27 entries, 00468 T2.4)                       |              |
+| `13bd2b94` | 00466 N27: one derivation of Claude Code's per-project directory                | 36           |
+| `446fcd5a` | 00466 N26: QA walkers judge excluded names below the scan root                  | 37           |
+| `e1cdcac8` | Worktree question: a main checkout's plugin install applies in its worktrees    | 31 (edited)  |
+| `bb88b686` | Task 3.2: the Claude config dir and plugin roots are not project docs           | 38           |
+| `e3d26e60` | Task 3.3: installed-plugin edit advisory; the session config dir is in bounds   | 39           |
+| `4d58dd04` | Task 4.1: plugins that ship hooks, at session start and in `health`             | 41           |
+| `11bf4c5e` | Task 4.3: `lsp_enforcement` judges LSP from enabled plugins; integration fixes  | 42           |
+| `738c4e5e` | Merge main `3104434b` (B1 archive, 00466 N28-N33); ledger conflicts, both kept  |              |
+| `fbb8becf` | 00466 N26: `audit_shell` gets the same fix; the class pin covers `audit_*.py`   | 37 (edited)  |
+| `dc8869db` | Merge main `455ee636` (B2); one scan-scope mechanism kept                       |              |
+| `bba3a5ab` | Task 3.1 / item 4: P3 walkers always skip an in-project Claude config dir       | 25 (edited)  |
+| `475ea16f` | 00466 N26: a missing or empty scan root fails every QA walker                   | 37 (edited)  |
+| `3933a9df` | Task 5.2: P8 is covered by Plan 00463's `e467a5cc`; HOOKS-DAEMON.md regenerated |              |
 
 Release note 40 was skipped on purpose (n466-n24 holds it).
 
@@ -80,9 +82,12 @@ plus one missing-directory test for each CLI. The ledger row is marked Remedied.
   `git_visible_paths` / `project_path_is_protected` filtering (`fd6c5438`),
   judges `_UNSCANNED_DIR_NAMES` through `relative_parts`, and keeps the one
   vacuous guard in `main()`. B2's test is kept. The class pin also now
-  classifies main's new `check_unreachable_handle_branch.py`. **Gap noted,
-  not fixed**: that check passes when its scan root is missing (0 of 0
-  candidates, so the vacuous guard cannot fire).
+  classifies main's new `check_unreachable_handle_branch.py`.
+- **Missing or empty root (`475ea16f`)**: `check_unreachable_handle_branch`
+  passed on a missing scan root. `vacuous_scan_failure` now fails on 0
+  examined in every case, and every walker applies it. The pin runs each
+  walker from a checkout holding only `scripts/qa/`, and from a missing and
+  an empty root. It was RED for 10 walkers. See the N26 ledger entry.
 
 The ledger row is marked Remedied.
 
@@ -225,6 +230,7 @@ fixture keeps every lsp test off the real config dir.
 
 ## Ready to archive
 
-- **00468**: no. Open: 4.2 (G9, waits for 00464) and 5.2 (P8
-  confirmation).
+- **00468**: no. Open: 4.2 (G9, waits for 00464). T5.2 is confirmed
+  covered by Plan 00463's `e467a5cc` (its class test passed at `01f9ef51`),
+  so 00468 must not archive before 00463 lands.
 - **00466**: no. Other ledger entries are open; N26 and N27 are Remedied.
