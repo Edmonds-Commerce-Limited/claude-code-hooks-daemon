@@ -93,4 +93,28 @@ config_changes:
 
   removed: []
 
-  changed: []
+  changed:
+    - key: handlers.pre_tool_use.lsp_enforcement.options.no_lsp_mode
+      description: >-
+        "No LSP" now means no enabled Claude Code plugin declares a language
+        server for the searched file type (taken from the Grep glob, type or
+        path, or a grep/rg command's --include, -g, -t and file arguments).
+        ENABLE_LSP_TOOL is no longer consulted: Claude Code keeps the LSP tool
+        inactive until a code intelligence plugin is installed. The default
+        moves from block to advisory, so by default the handler enforces only
+        where a language server can answer, and otherwise allows the search
+        and suggests installing a code intelligence plugin.
+      example_yaml: |
+        handlers:
+          pre_tool_use:
+            lsp_enforcement:
+              options:
+                no_lsp_mode: advisory  # advisory | block | disable
+      migration_note: >-
+        A config that sets no_lsp_mode: block keeps denying symbol searches no
+        enabled plugin covers, now with advice to install a code intelligence
+        plugin. Change it to advisory (the new default) to enforce only where
+        an LSP can answer. ENABLE_LSP_TOOL can be left set; it has no effect
+        on this handler.
+      recommended: true
+      dormant: false

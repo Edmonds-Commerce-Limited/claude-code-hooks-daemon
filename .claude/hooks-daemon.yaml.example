@@ -270,11 +270,11 @@ handlers:
       priority: 32
 
     lsp_enforcement:       # Steers LLMs toward LSP tools instead of Grep/Bash grep
-      enabled: false       # Enable when LSP is configured
+      enabled: false       # Enable once a code intelligence plugin is installed
       priority: 38
       options:
         mode: block_once       # advisory | block_once | strict
-        no_lsp_mode: block     # block | advisory | disable
+        no_lsp_mode: advisory  # advisory | block | disable (no enabled plugin serves the file type)
 
     reference_repo_freshness:  # Gates a READ of a stale reference clone (Plan 00401)
       enabled: true            # Silent unless the project actually governs repos

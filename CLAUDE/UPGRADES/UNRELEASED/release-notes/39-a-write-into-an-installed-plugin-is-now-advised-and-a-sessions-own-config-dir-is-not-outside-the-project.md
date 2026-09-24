@@ -1,7 +1,11 @@
 # Callout: a write into an installed plugin is now advised, and a session's own config dir counts as in bounds
 
-**Plan**: 00468 (P4, G10, G16)
-**Audience**: everyone who uses Claude Code plugins, and anyone who runs a session with a different Claude config dir from the daemon's
+**Plan**: 00468
+**Audience**: everyone
+
+Findings G10 and G16. This affects everyone who uses Claude Code plugins, and
+anyone who runs a session with a different Claude config dir from the
+daemon's.
 
 **New advisory, `installed_plugin_edit_advisor`** (on by default, never
 blocks). Claude Code keeps each installed plugin's files under

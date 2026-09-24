@@ -1,7 +1,9 @@
 # Callout: CLAUDE_CONFIG_DIR is honoured for your settings and transcripts
 
 **Plan**: 00468
-**Audience**: everyone who sets `CLAUDE_CONFIG_DIR`
+**Audience**: everyone
+
+This affects everyone who sets `CLAUDE_CONFIG_DIR`.
 
 When `CLAUDE_CONFIG_DIR` is set, Claude Code keeps its user settings and
 session transcripts there instead of `~/.claude`. Several daemon features

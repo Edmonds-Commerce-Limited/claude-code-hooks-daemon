@@ -525,7 +525,7 @@ handlers:
       priority: 38
       options:
         mode: block_once       # advisory | block_once | strict
-        no_lsp_mode: block     # block | advisory | disable
+        no_lsp_mode: advisory  # advisory | block | disable (no enabled plugin serves the file type)
 
     reference_repo_freshness:  # Gates a READ of a stale reference clone (Plan 00401)
       enabled: true            # Cache-only: this handler never touches the network

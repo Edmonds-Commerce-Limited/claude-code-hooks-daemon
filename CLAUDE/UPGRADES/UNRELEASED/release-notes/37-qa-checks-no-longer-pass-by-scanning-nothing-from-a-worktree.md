@@ -1,7 +1,10 @@
 # Callout: QA checks no longer pass by scanning nothing from a worktree
 
-**Plan**: 00466 (N26)
-**Audience**: contributors to this repository, and anyone who runs its QA from a git worktree
+**Plan**: 00466
+**Audience**: handler authors
+
+Ledger entry N26. This affects contributors to this repository, and anyone
+who runs its QA from a git worktree.
 
 Three QA checks, `skill_refs`, `doc_truth` and `github_urls`, skipped any
 file whose absolute path contained a directory name they exclude, such as

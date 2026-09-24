@@ -1,7 +1,10 @@
 # Callout: markdown in Claude Code's config dir and in a plugin's source tree is no longer blocked
 
-**Plan**: 00468 (P4, G8)
-**Audience**: everyone whose Claude config dir sits inside the project, and anyone who develops a Claude Code plugin in their repository
+**Plan**: 00468
+**Audience**: everyone
+
+Findings P4 and G8. This affects everyone whose Claude config dir sits inside
+the project, and anyone who develops a Claude Code plugin in their repository.
 
 `markdown_organization` judged two kinds of Claude Code file by the
 project's documentation layout, and denied them with

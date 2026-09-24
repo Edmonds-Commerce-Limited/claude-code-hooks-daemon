@@ -29,6 +29,7 @@ from claude_code_hooks_daemon.handlers.post_tool_use.validate_eslint_on_write im
 from claude_code_hooks_daemon.handlers.pre_compact.compaction_signal import (
     CompactionSignalHandler,
 )
+from claude_code_hooks_daemon.handlers.pre_tool_use import lsp_enforcement
 from claude_code_hooks_daemon.handlers.pre_tool_use.flaggable_content_channel_guard import (
     FlaggableContentChannelGuardHandler,
 )
@@ -50,6 +51,12 @@ from claude_code_hooks_daemon.handlers.session_start.model_fallback_detector imp
 )
 from claude_code_hooks_daemon.handlers.session_start.tool_disable_advisor import (
     ToolDisableAdvisorHandler,
+)
+from claude_code_hooks_daemon.utils.claude_plugins import (
+    EnabledPlugin,
+    PluginInventory,
+    PluginLspServer,
+    SettingsScope,
 )
 
 
@@ -91,34 +98,49 @@ class TestBaseContract:
 
 
 class TestLspEnforcement:
-    def test_relevant_when_env_var_set(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setenv("ENABLE_LSP_TOOL", "1")
-        assert LspEnforcementHandler().get_relevance(_context(tmp_path)).applicable is True
+    """Plan 00468 P5: an LSP exists only where an enabled plugin declares a server."""
 
-    def test_relevant_when_settings_json_sets_it(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.delenv("ENABLE_LSP_TOOL", raising=False)
-        (tmp_path / ".claude").mkdir()
-        (tmp_path / ".claude" / "settings.json").write_text('{"env": {"ENABLE_LSP_TOOL": "1"}}')
-        assert LspEnforcementHandler().get_relevance(_context(tmp_path)).applicable is True
+    @staticmethod
+    def _servers(monkeypatch: pytest.MonkeyPatch, *servers: PluginLspServer) -> list[Path]:
+        roots: list[Path] = []
 
-    def test_not_applicable_without_an_lsp(
+        def _resolve(project_root: Path, **_: Any) -> PluginInventory:
+            roots.append(project_root)
+            plugin = EnabledPlugin(
+                plugin_id="lsp@mkt",
+                name="lsp",
+                marketplace="mkt",
+                enabled_by=SettingsScope.USER,
+                install_scope="user",
+                install_path=Path("/nonexistent"),
+                version=None,
+                lsp_servers=servers,
+            )
+            return PluginInventory(config_dir=Path("/nonexistent"), enabled=(plugin,))
+
+        monkeypatch.setattr(lsp_enforcement, "resolve_enabled_plugins", _resolve)
+        return roots
+
+    def test_relevant_when_an_enabled_plugin_declares_a_server(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.delenv("ENABLE_LSP_TOOL", raising=False)
+        roots = self._servers(monkeypatch, PluginLspServer("pyright", None, {".py": "python"}))
+        assert LspEnforcementHandler().get_relevance(_context(tmp_path)).applicable is True
+        assert roots == [tmp_path]
+
+    def test_not_applicable_without_an_lsp_plugin(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._servers(monkeypatch)
         verdict = LspEnforcementHandler().get_relevance(_context(tmp_path))
         assert verdict.applicable is False
-        assert "ENABLE_LSP_TOOL" in verdict.reason
+        assert "code intelligence plugin" in verdict.reason
 
-    def test_malformed_settings_json_is_not_an_lsp(
+    def test_the_environment_variable_alone_is_not_an_lsp(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.delenv("ENABLE_LSP_TOOL", raising=False)
-        (tmp_path / ".claude").mkdir()
-        (tmp_path / ".claude" / "settings.json").write_text("{not json")
+        self._servers(monkeypatch)
+        monkeypatch.setenv("ENABLE_LSP_TOOL", "1")
         assert LspEnforcementHandler().get_relevance(_context(tmp_path)).applicable is False
 
 

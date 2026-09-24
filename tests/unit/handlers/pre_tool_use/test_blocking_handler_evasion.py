@@ -455,6 +455,10 @@ _NOT_COMMAND_ANCHORED: dict[str, str] = {
         "there is no command spelling to evade; advisory-only, never denies"
     ),
     "AgentIsolationAdvisorHandler": "matches on the Agent tool, not a command",
+    "InstalledPluginEditAdvisorHandler": (
+        "matches the write TARGET path (tool file_path, or get_bash_write_targets), "
+        "not a command name; advisory only"
+    ),
     "DispatchDeclarationHandler": (
         "matches on the Task tool's prompt field, not a command string - there is "
         "no shell spelling to evade"

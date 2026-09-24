@@ -1,7 +1,9 @@
 # Callout: Claude Code plugins that ship hooks are named at session start and in `health`
 
-**Plan**: 00468 (G1, G2)
-**Audience**: everyone who enables Claude Code plugins
+**Plan**: 00468
+**Audience**: everyone
+
+Findings G1 and G2. This affects everyone who enables Claude Code plugins.
 
 A Claude Code plugin can ship its own hooks. They run beside the daemon's,
 and the daemon never sees them, so none of its guards or its hook

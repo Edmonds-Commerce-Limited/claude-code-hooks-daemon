@@ -30,6 +30,7 @@ from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_bash_write_targets, get_file_path
 from claude_code_hooks_daemon.utils.claude_config import claude_config_dir, session_config_dir
+from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
 #: Where Claude Code keeps installed plugin files, under its config dir.
 _PLUGINS_DIRNAME: Final[str] = "plugins"
@@ -132,7 +133,7 @@ class InstalledPluginEditAdvisorHandler(PreToolUseHandlerBase):
         project_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": "untracked/scratch/plugin-advisor-probe.md",
+                "file_path": acceptance_path("plugin-advisor-probe.md"),
                 "content": "probe",
             },
         )

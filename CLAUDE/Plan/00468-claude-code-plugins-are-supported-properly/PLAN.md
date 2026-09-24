@@ -115,9 +115,13 @@ first, and the other fixes build on it.
   writer count is corrected (G7). `daemon_sync_after_merge` and
   `merge_qa_report` judge the repository the command ran in, using 00464's
   resolver once it merges (G9).
-- [ ] ⬜ **Task 4.3**: `lsp_enforcement` enforces only when an enabled LSP
+- [x] ✅ **Task 4.3**: `lsp_enforcement` enforces only when an enabled LSP
   plugin covers the searched language. Its advice names installing a
-  code-intelligence plugin (P5).
+  code-intelligence plugin (P5). **Decided (unattended, 2026-09-24)**:
+  `ENABLE_LSP_TOOL` is no longer read (the vendored tools-reference makes the
+  plugin the switch), `no_lsp_mode` defaults to `advisory`, and a search that
+  names no file type counts as covered by any enabled server; the audit's
+  dominant-language fallback is not built.
 
 ### Phase 5: documentation (G3, G4, G5, P8)
 

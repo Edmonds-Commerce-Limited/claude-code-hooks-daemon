@@ -703,10 +703,10 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
         claude_dir = self._workspace_root / ".claude"
         expected_value = f"./{self._track_plans_in_project}"
 
-        # eacces-safe-exempt: the project's own .claude/settings{,.local}.json.
         present = [
             claude_dir / name
             for name in (_PROJECT_SETTINGS_FILENAME, _LOCAL_SETTINGS_FILENAME)
+            # eacces-safe-exempt: the project's own .claude/settings{,.local}.json.
             if (claude_dir / name).exists()
         ]
         if not present:
@@ -1168,7 +1168,10 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
         candidate = self._candidate_on_disk(file_path)
         for directory in candidate.parents:
             meta = directory / _PLUGIN_META_DIRNAME
-            if any((meta / name).is_file() for name in _PLUGIN_ROOT_MANIFESTS):
+            # An unreadable manifest is not a plugin root: the layout rules apply.
+            if any(
+                path_is_file(meta / name, unreadable_means=False) for name in _PLUGIN_ROOT_MANIFESTS
+            ):
                 parts = candidate.relative_to(directory).parts
                 return len(parts) > 1 and parts[0] in _PLUGIN_MARKDOWN_COMPONENT_DIRS
             if directory == self._workspace_root:

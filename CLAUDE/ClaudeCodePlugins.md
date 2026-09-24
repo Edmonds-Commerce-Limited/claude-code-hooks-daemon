@@ -200,6 +200,12 @@ What uses it:
   `hooks-daemon health` lists every one, marking the acknowledged.
 - `installed_plugin_edit_advisor` advises when a write lands in an installed
   plugin's files, which the next plugin update replaces.
+- `lsp_enforcement` treats the LSP tool as available only where an enabled
+  plugin declares a language server for the searched file type, since Claude
+  Code keeps the tool inactive until a code intelligence plugin is installed
+  ([tools-reference.md](../remote-docs/code.claude.com/docs/en/tools-reference.md),
+  its LSP tool section).
+  `ENABLE_LSP_TOOL` is not consulted.
 
 Remaining work is tracked in
 [Plan 00468](Plan/00468-claude-code-plugins-are-supported-properly/PLAN.md).
