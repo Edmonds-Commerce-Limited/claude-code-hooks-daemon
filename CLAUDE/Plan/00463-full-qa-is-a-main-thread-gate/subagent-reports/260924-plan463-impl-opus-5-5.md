@@ -297,25 +297,38 @@ main at `57a255cb`).
   `TestTheDirectoryTheCommandCdsInto`, `TestOperandsAreJudgedFromTheirRepository`):
 
   - N4: `$(…)` and backticks inside double quotes are followed;
+
   - N5: globs and braces are judged by what they reach; `eval`, `bash <<<`,
     echo/printf piped into a shell, `bash < <(echo …)`, `source`/`.`, `time -p` and
     `builtin` are followed; `$'…'` is decoded locally, not through 464's lexer;
+
   - N6: operands are resolved and judged against the nearest `.git`/`pyproject.toml`;
+
   - N8: `.` after a `cd` resolves where the cd went, and a BARE run after a cd is judged
     as `.` from there, so `cd tests/unit/qa && pytest -q` is targeted;
+
   - N9: `xargs` runs its command, judged by its explicit arguments;
+
   - the reviewer's probe list beyond that: `$(pwd)/tests`, `setsid`, `ionice`, `chrt`,
     `taskset`, `flock` (and `flock -c`), `xvfb-run`, `script -c`, `parallel … ::: …` and
     `pipx run` are now followed;
+
   - the lead's rule: an unparseable command naming a declared program is DENIED, with
     "UNPARSED: this command could not be parsed" in the reason.
 
-  The reviewer's `probe_463r4_blocker.py` now reports 1 mismatch of 166:
-  `python -c 'import pytest; pytest.main(["tests"])'`. That stays a documented limit (it
-  is Python, not a shell command), with `$(which pytest)`, `"$(command -v pytest)"`,
+  - after the lead's follow-up: a literal `python -c` string (any interpreter, a venv
+    `bin/python`, or through `uv run`) that mentions `pytest` is judged as a pytest run.
+    It is a substring test on the literal, and the string's quoted literals are the
+    run's words, so `pytest.main()` and `pytest.main(["tests"])` are full and
+    `pytest.main(["tests/unit/qa/test_x.py"])` is targeted. A `"-m"` just before a
+    `"pytest"` literal is dropped as the module selector. Tests:
+    `TestPythonCodeThatRunsPytest`, which also re-checks `python -m pytest`.
+
+  The reviewer's `probe_463r4_blocker.py` now reports 0 mismatches of 166. The
+  remaining documented limits are `$(which pytest)`, `"$(command -v pytest)"`,
   `hatch test`, tox, nox, `cat commands.txt | bash` and `bash < commands.txt`, each
   pinned in `_DOCUMENTED_LIMITS` against HANDLER_REFERENCE.md. The blocker module's line
-  coverage from its own test file is 98.6%.
+  coverage from its tests is 98.8%.
 
 - **N7: prose that avoids the start words.** The guidance test now starts a candidate at
   any word naming a declared program, reads `cat` heredoc bodies, and expands `NAME=value`

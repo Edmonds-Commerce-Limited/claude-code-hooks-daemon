@@ -441,7 +441,6 @@ _DOCUMENTED_LIMITS: list[str] = [
     "hatch test",
     "tox",
     "nox",
-    "python -c 'import pytest; pytest.main([\"tests\"])'",
     "cat commands.txt | bash",
     "bash < commands.txt",
 ]
@@ -459,8 +458,53 @@ class TestTheDocumentedLimits:
         start = reference.index("#### subagent_full_qa_blocker")
         end = reference.find("\n#### ", start + 1)
         section = reference[start : end if end != -1 else len(reference)]
-        for spelling in ("$(which pytest)", "hatch test", "tox", "nox", "python -c", "| bash"):
+        for spelling in ("$(which pytest)", "hatch test", "tox", "nox", "| bash"):
             assert spelling in section, spelling
+
+
+class TestPythonCodeThatRunsPytest:
+    """The lead's direction after review 4: ``python -c`` naming pytest runs pytest.
+
+    A LITERAL ``-c`` string of any Python interpreter that mentions ``pytest``
+    is judged as a pytest run. Its string literals are the run's operands, so
+    a literal path narrows it and no path at all is a bare, whole-suite run.
+    """
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "python -c 'import pytest; pytest.main([\"tests\"])'",
+            "python3 -c 'import pytest; pytest.main()'",
+            "python3.11 -c 'import pytest; raise SystemExit(pytest.main([\"-q\"]))'",
+            "untracked/venv/bin/python -c 'import pytest; pytest.main([\"tests/unit\"])'",
+            "uv run python -c 'import pytest; pytest.main([\".\"])'",
+            "python -c 'import subprocess, sys; "
+            'subprocess.run([sys.executable, "-m", "pytest", "tests"])\'',
+            "python -X dev -c 'from pytest import main; main()'",
+            "python3 -c'import pytest; pytest.main()'",
+            "python -c \"import importlib; importlib.import_module('pytest').main(['tests'])\"",
+        ],
+    )
+    def test_code_that_runs_the_whole_suite_is_full(self, command: str) -> None:
+        match = find_full_qa_invocation(command, _patterns())
+        assert match is not None, command
+        assert match.pattern_id == "pytest-whole-suite"
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "python -c 'import pytest; pytest.main([\"tests/unit/qa/test_x.py\"])'",
+            'python3 -c \'import pytest; pytest.main(["-q", "tests/unit/handlers/"])\'',
+            "python -c 'import json; print(1)'",
+            "python3 -c \"print('llm_qa.py all')\"",
+        ],
+    )
+    def test_code_that_runs_a_narrow_path_or_no_pytest_is_not(self, command: str) -> None:
+        assert find_full_qa_invocation(command, _patterns()) is None, command
+
+    def test_python_dash_m_pytest_is_still_judged(self) -> None:
+        assert find_full_qa_invocation("python -m pytest", _patterns()) is not None
+        assert find_full_qa_invocation("python -m pytest tests/unit/x.py", _patterns()) is None
 
 
 class TestWhatCountsAsAFullRun:

@@ -42,7 +42,7 @@ turns out to carry it the guard covers it with no change.
 
 This is a resource guard for cooperating agents, not a security boundary.
 Code the shell only builds at run time (a program named by a substitution,
-commands read from a file, Python calling pytest) is not chased: the
+commands read from a file) is not chased: the
 coordinator's full gate still runs before the main branch moves, and the cost
 of a miss is one wasted run. A command that cannot be PARSED at all, but names
 a declared program, is denied and told so, rather than allowed unseen.
@@ -558,6 +558,11 @@ _PYTHON_INTERPRETER: Final[re.Pattern[str]] = re.compile(r"^python(?:\d+(?:\.\d+
 _PYTHON_VALUE_FLAGS: Final[frozenset[str]] = frozenset({"-X", "-W"})
 _PYTHON_MODULE_FLAG: Final[str] = "-m"
 _PYTHON_CODE_FLAG: Final[str] = "-c"
+#: The runner a ``python -c`` string runs when it names it anywhere.
+_PYTEST: Final[str] = "pytest"
+_PYTEST_IN_CODE: Final[re.Pattern[str]] = re.compile(rf"\b{_PYTEST}\b")
+#: A quoted string in Python code: its content is one word of the run.
+_PYTHON_STRING_LITERAL: Final[re.Pattern[str]] = re.compile(r"'([^'\\]*)'|\"([^\"\\]*)\"")
 
 _SHELL_INTERPRETERS: Final[frozenset[str]] = frozenset({"bash", "sh", "zsh", "dash", "ksh"})
 _SHELL_VALUE_FLAGS: Final[frozenset[str]] = frozenset({"-o", "+o", "-O", "+O"})
@@ -1238,13 +1243,37 @@ def _hatch_command(words: list[str]) -> list[str]:
     return words
 
 
+def _pytest_in_code(code: str) -> list[str] | None:
+    """The operands of the pytest run a ``python -c`` string makes, or None when it names none.
+
+    Code is not a shell command, so what it runs is judged by a substring test
+    on the literal: any mention of ``pytest`` (``import pytest``,
+    ``pytest.main(...)``, ``"-m", "pytest"`` in a subprocess call) makes it a
+    pytest run. Its string literals are the run's words, so ``pytest.main(
+    ["tests/unit/x.py"])`` is targeted and ``pytest.main()`` is a bare run.
+    The ``"-m"`` before a ``"pytest"`` literal selects the module and is dropped.
+    """
+    if _PYTEST_IN_CODE.search(code) is None:
+        return None
+    operands: list[str] = []
+    for single, double in _PYTHON_STRING_LITERAL.findall(code):
+        literal = single or double
+        if literal == _PYTEST:
+            if operands and operands[-1] == _PYTHON_MODULE_FLAG:
+                operands.pop()
+            continue
+        operands.append(literal)
+    return operands
+
+
 def _resolve_python(
     rest: list[str], segment: str, depth: int
 ) -> Iterator[tuple[str, list[str], str]]:
-    """``python [flags] script args`` or ``python [flags] -m module args``.
+    """``python [flags] script args``, ``-m module args`` or ``-c code``.
 
     A module is resolved like a command, so ``python -m coverage run -m
-    pytest`` reaches pytest and ``python -m py.test`` is pytest.
+    pytest`` reaches pytest and ``python -m py.test`` is pytest. Code that
+    mentions pytest is judged as a pytest run (see :func:`_pytest_in_code`).
     """
     index = 0
     while index < len(rest):
@@ -1257,8 +1286,12 @@ def _resolve_python(
             module = argument[len(_PYTHON_MODULE_FLAG) :]
             yield from _resolve([module, *rest[index + 1 :]], segment, depth)
             return
-        if argument == _PYTHON_CODE_FLAG:
-            # Python source, not a shell command: nothing here is a program.
+        if argument.startswith(_PYTHON_CODE_FLAG) and not argument.startswith(_LONG_FLAG_PREFIX):
+            attached = argument[len(_PYTHON_CODE_FLAG) :]
+            code = attached or (rest[index + 1] if index + 1 < len(rest) else "")
+            operands = _pytest_in_code(code)
+            if operands is not None:
+                yield _PYTEST, operands, segment
             return
         if argument in _PYTHON_VALUE_FLAGS:
             index += 2

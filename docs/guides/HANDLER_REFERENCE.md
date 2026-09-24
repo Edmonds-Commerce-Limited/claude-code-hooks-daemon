@@ -1403,6 +1403,7 @@ handlers:
 - wrappers (`timeout`, `env`, `nohup`, `sudo`);
 - launchers, each with its own flags and operands (`setsid`, `ionice`, `chrt`, `taskset`, `flock`, `xvfb-run`), the command a `-c` hands to `flock` or `script`, and `parallel cmd ::: args`;
 - interpreters (`python3 x.py`, `python -m pytest`, `bash -c '...'`);
+- a `python -c` string that mentions `pytest` (`import pytest; pytest.main()`, or `"-m", "pytest"` in a subprocess call), judged as a pytest run whose words are the string's quoted literals;
 - grouping;
 - `uv run`/`poetry run`/`pdm run`/`pipx run`/`hatch run env:cmd`, and `coverage run [-m] cmd`;
 - `uvx`/`uv tool run`, with any version pin such as `pytest@8`;
@@ -1456,7 +1457,6 @@ A malformed entry is skipped and logged. `hooks-daemon check` reports a handler 
 - a substitution in command position (`$(which pytest)`, `"$(command -v pytest)" tests`): the program is only known once the shell has run it;
 - a script that runs the suite under an undeclared name, and a project's own runner such as `tox`, `nox` or `hatch test`: the suite they run lives in the project's config, which the guard does not read. Declare them in `full_qa_patterns` if you use them;
 - a wrapper or launcher not listed above: each has its own grammar, so an unknown one is judged as the program it names;
-- Python that calls the runner itself (`python -c 'import pytest; pytest.main(["tests"])'`): it is Python, not a shell command;
 - code a shell reads from a file or any producer other than `echo`/`printf` (`cat commands.txt | bash`, `bash < commands.txt`): its content is not in the command;
 - a `cd` target the shell would expand (`cd $DIR`). After one, words are judged by shape alone. Every `cd` is followed in order, including one inside a subshell or after `||`.
 
