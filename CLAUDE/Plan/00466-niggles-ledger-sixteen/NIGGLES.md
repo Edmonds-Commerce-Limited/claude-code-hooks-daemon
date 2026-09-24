@@ -141,41 +141,53 @@ off; a non-safety advisory handler that raises still allows, and says so.
 
 N16 is filed on the unmerged `worktree-n466-guard-defects` branch; it joins this file at integration.
 
-### N19 — the registry's options-collection failure is logged at debug level
+### N19 — ✅ Remedied — the registry's options-collection failure is logged at debug level
 
 **Found by the N13/N14 agent.** The handler registry's pass-1 `except Exception` logs a failure to collect a handler's options at debug level only. During the N14 work, a local variable that shadowed the new accessor made the registry silently drop EVERY handler's options, and only an existing registry test caught it before commit. In production, that failure would have looked like every handler running on defaults, with nothing at a visible log level.
 
 **Candidate remedy:** narrow the catch to the exceptions that option collection can legitimately raise, and log anything else at error level with the handler name. If a handler's configured options cannot be applied, that is a degraded protection state and should surface in `health`. RED test: an injected failure while collecting options is visible at error level and in health.
 
-### N18 — PlanWorkflow.core.md says the plan index is linted against one rule
+**Remedy** (`worktree-n466-n13n14`, 4bb2a733 and fd8778a3): the pass-1 `try` covers only the `handler_options` call, which reads every block shape without raising, so anything it catches is a daemon defect. Each failure is logged at ERROR with the handler's registry key and a traceback, and recorded in `HandlerRegistry.option_failures`. The handler still registers, on its defaults: loud fail-open, which the coordinator chose over fail-fast because a daemon that will not start protects nothing. `health` lists the failures under "Handler options" and exits 1. Because `health` is only seen when someone runs it, `project_handler_load_checker` also receives the failures and opens each session with a "HANDLER OPTIONS NOT APPLIED" advisory naming each handler. Pinned by `tests/unit/handlers/test_registry_option_collection_failure.py` and `TestOptionFailures` in the checker's tests. Release note 62.
+
+### N18 — ✅ Remedied — PlanWorkflow.core.md says the plan index is linted against one rule
 
 **Found by the N13/N14 agent.** `CLAUDE/core/PlanWorkflow.core.md:407` and its deployed template copy say the plan index is linted "against one rule". `index-no-log` already made that false, and N13 adds `plan-stats-arithmetic` to the commit gate. The page is a deployed template pair, so it ships to clients.
 
 **Candidate remedy:** name the rules, or better, point at the plan QA rule list, which is the source of truth, instead of counting. Change both copies of the pair together, and pin it with a doc-truth test that the page names no count that disagrees with the registry.
 
-### N17 — `skill_opportunity_detector` never receives its configured options
+**Remedy** (`worktree-n466-n13n14`, e00a16c4): both copies now name `index-row-length` only as an example and point at a new `plan-qa --list-checks`, which prints every registered check with its `stage:level` pairs straight from `all_checks()`. `tests/unit/plan_qa/test_plan_qa_doc_truth.py` pins both copies: no count of rules or checks, the listing is named, every named check is registered, and the two sections are identical. Release note 63.
+
+### N17 — ✅ Remedied — `skill_opportunity_detector` never receives its configured options
 
 **Found by the N13/N14 agent.** `_options()` reads `self.config["options"]`, which only `configure()` populates. Nothing in `src/` calls `configure()`; the registry injects options as `_<key>` attributes instead. So a configured `check_interval_days` is ignored at runtime, and only the unit tests, which call `configure()` directly, exercise the option.
 
 **Candidate remedy:** read options the way the registry delivers them, through the shared accessor. RED test: a handler built by the real registry from a config with a non-default `check_interval_days` uses it. Then audit every handler for a `configure()`-only options path, and pin the class with a test that instantiates each handler through the registry with a non-default value for every declared option and checks that it is honoured.
 
-### N15 — `remote-docs add` scans a capture with an unconfigured `sensitive_content` handler
+**Remedy** (`worktree-n466-n13n14`, bcd9bf61): two class pins in `tests/unit/handlers/test_registry_option_injection.py`. One builds every handler through the real `register_all` with a non-default value for each option in its `HANDLER_REFERENCE.md` Options table, and fails if the value is not delivered or never read. The other fails on any read of an option from a `self.config` dict. They failed on exactly three handlers, all now fixed: `skill_opportunity_detector`; `hook_registration_checker`, which ignored `auto_migrate_settings: false` (set in this repository's own config) and `auto_repair_registrations`; and `version_check`, which ignored `cache_ttl_hours` (now documented). Release note 61.
+
+### N15 — ✅ Remedied — `remote-docs add` scans a capture with an unconfigured `sensitive_content` handler
 
 **Found by the Plan 00468 docs agent.** `daemon/cli.py` (~:6377) builds `SensitiveContentHandler()` with none of its configured options for the capture-time `scan_text` in `remote-docs add`. So the scan at the moment a page is vendored runs with no public patterns at all. That is how 28 example UUIDs were vendored into `hooks.md` without a warning, to be caught only later by the tree-wide QA scan. The secret word list happens to be found only because the configured path equals the default. This is the same class as N14: a component reads a handler's behaviour without that handler's configured options.
 
 **Candidate remedy:** construct the handler from the project's resolved config, through the same shared handler-options accessor N14 introduces. RED test: `remote-docs add` of a page carrying a configured public-pattern match reports it at capture time, and a non-default `secret_word_list_path` is honoured. Add the construct-without-config shape to N14's class audit.
 
-### N14 — log and payload redaction ignore a configured secret word list path
+**Remedy** (`worktree-n466-n13n14`, 0881dc94): `_sensitive_content_guard(project_root)` builds the handler from the project's config through `handler_options` and a new shared `registry.apply_handler_options`, with the word-list path resolved against the project root. `remote-docs add` and `refresh` now refuse a page matching a configured public pattern or a term from a non-default word list (`TestCaptureScanUsesTheConfiguredHandler`). The class audit found one more instance, `hooks-daemon check` probing `lint_on_edit` without its languages, also fixed. A new pin fails on any built-in handler constructed outside the registry without `apply_handler_options`. Release note 59.
+
+### N14 — ✅ Remedied — log and payload redaction ignore a configured secret word list path
 
 **Found by the 00414/00415 agent**, outside its brief. `utils/secret_redaction.py` `_resolve_active_path` reads `handler_cfg.get("options", {})` only when `isinstance(handler_cfg, dict)`. But `Config` coerces every handler entry to a `HandlerConfig` model (`type(c.handlers.pre_tool_use.get("sensitive_content"))` is `HandlerConfig`), so the isinstance test is never true. The daemon-wide resolver therefore never reads a configured `secret_word_list_path`, and always falls back to the default `.claude/block-words.secret`. The `sensitive_content` handler reads its own option correctly, so blocking still works. But payload capture and log redaction silently use the wrong list, or no list, in any project whose word list lives somewhere else. That is exactly how a secret term reaches a log. This repository is unaffected only because its configured path equals the default. `secret_file_matching.resolve_configured_patterns` carries a comment about this same mistake and fixed its own copy, so this is the second sighting of the class.
 
 **Candidate remedy:** read the option through `HandlerConfig.options`, via one shared accessor for handler options that accepts either shape. RED test: with a non-default `secret_word_list_path`, a term from that list is redacted from a captured payload and a log line. Then audit every `isinstance(<handler config>, dict)` read of handler config across `src/`, and pin the class with a test or QA check that fails when handler config is read as a dict.
 
-### N13 — the plan-index statistics arithmetic is checked only by full QA, so a wrong count reaches main
+**Remedy** (`worktree-n466-n13n14`, e7f6b3d8): one accessor, `config.models.handler_options`, reads a block's options whichever shape it arrives in, and all 17 hand reads of `options` in `src/` go through it. A configured `secret_word_list_path` now reaches payload capture and log redaction (`TestConfiguredWordListPathReachesEveryLeakVector`). `tests/unit/config/test_handler_options_accessor.py` fails on any hand read of `options` outside the accessor, and on any local that shadows it. Release note 57, plus post-upgrade task 02 for projects with a non-default path to audit files written before the fix.
+
+### N13 — ✅ Remedied — the plan-index statistics arithmetic is checked only by full QA, so a wrong count reaches main
 
 **Found by the coordinator**, through Plan 00421's agent. Opening Plan 00468 updated the README statistics bullets (468 allocated, 455 distinct) but missed the closing self-check line (`454 + 13 = 467`). `check_repo_hygiene.py`'s `plan-stats-arithmetic` check catches exactly this. But it runs only in `llm_qa.py all`, and the commit-time plan QA gate that runs on every README commit does not include it. The inconsistent index was therefore committed and pushed (d10bbf13), and was found only when an agent ran the hygiene checker by hand. The same README gate already enforces row length and the 30-row completed window at commit time.
 
 **Candidate remedy:** run the `plan-stats-arithmetic` check in the commit-time plan QA gate whenever the staged tree touches the plan index, or move the check into plan QA and have repo_hygiene call it. Either way there is one implementation. RED test: a commit staging a README whose statistics disagree with the self-check line is denied, and names the line to fix.
+
+**Remedy** (`worktree-n466-n13n14`, 724c2d7f): the check moved into plan QA as `plan_qa/checks/stats_arithmetic.py`, and `check_repo_hygiene.py` keeps only a thin adapter, so there is one implementation (pinned). It blocks at commit when the commit stages the plan index and the disagreement is not already in HEAD, advises otherwise so inherited drift traps no unrelated commit, blocks in the sweep and advises at edit time. The denial names the line (`TestPlanStatsArithmetic`). Release note 58. It also delivers Plan 00408 Task 3.2.
 
 ### N12 — a hand-built probe payload is logged as real traffic, because nothing tells a prober to mark it
 

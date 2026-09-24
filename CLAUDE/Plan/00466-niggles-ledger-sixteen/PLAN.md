@@ -45,12 +45,12 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N10 | A wildcard in the middle of a protected filename gets past `secret_file_guard`                            | 00466 review       | 🔄 In progress        |
 | N11 | Any exception in `secret_file_guard.matches()` lets the call through unless `strict_mode` is on           | 00466 review       | 🔄 In progress        |
 | N12 | A hand-built probe payload is logged as real traffic, because nothing tells a prober to mark it           | 00467 audit        | ⬜ Open               |
-| N13 | The plan-index statistics arithmetic is checked only by full QA, so a wrong count reaches main            | Coordinator        | ⬜ Open               |
-| N14 | Log and payload redaction ignore a configured secret word list path                                       | 00414 agent        | 🔄 In progress        |
-| N15 | `remote-docs add` scans a capture with an unconfigured `sensitive_content` handler                        | 00468 docs agent   | 🔄 In progress        |
-| N17 | `skill_opportunity_detector` never receives its configured options                                        | N13/N14 agent      | 🔄 In progress        |
-| N18 | PlanWorkflow.core.md says the plan index is linted against one rule                                       | N13/N14 agent      | 🔄 In progress        |
-| N19 | The registry's options-collection failure is logged at debug level                                        | N13/N14 agent      | 🔄 In progress        |
+| N13 | The plan-index statistics arithmetic is checked only by full QA, so a wrong count reaches main            | Coordinator        | ✅ Remedied           |
+| N14 | Log and payload redaction ignore a configured secret word list path                                       | 00414 agent        | ✅ Remedied           |
+| N15 | `remote-docs add` scans a capture with an unconfigured `sensitive_content` handler                        | 00468 docs agent   | ✅ Remedied           |
+| N17 | `skill_opportunity_detector` never receives its configured options                                        | N13/N14 agent      | ✅ Remedied           |
+| N18 | PlanWorkflow.core.md says the plan index is linted against one rule                                       | N13/N14 agent      | ✅ Remedied           |
+| N19 | The registry's options-collection failure is logged at debug level                                        | N13/N14 agent      | ✅ Remedied           |
 | N20 | The capture-corruption auditor judges a multi-line single-quoted string one line at a time                | B1 integration     | ⬜ Open               |
 | N21 | The semgrep QA gate passes when a rule times out                                                          | 00414 agent        | 🔄 In progress        |
 | N22 | `lsp_enforcement` takes another command's argument for a grep symbol lookup                               | Coordinator        | ⬜ Open               |
