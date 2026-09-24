@@ -567,10 +567,6 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - git_hooks_executable_fixer — auto-fixes non-executable git hooks
 
-<!-- handler: markdown-table-formatter -->
-
-- markdown_table_formatter — markdown tables are auto-aligned
-
 <!-- handler: merge-qa-report -->
 
 - merge_qa_report — post-hoc plan/docs QA report after a merge
@@ -578,6 +574,14 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 <!-- handler: model-downgrade-recorder -->
 
 - model_downgrade_recorder — the automatic model downgrade is written down
+
+<!-- handler: markdown-table-formatter -->
+
+- markdown_table_formatter — markdown tables are auto-aligned
+
+<!-- handler: background-process-tracker -->
+
+- background_process_tracker — backgrounded processes are tracked
 
 <!-- handler: budget-exhaustion-detector -->
 
@@ -590,10 +594,6 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 <!-- handler: goal-injection -->
 
 - goal_injection — plan-start goal signal for the ccy supervisor
-
-<!-- handler: background-process-tracker -->
-
-- background_process_tracker — backgrounded processes are tracked
 
 <!-- handler: recovery-cron-advisor -->
 
@@ -615,10 +615,6 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - git_upstream_checker — additive fetch + pull/cleanup advice on session start
 
-<!-- handler: hook-registration-checker -->
-
-- hook_registration_checker — hooks configuration policy
-
 <!-- handler: plan-qa-sweep -->
 
 - plan_qa_sweep — plan-tree drift report at session start
@@ -627,13 +623,25 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - plan_workflow_asset_checker — plan tooling provisioning alert
 
+<!-- handler: reference-repo-sweep -->
+
+- reference_repo_sweep — reference clones are made fresh before you read them
+
+<!-- handler: tool-disable-advisor -->
+
+- tool_disable_advisor — declared never-want tools are checked at session start
+
 <!-- handler: project-handler-load-checker -->
 
 - project_handler_load_checker — project protection degraded alert
 
-<!-- handler: reference-repo-sweep -->
+<!-- handler: hook-registration-checker -->
 
-- reference_repo_sweep — reference clones are made fresh before you read them
+- hook_registration_checker — hooks configuration policy
+
+<!-- handler: session-actions-directive -->
+
+- session_actions_directive — the must-do list is delivered as a turn
 
 <!-- handler: routine-qa-sweep -->
 
@@ -643,21 +651,13 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - secret_file_hygiene_checker -- on-disk hygiene for protected paths
 
-<!-- handler: session-actions-directive -->
+<!-- handler: failsafe-cron-session-advisor -->
 
-- session_actions_directive — the must-do list is delivered as a turn
-
-<!-- handler: tool-disable-advisor -->
-
-- tool_disable_advisor — declared never-want tools are checked at session start
+- failsafe_cron_session_advisor — the failsafe cron from session start
 
 <!-- handler: model-fallback-detector -->
 
 - model_fallback_detector — silent model substitution is surfaced
-
-<!-- handler: failsafe-cron-session-advisor -->
-
-- failsafe_cron_session_advisor — the failsafe cron from session start
 
 <!-- handler: persistent-cron-assertor -->
 
