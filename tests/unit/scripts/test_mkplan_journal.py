@@ -310,6 +310,26 @@ class TestAppendOnly:
         content = next(journal_dir.glob("00042-Journal-*.md")).read_text()
         assert content.count("Append-only activity log") == 1
 
+    def test_a_day_file_it_creates_holds_only_the_entry_it_was_asked_for(
+        self, plan_repo: Path
+    ) -> None:
+        """Plan 00461: the template's seeded `plan scaffolded` entry belongs to
+        plan CREATION. Copied into the day-file `--journal` opens on a later
+        day, it records an event that did not happen then, and every
+        multi-day plan gets one once `--journal` is the only way to append."""
+        _make_plan(plan_repo, "00042", "sample-plan")
+        body = _write_body(plan_repo, "The only entry today.\n")
+
+        result = _run(plan_repo, "--journal", "42", "finding", str(body))
+        assert result.returncode == 0, result.stderr
+
+        journal_dir = plan_repo / "CLAUDE" / "Plan" / "00042-sample-plan" / "JOURNAL"
+        content = next(journal_dir.glob("00042-Journal-*.md")).read_text()
+        headings = [match.group(3) for match in _ENTRY_HEADING.finditer(content)]
+        assert headings == ["finding"], content
+        assert "plan scaffolded" not in content
+        assert "Append-only activity log" in content
+
 
 class TestEntryShape:
     """The appended heading matches the grammar and honours --ref/--title."""
@@ -445,3 +465,33 @@ class TestUtcCrossZoneRegression:
             lower,
             upper,
         )
+
+
+_TEMPLATE_SCRIPT = (
+    _REPO_ROOT / "src" / "claude_code_hooks_daemon" / "install" / "templates" / "mkplan.bash"
+)
+
+
+class TestHelpDocumentsJournalMode:
+    """Plan 00461: an agent that checks the usage must find `--journal`.
+
+    Journal entries are only accepted through this mode, so the usage an
+    agent reaches for first cannot leave it out. Both the deployed copy and the
+    template every client receives are checked.
+    """
+
+    @pytest.mark.parametrize("script", [_SCRIPT, _TEMPLATE_SCRIPT], ids=["deployed", "template"])
+    def test_help_names_the_journal_mode_and_its_arguments(self, script: Path) -> None:
+        result = subprocess.run(
+            ["bash", str(script), "--help"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_SHELL_TIMEOUT,
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert "--journal <plan-number> <category> <body-file>" in result.stderr
+        assert "UTC" in result.stderr
+        for category in ("action", "finding", "decision", "thought", "blocker", "handoff"):
+            assert category in result.stderr

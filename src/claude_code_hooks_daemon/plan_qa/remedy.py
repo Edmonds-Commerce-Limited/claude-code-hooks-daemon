@@ -53,7 +53,8 @@ REMEDIES: Final[tuple[Remedy, ...]] = (
         verb="RELOCATE",
         detail=(
             "dated narrative — progress notes, incident write-ups, "
-            "hand-off prose — into this plan's JOURNAL/ day-file, which is "
+            "hand-off prose — into this plan's JOURNAL/, appended with "
+            "`mkplan.bash --journal` (never typed into a day-file), which is "
             "append-only and unbounded by design"
         ),
     ),
