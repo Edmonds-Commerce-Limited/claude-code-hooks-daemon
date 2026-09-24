@@ -1596,6 +1596,13 @@ would introduce:
   GitHub comment is more public than a commit and cannot be retracted by a
   history rewrite. `gh api` and a body piped on stdin are not covered.
 
+**Faithful vendored copies.** Public patterns do not judge the body of a
+remote-docs capture whose body still matches its recorded `source_sha256`:
+upstream's bytes cannot carry your material. A copy edited after capture is
+scanned normally, and the secret word list always applies. The same rule
+governs `Write`, `git commit` and the whole-tree QA check; see
+[CLAUDE/RemoteDocs.md](../../CLAUDE/RemoteDocs.md#sensitive-content-and-vendored-copies).
+
 **Options:**
 
 | Option                  | Type         | Default                      | Description                                                                                                                 |

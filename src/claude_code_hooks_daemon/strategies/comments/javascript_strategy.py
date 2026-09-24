@@ -9,10 +9,10 @@ from claude_code_hooks_daemon.strategies.comments.syntax import (
     SLASH_DOC_SYNTAX,
     CommentSyntax,
 )
-from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
 _LANGUAGE_NAME = "JavaScript/TypeScript"
-#: Acceptance-test fixture directory, below the sanctioned scratch root.
+#: Acceptance-test fixture directory, below the gitignored acceptance root.
 _FIXTURE_DIR = "acceptance-test-comment-changelog-js"
 _EXTENSIONS: tuple[str, ...] = (".js", ".jsx", ".ts", ".tsx")
 
@@ -47,11 +47,11 @@ class JavaScriptCommentStrategy:
             ToolPayload,
         )
 
-        fixture_root = scratch_path(_FIXTURE_DIR)
+        fixture_root = acceptance_path(_FIXTURE_DIR)
         probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": scratch_path(_FIXTURE_DIR, "example.ts"),
+                "file_path": acceptance_path(_FIXTURE_DIR, "example.ts"),
                 "content": (
                     'const VERSION = "1.4.3"; // Prior 1.4.2: fixed a race. Prior '
                     "1.4.1: original broken behaviour.\n"
@@ -71,7 +71,7 @@ class JavaScriptCommentStrategy:
                 expected_decision=Decision.DENY,
                 expected_message_patterns=["changelog", "comment", "BLOCKED"],
                 safety_notes=(
-                    "Inside the gitignored scratch directory - safe. Handler "
+                    "Inside the gitignored acceptance directory - safe. Handler "
                     "blocks Write before file is created."
                 ),
                 test_type=TestType.BLOCKING,

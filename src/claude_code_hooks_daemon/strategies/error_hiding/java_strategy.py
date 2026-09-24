@@ -3,10 +3,10 @@
 from typing import Any
 
 from claude_code_hooks_daemon.strategies.error_hiding.protocol import ErrorHidingPattern
-from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
 _LANGUAGE_NAME = "Java"
-#: Acceptance-test fixture directory, below the sanctioned scratch root.
+#: Acceptance-test fixture directory, below the gitignored acceptance root.
 _FIXTURE_DIR = "acceptance-test-error-hiding-java"
 _EXTENSIONS: tuple[str, ...] = (".java",)
 
@@ -46,7 +46,7 @@ class JavaErrorHidingStrategy:
             ToolPayload,
         )
 
-        fixture_root = scratch_path(_FIXTURE_DIR)
+        fixture_root = acceptance_path(_FIXTURE_DIR)
 
         # Stated once; the prose is rendered from it (Plan 00345 Phase 2).
         # A WRITE payload, not Bash: these read as `Write(...)` call syntax,
@@ -56,14 +56,14 @@ class JavaErrorHidingStrategy:
         bad_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": scratch_path(_FIXTURE_DIR, "Bad.java"),
+                "file_path": acceptance_path(_FIXTURE_DIR, "Bad.java"),
                 "content": "class Bad { void m() { try { } catch (Exception e) {} } }",
             },
         )
         good_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": scratch_path(_FIXTURE_DIR, "Good.java"),
+                "file_path": acceptance_path(_FIXTURE_DIR, "Good.java"),
                 "content": (
                     "class Good { void m() { try { } "
                     "catch (Exception e) { log.error(e.getMessage()); throw e; } } }"
@@ -82,7 +82,7 @@ class JavaErrorHidingStrategy:
                     r"BLOCKED \[R-ERROR-HIDING\]",
                     r"empty catch block",
                 ],
-                safety_notes="Inside the gitignored scratch directory - safe",
+                safety_notes="Inside the gitignored acceptance directory - safe",
                 test_type=TestType.BLOCKING,
                 setup_commands=[f"mkdir -p {fixture_root}"],
                 cleanup_commands=[f"rm -rf {fixture_root}"],
@@ -96,7 +96,7 @@ class JavaErrorHidingStrategy:
                 description=("Allows Java file with proper catch handling via Write tool"),
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
-                safety_notes="Inside the gitignored scratch directory - safe",
+                safety_notes="Inside the gitignored acceptance directory - safe",
                 test_type=TestType.ADVISORY,
                 setup_commands=[f"mkdir -p {fixture_root}"],
                 cleanup_commands=[f"rm -rf {fixture_root}"],

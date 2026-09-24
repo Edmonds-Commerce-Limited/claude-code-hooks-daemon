@@ -3,10 +3,10 @@
 from typing import Any
 
 from claude_code_hooks_daemon.strategies.error_hiding.protocol import ErrorHidingPattern
-from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
 _LANGUAGE_NAME = "Shell"
-#: Acceptance-test fixture directory, below the sanctioned scratch root.
+#: Acceptance-test fixture directory, below the gitignored acceptance root.
 _FIXTURE_DIR = "acceptance-test-error-hiding-shell"
 _EXTENSIONS: tuple[str, ...] = (".sh", ".bash")
 
@@ -76,7 +76,7 @@ class ShellErrorHidingStrategy:
             ToolPayload,
         )
 
-        fixture_root = scratch_path(_FIXTURE_DIR)
+        fixture_root = acceptance_path(_FIXTURE_DIR)
 
         # Stated once; the prose is rendered from it (Plan 00345 Phase 2).
         # These were `Write(...)` CALL SYNTAX, a sixth grammar the Plan 00243
@@ -89,14 +89,14 @@ class ShellErrorHidingStrategy:
         bad_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": scratch_path(_FIXTURE_DIR, "bad.sh"),
+                "file_path": acceptance_path(_FIXTURE_DIR, "bad.sh"),
                 "content": "#!/bin/bash\nsome_command || true\n",
             },
         )
         good_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": scratch_path(_FIXTURE_DIR, "good.sh"),
+                "file_path": acceptance_path(_FIXTURE_DIR, "good.sh"),
                 "content": "#!/bin/bash\nset -euo pipefail\ncmd || { echo failed >&2; exit 1; }\n",
             },
         )
@@ -114,7 +114,7 @@ class ShellErrorHidingStrategy:
                     r"BLOCKED \[R-ERROR-HIDING\]",
                     r"\|\| true",
                 ],
-                safety_notes="Inside the gitignored scratch directory - safe",
+                safety_notes="Inside the gitignored acceptance directory - safe",
                 test_type=TestType.BLOCKING,
                 setup_commands=[f"mkdir -p {fixture_root}"],
                 cleanup_commands=[f"rm -rf {fixture_root}"],
@@ -128,7 +128,7 @@ class ShellErrorHidingStrategy:
                 description=("Allows shell script with proper error handling via Write tool"),
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
-                safety_notes="Inside the gitignored scratch directory - safe",
+                safety_notes="Inside the gitignored acceptance directory - safe",
                 test_type=TestType.ADVISORY,
                 setup_commands=[f"mkdir -p {fixture_root}"],
                 cleanup_commands=[f"rm -rf {fixture_root}"],
