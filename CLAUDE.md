@@ -631,10 +631,6 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - reference_repo_sweep — reference clones are made fresh before you read them
 
-<!-- handler: secret-file-hygiene-checker -->
-
-- secret_file_hygiene_checker -- on-disk hygiene for protected paths
-
 <!-- handler: tool-disable-advisor -->
 
 - tool_disable_advisor — declared never-want tools are checked at session start
@@ -654,6 +650,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 <!-- handler: routine-qa-sweep -->
 
 - routine_qa_sweep — recurring work that has stopped recurring
+
+<!-- handler: secret-file-hygiene-checker -->
+
+- secret_file_hygiene_checker -- on-disk hygiene for protected paths
 
 <!-- handler: idle-housekeeping-advisory -->
 

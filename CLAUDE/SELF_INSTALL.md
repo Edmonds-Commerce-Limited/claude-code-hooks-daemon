@@ -22,6 +22,7 @@ When `self_install_mode: true` in `.claude/hooks-daemon.yaml`, the daemon runs f
 /workspace/
 ├── untracked/venv-{slug}-py{MM}-{fingerprint}/  # Virtual environment (see "Venv layout" below)
 ├── untracked/venv/              # Legacy (pre-v3.7.0) — auto-deleted on upgrade
+├── untracked/lsp-venv            # Symlink to the venv above, for pyrightconfig.json (see CLAUDE/development/LSP.md)
 ├── untracked/daemon-{host}.sock # Unix socket (hostname-scoped)
 ├── untracked/daemon-{host}.pid  # PID file (hostname-scoped)
 ├── src/claude_code_hooks_daemon/  # Source code (not pip package)
@@ -60,11 +61,25 @@ the interpreter via `scripts/lib/resolve_venv.sh` (see "Daemon CLI" below). A
 hand-made `untracked/venv/` is the retired pre-v3.7.0 layout: `resolve_venv.sh`
 refuses it and every wrapper call exits 5.
 
+A separate `untracked/lsp-venv` symlink to this directory exists purely for
+`pyrightconfig.json`, which can only name a venv by a stable path, not a
+fingerprint-keyed one; it is created and repointed by the daemon itself
+(`ProjectContext`, not `resolve_venv.sh`) — see
+[development/LSP.md](development/LSP.md).
+
 ### Why the venv is fingerprint-keyed (v3.7.0+)
 
 Pre-v3.7.0 all installs shared a single `untracked/venv/`. That corrupts when the same project directory is opened in two different Python environments — e.g. inside a YOLO container (Fedora `/usr/bin/python3`) **and** directly on the desktop host (pyenv, homebrew, distro, or different arch).
 
-v3.7.0 introduced the fingerprint suffix; v3.19.1 added the project-path slug. The daemon auto-detects stamp mismatches and rebuilds on first use in a new environment. CI sets `HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP=1` (or relies on `CI=true`) to bypass bootstrap.
+v3.7.0 introduced the fingerprint suffix; v3.19.1 added the project-path slug. CI sets `HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP=1` (or relies on `CI=true`) to bypass AUTOMATIC bootstrap: `ensure_venv` skips, and the hook path reports "switched off" naming the setting. An explicit `bin/hooks-daemon repair` is a deliberate request and builds regardless (it says it is overriding the setting).
+
+What rebuilds a venv, and when:
+
+- **A venv that is MISSING for this project path is built on first use, from the hook path.** The usual case is the second view (host vs container) of a bind-mounted project, which shares the clone but not its per-path venv. The first hook that finds a real clone with a readable version and no venv for its path runs the clone's `scripts/venv_bootstrap.sh`. That script checks five conditions without a venv: `uv` on PATH (or in `~/.local/bin`), a parseable `pyproject.toml`, a `uv.lock`, a Python meeting `requires-python`, and a writable `untracked/`. If all five hold, it starts ONE detached `ensure_venv` build under the venv build lock, and the hook returns at once with the build's log path (`untracked/.venv-bootstrap-<fingerprint>.log`). Hooks time out at 60s and a `uv sync` can take longer, which is why the build is detached. Concurrent hooks start no second build. The next hook after the build finishes starts the daemon. If a condition does not hold, nothing is changed, and the hook message names each failed condition with its fix.
+- **The detached build is bounded and findable, on every platform.** The build runs as its own process group, watched by a watchdog in the build process itself (no `timeout` command needed, so stock macOS is bounded too). `HOOKS_DAEMON_VENV_BUILD_TIMEOUT` seconds (900) after the hook started it, the watchdog tells the build process. The build process then sends the group TERM, and KILL 30s later, and only that is recorded as "timed out". Only the build process signals the group, and only while its own job table shows that job still running. So a group id freed and reused by another process is never signalled. If the build process itself is KILLed, the watchdog exits within a second and signals nothing. Any other stop (a shutdown, someone ending the pid) records no failure, so the next hook retries, and no stop counts as a failure when the venv resolves anyway. While it runs, `untracked/.venv-bootstrap.current` records its log, start time, bound and pid, and the hook message shows the pid and how long it has run. `repair`, the skill's in-place repair and an upgrade that find the lock held by that build wait out the build's own bound, not the generic 120s lock wait. Without `flock`, the lock is a directory whose holder refreshes its age every `HOOKS_DAEMON_VENV_LOCK_HEARTBEAT_SECONDS` (60), so a long build is never mistaken for a dead one (600s), and a holder only ever removes a lock whose `pid` is its own. The age is measured against a probe file the reader touches beside the lock, never against the reader's own clock. A host and a container or VM sharing the directory can run clocks minutes apart, and on a share whose server applies the timestamps, both stamps come from one clock. The skill's aside directories are judged the same way. Only a holder that keeps the lock runs a heartbeat (a hook that takes the lock just to read the failed marker does not), and stopping a heartbeat also stops its `sleep`.
+- **A failed automatic build is not retried on every hook.** It leaves `untracked/.venv-bootstrap-<fingerprint>.failed`, judged under the build lock so a hook racing the failure cannot retry it. Hooks report "the last build failed" with the log, and retry only after `pyproject.toml`, `uv.lock`, the interpreter or the uv binary (its path, size or mtime, so `uv self update` counts) changes. `bin/hooks-daemon repair` retries at once, in the foreground: it builds the venv even when none exists, then runs the normal repair with the same uv the build used (`~/.local/bin` included).
+- **A venv that exists but is stale** (its `lock_hash` no longer matches `pyproject.toml` + `uv.lock`) is rebuilt by `ensure_venv` on install, upgrade and `repair`, not by a hook. A stale venv still resolves, so the daemon still starts from it.
+- **The automatic build and `repair` never touch another environment's venv.** A version-CHANGING upgrade is different: it deliberately removes every other `venv-*` (Plan 00100's eager cleanup), and each other environment's next hook then builds its own again. `HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP=1` or `CI=true` switches the automatic build off. The hook message then names the setting and `repair`, which builds regardless.
 
 Manage venvs with:
 

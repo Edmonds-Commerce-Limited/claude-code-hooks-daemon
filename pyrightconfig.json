@@ -1,6 +1,6 @@
 {
   "venvPath": "untracked",
-  "venv": "venv",
+  "venv": "lsp-venv",
   "extraPaths": ["src", "scripts/qa"],
   "exclude": [
     "untracked",

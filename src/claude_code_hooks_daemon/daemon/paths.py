@@ -686,6 +686,28 @@ def _load_toml_or_raise(path: Path) -> dict[str, Any]:
         raise _TomlParseError(str(exc)) from exc
 
 
+_UV_BINARY_NAME = "uv"
+# Where uv's own installer puts it; relative to $HOME.
+_UV_DEFAULT_HOME = Path(".local") / "bin"
+
+
+def find_uv() -> str | None:
+    """Return the ``uv`` every venv builder uses, or ``None`` when there is none.
+
+    ``scripts/install/venv.sh`` puts ``$HOME/.local/bin`` at the FRONT of PATH
+    before any build, because uv's installer puts uv there and only edits shell
+    rc files, so a non-login shell (a container's tool shell, GitHub issue #53)
+    has it off PATH. Every Python-side check and spawn goes through here, so it
+    sees the uv the bash build does (Plan 00456 review B2).
+    """
+    home = os.environ.get("HOME")
+    if home:
+        candidate = Path(home) / _UV_DEFAULT_HOME / _UV_BINARY_NAME
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return shutil.which(_UV_BINARY_NAME)
+
+
 def can_inline_bootstrap(daemon_dir: Path) -> BootstrapDecision:
     """Decide whether the daemon may bootstrap its own venv in-place.
 
@@ -700,9 +722,9 @@ def can_inline_bootstrap(daemon_dir: Path) -> BootstrapDecision:
     missing: list[str] = []
     reasons: list[str] = []
 
-    if shutil.which("uv") is None:
+    if find_uv() is None:
         missing.append(_BOOTSTRAP_MISSING_UV)
-        reasons.append("uv not resolvable on PATH")
+        reasons.append("uv not resolvable on PATH or in ~/.local/bin")
 
     pyproject_path = daemon_dir / _PYPROJECT_FILENAME
     pyproject_data: dict[str, Any] | None = None
@@ -766,6 +788,113 @@ def can_inline_bootstrap(daemon_dir: Path) -> BootstrapDecision:
         missing=missing,
         reason="; ".join(reasons),
     )
+
+
+# Plan 00456 Task 1.3: one fix per failed precondition, rendered into init.sh's
+# venv-missing message. None of them may point at install or --force: this
+# state has a real clone in it, and a forced reinstall deletes it.
+_BOOTSTRAP_REMEDIATION_TEMPLATES: dict[str, str] = {
+    _BOOTSTRAP_MISSING_UV: (
+        "install uv (https://docs.astral.sh/uv/getting-started/installation/) so that "
+        "`uv` is on PATH; ~/.local/bin, uv's default home, is searched as well"
+    ),
+    _BOOTSTRAP_MISSING_PYPROJECT: (
+        "{daemon_dir}/pyproject.toml is missing or does not parse, so the clone's "
+        "tracked files are incomplete; a same-version upgrade restores them"
+    ),
+    _BOOTSTRAP_MISSING_UV_LOCK: (
+        "{daemon_dir}/uv.lock is missing, so the clone's tracked files are "
+        "incomplete; a same-version upgrade restores them"
+    ),
+    _BOOTSTRAP_MISSING_PYTHON: (
+        "put a Python {floor}+ interpreter on PATH (as python3.NN), or set "
+        "HOOKS_DAEMON_PYTHON to the absolute path of one"
+    ),
+    _BOOTSTRAP_MISSING_UNTRACKED_WRITABLE: (
+        "make {daemon_dir}/{untracked} writable by this user (check its owner "
+        "with `ls -ld`); the venv is built inside it"
+    ),
+}
+
+
+def bootstrap_remediation(missing_id: str, daemon_dir: Path) -> str:
+    """Return the one-line fix for a :class:`BootstrapDecision` missing-id.
+
+    Raises:
+        ValueError: ``missing_id`` is not one :func:`can_inline_bootstrap` emits.
+    """
+    template = _BOOTSTRAP_REMEDIATION_TEMPLATES.get(missing_id)
+    if template is None:
+        raise ValueError(f"unknown bootstrap precondition id: {missing_id}")
+    floor = _read_requires_python_floor(daemon_dir / _PYPROJECT_FILENAME) or _MIN_COMPATIBLE_PYTHON
+    return template.format(
+        daemon_dir=daemon_dir,
+        untracked=_UNTRACKED_SUBDIR_NAME,
+        floor=f"{floor[0]}.{floor[1]}",
+    )
+
+
+def bootstrap_inputs_signature(daemon_dir: Path) -> str:
+    """Fingerprint of everything an automatic venv build depends on.
+
+    A failed build records this beside its log, and the hook path retries only
+    once it differs (Plan 00456): the dependency pins (``pyproject.toml`` +
+    ``uv.lock``, via the resolver's own lock hash), the interpreter running
+    this check, and the ``uv`` that would do the build: its path, and its size
+    and mtime, so an in-place ``uv self update`` counts too (review S1). An
+    environmental failure that changes none of them waits for an explicit
+    ``repair``.
+    """
+    lock_hash = _compute_project_lock_hash_stdlib(daemon_dir) or "no-pyproject"
+    material = f"{lock_hash}|{Path(sys.executable).resolve()}|{_uv_identity()}"
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()[:16]
+
+
+def _uv_identity() -> str:
+    """``find_uv``'s path plus its size and mtime, for the inputs signature."""
+    uv_path = find_uv()
+    if uv_path is None:
+        return "no-uv"
+    try:
+        stat = Path(uv_path).resolve().stat()
+    except OSError as exc:
+        # Present but unreadable: the path alone still identifies it, and the
+        # errno is part of the identity so a later fix changes the signature.
+        return f"{uv_path}:unreadable:{exc.errno}"
+    return f"{uv_path}:{stat.st_size}:{stat.st_mtime_ns}"
+
+
+def _one_line(text: str) -> str:
+    """Collapse ``text`` onto one line for the ``key=value`` protocol."""
+    return " ".join(text.split())
+
+
+def _cli_bootstrap_decision(args: argparse.Namespace) -> int:
+    """CLI handler for the ``bootstrap-decision`` subcommand (Plan 00456).
+
+    Run BY FILE PATH under a stdlib interpreter by ``scripts/venv_bootstrap.sh``
+    when no venv resolves, so it must never import the package. Prints
+    ``key=value`` lines: ``allowed``, one ``missing`` and one ``fix`` per failed
+    precondition, ``reason``, and the ``python``/``fingerprint``/``inputs``
+    that key the build this gate would allow. Exit 0 either way; the decision
+    is data. Exit 2 when the daemon dir does not exist.
+    """
+    daemon_dir = Path(args.daemon_dir)
+    if not daemon_dir.is_dir():
+        print(f"bootstrap-decision: daemon dir does not exist: {daemon_dir}", file=sys.stderr)
+        return 2
+
+    decision = can_inline_bootstrap(daemon_dir)
+    print(f"allowed={'true' if decision.allowed else 'false'}")
+    for missing_id in decision.missing:
+        print(f"missing={missing_id}")
+    for missing_id in decision.missing:
+        print(f"fix={missing_id}: {_one_line(bootstrap_remediation(missing_id, daemon_dir))}")
+    print(f"reason={_one_line(decision.reason)}")
+    print(f"python={sys.executable}")
+    print(f"fingerprint={python_venv_fingerprint(daemon_dir)}")
+    print(f"inputs={bootstrap_inputs_signature(daemon_dir)}")
+    return 0
 
 
 def get_venv_path(project_dir: Path | str) -> Path:
@@ -2201,6 +2330,7 @@ def main(argv: list[str] | None = None) -> int:
 
     - ``resolve-venv`` (Plan 00100 Phase 2) — SSOT venv resolver
     - ``check-venv-fresh`` (Plan 00100 Task 3.7) — lock_hash freshness gate
+    - ``bootstrap-decision`` (Plan 00456) — the venv-less auto-build gate
     """
     parser = argparse.ArgumentParser(
         description="Hooks-daemon path utilities (SSOT for bash wrappers).",
@@ -2251,6 +2381,20 @@ def main(argv: list[str] | None = None) -> int:
         help="Daemon installation directory (defaults to CWD).",
     )
     check_fresh_parser.set_defaults(func=_cli_check_venv_fresh)
+
+    bootstrap_parser = subparsers.add_parser(
+        "bootstrap-decision",
+        help=(
+            "Report whether a missing venv may be built automatically (the five "
+            "can_inline_bootstrap preconditions), as key=value lines."
+        ),
+    )
+    bootstrap_parser.add_argument(
+        "--daemon-dir",
+        required=True,
+        help="Daemon installation directory whose untracked/ would hold the venv.",
+    )
+    bootstrap_parser.set_defaults(func=_cli_bootstrap_decision)
 
     args = parser.parse_args(argv)
     return int(args.func(args))

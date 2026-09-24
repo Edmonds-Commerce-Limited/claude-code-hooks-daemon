@@ -45,8 +45,10 @@ from claude_code_hooks_daemon.strategies.comments.registry import (
 )
 from claude_code_hooks_daemon.utils.path_exclusion import (
     handler_excludes_path,
+    resolve_project_root,
     vendored_exclude_globs,
 )
+from claude_code_hooks_daemon.utils.path_segments import matches_path_segment
 from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 
 if TYPE_CHECKING:
@@ -313,7 +315,12 @@ class CommentChangelogHandler(PreToolUseHandlerBase):
         if strategy is None:
             return False
 
-        if any(skip_dir in file_path for skip_dir in strategy.skip_directories):
+        # Segment-bounded against the project-relative path (Plan 00458 /
+        # 00422 N20): a bare substring test also matched a worktree merely
+        # named "...-venv/", silently standing this guard down.
+        if matches_path_segment(
+            file_path, strategy.skip_directories, project_root=resolve_project_root()
+        ):
             return False
         if self._is_excluded(file_path):
             return False

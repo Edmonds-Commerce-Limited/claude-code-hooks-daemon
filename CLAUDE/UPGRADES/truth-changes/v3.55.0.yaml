@@ -31,6 +31,7 @@ truth_changes:
       (`handlers.pre_tool_use.github_auto_close_keywords.options.mode: warn`).
       An agent should not hunt for a way around the block; ask the user.
   - topic: blocking-handlers
+    id: protected-file-contents
     was: >
       When `sensitive_content` denied a write with "entry N of M in the
       secret word list", the documented remediation was to OPEN the secret

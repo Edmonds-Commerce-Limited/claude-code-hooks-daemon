@@ -3,6 +3,18 @@
   "description": "Intentional error-handling patterns exempt from the error-hiding audit. Prefer 'function' over 'lines': line numbers shift whenever anything above them is edited, function names do not. 'lines' remains necessary for module-level sites and shell scripts, where there is no enclosing function to key on. Each entry documents WHY the pattern is appropriate. Entries are themselves audited: an exclusion matching NO finding is reported as a 'stale-exclusion' violation, because it means either the entry drifted off its target (realign it) or the code was fixed (delete it) — and a drifted entry silently exempts an innocent site while the real finding resurfaces elsewhere looking new.",
   "exclusions": [
     {
+      "file": "utils/encrypted_at_rest.py",
+      "function": "_read_bounded",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00459: this detector RELAXES secret_file_guard, so every failure must mean 'not confirmed encrypted', which keeps the file protected. An unreadable, vanished or raced file (OSError) returns None and the caller answers AtRestFormat.NONE: the guard then denies exactly as it did before the plan. Raising would propagate out of a PreToolUse security handler and risk failing it OPEN. Logged at debug with the exception class name only, never the path's content. Covered by test_unreadable_file, test_missing_file, test_dangling_symlink and test_file_swapped_between_lstat_and_open."
+    },
+    {
+      "file": "utils/secret_file_matching.py",
+      "function": "_shell_words",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00459: shlex raises ValueError on unbalanced quoting. The shell's own reading of such a command is unknown, so the encrypted-target exemption must not apply; None makes is_encrypted_target_invocation answer False and the ordinary deny-by-default mention rule decides, exactly as before the plan. Raising would abort the guard's dispatch on arbitrary Bash text and fail it open. Covered by test_unparseable_quoting."
+    },
+    {
       "file": "utils/deployed_version.py",
       "function": "read_tracked_deployed_version",
       "rule": "return-none-on-error",
@@ -121,6 +133,12 @@
       "function": "_ensure_self_install_cli_symlink",
       "rule": "log-and-continue",
       "reason": "Plan 00455: creating the conventional .claude/hooks-daemon/bin/hooks-daemon symlink for a self-install checkout is a best-effort convenience, not a precondition for the daemon to serve hooks -- ProjectContext.initialize() must still complete (and the daemon must still start) if the filesystem refuses the symlink (permissions, an unsupported filesystem). The OSError is caught narrowly (not a bare except) and logged at WARNING with the path and the underlying error, so the degraded state is visible rather than concealed."
+    },
+    {
+      "file": "core/project_context.py",
+      "function": "_ensure_self_install_lsp_venv_symlink",
+      "rule": "log-and-continue",
+      "reason": "Ledger 00422 N18: maintaining the untracked/lsp-venv symlink that gives pyrightconfig.json a stable path to the current venv is a best-effort convenience for LSP diagnostics, not a precondition for the daemon to serve hooks -- ProjectContext.initialize() must still complete if the filesystem refuses the symlink (permissions, an unsupported filesystem, a concurrent repoint). The OSError is caught narrowly (not a bare except) and logged at WARNING with the path and the underlying error, so the degraded state is visible rather than concealed."
     },
     {
       "file": "core/pseudo_event.py",

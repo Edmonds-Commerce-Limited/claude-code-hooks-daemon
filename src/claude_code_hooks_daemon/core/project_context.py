@@ -17,7 +17,9 @@ Usage:
 """
 
 import logging
+import os
 import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar
@@ -64,6 +66,71 @@ def _ensure_self_install_cli_symlink(project_root: Path) -> None:
     except OSError as exc:
         logger.warning(
             "ProjectContext: could not create conventional CLI symlink at %s: %s",
+            link_path,
+            exc,
+        )
+
+
+def _ensure_self_install_lsp_venv_symlink(project_root: Path) -> None:
+    """Keep ``untracked/lsp-venv`` pointed at the venv this daemon runs from.
+
+    ``pyrightconfig.json`` can only name a venv through a stable
+    ``venvPath`` + ``venv`` pair, not the fingerprint-keyed directory name
+    that changes across upgrades (``untracked/venv-<fingerprint>/``) -- so
+    the language server needs a stable path to resolve through. This link is
+    that path (``CLAUDE/development/LSP.md``). It is derived from the
+    interpreter the daemon is actually running under (``sys.prefix``), and
+    only touched when that interpreter's venv lives directly under this
+    project's own ``untracked/`` -- a daemon whose venv resolved somewhere
+    else (an unrelated interpreter, a misconfigured environment) leaves the
+    link alone rather than pointing it somewhere misleading.
+
+    Unlike ``_ensure_self_install_cli_symlink``, an existing symlink here IS
+    repointed when it is stale: the fingerprint-keyed target changes on every
+    upgrade, and a link stuck on a deleted venv is worse than no link. The
+    repoint is atomic (temp symlink + ``Path.replace``) so nothing reading the
+    link mid-repoint can ever see a half-written path. A path that exists but
+    is NOT a symlink (a real file or directory placed there deliberately) is
+    left untouched, matching the sibling function's defensive contract. A
+    failure to create or repoint it is logged, not raised: the daemon must
+    still start without a working language-server venv link.
+
+    Args:
+        project_root: The self-install checkout's own root (== the project).
+    """
+    venv_dir = Path(sys.prefix).resolve()
+    untracked_dir = (project_root / "untracked").resolve()
+    if venv_dir.parent != untracked_dir:
+        logger.debug(
+            "ProjectContext: sys.prefix %s is not a direct child of %s; "
+            "skipping lsp-venv symlink",
+            venv_dir,
+            untracked_dir,
+        )
+        return
+
+    link_path = project_root / "untracked" / "lsp-venv"
+    target = Path(venv_dir.name)
+
+    try:
+        if link_path.is_symlink():
+            if link_path.readlink() == target:
+                return
+            tmp_path = link_path.with_name(f"{link_path.name}.tmp-{os.getpid()}")
+            if tmp_path.is_symlink() or tmp_path.exists():
+                tmp_path.unlink()
+            tmp_path.symlink_to(target)
+            tmp_path.replace(link_path)
+            return
+
+        if link_path.exists():
+            return
+
+        link_path.parent.mkdir(parents=True, exist_ok=True)
+        link_path.symlink_to(target)
+    except OSError as exc:
+        logger.warning(
+            "ProjectContext: could not create/repoint lsp-venv symlink at %s: %s",
             link_path,
             exc,
         )
@@ -180,6 +247,7 @@ class ProjectContext:
                 "ProjectContext: Self-install mode detected (daemon source at project root)"
             )
             _ensure_self_install_cli_symlink(project_root)
+            _ensure_self_install_lsp_venv_symlink(project_root)
         else:
             logger.info("ProjectContext: Normal install mode (daemon in .claude/hooks-daemon/)")
 

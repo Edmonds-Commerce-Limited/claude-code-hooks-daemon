@@ -22,6 +22,9 @@ from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.pre_tool_use.comment_changelog import (
     CommentChangelogHandler,
 )
+from claude_code_hooks_daemon.strategies.comments.common import (
+    DEFAULT_SKIP_DIRECTORIES,
+)
 
 # Build the version-transition arrow dynamically so this test file's own
 # source never contains a literal '->' immediately next to two dotted
@@ -108,6 +111,36 @@ class TestMatchesGating:
         hook_input = _make_write_input("/workspace/vendor/lib.py", content)
         assert handler.matches(hook_input) is False
 
+    def test_does_not_ignore_a_directory_merely_ending_in_vendor(self) -> None:
+        """A directory merely ending in "vendor/" is not a skip match
+        (Plan 00458 / 00422 N20). Built from parts so this test file's OWN
+        source text never contains a literal changelog-narrative comment."""
+        handler = CommentChangelogHandler()
+        content = "# " + "Prior" + " 1.0.0: fixed. " + "Prior" + " 0.9.0: original.\n"
+        hook_input = _make_write_input("/workspace/myvendor/lib.py", content)
+        assert handler.matches(hook_input) is True
+
+    def test_does_not_ignore_a_worktree_named_with_a_venv_suffix(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """00422 N20's reproduction, for CommentChangelogHandler."""
+        from pathlib import Path
+
+        from claude_code_hooks_daemon.core import project_context as pc
+
+        root = "/workspace/untracked/worktrees/worktree-issue-53-venv"
+        monkeypatch.setattr(pc.ProjectContext, "_initialized", True, raising=False)
+        monkeypatch.setattr(
+            pc.ProjectContext, "project_root", classmethod(lambda cls: Path(root)), raising=False
+        )
+
+        handler = CommentChangelogHandler()
+        content = "# " + "Prior" + " 1.0.0: fixed. " + "Prior" + " 0.9.0: original.\n"
+        hook_input = _make_write_input(
+            f"{root}/untracked/scratch/acceptance-test-qa-python/sample.py", content
+        )
+        assert handler.matches(hook_input) is True
+
     def test_ignores_third_party_dir_with_no_exclude_paths_configured(self) -> None:
         """third_party/ is part of the canonical vendored core (Task 3.2) but
         was NOT already covered by the per-language strategy's own
@@ -144,6 +177,31 @@ class TestMatchesGating:
             new_string="x = 1  # a clean comment now\n",
             old_string="x = 1  # Prior 1.2.0: fixed the timing bug\n",
         )
+        assert handler.matches(hook_input) is False
+
+
+class TestCommentChangelogEverySkipListEntry:
+    """Every entry of the shared comment-strategy skip list, not just venv/ --
+    per review feedback on Plan 00458: the bare substring bug applied
+    identically to build/, dist/, vendor/, node_modules/ and migrations/, and
+    a fix proven against one entry does not prove it against the others."""
+
+    @pytest.mark.parametrize("entry", DEFAULT_SKIP_DIRECTORIES)
+    def test_a_directory_merely_ending_in_the_entry_is_not_skipped(self, entry: str) -> None:
+        handler = CommentChangelogHandler()
+        content = "# " + "Prior" + " 1.0.0: fixed. " + "Prior" + " 0.9.0: original.\n"
+        # "x" prefixed directly onto the entry: the whole entry string is
+        # still present as a substring, but its start is preceded by "x",
+        # not "/" -- the exact boundary a bare `in` test cannot see.
+        collision_dir = f"x{entry}".rstrip("/")
+        hook_input = _make_write_input(f"/workspace/{collision_dir}/lib.py", content)
+        assert handler.matches(hook_input) is True
+
+    @pytest.mark.parametrize("entry", DEFAULT_SKIP_DIRECTORIES)
+    def test_the_entry_directly_under_the_project_root_is_still_skipped(self, entry: str) -> None:
+        handler = CommentChangelogHandler()
+        content = "# " + "Prior" + " 1.0.0: fixed. " + "Prior" + " 0.9.0: original.\n"
+        hook_input = _make_write_input(f"/workspace/{entry}lib.py", content)
         assert handler.matches(hook_input) is False
 
 

@@ -1707,6 +1707,17 @@ hint, and a keyed HMAC digest — never content), and allowlisted consumers
 with the path in flag position (`ansible-playbook --vault-password-file …`;
 `ansible-vault view|decrypt` stay denied — those subcommands print secrets).
 
+**A file encrypted at rest is not protected** (Plan 00459). The globs pick
+by name, so an encrypted vars file such as `group_vars/all/vault_passwords.yml`
+matches `*vault_pass*`. When a protected file's content is a whole-file
+Ansible Vault payload, checked on every call with no cache, it can be read,
+grepped and edited, and named in ONE plain Bash command: `git add|commit|status|mv|rm`, `cat`, `ls`, `cp`, `mv` and a few others. The
+command can have no `&&`/`;`/`|`, no `$`/glob/`~`, and every protected path
+in it must be encrypted. Commands that could decrypt it (`ansible*`, `git diff|log|show`) stay denied, and so does authoring a script that names it.
+Decrypted in place, the file is fully protected again. YAML with only
+inline `!vault` values and SOPS files stay protected. The full rules are in
+the handler's guidance (`bin/hooks-daemon explain-handler secret_file_guard`).
+
 **No agent escape hatch** (same doctrine as `artifact_publish_blocker`): a
 human edits this config block to lift protection. Honest limits: this is
 defence in depth over an OS boundary the project must set independently.
@@ -3361,7 +3372,7 @@ handlers:
 | **Type**       | Advisory                      |
 | **Event**      | SessionStart                  |
 
-**Description:** Session-start half of the on-disk hygiene the `secret-meta` CLI already reports on demand for one path at a time (Plan 00272 Task 6.1). For every configured protected path (the effective `secret_file_guard` globs) that EXISTS on disk, advises — never blocks — when it is not gitignored, is git-tracked, or is group/world-readable. Uses `os.walk`, `git check-ignore`/`git ls-files` and `stat()` only; the file's contents are never opened.
+**Description:** Session-start half of the on-disk hygiene the `secret-meta` CLI already reports on demand for one path at a time (Plan 00272 Task 6.1). For every configured protected path (the effective `secret_file_guard` globs) that EXISTS on disk, advises — never blocks — when it is not gitignored, is git-tracked, or is group/world-readable. A file whose content is a whole-file Ansible Vault payload is ciphertext that is meant to be committed, so it gets none of that advice, and the advisory stays silent when nothing else is wrong (Plan 00459). Ciphertext that is untracked or gitignored, which is where the old advice left some projects, is told to come back: remove the ignore rule or add `!/<path>` after it, then `git add <path>`. `gitignore_safety_checker` applies the same rule to `.gitignore` lines: when it advises a protected glob, a `!/<path>` negation follows it for every existing encrypted file it would catch, and it reports encrypted files a present rule already ignores. A YAML file with inline `!vault` values gets a conditional statement in place of the untrack advice. Files are found with `git ls-files` and judged with `stat()` plus that one format check, which runs inside the daemon and returns only a format name, so content never reaches the advisory.
 
 **Options:** none.
 

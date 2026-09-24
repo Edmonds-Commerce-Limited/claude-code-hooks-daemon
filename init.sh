@@ -62,6 +62,19 @@ _HOOKS_DAEMON_REPO_UNCONFIGURED=false
 _HOOKS_DAEMON_VENV_MISSING=false
 _HOOKS_DAEMON_VENV_MISSING_VERSION=""
 
+# Set by _venv_self_heal (Plan 00456) when VENV_MISSING found a real clone
+# with a readable version: what the clone's scripts/venv_bootstrap.sh did
+# about it. STATE is one of started|running|failed|refused|disabled|error, or
+# empty when no attempt was made (a damaged clone, or a clone too old to ship
+# the driver), in which case the 00454 message stands unchanged.
+_HOOKS_DAEMON_BOOTSTRAP_STATE=""
+_HOOKS_DAEMON_BOOTSTRAP_LOG=""
+_HOOKS_DAEMON_BOOTSTRAP_MISSING=""
+_HOOKS_DAEMON_BOOTSTRAP_FIXES=""
+_HOOKS_DAEMON_BOOTSTRAP_DETAIL=""
+_HOOKS_DAEMON_BOOTSTRAP_PID=""
+_HOOKS_DAEMON_BOOTSTRAP_ELAPSED=""
+
 #
 # emit_hook_error() - Output a valid hook error response to stdout
 #
@@ -100,6 +113,8 @@ emit_hook_error() {
 
     # Build error context message based on CI enforcement policy
     local context_msg
+    # The Stop-family block reason for VENV_MISSING, shared by both encoders.
+    local venv_block_reason=""
 
     if [[ "$_HOOKS_DAEMON_CI_ENFORCED" == "true" ]]; then
         # CI ENFORCED: Loud STOP message — project requires daemon via ci_enabled: true
@@ -154,19 +169,25 @@ emit_hook_error() {
         # The standard NOT_INSTALLED message below is the wrong answer: its
         # remedy is the install skill, and when the health probe it runs
         # cannot pass — which it cannot, since the wrong venv (or none) is in
-        # this directory — the skill escalates to `--force` on its own, whose
-        # `rm -rf` deletes $HOOKS_DAEMON_ROOT_DIR outright. That destroys
-        # whatever venv IS in there, which most often belongs to a second
-        # view of the same bind-mounted project (host vs container) sharing
-        # this clone but not its per-path venv. So this branch says outright
-        # not to install, same reasoning as REPO_UNCONFIGURED and
-        # VERSION_MISMATCH above: when the usual advice cannot succeed safely,
-        # say so rather than offering it anyway.
+        # this directory — a skill older than Plan 00456 escalates to
+        # `--force` on its own, whose `rm -rf` deletes $HOOKS_DAEMON_ROOT_DIR
+        # outright. That destroys whatever venv IS in there, which most often
+        # belongs to a second view of the same bind-mounted project (host vs
+        # container) sharing this clone but not its per-path venv. So this
+        # branch says outright not to install, same reasoning as
+        # REPO_UNCONFIGURED and VERSION_MISMATCH above: when the usual advice
+        # cannot succeed safely, say so rather than offering it anyway.
         #
-        # The safe fix is a same-version upgrade: scripts/upgrade_version.sh's
+        # Plan 00456: a real clone with a readable version now heals itself —
+        # _venv_self_heal started (or reported) a background build, and what
+        # it did replaces the remedy below. Every remedy it can print names
+        # `repair` or waiting, never install or --force.
+        #
+        # The manual fix is a same-version upgrade: scripts/upgrade_version.sh's
         # idempotent path starts with ensure_venv (Plan 00099/00104) and
         # deletes nothing. Pinning it to the clone's OWN version (read by
         # _clone_version, which needs no working venv) keeps it on that path.
+        local _hd_repair_cmd="$HOOKS_DAEMON_ROOT_DIR/bin/hooks-daemon repair"
         local _hd_venv_missing_remedy
         if [[ -n "$_HOOKS_DAEMON_VENV_MISSING_VERSION" ]]; then
             _hd_venv_missing_remedy="TO FIX — build the missing venv with a same-version upgrade:
@@ -181,6 +202,60 @@ $HOOKS_DAEMON_ROOT_DIR directly, or remove it and reinstall only once you are
 certain no other environment's venv lives there."
         fi
 
+        local _hd_venv_state_note=""
+        case "$_HOOKS_DAEMON_BOOTSTRAP_STATE" in
+            started)
+                _hd_venv_missing_remedy="A BUILD HAS STARTED — nothing to do but wait.
+The missing venv is being built in the background for this project path only,
+under the venv build lock. Other environments' venvs are not touched.
+Build log: $_HOOKS_DAEMON_BOOTSTRAP_LOG
+When it finishes, the next hook starts the daemon on its own."
+                _hd_venv_state_note=" - a venv build is running in the background"
+                ;;
+            running)
+                local _hd_build_who=""
+                if [[ -n "$_HOOKS_DAEMON_BOOTSTRAP_PID" ]]; then
+                    _hd_build_who="
+Build process: pid $_HOOKS_DAEMON_BOOTSTRAP_PID, running for ${_HOOKS_DAEMON_BOOTSTRAP_ELAPSED:-?}s (in the environment that started it)."
+                fi
+                _hd_venv_missing_remedy="A venv build is ALREADY RUNNING under this clone — nothing to do but wait.
+Build log: ${_HOOKS_DAEMON_BOOTSTRAP_LOG:-not recorded here (another process, such as an upgrade or a repair, holds the venv build lock)}${_hd_build_who}
+When it finishes, the next hook starts the daemon, or starts this path's own
+build if the one running belonged to another environment. A background build
+is stopped and reported as failed if it outlives its bound."
+                _hd_venv_state_note=" - a venv build is running in the background"
+                ;;
+            failed)
+                _hd_venv_missing_remedy="THE LAST AUTOMATIC BUILD OF THIS VENV FAILED. Its log says why:
+  $_HOOKS_DAEMON_BOOTSTRAP_LOG
+Hooks do not retry it until pyproject.toml, uv.lock, the Python interpreter or
+the uv binary changes. Once the cause is fixed, retry in the foreground (it
+shows the output):
+  $_hd_repair_cmd"
+                _hd_venv_state_note=" - the automatic venv build failed"
+                ;;
+            refused)
+                _hd_venv_missing_remedy="The venv was NOT built automatically, because these conditions for a safe
+automatic build do not hold here (nothing was changed):
+${_HOOKS_DAEMON_BOOTSTRAP_FIXES}Fix them and the next hook builds the venv on its own, or build it now with:
+  $_hd_repair_cmd"
+                _hd_venv_state_note=" - automatic venv build refused ($_HOOKS_DAEMON_BOOTSTRAP_MISSING)"
+                ;;
+            disabled)
+                _hd_venv_missing_remedy="Automatic venv builds are switched off here (${_HOOKS_DAEMON_BOOTSTRAP_DETAIL:-HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP=1}).
+That setting stops hooks building a venv on their own; an explicit repair still
+builds one. To build it now:
+  $_hd_repair_cmd"
+                _hd_venv_state_note=" - automatic venv builds switched off (${_HOOKS_DAEMON_BOOTSTRAP_DETAIL:-HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP=1})"
+                ;;
+            error)
+                _hd_venv_missing_remedy="The automatic build could not be evaluated: $_HOOKS_DAEMON_BOOTSTRAP_DETAIL
+To build it now: $_hd_repair_cmd
+$_hd_venv_missing_remedy"
+                ;;
+        esac
+        venv_block_reason="Hooks daemon clone present but venv missing for this project path ($_hooks_daemon_checkout)${_hd_venv_state_note} - do not install/force, see additionalContext - protection not active"
+
         context_msg=$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s' \
             "HOOKS DAEMON: clone present, venv missing for this project path" \
             "" \
@@ -193,10 +268,10 @@ certain no other environment's venv lives there."
             "" \
             "ALL safety handlers, code quality checks, and workflow enforcement are INACTIVE." \
             "" \
-            "Do NOT use install/force here — it deletes the ENTIRE daemon directory
-($HOOKS_DAEMON_ROOT_DIR) with rm -rf, including any other environment's venv
-that lives inside it. The install skill escalates to --force automatically
-when its health probe fails, which it will here.
+            "Do NOT use install/force here — a forced reinstall deletes the ENTIRE daemon
+directory ($HOOKS_DAEMON_ROOT_DIR) with rm -rf and re-clones it, which this
+state does not need, and an install skill older than this clone deletes any
+other environment's venv inside it too.
 
 $_hd_venv_missing_remedy")
     elif [[ "$_HOOKS_DAEMON_NOT_INSTALLED" == "true" ]]; then
@@ -314,8 +389,7 @@ $_hd_venv_missing_remedy")
             # reader who sees "venv" here knows install would be the wrong
             # fix, where a bare "not installed" would point them at it.
             if [[ "$event_name" == "Stop" || "$event_name" == "SubagentStop" ]]; then
-                jq -n --arg reason \
-                    "Hooks daemon clone present but venv missing for this project path ($_hooks_daemon_checkout) - do not install/force, see additionalContext - protection not active" \
+                jq -n --arg reason "$venv_block_reason" \
                     '{"decision": "block", "reason": $reason}'
             else
                 jq -n --arg event "$event_name" --arg context "$context_msg" \
@@ -357,7 +431,7 @@ $_hd_venv_missing_remedy")
 import json
 import sys
 
-event_name, context_msg, ci_enforced, not_installed, checkout, venv_missing = sys.argv[1:7]
+event_name, context_msg, ci_enforced, not_installed, checkout, venv_missing, venv_block_reason = sys.argv[1:8]
 stop_events = ("Stop", "SubagentStop")
 
 if not event_name:
@@ -377,15 +451,9 @@ elif venv_missing == "true":
     # Clone present, venv missing for this path: same reasoning as the jq
     # branch above -- the block reason must not read as plain NOT_INSTALLED,
     # since the remedy that answer names (install/force) is destructive here.
+    # The shell composed the reason once, so both encoders say the same.
     if event_name in stop_events:
-        resp = {
-            "decision": "block",
-            "reason": (
-                f"Hooks daemon clone present but venv missing for this project path "
-                f"({checkout}) - do not install/force, see additionalContext - "
-                f"protection not active"
-            ),
-        }
+        resp = {"decision": "block", "reason": venv_block_reason}
     else:
         resp = {"hookSpecificOutput": {"hookEventName": event_name, "additionalContext": context_msg}}
 elif not_installed == "true":
@@ -404,7 +472,7 @@ else:
 
 print(json.dumps(resp))
 ' "$event_name" "$context_msg" "$_HOOKS_DAEMON_CI_ENFORCED" "$_HOOKS_DAEMON_NOT_INSTALLED" \
-            "$_hooks_daemon_checkout" "$_HOOKS_DAEMON_VENV_MISSING"
+            "$_hooks_daemon_checkout" "$_HOOKS_DAEMON_VENV_MISSING" "$venv_block_reason"
     fi
 }
 
@@ -1038,6 +1106,52 @@ _clone_version() {
 }
 
 #
+# _venv_self_heal() - Have the clone build this path's missing venv (Plan 00456).
+#
+# Called ONLY from ensure_daemon's VENV_MISSING diagnosis, for a real clone
+# with a readable version, so the healthy path never pays for it. The work is
+# the clone's own scripts/venv_bootstrap.sh `hook`: this file is a per-project
+# COPY and the clone is what builds. That driver checks the five
+# can_inline_bootstrap preconditions without a venv. When they hold, it starts
+# one DETACHED build under the venv build lock and returns at once: hooks time
+# out at 60s, and a uv sync can take longer. When they do not hold, it
+# changes nothing and names each failed condition with its fix.
+#
+# A clone too old to ship the driver leaves the state empty, and the Plan
+# 00454 message stands. Sets the _HOOKS_DAEMON_BOOTSTRAP_* globals. Returns 0.
+#
+_venv_self_heal() {
+    local driver="$HOOKS_DAEMON_ROOT_DIR/scripts/venv_bootstrap.sh"
+    [[ -f "$driver" ]] || return 0
+
+    # stdout is the driver's key=value protocol; its stderr is left on this
+    # hook's stderr, where Claude Code's debug log keeps it.
+    local output rc=0
+    output="$(bash "$driver" hook "$HOOKS_DAEMON_ROOT_DIR")" || rc=$?
+    if [[ "$rc" -ne 0 ]]; then
+        _HOOKS_DAEMON_BOOTSTRAP_STATE="error"
+        _HOOKS_DAEMON_BOOTSTRAP_DETAIL="$driver exited $rc (its output is on the hook's stderr)"
+        return 0
+    fi
+
+    local key value
+    while IFS='=' read -r key value; do
+        case "$key" in
+            state) _HOOKS_DAEMON_BOOTSTRAP_STATE="$value" ;;
+            log) _HOOKS_DAEMON_BOOTSTRAP_LOG="$value" ;;
+            missing)
+                _HOOKS_DAEMON_BOOTSTRAP_MISSING="${_HOOKS_DAEMON_BOOTSTRAP_MISSING:+$_HOOKS_DAEMON_BOOTSTRAP_MISSING, }$value"
+                ;;
+            fix) _HOOKS_DAEMON_BOOTSTRAP_FIXES="$_HOOKS_DAEMON_BOOTSTRAP_FIXES  - $value"$'\n' ;;
+            detail) _HOOKS_DAEMON_BOOTSTRAP_DETAIL="$value" ;;
+            pid) _HOOKS_DAEMON_BOOTSTRAP_PID="$value" ;;
+            elapsed) _HOOKS_DAEMON_BOOTSTRAP_ELAPSED="$value" ;;
+        esac
+    done <<< "$output"
+    return 0
+}
+
+#
 # _tracked_deployed_version() - Version the project's TRACKED assets came from
 #
 # .claude/HOOKS-DAEMON.md is a tracked deployed asset regenerated by
@@ -1288,6 +1402,11 @@ ensure_daemon() {
     #     and guessing which half to trust is the mistake this branch exists
     #     to avoid — so the version stays empty and the message says the
     #     clone looks damaged rather than naming an upgrade target.
+    #
+    # Plan 00456: only the trusted case — a real clone whose version reads —
+    # tries to heal itself (_venv_self_heal). A damaged clone or a lone
+    # leftover venv never gets an automatic build, for the same reason it
+    # never gets a version-pinned upgrade.
     if _detect_stale_clone; then
         _HOOKS_DAEMON_VERSION_MISMATCH=true
     elif ! _is_daemon_installed; then
@@ -1295,6 +1414,9 @@ ensure_daemon() {
             _HOOKS_DAEMON_VENV_MISSING=true
             if ! _HOOKS_DAEMON_VENV_MISSING_VERSION="$(_clone_version)"; then
                 _HOOKS_DAEMON_VENV_MISSING_VERSION=""
+            fi
+            if [[ -n "$_HOOKS_DAEMON_VENV_MISSING_VERSION" ]]; then
+                _venv_self_heal
             fi
         elif _daemon_orphan_venv_present; then
             _HOOKS_DAEMON_VENV_MISSING=true
