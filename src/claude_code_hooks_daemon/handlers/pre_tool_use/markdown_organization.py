@@ -29,7 +29,7 @@ from claude_code_hooks_daemon.handlers.utils.plan_numbering import (
     next_plan_number_for_target,
     record_plan_allocation,
 )
-from claude_code_hooks_daemon.utils.claude_config import claude_config_dir
+from claude_code_hooks_daemon.utils.claude_config import is_in_claude_config_dir
 from claude_code_hooks_daemon.utils.path_predicates import path_is_file
 from claude_code_hooks_daemon.utils.scratch_dir import project_dir_path
 
@@ -1143,18 +1143,11 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
     def _is_in_claude_config_dir(self, file_path: str) -> bool:
         """Is the target inside Claude Code's config dir, by either spelling?
 
-        Both the path as written and its resolved form are compared, so a
-        home symlinked into the project (ccy) is recognised whichever way the
-        write names it. A config dir that contains the project would exempt
-        the whole project, so it exempts nothing.
+        See :func:`is_in_claude_config_dir`: a config dir that contains the
+        project exempts nothing.
         """
-        config = self._config_dir if self._config_dir is not None else claude_config_dir()
-        resolved_config = config.resolve()
-        if self._workspace_root.resolve().is_relative_to(resolved_config):
-            return False
-        candidate = self._candidate_on_disk(file_path)
-        return candidate.is_relative_to(config) or candidate.resolve().is_relative_to(
-            resolved_config
+        return is_in_claude_config_dir(
+            self._candidate_on_disk(file_path), self._workspace_root, config_dir=self._config_dir
         )
 
     def _is_plugin_component(self, file_path: str) -> bool:

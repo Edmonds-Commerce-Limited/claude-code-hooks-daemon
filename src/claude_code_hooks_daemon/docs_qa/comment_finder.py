@@ -20,6 +20,7 @@ from typing import Final
 
 from claude_code_hooks_daemon.strategies.comments.extractor import extract_comment_spans
 from claude_code_hooks_daemon.strategies.comments.registry import CommentStrategyRegistry
+from claude_code_hooks_daemon.utils.claude_config import claude_config_dir, is_in_claude_config_dir
 from claude_code_hooks_daemon.utils.git_repo import (
     GitRepo,
     git_visible_paths,
@@ -93,8 +94,13 @@ def _iter_dir_files_git_filtered(directory: Path) -> list[Path]:
     repo = GitRepo.resolve_for(directory)
     root = repo.root if repo is not None else directory
     git_visible = git_visible_paths(repo.root) if repo is not None else None
+    config_dir = claude_config_dir()
     visible: list[Path] = []
     for candidate in candidates:
+        # Claude Code's own files in the project (Plan 00468 P3): the config
+        # dir may be tracked, or the tree not a repository at all.
+        if is_in_claude_config_dir(candidate, root, config_dir=config_dir):
+            continue
         try:
             rel = candidate.relative_to(root).as_posix()
         except ValueError:

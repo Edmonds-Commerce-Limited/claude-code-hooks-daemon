@@ -87,6 +87,33 @@ def config_dir_within(project_root: Path, *, config_dir: Path | None = None) -> 
     return resolved_dir.relative_to(resolved_root).as_posix()
 
 
+def is_in_claude_config_dir(
+    path: Path, project_root: Path, *, config_dir: Path | None = None
+) -> bool:
+    """Whether ``path`` lies in Claude Code's config dir, by either spelling.
+
+    The path as written and its resolved form are both compared against the
+    config dir as written and resolved, so a home symlinked into the project
+    (ccy) is recognised whichever way round the link runs. A config dir that
+    contains ``project_root`` would claim every project file, so it claims
+    none.
+
+    Args:
+        path: The file or directory to test.
+        project_root: The project being walked or judged.
+        config_dir: Defaults to :func:`claude_config_dir`.
+    """
+    directory = config_dir if config_dir is not None else claude_config_dir()
+    homes = {directory, directory.resolve()}
+    if any(
+        root.is_relative_to(home)
+        for root in {project_root, project_root.resolve()}
+        for home in homes
+    ):
+        return False
+    return any(form.is_relative_to(home) for form in {path, path.resolve()} for home in homes)
+
+
 def session_config_dir(transcript_path: object) -> Path | None:
     """The calling session's config dir, read from its transcript path.
 

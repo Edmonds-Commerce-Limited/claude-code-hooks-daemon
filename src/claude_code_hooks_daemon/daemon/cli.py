@@ -97,6 +97,7 @@ from claude_code_hooks_daemon.install.install_stamp import read_install_stamp
 from claude_code_hooks_daemon.install.release_notes import load_release_notes_between
 from claude_code_hooks_daemon.issue_report.build import build_report
 from claude_code_hooks_daemon.issue_report.upstream import filing_command
+from claude_code_hooks_daemon.utils.claude_config import claude_config_dir, is_in_claude_config_dir
 from claude_code_hooks_daemon.utils.claude_plugins import resolve_enabled_plugins
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
 from claude_code_hooks_daemon.utils.git_repo import (
@@ -5451,10 +5452,14 @@ def _iter_markdown_candidates(
       -- even when ``project_root`` is not a git repository and the filter
       above is inert, so ``format-markdown`` never rewrites (or reports a
       would-reformat finding for) a protected file's content.
+    - Claude Code's config dir, when it sits in the project, is pruned
+      (Plan 00468 P3): it may be tracked, or the project may not be a git
+      repository, so git visibility alone does not keep it out.
     """
     from claude_code_hooks_daemon.utils.path_exclusion import is_path_excluded
 
     project_root_str = str(project_root)
+    config_dir = claude_config_dir()
     git_visible = git_visible_paths(project_root)
     descend_roots = None if git_visible is None else git_visible_ancestor_dirs(git_visible)
     for dirpath, dirnames, filenames in os.walk(root):
@@ -5463,6 +5468,8 @@ def _iter_markdown_candidates(
         for name in sorted(dirnames):
             child = current / name
             if _is_nested_git_repo_root(child):
+                continue
+            if is_in_claude_config_dir(child, project_root, config_dir=config_dir):
                 continue
             if descend_roots is not None and not _rel_is_git_visible(
                 child, project_root, descend_roots
@@ -5480,6 +5487,8 @@ def _iter_markdown_candidates(
                 # this skips it rather than handing it to read_text() to fail.
                 continue
             if is_path_excluded(str(candidate), exclude_paths, project_root=project_root_str):
+                continue
+            if is_in_claude_config_dir(candidate, project_root, config_dir=config_dir):
                 continue
             if git_visible is not None and not _rel_is_git_visible(
                 candidate, project_root, git_visible
