@@ -10,6 +10,8 @@ position).
 import time
 from pathlib import Path
 
+import pytest
+
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 
 #: Wall-clock ceiling for the wide-range tests below. The rejected path does
@@ -740,6 +742,107 @@ class TestPythonDashCImportStatements:
         elsewhere in the command is still caught."""
         command = 'python -c "import id_rsa" && cat id_rsa'
         assert sfm.find_protected_mention(command, ("id_rsa",)) == "id_rsa"
+
+
+class TestBareHomePrefixTokenDoesNotCrash:
+    """N5 (Plan 00466), security fail-open: a token that is EXACTLY one of
+    ``_HOME_PREFIXES`` (the prefix with nothing following it, e.g. a quoted
+    Python string literal ``"~/"``) strips down to an EMPTY residual in
+    ``_normalised_token_forms`` -- ``token[len(prefix):]`` on a token equal to
+    the prefix is ``""``. That empty form then reached
+    ``path_matches_globs("", ...)`` with a real ``project_root``, which calls
+    ``os.path.relpath("", root)`` and raises ``ValueError: no path specified``
+    -- os.path.relpath rejects an empty PATH argument outright, regardless of
+    ``start``.
+
+    Reproduced live (00463's agent's transcript, replayed through the real
+    daemon by the coordinator): editing
+    ``subagent_full_qa_blocker.py`` to add
+    ``_HOME_PREFIXES: Final[tuple[str, ...]] = ("~/", "$HOME/", "${HOME}/",
+    "$PWD/", "${PWD}/")`` raised inside ``secret_file_guard``'s ``matches()``.
+    Because the exception happens in ``matches()``, not ``handle()``, the
+    daemon's non-strict per-handler catch (``core/chain.py``) logs it as
+    context and moves on -- which means THIS HANDLER, `secret_file_guard`,
+    is skipped for that write. That is a fail-OPEN on a security guard, not
+    mere noise: a write whose content also names a real protected path
+    would slip through unexamined. See
+    ``test_a_genuine_mention_alongside_the_crashing_token_is_still_denied``
+    below, which pins the fail-SAFE behaviour the fix must restore.
+
+    All tests here initialise ``ProjectContext`` (via ``monkeypatch``) so
+    ``resolve_project_root()`` returns a real root -- the crash needs a
+    non-``None`` ``project_root`` to reach ``os.path.relpath`` at all, which
+    an un-initialised unit-test process never supplies on its own.
+    """
+
+    PATTERNS = sfm.DEFAULT_PROTECTED_PATTERNS
+
+    @pytest.fixture(autouse=True)
+    def _project_root(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from claude_code_hooks_daemon.core import project_context as pc
+
+        monkeypatch.setattr(pc.ProjectContext, "_initialized", True, raising=False)
+        monkeypatch.setattr(
+            pc.ProjectContext, "project_root", classmethod(lambda cls: Path("/proj")), raising=False
+        )
+
+    def test_normalised_token_forms_never_yields_an_empty_string(self) -> None:
+        for prefix in sfm._HOME_PREFIXES:
+            assert "" not in sfm._normalised_token_forms(prefix), prefix
+
+    def test_each_bare_prefix_token_alone_does_not_raise(self) -> None:
+        for prefix in sfm._HOME_PREFIXES:
+            assert sfm.find_protected_mention_detail(prefix, self.PATTERNS) is None
+
+    def test_the_reported_tuple_literal_does_not_raise(self) -> None:
+        """The exact shape from the live transcript: a quoted string literal
+        equal to a home/pwd prefix, inside a Python tuple, as Write/Edit
+        CONTENT (the ``_script_content_mention`` route)."""
+        content = (
+            "_HOME_PREFIXES: Final[tuple[str, ...]] = "
+            '("~/", "$HOME/", "${HOME}/", "$PWD/", "${PWD}/")\n'
+        )
+        assert sfm.find_protected_mention_detail(content, self.PATTERNS) is None
+
+    def test_the_bare_expansion_marker_tuple_does_not_raise(self) -> None:
+        """The third live payload: single-character expansion markers,
+        individually quoted."""
+        content = '_UNSEEN_CD_PREFIXES: Final[tuple[str, ...]] = ("$", "~", "`")\n'
+        assert sfm.find_protected_mention_detail(content, self.PATTERNS) is None
+
+    def test_a_genuine_mention_alongside_the_crashing_token_is_still_denied(self) -> None:
+        """Fail-SAFE pin (team-lead item (c)): a content blob carrying BOTH a
+        home-prefix token AND a genuine protected-path mention must still
+        DENY. Before the fix, the crash on the home-prefix token happened
+        mid-scan and the real mention later in the same content was never
+        reached -- an exception is not a decision, and this handler's
+        contract has no silent-skip case."""
+        content = 'home = "~/"\nkey_path = "id_rsa"\n'
+        assert sfm.find_protected_mention_detail(content, self.PATTERNS) == ("id_rsa", "id_rsa")
+
+    def test_mention_scan_never_raises_over_a_corpus_of_path_operands(self) -> None:
+        """Class test (team-lead ask): the mention scan must be TOTAL over
+        every shell/Python path-expansion operand observed in the payloads
+        that triggered N5, alone and paired with ordinary code around them."""
+        operands = (
+            "~/",
+            "$HOME/",
+            "${HOME}/",
+            "$PWD/",
+            "${PWD}/",
+            "$PWD",
+            "${PWD}",
+            "$",
+            "~",
+            "`",
+            "./",
+            ".",
+            "..",
+        )
+        for operand in operands:
+            sfm.find_protected_mention_detail(operand, self.PATTERNS)
+            sfm.find_protected_mention_detail(f'x = "{operand}"\n', self.PATTERNS)
+            sfm.find_protected_mention_detail(f"path.startswith({operand!r})\n", self.PATTERNS)
 
 
 class TestTheImportExemptionCannotLaunderAMention:

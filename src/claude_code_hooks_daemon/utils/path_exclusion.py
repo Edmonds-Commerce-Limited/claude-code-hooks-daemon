@@ -116,8 +116,17 @@ def _candidate_paths(file_path: str, project_root: str | os.PathLike[str] | None
     Always includes the raw path with any leading slash stripped; also includes
     the project-relative path when ``project_root`` is given and the file lives
     under it (so leading-``/`` anchored patterns resolve against the root).
+
+    Total on an empty ``file_path`` (N5, Plan 00466): ``os.path.relpath``
+    rejects an empty PATH argument with ``ValueError: no path specified``,
+    regardless of ``start`` -- a caller that (however it happened) ends up
+    asking whether "" matches a glob gets the defined answer, an empty
+    candidate list that matches nothing, not an exception it must have
+    guarded against first.
     """
     raw = file_path.replace("\\", "/")
+    if not raw:
+        return [raw]
     candidates = [raw.lstrip("/")]
     if project_root is not None:
         root = str(project_root).replace("\\", "/")

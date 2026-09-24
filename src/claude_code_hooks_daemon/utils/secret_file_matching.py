@@ -366,10 +366,21 @@ def _without_import_module_paths(command: str) -> str:
 
 
 def _normalised_token_forms(token: str) -> list[str]:
-    """Spellings of a token to match against protected globs."""
+    """Spellings of a token to match against protected globs.
+
+    Never yields ``""`` (N5, Plan 00466): a token EQUAL to a home/pwd prefix
+    (``"~/"`` as a bare quoted Python string literal, observed live) strips
+    to an empty residual, and an empty form reaching
+    ``path_matches_globs`` with a real ``project_root`` used to raise --
+    ``os.path.relpath`` rejects an empty PATH argument outright. An empty
+    spelling can never usefully match a protected filename anyway (a bare
+    ``~/`` or ``$PWD/`` names a directory, not a specific file), so it is
+    dropped rather than "normalised" to an empty string -- the same guard
+    shape the ``./``-stripping branch immediately below already uses.
+    """
     forms = [token]
     for prefix in _HOME_PREFIXES:
-        if token.startswith(prefix):
+        if token.startswith(prefix) and len(token) > len(prefix):
             forms.append(token[len(prefix) :])
     stripped = token.lstrip("./")
     if stripped and stripped != token and token.startswith("./"):
