@@ -65,7 +65,8 @@
 #    own scripts/venv_bootstrap.sh builds the venv in the foreground, under the
 #    same lock as every other builder, and the normal Python repair then runs.
 #    With a venv present, `repair` is untouched. Plan 00431 is the precedent
-#    for moving a check ahead of venv resolution.
+#    for moving a check ahead of venv resolution. `_run_venv_free_verb` is the
+#    one place such verbs are listed, so `signal` (Plan 00457) is one more arm.
 
 set -euo pipefail
 
@@ -99,18 +100,33 @@ fi
 source "$RESOLVE_LIB"
 
 BOOTSTRAP="$DAEMON_DIR/scripts/venv_bootstrap.sh"
+
+# The verbs that run when NO venv resolves (design note 4), one case arm each.
+# An arm either makes a venv resolve, sets PYTHON and returns 0 so the normal
+# path below runs, or execs a venv-free implementation itself. Any other verb
+# returns 1 and gets the exit-5 refusal. A new venv-free verb is a new arm.
+_run_venv_free_verb() {
+    case "${1:-}" in
+        repair)
+            [ -f "$BOOTSTRAP" ] || return 1
+            echo "hooks-daemon repair: no venv resolves for this project path, so one is built first." >&2
+            if ! bash "$BOOTSTRAP" repair "$DAEMON_DIR"; then
+                echo "❌ hooks-daemon repair: the venv for this project path could not be built (see above)." >&2
+                exit 1
+            fi
+            if ! PYTHON="$(resolve_venv_python "$DAEMON_DIR")"; then
+                echo "❌ hooks-daemon repair: a venv was built but still does not resolve under $DAEMON_DIR" >&2
+                exit 1
+            fi
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
 if ! PYTHON="$(resolve_venv_python "$DAEMON_DIR")"; then
-    if [ "${1:-}" = "repair" ] && [ -f "$BOOTSTRAP" ]; then
-        echo "hooks-daemon repair: no venv resolves for this project path, so one is built first." >&2
-        if ! bash "$BOOTSTRAP" repair "$DAEMON_DIR"; then
-            echo "❌ hooks-daemon repair: the venv for this project path could not be built (see above)." >&2
-            exit 1
-        fi
-        if ! PYTHON="$(resolve_venv_python "$DAEMON_DIR")"; then
-            echo "❌ hooks-daemon repair: a venv was built but still does not resolve under $DAEMON_DIR" >&2
-            exit 1
-        fi
-    else
+    if ! _run_venv_free_verb "$@"; then
         echo "❌ hooks-daemon: could not resolve a usable venv under $DAEMON_DIR" >&2
         echo "   Build the venv for this project path: $BIN_DIR/hooks-daemon repair" >&2
         exit 5

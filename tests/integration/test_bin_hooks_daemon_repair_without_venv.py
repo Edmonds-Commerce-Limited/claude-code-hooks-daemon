@@ -16,6 +16,7 @@ exit 5, and now names ``repair`` as the fix.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -29,6 +30,25 @@ from tests.venv_bootstrap_sandbox import (
 
 #: bin/hooks-daemon's "no venv resolves" exit status.
 _NO_VENV_EXIT = 5
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
+#: The deployed wrapper and the template it is installed from (byte-identical).
+_WRAPPER_COPIES = (
+    _REPO_ROOT / "bin" / "hooks-daemon",
+    _REPO_ROOT / "src" / "claude_code_hooks_daemon" / "install" / "templates" / "hooks-daemon",
+)
+
+#: The one function that decides which verbs run with no venv.
+_DISPATCH_FUNCTION = "_run_venv_free_verb"
+
+
+def _function_body(script: str, name: str) -> str:
+    """Return the text of shell function ``name`` in ``script``, up to its closing brace."""
+    match = re.search(rf"^{name}\(\) \{{\n(.*?)^\}}$", script, re.MULTILINE | re.DOTALL)
+    if match is None:
+        raise AssertionError(f"shell function {name}() is not defined")
+    return match.group(1)
 
 
 @pytest.fixture
@@ -111,3 +131,28 @@ class TestOtherVerbsStillRefuse:
         sandbox.stub_uv()
         sandbox.wrapper("status")
         assert sandbox.uv_calls() == []
+
+
+class TestVenvFreeVerbsAreOneDispatch:
+    """The pre-resolution intercept is a dispatch table, not a ``repair`` special case.
+
+    ``signal`` (Plan 00457, #55) is the next verb that must run where no venv
+    resolves. It should be added as one more arm of the same dispatch, so the
+    wrapper must have exactly one place that decides which verbs run without a
+    venv, and the exit-5 refusal must be reached only through it.
+    """
+
+    @pytest.fixture(params=_WRAPPER_COPIES, ids=lambda path: path.parent.name)
+    def wrapper_text(self, request: pytest.FixtureRequest) -> str:
+        path: Path = request.param
+        return path.read_text()
+
+    def test_the_dispatch_is_one_function_with_a_case_arm_per_verb(self, wrapper_text: str) -> None:
+        body = _function_body(wrapper_text, _DISPATCH_FUNCTION)
+        assert re.search(r'^\s*case "\$\{1:-\}" in$', body, re.MULTILINE)
+        assert re.search(r"^\s*repair\)$", body, re.MULTILINE)
+        assert re.search(r"^\s*\*\)$", body, re.MULTILINE)
+
+    def test_the_refusal_is_reached_only_through_the_dispatch(self, wrapper_text: str) -> None:
+        assert f'if ! {_DISPATCH_FUNCTION} "$@"; then' in wrapper_text
+        assert '"${1:-}" = "repair"' not in wrapper_text
