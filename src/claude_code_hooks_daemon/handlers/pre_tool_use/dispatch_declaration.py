@@ -116,6 +116,11 @@ class DispatchDeclarationHandler(PreToolUseHandlerBase):
         # lookup (mirrors subagent_report_size_blocker's identically-named
         # attribute): production resolves lazily via resolve_lookup_root().
         self._project_root: Path | None = None
+        # Test-only override for resolve_agent_can_write's `home_dir` param
+        # (mirrors subagent_report_size_blocker's identically-named
+        # attribute, review finding m10): production leaves this None, which
+        # resolve_agent_can_write resolves lazily to the real Path.home().
+        self._home_dir: Path | None = None
 
     def _plan_dir(self) -> str:
         """Configured plan directory (facade, or the matching default).
@@ -203,21 +208,29 @@ class DispatchDeclarationHandler(PreToolUseHandlerBase):
             "tool call would get."
         )
 
-    def _read_only_dispatch_mismatch(self, hook_input: dict[str, Any], prompt: str) -> str | None:
+    def _read_only_dispatch_mismatch(
+        self, hook_input: dict[str, Any], has_destination: bool
+    ) -> str | None:
         """The Task 1.4 advisory text, or None when it does not apply.
 
-        Only fires when a report DESTINATION is declared — an undeclared
-        dispatch already gets the standard contract-injection advisory
-        (`_contract_text`), and does not additionally need this one.
+        Only fires when the prompt declares an explicit report DESTINATION
+        (``has_destination``, a caller-supplied ``_DESTINATION_PATTERN``
+        match) — review finding m4: gating this on ``_has_declaration``
+        over-fired, because that also matches a prompt that only mentions a
+        plan folder as CONTEXT (e.g. "This is Plan 00307 work ... Write your
+        findings there", naming no path directly), which commits the agent
+        to nothing a `Write`-less type could fail at. ``has_destination`` is
+        computed once by the caller (`handle`), not re-evaluated here, since
+        it is already known at the call site.
         """
-        if not self._has_declaration(prompt):
+        if not has_destination:
             return None
         tool_input = hook_input.get(HookInputField.TOOL_INPUT, {})
         subagent_type = tool_input.get("subagent_type") if isinstance(tool_input, dict) else None
         if not isinstance(subagent_type, str):
             return None
         root = resolve_lookup_root(self._project_root, getattr(self, "_workspace_root", None))
-        if resolve_agent_can_write(subagent_type, root) is False:
+        if resolve_agent_can_write(subagent_type, root, home_dir=self._home_dir) is False:
             return self._read_only_mismatch_text(subagent_type)
         return None
 
@@ -250,7 +263,8 @@ class DispatchDeclarationHandler(PreToolUseHandlerBase):
         prompt = tool_input.get("prompt", "") if isinstance(tool_input, dict) else ""
 
         if self._has_declaration(prompt):
-            mismatch = self._read_only_dispatch_mismatch(hook_input, prompt)
+            has_destination = bool(_DESTINATION_PATTERN.search(prompt))
+            mismatch = self._read_only_dispatch_mismatch(hook_input, has_destination)
             context = [mismatch] if mismatch is not None else []
             return GatingResult(decision=Decision.ALLOW, context=context)
 

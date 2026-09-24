@@ -42,16 +42,44 @@ _DECLARED_PROMPT = (
     "-report-handoff/. Write your findings there."
 )
 
+# Plan 00460 review finding m4: unlike `_DECLARED_PROMPT` above, this one also
+# matches `_DESTINATION_PATTERN` (a verb + to/in/under/into + a path-shaped
+# token) -- the read-only-mismatch advisory is scoped to an explicit report
+# DESTINATION, not to a bare plan-folder mention, so tests that exercise that
+# advisory need a prompt that actually declares one.
+_DECLARED_PROMPT_WITH_DESTINATION = (
+    "This is Plan 00307 work: /workspace/CLAUDE/Plan/00307-subagent-file-based"
+    "-report-handoff/. Write your report to CLAUDE/Plan/00307-subagent-file-based"
+    "-report-handoff/subagent-reports/output.md."
+)
+
 
 @pytest.fixture
-def handler() -> DispatchDeclarationHandler:
-    return DispatchDeclarationHandler()
+def handler(tmp_path: Any) -> DispatchDeclarationHandler:
+    """Plan 00460 review finding m10: root both the project- and user-agent
+    lookups (`resolve_agent_can_write`'s two bases) at fresh `tmp_path`
+    subdirectories by default, neither of which exists. Left unset, a test
+    that never sets `_project_root` resolves against the REAL checkout via
+    `resolve_lookup_root`'s cwd fallback, and `_home_dir` unset resolves
+    against the real `Path.home()` -- a real risk now that review finding M4
+    makes project/user agents consulted BEFORE the built-in table: this
+    repo's own real `.claude/agents/` (or a developer's real `~/.claude/
+    agents/`) could silently answer a lookup a test meant to be hermetic.
+    Individual tests that need a populated agents dir (e.g.
+    `test_project_agent_without_write_tool_is_advised`) override
+    `_project_root` explicitly."""
+    instance = DispatchDeclarationHandler()
+    instance._project_root = tmp_path / "project"
+    instance._home_dir = tmp_path / "home"
+    return instance
 
 
 @pytest.fixture
-def strict_handler() -> DispatchDeclarationHandler:
+def strict_handler(tmp_path: Any) -> DispatchDeclarationHandler:
     instance = DispatchDeclarationHandler()
     instance._strict = True
+    instance._project_root = tmp_path / "project"
+    instance._home_dir = tmp_path / "home"
     return instance
 
 
@@ -197,7 +225,7 @@ class TestReadOnlyDispatchAdvisory:
     def test_advises_when_read_only_type_dispatched_with_declaration(
         self, handler: DispatchDeclarationHandler
     ) -> None:
-        hook_input = _task_input(_DECLARED_PROMPT, subagent_type="Explore")
+        hook_input = _task_input(_DECLARED_PROMPT_WITH_DESTINATION, subagent_type="Explore")
 
         result = handler.handle(hook_input)
 
@@ -212,7 +240,7 @@ class TestReadOnlyDispatchAdvisory:
         """Plan 00460 Task 1.6: since the daemon now auto-saves every reply
         regardless of Write access, the mismatch advisory should say so
         rather than only suggesting a writable type or an inline summary."""
-        hook_input = _task_input(_DECLARED_PROMPT, subagent_type="Explore")
+        hook_input = _task_input(_DECLARED_PROMPT_WITH_DESTINATION, subagent_type="Explore")
 
         result = handler.handle(hook_input)
 
@@ -221,7 +249,7 @@ class TestReadOnlyDispatchAdvisory:
     def test_silent_when_writable_type_dispatched_with_declaration(
         self, handler: DispatchDeclarationHandler
     ) -> None:
-        hook_input = _task_input(_DECLARED_PROMPT, subagent_type="general-purpose")
+        hook_input = _task_input(_DECLARED_PROMPT_WITH_DESTINATION, subagent_type="general-purpose")
 
         result = handler.handle(hook_input)
 
@@ -230,7 +258,24 @@ class TestReadOnlyDispatchAdvisory:
 
     def test_silent_when_subagent_type_missing(self, handler: DispatchDeclarationHandler) -> None:
         """No `subagent_type` on the dispatch resolves unknown -- never guessed."""
-        result = handler.handle(_task_input(_DECLARED_PROMPT))
+        result = handler.handle(_task_input(_DECLARED_PROMPT_WITH_DESTINATION))
+
+        assert result.decision == Decision.ALLOW
+        assert result.context == []
+
+    def test_no_advisory_when_plan_folder_is_only_context(
+        self, handler: DispatchDeclarationHandler
+    ) -> None:
+        """Plan 00460 review finding m4: a bare plan-folder mention with no
+        explicit destination phrasing (`_DECLARED_PROMPT` says "Write your
+        findings there", naming no path directly) satisfies the standard
+        declaration (so the contract-injection advisory stays silent) but
+        must NOT additionally trigger the read-only-mismatch advisory --
+        that one is scoped to a prompt that actually names a report
+        destination, not to any prompt that merely cites a plan folder."""
+        hook_input = _task_input(_DECLARED_PROMPT, subagent_type="Explore")
+
+        result = handler.handle(hook_input)
 
         assert result.decision == Decision.ALLOW
         assert result.context == []
@@ -252,7 +297,7 @@ class TestReadOnlyDispatchAdvisory:
     def test_advisory_fires_even_in_strict_mode_and_never_denies(
         self, strict_handler: DispatchDeclarationHandler
     ) -> None:
-        hook_input = _task_input(_DECLARED_PROMPT, subagent_type="Explore")
+        hook_input = _task_input(_DECLARED_PROMPT_WITH_DESTINATION, subagent_type="Explore")
 
         result = strict_handler.handle(hook_input)
 
@@ -270,7 +315,7 @@ class TestReadOnlyDispatchAdvisory:
             "tools: Read, Glob, Grep, Bash\n---\n\nBody.\n"
         )
         handler._project_root = tmp_path
-        hook_input = _task_input(_DECLARED_PROMPT, subagent_type="code-reviewer")
+        hook_input = _task_input(_DECLARED_PROMPT_WITH_DESTINATION, subagent_type="code-reviewer")
 
         result = handler.handle(hook_input)
 
