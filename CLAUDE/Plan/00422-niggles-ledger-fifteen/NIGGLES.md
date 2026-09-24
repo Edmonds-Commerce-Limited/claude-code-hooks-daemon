@@ -1593,6 +1593,55 @@ That gap is real and is accepted, not overlooked: content quality is not
 checkable from here, and a guard that pretended otherwise would be the same
 false-assurance failure this ledger keeps recording.
 
+### N19 — the Python nested-install check can never fire in a real client
+
+**Found**: reviewing Plan 00455 (issue #54). Its implementation agent copied
+this check's exemption into `init.sh:445` "to mirror the Python side".
+Review caught that the exemption silences the check for every client, and
+the `init.sh` copy was reverted before merge.
+
+`daemon/validation.py` `check_for_nested_installation` (lines 273-281) looks
+for `<project>/.claude/hooks-daemon/.claude/hooks-daemon`. If it exists but
+the OUTER `.claude/hooks-daemon/` has a `pyproject.toml`, it returns `None`,
+treating the inner directory as "the repo's own dogfooding config
+directory, not a genuine nested installation".
+
+**Every real client clone has that `pyproject.toml`**, because the outer
+directory IS the cloned daemon. So in a real client the exemption always
+holds and the check never fires. Its rationale is also false: the daemon
+repo gitignores `.claude/hooks-daemon/` (`.claude/.gitignore:9`), so a
+client's clone never carries an inner one. The inner path appears only at
+runtime, when a daemon runs with its project root wrongly set to the clone.
+That is the exact pathology the function's own docstring says it detects
+("runtime files created when daemon used the wrong project root").
+
+**What still guards it.** `init.sh:445` fires unconditionally, on every
+hook, so a genuine nested install is still reported. The Python function is
+the one that never fires. When the exemption does NOT hold, it also deletes
+the inner tree with `shutil.rmtree`, so whichever way this is fixed, the
+destructive branch needs care.
+
+**Traced: the exemption silenced the symptom it was reported against.** It
+arrived in `6c747b7a0` ("Prevent false positive nested installation
+detection for hooks-daemon repo"). That commit says the repo, installed at
+`.claude/hooks-daemon/`, "has its own .claude/hooks-daemon/ subdirectory
+(for self-dogfooding)". But `git log --all -- '.claude/hooks-daemon/*'` is
+empty: nothing has EVER been tracked there. So the inner directory in that
+report was created at runtime, which is the wrong-root pathology itself,
+and the "false positive" was a true positive, explained away.
+
+**Candidate remedies:**
+
+1. Key the exemption on something only the dogfood case has, or delete it,
+   with tests for a real outer clone plus inner path (must fire) and for the
+   self-install repo (must not).
+2. Leave it and document that `init.sh` is the live guard. Cheapest, but it
+   keeps a function whose docstring promises detection it cannot deliver.
+
+Deduped: the only related entries are this ledger's N5 rows on install
+validation (closed) and Plan 00455, which found it and deliberately did not
+widen its scope.
+
 ### N18 — LSP.md relies on an `untracked/venv` symlink that nothing creates and the code calls legacy
 
 **Found**: chasing a Pyright `Import "pytest" could not be resolved` on a new
