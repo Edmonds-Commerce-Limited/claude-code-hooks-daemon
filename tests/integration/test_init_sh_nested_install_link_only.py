@@ -1,22 +1,28 @@
-"""`init.sh`'s nested-installation check, robust to a link-only inner dir (Plan 00455).
+"""`init.sh`'s nested-installation check still fires with the generated link (Plan 00455).
 
 `init.sh` refuses to run when `.claude/hooks-daemon/.claude/hooks-daemon`
-exists, on the theory that it can only mean a daemon once ran with the wrong
-project root and wrote runtime artifacts one level too deep. The self-install
-daemon now generates a bare `bin/hooks-daemon` symlink under its own
-`.claude/hooks-daemon/` (Plan 00455 Task 1.3) -- so a developer running the
-self-install daemon directly inside a CLIENT clone's own inner checkout
-(`<client>/.claude/hooks-daemon/`, itself a full self-install-capable
-checkout) creates exactly that path, as a link-only marker rather than a
-genuine nested install.
+exists. A CLIENT's clone never contains that path from cloning alone:
+`.claude/hooks-daemon/` is gitignored by this repository's own
+`.claude/.gitignore`, including inside the clone's own tracked `.claude/`
+tree, so the clone carries no nested `hooks-daemon` directory at all. The
+path can therefore only come into being at RUNTIME -- historically, a
+daemon that started with the wrong project root and wrote runtime artifacts
+one level too deep; now also a self-install daemon whose project root was
+set to the CLIENT clone's own inner checkout
+(`<client>/.claude/hooks-daemon/`), which is the identical wrong-root
+pathology this check exists to flag. The self-install daemon's generated
+`bin/hooks-daemon` symlink (Plan 00455 Task 1.3) makes that pathology
+produce a link-only marker rather than daemon runtime files, but it is
+still the SAME symptom of the SAME bug, and must still be reported.
 
-Unlike the Python equivalent (`daemon/validation.py`'s
-`check_for_nested_installation`), this check had NO exemption at all -- it
-would refuse every hook event for the CLIENT project. The fix mirrors the
-Python side's existing exemption: skip the refusal when the OUTER
-`.claude/hooks-daemon/` is itself a real daemon clone (has `pyproject.toml`),
-which is also the ordinary case for every ok client install with its own
-dogfooded `.claude/` tree.
+An earlier revision of this plan added an exemption here (skip the refusal
+when the outer `.claude/hooks-daemon/` has `pyproject.toml`, mirroring
+`daemon/validation.py`'s `check_for_nested_installation`). That was wrong:
+every REAL client clone has `pyproject.toml` at that path, so the exemption
+would have silenced the check for every client, always -- it could never
+fire again for a genuine nested installation either. Reverted; these tests
+pin the check firing in exactly that "real clone, nested path present"
+shape instead.
 """
 
 from __future__ import annotations
@@ -78,10 +84,20 @@ def _source(project: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
-class TestLinkOnlyInnerDirIsExempt:
-    """The bug this plan fixes."""
+class TestTheCheckStillFiresWithARealOuterClone:
+    """The case an earlier revision of this plan wrongly exempted."""
 
-    def test_a_link_only_inner_marker_does_not_refuse(self, tmp_path: Path) -> None:
+    def test_a_link_only_inner_marker_under_a_real_clone_is_still_refused(
+        self, tmp_path: Path
+    ) -> None:
+        """The self-install-in-the-wrong-place symptom must still be reported.
+
+        Outer has `pyproject.toml` (a genuine client clone) AND the inner
+        `.claude/hooks-daemon/` exists (here, a link-only marker -- what the
+        self-install daemon now generates when run with its project root set
+        to this exact wrong place). This is the wrong-root pathology the
+        check exists to catch, so it must still refuse.
+        """
         project = _throwaway_repo(tmp_path)
         outer = project / ".claude" / "hooks-daemon"
         (outer / "pyproject.toml").parent.mkdir(parents=True)
@@ -93,21 +109,18 @@ class TestLinkOnlyInnerDirIsExempt:
         result = _source(project)
 
         combined = result.stdout + result.stderr
-        assert _NESTED_INSTALL_CODE not in combined, (
-            "init.sh refused a client project whose inner .claude/hooks-daemon "
-            f"is only the self-install daemon's own generated marker: {combined!r}"
+        assert _NESTED_INSTALL_CODE in combined, (
+            "init.sh let the wrong-root pathology through: a real clone with a "
+            f"link-only marker one level too deep should still be refused: {combined!r}"
         )
 
 
 class TestGenuineNestedInstallIsStillRefused:
-    """Negative direction: a REAL nested install must still be caught."""
+    """The check's original coverage: a REAL nested install must still be caught."""
 
     def test_a_real_nested_clone_is_refused(self, tmp_path: Path) -> None:
         project = _throwaway_repo(tmp_path)
         outer = project / ".claude" / "hooks-daemon"
-        # Outer has NO pyproject.toml: not a real clone, so the exemption must
-        # not apply, and the inner structure is a genuine nested-install
-        # artifact.
         inner = outer / ".claude" / "hooks-daemon"
         inner.mkdir(parents=True)
 

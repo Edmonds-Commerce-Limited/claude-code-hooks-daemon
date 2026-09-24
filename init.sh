@@ -440,19 +440,9 @@ HOOKS_DAEMON_ROOT_DIR="${HOOKS_DAEMON_ROOT_DIR:-$PROJECT_PATH/.claude/hooks-daem
 # Nested installation check
 #
 # Detects if hooks-daemon has been installed inside itself creating
-# .claude/hooks-daemon/.claude/hooks-daemon structure.
+# .claude/hooks-daemon/.claude/hooks-daemon structure
 #
-# Exempt when the OUTER .claude/hooks-daemon/ is itself a real daemon clone
-# (has pyproject.toml) -- true for every ordinary client install, whose
-# clone carries its own dogfooded .claude/ tree, and also true when the
-# inner path is only the self-install daemon's own generated
-# bin/hooks-daemon marker (Plan 00455 Task 1.3), created when someone runs
-# the self-install daemon directly inside a client clone's inner checkout.
-# Mirrors daemon/validation.py's check_for_nested_installation, which has
-# carried this exact exemption since before this file did.
-#
-if [[ -d "$PROJECT_PATH/.claude/hooks-daemon/.claude/hooks-daemon" ]] && \
-   [[ ! -f "$PROJECT_PATH/.claude/hooks-daemon/pyproject.toml" ]]; then
+if [[ -d "$PROJECT_PATH/.claude/hooks-daemon/.claude/hooks-daemon" ]]; then
     emit_hook_error "" "nested_installation" \
         "NESTED INSTALLATION DETECTED! Found: $PROJECT_PATH/.claude/hooks-daemon/.claude/hooks-daemon. Remove $PROJECT_PATH/.claude/hooks-daemon and reinstall."
     exit 0

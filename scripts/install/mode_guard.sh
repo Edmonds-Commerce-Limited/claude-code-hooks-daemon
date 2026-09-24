@@ -80,14 +80,9 @@ detect_self_install_mode() {
 #
 # Args:
 #   $1 - project_root (optional): Path to validate. Both callers
-#        (install_version.sh, upgrade_version.sh) pass one explicitly; when
-#        omitted, falls back to the PROJECT_ROOT env var, then cwd -- the
-#        pre-Plan-00455 behaviour, kept for any other caller relying on it.
-#        Previously this parameter was accepted but silently ignored in
-#        favour of the global alone; both current callers already set
-#        PROJECT_ROOT to the same value they pass, so this was not
-#        observably wrong, but the dead parameter invited exactly the drift
-#        it now prevents.
+#        (install_version.sh, upgrade_version.sh) pass PROJECT_ROOT
+#        explicitly. When omitted, falls back to the PROJECT_ROOT env var,
+#        then cwd.
 #
 # Returns:
 #   Exit code 0 if normal mode (safe to proceed)
