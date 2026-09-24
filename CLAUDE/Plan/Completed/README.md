@@ -34,6 +34,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 - [00404: niggles ledger ten](00404-niggles-ledger-ten/PLAN.md) - Complete at `bd8fd27f` + the archiving commit (one entry, fixed: an unguarded `chmod` one line outside `_bind_event_sockets`' per-socket guard meant a single unsecurable socket aborted daemon startup and cost ALL 31 event sockets — found by reading a CI failure rather than hitting a symptom. The NEXT niggle opens ledger eleven)
 
+- [00402: restart path leaves generated handler doc stale](00402-restart-path-leaves-generated-handler-doc-stale/PLAN.md) - Complete at `40098113`…`d1f9e32a` + the archiving commit (a restart regenerated the `CLAUDE.md` block but never `.claude/HOOKS-DAEMON.md`, and nothing could see the drift. Ruled option 3: a `generated_doc_drift` QA check compares the body against fresh output and never rewrites the deployed-from marker `upgrade.sh` reads)
+
 - [00401: reference repo freshness before read](00401-reference-repo-freshness-before-read/PLAN.md) - Complete at `9e399219`…`7a43abf6` + the archiving commit (one checker over `git_sync` feeds a SessionStart sweep, a cache-only PreToolUse gate and a CLI report, with a third verdict for a clone that is un-fetchable by design; four defects were found by using the finished thing, not by adding tests)
 
 - [00400: niggles ledger nine](00400-niggles-ledger-nine/PLAN.md) - Complete at `35da2e85`…`397cdde3` (CI evidence at `6a8d01da`) + the archiving commit (six entries: N1–N4 found without hitting a symptom; N5 and N6 by refusing the first explanation — 18 acceptance errors read as tool contention were a STALE DAEMON, and the restart clearing them refreshes only one of two generated docs. N6's behaviour graduated to Plan 00402)

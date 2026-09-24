@@ -1,6 +1,6 @@
 # Plan 00402: restart path leaves generated handler doc stale
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-14
 **Owner**: joseph
 **Priority**: Medium
@@ -138,8 +138,12 @@ defects' instruction; the owner can reverse this with one message.
 - [x] The `Generated on` marker still reports the deployed-from version after
   the change; `scripts/upgrade.sh` FROM-version derivation is unaffected.
 - [x] No documentation claims a restart refreshes both generated artefacts.
-- [ ] Full QA passes and CI is green.
+- [x] Full QA passes and CI is green. Landed with integration batch B1
+  (2e6483a3); CI green on d23b56f0 (Python 3.11-3.13, shell, daemon load).
+- [x] Shipped in the holding area:
+  `CLAUDE/UPGRADES/UNRELEASED/release-notes/17-a-stale-handler-doc-now-fails-qa.md`.
 
 ## Delivery & Milestones
 
 - Graduated from Plan 00400 N6 with the evidence recorded there.
+- Delivered on branch d-00402 (40098113 RED, d1f9e32a fix), landed with B1.

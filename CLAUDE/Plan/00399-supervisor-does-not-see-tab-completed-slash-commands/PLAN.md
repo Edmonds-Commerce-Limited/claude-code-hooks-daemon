@@ -146,7 +146,8 @@ write-up saying otherwise would be a tidy story pointing the wrong way.
 - [x] No fix widens the match in a way that can produce a FALSE recognition,
   which costs more than the bug it repairs. Guarded by
   `test_keystrokes_without_the_whole_word_are_not_a_compact`.
-- [ ] Full QA passes and CI is green.
+- [x] Full QA passes and CI is green. Landed with integration batch B1
+  (2e6483a3); CI green on d23b56f0.
 - [x] Release note: `CLAUDE/UPGRADES/UNRELEASED/release-notes/18-a-tab-completed-compact-is-recognised-from-the-daemon-record.md`.
 
 ## Delivery & Milestones
