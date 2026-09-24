@@ -56,6 +56,16 @@ checks that the script names no denied QA entry point.
 
 **Graduated to Plan 00463**, which owns the sub-agent QA policy.
 
+**Remedied by Plan 00463** (commit 480740cc), as the candidate remedy says.
+Step 7 checks that `scripts/qa/llm_qa.py` is executable. The "Run QA" hint
+prints `./scripts/qa/llm_qa.py changed`. The agent prompt template tells the
+agent to run targeted QA (`llm_qa.py changed`, named `llm_qa.py` tools, and
+pytest on the test files it touched), and says full QA is the coordinator's
+batched integration gate. `tests/unit/scripts/test_setup_worktree_qa_guidance.py`
+was RED first. It checks that the script never names `run_all.sh`, and that no
+command the script prints is a full run under this repo's live
+`full_qa_patterns`, judged by `subagent_full_qa_blocker`'s own matcher.
+
 ### N1 — `resolve_venv_python`'s fallback accepts a venv interpreter that cannot run on this host
 
 **Found by Plan 00457's agent** (#55; recorded in 00457's JOURNAL as a
