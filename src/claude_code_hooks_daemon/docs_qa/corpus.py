@@ -53,6 +53,7 @@ from claude_code_hooks_daemon.utils.authored_paths import (
     authored_path,
     contained_authored_path,
 )
+from claude_code_hooks_daemon.utils.git_repo import git_visible_ancestor_dirs, git_visible_paths
 from claude_code_hooks_daemon.utils.markdown_links import extract_link_targets
 from claude_code_hooks_daemon.utils.path_exclusion import is_path_excluded
 from claude_code_hooks_daemon.utils.vendor_paths import (
@@ -140,6 +141,17 @@ COMMON_VENDORED_BUILD_DIR_NAMES: Final[frozenset[str]] = CORE_VENDORED_BUILD_DIR
 OWN_EXCLUDED_DIR_NAMES: Final[frozenset[str]] = frozenset(
     {"untracked", ".git", Path(ProjectPath.CLAUDE_WORKTREES_DIR).name}
 )
+
+# Plan 00466 N9: ``.claude/ccy/CLAUDE.md`` is UNTRACKED and gitignored by
+# design -- ``.claude/ccy/.gitignore`` ignores everything except a small
+# whitelist, and that file's own comment there explains CLAUDE.md is
+# deliberately kept off it (ccy's startup gate refuses to launch when it is
+# tracked). Yet :func:`is_module_doc_path` names it, in its own docstring, as
+# squarely in ``module-doc-budget``'s scope. The git-visibility filter below
+# would otherwise drop it silently, indistinguishable from the vendored
+# plugin markdown the filter exists to remove -- so the one deliberate
+# inclusion is named here explicitly rather than left an accidental gap.
+_GITIGNORED_MARKDOWN_INCLUDES: Final[frozenset[str]] = frozenset({".claude/ccy/CLAUDE.md"})
 
 
 def is_module_doc_path(rel_path: str, agent_tree: str) -> bool:
@@ -301,7 +313,22 @@ def iter_markdown_paths(
     :func:`matches_scope_exclude` as a per-file post-filter too; this only
     changes whether an excluded subtree is physically entered, never which
     paths end up in the result.
+
+    A path git does not consider part of the project -- untracked and
+    matched by a ``.gitignore`` rule -- is excluded too (Plan 00466 N9): a
+    Claude Code plugin install lands its vendored spec markdown under
+    ``.claude/ccy/plugins/``, which is gitignored precisely so it is NOT
+    project documentation, and this walk previously had no way to tell the
+    two apart. See :func:`utils.git_repo.git_visible_paths` for the single
+    git call this costs and its not-a-repository fallback, and
+    :data:`_GITIGNORED_MARKDOWN_INCLUDES` for the one deliberate exception.
     """
+    git_visible = git_visible_paths(project_root)
+    descend_roots = (
+        None
+        if git_visible is None
+        else git_visible_ancestor_dirs(git_visible | _GITIGNORED_MARKDOWN_INCLUDES)
+    )
     matches: list[str] = []
     for dirpath, dirnames, filenames in os.walk(project_root):
         rel_dir_parts = Path(dirpath).relative_to(project_root).parts
@@ -309,6 +336,7 @@ def iter_markdown_paths(
             name
             for name in dirnames
             if walk_into((*rel_dir_parts, name), vendor_scopes=vendor_scopes, also_prune=also_prune)
+            and (descend_roots is None or "/".join((*rel_dir_parts, name)) in descend_roots)
         ]
         for filename in filenames:
             if not filename.endswith(_MARKDOWN_SUFFIX):
@@ -318,6 +346,12 @@ def iter_markdown_paths(
             # parent had to be walked for a vendor exception is still
             # vendored unless it IS the exception.
             if rel_dir_parts and is_vendored_path_in_scopes(rel_path, vendor_scopes):
+                continue
+            if (
+                git_visible is not None
+                and rel_path not in git_visible
+                and rel_path not in _GITIGNORED_MARKDOWN_INCLUDES
+            ):
                 continue
             matches.append(rel_path)
     return sorted(matches)
@@ -445,7 +479,17 @@ def is_lintable_path(
 
 
 def iter_corpus_paths(project_root: Path, policy: DocumentationPolicy) -> list[Path]:
-    """Every in-scope documentation file under ``project_root``, sorted."""
+    """Every in-scope documentation file under ``project_root``, sorted.
+
+    Filtered to what git considers part of the project the same way
+    :func:`iter_markdown_paths` is (Plan 00466 N9): tracked files, plus
+    untracked files no ``.gitignore`` rule excludes. ``candidates`` is
+    collected first, as before -- these are targeted ``rglob`` calls under a
+    handful of configured trees, not a project-wide walk, so there is no
+    directory-level pruning to add here; the git-visibility test is applied
+    once per candidate instead, from the SAME single ``git ls-files`` call
+    :func:`utils.git_repo.git_visible_paths` makes.
+    """
     candidates: set[Path] = set()
     for entry in project_root.glob("*.md"):
         if entry.is_file():
@@ -462,7 +506,13 @@ def iter_corpus_paths(project_root: Path, policy: DocumentationPolicy) -> list[P
         satellite_dir = authored_path(project_root, f"{_CLAUDE_DIR_NAME}/{satellite}")
         if satellite_dir.is_dir():
             candidates.update(p for p in satellite_dir.rglob("*.md") if p.is_file())
-    return sorted(p for p in candidates if is_in_scope(p, project_root, policy))
+    git_visible = git_visible_paths(project_root)
+    return sorted(
+        p
+        for p in candidates
+        if is_in_scope(p, project_root, policy)
+        and (git_visible is None or str(p.relative_to(project_root)) in git_visible)
+    )
 
 
 @dataclass(frozen=True)

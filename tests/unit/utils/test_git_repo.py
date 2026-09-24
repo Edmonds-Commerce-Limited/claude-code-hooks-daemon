@@ -20,7 +20,7 @@ from unittest import mock
 import pytest
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
-from claude_code_hooks_daemon.utils.git_repo import GitRepo, run_git
+from claude_code_hooks_daemon.utils.git_repo import GitRepo, git_visible_paths, run_git
 
 _KEY = "hooksdaemon.testValue"
 
@@ -410,6 +410,53 @@ class TestIsLinkedWorktree:
         from claude_code_hooks_daemon.utils.git_repo import is_linked_worktree
 
         assert is_linked_worktree(tmp_path) is False
+
+
+class TestGitVisiblePaths:
+    """``git_visible_paths`` (Plan 00466 N9): the single shared "what counts
+    as part of the project" answer every filesystem-walking QA corpus should
+    consult -- tracked files, plus untracked files no ``.gitignore`` rule
+    excludes."""
+
+    def test_tracked_file_is_visible(self, tmp_git_repo: Path) -> None:
+        visible = git_visible_paths(tmp_git_repo)
+        assert visible is not None
+        assert "tracked.txt" in visible
+
+    def test_untracked_not_ignored_file_is_visible(self, tmp_git_repo: Path) -> None:
+        (tmp_git_repo / "new.txt").write_text("new\n", encoding="utf-8")
+        visible = git_visible_paths(tmp_git_repo)
+        assert visible is not None
+        assert "new.txt" in visible
+
+    def test_gitignored_file_is_not_visible(self, tmp_git_repo: Path) -> None:
+        (tmp_git_repo / ".gitignore").write_text("ignored.txt\n", encoding="utf-8")
+        (tmp_git_repo / "ignored.txt").write_text("x\n", encoding="utf-8")
+        visible = git_visible_paths(tmp_git_repo)
+        assert visible is not None
+        assert "ignored.txt" not in visible
+
+    def test_gitignored_directory_contents_are_not_visible(self, tmp_git_repo: Path) -> None:
+        (tmp_git_repo / ".gitignore").write_text("vendored/\n", encoding="utf-8")
+        (tmp_git_repo / "vendored" / "sub").mkdir(parents=True)
+        (tmp_git_repo / "vendored" / "sub" / "SPEC.md").write_text("x\n", encoding="utf-8")
+        visible = git_visible_paths(tmp_git_repo)
+        assert visible is not None
+        assert "vendored/sub/SPEC.md" not in visible
+
+    def test_not_a_git_repo_returns_none(self, tmp_path: Path) -> None:
+        plain = tmp_path / "plain"
+        plain.mkdir()
+        assert git_visible_paths(plain) is None
+
+    def test_git_unavailable_returns_none(
+        self, tmp_git_repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _raise(*_a: object, **_k: object) -> None:
+            raise OSError("git missing")
+
+        monkeypatch.setattr(subprocess, "run", _raise)
+        assert git_visible_paths(tmp_git_repo) is None
 
     def test_a_submodule_style_gitdir_file_is_not(self, tmp_path: Path) -> None:
         """A submodule's ``.git`` is also a file, pointing at ``modules/`` not ``worktrees/``."""

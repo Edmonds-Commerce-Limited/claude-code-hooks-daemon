@@ -327,6 +327,40 @@ def test_does_not_scan_agent_worktrees(tmp_path: Path) -> None:
     )
 
 
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(  # nosec B603 B607 - trusted git binary, fixed argv, test fixture only
+        ["git", "-C", str(repo), *args],
+        capture_output=True,
+        check=True,
+        timeout=_TIMEOUT_SECONDS,
+    )
+
+
+def test_does_not_scan_a_gitignored_vendored_plugin_install(tmp_path: Path) -> None:
+    """Plan 00466 N9: installing a Claude Code plugin lands vendored markdown
+    under the gitignored ``.claude/ccy/plugins/`` tree. ``_UNSCANNED_DIR_NAMES``
+    already names ``marketplaces`` but not the plugin ``cache/`` directory --
+    a gap this reproduces directly, closed by filtering against ``git``'s view
+    of the tree rather than an ever-growing directory-name denylist.
+    """
+    root = _make_docs(tmp_path, "## Fine\n\nAccurate prose only.\n")
+    _git(root, "init")
+    _git(root, "config", "user.email", "t@example.com")
+    _git(root, "config", "user.name", "T")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-m", "initial")
+    (root / ".gitignore").write_text("/.claude/ccy/\n")
+    vendored = root / ".claude" / "ccy" / "plugins" / "cache" / "some-plugin" / "README.md"
+    vendored.parent.mkdir(parents=True)
+    vendored.write_text("## Usage\n\n```bash\n/release\n```\n", encoding="utf-8")
+
+    exit_code, report = _run_checker(root)
+
+    assert exit_code == 0, (
+        "a violation inside a gitignored plugin install failed the gate: " f"{report['violations']}"
+    )
+
+
 def test_real_repository_docs_are_truthful() -> None:
     """The gate itself: this repository's prose must match generated truth."""
     exit_code, report = _run_checker(REPO_ROOT)
