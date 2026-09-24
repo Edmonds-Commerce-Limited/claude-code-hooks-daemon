@@ -1604,6 +1604,26 @@ That gap is real and is accepted, not overlooked: content quality is not
 checkable from here, and a guard that pretended otherwise would be the same
 false-assurance failure this ledger keeps recording.
 
+### N26 — commit gates never see content staged earlier in the same command
+
+**Found by Plan 00464's agent** (full text in 00464's JOURNAL, T1.3).
+Every PreToolUse commit gate reads the index before the command runs, so
+`git add <file> && git commit -m x` commits content no staged-content check
+examined: the secret-term scan, plan QA, docs QA, staged lint and
+remote-docs provenance. The probe
+(`untracked/scratch/p464_probe_same_command_add.py` in the 00464 worktree)
+uses a real repo with an unstaged file carrying a listed term. The
+same-command add-and-commit gives `matches=False`; after a separate add,
+the commit gives `matches=True`.
+
+**The other direction, seen by the coordinator today:** the close-out
+commit for Plans 00458 and 00459 was denied by `R-PLAN-QA-COMMIT` for
+README links to `Completed/…`, because the `git mv` creating those folders
+was earlier in the same command.
+
+**Graduated to Plan 00465**, which starts after 00464 merges because both
+change the same gates.
+
 ### N25 — `pipe_blocker` names the loop keyword `do` as a pipe's producer
 
 **Found**: the coordinator ran
