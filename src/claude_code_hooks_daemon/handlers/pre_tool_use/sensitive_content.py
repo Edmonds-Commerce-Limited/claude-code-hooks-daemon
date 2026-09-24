@@ -659,7 +659,39 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
                 return f"matches entry {index} of {len(terms)} in the secret word list"
         return None
 
+    def _nul_byte_file_path_reason(self, hook_input: dict[str, Any]) -> str | None:
+        """Deny reason when a Write/Edit ``file_path`` embeds a NUL byte, else None.
+
+        Plan 00466 N24 follow-up (guard-defects review 2, m3): every path
+        operation this handler reaches for a Write/Edit call — starting with
+        ``_is_excluded``'s ``layout_for()`` call — ultimately calls the
+        platform's own realpath, which RAISES rather than resolving a
+        NUL-bearing path; no real filesystem path can ever contain one. That
+        makes it a classic path-truncation attack shape (many older API
+        layers silently stop reading at the NUL), not merely text this
+        handler cannot scan — so it is denied outright here, explicitly,
+        rather than left to fall through to "not excluded, not the secret
+        list, scan whatever haystacks come back" (now safe, since
+        ``core/workspace.py``'s resolution never raises, but still the wrong
+        verdict for a path this malformed) or the chain's generic
+        strict-mode/SAFETY+BLOCKING "evaluation error" catch-all.
+        """
+        tool_name = hook_input.get(HookInputField.TOOL_NAME)
+        if tool_name not in (ToolName.WRITE, ToolName.EDIT):
+            return None
+        tool_input: dict[str, Any] = hook_input.get(HookInputField.TOOL_INPUT, {})
+        file_path = str(tool_input.get(_FIELD_FILE_PATH, ""))
+        if "\x00" not in file_path:
+            return None
+        return (
+            "file_path contains an embedded NUL byte, which no real filesystem "
+            f"path can: {file_path!r}"
+        )
+
     def matches(self, hook_input: dict[str, Any]) -> bool:
+        if self._nul_byte_file_path_reason(hook_input) is not None:
+            return True
+
         haystacks = self._compute_and_cache(hook_input)
         if not haystacks:
             return False
@@ -1153,6 +1185,10 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         return [_RULE_PUBLIC_PATTERN, _RULE_SECRET_TERM]
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
+        nul_byte_reason = self._nul_byte_file_path_reason(hook_input)
+        if nul_byte_reason is not None:
+            return GatingResult(decision=Decision.DENY, reason=f"BLOCKED: {nul_byte_reason}")
+
         haystacks = self._take_cached_haystacks(hook_input)
         transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
 

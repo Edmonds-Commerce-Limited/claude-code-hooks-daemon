@@ -360,6 +360,18 @@ class TestABodyItDidNot:
 
         assert result.decision == Decision.DENY
 
+    def test_a_nul_byte_in_the_body_file_path_is_denied_not_raised(self, tmp_path: Path) -> None:
+        """Plan 00466 N24 follow-up (guard-defects review 2, m3): the fuzzer
+
+        found ``Path.stat()`` raising ``ValueError: embedded null byte`` on
+        NUL-bearing paths, uncaught here -- only ``OSError`` was handled.
+        """
+        result = _handler().handle(
+            _bash(f"gh issue create --repo {_UPSTREAM} --body-file {tmp_path}/x\x00y.md")
+        )
+
+        assert result.decision == Decision.DENY
+
     def test_a_second_unverified_body_file_is_not_laundered_by_the_first(
         self, tmp_path: Path
     ) -> None:

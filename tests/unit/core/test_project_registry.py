@@ -72,6 +72,35 @@ class TestUndeclaredRepositoryIsNotSplitUp:
         assert workspace.bin_dirs == ()
 
 
+class TestAnUnresolvableFilePathDoesNotRaise:
+    """A NUL-bearing (or otherwise unresolvable) path falls back, never raises.
+
+    Plan 00466 N24 follow-up (guard-defects review 2, m3): the guard-defects
+    fuzzer found ``Path(file_path).resolve()`` raising ``ValueError: embedded
+    null byte`` on 485/12000 fuzzed Write/Edit paths carrying an embedded
+    NUL. ``for_path``/``layout_for`` are both documented "never returns
+    None" / "always a valid answer" -- a caller-supplied path the OS itself
+    cannot realpath must fall back to that same promise, not crash the
+    handler evaluating it. See ``sensitive_content``'s own explicit NUL-byte
+    guard (a DIFFERENT, deliberate DENY) for the one caller where the
+    malformed path itself is the safety-relevant signal.
+    """
+
+    def test_for_path_falls_back_to_the_repo_root(self, tmp_path: Path) -> None:
+        registry = ProjectRegistry.single_project(tmp_path)
+
+        workspace = registry.for_path(tmp_path / "foo\x00bar")
+
+        assert workspace.root == tmp_path
+
+    def test_layout_for_falls_back_to_the_root_layout(self, tmp_path: Path) -> None:
+        registry = ProjectRegistry.single_project(tmp_path)
+
+        layout = registry.layout_for(tmp_path / "foo\x00bar")
+
+        assert layout == registry.root_layout
+
+
 class TestDeclaredProjectsResolve:
     @staticmethod
     def _registry(root: Path, projects: list[dict[str, object]]) -> ProjectRegistry:

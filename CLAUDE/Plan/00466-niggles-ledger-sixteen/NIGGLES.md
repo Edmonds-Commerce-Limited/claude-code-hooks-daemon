@@ -266,6 +266,57 @@ project and writes the probe's source into that tmp project's own
 business permanently installed in a maintainer-visible directory meant for
 genuinely useful project handlers.
 
+**NUL-byte realpath sweep (guard-defects review 2, m3, follow-up).** The
+fuzzer found `sensitive_content` raising `ValueError: embedded null byte`
+from a `realpath` call on 485/12000 fuzzed Write/Edit paths. With N24's
+Part 2 fix this had already stopped being a silent bypass (it denies as
+"evaluation error, denied for safety"), but that is the generic
+chain-level catch-all, not a clear handler-specific reason — so the raise
+itself is still a defect worth fixing at its source, four places:
+
+1. `core/workspace.py`'s `ProjectRegistry.for_path`/`layout_for` both called
+   `file_path.resolve()` unguarded — the shared root cause behind THREE
+   handlers, since it is reached via the `Handler.layout_for()` base method:
+   `error_hiding_blocker`, `security_antipattern` and `secret_file_guard`
+   (via `_is_excluded`), plus `sensitive_content` itself. A new
+   `_resolve_or_self` helper catches `(OSError, ValueError)` and falls back
+   to the unresolved path, which safely fails to match any real declared
+   project and so falls through to the same root-project/root-layout answer
+   an ordinary undeclared path already gets — never a crash, matching both
+   methods' own "never returns None" contract. Unit coverage:
+   `tests/unit/core/test_project_registry.py::TestAnUnresolvableFilePathDoesNotRaise`.
+2. `secret_file_guard`'s OWN separate raise: `utils/secret_file_matching.py`'s
+   `path_is_protected` calls `os.path.realpath` and only caught `OSError`,
+   not `ValueError`. Widened to `(OSError, ValueError)` — a NUL-bearing path
+   cannot BE a symlink to anything, so there is nothing for the realpath
+   check to discover; the raw-path glob match (which already ran first)
+   still stands. Unit coverage:
+   `tests/unit/utils/test_secret_file_matching.py::TestPathIsProtected::test_nul_byte_in_path_does_not_raise`.
+3. `issue_filing_gate`'s `_read` calls `path.stat()` on a `gh --body-file`
+   path and only caught `OSError`, not `ValueError`. Widened the same way —
+   still just "could not be read", the existing refusal-not-pass verdict.
+   Unit coverage:
+   `tests/unit/handlers/pre_tool_use/test_issue_filing_gate.py::TestABodyItDidNot::test_a_nul_byte_in_the_body_file_path_is_denied_not_raised`.
+4. `project_containment` was ALREADY safe: its `_is_within` wraps
+   `Path(candidate).resolve().relative_to(container)` in a single
+   `except ValueError:`, which already catches `.resolve()`'s NUL-byte raise
+   the same way it catches `.relative_to()`'s mismatch — no fix needed.
+
+`sensitive_content` itself gets a DIFFERENT, deliberate treatment beyond
+just "does not crash": a NUL byte can never appear in a real filesystem
+path, so a Write/Edit `file_path` carrying one is now denied OUTRIGHT with
+a clear, handler-specific reason ("file_path contains an embedded NUL
+byte...") — this is a classic path-truncation attack shape, and letting the
+now-safe fallback silently continue to "not excluded, not the secret list,
+scan whatever haystacks come back" would have been the wrong verdict even
+though it would no longer crash. Checked via `matches()` before any haystack
+computation runs, both `Write` and `Edit`. Unit coverage:
+`tests/unit/handlers/pre_tool_use/test_sensitive_content.py::TestNulByteFilePathIsDenied`.
+
+Swept every `HandlerTag.SAFETY` `pre_tool_use` handler (23, the same
+dynamic discovery as N25 Task 3) with NUL-bearing Write/Edit/Bash payloads
+after all four fixes: none raise.
+
 The N5 and N11 entries' "this repository runs `strict_mode: true`, so here
 the crash denied" claim is corrected below, in place, rather than restated
 here.

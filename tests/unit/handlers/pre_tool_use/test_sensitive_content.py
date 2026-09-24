@@ -172,6 +172,48 @@ class TestInit:
         assert handler._public_patterns == []
 
 
+class TestNulByteFilePathIsDenied:
+    """A NUL-bearing Write/Edit ``file_path`` is denied outright, not silently scanned.
+
+    Plan 00466 N24 follow-up (guard-defects review 2, m3): the fuzzer found
+    ``Path(file_path).resolve()`` — reached via this handler's own
+    ``layout_for()`` call inside ``_is_excluded`` — raising ``ValueError:
+    embedded null byte`` on 485/12000 fuzzed Write/Edit paths. No real
+    filesystem path can ever contain a NUL byte (the OS itself rejects it),
+    so this is a classic path-truncation attack shape, not merely
+    unscannable text — a clear, handler-specific DENY, not a silent
+    "nothing matched" fall-through and not the chain's generic "evaluation
+    error" catch-all.
+    """
+
+    def test_matches_is_true(self) -> None:
+        handler = SensitiveContentHandler()
+        hook_input = _write_input("/tmp/foo\x00bar.py", "clean body\n")
+        assert handler.matches(hook_input) is True
+
+    def test_handle_denies_with_a_clear_reason(self) -> None:
+        handler = SensitiveContentHandler()
+        hook_input = _write_input("/tmp/foo\x00bar.py", "clean body\n")
+
+        result = handler.handle(hook_input)
+
+        assert result.decision == Decision.DENY
+        assert "NUL byte" in str(result.reason)
+
+    def test_edit_is_covered_too(self) -> None:
+        handler = SensitiveContentHandler()
+        hook_input = _edit_input("/tmp/foo\x00bar.py", "new")
+
+        result = handler.handle(hook_input)
+
+        assert result.decision == Decision.DENY
+
+    def test_an_ordinary_path_is_not_affected(self) -> None:
+        handler = SensitiveContentHandler()
+        hook_input = _write_input("/tmp/foo.py", "clean body\n")
+        assert handler.matches(hook_input) is False
+
+
 class TestMatchesIgnoresNonWriteEdit:
     def test_bash_command_that_writes_no_git_metadata_never_matches(self) -> None:
         """THE load-bearing negative control for the whole Bash surface.

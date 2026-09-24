@@ -330,6 +330,10 @@ class IssueFilingGateHandler(PreToolUseHandlerBase):
             size = path.stat().st_size
         except OSError as exc:
             return None, f"`{path}` could not be read ({exc.strerror})"
+        except ValueError as exc:
+            # Plan 00466 N24 follow-up: a NUL-bearing path raises ValueError
+            # from stat(), not OSError -- still just "could not be read".
+            return None, f"`{path}` could not be read ({exc})"
         if size > _MAX_BODY_BYTES:
             return None, (
                 f"`{path}` is {size} bytes, far larger than any generated report. "

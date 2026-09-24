@@ -268,7 +268,10 @@ def path_is_protected(file_path: str, patterns: tuple[str, ...]) -> bool:
         return True
     try:
         real = os.path.realpath(file_path)
-    except OSError:
+    except (OSError, ValueError):
+        # Plan 00466 N24 follow-up: a NUL-bearing path raises ValueError,
+        # not OSError -- the OS itself cannot realpath it, so it cannot BE
+        # a symlink to anything; nothing for this check to discover.
         return False
     if real != file_path:
         return path_matches_globs(real, patterns, project_root=project_root)

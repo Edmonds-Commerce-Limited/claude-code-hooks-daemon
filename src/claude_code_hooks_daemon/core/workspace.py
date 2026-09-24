@@ -90,6 +90,27 @@ class Workspace:
     bin_dirs: tuple[Path, ...]
 
 
+def _resolve_or_self(file_path: Path) -> Path:
+    """``file_path.resolve()``, or ``file_path`` itself if the OS cannot realpath it.
+
+    Plan 00466 N24 follow-up (guard-defects review 2, m3): a NUL-bearing
+    path -- and, more broadly, anything the platform's own ``realpath``
+    rejects -- raises ``ValueError``/``OSError`` instead of resolving. Both
+    :meth:`ProjectRegistry.for_path` and :meth:`ProjectRegistry.layout_for`
+    are documented "never returns None" / "always a valid answer": the
+    unresolved path is still perfectly usable for the pure string
+    comparisons :meth:`ProjectRegistry._nearest_project` does (no further
+    filesystem access), and since it cannot equal or nest under any real,
+    resolved declared root, resolution falls through to the same
+    root-project/root-layout fallback an ordinary undeclared path gets --
+    never a crash, and never a bypass of anything these two methods decide.
+    """
+    try:
+        return file_path.resolve()
+    except (OSError, ValueError):
+        return file_path
+
+
 @dataclass(frozen=True)
 class DeclaredProject:
     """One project declared in the ``projects:`` config block.
@@ -207,7 +228,7 @@ class ProjectRegistry:
             The resolved Workspace. Never None -- the repository root is
             always a valid answer.
         """
-        best = self._nearest_project(file_path.resolve())
+        best = self._nearest_project(_resolve_or_self(file_path))
         if best is not None:
             return best.resolve()
         return DeclaredProject(name="", root=self.project_root).resolve()
@@ -232,7 +253,7 @@ class ProjectRegistry:
             file_path: The file being acted on. May be relative; resolved to
                 an absolute path first.
         """
-        best = self._nearest_project(file_path.resolve())
+        best = self._nearest_project(_resolve_or_self(file_path))
         if best is None:
             return self.root_layout
         return ProjectLayout.for_project(best.layout, self.root_layout)
