@@ -1,0 +1,35 @@
+version: "3.67.0"
+truth_changes:
+  - topic: blocking-handlers
+    id: protected-file-contents
+    was: >
+      Every file matching a `secret_file_guard` protected glob is unreadable,
+      whatever it contains: Read/Grep/Edit are denied and so is any Bash
+      command naming it, including `git add`/`git commit` of an encrypted
+      Ansible Vault vars file whose name happens to match (for example
+      `group_vars/all/vault_passwords.yml` against `*vault_pass*`). The
+      `secret_file_hygiene_checker` advisory tells a project to gitignore and
+      `git rm --cached` every tracked match, encrypted or not.
+    now: >
+      Reading a protected file's CONTENTS is blocked (Plan 00272), EXCEPT a
+      file whose content is a whole-file Ansible Vault payload (Plan 00459):
+      that is ciphertext, and committing it is the point of Vault. It can be
+      read, grepped and edited, and named in one plain Bash command such as
+      `git add <path>` or `git commit -m '...' -- <path>`; commands that could
+      decrypt it (`ansible-vault view|decrypt`, any `ansible*`,
+      `git diff|log|show`) stay denied, and the content is re-checked on every
+      call, so the same file decrypted in place is fully protected again. The
+      hygiene advisory gives an encrypted file no gitignore or untrack advice;
+      an encrypted file that is untracked or gitignored is told to come back
+      (remove the ignore rule or add `!/<path>` after it, then `git add
+      <path>`). The gitignore safety advisory follows any protected glob it
+      asks for with a `!/<path>` negation for each existing encrypted file.
+      Everything else is unchanged: a plaintext vault password file, the
+      word list and key material stay unreadable by any route; do not open
+      the `sensitive_content` word list — ask the user what entry N covers;
+      presence and metadata come from `hooks-daemon secret-meta <path>`;
+      allowlisted consumers such as `ansible-playbook --vault-password-file
+      <path>` keep working; there is no agent-side escape hatch.
+
+      IF YOUR PROJECT'S DOCS SAY ENCRYPTED VAULT FILES CANNOT BE STAGED BY AN
+      AGENT, OR THAT THEY MUST BE UNTRACKED, THOSE INSTRUCTIONS ARE NOW FALSE.

@@ -1604,6 +1604,137 @@ That gap is real and is accepted, not overlooked: content quality is not
 checkable from here, and a guard that pretended otherwise would be the same
 false-assurance failure this ledger keeps recording.
 
+### N26 — commit gates never see content staged earlier in the same command
+
+**Found by Plan 00464's agent** (full text in 00464's JOURNAL, T1.3).
+Every PreToolUse commit gate reads the index before the command runs, so
+`git add <file> && git commit -m x` commits content no staged-content check
+examined: the secret-term scan, plan QA, docs QA, staged lint and
+remote-docs provenance. The probe
+(`untracked/scratch/p464_probe_same_command_add.py` in the 00464 worktree)
+uses a real repo with an unstaged file carrying a listed term. The
+same-command add-and-commit gives `matches=False`; after a separate add,
+the commit gives `matches=True`.
+
+**The other direction, seen by the coordinator today:** the close-out
+commit for Plans 00458 and 00459 was denied by `R-PLAN-QA-COMMIT` for
+README links to `Completed/…`, because the `git mv` creating those folders
+was earlier in the same command.
+
+**Graduated to Plan 00465**, which starts after 00464 merges because both
+change the same gates.
+
+### N25 — `pipe_blocker` names the loop keyword `do` as a pipe's producer
+
+**Found**: the coordinator ran
+`for x in $f; do grep -n "…" $x | head -30; done`. `R-PIPE-TO-HEAD`
+denied it with `COMMAND: … do unrecognized` and suggested whitelisting
+`^do\b`. The producer of that pipe is `grep`, which is on the whitelist.
+The segmenter kept the shell keyword `do` in front of the command. The
+suggested fix is worse than the false positive: whitelisting `^do\b` would
+exempt every loop body's pipe, including `do pytest … | tail`.
+
+**Candidate remedy:** strip shell reserved words (`do`, `then`, `else`,
+`elif`, `{`, `!`, `time`) from the front of a segment before choosing the
+producer, as the command-wrapper peeling already does for `env`/`nohup`.
+Add a test showing `do pytest x | head` is still judged on `pytest`, and
+make the whitelist suggestion never offer a reserved word.
+
+### N24 — orchestrator simulate reports denials its blocking mode would never make
+
+**Found**: every main-thread Bash call this session drew
+`SIMULATED orchestrator-only mode (Plan 00418 — record only, never blocks): main thread would have been denied — Bash: …`.
+The coordinator took that at face value and told Plan 00463's agent that
+going live would deny the coordinator's own `llm_qa.py all` (a deadlock).
+The 00463 code review read the real handler
+(`.claude/project-handlers/pre_tool_use/orchestrator_simulate.py`).
+Simulate mode judges `tool_name not in _COORDINATION_TOOLS` (line 299),
+while blocking mode denies only `_BLOCKED_TOOLS = {Write, Edit, NotebookEdit}`
+(lines 183 and 320). Bash is "would have been denied" in simulate and
+never denied when live.
+
+**Why it matters.** The simulate record exists to preview what enforcement
+would cost before it is switched on. A preview that overstates enforcement
+misleads that decision and anyone reasoning from it, as it did here, and
+cost an agent a round of edits it then had to revert.
+
+**Candidate remedies:** simulate records exactly what blocking would
+deny, from ONE shared predicate, and a test pins the two modes to the same
+verdict for every tool. If the broader "not a coordination tool" count is
+still wanted as telemetry, it gets its own clearly different wording,
+never "would have been denied".
+
+### N23 — a worktree commit is judged against the main checkout's staged tree
+
+**Found**: Plan 00462's agent ran `git commit` in its worktree and was
+denied by `R-PLAN-QA-COMMIT` for a README link to
+`Completed/00456-…/PLAN.md`. That path did not exist in the worktree:
+not tracked, not on disk. It existed only in the MAIN checkout's index,
+where the coordinator was archiving 00456 at that moment. An identical
+retry passed after the coordinator committed.
+
+**Why it happens.** The daemon's DEBUG payload log shows an in-process
+teammate's PreToolUse payload carrying `"cwd": "/workspace"`, the main
+checkout, while it works in its worktree. `plan_qa_commit_gate` decides the
+repository to judge from that field (`_is_foreign_repo` →
+`GitRepo.resolve_for(cwd)` against `ProjectContext.project_root()`) and
+never reads the `cd` at the front of the command. `docs_qa_commit_gate`,
+`staged_lint_gate` and `sensitive_content`'s commit scan also key on
+`cwd`. So every worktree commit is judged against main's staged tree. It
+is denied for main's state, and its own content is never examined. That
+includes the secret-term scan, whose documented contract is that the
+commit is the gate. `git merge` does not pass through those gates, so a
+term committed in a worktree reaches `main` unscanned.
+
+**Graduated to Plan 00464** (a class defect across several gates, with a
+fail-open security direction).
+
+### N22 — the local "full QA" never runs shellcheck
+
+**Found**: Plan 00456's final QA was checked before merge. Every
+`untracked/qa/*.json` in the worktree was written between 13:23 and 13:41,
+after the last code commit, except `shell_check.json`, which was dated
+10:16. That is hours before the N7–N9 fixes that rewrote
+`scripts/venv_bootstrap.sh`, `scripts/install/venv.sh` and both copies of
+the skill's `install.sh`. Re-running `scripts/qa/run_shell_check.sh` by hand
+passed (67 files, 0 issues), so nothing was hidden this time.
+
+**Why it happens.** `scripts/qa/llm_qa.py`'s `TOOL_REGISTRY` has no
+shellcheck entry. `run_all.sh` calls `run_shell_check.sh`, but
+`enforce_llm_qa` denies `run_all.sh` and points at `llm_qa.py all`. So the
+QA every agent is told to run, and reports as "full QA N/N", never runs
+shellcheck. CI's `shellcheck` step (`.github/workflows/qa.yml`) is the only
+place it runs. A shell defect therefore reaches `main` and is caught only
+after the merge, when fixing it costs a second commit on `main`. The stale
+`shell_check.json` left in the tree also reads like a result for the
+current code.
+
+**Candidate remedies:**
+
+1. Add a `shell_check` tool to `llm_qa.py`'s registry, wrapping
+   `run_shell_check.sh` like the other script tools, with a wiring test
+   that every check `run_all.sh` runs is also in the registry. That class
+   test catches the next divergence too.
+2. Until then, briefs that say "full QA" add `run_shell_check.sh` whenever
+   a shell file changed.
+
+**Remedied**: remedy (1). `TOOL_REGISTRY` gained a `shell_check` entry
+wrapping `run_shell_check.sh`, in run_all.sh's step-8 position, with a
+summariser reporting the issue count and files checked. The nested
+`summary.error` shape `run_shell_check.sh` writes when shellcheck is not
+installed was already handled generically by `_report_error` (it names both
+JSON shapes shipped scripts use), so a missing binary still fails the tool
+visibly rather than passing — verified by temporarily hiding shellcheck from
+`PATH` and re-running the tool in isolation.
+
+`tests/unit/qa/test_llm_qa_run_all_wiring.py` is the class test: it parses
+every `"${SCRIPT_DIR}/<script>"` invocation out of `run_all.sh` and asserts
+each has a `TOOL_REGISTRY` entry running that same script, or is named with a
+reason in a `_KNOWN_GAPS` map (empty today — every invoked script is now
+registered). It failed on exactly `run_shell_check.sh` before the fix and
+passes after. `CLAUDE/QA.md` already states no check count, so it needed no
+edit.
+
 ### N21 — nothing points a journal append at the tool that stamps the time
 
 **Found**: the owner asked whether "the journal command that enforces proper
@@ -1701,6 +1832,15 @@ lives under a directory named exactly `venv` or `build`, so the match must
 be made against the path relative to the project root. The mechanism
 suspected above (`core/worktree_paths.py`) is not involved. Candidate
 remedies 1-3 above are withdrawn. Graduated to its own plan.
+
+**Remedied by Plan 00458.** All six sites (and `matches_directory`) use
+`utils/path_segments.py::matches_path_segment`. It matches whole segments
+of the project-relative path and returns False for a path outside the
+root, so a blocking guard fails closed. `scripts/qa/check_skip_list_substring.py`
+flags the class, including through derived loop variables. It is recorded
+in `CLAUDE/Security/AsymmetricSiblingProtection.md`. Plan 00456's final
+QA passed with 0 failures in `worktree-issue-53-venv`, the worktree
+where this was found.
 
 ### N19 — the Python nested-install check can never fire in a real client
 

@@ -2,11 +2,24 @@
 
 Runs on SessionStart (new sessions only). Uses content-hash caching so the
 filesystem check only re-runs when .gitignore or .claude/.gitignore actually changes.
+
+**A protected glob's ignore line must never swallow ciphertext** (Plan
+00459). The globs select by NAME, and an Ansible Vault encrypted vars file
+can match one whose name describes what it holds; committing it is the
+point of Vault. So each session, uncached (a file can be encrypted or
+decrypted without the `.gitignore` changing), the protected files git knows
+about are checked with the shared ``encrypted_at_rest`` detector: an advised
+glob line is followed by a ``!/<path>`` negation for every ciphertext file it
+would catch, and ciphertext an existing rule already ignores is reported
+with the negation that re-includes it. Plaintext protected files must stay
+ignored, exactly as before. Only format names leave the detector, so no
+content reaches this advisory.
 """
 
 import hashlib
 import json
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +27,16 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
-from claude_code_hooks_daemon.utils.secret_file_matching import resolve_configured_patterns
+from claude_code_hooks_daemon.utils.encrypted_at_rest import is_encrypted_at_rest
+from claude_code_hooks_daemon.utils.git_file_states import (
+    gitignore_negation,
+    scan_git_file_states,
+    unignore_advice,
+)
+from claude_code_hooks_daemon.utils.secret_file_matching import (
+    path_is_protected,
+    resolve_configured_patterns,
+)
 from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 
 logger = logging.getLogger(__name__)
@@ -92,6 +114,22 @@ _CLAUDE_GITIGNORE_FILE = ".claude/.gitignore"
 _CACHE_FILE_NAME = "gitignore_safety_cache.json"
 # A leading '!' in .gitignore negates (un-ignores) a pattern — never coverage.
 _GITIGNORE_NEGATION_PREFIX = "!"
+
+_NEGATION_CAVEAT = (
+    "An Ansible Vault ENCRYPTED file matching a protected glob is meant to be "
+    "tracked: follow the glob with a `!/<path>` line for it."
+)
+_SWALLOWED_HEADING = (
+    "⚠️  GITIGNORE SAFETY: .gitignore ignores an encrypted file that should be tracked"
+)
+
+
+@dataclass(frozen=True)
+class _Ciphertext:
+    """A protected file git knows about whose content is a whole-file vault payload."""
+
+    relpath: str
+    ignored: bool
 
 
 class GitignoreSafetyCheckerHandler(SessionStartHandlerBase):
@@ -247,29 +285,69 @@ class GitignoreSafetyCheckerHandler(SessionStartHandlerBase):
         return not is_resume_session(hook_input)
 
     def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
-        """Check gitignore safety, using content-hash cache to minimise I/O."""
+        """Check gitignore safety, using content-hash cache to minimise I/O.
+
+        Only the missing-line check is cached: its answer depends on the
+        ``.gitignore`` content alone. Which protected files are ciphertext
+        depends on file content, so that is checked every time.
+        """
         project_root = self._get_project_root()
         if project_root is None:
             return AdvisoryResult(decision=Decision.ALLOW, context=[])
 
+        ciphertext = self._find_ciphertext(project_root)
         cache_file = self._get_cache_file()
         current_hash = self._compute_gitignore_hash(project_root)
 
         if self._is_cache_valid(cache_file, current_hash):
             cached = self._get_cached_missing_entries(cache_file)
             if cached is not None:
-                return self._build_result(cached)
+                return self._build_result(cached, ciphertext, project_root)
 
         # Cache miss — re-scan
         missing = self._find_missing_entries(project_root)
         self._write_cache(cache_file, current_hash, missing)
-        return self._build_result(missing)
+        return self._build_result(missing, ciphertext, project_root)
 
-    def _build_result(self, missing: list[str]) -> AdvisoryResult:
-        """Build AdvisoryResult from missing entries list."""
-        if not missing:
-            return AdvisoryResult(decision=Decision.ALLOW, context=[])
+    def _find_ciphertext(self, project_root: Path) -> list[_Ciphertext]:
+        """Protected files git knows about whose content is a whole-file vault.
 
+        Empty outside a git repository: without git there is no ignore state
+        to judge, and the advisory falls back to the caveat line.
+        """
+        states = scan_git_file_states(project_root)
+        if states is None:
+            return []
+        patterns = resolve_configured_patterns()
+        found: list[_Ciphertext] = []
+        for relpath in sorted(states.all_paths):
+            absolute = project_root / relpath
+            if not path_is_protected(str(absolute), patterns):
+                continue
+            if is_encrypted_at_rest(absolute, project_root):
+                found.append(_Ciphertext(relpath=relpath, ignored=states.is_ignored(relpath)))
+        return found
+
+    def _build_result(
+        self,
+        missing: list[str],
+        ciphertext: list[_Ciphertext] | None = None,
+        project_root: Path | None = None,
+    ) -> AdvisoryResult:
+        """Build AdvisoryResult from missing entries and the ciphertext found."""
+        found = ciphertext or []
+        swallowed = [item.relpath for item in found if item.ignored]
+        context = self._missing_section(missing, found, project_root) if missing else []
+        if swallowed:
+            if context:
+                context.append("")
+            context += [_SWALLOWED_HEADING, ""]
+            context += [f"  {relpath}: {unignore_advice(relpath)}" for relpath in swallowed]
+        return AdvisoryResult(decision=Decision.ALLOW, context=context)
+
+    def _missing_section(
+        self, missing: list[str], ciphertext: list[_Ciphertext], project_root: Path | None
+    ) -> list[str]:
         context = [
             "⚠️  GITIGNORE SAFETY: Required .claude/ paths are not gitignored",
             "",
@@ -284,14 +362,30 @@ class GitignoreSafetyCheckerHandler(SessionStartHandlerBase):
             "Fix: add the missing entries to your root .gitignore, e.g.:",
             "",
         ]
+        protected = set(resolve_configured_patterns())
+        advises_a_protected_glob = False
         for root_pattern, _, description in _required_gitignore_patterns():
-            if description in missing:
-                context.append(f"  {root_pattern}")
+            if description not in missing:
+                continue
+            context.append(f"  {root_pattern}")
+            if root_pattern not in protected:
+                continue
+            advises_a_protected_glob = True
+            # Never advise a glob that would swallow an existing encrypted
+            # file: the negation must follow it, since the last match wins.
+            context += [
+                f"  {gitignore_negation(item.relpath)}"
+                for item in ciphertext
+                if project_root is not None
+                and path_is_protected(str(project_root / item.relpath), (root_pattern,))
+            ]
         context += [
             "",
             "These paths are managed by Claude Code and must never be committed.",
         ]
-        return AdvisoryResult(decision=Decision.ALLOW, context=context)
+        if advises_a_protected_glob:
+            context.append(_NEGATION_CAVEAT)
+        return context
 
     def get_claude_md(self) -> str | None:
         return None

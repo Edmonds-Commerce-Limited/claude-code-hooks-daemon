@@ -219,8 +219,8 @@ _rv_resolve_python_impl() {
         echo "  Searched: \$HOOKS_DAEMON_PYTHON, \$HOOKS_DAEMON_VENV_PATH/bin/python," >&2
         echo "    $daemon_dir/untracked/venv-*/bin/python" >&2
         if [ "$fallback_flag" != "--fallback-target" ]; then
-            echo "  Invoke the hooks-daemon skill (install action) to create the venv, or pass" >&2
-            echo "  --fallback-target if you intend to bootstrap from a fresh clone." >&2
+            echo "  Build the venv for this project path with: $daemon_dir/bin/hooks-daemon repair" >&2
+            echo "  (or pass --fallback-target if you intend to bootstrap from a fresh clone)." >&2
         fi
         return 5
     fi

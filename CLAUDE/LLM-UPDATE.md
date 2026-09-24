@@ -1009,6 +1009,13 @@ plugins:
 
 ### Venv Broken After Update
 
+`repair` works even when no venv exists for this project path. It builds one
+in the foreground first, under the same lock as every other builder, and then
+runs the normal repair. A hook in that state starts the same build in the
+background on its own (see "Why the venv is fingerprint-keyed" in
+`CLAUDE/SELF_INSTALL.md`), so the hook message may already say a build is
+running or has failed, with its log.
+
 ```bash
 
 # Try repair command

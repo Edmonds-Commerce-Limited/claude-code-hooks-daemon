@@ -11,8 +11,10 @@ A broken/partial install (directory present, but no working venv / the package
 does not import) therefore could not be repaired with the documented
 ``/hooks-daemon install`` — only ``--force`` worked. The fix introduces
 ``_installation_is_healthy`` (venv python exists AND
-``import claude_code_hooks_daemon`` succeeds); an unhealthy directory
-auto-escalates to a forced repair instead of bailing.
+``import claude_code_hooks_daemon`` succeeds). An unhealthy directory holding
+a whole clone is repaired IN PLACE with the clone's own ``repair``, and never
+escalated to ``--force`` (Plan 00456, GitHub issue #53: the force path's
+``rm -rf`` took every other environment's venv with it).
 
 These tests extract ``_installation_is_healthy`` from install.sh and exercise
 it directly with stub venv pythons, mirroring the brace-extraction approach in
@@ -102,18 +104,20 @@ def test_unhealthy_when_package_import_fails(tmp_path: Path) -> None:
     assert _run_health_check(daemon_dir) != 0
 
 
-def test_guard_auto_escalates_to_force_on_broken_install() -> None:
-    """The guard must set --force (repair) rather than exit 0 on a broken dir.
+def test_guard_never_escalates_to_force_on_a_broken_install() -> None:
+    """The guard must repair, not force, when the probe fails (Plan 00456).
 
-    Static contract check on install.sh: the 'already installed' guard now
-    consults _installation_is_healthy and, on the unhealthy branch, sets
-    FORCE_FLAG="--force" instead of `exit 0`.
+    Plan 00122 made an unhealthy directory escalate to --force. That repaired a
+    broken single-environment install, but the force path's rm -rf also
+    deleted every OTHER environment's venv, and in GitHub issue #53's state the
+    probe can never pass. The guard still consults _installation_is_healthy,
+    and nothing in the script may set FORCE_FLAG except the caller's own
+    argument. The behaviour itself is pinned end to end by
+    test_skill_install_never_auto_forces.py.
     """
     text = INSTALL_SH.read_text()
-    assert "_installation_is_healthy" in text, "guard must call the health helper"
-    guard_start = text.index('if [ -d "$DAEMON_DIR" ]')
-    guard_region = text[guard_start : guard_start + 800]
+    guard_start = text.index('if [ -d "$DAEMON_DIR" ] && [ "$FORCE_FLAG" != "--force" ]')
+    guard_region = text[guard_start : text.index("\nfi\n", guard_start)]
     assert "_installation_is_healthy" in guard_region, "guard block must use the health check"
-    assert (
-        'FORCE_FLAG="--force"' in guard_region
-    ), "unhealthy install must escalate to forced repair"
+    assert 'FORCE_FLAG="--force"' not in text, "only the caller may ask for --force"
+    assert 'hooks-daemon" repair' in guard_region, "a whole clone is repaired in place"
