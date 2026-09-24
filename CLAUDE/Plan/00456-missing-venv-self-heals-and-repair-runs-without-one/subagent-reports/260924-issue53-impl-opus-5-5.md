@@ -218,3 +218,58 @@ in the journal entry at 11:04.
     session's orchestrator-simulate/team environment.
   - A `docs_qa/test_corpus.py` `...logs_nothing` test fails only in some
     orders; it passes alone.
+
+## Correction to the QA section: the probe-failure mechanism (review I5)
+
+The conclusion above stands: the 14 acceptance-probe failures predate this
+branch, and this branch does not cause them. The stated mechanism is
+**wrong**, and the proposed niggle must not be ledgered.
+
+- The cause is **not** `untracked/worktrees/`. Another checkout there
+  (`worktree-issue-55-signal`) passes, and so does
+  `/tmp/untracked/worktrees/x`.
+- The cause is this worktree's **name**: `worktree-issue-53-venv/`
+  contains the substring `venv/`. QaSuppression, CommentChangelog and
+  CommentSize skip any file whose absolute path merely contains a
+  skip-dir string (`skip_dir in file_path`, with `venv/`, `build/`,
+  `dist/`, `vendor/`, `migrations/`). `/tmp/foo-venv` and `/tmp/myvenv`
+  are skipped too.
+- The real, pre-existing defect is a guard false-negative for any
+  project whose path contains one of those substrings. It is **Plan
+  00458**, being fixed in another worktree. The handlers are not touched
+  here.
+- The `test_playbook_harness.py` failure listed above, which I put down
+  to the session's orchestrator-simulate mode, fails on the same 14
+  probes. It is the same cause.
+
+The journal's 11:37 correction entry records this.
+
+## Review findings and their resolution
+
+The review is `subagent-reports/260924-review-opus-5-5.md`, committed as
+delivered at `9607ea07`. Every fix was TDD, with RED quoted in the journal
+at 11:37.
+
+| Finding                                                              | Resolution                                                                                                                                                                                                                                                            | Commit      | Test (RED first)                                                                                               |
+| -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | -------------------------------------------------------------------------------------------------------------- |
+| B1: CI=true and the opt-out break `repair` and fake a failed build   | One `venv_bootstrap_switched_off_by`. The hook reports `disabled` with `detail=<setting>`. A switched-off build writes no marker. An explicit `repair` announces the override and builds. init.sh names the setting                                                   | `271040e7`  | driver `TestSwitchedOffMeansSwitchedOff` (5); init.sh `test_ci_true_is_named_never_reported_as_a_failed_build` |
+| B2: Python repair's bare `uv` misses `~/.local/bin`                  | `paths.find_uv()` checks `$HOME/.local/bin` first, then PATH. Used by the gate, the signature and `cmd_repair`, which spawns its absolute path                                                                                                                        | `271040e7`  | unit `TestFindUv` (5), `TestCmdRepairUsesTheBuildsUv` (2); wrapper `test_uv_only_in_uv_home_repairs_cleanly`   |
+| I1: hung detached build, no bound, no pid                            | `timeout -k 30 $HOOKS_DAEMON_VENV_BUILD_TIMEOUT` (900s) around the child. A TERM trap writes the marker and logs "timed out". The record holds the pid, `running` shows pid and elapsed, and the log names the pid. Without `timeout` it is unbounded, with a warning | `271040e7`  | driver `TestADetachedBuildIsBoundedAndNamed` (2)                                                               |
+| I2: mkdir backend reclaims a live build; exit deletes another's lock | A heartbeat keeps a live holder's lock fresh. Release removes only a lock whose `pid` is `$$`. Age stays the staleness rule, because a pid is not checkable across views                                                                                              | `271040e7`  | driver `TestTheMkdirLockSurvivesALongBuild` (2)                                                                |
+| I3: a KILLed `--force` strands venvs in an unignored dir             | The aside dir holds a `.gitignore` of `*`. Every run adopts stranded aside dirs and restores them from the EXIT trap                                                                                                                                                  | `b868330e`  | skill `TestVenvsStrandedByAKilledForceAreRecovered` (2)                                                        |
+| I4: repair, skill and upgrade hit the 120s wait behind a hook build  | `acquire_venv_lock` extends the wait to the recorded build's remaining bound, and announces it                                                                                                                                                                        | `271040e7`  | driver `test_repair_outwaits_the_generic_lock_bound`                                                           |
+| I5: wrong probe-failure diagnosis                                    | Not this branch's (Plan 00458). The report and journal are corrected                                                                                                                                                                                                  | this report | n/a                                                                                                            |
+| I6: marker checked before the lock                                   | The marker is judged after `try_acquire`, and the lock is released before reporting `failed`                                                                                                                                                                          | `271040e7`  | driver `test_a_marker_written_just_before_the_acquire_is_honoured` (a fake `flock` plants it at acquire)       |
+| S1: in-place `uv self update` is not an input change                 | The signature hashes uv's path, size and mtime. The wording is now "the uv binary changes"                                                                                                                                                                            | `271040e7`  | unit `test_changes_when_uv_is_updated_in_place`                                                                |
+| S2: source-shape tests                                               | Declined for now. The dispatch-shape test pins the lead's extension point, and the behaviour beside it is tested. Plan 00457 replaces it with per-arm behaviour when `signal` lands (journal 11:37)                                                                   | n/a         | n/a                                                                                                            |
+| S3: verb only read from `$1`; `repair --help` builds                 | `_subcommand_of` skips global options and their values. `repair --help` prints usage and builds nothing                                                                                                                                                               | `271040e7`  | wrapper `TestTheVerbIsFoundPastGlobalOptions` (2)                                                              |
+| S4: missing driver gives circular advice                             | The `repair` arm names `scripts/venv_bootstrap.sh` and exits 5                                                                                                                                                                                                        | `271040e7`  | wrapper `test_a_missing_driver_is_named`                                                                       |
+| S5: adopt trusts any `mkdir:<dir>`                                   | The mkdir spec must equal the daemon's lock dir. The flock fd is checked via `/proc` where present. The variable is unset after adoption                                                                                                                              | `271040e7`  | driver `test_a_foreign_directory_is_refused_and_untouched`                                                     |
+| S6: gate cost in failed/refused                                      | Declined. Measured median 101 ms (failed) and 94 ms (refused), only while the daemon is down anyway (journal 11:37)                                                                                                                                                   | n/a         | `untracked/scratch/s6_measure.py`                                                                              |
+| S7: three version.py readers                                         | Declined. The three live in units that cannot share code, so moving one would not remove one (journal 11:37)                                                                                                                                                          | n/a         | n/a                                                                                                            |
+
+Of the earlier "Unresolved" items, one is now resolved by I1: the hook's
+driver has a bound on its BUILD. The gate's own `python3` spawn is still
+unbounded; it takes about 0.1s.
+
+**Full QA after the review fixes:** QA_REVIEW_PLACEHOLDER
