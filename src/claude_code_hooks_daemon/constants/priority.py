@@ -152,6 +152,15 @@ class Priority:
     # whose report is rejected still has its cache cost counted — the figure
     # describes the agent's whole run, not the fate of its final message.
     SUBAGENT_CACHE_AGGREGATOR = 9
+    # Plan 00460 Task 1.6: runs ahead of the terminal size blocker (15) so a
+    # persisted report EXISTS on disk before the size blocker's glob lookup
+    # (subagent_report_paths.find_persisted_report) runs — there is no
+    # in-memory hand-off between the two, only this ordering plus the file
+    # the persister already wrote. 10, not 8 or 9: both are taken on this
+    # event (path_verifier, cache_aggregator) and this handler has no claim
+    # to run ahead of either — it never denies, and its own write is
+    # independent of what they find.
+    SUBAGENT_REPORT_PERSISTENCE = 10
 
     TDD_ENFORCEMENT = 15
     DANGEROUS_PERMISSIONS = 15

@@ -741,6 +741,14 @@ handlers:
       enabled: true                 # Sensor only (Plan 00452): renders nothing, never blocks a stop
       priority: 9                   # Ahead of the terminal size blocker, so a rejected report still counts
 
+    subagent_report_persistence:    # Auto-saves every sub-agent's final reply to a gitignored file (Plan 00460)
+      enabled: true                 # Sensor only: never blocks a stop; runs before the size blocker below
+      priority: 10                  # Must run before the terminal size blocker, which looks up its output
+      options:
+        report_dir: "untracked/agent-reports/auto/"
+        max_kept_reports: 500
+        max_report_age_days: 30
+
     subagent_report_size_blocker:  # Blocks an oversized subagent final message
       enabled: true                 # On by default (Plan 00307 Task 4.3); set false to opt out
       priority: 15

@@ -940,6 +940,10 @@ handlers:
       enabled: true
       priority: 9    # Ahead of the terminal size blocker (15), so a rejected report still gets counted
 
+    subagent_report_persistence:    # Auto-saves every sub-agent's final reply to a gitignored file (Plan 00460)
+      enabled: true  # Sensor only: never blocks a stop
+      priority: 10   # Must run before the terminal size blocker (15), which looks up its output
+
   # UserPromptSubmit handlers (run when user submits prompt)
   user_prompt_submit:
     git_context_injector:  # Injects git context into user prompts

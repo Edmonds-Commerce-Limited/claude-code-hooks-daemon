@@ -555,6 +555,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - flaggable_work_advisor — delegate flaggable work BEFORE reading it
 
+<!-- handler: background-process-tracker -->
+
+- background_process_tracker — backgrounded processes are tracked
+
 <!-- handler: budget-exhaustion-detector -->
 
 - budget_exhaustion_detector — hidden agent budgets are surfaced
@@ -591,10 +595,6 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - recovery_cron_advisor — failsafe recovery cron lifecycle advisory
 
-<!-- handler: background-process-tracker -->
-
-- background_process_tracker — backgrounded processes are tracked
-
 <!-- handler: ccy-supervisor-integrity -->
 
 - ccy_supervisor_integrity — keep the ccy supervisor properly set up
@@ -610,6 +610,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 <!-- handler: git-upstream-checker -->
 
 - git_upstream_checker — additive fetch + pull/cleanup advice on session start
+
+<!-- handler: hook-registration-checker -->
+
+- hook_registration_checker — hooks configuration policy
 
 <!-- handler: model-fallback-detector -->
 
@@ -627,29 +631,25 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - plan_workflow_asset_checker — plan tooling provisioning alert
 
-<!-- handler: reference-repo-sweep -->
-
-- reference_repo_sweep — reference clones are made fresh before you read them
-
-<!-- handler: tool-disable-advisor -->
-
-- tool_disable_advisor — declared never-want tools are checked at session start
-
 <!-- handler: project-handler-load-checker -->
 
 - project_handler_load_checker — project protection degraded alert
 
-<!-- handler: hook-registration-checker -->
+<!-- handler: reference-repo-sweep -->
 
-- hook_registration_checker — hooks configuration policy
+- reference_repo_sweep — reference clones are made fresh before you read them
+
+<!-- handler: routine-qa-sweep -->
+
+- routine_qa_sweep — recurring work that has stopped recurring
 
 <!-- handler: session-actions-directive -->
 
 - session_actions_directive — the must-do list is delivered as a turn
 
-<!-- handler: routine-qa-sweep -->
+<!-- handler: tool-disable-advisor -->
 
-- routine_qa_sweep — recurring work that has stopped recurring
+- tool_disable_advisor — declared never-want tools are checked at session start
 
 <!-- handler: secret-file-hygiene-checker -->
 
@@ -671,10 +671,6 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - cron_stop_enforcer — declared crons are verified, not just asked for
 
-<!-- handler: subagent-report-size-blocker -->
-
-- subagent_report_size_blocker — write large reports to a file
-
 <!-- handler: cron-subagent-stop-enforcer -->
 
 - cron_subagent_stop_enforcer — SubagentStop twin of `cron_stop_enforcer`
@@ -682,6 +678,14 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 <!-- handler: subagent-report-path-verifier -->
 
 - subagent_report_path_verifier — a claimed report path must exist
+
+<!-- handler: subagent-report-persistence -->
+
+- subagent_report_persistence — every sub-agent reply is saved to a file
+
+<!-- handler: subagent-report-size-blocker -->
+
+- subagent_report_size_blocker — write large reports to a file
 
 <!-- handler: worktree-create -->
 

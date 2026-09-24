@@ -543,6 +543,15 @@ class HandlerID:
         config_key="subagent_report_path_verifier",
         display_name="subagent-report-path-verifier",
     )
+    # SubagentStop report persister -- Plan 00460 Task 1.6: persists EVERY
+    # sub-agent's last_assistant_message to a gitignored, bounded location,
+    # regardless of agent type or Write access, so the size blocker never
+    # needs to ask an agent to write one itself.
+    SUBAGENT_REPORT_PERSISTENCE = HandlerIDMeta(
+        class_name="SubagentReportPersistenceHandler",
+        config_key="subagent_report_persistence",
+        display_name="subagent-report-persistence",
+    )
     COMMAND_HINTS = HandlerIDMeta(
         class_name="CommandHintsHandler",
         config_key="command_hints",

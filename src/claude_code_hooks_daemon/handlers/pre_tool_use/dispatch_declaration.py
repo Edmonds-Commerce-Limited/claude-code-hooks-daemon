@@ -25,6 +25,7 @@ the default) or the dispatch is denied (strict mode, opt-in via
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import (
@@ -37,10 +38,22 @@ from claude_code_hooks_daemon.constants import (
 from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.utils.option_coercion import coerce_bool_option
+from claude_code_hooks_daemon.utils.subagent_report_paths import (
+    DEFAULT_REPORT_DIR,
+)
+from claude_code_hooks_daemon.utils.subagent_tool_resolution import (
+    resolve_agent_can_write,
+    resolve_lookup_root,
+)
 
 # Fallback location for dispatches that are genuinely plan-less. Configurable
-# via dispatch_declaration.options.fallback_report_dir.
-_DEFAULT_FALLBACK_REPORT_DIR = "untracked/agent-reports/"
+# via dispatch_declaration.options.fallback_report_dir. Same default as
+# subagent_report_persistence's auto-save target (DEFAULT_REPORT_DIR) --
+# not the same setting (this one is user-declarable per dispatch prompt,
+# that one is the daemon's own unconditional safety net), but sharing a
+# default keeps the two mentions in `_contract_text()` pointing at the same
+# place when a project has not overridden either.
+_DEFAULT_FALLBACK_REPORT_DIR = DEFAULT_REPORT_DIR
 
 # Fallback plan directory, used only when no ProjectLayout facade was
 # injected (e.g. a handler constructed directly in a unit test). Mirrors
@@ -99,6 +112,15 @@ class DispatchDeclarationHandler(PreToolUseHandlerBase):
         # identical mypy redundant-expr concern).
         self._strict: Any = False
         self._fallback_report_dir: str = _DEFAULT_FALLBACK_REPORT_DIR
+        # Test-only override for the Plan 00460 Task 1.4 Write-capability
+        # lookup (mirrors subagent_report_size_blocker's identically-named
+        # attribute): production resolves lazily via resolve_lookup_root().
+        self._project_root: Path | None = None
+        # Test-only override for resolve_agent_can_write's `home_dir` param
+        # (mirrors subagent_report_size_blocker's identically-named
+        # attribute, review finding m10): production leaves this None, which
+        # resolve_agent_can_write resolves lazily to the real Path.home().
+        self._home_dir: Path | None = None
 
     def _plan_dir(self) -> str:
         """Configured plan directory (facade, or the matching default).
@@ -158,8 +180,59 @@ class DispatchDeclarationHandler(PreToolUseHandlerBase):
             "Either way: long-form output goes to a FILE, never inline. The "
             "agent's final message should be a short completion summary plus "
             "the file path — a subagent's return travels over a bounded-size "
-            "channel that silently elides an oversized inline report."
+            "channel that silently elides an oversized inline report.\n\n"
+            "Safety net either way (Plan 00460): the daemon auto-saves this "
+            "agent's full final reply to a gitignored file under "
+            f"`{DEFAULT_REPORT_DIR}` when it stops, regardless of what is "
+            "declared above — but that is a fallback for recovering an "
+            "oversized reply, not a substitute for declaring the real "
+            "destination its work belongs at."
         )
+
+    def _read_only_mismatch_text(self, agent_type: str) -> str:
+        """Plan 00460 Task 1.4: the dispatch names a report path but
+        ``agent_type`` cannot Write one there."""
+        return (
+            f"⚠️ READ-ONLY AGENT DISPATCH (Plan 00460): `{agent_type}` has no "
+            "`Write` tool, but this prompt declares a report destination. It "
+            "cannot write a report file there.\n\n"
+            "That destination is not this agent's only route to safety, "
+            "though: the daemon auto-saves its full final reply to a "
+            f"gitignored file under `{DEFAULT_REPORT_DIR}` when it stops, "
+            "no `Write` tool required. Ask for a short completion summary "
+            "and read the saved path back from its reply, or dispatch a "
+            "writable agent type instead if the declared destination is "
+            "the one that actually needs the report. Do NOT let it fall "
+            "back to a Bash heredoc/redirect/`tee` to work around this — "
+            "that reaches disk unexamined by the content guards a `Write` "
+            "tool call would get."
+        )
+
+    def _read_only_dispatch_mismatch(
+        self, hook_input: dict[str, Any], has_destination: bool
+    ) -> str | None:
+        """The Task 1.4 advisory text, or None when it does not apply.
+
+        Only fires when the prompt declares an explicit report DESTINATION
+        (``has_destination``, a caller-supplied ``_DESTINATION_PATTERN``
+        match) — review finding m4: gating this on ``_has_declaration``
+        over-fired, because that also matches a prompt that only mentions a
+        plan folder as CONTEXT (e.g. "This is Plan 00307 work ... Write your
+        findings there", naming no path directly), which commits the agent
+        to nothing a `Write`-less type could fail at. ``has_destination`` is
+        computed once by the caller (`handle`), not re-evaluated here, since
+        it is already known at the call site.
+        """
+        if not has_destination:
+            return None
+        tool_input = hook_input.get(HookInputField.TOOL_INPUT, {})
+        subagent_type = tool_input.get("subagent_type") if isinstance(tool_input, dict) else None
+        if not isinstance(subagent_type, str):
+            return None
+        root = resolve_lookup_root(self._project_root, getattr(self, "_workspace_root", None))
+        if resolve_agent_can_write(subagent_type, root, home_dir=self._home_dir) is False:
+            return self._read_only_mismatch_text(subagent_type)
+        return None
 
     def _is_strict(self) -> bool:
         """Coerced ``strict`` option.
@@ -177,12 +250,23 @@ class DispatchDeclarationHandler(PreToolUseHandlerBase):
         return coerce_bool_option(self._strict, default=False)
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
-        """Silent when declared; otherwise advise (default) or deny (strict)."""
+        """Silent when declared; otherwise advise (default) or deny (strict).
+
+        The Plan 00460 read-only-dispatch advisory is a SEPARATE, always-
+        advisory check layered on top: it can fire alongside "declared"
+        (the normal ALLOW-silent path gets non-empty context instead) but
+        never overrides strict mode's deny for an UNDECLARED dispatch —
+        Task 1.4 is scoped to a declared report path, so the two paths never
+        compete for the same dispatch.
+        """
         tool_input = hook_input.get(HookInputField.TOOL_INPUT, {})
         prompt = tool_input.get("prompt", "") if isinstance(tool_input, dict) else ""
 
         if self._has_declaration(prompt):
-            return GatingResult(decision=Decision.ALLOW)
+            has_destination = bool(_DESTINATION_PATTERN.search(prompt))
+            mismatch = self._read_only_dispatch_mismatch(hook_input, has_destination)
+            context = [mismatch] if mismatch is not None else []
+            return GatingResult(decision=Decision.ALLOW, context=context)
 
         if self._is_strict():
             return GatingResult(decision=Decision.DENY, reason=self._contract_text())
@@ -206,7 +290,21 @@ class DispatchDeclarationHandler(PreToolUseHandlerBase):
             "content is missing. Reply with a short summary + file path.\n\n"
             "Advisory by default (context injected when the declaration is "
             "missing); a project may opt into strict mode, which denies an "
-            "undeclared dispatch."
+            "undeclared dispatch.\n\n"
+            "**Safety net (Plan 00460 Task 1.6):** whatever is declared or "
+            "not, the daemon separately auto-saves every dispatched agent's "
+            f"full final reply to a gitignored file under `{DEFAULT_REPORT_DIR}` "
+            "at SubagentStop, regardless of agent type or `Write` access. "
+            "That is a fallback for recovering an oversized reply, not a "
+            "substitute for declaring the real destination the work "
+            "belongs at.\n\n"
+            "**Separately (Plan 00460 Task 1.4):** when the dispatch DOES "
+            "declare a report destination but `subagent_type` resolves to "
+            "an agent with no `Write` tool (a documented read-only "
+            "built-in, or a project/user agent whose frontmatter omits "
+            "`Write`), an ADVISORY fires — never a deny — pointing at the "
+            "daemon's auto-saved path above and warning against a Bash "
+            "write-around."
         )
 
     def get_acceptance_tests(self) -> list[Any]:
@@ -230,6 +328,17 @@ class DispatchDeclarationHandler(PreToolUseHandlerBase):
             tool_name=ToolName.AGENT,
             tool_input={
                 "description": "summarise findings",
+                "prompt": (
+                    "Write your report into CLAUDE/Plan/00345-harness-payloads-for-"
+                    "shell-and-call-syntax-tests/ and summarise what you found."
+                ),
+            },
+        )
+        read_only_declared_probe = ToolPayload(
+            tool_name=ToolName.AGENT,
+            tool_input={
+                "description": "explore the codebase",
+                "subagent_type": "Explore",
                 "prompt": (
                     "Write your report into CLAUDE/Plan/00345-harness-payloads-for-"
                     "shell-and-call-syntax-tests/ and summarise what you found."
@@ -292,5 +401,23 @@ class DispatchDeclarationHandler(PreToolUseHandlerBase):
                 requires_event="PreToolUse with Task tool",
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=False,
+            ),
+            AcceptanceTest(
+                title="Task dispatch declares a report path for a read-only subagent_type",
+                command=read_only_declared_probe.as_instruction(),
+                tool_payload=read_only_declared_probe,
+                description=(
+                    "Plan 00460 Task 1.4: Explore has no Write tool, so a "
+                    "declared report destination cannot be honoured -- advises "
+                    "the coordinator instead of silently letting the mismatch "
+                    "through"
+                ),
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[r"READ-ONLY AGENT DISPATCH", r"no `Write` tool"],
+                safety_notes="Advisory only, never a deny -- Task 1.4 is explicit about this.",
+                test_type=TestType.ADVISORY,
+                requires_event="PreToolUse with Task tool",
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=True,
             ),
         ]
