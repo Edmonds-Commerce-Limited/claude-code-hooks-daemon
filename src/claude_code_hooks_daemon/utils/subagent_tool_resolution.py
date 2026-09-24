@@ -45,7 +45,14 @@ from pathlib import Path
 from typing import Any, Final
 
 from claude_code_hooks_daemon.utils.markdown_format import parse_frontmatter_yaml
-from claude_code_hooks_daemon.utils.path_exclusion import resolve_project_root
+
+# Review m5: resolve_lookup_root now lives in path_exclusion.py next to
+# resolve_project_root (the one definition of a precedence this module used
+# to duplicate); re-exported here (the "import X as X" form mypy recognises
+# as deliberate) so this module's existing callers need no import change.
+from claude_code_hooks_daemon.utils.path_exclusion import (
+    resolve_lookup_root as resolve_lookup_root,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -183,24 +190,3 @@ def resolve_agent_can_write(
     # same kind of gap and is documented as out of scope for the same
     # reason (review M4).
     return None
-
-
-def resolve_lookup_root(
-    project_root_override: Path | None, workspace_root: Path | str | None
-) -> Path:
-    """The directory an ``agent_type``'s `.claude/agents/` lookup is rooted at.
-
-    Shared by every handler that calls :func:`resolve_agent_can_write`
-    (``subagent_report_size_blocker`` and ``dispatch_declaration``) so the
-    two never resolve a different root for the same agent type. An injected
-    TEST override wins, then the registry's ``workspace_root`` option, then
-    :func:`resolve_project_root` (None when ``ProjectContext`` is not
-    initialised, e.g. a bare unit test), falling back to the process cwd so
-    this always returns a concrete path.
-    """
-    if project_root_override is not None:
-        return project_root_override
-    if workspace_root is not None:
-        return Path(workspace_root)
-    resolved = resolve_project_root()
-    return Path(resolved) if resolved is not None else Path.cwd()

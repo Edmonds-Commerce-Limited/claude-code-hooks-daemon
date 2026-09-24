@@ -59,7 +59,7 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import SubagentStopHandlerBase
 from claude_code_hooks_daemon.utils.option_coercion import coerce_int_option
-from claude_code_hooks_daemon.utils.path_exclusion import resolve_project_root
+from claude_code_hooks_daemon.utils.path_exclusion import resolve_lookup_root
 from claude_code_hooks_daemon.utils.retention import prune_directory
 from claude_code_hooks_daemon.utils.subagent_report_paths import (
     DEFAULT_PERSISTED_REPORT_DIR,
@@ -130,19 +130,13 @@ class SubagentReportPersistenceHandler(SubagentStopHandlerBase):
     def _root(self) -> Path:
         """The checkout the report directory is resolved under.
 
-        An injected test override wins, then the registry's
-        ``workspace_root`` option, then :func:`resolve_project_root` (None
-        when ``ProjectContext`` is not initialised, e.g. a bare unit test),
-        falling back to the process cwd so this always returns a concrete
-        path.
+        Review m5: this precedence (test override, then the registry's
+        ``workspace_root`` option, then :func:`resolve_project_root` with a
+        cwd fallback) used to be duplicated here line-for-line against
+        ``subagent_tool_resolution.resolve_lookup_root`` — delegates to the
+        shared :func:`resolve_lookup_root` (``path_exclusion.py``) instead.
         """
-        if self._project_root is not None:
-            return self._project_root
-        workspace_root = getattr(self, "_workspace_root", None)
-        if workspace_root is not None:
-            return Path(workspace_root)
-        resolved = resolve_project_root()
-        return Path(resolved) if resolved is not None else Path.cwd()
+        return resolve_lookup_root(self._project_root, getattr(self, "_workspace_root", None))
 
     def _target_dir(self) -> Path | None:
         """The validated, confined write target, or ``None`` when unsafe.
