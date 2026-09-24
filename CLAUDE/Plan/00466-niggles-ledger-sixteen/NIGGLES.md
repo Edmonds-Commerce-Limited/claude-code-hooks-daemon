@@ -3,6 +3,158 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
+### N29 — `error_hiding`'s return-None-in-except check is evaded by returning a local assigned in the handler
+
+**Found by the coordinator** reading the goal-flip agent's report. To clear the
+`error_hiding` finding on a literal `return None` inside an `except` handler,
+that agent assigned `None` to a local in the handler and returned the local
+after the `try`. The behaviour is identical, and the detector no longer sees
+it. So the check keys on syntax, not on the flow it exists to catch, and an
+agent under QA pressure finds the gap on the first try. The goal-flip branch
+has been told to undo the evasion and fix the code honestly.
+
+**Candidate remedy:** judge the flow, not the token. An `except` handler that
+binds a name read by a later `return`, where that name's only values are
+`None` or a default and the handler logs or re-raises nothing, is the same
+finding as a literal `return None`. RED tests: the evasion shape is flagged,
+a handler that logs at warning or above and returns a documented sentinel is
+not, and the literal form is still flagged. Then sweep the tree for existing
+instances of the evasion shape, which would currently pass unseen.
+
+### N28 — `project_containment` resolves a relative target against the payload cwd and ignores a same-command `cd`
+
+**Found by the Plan 00464 agent** during its re-review fix round (S12). It is
+an instance of 00464's own defect class: the payload `cwd` is where the
+session started, not where the command runs. So `cd <elsewhere> && <write to a relative path>` was judged against the wrong directory, and the containment
+verdict could be wrong in both directions.
+
+**Remedied on the 00464 branch** (`worktree-plan-464-commit-gate-repo`,
+827c45df) through the new `find_command_placements`, which every
+path-judging guard is meant to share. Two sibling walkers still resolve
+their own way: `reference_repo_freshness` (the 00464 agent fixes it on that
+branch) and `secret_file_matching` (after the guard-defects branch merges,
+in the shell-parser consolidation). Mark Remedied when 00464 lands; the
+siblings are tracked in the coordinator's consolidation work.
+
+### N27 — `skill_scan` and `tool_report` build the transcript directory name two different ways
+
+**Found by the 00468 core agent** (report on its branch,
+`subagent-reports/260924-p468-core-opus-5-5.md`). Claude Code keeps a
+project's transcripts under a directory named after the project path, with
+characters it cannot use in a name replaced. `skill_scan` and `tool_report`
+each derive that name with their own code, and they disagree for a path
+containing `.` or `_`. So for such a project one of them reads the wrong
+directory, finds nothing, and reports "no data" rather than an error.
+
+**Candidate remedy:** one helper derives the transcript directory from the
+project path, pinned to Claude Code's real rule (checked against a real
+`~/.claude/projects/` entry for a path with `.`, `_` and `-`). Both commands
+and every other derivation site use it (sweep for the other derivations).
+The helper raises, not returns empty, when the directory does not exist and
+the caller asked for it. RED test: a project path with `.` and `_` resolves
+to the same directory from both commands.
+
+### N26 — `check_skill_references.py` scans zero files when run from a worktree
+
+**Found by the 00468 core agent.** Run from any worktree, the skill
+references QA check reports success after scanning 0 files. A check that
+examines nothing and passes is a fail-open gate: every sub-agent's targeted
+QA runs from a worktree, so the check has been silently vacuous exactly
+where branches are verified.
+
+**Candidate remedy:** find why the file discovery comes up empty in a
+worktree (a `.git` file rather than a directory, or a path anchored to the
+main checkout), and fix it. Separately, the check FAILS when it scans zero
+files where skills exist, so a vacuous pass cannot recur. Audit the other
+`scripts/qa/check_*.py` for the same "0 examined, PASS" shape and pin the
+class with a test that runs each check from a worktree fixture.
+
+**The cause, and two more instances (integration B2).** Each checker drops a
+file whose path contains a noise-directory name such as `untracked` or
+`worktrees`, and it tests the ABSOLUTE path. Every agent checkout lives at
+`untracked/worktrees/<name>/`, so every file matches:
+
+- `check_doc_truth.py` `_iter_markdown`: 0 docs scanned in every worktree.
+  **Fixed on the B2 branch** (08c4be0e): it tests the path below `--root`.
+  1785 docs scanned after, 0 violations. The test is
+  `test_a_checkout_inside_a_worktrees_directory_is_still_scanned`.
+- `audit_shell.py` `_is_excluded`: it keeps 0 of the worktree's `.sh` files, so
+  `shell_audit` passes vacuously. Not fixed. B2 ran it by hand over the
+  relative `scripts/` and skill-scripts directories: 52 files, no violations.
+- `check_skill_references.py` (this entry): `_EXCLUDED_DIRS` holds both names
+  and is tested against `path.parts`, so it is very likely the same cause.
+  `check_github_urls.py` tests `path.parts` the same way and should be checked.
+
+### N25 — a slow handler runs out the client's 30 s budget, and a timeout is an ALLOW for the whole PreToolUse chain
+
+**Found by the guard-defects security review 2**
+([report](subagent-reports/260924-n466-guards-review2-opus-5-5.md), B1 and
+m3). `.claude/hooks/pre-tool-use` gives the daemon `--timeout-ms 30000`. On a
+read-side socket timeout, `.claude/init.sh` (about lines 1654-1661) emits
+`hookSpecificOutput` with context only, which is an ALLOW for every non-Stop
+event. So any handler that can be made slow enough bypasses every guard
+behind it, not just itself. Two instances are measured:
+
+- `destructive_git`'s `strip_inert_spans` takes 99 s on a 200 KB command.
+  That is already on main.
+- The guard-defects branch's interior-wildcard DP takes 31 s on a crafted
+  60 KB command. That one is fixed on its branch as review 2's B1.
+
+Fixing each slow handler one by one leaves the class open: the next
+super-linear regex or DP reopens it silently.
+
+**Candidate remedies (the class, not the instance):**
+
+1. The daemon enforces a per-event deadline well under the client budget
+   (for example 20 s for the whole chain). When it passes, the remaining
+   SAFETY+BLOCKING handlers are treated as having raised, which means DENY
+   with a "not judged in time" reason under N24's fail-closed rule.
+   Advisory handlers are skipped with a note.
+2. Fix the measured instance: `strip_inert_spans` becomes linear, with a
+   timing test at 200 KB.
+3. A test harness drives every SAFETY handler with large hostile inputs
+   (long runs of quotes, backslashes, wildcards and nesting) under a time
+   bound, so a super-linear path fails CI rather than a client.
+
+Deliberately NOT a remedy: making the client fail closed on timeout. A
+daemon that is merely slow (an overloaded host) would then block every tool
+call. The deadline belongs inside the daemon, where it can tell safety
+handlers from advisories.
+
+### N24 — `daemon.strict_mode` never reaches the live daemon, so every guard fails OPEN on a handler exception
+
+**Found by the guard-defects security review 2**
+([report](subagent-reports/260924-n466-guards-review2-opus-5-5.md), M3), with a
+live probe against this repository's own daemon. `.claude/hooks-daemon.yaml`
+sets `strict_mode: true`. A Write payload that makes a handler raise
+(`ValueError: no path specified`, the still-live N5 shape) came back as
+`additionalContext: "Handler exception: ..."`: an ALLOW, not the strict-mode
+`SYSTEM ERROR ... blocking for safety` deny.
+
+`daemon/controller.py:959` reads `self._config.strict_mode if self._config else False`. The constructor's own comment (`:162-166`) says the `config`
+parameter "is not populated by the real daemon startup path", and
+`get_controller()` (`:1210`) builds `DaemonController()` with no config. So
+`strict_mode` is inert in every install. Every SAFETY guard treats its own
+crash as "no match". The per-guard wrapper that N11 adds to `secret_file_guard`
+is the only thing between a crash and a bypass, and no other guard has one.
+The N5 and N11 entries' claim that "this repository runs `strict_mode: true`,
+so here the crash denied" is false.
+
+**Candidate remedy (both halves):**
+
+1. Plumb `config.daemon.strict_mode` into the controller's real startup path,
+   through the same narrow-slice injection already used for `ChainConfig`.
+   Test it through `get_controller()` and a real daemon start, not by
+   constructing the controller with a config the daemon never passes.
+2. Independently of `strict_mode`, the chain denies when a handler tagged
+   SAFETY and BLOCKING raises, because a safety guard that crashes has not
+   judged the call. That closes the class for every guard at once, including
+   the review's m1 (`handle()` outside the fail-closed wrapper).
+
+RED tests: a live-path daemon with `strict_mode: true` denies on a raising
+handler; a SAFETY+BLOCKING handler that raises denies even with `strict_mode`
+off; a non-safety advisory handler that raises still allows, and says so.
+
 ### N23 — `recovery_cron_advisor` hands one request's lifecycle phase to another, through the singleton
 
 **Found by Plan 00449's agent** while fixing the eviction race in the same handler. `matches()` stores the detected phase on the handler (`self._cached_phase`) and `handle()` consumes it. The handler is a daemon-lifetime singleton and `server.py` dispatches on a thread pool, so request B's `matches()` can overwrite the value between request A's `matches()` and `handle()`. A then advises on B's phase (CREATION guidance for a PROGRESS edit, say), and B finds the cache already cleared and detects again. It raises nothing, so no test or log shows it. This is a different class from Plan 00449's select-then-evict: per-call state parked on a shared object between two calls. It is out of that plan's scope by its own Non-Goals ("no audit of every mutable handler attribute").
