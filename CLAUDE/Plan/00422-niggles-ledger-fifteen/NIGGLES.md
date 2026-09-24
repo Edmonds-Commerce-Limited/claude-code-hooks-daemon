@@ -1653,6 +1653,21 @@ Deduped: the only related entries are this ledger's N5 rows on install
 validation (closed) and Plan 00455, which found it and deliberately did not
 widen its scope.
 
+**Remedied**: remedy (1). The `pyproject.toml` exemption is deleted;
+`check_for_nested_installation` now cleans up the nested path unconditionally
+whenever it exists. Tests cover a real outer clone with the inner path
+present (must clean up) and the self-install repo layout, which has no outer
+clone and so never reaches the nested path at all (must leave everything
+alone). The destructive branch also got safer while it was open: a nested
+path that is itself a symlink is unlinked rather than handed to
+`shutil.rmtree` (which refuses a symlink path outright), and a symlink found
+while removing a genuine nested directory only has the link removed, never
+its target. `install.py`'s `_validate_not_nested` was checked and carries no
+copy of the exemption (it raises unconditionally already); the OTHER
+`_project_root_is_daemon_repo` check inside `validate_installation_target`'s
+step 1 is a different, correct use of the same pyproject-name detection and
+was left alone.
+
 ### N18 — LSP.md relies on an `untracked/venv` symlink that nothing creates and the code calls legacy
 
 **Found**: chasing a Pyright `Import "pytest" could not be resolved` on a new
