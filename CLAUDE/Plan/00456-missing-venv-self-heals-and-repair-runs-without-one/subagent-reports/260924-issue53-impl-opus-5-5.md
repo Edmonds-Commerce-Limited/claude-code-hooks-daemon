@@ -95,8 +95,9 @@ Phase 2 (merge, CI, daemon restart, #53) is for the lead.
    the foreground under the lock, clears the marker, re-resolves, then
    runs the Python repair. With a venv present, nothing changes.
    **Extension point for `signal` (Plan 00457, #55):** the intercept is a
-   dispatch, `_run_venv_free_verb()` at `bin/hooks-daemon:108`, called
-   from `bin/hooks-daemon:129`. The template
+   dispatch, `_run_venv_free_verb()` at `bin/hooks-daemon:131` (the
+   `repair)` arm at `:135`), called from `bin/hooks-daemon:169`. These
+   line numbers are as of `c9a55fa0`. The template
    (`src/claude_code_hooks_daemon/install/templates/hooks-daemon`) is
    byte-identical.
    - Each verb is one `case` arm. An arm either makes a venv resolve (sets
@@ -294,3 +295,28 @@ to fix. Every other check passes: the other 34 tools, and the other
 
 This paragraph and its journal entry are the only change after that run,
 and they touch only plan markdown.
+
+## Re-review findings N1-N6 and their resolution
+
+The re-review addendum is in `subagent-reports/260924-review-opus-5-5.md`,
+committed as delivered at `2ff6ef52`. All six are fixed in `c9a55fa0`. Each
+had a RED test first, built on the reviewer's probes; RED and GREEN are
+quoted in the journal at 12:18. N3 supersedes the I1 row above: the bound
+is now a bash watchdog, not GNU `timeout`. N2 narrows I1's "a TERM writes
+the marker" to a real timeout only.
+
+| Finding                                                                | Resolution                                                                                                                                                                                                                                                                          | Commit     | Test (RED first)                                                                                                                               |
+| ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| N1: restoring a stranded aside dir deletes a NEWER venv; message wrong | `_restore_from aside own\|stranded`: on a name clash the venv already in place is always kept and the copy aside is discarded. The message names which copy won and why, per case                                                                                                   | `c9a55fa0` | skill `test_a_newer_venv_of_the_same_name_survives_a_force`, `test_a_stranded_copy_gives_way_to_the_current_venv`                              |
+| N2: any TERM is recorded as "timed out" and blocks retry               | `_vb_judge_stop`: venv resolves, so no marker (0); elapsed ≥ bound, so the "timed out after N s" marker (124); otherwise "stopped by a signal" is logged, with no marker (143), and the next hook retries. A `BASH_SOURCE` guard makes the judge testable on its own                | `c9a55fa0` | driver `TestOnlyATimeoutIsATimeout` (2)                                                                                                        |
+| N3: no bound without a `timeout` binary (macOS); message/docs untrue   | No GNU `timeout`. The child runs the build as a `set -m` job (its own process group), with a bash watchdog: sleep out the remaining bound, TERM the group, 30 s grace, KILL. The `running` message and the TROUBLESHOOTING row are true on every platform                           | `c9a55fa0` | driver `TestTheBoundHoldsWithoutTimeout::test_a_hung_build_ends_failed_with_no_timeout_binary` (`timeout`, `setsid`, `flock` off PATH)         |
+| N4: a live run's aside dir can be adopted                              | An aside dir carries an `owner` file (`pid=`, `host=`) and a heartbeat, the lock's liveness evidence under the same tunables. It is adopted only if released, silent past the stale age, or owned by a gone same-host pid and silent for two beats. Else left alone, with a message | `c9a55fa0` | skill `TestALiveAsideDirIsNotTaken` (2: live owner untouched, dead owner adopted)                                                              |
+| N5: restore creates a daemon dir holding only venvs                    | `_holds_a_clone` gates every restore. Without a clone the venvs stay aside, the owner file is dropped so the next run can adopt the dir, and the output names the dir                                                                                                               | `c9a55fa0` | skill `test_a_failed_install_keeps_the_venvs_aside_and_creates_no_venv_only_dir`, `test_stranded_venvs_stay_aside_when_no_clone_can_take_them` |
+| N6: stray `sleep 60` heartbeats; a heartbeat in the failed state       | The heartbeat starts only where a build holds the mkdir lock (`acquire_venv_lock` success, `adopt_venv_lock`), never in `_venv_lock_try_once`. Its `sleep` is a waited-on job killed by the loop's TERM trap, and the stopper kills and reaps the loop                              | `c9a55fa0` | driver `TestNoStrayHeartbeats` (2: failed-state hooks start none; release leaves no sleep)                                                     |
+
+The reviewer's probes after the fixes: stranded-order gives "surviving
+generation: NEWER"; TERM gives "state after TERM: ['started']" with no
+"timed out"; macOS-like runs, drops the lock dir, resolves, and calls `uv`
+once. The stranded-order probe still finds an aside dir left behind. That
+is N4 working, not a leak: the probe reinstalls at once under the default
+60 s heartbeat, so the killed run's dir is still inside its two beats.
