@@ -187,13 +187,18 @@ class TestOtherVerbsStillRefuse:
         assert sandbox.uv_calls() == []
 
 
-class TestVenvFreeVerbsAreOneDispatch:
-    """The pre-resolution intercept is a dispatch table, not a ``repair`` special case.
+class TestDispatchHasOneArmPerVerb:
+    """The pre-resolution intercept is a dispatch table, not a ``repair`` special
+    case: the wrapper has exactly one place that decides which verbs run
+    without a venv, and the exit-5 refusal is reached only through it.
 
-    ``signal`` (Plan 00457, #55) is the next verb that must run where no venv
-    resolves. It should be added as one more arm of the same dispatch, so the
-    wrapper must have exactly one place that decides which verbs run without a
-    venv, and the exit-5 refusal must be reached only through it.
+    ``signal`` (Plan 00457, #55) is the second verb proven to actually run
+    with no venv present -- see ``test_bin_hooks_daemon_signal_without_venv.py``
+    for that behavioural proof, mirroring ``TestRepairWithNoVenv`` above. This
+    class only guards the dispatch SHAPE, which is cheap and still worth
+    keeping on its own: a future verb landing outside ``_run_venv_free_verb``
+    (a parallel ``"${1:-}" = "..."`` check, say) would defeat the single point
+    of control even if its own behavioural tests passed.
     """
 
     @pytest.fixture(params=_WRAPPER_COPIES, ids=lambda path: path.parent.name)
@@ -205,8 +210,10 @@ class TestVenvFreeVerbsAreOneDispatch:
         body = _function_body(wrapper_text, _DISPATCH_FUNCTION)
         assert re.search(r'^\s*case "\$verb" in$', body, re.MULTILINE)
         assert re.search(r"^\s*repair\)$", body, re.MULTILINE)
+        assert re.search(r"^\s*signal\)$", body, re.MULTILINE)
         assert re.search(r"^\s*\*\)$", body, re.MULTILINE)
 
     def test_the_refusal_is_reached_only_through_the_dispatch(self, wrapper_text: str) -> None:
         assert f'if ! {_DISPATCH_FUNCTION} "$@"; then' in wrapper_text
         assert '"${1:-}" = "repair"' not in wrapper_text
+        assert '"${1:-}" = "signal"' not in wrapper_text

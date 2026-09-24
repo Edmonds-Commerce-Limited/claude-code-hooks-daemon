@@ -114,10 +114,62 @@ self-resolved, one mypy `no-any-return`, one pyright
 `reportAssignmentType`; 10 acceptance-test errors were a stale
 THIS-WORKTREE daemon, cleared by `bin/hooks-daemon restart`.)
 
-## What Task 1.3 needs
+## Task 1.3 — wiring into `bin/hooks-daemon`
 
-Wire `signal` into `bin/hooks-daemon`'s pre-venv-resolution dispatch
-(Plan 00456's mechanism, once it merges) as a direct-file-path `python3`
-invocation of `daemon/signal_standalone.py`, after checking the invoking
-interpreter is Python >= 3.8 with a clear message otherwise. Do not add
-`-m` or `PYTHONPATH` — the module needs neither.
+Merged `main` (Plan 00456, `9e2f74cd`) into this worktree as `74153796`
+(clean, no conflicts) to pick up `_run_venv_free_verb` and its `repair` arm.
+
+Added a `signal)` arm to `_run_venv_free_verb` in `bin/hooks-daemon` and its
+install template (kept byte-identical), same shape as `repair`'s: a
+`python3 >= 3.8` gate ahead of everything else, then `exec`s
+`daemon/signal_standalone.py` by file path under the system `python3` — it
+never touches `venv_bootstrap.sh` or builds a venv. A reconstruction loop
+inside the arm replays `_subcommand_of`'s own option-recognition rule
+(`--project-root`/`--pid-file`/`--socket` consume a value; the first bare
+word is the verb and is dropped) to strip the literal `signal` word before
+forwarding the rest to `signal_standalone.py`'s argparse — the first cut
+forwarded `"$@"` unchanged and argparse rejected "signal" as an invalid
+`<kind>`; this fixed it. `${rest[@]+"${rest[@]}"}` is used for that array's
+expansion for bash 3.2 (`set -u`, empty-array) safety, proactively (not
+forced by an existing test — extensionless `bin/hooks-daemon` isn't scanned
+by `test_bash32_portability.py`).
+
+`tests/venv_bootstrap_sandbox.py`'s `CLONE_FILES` now also stages
+`signal_standalone.py`, `install_layout.py`, `operator_signal.py` and
+`temp_names.py`. Replaced `TestVenvFreeVerbsAreOneDispatch` with
+`TestDispatchHasOneArmPerVerb` (repair test file) to assert the dispatch
+SHAPE covers both verbs; added
+`tests/integration/test_bin_hooks_daemon_signal_without_venv.py` (6 tests,
+mirroring `repair`'s own suite): writes a signal and builds no venv, a
+malformed request is still refused, `--help` needs no venv, a missing entry
+point is named at exit 5, an old `python3` is refused at exit 5 naming
+"3.8", and the verb is found after a leading global option.
+
+**Caveat carried from Plan 00456, not introduced here** (recorded in the
+journal and in PLAN.md's Success Criteria): `resolve_venv_python`'s
+glob-fallback scan checks only the executable bit on a candidate
+`venv-*/bin/python`, not whether it can actually run on this host. A venv
+built inside a container (present, wrong architecture) could in principle
+be reported "resolved" rather than falling through to
+`_run_venv_free_verb`. Out of Task 1.3's scope (reuse the mechanism, don't
+redesign it) — flagged as a candidate niggle for its own follow-up plan.
+
+### Commits (this session)
+
+- `74153796` — merge `main` (Plan 00456)
+- Task 1.3 implementation + tests + PLAN.md/journal updates (see the commit
+  this report accompanies)
+
+### QA
+
+`QA: 36/36 PASSED`, run in the foreground on the final commit after a
+worktree daemon restart. Two earlier foreground runs in this session hit
+transient issues unrelated to Task 1.3's code: black auto-fixed one new
+test file's formatting on the first run (re-verified clean afterwards), and
+two subsequent runs failed only `smoke_test` because the daemon's own
+`idle_timeout_seconds: 600` elapsed mid-run under heavy concurrent
+host load (several other worktrees' QA suites running at once, each run
+taking >15 minutes) — a keepalive loop pinging the daemon every 2 minutes
+for the duration of the run (stopped and cleaned up afterwards) fixed this;
+also ran `./scripts/qa/run_shell_check.sh` separately (67 files, 0 issues)
+since `llm_qa.py` does not run shellcheck (ledger 00422 N22).

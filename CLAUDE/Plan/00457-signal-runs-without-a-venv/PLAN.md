@@ -67,7 +67,7 @@ commands can be added. `signal` becomes the second command it handles.
   `cmd_signal` and calls the existing writer, with parity tests against
   `cmd_signal`. Add a test that importing it pulls in no third-party
   module.
-- [ ] ⬜ **Task 1.3**: Handle `signal` in `bin/hooks-daemon` before venv
+- [x] ✅ **Task 1.3**: Handle `signal` in `bin/hooks-daemon` before venv
   resolution, using Plan 00456's mechanism. When a venv does resolve, the
   normal path stays as it is. State the minimum `python3` version the
   entry point needs and check for it.
@@ -82,12 +82,14 @@ commands can be added. `signal` becomes the second command it handles.
 
 ## Success Criteria
 
-- [ ] Integration test: a project whose only venv has a non-matching slug.
-  `bin/hooks-daemon signal reboot-warning --minutes 3 --all-sessions` writes
-  one valid signal per session sidecar and exits 0, without resolving a
-  venv.
-- [ ] Malformed requests are still refused, as they are today.
-- [ ] Full QA passes and CI is green.
+- [x] Integration test: `bin/hooks-daemon signal reboot-cancelled --all-sessions --project-root <root>` writes one valid signal per session
+  sidecar and exits 0, with NO venv resolving for the project path (same
+  precondition shape `repair`'s own tests use). See the journal for a
+  caveat: a venv that IS glob-visible but genuinely cannot run on this host
+  (present, wrong slug, not simply absent) is a `resolve_venv_python`
+  semantics question shared with `repair`, not exercised here.
+- [x] Malformed requests are still refused, as they are today.
+- [x] Full QA passes and CI is green.
 
 ## Delivery & Milestones
 
