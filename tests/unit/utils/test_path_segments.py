@@ -71,7 +71,7 @@ class TestProjectRelative:
         name is in an ANCESTOR directory (the worktree's own name), not in the
         project-relative path, so the site must still be guarded."""
         root = "/workspace/untracked/worktrees/worktree-issue-53-venv"
-        path = f"{root}/untracked/scratch/acceptance-test-qa-python/sample.py"
+        path = f"{root}/untracked/acceptance/acceptance-test-qa-python/sample.py"
         assert matches_path_segment(path, ("venv/",), project_root=root) is False
 
     def test_a_file_outside_the_project_root_is_not_skipped(self) -> None:

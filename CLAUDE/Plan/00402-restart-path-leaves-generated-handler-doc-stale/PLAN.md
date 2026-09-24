@@ -1,6 +1,6 @@
 # Plan 00402: restart path leaves generated handler doc stale
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-14
 **Owner**: joseph
 **Priority**: Medium
@@ -93,37 +93,51 @@ between noise, safety and where the failure surfaces:
 Option 3 is the smallest change that closes the blind spot, and options 1 and 3
 compose. Recording no recommendation beyond that: the ruling is the owner's.
 
+**Decided (unattended, 2026-09-24)**: option 3. It is the smallest change, puts
+no risk on the marker `upgrade.sh` reads, and fails at the moment a handler is
+added; option 1 can be layered on later. Assumption: the owner's 'no known
+defects' instruction; the owner can reverse this with one message.
+
 ## Tasks
 
 ### Phase 1: Reproduce
 
-- [ ] ⬜ **Task 1.1**: Write a RED test that fails when `.claude/HOOKS-DAEMON.md`
+- [x] ✅ **Task 1.1**: Write a RED test that fails when `.claude/HOOKS-DAEMON.md`
   body diverges from freshly generated output, comparing everything except
   the `> Generated on …` marker line. Respect `tests/conftest.py`'s
   prohibition on writing the tracked file — generate into a tmp path and
-  compare.
-- [ ] ⬜ **Task 1.2**: Assert the marker line itself is NOT rewritten by the
+  compare. `tests/unit/qa/test_check_generated_doc_drift.py`, including the
+  originating instance (`test_flags_the_originating_instance`).
+- [x] ✅ **Task 1.2**: Assert the marker line itself is NOT rewritten by the
   comparison path, so the FROM-version signal cannot regress.
+  `test_the_check_never_writes_the_doc`.
 
 ### Phase 2: Close the gap (shape depends on the ruling above)
 
-- [ ] ⬜ **Task 2.1**: Implement the ruled option.
-- [ ] ⬜ **Task 2.2**: Cover the preserved-marker invariant with a test that
+- [x] ✅ **Task 2.1**: Implement the ruled option.
+  `scripts/qa/check_generated_doc_drift.py`, wired into `llm_qa.py`
+  (`generated_doc_drift`) and `run_all.sh`; the real-repo gate
+  (`test_real_repository_handler_doc_is_fresh`) runs in CI's pytest step.
+- [x] ✅ **Task 2.2**: Cover the preserved-marker invariant with a test that
   fails if a future change stamps the running version into the file.
+  `test_an_older_marker_is_not_drift` (the check never demands the running
+  version) and `test_a_missing_marker_is_flagged` (excluding the marker does
+  not make its absence pass).
 
 ### Phase 3: Documentation truth
 
-- [ ] ⬜ **Task 3.1**: The false claim in `.claude/skills/hooks-daemon/regen-docs.md`
+- [x] ✅ **Task 3.1**: The false claim in `.claude/skills/hooks-daemon/regen-docs.md`
   and the `hooks-daemon` SKILL.md is corrected under Plan 00400 N6; confirm
-  no other surface repeats it.
+  no other surface repeats it. Confirmed; `regen-docs.md`'s "no test detects
+  that" line now names the check and says why a restart leaves the file alone.
 
 ## Success Criteria
 
-- [ ] A test fails against today's code when the tracked handler doc's body is
+- [x] A test fails against today's code when the tracked handler doc's body is
   stale relative to the live registry, and passes once regenerated.
-- [ ] The `Generated on` marker still reports the deployed-from version after
+- [x] The `Generated on` marker still reports the deployed-from version after
   the change; `scripts/upgrade.sh` FROM-version derivation is unaffected.
-- [ ] No documentation claims a restart refreshes both generated artefacts.
+- [x] No documentation claims a restart refreshes both generated artefacts.
 - [ ] Full QA passes and CI is green.
 
 ## Delivery & Milestones

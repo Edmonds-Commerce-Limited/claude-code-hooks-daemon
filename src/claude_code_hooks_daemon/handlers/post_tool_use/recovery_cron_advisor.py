@@ -51,7 +51,7 @@ from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.side_effect_journal import SideEffectJournal
 from claude_code_hooks_daemon.core.utils import get_bash_command, get_file_path
-from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
 # ─── Lifecycle phase ──────────────────────────────────────────────────────────
 
@@ -73,7 +73,7 @@ class LifecyclePhase(Enum):
 # _plan_path_pattern() below.
 _FALLBACK_PLAN_DIR: Final[str] = "CLAUDE/Plan"
 
-# Acceptance-test fixture, below the sanctioned scratch root. Plan 00320/
+# Acceptance-test fixture, below the gitignored acceptance root. Plan 00320/
 # 00321: the plan number MUST stay outside the real allocated range -- this
 # fixture flips a PLAN.md to In Progress, which is a real goal-emission
 # trigger; when it used 00099 the resulting goal named a plan that genuinely
@@ -649,9 +649,9 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
         # absolute -- required for the Write/Edit tool payloads below:
         # AbsolutePathHandler denies a relative file_path before this
         # handler is ever reached.
-        plan_dir = f"untracked/scratch/{_FIXTURE_DIR}/{_FIXTURE_PLAN_SUBPATH}"
+        plan_dir = f"untracked/acceptance/{_FIXTURE_DIR}/{_FIXTURE_PLAN_SUBPATH}"
         plan_path = f"{plan_dir}/PLAN.md"
-        plan_path_abs = scratch_path(_FIXTURE_DIR, _FIXTURE_PLAN_SUBPATH, "PLAN.md")
+        plan_path_abs = acceptance_path(_FIXTURE_DIR, _FIXTURE_PLAN_SUBPATH, "PLAN.md")
 
         # Stated once; the prose is rendered from it (Plan 00243).
         creation_probe = ToolPayload(
@@ -696,7 +696,7 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
                     r"heartbeat",
                 ],
                 safety_notes=(
-                    "Inside the gitignored scratch directory - safe.  Advisory handler "
+                    "Inside the gitignored acceptance directory - safe.  Advisory handler "
                     "allows write and adds guidance. No setup mkdir: the Write tool "
                     "creates the missing parent directories itself, which also avoids "
                     "plan_number_helper treating a literal `mkdir .../CLAUDE/Plan/99099-test` "
@@ -705,7 +705,7 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
                 ),
                 test_type=TestType.ADVISORY,
                 setup_commands=[],
-                cleanup_commands=[f"rm -rf untracked/scratch/{_FIXTURE_DIR}"],
+                cleanup_commands=[f"rm -rf untracked/acceptance/{_FIXTURE_DIR}"],
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=False,
             ),
@@ -720,7 +720,7 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[r"CronList", r"create one now"],
                 safety_notes=(
-                    "Inside the gitignored scratch directory - safe.  Advisory handler "
+                    "Inside the gitignored acceptance directory - safe.  Advisory handler "
                     "allows edit and adds guidance. Setup uses `install -d`, not `mkdir`, "
                     "to create the fixture directory: the Edit tool requires the file to "
                     "already exist, so the directory genuinely must be created here (unlike "
@@ -737,7 +737,7 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
                         f"\\n\\n- [ ] ⬜ **Task 1.1**: Todo' > {plan_path}"
                     ),
                 ],
-                cleanup_commands=[f"rm -rf untracked/scratch/{_FIXTURE_DIR}"],
+                cleanup_commands=[f"rm -rf untracked/acceptance/{_FIXTURE_DIR}"],
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=False,
             ),
@@ -754,7 +754,7 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[r"CronDelete"],
                 safety_notes=(
-                    "Inside the gitignored scratch directory - safe.  Advisory handler "
+                    "Inside the gitignored acceptance directory - safe.  Advisory handler "
                     "allows write and adds guidance. No setup mkdir: the Write tool "
                     "creates the missing parent directories itself, which also avoids "
                     "plan_number_helper treating a literal `mkdir .../CLAUDE/Plan/99099-test` "
@@ -763,7 +763,7 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
                 ),
                 test_type=TestType.ADVISORY,
                 setup_commands=[],
-                cleanup_commands=[f"rm -rf untracked/scratch/{_FIXTURE_DIR}"],
+                cleanup_commands=[f"rm -rf untracked/acceptance/{_FIXTURE_DIR}"],
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=False,
             ),

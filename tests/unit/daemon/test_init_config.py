@@ -109,6 +109,13 @@ class TestConfigTemplate:
 
         assert "enforce_single_daemon_process: true" in result
 
+    def test_plugins_block_is_labelled_as_daemon_plugins(self) -> None:
+        """Both templates say the `plugins:` block holds daemon plugins, so a
+        client never mistakes it for Claude Code plugins (Plan 00468 G5)."""
+        label = "# Daemon plugins: custom handler modules (not Claude Code plugins)\nplugins:\n"
+        assert label in ConfigTemplate.generate_minimal()
+        assert label in ConfigTemplate.generate_full()
+
 
 class TestGenerateConfig:
     """Tests for generate_config convenience function."""

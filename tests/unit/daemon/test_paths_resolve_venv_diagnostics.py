@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import stat
+import time
 from pathlib import Path
 
 import pytest
@@ -80,6 +81,45 @@ def _write_metadata(
     metadata_path = venv_dir / ".daemon-metadata.json"
     metadata_path.write_text(json.dumps(meta))
     return metadata_path
+
+
+def _make_fake_venv_failing(venv_dir: Path) -> Path:
+    """A present, +x candidate that exits non-zero.
+
+    Executable-bit-only checks accept this; the run probe (Plan 00466 N1)
+    must not — it launches the candidate and requires a clean exit.
+    """
+    bin_dir = venv_dir / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    py = bin_dir / "python"
+    py.write_text("#!/bin/bash\nexit 1\n")
+    py.chmod(py.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    return py
+
+
+def _make_fake_venv_dangling_symlink(venv_dir: Path) -> Path:
+    """A ``bin/python`` symlink whose target does not exist.
+
+    Mirrors #55: a venv built inside a container can symlink into a path
+    that exists only there. ``os.access(X_OK)`` on a dangling symlink is
+    platform-dependent (a broken link is not itself executable), but the
+    run probe closes the case either way -- launching it always fails.
+    """
+    bin_dir = venv_dir / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    py = bin_dir / "python"
+    py.symlink_to(venv_dir / "nonexistent-target")
+    return py
+
+
+def _make_fake_venv_hanging(venv_dir: Path) -> Path:
+    """A present, +x candidate that never exits on its own."""
+    bin_dir = venv_dir / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    py = bin_dir / "python"
+    py.write_text("#!/bin/bash\nsleep 100\n")
+    py.chmod(py.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    return py
 
 
 def _make_fake_venv_python3_only(venv_dir: Path) -> Path:
@@ -931,3 +971,137 @@ class TestMissingPersistedPythonRecovery:
         chosen, probes = find_latest_python_or_explain((3, 11))
         assert chosen is None
         assert probes == []
+
+
+class TestRunnabilityProbe:
+    """Plan 00466 N1: the executable bit alone does not prove a venv
+    interpreter can run on this host. A venv built inside a container can
+    be present, +x, and still fail at exec time -- wrong architecture/libc,
+    or a symlink into a container-only path. Every acceptance point
+    (steps 2-5) must probe a candidate before accepting it."""
+
+    def test_scan_fallback_skips_candidate_that_exits_nonzero(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        daemon_dir = tmp_path / "daemon"
+        _make_fake_venv_failing(daemon_dir / "untracked" / "venv-py999-broken")
+
+        resolved, steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
+        assert resolved is None
+        scan_step = next(s for s in steps if s.startswith("step 4"))
+        assert "cannot run" in scan_step.lower()
+
+    def test_scan_fallback_skips_dangling_symlink_candidate(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        daemon_dir = tmp_path / "daemon"
+        _make_fake_venv_dangling_symlink(daemon_dir / "untracked" / "venv-py999-dangling")
+
+        resolved, _steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
+        assert resolved is None
+
+    def test_scan_fallback_skips_hanging_candidate_within_bound(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import claude_code_hooks_daemon.daemon.paths as paths_mod
+
+        monkeypatch.setattr(paths_mod, "_VENV_RUN_PROBE_TIMEOUT_SECS", 0.2)
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        daemon_dir = tmp_path / "daemon"
+        _make_fake_venv_hanging(daemon_dir / "untracked" / "venv-py999-hangs")
+
+        started = time.monotonic()
+        resolved, _steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
+        elapsed = time.monotonic() - started
+
+        assert resolved is None
+        assert elapsed < 3.0, f"probe must respect its bound; took {elapsed:.2f}s"
+
+    def test_scan_fallback_falls_through_to_good_second_candidate(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        daemon_dir = tmp_path / "daemon"
+        _make_fake_venv_failing(daemon_dir / "untracked" / "venv-py999-aaa-broken")
+        good = _make_fake_venv(daemon_dir / "untracked" / "venv-py999-zzz-good")
+
+        resolved, steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
+        assert resolved == good
+        assert any(s.startswith("step 4") and "scan-fallback hit" in s for s in steps)
+
+    def test_all_candidates_bad_falls_through_every_step(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        daemon_dir = tmp_path / "daemon"
+        _write_pyproject(daemon_dir)
+        fp = python_venv_fingerprint(daemon_dir)
+        _make_fake_venv_failing(daemon_dir / "untracked" / f"venv-{fp}")
+        _make_fake_venv_failing(daemon_dir / "untracked" / "venv-py999-other-broken")
+        _make_fake_venv_failing(daemon_dir / "untracked" / "venv")
+
+        resolved, steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
+        assert resolved is None
+        for marker in ("step 1", "step 2", "step 3", "step 4", "step 5"):
+            assert any(s.startswith(marker) for s in steps), f"missing {marker} in {steps}"
+
+    def test_fingerprint_keyed_candidate_that_cannot_run_falls_through_to_scan(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The "slug-exact" venv (step 3) is probed too -- #55 showed an
+        exact-fingerprint match can be container-built and still broken."""
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        daemon_dir = tmp_path / "daemon"
+        fp = python_venv_fingerprint(daemon_dir)
+        _make_fake_venv_failing(daemon_dir / "untracked" / f"venv-{fp}")
+        good = _make_fake_venv(daemon_dir / "untracked" / "venv-py999-other-good")
+
+        resolved, steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
+        assert resolved == good
+        assert any(s.startswith("step 3") and "cannot run" in s.lower() for s in steps)
+        assert any(s.startswith("step 4") and "scan-fallback hit" in s for s in steps)
+
+    def test_metadata_python_path_that_cannot_run_falls_through(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        daemon_dir = tmp_path / "daemon"
+        _write_pyproject(daemon_dir)
+        lock_hash = _compute_test_lock_hash(daemon_dir)
+
+        venv = daemon_dir / "untracked" / "venv-py999-badmeta"
+        py = _make_fake_venv_failing(venv)
+        _write_metadata(venv, python_path=str(py), lock_hash=lock_hash)
+
+        resolved, steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
+        assert resolved is None
+        step2 = next(s for s in steps if s.startswith("step 2"))
+        assert "run" in step2.lower()
+
+    def test_legacy_candidate_that_cannot_run_falls_through(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        daemon_dir = tmp_path / "daemon"
+        _make_fake_venv_failing(daemon_dir / "untracked" / "venv")
+
+        resolved, steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
+        assert resolved is None
+        step5 = next(s for s in steps if s.startswith("step 5"))
+        assert "cannot run" in step5.lower()
+
+    def test_slug_exact_venv_that_runs_is_unaffected(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Regression: a genuinely working fingerprint-keyed venv is
+        unaffected by the probe -- same result and same trace shape."""
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        daemon_dir = tmp_path / "daemon"
+        fp = python_venv_fingerprint(daemon_dir)
+        py = _make_fake_venv(daemon_dir / "untracked" / f"venv-{fp}")
+
+        resolved, steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
+        assert resolved == py
+        assert any("step 3" in s and "OK" in s for s in steps)

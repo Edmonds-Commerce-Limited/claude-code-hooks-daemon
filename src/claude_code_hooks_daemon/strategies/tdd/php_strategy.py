@@ -8,11 +8,11 @@ from claude_code_hooks_daemon.strategies.tdd.common import (
     is_in_common_test_directory,
     matches_directory,
 )
-from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
 # Language-specific constants
 _LANGUAGE_NAME = "PHP"
-#: Acceptance-test fixture directory, below the sanctioned scratch root.
+#: Acceptance-test fixture directory, below the gitignored acceptance root.
 _FIXTURE_DIR = "acceptance-test-tdd-php"
 _EXTENSIONS: tuple[str, ...] = (".php",)
 _SOURCE_DIRECTORIES: tuple[str, ...] = ("/src/", "/app/")
@@ -101,11 +101,11 @@ class PhpTddStrategy:
             ToolPayload,
         )
 
-        fixture_root = scratch_path(_FIXTURE_DIR)
+        fixture_root = acceptance_path(_FIXTURE_DIR)
         probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": scratch_path(_FIXTURE_DIR, "src", "Services", "UserService.php"),
+                "file_path": acceptance_path(_FIXTURE_DIR, "src", "Services", "UserService.php"),
                 "content": "<?php\n\nclass UserService {}",
             },
         )
@@ -119,7 +119,7 @@ class PhpTddStrategy:
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"BLOCKED \[R-TDD-TEST-FIRST\]", r"PHP", r"test file"],
                 safety_notes=(
-                    "Inside the gitignored scratch directory - safe. Handler blocks "
+                    "Inside the gitignored acceptance directory - safe. Handler blocks "
                     "Write before file is created."
                 ),
                 test_type=TestType.BLOCKING,

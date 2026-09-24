@@ -791,21 +791,6 @@ _ATTACHED_REDIRECT_START: Final[re.Pattern[str]] = re.compile(r"&?[<>]")
 _BARE_REDIRECT_OPERATOR: Final[re.Pattern[str]] = re.compile(r"^(?:&?>>?|<<?<?|>&|<&|>\|)$")
 
 
-def _words(segment: str) -> list[str] | None:
-    """The words of one command, quoting removed as bash would remove it.
-
-    None when the command cannot be split (an unbalanced quote): the caller
-    judges it as unparsed rather than guessing at its words.
-    """
-    words: list[str] | None
-    try:
-        words = shlex.split(segment)
-    except ValueError as error:
-        logger.debug("Unparseable command segment (%s): judged as unparsed", error)
-        words = None
-    return words
-
-
 def _ansi_c_to_single_quoted(text: str) -> str:
     """Rewrite each ``$'...'`` as the plain single-quoted word bash makes of it.
 
@@ -937,8 +922,10 @@ def _invocations(command: str, depth: int = 0) -> Iterator[tuple[str, list[str],
         for code in _code_fed_to_a_shell(scan_target):
             yield from _invocations(code, depth + 1)
     for segment in split_unquoted(scan_target, _COMMAND_BOUNDARIES):
-        words = _words(segment)
-        if words is None:
+        try:
+            words = shlex.split(segment)
+        except ValueError:
+            # An unbalanced quote: judged as unparsed, never guessed at.
             yield _UNPARSED, [], segment
             continue
         for background in _split_background(words):
@@ -984,21 +971,28 @@ def _code_fed_to_a_shell(text: str) -> list[str]:
     """Code a shell reads on stdin from ``echo``/``printf``: a pipe or ``< <(...)``.
 
     Output of any other producer (a file, a download) cannot be read here,
-    which is a documented limit.
+    which is a documented limit. Text that cannot be split into words is left
+    to :func:`_invocations`, which judges the same segment as unparsed.
     """
     code: list[str] = []
     for pipeline in split_unquoted(text, _PIPELINE_BOUNDARIES):
-        stages = [_words(stage) for stage in split_unquoted(pipeline, _PIPE)]
+        try:
+            stages = [shlex.split(stage) for stage in split_unquoted(pipeline, _PIPE)]
+        except ValueError as error:
+            logger.debug("Pipeline left to the unparsed check (%s): %r", error, pipeline)
+            continue
         for producer, consumer in pairwise(stages):
-            if producer is None or consumer is None or not _reads_code_from_stdin(consumer):
-                continue
-            printed = _literal_output(producer)
+            printed = _literal_output(producer) if _reads_code_from_stdin(consumer) else None
             if printed is not None:
                 code.append(printed)
     for found in _STDIN_PROCESS_SUBSTITUTION.finditer(text):
         end = _closing_paren(text, found.end())
-        producer = _words(text[found.end() : end])
-        printed = _literal_output(producer) if producer is not None else None
+        try:
+            producer = shlex.split(text[found.end() : end])
+        except ValueError as error:
+            logger.debug("Substitution left to the unparsed check (%s)", error)
+            continue
+        printed = _literal_output(producer)
         if printed is not None:
             code.append(printed)
     return code

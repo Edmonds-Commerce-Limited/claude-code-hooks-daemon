@@ -50,6 +50,14 @@ _SOURCE_HASH_HEX_LEN: Final[int] = 12
 _STATUS_KEY_PID: Final[str] = "pid"
 _STATUS_KEY_SOURCE_HASH: Final[str] = "source_hash"
 
+# The supervisor's INVARIANT provenance prefix on every line it types -- matches
+# both the goal-injection form (`🤖 [ccy-supervisor] ...`) and the timestamped
+# form (`🤖 [ccy-supervisor 2026-08-28 10:51:04] continue`). It deliberately has
+# NO closing bracket, mirroring the supervisor's own `_BOT_PREFIX` in
+# `.claude/ccy/claude-supervise.py`; a literal `🤖 [ccy-supervisor]` would miss
+# every timestamped line.
+CCY_SUPERVISOR_MARKER: Final[str] = "🤖 [ccy-supervisor"
+
 
 def ccy_dir(project_root: Path) -> Path:
     """Resolve the ``.claude/ccy`` directory under ``project_root``."""

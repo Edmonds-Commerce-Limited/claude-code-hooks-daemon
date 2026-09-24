@@ -14,14 +14,14 @@ from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_file_path
 from claude_code_hooks_daemon.plan_qa.remedy import remedy_markdown_list
-from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
 # Fallback plan directory, used only when no ProjectLayout facade was
 # injected. Mirrors PlanWorkflowConfig.directory's default exactly.
 _FALLBACK_PLAN_DIR: Final[str] = "CLAUDE/Plan"
 _FALLBACK_WORKFLOW_DOCS: Final[str] = "CLAUDE/PlanWorkflow.md"
 
-#: Acceptance-test fixture directory, below the sanctioned scratch root.
+#: Acceptance-test fixture directory, below the gitignored acceptance root.
 _FIXTURE_DIR: Final[str] = "acceptance-test-planwf"
 
 
@@ -155,7 +155,7 @@ class PlanWorkflowHandler(PreToolUseHandlerBase):
         probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": scratch_path(_FIXTURE_DIR, "CLAUDE", "Plan", "099-test", "PLAN.md"),
+                "file_path": acceptance_path(_FIXTURE_DIR, "CLAUDE", "Plan", "099-test", "PLAN.md"),
                 "content": "# Plan 099: Test Plan\n\n**Status**: Not Started",
             },
         )
@@ -169,7 +169,7 @@ class PlanWorkflowHandler(PreToolUseHandlerBase):
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[r"[Pp]lan", r"[Ww]orkflow"],
                 safety_notes=(
-                    "Inside the gitignored scratch directory - safe. Advisory handler "
+                    "Inside the gitignored acceptance directory - safe. Advisory handler "
                     "allows write and adds guidance. No setup mkdir: the Write tool "
                     "creates the missing parent directories itself, which also avoids "
                     "plan_number_helper reading a literal `mkdir .../CLAUDE/Plan/099-test` "
@@ -178,7 +178,7 @@ class PlanWorkflowHandler(PreToolUseHandlerBase):
                 ),
                 test_type=TestType.ADVISORY,
                 setup_commands=[],
-                cleanup_commands=[f"rm -rf untracked/scratch/{_FIXTURE_DIR}"],
+                cleanup_commands=[f"rm -rf untracked/acceptance/{_FIXTURE_DIR}"],
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=False,
             ),

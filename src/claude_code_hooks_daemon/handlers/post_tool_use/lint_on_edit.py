@@ -738,10 +738,10 @@ warning, never crashes the handler."""
         """
         from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
 
-        # Plan 00333: inside the gitignored scratch directory, not /tmp --
+        # Plan 00333: inside the gitignored acceptance directory, not /tmp --
         # project_containment denies a Bash write named outside the repo root,
         # and this fixture is authored via a heredoc redirect.
-        directory = "untracked/scratch/acceptance-test-lint-bash"
+        directory = "untracked/acceptance/acceptance-test-lint-bash"
         return [
             AcceptanceTest(
                 title="Bash heredoc authoring invalid Python is DENIED",
@@ -757,7 +757,7 @@ warning, never crashes the handler."""
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"authored\.py"],
                 safety_notes=(
-                    "Writes a temporary Python file inside the gitignored scratch "
+                    "Writes a temporary Python file inside the gitignored acceptance "
                     "directory; removed by cleanup"
                 ),
                 test_type=TestType.BLOCKING,
@@ -791,7 +791,7 @@ warning, never crashes the handler."""
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
                 safety_notes=(
-                    "Copies a temporary file inside the gitignored scratch directory; "
+                    "Copies a temporary file inside the gitignored acceptance directory; "
                     "removed by cleanup"
                 ),
                 test_type=TestType.ADVISORY,

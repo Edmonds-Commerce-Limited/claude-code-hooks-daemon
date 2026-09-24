@@ -182,16 +182,12 @@ _SECONDS_PER_MINUTE: Final[int] = 60
 # reinforcement this handler emits carries it, so it can never re-trigger
 # itself.
 _FAILSAFE_RECOVERY_MARKER: Final[str] = "FAILSAFE RECOVERY CHECK"
-# The supervisor's INVARIANT provenance prefix — matches both the goal-injection
-# form (`🤖 [ccy-supervisor] ...`) and the timestamped nudge form
-# (`🤖 [ccy-supervisor 2026-08-28 10:51:04] continue`). It deliberately has NO
-# closing bracket, mirroring the supervisor's own `_BOT_PREFIX` in
-# `.claude/ccy/claude-supervise.py`; a literal `🤖 [ccy-supervisor]` would miss
-# every timestamped nudge, letting compact/continue turns count as human prompts.
-_CCY_SUPERVISOR_MARKER: Final[str] = "🤖 [ccy-supervisor"
+# The supervisor's provenance prefix (see `ccy_supervisor.CCY_SUPERVISOR_MARKER`
+# for why it has no closing bracket): a bracketed literal would miss every
+# timestamped nudge, letting compact/continue turns count as human prompts.
 _AUTOMATED_PROMPT_MARKERS: Final[tuple[str, ...]] = (
     _FAILSAFE_RECOVERY_MARKER,
-    _CCY_SUPERVISOR_MARKER,
+    ccy_supervisor.CCY_SUPERVISOR_MARKER,
 )
 
 # Bound the per-session state map so a long-lived daemon cannot leak memory

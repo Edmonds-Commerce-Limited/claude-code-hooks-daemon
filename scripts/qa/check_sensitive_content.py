@@ -235,6 +235,40 @@ def _without_protected_paths(files: list[Path]) -> list[Path]:
     return [f for f in files if not path_is_protected(str(f), patterns)]
 
 
+def _never_exempt(_relative_path: str, _content: str) -> bool:
+    """Stand-in exemption used when the daemon package is not importable.
+
+    Scanning everything is the strict direction: a vendored copy may be
+    reported, but nothing escapes.
+    """
+    return False
+
+
+def resolve_public_pattern_exemption(config_path: Path) -> Callable[[str, str], bool]:
+    """The handler's own faithful-vendored-copy rule, bound to this config's remote tree.
+
+    Imported rather than reimplemented, so the tree scan and the write-time
+    and commit-time guards agree on which files public patterns stand down
+    for (Plan 00468). Takes a scan-root-relative POSIX path and the content.
+    """
+    try:
+        from claude_code_hooks_daemon.config.models import DocumentationTreesConfig
+        from claude_code_hooks_daemon.remote_docs.provenance import is_faithful_vendored_copy
+    except ImportError:
+        return _never_exempt
+
+    documentation = _load_config(config_path).get("documentation", {})
+    trees = documentation.get("trees", {}) if isinstance(documentation, dict) else {}
+    remote_tree = DocumentationTreesConfig.model_validate(
+        trees if isinstance(trees, dict) else {}
+    ).remote
+
+    def exempt(relative_path: str, content: str) -> bool:
+        return is_faithful_vendored_copy(relative_path, content, remote_tree)
+
+    return exempt
+
+
 def resolve_term_matcher() -> Callable[[str, str], bool]:
     """The shared secret-term predicate from ``utils/secret_redaction``.
 
@@ -257,8 +291,14 @@ def scan_file(
     secret_terms: tuple[str, ...],
     term_matcher: Callable[[str, str], bool],
     scan_root: Path,
+    exempt_public: Callable[[str, str], bool] = _never_exempt,
 ) -> list[Violation]:
-    """Every violation in one file — public patterns, then the secret list."""
+    """Every violation in one file — public patterns, then the secret list.
+
+    ``exempt_public`` stands the public patterns down for the BODY of a
+    faithful vendored copy. The file name and the secret list are always
+    judged.
+    """
     try:
         content = path.read_text(encoding="utf-8")
     except (UnicodeDecodeError, OSError):
@@ -317,8 +357,11 @@ def scan_file(
                 )
             )
 
+    body_patterns = (
+        [] if exempt_public(path.relative_to(scan_root).as_posix(), content) else compiled_patterns
+    )
     for number, line in enumerate(content.splitlines(), start=1):
-        for entry, compiled in compiled_patterns:
+        for entry, compiled in body_patterns:
             match = compiled.search(line)
             if match:
                 name = entry.get(_PATTERN_KEY_NAME, "unnamed")
@@ -401,11 +444,19 @@ def main() -> int:
     # Resolved once, not per file: the predicate is shared with the live
     # handler so both surfaces agree on what counts as a match.
     term_matcher = resolve_term_matcher()
+    exempt_public = resolve_public_pattern_exemption(config_path)
 
     violations: list[Violation] = []
     for file_path in files:
         violations.extend(
-            scan_file(file_path, compiled_patterns, secret_terms, term_matcher, scan_root_for_terms)
+            scan_file(
+                file_path,
+                compiled_patterns,
+                secret_terms,
+                term_matcher,
+                scan_root_for_terms,
+                exempt_public,
+            )
         )
 
     output = {

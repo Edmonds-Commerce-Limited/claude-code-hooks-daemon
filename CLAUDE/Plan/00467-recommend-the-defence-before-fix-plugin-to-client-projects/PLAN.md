@@ -1,6 +1,6 @@
 # Plan 00467: recommend the defence before fix plugin to client projects
 
-**Status**: In Progress
+**Status**: Blocked
 **Created**: 2026-09-24
 **Owner**: dev
 **Priority**: Medium
@@ -22,10 +22,11 @@ no hooks and no MCP servers. The skill's only extra tool grant is its own
 back to its vendored copies. Projected cost is about 290 tokens always-on,
 and about 1.6k per `/dbf` invocation.
 
-It is installed here at project scope (commit `b00ecd02`: the marketplace
-is in `extraKnownMarketplaces`, the plugin in `enabledPlugins` in
-`.claude/settings.json`). The installer's three-way `settings.json` merge
-(Plan 00176) keeps both keys across a daemon upgrade.
+It is enabled here through `.claude/settings.local.json`: the marketplace
+is in `extraKnownMarketplaces`, the plugin in `enabledPlugins`. It is not
+in `.claude/settings.json`, because that file is also the template the
+installers ship to every client (Plan 00468 P1). The plugin's files are
+cached under `.claude/ccy/plugins/` (`cache/` and `marketplaces/`).
 
 The daemon has no mechanism for recommending a Claude Code plugin to a
 client project. Plans 00133 and 00308 suggest dormant **daemon** features
@@ -57,8 +58,10 @@ closest prior art, and the natural home for the recommendation.
 - [x] ✅ **Task 1.1**: Review the plugin before installing it (manifest,
   agents' tool grants, the network script), then install it at project
   scope.
+
 - [ ] ⬜ **Task 1.2**: Evaluate it against these criteria, recording
   evidence in the journal each time `/dbf` runs or auto-triggers:
+
   - Does it find this project's detectors? Found before the first run:
     its toolchain discovery reads `composer.json` / `package.json`
     manifest keys and a register graded for PHP and TypeScript. This
@@ -75,12 +78,39 @@ closest prior art, and the natural home for the recommendation.
   - The token cost, measured against the projection.
   - Do the two agents' outputs follow this repository's report
     conventions (sub-agent reports to a file, Plan 00460)?
-- [ ] ⬜ **Task 1.3**: File each shortfall upstream on
+
+  Evidence: [EVALUATION.md](EVALUATION.md). Every criterion has evidence
+  except auto-trigger. That one is judged from the description only,
+  because the headless probe could not log in. It stays open until one
+  logged-in probe runs (EVALUATION.md, last section).
+
+- [x] ✅ **Task 1.3**: File each shortfall upstream on
   `Defence-Before-Fix/claude-plugin`, with a reproduction and no
   client-identifying detail. For example: a Python toolchain route, or a
-  way for a project to declare its detector entry point.
+  way for a project to declare its detector entry point. Filed: #2 and #3
+  earlier; from [upstream-drafts/](upstream-drafts/), #4 (draft 01,
+  discovery skips the project's own detectors), #5 (draft 03, the
+  reviewer's full-gate cost) and #6 (draft 04, the spec cache directory and
+  versions). Drafts 05 and 06 are posted as comments on #2 and #3. Draft 02
+  (auto-trigger on every red run) is held: it is a judgement from the
+  description, and it is filed only if the logged-in probe in Task 1.2
+  confirms it.
+
 - [ ] ⬜ **Task 1.4**: Write up the dogfood findings and put the go/no-go
   question to the owner. **Phase 2 starts only on the owner's sign-off.**
+  Written up in [EVALUATION.md](EVALUATION.md) and the
+  [dogfood report](subagent-reports/260924-p467-dogfood-opus-5-5.md).
+  **Recommendation: no-go for now.** Four reasons:
+
+  1. The agents lose their reports without this repository's auto-save (#3).
+  2. Discovery cannot find a non-PHP/TS project's own detectors (#2, #4).
+  3. The daemon's own plugin support (00468 Phases 2–3) should land first.
+  4. The auto-trigger has not been observed live, and a false trigger costs
+     roughly 6–20k tokens plus two agents.
+     Go once 1–3 are fixed upstream and here, with the measured costs stated.
+     **Waiting on the owner** for the go/no-go, and on one logged-in session
+     (a human-started one, where the plugin is loaded) running the Task 1.2
+     trigger probe in `untracked/scratch/p467/trigger-probe/`.
 
 ### Phase 2: Recommend to client projects (gated on owner sign-off)
 

@@ -122,7 +122,7 @@ class TestMatchesGating:
 
         content = "x = 1  # " + ("y" * 60) + "\n"
         hook_input = _make_write_input(
-            f"{root}/untracked/scratch/acceptance-test-qa-python/sample.py", content
+            f"{root}/untracked/acceptance/acceptance-test-qa-python/sample.py", content
         )
         assert handler.matches(hook_input) is True
 

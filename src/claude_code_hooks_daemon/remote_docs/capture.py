@@ -22,6 +22,7 @@ from urllib.parse import urlparse
 import yaml
 
 from claude_code_hooks_daemon.remote_docs.provenance import (
+    CAPTURE_BODY_SEPARATOR,
     NEVER,
     UNREVIEWED,
     Fidelity,
@@ -195,7 +196,7 @@ def _render_frontmatter(
     # `sort_keys=False` keeps the declaration order, which is the order a human
     # reads these in; `default_flow_style=False` keeps one field per line.
     body = yaml.safe_dump(fields, sort_keys=False, default_flow_style=False, allow_unicode=True)
-    return f"---\n{body}---\n\n"
+    return f"---\n{body}---\n{CAPTURE_BODY_SEPARATOR}"
 
 
 def capture(

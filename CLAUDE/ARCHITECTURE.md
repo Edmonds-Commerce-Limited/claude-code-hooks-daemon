@@ -12,7 +12,7 @@ Claude Code Hooks Daemon is a reusable, configurable hook system for Claude Code
 
 1. **Reusability** - Write once, use everywhere
 2. **Configurability** - Enable/disable handlers per project
-3. **Extensibility** - Easy plugin system for custom handlers
+3. **Extensibility** - Project handlers and daemon plugins (handler modules) for custom handlers
 4. **Performance** - Single process, efficient dispatch (20ms vs 200ms)
 5. **Safety** - Fail-open philosophy (errors don't block work)
 6. **Deterministic Only** - Daemon handles pattern matching; agent evaluation uses native Claude Code hooks
@@ -78,17 +78,25 @@ Claude Code Hooks Daemon is a reusable, configurable hook system for Claude Code
 
 ### Configuration Locations
 
-| Hook Type          | Configuration File          | Purpose                                       |
-| ------------------ | --------------------------- | --------------------------------------------- |
-| Daemon Handlers    | `.claude/hooks-daemon.yaml` | Deterministic validation, reusable handlers   |
-| Native Agent Hooks | `.claude/settings.json`     | Complex evaluation, project-specific workflow |
+| Hook Type                | Configuration File                                      | Purpose                                                     |
+| ------------------------ | ------------------------------------------------------- | ----------------------------------------------------------- |
+| Daemon Handlers          | `.claude/hooks-daemon.yaml`                             | Deterministic validation, reusable handlers                 |
+| Native Agent Hooks       | `.claude/settings.json`                                 | Complex evaluation, project-specific workflow               |
+| Claude Code Plugin Hooks | `hooks/hooks.json` inside an enabled Claude Code plugin | Whatever the plugin ships; live while the plugin is enabled |
 
 **There is no `.claude/hooks.json`.** This table named one until Plan 00266
 checked it against the Claude Code hook documentation: native hooks live in the
 same `settings.json` files the daemon's own registrations use (`~/.claude/`,
 `.claude/settings.json`, `.claude/settings.local.json`), plus skill and subagent
-frontmatter. The `hooks/hooks.json` filename is real but belongs to PLUGINS,
-which is the likely source of the error.
+frontmatter. The `hooks/hooks.json` filename is real but lives inside a Claude
+Code plugin, which is the likely source of the error.
+
+**Claude Code plugin hooks are a live hook source.** When a plugin is enabled,
+its `hooks/hooks.json` merges with the user and project hooks, so a plugin can
+add hooks to a project whose settings files never mention them. The daemon
+never sees those hooks. How they interact with its verdicts, including a
+plugin `PreToolUse` hook replacing input the daemon judged, is in
+[ClaudeCodePlugins.md](ClaudeCodePlugins.md#plugin-hooks-run-in-parallel-with-the-daemons).
 
 A native hook therefore sits **alongside** this daemon's `command` hook in the
 same file, and both run: the documentation states that all matching hooks run
@@ -192,7 +200,7 @@ Need to validate something?
   ┌───────────┼───────────────┐
   ▼           ▼               ▼
 ┌───────────┐ ┌─────────────┐ ┌──────────────────┐
-│ Built-in  │ │   Plugin    │ │ Project Handlers │
+│ Built-in  │ │Daemon plugin│ │ Project Handlers │
 │ Handlers  │ │  Handlers   │ │ (.claude/project │
 │ (daemon)  │ │  (legacy)   │ │  -handlers/)     │
 └───────────┘ └─────────────┘ └──────────────────┘
@@ -442,7 +450,12 @@ daemon:
 - Threshold: >= 3 indicators = container environment
 - Auto-enables enforcement during config generation (`init_config.py`)
 
-### 6. Plugin System (`plugins/loader.py`)
+### 6. Daemon Plugin System (`plugins/loader.py`)
+
+A daemon plugin is a handler module loaded from the `plugins:` block of
+`.claude/hooks-daemon.yaml`. It is unrelated to a Claude Code plugin, which
+Claude Code installs and runs itself: see
+[ClaudeCodePlugins.md § Two meanings of "plugin"](ClaudeCodePlugins.md#two-meanings-of-plugin).
 
 **Plugin Loading**:
 
@@ -538,7 +551,7 @@ project_handlers:
 | `web_search_year`    | 55       | Yes      | Ensure current year in search queries           |
 | `british_english`    | 60       | No       | Warn about American spellings (non-blocking)    |
 
-### Project-Specific Handlers (Plugins)
+### Project-Specific Handlers
 
 These remain in individual projects due to project-specific logic:
 

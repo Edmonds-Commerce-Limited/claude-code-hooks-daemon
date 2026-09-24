@@ -394,6 +394,19 @@ else
 fi
 echo ""
 
+# Plan 00402: a restart regenerates the CLAUDE.md block but never
+# .claude/HOOKS-DAEMON.md, so its body is compared with fresh generate-docs
+# output here. The deployed-from marker line is excluded from the comparison.
+echo "31. Running Generated-Doc Drift Check..."
+echo "----------------------------------------"
+if ! "${VENV_PYTHON}" "${SCRIPT_DIR}/check_generated_doc_drift.py" --json; then
+    OVERALL_EXIT_CODE=1
+    echo "❌ Generated-doc drift check FAILED"
+else
+    echo "✅ Generated-doc drift check PASSED"
+fi
+echo ""
+
 # Print overall summary
 echo "========================================"
 echo "QA Summary"
@@ -438,6 +451,7 @@ results = {
     "Fail-Open Inventory": "untracked/qa/fail_open_inventory.json",
     "Dangerous Invocation Corpus": "untracked/qa/dangerous_invocation_corpus.json",
     "Security Downgrade Flags": "untracked/qa/security_downgrade_flags.json",
+    "Generated Doc Drift": "untracked/qa/generated_doc_drift.json",
 }
 
 all_passed = True

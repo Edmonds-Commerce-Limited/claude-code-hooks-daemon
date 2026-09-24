@@ -986,9 +986,11 @@ The daemon repository contains a `.claude/` directory with project-level handler
 
 If you see `.claude/` inside `.claude/hooks-daemon/`, this is normal and expected.
 
-### Plugin Config Breaking Change (v2.8.0+)
+### Daemon Plugin Config Breaking Change (v2.8.0+)
 
-Plugins now require an explicit `event_type` field. If you have custom plugins, update their config:
+Daemon plugins (handler modules in the `plugins:` block of
+`.claude/hooks-daemon.yaml`, not Claude Code plugins) now require an explicit
+`event_type` field. If you have daemon plugins, update their config:
 
 **Before:**
 

@@ -186,6 +186,35 @@ document cannot enter history; the session-start sweep reports one sitting in
 the working tree. What genuinely remains uncovered is the window between a
 Bash write and the next commit or session.
 
+## Sensitive content and vendored copies
+
+`sensitive_content`'s **public patterns** exist to catch this project's own
+material (a session UUID, a server path) leaking into the repository. A
+faithful copy of an upstream page cannot carry any, and upstream pages do
+carry look-alikes: the Claude Code hooks reference is full of example UUIDs.
+So public patterns stand down for the body of a file that is:
+
+- a markdown file inside the remote-docs tree, and
+- an **unaltered capture**: valid provenance, and a body whose SHA-256 still
+  equals the recorded `source_sha256`. Capture stores the fetched bytes as
+  the body, after one separating blank line, so no extra hash field is needed.
+
+A body edited after capture no longer matches, so it is scanned normally, and
+so is every file outside the tree. The **secret word list is never stood
+down**: its terms must not be in the repository whoever wrote them. File names
+are still judged by both sources.
+
+One predicate, `remote_docs.provenance.is_faithful_vendored_copy`, decides
+this for every surface: a `Write` (never an `Edit`, which carries a fragment),
+the `git commit` staged-content scan (judged on the whole recorded version,
+the index blob or the working tree for `commit -a`), and
+`scripts/qa/check_sensitive_content.py`.
+
+The hash proves the body is unchanged since the frontmatter was written, not
+that the bytes came from upstream: an author who writes the frontmatter and
+computes the hash by hand is indistinguishable from a capture. That is why the
+exemption covers only the public patterns, and never the secret word list.
+
 ## Configuration
 
 ```yaml

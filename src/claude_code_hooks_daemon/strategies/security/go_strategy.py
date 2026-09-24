@@ -3,10 +3,10 @@
 from typing import Any
 
 from claude_code_hooks_daemon.strategies.security.protocol import SecurityPattern
-from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
 _LANGUAGE_NAME = "Go"
-#: Acceptance-test fixture directory, below the sanctioned scratch root.
+#: Acceptance-test fixture directory, below the gitignored acceptance root.
 _FIXTURE_DIR = "acceptance-test-security-go"
 _EXTENSIONS: tuple[str, ...] = (".go",)
 
@@ -67,7 +67,7 @@ class GoSecurityStrategy:
         template_html_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": scratch_path(_FIXTURE_DIR, "test_security.go"),
+                "file_path": acceptance_path(_FIXTURE_DIR, "test_security.go"),
                 "content": "safe := template.HTML(userInput)",
             },
         )

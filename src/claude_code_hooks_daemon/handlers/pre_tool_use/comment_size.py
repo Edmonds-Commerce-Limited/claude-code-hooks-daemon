@@ -51,7 +51,7 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
 )
 from claude_code_hooks_daemon.utils.path_predicates import path_is_file
 from claude_code_hooks_daemon.utils.path_segments import matches_path_segment
-from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.core.project_layout import ProjectLayout
@@ -61,7 +61,7 @@ _MODE_WARN: Final[str] = "warn"
 _DEFAULT_MAX_COMMENT_LINE_CHARS: Final[int] = 400
 _DEFAULT_MAX_COMMENT_BLOCK_LINES: Final[int] = 40
 
-#: Acceptance-test fixture directories, below the sanctioned scratch root.
+#: Acceptance-test fixture directories, below the gitignored acceptance root.
 _FIXTURE_DIR: Final[str] = "acceptance-test-comment-size"
 _FIXTURE_DIR_OK: Final[str] = "acceptance-test-comment-size-ok"
 
@@ -449,14 +449,14 @@ class CommentSizeHandler(PreToolUseHandlerBase):
         oversize_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": scratch_path(_FIXTURE_DIR, "example.py"),
+                "file_path": acceptance_path(_FIXTURE_DIR, "example.py"),
                 "content": f"def example() -> None:\n    return None\n\n{over_long_comment}\n",
             },
         )
         ordinary_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": scratch_path(_FIXTURE_DIR_OK, "example.py"),
+                "file_path": acceptance_path(_FIXTURE_DIR_OK, "example.py"),
                 "content": (
                     "# Return nothing; the caller only wants the side effect.\ndef example() -> None:\n    return None\n"
                 ),
@@ -480,12 +480,12 @@ class CommentSizeHandler(PreToolUseHandlerBase):
                     "MUST_EXCEED_COMMENT_SIZE_BECAUSE",
                 ],
                 safety_notes=(
-                    "Inside the gitignored scratch directory - safe. Handler blocks "
+                    "Inside the gitignored acceptance directory - safe. Handler blocks "
                     "Write before file is created."
                 ),
                 test_type=TestType.BLOCKING,
-                setup_commands=[f"mkdir -p untracked/scratch/{_FIXTURE_DIR}"],
-                cleanup_commands=[f"rm -rf untracked/scratch/{_FIXTURE_DIR}"],
+                setup_commands=[f"mkdir -p untracked/acceptance/{_FIXTURE_DIR}"],
+                cleanup_commands=[f"rm -rf untracked/acceptance/{_FIXTURE_DIR}"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),
@@ -500,12 +500,12 @@ class CommentSizeHandler(PreToolUseHandlerBase):
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
                 safety_notes=(
-                    "Inside the gitignored scratch directory - safe. Verify the file "
+                    "Inside the gitignored acceptance directory - safe. Verify the file "
                     "is created, not blocked."
                 ),
                 test_type=TestType.ADVISORY,
-                setup_commands=[f"mkdir -p untracked/scratch/{_FIXTURE_DIR_OK}"],
-                cleanup_commands=[f"rm -rf untracked/scratch/{_FIXTURE_DIR_OK}"],
+                setup_commands=[f"mkdir -p untracked/acceptance/{_FIXTURE_DIR_OK}"],
+                cleanup_commands=[f"rm -rf untracked/acceptance/{_FIXTURE_DIR_OK}"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),

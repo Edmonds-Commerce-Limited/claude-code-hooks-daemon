@@ -110,8 +110,10 @@ Rules:
 2. **Handler is a thin aggregator** — collects from all strategies via
    `get_acceptance_tests()`, deduplicates by `language_name`, adds nothing
    of its own
-3. **Tests use safe paths** — `/tmp/acceptance-test-tdd-{language}/` only,
-   with `setup_commands` and `cleanup_commands`
+3. **Tests use safe paths** — `acceptance_path("acceptance-test-tdd-{language}", ...)`
+   only (the gitignored `untracked/acceptance/` root), with `setup_commands`
+   and `cleanup_commands` — see
+   [where probe fixtures live](../AcceptanceTests/GENERATING.md#where-probe-fixtures-live)
 4. **`expected_message_patterns` include the exact `language_name` string**
    — deduplication verification depends on it
 5. **Tests are BLOCKING type** (`expected_decision=Decision.DENY`)

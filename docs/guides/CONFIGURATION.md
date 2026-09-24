@@ -49,7 +49,7 @@ handlers:                # Handler configuration by event type
     # ...
   # ... more event types
 
-plugins:                 # Custom project-specific handlers
+plugins:                 # Daemon plugins: custom handler modules (not Claude Code plugins)
   # ...
 
 projects:                # Monorepo sub-tree declarations (optional)
@@ -190,7 +190,7 @@ across every project uses `ProjectRegistry.iter_layouts()`/`all_source_dirs()`
 **Path notation: `{REPO_ROOT}`.** Documented paths use the literal token
 `{REPO_ROOT}` for "the repository root" (e.g. `{REPO_ROOT}/web`) — optional
 sugar accepted anywhere a repository-relative path is, and on a handful of
-exempt fields (a plugin path, `project_handlers.path`) the portable
+exempt fields (a daemon plugin path, `project_handlers.path`) the portable
 alternative to a genuine absolute path. Full semantics:
 [../../CLAUDE/Code/WorkspaceResolution.md](../../CLAUDE/Code/WorkspaceResolution.md).
 
@@ -216,12 +216,12 @@ an older daemon version is the backward-compat path.
 A handful of advisory/best-effort options (`sensitive_content`'s
 `secret_word_list_path`, `daemon.payload_capture.dir`,
 `model_fallback_detector`'s `snapshot_dir`) degrade instead of rejecting: an
-absolute value is logged and the built-in default is used. Plugin paths,
+absolute value is logged and the built-in default is used. Daemon plugin paths,
 `project_handlers.path`, `daemon.socket_path`/`pid_file_path`, and
 `transport.relay_binary` are documented exemptions — see
 `CLAUDE/UPGRADES/UNRELEASED/truth-changes/v3.58.0.yaml` for the full list and
-rationale. On the two exemptions that resolve against the project (plugin
-paths, `project_handlers.path`), a leading `{REPO_ROOT}` token is the
+rationale. On the two exemptions that resolve against the project (daemon
+plugin paths, `project_handlers.path`), a leading `{REPO_ROOT}` token is the
 portable alternative to a genuine absolute path — see the path notation
 paragraph above.
 
@@ -451,11 +451,14 @@ handlers:
 
 ---
 
-## Plugin System
+## Daemon Plugins (handler modules)
 
-The plugin system lets you add custom handlers specific to your project.
+Daemon plugins let you add custom handlers specific to your project. A daemon
+plugin is a Python handler module the daemon loads itself. It is **not** a
+Claude Code plugin, which Claude Code installs from a marketplace and runs
+without the daemon: see [Claude Code plugins](CLAUDE_CODE_PLUGINS.md).
 
-### Plugin Configuration
+### Daemon Plugin Configuration
 
 ```yaml
 plugins:
@@ -517,7 +520,7 @@ class MyHandler(PreToolUseHandlerBase):
 
 This matters because an event that cannot express a refusal drops one silently — a `DENY` returned from a `SessionStart` handler produces a valid response with the refusal removed, so the handler believes it blocked and nothing blocked. Subclassing `Handler` directly still works and is not deprecated, but the event base lets a type-checker catch that mistake before it ships.
 
-### Plugin Search Paths
+### Daemon Plugin Search Paths
 
 Use `paths` to add directories to the Python module search path, allowing your handlers to import shared utilities:
 

@@ -4,6 +4,11 @@ Supporting document for [PLAN.md](PLAN.md) Phase 1. It records the ruling
 between the three options at PLAN.md:54-73, the evidence, the cost, the best
 case against, and whether any owner-only question remains.
 
+> **Superseded as the ruling.** Task 1.1 was decided as option 2, not the
+> option 3 recommended below; PLAN.md Task 1.1 records the ruling and what it
+> built. The evidence here stands, including the queued-window limit, which
+> the built option 2 carries as its stated limit.
+
 ## The decision, in one sentence
 
 **Option 3 — accept the blind spot: keep the exact-prefix recogniser as it is,

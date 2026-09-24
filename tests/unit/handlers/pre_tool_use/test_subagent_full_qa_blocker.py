@@ -377,6 +377,9 @@ _EDGE_FULL_RUNS: list[str] = [
     "bash --norc -c 'pytest tests'",
     "pytest tests/{unit,{a,b}}",
     "cd a b && pytest",
+    # Unsplittable code fed to a shell is judged by the unparsed check.
+    "echo 'pytest tests | bash",
+    'bash < <(echo "pytest tests)',
 ]
 _EDGE_NOT_FULL_RUNS: list[str] = [
     'x="\\$(pytest tests)"',
