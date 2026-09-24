@@ -1604,6 +1604,35 @@ That gap is real and is accepted, not overlooked: content quality is not
 checkable from here, and a guard that pretended otherwise would be the same
 false-assurance failure this ledger keeps recording.
 
+### N22 — the local "full QA" never runs shellcheck
+
+**Found**: Plan 00456's final QA was checked before merge. Every
+`untracked/qa/*.json` in the worktree was written between 13:23 and 13:41,
+after the last code commit, except `shell_check.json`, which was dated
+10:16. That is hours before the N7–N9 fixes that rewrote
+`scripts/venv_bootstrap.sh`, `scripts/install/venv.sh` and both copies of
+the skill's `install.sh`. Re-running `scripts/qa/run_shell_check.sh` by hand
+passed (67 files, 0 issues), so nothing was hidden this time.
+
+**Why it happens.** `scripts/qa/llm_qa.py`'s `TOOL_REGISTRY` has no
+shellcheck entry. `run_all.sh` calls `run_shell_check.sh`, but
+`enforce_llm_qa` denies `run_all.sh` and points at `llm_qa.py all`. So the
+QA every agent is told to run, and reports as "full QA N/N", never runs
+shellcheck. CI's `shellcheck` step (`.github/workflows/qa.yml`) is the only
+place it runs. A shell defect therefore reaches `main` and is caught only
+after the merge, when fixing it costs a second commit on `main`. The stale
+`shell_check.json` left in the tree also reads like a result for the
+current code.
+
+**Candidate remedies:**
+
+1. Add a `shell_check` tool to `llm_qa.py`'s registry, wrapping
+   `run_shell_check.sh` like the other script tools, with a wiring test
+   that every check `run_all.sh` runs is also in the registry. That class
+   test catches the next divergence too.
+2. Until then, briefs that say "full QA" add `run_shell_check.sh` whenever
+   a shell file changed.
+
 ### N21 — nothing points a journal append at the tool that stamps the time
 
 **Found**: the owner asked whether "the journal command that enforces proper
