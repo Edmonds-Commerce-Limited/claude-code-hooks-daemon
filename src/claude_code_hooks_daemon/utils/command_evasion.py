@@ -155,6 +155,32 @@ def strip_reserved_word_prefix(segment: str) -> str:
     return _RESERVED_WORD_HEAD.sub("", segment, count=1)
 
 
+# The reserved words that change neither WHICH command runs, WHETHER it runs,
+# nor WHAT it reads: `time` only reports timing and `!` only inverts the exit
+# status. An exemption granted to a single simple command can look past these
+# and nothing else. `then`, `do`, `else` and the other words in
+# `SHELL_RESERVED_COMMAND_PREFIXES` only ever appear inside a compound command,
+# so an exemption for ONE command must not strip them: that would judge a
+# fragment of the compound as if it were all of it.
+TRANSPARENT_RESERVED_WORDS: Final[tuple[str, ...]] = ("time", "!")
+
+_TRANSPARENT_WORD_HEAD: Final[re.Pattern[str]] = re.compile(
+    r"^\s*(?:(?:time\s+-p|"
+    + "|".join(re.escape(word) for word in TRANSPARENT_RESERVED_WORDS)
+    + r")\s+)*"
+)
+
+
+def strip_transparent_reserved_words(command: str) -> str:
+    """``command`` past any leading run of ``time``, ``time -p`` and ``!``.
+
+    ``"time ! cat f"`` -> ``"cat f"``. Every other reserved word is left in
+    place, so a caller that accepts only a single simple command still sees
+    ``then cat f`` for what it is and refuses it.
+    """
+    return _TRANSPARENT_WORD_HEAD.sub("", command, count=1)
+
+
 # Git global options that take their value as a SEPARATE token. Everything else
 # is either self-contained (`--git-dir=<path>`) or valueless (`--no-pager`), so
 # these are the only ones whose value could be mistaken for the subcommand —

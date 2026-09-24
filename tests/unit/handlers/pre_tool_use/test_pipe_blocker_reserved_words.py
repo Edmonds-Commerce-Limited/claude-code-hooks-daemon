@@ -129,9 +129,11 @@ class TestASubshellIsJudgedOnItsLastCommand:
     def test_an_unknown_producer_is_suggested_without_its_parentheses(
         self, handler: PipeBlockerHandler
     ) -> None:
+        """The capture snippet splices the producer, so it must be runnable text."""
         reason = _reason(handler, "( (mytool --report) ) | head")
         assert '"^mytool\\\\b"' in reason
-        assert "mytool --report 2>&1" in reason
+        assert "\n  mytool --report " in reason
+        assert "\n  mytool --report)" not in reason
 
 
 class TestTheWhitelistSuggestionNeverNamesAReservedWord:

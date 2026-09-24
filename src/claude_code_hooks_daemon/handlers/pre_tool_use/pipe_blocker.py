@@ -233,6 +233,9 @@ _SUBSTITUTION_OPENERS: tuple[str, ...] = ("$(", "<(", ">(")
 _SUBSTITUTION_OPENER_WIDTH = 2
 _SUBSTITUTION_CLOSER = ")"
 
+# A subshell opens with a bare `(`; it closes with the same `)` as `$(`.
+_SUBSHELL_OPENER = "("
+
 # Backticks are the older substitution spelling. They do not nest — the same
 # character opens and closes — so a frame records which spelling opened it.
 _BACKTICK = "`"
@@ -554,13 +557,35 @@ class PipeBlockerHandler(PreToolUseHandlerBase):
             # like grep -E "15:56|15:57" where | is a regex alternation, not a pipe.
             before_pipe = split_unquoted(before_pipe, _PIPE_SEPARATORS)[-1]
 
-            # `do grep x | head` is fed by grep. Reading `do` as the producer
-            # denied a whitelisted command and suggested whitelisting `^do\b`
-            # (Plan 00422 N25).
-            return strip_reserved_word_prefix(before_pipe).strip()
+            return self._command_inside(before_pipe)
 
         except Exception:  # nosec B110 - fail-safe: extraction error → empty string (unknown)
             return ""
+
+    @staticmethod
+    def _command_inside(segment: str) -> str:
+        """The command a producer segment runs, past reserved words and subshells.
+
+        `do grep x | head` is fed by grep: reading `do` as the producer denied a
+        whitelisted command and suggested whitelisting `^do\\b` (Plan 00422
+        N25). `(grep x f) | head` is fed by the subshell's last command, so the
+        `(` openers in front are dropped with the `)` closers that match them,
+        and `( (pytest) ) | head` is judged on pytest. Openers and reserved
+        words can interleave (`( ! grep x )`), so both are stripped until
+        neither is left. `(` stays out of the shared reserved-word primitive
+        on purpose: other callers ask whether state survives, and a subshell's
+        does not.
+        """
+        text = segment.strip()
+        previous = None
+        while text != previous:
+            previous = text
+            text = strip_reserved_word_prefix(text).lstrip(_SUBSHELL_OPENER).strip()
+        while text.endswith(_SUBSTITUTION_CLOSER) and text.count(_SUBSTITUTION_CLOSER) > text.count(
+            _SUBSHELL_OPENER
+        ):
+            text = text[: -len(_SUBSTITUTION_CLOSER)].rstrip()
+        return text
 
     @staticmethod
     def _substitution_content_start(command: str, pipe_index: int) -> int:

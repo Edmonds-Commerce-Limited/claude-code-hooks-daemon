@@ -462,12 +462,16 @@ without them. The fix is one primitive in `utils/command_evasion`:
 `strip_reserved_word_prefix` for sites that read the first word. Nine
 declared rows bind the sites to it. `bash_flags` is deliberately excluded,
 because it asks whether a `set` still applies afterwards, and a `set` behind
-`then` may never run. The two `secret_file_matching` exemption sites are left
-unchanged for the owner. They withhold an exemption, which is the safe
-direction, inside a fail-closed allowlist.
+`then` may never run. The two `secret_file_matching` exemption sites look past
+`time` and `!` only, through `strip_transparent_reserved_words`. Those two words
+change neither which command runs nor what it reads. The compound-only words
+stay fail-closed, because both exemptions accept a single simple command.
+`pipe_blocker` also resolves a subshell producer, `( (grep x) ) | head`, to its
+last command. `(` stays out of the shared primitive.
 
-- Defence: `6be0ae57`, committed deliberately red over 9 declared rows.
-- Fix: `319cdd35`.
+- Defence: `6be0ae57`, committed deliberately red over 9 declared rows; the
+  follow-up `1cf338c6` added a tenth row (the secret exemptions) red.
+- Fix: `319cdd35`, then the commit following `1cf338c6`.
 
 Nine further table rows are recorded in
 [the consolidated worklist](../Plan/Completed/00412-jobs-recurring-work-and-security-review/subagent-reports/260915-consolidated-defence-worklist.md),
