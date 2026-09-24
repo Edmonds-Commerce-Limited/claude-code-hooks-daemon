@@ -404,9 +404,13 @@ a `PLAN.md` is linted against single-file rules on the content the file *would*
 have. New material with a missing/invalid `**Status**:` line, a header that
 contradicts an all-ticked body, or ad-hoc task markers is **blocked** with the
 exact fix (mode `edit_mode`, default `block`). The plan-index `README.md` is
-linted too, against one rule — `index-row-length`: keep every line under 500
+linted too — for example `index-row-length` keeps every line under 500
 characters, because a row is a pointer (link, status, one clause), not a
 summary copied from the linked plan.
+
+`plan-qa --list-checks` prints every check and the stages it runs on. That
+listing comes from the check registry itself, so it is the catalogue; this page
+names checks only as examples.
 
 **Stage 2 — commit gate** (`plan_qa_commit_gate`, PreToolUse on `git commit`):
 checks the **staged** tree against cross-file invariants -- index-at-birth (a
@@ -436,6 +440,7 @@ recount.
 .claude/hooks-daemon/bin/hooks-daemon plan-qa --sweep          # whole tree; exit 1 on findings (CI-able)
 .claude/hooks-daemon/bin/hooks-daemon plan-qa --check-staged   # staged-tree commit-gate checks
 .claude/hooks-daemon/bin/hooks-daemon plan-qa --lint <PLAN.md> # single-file edit-stage checks
+.claude/hooks-daemon/bin/hooks-daemon plan-qa --list-checks    # every check and its stages
 ```
 
 Add `--json` to any of these for machine-readable output.

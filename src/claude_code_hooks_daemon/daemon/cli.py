@@ -6077,6 +6077,26 @@ def cmd_find_plan(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_plan_qa_checks(json_output: bool) -> int:
+    """Print every registered plan QA check with the stages it runs on."""
+    from claude_code_hooks_daemon.plan_qa.checks import all_checks
+
+    stages_by_check: dict[str, list[str]] = {}
+    for spec in all_checks():
+        stages = stages_by_check.setdefault(spec.check_id, [])
+        stage = f"{spec.stage.value}:{spec.level.value}"
+        if stage not in stages:
+            stages.append(stage)
+
+    if json_output:
+        print(json.dumps(stages_by_check, indent=2))
+        return 0
+    width = max(len(check_id) for check_id in stages_by_check)
+    for check_id, stages in stages_by_check.items():
+        print(f"{check_id:<{width}}  {', '.join(stages)}")
+    return 0
+
+
 def cmd_plan_qa(args: argparse.Namespace) -> int:
     """Run plan QA checks (Plan 00144): sweep, staged gate, or single-file lint.
 
@@ -6088,10 +6108,14 @@ def cmd_plan_qa(args: argparse.Namespace) -> int:
       checks) without committing.
     - ``--lint PATH``: run the Stage 1 edit-time checks against one file's
       current on-disk content.
+    - ``--list-checks``: print the registered check catalogue and the stages
+      each check runs on. It describes the daemon, not the project, so it
+      needs no plan tree; documentation points here rather than counting
+      checks (Plan 00466 N18).
 
     Args:
         args: Parsed CLI arguments with ``sweep``, ``check_staged``, ``lint``,
-            ``json_output`` and optional ``project_root``.
+            ``list_checks``, ``json_output`` and optional ``project_root``.
 
     Returns:
         0 when clean (or plan workflow / plan QA disabled in config),
@@ -6110,6 +6134,9 @@ def cmd_plan_qa(args: argparse.Namespace) -> int:
     from claude_code_hooks_daemon.plan_qa.report import CLEAN_SCOPE_TREE, format_cli_report
     from claude_code_hooks_daemon.plan_qa.runner import run_stage
     from claude_code_hooks_daemon.plan_qa.types import Stage
+
+    if getattr(args, "list_checks", False):
+        return _print_plan_qa_checks(bool(getattr(args, "json_output", False)))
 
     # An explicit --project-root is trusted as-is (plan QA needs a plan tree,
     # not a validated daemon installation); otherwise auto-detect as usual.
@@ -9107,6 +9134,12 @@ def main() -> int:
         metavar="FILE",
         default=None,
         help="Run edit-time checks against one plan file's on-disk content",
+    )
+    parser_plan_qa.add_argument(
+        "--list-checks",
+        dest="list_checks",
+        action="store_true",
+        help="List every registered check and the stages it runs on",
     )
     parser_plan_qa.add_argument(
         "--json",
