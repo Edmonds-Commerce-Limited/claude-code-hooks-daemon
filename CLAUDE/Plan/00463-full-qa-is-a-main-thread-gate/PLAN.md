@@ -87,11 +87,17 @@ commands that ARE allowed, and they must exist.
   tells a worktree agent the same (ledger 00466 N2).
 - When `main` moves during a batch, a checked mechanism decides what re-runs:
   `llm_qa.py main-moved` reads the batch base from
-  `refs/integration/<branch>/base` (set by `--start`) and exits `unmoved` (0),
+  `refs/integration/base/<branch>` (set by `--start`, which refuses a second
+  start without `--restart`) and the certified head from
+  `refs/integration/certified/<branch>` (set only by a passing `all` or a
+  successful `--advance`, on a clean tree). It exits `head-moved` (7) unless
+  HEAD is the certified head on a clean tree, then `unmoved` (0),
   `docs-only` (5), `targeted` (6) or `full-gate` (4). A moved document is
   judged by the `changed` test mapper, never a hand-kept list; the runtime-read
-  set is defined once in `llm_qa.py` and pinned by a test. `--advance` moves
-  the base only when the recheck's provenance certifies a pass on this tree.
+  set is defined once in `llm_qa.py` and pinned by a test. `--advance` refuses
+  a dirty tree and any work since the certified head but `main` merged in, and
+  moves the base only when the recheck's provenance certifies a pass on this
+  tree. `--finish` deletes both refs once `main` holds the certified head.
 - 00463 ships no lock of its own. `llm_qa.py`'s existing run lock is
   non-inheritable, and a test pins that a daemon started during a run does not
   keep it after the run exits.
@@ -156,7 +162,8 @@ commands that ARE allowed, and they must exist.
   branch holding current `main`, runs `llm_qa.py main-moved --start` and full
   QA once there, and on green loops `llm_qa.py main-moved` (recheck, then
   `--advance`) until `unmoved`, then fast-forwards. It restarts the daemon
-  before the push, then verifies ancestry and CI.
+  before the push, runs `main-moved --finish` after it, then verifies ancestry
+  and CI.
 - [ ] ⬜ **Task 2.2**: Live dogfood check: a sub-agent's `llm_qa.py all`
   in the main checkout is denied with the targeted forms named, and the
   coordinator's same command runs.

@@ -321,7 +321,8 @@ with `./scripts/qa/llm_qa.py main-moved --start`. Then run the suite once on the
 combined head. When it is red, find which branch broke it before blaming this
 issue's branch, and follow "A red batch" in QA.md. Until Step 7 lands, commit
 nothing but docs to `main`, and put even those on the integration branch where
-you can.
+you can, before the suite runs: a commit after the passing run has not been
+through it.
 
 Read the suite's **own** exit line, not the wrapper's. Chaining with `;` gives
 the exit status of the last command in the chain, which has silently reported a
@@ -352,7 +353,11 @@ and that head is what passed. First ask, in the integration worktree, whether
 ```
 
 - `unmoved` (exit 0): from the main checkout, on the default branch,
-  `git merge --ff-only <integration-branch>`, then `git push`.
+  `git merge --ff-only <integration-branch>`, then `git push`. Then, in the
+  integration worktree, `main-moved --finish` removes the batch refs.
+- `head-moved` (7): the integration head is not the one the suite passed on, or
+  the tree is dirty. Commit or remove the change, run the suite again on a clean
+  tree, then `main-moved` again.
 - `docs-only` (5), `targeted` (6) or `full-gate` (4): run the four steps it
   prints. Merge `main` in, run the named recheck exactly as printed, then
   `main-moved --advance`, then `main-moved` again. Repeat until `unmoved`.

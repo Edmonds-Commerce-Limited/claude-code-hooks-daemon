@@ -256,13 +256,15 @@ The team lead (operating from `/workspace/`) is responsible for orchestrating th
   `./scripts/qa/llm_qa.py all`, which covers every check and 95%+ coverage.
 - If the full gate passes: run `./scripts/qa/llm_qa.py main-moved` and follow
   its verdict until it says `unmoved` (exit 0), then fast-forward main to the
-  parent. Any other verdict prints its recheck and `--advance`. Main is frozen
-  for code while the batch is in flight.
+  parent. `head-moved` (exit 7) means the parent is not the head the gate
+  certified, so the gate runs again. Any other verdict prints its recheck and
+  `--advance`. Main is frozen for code while the batch is in flight.
 - If the full gate fails: find the child whose change broke it and send its
   failing checks to that developer. The developer fixes them on the CHILD
   branch with targeted runs; merge the child into the parent again and re-run
-  the gate. To drop a child instead, rebuild the parent without it ([QA.md](QA.md),
-  "A red batch")
+  the gate. To drop a child instead, build a new parent branch from current
+  `main` with the other ready children, and land the batch through it
+  ([QA.md](QA.md), "A red batch")
 - If any gate fails: Developer fixes and restarts from Gate 1
 - If Honesty Checker vetoes: Entire branch rejected, back to planning
 
@@ -1202,12 +1204,15 @@ cd /workspace/untracked/worktrees/worktree-plan-NNNNN
 git fetch origin
 git merge main --no-edit
 # ⚠️ Resolve conflicts HERE in the worktree (isolated, safe)
-# Record the batch base in refs/integration/<parent-branch>/base (a git ref,
-# so it survives between shell calls). main is now frozen for code.
+# Record the batch base in refs/integration/base/<parent-branch> (a git ref,
+# so it survives between shell calls). main is now frozen for code. A second
+# --start refuses while a base is recorded; see QA.md for --restart.
 ./scripts/qa/llm_qa.py main-moved --start
 
 # The batched integration gate: the parent now holds current main plus every
-# ready child, so this ONE run is the gate for all of them.
+# ready child, so this ONE run is the gate for all of them. Commit anything
+# the batch should carry FIRST: a green run on a clean tree certifies this
+# exact head, and a later commit makes STEP 5 say head-moved.
 ./scripts/qa/llm_qa.py all  # QA MUST pass after sync
 # If it is RED: the fix lands on the CHILD branch that broke it, never here.
 # Merge the fixed child into the parent again and re-run this step
@@ -1269,21 +1274,28 @@ git status  # MUST show "nothing to commit, working tree clean"
 # STEP 5: MERGE PARENT TO MAIN
 # ===================================================================
 git log worktree-plan-NNNNN --oneline  # Review changes
-# Did main move since the batch base? main-moved judges it in the PARENT
-# worktree (it reads the parent's base ref) and the exit code decides
-# (CLAUDE/QA.md, "The Batched Integration Gate"):
+# Is the parent still the head the gate certified, and did main move since
+# the batch base? main-moved judges both in the PARENT worktree (it reads the
+# parent's batch refs) and the exit code decides (CLAUDE/QA.md, "The Batched
+# Integration Gate"). `|| rc=$?` keeps a non-zero verdict from ending a
+# `set -euo pipefail` script before the case runs.
 cd /workspace/untracked/worktrees/worktree-plan-NNNNN
-./scripts/qa/llm_qa.py main-moved
-case $? in
+rc=0
+./scripts/qa/llm_qa.py main-moved || rc=$?
+case $rc in
   0) # unmoved: fast-forward only, so main becomes exactly the gated head
-     cd /workspace && git merge --ff-only worktree-plan-NNNNN ;;
+     git -C /workspace merge --ff-only worktree-plan-NNNNN ;;
+  7) # head-moved: something was committed or merged after the gate passed,
+     # or the tree is dirty. Commit or remove it, run `llm_qa.py all` on a
+     # clean tree, then run STEP 5 again from the top
+     echo "head-moved: re-run the gate on a clean tree" ;;
   4|5|6) # full-gate / docs-only / targeted: in THIS worktree, run the four
      # printed steps (merge main, the recheck, main-moved --advance), then
      # run STEP 5 again from the top
-     ;;
+     echo "main moved: run the printed recheck and --advance" ;;
   *) # 1: no verdict (no base, bad ref, git or the mapper failed). STOP and
      # fix the cause; never fast-forward without a verdict
-     ;;
+     echo "no verdict: fix the cause before anything lands" ;;
 esac
 # If --ff-only REFUSES, main moved after the check: run STEP 5 again. The
 # advanced base means nothing already covered is re-run.
@@ -1300,12 +1312,15 @@ git status  # Should show clean state
 # If the restart or status FAILS: DO NOT PUSH. Put local main back on the
 # batch base (--keep refuses rather than discard; --hard is denied), fix the
 # cause on a branch, and batch again (CLAUDE/QA.md, "After the fast-forward"):
-#   git reset --keep "$(git rev-parse refs/integration/worktree-plan-NNNNN/base)"
+#   git reset --keep "$(git rev-parse refs/integration/base/worktree-plan-NNNNN)"
 
 # ===================================================================
-# STEP 7: PUSH TO ORIGIN
+# STEP 7: PUSH TO ORIGIN, THEN CLOSE THE BATCH
 # ===================================================================
 git push
+# The batch refs are kept until now so the reset above stays possible;
+# --finish deletes them once main holds the certified head
+(cd /workspace/untracked/worktrees/worktree-plan-NNNNN && ./scripts/qa/llm_qa.py main-moved --finish)
 
 # ===================================================================
 # STEP 8: STOP DAEMONS, THEN CLEANUP WORKTREES (parent AND kept children)
@@ -1318,7 +1333,7 @@ $CHILD_WT/bin/hooks-daemon stop 2>/dev/null || true
 git worktree remove untracked/worktrees/worktree-child-plan-NNNNN-task-a
 git branch -d worktree-child-plan-NNNNN-task-a  # merged, so -d is enough
 git worktree remove untracked/worktrees/worktree-plan-NNNNN
-git branch -D worktree-plan-NNNNN
+git branch -d worktree-plan-NNNNN  # main was fast-forwarded to it, so -d is enough
 
 # ===================================================================
 # STEP 9: FINAL VERIFICATION
@@ -1774,17 +1789,21 @@ Task(subagent_type="general-purpose", team_name="plan-00028", name="final-honest
 # With `worktree.merge_to_main_requires_human_approval: true`, the merge
 # below is denied until a human runs `hooks-daemon approve-merge <branch>`.
 
-# Did main move since the batch base? Judged in the PARENT worktree, which
-# holds the base ref (CLAUDE/QA.md, "The Batched Integration Gate")
+# Is the parent still the certified head, and did main move since the batch
+# base? Judged in the PARENT worktree, which holds the batch refs
+# (CLAUDE/QA.md, "The Batched Integration Gate")
 cd /workspace/untracked/worktrees/worktree-plan-00028
-./scripts/qa/llm_qa.py main-moved
-case $? in
+rc=0
+./scripts/qa/llm_qa.py main-moved || rc=$?
+case $rc in
   0) # unmoved: fast-forward main to the gated head (no second full run)
-     cd /workspace && git merge --ff-only worktree-plan-00028 ;;
+     git -C /workspace merge --ff-only worktree-plan-00028 ;;
+  7) # head-moved: re-run the gate on a clean tree, then repeat this block
+     echo "head-moved: re-run the gate on a clean tree" ;;
   4|5|6) # a recheck: run the four printed steps here, then repeat this block
-     ;;
+     echo "main moved: run the printed recheck and --advance" ;;
   *) # no verdict: STOP and fix the cause
-     ;;
+     echo "no verdict: fix the cause before anything lands" ;;
 esac
 # --ff-only refused? main moved after the check: repeat this block.
 
@@ -1792,10 +1811,11 @@ cd /workspace
 ./bin/hooks-daemon restart
 ./bin/hooks-daemon status
 # FAILED? DO NOT PUSH. Undo locally, fix on a branch, batch again:
-#   git reset --keep "$(git rev-parse refs/integration/worktree-plan-00028/base)"
+#   git reset --keep "$(git rev-parse refs/integration/base/worktree-plan-00028)"
 
-# Push to origin
+# Push to origin, then close the batch (deletes the batch refs)
 git push
+(cd /workspace/untracked/worktrees/worktree-plan-00028 && ./scripts/qa/llm_qa.py main-moved --finish)
 
 # Stop daemons, cleanup the kept children and the parent
 for CHILD in handler-a handler-b handler-c handler-d; do
@@ -1807,7 +1827,7 @@ done
 WT=/workspace/untracked/worktrees/worktree-plan-00028
 $WT/bin/hooks-daemon stop 2>/dev/null || true
 git worktree remove untracked/worktrees/worktree-plan-00028
-git branch -D worktree-plan-00028
+git branch -d worktree-plan-00028
 
 # Clean up team
 TeamDelete()
@@ -1877,14 +1897,15 @@ Wave 2 audit revealed 50% of merged work was incomplete with false claims. The m
   which is merged in again, and the gate re-runs
 - [ ] **Spawn final Honesty Checker** to audit entire parent worktree
 - [ ] Final Honesty Checker approves → `llm_qa.py main-moved` in the parent,
-  branching on its exit code: 0 → `git merge --ff-only` from main; 4, 5 or 6
-  → the printed recheck, `--advance`, and check again; anything else → stop
+  branching on its exit code: 0 → `git merge --ff-only` from main; 7 → the
+  gate again on a clean tree; 4, 5 or 6 → the printed recheck, `--advance`,
+  and check again; anything else → stop
   (if `worktree.merge_to_main_requires_human_approval` is on, report
   readiness and wait for a human to run
   `hooks-daemon approve-merge <branch>`)
 - [ ] Restart and check the daemon in main; if it fails, DO NOT PUSH:
   `git reset --keep` to the batch base ref
-- [ ] Push to origin
+- [ ] Push to origin, then `llm_qa.py main-moved --finish` in the parent
 - [ ] Stop parent and child daemons, cleanup their worktrees and branches
 
 **Cleanup:**

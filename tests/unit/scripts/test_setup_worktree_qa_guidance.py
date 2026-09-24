@@ -12,11 +12,16 @@ The first version of this test checked only printed lines that BEGAN with a
 command, so the prose shape of the original defect ("Run ... before
 committing.") got past it, as did single-quoted and ``printf`` lines (review 3
 R3). It now judges every place a command can start inside every line the
-script prints, however that line is quoted, with the guard's own matcher.
+script prints, however that line is quoted, with the guard's own matcher. That
+includes every word naming a declared program whatever verb precedes it, the
+body of a ``cat`` heredoc, and a ``$NAME`` the script assigned (review 4 N7).
+So a printed MENTION of a runner reads as an instruction too: name a path
+after it (``pytest tests/unit/qa/test_x.py``), or do not name it.
 """
 
 from __future__ import annotations
 
+import re
 import shlex
 from pathlib import Path
 from typing import Any
@@ -45,6 +50,9 @@ _LABEL_END = ":"
 _COMMAND_SHAPED_PREFIXES: tuple[str, ...] = ("./", "/", "$", "~", "`")
 _LEADING_PUNCTUATION = "(`\"'"
 _TRAILING_PUNCTUATION = ".,;:)`\"'"
+_ASSIGNMENT = re.compile(r"^[A-Za-z_]\w*=")
+#: ``cat <<'EOF'``, ``cat <<EOF`` and ``cat <<-EOF``: the body is printed.
+_CAT_HEREDOC = re.compile(r"^\s*cat\b[^<]*<<-?\s*(?P<quote>['\"]?)(?P<delim>\w+)(?P=quote)")
 
 
 def _live_patterns() -> list[FullQaPattern]:
@@ -64,8 +72,41 @@ def _split(text: str) -> list[str]:
         return text.split()
 
 
+def _assignments(script: str) -> dict[str, str]:
+    """``NAME=value`` lines, so ``$NAME`` in a printed line reads as what it prints."""
+    values: dict[str, str] = {}
+    for line in script.splitlines():
+        words = _split(line.strip())
+        if len(words) == 1 and _ASSIGNMENT.match(words[0]):
+            name, value = words[0].split("=", 1)
+            values[name] = value
+    return values
+
+
+def _expand(text: str, values: dict[str, str]) -> str:
+    for name, value in values.items():
+        text = text.replace(f"${{{name}}}", value).replace(f"${name}", value)
+    return text
+
+
+def _heredoc_bodies(script: str) -> list[str]:
+    """The body lines of every heredoc fed to ``cat``, which prints them."""
+    bodies: list[str] = []
+    lines = iter(script.splitlines())
+    for line in lines:
+        opened = _CAT_HEREDOC.search(line)
+        if opened is None:
+            continue
+        delimiter = opened.group("delim")
+        for body in lines:
+            if body.strip() == delimiter:
+                break
+            bodies.append(body.strip())
+    return bodies
+
+
 def _printed_texts(script: str) -> list[str]:
-    """The text of every ``echo`` or ``printf`` line, with shell quoting removed."""
+    """The text of every ``echo``/``printf`` line and ``cat`` heredoc, quoting removed."""
     texts = []
     for line in script.splitlines():
         words = _split(line.strip())
@@ -83,11 +124,18 @@ def _printed_texts(script: str) -> list[str]:
         for escape in _ESCAPES:
             text = text.replace(escape, " ")
         texts.append(text)
-    return texts
+    texts.extend(_heredoc_bodies(script))
+    values = _assignments(script)
+    return [_expand(text, values) for text in texts]
 
 
-def _candidate_commands(text: str) -> list[str]:
-    """Each suffix of ``text`` that starts where prose could start a command."""
+def _candidate_commands(text: str, programs: frozenset[str]) -> list[str]:
+    """Each suffix of ``text`` that starts where prose could start a command.
+
+    That is after a start word, a label or a command-shaped word, and at any
+    word naming a declared program, whatever verb comes before it (review 4
+    N7): ``Execute pytest tests`` is an instruction however it is phrased.
+    """
     raw = _split(text)
     words = [word.lstrip(_LEADING_PUNCTUATION).rstrip(_TRAILING_PUNCTUATION) for word in raw]
     candidates = []
@@ -98,6 +146,7 @@ def _candidate_commands(text: str) -> list[str]:
             or previous.lower() in _STARTS_AFTER
             or previous.endswith(_LABEL_END)
             or raw[index].startswith(_COMMAND_SHAPED_PREFIXES)
+            or word.rsplit("/", 1)[-1] in programs
         )
         if starts and word:
             candidates.append(" ".join(words[index:]))
@@ -106,12 +155,13 @@ def _candidate_commands(text: str) -> list[str]:
 
 def _full_runs(script: str, patterns: list[FullQaPattern]) -> list[str]:
     """Every printed text that tells its reader to start a full QA run."""
+    programs = frozenset(pattern.command for pattern in patterns)
     return [
         text
         for text in _printed_texts(script)
         if any(
             find_full_qa_invocation(candidate, patterns) is not None
-            for candidate in _candidate_commands(text)
+            for candidate in _candidate_commands(text, programs)
         )
     ]
 
@@ -138,12 +188,36 @@ def test_nothing_the_script_prints_tells_an_agent_to_run_full_qa() -> None:
         'echo "  bash scripts/qa/run_tests.sh"',
         'echo "  Run pytest tests/unit before committing."',
         'echo -e "  ${GREEN}->${NC} `./scripts/qa/llm_qa.py tests`"',
+        # Review 4 N7: any verb, a heredoc, and a command held in a variable.
+        'echo "  Execute pytest tests before committing."',
+        'echo "  Then use pytest tests/unit to check."',
+        'echo "  Next, invoke python -m pytest tests."',
+        'echo "  Finally: run the full suite (pytest)."',
+        'echo "  Run pytest before committing."',
+        "cat <<'EOF'\n  Run ./scripts/qa/llm_qa.py all before committing.\nEOF",
+        "cat <<EOF\n  Then use pytest tests.\nEOF",
+        "cat <<-'EOF'\n\tthen use ./scripts/qa/run_tests.sh\n\tEOF",
+        'QA_CMD="./scripts/qa/llm_qa.py all"\necho "  Run $QA_CMD before committing."',
+        "QA_CMD='pytest tests'\necho \"  Run ${QA_CMD} first.\"",
     ],
 )
 def test_a_full_run_in_any_printed_shape_is_caught(injected: str) -> None:
-    """Review 3 R3: each of these was MISSED by the first version of this test."""
+    """Review 3 R3 and review 4 N7: each of these was MISSED by an earlier version."""
     script = _SCRIPT.read_text(encoding="utf-8") + f"\n{injected}\n"
     assert _full_runs(script, _live_patterns()) != [], injected
+
+
+@pytest.mark.parametrize(
+    "injected",
+    [
+        'echo "  Run pytest tests/unit/handlers/test_x.py before committing."',
+        "python3 - <<'PY'\nprint('pytest tests')\nPY",
+        'echo "  Run ./scripts/qa/llm_qa.py changed first."',
+    ],
+)
+def test_a_targeted_run_or_code_that_is_not_printed_is_not(injected: str) -> None:
+    script = _SCRIPT.read_text(encoding="utf-8") + f"\n{injected}\n"
+    assert _full_runs(script, _live_patterns()) == [], injected
 
 
 def test_the_agent_template_names_targeted_qa_and_the_coordinators_gate() -> None:

@@ -298,7 +298,7 @@ echo -e "${GREEN}✓${NC} Venv created at ${WT_VENV_PATH}"
 # into the same fingerprint venv, so it matches uv.lock exactly. Link mode
 # follows ensure_venv's choice: copy inside a container (uv's cache and the
 # bind-mounted target are cross-device), uv's default elsewhere.
-echo -e "${YELLOW}→${NC} Installing dev extras (pytest, ruff, mypy...) from uv.lock..."
+echo -e "${YELLOW}→${NC} Installing dev extras (the test, lint and type tools) from uv.lock..."
 WT_LINK_MODE="${UV_LINK_MODE:-}"
 if [[ -z "${WT_LINK_MODE}" ]] && _uv_in_container; then
     WT_LINK_MODE="copy"
@@ -315,7 +315,7 @@ if ! "${WT_VENV_PATH}/bin/python" -c "import pytest"; then
     echo "  QA cannot run in this worktree. Fix: UV_PROJECT_ENVIRONMENT=${WT_VENV_PATH} uv sync --frozen --all-extras --project ${WORKTREE_DIR}"
     exit 1
 fi
-echo -e "${GREEN}✓${NC} Dev extras installed (pytest importable)"
+echo -e "${GREEN}✓${NC} Dev extras installed (the test runner imports)"
 
 # Step 5: Verify editable install points to correct source.
 # uv sync already installed the package editable via pyproject; just verify.
@@ -398,6 +398,7 @@ echo "  You are working in a git worktree at ${WORKTREE_DIR}/"
 echo "  DO NOT work in /workspace - only work in YOUR worktree directory."
 echo "  Run the daemon CLI as ./bin/hooks-daemon from that worktree."
 echo "  Before committing, run TARGETED QA: ./scripts/qa/llm_qa.py changed, plus"
-echo "  ./scripts/qa/llm_qa.py <tool> and pytest on the test files you touched."
+echo "  ./scripts/qa/llm_qa.py <tool>, and pytest tests/unit/qa/test_x.py naming"
+echo "  each test file you touched by its path."
 echo "  Do not run full QA: it is the coordinator's batched integration gate,"
 echo "  run once over every ready branch merged together. Hand over a commit hash."
