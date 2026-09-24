@@ -13,15 +13,23 @@ plans that already journal — starting one is ``journal-folder-present``'s job.
 from typing import Final
 
 from claude_code_hooks_daemon.plan_qa.checks.common import journalling_active
-from claude_code_hooks_daemon.plan_qa.model import PlanFolder, PlanLocation, PlanStatus
+from claude_code_hooks_daemon.plan_qa.model import (
+    JOURNAL_BODY_FILE_HINT,
+    PlanFolder,
+    PlanLocation,
+    PlanStatus,
+    journal_append_command,
+)
 from claude_code_hooks_daemon.plan_qa.types import CheckContext, CheckSpec, Finding, Level, Stage
 
 CHECK_ID: Final[str] = "journal-freshness"
 
-_REMEDIATION: Final[str] = (
-    "For each listed plan, append a dated entry to today's journal day-file "
-    "(create it if the day has none) so the log reflects recent activity."
-)
+
+def _remediation(plan_dir: str) -> str:
+    return (
+        "For each listed plan, append an entry recording recent activity with "
+        f"`{journal_append_command(plan_dir, None)}` ({JOURNAL_BODY_FILE_HINT})."
+    )
 
 
 def _run(context: CheckContext) -> list[Finding]:
@@ -51,7 +59,7 @@ def _run(context: CheckContext) -> list[Finding]:
             check_id=CHECK_ID,
             level=Level.ADVISE,
             message=message,
-            remediation=_REMEDIATION,
+            remediation=_remediation(context.plan_dir_rel),
             path=None,
         )
     ]

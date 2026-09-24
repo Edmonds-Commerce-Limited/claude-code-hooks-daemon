@@ -1,6 +1,6 @@
 # Plan 00462: php lsp advice keeps composer dependencies indexed
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-24
 **Owner**: dev
 **Priority**: High
@@ -82,18 +82,21 @@ confirms this with sources rather than by assumption.
 
 ### Phase 2: Deliver
 
-- [ ] ⬜ **Task 2.1**: Merge `--no-ff`, verify ancestry and CI, and restart
+- [x] ✅ **Task 2.1**: Merge `--no-ff`, verify ancestry and CI, and restart
   the daemon.
-- [ ] ⬜ **Task 2.2**: Comment on #56 with the fix and the client action,
+- [x] ✅ **Task 2.2**: Comment on #56 with the fix and the client action,
   and close it.
 
 ## Success Criteria
 
-- [ ] Following the PHP advice exactly leaves `vendor/` indexed, apart from
+- [x] Following the PHP advice exactly leaves `vendor/` indexed, apart from
   its nested test and vendor trees.
-- [ ] An override excluding the whole of `vendor/` is flagged, and the flag
+- [x] An override excluding the whole of `vendor/` is flagged, and the flag
   names the fix.
-- [ ] Full QA passes and CI is green.
+- [x] Full QA passes and CI is green.
+- [x] Every release-bound consequence is in the pending-release holding
+  area: `UNRELEASED/release-notes/12-php-lsp-advice-no-longer-tells-you-to-exclude-vendor.md`
+  and `UNRELEASED/post-upgrade-tasks/01-remove-vendor-from-a-php-intelephense-override.md`.
 
 ## Delivery & Milestones
 
@@ -101,4 +104,5 @@ confirms this with sources rather than by assumption.
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00462-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- Not yet delivered.
+- Delivered in merge `830363e5` (branch head `ec3282c5`, full QA 37/37);
+  CI green at `6359ad0c`. #56 closed with the client action.

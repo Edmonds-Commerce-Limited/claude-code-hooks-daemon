@@ -539,6 +539,13 @@ handlers:
       enabled: true        # Enable when using CLAUDE/Plan/ structure
       priority: 33
 
+    # Plan 00461: a JOURNAL/ entry goes through `mkplan.bash --journal`, which
+    # stamps the real UTC time. A coordinator and five sub-agents appended every
+    # entry by hand in one session, one of them 40 minutes in the future.
+    plan_journal_guard:
+      enabled: true
+      priority: 31
+
     agent_isolation_advisor:  # Advises worktree isolation for concurrent agents
       enabled: true
       priority: 46
@@ -939,6 +946,10 @@ handlers:
     subagent_cache_aggregator:      # Sub-agent prompt-cache cost, for the status line's SUB figure (Plan 00452)
       enabled: true
       priority: 9    # Ahead of the terminal size blocker (15), so a rejected report still gets counted
+
+    subagent_report_persistence:    # Auto-saves every sub-agent's final reply to a gitignored file (Plan 00460)
+      enabled: true  # Sensor only: never blocks a stop
+      priority: 10   # Must run before the terminal size blocker (15), which looks up its output
 
   # UserPromptSubmit handlers (run when user submits prompt)
   user_prompt_submit:

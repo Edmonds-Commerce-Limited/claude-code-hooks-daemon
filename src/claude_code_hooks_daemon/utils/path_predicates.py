@@ -61,7 +61,9 @@ class TextOrReason:
     reason: str | None = None
 
 
-def read_text_or_reason(path: str | Path, *, encoding: str = "utf-8") -> TextOrReason:
+def read_text_or_reason(
+    path: str | Path, *, encoding: str = "utf-8", errors: str = "strict"
+) -> TextOrReason:
     """Read ``path``, carrying any failure back as a reason rather than raising.
 
     The read counterpart of the predicates below, for the same reason: a
@@ -70,9 +72,14 @@ def read_text_or_reason(path: str | Path, *, encoding: str = "utf-8") -> TextOrR
     afterwards. Returning a bare ``None`` collapsed "absent" and "unreadable"
     into one fact, and a ``return None`` inside an ``except`` body is error
     hiding, which this project's own audit denies.
+
+    ``errors`` is the decode policy, passed straight to ``read_text``. A decode
+    failure is not an ``OSError`` and still raises under the default
+    ``"strict"``; a caller that only looks for ASCII markers passes
+    ``"replace"``, so a stray byte cannot raise at all.
     """
     try:
-        return TextOrReason(text=Path(path).read_text(encoding=encoding))
+        return TextOrReason(text=Path(path).read_text(encoding=encoding, errors=errors))
     except OSError as exc:
         logger.debug("read_text_or_reason: %s unreadable: %s", path, exc)
         return TextOrReason(reason=str(exc))

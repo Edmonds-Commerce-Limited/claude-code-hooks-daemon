@@ -1,0 +1,48 @@
+# Drafted by Plan 00461. The VERSION in the filename and the `version:` key are
+# a target, not a decision — releases are human-gated in this project, and the
+# release agent confirms or renames this file. Only the content is asserted here.
+version: "3.67.0"
+date: "UNRELEASED"
+
+breaking: false
+
+config_changes:
+  added:
+    - key: handlers.pre_tool_use.plan_journal_guard
+      description: >-
+        Denies a plan journal entry written by hand. `mkplan.bash --journal
+        <plan-number> <category> <body-file>` reads the real UTC clock and
+        writes the entry heading itself; hand-typed stamps have landed 40
+        minutes in the future, and an append-only journal cannot correct one
+        until the clock passes it. Denied, in every checkout including git
+        worktrees: an Edit/Write that adds any line to a JOURNAL/ day-file or
+        creates one, and a Bash command that writes into one by any route
+        (redirect, tee, heredoc, cp/mv/install/dd/ln/rsync/sponge, an in-place
+        editor, a patch, an interpreter program inline or on a heredoc or
+        behind a wrapper, or a name the shell builds at run time). Allowed:
+        mkplan.bash itself, git, reads, and an Edit that adds no line. The
+        deny prints the exact command for that plan, with absolute paths into
+        that checkout. Active only when the plan workflow and journalling are
+        enabled, the journal directory keeps its default JOURNAL name, and the
+        checkout's plan directory holds _JOURNAL_TEMPLATE_.md and a mkplan.bash
+        that offers --journal; otherwise it is inert and logs why, once.
+      example_yaml: |
+        handlers:
+          pre_tool_use:
+            plan_journal_guard:
+              enabled: true
+              priority: 31
+      migration_note: >-
+        On by default and inert in a project without the plan workflow. Where
+        it is active, write each entry body to a fresh file under
+        untracked/scratch/ and append it with `mkplan.bash --journal`; update
+        any agent brief that says to append with Edit and `date -u`. Disable
+        with handlers.pre_tool_use.plan_journal_guard.enabled: false.
+      recommended: true
+      dormant: false
+
+  renamed: []
+
+  removed: []
+
+  changed: []

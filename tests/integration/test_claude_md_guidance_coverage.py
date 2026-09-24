@@ -78,6 +78,7 @@ _EARNS_GUIDANCE: dict[str, str] = {
     "DangerousPermissionsHandler": "T1 denies chmod 777 and friends",
     "DestructiveGitHandler": "T1 denies irreversible git commands",
     "ProjectContainmentHandler": "T1 denies a write named outside the repo root",
+    "PlanJournalGuardHandler": "T1 denies a journal entry written by hand",
     "SubagentCronDeleteBlockerHandler": "T1 denies CronDelete inside a subagent",
     "ErrorHidingBlockerHandler": "T1 denies error-suppression patterns",
     "GhIssueCommentsHandler": "T1 denies gh issue view without --comments",
@@ -180,6 +181,15 @@ _EARNS_GUIDANCE: dict[str, str] = {
     "AutoContinueStopHandler": "T1 denies a stop with no declared reason",
     "AutoApproveReadsHandler": "T1 decides a permission request outright",
     "SubagentReportSizeBlockerHandler": "T1 denies an oversized SubagentStop return",
+    "SubagentReportPersistenceHandler": (
+        "never denies (a sensor, like SubagentCacheAggregatorHandler below), "
+        "but its guidance is what tells a coordinator WHERE the auto-saved "
+        "reply lives and that subagent_report_size_blocker's over-threshold "
+        "message names that same path -- an agent that never reads this "
+        "guidance still gets the size blocker's deny message with the path "
+        "in it, but the persister's OWN existence, and the fact it runs "
+        "unconditionally regardless of Write access, is otherwise invisible"
+    ),
     "SubagentReportPathVerifierHandler": (
         "T1 denies a SubagentStop whose final message claims a report file "
         "that is not on disk, and the guidance is what stops an agent "

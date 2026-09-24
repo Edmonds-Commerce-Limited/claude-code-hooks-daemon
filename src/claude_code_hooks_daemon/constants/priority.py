@@ -152,6 +152,15 @@ class Priority:
     # whose report is rejected still has its cache cost counted — the figure
     # describes the agent's whole run, not the fate of its final message.
     SUBAGENT_CACHE_AGGREGATOR = 9
+    # Plan 00460 Task 1.6: runs ahead of the terminal size blocker (15) so a
+    # persisted report EXISTS on disk before the size blocker's glob lookup
+    # (subagent_report_paths.find_persisted_report) runs — there is no
+    # in-memory hand-off between the two, only this ordering plus the file
+    # the persister already wrote. 10, not 8 or 9: both are taken on this
+    # event (path_verifier, cache_aggregator) and this handler has no claim
+    # to run ahead of either — it never denies, and its own write is
+    # independent of what they find.
+    SUBAGENT_REPORT_PERSISTENCE = 10
 
     TDD_ENFORCEMENT = 15
     DANGEROUS_PERMISSIONS = 15
@@ -253,6 +262,11 @@ class Priority:
     # qa_suppression/markdown_organization.
     COMMENT_CHANGELOG = 31
     COMMENT_SIZE = 33
+
+    # Plan 00461: beside plan_number_helper, the other guard that redirects a
+    # hand-rolled plan-tree write to `mkplan.bash`. Ahead of plan_qa_edit (44),
+    # whose journal advisories are moot for an entry that is denied here.
+    PLAN_JOURNAL_GUARD = 31
 
     # Plan 00268: "a verification result must be consumed" is QA enforcement,
     # so it sits in this band rather than with the safety blockers. Advisory by

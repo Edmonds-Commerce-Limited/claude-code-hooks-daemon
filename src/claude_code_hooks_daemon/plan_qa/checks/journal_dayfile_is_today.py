@@ -28,7 +28,11 @@ from claude_code_hooks_daemon.plan_qa.checks.common import (
     journal_today_only_level,
     level_for_plan,
 )
-from claude_code_hooks_daemon.plan_qa.model import parse_journal_dayfile_name
+from claude_code_hooks_daemon.plan_qa.model import (
+    JOURNAL_BODY_FILE_HINT,
+    journal_append_command,
+    parse_journal_dayfile_name,
+)
 from claude_code_hooks_daemon.plan_qa.types import (
     CheckContext,
     CheckSpec,
@@ -39,27 +43,23 @@ from claude_code_hooks_daemon.plan_qa.types import (
 
 CHECK_ID: Final[str] = "journal-dayfile-is-today"
 
-_GENERIC_REMEDIATION: Final[str] = (
-    "Journals are append-only per-day logs — never edit a stale day-file, even "
-    "one dated yesterday. Write to today's day-file instead, named "
-    "`NNNNN-Journal-YY-MM-DD.md` with today's date (create it if it does not "
-    "exist yet)."
-)
+_GENERIC_DAYFILE_NAME: Final[str] = "NNNNN-Journal-YY-MM-DD.md"
 
 
 def _suggested_filename(plan_number: int, today: date) -> str:
-    """The exact today-dated day-file name an agent should write to instead."""
+    """The exact today-dated day-file name the stamping tool will write to."""
     return f"{plan_number:05d}-Journal-{today.strftime('%y-%m-%d')}.md"
 
 
-def _remediation(plan_number: int | None, today: date) -> str:
-    if plan_number is None:
-        return _GENERIC_REMEDIATION
-    suggested = _suggested_filename(plan_number, today)
+def _remediation(plan_dir: str, plan_number: int | None, today: date) -> str:
+    dayfile = (
+        _GENERIC_DAYFILE_NAME if plan_number is None else _suggested_filename(plan_number, today)
+    )
     return (
         "Journals are append-only per-day logs — never edit a stale day-file, "
-        f"even one dated yesterday. Write to today's day-file instead: "
-        f"`{suggested}` (create it if it does not exist yet)."
+        "even one dated yesterday. Append the entry with "
+        f"`{journal_append_command(plan_dir, plan_number)}` instead "
+        f"({JOURNAL_BODY_FILE_HINT}); it writes to today's day-file, `{dayfile}`."
     )
 
 
@@ -99,7 +99,7 @@ def _run(context: CheckContext) -> list[Finding]:
                 f"Journal day-file `{target.basename}` is dated "
                 f"{parsed.date.isoformat()}, not today ({context.today.isoformat()})"
             ),
-            remediation=_remediation(target.plan_number, context.today),
+            remediation=_remediation(context.plan_dir_rel, target.plan_number, context.today),
             path=target.rel_path,
         )
     ]

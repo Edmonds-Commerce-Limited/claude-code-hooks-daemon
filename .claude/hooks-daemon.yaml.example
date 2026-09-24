@@ -291,6 +291,10 @@ handlers:
       # Plan directory is the top-level plan_workflow.directory (single source
       # of truth) — no per-handler track_plans_in_project needed.
 
+    plan_journal_guard:    # A JOURNAL/ entry goes through `mkplan.bash --journal` (UTC-stamped)
+      enabled: true        # Inert unless plan_workflow is on and mkplan.bash --journal is deployed
+      priority: 31
+
     agent_isolation_advisor:  # Advises worktree isolation when agents share a checkout
       enabled: false          # Enable if you dispatch concurrent agents
       priority: 46
@@ -740,6 +744,14 @@ handlers:
     subagent_cache_aggregator:      # Records each sub-agent's prompt-cache cost for the status line
       enabled: true                 # Sensor only (Plan 00452): renders nothing, never blocks a stop
       priority: 9                   # Ahead of the terminal size blocker, so a rejected report still counts
+
+    subagent_report_persistence:    # Auto-saves every sub-agent's final reply to a gitignored file (Plan 00460)
+      enabled: true                 # Sensor only: never blocks a stop; runs before the size blocker below
+      priority: 10                  # Must run before the terminal size blocker, which looks up its output
+      options:
+        report_dir: "untracked/agent-reports/auto/"
+        max_kept_reports: 500
+        max_report_age_days: 30
 
     subagent_report_size_blocker:  # Blocks an oversized subagent final message
       enabled: true                 # On by default (Plan 00307 Task 4.3); set false to opt out

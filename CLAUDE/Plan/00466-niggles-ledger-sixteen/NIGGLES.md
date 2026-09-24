@@ -3,7 +3,18 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
-### N3 — `goal_injection` treats any edit of an In Progress plan as the plan starting
+### N7 — the regenerated CLAUDE.md guidance block is not deterministic, so every daemon restart can commit a reorder
+
+**Found by the coordinator** at the batch A merge. The integration worktree's daemon had just regenerated CLAUDE.md, and that result was committed. The main checkout's daemon then restarted on the same tree and auto-committed `ce31d6d8` ("Auto: hooks daemon regenerated CLAUDE.md handler guidance"). The commit changed 18 lines both ways. Every change is the same handler markers in a new order: `tool-disable-advisor`, `project-handler-load-checker`, `hook-registration-checker`, `routine-qa-sweep` and `secret-file-hygiene-checker` among them. The earlier 00462 merge restart committed `6359ad0c`, changing 83 lines both ways, with the same shape.
+
+`ClaudeMdInjector._collect_tiers()` emits handlers in the order of `self._handlers` (`core/claude_md_injector.py:642`) and never sorts them. Two daemons on one tree can therefore produce different blocks, apparently for handlers that share a priority. The results:
+
+- A spurious auto-commit on restart.
+- A CLAUDE.md conflict whenever two branches merge. This happened twice while building batch A.
+- A worktree's regenerated block that never matches main's.
+
+**Candidate remedy:** emit in a total order that depends only on the handler set, for example tier, then priority, then handler name. Test that two injector runs over the same handlers in shuffled input order produce byte-identical blocks. Check whether `HOOKS-DAEMON.md` generation has the same tie problem, and give it the same fix.
+`goal_injection` treats any edit of an In Progress plan as the plan starting
 
 **Found by the coordinator**, live. The supervisor had set the goal to Plan
 00461\. The coordinator then added a table row to this ledger's PLAN.md. That

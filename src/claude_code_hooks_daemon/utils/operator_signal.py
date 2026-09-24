@@ -34,6 +34,8 @@ from __future__ import annotations
 import json
 import logging
 import re
+import sys
+import time
 from pathlib import Path
 from typing import Final
 
@@ -145,6 +147,106 @@ def write_operator_signal(
     tmp_path.write_text(json.dumps(payload), encoding="utf-8")
     tmp_path.replace(final_path)
     return final_path
+
+
+def validate_signal_request(kind: str, minutes: int | None) -> str | None:
+    """``None`` when ``kind``/``minutes`` is a well-formed CLI request.
+
+    Otherwise the CLI-ready error message ("ERROR: ..."). The ONE definition
+    of this shape rule (Plan 00457): :func:`run_signal_cli` calls it, and
+    ``cmd_signal`` (``daemon/cli.py``) calls it again FIRST -- before
+    ``ProjectContext.initialize`` does any git/filesystem work -- so a
+    malformed request fails fast rather than after that work has run.
+    """
+    needs_minutes = kind in KINDS_WITH_MINUTES
+    if needs_minutes and minutes is None:
+        return f"ERROR: kind '{kind}' requires --minutes N"
+    if not needs_minutes and minutes is not None:
+        return f"ERROR: kind '{kind}' takes no --minutes payload"
+    return None
+
+
+def run_signal_cli(
+    daemon_untracked_dir: Path,
+    *,
+    kind: str,
+    minutes: int | None,
+    all_sessions: bool,
+    session_id: str,
+) -> int:
+    """Validate, target and write operator signal(s) -- the CLI's whole body.
+
+    The shared implementation behind BOTH ``cmd_signal`` (``daemon/cli.py``,
+    which resolves ``daemon_untracked_dir`` via ``ProjectContext``) and the
+    venv-free entry point (``daemon/signal_standalone.py``, which resolves it
+    via ``daemon.paths.get_untracked_dir`` instead) -- Plan 00457's answer to
+    "reuse the writer, don't re-implement it" for everything past directory
+    resolution. Prints to stdout/stderr exactly as a CLI command should.
+
+    Args:
+        daemon_untracked_dir: Already-resolved untracked dir to write into.
+        kind: One of :data:`KINDS`.
+        minutes: Required (a positive int) for :data:`KINDS_WITH_MINUTES`,
+            ``None`` otherwise.
+        all_sessions: Reach every live session's context sidecar under
+            ``daemon_untracked_dir`` instead of just ``session_id``.
+        session_id: The caller's own session id (empty string if unset) --
+            ignored when ``all_sessions`` is set.
+
+    Returns:
+        0 on every targeted signal written, 1 on refusal/failure.
+    """
+    error = validate_signal_request(kind, minutes)
+    if error is not None:
+        print(error, file=sys.stderr)
+        return 1
+
+    if all_sessions:
+        session_ids = discover_session_ids(daemon_untracked_dir)
+        if not session_ids:
+            print(
+                "ERROR: --all-sessions found no live session (no <session>.json context "
+                f"sidecar under {daemon_untracked_dir}) -- nothing to signal",
+                file=sys.stderr,
+            )
+            return 1
+    else:
+        if not session_id:
+            print(
+                "ERROR: CLAUDE_CODE_SESSION_ID is not set. Without --all-sessions the "
+                "signal is session-keyed, so `signal` must run INSIDE the Claude Code "
+                "session it should target (a Bash tool call sets the variable) -- or "
+                "pass --all-sessions to reach every session of this project instead.",
+                file=sys.stderr,
+            )
+            return 1
+        session_ids = [session_id]
+
+    now = time.time()
+    written: list[Path] = []
+    for target_session_id in session_ids:
+        try:
+            path = write_operator_signal(
+                daemon_untracked_dir,
+                session_id=target_session_id,
+                kind=kind,
+                minutes=minutes,
+                now=now,
+            )
+        except ValueError as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            return 1
+        except OSError as e:
+            print(
+                f"ERROR: failed to write operator signal for session '{target_session_id}': {e}",
+                file=sys.stderr,
+            )
+            return 1
+        written.append(path)
+
+    for path in written:
+        print(f"Operator signal written: {path}")
+    return 0
 
 
 def discover_session_ids(daemon_untracked_dir: Path) -> list[str]:

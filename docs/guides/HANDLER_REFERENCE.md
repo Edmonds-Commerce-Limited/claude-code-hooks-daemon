@@ -2021,6 +2021,29 @@ handlers:
 
 ---
 
+#### plan_journal_guard
+
+| Property       | Value                |
+| -------------- | -------------------- |
+| **Config key** | `plan_journal_guard` |
+| **Priority**   | 31                   |
+| **Type**       | Blocking             |
+| **Event**      | PreToolUse           |
+
+**Description:** Denies a plan journal entry written by hand, in any checkout including git worktrees: an `Edit`/`Write` that adds any line to (or creates) a `JOURNAL/` day-file, or a Bash command that writes into one by any route. The deny prints the exact `mkplan.bash --journal <plan> <category> <body-file>` command for that plan, with absolute paths, because the tool stamps the real UTC time and a hand-typed one can be wrong. `mkplan.bash`, `git`, reads and edits that add no line are allowed. Active only when the plan workflow and journalling are on, the journal directory keeps its default `JOURNAL` name, and the checkout's plan directory holds `_JOURNAL_TEMPLATE_.md` and a `mkplan.bash` that offers `--journal`; otherwise it is inert and logs why once. Full rule: [CLAUDE/PlanJournalling.md](../../CLAUDE/PlanJournalling.md#appending-an-entry).
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    plan_journal_guard:
+      enabled: true
+      priority: 31
+```
+
+---
+
 #### lsp_enforcement
 
 | Property       | Value             |
@@ -4029,6 +4052,7 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | `merge_to_main_approval`       | PreToolUse        | 20       | git merge/gh pr merge into main without a human's approval (opt-in)   |
 | `qa_suppression`               | PreToolUse        | 30       | noqa, type: ignore, eslint-disable, nolint, ... (all langs)           |
 | `plan_number_helper`           | PreToolUse        | 30       | Broken plan number discovery commands                                 |
+| `plan_journal_guard`           | PreToolUse        | 31       | A plan journal entry written by hand (use `mkplan.bash --journal`)    |
 | `comment_changelog`            | PreToolUse        | 31       | Changelog narrative in a comment (`Prior <version>:`, dated entries)  |
 | `comment_size`                 | PreToolUse        | 33       | Over-long comments growing past the size limit                        |
 | `markdown_organization`        | PreToolUse        | 35       | Disorganised markdown; untracked Claude memory writes                 |

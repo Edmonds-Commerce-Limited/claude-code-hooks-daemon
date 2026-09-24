@@ -1253,6 +1253,54 @@
       "function": "record",
       "rule": "log-and-continue",
       "reason": "Plan 00452: this is a SENSOR on a blocking event. The sidecar write is the last thing that happens before a sub-agent stops, and the only two failures reachable here are a daemon with no ProjectContext (RuntimeError, a standalone entry point or a unit test) and an unwritable untracked directory (OSError) -- neither of which is a reason to strand a stopping agent, which is what propagating would risk. The figure is advisory, purely cosmetic (a `sub NN%` fragment on the status line), and the next agent's stop records again, so nothing is lost permanently. Both branches log at WARNING, so the failure is visible rather than concealed. The write itself is atomic (tmp + Path.replace), so a failure can never leave a half-written document for the status-line reader. Covered by test_a_missing_project_context_does_not_raise and test_an_unwritable_root_does_not_raise."
+    },
+    {
+      "file": "utils/markdown_format.py",
+      "function": "parse_frontmatter_yaml",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00460: parses arbitrary `.claude/agents/*.md` frontmatter -- external, hand-editable data this module does not own. Malformed YAML, or YAML that parses to a non-mapping, is a legitimate 'nothing safe to act on' outcome, not a fault: its only caller (the Plan 00460 subagent-tool resolver) treats None identically to 'no frontmatter block found', which is the correct reading of unparseable frontmatter. Raising would take down a PreToolUse/SubagentStop hook dispatch over a hand-edited agent file, which is a strictly worse outcome than silently falling back to 'unknown, keep today's behaviour' -- the documented fail-safe default this resolver is built around. remote_docs/provenance.py has its own, separate frontmatter loader with ProvenanceError-based reporting rather than calling this function. Covered by test_returns_none_on_invalid_yaml and test_returns_none_when_frontmatter_is_not_a_mapping."
+    },
+    {
+      "file": "utils/subagent_report_paths.py",
+      "function": "write_new_file_never_overwrite",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00460 Task 1.6: this function's own docstring already documents the contract -- 'None on any failure ... logged, never raised. The caller is a SubagentStop sensor: persistence failing must never block a stopping agent.' All three return-None sites (directory creation OSError, per-attempt file-creation OSError, and content-write OSError) are the same fail-open outcome: the daemon's own best-effort save of an agent's reply, not a Write tool call the user is waiting on, so raising here would strand the stopping agent over a filesystem problem the agent cannot fix. Every branch is logged at warning first. Covered by test_returns_none_when_the_directory_cannot_be_created (utils) and test_never_denies_even_when_write_target_is_unwritable (the SubagentStop handler that calls it)."
+    },
+    {
+      "file": "utils/subagent_report_paths.py",
+      "function": "write_new_file_never_overwrite",
+      "rule": "silent-continue",
+      "reason": "Plan 00460 Task 1.6: `except FileExistsError: continue` is the collision-retry loop the function's own name promises -- a name already in use is not a failure, it is the expected reason to try the next numeric suffix. Raising here would turn an ordinary same-second collision (two SubagentStops for the same agent_id) into a lost report instead of the `-2`, `-3`, ... suffix this function exists to apply. Bounded by `_MAX_COLLISION_ATTEMPTS`; exhausting it is a real failure and IS logged and returned as None (the return-none-on-error entry above). Covered by test_collision_uses_a_numeric_suffix and test_third_collision_increments_the_suffix."
+    },
+    {
+      "file": "utils/subagent_report_paths.py",
+      "function": "find_persisted_report",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00460 Task 1.6: this is a best-effort LOOKUP the size blocker uses to find what the persister already saved, not a load-bearing read -- the function's own docstring says so ('or None'), and its sole caller (subagent_report_size_blocker._find_persisted_report) already treats a None return identically to 'nothing was persisted', falling back to the pre-Task-1.6 deny message. An OSError globbing the report directory (permissions, a concurrent removal) is exactly as harmless to conceal as the ordinary 'no match found' case two lines later, which is this same function's normal control flow, not an exception. Logged at debug (not warning): a missing/unreadable report directory is the common case for any project that has not yet had a SubagentStop, not an anomaly worth surfacing. Covered by test_returns_none_when_directory_is_missing."
+    },
+    {
+      "file": "utils/subagent_report_paths.py",
+      "function": "_ensure_self_ignoring",
+      "rule": "log-and-continue",
+      "reason": "Plan 00460 review finding B1: writing the self-ignoring `.gitignore` (the runtime enforcement that a client repo's own ignore rules cannot be trusted to cover this directory) is a best-effort defence in depth layered on top of the write it accompanies -- the write itself already has its own logged, never-raised fail-open contract (the return-none-on-error entry for write_new_file_never_overwrite above), and a failure writing the marker must not additionally fail that already-decided-fail-open write. Logged at warning, not silently swallowed."
+    },
+    {
+      "file": "utils/subagent_report_paths.py",
+      "function": "resolve_confined_report_dir",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00460 review finding M1: this function's OWN documented contract (docstring: 'Returns None for all of those -- callers must skip persistence entirely rather than guess a safer target') is a validation gate, not a read that can fail -- a report_dir that resolves outside the project root (ValueError from Path.relative_to) is exactly as invalid as an empty string or an absolute path, both handled by the same None return a few lines earlier in this same function's normal control flow. Raising here would turn a misconfigured YAML option into a crashed SubagentStop dispatch instead of the documented 'skip persistence, log a warning' outcome the sole caller (subagent_report_persistence.handle) already implements. Covered by TestResolveConfinedReportDir's full negative-case suite in tests/unit/utils/test_subagent_report_paths.py."
+    },
+    {
+      "file": "utils/subagent_report_paths.py",
+      "function": "write_new_file_never_overwrite",
+      "rule": "log-and-continue",
+      "reason": "Plan 00460 review finding m3: after O_CREAT|O_EXCL already created the file on disk, an OSError from the content write must not leave a truncated/empty file behind for find_persisted_report to later cite as though it were a complete reply -- so the write-failure branch (already covered by the return-none-on-error entry above) additionally attempts candidate.unlink(missing_ok=True). If even THAT fails (a second, independent filesystem error), logging and continuing to the same None return is correct: the outer branch is already returning None and logging the original write failure, and a cleanup failure on top of an already-fail-open path must not escalate to raising. Covered by test_removes_a_partial_file_when_the_content_write_fails."
+    },
+    {
+      "file": "handlers/subagent_stop/subagent_report_size_blocker.py",
+      "function": "_find_persisted_report",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00460 review finding m2: reading the candidate file's content is purely to compare it against the current last_assistant_message (a match is required before the caller may cite the path) -- the read is not load-bearing on its own. An OSError here (the file vanishing between find_persisted_report's glob and this read, a concurrent prune) is exactly as harmless to treat as 'no match' as the ordinary content-mismatch case one line later, which is this same function's normal control flow, not an exception. The caller (handle()) already treats None identically to 'nothing usable was persisted' and falls back to the pre-Task-1.6 messages, so raising here would turn a benign filesystem race in a TERMINAL SubagentStop handler into a crashed dispatch over a lookup that was already best-effort."
     }
   ]
 }
