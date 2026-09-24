@@ -1,9 +1,9 @@
 # Callout: `format-markdown` and `find-comment-blocks` now respect `.gitignore`
 
-**Plan**: 00468 (Task 3.1 / P3)
+**Plan**: 00468
 **Audience**: client projects
 
-The same defect class as 00466 N9, in two more walkers. `format-markdown`
+Plan 00468 Task 3.1 (P3). The same defect class as 00466 N9, in two more walkers. `format-markdown`
 (`daemon/cli.py`, also driven by `housekeeping`'s mutating step) and
 `find-comment-blocks` walked the filesystem for markdown/comments with no
 regard for `.gitignore`. Installing a Claude Code plugin vendors files into a

@@ -1,9 +1,9 @@
 # Callout: `docs_qa` and `doc_truth` now respect `.gitignore`
 
-**Plan**: 00466 (N9)
+**Plan**: 00466
 **Audience**: client projects
 
-The `docs_qa` corpus (`module-doc-budget`, `source-tree-markdown`) and the
+Ledger 00466 N9. The `docs_qa` corpus (`module-doc-budget`, `source-tree-markdown`) and the
 `doc_truth` QA script walked the filesystem for markdown with no regard for
 `.gitignore`. Installing a Claude Code plugin vendors its spec markdown into
 a gitignored config tree (e.g. `.claude/ccy/plugins/`), and both checks
