@@ -206,6 +206,31 @@ work should instead declare an explicit destination (falling back to
 `subagent-reports/` is a recognised plan-folder member for plan QA purposes —
 its presence never triggers a stray-file or unexpected-content finding.
 
+### Journal entries: `mkplan.bash --journal` is the only way
+
+A `JOURNAL/` entry is appended with the scaffolder, never by hand. It reads the
+real UTC clock and writes the `## HH:MM · category · REF` heading itself:
+
+```bash
+# 1. Write the entry BODY (no heading) with the Write tool, e.g.
+#    untracked/scratch/journal-<plan-number>-entry.md
+# 2. Append it:
+CLAUDE/Plan/mkplan.bash --journal <plan-number> <category> untracked/scratch/journal-<plan-number>-entry.md --title "short title"
+```
+
+`<category>` is one of `action`, `finding`, `decision`, `thought`, `blocker`,
+`handoff`; add `--ref T1.2` for a task reference. The script creates today's
+day-file from the template when there is none. Use your configured plan
+directory if it is not `CLAUDE/Plan/`.
+
+Hand-typed timestamps have landed 40 minutes in the future, and an
+append-only journal cannot correct one until the clock passes it. So the
+`plan_journal_guard` handler DENIES an `Edit`/`Write` that adds an entry, a
+`Write` that creates a day-file, and a Bash command that writes into one (a
+redirect, `tee`, a heredoc, a copy, an in-place editor, an interpreter
+one-liner). **A coordinator's dispatch brief that asks for journalling must
+carry this two-step pattern**, not "append with Edit and `date -u`".
+
 ### Plan Numbering
 
 - Plans are numbered sequentially with 5-digit zero-padding: `00001-`, `00002-`, `00003-`, etc. (`NNNNN` in templates)
@@ -933,7 +958,8 @@ Use this template when improving existing code without changing behaviour.
 3. **After completing**: Mark ✅, run QA, commit with reference
 4. **Regularly**: Review the plan and edit it IN PLACE so it states current
    truth. Append the narrative of what happened to the plan's `JOURNAL/`
-   day-file — never to `PLAN.md`. See [CLAUDE/PlanJournalling.md](../PlanJournalling.md).
+   day-file with `mkplan.bash --journal` (see "Journal entries" above) —
+   never to `PLAN.md`. See [CLAUDE/PlanJournalling.md](../PlanJournalling.md).
 
 ### Handling Changes
 

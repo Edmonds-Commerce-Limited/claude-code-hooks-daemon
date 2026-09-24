@@ -2010,6 +2010,29 @@ handlers:
 
 ---
 
+#### plan_journal_guard
+
+| Property       | Value                |
+| -------------- | -------------------- |
+| **Config key** | `plan_journal_guard` |
+| **Priority**   | 31                   |
+| **Type**       | Blocking             |
+| **Event**      | PreToolUse           |
+
+**Description:** Denies a plan journal entry written by hand, whether by an `Edit`/`Write` that adds an entry heading to (or creates) a `JOURNAL/` day-file, or by a Bash command that writes into one. The deny prints the exact `mkplan.bash --journal <plan> <category> <body-file>` command for that plan, because the tool stamps the real UTC time and a hand-typed one can be wrong. `mkplan.bash`, `git`, reads and deletion-only edits are allowed. Active only when the plan workflow is on and `mkplan.bash --journal` is deployed. Full rule: [CLAUDE/PlanJournalling.md](../../CLAUDE/PlanJournalling.md#appending-an-entry).
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    plan_journal_guard:
+      enabled: true
+      priority: 31
+```
+
+---
+
 #### lsp_enforcement
 
 | Property       | Value             |
@@ -4018,6 +4041,7 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | `merge_to_main_approval`       | PreToolUse        | 20       | git merge/gh pr merge into main without a human's approval (opt-in)   |
 | `qa_suppression`               | PreToolUse        | 30       | noqa, type: ignore, eslint-disable, nolint, ... (all langs)           |
 | `plan_number_helper`           | PreToolUse        | 30       | Broken plan number discovery commands                                 |
+| `plan_journal_guard`           | PreToolUse        | 31       | A plan journal entry written by hand (use `mkplan.bash --journal`)    |
 | `comment_changelog`            | PreToolUse        | 31       | Changelog narrative in a comment (`Prior <version>:`, dated entries)  |
 | `comment_size`                 | PreToolUse        | 33       | Over-long comments growing past the size limit                        |
 | `markdown_organization`        | PreToolUse        | 35       | Disorganised markdown; untracked Claude memory writes                 |

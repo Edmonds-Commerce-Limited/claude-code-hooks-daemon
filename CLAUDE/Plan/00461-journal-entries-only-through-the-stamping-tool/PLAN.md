@@ -56,11 +56,11 @@ plan in question.
 
 ### Phase 1: TDD in a worktree
 
-- [ ] ⬜ **Task 1.1**: RED tests reproducing today's allowed paths: an
+- [x] ✅ **Task 1.1**: RED tests reproducing today's allowed paths: an
   Edit appending an entry, a Write creating a day-file, a
   `cat >> JOURNAL/… <<'EOF'`, `tee -a`, `printf … >>`, and a
   `python3 -c` writing to a journal.
-- [ ] ⬜ **Task 1.2**: The guard. It covers the Edit/Write surface and the
+- [x] ✅ **Task 1.2**: The guard. It covers the Edit/Write surface and the
   Bash write-target surface, reusing the project's existing Bash
   write-target detection rather than a new parser. Decide and test the
   narrow allowances: a deletion-only Edit (for example removing git
@@ -68,12 +68,12 @@ plan in question.
   append-only rule and not by this guard; `mkplan.bash --journal`; and
   `git` commands. Acceptance probes: DENY for a hand append, ALLOW for
   `mkplan.bash --journal`.
-- [ ] ⬜ **Task 1.3**: `mkplan.bash` usage documents `--journal`, in both
+- [x] ✅ **Task 1.3**: `mkplan.bash` usage documents `--journal`, in both
   the deployed copy and its template. Update the journalling docs,
   handler guidance and the plan-workflow core docs clients receive, so
   that `--journal` is THE way and not merely the preferred one. Release
   note: a client-facing behaviour change.
-- [ ] ⬜ **Task 1.4**: Full QA green. Every journal entry this plan writes
+- [ ] 🔄 **Task 1.4**: Full QA green. Every journal entry this plan writes
   goes through `--journal`.
 
 ### Phase 2: Deliver

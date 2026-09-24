@@ -1,0 +1,43 @@
+# Drafted by Plan 00461. The VERSION in the filename and the `version:` key are
+# a target, not a decision — releases are human-gated in this project, and the
+# release agent confirms or renames this file. Only the content is asserted here.
+version: "3.67.0"
+date: "UNRELEASED"
+
+breaking: false
+
+config_changes:
+  added:
+    - key: handlers.pre_tool_use.plan_journal_guard
+      description: >-
+        Denies a plan journal entry written by hand. `mkplan.bash --journal
+        <plan-number> <category> <body-file>` reads the real UTC clock and
+        writes the entry heading itself; hand-typed stamps have landed 40
+        minutes in the future, and an append-only journal cannot correct one
+        until the clock passes it. Denied: an Edit/Write that adds an entry
+        heading to a JOURNAL/ day-file or creates one, and a Bash command that
+        writes into one (redirect, tee, heredoc, cp/mv/install/dd, an in-place
+        editor, an interpreter one-liner). Allowed: mkplan.bash itself, git,
+        reads, and an Edit that only deletes. The deny prints the exact
+        command for that plan. Active only when the plan workflow is enabled,
+        the deployed mkplan.bash offers --journal, _JOURNAL_TEMPLATE_.md is
+        present, and the journal directory keeps its default JOURNAL name.
+      example_yaml: |
+        pre_tool_use:
+          plan_journal_guard:
+            enabled: true
+            priority: 31
+      migration_note: >-
+        On by default and inert in a project without the plan workflow. Where
+        it is active, write each entry body to untracked/scratch/ and append it
+        with `mkplan.bash --journal`; update any agent brief that says to
+        append with Edit and `date -u`. Disable with
+        handlers.pre_tool_use.plan_journal_guard.enabled: false.
+      recommended: true
+      dormant: false
+
+  renamed: []
+
+  removed: []
+
+  changed: []
