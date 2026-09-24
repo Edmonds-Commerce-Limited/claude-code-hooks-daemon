@@ -684,6 +684,7 @@ def _glob_token_overlaps_stem(
     *,
     leading_wildcard: bool,
     trailing_wildcard: bool,
+    pattern_has_trailing_wildcard: bool,
 ) -> bool:
     """True when ``residue``'s literal edge could directly join ``stem_basename``.
 
@@ -697,8 +698,27 @@ def _glob_token_overlaps_stem(
 
     - A TRAILING-wildcard token (``dummy.vault-p*``) can be extended on the
       RIGHT, so its residue's SUFFIX must overlap the stem's PREFIX (forward).
+      The TOKEN's own trailing wildcard supplies the flexibility needed to
+      absorb whatever the pattern demands after the overlap, so this holds
+      regardless of the pattern's own trailing shape.
     - A LEADING-wildcard token (``*passXXX``) can be preceded on the LEFT, so
-      the stem's SUFFIX must overlap the residue's PREFIX (reverse).
+      the stem's SUFFIX must overlap the residue's PREFIX (reverse) — but
+      here the token supplies NO trailing flexibility of its own (a leading
+      wildcard AND a trailing wildcard both being open is the BOTH-edges
+      case above, handled first). Whatever follows the overlap in the
+      residue (``position`` in ``*words[position``) can only be absorbed by
+      the PATTERN's own trailing wildcard, if it has one. A pattern anchored
+      at the end (``*.vault-password``, no trailing ``*``) admits no such
+      leftover, so a genuine truncation needs the residue's FULL length to
+      be a literal suffix of the stem — a partial boundary overlap is then
+      coincidence, not truncation (observed live (N4, Plan 00466): the
+      Python unpacking operator ``*words[position + 1 :]`` tokenises to
+      ``*words[position``, whose residue ``wordsposition`` shares only its
+      first 4 characters, ``word``, with the stem's tail ``...pass-word``,
+      leaving ``sposition`` with nowhere to go). The pre-existing
+      substring+fnmatch check above already denies every FULL-suffix case,
+      so this branch is never the sole route to a genuine positive here —
+      only to this false one.
 
     A token whose wildcard sits INTERNALLY (``assert.*x``, ``secret*.py``) has
     neither edge open, so neither direction applies. Gated at
@@ -722,6 +742,7 @@ def _glob_token_overlaps_stem(
     if (
         leading_wildcard
         and _suffix_prefix_overlap_length(stem_basename, residue) >= _MIN_GLOB_OVERLAP_CHARS
+        and (pattern_has_trailing_wildcard or stem_basename.endswith(residue))
     ):
         return True
     return False
@@ -878,6 +899,7 @@ def _token_mention(
                     stem_basename,
                     leading_wildcard=has_leading_wildcard,
                     trailing_wildcard=has_trailing_wildcard,
+                    pattern_has_trailing_wildcard=_has_trailing_wildcard(pattern),
                 ):
                     return pattern
     real = _realpath_if_resolvable(token)

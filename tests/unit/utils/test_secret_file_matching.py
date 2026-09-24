@@ -262,6 +262,36 @@ class TestBashMentionsProtectedPath:
         assert self._match("x = words[0].rsplit(y)") is None
         assert self._match("a = parts[0].split(z)") is None
 
+    def test_leading_wildcard_python_splat_operator_is_not_matched(self) -> None:
+        """Regression (N4, Plan 00466): a Python unpacking/splat ``*`` glued
+        to an identifier is not a shell glob wildcard, but the leading-
+        wildcard reverse-overlap branch of ``_glob_token_overlaps_stem``
+        cannot tell the difference. The reported Edit added ``rest =
+        [words[0], *words[position + 1 :]]`` -- the space before the
+        colon splits the slice into its own token, leaving ``*words[position``
+        to stand alone. Stripped of its ``*``/``[`` glob chars the residue is
+        ``wordsposition``, whose ``word`` PREFIX coincidentally overlaps the
+        ``.vault-password`` stem's ``word`` SUFFIX (``pass-word``) by 4
+        characters -- past the 2-char minimum. The pattern ``*.vault-password``
+        has NO trailing wildcard, so nothing on the pattern side can absorb
+        the residue's leftover ``sposition`` -- a genuine truncation would
+        need the token's ENTIRE residue to be a literal suffix of the stem,
+        not a boundary coincidence. The plain (bracket-free) unpacking shape
+        reproduces the same false match."""
+        assert self._match("rest = [words[0], *words[position + 1 :]]") is None
+        assert self._match("def f(*wordlist): pass") is None
+        assert self._match("call(*wordlist)") is None
+
+    def test_leading_wildcard_full_suffix_of_anchored_stem_still_matched(self) -> None:
+        """The fix above must not blunt a REAL truncation of an anchored
+        (no-trailing-wildcard) pattern: a token whose ENTIRE residue is a
+        literal suffix of the stem still glob-expands to the protected file
+        and must stay denied -- these already pass via the pre-existing
+        substring+fnmatch check, so this pins that the gate change leaves it
+        alone."""
+        assert self._match("cat *password") is not None
+        assert self._match("cat *ult-password") is not None
+
     def test_python_list_literal_is_not_matched(self) -> None:
         """Regression (Plan 00305 Task 2.5, clippy-shim-fix agent report): an
         Edit whose added content was the literal Python list
