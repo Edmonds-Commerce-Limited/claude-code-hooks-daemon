@@ -26,18 +26,24 @@ why.
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 from typing import Any
 
 from pydantic import ValidationError
 
 from claude_code_hooks_daemon.config.models import Config, PersistentCronConfig
-from claude_code_hooks_daemon.constants import HandlerTag
+from claude_code_hooks_daemon.constants import HandlerTag, HookInputField
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision, ProjectContext
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.utils.cron_enforcement import declared_tick_prompt
+from claude_code_hooks_daemon.utils.cron_pause import (
+    default_pauses_path,
+    load_live_pauses,
+    render_paused_note,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -109,11 +115,34 @@ class PersistentCronAssertorHandler(SessionStartHandlerBase):
         lines.extend(f"      {line}" for line in declared_tick_prompt(job).splitlines())
         return lines
 
+    def _pauses_path(self) -> Path | None:
+        """Where ``hooks-daemon cron-pause`` records this project's pauses."""
+        return default_pauses_path()
+
     def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
-        """Emit the declared jobs plus the reconcile instruction."""
+        """Emit the declared jobs plus the reconcile instruction.
+
+        A job paused for THIS session (ledger 00422 N4) is left out of the
+        create list and stated as paused instead: a SessionStart inside the
+        same session (resume, clear, compact) must not ask for the job it was
+        told to pause. A new session has a new id, so it is asked again.
+        """
         jobs = self._active_jobs()
         if not jobs:
             return AdvisoryResult(decision=Decision.ALLOW, context=[])
+
+        now = time.time()
+        session_id = str(hook_input.get(HookInputField.SESSION_ID) or "")
+        live = load_live_pauses(self._pauses_path(), session_id=session_id, now=now)
+        paused = [live[job.id] for job in jobs if job.id in live]
+        jobs = [job for job in jobs if job.id not in live]
+        pause_lines = (
+            [render_paused_note(paused, now=now), "Do NOT re-create a paused job in this session."]
+            if paused
+            else []
+        )
+        if not jobs:
+            return AdvisoryResult(decision=Decision.ALLOW, context=pause_lines)
 
         plural = "job" if len(jobs) == 1 else "jobs"
         lines = [
@@ -139,7 +168,7 @@ class PersistentCronAssertorHandler(SessionStartHandlerBase):
         ]
         for job in jobs:
             lines.extend(self._render_job(job))
-        return AdvisoryResult(decision=Decision.ALLOW, context=lines)
+        return AdvisoryResult(decision=Decision.ALLOW, context=[*lines, *pause_lines])
 
     def get_acceptance_tests(self) -> list[Any]:
         """One CONTEXT case: a declared job is stated at session start."""
@@ -183,5 +212,8 @@ class PersistentCronAssertorHandler(SessionStartHandlerBase):
             "an hour, costing a model turn each time.\n\n"
             "Inertness is controlled by ONE switch, `persistent_crons.enabled`, which "
             "is off by default and overrides each job's own `enabled` flag. A project "
-            "that declares nothing gets nothing."
+            "that declares nothing gets nothing.\n\n"
+            "A job paused for this session with `hooks-daemon cron-pause` is left out "
+            "of the list and stated as paused instead — do not re-create it. The pause "
+            "belongs to one session, so a new session is asked for the job again."
         )

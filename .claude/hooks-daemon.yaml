@@ -1192,6 +1192,10 @@ layout:
 # here and the persistent_cron_assertor SessionStart handler states them for
 # re-creation. The daemon cannot read session memory, so it never claims one
 # is absent; run CronList first and create only what is missing.
+# This block is the only PERMANENT switch. To stop one job for the current
+# session only, run `hooks-daemon cron-pause <id> --reason "..."` (expires
+# within 24h; `cron-resume <id>` ends it) -- the stop enforcers then accept it
+# as missing and name it, and the next session is asked for it again.
 persistent_crons:
   enabled: true
   jobs:

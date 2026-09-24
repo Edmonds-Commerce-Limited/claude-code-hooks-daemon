@@ -4199,6 +4199,135 @@ def cmd_approve_merge(args: argparse.Namespace) -> int:
     return 0
 
 
+class _CronPauseRefusedError(Exception):
+    """A ``cron-pause``/``cron-resume`` request that must not proceed."""
+
+
+def _resolve_cron_pause_target(args: argparse.Namespace) -> tuple[str, str, Path]:
+    """Validate a ``cron-pause``/``cron-resume`` request (ledger 00422 N4).
+
+    Returns ``(session_id, job_id, pauses_path)``. The job check is what stops a
+    typo from recording a pause that does nothing while the real job keeps being
+    demanded.
+
+    Raises:
+        _CronPauseRefusedError: No session to scope it to, a job id that names
+            no ACTIVE declared job, or no untracked directory to record it in.
+    """
+    from claude_code_hooks_daemon.config.models import Config
+    from claude_code_hooks_daemon.core.project_context import ProjectContext
+    from claude_code_hooks_daemon.utils.cron_pause import CRON_PAUSES_FILENAME
+
+    session_id = os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip()
+    if not session_id:
+        raise _CronPauseRefusedError(
+            "CLAUDE_CODE_SESSION_ID is not set. A cron pause belongs to ONE session, so "
+            "run this inside that Claude Code session (a Bash tool call sets the variable)."
+        )
+
+    if getattr(args, "project_root", None):
+        project_path = Path(args.project_root).resolve()
+    else:
+        project_path = get_project_path(None)
+    config_file = project_path / ".claude" / "hooks-daemon.yaml"
+    job_id = str(args.job).strip()
+    declared = [
+        job.id for job in Config.load_or_default(config_file).persistent_crons.active_jobs()
+    ]
+    if job_id not in declared:
+        listed = ", ".join(declared) if declared else "none"
+        raise _CronPauseRefusedError(
+            f"'{job_id}' is not an active job under persistent_crons (active: {listed})."
+        )
+
+    # Same tolerance as approve-merge: an earlier step in this process may have
+    # initialised the context already, in which case it is reused.
+    if not ProjectContext.is_initialized():
+        try:
+            ProjectContext.initialize(config_file)
+        except ValueError as e:
+            print(f"WARNING: could not initialise project context: {e}", file=sys.stderr)
+    try:
+        untracked_dir = ProjectContext.daemon_untracked_dir()
+    except RuntimeError as e:
+        raise _CronPauseRefusedError(f"no untracked directory to record the pause in: {e}") from e
+    return session_id, job_id, untracked_dir / CRON_PAUSES_FILENAME
+
+
+def cmd_cron_pause(args: argparse.Namespace) -> int:
+    """Pause one declared persistent cron for THIS session (ledger 00422 N4).
+
+    The spelling for "cancelled for now": the Stop enforcers then accept that
+    job as missing, naming it with the reason and the expiry, until the pause
+    expires within 24 hours or ``cron-resume`` ends it. ``persistent_crons``
+    is untouched, so the next session is asked to create the job again.
+
+    Returns:
+        0 on pause recorded, 1 on refusal/failure.
+    """
+    from claude_code_hooks_daemon.utils.cron_pause import CronPause, format_expiry, record_pause
+
+    reason = " ".join(str(getattr(args, "reason", None) or "").split())
+    if not reason:
+        print(
+            "ERROR: --reason is required -- the stop output shows it to whoever meets "
+            "the paused job next.",
+            file=sys.stderr,
+        )
+        return 1
+    try:
+        session_id, job_id, path = _resolve_cron_pause_target(args)
+    except _CronPauseRefusedError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 1
+
+    now = time.time()
+    pause = CronPause(job_id=job_id, session_id=session_id, reason=reason, recorded_at=now)
+    try:
+        record_pause(path, pause, now=now)
+    except OSError as e:
+        print(f"ERROR: pause not recorded ({path}): {e}", file=sys.stderr)
+        return 1
+    print(f"Paused '{job_id}' for session {session_id}; reason: {reason}")
+    print(f"Expires: {format_expiry(pause, now=now)}")
+    print(
+        "The stop enforcer now accepts it as missing. If it is running, CronDelete it "
+        f"from the main session. Undo with: hooks-daemon cron-resume {job_id}"
+    )
+    return 0
+
+
+def cmd_cron_resume(args: argparse.Namespace) -> int:
+    """End this session's pause of one declared persistent cron (ledger 00422 N4).
+
+    Idempotent: resuming a job that is not paused is not an error.
+
+    Returns:
+        0 on pause removed or nothing to remove, 1 on refusal/failure.
+    """
+    from claude_code_hooks_daemon.utils.cron_pause import remove_pause
+
+    try:
+        session_id, job_id, path = _resolve_cron_pause_target(args)
+    except _CronPauseRefusedError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 1
+    try:
+        removed = remove_pause(path, job_id=job_id, session_id=session_id, now=time.time())
+    except OSError as e:
+        print(f"ERROR: pause not removed ({path}): {e}", file=sys.stderr)
+        return 1
+    if removed is None:
+        print(f"'{job_id}' is not paused for session {session_id}; nothing to resume.")
+        return 0
+    print(f"Resumed '{job_id}' for session {session_id}.")
+    print(
+        "The stop enforcer requires it again: run CronCreate (recurring: true) with its "
+        "declared schedule and prompt before stopping."
+    )
+    return 0
+
+
 def cmd_inject_goal(args: argparse.Namespace) -> int:
     """Write a ``<session>.goal-intent`` signal on demand (Plan 00269 Task 2.3).
 
@@ -9855,6 +9984,44 @@ def main() -> int:
         help="Project root override (default: auto-detected)",
     )
     parser_approve_merge.set_defaults(func=cmd_approve_merge)
+
+    # cron-pause / cron-resume (ledger 00422 N4): the session-scoped spelling
+    # for "cancel this declared cron for now"
+    parser_cron_pause = subparsers.add_parser(
+        "cron-pause",
+        help=(
+            "Pause one persistent_crons job for THIS session (expires within 24h); "
+            "the stop enforcer then accepts it as missing"
+        ),
+    )
+    parser_cron_pause.add_argument("job", metavar="JOB", help="Declared job id to pause")
+    parser_cron_pause.add_argument(
+        "--reason",
+        required=True,
+        help="Why it is paused; shown in the stop enforcer's output",
+    )
+    parser_cron_pause.add_argument(
+        "--project-root",
+        dest="project_root",
+        type=Path,
+        default=None,
+        help="Project root override (default: auto-detected)",
+    )
+    parser_cron_pause.set_defaults(func=cmd_cron_pause)
+
+    parser_cron_resume = subparsers.add_parser(
+        "cron-resume",
+        help="End this session's pause of one persistent_crons job",
+    )
+    parser_cron_resume.add_argument("job", metavar="JOB", help="Declared job id to resume")
+    parser_cron_resume.add_argument(
+        "--project-root",
+        dest="project_root",
+        type=Path,
+        default=None,
+        help="Project root override (default: auto-detected)",
+    )
+    parser_cron_resume.set_defaults(func=cmd_cron_resume)
 
     # verdicts command (Plan 00209): report on the handler decision log
     parser_verdicts = subparsers.add_parser(
