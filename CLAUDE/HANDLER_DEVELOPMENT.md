@@ -794,10 +794,13 @@ A synthetic event is otherwise neither a main thread nor a subagent, so a
 handler scoped `MAIN` or `SUB` never sees it. `probe_as: main|sub` (the
 helper's `--as`) lets it through. This is honoured only for a probe-class
 source, never for a harness, a cron tick or a supervisor event. The
-probe-class sources are declared by name in `PROBE_CLASS_SOURCES`:
-`manual-probe`, and `transport-verify`, which the transport toggle's own
-verification probes carry. `probe_as: sub` carries the fixed `agent_id`
-`manual-probe-agent`, which no consumer mistakes for a real teammate.
+probe-class sources are declared by name in `PROBE_CLASS_SOURCES` (listed in
+DEBUGGING_HOOKS.md); a hand-sent probe uses `manual-probe`, and a test or QA
+script probing the live daemon uses `test-probe`.
+`tests/integration/test_live_probes_are_marked.py` fails on a test or script
+that sends the live daemon an unmarked payload. `probe_as: sub` carries the
+fixed `agent_id` `manual-probe-agent`, which no consumer mistakes for a real
+teammate.
 
 If your handler RECORDS something about real agents or sessions, it should
 decline a synthetic event, as report persistence and the goal ledger do.

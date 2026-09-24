@@ -69,6 +69,11 @@ MANUAL_PROBE: Final[str] = "manual-probe"
 #: see MAIN-scoped ``auto_continue_stop`` block.
 TRANSPORT_VERIFY: Final[str] = "transport-verify"
 
+#: An acceptance or integration test, or a QA script, sending its own probe to
+#: the live daemon. ``tests/integration/test_live_probes_are_marked.py``
+#: requires the marker on every such payload.
+TEST_PROBE: Final[str] = "test-probe"
+
 #: Field a PROBE sets to name the thread it stands for. The marker keeps the
 #: probe out of the real record, and a synthetic event is neither a main
 #: thread nor a subagent, so without this a probe could never reach a MAIN- or
@@ -79,7 +84,9 @@ PROBE_AS_FIELD: Final[str] = "probe_as"
 #: probe is sent to exercise handlers, so it may stand for a thread; a harness
 #: run, a cron tick or a supervisor-generated event must never pass for one,
 #: and keeps the refusal.
-PROBE_CLASS_SOURCES: Final[frozenset[str]] = frozenset({MANUAL_PROBE, TRANSPORT_VERIFY})
+PROBE_CLASS_SOURCES: Final[frozenset[str]] = frozenset(
+    {MANUAL_PROBE, TRANSPORT_VERIFY, TEST_PROBE, SOCKET_STDIN_TEST}
+)
 
 #: The ``agent_id`` a probe standing for a subagent carries. Documented and
 #: fixed, so every consumer of ``agent_id`` can tell it from a real teammate,

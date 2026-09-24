@@ -37,7 +37,9 @@ from claude_code_hooks_daemon.daemon.synthetic_traffic import (
     MANUAL_PROBE,
     PROBE_AGENT_ID,
     PROBE_AS_FIELD,
+    SOCKET_STDIN_TEST,
     SYNTHETIC_SOURCE_FIELD,
+    TEST_PROBE,
     TRANSPORT_VERIFY,
 )
 
@@ -137,7 +139,7 @@ class TestProbeAs:
         event = _probe(**{PROBE_AS_FIELD: "main", "agent_id": PROBE_AGENT_ID})
         assert not scope_admits(HandlerScope.MAIN, event)
 
-    @pytest.mark.parametrize("source", ["playbook-probe", "socket-stdin-test", "cron-tick"])
+    @pytest.mark.parametrize("source", ["playbook-probe", "cron-tick"])
     def test_a_non_probe_synthetic_source_cannot_claim_a_thread(self, source: str) -> None:
         """A harness, a cron tick or a supervisor event keeps today's refusal."""
         event = {**_main_thread(), SYNTHETIC_SOURCE_FIELD: source, PROBE_AS_FIELD: "main"}
@@ -145,9 +147,10 @@ class TestProbeAs:
         sub = {**event, PROBE_AS_FIELD: "sub", "agent_id": PROBE_AGENT_ID}
         assert not scope_admits(HandlerScope.SUB, sub)
 
-    def test_the_transport_verification_source_is_declared_probe_class(self) -> None:
-        """Its Stop probe exists to see `auto_continue_stop` block."""
-        event = {**_main_thread(), SYNTHETIC_SOURCE_FIELD: TRANSPORT_VERIFY, PROBE_AS_FIELD: "main"}
+    @pytest.mark.parametrize("source", [TRANSPORT_VERIFY, TEST_PROBE, SOCKET_STDIN_TEST])
+    def test_a_live_daemon_probe_source_is_declared_probe_class(self, source: str) -> None:
+        """Each sends a Stop probe that exists to see `auto_continue_stop` block."""
+        event = {**_main_thread(), SYNTHETIC_SOURCE_FIELD: source, PROBE_AS_FIELD: "main"}
         assert scope_admits(HandlerScope.MAIN, event)
 
     @pytest.mark.parametrize("value", ["MAIN", "orchestrator", "", 1, None])

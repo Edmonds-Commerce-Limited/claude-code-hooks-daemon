@@ -164,9 +164,15 @@ as if the handler were not there. Measured: a marked Stop probe with no
 `R-STOP-NO-REASON`.
 
 `probe_as` is honoured only when `synthetic_source` is a probe source
-(`PROBE_CLASS_SOURCES`: `manual-probe`, and `transport-verify`, which the
-transport toggle's own verification probes carry). A harness run, a cron tick
-or a supervisor-generated event cannot claim a thread. It keeps the refusal
+(`PROBE_CLASS_SOURCES`):
+
+- `manual-probe`, a probe sent by hand;
+- `transport-verify`, the transport toggle's own verification probes;
+- `test-probe`, a test or QA script probing the live daemon;
+- `socket-stdin-test`, the forwarder socket-stdin integration test.
+
+A harness run, a cron tick or a supervisor-generated event cannot claim a
+thread. It keeps the refusal
 whatever it carries, and the helper warns when a caller-supplied source makes
 `probe_as` inert. Handlers that record state about real agents ignore
 synthetic events entirely: sub-agent report persistence, the status-line cache
@@ -193,6 +199,14 @@ cases:
 There is no exemption. `tests/acceptance/test_documented_stop_probe.py`
 sends the Stop probe the debugging docs teach through the live entry point,
 and asserts that it is blocked.
+
+`tests/integration/test_live_probes_are_marked.py` holds code to the same
+rule. Any acceptance or integration test, or script under `scripts/`, with a
+route to the live daemon must mark each payload with a probe-class source.
+The routes are this repository's `.claude/hooks/` entry points, the acceptance
+`daemon_socket` fixture, and the live socket. A payload for an event that can
+carry `agent_id` also needs `probe_as`. A test that starts its own daemon in a
+temporary directory writes to a log deleted with it, and is not judged.
 
 ## Workflow: From Scenario to Handler
 

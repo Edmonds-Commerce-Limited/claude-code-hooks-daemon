@@ -47,9 +47,16 @@ import yaml
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.daemon.controller import DaemonController
 from claude_code_hooks_daemon.daemon.hook_probe import response_decision, response_text
-from claude_code_hooks_daemon.daemon.synthetic_traffic import SYNTHETIC_SOURCE_FIELD
+from claude_code_hooks_daemon.daemon.synthetic_traffic import (
+    PROBE_AS_FIELD,
+    SYNTHETIC_SOURCE_FIELD,
+    TEST_PROBE,
+    ProbeThread,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+_MAIN_PROBE = {SYNTHETIC_SOURCE_FIELD: TEST_PROBE, PROBE_AS_FIELD: ProbeThread.MAIN.value}
 
 #: Documents an agent or operator follows verbatim. The same corpus as
 #: ``test_documented_commands_are_not_self_denied`` plus the project agents
@@ -200,7 +207,7 @@ class TestTheDetector:
         "text",
         [
             'echo \'{"tool_name":"Bash"}\' | bash .claude/hooks/pre-tool-use',
-            'echo \'{"hook_event_name":"Stop"}\' | /workspace/.claude/hooks/stop',
+            "echo '{\"stop_hook_active\":false}' | /workspace/.claude/hooks/stop",
             'echo \'{"tool_name":"Bash"}\' \\\n  | bash .claude/hooks/pre-tool-use',
             'echo \'{"tool_name":"Bash"}\' | \\\n  .claude/hooks/pre-tool-use',
             "echo '{}' | bash ../../.claude/hooks/pre-tool-use",
@@ -248,7 +255,7 @@ class TestTheDetector:
         put a fabricated stop in the record as a real agent's."""
         text = (
             "# unmarked-probe: auto_continue_stop is scoped MAIN and never sees a marked probe\n"
-            'echo \'{"hook_event_name":"Stop"}\' | bash .claude/hooks/stop'
+            "echo '{\"stop_hook_active\":false}' | bash .claude/hooks/stop"
         )
         assert unmarked_dispatches(text)
 
@@ -301,6 +308,8 @@ def judge(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Any]:
                     "tool_input": {"command": command},
                     "session_id": f"probe-judge-{judged}",
                     "cwd": str(workspace),
+                    # Judged as the main thread that would run the command.
+                    **_MAIN_PROBE,
                 },
             }
         )
@@ -313,7 +322,7 @@ def test_the_judge_denies_an_inline_probe_of_a_guarded_command(judge: Any) -> No
     """Otherwise the corpus test below would pass on a judge that denies nothing."""
     probe = (
         'echo \'{"tool_name":"Bash","tool_input":{"command":"git reset --hard"},'
-        '"synthetic_source":"manual-probe"}\' | bash .claude/hooks/pre-tool-use'
+        '"synthetic_source":"manual-probe","probe_as":"main"}\' | bash .claude/hooks/pre-tool-use'
     )
     assert response_decision(judge(probe)) == "deny"
 

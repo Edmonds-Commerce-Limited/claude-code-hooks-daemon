@@ -19,7 +19,8 @@ handler and a Stop probe answers `{}`. The command sets `probe_as: main` by
 default; `--as sub` stands for a subagent, with the fixed
 `agent_id` `manual-probe-agent`. Only a `manual-probe` source may name a
 thread, plus the `transport-verify` probes that `hooks-daemon transport`
-now marks when it verifies a toggle. Sub-agent report persistence, the
+now marks when it verifies a toggle, and the daemon's own `test-probe`
+acceptance and smoke-test probes. Sub-agent report persistence, the
 status-line cache totals, the goal ledger and the human-blocked cron marker
 now ignore synthetic events, so a probe never writes into state that real
 sessions act on.
