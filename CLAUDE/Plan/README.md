@@ -6,7 +6,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00468: claude code plugins are supported properly](00468-claude-code-plugins-are-supported-properly/PLAN.md) - In Progress (from the 00467 plugin audit: 8 defects, 3 release-blocking, and 16 gaps, most resting on one missing resolver for the Claude config dir and its enabled plugins)
 
-- [00467: recommend the defence before fix plugin to client projects](00467-recommend-the-defence-before-fix-plugin-to-client-projects/PLAN.md) - In Progress (owner request: the DBF plugin is installed here at project scope to dogfood; Phase 1 evaluates it against written criteria and files shortfalls upstream, and Phase 2 recommends it to client projects only on the owner's sign-off)
+- [00467: recommend the defence before fix plugin to client projects](00467-recommend-the-defence-before-fix-plugin-to-client-projects/PLAN.md) - Blocked (owner request: dogfood the DBF plugin, then recommend it to clients. Phase 1 is done, with shortfalls filed upstream as #4-#6 and recommendation no-go for now. Waiting on the owner's go/no-go, and on one logged-in auto-trigger probe)
 
 - [00466: niggles ledger sixteen](00466-niggles-ledger-sixteen/PLAN.md) - In Progress, the OPEN ledger for new niggles (00422 passed its size warning with N29 and keeps only its own entries; opens with N1: the venv fallback accepts an interpreter that cannot run on this host)
 

@@ -59,6 +59,9 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N26 | `check_skill_references.py` scans zero files when run from a worktree, and passes                         | 00468 core agent   | ⬜ Open               |
 | N27 | `skill_scan` and `tool_report` build the transcript directory name two different ways                     | 00468 core agent   | ⬜ Open               |
 | N28 | `project_containment` resolves a relative target against the payload cwd, ignoring a same-command `cd`    | Plan 00464 agent   | 🔄 In progress        |
+| N29 | `error_hiding`'s return-None-in-except check is evaded by returning a local assigned in the handler       | Coordinator        | ⬜ Open               |
+| N30 | More shell code that must survive a hostile PATH depends on a PATH command (`date`, `pgrep`)              | 00467 dogfood      | ⬜ Open               |
+| N31 | The dispatch-declaration advisory does not recognise "File to write to: <path>"                           | 00467 dogfood      | ⬜ Open               |
 
 ## Tasks
 

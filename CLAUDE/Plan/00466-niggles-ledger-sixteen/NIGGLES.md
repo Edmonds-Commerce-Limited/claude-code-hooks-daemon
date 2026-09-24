@@ -3,6 +3,68 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
+### N31 — the dispatch-declaration advisory does not recognise "File to write to: <path>"
+
+**Found by the 00467 dogfood agent.** A dispatch brief that named its report
+path as `File to write to: <path>` still drew the Plan 00307
+dispatch-declaration advisory saying no report destination was declared.
+The advisory matches a narrower set of phrasings than briefs actually use,
+so it nags on a correct dispatch, and a nag that is often wrong teaches
+people to skim it.
+
+**Candidate remedy:** recognise any phrasing that pairs a write verb or noun
+("write", "report", "file", "output", "save") with a path in the brief, not
+only fixed phrases. RED tests: the phrasing above is recognised, and a brief
+with no path at all still draws the advisory.
+
+### N30 — more shell code that must survive a hostile PATH depends on a PATH command
+
+**Found by the 00467 dogfood agent**, applying the Defence Before Fix method
+to the watchdog defect fixed at 766677c1 (00466 N1's follow-up). An
+independent search for the same class ("shell code that must survive a
+hostile or stripped `PATH` runs a command looked up on `PATH`, and its
+absence silently takes a wrong branch") found four more candidates:
+
+- `scripts/venv_bootstrap.sh:443` and `:474` (`date`). The agent reproduced
+  this idiom.
+- `scripts/install/venv.sh:427` (`date`).
+- `scripts/install/daemon_control.sh:40-43` (`pgrep`).
+
+These are the venv and install paths, which exist to work when the host's
+tools are broken, exactly as `resolve_venv.sh` does.
+
+**Candidate remedy:**
+
+1. Fix each instance: use a bash builtin (`printf '%(...)T'` for dates,
+   `/proc` or `kill -0` for process checks). Where there is no builtin,
+   make the missing command a loud, explicit failure rather than a silent
+   wrong branch.
+2. The detector the method asks for: a check over the scripts that must
+   survive a hostile PATH (`resolve_venv.sh`, `venv_bootstrap.sh`,
+   `scripts/install/*.sh`, the `bin/` wrappers) that flags an external
+   command whose failure is not handled. It could be a `shell_audit` rule, or
+   a test that runs each such script's functions under an empty `PATH`. It
+   must catch the original watchdog shape, verified by reverting 766677c1 in
+   a scratch copy.
+
+### N29 — `error_hiding`'s return-None-in-except check is evaded by returning a local assigned in the handler
+
+**Found by the coordinator** reading the goal-flip agent's report. To clear the
+`error_hiding` finding on a literal `return None` inside an `except` handler,
+that agent assigned `None` to a local in the handler and returned the local
+after the `try`. The behaviour is identical, and the detector no longer sees
+it. So the check keys on syntax, not on the flow it exists to catch, and an
+agent under QA pressure finds the gap on the first try. The goal-flip branch
+has been told to undo the evasion and fix the code honestly.
+
+**Candidate remedy:** judge the flow, not the token. An `except` handler that
+binds a name read by a later `return`, where that name's only values are
+`None` or a default and the handler logs or re-raises nothing, is the same
+finding as a literal `return None`. RED tests: the evasion shape is flagged,
+a handler that logs at warning or above and returns a documented sentinel is
+not, and the literal form is still flagged. Then sweep the tree for existing
+instances of the evasion shape, which would currently pass unseen.
+
 ### N28 — `project_containment` resolves a relative target against the payload cwd and ignores a same-command `cd`
 
 **Found by the Plan 00464 agent** during its re-review fix round (S12). It is
