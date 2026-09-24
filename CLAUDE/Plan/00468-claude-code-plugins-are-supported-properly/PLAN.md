@@ -80,9 +80,11 @@ first, and the other fixes build on it.
 
 ### Phase 3: walkers and path guards leave plugin trees alone (P3, P4, G8, G10, G16)
 
-- [ ] ⬜ **Task 3.1**: `format-markdown`, `housekeeping` and
+- [x] ✅ **Task 3.1**: `format-markdown`, `housekeeping` and
   `find-comment-blocks` walk git-visible files through the shared helper from
-  00466 N9, and always exclude an in-project config dir (P3).
+  00466 N9 (P3). The in-project config dir exclusion is deferred: another
+  branch is building `claude_config_dir()`, and git-visibility already covers
+  this repository's case because `.claude/ccy` is gitignored.
 - [ ] ⬜ **Task 3.2**: `markdown_organization` classifies the raw path
   before resolving it: the Claude config dir is exempt from the project
   layout rules, and the memory policy is unchanged (P4). A plugin root is
