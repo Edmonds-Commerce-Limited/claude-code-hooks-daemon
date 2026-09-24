@@ -1604,6 +1604,53 @@ That gap is real and is accepted, not overlooked: content quality is not
 checkable from here, and a guard that pretended otherwise would be the same
 false-assurance failure this ledger keeps recording.
 
+### N29 — `write_clobber_guard` blocks a Write to a file this session created with Write
+
+**Found**: the coordinator created `untracked/scratch/gate.sh` with the
+Write tool, and later tried to replace it with Write. That was denied with
+`R-WRITE-CLOBBER` ("You have not read this file in this session"). The
+same deny text says "a file you wrote or read earlier in this session is
+not blocked either". The write happened after the last compaction, so a
+compaction cannot explain the lost record. Either the guard records only
+Read, or it keys the record on something a Write does not set.
+
+**Candidate remedy:** record a successful Write (PostToolUse) the same way
+a Read is recorded, keyed on the same session identity. Add a test that
+Write-then-Write of a new file is allowed, and that a DIFFERENT session's
+Write does not count.
+
+### N28 — `plan_number_helper` resolves a relative `mkdir` against the workspace root
+
+**Found by Plan 00461's agent**: `mkdir mkj/CLAUDE/Plan/00007-probe`, run
+from `untracked/scratch/` to build a scratch repo, was denied as a
+plan-folder creation in this project. The relative path was resolved
+against the workspace root, not the command's working directory. This is
+the same class as N23: a handler placing a command's effect in the wrong
+directory.
+
+**Candidate remedy:** once Plan 00464 merges, resolve the `mkdir` target
+with its command-directory resolver (a leading `cd`, and the payload cwd
+only as the base), with tests from both the root and a subdirectory.
+
+### N27 — a worktree daemon idles out in the middle of a full QA run
+
+**Found by Plan 00461's agent**: a worktree session's hook traffic goes to
+the MAIN daemon (the payload `cwd` is the main checkout, see N23). So the
+worktree's own daemon, restarted at the start of QA, receives nothing.
+With `idle_timeout_seconds: 600` it stops before the end of an 18-minute
+`llm_qa.py all`, and `smoke_test` then fails "Daemon not running". The
+agent worked around it with a keep-alive that fed a Read event to the
+worktree's `.claude/hooks/pre-tool-use` every two minutes. The
+coordinator's full-QA gate script now does the same.
+
+**Candidate remedies:**
+
+1. `llm_qa.py`, or the smoke test, holds the daemon for the run: it
+   restarts it immediately before the probes, or passes a flag that
+   suspends idle shutdown while QA runs.
+2. At minimum, `smoke_test` distinguishes "idled out during this run"
+   from "never started", so the failure names its real cause.
+
 ### N26 — commit gates never see content staged earlier in the same command
 
 **Found by Plan 00464's agent** (full text in 00464's JOURNAL, T1.3).
