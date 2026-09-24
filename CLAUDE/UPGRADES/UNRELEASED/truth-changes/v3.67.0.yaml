@@ -33,3 +33,26 @@ truth_changes:
 
       IF YOUR PROJECT'S DOCS SAY ENCRYPTED VAULT FILES CANNOT BE STAGED BY AN
       AGENT, OR THAT THEY MUST BE UNTRACKED, THOSE INSTRUCTIONS ARE NOW FALSE.
+  - topic: install-and-upgrade
+    id: upgrade-pre-deploy-gate
+    was: >
+      A hooks-daemon upgrade run by an agent (or any caller without a
+      terminal) runs to completion unattended: the "REQUIRED READING" guide
+      list, where it appears at all, is informational, and nothing stops the
+      upgrade before it deploys.
+    now: >
+      Every upgrade runs a pre-deploy gate once the target is checked out and
+      before anything is deployed (Plan 00376). When it lists something (the
+      crossed upgrade guides, a pre-upgrade task whose Detect pattern found a
+      call site in the project, a breaking change), the upgrade stops, puts
+      the daemon checkout back on the previous version, deploys nothing, and
+      exits 3. The caller reads the list, carries out the pre-upgrade tasks
+      it names, and re-runs with `--skip-reading-confirmation`. A MAJOR
+      version, a crossed `breaking: true` config-changes manifest or a
+      critical pre-upgrade task with hits exits 4 instead, and also needs the
+      project owner to run `hooks-daemon approve-upgrade <version>`; an agent
+      reports and stops, and never records that approval itself.
+
+      IF YOUR PROJECT'S DOCS OR AUTOMATION SAY A DAEMON UPGRADE ALWAYS RUNS
+      TO COMPLETION UNATTENDED, OR TREAT ANY NON-ZERO EXIT OF THE UPGRADE AS
+      A FAILURE TO RETRY BLINDLY, UPDATE THEM.

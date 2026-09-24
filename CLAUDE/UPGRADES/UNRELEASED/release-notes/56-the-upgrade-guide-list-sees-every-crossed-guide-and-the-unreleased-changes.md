@@ -18,7 +18,7 @@ The list also misses fewer guides. It used to match only directories named
 covers every guide in the range. A branch install also lists the documents
 staged for the next release under `CLAUDE/UPGRADES/UNRELEASED/`.
 
-Both checks report and never stop the upgrade. The interactive "have you read
-the guides?" prompt is gone: it read the old checkout, so it could never
-fire. `upgrade_version.sh` still accepts `--skip-reading-confirmation`, which
-now does nothing.
+The config check only reports. The reading list is now the first half of the
+pre-deploy gate (see "the upgrade stops before deploying until you confirm
+what it listed"). The interactive "have you read the guides?" prompt it
+replaces read the old checkout, so it could never fire.

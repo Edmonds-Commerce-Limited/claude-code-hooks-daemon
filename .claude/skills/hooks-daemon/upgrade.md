@@ -11,8 +11,31 @@ Upgrade the Claude Code Hooks Daemon and commit the result atomically.
    /hooks-daemon upgrade 3.14.0                       # specific version
    /hooks-daemon upgrade --force                      # reinstall current
    /hooks-daemon upgrade --skip-config-optimisation    # opt out of step 9
+   /hooks-daemon upgrade --skip-reading-confirmation   # after reading what the gate listed
    /hooks-daemon optimise                              # step 9 on its own
    ```
+
+   **The pre-deploy gate (MANDATORY to act on).** Once the new version is
+   checked out, and before anything is deployed into the project, the upgrade
+   prints `REQUIRED READING`: the upgrade guides this upgrade crosses, and every
+   pre-upgrade task whose `**Detect**` pattern found a call site in this
+   project, at `file:line`. When there is anything to read, the run stops
+   with `UPGRADE STOPPED before anything was deployed`, puts the daemon
+   checkout back on the previous version, and exits non-zero:
+
+   - **Exit 3: read, act, re-run.** Read every listed document. Carry out each
+     listed pre-upgrade task in the project as its file says (its `## How to handle`), and commit that work separately. Then re-run the same command with
+     `--skip-reading-confirmation`. Pass the flag only after doing this.
+   - **Exit 4: the owner must approve.** The upgrade is breaking for this
+     project: a MAJOR version, a manifest declaring `breaking: true`, or a
+     `critical` pre-upgrade task that found call sites. Report the reasons the
+     gate printed to the user and STOP. Only the project owner approves, by
+     running `.claude/hooks-daemon/bin/hooks-daemon approve-upgrade <version>`.
+     Never run it yourself. After the owner has approved, re-run with
+     `--skip-reading-confirmation`.
+
+   Any other non-zero exit is an upgrade failure; report it. No metadata block
+   is emitted on any stop.
 
 2. **Parse the metadata block** emitted on stdout between the
    `<<<UPGRADE_METADATA` and `UPGRADE_METADATA>>>` sentinels. Fields:

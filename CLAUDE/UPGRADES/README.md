@@ -28,6 +28,9 @@ CLAUDE/UPGRADES/
 ├── README.md                           # This file
 ├── UNRELEASED/                         # Staging for the NEXT release
 │   ├── README.md
+│   ├── pre-upgrade-tasks/              # Detected and gated BEFORE deploy
+│   │   ├── README.md                   # Detection contract + current task index
+│   │   └── NN-*.md                     # One file per task
 │   └── post-upgrade-tasks/             # Tasks accumulating between releases
 │       ├── README.md                   # Convention + current task index
 │       └── NN-*.md                     # One file per task
@@ -220,6 +223,12 @@ Required sections:
 - Reached by `hooks-daemon check-post-upgrade-tasks --from <previous> --to <new>`, which lists the tasks of every guide directory in that range; the upgrade skill and `CLAUDE/LLM-UPDATE.md` make running it a mandatory step. The guide directory must be named `v{A}-to-v{B}` for the range to find it.
 - Authoring during a release cycle: drop tasks into `CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks/`. The `/release` skill moves them into the versioned guide at release time.
 - Omit the directory entirely if no post-upgrade tasks apply to the release.
+
+**pre-upgrade-tasks/** (optional):
+
+- Changes a project must hear about **before** the release is deployed into it, each carrying a `**Detect**` pattern (the detection contract: `CLAUDE/UPGRADES/UNRELEASED/pre-upgrade-tasks/README.md`). The schema is the one post-upgrade tasks use.
+- Read by the pre-deploy gate (`install/upgrade_gate.py`), which Layer 2 runs on every upgrade once the target is checked out: it names each hit at `file:line`, stays silent for a task that finds nothing, and stops the upgrade until the caller confirms with `--skip-reading-confirmation`. A `critical` task with hits also needs the owner's `hooks-daemon approve-upgrade <version>`. See `CLAUDE/LLM-UPDATE.md`, "The pre-deploy gate".
+- Authoring and release: as for `post-upgrade-tasks/`, through `CLAUDE/UPGRADES/UNRELEASED/pre-upgrade-tasks/`.
 
 ## Creating a New Upgrade Guide
 

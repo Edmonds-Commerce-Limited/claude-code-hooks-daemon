@@ -165,11 +165,12 @@ rm untracked/scratch/upgrade.sh
 - Extracts user customizations (diff against old defaults)
 - Stops the daemon safely
 - Checks out target version code
+- Runs the pre-deploy gate before the venv is rebuilt (see "The pre-deploy
+  gate" below), and stops the upgrade there when you have not yet confirmed
+  what it lists
 - Recreates virtual environment (clean venv)
-- Before deploying anything, checks your config against the target's handlers
-  and prints "REQUIRED READING": the target's upgrade guides for every version
-  crossed (plus the staged `UNRELEASED/` documents on a branch install). It
-  reports only; it does not stop the upgrade
+- Before deploying anything, checks your config against the target's handlers.
+  This check only reports
 - Deploys hook scripts and slash commands
 - Merges user customizations into new default config
 - Validates merged config
@@ -177,6 +178,35 @@ rm untracked/scratch/upgrade.sh
 - Starts daemon and verifies running
 - Cleans up old snapshots (keeps 5 most recent)
 - Rolls back automatically on any failure
+
+### The pre-deploy gate
+
+Once the target is checked out, and before its venv is built or anything is
+deployed, Layer 2 runs the gate (`src/claude_code_hooks_daemon/install/upgrade_gate.py`).
+It prints `REQUIRED READING`, which lists:
+
+- the target's upgrade guides for every version crossed (plus the staged
+  `UNRELEASED/` documents on a branch install);
+- every **pre-upgrade task** (`CLAUDE/UPGRADES/.../pre-upgrade-tasks/`) whose
+  `**Detect**` pattern finds a call site in your project, at `file:line`. A
+  task that finds nothing is not shown;
+- any reason the upgrade breaks this project: a MAJOR version, a crossed
+  config-changes manifest declaring `breaking: true`, or a `critical`
+  pre-upgrade task with hits.
+
+With nothing to list, the upgrade continues without comment. Otherwise it
+never infers consent from the absence of a terminal. It stops, puts the daemon
+checkout back on the previous version, deploys nothing, and exits:
+
+| Exit | Meaning                 | What to do                                                                                                                                                                                                                                                 |
+| ---- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `3`  | Reading not confirmed   | Read every listed document. Carry out each listed pre-upgrade task in the project, as its file says. Then re-run with `--skip-reading-confirmation`                                                                                                        |
+| `4`  | Owner's approval needed | Report the printed reasons and stop. The project owner approves ONE upgrade with `.claude/hooks-daemon/bin/hooks-daemon approve-upgrade <version>`. An agent never records it. Then re-run with `--skip-reading-confirmation`, which consumes the approval |
+
+A gate that cannot decide (it crashes) also stops the upgrade (exit `1`); report
+it as a daemon bug. A daemon older than the `approve-upgrade` command
+cannot record the approval that way. The owner then creates the marker file
+the stop message names.
 
 ### Why Fetch from GitHub?
 
@@ -457,11 +487,13 @@ same list, and the two versions, under "Post-upgrade tasks to carry out"):
 
 ```bash
 .claude/hooks-daemon/bin/hooks-daemon check-post-upgrade-tasks \
-    --from <previous version> --to <new version>
+    --from <previous version> --to <new version> --project-root "$PWD"
 ```
 
 Exit code `0` means there is nothing to do. Exit code `1` lists every task
-file, oldest guide first, with its severity and type. A non-release (branch)
+file, oldest guide first, with its severity and type. A task that declares a
+`**Detect**` pattern has already been run over the project: the list says
+"not detected" or names each hit at `file:line`. A non-release (branch)
 install also lists the tasks staged for the next release under
 `CLAUDE/UPGRADES/UNRELEASED/`, because that code is already running.
 

@@ -60,7 +60,7 @@ find .claude/hooks-daemon/untracked -type l -prune -o -perm /022 -print
 Note `-perm /022`, not `/077`: the latter also matches a perfectly ordinary
 `0644` and buries the real finding in noise.
 
-## What to do
+## How to handle
 
 1. **Run the check** above and read what it reports.
 
@@ -83,6 +83,11 @@ Note `-perm /022`, not `/077`: the latter also matches a perfectly ordinary
    (`daemon.payload_capture.enabled`, off by default).
 
 4. **Re-run the check** to confirm it exits `0`.
+
+## How to confirm
+
+`.claude/hooks-daemon/bin/hooks-daemon check-permissions` exits `0` and reports
+nothing.
 
 ## Behaviour change you may notice
 

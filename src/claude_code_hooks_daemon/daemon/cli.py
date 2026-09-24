@@ -3674,32 +3674,38 @@ def cmd_check_truth_changes(args: argparse.Namespace) -> int:
 def cmd_check_post_upgrade_tasks(args: argparse.Namespace) -> int:
     """List the post-upgrade tasks of every guide a version range crosses (Plan 00376).
 
-    The command behind the upgrade skill's mandatory post-upgrade-tasks step.
-    Versioned tasks come from each ``v{A}-to-v{B}/post-upgrade-tasks/`` in
-    (from, to]; the UNRELEASED holding area's tasks join exactly for a branch
-    install, or when ``--include-unreleased`` forces them in.
+    The command behind the upgrade skill's mandatory post-upgrade-tasks step,
+    and the report the upgrade script prints at its end. Versioned tasks come
+    from each ``v{A}-to-v{B}/post-upgrade-tasks/`` in (from, to]; the
+    UNRELEASED holding area's tasks join exactly for a branch install, or when
+    ``--include-unreleased`` forces them in. A task that declares
+    ``**Detect**:`` is run against the project tree, and the report says
+    whether (and where) it applies.
 
     Args:
         args: Parsed CLI arguments with from_version, to_version, format, and
-              optional upgrades_dir and include_unreleased.
+              optional upgrades_dir, include_unreleased and project_root.
 
     Returns:
         0 if no tasks, 1 if tasks to carry out, 2 on error.
     """
-    from claude_code_hooks_daemon.install.upgrade_guides import run_check_post_upgrade_tasks
+    from claude_code_hooks_daemon.install.upgrade_tasks import TaskKind, run_check_upgrade_tasks
 
     upgrades_dir: Path | None = (
         Path(args.upgrades_dir) if getattr(args, "upgrades_dir", None) else None
     )
     # Plan 00291: same switch as check-truth-changes.
     include_unreleased: bool | None = True if getattr(args, "include_unreleased", False) else None
+    project_root = _find_project_tree_root(getattr(args, "project_root", None))
 
     try:
-        result = run_check_post_upgrade_tasks(
+        result = run_check_upgrade_tasks(
+            TaskKind.POST,
             from_version=args.from_version,
             to_version=args.to_version,
             upgrades_dir=upgrades_dir,
             include_unreleased=include_unreleased,
+            project_root=project_root,
             output_format=args.format,
         )
     except ValueError as e:
@@ -4235,6 +4241,48 @@ def cmd_approve_merge(args: argparse.Namespace) -> int:
             "NOTE: worktree.merge_to_main_requires_human_approval is false, so the gate is "
             "off and nothing will consume this marker until the key is turned on."
         )
+    return 0
+
+
+def cmd_approve_upgrade(args: argparse.Namespace) -> int:
+    """Record the owner's one-shot approval to upgrade to VERSION (Plan 00376 Task 3.2).
+
+    The owner's route through the upgrade gate's escalation (a MAJOR bump, a
+    crossed ``breaking: true`` manifest, or a ``critical`` pre-upgrade task
+    detected in the project): writes ``upgrade-approvals/<X.Y.Z>.approved``
+    under the project's daemon untracked directory, resolved by the same
+    ``install_layout`` rule the gate uses. The next upgrade to that release
+    run with ``--skip-reading-confirmation`` consumes it.
+
+    Returns:
+        0 on marker written, 1 on refusal.
+    """
+    from claude_code_hooks_daemon.daemon.install_layout import get_untracked_dir
+    from claude_code_hooks_daemon.install.upgrade_gate import (
+        APPROVAL_SUBDIR,
+        SKIP_READING_FLAG,
+        approval_key,
+    )
+    from claude_code_hooks_daemon.utils.one_shot_approval import OneShotApprovalStore
+
+    raw = str(args.version).strip()
+    try:
+        key = approval_key(raw)
+    except ValueError:
+        print(f"ERROR: {raw!r} is not a release version (e.g. 4.0.0 or v4.0.0)", file=sys.stderr)
+        return 1
+
+    if getattr(args, "project_root", None):
+        project_path = Path(args.project_root).resolve()
+    else:
+        project_path = get_project_path(None)
+
+    marker = OneShotApprovalStore(APPROVAL_SUBDIR).record(get_untracked_dir(project_path), key)
+    print(f"Approved one upgrade to v{key}; marker: {marker}")
+    print(
+        f"The next upgrade to v{key} run with {SKIP_READING_FLAG} consumes it; "
+        "the gate asks again for any later one."
+    )
     return 0
 
 
@@ -9058,6 +9106,13 @@ def main() -> int:
         action="store_true",
         help="Also read the UNRELEASED staged tasks (automatic for a non-release install)",
     )
+    parser_post_upgrade.add_argument(
+        "--project-root",
+        dest="project_root",
+        type=Path,
+        default=None,
+        help="Project tree a task's **Detect** pattern is run against (default: auto-detect)",
+    )
     parser_post_upgrade.set_defaults(func=cmd_check_post_upgrade_tasks)
 
     # issue-report command (Plan 00403) — a filable upstream issue body
@@ -9853,6 +9908,29 @@ def main() -> int:
         help="Project root override (default: auto-detected)",
     )
     parser_approve_merge.set_defaults(func=cmd_approve_merge)
+
+    # approve-upgrade command (Plan 00376 Task 3.2): the owner's one-shot
+    # approval for an upgrade the pre-deploy gate escalated
+    parser_approve_upgrade = subparsers.add_parser(
+        "approve-upgrade",
+        help=(
+            "Record the owner's one-shot approval for one upgrade to VERSION "
+            "(MAJOR, breaking, or a critical pre-upgrade task detected)"
+        ),
+    )
+    parser_approve_upgrade.add_argument(
+        "version",
+        metavar="VERSION",
+        help="Target release whose next acknowledged upgrade is approved (e.g. 4.0.0)",
+    )
+    parser_approve_upgrade.add_argument(
+        "--project-root",
+        dest="project_root",
+        type=Path,
+        default=None,
+        help="Project root override (default: auto-detected)",
+    )
+    parser_approve_upgrade.set_defaults(func=cmd_approve_upgrade)
 
     # verdicts command (Plan 00209): report on the handler decision log
     parser_verdicts = subparsers.add_parser(

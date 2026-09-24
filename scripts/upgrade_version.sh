@@ -119,39 +119,142 @@ _resolve_install_stamp() {
     print_branch_install_banner "$TRACK_REF" "$TRACK_REASON" "$INSTALL_STAMP"
 }
 
-# run_pre_deploy_phase() - Config compatibility and the upgrade-guide reading
-# list, run once the daemon dir sits on the target and its venv is ready, but
-# before anything is deployed into the project (Plan 00376 Task 1.1).
+# The caller confirms it has read the gate's reading list with this flag, as an
+# argument or through Layer 1's UPGRADE_FLAGS. Nothing else confirms it: there
+# is deliberately no "no terminal, so nobody to ask" inference.
+SKIP_READING_CONFIRMATION=false
+if [[ "$*" == *"--skip-reading-confirmation"* ]] || [[ "${UPGRADE_FLAGS:-}" == *"--skip-reading-confirmation"* ]]; then
+    SKIP_READING_CONFIRMATION=true
+fi
+
+# The gate's stop codes (install/upgrade_gate.py GateVerdict.exit_code).
+GATE_NEEDS_ACKNOWLEDGEMENT=3
+GATE_NEEDS_APPROVAL=4
+
+# abort_before_deploy() - Stop the upgrade with nothing deployed (Plan 00376
+# Tasks 1.2 and 3.3). Args: exit code, reason.
 #
-# That is the one point every route shares with the target's own code: Layer 1
-# checks the target out before it calls this script, so it arrives on the
-# idempotent path; a direct call arrives after Step 7. Run any earlier, on the
-# pre-checkout tree, and the guide for the version being installed does not
-# exist yet. The FROM side is CURRENT_VERSION (Layer 1 hands the pre-checkout
-# version over); the TARGET side is the release part of INSTALL_STAMP, which
-# for a branch install is the pyproject version the branch carries.
+# The daemon dir goes back to the commit Layer 1 moved it from, rather than
+# staying on the target: Layer 1 reads the next run's FROM version from the
+# clone's own pyproject, so a clone left on the target would make the re-run
+# see an empty range and skip the very gate that stopped it. Before the gate
+# nothing else has changed -- it runs before ensure_venv -- so the restore is
+# the whole undo. A direct call's slow path is already covered by the snapshot
+# rollback in the EXIT trap, so there it only has to exit.
+abort_before_deploy() {
+    local exit_code="$1"
+    local reason="$2"
+    if [ "$UPGRADE_STARTED" = true ]; then
+        print_error "Upgrade $reason. Rolling back to the pre-upgrade state; nothing new was deployed."
+        exit "$exit_code"
+    fi
+    local previous_ref="${HOOKS_DAEMON_UPGRADE_PREVIOUS_REF:-}"
+    if [ -z "$previous_ref" ]; then
+        print_info "No previous ref was handed over: the daemon dir was already on $TARGET_VERSION when this run started, so it stays there."
+    elif [ "$previous_ref" = "$(git -C "$DAEMON_DIR" rev-parse HEAD)" ]; then
+        print_info "The daemon dir is still on the previous ref $previous_ref."
+    elif git -C "$DAEMON_DIR" reset --hard --quiet "$previous_ref"; then
+        print_success "Daemon dir restored to the previous ref $previous_ref."
+    else
+        print_error "Upgrade $reason, and the daemon dir could not be restored to $previous_ref (git's error is above). It is still on $TARGET_VERSION with nothing deployed; restore it with: git -C \"$DAEMON_DIR\" reset --hard $previous_ref"
+        exit 1
+    fi
+    print_error "Upgrade $reason. Nothing was deployed into $PROJECT_ROOT; the previous daemon starts again on the next hook event."
+    exit "$exit_code"
+}
+
+# _target_release() - Print the release the checked-out target carries.
 #
-# Report only. It never stops the upgrade: nothing decides yet what an abort
-# at this point would restore (Task 1.2), and the proceed/abort gate that acts
-# on this report is the plan's Phase 3.
+# The release part of INSTALL_STAMP: the tag, or for a branch install the
+# pyproject version its stamp starts with. A direct call naming a commit no tag
+# describes has a sha for a stamp, so the checkout's own version.py answers
+# instead; "unknown" if even that is unreadable, which the gate treats as a
+# range it cannot read.
+_target_release() {
+    local release="${INSTALL_STAMP%%+*}"
+    if [[ "$release" =~ ^[vV]?[0-9]+(\.[0-9]+)*$ ]]; then
+        echo "$release"
+        return 0
+    fi
+    release="$(awk -F'"' '/^__version__[[:space:]]*=/ { print $2; exit }' \
+        "$DAEMON_DIR/src/claude_code_hooks_daemon/version.py")"
+    echo "${release:-unknown}"
+}
+
+# run_pre_deploy_phase() - The pre-deploy gate (Plan 00376 Tasks 1.1, 3.1-3.3).
 #
-# Every value reaches Python as an ARGV entry, never spliced into its source.
-# Exported so a direct call's second pass does not repeat it.
+# Runs once the daemon dir sits on the target and BEFORE ensure_venv rebuilds
+# the venv for it, on every route: Layer 1 checks the target out before it
+# calls this script, so it arrives on the idempotent path; a direct call
+# arrives after Step 6. Earlier, the pre-checkout tree holds no guide for the
+# version being installed; later, the venv is already the target's and a stop
+# could no longer leave the install as it was.
+#
+# install/upgrade_gate.py prints the reading list, every pre-upgrade task
+# detected in the project, and any reason the change needs the owner; then it
+# decides (see its module docstring). It runs through the stdlib-only
+# standalone entry because the target's venv does not exist yet. A stop goes
+# through abort_before_deploy. A gate that crashes also stops the upgrade: an
+# undecided gate must not wave an upgrade through.
+#
+# The FROM side is CURRENT_VERSION (Layer 1 hands the pre-checkout version
+# over); the TARGET side is the release part of INSTALL_STAMP, which for a
+# branch install is the pyproject version the branch carries. Exported so a
+# direct call's second pass does not repeat it.
 run_pre_deploy_phase() {
     if [ -n "${HOOKS_DAEMON_PRE_DEPLOY_PHASE_DONE:-}" ]; then
         return 0
     fi
-    if [ "$CURRENT_VERSION" = "unknown" ] || [ -z "$VENV_PYTHON" ]; then
-        print_info "Previous version unknown: skipping the config compatibility check and the upgrade-guide list"
+    local target_semver
+    target_semver="$(_target_release)"
+    local gate_script="$DAEMON_DIR/src/claude_code_hooks_daemon/install/upgrade_gate_standalone.py"
+    local -a gate_args=(
+        --daemon-dir "$DAEMON_DIR"
+        --project-root "$PROJECT_ROOT"
+        --from "$CURRENT_VERSION"
+        --to "$target_semver"
+    )
+    if [ "$BRANCH_INSTALL_STATE" = "armed" ]; then
+        gate_args+=(--include-unreleased)
+    fi
+    if [ "$SKIP_READING_CONFIRMATION" = true ]; then
+        gate_args+=(--acknowledged)
+    fi
+
+    print_info "Pre-deploy gate: what upgrading from $CURRENT_VERSION to $target_semver changes..."
+    local gate_exit=0
+    "${HOOKS_DAEMON_PYTHON:-python3}" "$gate_script" "${gate_args[@]}" || gate_exit=$?
+    case "$gate_exit" in
+        0)
+            export HOOKS_DAEMON_PRE_DEPLOY_PHASE_DONE=1
+            ;;
+        "$GATE_NEEDS_ACKNOWLEDGEMENT" | "$GATE_NEEDS_APPROVAL")
+            abort_before_deploy "$gate_exit" "stopped by the pre-deploy gate (see above)"
+            ;;
+        *)
+            print_error "The pre-deploy gate itself failed (exit $gate_exit) - its error is above."
+            abort_before_deploy 1 "stopped: the pre-deploy gate could not decide, and an undecided gate does not let an upgrade through"
+            ;;
+    esac
+}
+
+# run_config_compatibility_check() - Report whether the project's config names
+# handlers the target removed or renamed (Plan 00376 Task 1.1). Needs the
+# target's venv, so it runs after verify_venv and before the first deploy.
+# Report only: the handler names it flags are fixed in the config afterwards.
+#
+# Every value reaches Python as an ARGV entry, never spliced into its source.
+run_config_compatibility_check() {
+    if [ -n "${HOOKS_DAEMON_COMPAT_CHECK_DONE:-}" ]; then
+        return 0
+    fi
+    if [ "$CURRENT_VERSION" = "unknown" ]; then
+        print_info "Previous version unknown: skipping the config compatibility check"
         return 0
     fi
 
-    local target_semver="${INSTALL_STAMP%%+*}"
-    local include_unreleased=""
-    if [ "$BRANCH_INSTALL_STATE" = "armed" ]; then
-        include_unreleased="1"
-    fi
-
+    local target_semver
+    target_semver="$(_target_release)"
     local compat_exit=0
     if [ -f "$TARGET_CONFIG" ]; then
         print_info "Checking config compatibility with target version..."
@@ -200,46 +303,7 @@ COMPAT_CHECK_PY
         fi
     fi
 
-    local guide_exit=0
-    print_info "Checking for upgrade guides between $CURRENT_VERSION and $target_semver..."
-    "$VENV_PYTHON" - "$DAEMON_DIR" "$CURRENT_VERSION" "$target_semver" "$include_unreleased" \
-        <<'GUIDE_CHECK_PY' || guide_exit=$?
-import sys
-from pathlib import Path
-
-from claude_code_hooks_daemon.install.upgrade_compatibility import CompatibilityChecker
-
-daemon_dir = Path(sys.argv[1])
-current_version = sys.argv[2]
-target_version = sys.argv[3]
-include_unreleased = sys.argv[4] == "1"
-
-checker = CompatibilityChecker(
-    changelog_path=daemon_dir / "CHANGELOG.md",
-    current_version=current_version,
-    target_version=target_version,
-)
-guides = checker.suggest_upgrade_guides(daemon_dir, include_unreleased=include_unreleased)
-
-if not guides:
-    print("✓ No upgrade guides for this version range", file=sys.stderr)
-    sys.exit(0)
-
-print("", file=sys.stderr)
-print("📚 REQUIRED READING: Upgrade Guides", file=sys.stderr)
-print("=" * 70, file=sys.stderr)
-print(f"Upgrading from v{current_version.lstrip('vV')} to v{target_version.lstrip('vV')}", file=sys.stderr)
-print(f"{len(guides)} document(s) describe what this upgrade changes:", file=sys.stderr)
-for guide in guides:
-    print(f"  • {guide}", file=sys.stderr)
-print("", file=sys.stderr)
-GUIDE_CHECK_PY
-    if [ "$guide_exit" -ne 0 ]; then
-        print_error "Upgrade-guide check crashed (exit $guide_exit) - traceback above."
-        print_warning "Continuing without a guide list; review $DAEMON_DIR/CLAUDE/UPGRADES/ manually."
-    fi
-
-    export HOOKS_DAEMON_PRE_DEPLOY_PHASE_DONE=1
+    export HOOKS_DAEMON_COMPAT_CHECK_DONE=1
 }
 
 # Derived paths
@@ -464,6 +528,11 @@ if [ "$ROLLBACK_REF" = "$TARGET_VERSION" ] || { [ -n "$TARGET_COMMIT" ] && [ "$T
     print_success "$(upgrade_transition_headline "$INSTALLED_VERSION" "$INSTALL_STAMP")"
     print_info "Running idempotent deployment steps to ensure files are current..."
 
+    # Every Layer 1 upgrade arrives here with the target checked out: the gate
+    # runs now, before ensure_venv touches anything, so a stop leaves only the
+    # checkout to restore.
+    run_pre_deploy_phase
+
     # Plan 00099: ensure_venv uses a fingerprint-keyed venv path so concurrent
     # environments (container vs host, different Pythons) don't clobber each
     # other. Handles stale/missing stamps internally (recreate+restamp).
@@ -477,9 +546,9 @@ if [ "$ROLLBACK_REF" = "$TARGET_VERSION" ] || { [ -n "$TARGET_COMMIT" ] && [ "$T
         fail_fast "Virtual environment verification failed"
     fi
 
-    # Every Layer 1 upgrade arrives here, so this is where the target's own
-    # compatibility check and guide list must run: before the first deploy.
-    run_pre_deploy_phase
+    # The target's own compatibility check needs its venv, and runs before the
+    # first deploy.
+    run_config_compatibility_check
 
     # Plan 00099: clean up pre-v3.7.0 legacy venv on idempotent re-runs too.
     # The full upgrade path (Step 7) already does this, but multi-host projects
@@ -638,13 +707,17 @@ fi
 
 # Run pre-upgrade safety checks if venv exists
 if [ -f "$VENV_PYTHON" ]; then
-    run_pre_install_checks "$PROJECT_ROOT" "$VENV_PYTHON" "$DAEMON_DIR" "false" || true
+    # fail_on_error=false: a non-zero return is the documented "problems were
+    # found and printed" signal, and is non-fatal here by design.
+    if ! run_pre_install_checks "$PROJECT_ROOT" "$VENV_PYTHON" "$DAEMON_DIR" "false"; then
+        print_warning "Pre-install checks reported problems (non-fatal, see above)"
+    fi
 fi
 
-# The config compatibility check and the upgrade-guide list are NOT run here:
-# this tree is still the version being replaced on a direct call, so neither
-# the target's handlers nor its guides exist yet. run_pre_deploy_phase runs
-# both once the target is checked out and before anything is deployed.
+# The gate and the config compatibility check are NOT run here: this tree is
+# still the version being replaced on a direct call, so neither the target's
+# guides nor its handlers exist yet. run_pre_deploy_phase and
+# run_config_compatibility_check run once the target is checked out.
 
 # ============================================================
 # Step 3: Create state snapshot
@@ -777,11 +850,9 @@ fi
 # Step 5a: Upgrade-guide reading list -- see run_pre_deploy_phase
 # ============================================================
 
-# The list, and the interactive "have you read them?" prompt that used to sit
-# here, read the PRE-checkout tree, which cannot hold a guide for the version
-# being installed, so the prompt could not fire. The list now runs from
-# run_pre_deploy_phase. A proceed/abort gate that also works for an agent is
-# Plan 00376 Phase 3; its site is that function.
+# The reading list and its proceed/abort gate run after Step 6, from
+# run_pre_deploy_phase: only the target's tree holds the guide for the version
+# being installed.
 
 # ============================================================
 # Step 6: Checkout target version
@@ -793,7 +864,7 @@ print_info "Fetching tags..."
 git -C "$DAEMON_DIR" fetch --tags --quiet
 
 # Verify target version exists
-if ! git -C "$DAEMON_DIR" rev-parse "$TARGET_VERSION" &>/dev/null; then
+if ! git -C "$DAEMON_DIR" rev-parse --verify --quiet "${TARGET_VERSION}^{commit}" > /dev/null; then
     fail_fast "Version $TARGET_VERSION not found. Available versions:
 $(git -C "$DAEMON_DIR" tag -l | sort -V | tail -10)"
 fi
@@ -828,6 +899,10 @@ if [ -n "$LAYER2_SOURCE_FINGERPRINT_BEFORE" ] && [ -f "$LAYER2_TARGET_SCRIPT" ];
     fi
 fi
 
+# The target is checked out and nothing is deployed yet: the gate decides now,
+# before Step 7 rebuilds the venv. A stop exits through the snapshot rollback.
+run_pre_deploy_phase
+
 # ============================================================
 # Step 7: Recreate virtual environment (clean reinstall)
 # ============================================================
@@ -847,9 +922,9 @@ if ! verify_venv "$VENV_PYTHON" "$DAEMON_DIR"; then
     fail_fast "Virtual environment verification failed"
 fi
 
-# A direct call reaches the target's tree here, after Step 6; nothing has been
-# deployed into the project yet.
-run_pre_deploy_phase
+# The target's venv is verified and nothing has been deployed into the project
+# yet.
+run_config_compatibility_check
 
 # Plan 00099: clean up pre-v3.7.0 legacy venv to avoid confusion. Only remove
 # the legacy path if we successfully provisioned a fingerprint-keyed venv at a

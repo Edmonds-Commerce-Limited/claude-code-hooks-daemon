@@ -11,9 +11,11 @@ never read them. These tests pin the whole route:
    ``check-post-upgrade-tasks``;
 2. ``LLM-UPDATE.md`` runs it in its mandatory Post-Update sequence, and the
    bare Layer 1 script runs it before the metadata block;
-3. every task file on disk -- released under ``v{major}/v{A}-to-v{B}/`` or
-   staged under ``UNRELEASED/`` -- is returned by that command's resolver for
-   an upgrade that crosses it. A misnamed guide directory, a misnamed task
+3. every task file on disk -- pre- or post-upgrade, released under
+   ``v{major}/v{A}-to-v{B}/`` or staged under ``UNRELEASED/`` -- is returned
+   by the shared resolver for an upgrade that crosses it (the pre-upgrade
+   tasks are read by the upgrade gate, which every route runs; see
+   ``test_upgrade_pre_deploy_phase_placement.py``). A misnamed guide directory, a misnamed task
    file or a guide numbered past the current version fails here, at the
    commit that adds it, rather than going unread at upgrade time.
 """
@@ -25,11 +27,8 @@ from pathlib import Path
 
 import pytest
 
-from claude_code_hooks_daemon.install.upgrade_guides import (
-    POST_UPGRADE_TASKS_DIRNAME,
-    UNRELEASED_DIRNAME,
-    post_upgrade_tasks,
-)
+from claude_code_hooks_daemon.install.upgrade_guides import UNRELEASED_DIRNAME
+from claude_code_hooks_daemon.install.upgrade_tasks import TaskKind, tasks_for_range
 from claude_code_hooks_daemon.version import __version__
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -58,16 +57,19 @@ def _numbered_steps(text: str) -> list[tuple[int, str, str]]:
     return steps
 
 
-def _task_files_on_disk() -> list[Path]:
-    """Every non-README markdown file in any post-upgrade-tasks/ directory."""
-    found: list[Path] = []
-    for tasks_dir in _UPGRADES.rglob(POST_UPGRADE_TASKS_DIRNAME):
-        if _TEMPLATE_DIRNAME in tasks_dir.relative_to(_UPGRADES).parts:
-            continue
-        found.extend(
-            path for path in tasks_dir.glob("*.md") if path.is_file() and path.name != "README.md"
-        )
-    return sorted(found)
+def _task_files_on_disk() -> list[tuple[TaskKind, Path]]:
+    """Every non-README markdown file in any pre- or post-upgrade-tasks/ directory."""
+    found: list[tuple[TaskKind, Path]] = []
+    for kind in TaskKind:
+        for tasks_dir in _UPGRADES.rglob(kind.value):
+            if _TEMPLATE_DIRNAME in tasks_dir.relative_to(_UPGRADES).parts:
+                continue
+            found.extend(
+                (kind, path)
+                for path in tasks_dir.glob("*.md")
+                if path.is_file() and path.name != "README.md"
+            )
+    return sorted(found, key=lambda item: (item[0].value, str(item[1])))
 
 
 @pytest.mark.parametrize("skill", _SKILL_COPIES, ids=lambda p: str(p.relative_to(_REPO_ROOT)))
@@ -108,20 +110,24 @@ def test_there_are_tasks_to_check() -> None:
     assert _task_files_on_disk(), "no post-upgrade task files found -- the scan is broken"
 
 
-@pytest.mark.parametrize("task", _task_files_on_disk(), ids=lambda p: str(p.relative_to(_UPGRADES)))
-def test_every_task_is_listed_for_an_upgrade_that_crosses_it(task: Path) -> None:
+@pytest.mark.parametrize(
+    ("kind", "task"),
+    _task_files_on_disk(),
+    ids=lambda value: str(value.relative_to(_UPGRADES)) if isinstance(value, Path) else "",
+)
+def test_every_task_is_listed_for_an_upgrade_that_crosses_it(kind: TaskKind, task: Path) -> None:
     staged = task.relative_to(_UPGRADES).parts[0] == UNRELEASED_DIRNAME
     if staged:
-        listed = post_upgrade_tasks(
-            __version__, __version__, upgrades_dir=_UPGRADES, include_unreleased=True
+        listed = tasks_for_range(
+            kind, __version__, __version__, upgrades_dir=_UPGRADES, include_unreleased=True
         )
     else:
-        listed = post_upgrade_tasks(
-            _EARLIEST, __version__, upgrades_dir=_UPGRADES, include_unreleased=False
+        listed = tasks_for_range(
+            kind, _EARLIEST, __version__, upgrades_dir=_UPGRADES, include_unreleased=False
         )
     assert task in {entry.path for entry in listed}, (
-        f"{task.relative_to(_REPO_ROOT)} is never listed by `{_COMMAND}`, so no upgrade "
-        "reaches it. Name the file NN-slug.md and put it in "
-        "CLAUDE/UPGRADES/v{major}/v{A}-to-v{B}/post-upgrade-tasks/ (B no later than the "
-        "current version) or in CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks/."
+        f"{task.relative_to(_REPO_ROOT)} is never listed for an upgrade, so none reaches it. "
+        f"Name the file NN-slug.md and put it in CLAUDE/UPGRADES/v{{major}}/v{{A}}-to-v{{B}}/"
+        f"{kind.value}/ (B no later than the current version) or in "
+        f"CLAUDE/UPGRADES/UNRELEASED/{kind.value}/."
     )

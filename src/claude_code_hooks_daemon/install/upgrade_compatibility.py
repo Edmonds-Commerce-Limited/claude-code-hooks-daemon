@@ -29,11 +29,7 @@ from claude_code_hooks_daemon.install.breaking_changes_detector import (
     parse_version,
 )
 from claude_code_hooks_daemon.install.install_stamp import is_branch_install
-from claude_code_hooks_daemon.install.upgrade_guides import (
-    crossed_guide_dirs,
-    guide_document,
-    unreleased_staged_documents,
-)
+from claude_code_hooks_daemon.install.upgrade_guides import guide_documents
 
 # Directory layout for upgrade guides: CLAUDE/UPGRADES/v{major}/v{A}-to-v{B}/.
 _UPGRADES_DIR_NAME = "UPGRADES"
@@ -383,17 +379,11 @@ class CompatibilityChecker:
         parse_version(self.current_version)
         parse_version(self.target_version)
 
-        upgrades_dir = daemon_dir / _CLAUDE_DIR_NAME / _UPGRADES_DIR_NAME
-        guides: list[Path] = []
-        for guide_dir in crossed_guide_dirs(
-            upgrades_dir, self.current_version, self.target_version
-        ):
-            document = guide_document(guide_dir)
-            if document is not None:
-                guides.append(document)
-
         if include_unreleased is None:
             include_unreleased = is_branch_install()
-        if include_unreleased:
-            guides.extend(unreleased_staged_documents(upgrades_dir))
-        return guides
+        return guide_documents(
+            daemon_dir / _CLAUDE_DIR_NAME / _UPGRADES_DIR_NAME,
+            self.current_version,
+            self.target_version,
+            include_unreleased=include_unreleased,
+        )

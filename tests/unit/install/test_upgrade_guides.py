@@ -19,8 +19,7 @@ from claude_code_hooks_daemon.install import upgrade_guides
 from claude_code_hooks_daemon.install.upgrade_guides import (
     crossed_guide_dirs,
     guide_document,
-    post_upgrade_tasks,
-    run_check_post_upgrade_tasks,
+    guide_documents,
     unreleased_staged_documents,
 )
 
@@ -142,89 +141,23 @@ class TestUnreleasedStagedDocuments:
         assert unreleased_staged_documents(tmp_path) == []
 
 
-class TestPostUpgradeTasks:
-    def test_tasks_of_every_crossed_guide_in_order(self, upgrades: Path) -> None:
-        tasks = post_upgrade_tasks("3.57.0", "3.65.0", upgrades, include_unreleased=False)
-        assert [t.path.name for t in tasks] == ["01-old.md", "01-rewrite.md", "02-audit.md"]
-        assert [t.source for t in tasks] == [
-            "v3.57-to-v3.58",
-            "v3.63.0-to-v3.64.0",
-            "v3.63.0-to-v3.64.0",
+class TestGuideDocuments:
+    def test_crossed_documents_then_staged_ones(self, upgrades: Path) -> None:
+        documents = guide_documents(upgrades, "3.62.1", "3.65.0", include_unreleased=True)
+        assert [d.relative_to(upgrades).as_posix() for d in documents] == [
+            "v3/v3.62.1-to-v3.63.0/v3.62.1-to-v3.63.0.md",
+            "v3/v3.64.0-to-v3.65.0/v3.64.0-to-v3.65.0.md",
+            "UNRELEASED/post-upgrade-tasks/01-staged.md",
+            "UNRELEASED/release-notes/01-callout.md",
         ]
-
-    def test_header_fields_are_read(self, upgrades: Path) -> None:
-        tasks = post_upgrade_tasks("3.63.0", "3.64.0", upgrades, include_unreleased=False)
-        assert [(t.task_type, t.severity) for t in tasks] == [
-            ("audit", "recommended"),
-            ("audit", "critical"),
-        ]
-
-    def test_unreleased_tasks_join_a_branch_install_even_at_the_same_version(
-        self, upgrades: Path
-    ) -> None:
-        tasks = post_upgrade_tasks("3.65.0", "3.65.0", upgrades, include_unreleased=True)
-        assert [(t.path.name, t.source) for t in tasks] == [("01-staged.md", "UNRELEASED")]
-
-    def test_release_install_never_sees_unreleased_tasks(self, upgrades: Path) -> None:
-        tasks = post_upgrade_tasks("3.64.0", "3.65.0", upgrades, include_unreleased=False)
-        assert tasks == []
 
     def test_default_asks_the_install_stamp(
         self, upgrades: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(upgrade_guides, "is_branch_install", lambda: True)
-        tasks = post_upgrade_tasks("3.64.0", "3.65.0", upgrades)
-        assert [t.path.name for t in tasks] == ["01-staged.md"]
-
-    def test_template_example_is_never_a_task(self, upgrades: Path) -> None:
-        tasks = post_upgrade_tasks("0.0.1", "99.0.0", upgrades, include_unreleased=True)
-        assert "00-EXAMPLE-task.md" not in {t.path.name for t in tasks}
+        monkeypatch.setattr(upgrade_guides, "is_branch_install", lambda: False)
+        documents = guide_documents(upgrades, "3.64.0", "3.65.0")
+        assert [d.name for d in documents] == ["v3.64.0-to-v3.65.0.md"]
 
     def test_default_tree_is_the_daemons_own(self) -> None:
         tree = upgrade_guides.default_upgrades_dir()
         assert (tree / "UNRELEASED" / "post-upgrade-tasks" / "README.md").is_file()
-
-
-class TestRunCheckPostUpgradeTasks:
-    def test_text_names_every_task_with_its_severity(self, upgrades: Path) -> None:
-        result = run_check_post_upgrade_tasks(
-            "3.63.0", "3.64.0", upgrades_dir=upgrades, include_unreleased=False
-        )
-        assert result["has_tasks"] is True
-        text = result["text"]
-        assert str(
-            upgrades / "v3" / "v3.63.0-to-v3.64.0" / "post-upgrade-tasks" / "02-audit.md"
-        ) in (text)
-        assert "critical" in text
-        assert "How to detect" in text
-
-    def test_json_shape(self, upgrades: Path) -> None:
-        result = run_check_post_upgrade_tasks(
-            "3.64.0",
-            "3.65.0",
-            upgrades_dir=upgrades,
-            include_unreleased=True,
-            output_format="json",
-        )
-        assert "text" not in result
-        assert result["tasks"] == [
-            {
-                "path": str(upgrades / "UNRELEASED" / "post-upgrade-tasks" / "01-staged.md"),
-                "source": "UNRELEASED",
-                "type": "audit",
-                "severity": "optional",
-            }
-        ]
-
-    def test_header_does_not_double_the_tag_prefix(self, upgrades: Path) -> None:
-        result = run_check_post_upgrade_tasks(
-            "v3.63.0", "v3.64.0", upgrades_dir=upgrades, include_unreleased=False
-        )
-        assert result["text"].startswith("Post-upgrade tasks: v3.63.0 -> v3.64.0\n")
-
-    def test_nothing_to_do_says_so(self, upgrades: Path) -> None:
-        result = run_check_post_upgrade_tasks(
-            "3.64.0", "3.65.0", upgrades_dir=upgrades, include_unreleased=False
-        )
-        assert result["has_tasks"] is False
-        assert "No post-upgrade tasks" in result["text"]

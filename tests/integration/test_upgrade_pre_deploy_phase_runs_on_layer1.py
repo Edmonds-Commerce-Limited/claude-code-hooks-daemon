@@ -1,23 +1,29 @@
-"""The pre-deploy phase runs on the Layer 1 route (Plan 00376 Task 1.1).
+"""The pre-deploy phase and its gate run on the Layer 1 route (Plan 00376).
 
 Every normal upgrade goes through Layer 1 (``scripts/upgrade.sh``), which
 checks the target out and only then runs the target's own Layer 2. Layer 2's
 "already at the target" test is therefore always true on that route, and its
 idempotent path used to exit before the config compatibility check and the
-upgrade-guide reading list, so neither ever ran for a real upgrade. Invoked
-directly, both ran against the pre-checkout tree, which cannot hold a guide
-for the version being installed.
+upgrade-guide reading list, so neither ever ran for a real upgrade (Task 1.1).
 
 These tests drive the real route end to end in a scratch fixture: a daemon
-origin whose ``v{current}`` tag is this working tree and whose next-minor tag
-adds an upgrade guide and a post-upgrade task, plus a branch carrying a task
-staged under ``UNRELEASED/``. A project installed from ``v{current}`` is
-upgraded with the working tree's Layer 1, and the output must show:
+origin whose ``v{current}`` tag is this working tree, whose next-minor tag
+adds an upgrade guide, a pre-upgrade task and a post-upgrade task, whose
+next-major tag sits on top of that, plus a branch carrying a task staged under
+``UNRELEASED/``. A project installed from ``v{current}`` -- holding one call
+site the pre-upgrade task detects -- is upgraded with the working tree's
+Layer 1, and:
 
-* the compatibility check and the reading list, evaluated against the FROM
-  version and the TARGET's guides, BEFORE anything is deployed;
-* the post-upgrade task list, naming the target's task;
-* for a branch install, the staged ``UNRELEASED/`` task in both lists.
+* without ``--skip-reading-confirmation`` the gate stops the upgrade with the
+  reading list and the call site at ``file:line``, Layer 1 exits with the
+  gate's code, the daemon checkout is back on ``v{current}`` and nothing is
+  deployed (Tasks 1.2, 3.1, 3.3);
+* with the flag, the compatibility check and the reading list run BEFORE
+  anything is deployed, and the post-upgrade task list names the target's
+  task, with the call site the post-upgrade task detects (Task 4.1);
+* a branch install lists the staged ``UNRELEASED/`` task in both lists;
+* a MAJOR upgrade also needs the owner's one-shot approval, which the run it
+  lets through consumes (Task 3.2).
 """
 
 from __future__ import annotations
@@ -34,6 +40,13 @@ from typing import Final
 import pytest
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.daemon.install_layout import get_untracked_dir
+from claude_code_hooks_daemon.install.upgrade_gate import (
+    APPROVAL_SUBDIR,
+    SKIP_READING_FLAG,
+    GateVerdict,
+)
+from claude_code_hooks_daemon.utils.one_shot_approval import OneShotApprovalStore
 from claude_code_hooks_daemon.version import __version__
 
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
@@ -43,11 +56,17 @@ _UPGRADE_TIMEOUT_SECONDS: Final[int] = 600
 _GIT_TIMEOUT_SECONDS: Final[int] = 120
 _BRANCH: Final[str] = "e2e-staged"
 _GUIDE_TASK: Final[str] = "01-e2e-fixture-task.md"
+_PRE_TASK: Final[str] = "01-e2e-pre-task.md"
 _STAGED_TASK: Final[str] = "99-e2e-staged-task.md"
 _HOSTNAME_PREFIX: Final[str] = "pre-deploy-e2e-"
+#: A call site in the fixture project that both fixture tasks detect.
+_CALL_SITE_FILE: Final[str] = "tools/qa.sh"
+_CALL_SITE: Final[str] = "e2e-fixture-command --json"
 
+_GATE_MARKER: Final[str] = "Pre-deploy gate"
 _COMPAT_MARKER: Final[str] = "Checking config compatibility with target version"
 _READING_MARKER: Final[str] = "REQUIRED READING"
+_STOPPED_MARKER: Final[str] = "UPGRADE STOPPED before anything was deployed"
 _TASKS_MARKER: Final[str] = "Post-upgrade tasks to carry out"
 #: The first deploy action on the idempotent path: nothing before it has
 #: touched the project.
@@ -59,10 +78,24 @@ _TASK_BODY: Final[str] = """# Task: {title}
 **Severity**: optional
 **Applies to**: all
 **Idempotent**: yes
+**Detect**: `e2e-fixture-command[^\\n]*--json`
+**Detect in**: `*.sh`
 
 ## Why
 
 End-to-end fixture.
+
+## How to detect if this applies to you
+
+The gate runs the pattern.
+
+## How to handle
+
+Nothing.
+
+## How to confirm
+
+Nothing.
 """
 
 pytestmark = [
@@ -74,6 +107,10 @@ pytestmark = [
 def _next_minor(version: str) -> str:
     major, minor, _patch = (int(part) for part in version.split("."))
     return f"{major}.{minor + 1}.0"
+
+
+def _next_major(version: str) -> str:
+    return f"{int(version.split('.')[0]) + 1}.0.0"
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -121,8 +158,8 @@ def _write(path: Path, text: str) -> None:
     path.write_text(text)
 
 
-def _build_origin(root: Path, current: str, target: str) -> Path:
-    """An origin with ``v{current}``, ``v{target}`` and a branch off ``v{current}``."""
+def _build_origin(root: Path, current: str, target: str, major: str) -> Path:
+    """``v{current}``, ``v{target}``, ``v{major}`` on top, and a branch off ``v{current}``."""
     origin = root / "origin"
     origin.mkdir()
     _snapshot_working_tree(origin)
@@ -137,10 +174,16 @@ def _build_origin(root: Path, current: str, target: str) -> Path:
     guide_dir = origin / "CLAUDE" / "UPGRADES" / "v3" / guide
     _write(guide_dir / f"{guide}.md", f"# {guide}\n")
     _write(guide_dir / "post-upgrade-tasks" / _GUIDE_TASK, _TASK_BODY.format(title="guide task"))
+    _write(guide_dir / "pre-upgrade-tasks" / _PRE_TASK, _TASK_BODY.format(title="pre task"))
     _set_version(origin, current, target)
     _git(origin, "add", "-A")
     _git(origin, "commit", "-q", "--no-verify", "-m", f"v{target}")
     _git(origin, "tag", f"v{target}")
+
+    _set_version(origin, target, major)
+    _git(origin, "add", "-A")
+    _git(origin, "commit", "-q", "--no-verify", "-m", f"v{major}")
+    _git(origin, "tag", f"v{major}")
 
     _git(origin, "checkout", "-q", "-b", _BRANCH, f"v{current}")
     staged = origin / "CLAUDE" / "UPGRADES" / "UNRELEASED" / "post-upgrade-tasks" / _STAGED_TASK
@@ -161,6 +204,7 @@ def _build_project(root: Path, origin: Path, current: str) -> tuple[Path, Path]:
     shutil.copy2(
         origin / ".claude" / "hooks-daemon.yaml.example", project / ".claude" / "hooks-daemon.yaml"
     )
+    _write(project / _CALL_SITE_FILE, f"set -e\n{_CALL_SITE} | jq .\n")
     daemon_dir = project / ".claude" / "hooks-daemon"
     _git(root, "clone", "-q", str(origin), str(daemon_dir))
     _git(daemon_dir, "checkout", "-q", f"v{current}")
@@ -229,35 +273,76 @@ def _section(output: str, marker: str) -> str:
 def fixture_tree(tmp_path: Path) -> tuple[Path, Path, str, str]:
     current = __version__
     target = _next_minor(current)
-    origin = _build_origin(tmp_path, current, target)
+    origin = _build_origin(tmp_path, current, target, _next_major(current))
     project, daemon_dir = _build_project(tmp_path, origin, current)
     return project, daemon_dir, current, target
 
 
-def test_release_route_checks_the_targets_guides_before_deploying(
+def _head(daemon_dir: Path) -> str:
+    return _git(daemon_dir, "rev-parse", "HEAD").strip()
+
+
+def _commit_of(daemon_dir: Path, tag: str) -> str:
+    return _git(daemon_dir, "rev-parse", f"{tag}^{{commit}}").strip()
+
+
+def _assert_stopped_and_restored(
+    result: subprocess.CompletedProcess[str],
+    verdict: GateVerdict,
+    project: Path,
+    daemon_dir: Path,
+    current: str,
+) -> str:
+    combined = result.stdout
+    assert result.returncode == verdict.exit_code, (
+        f"Layer 1 must exit with the gate's code {verdict.exit_code}, "
+        f"got {result.returncode}:\n{combined[-6000:]}"
+    )
+    assert _STOPPED_MARKER in combined, combined[-6000:]
+    assert _FIRST_DEPLOY_MARKER not in combined, "a stopped upgrade must deploy nothing"
+    assert not (project / ".claude" / "hooks").exists(), "no hook may reach the project"
+    assert _head(daemon_dir) == _commit_of(
+        daemon_dir, f"v{current}"
+    ), "the daemon checkout must be back on the previous version"
+    return combined
+
+
+def test_release_route_stops_until_the_reading_is_confirmed(
     fixture_tree: tuple[Path, Path, str, str],
 ) -> None:
     project, daemon_dir, current, target = fixture_tree
     env = _env()
     try:
-        result = _upgrade(project, env, f"v{target}")
+        stopped = _upgrade(project, env, f"v{target}")
+        combined = _assert_stopped_and_restored(
+            stopped, GateVerdict.NEEDS_ACKNOWLEDGEMENT, project, daemon_dir, current
+        )
+        reading = _section(combined, _READING_MARKER)
+        assert f"v{current}-to-v{target}.md" in reading, reading
+        assert _PRE_TASK in reading, reading
+        assert f"{_CALL_SITE_FILE}:2" in reading, "the call site must be named at file:line"
+        assert SKIP_READING_FLAG in combined
+
+        result = _upgrade(project, env, f"v{target}", SKIP_READING_FLAG)
     finally:
         _stop_daemon(daemon_dir, project, env)
     combined = result.stdout
     assert result.returncode == 0, f"upgrade failed ({result.returncode}):\n{combined[-6000:]}"
 
+    gate_at = _position(combined, _GATE_MARKER)
     compat_at = _position(combined, _COMPAT_MARKER)
     reading_at = _position(combined, _READING_MARKER)
     deploy_at = _position(combined, _FIRST_DEPLOY_MARKER)
+    assert gate_at < deploy_at, "the gate must decide before anything is deployed"
     assert compat_at < deploy_at, "the compatibility check must run before anything is deployed"
     assert reading_at < deploy_at, "the reading list must be shown before anything is deployed"
 
     reading = _section(combined, _READING_MARKER)
-    assert f"v{current}-to-v{target}.md" in reading, reading
     assert _STAGED_TASK not in reading, "a release install must not list staged documents"
 
     tasks = _section(combined, _TASKS_MARKER)
     assert _GUIDE_TASK in tasks, tasks
+    assert f"{_CALL_SITE_FILE}:2" in tasks, "the post-upgrade report must run detection too"
 
 
 def test_branch_route_includes_the_staged_unreleased_task(
@@ -271,7 +356,7 @@ def test_branch_route_includes_the_staged_unreleased_task(
         }
     )
     try:
-        result = _upgrade(project, env)
+        result = _upgrade(project, env, SKIP_READING_FLAG)
     finally:
         _stop_daemon(daemon_dir, project, env)
     combined = result.stdout
@@ -283,3 +368,29 @@ def test_branch_route_includes_the_staged_unreleased_task(
 
     tasks = _section(combined, _TASKS_MARKER)
     assert _STAGED_TASK in tasks, tasks
+
+
+def test_major_route_needs_the_owners_one_shot_approval(
+    fixture_tree: tuple[Path, Path, str, str],
+) -> None:
+    project, daemon_dir, current, _target = fixture_tree
+    major = _next_major(current)
+    env = _env()
+    store = OneShotApprovalStore(APPROVAL_SUBDIR)
+    marker = store.path(get_untracked_dir(project), major)
+    try:
+        stopped = _upgrade(project, env, f"v{major}", SKIP_READING_FLAG)
+        combined = _assert_stopped_and_restored(
+            stopped, GateVerdict.NEEDS_APPROVAL, project, daemon_dir, current
+        )
+        assert "MAJOR" in combined
+        assert f"approve-upgrade {major}" in combined
+
+        # The owner's step, as `hooks-daemon approve-upgrade` records it.
+        store.record(get_untracked_dir(project), major)
+        result = _upgrade(project, env, f"v{major}", SKIP_READING_FLAG)
+    finally:
+        _stop_daemon(daemon_dir, project, env)
+    assert result.returncode == 0, f"upgrade failed ({result.returncode}):\n{result.stdout[-6000:]}"
+    assert not marker.exists(), "the approval is one-shot: the run it let through consumes it"
+    assert _head(daemon_dir) == _commit_of(daemon_dir, f"v{major}")

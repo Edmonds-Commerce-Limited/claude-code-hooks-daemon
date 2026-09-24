@@ -38,6 +38,13 @@ while [ $# -gt 0 ]; do
             UPGRADE_FLAGS="$UPGRADE_FLAGS --skip-config-optimisation"
             shift
             ;;
+        --skip-reading-confirmation)
+            # Plan 00376: the caller confirms it has read what Layer 2's
+            # pre-deploy gate listed; without it, a gate with anything to
+            # show stops the upgrade before deploying.
+            UPGRADE_FLAGS="$UPGRADE_FLAGS --skip-reading-confirmation"
+            shift
+            ;;
         --project-root)
             [ -n "${2:-}" ] || { echo "ERR --project-root requires a path argument" >&2; exit 1; }
             PROJECT_ROOT="$2"
@@ -48,6 +55,9 @@ while [ $# -gt 0 ]; do
             echo ""
             echo "  --project-root PATH        Project root directory (REQUIRED)"
             echo "  --skip-config-optimisation Opt out of the mandatory post-upgrade config-optimisation review"
+            echo "  --skip-reading-confirmation"
+            echo "                             Confirm you have read what the pre-deploy gate listed"
+            echo "                             (it stops the upgrade until you do)"
             echo "  VERSION                    Git tag to upgrade to (default: latest)"
             exit 0
             ;;
@@ -582,7 +592,9 @@ else
     TARGET_SEMVER="$TARGET_VERSION"
 fi
 
-git -C "$DAEMON_DIR" rev-parse "$TARGET_VERSION" &>/dev/null || \
+# --verify --quiet answers "does this name a commit?" by exit status alone and
+# keeps stderr open for anything else git has to say; stdout is only the sha.
+git -C "$DAEMON_DIR" rev-parse --verify --quiet "${TARGET_VERSION}^{commit}" > /dev/null || \
     _fail "Version $TARGET_VERSION not found"
 if [ "$_BRANCH_INSTALL" = "true" ]; then
     echo ""
@@ -632,6 +644,15 @@ fi
 # Pinned by tests/integration/test_upgrade_sh_forced_checkout.py, which
 # extracts the client invocation from this file and runs it against dirty
 # fixtures -- reverting to a plain checkout fails those tests.
+# Plan 00376 Task 1.2: the commit this checkout moves away from. Layer 2's
+# pre-deploy gate can stop the upgrade before anything is deployed, and then
+# puts a client's daemon dir back here, so the re-run derives the same FROM
+# version (Step 3b reads it from this checkout) and meets the same gate.
+if [ "$SELF_INSTALL" != "true" ]; then
+    HOOKS_DAEMON_UPGRADE_PREVIOUS_REF="$(git -C "$DAEMON_DIR" rev-parse HEAD)"
+    export HOOKS_DAEMON_UPGRADE_PREVIOUS_REF
+fi
+
 _info "Checking out $TARGET_DISPLAY..."
 if [ "$SELF_INSTALL" = "true" ]; then
     git -C "$DAEMON_DIR" checkout "$TARGET_VERSION" --quiet
@@ -674,11 +695,13 @@ Use a fresh install instead: see CLAUDE/LLM-INSTALL.md"
 fi
 
 _info "Delegating to version-specific upgrader..."
-# Invoke Layer 2 inside an `if` so set -e does not abort on its (potentially
-# nonzero) exit. Non-zero = abort without emitting metadata.
+# Non-zero = abort without emitting metadata, with Layer 2's own exit code:
+# the pre-deploy gate's stop codes tell the caller WHY it stopped. Captured
+# with `||`, not inside `if !`, where $? is the negation's status (always 0).
 export UPGRADE_FLAGS
-if ! bash "$LAYER2_SCRIPT" "$PROJECT_ROOT" "$DAEMON_DIR" "$TARGET_VERSION"; then
-    LAYER2_EXIT=$?
+LAYER2_EXIT=0
+bash "$LAYER2_SCRIPT" "$PROJECT_ROOT" "$DAEMON_DIR" "$TARGET_VERSION" || LAYER2_EXIT=$?
+if [ "$LAYER2_EXIT" -ne 0 ]; then
     exit "$LAYER2_EXIT"
 fi
 
@@ -915,11 +938,11 @@ fi
 # ------------------------------------------------------------
 # Post-upgrade tasks (Plan 00376 Task 4.3)
 # ------------------------------------------------------------
-# A third mirror of the two blocks above. A release's post-upgrade tasks are
-# the work a clean upgrade does not do for the project, and nothing runs them,
-# so an agent running the bare script must still SEE that they exist and that
-# upgrade.md step 6 carries them out. A branch install's CLI includes the
-# UNRELEASED tasks by itself, from its own install stamp.
+# A third mirror of the two blocks above, and the post-upgrade tasks' runner
+# (Plan 00376 Task 4.1): acting on the project is the agent's job, so this
+# reports every task the upgrade crossed, with the call sites each task's
+# detection finds, and upgrade.md step 6 carries them out. A branch install's
+# CLI includes the UNRELEASED tasks by itself, from its own install stamp.
 if [ -n "$_metadata_venv_python" ] && [ -x "$_metadata_venv_python" ]; then
     # Exit 1 means tasks exist (normal!), 0 none, 2 on error or an older
     # target that has no such command; same idiom as above.
@@ -927,7 +950,8 @@ if [ -n "$_metadata_venv_python" ] && [ -x "$_metadata_venv_python" ]; then
     if _tasks_out="$("$_metadata_venv_python" -m claude_code_hooks_daemon.daemon.cli \
         check-post-upgrade-tasks \
         --from "${FROM_VERSION#v}" \
-        --to "${TARGET_SEMVER#v}" 2>&1)"; then
+        --to "${TARGET_SEMVER#v}" \
+        --project-root "$PROJECT_ROOT" 2>&1)"; then
         _tasks_rc=0
     else
         _tasks_rc=$?
@@ -938,7 +962,7 @@ if [ -n "$_metadata_venv_python" ] && [ -x "$_metadata_venv_python" ]; then
         _info "${_BOLD}Post-upgrade tasks to carry out${_NC}"
         echo "$_tasks_out"
         _info "Carry out every task per upgrade.md step 6 before reporting the upgrade done."
-        _info "Re-run manually: \"$_metadata_venv_python\" -m claude_code_hooks_daemon.daemon.cli check-post-upgrade-tasks --from ${FROM_VERSION#v} --to ${TARGET_SEMVER#v}"
+        _info "Re-run manually: \"$_metadata_venv_python\" -m claude_code_hooks_daemon.daemon.cli check-post-upgrade-tasks --from ${FROM_VERSION#v} --to ${TARGET_SEMVER#v} --project-root \"$PROJECT_ROOT\""
     elif [ "$_tasks_rc" -eq 0 ]; then
         _ok "Post-upgrade tasks: none for this upgrade."
     else

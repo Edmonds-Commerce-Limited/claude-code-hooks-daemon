@@ -72,7 +72,7 @@ the deploy worked and only the pick-up is outstanding.
 The same delay applies to CHANGES to the file, which matters if you fork it:
 editing your copy may not take effect until the next re-scan either.
 
-## What to do
+## How to handle
 
 1. **Commit the file.** `.claude/agents/` is a directory your project owns and
    commits; an uncommitted agent works for you and for nobody else on the team.
@@ -88,6 +88,11 @@ editing your copy may not take effect until the next re-scan either.
    reads only the title, status and Overview of plans that are NOT
    Complete/Cancelled/Superseded, so an archived plan covering the same ground
    is deliberately not reported.
+
+## How to confirm
+
+`.claude/agents/hooks-daemon-plan-dedupe-scout.md` is committed (or
+deliberately deleted), and one trial dispatch named the plan you expected.
 
 ## Known limitation
 

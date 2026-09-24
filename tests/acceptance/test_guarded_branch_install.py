@@ -144,9 +144,19 @@ def test_guarded_branch_install_is_stamped_and_flagged_everywhere(tmp_path: Path
     venv_python: Path | None = None
     try:
         # Layer 1 hands Layer 2 the resolved commit; the clone already sits on
-        # it, which is the state every Layer-1-driven upgrade arrives in.
+        # it, which is the state every Layer-1-driven upgrade arrives in. A
+        # branch install lists the staged UNRELEASED documents, so the
+        # pre-deploy gate stops it until the reading is confirmed (Plan 00376;
+        # the stop itself is pinned in test_upgrade_pre_deploy_phase_runs_on_layer1).
         result = _run(
-            [BASH, str(UPGRADE_VERSION_SH), str(project_root), str(daemon_dir), short_sha],
+            [
+                BASH,
+                str(UPGRADE_VERSION_SH),
+                str(project_root),
+                str(daemon_dir),
+                short_sha,
+                "--skip-reading-confirmation",
+            ],
             cwd=foreign_cwd,
             env=env,
         )
