@@ -54,6 +54,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N20 | The capture-corruption auditor judges a multi-line single-quoted string one line at a time                | B1 integration     | ⬜ Open               |
 | N21 | The semgrep QA gate passes when a rule times out                                                          | 00414 agent        | 🔄 In progress        |
 | N22 | `lsp_enforcement` takes another command's argument for a grep symbol lookup                               | Coordinator        | ⬜ Open               |
+| N23 | `recovery_cron_advisor` hands one request's lifecycle phase to another through the singleton              | Plan 00449's agent | ⬜ Open               |
 
 ## Tasks
 

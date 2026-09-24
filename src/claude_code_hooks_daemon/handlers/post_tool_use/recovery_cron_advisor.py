@@ -51,6 +51,7 @@ from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.side_effect_journal import SideEffectJournal
 from claude_code_hooks_daemon.core.utils import get_bash_command, get_file_path
+from claude_code_hooks_daemon.handlers.utils.bounded_fifo_map import BoundedFifoMap
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
 # ─── Lifecycle phase ──────────────────────────────────────────────────────────
@@ -131,7 +132,7 @@ _PROGRESS_COUNT_START: Final[int] = 1
 # Maximum number of plan folders tracked in each per-plan tracking map
 # (progress counts, creation-seen, completion-seen). Bounds memory on the
 # daemon-lifetime singleton: when exceeded, the oldest inserted entry is
-# evicted (insertion-ordered dict). A plan re-entering after eviction simply
+# evicted (BoundedFifoMap, atomically). A plan re-entering after eviction simply
 # restarts tracking for that phase — harmless for an advisory.
 _MAX_TRACKED_PLANS: Final[int] = 256
 
@@ -253,29 +254,6 @@ def _is_plan_path(file_path: str, plan_dir: str = _FALLBACK_PLAN_DIR) -> tuple[b
     if not m:
         return False, ""
     return True, m.group(1)
-
-
-# ─── Bounded per-plan tracking helper ─────────────────────────────────────────
-
-
-def _evict_oldest_tracked_entry_if_full(
-    tracked: dict[str, Any], journal: SideEffectJournal | None = None
-) -> None:
-    """Evict the oldest inserted key from a bounded per-plan tracking map.
-
-    Shared by every per-plan tracking map on this handler (progress counts,
-    creation-seen markers, completion-seen markers) so the bound
-    (_MAX_TRACKED_PLANS) and eviction policy — oldest-first, relying on
-    insertion-ordered dict iteration — live in exactly one place rather than
-    being copy-pasted per map.  No-op while the map has room. The eviction
-    is journalled when a ``journal`` is given, so a rolled-back call restores
-    the entry it evicted.
-    """
-    if len(tracked) >= _MAX_TRACKED_PLANS:
-        oldest_key = next(iter(tracked))
-        if journal is not None:
-            journal.snapshot(tracked, oldest_key)
-        del tracked[oldest_key]
 
 
 # Matches a bare Complete/Completed VALUE occupying its own line (no
@@ -432,16 +410,19 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
             ],
         )
         # Per-plan PROGRESS edit count: {plan_folder: number_of_progress_edits}.
-        # Insertion-ordered so the oldest entry can be evicted once the map
-        # exceeds _MAX_TRACKED_PLANS.
-        self._progress_counts: dict[str, int] = {}
+        # All three maps evict their oldest entry atomically once full.
+        self._progress_counts: BoundedFifoMap[str, int] = BoundedFifoMap(
+            max_entries=_MAX_TRACKED_PLANS
+        )
         # Per-plan CREATION / COMPLETION "seen" markers: {plan_folder: True}.
         # Presence of a key means that phase has already advised once for that
-        # plan folder. Insertion-ordered so the oldest entry can be evicted
-        # once a map exceeds _MAX_TRACKED_PLANS — same policy as
-        # _progress_counts, via the shared _evict_oldest_tracked_entry helper.
-        self._creation_seen: dict[str, bool] = {}
-        self._completion_seen: dict[str, bool] = {}
+        # plan folder.
+        self._creation_seen: BoundedFifoMap[str, bool] = BoundedFifoMap(
+            max_entries=_MAX_TRACKED_PLANS
+        )
+        self._completion_seen: BoundedFifoMap[str, bool] = BoundedFifoMap(
+            max_entries=_MAX_TRACKED_PLANS
+        )
         # Undo journal for the three maps above (Plan 00242 Phase 2): the
         # advice state a call records is rolled back in commit_side_effects()
         # if the Write/Edit that triggered it ends up denied.
@@ -495,20 +476,15 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
         """Record a progress edit for plan_folder and return whether to advise.
 
         Advises on the 1st progress edit and every _PROGRESS_ADVISE_INTERVAL-th
-        edit thereafter.  Bounds the tracking map at _MAX_TRACKED_PLANS via the
-        shared eviction helper.
+        edit thereafter. The journalled put records both the new count and
+        any entry it evicts, so a denied call restores the map exactly.
         """
         count = self._progress_counts.get(plan_folder)
-        self._journal.snapshot(self._progress_counts, plan_folder)
-        if count is None:
-            _evict_oldest_tracked_entry_if_full(self._progress_counts, self._journal)
-            count = _PROGRESS_COUNT_START
-        else:
-            count += 1
-        self._progress_counts[plan_folder] = count
+        count = _PROGRESS_COUNT_START if count is None else count + 1
+        self._progress_counts.put(plan_folder, count, journal=self._journal)
         return (count - _PROGRESS_COUNT_START) % _PROGRESS_ADVISE_INTERVAL == 0
 
-    def _should_advise_once(self, tracked: dict[str, bool], plan_folder: str) -> bool:
+    def _should_advise_once(self, tracked: BoundedFifoMap[str, bool], plan_folder: str) -> bool:
         """Record plan_folder as seen and return True only the FIRST time.
 
         Shared by CREATION and COMPLETION, which are one-shot state
@@ -516,15 +492,10 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
         folder, so a repeat creation or a re-save of an already-complete plan
         carries no new information and stays silent. This is deliberately NOT
         the PROGRESS rule (every Nth edit), which tracks ongoing activity
-        rather than a transition. Bounded and evicted identically to
-        _progress_counts via the shared eviction helper.
+        rather than a transition. The check and the journalled insert are one
+        step, so two concurrent writes cannot both be the first.
         """
-        if plan_folder in tracked:
-            return False
-        self._journal.snapshot(tracked, plan_folder)
-        _evict_oldest_tracked_entry_if_full(tracked, self._journal)
-        tracked[plan_folder] = True
-        return True
+        return tracked.insert_if_absent(plan_folder, True, journal=self._journal)
 
     def commit_side_effects(self, hook_input: dict[str, Any], chain_decision: Decision) -> None:
         """Keep this call's advice bookkeeping only if the Write/Edit landed."""

@@ -63,6 +63,7 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputF
 from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import UserPromptSubmitHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.handlers.utils.bounded_fifo_map import BoundedFifoMap
 from claude_code_hooks_daemon.utils import ccy_supervisor
 from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
 
@@ -191,7 +192,7 @@ _AUTOMATED_PROMPT_MARKERS: Final[tuple[str, ...]] = (
 )
 
 # Bound the per-session state map so a long-lived daemon cannot leak memory
-# across many sessions. Same FIFO-eviction shape as command_hints._fire_state.
+# across many sessions. Same BoundedFifoMap as command_hints._fire_state.
 _MAX_TRACKED_SESSIONS: Final[int] = 512
 
 _UNKNOWN_SESSION: Final[str] = "unknown"
@@ -332,8 +333,10 @@ class StandingAuthorisationsHandler(UserPromptSubmitHandlerBase):
         # the supervisor types as a real user-role line instead of hook-context.
         self._supervisor_channel_enabled: bool = _DEFAULT_SUPERVISOR_CHANNEL_ENABLED
 
-        # Per-session cadence state — bounded, FIFO.
-        self._session_states: dict[str, _SessionState] = {}
+        # Per-session cadence state — bounded, atomic FIFO eviction.
+        self._session_states: BoundedFifoMap[str, _SessionState] = BoundedFifoMap(
+            max_entries=_MAX_TRACKED_SESSIONS
+        )
 
         # Injectable wall clock (tests substitute a fake). Not a config option.
         self._clock: Callable[[], float] = time.time
@@ -365,16 +368,7 @@ class StandingAuthorisationsHandler(UserPromptSubmitHandlerBase):
 
     def _state_for(self, session_id: str) -> _SessionState:
         """Return this session's cadence state, creating it (bounded, FIFO)."""
-        existing = self._session_states.get(session_id)
-        if existing is not None:
-            return existing
-        if len(self._session_states) >= _MAX_TRACKED_SESSIONS:
-            # FIFO eviction — dicts preserve insertion order.
-            oldest = next(iter(self._session_states))
-            del self._session_states[oldest]
-        state = _SessionState()
-        self._session_states[session_id] = state
-        return state
+        return self._session_states.get_or_insert(session_id, _SessionState())
 
     def _is_due(self, state: _SessionState, now: float) -> bool:
         """Whether a reinforcement is due for an already-established session."""
