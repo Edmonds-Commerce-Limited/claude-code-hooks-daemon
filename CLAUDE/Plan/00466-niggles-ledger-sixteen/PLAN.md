@@ -38,8 +38,8 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | --- | --------------------------------------------------------------------------------------------------------- | ------------------ | --------------------- |
 | N1  | `resolve_venv_python`'s fallback accepts a venv interpreter that cannot run on this host                  | Plan 00457's agent | ⬜ Open               |
 | N2  | `setup_worktree.sh` tells every agent to run the full suite through the denied `run_all.sh`               | Coordinator        | 🔄 Graduated to 00463 |
-| N3  | `goal_injection` treats any edit of an In Progress plan as the plan starting, and displaces the live goal | Coordinator        | 🔄 In progress        |
-| N7  | The regenerated CLAUDE.md guidance block is not deterministic, so a restart commits a reorder             | Coordinator        | 🔄 In progress        |
+| N3  | `goal_injection` treats any edit of an In Progress plan as the plan starting, and displaces the live goal | Coordinator        | ✅ Remedied           |
+| N7  | The regenerated CLAUDE.md guidance block is not deterministic, so a restart commits a reorder             | Coordinator        | ✅ Remedied           |
 | N8  | `reference_repo_freshness` says BLOCKED on a call it allows                                               | Coordinator        | ⬜ Open               |
 | N9  | `docs_qa` judges gitignored markdown, so installing a Claude Code plugin fails local full QA              | Coordinator        | 🔄 In progress        |
 | N10 | A wildcard in the middle of a protected filename gets past `secret_file_guard`                            | 00466 review       | 🔄 In progress        |

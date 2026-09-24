@@ -78,6 +78,20 @@ soundness. Both `registry.py` glob loops are now wrapped in `sorted(...)`
 too, so discovery order is deterministic at its source as well as at
 every rendering layer.
 
+**Also fixed (00466 review, nit n6):** the promoted tier's alphabetical
+sort lost the reason a handler is promoted at all — the config author's
+own `promoted_handlers` list order, chosen so the most-triggered guidance
+reads first. `_collect_tiers()` now sorts the promoted tier by each
+entry's INDEX in `self._promoted_handlers_order` (the author-authored
+config list, kept alongside the pre-existing `frozenset` used for the O(1)
+membership check) instead of alphabetically — still a complete,
+deterministic total order, because that config list is a fixed value, not
+a filesystem walk. The progressive and fallback tiers are unaffected;
+alphabetical is the right call there, since nothing about them carries
+author-chosen intent. Pinned by
+`test_promoted_tier_follows_the_authors_promoted_handlers_order` (RED
+against the pre-fix alphabetical code).
+
 ### N3 — `goal_injection` treats any edit of an In Progress plan as the plan starting, and displaces the live goal
 
 **Found by the coordinator**, live. The supervisor had set the goal to Plan
@@ -157,6 +171,83 @@ tests, 1 RED against the pre-fix code) pins the contract. Its Edit path
 (compares `PlanDoc.parse(current).status` against the proposed status).
 `plan_qa_edit.py`'s "In Progress" occurrences are guidance prose, not
 status-detection logic.
+
+**Second review pass (majors M2/M3, minors m4/m5, nits n3/n4/n7)**, fixed
+together on the same branch:
+
+- **M2 — a daemon restart silently disabled the retirement refresh.**
+  `_maybe_refresh_on_retirement` gated on the IN-MEMORY `self._fired`
+  latch, which a restart (`daemon_restart_verifier` requires one before
+  every commit) empties, and N3's flip-only rule meant a later non-flip
+  write no longer re-latched either — so a plan flipped in one daemon
+  lifetime and completed in the next never dropped out of the combined
+  `/goal` signal. Fixed by asking the PERSISTENT `GoalLedger` instead
+  (`GoalLedger.has_live_entry`, via the new `_session_ledgered_plan`),
+  which survives the restart the latch does not. Pinned by
+  `test_completing_a_plan_after_a_daemon_restart_still_refreshes_signal`
+  (a fresh `GoalInjectionHandler` instance simulates the restart; RED
+  against the pre-fix code).
+- **M3 — the "goal survives a session restart" contract was silently
+  dropped, not replaced.** Plan 00269 Task 2.1 deliberately chose "the
+  first edit to an already-In-Progress plan in a NEW session re-fires" so
+  a resumed session got its `/goal` back; N3's flip requirement removed
+  that with no replacement, and the original release note wrongly called
+  it "no action needed". Restored via `GoalLedger.reassert_session` (two
+  new ledger methods: `session_has_entries` decides whether THIS session
+  is new at all; `reassert_session` transfers ownership of the plan's
+  already-live entry with NONE of `record_emission`'s displacement
+  bookkeeping) and `_maybe_reassert_for_new_session`: a session with no
+  ledger entries whatsoever that touches an already-live plan without
+  itself producing a real flip gets its own signal written, no new ledger
+  record, no "GOAL DISPLACED" advisory, and no risk of wrongly displacing
+  some OTHER live plan. A session that already has its own live goal is
+  unaffected. Pinned by three new tests in
+  `TestNewSessionReassertion` (one RED against the pre-fix code) plus
+  three new `GoalLedger` test classes. Release note 13 and the module
+  docstring corrected to describe the restored contract instead of
+  claiming no behaviour changed.
+- **m4 — an Edit whose `old_string` carried only the bare status VALUE
+  (no `**Status**:` prefix) missed a genuine flip.** `PlanDoc.parse` on
+  `old_string` alone then found no Status line and read "never touched
+  it". Fixed by reconstructing the pre-edit text from what is already on
+  disk when this happens — reversing the SAME substitution the Edit tool
+  performed (`_reconstruct_pre_edit_text`, honouring `replace_all`) — and
+  parsing that instead of giving up. Pinned by
+  `test_edit_whose_old_string_is_only_the_status_value_still_emits` (RED
+  against the pre-fix code) plus a no-op control test.
+- **m5 — a Write in a nested repository (a linked worktree, any nested
+  clone) read HEAD from the PROJECT ROOT's repo, which never tracks the
+  nested path, so it always answered "absent" and misread every write
+  there as a genuine flip.** `project_relative_head_text` now resolves
+  the FILE's own enclosing repository via `GitRepo.resolve_for` (the same
+  `git -C <dir> rev-parse --show-toplevel` this project already
+  centralises) and reads HEAD relative to THAT root; a project root that
+  is itself a plain checkout is unaffected. Pinned by
+  `test_a_file_in_a_nested_repository_reads_from_its_OWN_head` (RED
+  against the pre-fix code) in `test_git_facts.py`, which also fixes
+  `recovery_cron_advisor`'s Write-path COMPLETION check for the same
+  reason (it shares the helper).
+- **n3 — `git_facts.py` imported `core.project_context`, breaking its own
+  documented "docs QA depends on this module alone" claim.**
+  `project_relative_head_text` now takes `project_root` as a plain
+  parameter instead — both callers already resolve
+  `ProjectContext.project_root()` for other purposes, so nothing is lost.
+- **n4 — acknowledged, not changed.** `_is_inside_project` fails open on
+  an uninitialised `ProjectContext`; `project_relative_head_text` lets it
+  propagate (by design, from the first review pass). Both new M2/M3
+  helpers (`_session_ledgered_plan`, `_maybe_reassert_for_new_session`)
+  now follow the SAME unguarded-propagation convention for consistency
+  (and because `error_hiding` flagged the None-returning one) — the
+  review itself called this "only reachable uninitialised", i.e. never on
+  the real dispatch path, so the two conventions differing is intentional
+  per the first review's explicit design, not an oversight.
+- **n7 — release note 13's title said "already-terminal-status"; In
+  Progress is not terminal.** Corrected to match the filename's wording.
+
+`TestStatusFlipDetection`, `TestCombinedGoalSignal`,
+`TestNewSessionReassertion`, `TestWriteCompletionIsTransitionBased`,
+`TestProjectRelativeHeadText` and the new `GoalLedger` test classes all
+pass; 518 tests across every touched handler/utils/core/daemon test file.
 
 ### N2 — `setup_worktree.sh` tells every agent to run the full suite through `run_all.sh`
 

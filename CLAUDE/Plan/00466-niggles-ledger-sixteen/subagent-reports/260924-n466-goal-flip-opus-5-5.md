@@ -1,9 +1,10 @@
 # Subagent report: Ledger 00466 N3/N7 — goal_injection real-flip fix, CLAUDE.md guidance order
 
-**Agent**: Claude Opus 5.5 (N3, N3 follow-up), Claude Sonnet 5 (N7)
+**Agent**: Claude Opus 5.5 (N3, N3 follow-up), Claude Sonnet 5 (N7, review fix-up)
 **Task**: Fix `goal_injection` firing on any edit of an already-In-Progress
 plan (niggle N3), then fix the CLAUDE.md guidance block's nondeterministic
-order (niggle N7), TDD-first, in worktree
+order (niggle N7), then fix everything the pre-merge review found against
+this branch, TDD-first, in worktree
 `worktree-n466-goal-flip`.
 
 ## RED evidence
@@ -381,5 +382,193 @@ the regenerated `.claude/HOOKS-DAEMON.md`. Ledger update (PLAN.md row →
 Remedied, NIGGLES.md N7 Remedy paragraph, journal entry via `mkplan.bash --journal`, this report) lands in the commit that follows it.
 
 Daemon restarted and confirmed `Daemon: RUNNING` before the commit.
+
+## Pre-merge review fix-up (majors M2/M3, minors m4/m5/m6, nits n3/n6/n7)
+
+The review at `subagent-reports/260924-n466-review-opus-5-5.md` (0 blocker,
+4 major, 7 minor, 7 nit across both the N3/N7 and N4/N5/N6 fix branches)
+found real regressions against this branch. Fixed all of them; merged main
+first to pick up its restored N3/N7/N8 headings and the N10/N11 rows
+before resolving three further conflicts (JOURNAL day-file, NIGGLES.md,
+PLAN.md) the same way as the earlier merge.
+
+### M2 — retirement refresh did not survive a daemon restart
+
+`_maybe_refresh_on_retirement` gated on `self._fired`, an in-memory latch
+a restart empties; N3's flip-only rule meant a later non-flip write never
+re-latched either. Added `GoalLedger.has_live_entry(session_id, plan_number)` (read-only, no reconciliation) and
+`GoalInjectionHandler._session_ledgered_plan`, which asks the persisted
+ledger instead. RED: `test_completing_a_plan_after_a_daemon_restart_still_refreshes_signal`
+uses a FRESH `GoalInjectionHandler` instance for the completing write (in-
+memory latch genuinely empty, same ledger/untracked dir) — failed against
+the pre-fix code, `00296` stayed in the combined signal after completing.
+
+### M3 — a resumed session lost its `/goal` entirely
+
+Plan 00269 Task 2.1's own PLAN.md records the intended trade: "the first
+edit to an already-In-Progress plan in a NEW session re-fires... that is
+what makes the goal survive session restarts." N3's flip requirement
+removed that path outright, and my own docstring/release-note claims that
+nothing changed were wrong (M3's own finding). Chose option (a) from the
+review's fix direction — reassert from the ledger, no displacement —
+implemented as two new `GoalLedger` methods:
+
+- `session_has_entries(session_id)` — has the ledger EVER recorded an
+  emission for this session (retired entries count too — a session that
+  fully completed one plan is not "new" either).
+- `reassert_session(session_id, plan_number)` — finds the plan's still-
+  live entry (if any) and reassigns its `session_id`, with ZERO
+  displacement bookkeeping — the defining difference from
+  `record_emission`, pinned by its own unit test
+  (`test_does_not_displace_any_other_live_plan`).
+
+`GoalInjectionHandler._maybe_reassert_for_new_session` calls both: a
+session with no entries at all that touches an already-live plan without
+producing a real flip gets `reassert_session` called and, if it found an
+entry, its own combined signal written via the existing
+`_write_combined_signal` — no `_ledger_record`, no advisory. RED:
+`TestNewSessionReassertion.test_a_new_session_touching_an_already_live_plan_gets_its_own_signal`
+failed with `FileNotFoundError` against the pre-fix code (no signal file
+ever appeared for the new session). Two more tests pin the two ways this
+could go wrong silently: a session with its OWN live goal must not
+reassert an unrelated plan, and reasserting must not displace some OTHER
+live plan (checked directly against the ledger, not just the reasserting
+session's own signal, since nothing re-renders another session's stale
+signal file).
+
+Corrected release note 13 and the module docstring, which both said "no
+action needed" / "exactly as before" — false once M3 was understood.
+
+### m4 — `old_string` carrying only the bare status value
+
+`PlanDoc.parse(old_string)` needs the whole `**Status**:` line; an agent
+quoting just `"Not Started"` as `old_string` has no Status line in the
+parsed fragment, so the old code read "never touched it". Added
+`_reconstruct_pre_edit_text(tool_input, post_edit_text)`: reverses the
+edit against the file's current (post-edit) on-disk content — the exact
+inverse of `would_be_content`'s forward transform, honouring
+`replace_all` — and parses THAT when `old_string` alone has no Status
+line. `None` (irreversible: `new_string` not found in the post-edit text)
+reads as "not a flip", the same conservative default the old code used.
+RED: `test_edit_whose_old_string_is_only_the_status_value_still_emits`
+failed against the pre-fix code (no signal). A no-op control test pins
+that a value-only edit which never actually changed the status still
+emits nothing.
+
+### m5 — a Write in a nested repository read the wrong repo's HEAD
+
+`project_relative_head_text` resolved membership against the PROJECT
+ROOT, then ran `git show HEAD:...` against that SAME root's repo — wrong
+whenever the file's real containing repo is a nested one (a linked
+worktree under `untracked/worktrees/`, any nested clone): the project
+root's repo never tracked that path, so it always answered "absent",
+misreading the write as a genuine flip. Fixed with `GitRepo.resolve_for`
+(already-centralised `git -C <dir> rev-parse --show-toplevel`) to find
+the file's OWN toplevel before reading HEAD; a project root that is
+itself a plain checkout is unaffected (resolves to itself). RED:
+`test_a_file_in_a_nested_repository_reads_from_its_OWN_head` in
+`test_git_facts.py` — asserted `None` against the pre-fix code where the
+real committed content was expected. Fixes `recovery_cron_advisor`'s
+Write-path COMPLETION check for the same reason, since it shares the
+helper.
+
+### m6 — N7's own narrative misattributed the root cause
+
+The review checked this claim against the actual `pkgutil` source:
+`_iter_file_finder_modules` calls `filenames.sort()`, so `pkgutil` was
+never the unsorted source. The real one is `HandlerRegistry.register_all`'s
+own two `event_dir.glob("*.py")` loops (`registry.py:467`, `:511`), which
+iterate in raw `os.scandir` order — a THIRD loop in the same file
+(`iter_builtin_handler_classes`, line 198) already wraps its glob in
+`sorted(...)`, so the inconsistency was local to this one function.
+Wrapped both remaining loops in `sorted(...)`. RED:
+`test_register_all_handler_order_is_independent_of_glob_order` patches
+`Path.glob` to return a reversed listing and asserts registration order
+is unaffected — failed against the pre-fix code (`normal_order != reversed_order`). Corrected the N7 ledger entry and commit-message
+narrative; the injector- and docs_generator-level sorts from the first
+pass were already sound regardless of this misattribution (the review's
+own assessment, verified independently).
+
+### n3 — `git_facts.py` stopped being core-free
+
+Its own docstring claims "docs QA depends on this module alone"; my
+earlier `project_relative_head_text` addition imported
+`core.project_context` to call `ProjectContext.project_root()`, silently
+breaking that claim (not caught by
+`test_qa_package_dependency_direction.py`, which only forbids `plan_qa`
+imports, not `core` ones — a real gap, but out of this branch's scope to
+close). Fixed by taking `project_root: Path` as a parameter instead; both
+callers (`goal_injection.py`, `recovery_cron_advisor.py`) already resolve
+`ProjectContext.project_root()` unguarded for other purposes, so nothing
+is lost. Updated both call sites and every test that monkeypatched
+`utils.git_facts.ProjectContext.project_root` to patch the CALLER's own
+import instead (or, in `test_git_facts.py`, to just pass the fixture's
+`repo` path directly — no monkeypatch needed at all now).
+
+### n6 — the promoted tier lost the config author's intent
+
+Alphabetising the promoted tier (the N7 fix) satisfies determinism but
+discards WHY a handler is promoted at all — the author's own
+`promoted_handlers` list order, chosen so the most-triggered guidance
+reads first. Kept the frozenset for the O(1) membership check in the
+per-handler loop, and added `self._promoted_handlers_order: tuple[str, ...]` alongside it purely for the sort key, computed once over the much
+smaller `promoted` list. RED:
+`test_promoted_tier_follows_the_authors_promoted_handlers_order` (a
+config with `zzz` listed before `aaa`) failed against the alphabetical
+code (`zzz` sorted after `aaa` despite the config saying otherwise).
+
+### n7 — release note title said "terminal-status"
+
+In Progress is not a terminal status; the filename's own wording was
+already correct. Retitled the note body's H1 to match, and rewrote it
+comprehensively to describe M2/M3's preserved (not just removed)
+behaviour instead of the stale "no action is needed" line.
+
+### n4 — read, understood, deliberately left as designed
+
+The two failure conventions genuinely differ (`_is_inside_project` fails
+open on an uninitialised `ProjectContext`; `project_relative_head_text`
+lets `RuntimeError` propagate) because the FIRST review pass explicitly
+chose propagation for `project_relative_head_text`, reasoning that
+`ProjectContext` is always initialised on the real dispatch path and a
+`RuntimeError` there means genuine misconfiguration `core/chain.py`
+already handles safely. The review itself filed this as the LOWEST
+severity (nit) and noted it is "only reachable uninitialised". Rather
+than re-litigate that design decision, made the two NEW M2/M3 helpers
+(`_session_ledgered_plan`, `_maybe_reassert_for_new_session`) follow the
+SAME propagate convention as `project_relative_head_text` — partly for
+internal consistency, partly because `error_hiding` flagged the
+None-returning `try`/`except RuntimeError` I had originally written in
+`_maybe_reassert_for_new_session` (return type `-> None`, so a bare
+`return` in the except branch is literally "return None on error"); the
+existing `_ledger_record`/`_write_combined_signal` pattern (pre-existing,
+unmodified) returns `[]`/calls a fallback instead of `None` and was not
+flagged, which is why it hadn't surfaced before.
+
+### Targeted QA and regression
+
+```
+./scripts/qa/llm_qa.py format lint type_check pyright magic_values error_hiding docs_qa plan_qa
+```
+
+`QA: 8/8 PASSED`, zero new exclusions (`error_hiding` needed the
+`_session_ledgered_plan`/`_maybe_reassert_for_new_session` restructure
+above before it passed clean).
+
+Combined regression across every touched test file — `test_goal_injection.py`,
+`test_recovery_cron_advisor.py`, `test_git_facts.py`, `test_goal_ledger.py`,
+`test_claude_md_injector.py`, `test_docs_generator.py`, `test_registry.py`,
+and the full controller test suite (`controller.py` was not touched again
+this pass, but the earlier N7 fix stands) — **518 passed**.
+
+Regenerated `.claude/HOOKS-DAEMON.md` and the CLAUDE.md `<hooksdaemon>`
+block in this worktree; byte-identical to the already-committed tree (this
+project's actual `promoted_handlers` config and on-disk handler file
+listing were unaffected by the m6/n6 ordering fixes — the general fix is
+what the new tests pin, not a visible diff here). Daemon restarted and
+confirmed `Daemon: RUNNING` before the commit.
+
+Commits: `7eb246dc` (the review fix-up); ledger update follows in the
+commit that adds this section.
 
 HEAD SHA at report time: see the commit that adds this update.
