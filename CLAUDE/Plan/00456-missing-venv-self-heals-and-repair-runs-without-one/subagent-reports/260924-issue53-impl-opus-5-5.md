@@ -368,3 +368,12 @@ The reviewer's probes after the fix: `review456_watchdog_orphan_probe.py`
 finds no build processes at 4s or at 8s, and "watchdog fired after its
 owner died: False". `review456_macos_bound_probe.py` still shows the lock
 released after 2.2s, `failed`, "timed out", and no job-control noise.
+
+**Full QA after N7-N9**, on `0686445d`. It was one run, 13:23 to 13:41,
+polled in the foreground, after restarting this worktree's daemon, and
+with no commits or restarts during it.
+
+```
+✅ tests: 25711 passed, 0 failed, 24 skipped | coverage: 95.1%
+QA: 36/36 PASSED
+```
