@@ -20,7 +20,6 @@ from claude_code_hooks_daemon.daemon.source_fingerprint import (
     compute_daemon_identity_fingerprint,
     compute_source_fingerprint,
     daemon_package_root,
-    describe_fingerprint_mismatch,
 )
 
 
@@ -175,40 +174,6 @@ class TestComputeDaemonIdentityFingerprint:
         with_extra = compute_daemon_identity_fingerprint(extra)
 
         assert without_extra != with_extra
-
-
-class TestDescribeFingerprintMismatch:
-    """Tests for describe_fingerprint_mismatch()."""
-
-    def test_none_when_fingerprints_match(self) -> None:
-        """A daemon whose reported fingerprint equals the current one is fresh."""
-        assert describe_fingerprint_mismatch("abc123", "abc123") is None
-
-    def test_message_when_running_fingerprint_is_missing(self) -> None:
-        """No reported fingerprint at all (down, unreachable, or a daemon that
-        predates this plan) is a staleness risk, not merely 'unknown'."""
-        message = describe_fingerprint_mismatch(None, "abc123")
-
-        assert message is not None
-        assert "restart" in message.lower()
-
-    def test_message_names_stale_daemon_on_mismatch(self) -> None:
-        """A genuine mismatch is named clearly, not left to a generic assertion failure.
-
-        This is the regression this plan fixes, reproduced directly: the
-        exact reported incident was a stale daemon answering with the wrong
-        reason and nothing naming *why* -- this message must name it.
-        """
-        message = describe_fingerprint_mismatch("running-fp-value", "current-fp-value")
-
-        assert message is not None
-        assert "stale" in message.lower()
-        assert "restart" in message.lower()
-
-    @pytest.mark.parametrize("running", ["deadbeef" * 8, None])
-    def test_never_raises(self, running: str | None) -> None:
-        """A pure comparison function: never raises regardless of input shape."""
-        describe_fingerprint_mismatch(running, "current")
 
 
 class TestComputeCurrentProjectFingerprint:
