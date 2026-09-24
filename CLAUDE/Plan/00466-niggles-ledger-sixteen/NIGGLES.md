@@ -3,6 +3,182 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
+### N6 — `enforce_llm_qa` denies a PROSE mention of `run_all.sh` inside an unrelated command's own argument
+
+**Found by the coordinator**, live: a `CLAUDE/Plan/mkplan.bash --journal ... --title "..."` journal entry was denied under `R-NPM...`-style project-handler
+enforcement, naming `run_all.sh`, even though the runner's name appeared only
+inside the quoted `--title` prose, not as anything the command would execute.
+
+**Cause** (`.claude/project-handlers/pre_tool_use/enforce_llm_qa.py`,
+`_is_inspection_only` and its call site in `matches()`, pre-fix): the handler
+split a command into top-level segments, then for any segment CONTAINING the
+substring `run_all.sh` ANYWHERE, checked only the segment's OWN leading word
+against an inspection/VCS allowlist (`cat`, `grep`, `git`, ...). A word
+appearing inside a quoted argument to an unrelated command was invisible to
+that check — the leading word of `CLAUDE/Plan/mkplan.bash --title "... run_all.sh ..."` is `mkplan.bash`, which is on no allowlist, so the whole segment was
+treated as a potential invocation and denied. The same shape denied a `gh issue comment --body "... run_all.sh ..."` (a plain prose mention) and a
+`bash scripts/qa/run_tests.sh; echo "see run_all.sh notes"` compound (a
+DIFFERENT script's wrapper plus unrelated prose in the next segment).
+
+**Remedy (implemented)**: replaced the substring-plus-allowlist check with a
+`shlex`-based real-invocation detector (`_has_real_invocation` /
+`_segment_executes_script`), reusing this project's already-established
+`shlex.split()` + `try/except ValueError` tokenisation pattern
+(`project_containment.py`'s `_tokenise`) rather than a third hand-rolled
+parser. A segment now matches only when the script is named at the command's
+own HEAD, or as an argument to a wrapper (`bash`/`sh`/`env`/`timeout`/`nice`/
+`exec`) — recursing into a wrapper's `-c` subshell argument and into any
+`$(...)`/backtick substitution's inner text, since bash runs both before the
+rest of the line. A prose word that merely CONTAINS the script's name inside a
+longer shlex token (a whole quoted `--title "..."` phrase is ONE token) is no
+longer conflated with a token that IS the script's path. This also let the
+old `_INSPECTION_COMMANDS`/`_VCS_COMMANDS` allowlists be deleted outright
+(YAGNI): a command whose head is not a wrapper and does not itself name the
+script now correctly can't execute it, with no enumerated list of safe verbs
+needed. A segment that can't be tokenised safely falls back to the prior
+conservative substring check (deny), so an unparsed edge case still fails
+closed rather than opening a bypass.
+
+One pre-existing acceptance-test fixture (`get_acceptance_tests()`, "Block
+run_all.sh") turned out to be the SAME false-positive class in miniature: it
+used `echo "./scripts/qa/run_all.sh"` as a "safe to execute" DENY case, which
+only denied because `echo` happened to be absent from the old allowlist — a
+prose mention, not an invocation. Replaced with `bash -n scripts/qa/run_all.sh`
+(a genuine wrapper-invocation shape; `-n` keeps it parse-only and harmless if
+the block ever regresses).
+
+RED tests (confirmed failing pre-fix, passing after), added to
+`.claude/project-handlers/pre_tool_use/test_enforce_llm_qa.py`:
+`test_does_not_match_a_prose_mention_in_a_quoted_title_flag` (the exact live
+shape) and `test_does_not_match_an_unrelated_wrapper_invocation`. Four
+companion "must still deny" regression guards were written alongside (already
+passing pre-fix, kept as pins): a `gh --body` prose mention, `cd ... && ./run_all.sh`, `sh -c './scripts/qa/run_all.sh'`, and a bare `$(./run_all.sh)`
+substitution. All 41 tests in that file pass, and all 198 project-handler
+tests pass (`bin/hooks-daemon test-project-handlers --verbose`).
+
+### N5 — SECURITY FAIL-OPEN: an empty path-mention token crashes `secret_file_guard.matches()`, skipping the whole guard for that write
+
+**Found by 00463's agent** live, reported to the coordinator; reproduced here
+via the daemon after the coordinator saved the exact triggering `tool_input`s
+and replayed them for a full traceback. Three Edits to
+`subagent_full_qa_blocker.py` (a WIP file inside a worktree) each drew
+`Handler exception: ValueError: no path specified` as PreToolUse:Edit
+context. The added content declared tuples of shell/Python path-expansion
+operands, e.g. `_HOME_PREFIXES: Final[tuple[str, ...]] = ("~/", "$HOME/", "${HOME}/", "$PWD/", "${PWD}/")` and `_UNSEEN_CD_PREFIXES: Final[tuple[str, ...]] = ("$", "~", "` `")`.
+
+**Cause**, traced through a live daemon log:
+`chain.py:431 handler.matches (block-secret-file-read)` →
+`secret_file_guard.py _matched_pattern_and_route` → `_script_content_mention`
+→ `secret_file_matching.py find_protected_mention_detail` →
+`iter_protected_mentions` → `_token_mention`: `path_matches_globs(form, ...)`
+with `form == ""` → `path_exclusion.py _candidate_paths`:
+`os.path.relpath(raw, root)` with `raw == ""` →
+`ValueError: no path specified` (`os.path.relpath` rejects an empty PATH
+argument outright, regardless of `start`).
+
+The empty `form` came from `_normalised_token_forms`: for a token EQUAL to
+one of `_HOME_PREFIXES` (e.g. the tokeniser isolates `"~/"` cleanly out of a
+quoted Python string literal, since neither `~` nor `/` is a token
+delimiter), `token[len(prefix):]` on a token exactly as long as the prefix is
+`""`. That empty spelling then reached the glob matcher, which had never been
+asked to answer for an empty path before.
+
+**Severity — this is a fail-OPEN, not noise.** The exception is raised inside
+`matches()`, not `handle()`. The daemon's per-handler catch
+(`core/chain.py`) is non-strict by default for this path: it logs the
+exception as context and moves on to the NEXT handler, treating this one as
+"did not match". So a Write/Edit whose content contains an empty-yielding
+operand token SKIPS `secret_file_guard` ENTIRELY for that call — including
+any genuine protected-path mention elsewhere in the same content. An agent
+could not have engineered this to bypass the guard (nothing here is a
+crafted evasion — `~/`, `$PWD/` and friends are ordinary path-handling
+vocabulary), but a real protected mention sitting anywhere in the same
+Write/Edit as one of these operands would have gone undetected.
+
+**Remedy (implemented), both layers per the coordinator's instruction:**
+
+(a) `_normalised_token_forms`
+(`src/claude_code_hooks_daemon/utils/secret_file_matching.py`) never emits an
+empty form: the home/pwd-prefix-stripping branch now requires
+`len(token) > len(prefix)`, the same non-empty guard shape the adjacent
+`./`-stripping branch already used.
+
+(b) `_candidate_paths` (`src/claude_code_hooks_daemon/utils/path_exclusion.py`)
+is now TOTAL on an empty `file_path`: it returns early with a single empty
+candidate (matching nothing) rather than calling `os.path.relpath` at all —
+defence in depth, so no OTHER caller of `path_matches_globs`/`is_path_excluded`
+can hit the same crash by a different route.
+
+(c) Fail-safe pinned with a RED test: content carrying BOTH a home-prefix
+token and a genuine protected mention (`id_rsa`) elsewhere in the same blob
+must still deny — confirmed failing (crashing) before the fix, passing
+after. A corpus test iterates every operand shape from the live payloads
+(alone, inside a quoted string, inside a call) asserting the mention scan
+never raises.
+
+RED tests: `tests/unit/utils/test_path_exclusion.py ::TestEmptyAndNoMatch::test_empty_file_path_with_a_project_root_does_not_raise`
+and `tests/unit/utils/test_secret_file_matching.py ::TestBareHomePrefixTokenDoesNotCrash` (6 tests). Full
+`test_secret_file_matching.py` (196), `test_path_exclusion.py` (55) and
+`test_secret_file_guard.py` (76) pass — 327 total.
+
+### N4 — `secret_file_guard`'s leading-wildcard overlap check denies an unrelated Python splat expression as `*.vault-password`
+
+**Found by a peer agent** working in a worktree, reported to the coordinator;
+reproduced independently here before fixing (per instruction, its account was
+treated as a hypothesis, not a fact). An Edit adding the Python expression
+`*words[position + 1 :]` (a plain unpacking of a slice, e.g. `rest = [words[0], *words[position + 1 :]]`) to a `.py` file was denied under
+`R-SECRET-SCRIPT-AUTHOR`, naming the protected glob `*.vault-password`. The
+same shape denies the equivalent Bash mention (`cat 'rest = [words[0], *words[position + 1 :]]'`) and, stripped of any bracket at all, a bare
+`def f(*wordlist): pass` or `call(*wordlist)`.
+
+**Cause** (`src/claude_code_hooks_daemon/utils/secret_file_matching.py`,
+`_glob_token_overlaps_stem` and its call site in `_token_mention`): the
+tokeniser splits `*words[position + 1 :]` on whitespace into `*words[position`,
+`+`, `1` and `:]` (`_tokenise`'s delimiter set includes space but not `[`/`]`/
+`:`/`+`). The first token starts with a literal `*` (Python's unpacking
+operator, not a shell glob), so `_has_leading_wildcard` reports it as a
+leading-wildcard token. Its literal residue, after stripping `*`/`[`, is
+`wordsposition`. The leading-wildcard branch of `_glob_token_overlaps_stem`
+then checks whether the STEM's suffix overlaps the residue's PREFIX
+(`_suffix_prefix_overlap_length`) — and `.vault-password`'s last 4 characters
+(`word`, from "pass-**word**") exactly equal `wordsposition`'s first 4
+characters, clearing the 2-char minimum. The same coincidence reproduces
+without any bracket: `*wordlist`'s residue `wordlist` shares the same 4-char
+`word` overlap.
+
+That overlap check was correct for the case it was built for — a token like
+`*passXXX` against a BOTH-EDGES pattern (`*vault_pass*`), where the pattern's
+own trailing wildcard can absorb whatever the token's residue doesn't cover
+after the overlap. It was applied uniformly to every leading-wildcard pattern
+though, including `*.vault-password` — the ONLY pattern in the shipped
+defaults with a leading wildcard and NO trailing one. For such a pattern a
+matching real filename must end EXACTLY at the stem (nothing can follow), so
+a token with no trailing wildcard of its own (as `*words[position`/`*wordlist`
+both are — the whole point of a leading-only token) can only be a genuine
+truncation if its ENTIRE residue is a literal suffix of the stem, not merely a
+short boundary coincidence. That stronger case was already covered by the
+pre-existing substring+fnmatch check earlier in the same function (confirmed:
+no test in the existing suite exercises a leading-only token against a
+leading-only pattern needing the overlap branch specifically) — so the overlap
+branch contributed nothing there but this false positive.
+
+**Remedy** (implemented): `_glob_token_overlaps_stem` takes a new
+`pattern_has_trailing_wildcard` parameter; its leading-wildcard branch now
+also requires `pattern_has_trailing_wildcard or stem_basename.endswith(residue)`
+before counting the overlap as a mention. The call site passes
+`_has_trailing_wildcard(pattern)` — a function already used elsewhere in the
+same module for the token's own edges, reused here for the pattern's. This is
+parametrised on the pattern's own shape, not special-cased to
+`.vault-password`, so any future or project-configured leading-wildcard-only
+glob is covered the same way. RED tests (confirmed failing pre-fix, passing
+after):
+`TestBashMentionsProtectedPath::test_leading_wildcard_python_splat_operator_is_not_matched`
+(the reported shape plus the bracket-free forms) and a paired
+`..._full_suffix_of_anchored_stem_still_matched` regression guard proving a
+genuine truncation of an anchored pattern (`*password`, `*ult-password`
+against `*.vault-password`) still denies. Full `test_secret_file_matching.py`
+(190 tests) and `test_secret_file_guard.py` (76 tests) pass.
+
 ### N3 — `goal_injection` treats any edit of an In Progress plan as the plan starting
 
 **Found by the coordinator**, live. The supervisor had set the goal to Plan
