@@ -125,12 +125,6 @@ class TestTheCoordinatorsFullGateUnderAnArmedOrchestrator:
         assert result.result.decision == Decision.ALLOW, result.result.reason
         assert _verdict(result, _ORCHESTRATOR) == Decision.ALLOW
 
-    def test_the_orchestrator_does_not_record_the_full_gate_as_a_would_be_denial(
-        self, armed_router: EventRouter
-    ) -> None:
-        result = _route(armed_router, _event("Bash", {"command": _FULL_GATE}))
-        assert "would have been denied" not in " ".join(result.result.context)
-
 
 class TestTheControlsProveTheChainIsArmed:
     def test_a_main_thread_edit_is_denied_by_the_orchestrator(

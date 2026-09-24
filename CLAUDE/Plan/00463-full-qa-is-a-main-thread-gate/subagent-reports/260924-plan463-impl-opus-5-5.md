@@ -63,26 +63,27 @@ It runs pytest on the selection and writes `untracked/qa/changed_tests.json`.
   ticked with the Workflow point recorded as unmeasured.
 - **Default:** disabled, with empty patterns. Client QA commands vary, so a default
   populated from this repo's commands would never fire in a client project.
-- **Orchestrator-only mode (00418), corrected.** The first version of this report said
-  "no deadlock", and the only test pinning it ran the handler on its own. The lead then
-  saw live evidence that seemed to contradict it. On every main-thread Bash call, the
-  simulate record said "main thread would have been denied — Bash: ...".
+- **Orchestrator-only mode (00418): no deadlock, now proven on the real chain.** The
+  first version of this report said "no deadlock", and that stands; the coordinator's
+  reviewer confirmed it against the real handler. The only test pinning it ran the
+  handler on its own, though. Meanwhile, on every main-thread Bash call, the simulate
+  record said "main thread would have been denied — Bash: ...", which looked like
+  contrary evidence.
   - **Cause.** `orchestrator_simulate.py` `handle()` printed that text for every call
     `matches()` flags. The blocking policy (`_would_deny`) refuses only Write, Edit and
     NotebookEdit outside `CLAUDE/Plan/`. The record was false; the policy was not.
-  - **Fix.** The policy is now `_policy_denies()`, and `_would_deny()` is that policy gated
-    by the switch. Simulate mode says "would have been denied" only when the policy would
-    deny. Otherwise it says "recorded, not a would-be denial", and Bash calls add "Bash is
-    never denied by this mode". `TestTheSimulatedRecordTellsTheTruth` pins the record to the
-    armed verdict across the tool surface.
-  - **The real policy against the real gate.**
+  - **Not fixed here.** A fix to the simulate message was committed at `14c0b806` and then
+    reverted at the coordinator's direction. The coordinator is filing the simulate/live
+    disagreement as its own defect. `orchestrator_simulate.py` is back to its content at
+    `644a5939`.
+  - **The real policy against the real gate (kept).**
     `tests/integration/test_full_qa_gate_is_never_deadlocked.py` builds the live PreToolUse
     chain: library handlers via `register_all()` on this repo's config, plus all discovered
     project handlers, with orchestrator-simulate ARMED. The main thread's
     `./scripts/qa/llm_qa.py all` gets ALLOW, both from the chain and from the orchestrator.
     Two controls show the chain is armed: a main-thread Edit is denied
     (R-ORCHESTRATOR-MAIN-THREAD-WRITE), and a sub-agent's `llm_qa.py all` is denied by
-    subagent-full-qa-blocker. Before the message fix, only the record assertion failed.
+    subagent-full-qa-blocker.
   - **No allowlist entry.** Bash is outside the policy's blocked-tool set, so an entry for
     `llm_qa.py all` would never run. The integration test is the explicit pin, and it fails
     first if the policy ever gains a Bash branch.
