@@ -194,6 +194,67 @@ def _strip_heredoc_bodies(lines: list[str]) -> list[str]:
     return out
 
 
+def _line_continues(line: str, quote: str | None) -> tuple[bool, str | None]:
+    """Does ``line`` end in a backslash continuation, given the quote it opens in?
+
+    Returns that verdict plus the quote still open at the end of the line
+    (``'``, ``"``, ``$'`` or ``None``), which the next physical line opens in.
+    A backslash is literal inside single quotes and inside a comment, so
+    neither can continue a line; inside double quotes (and ``$'...'``) it can.
+    """
+    i = 0
+    last = len(line) - 1
+    while i <= last:
+        ch = line[i]
+        if quote == "'":
+            if ch == "'":
+                quote = None
+        elif ch == "\\":
+            if i == last:
+                return True, quote
+            i += 1  # the escaped character is literal
+        elif quote is not None:
+            if ch == quote[-1]:
+                quote = None
+        elif ch == "#" and (i == 0 or line[i - 1].isspace()):
+            return False, None
+        elif ch == "$" and line[i + 1 : i + 2] == "'":
+            quote = "$'"
+            i += 1
+        elif ch in ("'", '"'):
+            quote = ch
+        i += 1
+    return False, quote
+
+
+def _join_continuations(lines: list[str]) -> list[str]:
+    """Fold each backslash-continued command onto its first physical line.
+
+    ``echo "x" \\`` with ``>&2`` on the next line is ONE command; judging the
+    physical lines apart reads it as an unredirected echo. The line count is
+    preserved -- continuation lines become blank -- so a finding still carries
+    the line number where its command starts. Run AFTER
+    ``_strip_heredoc_bodies``: a heredoc body is data, and joining its last
+    line onto the terminator would swallow the terminator.
+    """
+    out: list[str] = []
+    quote: str | None = None
+    head: int | None = None
+    for line in lines:
+        continues, quote = _line_continues(line, quote)
+        piece = line[:-1] if continues else line
+        if head is None:
+            out.append(piece)
+            if continues:
+                head = len(out) - 1
+            continue
+        out[head] = f"{out[head].rstrip()} {piece.strip()}"
+        out.append("")
+        if not continues:
+            head = None
+    return out
+
+
 def _has_function_level_marker(lines: list[str], def_idx: int) -> bool:
     """True if the consecutive comment block above ``def_idx`` carries a marker.
 
@@ -617,7 +678,7 @@ def audit_files(paths: list[Path]) -> list[Violation]:
         except OSError as exc:
             raise RuntimeError(f"could not read {path}: {exc}") from exc
         raw_lines = source.splitlines()
-        lines = _strip_heredoc_bodies(raw_lines)
+        lines = _join_continuations(_strip_heredoc_bodies(raw_lines))
         per_file_lines.append(lines)
         all_func_defs.extend(_extract_functions(lines, str(path)))
 

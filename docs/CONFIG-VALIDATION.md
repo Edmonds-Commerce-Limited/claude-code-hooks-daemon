@@ -22,7 +22,7 @@ Exhaustive configuration validation for `hooks-daemon.yaml` files with automated
 - ✅ Handler name format (snake_case)
 - ✅ Event type validation (10 valid types)
 - ✅ Type checking (int, bool, str, dict, list)
-- ✅ Plugins section (optional)
+- ✅ Daemon plugins section (optional)
 
 **Valid Event Types** (10 total):
 

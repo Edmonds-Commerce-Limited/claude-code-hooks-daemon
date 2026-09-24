@@ -769,6 +769,14 @@ source-path=SCRIPTDIR
 **Report anything the defaults catch.** A daemon-owned file that is dirty under
 default rules is an upstream bug — file it rather than excluding around it.
 
+### Claude Code Plugins
+
+If the project uses Claude Code plugins, or you plan to enable one, read
+[ClaudeCodePlugins.md](ClaudeCodePlugins.md) first. Enabling a plugin at
+project scope writes to the same `.claude/settings.json` that holds the
+daemon's hook registrations. A plugin's hooks also run beside the daemon's,
+outside its control.
+
 ---
 
 ## Feedback & Issue Reporting

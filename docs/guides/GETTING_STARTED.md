@@ -174,7 +174,7 @@ handlers:
 
   # ... more event types ...
 
-# Custom project-specific handlers
+# Daemon plugins: handler modules the daemon loads (not Claude Code plugins)
 plugins:
   paths: []
   plugins: []
@@ -300,7 +300,8 @@ Logs show which handlers matched, what decisions were made, and any errors.
 
 ## Next Steps
 
-- **[Configuration Guide](CONFIGURATION.md)** -- Full reference for all config options, handler settings, priority system, plugins, and environment variables
+- **[Configuration Guide](CONFIGURATION.md)** -- Full reference for all config options, handler settings, priority system, daemon plugins, and environment variables
+- **[Claude Code Plugins](CLAUDE_CODE_PLUGINS.md)** -- Using Claude Code plugins alongside the daemon: scope, trust, and how plugin hooks interact with the daemon's
 - **[Handler Reference](HANDLER_REFERENCE.md)** -- Detailed documentation for every built-in handler
 - **[Troubleshooting](TROUBLESHOOTING.md)** -- Common issues and how to fix them
 - **README.md** (project root) -- Architecture overview, changelog, and development guide

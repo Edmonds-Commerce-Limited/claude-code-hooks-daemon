@@ -16,7 +16,7 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_file_content, get_file_path
 from claude_code_hooks_daemon.utils.path_exclusion import resolve_project_root
 from claude_code_hooks_daemon.utils.path_segments import matches_path_segment
-from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
 # Fallback doc-tree dirs, used only when no ProjectLayout facade was
 # injected. Mirror the Config defaults exactly (DocumentationTreesConfig
@@ -24,7 +24,7 @@ from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
 _FALLBACK_AGENT_DOCS_DIR: Final[str] = "CLAUDE"
 _FALLBACK_HUMAN_DOCS_DIR: Final[str] = "docs"
 
-#: Acceptance-test fixture directory, below the sanctioned scratch root.
+#: Acceptance-test fixture directory, below the gitignored acceptance root.
 _FIXTURE_DIR: Final[str] = "acceptance-test-british"
 
 # Non-layout extra: a directory this project checks that is NOT a
@@ -226,7 +226,7 @@ class BritishEnglishHandler(PreToolUseHandlerBase):
         probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": scratch_path(_FIXTURE_DIR, "docs", "style-guide.md"),
+                "file_path": acceptance_path(_FIXTURE_DIR, "docs", "style-guide.md"),
                 "content": "The color of the organization logo should favor readability.",
             },
         )
@@ -240,12 +240,12 @@ class BritishEnglishHandler(PreToolUseHandlerBase):
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[r"colour", r"British"],
                 safety_notes=(
-                    "Inside the gitignored scratch directory - safe. Advisory handler "
+                    "Inside the gitignored acceptance directory - safe. Advisory handler "
                     "allows write but warns."
                 ),
                 test_type=TestType.ADVISORY,
-                setup_commands=[f"mkdir -p untracked/scratch/{_FIXTURE_DIR}/docs"],
-                cleanup_commands=[f"rm -rf untracked/scratch/{_FIXTURE_DIR}"],
+                setup_commands=[f"mkdir -p untracked/acceptance/{_FIXTURE_DIR}/docs"],
+                cleanup_commands=[f"rm -rf untracked/acceptance/{_FIXTURE_DIR}"],
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=False,
             ),

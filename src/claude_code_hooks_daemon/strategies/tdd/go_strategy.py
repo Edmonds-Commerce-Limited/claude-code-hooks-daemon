@@ -7,11 +7,11 @@ from claude_code_hooks_daemon.strategies.tdd.common import (
     is_in_common_test_directory,
     matches_directory,
 )
-from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
 # Language-specific constants
 _LANGUAGE_NAME = "Go"
-#: Acceptance-test fixture directory, below the sanctioned scratch root.
+#: Acceptance-test fixture directory, below the gitignored acceptance root.
 _FIXTURE_DIR = "acceptance-test-tdd-go"
 _EXTENSIONS: tuple[str, ...] = (".go",)
 _SOURCE_DIRECTORIES: tuple[str, ...] = ("/src/", "/cmd/", "/pkg/", "/internal/")
@@ -67,7 +67,7 @@ class GoTddStrategy:
             ToolPayload,
         )
 
-        fixture_root = scratch_path(_FIXTURE_DIR)
+        fixture_root = acceptance_path(_FIXTURE_DIR)
         # Stated ONCE, and the prose is rendered from it (Plan 00243). The
         # payload is what a harness dispatches; `as_instruction()` is what a
         # human tester reads. Hand-writing both is what let five grammars and
@@ -75,7 +75,7 @@ class GoTddStrategy:
         probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": scratch_path(_FIXTURE_DIR, "src", "myapp", "server.go"),
+                "file_path": acceptance_path(_FIXTURE_DIR, "src", "myapp", "server.go"),
                 "content": "package main\n\nfunc main() {}",
             },
         )
@@ -89,7 +89,7 @@ class GoTddStrategy:
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"BLOCKED \[R-TDD-TEST-FIRST\]", r"Go", r"test file"],
                 safety_notes=(
-                    "Inside the gitignored scratch directory - safe. Handler blocks "
+                    "Inside the gitignored acceptance directory - safe. Handler blocks "
                     "Write before file is created."
                 ),
                 test_type=TestType.BLOCKING,

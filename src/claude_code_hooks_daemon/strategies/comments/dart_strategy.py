@@ -9,10 +9,10 @@ from claude_code_hooks_daemon.strategies.comments.syntax import (
     SLASH_SYNTAX,
     CommentSyntax,
 )
-from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
 _LANGUAGE_NAME = "Dart"
-#: Acceptance-test fixture directory, below the sanctioned scratch root.
+#: Acceptance-test fixture directory, below the gitignored acceptance root.
 _FIXTURE_DIR = "acceptance-test-comment-changelog-dart"
 _EXTENSIONS: tuple[str, ...] = (".dart",)
 
@@ -52,11 +52,11 @@ class DartCommentStrategy:
             ToolPayload,
         )
 
-        fixture_root = scratch_path(_FIXTURE_DIR)
+        fixture_root = acceptance_path(_FIXTURE_DIR)
         probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": scratch_path(_FIXTURE_DIR, "example.dart"),
+                "file_path": acceptance_path(_FIXTURE_DIR, "example.dart"),
                 "content": (
                     'const String version = "3.2.3"; // Prior 3.2.2: fixed a race. '
                     "Prior 3.2.1: original broken behaviour.\n"
@@ -76,7 +76,7 @@ class DartCommentStrategy:
                 expected_decision=Decision.DENY,
                 expected_message_patterns=["changelog", "comment", "BLOCKED"],
                 safety_notes=(
-                    "Inside the gitignored scratch directory - safe. Handler "
+                    "Inside the gitignored acceptance directory - safe. Handler "
                     "blocks Write before file is created."
                 ),
                 test_type=TestType.BLOCKING,

@@ -15,6 +15,12 @@ The ignore file is written only when absent. A project may already ignore
 ``untracked/`` from the repository root (this one does), or carry its own rules
 here; overwriting them would be a silent policy change the daemon has no
 business making.
+
+Acceptance probe fixtures do NOT live in the scratch directory: they have their
+own root beside it, built by :func:`acceptance_path` (Plan 00422 N11). That
+root needs no creation step -- a probe's ``mkdir -p`` setup, or the Write tool
+itself, creates each fixture directory -- and the same ``untracked/.gitignore``
+already ignores it.
 """
 
 from __future__ import annotations
@@ -33,7 +39,7 @@ _PATH_SEPARATOR = "/"
 
 #: Claude Code sets this in the hook environment. Used UNEXPANDED so the text
 #: stays identical on every machine while still resolving absolutely for the
-#: reader -- see :func:`scratch_path` for why both properties are required.
+#: reader -- see :func:`acceptance_path` for why both properties are required.
 _PROJECT_DIR_VAR = "$CLAUDE_PROJECT_DIR"
 
 #: ``*`` keeps every scratch file out of git; ``!.gitignore`` keeps the rule
@@ -42,18 +48,23 @@ _PROJECT_DIR_VAR = "$CLAUDE_PROJECT_DIR"
 SCRATCH_IGNORE_CONTENT = "*\n!.gitignore\n"
 
 
-def scratch_path(*segments: str) -> str:
-    """Return a scratch path that resolves ABSOLUTELY on whatever machine runs it.
+def acceptance_path(*segments: str) -> str:
+    """Return an acceptance-fixture path that resolves ABSOLUTELY on any machine.
 
-    Use for any scratch path quoted in agent-facing text — most importantly an
-    ``AcceptanceTest.command``, which the playbook renders verbatim for a
-    tester to follow.
+    Use for every path an acceptance probe writes, reads or cleans up -- most
+    importantly in an ``AcceptanceTest.command``, which the playbook renders
+    verbatim for a tester to follow.
+
+    The root is ``ProjectPath.ACCEPTANCE_DIR``, deliberately NOT the human
+    scratch directory (Plan 00422 N11). Sharing that directory meant an
+    exclusion written for working notes also covered the probes' fixtures,
+    and ``lint_on_edit`` stopped denying its own declared DENY inputs.
 
     Two constraints pull in opposite directions here, and satisfying only one
     is how both known defects happened:
 
-    - It must be ABSOLUTE when executed. A relative ``untracked/scratch/x.py``
-      in a Write instruction is denied by ``AbsolutePathHandler`` (terminal,
+    - It must be ABSOLUTE when executed. A relative ``untracked/...`` path in
+      a Write instruction is denied by ``AbsolutePathHandler`` (terminal,
       priority 12) before the handler under test is consulted, so the test
       observes the wrong rule and can never pass. The original ``/tmp``
       spelling worked because it was absolute, not merely because it existed.
@@ -68,31 +79,30 @@ def scratch_path(*segments: str) -> str:
     ``sed_blocker``).
 
     Do NOT use this in ``get_claude_md()``. That text is committed into tracked
-    docs as prose rather than executed, so it names the plain relative
-    ``ProjectPath.SCRATCH_DIR``.
+    docs as prose rather than executed.
 
     Args:
-        *segments: Path segments below the scratch directory, e.g.
+        *segments: Path segments below the acceptance root, e.g.
             ``("acceptance-test-lint-python", "valid.py")``.
 
     Returns:
         A path rooted at ``$CLAUDE_PROJECT_DIR``, e.g.
-        ``$CLAUDE_PROJECT_DIR/untracked/scratch/fixture/x.py``.
+        ``$CLAUDE_PROJECT_DIR/untracked/acceptance/fixture/x.py``.
     """
-    base = f"{_PROJECT_DIR_VAR}{_PATH_SEPARATOR}{ProjectPath.SCRATCH_DIR}"
+    base = f"{_PROJECT_DIR_VAR}{_PATH_SEPARATOR}{ProjectPath.ACCEPTANCE_DIR}"
     return _PATH_SEPARATOR.join((base, *segments))
 
 
 def project_dir_path(*segments: str) -> str:
     """Return a project-rooted path that resolves ABSOLUTELY on any machine.
 
-    The non-scratch sibling of :func:`scratch_path`, for the handful of
-    acceptance probes whose target must NOT be the scratch directory --
+    The sibling of :func:`acceptance_path`, for the handful of acceptance
+    probes whose target must NOT be under ``untracked/`` --
     ``markdown_organization``'s wrong-location test being the case in point,
-    since ``untracked/`` is itself an ALLOWED markdown location and a scratch
-    path would quietly stop the test exercising anything.
+    since ``untracked/`` is itself an ALLOWED markdown location and a fixture
+    path there would quietly stop the test exercising anything.
 
-    Both constraints from :func:`scratch_path` still apply and pull the same
+    Both constraints from :func:`acceptance_path` still apply and pull the same
     two ways: absolute when executed, and never naming the RENDERING machine's
     root. Resolving ``ProjectContext.project_root()`` here would satisfy only
     the first -- it bakes this checkout's ``/workspace`` into a playbook a

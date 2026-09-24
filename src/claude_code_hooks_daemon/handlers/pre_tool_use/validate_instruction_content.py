@@ -22,9 +22,9 @@ from claude_code_hooks_daemon.core.acceptance_test import (
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.hook_result import Decision
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
-from claude_code_hooks_daemon.utils.scratch_dir import scratch_path
+from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
-#: Acceptance-test fixture directory, below the sanctioned scratch root.
+#: Acceptance-test fixture directory, below the gitignored acceptance root.
 _FIXTURE_DIR: Final[str] = "acceptance-test-validate"
 
 # SINGLE SOURCE OF TRUTH: (category name -- matches the keys _find_blocked_pattern
@@ -324,14 +324,14 @@ class ValidateInstructionContentHandler(PreToolUseHandlerBase):
         implementation_log_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": scratch_path(_FIXTURE_DIR, "CLAUDE.md"),
+                "file_path": acceptance_path(_FIXTURE_DIR, "CLAUDE.md"),
                 "content": "Created the file ProductService.php and added the class",
             },
         )
         clean_content_probe = ToolPayload(
             tool_name=ToolName.WRITE,
             tool_input={
-                "file_path": scratch_path(_FIXTURE_DIR, "CLAUDE.md"),
+                "file_path": acceptance_path(_FIXTURE_DIR, "CLAUDE.md"),
                 "content": "# Project Instructions\n\nUse strict typing for all modules.",
             },
         )
@@ -345,12 +345,12 @@ class ValidateInstructionContentHandler(PreToolUseHandlerBase):
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"implementation logs", r"BLOCKED"],
                 safety_notes=(
-                    "Inside the gitignored scratch directory - safe. Handler blocks "
+                    "Inside the gitignored acceptance directory - safe. Handler blocks "
                     "Write before file is created."
                 ),
                 test_type=TestType.BLOCKING,
-                setup_commands=[f"mkdir -p untracked/scratch/{_FIXTURE_DIR}"],
-                cleanup_commands=[f"rm -rf untracked/scratch/{_FIXTURE_DIR}"],
+                setup_commands=[f"mkdir -p untracked/acceptance/{_FIXTURE_DIR}"],
+                cleanup_commands=[f"rm -rf untracked/acceptance/{_FIXTURE_DIR}"],
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),
@@ -362,12 +362,12 @@ class ValidateInstructionContentHandler(PreToolUseHandlerBase):
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[r"validated"],
                 safety_notes=(
-                    "Inside the gitignored scratch directory - safe. Clean content "
+                    "Inside the gitignored acceptance directory - safe. Clean content "
                     "should be allowed."
                 ),
                 test_type=TestType.ADVISORY,
-                setup_commands=[f"mkdir -p untracked/scratch/{_FIXTURE_DIR}"],
-                cleanup_commands=[f"rm -rf untracked/scratch/{_FIXTURE_DIR}"],
+                setup_commands=[f"mkdir -p untracked/acceptance/{_FIXTURE_DIR}"],
+                cleanup_commands=[f"rm -rf untracked/acceptance/{_FIXTURE_DIR}"],
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=False,
             ),

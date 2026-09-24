@@ -150,6 +150,13 @@ This space sits outside the documentation corpus entirely.
 files, command captures, probes, prototypes. It is created at daemon start if
 absent (`utils/scratch_dir.py`) and gitignored.
 
+**`untracked/acceptance/` belongs to the acceptance probes, not to you.**
+Handler and strategy acceptance tests write their fixtures there, and the
+playbook harness will only create or delete files inside it. It is a sibling
+of `untracked/scratch/` so that an exclusion written for working notes cannot
+reach a probe fixture. The rule and its guard are in
+[AcceptanceTests/GENERATING.md](AcceptanceTests/GENERATING.md#where-probe-fixtures-live).
+
 **Scratch stays inside the repository.** `project_containment` denies a write
 whose target is named outside the repository root, on the Write/Edit surface
 and the Bash surface alike. The reason is durability rather than tidiness: a
