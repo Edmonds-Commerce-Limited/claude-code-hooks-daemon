@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from tests.claude_plugin_fixture import install_fake_plugin
 
 from claude_code_hooks_daemon.daemon.cli import cmd_tool_report
 
@@ -31,6 +32,15 @@ def _tool_use_line(tool_name: str) -> str:
             },
         }
     )
+
+
+@pytest.fixture(autouse=True)
+def claude_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """The plugin section reads the Claude config dir (Plan 00468 G15); never
+    the real one."""
+    config = tmp_path / "hermetic-claude-config"
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config))
+    return config
 
 
 @pytest.fixture()
@@ -101,3 +111,20 @@ class TestCmdToolReport:
         exit_code = cmd_tool_report(_args(root, root / "nope", no_write=True))
         assert exit_code == 0
         assert "0 transcript" in capsys.readouterr().out
+
+    def test_enabled_plugins_listing_cost_is_reported(
+        self,
+        project: tuple[Path, Path],
+        claude_config: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Plan 00468 G15: the enabled plugins' always-on cost reaches the report."""
+        root, transcripts = project
+        install_fake_plugin(
+            claude_config, root, skills={"dbf": "name: dbf\ndescription: runs the method"}
+        )
+        assert cmd_tool_report(_args(root, transcripts, json_output=True, no_write=True)) == 0
+        payload = json.loads(capsys.readouterr().out)
+        (plugin,) = payload["plugins"]
+        assert plugin["plugin_id"] == "defence-before-fix@defence-before-fix"
+        assert plugin["skills_listed"] == 1

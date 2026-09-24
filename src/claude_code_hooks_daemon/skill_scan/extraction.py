@@ -1,6 +1,6 @@
 """Stage 1: deterministic extraction of genuine human prompts (Plan 00274).
 
-Reads Claude Code session transcripts (``~/.claude/projects/<slug>/*.jsonl``)
+Reads Claude Code session transcripts (``<config dir>/projects/<slug>/*.jsonl``)
 and applies the two-layer noise filter verified in BRAINSTORM.md section 2:
 field-level flags first, then content-level markers. Tolerant of unknown
 record shapes — skip and count, never crash (the jsonl format is Claude
@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 
 from claude_code_hooks_daemon.skill_scan.constants import (
-    CLAUDE_PROJECTS_SUBDIR,
+    CLAUDE_PROJECTS_DIRNAME,
     EXCLUDE_CONTENT_MARKERS,
     EXCLUDE_FLAGS,
     SECONDS_PER_DAY,
@@ -23,6 +23,7 @@ from claude_code_hooks_daemon.skill_scan.constants import (
     USER_RECORD_TYPE,
 )
 from claude_code_hooks_daemon.skill_scan.models import Prompt, ScanStats
+from claude_code_hooks_daemon.utils.claude_config import claude_config_dir
 
 logger = logging.getLogger(__name__)
 
@@ -34,16 +35,17 @@ _SLUG_SEPARATOR = "-"
 _PATH_SEPARATOR = "/"
 
 
-def derive_transcript_dir(project_root: Path, home: Path | None = None) -> Path:
+def derive_transcript_dir(project_root: Path, *, config_dir: Path | None = None) -> Path:
     """Claude Code's transcript directory for ``project_root``.
 
     Claude Code slugs a project path by replacing every path separator with
     ``-`` (so ``/workspace`` becomes ``-workspace``) under
-    ``~/.claude/projects/``.
+    ``<config dir>/projects/``; the config dir defaults to
+    :func:`claude_config_dir` (Plan 00468 G13).
     """
-    base = home if home is not None else Path.home()
+    base = config_dir if config_dir is not None else claude_config_dir()
     slug = str(project_root).replace(_PATH_SEPARATOR, _SLUG_SEPARATOR)
-    return base.joinpath(*CLAUDE_PROJECTS_SUBDIR) / slug
+    return base / CLAUDE_PROJECTS_DIRNAME / slug
 
 
 def _is_genuine_text(text: str, markers: tuple[str, ...]) -> bool:

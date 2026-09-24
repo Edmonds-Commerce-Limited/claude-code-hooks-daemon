@@ -4,9 +4,9 @@ Plan 00368 Task 2.2. Claude Code injects a language server's diagnostics
 into the agent's context after every edit. When the server analyses trees
 that are not this project's code - the daemon's own runtime directory with
 its linked worktrees and venvs, the plan archive's probes, vendored and
-build output, the vendored remote-docs tree, the ccy supervisor's own
-``plugins/`` runtime tree (vendored third-party marketplace plugin code
-ccy itself clones) - those trees' half-built or deliberately broken files
+build output, the vendored remote-docs tree, the installed Claude Code
+plugins' ``plugins/`` tree when the Claude config dir lives inside the
+project (as ccy puts it) - those trees' half-built or deliberately broken files
 are reported as defects HERE, by the thousand, and the agent learns to
 skim the stream. A skimmed stream reports nothing: "if there's noise,
 there's no signal and LSP is pointless".
@@ -53,7 +53,6 @@ from claude_code_hooks_daemon.constants import (
     HandlerID,
     HandlerTag,
     Priority,
-    ProjectPath,
 )
 from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
@@ -65,11 +64,14 @@ from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
 from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.strategies.lsp_noise.protocol import LspNoiseStrategy
 from claude_code_hooks_daemon.strategies.lsp_noise.registry import LspNoiseStrategyRegistry
+from claude_code_hooks_daemon.utils.claude_config import config_dir_within
 from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 
 logger = logging.getLogger(__name__)
 
 _ANY_DEPTH_PREFIX: Final[str] = "**/"
+#: Where Claude Code keeps installed plugins, under its config dir.
+_CLAUDE_PLUGINS_DIRNAME: Final[str] = "plugins"
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,24 +113,35 @@ def running_language_servers(known_names: frozenset[str]) -> list[RunningServer]
     return found
 
 
-def required_excludes(layout: ProjectLayout | None) -> frozenset[str]:
+def required_excludes(
+    layout: ProjectLayout | None,
+    project_root: Path | None = None,
+    *,
+    config_dir: Path | None = None,
+) -> frozenset[str]:
     """Every tree no language's server should analyse, from what the daemon already knows.
 
-    Nothing here is typed by hand: the runtime dir and the ccy plugin
-    runtime tree are the daemon's path constants (``DaemonPath``,
-    ``ProjectPath.CCY_PLUGINS_DIR``), the plan and remote-docs trees come
-    from the configured layout (built-in defaults when no layout has been
-    injected), and the vendored/build names are the reviewed core set, at
-    any depth. Shared by every language strategy - this is daemon
-    knowledge, not a language's.
+    Nothing here is typed by hand: the runtime dir is a daemon path constant
+    (``DaemonPath``), the plan and remote-docs trees come from the configured
+    layout (built-in defaults when no layout has been injected), and the
+    vendored/build names are the reviewed core set, at any depth. When the
+    Claude config dir (``config_dir``, default :func:`claude_config_dir`)
+    lies inside ``project_root``, as it does under ccy, its ``plugins/`` tree
+    is added: the installed plugins' cache and marketplace clones are
+    third-party code, never this project's (Plan 00468 G11 derives it rather
+    than assuming ccy's ``.claude/ccy``). Shared by every language strategy -
+    this is daemon knowledge, not a language's.
     """
     resolved = layout if layout is not None else ProjectLayout.built_in_default()
     entries = {
         DaemonPath.UNTRACKED_DIR,
         resolved.plan_dir,
         resolved.remote_docs_dir,
-        ProjectPath.CCY_PLUGINS_DIR,
     }
+    if project_root is not None:
+        in_project = config_dir_within(project_root, config_dir=config_dir)
+        if in_project is not None:
+            entries.add(f"{in_project}/{_CLAUDE_PLUGINS_DIRNAME}")
     entries.update(f"{_ANY_DEPTH_PREFIX}{name}" for name in CORE_VENDORED_BUILD_DIR_NAMES)
     return frozenset(entries)
 
@@ -250,7 +263,7 @@ class LspNoiseCheckerHandler(SessionStartHandlerBase):
             return AdvisoryResult(decision=Decision.ALLOW, context=[])
 
         context = RelevanceContext.probe(root)
-        required = required_excludes(self._project_layout)
+        required = required_excludes(self._project_layout, root)
         relevant = [s for s in self._registry.strategies if s.is_relevant(context)]
         known_names = frozenset(name for s in relevant for name in s.process_names)
         servers = self.process_reader(known_names) if relevant else []

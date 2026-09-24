@@ -23,6 +23,8 @@ from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from claude_code_hooks_daemon.utils.claude_config import claude_config_dir
+
 logger = logging.getLogger(__name__)
 
 # A transcript line longer than this (in decoded characters, not raw bytes
@@ -67,12 +69,13 @@ def transcripts_root_for(project_root: Path, claude_home: Path | None = None) ->
 
     Args:
         project_root: Absolute project root path.
-        claude_home: Override for ``~/.claude`` (tests use a tmp dir).
+        claude_home: Override for the Claude config dir (tests use a tmp
+            dir); defaults to :func:`claude_config_dir` (Plan 00468 G13).
 
     Returns:
         ``<claude_home>/projects/<slug>`` for the project.
     """
-    home = claude_home if claude_home is not None else Path.home() / ".claude"
+    home = claude_home if claude_home is not None else claude_config_dir()
     slug = _SLUG_PATTERN.sub("-", str(project_root))
     return home / "projects" / slug
 

@@ -5,6 +5,7 @@ instead of bare 'python -m claude_code_hooks_daemon' or '/hooks-daemon' slash sy
 """
 
 import json
+import os
 import subprocess  # nosec B404 - subprocess used for running QA checker only
 import sys
 from pathlib import Path
@@ -18,13 +19,17 @@ CHECKER = SCRIPT_DIR / "check_skill_references.py"
 PYTHON = Path(sys.executable)
 
 
-def _run_checker(*args: str) -> dict[str, Any]:
-    """Run the checker with --json and return parsed output."""
+def _run_checker(*args: str, env: dict[str, str] | None = None) -> dict[str, Any]:
+    """Run the checker with --json and return parsed output.
+
+    ``env`` adds to the inherited environment, e.g. a ``CLAUDE_CONFIG_DIR``.
+    """
     subprocess.run(  # nosec B603 B607 - trusted checker script
         [str(PYTHON), str(CHECKER), "--json", *args],
         capture_output=True,
         text=True,
         check=False,
+        env={**os.environ, **(env or {})},
     )
     # A scoped run reports beside what it scanned, never into this checkout's
     # published artefact (Plan 00432). Reading the scoped file is also what
@@ -219,6 +224,29 @@ class TestExclusions:
         (memory / "MEMORY.md").write_text("- wired into /hooks-daemon skill as `check`\n")
         data = _run_checker("--path", str(tmp_path))
         assert data["summary"]["passed"]
+
+    def test_excludes_an_in_tree_claude_config_dir_of_any_name(self, tmp_path: Path) -> None:
+        """Plan 00468 G11: the Claude config dir holds transcripts, memory and
+        third-party plugin code wherever it is, not only under a `ccy` dir."""
+        memory = tmp_path / "tooling" / "claude-home" / "projects" / "-x" / "memory"
+        memory.mkdir(parents=True)
+        (memory / "MEMORY.md").write_text("- wired into /hooks-daemon skill as `check`\n")
+        data = _run_checker(
+            "--path",
+            str(tmp_path),
+            env={"CLAUDE_CONFIG_DIR": str(tmp_path / "tooling" / "claude-home")},
+        )
+        assert data["summary"]["passed"]
+
+    def test_the_same_tree_is_scanned_when_it_is_not_the_config_dir(self, tmp_path: Path) -> None:
+        """Control: the exclusion follows the config dir, not the name."""
+        memory = tmp_path / "tooling" / "claude-home" / "projects" / "-x" / "memory"
+        memory.mkdir(parents=True)
+        (memory / "MEMORY.md").write_text("- wired into /hooks-daemon skill as `check`\n")
+        data = _run_checker(
+            "--path", str(tmp_path), env={"CLAUDE_CONFIG_DIR": str(tmp_path / "elsewhere")}
+        )
+        assert not data["summary"]["passed"]
 
 
 class TestJsonOutput:

@@ -7056,11 +7056,13 @@ def cmd_tool_report(args: argparse.Namespace) -> int:
         analyse_transcripts,
         transcripts_root_for,
     )
+    from claude_code_hooks_daemon.tool_report.plugin_costs import plugin_listing_costs
     from claude_code_hooks_daemon.tool_report.report import (
         build_report,
         render_markdown,
         report_to_json,
     )
+    from claude_code_hooks_daemon.utils.claude_plugins import resolve_enabled_plugins
 
     resolved_root = resolve_tree_root(args)
     if resolved_root is None:
@@ -7076,6 +7078,7 @@ def cmd_tool_report(args: argparse.Namespace) -> int:
         summary,
         never_want=config.tool_policy.never_want_map(),
         low_use_max_calls=config.tool_policy.low_use_max_calls,
+        plugin_costs=plugin_listing_costs(resolve_enabled_plugins(project_root)),
     )
     markdown = render_markdown(report)
     payload = report_to_json(report)

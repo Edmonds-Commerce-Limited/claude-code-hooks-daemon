@@ -74,7 +74,7 @@ first, and the other fixes build on it.
   (P6). The resolver returns the frontmatter, so `agent_isolation_advisor`
   honours `isolation: worktree` (P7). The size blocker's path is sanitised
   (G12).
-- [ ] ⬜ **Task 2.3**: The LSP exclude advice and skill-reference checks
+- [x] ✅ **Task 2.3**: The LSP exclude advice and skill-reference checks
   derive the config dir (G11). `skill-scan` knows plugin and user skills
   (G14). `tool-report` sums enabled plugins' always-on cost (G15).
 - [ ] ⬜ **Task 2.4**: File the upstream DBF issue: both agents lack `Write`

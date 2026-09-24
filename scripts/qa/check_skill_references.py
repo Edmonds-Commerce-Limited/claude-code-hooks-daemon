@@ -24,7 +24,15 @@ import re
 import sys
 from pathlib import Path
 
+from claude_code_hooks_daemon.utils.claude_config import claude_config_dir
+
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+# Claude Code's config dir holds transcripts, auto-memory and installed
+# third-party plugins, never project source, wherever it is (Plan 00468
+# G11): excluded by its resolved location, so an in-tree home of any name
+# is skipped, not only one under a directory called `ccy`.
+_CLAUDE_CONFIG_DIR = claude_config_dir().resolve()
 _QA_OUTPUT_DIR = _PROJECT_ROOT / "untracked" / "qa"
 _ARTEFACT_NAME = "skill_references.json"
 _OUTPUT_FILE = _QA_OUTPUT_DIR / _ARTEFACT_NAME
@@ -37,7 +45,7 @@ _EXCLUDED_DIRS = {
     "untracked",
     ".venv",
     "venv",
-    "ccy",  # claude-yolo runtime/memory tree (gitignored state, not project source)
+    "ccy",  # the ccy supervisor's tree, the Claude home under ccy (see _CLAUDE_CONFIG_DIR)
     "commands",
     "worktrees",
     "Completed",
@@ -296,6 +304,9 @@ def _should_exclude(path: Path, include_filter: str | None = None) -> bool:
     for part in path.parts:
         if part in _EXCLUDED_DIRS:
             return True
+
+    if path.resolve().is_relative_to(_CLAUDE_CONFIG_DIR):
+        return True
 
     # Exclude test files
     if path.name.startswith("test_"):

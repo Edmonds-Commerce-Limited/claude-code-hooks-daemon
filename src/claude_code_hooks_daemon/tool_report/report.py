@@ -14,6 +14,10 @@ from typing import Any
 
 from claude_code_hooks_daemon.tool_report.analyser import UsageSummary
 from claude_code_hooks_daemon.tool_report.costs import MEASURED_SCHEMA_TOKENS, disable_route_for
+from claude_code_hooks_daemon.tool_report.plugin_costs import (
+    CHARS_PER_TOKEN_ESTIMATE,
+    PluginListingCost,
+)
 
 
 class Tier(StrEnum):
@@ -48,6 +52,8 @@ class ToolReport:
     sessions_scanned: int = 0
     malformed_lines: int = 0
     low_use_max_calls: int = 2
+    #: Each enabled Claude Code plugin's always-on listing cost (Plan 00468).
+    plugin_costs: tuple[PluginListingCost, ...] = ()
 
 
 def _tier_for(
@@ -67,6 +73,7 @@ def build_report(
     summary: UsageSummary,
     never_want: dict[str, str],
     low_use_max_calls: int,
+    plugin_costs: tuple[PluginListingCost, ...] = (),
 ) -> ToolReport:
     """Combine observed usage, measured costs and declarations into a report.
 
@@ -78,6 +85,7 @@ def build_report(
         summary: The transcript scan result.
         never_want: Declared never-want tools mapped to their reasons.
         low_use_max_calls: Highest total call count still classed as low-use.
+        plugin_costs: The enabled Claude Code plugins' listing costs.
 
     Returns:
         A :class:`ToolReport` with rows ranked by schema token cost
@@ -110,7 +118,34 @@ def build_report(
         sessions_scanned=summary.sessions_scanned,
         malformed_lines=summary.malformed_lines,
         low_use_max_calls=low_use_max_calls,
+        plugin_costs=plugin_costs,
     )
+
+
+def _render_plugin_costs(report: ToolReport) -> list[str]:
+    """The enabled plugins' always-on listing cost, one row per plugin."""
+    lines = ["## Enabled Claude Code plugins: always-on listing cost", ""]
+    if not report.plugin_costs:
+        return [*lines, "No enabled Claude Code plugins.", ""]
+    lines.extend(
+        [
+            "Every enabled plugin's skill and agent names and descriptions are in "
+            "context in every session, used or not. Characters are measured from "
+            f"the plugin's own files; tokens are estimated at "
+            f"{CHARS_PER_TOKEN_ESTIMATE} characters each. MCP tool schemas are "
+            "not measured. Hidden skills (`disable-model-invocation`) cost nothing.",
+            "",
+            "| Plugin | Skills listed | Skills hidden | Agents | Characters | Tokens (est.) |",
+            "| ------ | ------------- | ------------- | ------ | ---------- | ------------- |",
+        ]
+    )
+    lines.extend(
+        f"| {cost.plugin_id} | {cost.skills_listed} | {cost.skills_hidden} | "
+        f"{cost.agents_listed} | {cost.total_chars} | {cost.estimated_tokens} |"
+        for cost in report.plugin_costs
+    )
+    lines.append("")
+    return lines
 
 
 def render_markdown(report: ToolReport) -> str:
@@ -154,6 +189,7 @@ def render_markdown(report: ToolReport) -> str:
         if row.tier in (Tier.NEVER_WANT, Tier.NEVER_USED):
             lines.append(f"- **{row.tool}** ({row.tier.value}): {row.disable_route}")
     lines.append("")
+    lines.extend(_render_plugin_costs(report))
     lines.append(
         f"Low-use floor: {report.low_use_max_calls} call(s) (`tool_policy.low_use_max_calls`)."
     )
@@ -179,5 +215,18 @@ def report_to_json(report: ToolReport) -> dict[str, Any]:
                 "disable_route": row.disable_route,
             }
             for row in report.rows
+        ],
+        "plugins": [
+            {
+                "plugin_id": cost.plugin_id,
+                "skills_listed": cost.skills_listed,
+                "skills_hidden": cost.skills_hidden,
+                "agents_listed": cost.agents_listed,
+                "skill_chars": cost.skill_chars,
+                "agent_chars": cost.agent_chars,
+                "total_chars": cost.total_chars,
+                "estimated_tokens": cost.estimated_tokens,
+            }
+            for cost in report.plugin_costs
         ],
     }
