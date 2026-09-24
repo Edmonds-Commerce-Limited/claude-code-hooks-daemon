@@ -1493,6 +1493,193 @@ class TestStatusFlipDetection:
         assert "00298" in joined
 
 
+class TestGroundTruthSnapshotResolution:
+    """Plan 00466 RV3-n5: a PreToolUse snapshot of the plan's pre-write
+    status (keyed by ``tool_use_id``), consumed here as ground truth in
+    place of ``old_string``/``new_string`` + git-HEAD inference.
+
+    C3b and m4d's C3 (review 3, subagent-reports/260924-n466-goalflip-
+    review3-opus-5-5.md) are both cases where a REAL flip is missed because
+    "In Progress" also appears somewhere else in the document (a table
+    cell, a title) -- from the Edit payload alone the two pre-edit texts
+    really are indistinguishable, so the existing reconstruction correctly
+    stays conservative. A pre-write snapshot removes the ambiguity
+    entirely: it never reconstructs anything, it just reports what the
+    file said a moment before the write. The restart-fallback tests pin
+    that the OLD inference (and its conservative answer) is still exactly
+    what runs when no snapshot exists for this ``tool_use_id``.
+    """
+
+    @pytest.fixture(autouse=True)
+    def mock_project_context(self, tmp_path: Path):
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                "claude_code_hooks_daemon.handlers.post_tool_use.goal_injection."
+                "ProjectContext.daemon_untracked_dir",
+                classmethod(lambda cls: tmp_path / "untracked"),
+            )
+            mp.setattr(
+                "claude_code_hooks_daemon.handlers.post_tool_use.goal_injection."
+                "ProjectContext.project_root",
+                classmethod(lambda cls: tmp_path),
+            )
+            self._untracked = tmp_path / "untracked"
+            self._project = tmp_path
+            yield
+
+    @pytest.fixture
+    def handler(self) -> GoalInjectionHandler:
+        return GoalInjectionHandler()
+
+    def _plan_path(self, folder: str = _PLAN_FOLDER) -> Path:
+        plan_dir = self._project / "CLAUDE" / "Plan" / folder
+        plan_dir.mkdir(parents=True, exist_ok=True)
+        return plan_dir / "PLAN.md"
+
+    def _signal_path(self, session: str = _SESSION) -> Path:
+        return self._untracked / _SIGNAL_SUBDIR / f"{session}{_SIGNAL_SUFFIX}"
+
+    def _edit_hook_input(
+        self, file_path: Path, old_string: str, new_string: str, *, tool_use_id: str = ""
+    ) -> dict[str, Any]:
+        hook_input: dict[str, Any] = {
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": str(file_path),
+                "old_string": old_string,
+                "new_string": new_string,
+            },
+            "session_id": _SESSION,
+        }
+        if tool_use_id:
+            hook_input["tool_use_id"] = tool_use_id
+        return hook_input
+
+    def test_c3b_table_cell_collision_is_resolved_by_the_snapshot(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """RV3-n5's C3b: the Status line genuinely flips (replace_all), and
+        an UNRELATED table cell already read "In Progress" before and after
+        -- the reconstruction's full-vs-partial-reversal verdicts disagree
+        (main's conservative answer), but a pre-write snapshot resolves it
+        as the real flip it is."""
+        from claude_code_hooks_daemon.plan_qa.model import PlanStatus
+        from claude_code_hooks_daemon.utils.plan_status_snapshot import plan_status_snapshots
+
+        plan = self._plan_path()
+        pre_edit = (
+            "# Plan 00269: supervisor goal message injection\n\n"
+            "**Status**: Not Started\n\n"
+            "| Task | State |\n| --- | --- |\n| A | In Progress |\n"
+        )
+        plan.write_text(pre_edit.replace("Not Started", "In Progress"), encoding="utf-8")
+
+        edit = self._edit_hook_input(
+            plan, old_string="Not Started", new_string="In Progress", tool_use_id="tu-c3b"
+        )
+        edit["tool_input"]["replace_all"] = True
+        plan_status_snapshots.record("tu-c3b", PlanStatus.NOT_STARTED)
+
+        result = handler.handle(edit)
+
+        assert result.decision == Decision.ALLOW
+        assert self._signal_path().exists()
+
+    def test_m4d_title_collision_is_resolved_by_the_snapshot(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """m4d's C3 (review 2/3): the plan title itself contains "In
+        Progress" ("Track In Progress plans"), so undoing each occurrence
+        of ``new_string`` individually produces disagreeing verdicts even
+        after the per-candidate uniqueness filter -- a real flip is missed.
+        A pre-write snapshot needs no reconstruction at all."""
+        from claude_code_hooks_daemon.plan_qa.model import PlanStatus
+        from claude_code_hooks_daemon.utils.plan_status_snapshot import plan_status_snapshots
+
+        plan = self._plan_path()
+        pre_edit = "# Plan 00269: Track In Progress plans\n\n" "**Status**: Not Started\n\nBody.\n"
+        plan.write_text(pre_edit.replace("Not Started", "In Progress"), encoding="utf-8")
+
+        edit = self._edit_hook_input(
+            plan, old_string="Not Started", new_string="In Progress", tool_use_id="tu-m4d"
+        )
+        plan_status_snapshots.record("tu-m4d", PlanStatus.NOT_STARTED)
+
+        result = handler.handle(edit)
+
+        assert result.decision == Decision.ALLOW
+        assert self._signal_path().exists()
+
+    def test_no_snapshot_falls_back_to_inference_and_logs_it(
+        self, handler: GoalInjectionHandler, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Restart-fallback: no snapshot was ever recorded for this
+        ``tool_use_id`` (a daemon restart between Pre and Post dispatch of
+        the SAME tool call empties the in-memory store). The unambiguous
+        case still flips correctly via the old inference, and the fallback
+        use is logged."""
+        plan = self._plan_path()
+        plan.write_text(_plan_md("In Progress"), encoding="utf-8")
+
+        with caplog.at_level("INFO", logger="claude_code_hooks_daemon"):
+            result = handler.handle(
+                self._edit_hook_input(
+                    plan,
+                    old_string="**Status**: Not Started",
+                    new_string="**Status**: In Progress",
+                    tool_use_id="tu-never-recorded",
+                )
+            )
+
+        assert result.decision == Decision.ALLOW
+        assert self._signal_path().exists()
+        assert any(
+            "falling back to old_string/new_string and git-HEAD inference" in record.message
+            for record in caplog.records
+        )
+
+    def test_no_snapshot_ambiguous_case_stays_conservative(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """Restart-fallback, ambiguous shape: without a snapshot, the C3b
+        table-cell collision is answered exactly as main answers it today
+        -- conservatively, as no flip -- rather than silently changing
+        behaviour whenever a snapshot happens to be unavailable."""
+        plan = self._plan_path()
+        pre_edit = (
+            "# Plan 00269: supervisor goal message injection\n\n"
+            "**Status**: Not Started\n\n"
+            "| Task | State |\n| --- | --- |\n| A | In Progress |\n"
+        )
+        plan.write_text(pre_edit.replace("Not Started", "In Progress"), encoding="utf-8")
+
+        edit = self._edit_hook_input(
+            plan, old_string="Not Started", new_string="In Progress", tool_use_id="tu-c3b-no-snap"
+        )
+        edit["tool_input"]["replace_all"] = True
+
+        result = handler.handle(edit)
+
+        assert result.decision == Decision.ALLOW
+        assert not self._signal_path().exists()
+
+    def test_empty_tool_use_id_also_falls_back(self, handler: GoalInjectionHandler) -> None:
+        """A payload carrying no ``tool_use_id`` at all (empty string, the
+        store's own documented no-op key) must fall back exactly like a
+        genuinely missing snapshot -- never raise, never misbehave."""
+        plan = self._plan_path()
+        plan.write_text(_plan_md("In Progress"), encoding="utf-8")
+
+        result = handler.handle(
+            self._edit_hook_input(
+                plan, old_string="**Status**: Not Started", new_string="**Status**: In Progress"
+            )
+        )
+
+        assert result.decision == Decision.ALLOW
+        assert self._signal_path().exists()
+
+
 class TestNewSessionReassertion:
     """Review M3: Plan 00269 Task 2.1 deliberately chose "the first edit to
     an already-In-Progress plan in a NEW session re-fires" -- that is what

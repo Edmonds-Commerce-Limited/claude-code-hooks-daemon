@@ -107,6 +107,16 @@ from claude_code_hooks_daemon.utils.ccy_supervisor import supervisor_relevance
 from claude_code_hooks_daemon.utils.git_facts import project_relative_head_text
 from claude_code_hooks_daemon.utils.goal_ledger import LEDGER_FILENAME, GoalLedger, LivePlanRef
 from claude_code_hooks_daemon.utils.markdown_fences import line_spans_outside_fences
+from claude_code_hooks_daemon.utils.plan_status_snapshot import plan_status_snapshots
+from claude_code_hooks_daemon.utils.plan_trigger import (
+    is_inside_project as _plan_trigger_is_inside_project,
+)
+from claude_code_hooks_daemon.utils.plan_trigger import (
+    plan_dir_for as _plan_trigger_plan_dir_for,
+)
+from claude_code_hooks_daemon.utils.plan_trigger import (
+    plan_path_pattern as _plan_trigger_plan_path_pattern,
+)
 from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
 
 logger = logging.getLogger(__name__)
@@ -217,9 +227,9 @@ _MULTI_WORK_LINE_TEXT: Final[str] = (
 # The plan-dir portion of the trigger pattern (<plan_dir>/<digits>-<name>/
 # PLAN.md, NOT inside Completed/ — the same shape recovery_cron_advisor uses
 # for the same trigger surface) is built per-instance from the ProjectLayout
-# facade's plan_dir (Plan 00288 Task 4.2), not this literal fallback — see
-# _FALLBACK_PLAN_DIR and _plan_dir()/_plan_path_pattern() below.
-_FALLBACK_PLAN_DIR: Final[str] = "CLAUDE/Plan"
+# facade's plan_dir (Plan 00288 Task 4.2) via the shared
+# ``utils.plan_trigger`` module (Plan 00466 RV3-n5) — see
+# _plan_dir()/_plan_path_pattern() below, which delegate to it.
 _COMPLETED_SEGMENT: Final[str] = "/Completed/"
 # RV3-m2: locates a candidate Status line's position for the replace_all
 # ambiguity check below -- classification of ITS VALUE is always left to
@@ -650,17 +660,24 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         return supervisor_relevance(context)
 
     def _plan_dir(self) -> str:
-        """Configured plan directory (facade, or the matching default)."""
-        layout = self._project_layout
-        return layout.plan_dir if layout is not None else _FALLBACK_PLAN_DIR
+        """Configured plan directory (facade, or the matching default).
+
+        Delegates to :mod:`utils.plan_trigger` (Plan 00466 RV3-n5) — kept
+        as a thin wrapper, rather than removed, so every existing call site
+        below is unaffected while ``plan_status_snapshot`` (PreToolUse)
+        shares the SAME implementation, keeping the two handlers' notion of
+        "the trigger" from silently drifting apart.
+        """
+        return _plan_trigger_plan_dir_for(self._project_layout)
 
     def _plan_path_pattern(self) -> re.Pattern[str]:
         """Compile the trigger pattern from the configured plan directory.
 
         Matches ``<plan_dir>/<digits>-<name>/PLAN.md`` (the ``/Completed/``
         exclusion is checked separately by callers via _COMPLETED_SEGMENT).
+        Delegates to :mod:`utils.plan_trigger`; see :meth:`_plan_dir`.
         """
-        return re.compile(rf"{re.escape(self._plan_dir())}/(\d+-[^/]+)/PLAN\.md$")
+        return _plan_trigger_plan_path_pattern(self._plan_dir())
 
     @staticmethod
     def _is_inside_project(file_path: str) -> bool:
@@ -672,22 +689,10 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         directory. A scratch plan under /tmp would therefore emit a live
         goal naming a project path that does not exist, and an
         unsatisfiable goal cannot be discharged by doing the work
-        (Plan 00320).
-
-        Fails OPEN — an unresolvable path or uninitialised context keeps the
-        pre-existing behaviour rather than silently disabling the trigger,
-        matching this module's best-effort sensor contract.
+        (Plan 00320). Delegates to :mod:`utils.plan_trigger`; see
+        :meth:`_plan_dir`.
         """
-        try:
-            root = ProjectContext.project_root().resolve()
-        except (RuntimeError, OSError) as e:
-            logger.warning("goal_injection: project-root check skipped: %s", e)
-            return True
-        try:
-            Path(file_path).resolve().relative_to(root)
-        except (ValueError, OSError):
-            return False
-        return True
+        return _plan_trigger_is_inside_project(file_path)
 
     @staticmethod
     def _is_in_progress_status(status: PlanStatus | None) -> bool:
@@ -870,28 +875,73 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
             return True
         return not is_target(PlanDoc.parse(before_text).status)
 
+    def _resolve_transition(
+        self,
+        hook_input: dict[str, Any],
+        file_path: Path,
+        post_edit_text: str,
+        *,
+        is_target: Callable[[PlanStatus | None], bool],
+    ) -> tuple[bool, bool]:
+        """Ground-truth-first transition check (Plan 00466 RV3-n5).
+
+        Returns ``(is_transition, used_fallback)``. Prefers the PreToolUse
+        snapshot recorded for THIS SAME tool call (``plan_status_snapshot``,
+        keyed by ``tool_use_id``) over :meth:`_is_real_transition`'s
+        inference: a value read directly off disk immediately before the
+        write cannot collide with a table cell or a fenced example the way
+        reconstructing the pre-edit text from ``old_string``/``new_string``
+        can (RV3-m1/m2), and is not subject to git HEAD lagging an
+        uncommitted flip (RV3-m6) the way the Write-only fallback is. The
+        inference machinery is kept and used ONLY when no snapshot exists
+        for this ``tool_use_id`` -- a daemon restart between the Pre and
+        Post dispatch of this same call, or a payload carrying no
+        ``tool_use_id`` at all -- and that fallback use is logged, since it
+        is the narrower, sometimes-ambiguous signal being kept for exactly
+        that narrow window rather than the common path.
+        """
+        tool_use_id = str(hook_input.get(HookInputField.TOOL_USE_ID, "") or "")
+        snapshot_status, found = plan_status_snapshots.consume(tool_use_id)
+        if found:
+            return not is_target(snapshot_status), False
+        logger.info(
+            "goal_injection: no pre-write status snapshot for tool_use_id=%r; "
+            "falling back to old_string/new_string and git-HEAD inference",
+            tool_use_id,
+        )
+        transition = self._is_real_transition(
+            hook_input, file_path, post_edit_text, is_target=is_target
+        )
+        return transition, True
+
     def _is_real_flip_to_in_progress(
         self, hook_input: dict[str, Any], file_path: Path, plan_number: str, post_edit_text: str
     ) -> bool:
         """True only when THIS Write/Edit is what set Status to In Progress.
 
-        Delegates to :meth:`_is_real_transition`. RV3-m6: for a Write only,
-        a positive transition verdict is narrowed further -- git HEAD can
-        lag an uncommitted flip (a teammate's Write lands on disk, and in
-        the ledger, before it is ever committed), so a Write that reads
-        "not yet in progress at HEAD" is still not a fresh flip when the
-        ledger ALREADY has a live entry for this plan: someone else already
+        Delegates to :meth:`_resolve_transition`. RV3-m6: for a Write only,
+        a positive transition verdict reached via the INFERENCE FALLBACK
+        (no snapshot available) is narrowed further -- git HEAD can lag an
+        uncommitted flip (a teammate's Write lands on disk, and in the
+        ledger, before it is ever committed), so a Write that reads "not
+        yet in progress at HEAD" is still not a fresh flip when the ledger
+        ALREADY has a live entry for this plan: someone else already
         started it, and this Write is not what did so. Edit is immune to
         this race -- its ``old_string``/``new_string`` are the tool's own
         record of the pre-/post-edit text on THIS call, not a git snapshot.
+        A snapshot-backed verdict needs no such narrowing: it already read
+        the plan's actual pre-write status straight off disk, so the race
+        this guards against cannot have occurred.
         """
-        transition = self._is_real_transition(
+        transition, used_fallback = self._resolve_transition(
             hook_input, file_path, post_edit_text, is_target=self._is_in_progress_status
         )
         if not transition:
             return False
-        if hook_input.get(HookInputField.TOOL_NAME) != ToolName.EDIT and self._ledger_plan_is_live(
-            plan_number
+        if (
+            used_fallback
+            and hook_input.get(HookInputField.TOOL_NAME) != ToolName.EDIT
+            and self._ledger_plan_is_live(plan_number)
         ):
             return False
         return True
@@ -1061,7 +1111,7 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         """Refresh EVERY owning session's combined signal when THIS write is
         what moved a LEDGERED plan into a terminal status.
 
-        RV3-M1: gated on :meth:`_is_real_transition` (target: terminal), the
+        RV3-M1: gated on :meth:`_resolve_transition` (target: terminal), the
         same transition discipline ledger 00466 N3 already requires for the
         flip side. Without this, ANY later write that merely leaves an
         already-Complete (or otherwise terminal) plan alone -- a note added
@@ -1107,9 +1157,10 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         doc = PlanDoc.parse(plan_text)
         if doc.status is None or doc.status not in TERMINAL_STATUSES:
             return
-        if not self._is_real_transition(
+        transition, _used_fallback = self._resolve_transition(
             hook_input, plan_md_path, plan_text, is_target=self._is_terminal_status
-        ):
+        )
+        if not transition:
             return
         ledger = self._open_ledger()
         owners = ledger.owning_sessions(plan_number)

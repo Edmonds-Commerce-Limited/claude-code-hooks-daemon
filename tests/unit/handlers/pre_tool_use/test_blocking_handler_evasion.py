@@ -455,6 +455,11 @@ _NOT_COMMAND_ANCHORED: dict[str, str] = {
         "there is no command spelling to evade; advisory-only, never denies"
     ),
     "AgentIsolationAdvisorHandler": "matches on the Agent tool, not a command",
+    "PlanStatusSnapshotHandler": (
+        "matches on a Write/Edit's file_path landing on an active plan's "
+        "PLAN.md (shared matcher, utils/plan_trigger.py), not a command name "
+        "- there is no command string to respell; always ALLOWs, never denies"
+    ),
     "DispatchDeclarationHandler": (
         "matches on the Task tool's prompt field, not a command string - there is "
         "no shell spelling to evade"

@@ -409,6 +409,67 @@ class TestSessionHasEntries:
 
         assert ledger.session_has_entries(_SESSION) is True
 
+    def test_survives_session_id_overwrite_by_a_different_re_emitting_session(
+        self, tmp_path: Path
+    ) -> None:
+        """RV3-n2: ``record_emission`` overwrites the entry's single
+        ``session_id`` field with whoever re-emits for the SAME plan next --
+        a DIFFERENT session re-flipping plan A must not erase the fact that
+        the ORIGINAL session ever recorded anything at all."""
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        _make_plan(plan_dir, _PLAN_A, _STATUS_IN_PROGRESS)
+        ledger = GoalLedger(tmp_path / LEDGER_FILENAME)
+        ledger.record_emission(_SESSION, _PLAN_A, _GOAL_LINE, plan_dir)
+
+        ledger.record_emission(_OTHER_SESSION, _PLAN_A, _GOAL_LINE, plan_dir)
+
+        entry = next(e for e in ledger.entries() if e.plan_number == _PLAN_A)
+        assert entry.session_id == _OTHER_SESSION, "sanity: the field really was overwritten"
+        assert ledger.session_has_entries(_SESSION) is True
+
+    def test_survives_pruning_past_the_entry_cap(self, tmp_path: Path) -> None:
+        """RV3-n2: ``_prune`` drops the OLDEST retired entries once the
+        ledger exceeds its cap -- the session that recorded the dropped
+        entry must still read as having recorded SOMETHING, ever, even
+        when every SURVIVING entry belongs to other sessions entirely."""
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        plan_dir.mkdir(parents=True)
+        ledger = GoalLedger(tmp_path / LEDGER_FILENAME)
+        ledger.record_emission(_SESSION, "P000", _GOAL_LINE, plan_dir)
+        # No PLAN.md folder exists for any of these plan numbers, so each
+        # entry reconciles to MISSING (and is retired) on the NEXT call --
+        # by the end, well over 100 retired entries exist and _prune has
+        # dropped the earliest ones, including _SESSION's very first (and
+        # only) entry. Every one of these belongs to a DIFFERENT session,
+        # so no surviving entry's own ``session_id``/``sessions`` field
+        # could keep _SESSION findable by accident.
+        for i in range(1, 105):
+            ledger.record_emission(f"other-{i}", f"P{i:03d}", _GOAL_LINE, plan_dir)
+
+        assert not any(
+            e.plan_number == "P000" for e in ledger.entries()
+        ), "sanity: the first entry really was pruned off the ledger"
+        assert ledger.session_has_entries(_SESSION) is True
+
+    def test_false_for_a_reassert_only_session(self, tmp_path: Path) -> None:
+        """B4: a session that has ONLY ever been reasserted onto a plan --
+        never performed a real emission of its own -- must still read as
+        having no entries of its own. Reassertion grants ownership
+        additively without the caller having genuinely started anything
+        (Plan 00269's "goal survives a restart" contract); conflating that
+        with "has entries" would incorrectly block such a session from
+        later becoming a stakeholder of a SECOND unrelated live plan too --
+        an existing, deliberate behaviour (see
+        TestOwnershipSurvivesASecondSession in test_goal_injection.py)."""
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        _make_plan(plan_dir, _PLAN_A, _STATUS_IN_PROGRESS)
+        ledger = GoalLedger(tmp_path / LEDGER_FILENAME)
+        ledger.record_emission(_SESSION, _PLAN_A, _GOAL_LINE, plan_dir)
+
+        assert ledger.reassert_session(_OTHER_SESSION, _PLAN_A) is True
+
+        assert ledger.session_has_entries(_OTHER_SESSION) is False
+
 
 class TestReassertSession:
     """Review M3/RV-M1: ADDS a session to a still-live entry's ownership set

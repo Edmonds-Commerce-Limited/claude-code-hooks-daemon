@@ -46,7 +46,19 @@ _PRIVATE_FILE_MODE: Final[int] = 0o600
 _LOCK_FILE_MODE: Final[int] = _PRIVATE_FILE_MODE
 
 _ENTRIES_KEY: Final[str] = "entries"
+# RV3-n2: sessions that have EVER performed a real emission
+# (record_emission), tracked as its OWN ledger-wide, bounded, order-
+# preserving list -- independent of any per-entry field, so it survives
+# both record_emission overwriting an entry's single session_id (the
+# latest re-flipper wins there) and _prune dropping the entry entirely.
+# Deliberately NOT touched by reassert_session (see session_has_entries).
+_EVER_RECORDED_KEY: Final[str] = "ever_recorded_sessions"
 _MAX_ENTRIES: Final[int] = 100
+# Same order of magnitude as _MAX_ENTRIES, but a distinct cap: one SESSION
+# can persist across many entries over the ledger's lifetime, so bounding
+# it to the entry cap would undercount long-lived, frequently-flipping
+# sessions.
+_MAX_EVER_RECORDED_SESSIONS: Final[int] = 200
 # RV3-m5: bounds ONE entry's owner set, distinct from _MAX_ENTRIES above
 # (which bounds the number of ENTRIES). A rolling ledger plan touched by
 # dozens of teammates can otherwise accumulate owners without bound, each
@@ -122,6 +134,19 @@ class LivePlanRef:
     plan_text: str
 
 
+def _add_bounded(items: list[str], value: str, cap: int) -> None:
+    """Append ``value`` to ``items`` if absent, evicting the OLDEST entry
+    (index 0) when doing so would exceed ``cap``. Shared by every bounded,
+    order-preserving membership list this module grows: RV3-m5's per-entry
+    ``sessions`` owner set, and RV3-n2's ledger-wide ``ever_recorded_sessions``.
+    """
+    if value in items:
+        return
+    if len(items) >= cap:
+        del items[0]
+    items.append(value)
+
+
 def _add_owner(sessions: list[str], session_id: str) -> None:
     """Append ``session_id`` to ``sessions`` if absent, with FIFO eviction
     of the OLDEST owner at :data:`_MAX_OWNERS_PER_ENTRY` (RV3-m5). Shared by
@@ -129,11 +154,7 @@ def _add_owner(sessions: list[str], session_id: str) -> None:
     -- both grow the same additive ``sessions`` set and both need the same
     bound.
     """
-    if session_id in sessions:
-        return
-    if len(sessions) >= _MAX_OWNERS_PER_ENTRY:
-        del sessions[0]
-    sessions.append(session_id)
+    _add_bounded(sessions, session_id, _MAX_OWNERS_PER_ENTRY)
 
 
 def _optional_str(value: Any) -> str | None:
@@ -261,8 +282,9 @@ class GoalLedger:
 
     # ── persistence ────────────────────────────────────────────────────────
 
-    def entries(self) -> list[GoalLedgerEntry]:
-        """Load all entries; an unreadable or corrupt ledger yields ``[]``.
+    def _load_raw(self) -> Any:
+        """Parse the raw ledger JSON (any shape); ``None`` on any read/parse
+        failure, including a missing file.
 
         Review RV-m5: ``ValueError`` (not just ``json.JSONDecodeError``) is
         caught alongside ``OSError`` so a ledger file that is valid bytes but
@@ -271,13 +293,28 @@ class GoalLedger:
         unreadable ledger, rather than raising past this fail-open API. This
         repo runs the daemon in ``strict_mode``, where an uncaught exception
         here would DENY every PLAN.md edit with a system error.
+
+        Shared by :meth:`entries` and :meth:`_parse_ever_recorded` (RV3-n2)
+        so a caller needing BOTH reads the file once, not twice.
         """
         try:
-            raw = json.loads(self._path.read_text(encoding="utf-8"))
+            return json.loads(self._path.read_text(encoding="utf-8"))
         except FileNotFoundError:
-            return []
+            return None
         except (OSError, ValueError) as e:
             logger.warning("goal_ledger: unreadable ledger %s: %s", self._path, e)
+            return None
+
+    def entries(self) -> list[GoalLedgerEntry]:
+        """Load all entries; an unreadable or corrupt ledger yields ``[]``."""
+        return self._parse_entries(self._load_raw())
+
+    def _parse_entries(self, raw: Any) -> list[GoalLedgerEntry]:
+        # ``raw is None`` means _load_raw already handled (and, for a real
+        # read/parse error, already logged) the failure -- a missing file is
+        # the ordinary "no ledger written yet" case and must stay silent, so
+        # only a SUCCESSFULLY parsed but wrongly-shaped payload warns here.
+        if raw is None:
             return []
         raw_entries = raw.get(_ENTRIES_KEY) if isinstance(raw, dict) else None
         if not isinstance(raw_entries, list):
@@ -289,6 +326,19 @@ class GoalLedger:
             if entry is not None:
                 parsed.append(entry)
         return parsed
+
+    @staticmethod
+    def _parse_ever_recorded(raw: Any) -> list[str]:
+        """RV3-n2: the ledger-wide "ever recorded" session list from a raw
+        parse. No warning on absence -- an old ledger written before this
+        key existed, or a brand-new one, is not malformed.
+        """
+        if not isinstance(raw, dict):
+            return []
+        raw_sessions = raw.get(_EVER_RECORDED_KEY)
+        if not isinstance(raw_sessions, list):
+            return []
+        return [str(s) for s in raw_sessions]
 
     @staticmethod
     def _parse_entry(item: Any) -> GoalLedgerEntry | None:
@@ -321,15 +371,19 @@ class GoalLedger:
             logger.warning("goal_ledger: skipping malformed entry: %s", e)
             return None
 
-    def _save(self, entries: list[GoalLedgerEntry]) -> None:
-        """Atomically persist ``entries`` (pruned); failures are logged only.
+    def _save(self, entries: list[GoalLedgerEntry], ever_recorded: list[str]) -> None:
+        """Atomically persist ``entries`` (pruned) and ``ever_recorded``
+        (RV3-n2, defensively capped here too); failures are logged only.
 
         The tmp filename carries a uuid, not a pid: hook events run on
         concurrent THREADS of the one daemon process, so a pid-only suffix
         would let two writers share a tmp path and corrupt each other.
         """
         pruned = self._prune(entries)
-        payload = {_ENTRIES_KEY: [asdict(e) for e in pruned]}
+        payload = {
+            _ENTRIES_KEY: [asdict(e) for e in pruned],
+            _EVER_RECORDED_KEY: ever_recorded[-_MAX_EVER_RECORDED_SESSIONS:],
+        }
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
             tmp_path = self._path.parent / f".{self._path.name}.{uuid.uuid4().hex}.tmp"
@@ -405,7 +459,9 @@ class GoalLedger:
         """
         with self._locked():
             now = time.time()
-            entries = self.entries()
+            raw = self._load_raw()
+            entries = self._parse_entries(raw)
+            ever_recorded = self._parse_ever_recorded(raw)
             _, states = self._reconcile(entries, plan_dir)
 
             displaced: list[str] = []
@@ -442,7 +498,9 @@ class GoalLedger:
                         sessions=[session_id],
                     )
                 )
-            self._save(entries)
+            if session_id:
+                _add_bounded(ever_recorded, session_id, _MAX_EVER_RECORDED_SESSIONS)
+            self._save(entries, ever_recorded)
         return sorted(displaced)
 
     def has_live_entry(self, session_id: str, plan_number: str) -> bool:
@@ -514,16 +572,32 @@ class GoalLedger:
         return any(e.plan_number == plan_number and e.retired_at is None for e in self.entries())
 
     def session_has_entries(self, session_id: str) -> bool:
-        """True when the ledger has EVER recorded an emission for this session.
+        """True when the ledger has EVER recorded a real emission
+        (:meth:`record_emission`) for this session.
 
         Review M3: distinguishes a genuinely NEW session (no entries at
         all, so nothing here has told it about any goal yet) from a session
         that already went through the injection flow itself (which does not
-        need re-arming — it already has its own live signal). Counts
-        retired entries too: a session that fully completed one plan and
-        moved on is not "new" either.
+        need re-arming — it already has its own live signal).
+
+        RV3-n2: answered from a ledger-wide, bounded ``ever_recorded_sessions``
+        set (:data:`_EVER_RECORDED_KEY`), not any per-entry field. The
+        previous implementation read the single ``session_id`` field on any
+        entry, which is not actually what it means: ``record_emission``
+        OVERWRITES that field with whoever re-emits for the SAME plan next
+        (so a session whose plan was later re-flipped by someone else wrongly
+        counted as new again), and ``_prune`` can drop the entry out of the
+        ledger entirely once it exceeds its cap (silently losing the record
+        along with it). The durable set survives both.
+
+        Deliberately NOT populated by :meth:`reassert_session` -- a session
+        that has only ever been ADDED to another plan's ownership, without
+        ever performing a real emission of its own, is not "new" in the
+        sense this method exists to detect (Plan 00269's own motivating
+        case: nothing here should stop it from also becoming a stakeholder
+        of a second, unrelated live plan it is asked to track).
         """
-        return any(e.session_id == session_id for e in self.entries())
+        return session_id in self._parse_ever_recorded(self._load_raw())
 
     def reassert_session(self, session_id: str, plan_number: str) -> bool:
         """Add ``session_id`` to a still-live entry's set of owning sessions.
@@ -550,7 +624,8 @@ class GoalLedger:
         method, which stays simple and safe to call repeatedly.
         """
         with self._locked():
-            entries = self.entries()
+            raw = self._load_raw()
+            entries = self._parse_entries(raw)
             existing = next(
                 (e for e in entries if e.plan_number == plan_number and e.retired_at is None),
                 None,
@@ -559,7 +634,10 @@ class GoalLedger:
                 return False
             _add_owner(existing.sessions, session_id)
             existing.emitted_at = time.time()
-            self._save(entries)
+            # RV3-n2: ever_recorded is preserved UNCHANGED here -- a
+            # reassertion is deliberately not a "real emission" (see
+            # session_has_entries).
+            self._save(entries, self._parse_ever_recorded(raw))
         return True
 
     def live_plan_numbers(self, plan_dir: Path) -> list[str]:
@@ -570,10 +648,11 @@ class GoalLedger:
         must still defend.
         """
         with self._locked():
-            entries = self.entries()
+            raw = self._load_raw()
+            entries = self._parse_entries(raw)
             changed, states = self._reconcile(entries, plan_dir)
             if changed:
-                self._save(entries)
+                self._save(entries, self._parse_ever_recorded(raw))
         live = {
             e.plan_number
             for e in entries

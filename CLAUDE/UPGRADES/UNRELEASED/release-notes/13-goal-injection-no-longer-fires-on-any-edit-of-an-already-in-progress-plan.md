@@ -13,13 +13,22 @@ and had the Stop hook challenge stops on the spuriously ledgered plan's
 behalf. `recovery_cron_advisor`'s Write-path completion check had the same
 defect shape for `**Status**: Complete`: rewriting an already-complete plan
 re-injected the CronDelete teardown advisory every time. Both now fire only
-when the triggering Write/Edit is itself what moved the Status line;
-`goal_injection` reads its own Edit's replaced span (reconstructing the
-pre-edit text from disk when the span carried only the bare status value,
-with no `**Status**:` prefix) or, for a Write, git HEAD read from the
-file's OWN enclosing repository (not necessarily the project root's — a
-nested worktree checkout is a separate repo); `recovery_cron_advisor`'s
-Write path shares that same HEAD comparison. An edit or rewrite whose
+when the triggering Write/Edit is itself what moved the Status line.
+`goal_injection`'s primary source of truth is a ground-truth PreToolUse
+snapshot: a companion `plan_status_snapshot` handler reads the plan's
+status immediately BEFORE the same Write/Edit lands and hands it to
+`goal_injection` for the SAME tool call (matched by `tool_use_id`) — no
+reconstruction, so a bare status value that also happens to appear
+elsewhere in the document (a table cell, the plan's own title) can no
+longer be misread either way. When no snapshot exists for a given call (a
+daemon restart between the two dispatches, or a payload with no
+`tool_use_id`) it falls back to reading its own Edit's replaced span
+(reconstructing the pre-edit text from disk when the span carried only the
+bare status value, with no `**Status**:` prefix) or, for a Write, git HEAD
+read from the file's OWN enclosing repository (not necessarily the project
+root's — a nested worktree checkout is a separate repo); that fallback use
+is logged. `recovery_cron_advisor`'s Write path shares that same HEAD
+comparison and has no snapshot of its own. An edit or rewrite whose
 replaced/compared span never touched the Status line emits nothing from
 either handler THROUGH THE FLIP PATH (no new ledger record, no
 displacement advisory) — a session touching an already-live plan without

@@ -657,6 +657,10 @@ handlers:
       enabled: true
       priority: 60
 
+    plan_status_snapshot:  # Dogfood: PreToolUse ground-truth sensor feeding goal_injection (Plan 00466 RV3-n5)
+      enabled: true  # Opt-in (false) elsewhere; only useful alongside goal_injection, itself opt-in
+      priority: 30
+
   # PostToolUse handlers (run after tool execution)
   post_tool_use:
     validate_eslint_on_write:  # Runs ESLint after file writes

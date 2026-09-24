@@ -251,6 +251,12 @@ class Priority:
     QA_SUPPRESSION = 30
     PLAN_NUMBER_HELPER = 30
     DAEMON_STATS = 30
+    # Plan 00466 RV3-n5: PreToolUse sensor for goal_injection's ground-truth
+    # snapshot mechanism. Same band as its PostToolUse counterpart
+    # (GOAL_INJECTION = 31) -- both are workflow-support infrastructure for
+    # the same feature, never blocking, so their relative order among
+    # other PreToolUse handlers is not load-bearing.
+    PLAN_STATUS_SNAPSHOT = 30
     # Extracted from DAEMON_STATS (Plan 00167) so the upgrade prompt reaches
     # every client on-by-default, independent of the off-by-default dev health
     # line. Sits right after it so the arrow renders in the same trailing area.
