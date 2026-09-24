@@ -42,6 +42,7 @@ from claude_code_hooks_daemon.plan_qa.checks import (
     row_folder_bijection,
     same_commit_plan_doc,
     staleness_nag,
+    stats_arithmetic,
     stats_recount,
     status_enum_and_date,
     status_line_present,
@@ -89,6 +90,9 @@ def all_checks() -> tuple[CheckSpec, ...]:
         # Plan-index retention window — COMMIT + SWEEP, no EDIT: a mid-archival
         # write is legitimately over the window (Plan 00379 N1).
         *index_retention_window.CHECKS,
+        # Plan-index statistics self-check — EDIT advises, COMMIT + SWEEP
+        # block: a mid-update write is legitimately inconsistent (Plan 00466 N13).
+        *stats_arithmetic.CHECKS,
         # Stage 2 — commit-gate-only checks
         index_at_birth.CHECK,
         counter_sanity.CHECK,

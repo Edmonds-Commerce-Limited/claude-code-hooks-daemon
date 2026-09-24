@@ -896,6 +896,14 @@ def test_flags_a_closing_sum_whose_operands_contradict_the_bullet(tmp_path: Path
 
     assert exit_code == 1, "a closing sum contradicting its own bullet must fail the gate"
     assert "plan-stats-arithmetic" in _rules(report)
+    # The per-rule summary must count it too; it once listed every rule but this one.
+    assert report["summary"]["by_rule"]["plan-stats-arithmetic"] >= 1
+    # The message names the line to fix: the closing self-check is line 9.
+    assert all(
+        "line 9:" in violation["message"]
+        for violation in report["violations"]
+        if violation["rule"] == "plan-stats-arithmetic"
+    )
 
 
 def test_flags_a_folder_sum_that_does_not_add_up(tmp_path: Path) -> None:
