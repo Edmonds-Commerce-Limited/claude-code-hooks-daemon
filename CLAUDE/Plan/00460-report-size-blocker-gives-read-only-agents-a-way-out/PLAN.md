@@ -80,7 +80,7 @@ when the dispatched type cannot write.
   `subagent_type` cannot write but the prompt declares a report path.
   Update the handler guidance (`get_claude_md`) for both handlers.
 - [x] ✅ **Task 1.5**: Release note. Full QA green.
-- [ ] ⬜ **Task 1.6**: The daemon persists every sub-agent's
+- [x] ✅ **Task 1.6**: The daemon persists every sub-agent's
   `last_assistant_message` at SubagentStop to a gitignored, bounded
   location under `untracked/agent-reports/`, never overwriting,
   retention pruned to a configured cap from day one (issue #52 was a
@@ -106,14 +106,14 @@ when the dispatched type cannot write.
 - [x] Test: `dispatch_declaration` advises on a read-only type with a
   declared report path.
 - [x] Full QA passes and CI is green.
-- [ ] Test: a stop's `last_assistant_message` is persisted to a file for
+- [x] Test: a stop's `last_assistant_message` is persisted to a file for
   every agent type (read-only, writable, unresolvable), whether or not
   it is over the size threshold.
-- [ ] Test: persistence never overwrites an existing file (collision
+- [x] Test: persistence never overwrites an existing file (collision
   suffixes instead).
-- [ ] Test: the report directory is pruned to the configured cap after
+- [x] Test: the report directory is pruned to the configured cap after
   a write.
-- [ ] Test: the size blocker's over-threshold message points at the
+- [x] Test: the size blocker's over-threshold message points at the
   saved path when persistence succeeded, and falls back to the
   pre-Task-1.6 message when it did not.
 - [ ] Full QA passes (foreground, on the final commit).
