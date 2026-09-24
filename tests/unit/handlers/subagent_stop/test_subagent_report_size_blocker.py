@@ -36,10 +36,14 @@ from claude_code_hooks_daemon.handlers.subagent_stop.subagent_report_size_blocke
 
 
 def _subagent_stop_input(message: str, **extra: Any) -> dict[str, Any]:
+    # Plan 00460: default agent_type is a documented WRITABLE built-in
+    # (general-purpose), not "Explore" -- Explore is genuinely read-only, so
+    # tests exercising the pre-00460 write-to-file behaviour need a type that
+    # still resolves that way. TestReadOnlyAgent below covers Explore itself.
     payload: dict[str, Any] = {
         "hook_event_name": "SubagentStop",
         "agent_id": "agent-1",
-        "agent_type": "Explore",
+        "agent_type": "general-purpose",
         "last_assistant_message": message,
         "stop_hook_active": False,
     }
@@ -130,13 +134,15 @@ class TestPrescriptiveFallbackPath:
     ) -> None:
         oversized = "x" * (handler._threshold_chars + 1)
 
-        result = handler.handle(_subagent_stop_input(oversized, agent_type="Explore"))
+        # A WRITABLE agent_type: Explore is genuinely read-only as of Plan
+        # 00460 and takes the condense path instead (see TestReadOnlyAgent).
+        result = handler.handle(_subagent_stop_input(oversized, agent_type="general-purpose"))
 
         assert result.reason is not None
         # yymmdd (today's date, 6 digits) + the real agent_type + the
         # documented model placeholder, under the fallback dir.
         yymmdd = datetime.now(tz=UTC).strftime("%y%m%d")
-        assert f"untracked/agent-reports/{yymmdd}-Explore-{{model}}.md" in result.reason
+        assert f"untracked/agent-reports/{yymmdd}-general-purpose-{{model}}.md" in result.reason
 
     def test_deny_reason_uses_placeholder_when_agent_type_missing(
         self, handler: SubagentReportSizeBlockerHandler
@@ -187,6 +193,82 @@ class TestPrescriptiveFallbackPath:
             # matches() False means the write is NOT intercepted as a wrong
             # location -- i.e. the path is allowed.
             assert location_handler.matches(write_input) is False
+
+
+class TestReadOnlyAgent:
+    """Plan 00460: an agent type with no `Write` tool must never be told to
+    write the report to a file -- it gets a condense-and-reply way out
+    instead, with an explicit Bash-workaround warning. A writable or
+    unresolvable type keeps today's behaviour byte-identical."""
+
+    def test_builtin_read_only_agent_gets_condense_message(
+        self, handler: SubagentReportSizeBlockerHandler
+    ) -> None:
+        oversized = "x" * (handler._threshold_chars + 1)
+
+        result = handler.handle(_subagent_stop_input(oversized, agent_type="Explore"))
+
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "subagent-reports" not in result.reason
+        assert "Explore" in result.reason
+        assert "no `Write` tool" in result.reason
+        assert "Condense" in result.reason
+
+    def test_read_only_message_forbids_bash_workaround(
+        self, handler: SubagentReportSizeBlockerHandler
+    ) -> None:
+        oversized = "x" * (handler._threshold_chars + 1)
+
+        result = handler.handle(_subagent_stop_input(oversized, agent_type="Plan"))
+
+        assert result.reason is not None
+        assert "heredoc" in result.reason
+        assert "content guards" in result.reason
+
+    def test_builtin_writable_agent_behaviour_unchanged(
+        self, handler: SubagentReportSizeBlockerHandler
+    ) -> None:
+        oversized = "x" * (handler._threshold_chars + 1)
+
+        result = handler.handle(_subagent_stop_input(oversized, agent_type="general-purpose"))
+
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "subagent-reports" in result.reason
+
+    def test_unresolvable_agent_type_behaviour_unchanged(
+        self, handler: SubagentReportSizeBlockerHandler
+    ) -> None:
+        """An agent type this resolver cannot classify (no built-in match, no
+        `.claude/agents/*.md` file) keeps today's write-to-file instruction --
+        the fail-safe default for `None` (Plan 00460 Task 1.1)."""
+        oversized = "x" * (handler._threshold_chars + 1)
+
+        result = handler.handle(_subagent_stop_input(oversized, agent_type="totally-custom-type"))
+
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "subagent-reports" in result.reason
+
+    def test_project_agent_without_write_tool_gets_condense_message(
+        self, handler: SubagentReportSizeBlockerHandler, tmp_path: Any
+    ) -> None:
+        agents_dir = tmp_path / ".claude" / "agents"
+        agents_dir.mkdir(parents=True)
+        (agents_dir / "code-reviewer.md").write_text(
+            "---\nname: code-reviewer\ndescription: reviews code\n"
+            "tools: Read, Glob, Grep, Bash\n---\n\nBody.\n"
+        )
+        handler._project_root = tmp_path
+        oversized = "x" * (handler._threshold_chars + 1)
+
+        result = handler.handle(_subagent_stop_input(oversized, agent_type="code-reviewer"))
+
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "subagent-reports" not in result.reason
+        assert "code-reviewer" in result.reason
 
 
 class TestFailOpen:
