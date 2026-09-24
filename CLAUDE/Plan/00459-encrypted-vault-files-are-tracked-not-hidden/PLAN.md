@@ -91,7 +91,7 @@ protection must return on the very next check.
   those print plaintext. A decrypted-in-place file is denied again. Check
   that the flaggable-content and quarantine guards do not re-block the same
   file by name.
-- [ ] ⬜ **Task 1.5**: Docs (the handlers' guidance, `explain-rule`
+- [x] ✅ **Task 1.5**: Docs (the handlers' guidance, `explain-rule`
   text, the secret-file docs) and a release note. Full QA green.
 
 ### Phase 2: Deliver
