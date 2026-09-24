@@ -6,5 +6,16 @@
       "Read(//tmp/**)",
       "Bash(echo \"SUB_DIFF=$?\")"
     ]
+  },
+  "extraKnownMarketplaces": {
+    "defence-before-fix": {
+      "source": {
+        "source": "github",
+        "repo": "Defence-Before-Fix/claude-plugin"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "defence-before-fix@defence-before-fix": true
   }
 }

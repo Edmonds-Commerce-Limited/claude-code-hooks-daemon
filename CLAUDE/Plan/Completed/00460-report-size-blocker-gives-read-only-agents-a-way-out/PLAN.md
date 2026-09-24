@@ -1,6 +1,6 @@
 # Plan 00460: report size blocker gives read only agents a way out
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-24
 **Owner**: dev
 **Priority**: High
@@ -93,7 +93,7 @@ when the dispatched type cannot write.
 
 ### Phase 2: Deliver
 
-- [ ] ⬜ **Task 2.1**: Merge `--no-ff`, verify ancestry and CI, and restart
+- [x] ✅ **Task 2.1**: Merge `--no-ff`, verify ancestry and CI, and restart
   the daemon.
 
 ## Success Criteria
@@ -117,6 +117,8 @@ when the dispatched type cannot write.
   saved path when persistence succeeded, and falls back to the
   pre-Task-1.6 message when it did not.
 - [x] Full QA passes (foreground, on the final commit).
+- [x] Every release-bound consequence is in the pending-release holding
+  area: `UNRELEASED/release-notes/10-a-read-only-subagent-blocked-on-report-size-gets-a-way-out-that-does-not-bypass-content-guards.md`.
 
 ## Delivery & Milestones
 
@@ -124,4 +126,6 @@ when the dispatched type cannot write.
      "when" — do not add dates). The blow-by-blow activity log lives in
      JOURNAL/00460-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
-- Not yet delivered.
+- Delivered in integration batch A: merged `--no-ff` as `ca2b1ba5`, full QA
+  37/37 on the combined head `2c38ff05`, main fast-forwarded to `a8204ad0`,
+  CI green at `ce31d6d8`.

@@ -1,6 +1,6 @@
 # Plan 00422: niggles ledger fifteen
 
-**Status**: Blocked
+**Status**: In Progress
 **Created**: 2026-09-16
 **Owner**: joseph
 **Priority**: Medium
@@ -24,14 +24,9 @@ unfinished remedy, not the finding.
 ([00466](../00466-niggles-ledger-sixteen/PLAN.md)). This PLAN.md passed its
 size warning with N29.
 
-**Blocked, not in progress.** Eleven of the fifteen rows are terminal. Every
-one of the remaining four ⏸ rows is an owner question that has been stated and
-is waiting for an answer (N1 scope, N4 A/B/C, N7, N11), and both 🔄 rows have
-had their buildable half delivered — what is left in each is an open design
-question, not work. There is no row an executor could advance without an answer
-first, so the status says so: `In Progress` claimed work was moving and
-misreported this ledger as mid-work to the release slate check, which is the
-one reader that acts on the difference.
+**In progress again.** The ledger was Blocked on six owner questions. They
+are now decided in [DECISIONS.md](DECISIONS.md), so every open row has
+buildable work.
 
 **One of the four carries a class that now has three sightings**, and naming it
 is a goal of this plan rather than a footnote in it. 00419's N3 (the two
@@ -88,7 +83,7 @@ ledger's shape is readable without opening it:
 | N18 | LSP.md relies on an `untracked/venv` symlink nothing creates                   | chasing a Pyright diagnostic during issue #53                       | ✅ Remedied by "Ledger 00422 N18: create and maintain untracked/lsp-venv so LSP.md's claims are true" — a new name avoids the `LEGACY_VENV` collision; ProjectContext creates/repoints it from `sys.prefix` on self-install daemon start                               |
 | N19 | the Python nested-install check can never fire in a real client                | reviewing Plan 00455, whose agent copied it into `init.sh`          | ✅ Remedied by "Ledger 00422 N19: delete the pyproject.toml exemption so the nested-install cleanup fires for real clients" — cleanup is now unconditional; the destructive branch also handles a symlinked nested path and symlinks inside it                         |
 | N20 | the acceptance probes cannot pass in a worktree whose daemon is running        | Plan 00456's final QA in its worktree                               | ✅ Remedied by Plan 00458. It was not a worktree fault: six guards matched skip lists as a bare substring. They now match whole path segments relative to the project, and a QA detector keeps the class out                                                           |
-| N21 | nothing points a journal append at the tool that stamps the time               | the owner's question, after a session of hand-stamped entries       | ⬜ Open — `mkplan.bash --journal` shipped in v3.66.0, yet an Edit/Write/heredoc append to a `JOURNAL/` file draws no advisory naming it                                                                                                                                |
+| N21 | nothing points a journal append at the tool that stamps the time               | the owner's question, after a session of hand-stamped entries       | ✅ Remedied by Plan 00461 — a hand-written Edit/Write/Bash journal entry is now DENIED with the `mkplan.bash --journal` command (merged `e3f03f3e`, CI green at `ce31d6d8`)                                                                                            |
 | N22 | the local "full QA" never runs shellcheck                                      | verifying Plan 00456's final QA before merge                        | ✅ Remedied by "Ledger 00422 N22: wire shellcheck into llm_qa.py so full QA covers it" — `shell_check` is now a `TOOL_REGISTRY` entry wrapping `run_shell_check.sh`; a wiring test pins every `run_all.sh` script against the registry so the next gap fails a test    |
 | N23 | a worktree commit is judged against the main checkout's staged tree            | Plan 00462's agent, denied over a path only main had staged         | 🔄 Graduated to Plan 00464 — a teammate's payload `cwd` is the main checkout, and the commit gates pick their repo from it, so worktree commits are wrongly denied AND their own staged content is never checked                                                       |
 | N24 | orchestrator simulate reports denials its blocking mode would never make       | a Plan 00463 review corrected the coordinator                       | ⬜ Open — simulate judges "not a coordination tool" (so every `Bash` is "would have been denied") while blocking denies only `Write`/`Edit`/`NotebookEdit`; the record meant to preview enforcement overstates it                                                      |
@@ -100,10 +95,10 @@ ledger's shape is readable without opening it:
 
 ## Questions waiting on the owner
 
-Six entries are blocked on a decision rather than on work. They are collected
-here so the whole set can be read in one sitting: each is ONE question, with
-what each answer costs and what happens while it goes unanswered. Nothing here
-needs investigation first — every one has been measured.
+**All six are decided** in [DECISIONS.md](DECISIONS.md). An unattended session
+took the recommended option for each and stated the assumption beside it, so
+the owner can reverse any one with a single message. The questions are kept
+below as they were put: each is ONE question, with what each answer costs.
 
 1. **N1 — how loud may a template-versus-constants test be?** `priority.py` and
    the `init_config.py` template disagree across the whole `status_line` block

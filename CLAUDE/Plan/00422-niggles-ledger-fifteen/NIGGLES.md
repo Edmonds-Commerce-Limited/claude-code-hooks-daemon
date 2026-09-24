@@ -1810,6 +1810,18 @@ append is never checked at all.
 3. The plan-workflow guidance that the coordinator copies into dispatch
    briefs names `--journal` as THE way to append.
 
+**Remedied by Plan 00461**, going further than remedies 1 and 2 on the
+owner's instruction ("journal entries by hand are NOW FORBIDDEN"): a DENY,
+not an advisory. `plan_journal_guard` refuses any added non-blank line in a
+plan `JOURNAL/` day-file, in the main checkout and in worktrees. That covers
+`Edit`/`Write` and a Bash redirect, heredoc, `tee` or wrapper, including a
+destination the shell builds when the command runs. The deny prints that
+checkout's absolute `mkplan.bash --journal` command and a fresh body-file
+path. Remedy 3 is covered by every journal remediation, which now names
+`--journal`. Merged in integration batch A (`e3f03f3e`), CI green at
+`ce31d6d8`. Live in the main checkout, a probe Edit and a probe Bash heredoc
+append to a day-file are both denied as `R-JOURNAL-HAND-WRITTEN-ENTRY`.
+
 ### N20 — the acceptance probes cannot pass in a worktree whose daemon is running
 
 **Found**: Plan 00456's final QA in `untracked/worktrees/worktree-issue-53-venv`
