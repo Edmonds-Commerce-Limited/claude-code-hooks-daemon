@@ -34,6 +34,8 @@ from claude_code_hooks_daemon.plan_qa.checks.common import (
     journal_level,
 )
 from claude_code_hooks_daemon.plan_qa.model import (
+    JOURNAL_BODY_FILE_HINT,
+    journal_append_command,
     journal_entry_headings,
     parse_journal_dayfile_name,
 )
@@ -56,12 +58,16 @@ _TOLERANCE_MINUTES: Final[int] = 30
 #: check just goes back to the local clock.
 _UTC_SENTINEL: Final[str] = "timestamps in this file are UTC"
 
-_REMEDIATION: Final[str] = (
-    "Read the clock rather than estimating it, and correct the timestamp before "
-    "this write lands — once the entry is committed the journal is append-only, "
-    "so the reading can never be fixed, only annotated by a later entry. If the "
-    "entry genuinely belongs to a different day, write it to that day's file."
-)
+
+def _remediation(plan_dir: str, plan_number: int | None) -> str:
+    return (
+        "The time was typed rather than read from the clock. Take this entry out "
+        "of the write and append it with "
+        f"`{journal_append_command(plan_dir, plan_number)}` ({JOURNAL_BODY_FILE_HINT}). "
+        "Once an entry is committed the journal is append-only, so a wrong "
+        "reading can never be fixed, only annotated by a later entry appended "
+        "the same way."
+    )
 
 
 def _now() -> datetime:
@@ -125,7 +131,7 @@ def _rule(context: CheckContext, target: JournalEditTarget, content: str) -> lis
                 "and once committed it cannot be corrected — the journal is "
                 "append-only."
             ),
-            remediation=_REMEDIATION,
+            remediation=_remediation(context.plan_dir_rel, target.plan_number),
             path=target.rel_path,
         )
     ]

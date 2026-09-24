@@ -75,6 +75,14 @@ plan in question.
   note: a client-facing behaviour change.
 - [x] ✅ **Task 1.4**: Full QA green. Every journal entry this plan writes
   goes through `--journal`.
+- [x] ✅ **Task 1.5**: Fix every finding of the pre-merge review
+  ([report](subagent-reports/260924-plan461-review-opus-5-5.md)): worktree
+  day-files guarded, with the remedy printed as that checkout's absolute
+  command; any added line denied; a Bash destination the shell builds at
+  run time fails closed when it names a day-file; a fresh body-file name
+  per deny; every journal remediation names `--journal`; and the ten
+  minors. Targeted QA only (Plan 00463); the full gate is the
+  coordinator's.
 
 ### Phase 2: Deliver
 

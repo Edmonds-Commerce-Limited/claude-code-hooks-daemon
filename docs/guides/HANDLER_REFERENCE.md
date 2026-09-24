@@ -2030,7 +2030,7 @@ handlers:
 | **Type**       | Blocking             |
 | **Event**      | PreToolUse           |
 
-**Description:** Denies a plan journal entry written by hand, whether by an `Edit`/`Write` that adds an entry heading to (or creates) a `JOURNAL/` day-file, or by a Bash command that writes into one. The deny prints the exact `mkplan.bash --journal <plan> <category> <body-file>` command for that plan, because the tool stamps the real UTC time and a hand-typed one can be wrong. `mkplan.bash`, `git`, reads and deletion-only edits are allowed. Active only when the plan workflow is on and `mkplan.bash --journal` is deployed. Full rule: [CLAUDE/PlanJournalling.md](../../CLAUDE/PlanJournalling.md#appending-an-entry).
+**Description:** Denies a plan journal entry written by hand, in any checkout including git worktrees: an `Edit`/`Write` that adds any line to (or creates) a `JOURNAL/` day-file, or a Bash command that writes into one by any route. The deny prints the exact `mkplan.bash --journal <plan> <category> <body-file>` command for that plan, with absolute paths, because the tool stamps the real UTC time and a hand-typed one can be wrong. `mkplan.bash`, `git`, reads and edits that add no line are allowed. Active only when the plan workflow and journalling are on, the journal directory keeps its default `JOURNAL` name, and the checkout's plan directory holds `_JOURNAL_TEMPLATE_.md` and a `mkplan.bash` that offers `--journal`; otherwise it is inert and logs why once. Full rule: [CLAUDE/PlanJournalling.md](../../CLAUDE/PlanJournalling.md#appending-an-entry).
 
 **Config example:**
 

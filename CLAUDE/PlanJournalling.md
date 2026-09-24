@@ -180,42 +180,55 @@ reads the real clock, normalises it to UTC and writes the heading itself, so
 the caller never supplies a time:
 
 ```bash
-# 1. Write the entry BODY (no heading) with the Write tool, e.g.
-#    untracked/scratch/journal-190-entry.md
+# 1. Write the entry BODY (no heading) with the Write tool to a FRESH file, e.g.
+#    untracked/scratch/journal-190-260924-1405.md
 # 2. Append it:
-CLAUDE/Plan/mkplan.bash --journal 190 finding untracked/scratch/journal-190-entry.md --title "rate limit is per token"
+CLAUDE/Plan/mkplan.bash --journal 190 finding untracked/scratch/journal-190-260924-1405.md --title "rate limit is per token"
 ```
 
 Add `--ref T2.1` for a task reference. If today's day-file does not exist yet,
 the script creates it from `_JOURNAL_TEMPLATE_.md` first. `mkplan.bash --help`
-prints the full usage.
+prints the full usage. Use a new body-file name for every entry: the file stays
+behind after the append, and a second Write to the same name is refused by the
+clobber guard (ledger 00422 N29), as is one sub-agent writing over another's.
+In a worktree, run that worktree's own `CLAUDE/Plan/mkplan.bash`.
 
 **Why it is enforced.** In one session a coordinator and five sub-agents
 appended every entry by hand. One heredoc entry was stamped `09:50` when the
 clock read `09:11`. A journal is append-only, so a wrong stamp can only be
 corrected by a later entry, and only once the clock has passed the wrong time.
 The `plan_journal_guard` handler therefore DENIES a hand-written entry and
-prints the exact `--journal` command for that plan. It denies:
+prints the exact `--journal` command for that plan, with absolute paths into
+the checkout the day-file belongs to. It covers every checkout, worktrees
+included, and archived plans. It denies:
 
-- an `Edit` or `Write` that adds an entry heading to a day-file, or a `Write`
-  that creates one (archived plans included);
-- a Bash command that writes into a day-file: `>`/`>>`, `tee`, a heredoc,
-  `cp`/`mv`/`install`/`dd` onto it, an in-place editor, or an interpreter
-  one-liner that opens it for writing.
+- an `Edit` or `Write` that adds any line to a day-file, or a `Write` that
+  creates one. Any line, not only a heading: a note appended under the last
+  entry inherits that entry's stamp;
+- a Bash command that writes into a day-file by any route: `>`/`>>`, `tee`, a
+  heredoc, `cp`/`mv`/`install`/`dd`/`ln`/`rsync`/`sponge` onto it, an in-place
+  editor, a patch, or a program handed to an interpreter (inline, on a heredoc,
+  or behind a wrapper such as `timeout` or `uv run`) that opens it for writing;
+- a Bash destination the shell builds at run time (`$(date …)`, a variable, a
+  glob, a relative name after a `cd` in the same command) that names a
+  day-file, or whose file name is built inside a `JOURNAL/` directory.
 
 It allows `mkplan.bash` itself, `git` (moving a plan folder into `Completed/`
-carries the journal), reading a journal, and an `Edit` that only deletes, such
-as removing conflict markers after merging two branches that each appended an
-entry. It is active only where the tool exists: plan workflow enabled,
+carries the journal), reading a journal, and an `Edit` that adds no line:
+removing conflict markers after merging two branches that each appended an
+entry, reordering, or redacting within a line. It is active only where the tool
+exists: plan workflow enabled, journalling enabled and not `off`,
 `mkplan.bash` deployed with `--journal`, `_JOURNAL_TEMPLATE_.md` present, and
-the journal directory left at its default `JOURNAL` name. A coordinator that
-asks a sub-agent to journal puts the two-step pattern above in the brief.
+the journal directory left at its default `JOURNAL` name. When any of those
+fails it is inert and logs which one, once, at INFO. A coordinator that asks a
+sub-agent to journal puts the two-step pattern above in the brief.
 
 ### Append-only discipline
 
 A journal is **append-only**. New entries go at the **bottom**; earlier entries
 are never edited. **Corrections are new entries**, not rewrites — if you got
-something wrong at 09:00, add an 11:00 `finding` entry that corrects it. This
+something wrong at 09:00, append a `finding` entry with `--journal` that
+corrects it. This
 keeps the log an honest record of what was believed when, and lets the daemon's
 `journal-append-only` check confirm each edit only adds.
 
@@ -261,10 +274,10 @@ journalling into a heartbeat.
 
 | When                         | Do                                                                                                                                                                                                           |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Plan created (`mkplan.bash`) | `JOURNAL/` + day-1 file scaffolded; add a `## HH:MM · action` entry                                                                                                                                          |
+| Plan created (`mkplan.bash`) | `JOURNAL/` + day-1 file scaffolded; append an `action` entry with `mkplan.bash --journal`                                                                                                                    |
 | Work happens                 | Append `action`/`finding`/`decision`/`blocker` entries with `mkplan.bash --journal <plan-number> <category> <body-file> [--ref R] [--title T]` — the only way; see [Appending an entry](#appending-an-entry) |
-| A day rolls over             | Start a new `NNNNN-Journal-YY-MM-DD.md` (naming check accepts today or yesterday)                                                                                                                            |
-| Session ends / context low   | Append a `handoff` entry naming next steps                                                                                                                                                                   |
+| A day rolls over             | Nothing to do: `--journal` creates today's `NNNNN-Journal-YY-MM-DD.md` on the day's first entry (never create one by hand)                                                                                   |
+| Session ends / context low   | Append a `handoff` entry naming next steps, with `mkplan.bash --journal`                                                                                                                                     |
 | Plan archived                | `JOURNAL/` moves with the folder automatically                                                                                                                                                               |
 
 ## Notes & Updates migration
@@ -287,8 +300,11 @@ rules the daemon actually checks. The journal QA checks below ship **ADVISE**
 
 The one journal rule that DENIES is a handler rather than a QA check:
 `plan_journal_guard` (see [Appending an entry](#appending-an-entry)). It
-stands down when `journal.enabled` is false or `journal.mode` is `off`, and is
-switched off on its own with `handlers.pre_tool_use.plan_journal_guard.enabled: false`.
+stands down when `journal.enabled` is false, `journal.mode` is `off`, or
+`journal.dir_name` is not `JOURNAL`, and in any checkout whose plan directory
+lacks `_JOURNAL_TEMPLATE_.md` or a `mkplan.bash` that offers `--journal`. Each
+of those is logged once at INFO. It is switched off on its own with
+`handlers.pre_tool_use.plan_journal_guard.enabled: false`.
 
 > **`mode: block` is a ceiling, not a guarantee.** The journal sub-block is
 > subordinate to the surface mode it rides on: a journal blocker only denies
@@ -329,6 +345,6 @@ Cadence, hand-off style, the `## Delivery & Milestones` stub, and everything in
 the narrative sections above are yours to adapt. The four checks and their
 knobs are enforced, only ever as advisories unless you deliberately ratchet
 `mode: block`. So is `plan_journal_guard`, which denies a hand-written entry
-wherever `mkplan.bash --journal` is deployed. The heading grammar (category
+wherever `mkplan.bash --journal` and its template are deployed. The heading grammar (category
 set, middot separator) is written by that tool, so it is fixed while the guard
 is on.

@@ -25,7 +25,9 @@ from claude_code_hooks_daemon.plan_qa.checks.common import (
     journalling_active,
 )
 from claude_code_hooks_daemon.plan_qa.model import (
+    JOURNAL_BODY_FILE_HINT,
     PlanLocation,
+    journal_append_command,
     journal_entry_headings,
     parse_journal_dayfile_name,
 )
@@ -59,22 +61,25 @@ CHECK_ID: Final[str] = "journal-entry-ordering"
 #: ``YY`` to a full year, so a two-digit tuple here would never compare true.
 _NO_BACKFILL_BEFORE: Final[tuple[int, int, int]] = (2026, 9, 11)
 
+
 #: Leads with the append, not the move, because the move is the one that can be
 #: ILLEGAL: `journal-append-only` forbids rewriting an entry that is already
 #: committed, so a remediation opening with "move it" tells most readers to do
 #: the forbidden thing first (ledger 00422 N3). Moving is still named, because
 #: it is right for an entry that has not landed yet — with the condition
 #: stated rather than dropped.
-_REMEDIATION: Final[str] = (
-    "Journal entries run oldest-first. Correct the record with a NEW entry at "
-    "the bottom carrying an honest timestamp — journals are append-only, so a "
-    "correction is an addition, never a restatement. Only if the out-of-order "
-    "entry is NOT yet committed may you move it back to its chronological slot "
-    "instead, keeping its text unchanged. A correction whose honest time is "
-    "EARLIER than the entry it corrects will itself read as out of order: that "
-    "is the append-only rule and this one meeting, and the correction is still "
-    "the right move."
-)
+def _remediation(plan_dir: str, plan_number: int | None) -> str:
+    return (
+        "Journal entries run oldest-first. Correct the record with a NEW entry "
+        f"appended with `{journal_append_command(plan_dir, plan_number)}` "
+        f"({JOURNAL_BODY_FILE_HINT}) — journals are append-only, so a correction "
+        "is an addition, never a restatement. Only if the out-of-order entry is "
+        "NOT yet committed may you move it back to its chronological slot "
+        "instead, keeping its text unchanged. A correction stamped EARLIER than "
+        "a future-dated entry it corrects will itself read as out of order: "
+        "that is the append-only rule and this one meeting, and the correction "
+        "is still the right move."
+    )
 
 
 def _rule(context: CheckContext, target: JournalEditTarget, content: str) -> list[Finding]:
@@ -97,7 +102,7 @@ def _rule(context: CheckContext, target: JournalEditTarget, content: str) -> lis
                 "order (the day-file grammar is that times increase down the "
                 "file): " + "; ".join(regressions)
             ),
-            remediation=_REMEDIATION,
+            remediation=_remediation(context.plan_dir_rel, target.plan_number),
             path=target.rel_path,
         )
     ]

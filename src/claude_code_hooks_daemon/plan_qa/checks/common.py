@@ -20,6 +20,7 @@ from claude_code_hooks_daemon.plan_qa.model import (
 from claude_code_hooks_daemon.plan_qa.paths import classify
 from claude_code_hooks_daemon.plan_qa.readme_index import ReadmeIndex
 from claude_code_hooks_daemon.plan_qa.types import (
+    JOURNAL_MODE_OFF,
     CheckContext,
     CheckSpec,
     Finding,
@@ -33,8 +34,8 @@ from claude_code_hooks_daemon.utils.authored_paths import (
 
 _PLAN_FOLDER_NUMBER_RE: Final[re.Pattern[str]] = re.compile(r"^(\d{1,5})-[a-zA-Z]")
 
-# Journal mode tokens (mirror PlanWorkflowQaJournalConfig.mode).
-_JOURNAL_MODE_OFF: Final[str] = "off"
+# Journal mode tokens (mirror PlanWorkflowQaJournalConfig.mode); "off" is
+# `types.JOURNAL_MODE_OFF`, shared with the handlers that read the same policy.
 _JOURNAL_MODE_BLOCK: Final[str] = "block"
 
 # journal-dayfile-is-today mode tokens (mirror
@@ -347,7 +348,7 @@ def journal_level(context: CheckContext) -> Level:
 
 def journalling_active(context: CheckContext) -> bool:
     """Whether journal checks should run at all under the current policy."""
-    return context.journal_enabled and context.journal_mode != _JOURNAL_MODE_OFF
+    return context.journal_enabled and context.journal_mode != JOURNAL_MODE_OFF
 
 
 def journal_today_only_level(context: CheckContext) -> Level | None:

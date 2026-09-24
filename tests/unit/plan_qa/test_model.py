@@ -520,6 +520,11 @@ class TestJournalEntryHeadings:
         content = "~~~\n## 23:59 · quoted\n~~~\n## 08:00 · action · —\n"
         assert [h.label for h in journal_entry_headings(content)] == ["08:00"]
 
+    def test_a_fence_closes_only_on_its_own_marker(self) -> None:
+        """A `~~~` inside a backtick fence is fence content, not its close."""
+        content = "```\n~~~\n## 23:59 · still quoted\n```\n## 08:00 · action · —\n"
+        assert [h.label for h in journal_entry_headings(content)] == ["08:00"]
+
     def test_empty_content_has_no_entries(self) -> None:
         assert journal_entry_headings("") == []
 

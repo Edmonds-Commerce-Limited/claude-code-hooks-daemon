@@ -3,20 +3,21 @@
 A journal entry reaches a plan's ``JOURNAL/`` day-file through
 ``mkplan.bash --journal`` and nothing else, because the tool reads the real UTC
 clock and a hand-typed timestamp does not. Every route that wrote an entry by
-hand in the session that prompted this plan is reproduced here and must be
-DENIED: an Edit append, a Write, a heredoc, ``tee -a``, ``printf >>``, a copy
-onto the file, an interpreter one-liner and an in-place editor.
+hand in the session that prompted this plan, and every route the pre-merge
+review found around the first version, is reproduced here and must be DENIED.
 
 The allowances are just as load-bearing, because a guard that blocks the
-remedy or an ordinary git operation gets switched off:
+remedy, an ordinary git operation or a read gets switched off:
 
 * ``mkplan.bash --journal`` itself;
 * ``git`` (``git mv`` of a plan folder into ``Completed/``, ``git add``);
 * READING a day-file (``tail``, ``grep``, a read-only one-liner);
-* a deletion-only Edit, e.g. removing merge conflict markers after two
-  branches each appended an entry -- that is the append-only rule's business.
+* an Edit that adds no line: a deletion (conflict markers after a merge), a
+  reordering, or a same-line redaction.
 """
 
+import logging
+import re
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -27,12 +28,19 @@ from claude_code_hooks_daemon.core.hook_result import Decision
 from claude_code_hooks_daemon.handlers.pre_tool_use.plan_journal_guard import (
     PlanJournalGuardHandler,
 )
+from claude_code_hooks_daemon.utils.path_predicates import TextOrReason
 
 PLAN_DIR = "CLAUDE/Plan"
 LIVE_FOLDER = "00461-journal-entries-only"
 ARCHIVED_FOLDER = "00300-old-work"
 LIVE_DAYFILE = "00461-Journal-26-09-24.md"
 ARCHIVED_DAYFILE = "00300-Journal-26-09-01.md"
+WORKTREE = "untracked/worktrees/wt-a"
+WORKTREE_FOLDER = "00500-worktree-plan"
+WORKTREE_DAYFILE = "00500-Journal-26-09-24.md"
+RULE_ID = "R-JOURNAL-HAND-WRITTEN-ENTRY"
+
+LAST_LINE = "Plan 00461 created via `mkplan.bash`.\n"
 
 EXISTING_JOURNAL = (
     "# Plan 00461 — Journal 26-09-24\n"
@@ -44,11 +52,13 @@ EXISTING_JOURNAL = (
     "> ```\n"
     "\n"
     "## 13:30 · action · — — plan scaffolded\n"
-    "\n"
-    "Plan 00461 created via `mkplan.bash`.\n"
+    "\n" + LAST_LINE
 )
 
 NEW_ENTRY = "\n## 14:05 · finding · T1.1 — hand-typed\n\nThe clock was guessed.\n"
+
+#: `<checkout>/untracked/scratch/journal-<N>-<yymmdd>-<hhmmss>-<4 hex>.md`
+BODY_FILE_RE = r"untracked/scratch/journal-{number}-\d{{6}}-\d{{6}}-[0-9a-f]{{4}}\.md"
 
 
 @pytest.fixture(autouse=True)
@@ -69,15 +79,20 @@ def _reset_disclosure_tracker() -> Any:
     reset_data_layer()
 
 
-@pytest.fixture
-def project(tmp_path: Path) -> Path:
-    """A project with the scaffolder, the journal template and two journals."""
-    plan_root = tmp_path / PLAN_DIR
-    plan_root.mkdir(parents=True)
+def _deploy_scaffolder(plan_root: Path) -> None:
+    plan_root.mkdir(parents=True, exist_ok=True)
     (plan_root / "mkplan.bash").write_text(
         "#!/usr/bin/env bash\n# Usage:\n#   mkplan.bash --journal <plan-number> ...\n"
     )
     (plan_root / "_JOURNAL_TEMPLATE_.md").write_text("# Plan {{PLAN_NUMBER}} — Journal\n")
+
+
+@pytest.fixture
+def project(tmp_path: Path) -> Path:
+    """The main checkout plus one git worktree, each with its own plan tree."""
+    root = tmp_path.resolve()
+    plan_root = root / PLAN_DIR
+    _deploy_scaffolder(plan_root)
 
     live = plan_root / LIVE_FOLDER / "JOURNAL"
     live.mkdir(parents=True)
@@ -87,7 +102,22 @@ def project(tmp_path: Path) -> Path:
     archived = plan_root / "Completed" / ARCHIVED_FOLDER / "JOURNAL"
     archived.mkdir(parents=True)
     (archived / ARCHIVED_DAYFILE).write_text(EXISTING_JOURNAL.replace("00461", "00300"))
-    return tmp_path
+
+    worktree_plan_root = root / WORKTREE / PLAN_DIR
+    _deploy_scaffolder(worktree_plan_root)
+    worktree_journal = worktree_plan_root / WORKTREE_FOLDER / "JOURNAL"
+    worktree_journal.mkdir(parents=True)
+    (worktree_journal / WORKTREE_DAYFILE).write_text(EXISTING_JOURNAL.replace("00461", "00500"))
+
+    scratch = root / "untracked" / "scratch"
+    scratch.mkdir(parents=True)
+    (scratch / "journal.patch").write_text(
+        f"--- a/{_relative_live()}\n+++ b/{_relative_live()}\n@@ -1 +1,2 @@\n x\n+y\n"
+    )
+    (scratch / "plan.patch").write_text(
+        f"--- a/{PLAN_DIR}/{LIVE_FOLDER}/PLAN.md\n+++ b/{PLAN_DIR}/{LIVE_FOLDER}/PLAN.md\n"
+    )
+    return root
 
 
 @pytest.fixture
@@ -108,6 +138,10 @@ def _archived_path(project: Path) -> Path:
     return project / PLAN_DIR / "Completed" / ARCHIVED_FOLDER / "JOURNAL" / ARCHIVED_DAYFILE
 
 
+def _worktree_path(project: Path) -> Path:
+    return project / WORKTREE / PLAN_DIR / WORKTREE_FOLDER / "JOURNAL" / WORKTREE_DAYFILE
+
+
 def _edit(path: Path, old: str, new: str) -> dict[str, Any]:
     return {
         "tool_name": "Edit",
@@ -123,32 +157,18 @@ def _bash(command: str, cwd: Path) -> dict[str, Any]:
     return {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(cwd)}
 
 
-def _append_edit(path: Path) -> dict[str, Any]:
-    last_line = "Plan 00461 created via `mkplan.bash`.\n"
-    return _edit(path, last_line, last_line + NEW_ENTRY)
+def _append_edit(
+    path: Path, addition: str = NEW_ENTRY, last_line: str = LAST_LINE
+) -> dict[str, Any]:
+    return _edit(path, last_line, last_line + addition)
 
 
 def _relative_live() -> str:
     return f"{PLAN_DIR}/{LIVE_FOLDER}/JOURNAL/{LIVE_DAYFILE}"
 
 
-def _refuse_to_read(monkeypatch: pytest.MonkeyPatch, basename: str) -> None:
-    """Make one file unreadable to the handler, as EACCES would.
-
-    Patched rather than chmod'ed: the suite may run as root, which reads a
-    mode-000 file regardless.
-    """
-    from claude_code_hooks_daemon.handlers.pre_tool_use import plan_journal_guard
-    from claude_code_hooks_daemon.utils.path_predicates import TextOrReason
-
-    real = plan_journal_guard.read_text_or_reason
-
-    def refusing(path: Any, **kwargs: Any) -> TextOrReason:
-        if Path(path).name == basename:
-            return TextOrReason(reason="[Errno 13] Permission denied")
-        return real(path, **kwargs)
-
-    monkeypatch.setattr(plan_journal_guard, "read_text_or_reason", refusing)
+def _live_journal_dir() -> str:
+    return f"{PLAN_DIR}/{LIVE_FOLDER}/JOURNAL"
 
 
 class TestInitialisation:
@@ -161,19 +181,16 @@ class TestInitialisation:
 
     def test_declares_its_rule(self) -> None:
         rules = PlanJournalGuardHandler().get_rules()
-        assert [rule.rule_id for rule in rules] == ["R-JOURNAL-HAND-WRITTEN-ENTRY"]
+        assert [rule.rule_id for rule in rules] == [RULE_ID]
 
 
 class TestEditWriteSurfaceIsDenied:
-    """Task 1.1: the Edit/Write routes that are allowed today."""
-
     def test_edit_appending_an_entry_is_denied(
         self, handler: PlanJournalGuardHandler, project: Path
     ) -> None:
         hook_input = _append_edit(_live_path(project))
         assert handler.matches(hook_input) is True
-        result = handler.handle(hook_input)
-        assert result.decision == Decision.DENY
+        assert handler.handle(hook_input).decision == Decision.DENY
 
     def test_write_creating_a_new_dayfile_is_denied(
         self, handler: PlanJournalGuardHandler, project: Path
@@ -186,46 +203,81 @@ class TestEditWriteSurfaceIsDenied:
     def test_write_that_adds_an_entry_to_an_existing_dayfile_is_denied(
         self, handler: PlanJournalGuardHandler, project: Path
     ) -> None:
-        hook_input = _write(_live_path(project), EXISTING_JOURNAL + NEW_ENTRY)
-        assert handler.matches(hook_input) is True
+        assert handler.matches(_write(_live_path(project), EXISTING_JOURNAL + NEW_ENTRY)) is True
 
     def test_an_archived_plans_journal_is_covered_too(
         self, handler: PlanJournalGuardHandler, project: Path
     ) -> None:
         last_line = "Plan 00300 created via `mkplan.bash`.\n"
-        hook_input = _edit(_archived_path(project), last_line, last_line + NEW_ENTRY)
+        hook_input = _append_edit(_archived_path(project), last_line=last_line)
         assert handler.matches(hook_input) is True
-        reason = handler.handle(hook_input).reason or ""
-        assert "--journal 300 " in reason
+        assert "--journal 300 " in (handler.handle(hook_input).reason or "")
+
+    @pytest.mark.parametrize(
+        "addition",
+        [
+            "\n##  14:30 · finding · — two spaces\n",
+            "\n##\t14:30 · finding · — a tab\n",
+            "\n### 14:30 · finding · — a level-3 heading\n",
+            "\n ## 14:30 · finding · — a leading space\n",
+            "\n## 9:30 · finding · — one-digit hour\n",
+            "\n## [14:30] finding\n",
+            "\n## finding — no time at all\n",
+            "\n**14:30 · finding**\n",
+            "\n```\n## 14:30 · finding · — after an unclosed fence\n",
+            "Addendum: the clock was wrong, it was 09:11.\n",
+        ],
+    )
+    def test_any_added_line_is_denied_whatever_its_shape(
+        self, handler: PlanJournalGuardHandler, project: Path, addition: str
+    ) -> None:
+        """M1: text appended under the last entry inherits its stamp."""
+        assert handler.matches(_append_edit(_live_path(project), addition)) is True, addition
+
+    def test_a_write_adding_an_untimed_paragraph_is_denied(
+        self, handler: PlanJournalGuardHandler, project: Path
+    ) -> None:
+        content = EXISTING_JOURNAL + "Addendum: one more thing.\n"
+        assert handler.matches(_write(_live_path(project), content)) is True
 
 
 class TestEditWriteSurfaceIsAllowed:
     def test_deletion_only_edit_removing_conflict_markers_is_allowed(
         self, handler: PlanJournalGuardHandler, project: Path
     ) -> None:
-        """After a merge of two appends, deleting the markers adds no entry."""
+        """After a merge of two appends, deleting the markers adds no line."""
         path = _live_path(project)
-        conflicted = (
+        path.write_text(
             EXISTING_JOURNAL
             + "<<<<<<< HEAD\n## 14:00 · action · — ours\n\nA.\n=======\n"
             + "## 14:02 · action · — theirs\n\nB.\n>>>>>>> branch\n"
         )
-        path.write_text(conflicted)
-        hook_input = _edit(path, "<<<<<<< HEAD\n", "")
+        assert handler.matches(_edit(path, "<<<<<<< HEAD\n", "")) is False
+
+    def test_reordering_two_entries_is_allowed(
+        self, handler: PlanJournalGuardHandler, project: Path
+    ) -> None:
+        path = _live_path(project)
+        first = "## 14:02 · action · — theirs\n\nB.\n"
+        second = "## 14:00 · action · — ours\n\nA.\n"
+        path.write_text(EXISTING_JOURNAL + "\n" + first + "\n" + second)
+        hook_input = _edit(path, first + "\n" + second, second + "\n" + first)
         assert handler.matches(hook_input) is False
 
-    def test_body_only_edit_adds_no_entry_and_is_allowed(
+    def test_same_line_redaction_is_allowed(
         self, handler: PlanJournalGuardHandler, project: Path
     ) -> None:
         hook_input = _edit(_live_path(project), "created via", "scaffolded via")
         assert handler.matches(hook_input) is False
 
-    def test_an_entry_shaped_line_inside_a_fence_is_not_an_entry(
+    def test_a_same_count_heading_rewrite_passes_to_the_append_only_check(
         self, handler: PlanJournalGuardHandler, project: Path
     ) -> None:
-        last_line = "Plan 00461 created via `mkplan.bash`.\n"
-        fenced = last_line + "\n```\n## 23:59 · quoted from a log\n```\n"
-        assert handler.matches(_edit(_live_path(project), last_line, fenced)) is False
+        """m4, by design: a rewrite adds no line, so it is `journal-append-only`'s."""
+        content = EXISTING_JOURNAL.replace(
+            "## 13:30 · action · — — plan scaffolded", "## 15:00 · finding · — replaced"
+        )
+        assert handler.matches(_write(_live_path(project), content)) is False
 
     def test_edit_whose_old_string_is_absent_is_left_to_the_tool(
         self, handler: PlanJournalGuardHandler, project: Path
@@ -245,19 +297,52 @@ class TestEditWriteSurfaceIsAllowed:
         notes = _live_path(project).with_name("notes.md")
         assert handler.matches(_write(notes, NEW_ENTRY)) is False
 
-    def test_a_dayfile_in_another_checkout_is_not_judged(
-        self, handler: PlanJournalGuardHandler, tmp_path: Path
+    def test_a_dayfile_outside_the_project_is_not_judged(
+        self, handler: PlanJournalGuardHandler, project: Path
     ) -> None:
-        """The printed command would write to THIS checkout, so stay silent."""
-        elsewhere = (
-            tmp_path.parent / "other-checkout" / PLAN_DIR / LIVE_FOLDER / "JOURNAL" / LIVE_DAYFILE
-        )
+        elsewhere = project.parent / "unrelated" / PLAN_DIR / LIVE_FOLDER / "JOURNAL" / LIVE_DAYFILE
         assert handler.matches(_write(elsewhere, NEW_ENTRY)) is False
 
 
-class TestBashSurfaceIsDenied:
-    """Task 1.1: every Bash route that writes into a day-file."""
+class TestWorktreeJournals:
+    """B1: sub-agents in a worktree send their hooks to the MAIN daemon."""
 
+    def test_an_edit_to_a_worktree_dayfile_is_denied_naming_that_checkouts_script(
+        self, handler: PlanJournalGuardHandler, project: Path
+    ) -> None:
+        last_line = "Plan 00500 created via `mkplan.bash`.\n"
+        hook_input = _append_edit(_worktree_path(project), last_line=last_line)
+
+        assert handler.matches(hook_input) is True
+        reason = handler.handle(hook_input).reason or ""
+        worktree_root = project / WORKTREE
+        assert f"{worktree_root}/{PLAN_DIR}/mkplan.bash --journal 500 " in reason
+        assert re.search(
+            re.escape(str(worktree_root)) + "/" + BODY_FILE_RE.format(number=500), reason
+        )
+
+    def test_a_relative_bash_append_from_the_worktree_is_denied(
+        self, handler: PlanJournalGuardHandler, project: Path
+    ) -> None:
+        relative = f"{PLAN_DIR}/{WORKTREE_FOLDER}/JOURNAL/{WORKTREE_DAYFILE}"
+        hook_input = _bash(f"echo '## 14:30' >> {relative}", project / WORKTREE)
+        assert handler.matches(hook_input) is True
+
+    def test_an_absolute_bash_append_into_the_worktree_is_denied(
+        self, handler: PlanJournalGuardHandler, project: Path
+    ) -> None:
+        hook_input = _bash(f"echo '## 14:30' >> {_worktree_path(project)}", project)
+        assert handler.matches(hook_input) is True
+
+    def test_a_worktree_without_the_scaffolder_stands_down(
+        self, handler: PlanJournalGuardHandler, project: Path
+    ) -> None:
+        (project / WORKTREE / PLAN_DIR / "mkplan.bash").unlink()
+        last_line = "Plan 00500 created via `mkplan.bash`.\n"
+        assert handler.matches(_append_edit(_worktree_path(project), last_line=last_line)) is False
+
+
+class TestBashSurfaceIsDenied:
     @pytest.mark.parametrize(
         "command",
         [
@@ -270,10 +355,11 @@ class TestBashSurfaceIsDenied:
             f"mv untracked/scratch/entry.md {_relative_live()}",
             f"dd if=untracked/scratch/entry.md of={_relative_live()}",
             f"git show HEAD:{_relative_live()} > {_relative_live()}",
-            ("python3 -c \"open('" + _relative_live() + "', 'a').write('## 14:05 · action · —')\""),
+            "python3 -c \"open('" + _relative_live() + "', 'a').write('## 14:05 · action · —')\"",
             "python3 -c \"from pathlib import Path; Path('"
             + _relative_live()
             + "').write_text('x')\"",
+            f"python3 -c \"open('{_relative_live()}', mode='w').write('x')\"",
             f"/usr/bin/python3 -c \"open('{_relative_live()}', 'a').write('x')\"",
             f"perl -pi -e 's/a/b/' {_relative_live()}",
             f"sed -i 's/a/b/' {_relative_live()}",
@@ -298,23 +384,162 @@ class TestBashSurfaceIsDenied:
         assert handler.matches(_bash(command, project)) is True
 
 
+class TestUnplaceableDestinationsFailClosed:
+    """M2: a destination the resolver cannot place is denied if it names a journal."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"cd {_live_journal_dir()} && cat >> {LIVE_DAYFILE} <<'EOF'\n## 14:05\nEOF",
+            f"cd {_live_journal_dir()}; echo x >> {LIVE_DAYFILE}",
+            f"(cd {_live_journal_dir()} && echo x >> {LIVE_DAYFILE})",
+            f"pushd {_live_journal_dir()} && echo x >> {LIVE_DAYFILE}",
+            f"cat >> {_live_journal_dir()}/00461-Journal-$(date -u +%y-%m-%d).md <<'EOF'\nx\nEOF",
+            f"echo x >> {_live_journal_dir()}/00461-Journal-`date -u +%y-%m-%d`.md",
+            f"echo x >> {_live_journal_dir()}/*.md",
+            f"echo x >> $PLANS/{LIVE_FOLDER}/JOURNAL/{LIVE_DAYFILE}",
+            f'cd {_live_journal_dir()} && echo x >> "$F"',
+        ],
+    )
+    def test_is_denied(self, handler: PlanJournalGuardHandler, project: Path, command: str) -> None:
+        assert handler.matches(_bash(command, project)) is True, command
+
+    def test_the_deny_still_names_the_plan(
+        self, handler: PlanJournalGuardHandler, project: Path
+    ) -> None:
+        command = (
+            f"cat >> {_live_journal_dir()}/00461-Journal-$(date -u +%y-%m-%d).md <<'EOF'\nx\nEOF"
+        )
+        reason = handler.handle(_bash(command, project)).reason or ""
+        assert f"{project}/{PLAN_DIR}/mkplan.bash --journal 461 " in reason
+
+    def test_an_absolute_cd_names_that_checkouts_script(
+        self, handler: PlanJournalGuardHandler, project: Path
+    ) -> None:
+        worktree_journal = _worktree_path(project).parent
+        command = f'cd {worktree_journal} && echo x >> "$F"'
+        reason = handler.handle(_bash(command, project)).reason or ""
+        assert f"{project / WORKTREE}/{PLAN_DIR}/mkplan.bash --journal 500 " in reason
+
+    def test_without_a_cwd_the_main_checkout_is_named(
+        self, handler: PlanJournalGuardHandler, project: Path
+    ) -> None:
+        command = f"echo x >> {_live_journal_dir()}/00461-Journal-$(date -u +%y-%m-%d).md"
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": command}}
+        reason = handler.handle(hook_input).reason or ""
+        assert f"{project}/{PLAN_DIR}/mkplan.bash --journal 461 " in reason
+
+    def test_an_unnamed_plan_is_a_placeholder(
+        self, handler: PlanJournalGuardHandler, project: Path
+    ) -> None:
+        command = f'cd {PLAN_DIR}/JOURNAL && echo x >> "$F"'
+        reason = handler.handle(_bash(command, project)).reason or ""
+        assert "--journal <plan-number> <category> " in reason
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"cd {_live_journal_dir()} && tail -n 5 {LIVE_DAYFILE}",
+            "cd untracked/scratch && echo x > note.md",
+            f"ls {_live_journal_dir()}/*.md > untracked/scratch/list.txt",
+            "echo x > untracked/scratch/$NAME.md",
+            f"ls {_live_journal_dir()} > untracked/scratch/$NAME.txt",
+        ],
+    )
+    def test_is_allowed(
+        self, handler: PlanJournalGuardHandler, project: Path, command: str
+    ) -> None:
+        assert handler.matches(_bash(command, project)) is False, command
+
+    def test_an_absolute_destination_after_cd_is_placed_not_failed_closed(
+        self, handler: PlanJournalGuardHandler, project: Path
+    ) -> None:
+        output = project / "untracked" / "scratch" / "n.txt"
+        command = f"cd {_live_journal_dir()} && grep -c x {LIVE_DAYFILE} > {output}"
+        assert handler.matches(_bash(command, project)) is False
+
+
+class TestWrappersAndOtherWriters:
+    """m1: the writer behind a wrapper, stdin program, patch or link."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f'timeout 5 bash -c "echo x >> {_relative_live()}"',
+            f"nohup sh -c 'echo x >> {_relative_live()}'",
+            f"nice -n 5 sed -i 's/a/b/' {_relative_live()}",
+            f"stdbuf -oL sed -i 's/a/b/' {_relative_live()}",
+            f"time sed -i 's/a/b/' {_relative_live()}",
+            f"uv run python -c \"open('{_relative_live()}', 'a').write('x')\"",
+            f"poetry run python -c \"open('{_relative_live()}', 'a').write('x')\"",
+            f"python3 - <<'EOF'\nopen('{_relative_live()}', 'a').write('x')\nEOF",
+            f"python3 <<EOF\nopen('{_relative_live()}', 'a').write('x')\nEOF",
+            f"awk -i inplace '{{print}}' {_relative_live()}",
+            f"gawk -i inplace -v x=1 '{{print}}' {_relative_live()}",
+            "git apply untracked/scratch/journal.patch",
+            "patch -p1 < untracked/scratch/journal.patch",
+            "patch -p1 -i untracked/scratch/journal.patch",
+            f"ln -sf /tmp/x {_relative_live()}",
+            f"rsync untracked/scratch/x.md {_relative_live()}",
+            f"echo x | sponge -a {_relative_live()}",
+        ],
+    )
+    def test_is_denied(self, handler: PlanJournalGuardHandler, project: Path, command: str) -> None:
+        assert handler.matches(_bash(command, project)) is True, command
+
+    def test_a_patch_that_touches_no_journal_is_allowed(
+        self, handler: PlanJournalGuardHandler, project: Path
+    ) -> None:
+        assert handler.matches(_bash("git apply untracked/scratch/plan.patch", project)) is False
+
+
+class TestReadsAreNotDenied:
+    """m2: a write signal elsewhere in a program does not make a read a write."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            f"python3 -c \"print(open('{_relative_live()}').read())\"",
+            f"python3 -c \"print(open('{_relative_live()}').read().count('a'))\"",
+            f"python3 -c \"import sys; sys.stdout.write(open('{_relative_live()}').read())\"",
+            f"python3 -c \"print(len(open('{_relative_live()}').read()) > 3)\"",
+            f'bash -c "wc -l {_relative_live()} > untracked/scratch/n.txt"',
+            f"perl -Ilib script.pl {_relative_live()}",
+            f"perl -Mlib=x script.pl {_relative_live()}",
+            f"awk 'NR>=1 && NR<=20' {_relative_live()}",
+            f"sed -n '1,5p' {_relative_live()}",
+            f"cat > untracked/scratch/notes.md <<EOF\npython3 -c \"open('{_relative_live()}', 'a').write('x')\"\nEOF",
+            f"cat > untracked/scratch/notes.md <<'EOF'\necho x >> {_relative_live()}\nEOF",
+        ],
+    )
+    def test_is_allowed(
+        self, handler: PlanJournalGuardHandler, project: Path, command: str
+    ) -> None:
+        assert handler.matches(_bash(command, project)) is False, command
+
+
 class TestBashSurfaceIsAllowed:
     @pytest.mark.parametrize(
         "command",
         [
             f"{PLAN_DIR}/mkplan.bash --journal 461 finding untracked/scratch/e.md --title 'x'",
             f"bash {PLAN_DIR}/mkplan.bash --journal 461 action untracked/scratch/e.md",
+            f"{PLAN_DIR}/mkplan.bash --journal 461 action untracked/scratch/e.md "
+            f"&& tail -n 5 {_relative_live()}",
             f"git mv {PLAN_DIR}/{LIVE_FOLDER} {PLAN_DIR}/Completed/",
-            f"git mv {_relative_live()} {PLAN_DIR}/{LIVE_FOLDER}/JOURNAL/00461-Journal-26-09-23.md",
+            f"git mv {_relative_live()} {_live_journal_dir()}/00461-Journal-26-09-23.md",
             f"git add {_relative_live()} && git commit -m 'journal'",
             f"tail -n 40 {_relative_live()}",
             f"grep -n 'rate limit' {_relative_live()}",
             f"cat {_relative_live()} > untracked/scratch/copy.md",
-            f"python3 -c \"print(open('{_relative_live()}').read())\"",
-            f"sed -n '1,5p' {_relative_live()}",
-            f"mkdir -p {PLAN_DIR}/{LIVE_FOLDER}/JOURNAL",
-            f"echo x >> {PLAN_DIR}/{LIVE_FOLDER}/JOURNAL/notes.md",
+            f"mkdir -p {_live_journal_dir()}",
+            f"echo x >> {_live_journal_dir()}/notes.md",
+            f"echo x >> {PLAN_DIR}/JOURNAL/{LIVE_DAYFILE}",
+            f"env ; tail -n 5 {_relative_live()}",
+            f"ruby -w {_relative_live()}",
             "echo 'no journal here' > untracked/scratch/x.md",
+            # An unterminated quote: bash refuses to run the command at all.
+            f"python3 -c \"open('{_relative_live()}', 'a').write('x')",
         ],
     )
     def test_is_allowed(
@@ -324,8 +549,6 @@ class TestBashSurfaceIsAllowed:
 
 
 class TestCommandShapes:
-    """The per-stage reader: command words, program flags, unparseable input."""
-
     @pytest.mark.parametrize(
         "command",
         [
@@ -334,32 +557,16 @@ class TestCommandShapes:
             f"sudo -E sed -i 's/a/b/' {_relative_live()}",
             f"sed -i 's/a/b/' {_relative_live()} && echo $'it\\'s done'",
             f"sed --in-place 's/a/b/' {_relative_live()}",
+            f"sed -i.bak 's/a/b/' {_relative_live()}",
+            f"env python3 -c \"open('{_relative_live()}', 'a').write('x')\"",
             f'perl -ne \'open(my $f, ">>", "{_relative_live()}")\' x',
+            f"ruby -e \"File.write('{_relative_live()}', 'x')\"",
             f"node --eval \"require('fs').appendFileSync('{_relative_live()}', 'x')\"",
             f"awk '{{print > \"{_relative_live()}\"}}' untracked/scratch/body.md",
         ],
     )
     def test_is_denied(self, handler: PlanJournalGuardHandler, project: Path, command: str) -> None:
         assert handler.matches(_bash(command, project)) is True, command
-
-    @pytest.mark.parametrize(
-        "command",
-        [
-            f"awk 'NR>=1 && NR<=20' {_relative_live()}",
-            f"env ; tail -n 5 {_relative_live()}",
-            f"{PLAN_DIR}/mkplan.bash --journal 461 action untracked/scratch/e.md "
-            f"&& tail -n 5 {_relative_live()}",
-            f"ruby -w {_relative_live()}",
-            f"echo x >> {PLAN_DIR}/JOURNAL/{LIVE_DAYFILE}",
-            # An unterminated quote: bash refuses to run the command at all
-            # ("unexpected EOF"), so nothing reaches the day-file.
-            f"python3 -c \"open('{_relative_live()}', 'a').write('x')",
-        ],
-    )
-    def test_is_allowed(
-        self, handler: PlanJournalGuardHandler, project: Path, command: str
-    ) -> None:
-        assert handler.matches(_bash(command, project)) is False, command
 
     def test_home_relative_path_in_a_program_is_resolved(
         self, handler: PlanJournalGuardHandler, project: Path, monkeypatch: pytest.MonkeyPatch
@@ -378,8 +585,7 @@ class TestCommandShapes:
         self, handler: PlanJournalGuardHandler
     ) -> None:
         command = f"python3 -c \"open('{_relative_live()}', 'a').write('x')\""
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": command}}
-        assert handler.matches(hook_input) is False
+        assert handler.matches({"tool_name": "Bash", "tool_input": {"command": command}}) is False
 
 
 class TestUnreadableState:
@@ -402,57 +608,76 @@ class TestUnreadableState:
         self, handler: PlanJournalGuardHandler, project: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The Edit tool meets the same error itself, so there is nothing to count."""
-        _refuse_to_read(monkeypatch, LIVE_DAYFILE)
+        _refuse_to_read(handler, monkeypatch, LIVE_DAYFILE)
         assert handler.matches(_append_edit(_live_path(project))) is False
 
     def test_unstattable_dayfile_is_not_judged(
         self, handler: PlanJournalGuardHandler, project: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from claude_code_hooks_daemon.handlers.pre_tool_use import plan_journal_guard
-
-        real = plan_journal_guard.path_is_file
-
-        def unstattable_dayfile(path: Any, *, unreadable_means: Any) -> Any:
-            if str(path).endswith(LIVE_DAYFILE):
-                return unreadable_means
-            return real(path, unreadable_means=unreadable_means)
-
-        monkeypatch.setattr(plan_journal_guard, "path_is_file", unstattable_dayfile)
+        monkeypatch.setattr(handler, "_file_state", lambda path: None)
         assert handler.matches(_append_edit(_live_path(project))) is False
 
     def test_unreadable_scaffolder_stands_the_guard_down(
         self, handler: PlanJournalGuardHandler, project: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Unable to confirm the remedy exists, the guard does not name it."""
-        _refuse_to_read(monkeypatch, "mkplan.bash")
+        _refuse_to_read(handler, monkeypatch, "mkplan.bash")
         assert handler.matches(_append_edit(_live_path(project))) is False
 
 
+def _refuse_to_read(
+    handler: PlanJournalGuardHandler, monkeypatch: pytest.MonkeyPatch, basename: str
+) -> None:
+    """Make one file unreadable through the handler's read seam, as EACCES would.
+
+    A seam rather than chmod: the suite may run as root, which reads a mode-000
+    file regardless.
+    """
+    real = handler._read_text
+
+    def refusing(path: Path) -> TextOrReason:
+        if path.name == basename:
+            return TextOrReason(reason="[Errno 13] Permission denied")
+        return real(path)
+
+    monkeypatch.setattr(handler, "_read_text", refusing)
+
+
 class TestDenyMessage:
-    def test_names_the_exact_command_for_that_plan(
+    def test_names_the_rule(self, handler: PlanJournalGuardHandler, project: Path) -> None:
+        reason = handler.handle(_append_edit(_live_path(project))).reason or ""
+        assert RULE_ID in reason
+
+    def test_names_the_exact_command_with_absolute_paths(
         self, handler: PlanJournalGuardHandler, project: Path
     ) -> None:
+        """m7: a relative command fails from a cwd that has moved."""
         reason = handler.handle(_append_edit(_live_path(project))).reason or ""
-        assert f"{PLAN_DIR}/mkplan.bash --journal 461 " in reason
+        assert f"{project}/{PLAN_DIR}/mkplan.bash --journal 461 " in reason
+        assert re.search(re.escape(str(project)) + "/" + BODY_FILE_RE.format(number=461), reason)
 
-    def test_shows_the_two_step_body_file_pattern(
+    def test_each_deny_prints_a_fresh_body_file(
         self, handler: PlanJournalGuardHandler, project: Path
     ) -> None:
-        reason = handler.handle(_append_edit(_live_path(project))).reason or ""
-        assert "untracked/scratch/" in reason
-        assert "Write tool" in reason
+        """M3: a fixed name trips the clobber guard on the second entry."""
+        pattern = re.escape(str(project)) + "/" + BODY_FILE_RE.format(number=461)
+        first = re.search(pattern, handler.handle(_append_edit(_live_path(project))).reason or "")
+        second = re.search(pattern, handler.handle(_append_edit(_live_path(project))).reason or "")
+        assert first is not None and second is not None
+        assert first.group(0) != second.group(0)
 
-    def test_says_why(self, handler: PlanJournalGuardHandler, project: Path) -> None:
+    def test_first_fire_carries_the_rules_teaching_text(
+        self, handler: PlanJournalGuardHandler, project: Path
+    ) -> None:
+        (rule,) = handler.get_rules()
         reason = handler.handle(_append_edit(_live_path(project))).reason or ""
-        assert "UTC" in reason
-        assert "40 minutes" in reason
+        assert rule.verbose in reason
 
     def test_bash_deny_names_the_command_too(
         self, handler: PlanJournalGuardHandler, project: Path
     ) -> None:
-        hook_input = _bash(f"echo x >> {_relative_live()}", project)
-        reason = handler.handle(hook_input).reason or ""
-        assert f"{PLAN_DIR}/mkplan.bash --journal 461 " in reason
+        reason = handler.handle(_bash(f"echo x >> {_relative_live()}", project)).reason or ""
+        assert f"{project}/{PLAN_DIR}/mkplan.bash --journal 461 " in reason
 
     def test_second_fire_is_terse_but_keeps_the_command(
         self, handler: PlanJournalGuardHandler, project: Path
@@ -492,22 +717,14 @@ class TestGate:
     def test_journalling_switched_off(
         self, handler: PlanJournalGuardHandler, project: Path, enabled: bool, mode: str
     ) -> None:
-        policy = MagicMock()
-        policy.journal.enabled = enabled
-        policy.journal.mode = mode
-        policy.journal.dir_name = "JOURNAL"
-        handler._plan_qa = policy
+        handler._plan_qa = _policy(enabled=enabled, mode=mode)
         assert handler.matches(_append_edit(_live_path(project))) is False
 
     def test_a_non_default_journal_dir_stands_the_guard_down(
         self, handler: PlanJournalGuardHandler, project: Path
     ) -> None:
         """`--journal` always writes into `JOURNAL/`, so it is no remedy for `LOG/`."""
-        policy = MagicMock()
-        policy.journal.enabled = True
-        policy.journal.mode = "advise"
-        policy.journal.dir_name = "LOG"
-        handler._plan_qa = policy
+        handler._plan_qa = _policy(dir_name="LOG")
         log_dir = project / PLAN_DIR / LIVE_FOLDER / "LOG"
         log_dir.mkdir()
         (log_dir / LIVE_DAYFILE).write_text(EXISTING_JOURNAL)
@@ -517,20 +734,79 @@ class TestGate:
     def test_default_journal_policy_is_active(
         self, handler: PlanJournalGuardHandler, project: Path
     ) -> None:
-        policy = MagicMock()
-        policy.journal.enabled = True
-        policy.journal.mode = "advise"
-        policy.journal.dir_name = "JOURNAL"
-        handler._plan_qa = policy
+        handler._plan_qa = _policy()
         assert handler.matches(_append_edit(_live_path(project))) is True
 
-    def test_other_tools_are_ignored(self, handler: PlanJournalGuardHandler, project: Path) -> None:
+    def test_other_tools_are_ignored(self, handler: PlanJournalGuardHandler) -> None:
         assert handler.matches({"tool_name": "Read", "tool_input": {}}) is False
 
-    def test_bash_without_a_command_is_ignored(
-        self, handler: PlanJournalGuardHandler, project: Path
-    ) -> None:
+    def test_bash_without_a_command_is_ignored(self, handler: PlanJournalGuardHandler) -> None:
         assert handler.matches({"tool_name": "Bash", "tool_input": {}}) is False
+
+
+class TestStandingDownIsLogged:
+    """m3: a guard that switches itself off must say so, once."""
+
+    @pytest.mark.parametrize(
+        ("break_it", "expected"),
+        [
+            (
+                lambda root: (root / PLAN_DIR / "_JOURNAL_TEMPLATE_.md").unlink(),
+                "_JOURNAL_TEMPLATE_",
+            ),
+            (lambda root: (root / PLAN_DIR / "mkplan.bash").unlink(), "mkplan.bash"),
+            (
+                lambda root: (root / PLAN_DIR / "mkplan.bash").write_text("echo old\n"),
+                "--journal",
+            ),
+        ],
+    )
+    def test_a_missing_remedy_is_logged_once(
+        self,
+        handler: PlanJournalGuardHandler,
+        project: Path,
+        caplog: pytest.LogCaptureFixture,
+        break_it: Any,
+        expected: str,
+    ) -> None:
+        break_it(project)
+        with caplog.at_level(logging.INFO):
+            handler.matches(_append_edit(_live_path(project)))
+            handler.matches(_append_edit(_live_path(project)))
+        messages = [
+            r.getMessage() for r in caplog.records if "plan_journal_guard" in r.getMessage()
+        ]
+        assert len(messages) == 1, messages
+        assert expected in messages[0]
+        assert "inert" in messages[0]
+
+    @pytest.mark.parametrize(
+        "policy_kwargs", [{"enabled": False}, {"mode": "off"}, {"dir_name": "LOG"}]
+    )
+    def test_a_policy_switch_off_is_logged_once(
+        self,
+        handler: PlanJournalGuardHandler,
+        project: Path,
+        caplog: pytest.LogCaptureFixture,
+        policy_kwargs: dict[str, Any],
+    ) -> None:
+        handler._plan_qa = _policy(**policy_kwargs)
+        with caplog.at_level(logging.INFO):
+            handler.matches(_append_edit(_live_path(project)))
+            handler.matches(_append_edit(_live_path(project)))
+        messages = [
+            r.getMessage() for r in caplog.records if "plan_journal_guard" in r.getMessage()
+        ]
+        assert len(messages) == 1, messages
+        assert "inert" in messages[0]
+
+
+def _policy(enabled: bool = True, mode: str = "advise", dir_name: str = "JOURNAL") -> MagicMock:
+    policy = MagicMock()
+    policy.journal.enabled = enabled
+    policy.journal.mode = mode
+    policy.journal.dir_name = dir_name
+    return policy
 
 
 class TestGuidanceAndProbes:
@@ -538,6 +814,12 @@ class TestGuidanceAndProbes:
         guidance = PlanJournalGuardHandler().get_claude_md() or ""
         assert "mkplan.bash --journal" in guidance
         assert "untracked/scratch/" in guidance
+
+    def test_claude_md_states_when_the_guard_is_inert(self) -> None:
+        """m3: resident guidance must not promise a guard that may be off."""
+        guidance = PlanJournalGuardHandler().get_claude_md() or ""
+        assert "_JOURNAL_TEMPLATE_.md" in guidance
+        assert "inert" in guidance
 
     def test_acceptance_probes_deny_a_hand_append_and_allow_the_tool(self) -> None:
         tests = PlanJournalGuardHandler().get_acceptance_tests()

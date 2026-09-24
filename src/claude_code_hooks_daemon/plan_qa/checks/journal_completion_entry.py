@@ -21,7 +21,11 @@ from claude_code_hooks_daemon.plan_qa.checks.common import (
     staged_plan_md_folder,
 )
 from claude_code_hooks_daemon.plan_qa.gitfacts import GitFacts, StagedChange
-from claude_code_hooks_daemon.plan_qa.model import PlanDoc
+from claude_code_hooks_daemon.plan_qa.model import (
+    JOURNAL_BODY_FILE_HINT,
+    PlanDoc,
+    journal_append_command,
+)
 from claude_code_hooks_daemon.plan_qa.types import (
     CheckContext,
     CheckSpec,
@@ -31,6 +35,8 @@ from claude_code_hooks_daemon.plan_qa.types import (
 )
 
 CHECK_ID: Final[str] = "journal-completion-entry"
+
+_CLOSING_CATEGORY: Final[str] = "handoff"
 
 
 def _is_terminal_flip(gitfacts: GitFacts, change: StagedChange) -> bool:
@@ -42,6 +48,14 @@ def _is_terminal_flip(gitfacts: GitFacts, change: StagedChange) -> bool:
         return False
     head_text = gitfacts.head_file_text(change.old_path or change.path)
     return head_text is None or not PlanDoc.parse(head_text).is_terminal
+
+
+def _remediation(plan_dir: str, plan_number: int | None) -> str:
+    command = journal_append_command(plan_dir, plan_number, _CLOSING_CATEGORY)
+    return (
+        f"Append a closing entry (why it ended, hand-off state) with `{command}` "
+        f"({JOURNAL_BODY_FILE_HINT}), and stage the day-file in this commit."
+    )
 
 
 def _run(context: CheckContext) -> list[Finding]:
@@ -71,11 +85,7 @@ def _run(context: CheckContext) -> list[Finding]:
                     f"Plan {plan_number:05d} flips to a terminal status in this "
                     "commit but stages no closing journal entry"
                 ),
-                remediation=(
-                    f"Append a closing `## HH:MM · handoff` entry to "
-                    f"{folder}/{context.journal_dir_name}/ (why it ended, hand-off "
-                    "state) and stage it in this commit."
-                ),
+                remediation=_remediation(context.plan_dir_rel, plan_number),
                 path=change.path,
             )
         )

@@ -432,14 +432,16 @@ _NOT_COMMAND_ANCHORED: dict[str, str] = {
         "or navigation, so `cd <repo> && git pull && cat x` is still judged"
     ),
     "PlanJournalGuardHandler": (
-        "matches on the write TARGET's location (a plan JOURNAL/ day-file), not a "
-        "command name - the Bash route reads get_bash_write_targets like "
-        "ProjectContainmentHandler below, so respelling the writer does not move "
-        "where the bytes land. Its two command-anchored parts resolve the head "
-        "through shell_segmentation.command_word, and their respellings "
-        "(`/usr/bin/python3`, `sudo -E sed -i`, `FOO=1 python3`) are asserted in "
-        "tests/unit/handlers/pre_tool_use/test_plan_journal_guard.py; it also "
-        "needs a plan tree with a deployed scaffolder to match at all"
+        "matches on the write TARGET's location (a plan JOURNAL/ day-file), not on "
+        "one command name, so this harness's respellings of a single head do not "
+        "apply. Respelling is NOT inert for it, though: the writer's name decides "
+        "whether a write is seen at all (an in-place flag, an interpreter program, "
+        "a wrapper such as `timeout`/`nohup`/`uv run`, a heredoc fed to python). "
+        "Those are resolved in handlers/utils/bash_file_writes.py through "
+        "shell_segmentation.command_word, and the respellings are asserted in "
+        "test_bash_file_writes.py and test_plan_journal_guard.py (`/usr/bin/python3`, "
+        "`sudo -E sed -i`, `FOO=1 python3`, the wrappers); it also needs a plan "
+        "tree with a deployed scaffolder to match at all"
     ),
     "ProjectContainmentHandler": (
         "matches on the write TARGET's location, not a command name - the Bash "

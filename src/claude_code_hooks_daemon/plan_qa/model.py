@@ -360,6 +360,36 @@ JOURNAL_CATEGORIES: Final[tuple[str, ...]] = (
     "handoff",
 )
 
+#: The plan scaffolder, deployed into the plan directory.
+MKPLAN_SCRIPT_NAME: Final[str] = "mkplan.bash"
+_CATEGORY_PLACEHOLDER: Final[str] = "<category>"
+_PLAN_NUMBER_PLACEHOLDER: Final[str] = "<plan-number>"
+_BODY_FILE_PLACEHOLDER: Final[str] = "<body-file>"
+
+#: How the body file for `journal_append_command` is prepared. Said once here so
+#: every remediation that names the command says it the same way.
+JOURNAL_BODY_FILE_HINT: Final[str] = (
+    "write the entry BODY (no heading) with the Write tool to a fresh file under "
+    "untracked/scratch/ first; the tool stamps the real UTC time and creates "
+    "today's day-file when there is none"
+)
+
+
+def journal_append_command(
+    plan_dir: str, plan_number: int | None, category: str = _CATEGORY_PLACEHOLDER
+) -> str:
+    """The command that appends a journal entry: the only way one is written.
+
+    Plan 00461: `plan_journal_guard` denies an entry written any other way, so
+    every remediation that asks for an entry names this command rather than
+    describing a heading to type.
+    """
+    number = _PLAN_NUMBER_PLACEHOLDER if plan_number is None else str(plan_number)
+    return (
+        f"{plan_dir}/{MKPLAN_SCRIPT_NAME} --journal {number} {category} "
+        f'{_BODY_FILE_PLACEHOLDER} --title "short title"'
+    )
+
 
 @dataclass(frozen=True)
 class JournalEntryHeading:

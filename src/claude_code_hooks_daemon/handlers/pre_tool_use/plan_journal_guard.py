@@ -9,42 +9,47 @@ the clock had passed the wrong time (ledger 00422 N3 and N21). An advisory, in
 effect, already existed and changed nothing, so this handler DENIES and names
 the exact command for the plan in question.
 
+Every checkout is guarded, not just this one. A worktree under
+``untracked/worktrees/`` or ``.claude/worktrees/`` sends its sub-agents' hooks
+to the MAIN daemon, so a day-file is located with
+``core.worktree_paths.enclosing_checkout`` and the command printed is THAT
+checkout's ``mkplan.bash``, as an absolute path.
+
 Two surfaces, both keyed on the day-file a call would write:
 
-* ``Write``/``Edit``: denied when the would-be content carries MORE entry
-  headings than the file does now, or when a ``Write`` creates a day-file. The
-  count comes from the same parser the journal checks use
-  (``plan_qa.model.journal_entry_headings``), so the three cannot disagree
-  about what an entry is. A deletion-only Edit adds no heading and passes: for
-  example, removing merge conflict markers after two branches each appended
-  an entry. Whether an edit rewrites history is ``journal-append-only``'s
-  question, not this one.
-* ``Bash``: denied when the command writes into a day-file. The targets come
-  from ``core.utils.get_bash_write_targets`` (redirects, ``tee``, heredocs,
-  ``cp``/``mv``/``install``/``dd``) rather than a parser of this handler's own.
-  Two additions cover what that detector cannot see. A quoted program is one
-  shlex token, so an interpreter one-liner (``python3 -c``, ``perl -e``,
-  ``bash -c``, an awk program) is judged by the day-file its PROGRAM names
-  plus a write signal inside that program. An in-place editor flag (``-i``) on
-  ``sed``/``perl``/``ruby`` is also judged. A ``git`` stage's RELOCATIONS are
-  never judged (``git mv`` of a plan folder into ``Completed/``), but a
-  redirect riding on a git stage still is.
+* ``Write``/``Edit``: denied when the would-be content has more non-blank lines
+  or more entry headings than the file does now, or when a ``Write`` creates a
+  day-file. Any added line is denied, not only an added heading, because text
+  appended under the last entry inherits that entry's stamp. Headings come from
+  ``plan_qa.model.journal_entry_headings``, the parser the journal checks use.
+  An Edit that adds no line passes: a deletion (conflict markers after two
+  branches each appended an entry), a reordering, a same-line redaction.
+  Whether it rewrites history is ``journal-append-only``'s question.
+* ``Bash``: denied when the command writes into a day-file by any route
+  ``handlers.utils.bash_file_writes`` finds: a redirect, ``tee``, a heredoc, a
+  copy, an in-place editor, a program handed to an interpreter (inline, on a
+  heredoc, or behind a wrapper), a patch, a link. ``git`` relocations are never
+  judged (``git mv`` of a plan folder into ``Completed/``).
 
-Known limit: a script fed to an interpreter on stdin (``python3 <<'EOF'``) is
-not read. A heredoc into the day-file itself is caught, because that is a
-redirect.
+Fails CLOSED on a destination it cannot place: one built at run time
+(``$(date …)``, a variable, a glob), or a relative one after a ``cd``. Such a
+destination is denied when it visibly names a day-file (``NNNNN-Journal-``), or
+when its file name is built at run time inside a ``JOURNAL/`` directory.
 
-Gated exactly as ``plan_number_helper`` is: only when the plan workflow is on
-and the scaffolder is deployed. That scaffolder must also offer ``--journal``,
-and the journal template it needs must be present. A client without them is
-never told to use a tool it lacks.
+Gated as ``plan_number_helper`` is: the plan workflow is on and the checkout's
+scaffolder is deployed. That scaffolder must also offer ``--journal``, and the
+journal template it needs must be present, so no client is told to use a tool
+it lacks. Journalling switched off, or kept in a directory other than
+``JOURNAL/``, also stands the guard down. Each of those is logged once at INFO,
+because a guard that turns itself off must say so.
 """
 
 import logging
 import os.path
 import re
-import shlex
+import secrets
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
 
@@ -61,30 +66,23 @@ from claude_code_hooks_daemon.core import GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
-from claude_code_hooks_daemon.core.utils import (
-    expand_home,
-    get_bash_command,
-    get_bash_write_targets,
-    get_file_path,
-)
+from claude_code_hooks_daemon.core.utils import expand_home, get_bash_command, get_file_path
+from claude_code_hooks_daemon.core.worktree_paths import enclosing_checkout
+from claude_code_hooks_daemon.handlers.utils.bash_file_writes import bash_file_writes
 from claude_code_hooks_daemon.handlers.utils.would_be_content import would_be_content
-from claude_code_hooks_daemon.install.plan_workflow import (
-    JOURNAL_TEMPLATE_NAME,
-    MKPLAN_SCRIPT_NAME,
-)
+from claude_code_hooks_daemon.install.plan_workflow import JOURNAL_TEMPLATE_NAME
 from claude_code_hooks_daemon.plan_qa.checks.common import plan_number_for_folder
 from claude_code_hooks_daemon.plan_qa.model import (
     JOURNAL_CATEGORIES,
+    MKPLAN_SCRIPT_NAME,
     journal_entry_headings,
     parse_journal_dayfile_name,
 )
-from claude_code_hooks_daemon.plan_qa.types import DEFAULT_JOURNAL_DIR_NAME
-from claude_code_hooks_daemon.utils.path_predicates import path_is_file, read_text_or_reason
-from claude_code_hooks_daemon.utils.shell_segmentation import (
-    command_word,
-    split_unquoted,
-    strip_message_bodies,
-    strip_quoted_heredoc_bodies,
+from claude_code_hooks_daemon.plan_qa.types import DEFAULT_JOURNAL_DIR_NAME, JOURNAL_MODE_OFF
+from claude_code_hooks_daemon.utils.path_predicates import (
+    TextOrReason,
+    path_is_file,
+    read_text_or_reason,
 )
 
 logger = logging.getLogger(__name__)
@@ -93,82 +91,46 @@ logger = logging.getLogger(__name__)
 #: proof that the remedy this handler prints actually exists there.
 _JOURNAL_FLAG: Final[str] = "--journal"
 
-#: `plan_workflow.qa.journal.mode` token that switches journalling off.
-_JOURNAL_MODE_OFF: Final[str] = "off"
-
-#: Decode policy for the files this handler only searches for ASCII markers.
+#: Decode policy for the files this handler reads: it looks only for ASCII
+#: markers and headings, so a replaced byte can neither create nor hide one.
 _DECODE_REPLACE: Final[str] = "replace"
 
-#: Every day-file name carries this, so a command without it cannot name one.
-#: A cheap prefilter run on every Bash call, never a coverage decision.
-_DAYFILE_MARKER: Final[str] = "-Journal-"
-
-#: Stage separators for the per-stage checks. Longest first, so `&&` and `||`
-#: are not read as `&` and `|`.
-_STAGE_SEPARATORS: Final[tuple[str, ...]] = ("&&", "||", ";", "|", "\n")
-
-#: The one command word whose relocations are never judged. See the module
-#: docstring.
-_GIT: Final[str] = "git"
-
-#: Words that precede the real command without being it.
-_COMMAND_PREFIXES: Final[frozenset[str]] = frozenset({"sudo", "env", "command", "exec"})
-
-#: `NAME=value` before a command is an environment assignment, not the command.
-_ASSIGNMENT_RE: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
-
-#: Runs of text that could be a path to a markdown file. Deliberately wide:
-#: every candidate is then filtered by `parse_journal_dayfile_name` and the
-#: plan-tree location test, so this only has to over-collect.
-_MARKDOWN_PATH_RE: Final[re.Pattern[str]] = re.compile(r"[^\s'\"`;|&()<>=,\[\]{}]+\.md\b")
-
-#: Interpreters whose inline program flag carries the code to run, by name.
-#: A name matching `_PYTHON_RE` uses `-c`.
-_PROGRAM_FLAGS: Final[dict[str, frozenset[str]]] = {
-    "perl": frozenset({"-e", "-E"}),
-    "ruby": frozenset({"-e"}),
-    "node": frozenset({"-e", "-p", "--eval", "--print"}),
-    "bash": frozenset({"-c"}),
-    "sh": frozenset({"-c"}),
-    "zsh": frozenset({"-c"}),
-    "dash": frozenset({"-c"}),
-}
-_PYTHON_RE: Final[re.Pattern[str]] = re.compile(r"^python[\d.]*$")
-_PYTHON_PROGRAM_FLAGS: Final[frozenset[str]] = frozenset({"-c"})
-
-#: awk takes its program as the first operand rather than after a flag.
-_AWK_NAMES: Final[frozenset[str]] = frozenset({"awk", "gawk", "mawk", "nawk"})
-
-#: Editors whose `-i` rewrites the named file in place.
-_IN_PLACE_EDITORS: Final[frozenset[str]] = frozenset({"sed", "perl", "ruby"})
-_IN_PLACE_FLAG_RE: Final[re.Pattern[str]] = re.compile(r"^(?:-[A-Za-z]*i|--in-place)")
-
-#: Something inside a program that writes: a write/append mode string, a
-#: write call, or a redirect. Judged only together with a day-file named in
-#: the SAME program, so a read-only one-liner never matches.
-_WRITE_SIGNAL_RE: Final[re.Pattern[str]] = re.compile(
-    r"""['"](?:[wax]|r\+)[bt+]*['"]|\bwrite|\bappend|>"""
+#: A Bash command without one of these cannot write a day-file. A cheap
+#: prefilter run on every Bash call; the patch words let a patch file that
+#: names a day-file be read.
+_BASH_PREFILTER_RE: Final[re.Pattern[str]] = re.compile(
+    r"-Journal-|" + DEFAULT_JOURNAL_DIR_NAME + r"|\bpatch\b|\bapply\b"
 )
 
-_FLAG_PREFIX: Final[str] = "-"
-_LONG_FLAG_PREFIX: Final[str] = "--"
+#: A day-file named in a token, wherever the rest of the token came from.
+_DAYFILE_MENTION_RE: Final[re.Pattern[str]] = re.compile(r"(?:^|/)(\d{1,5})-Journal-")
+#: The plan folder above a `JOURNAL/` directory named in a token.
+_PLAN_FOLDER_MENTION_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?:^|/)(\d{1,5})-[A-Za-z][^/]*/" + DEFAULT_JOURNAL_DIR_NAME + r"(?:/|$)"
+)
 
+#: Characters meaning the shell builds the token at run time.
+_EXPANSION_CHARACTERS: Final[tuple[str, ...]] = ("$", "*", "?", "`", "{", "[")
+_HOME_PREFIX: Final[str] = "~"
+_PATH_SEPARATOR: Final[str] = "/"
 
-@dataclass(frozen=True)
-class _Layout:
-    """Where this project's day-files live, resolved once per call."""
+#: Shown in place of a number the command did not reveal.
+_PLAN_NUMBER_PLACEHOLDER: Final[str] = "<plan-number>"
 
-    plan_dir: str
-    plan_root: Path
-    journal_dir: str
+#: Fresh body-file name per deny (UTC stamp plus a random suffix), so a second
+#: entry is never written over the first one's file (ledger 00422 N29).
+_BODY_FILE_STAMP: Final[str] = "%y%m%d-%H%M%S"
+_BODY_FILE_SUFFIX_BYTES: Final[int] = 2
 
 
 @dataclass(frozen=True)
 class _JournalTarget:
-    """A day-file a call would write, resolved against the plan tree."""
+    """A day-file a call would write, and the checkout whose tool appends to it."""
 
-    rel_path: str
-    plan_number: int
+    display: str
+    plan_number: int | None
+    checkout: Path
+    placed: bool = True
 
 
 class PlanJournalGuardHandler(PreToolUseHandlerBase):
@@ -185,13 +147,14 @@ class PlanJournalGuardHandler(PreToolUseHandlerBase):
         # Injected by the registry for PLANNING-tagged handlers.
         self._track_plans_in_project: str | None = None
         self._plan_qa: Any = None
+        self._inert_logged: set[str] = set()
 
         self._rule = Rule(
             rule_id=RuleID.JOURNAL_HAND_WRITTEN_ENTRY,
             blocked="a plan journal entry written by hand (Edit/Write/Bash into a JOURNAL/ day-file)",
             why="Only `mkplan.bash --journal` stamps the real UTC time; hand-typed "
             "stamps have landed 40 minutes in the future",
-            fix="Write the entry body to untracked/scratch/, then run "
+            fix="Write the entry body to a fresh file under untracked/scratch/, then run "
             "`mkplan.bash --journal <plan> <category> <body-file>`",
             verbose=(
                 "`mkplan.bash --journal` reads the real UTC clock and writes the "
@@ -200,8 +163,8 @@ class PlanJournalGuardHandler(PreToolUseHandlerBase):
                 "09:50 when the clock read 09:11, 40 minutes in the future. The "
                 "journal is append-only, so a wrong stamp can only be corrected "
                 "by a later entry, and only once the clock has passed the wrong "
-                "time. This applies to every agent and every sub-agent, and to "
-                "archived plans too."
+                "time. This applies to every agent and every sub-agent, in every "
+                "worktree, and to archived plans too."
             ),
         )
         self._formatter = RuleFormatter()
@@ -211,11 +174,33 @@ class PlanJournalGuardHandler(PreToolUseHandlerBase):
         return [self._rule]
 
     # ------------------------------------------------------------------
+    # I/O seams
+    # ------------------------------------------------------------------
+
+    def _read_text(self, path: Path) -> TextOrReason:
+        """Every read this handler makes (a day-file, a scaffolder, a patch)."""
+        return read_text_or_reason(path, errors=_DECODE_REPLACE)
+
+    def _file_state(self, path: Path) -> bool | None:
+        """Whether ``path`` is a file; None when it cannot be stat'ed."""
+        return path_is_file(path, unreadable_means=None)
+
+    # ------------------------------------------------------------------
     # Gate
     # ------------------------------------------------------------------
 
-    def _layout(self) -> _Layout | None:
-        """The plan tree this handler guards, or None when it is inactive.
+    def _log_inert(self, condition: str) -> None:
+        """Say once why the guard is off, so its silence can be explained."""
+        if condition in self._inert_logged:
+            return
+        self._inert_logged.add(condition)
+        logger.info(
+            "plan_journal_guard: inert (%s); a hand-written journal entry is not denied",
+            condition,
+        )
+
+    def _plan_dir(self) -> str | None:
+        """The plan directory guarded, or None when journalling policy is off.
 
         The scaffolder writes into a directory named `JOURNAL`. A project that
         configures another name keeps its journals somewhere `--journal` never
@@ -226,31 +211,37 @@ class PlanJournalGuardHandler(PreToolUseHandlerBase):
         if plan_dir is None:
             return None
         journal = getattr(self._plan_qa, "journal", None)
-        if journal is not None and (
-            not journal.enabled
-            or journal.mode == _JOURNAL_MODE_OFF
-            or journal.dir_name != DEFAULT_JOURNAL_DIR_NAME
-        ):
+        if journal is None:
+            return plan_dir
+        if not journal.enabled:
+            self._log_inert("plan_workflow.qa.journal.enabled is false")
             return None
-        return _Layout(
-            plan_dir=plan_dir,
-            plan_root=Path(os.path.normpath(self._workspace_root / plan_dir)),
-            journal_dir=DEFAULT_JOURNAL_DIR_NAME,
-        )
+        if journal.mode == JOURNAL_MODE_OFF:
+            self._log_inert(f"plan_workflow.qa.journal.mode is {JOURNAL_MODE_OFF}")
+            return None
+        if journal.dir_name != DEFAULT_JOURNAL_DIR_NAME:
+            self._log_inert(
+                f"plan_workflow.qa.journal.dir_name is {journal.dir_name!r}, and "
+                f"`mkplan.bash {_JOURNAL_FLAG}` writes only into {DEFAULT_JOURNAL_DIR_NAME}/"
+            )
+            return None
+        return plan_dir
 
-    @staticmethod
-    def _remedy_is_deployed(layout: _Layout) -> bool:
-        """Whether `mkplan.bash --journal` exists here and can run.
+    def _remedy_is_deployed(self, plan_root: Path) -> bool:
+        """Whether `mkplan.bash --journal` exists in this checkout and can run.
 
         Read only once a call has already been found to target a day-file, so
         the cost falls on the rare matching call and never on ordinary traffic.
         """
-        if not path_is_file(layout.plan_root / JOURNAL_TEMPLATE_NAME, unreadable_means=False):
+        template = plan_root / JOURNAL_TEMPLATE_NAME
+        if self._file_state(template) is not True:
+            self._log_inert(f"{template} is missing, so `mkplan.bash {_JOURNAL_FLAG}` cannot run")
             return False
-        script = layout.plan_root / MKPLAN_SCRIPT_NAME
-        if not path_is_file(script, unreadable_means=False):
+        script = plan_root / MKPLAN_SCRIPT_NAME
+        if self._file_state(script) is not True:
+            self._log_inert(f"{script} is missing")
             return False
-        read = read_text_or_reason(script, errors=_DECODE_REPLACE)
+        read = self._read_text(script)
         if read.text is None:
             logger.warning(
                 "plan_journal_guard: cannot read %s (%s); standing down rather "
@@ -259,20 +250,18 @@ class PlanJournalGuardHandler(PreToolUseHandlerBase):
                 read.reason,
             )
             return False
-        return _JOURNAL_FLAG in read.text
+        if _JOURNAL_FLAG not in read.text:
+            self._log_inert(f"{script} has no {_JOURNAL_FLAG} mode")
+            return False
+        return True
 
     # ------------------------------------------------------------------
     # Target resolution
     # ------------------------------------------------------------------
 
-    def _dayfile_target(self, raw: str, cwd: Any, layout: _Layout) -> _JournalTarget | None:
-        """``raw`` as a day-file under this project's plan tree, else None.
-
-        Lexical only (`normpath`, no symlink resolution). A day-file in another
-        checkout is not this project's: the printed command would append to
-        THIS checkout's plan, which is the wrong file.
-        """
-        if raw.startswith("~"):
+    def _dayfile_target(self, raw: str, cwd: Any, plan_dir: str) -> _JournalTarget | None:
+        """``raw`` as a day-file under some checkout's plan tree, else None."""
+        if raw.startswith(_HOME_PREFIX):
             expanded = expand_home(raw)
             if expanded is None:
                 return None
@@ -282,35 +271,34 @@ class PlanJournalGuardHandler(PreToolUseHandlerBase):
             if not isinstance(cwd, str) or not cwd:
                 return None
             candidate = Path(cwd) / candidate
-        path = Path(os.path.normpath(candidate))
+        located = enclosing_checkout(os.path.normpath(candidate), self._workspace_root)
+        if located is None:
+            return None
+        checkout, relative = located
 
-        if not path.is_relative_to(layout.plan_root):
+        plan_parts = Path(plan_dir).parts
+        if relative.parts[: len(plan_parts)] != plan_parts:
             return None
-        if path.parent.name != layout.journal_dir:
+        if relative.parent.name != DEFAULT_JOURNAL_DIR_NAME:
             return None
-        if parse_journal_dayfile_name(path.name) is None:
+        if parse_journal_dayfile_name(relative.name) is None:
             return None
-        plan_number = plan_number_for_folder(path.parent.parent.name)
+        plan_number = plan_number_for_folder(relative.parent.parent.name)
         if plan_number is None:
             return None
-        return _JournalTarget(
-            rel_path=str(path.relative_to(self._workspace_root)),
-            plan_number=plan_number,
-        )
+        return _JournalTarget(display=str(relative), plan_number=plan_number, checkout=checkout)
 
-    def _file_tool_target(
-        self, hook_input: dict[str, Any], layout: _Layout
-    ) -> _JournalTarget | None:
-        """The day-file a Write/Edit would add an entry to, else None."""
+    def _file_tool_target(self, hook_input: dict[str, Any], plan_dir: str) -> _JournalTarget | None:
+        """The day-file a Write/Edit would add a line to, else None."""
         file_path = get_file_path(hook_input)
         if not file_path:
             return None
-        target = self._dayfile_target(file_path, hook_input.get(HookInputField.CWD), layout)
+        target = self._dayfile_target(file_path, hook_input.get(HookInputField.CWD), plan_dir)
         if target is None:
             return None
 
-        path = self._workspace_root / target.rel_path
-        exists = path_is_file(path, unreadable_means=None)
+        path = target.checkout / target.display
+        exists = self._file_state(path)
         if exists is None:
             # Nothing to count against, and the tool call will meet the same
             # permission error itself.
@@ -321,9 +309,7 @@ class PlanJournalGuardHandler(PreToolUseHandlerBase):
             # the template and stamps the first entry in one step.
             return target if is_write else None
 
-        # Headings are ASCII plus a middot, so a replaced byte can neither
-        # create nor hide one; a strict decode would only blind the guard.
-        read = read_text_or_reason(path, errors=_DECODE_REPLACE)
+        read = self._read_text(path)
         if read.text is None:
             logger.warning(
                 "plan_journal_guard: cannot read %s (%s); the tool call will meet "
@@ -337,124 +323,116 @@ class PlanJournalGuardHandler(PreToolUseHandlerBase):
         if after is None:
             # An Edit whose old_string is absent fails with its own error.
             return None
-        if len(journal_entry_headings(after)) > len(journal_entry_headings(before)):
+        if _non_blank_lines(after) > _non_blank_lines(before) or len(
+            journal_entry_headings(after)
+        ) > len(journal_entry_headings(before)):
             return target
         return None
 
-    def _bash_target(self, hook_input: dict[str, Any], layout: _Layout) -> _JournalTarget | None:
+    def _bash_target(self, hook_input: dict[str, Any], plan_dir: str) -> _JournalTarget | None:
         """The first day-file a Bash command would write into, else None."""
         command = get_bash_command(hook_input)
-        if not command or _DAYFILE_MARKER not in command:
+        if not command or not _BASH_PREFILTER_RE.search(command):
             return None
-        cwd = hook_input.get(HookInputField.CWD)
+        raw_cwd = hook_input.get(HookInputField.CWD)
+        cwd = raw_cwd if isinstance(raw_cwd, str) and raw_cwd else None
 
-        # Authored writes over the WHOLE command: a redirect, `tee`, a heredoc.
-        # Judged even on a git stage (`git show HEAD:f > f` is a shell write).
-        written = get_bash_write_targets(hook_input, authored_only=True)
-        for stage in self._stages(command):
-            words = _words(stage)
-            head_index = _head_index(words)
-            if head_index is None:
+        writes = bash_file_writes(command, cwd, self._read_text)
+        for raw in writes.destinations:
+            if _needs_expansion(raw) or (writes.directories and not _is_anchored(raw)):
+                if _could_name_dayfile(raw, writes.directories):
+                    return self._unplaced_target(raw, writes.directories, cwd, plan_dir)
                 continue
-            head = command_word(words[head_index])
-            if head == MKPLAN_SCRIPT_NAME:
-                continue
-            if head != _GIT:
-                written.extend(self._relocations(hook_input, stage))
-            written.extend(self._program_mentions(head, words[head_index + 1 :]))
-
-        for raw in written:
-            target = self._dayfile_target(raw, cwd, layout)
+            target = self._dayfile_target(raw, cwd, plan_dir)
             if target is not None:
                 return target
         return None
 
-    @staticmethod
-    def _stages(command: str) -> list[str]:
-        """The command's stages, with text the shell does not execute blanked.
+    def _unplaced_target(
+        self, raw: str, directories: tuple[str, ...], cwd: str | None, plan_dir: str
+    ) -> _JournalTarget:
+        """A destination that names a day-file but cannot be placed exactly."""
+        plan_number: int | None = None
+        for text in (raw, *directories):
+            match = _DAYFILE_MENTION_RE.search(text) or _PLAN_FOLDER_MENTION_RE.search(text)
+            if match is not None:
+                plan_number = int(match.group(1))
+                break
+        return _JournalTarget(
+            display=raw,
+            plan_number=plan_number,
+            checkout=self._checkout_for(directories, cwd, plan_dir),
+            placed=False,
+        )
 
-        A heredoc body fed to a data sink and a commit message are prose; a
-        line of either that happens to read like `python3 -c "..."` must not
-        be judged as a command.
-        """
-        executable = strip_message_bodies(strip_quoted_heredoc_bodies(command))
-        return split_unquoted(executable, _STAGE_SEPARATORS)
-
-    @staticmethod
-    def _relocations(hook_input: dict[str, Any], stage: str) -> list[str]:
-        """Paths ONE stage writes by relocating bytes (`cp`/`mv`/`install`/`dd`).
-
-        Per stage, because the git exemption is per stage: a `git mv` must not
-        excuse a `cp` onto the same file elsewhere in the chain.
-        """
-        stage_input = {**hook_input, HookInputField.TOOL_INPUT: {"command": stage}}
-        authored = set(get_bash_write_targets(stage_input, authored_only=True))
-        return [path for path in get_bash_write_targets(stage_input) if path not in authored]
-
-    @staticmethod
-    def _program_mentions(head: str, arguments: list[str]) -> list[str]:
-        """Markdown paths an interpreter or in-place editor would write.
-
-        Two shapes the write-target detector cannot see, because the write is
-        not shell syntax: an in-place flag on an editor (every path operand is
-        rewritten), and a write inside an inline program (a path named in the
-        program, when the program also carries a write signal).
-        """
-        if head in _IN_PLACE_EDITORS and any(_IN_PLACE_FLAG_RE.match(arg) for arg in arguments):
-            return [
-                path
-                for arg in arguments
-                if not arg.startswith(_FLAG_PREFIX)
-                for path in _MARKDOWN_PATH_RE.findall(arg)
-            ]
-        program = _inline_program(head, arguments)
-        if program is None or not _WRITE_SIGNAL_RE.search(program):
-            return []
-        return list(_MARKDOWN_PATH_RE.findall(program))
+    def _checkout_for(self, directories: tuple[str, ...], cwd: str | None, plan_dir: str) -> Path:
+        """The checkout a command works in: an absolute `cd`, else its cwd."""
+        anchors = [d for d in directories if Path(d).is_absolute() and not _needs_expansion(d)]
+        if cwd is not None:
+            anchors.append(cwd)
+        for anchor in anchors:
+            located = enclosing_checkout(
+                str(Path(anchor) / plan_dir / MKPLAN_SCRIPT_NAME), self._workspace_root
+            )
+            if located is not None:
+                return located[0]
+        return self._workspace_root
 
     # ------------------------------------------------------------------
     # Handler API
     # ------------------------------------------------------------------
 
-    def _target(self, hook_input: dict[str, Any]) -> tuple[_JournalTarget, _Layout] | None:
-        """The day-file this call would write an entry into, with its layout."""
+    def _target(self, hook_input: dict[str, Any]) -> tuple[_JournalTarget, str] | None:
+        """The day-file this call would write an entry into, with the plan dir."""
         tool_name = hook_input.get(HookInputField.TOOL_NAME)
         if tool_name not in (ToolName.WRITE, ToolName.EDIT, ToolName.BASH):
             return None
-        layout = self._layout()
-        if layout is None:
+        plan_dir = self._plan_dir()
+        if plan_dir is None:
             return None
         if tool_name == ToolName.BASH:
-            target = self._bash_target(hook_input, layout)
+            target = self._bash_target(hook_input, plan_dir)
         else:
-            target = self._file_tool_target(hook_input, layout)
-        if target is None or not self._remedy_is_deployed(layout):
+            target = self._file_tool_target(hook_input, plan_dir)
+        if target is None or not self._remedy_is_deployed(target.checkout / plan_dir):
             return None
-        return target, layout
+        return target, plan_dir
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Match a call that would write a journal entry by hand."""
         return self._target(hook_input) is not None
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
-        """Deny, naming the exact `--journal` command for that plan."""
+        """Deny, naming the exact `--journal` command for that plan and checkout."""
         resolved = self._target(hook_input)
         # Precondition: matches() found a target on this same input.
         assert resolved is not None, "Handler called without matches check"
-        target, layout = resolved
+        target, plan_dir = resolved
 
-        script = f"{layout.plan_dir}/{MKPLAN_SCRIPT_NAME}"
-        body_file = f"{ProjectPath.SCRATCH_DIR}/journal-{target.plan_number}-entry.md"
+        number = _PLAN_NUMBER_PLACEHOLDER if target.plan_number is None else str(target.plan_number)
+        script = target.checkout / plan_dir / MKPLAN_SCRIPT_NAME
+        stamp = datetime.now(UTC).strftime(_BODY_FILE_STAMP)
+        suffix = secrets.token_hex(_BODY_FILE_SUFFIX_BYTES)
+        body_file = (
+            target.checkout / ProjectPath.SCRATCH_DIR / f"journal-{number}-{stamp}-{suffix}.md"
+        )
+        unplaced_note = (
+            ""
+            if target.placed
+            else "  (built by the shell at run time; it names a journal day-file, "
+            "so it is treated as one)"
+        )
         message = self._render(hook_input)
         # The target and the command are invocation-specific, so they are shown
         # on every fire, terse or verbose.
         message += (
-            f"\n\nTarget: `{target.rel_path}`\n\n"
+            f"\n\nTarget: `{target.display}`{unplaced_note}\n\n"
             "Append the entry through the stamping tool, in two steps:\n\n"
             f"  1. Write the entry BODY with the Write tool to {body_file}\n"
-            "     (body only: the tool writes the `## HH:MM · category · REF` heading).\n"
+            "     (body only: the tool writes the `## HH:MM · category · REF` heading;\n"
+            "     use a fresh file name for every entry).\n"
             "  2. Run:\n\n"
-            f'       {script} {_JOURNAL_FLAG} {target.plan_number} <category> {body_file} --title "short title"\n\n'
+            f'       {script} {_JOURNAL_FLAG} {number} <category> {body_file} --title "short title"\n\n'
             f"     <category> is one of: {', '.join(JOURNAL_CATEGORIES)}. "
             "Add `--ref T1.2` for a task reference.\n\n"
             "It creates today's day-file from the template when there is none."
@@ -480,25 +458,32 @@ class PlanJournalGuardHandler(PreToolUseHandlerBase):
             "40 minutes in the future, and an append-only journal cannot correct one "
             "until the clock passes it.\n\n"
             "```\n"
-            "# 1. Write the entry BODY (no heading) with the Write tool, e.g.\n"
-            f"#    {ProjectPath.SCRATCH_DIR}/journal-<plan-number>-entry.md\n"
+            "# 1. Write the entry BODY (no heading) with the Write tool to a FRESH file, e.g.\n"
+            f"#    {ProjectPath.SCRATCH_DIR}/journal-<plan-number>-<yymmdd-hhmmss>.md\n"
             "# 2. Append it (category: "
             f"{' | '.join(JOURNAL_CATEGORIES)}):\n"
             "CLAUDE/Plan/mkplan.bash --journal <plan-number> <category> "
-            f'{ProjectPath.SCRATCH_DIR}/journal-<plan-number>-entry.md --title "short title"\n'
+            f"{ProjectPath.SCRATCH_DIR}/journal-<plan-number>-<yymmdd-hhmmss>.md "
+            '--title "short title"\n'
             "```\n\n"
-            "(Use the project's configured plan directory if it is not `CLAUDE/Plan/`.) "
-            "The deny message prints the exact command for the plan in question.\n\n"
-            "**DENIED**: an `Edit`/`Write` that adds an entry heading to a day-file "
-            "or creates one, and a Bash command that names a day-file as what it "
-            "writes — `>`, `>>`, `tee`, a heredoc, `cp`/`mv`/`dd` onto it, an in-place "
-            "editor, an interpreter one-liner. Archived plans' journals included. A "
-            "path built from a variable is not seen; that is not a loophole to use. "
-            "**Allowed**: the tool "
-            "itself, `git` (moving a plan folder into `Completed/`), reading a "
-            "journal, and an Edit that only DELETES (such as removing conflict "
-            "markers after a merge). Put the `--journal` pattern into every "
-            "sub-agent brief that asks for journalling."
+            "(Use the project's configured plan directory if it is not `CLAUDE/Plan/`, "
+            "and the `mkplan.bash` of the checkout you are in — a worktree has its "
+            "own.) The deny message prints the exact command, with absolute paths.\n\n"
+            "**DENIED**: an `Edit`/`Write` that adds any line to a day-file or creates "
+            "one, and a Bash command that writes into a day-file by any route — `>`, "
+            "`>>`, `tee`, a heredoc, `cp`/`mv`/`dd`/`ln`/`rsync`, an in-place editor, "
+            "a patch, an interpreter program (inline, on a heredoc, or behind "
+            "`timeout`/`uv run`/…). A destination the shell builds at run time "
+            "(`$(date …)`, a variable, a glob, a relative name after `cd`) is denied "
+            "when it names a day-file. Every worktree and archived plan included. "
+            "**Allowed**: the tool itself, `git` (moving a plan folder into "
+            "`Completed/`), reading a journal, and an Edit that adds no line (removing "
+            "conflict markers, reordering, a same-line redaction).\n\n"
+            "**Active only when** the plan workflow is on, journalling is on with its "
+            "directory named `JOURNAL`, and the checkout's plan directory holds "
+            "`_JOURNAL_TEMPLATE_.md` and a `mkplan.bash` that offers `--journal`. "
+            "Otherwise it is inert, and says so once in the daemon log. Put the "
+            "`--journal` pattern into every sub-agent brief that asks for journalling."
         )
 
     def get_acceptance_tests(self) -> list[Any]:
@@ -555,44 +540,35 @@ class PlanJournalGuardHandler(PreToolUseHandlerBase):
         ]
 
 
-def _words(stage: str) -> list[str]:
-    """Shell words of one stage; whitespace words when it cannot be parsed."""
-    try:
-        return shlex.split(stage)
-    except ValueError as exc:
-        # shlex also rejects text bash accepts (an ANSI-C `$'it\'s'` escape),
-        # so whitespace words keep the command name and any path visible.
-        logger.debug("plan_journal_guard: shlex could not parse %r (%s)", stage, exc)
-        return stage.split()
+def _non_blank_lines(text: str) -> int:
+    return sum(1 for line in text.splitlines() if line.strip())
 
 
-def _head_index(words: list[str]) -> int | None:
-    """Index of the word naming the command a stage runs, else None."""
-    for index, word in enumerate(words):
-        if _ASSIGNMENT_RE.match(word):
-            continue
-        if command_word(word) in _COMMAND_PREFIXES:
-            continue
-        if word.startswith(_FLAG_PREFIX):
-            continue
-        return index
-    return None
+def _needs_expansion(token: str) -> bool:
+    return any(character in token for character in _EXPANSION_CHARACTERS)
 
 
-def _inline_program(head: str, arguments: list[str]) -> str | None:
-    """The program text an interpreter was handed inline, else None."""
-    if head in _AWK_NAMES:
-        return next((arg for arg in arguments if not arg.startswith(_FLAG_PREFIX)), None)
-    flags = _PYTHON_PROGRAM_FLAGS if _PYTHON_RE.match(head) else _PROGRAM_FLAGS.get(head)
-    if flags is None:
-        return None
-    for index, arg in enumerate(arguments[:-1]):
-        if arg in flags:
-            return arguments[index + 1]
-        # A short-flag cluster ending in the program flag: `perl -ne '...'`.
-        if not arg.startswith(_LONG_FLAG_PREFIX) and any(
-            len(flag) == 2 and arg.startswith(_FLAG_PREFIX) and arg.endswith(flag[1])
-            for flag in flags
-        ):
-            return arguments[index + 1]
-    return None
+def _is_anchored(token: str) -> bool:
+    """Absolute or home-relative: placed the same wherever the shell stands."""
+    return token.startswith((_PATH_SEPARATOR, _HOME_PREFIX))
+
+
+def _names_journal_dir(text: str) -> bool:
+    return DEFAULT_JOURNAL_DIR_NAME in text.split(_PATH_SEPARATOR)
+
+
+def _could_name_dayfile(token: str, directories: tuple[str, ...]) -> bool:
+    """Whether an unplaceable destination could be a journal day-file.
+
+    Yes when it names one outright, or when its file name is built at run time
+    inside a `JOURNAL/` directory: named in the token itself, or entered with
+    `cd` before a relative token.
+    """
+    if _DAYFILE_MENTION_RE.search(token):
+        return True
+    directory, _, name = token.rpartition(_PATH_SEPARATOR)
+    if not _needs_expansion(name):
+        return False
+    if _names_journal_dir(directory):
+        return True
+    return not _is_anchored(token) and any(_names_journal_dir(d) for d in directories)

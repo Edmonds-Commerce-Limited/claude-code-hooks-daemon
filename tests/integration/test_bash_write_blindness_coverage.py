@@ -102,11 +102,13 @@ _BASH_BLINDNESS_VERDICT: dict[str, tuple[str, str]] = {
         _PARTIAL,
         "Plan 00461: the Bash surface IS the point of this handler, since a "
         "heredoc append is how a future-dated entry got in. It reads "
-        "get_bash_write_targets (redirect, tee, heredoc, cp/mv/install/dd) and "
-        "adds interpreter one-liners and in-place editors, so every literal "
-        "spelling of a day-file is seen. PARTIAL because the accessor declines a "
-        'target built by expansion (`> "$F"`) and a script fed on stdin is not '
-        "read; the resident guidance names the routes it denies, not all routes",
+        "bash_file_writes, built on bash_write_destinations (the raw half of "
+        "get_bash_write_targets), plus in-place editors, interpreter programs "
+        "inline or on a heredoc or behind a wrapper, patches and links, and it "
+        "fails closed on a destination built by expansion that names a "
+        "day-file. PARTIAL because a program whose write target is computed "
+        "(not a literal and not a named day-file) cannot be followed, and a "
+        "file written by a script on disk is not read",
     ),
     "AbsolutePathHandler": (
         _OUT_OF_FRAME,
