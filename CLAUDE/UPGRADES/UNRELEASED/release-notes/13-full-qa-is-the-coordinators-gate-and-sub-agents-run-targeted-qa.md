@@ -34,3 +34,8 @@ reason. `llm_qa.py --read-only` now fails a result in three cases:
 
 So neither an old green run nor a crashed tool's leftover report reads as a
 pass.
+
+`llm_qa.py main-moved <batch-base>` answers whether `main` moved in code while
+a batch was in flight. It prints `unmoved`, `docs-only` or `full-gate`. A
+docs-only move re-runs only the doc checks before the fast-forward, not the
+whole suite.

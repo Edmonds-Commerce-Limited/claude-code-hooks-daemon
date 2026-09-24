@@ -39,7 +39,10 @@ One full run per branch, one at a time, only turns five concurrent runs into a
 queue of five. Instead the coordinator merges every ready branch, each
 `--no-ff`, into ONE integration worktree created from current `main`, and runs
 `llm_qa.py all` once on that combined head. Green: `main` is fast-forwarded to
-the integration head, so there is one push and one CI run. Red: the coordinator
+the integration head, so there is one push and one CI run. `main` is frozen for
+code while a batch is in flight. If it moves anyway, `llm_qa.py main-moved <batch-base>` classifies the change mechanically. A docs-only move re-runs only
+the cheap doc checks before the fast-forward, and anything else re-runs the full
+gate. CI on the pushed head is the second line, not a substitute. Red: the coordinator
 bisects to the branch whose change broke it, sends it back to be fixed or drops
 it from the batch, and re-runs. The combined head is also the only place a
 break that needs two branches together can show before `main`. Any lock the
@@ -76,9 +79,13 @@ commands that ARE allowed, and they must exist.
   coordinator runs the full gate once per batch, on an integration worktree
   holding every ready branch, before `main` moves. `scripts/setup_worktree.sh`
   tells a worktree agent the same (ledger 00466 N2).
-- 00463 ships NO gate tooling and no lock of its own. `llm_qa.py`'s existing
-  run lock is non-inheritable, and a test pins that a daemon started during a
-  run does not keep it after the run exits.
+- When `main` moves during a batch, a checked mechanism decides whether the
+  full gate re-runs: `llm_qa.py main-moved <batch-base>` prints `unmoved`,
+  `docs-only` or `full-gate`. The docs-only path set is defined once in
+  `llm_qa.py` and pinned by a test. It runs no tools and takes no lock.
+- 00463 ships no lock of its own. `llm_qa.py`'s existing run lock is
+  non-inheritable, and a test pins that a daemon started during a run does not
+  keep it after the run exits.
 - Dogfooded: enabled in this repo's `.claude/hooks-daemon.yaml`, and
   confirmed live. A sub-agent's `llm_qa.py all` is denied, and the
   coordinator's is allowed.
@@ -137,8 +144,9 @@ commands that ARE allowed, and they must exist.
 
 - [ ] ⬜ **Task 2.1**: The batched integration gate: the coordinator merges
   this branch `--no-ff` with the other ready branches into an integration
-  worktree from `main`, runs full QA once there, fast-forwards `main` on green,
-  verifies ancestry and CI, and restarts the daemon.
+  worktree from `main`, runs full QA once there, and on green follows
+  `llm_qa.py main-moved <batch-base>` to the fast-forward. Then it verifies
+  ancestry and CI, and restarts the daemon.
 - [ ] ⬜ **Task 2.2**: Live dogfood check: a sub-agent's `llm_qa.py all`
   in the main checkout is denied with the targeted forms named, and the
   coordinator's same command runs.

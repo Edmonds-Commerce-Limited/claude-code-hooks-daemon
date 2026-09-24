@@ -29,6 +29,7 @@ Complete quality assurance for the Claude Code Hooks Daemon consists of **three 
 ```bash
 ./scripts/qa/llm_qa.py all       # the FULL gate: the coordinator (main thread) runs this
 ./scripts/qa/llm_qa.py changed   # TARGETED: what a sub-agent runs before handing over
+./scripts/qa/llm_qa.py main-moved <batch-base>  # the coordinator: did main move in code?
 ```
 
 Agents MUST use `llm_qa.py`, never `run_all.sh`: the `enforce_llm_qa` project
@@ -70,16 +71,50 @@ exist when two branches meet.
 
 The coordinator, never a sub-agent:
 
-1. Creates ONE integration worktree from current `main`.
+1. Creates ONE integration worktree from current `main`, and records that
+   commit as the **batch base**.
 2. Merges every ready branch into it, each with `git merge --no-ff`, so each
    branch stays one revertable merge commit and `git branch -d` still works.
 3. Runs `./scripts/qa/llm_qa.py all` once, on the combined head.
-4. **Green:** fast-forwards `main` to the integration head. One push, one CI run.
+4. **Green:** asks whether `main` moved, with
+   `./scripts/qa/llm_qa.py main-moved <batch-base>`, and follows its verdict
+   (below). The usual answer is `unmoved`: fast-forward `main` to the
+   integration head. One push, one CI run.
 5. **Red:** finds the branch whose change broke it, by bisecting the merge
    commits (`git bisect` over the first-parent chain, or rebuilding the
    integration head without one branch at a time). That branch goes back to its
    agent to fix, or is dropped from the batch; the rest are merged again and the
    run is repeated. A branch is never fixed inside the integration worktree.
+
+**While a batch is in flight, `main` is frozen for code.** The coordinator's
+own doc commits (ledger rows, journal entries, archival) either wait for the
+batch to land, or are committed onto the integration branch, where the full
+run covers them.
+
+**If `main` moves anyway, the verdict decides, not a judgement.**
+`llm_qa.py main-moved <batch-base> [<main-ref>]` classifies every path in
+`git diff --name-only --no-renames <batch-base>..main` and prints one of:
+
+| Verdict     | Meaning                                                     | Next step                                                                                                                                                  |
+| ----------- | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `unmoved`   | `main` is still the batch base                              | Fast-forward `main` to the integration head                                                                                                                |
+| `docs-only` | Every changed path is docs-only (below)                     | Merge `main` into the integration branch, run `llm_qa.py plan_qa docs_qa format british_english sensitive_content` on the result, then fast-forward `main` |
+| `full-gate` | At least one path is not docs-only, or `main` was rewritten | Merge `main` into the integration branch and run `llm_qa.py all` again                                                                                     |
+
+A path is **docs-only** when it is a file inside a numbered plan folder
+(`CLAUDE/Plan/NNNNN-name/…`, also under `Completed/` and the other buckets), or
+a `.md` file outside `src/`, `tests/` and `scripts/`. The plan directory's own
+root is NOT docs-only: `mkplan.bash` and `_planlib.inc.bash` are executed code.
+Renames count by both their old and new path, so a file moved out of `src/`
+still needs the full gate. The set is defined once, in `llm_qa.py`, and
+`tests/unit/qa/test_llm_qa_main_moved.py` pins every boundary. The command exits
+0 for `unmoved` and `docs-only`, 4 for `full-gate`, and 1 when git cannot answer.
+
+**CI on the pushed head is the second line, not a substitute.** A `docs-only`
+verdict skips a re-run of tests that a markdown change can still reach (some
+tests read `CLAUDE.md` and other docs). CI runs the whole suite on the head that
+was pushed, and a red CI there is a red `main`, handled at once. It is never a
+reason to skip the gate before the push.
 
 **Any lock held around the gate must be released when the run exits**, even if
 something the run started is still alive. A daemon restarted under the gate

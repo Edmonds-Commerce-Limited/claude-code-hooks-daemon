@@ -10,6 +10,7 @@ Usage:
     ./scripts/qa/llm_qa.py changed          # Targeted: fast static tools + mapped tests
     ./scripts/qa/llm_qa.py lint type_check  # Run specific tools
     ./scripts/qa/llm_qa.py --read-only all  # Summarize existing JSON only
+    ./scripts/qa/llm_qa.py main-moved BASE  # Batched gate: did main move in code?
 
 ``all`` is the coordinator's full gate. A sub-agent runs ``changed`` or named
 tools, and ``subagent_full_qa_blocker`` denies it the full suite (Plan 00463).
@@ -1264,9 +1265,151 @@ def split_changed_options(args: list[str]) -> tuple[list[str], list[str], str | 
     return remaining, forwarded, None
 
 
+# ── main-moved: may the batched gate skip a second full run? ────────
+
+#: The subcommand, and what it answers (CLAUDE/QA.md, "The Batched Integration
+#: Gate"). ``main`` moved after the integration branch was cut from it; the
+#: verdict says whether the green full run still stands.
+MAIN_MOVED_COMMAND: Final[str] = "main-moved"
+VERDICT_UNMOVED: Final[str] = "unmoved"
+VERDICT_DOCS_ONLY: Final[str] = "docs-only"
+VERDICT_FULL_GATE: Final[str] = "full-gate"
+#: A full-gate verdict is an answer, not a failure, so it has its own code.
+EXIT_FULL_GATE: Final[int] = 4
+_DEFAULT_MAIN_REF: Final[str] = "main"
+_MAX_MAIN_MOVED_ARGS: Final[int] = 2
+
+#: What a docs-only move re-runs instead of the full gate.
+DOCS_ONLY_TOOL_NAMES: Final[list[str]] = [
+    "plan_qa",
+    "docs_qa",
+    "format",
+    "british_english",
+    "sensitive_content",
+]
+
+#: THE docs-only path set, and its only definition. A file inside a numbered
+#: plan folder (optionally under a bucket such as ``Completed/``), or a
+#: markdown file outside the code roots. The plan directory's own root is
+#: excluded on purpose: ``mkplan.bash`` and ``_planlib.inc.bash`` are executed
+#: code with tests of their own.
+_PLAN_FOLDER_FILE: Final[re.Pattern[str]] = re.compile(
+    r"^CLAUDE/Plan/(?:[A-Za-z][^/]*/)?\d{5}-[^/]+/.+"
+)
+_DOCS_SUFFIX: Final[str] = ".md"
+_CODE_ROOTS: Final[tuple[str, ...]] = ("src/", "tests/", "scripts/")
+
+
+class MainMovedError(RuntimeError):
+    """``base..main`` could not be read, so no verdict can be given."""
+
+
+class MainMoved(NamedTuple):
+    """The verdict, every path ``main`` changed since the base, and why."""
+
+    verdict: str
+    paths: list[str]
+    reason: str
+
+
+def is_docs_only_path(path: str) -> bool:
+    """True when a change to ``path`` cannot alter what the full gate proved."""
+    if _PLAN_FOLDER_FILE.match(path):
+        return True
+    return path.endswith(_DOCS_SUFFIX) and not path.startswith(_CODE_ROOTS)
+
+
+def classify_moved_paths(paths: Sequence[str]) -> str:
+    """Unmoved, docs-only, or full-gate: one code path anywhere means the full gate."""
+    if not paths:
+        return VERDICT_UNMOVED
+    if all(is_docs_only_path(path) for path in paths):
+        return VERDICT_DOCS_ONLY
+    return VERDICT_FULL_GATE
+
+
+def main_moved(
+    base: str, main_ref: str, root: Path, *, git: GitBytesRunner = _run_git_bytes
+) -> MainMoved:
+    """Classify what ``main_ref`` changed since the batch was cut at ``base``.
+
+    Renames are split into a deletion and an addition (``--no-renames``), so a
+    file moved out of ``src/`` is judged by the path it left as well.
+
+    Raises:
+        MainMovedError: a ref does not resolve, or git cannot answer.
+    """
+    ancestor, _ = git(["merge-base", "--is-ancestor", base, main_ref], root)
+    if ancestor == 1:
+        return MainMoved(
+            VERDICT_FULL_GATE,
+            [],
+            f"{base} is not an ancestor of {main_ref}: {main_ref} was rewritten, "
+            "so there is no change set to classify",
+        )
+    if ancestor != 0:
+        raise MainMovedError(
+            f"git merge-base --is-ancestor {base} {main_ref} failed (exit {ancestor})"
+        )
+    code, output = git(["diff", "--name-only", "--no-renames", "-z", base, main_ref], root)
+    if code != 0:
+        raise MainMovedError(f"git diff {base} {main_ref} failed (exit {code})")
+    paths = [path for path in output.decode("utf-8", "surrogateescape").split("\0") if path]
+    verdict = classify_moved_paths(paths)
+    code_paths = [path for path in paths if not is_docs_only_path(path)]
+    reason = {
+        VERDICT_UNMOVED: f"{main_ref} has not moved since {base}",
+        VERDICT_DOCS_ONLY: f"every path {main_ref} changed since {base} is docs-only",
+        VERDICT_FULL_GATE: f"{len(code_paths)} changed path(s) are not docs-only",
+    }[verdict]
+    return MainMoved(verdict, paths, reason)
+
+
+_MAIN_MOVED_NEXT: Final[dict[str, str]] = {
+    VERDICT_UNMOVED: "fast-forward main to the integration head",
+    VERDICT_DOCS_ONLY: (
+        "merge main into the integration branch, run "
+        f"./scripts/qa/llm_qa.py {' '.join(DOCS_ONLY_TOOL_NAMES)}, "
+        "then fast-forward main to the result"
+    ),
+    VERDICT_FULL_GATE: (
+        "merge main into the integration branch and run ./scripts/qa/llm_qa.py all again"
+    ),
+}
+
+
+def main_moved_command(args: Sequence[str], *, root: Path = PROJECT_ROOT) -> int:
+    """``llm_qa.py main-moved BASE [MAIN]``: print the verdict and the next step."""
+    if not args or len(args) > _MAX_MAIN_MOVED_ARGS or any(a.startswith("-") for a in args):
+        print(
+            f"Usage: llm_qa.py {MAIN_MOVED_COMMAND} BATCH_BASE [MAIN_REF]  "
+            f"(MAIN_REF defaults to {_DEFAULT_MAIN_REF})",
+            file=sys.stderr,
+        )
+        return EXIT_FAILURE
+    base = args[0]
+    main_ref = args[1] if len(args) == _MAX_MAIN_MOVED_ARGS else _DEFAULT_MAIN_REF
+    try:
+        outcome = main_moved(base, main_ref, root)
+    except MainMovedError as exc:
+        print(f"llm_qa: {MAIN_MOVED_COMMAND}: {exc}", file=sys.stderr)
+        return EXIT_FAILURE
+    print(f"VERDICT: {outcome.verdict}")
+    print(f"  {outcome.reason}")
+    for path in outcome.paths:
+        marker = "docs" if is_docs_only_path(path) else "CODE"
+        print(f"  [{marker}] {path}")
+    print(f"NEXT: {_MAIN_MOVED_NEXT[outcome.verdict]}")
+    print("CI on the pushed head is the second line, not a substitute for this gate.")
+    return EXIT_FULL_GATE if outcome.verdict == VERDICT_FULL_GATE else EXIT_SUCCESS
+
+
 def main() -> int:
     """Entry point."""
     args = sys.argv[1:]
+
+    if args[:1] == [MAIN_MOVED_COMMAND]:
+        return main_moved_command(args[1:])
 
     read_only = False
     if "--read-only" in args:
@@ -1282,6 +1425,10 @@ def main() -> int:
         print(f"  {_SELECTION_CHANGED}: targeted, {', '.join(CHANGED_TOOL_NAMES)}")
         print(f"  {_BASE_OPTION}, {_ALLOW_UNMAPPED_OPTION}: passed to changed_tests")
         print("  --read-only: summarise; a result recorded for another tree FAILS")
+        print(
+            f"  {MAIN_MOVED_COMMAND} BATCH_BASE [MAIN_REF]: may the batched gate skip "
+            "a second full run? (runs no tools)"
+        )
         print(f"Tools: {', '.join(TOOL_REGISTRY)}")
         return EXIT_SUCCESS
 

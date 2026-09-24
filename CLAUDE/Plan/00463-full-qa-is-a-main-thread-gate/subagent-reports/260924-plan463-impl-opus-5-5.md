@@ -141,7 +141,28 @@ all six failed there.
   full suite after each child merge or again in main. `test_it_describes_the_batched_gate_not_one_run_per_branch`
   pins the deny and the guidance (RED first).
 
-- **Lock finding** (journal `finding`). 00463 ships no gate lock and no gate tooling.
+- **When main moves during a batch** (lead's refinement; journal `decision`).
+  `./scripts/qa/llm_qa.py main-moved <batch-base> [<main-ref>]` classifies
+  `git diff --name-only --no-renames <batch-base>..main`:
+
+  - `unmoved` (exit 0): fast-forward;
+  - `docs-only` (exit 0): merge main in, run
+    `plan_qa docs_qa format british_english sensitive_content`, then fast-forward;
+  - `full-gate` (exit 4): run the full gate again.
+
+  A base that main no longer contains gives `full-gate`, and a git failure is exit 1
+  with no verdict. The path set is defined once in `llm_qa.py`: a file inside a numbered
+  plan folder, or a `.md` outside `src/`, `tests/` and `scripts/`. The plan directory's
+  root is excluded, because `mkplan.bash` and `_planlib.inc.bash` are tested code.
+  `tests/unit/qa/test_llm_qa_main_moved.py` (RED first, 56 tests) pins every boundary
+  and runs against a real repository, including a rename out of `src/`. On this
+  repository's own history, `830363e5..8cd131f4` (a ledger commit plus a CLAUDE.md
+  regeneration) reads `docs-only`, and `94355465..830363e5` reads `full-gate`. QA.md,
+  AgentTeam.md, IssueSdlc.md, Worktree.md and PLAN.md state the freeze, the verdict
+  table and "CI is the second line, not a substitute".
+
+- **Lock finding** (journal `finding`). 00463 ships no gate lock. `main-moved` is gate
+  tooling, but it runs no tools and takes no lock.
   `llm_qa.py`'s own run lock is non-inheritable. `TestADaemonStartedUnderTheRunDoesNotHoldTheLock`
   pins that a daemon started during a run does not hold it after the run exits, with a
   leaking control. The `9>&-` rule for any gate lock is in CLAUDE/QA.md.

@@ -251,7 +251,10 @@ The team lead (operating from `/workspace/`) is responsible for orchestrating th
   batched integration gate: merge every ready child `--no-ff` into one
   integration worktree from the parent, and run `./scripts/qa/llm_qa.py all`
   once there. It covers every check and 95%+ coverage.
-- If the full gate passes: fast-forward the parent to the integration head
+- If the full gate passes: run `./scripts/qa/llm_qa.py main-moved <batch-base>`
+  and follow its verdict. `unmoved` fast-forwards the parent to the integration
+  head. `docs-only` re-runs only the doc checks it names. `full-gate` runs the
+  gate again. The parent is frozen for code while the batch is in flight.
 - If the full gate fails: find the child whose change broke it, send its
   failing checks to that developer (who fixes them with targeted runs and hands
   back a new commit) or drop it from the batch, and re-run the gate
@@ -1198,6 +1201,7 @@ cd /workspace/untracked/worktrees/worktree-plan-NNNNN
 git fetch origin
 git merge main --no-edit
 # ⚠️ Resolve conflicts HERE in the worktree (isolated, safe)
+BATCH_BASE=$(git rev-parse main)  # main is now frozen for code until STEP 5
 
 # The batched integration gate: the parent now holds current main plus every
 # ready child, so this ONE run is the gate for all of them.
@@ -1257,15 +1261,20 @@ git status  # MUST show "nothing to commit, working tree clean"
 # STEP 5: MERGE PARENT TO MAIN
 # ===================================================================
 git log worktree-plan-NNNNN --oneline  # Review changes
+# Did main move since STEP 1? The verdict decides (CLAUDE/QA.md, "The Batched
+# Integration Gate"): unmoved -> fast-forward; docs-only -> merge main into
+# the parent, run the doc checks it prints, then fast-forward; full-gate ->
+# merge main into the parent and run llm_qa.py all again first.
+./scripts/qa/llm_qa.py main-moved "$BATCH_BASE"
 # Fast-forward only: main becomes exactly the head that passed the gate.
-# If it refuses, main moved since STEP 1: go back to STEP 1 and re-run the gate.
 git merge --ff-only worktree-plan-NNNNN
 
 # ===================================================================
 # STEP 6: VERIFY MERGE SUCCEEDED IN MAIN
 # ===================================================================
 git status  # Should show clean state
-# No second full run: main's tree IS the tree the gate passed. CI runs once.
+# No second full run: main's tree IS the tree the gate passed. CI runs once,
+# on the pushed head, as the second line -- never a substitute for the gate.
 ./bin/hooks-daemon restart
 ./bin/hooks-daemon status
 # Expected: Status: RUNNING
@@ -1711,6 +1720,7 @@ cd /workspace/untracked/worktrees/worktree-plan-00028
 
 # Sync worktree with main FIRST
 git merge main --no-edit
+BATCH_BASE=$(git rev-parse main)  # main is now frozen for code until Phase 5
 
 # The batched integration gate: ONE full run covers main plus all 4 handlers
 ./scripts/qa/llm_qa.py all
@@ -1735,8 +1745,12 @@ Task(subagent_type="general-purpose", team_name="plan-00028", name="final-honest
 # With `worktree.merge_to_main_requires_human_approval: true`, the merge
 # below is denied until a human runs `hooks-daemon approve-merge <branch>`.
 
-# Fast-forward main to the head that passed the gate (no second full run)
+# Did main move since Phase 4? Follow the verdict (unmoved / docs-only /
+# full-gate; see CLAUDE/QA.md, "The Batched Integration Gate")
 cd /workspace
+./scripts/qa/llm_qa.py main-moved "$BATCH_BASE"
+
+# Fast-forward main to the head that passed the gate (no second full run)
 git merge --ff-only worktree-plan-00028
 ./bin/hooks-daemon restart
 ./bin/hooks-daemon status
@@ -1801,8 +1815,9 @@ Wave 2 audit revealed 50% of merged work was incomplete with false claims. The m
 - [ ] **Full gate (yours)**: Honesty Checker reports "genuine" → the branch is
   ready; merge every ready child `--no-ff` into one integration worktree from
   the parent and run `./scripts/qa/llm_qa.py all` once there
-- [ ] **Merge Decision**: full gate green → fast-forward the parent to the
-  integration head
+- [ ] **Merge Decision**: full gate green → `llm_qa.py main-moved <batch-base>`,
+  then follow its verdict (`unmoved`: fast-forward the parent to the
+  integration head)
 - [ ] If ANY gate fails → Send back to developer, restart from Gate 1
 
 **Per Task - Integration (After All 4 Gates Pass):**
