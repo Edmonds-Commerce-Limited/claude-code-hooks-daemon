@@ -110,9 +110,9 @@ class TestFreshnessVerdictReadPiecemealRule:
 
     def test_correct_code_is_not_reported(self, reported_lines: set[int]) -> None:
         false_positives = _marked_lines(_CLEAN_MARKER) & reported_lines
-        assert not false_positives, (
-            f"the rule fires on correct code at lines {sorted(false_positives)}."
-        )
+        assert (
+            not false_positives
+        ), f"the rule fires on correct code at lines {sorted(false_positives)}."
 
     def test_reports_nothing_outside_the_marked_lines(self, reported_lines: set[int]) -> None:
         unexplained = reported_lines - _marked_lines(_HIT_MARKER)

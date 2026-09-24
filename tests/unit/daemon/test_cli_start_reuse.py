@@ -230,6 +230,8 @@ class TestCmdStartChildReuseExitZero:
         args = argparse.Namespace(project_root=tmp_path)
 
         mock_config = MagicMock()
+        # Startup hashes the loaded config (Plan 00415); a mock has no model.
+        mock_config.model_dump.return_value = {}
         mock_config.daemon.socket_path = None
         mock_config.daemon.pid_file_path = None
         mock_config.daemon.get_socket_path.return_value = tmp_path / "sock"
@@ -321,6 +323,8 @@ class TestCmdStartChildReuseExitZero:
 
         sock_path = tmp_path / "daemon.sock"
         mock_config = MagicMock()
+        # Startup hashes the loaded config (Plan 00415); a mock has no model.
+        mock_config.model_dump.return_value = {}
         mock_config.daemon.socket_path = str(sock_path)
         mock_config.daemon.pid_file_path = str(tmp_path / "daemon.pid")
         mock_config.daemon.get_socket_path.return_value = sock_path
@@ -414,6 +418,8 @@ class TestCmdStartChildReuseExitZero:
 
         sock_path = tmp_path / "daemon.sock"
         mock_config = MagicMock()
+        # Startup hashes the loaded config (Plan 00415); a mock has no model.
+        mock_config.model_dump.return_value = {}
         mock_config.daemon.socket_path = str(sock_path)
         mock_config.daemon.pid_file_path = str(tmp_path / "daemon.pid")
         mock_config.daemon.get_socket_path.return_value = sock_path

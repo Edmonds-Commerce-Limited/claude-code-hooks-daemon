@@ -13,8 +13,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from claude_code_hooks_daemon.daemon.source_fingerprint import (
     compute_current_project_fingerprint,
     compute_daemon_identity_fingerprint,

@@ -32,7 +32,9 @@ from claude_code_hooks_daemon.daemon.source_fingerprint import (
 
 _BASE_YAML = "version: '1.0'\ndaemon:\n  idle_timeout_seconds: 600\n"
 _EDITED_YAML = "version: '1.0'\ndaemon:\n  idle_timeout_seconds: 900\n"
-_COMMENTED_YAML = "# a reformatted comment only\nversion: '1.0'\ndaemon:\n  idle_timeout_seconds: 600\n"
+_COMMENTED_YAML = (
+    "# a reformatted comment only\nversion: '1.0'\ndaemon:\n  idle_timeout_seconds: 600\n"
+)
 
 _SUBPROCESS_TIMEOUT_SECONDS = 120
 
