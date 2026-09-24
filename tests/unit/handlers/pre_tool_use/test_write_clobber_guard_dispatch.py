@@ -18,6 +18,7 @@ from typing import Any
 
 import pytest
 
+from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
 from claude_code_hooks_daemon.handlers.pre_tool_use.write_clobber_guard import (
@@ -43,9 +44,9 @@ def handler() -> WriteClobberGuardHandler:
 
 def _payload(tool_name: str, path: str, session: str = _SESSION) -> dict[str, Any]:
     tool_input: dict[str, Any] = {"file_path": path}
-    if tool_name == "Write":
+    if tool_name == ToolName.WRITE:
         tool_input["content"] = "replacement\n"
-    if tool_name == "Edit":
+    if tool_name == ToolName.EDIT:
         tool_input["old_string"] = "a"
         tool_input["new_string"] = "b"
     return {
@@ -69,20 +70,23 @@ class TestAWriteCreatedFileIsKnown:
     ) -> None:
         """The field report: create with Write, then replace with Write."""
         target = tmp_path / "gate.sh"
-        assert _dispatch(handler, _payload("Write", str(target))) == Decision.ALLOW
+        assert _dispatch(handler, _payload(ToolName.WRITE, str(target))) == Decision.ALLOW
         target.write_text("#!/bin/sh\necho first\n")
 
-        assert _dispatch(handler, _payload("Write", str(target))) == Decision.ALLOW
+        assert _dispatch(handler, _payload(ToolName.WRITE, str(target))) == Decision.ALLOW
 
     def test_another_sessions_create_does_not_count(
         self, handler: WriteClobberGuardHandler, tmp_path: Path
     ) -> None:
         """Knowledge is per session: a different session never saw the content."""
         target = tmp_path / "gate.sh"
-        assert _dispatch(handler, _payload("Write", str(target), _OTHER_SESSION)) == Decision.ALLOW
+        assert (
+            _dispatch(handler, _payload(ToolName.WRITE, str(target), _OTHER_SESSION))
+            == Decision.ALLOW
+        )
         target.write_text("written by the other session\n")
 
-        assert _dispatch(handler, _payload("Write", str(target))) == Decision.DENY
+        assert _dispatch(handler, _payload(ToolName.WRITE, str(target))) == Decision.DENY
 
     def test_a_denied_clobber_is_not_recorded_as_knowledge(
         self, handler: WriteClobberGuardHandler, tmp_path: Path
@@ -90,9 +94,9 @@ class TestAWriteCreatedFileIsKnown:
         """A Write the guard refused never ran, so it taught nothing."""
         target = tmp_path / "existing.txt"
         target.write_text("ORIGINAL\n")
-        assert _dispatch(handler, _payload("Write", str(target))) == Decision.DENY
+        assert _dispatch(handler, _payload(ToolName.WRITE, str(target))) == Decision.DENY
 
-        assert _dispatch(handler, _payload("Write", str(target))) == Decision.DENY
+        assert _dispatch(handler, _payload(ToolName.WRITE, str(target))) == Decision.DENY
 
 
 class TestAnEditTouchedFileIsKnown:
@@ -101,18 +105,21 @@ class TestAnEditTouchedFileIsKnown:
     ) -> None:
         target = tmp_path / "edited.txt"
         target.write_text("a\n")
-        assert _dispatch(handler, _payload("Edit", str(target))) == Decision.ALLOW
+        assert _dispatch(handler, _payload(ToolName.EDIT, str(target))) == Decision.ALLOW
 
-        assert _dispatch(handler, _payload("Write", str(target))) == Decision.ALLOW
+        assert _dispatch(handler, _payload(ToolName.WRITE, str(target))) == Decision.ALLOW
 
     def test_another_sessions_edit_does_not_count(
         self, handler: WriteClobberGuardHandler, tmp_path: Path
     ) -> None:
         target = tmp_path / "edited.txt"
         target.write_text("a\n")
-        assert _dispatch(handler, _payload("Edit", str(target), _OTHER_SESSION)) == Decision.ALLOW
+        assert (
+            _dispatch(handler, _payload(ToolName.EDIT, str(target), _OTHER_SESSION))
+            == Decision.ALLOW
+        )
 
-        assert _dispatch(handler, _payload("Write", str(target))) == Decision.DENY
+        assert _dispatch(handler, _payload(ToolName.WRITE, str(target))) == Decision.DENY
 
 
 class TestReadStillWorksThroughDispatch:
@@ -121,9 +128,9 @@ class TestReadStillWorksThroughDispatch:
     ) -> None:
         target = tmp_path / "read.txt"
         target.write_text("content\n")
-        assert _dispatch(handler, _payload("Read", str(target))) == Decision.ALLOW
+        assert _dispatch(handler, _payload(ToolName.READ, str(target))) == Decision.ALLOW
 
-        assert _dispatch(handler, _payload("Write", str(target))) == Decision.ALLOW
+        assert _dispatch(handler, _payload(ToolName.WRITE, str(target))) == Decision.ALLOW
 
     def test_an_unread_existing_file_is_still_denied(
         self, handler: WriteClobberGuardHandler, tmp_path: Path
@@ -131,7 +138,7 @@ class TestReadStillWorksThroughDispatch:
         target = tmp_path / "untouched.txt"
         target.write_text("content\n")
 
-        assert _dispatch(handler, _payload("Write", str(target))) == Decision.DENY
+        assert _dispatch(handler, _payload(ToolName.WRITE, str(target))) == Decision.DENY
 
 
 class TestSpellingsOfOnePathAreOnePath:
@@ -143,6 +150,6 @@ class TestSpellingsOfOnePathAreOnePath:
         target = tmp_path / "read.txt"
         target.write_text("content\n")
         dotted = str(tmp_path / "sub" / ".." / "read.txt")
-        assert _dispatch(handler, _payload("Read", dotted)) == Decision.ALLOW
+        assert _dispatch(handler, _payload(ToolName.READ, dotted)) == Decision.ALLOW
 
-        assert _dispatch(handler, _payload("Write", str(target))) == Decision.ALLOW
+        assert _dispatch(handler, _payload(ToolName.WRITE, str(target))) == Decision.ALLOW
