@@ -8,15 +8,21 @@ is a standard-library-only script, run DIRECTLY (never via `-m` or a normal
 `claude_code_hooks_daemon/__init__.py`, which imports pydantic) that reuses
 `operator_signal.py`'s validation and writer instead of re-implementing them.
 
-These tests exercise three different things:
+These tests exercise four different things:
   - the module loads with NO non-stdlib import, under the real system
     `python3` (not this venv's), confirming the constraint that makes this
     module exist in the first place;
   - its own syntax (and its dependencies') does not exceed the Python
-    version it claims to need;
+    version it claims to need, and a python3 below that floor is refused
+    with a clear message rather than an ImportError from a file the caller
+    never asked to look at;
   - it behaves like `cmd_signal` (``daemon/cli.py``) for the same request,
     both end-to-end under system `python3` and via the shared
-    `operator_signal.run_signal_cli` the two now both delegate to.
+    `operator_signal.run_signal_cli` the two now both delegate to;
+  - untracked-dir resolution comes from `install_layout.py`, a tiny sibling
+    with no `claude_code_hooks_daemon` imports of its own -- not
+    `daemon/paths.py`, which would otherwise raise this module's floor as a
+    side effect of code it never touches.
 """
 
 from __future__ import annotations
@@ -24,7 +30,9 @@ from __future__ import annotations
 import ast
 import json
 import os
+import runpy
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -33,7 +41,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT_PATH = REPO_ROOT / "src" / "claude_code_hooks_daemon" / "daemon" / "signal_standalone.py"
 _CLI_PY = REPO_ROOT / "src" / "claude_code_hooks_daemon" / "daemon" / "cli.py"
 _UTILS_DIR = REPO_ROOT / "src" / "claude_code_hooks_daemon" / "utils"
-_SYNTAX_FLOOR = (3, 10)  # see TestSyntaxFloor -- paths.py's bare `X | Y` annotations
+_SYNTAX_FLOOR = (3, 8)  # see TestSyntaxFloor -- operator_signal.py's `typing.Final` import
 _SYSTEM_PYTHON = Path("/usr/bin/python3")
 
 pytestmark = pytest.mark.skipif(
@@ -112,19 +120,21 @@ class TestModuleLoadsWithoutThirdPartyImports:
 class TestSyntaxFloor:
     """The script and everything it loads must parse at its declared floor.
 
-    ``daemon/paths.py`` uses bare ``X | Y`` annotations with no
-    ``from __future__ import annotations``, which need Python 3.10 to even
-    evaluate at function-definition time -- that, not anything in this
-    module's own code, is the real floor. This test pins it so a future
-    change to any of the four files cannot silently raise it without
-    notice.
+    ``operator_signal.py``'s ``from typing import Final`` (added 3.8) is the
+    binding constraint -- not anything in this module's own code, and no
+    longer ``daemon/paths.py`` (an earlier draft of Plan 00457 loaded that
+    instead of the new ``install_layout.py``, which set the floor to 3.10
+    purely as a side effect of unrelated code in a 1,800+-line file this
+    module never touches). This test pins the floor across every file this
+    module loads, so a future change to any of them cannot silently raise
+    it without notice.
     """
 
     @pytest.mark.parametrize(
         "relative_path",
         [
             "daemon/signal_standalone.py",
-            "daemon/paths.py",
+            "daemon/install_layout.py",
             "utils/operator_signal.py",
             "utils/temp_names.py",
         ],
@@ -134,6 +144,48 @@ class TestSyntaxFloor:
         source = path.read_text(encoding="utf-8")
 
         ast.parse(source, filename=str(path), feature_version=_SYNTAX_FLOOR)
+
+
+class TestVersionFloorEnforcement:
+    """A python3 below ``_MIN_PYTHON`` gets a clear message, not an
+    ImportError from deep inside ``operator_signal.py``.
+
+    ``_check_python_version`` takes the version to check as a parameter
+    (default: the real running interpreter) specifically so this is
+    testable without spawning an interpreter below the floor --
+    ``sys.version_info`` itself is a read-only structseq and cannot be
+    monkeypatched.
+    """
+
+    def _load_check_fn(self) -> Callable[[tuple[int, int]], bool]:
+        # Loaded via runpy (not a dotted import) for consistency with the
+        # rest of this file -- irrelevant here since the dev venv always
+        # satisfies the floor, so the module-level check never exits.
+        namespace = runpy.run_path(str(SCRIPT_PATH), run_name="test_version_floor_enforcement")
+        check_fn: Callable[[tuple[int, int]], bool] = namespace["_check_python_version"]
+        return check_fn
+
+    def test_accepts_the_floor_version(self, capsys: pytest.CaptureFixture[str]) -> None:
+        check = self._load_check_fn()
+
+        assert check((3, 8)) is True
+        assert capsys.readouterr().err == ""
+
+    def test_accepts_a_newer_version(self, capsys: pytest.CaptureFixture[str]) -> None:
+        check = self._load_check_fn()
+
+        assert check((3, 11)) is True
+        assert capsys.readouterr().err == ""
+
+    def test_rejects_an_older_version_with_a_clear_message(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        check = self._load_check_fn()
+
+        assert check((3, 7)) is False
+        err = capsys.readouterr().err
+        assert "3.8" in err
+        assert "3.7" in err
 
 
 class TestEndToEndWithoutVenv:

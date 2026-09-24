@@ -162,8 +162,13 @@ class ProjectContext:
         # Deferred import: avoids a circular import. daemon/server.py imports
         # ProjectContext back, so a module-level import here would try to bind
         # ProjectContext before the class exists (see the matching comment on
-        # _get_git_repo_name).
-        from claude_code_hooks_daemon.daemon.paths import get_untracked_dir, is_self_install_mode
+        # _get_git_repo_name). install_layout.py (not daemon.paths) is the
+        # ONE definition of this rule (Plan 00457) -- daemon.paths itself now
+        # delegates to it too.
+        from claude_code_hooks_daemon.daemon.install_layout import (
+            get_untracked_dir,
+            is_self_install_mode,
+        )
 
         # Normal install: /project/.claude/hooks-daemon.yaml, daemon at /project/.claude/hooks-daemon/
         # Self-install: /project/.claude/hooks-daemon.yaml, daemon at /project/

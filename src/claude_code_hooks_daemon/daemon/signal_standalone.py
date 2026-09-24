@@ -12,16 +12,19 @@ venv's slug does not match the host path and its interpreter cannot run on
 the host, so ``signal`` -- the operator-signal channel's host-reachable
 caller (Plan 00417) -- was refused on the exact deployment it exists for.
 This module needs no venv and no third-party package: only the standard
-library, at Python 3.10+ (see ``tests/unit/daemon/test_signal_standalone.py``
-``TestSyntaxFloor`` -- ``daemon/paths.py``'s bare ``X | Y`` annotations are
-the binding constraint, not anything in this file).
+library, at Python 3.8+ (``operator_signal.py``'s ``typing.Final`` import
+is the binding constraint -- see
+``tests/unit/daemon/test_signal_standalone.py`` ``TestSyntaxFloor``, which
+pins this across every file this module loads). A python3 below that floor
+is refused with a clear message (see ``_MIN_PYTHON`` below), before this
+module attempts to load anything that would need it.
 
 ``operator_signal.py`` is itself standard-library-only, but a normal
 ``from claude_code_hooks_daemon.utils.operator_signal import ...`` executes
 ``claude_code_hooks_daemon/__init__.py`` first (Python always initialises a
 dotted import's parent packages), which imports pydantic. This module loads
 ``operator_signal.py`` -- and its own dependency, ``temp_names.py``, and
-``daemon/paths.py`` for untracked-dir resolution -- directly by file path
+``install_layout.py`` for untracked-dir resolution -- directly by file path
 instead, registering each under its real dotted name in ``sys.modules``
 BEFORE executing it, so each module's own
 ``from claude_code_hooks_daemon...`` import statements resolve from that
@@ -29,7 +32,13 @@ cache rather than triggering a real package import. Validation, the closed
 ``kind`` set and the write itself are therefore reused unchanged from
 ``operator_signal.py`` via ``run_signal_cli`` -- the SAME function
 ``cmd_signal`` (``daemon/cli.py``) delegates to -- rather than
-re-implemented here.
+re-implemented here. ``install_layout.py`` (not ``daemon/paths.py``) is the
+untracked-dir dependency: it is a TINY, standard-library-only sibling with
+no ``claude_code_hooks_daemon`` imports of its own, so loading it pulls in
+nothing that could silently raise this module's Python floor -- unlike
+``daemon/paths.py`` (1,800+ lines, with unrelated deferred imports
+elsewhere in the file), which ``ProjectContext`` and ``install_layout.py``
+now both delegate the SAME rule to.
 
 ``--project-root`` is REQUIRED, unlike ``cmd_signal``'s optional flag with a
 CWD walk-up fallback (``daemon.cli.get_project_path``): that walk-up
@@ -52,14 +61,49 @@ from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING
 
+#: The lowest Python this module can run under. Nothing in THIS file needs
+#: more than the stdlib has carried since ~3.4, but ``operator_signal.py``
+#: (loaded below, unconditionally) imports ``typing.Final`` (added 3.8) at
+#: module scope -- an ImportError there would be a confusing failure inside
+#: a file this caller never asked to look at, so this module checks first
+#: and names the real reason.
+_MIN_PYTHON = (3, 8)
+
+
+def _check_python_version(version_info: tuple[int, int] = sys.version_info[:2]) -> bool:
+    """True if ``version_info`` meets :data:`_MIN_PYTHON`.
+
+    Otherwise prints a clear error to stderr and returns False.
+    ``version_info`` defaults to the REAL running interpreter's
+    ``(major, minor)`` -- a parameter rather than reading ``sys.version_info``
+    directly inline so this is unit-testable with a synthetic value; the
+    real attribute is a read-only structseq and cannot be monkeypatched
+    (see ``tests/unit/daemon/test_signal_standalone.py::TestVersionFloorEnforcement``).
+    """
+    if version_info >= _MIN_PYTHON:
+        return True
+    floor = ".".join(str(part) for part in _MIN_PYTHON)
+    actual = ".".join(str(part) for part in version_info)
+    print(
+        f"ERROR: signal_standalone.py needs python3 >= {floor} (this interpreter is "
+        f"{actual}). operator_signal.py's `typing.Final` import needs it. "
+        "Use a newer system python3.",
+        file=sys.stderr,
+    )
+    return False
+
+
+if not _check_python_version():
+    sys.exit(1)
+
 if TYPE_CHECKING:
     # Type-checking only -- never executed (see the module docstring for why
     # a REAL import of these here would defeat this module's whole point).
     # mypy/pyright run inside the fully-provisioned dev venv, so resolving
-    # this costs nothing at check time; it gives `operator_signal`/`paths`
-    # their real types below instead of the bare `ModuleType` a dynamic
-    # load would otherwise leave them with.
-    from claude_code_hooks_daemon.daemon import paths as _paths_type
+    # this costs nothing at check time; it gives `operator_signal`/
+    # `install_layout` their real types below instead of the bare
+    # `ModuleType` a dynamic load would otherwise leave them with.
+    from claude_code_hooks_daemon.daemon import install_layout as _install_layout_type
     from claude_code_hooks_daemon.utils import operator_signal as _operator_signal_type
 
 _PACKAGE_ROOT = Path(__file__).resolve().parent.parent
@@ -96,18 +140,20 @@ def _load_by_file_path(dotted_name: str, file_path: Path) -> ModuleType:
 
 if TYPE_CHECKING:
     operator_signal = _operator_signal_type
-    paths = _paths_type
+    install_layout = _install_layout_type
 else:
     # temp_names has no internal dependencies; operator_signal needs it
     # cached first (its own
     # `from claude_code_hooks_daemon.utils.temp_names import ...` resolves
-    # from sys.modules, not a real import). paths.py has no internal
-    # claude_code_hooks_daemon dependencies of its own.
+    # from sys.modules, not a real import). install_layout.py has no
+    # internal claude_code_hooks_daemon dependencies of its own.
     _load_by_file_path("claude_code_hooks_daemon.utils.temp_names", _UTILS_DIR / "temp_names.py")
     operator_signal = _load_by_file_path(
         "claude_code_hooks_daemon.utils.operator_signal", _UTILS_DIR / "operator_signal.py"
     )
-    paths = _load_by_file_path("claude_code_hooks_daemon.daemon.paths", _DAEMON_DIR / "paths.py")
+    install_layout = _load_by_file_path(
+        "claude_code_hooks_daemon.daemon.install_layout", _DAEMON_DIR / "install_layout.py"
+    )
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -158,7 +204,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: Project root does not exist: {project_root}", file=sys.stderr)
         return 1
 
-    untracked_dir = paths.get_untracked_dir(project_root)
+    untracked_dir = install_layout.get_untracked_dir(project_root)
     session_id = os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip()
     return operator_signal.run_signal_cli(
         untracked_dir,
