@@ -1261,6 +1261,19 @@ def socket_path_diagnosis(project_path: Path, *, self_install: bool) -> str | No
     )
 
 
+def is_self_install_mode(project_path: Path) -> bool:
+    """Whether ``project_path`` is a self-install (dogfood) checkout.
+
+    True iff the daemon SOURCE tree is present at the project root
+    (``{project_path}/src/claude_code_hooks_daemon``). The ONE definition of
+    this test (Plan 00457): ``ProjectContext.initialize`` calls it instead of
+    keeping its own copy, and the venv-free ``signal`` entry point
+    (``daemon/signal_standalone.py``) loads this module by file path to reach
+    the same function rather than re-implementing the check.
+    """
+    return (project_path / "src" / "claude_code_hooks_daemon").is_dir()
+
+
 def _get_untracked_dir(project_path: Path) -> Path:
     """
     Get the untracked directory for daemon runtime files.
@@ -1275,8 +1288,7 @@ def _get_untracked_dir(project_path: Path) -> Path:
         - Self-install mode: {project}/untracked
         - Normal mode: {project}/.claude/hooks-daemon/untracked
     """
-    # Self-install mode: daemon source exists at project root
-    if (project_path / "src" / "claude_code_hooks_daemon").is_dir():
+    if is_self_install_mode(project_path):
         return project_path / "untracked"
     return project_path / ".claude" / "hooks-daemon" / "untracked"
 

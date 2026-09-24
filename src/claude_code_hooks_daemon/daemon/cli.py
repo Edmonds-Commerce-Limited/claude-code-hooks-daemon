@@ -3972,24 +3972,30 @@ def cmd_signal(args: argparse.Namespace) -> int:
     directory the supervisor already watches, and no session outside it
     (``discover_session_ids``).
 
+    Targeting and writing are delegated to
+    ``operator_signal.run_signal_cli`` (Plan 00457), the SAME function the
+    venv-free ``signal_standalone.py`` entry point calls, so the two
+    invocation surfaces cannot drift apart. This function's own job is
+    everything ``run_signal_cli`` cannot do without the full package: resolve
+    ``daemon_untracked_dir`` via ``ProjectContext`` (git/config-validated).
+    Validation is checked here FIRST too, so a malformed request fails fast
+    before that resolution work runs — ``run_signal_cli`` checks it again,
+    so the rule has one definition either way.
+
     Returns:
         0 on every targeted signal written, 1 on refusal/failure.
     """
     from claude_code_hooks_daemon.core.project_context import ProjectContext
     from claude_code_hooks_daemon.utils.operator_signal import (
-        KINDS_WITH_MINUTES,
-        discover_session_ids,
-        write_operator_signal,
+        run_signal_cli,
+        validate_signal_request,
     )
 
     kind = str(args.kind)
     minutes = getattr(args, "minutes", None)
-    needs_minutes = kind in KINDS_WITH_MINUTES
-    if needs_minutes and minutes is None:
-        print(f"ERROR: kind '{kind}' requires --minutes N", file=sys.stderr)
-        return 1
-    if not needs_minutes and minutes is not None:
-        print(f"ERROR: kind '{kind}' takes no --minutes payload", file=sys.stderr)
+    error = validate_signal_request(kind, minutes)
+    if error is not None:
+        print(error, file=sys.stderr)
         return 1
 
     if getattr(args, "project_root", None):
@@ -4019,54 +4025,14 @@ def cmd_signal(args: argparse.Namespace) -> int:
         )
         return 1
 
-    all_sessions = bool(getattr(args, "all_sessions", False))
-    if all_sessions:
-        session_ids = discover_session_ids(untracked_dir)
-        if not session_ids:
-            print(
-                "ERROR: --all-sessions found no live session (no <session>.json context "
-                f"sidecar under {untracked_dir}) -- nothing to signal",
-                file=sys.stderr,
-            )
-            return 1
-    else:
-        session_id = os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip()
-        if not session_id:
-            print(
-                "ERROR: CLAUDE_CODE_SESSION_ID is not set. Without --all-sessions the "
-                "signal is session-keyed, so `signal` must run INSIDE the Claude Code "
-                "session it should target (a Bash tool call sets the variable) -- or "
-                "pass --all-sessions to reach every session of this project instead.",
-                file=sys.stderr,
-            )
-            return 1
-        session_ids = [session_id]
-
-    now = time.time()
-    written: list[Path] = []
-    for target_session_id in session_ids:
-        try:
-            path = write_operator_signal(
-                untracked_dir,
-                session_id=target_session_id,
-                kind=kind,
-                minutes=minutes,
-                now=now,
-            )
-        except ValueError as e:
-            print(f"ERROR: {e}", file=sys.stderr)
-            return 1
-        except OSError as e:
-            print(
-                f"ERROR: failed to write operator signal for session '{target_session_id}': {e}",
-                file=sys.stderr,
-            )
-            return 1
-        written.append(path)
-
-    for path in written:
-        print(f"Operator signal written: {path}")
-    return 0
+    session_id = os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip()
+    return run_signal_cli(
+        untracked_dir,
+        kind=kind,
+        minutes=minutes,
+        all_sessions=bool(getattr(args, "all_sessions", False)),
+        session_id=session_id,
+    )
 
 
 def cmd_approve_plan_close(args: argparse.Namespace) -> int:

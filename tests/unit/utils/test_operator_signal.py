@@ -33,7 +33,9 @@ from claude_code_hooks_daemon.utils.operator_signal import (
     SIGNAL_SUBDIR,
     SIGNAL_SUFFIX,
     discover_session_ids,
+    run_signal_cli,
     signal_path,
+    validate_signal_request,
     write_operator_signal,
 )
 
@@ -150,6 +152,89 @@ class TestRoundTrip:
 
         payload = json.loads(signal_path(tmp_path, _SESSION).read_text(encoding="utf-8"))
         assert payload[FIELD_KIND] == KIND_REBOOT_CANCELLED
+
+
+class TestValidateSignalRequest:
+    """The ONE definition of the kind/minutes shape rule (Plan 00457) --
+    ``run_signal_cli`` calls it internally, and ``cmd_signal``
+    (``daemon/cli.py``) calls it again first so a bad request never reaches
+    ``ProjectContext.initialize``'s git/filesystem work.
+    """
+
+    def test_none_for_a_valid_warning_with_minutes(self) -> None:
+        assert validate_signal_request(KIND_REBOOT_WARNING, 10) is None
+
+    def test_none_for_a_valid_cancellation_with_no_minutes(self) -> None:
+        assert validate_signal_request(KIND_REBOOT_CANCELLED, None) is None
+
+    def test_warning_kind_without_minutes_is_an_error(self) -> None:
+        error = validate_signal_request(KIND_REBOOT_WARNING, None)
+        assert error is not None
+        assert "--minutes" in error
+
+    def test_cancelled_kind_with_minutes_is_an_error(self) -> None:
+        error = validate_signal_request(KIND_REBOOT_CANCELLED, 5)
+        assert error is not None
+        assert "no --minutes" in error
+
+
+class TestRunSignalCli:
+    """The shared CLI body behind both ``cmd_signal`` and the venv-free
+    ``signal_standalone`` entry point -- see ``tests/unit/daemon/test_cli_signal.py``
+    for the equivalent coverage exercised through ``cmd_signal`` itself.
+    """
+
+    def test_writes_a_signal_for_the_given_session(self, tmp_path: Path, capsys) -> None:
+        rc = run_signal_cli(
+            tmp_path, kind=KIND_REBOOT_WARNING, minutes=10, all_sessions=False, session_id=_SESSION
+        )
+
+        assert rc == 0
+        payload = json.loads(signal_path(tmp_path, _SESSION).read_text(encoding="utf-8"))
+        assert payload[FIELD_KIND] == KIND_REBOOT_WARNING
+        assert payload[FIELD_MINUTES] == 10
+        assert str(signal_path(tmp_path, _SESSION)) in capsys.readouterr().out
+
+    def test_refuses_an_invalid_request_before_writing(self, tmp_path: Path, capsys) -> None:
+        rc = run_signal_cli(
+            tmp_path, kind=KIND_REBOOT_WARNING, minutes=None, all_sessions=False, session_id=_SESSION
+        )
+
+        assert rc == 1
+        assert "--minutes" in capsys.readouterr().err
+        assert not signal_path(tmp_path, _SESSION).exists()
+
+    def test_refuses_without_a_session_id_when_not_all_sessions(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        rc = run_signal_cli(
+            tmp_path, kind=KIND_REBOOT_CANCELLED, minutes=None, all_sessions=False, session_id=""
+        )
+
+        assert rc == 1
+        assert "CLAUDE_CODE_SESSION_ID" in capsys.readouterr().err
+
+    def test_all_sessions_reaches_every_live_sidecar(self, tmp_path: Path) -> None:
+        sidecar_dir = tmp_path / SIGNAL_SUBDIR
+        sidecar_dir.mkdir(parents=True)
+        (sidecar_dir / "sess-a.json").write_text("{}", encoding="utf-8")
+        (sidecar_dir / "sess-b.json").write_text("{}", encoding="utf-8")
+
+        rc = run_signal_cli(
+            tmp_path, kind=KIND_REBOOT_CANCELLED, minutes=None, all_sessions=True, session_id=""
+        )
+
+        assert rc == 0
+        assert signal_path(tmp_path, "sess-a").exists()
+        assert signal_path(tmp_path, "sess-b").exists()
+
+    def test_all_sessions_with_no_live_session_is_refused(self, tmp_path: Path, capsys) -> None:
+        rc = run_signal_cli(
+            tmp_path, kind=KIND_REBOOT_CANCELLED, minutes=None, all_sessions=True, session_id=""
+        )
+
+        assert rc == 1
+        assert capsys.readouterr().err
 
 
 class TestDiscoverSessionIds:

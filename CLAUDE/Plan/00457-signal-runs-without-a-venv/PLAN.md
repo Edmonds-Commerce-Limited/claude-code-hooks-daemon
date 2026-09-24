@@ -1,6 +1,6 @@
 # Plan 00457: signal runs without a venv
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-24
 **Owner**: dev
 **GitHub Issue**: #55
@@ -56,13 +56,13 @@ commands can be added. `signal` becomes the second command it handles.
 
 ### Phase 1: TDD in a worktree
 
-- [ ] ⬜ **Task 1.1**: Establish how `ProjectContext.daemon_untracked_dir()`
+- [x] ✅ **Task 1.1**: Establish how `ProjectContext.daemon_untracked_dir()`
   resolves in client and self-install mode, including any slug or
   environment override. Check whether the sidecar directory the container
   supervisor watches is the same directory the host sees through the
   shared mount, with no path-keyed name in between. Record the evidence in
   the journal.
-- [ ] ⬜ **Task 1.2**: A standard-library-only entry point for `signal`,
+- [x] ✅ **Task 1.2**: A standard-library-only entry point for `signal`,
   runnable with the system `python3`, that parses the same arguments as
   `cmd_signal` and calls the existing writer, with parity tests against
   `cmd_signal`. Add a test that importing it pulls in no third-party

@@ -159,22 +159,23 @@ class ProjectContext:
         if config_dir.name != ".claude":
             raise ValueError(f"Config file must be in .claude directory, got: {config_dir}")
 
-        # Determine self-install mode by checking if daemon source exists at project root
+        # Deferred import: avoids a circular import. daemon/server.py imports
+        # ProjectContext back, so a module-level import here would try to bind
+        # ProjectContext before the class exists (see the matching comment on
+        # _get_git_repo_name).
+        from claude_code_hooks_daemon.daemon.paths import get_untracked_dir, is_self_install_mode
+
         # Normal install: /project/.claude/hooks-daemon.yaml, daemon at /project/.claude/hooks-daemon/
         # Self-install: /project/.claude/hooks-daemon.yaml, daemon at /project/
-        project_root_candidate = config_dir.parent  # Go up from .claude to project root
-
-        daemon_src_at_root = (project_root_candidate / "src" / "claude_code_hooks_daemon").exists()
-        self_install_mode = daemon_src_at_root
+        project_root = config_dir.parent  # Go up from .claude to project root
+        self_install_mode = is_self_install_mode(project_root)
 
         if self_install_mode:
-            project_root = project_root_candidate
             logger.info(
                 "ProjectContext: Self-install mode detected (daemon source at project root)"
             )
             _ensure_self_install_cli_symlink(project_root)
         else:
-            project_root = project_root_candidate
             logger.info("ProjectContext: Normal install mode (daemon in .claude/hooks-daemon/)")
 
         logger.info("ProjectContext: Project root: %s", project_root)
@@ -199,13 +200,10 @@ class ProjectContext:
         logger.info("ProjectContext: Git repo name: %s", git_repo_name)
         logger.info("ProjectContext: Git toplevel: %s", git_toplevel)
 
-        # Calculate daemon untracked directory (for runtime files like socket, pid, log)
-        # Self-install mode: {project}/untracked
-        # Normal mode: {project}/.claude/hooks-daemon/untracked
-        if self_install_mode:
-            daemon_untracked_dir = project_root / "untracked"
-        else:
-            daemon_untracked_dir = config_dir / "hooks-daemon" / "untracked"
+        # Runtime files (socket, pid, log) live under the untracked dir --
+        # {project}/untracked (self-install) or
+        # {project}/.claude/hooks-daemon/untracked (normal mode).
+        daemon_untracked_dir = get_untracked_dir(project_root)
 
         logger.info("ProjectContext: Daemon untracked dir: %s", daemon_untracked_dir)
 
