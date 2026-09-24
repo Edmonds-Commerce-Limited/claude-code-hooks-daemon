@@ -3,6 +3,22 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
+### N32 — `pipe_blocker` splits at a `\|` inside double quotes and reads the next word as a pipe stage
+
+**Found by the Plan 00463 agent.** The command
+`grep -n "a\|--finish\|head-moved\|^#" CLAUDE/QA.md | bin/echd-capture --head 80`
+was denied as R-PIPE-TO-HEAD. The only real pipe goes to the whitelisted
+`bin/echd-capture`. The `\|` alternations inside the double-quoted grep
+pattern were split as pipes, and the "stage" `head-moved` was read as `head`.
+Two defects: a quoted `|` is not a pipe, and `head-moved` is not the
+command `head`.
+
+**Candidate remedy:** move pipe_blocker onto the shared shell lexer from
+Plan 00464 (the shell-parser consolidation), so pipe boundaries come from
+real tokenisation. Match a stage's command by whole word. RED tests: the
+command above is allowed; `pytest | head -1` is still denied; and
+`grep "x|y" f | head` is judged on `grep` (whitelisted), not on `y`.
+
 ### N31 — the dispatch-declaration advisory does not recognise "File to write to: <path>"
 
 **Found by the 00467 dogfood agent.** A dispatch brief that named its report

@@ -62,6 +62,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N29 | `error_hiding`'s return-None-in-except check is evaded by returning a local assigned in the handler       | Coordinator        | ⬜ Open               |
 | N30 | More shell code that must survive a hostile PATH depends on a PATH command (`date`, `pgrep`)              | 00467 dogfood      | ⬜ Open               |
 | N31 | The dispatch-declaration advisory does not recognise "File to write to: <path>"                           | 00467 dogfood      | ⬜ Open               |
+| N32 | `pipe_blocker` splits at a `\|` inside double quotes and reads the next word as a pipe stage              | Plan 00463 agent   | ⬜ Open               |
 
 ## Tasks
 
