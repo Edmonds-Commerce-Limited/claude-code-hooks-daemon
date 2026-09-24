@@ -3,6 +3,21 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
+### N28 — `project_containment` resolves a relative target against the payload cwd and ignores a same-command `cd`
+
+**Found by the Plan 00464 agent** during its re-review fix round (S12). It is
+an instance of 00464's own defect class: the payload `cwd` is where the
+session started, not where the command runs. So `cd <elsewhere> && <write to a relative path>` was judged against the wrong directory, and the containment
+verdict could be wrong in both directions.
+
+**Remedied on the 00464 branch** (`worktree-plan-464-commit-gate-repo`,
+827c45df) through the new `find_command_placements`, which every
+path-judging guard is meant to share. Two sibling walkers still resolve
+their own way: `reference_repo_freshness` (the 00464 agent fixes it on that
+branch) and `secret_file_matching` (after the guard-defects branch merges,
+in the shell-parser consolidation). Mark Remedied when 00464 lands; the
+siblings are tracked in the coordinator's consolidation work.
+
 ### N27 — `skill_scan` and `tool_report` build the transcript directory name two different ways
 
 **Found by the 00468 core agent** (report on its branch,
