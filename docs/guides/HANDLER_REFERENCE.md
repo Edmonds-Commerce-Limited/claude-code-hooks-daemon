@@ -3187,6 +3187,8 @@ handlers:
 
 **Turning it off disables the auto-restore.** Since the supervisor arms only on this signal, a session with no recorder never restores. That is the safe direction, and it is not silent: the supervisor writes `downgrade fable -> opus is unattributed (no model_downgrade_recorder signal) — no restore` to its decision log.
 
+**The effort floor answers the mirror question the other way, on purpose.** A model drop with no platform record opens no restore. An *effort* drop the supervisor did not type is trusted as yours: it is latched like a typed `/effort <level>`, so the per-model floor stops for the rest of that model spell. This covers a level picked from the bare `/effort` selector, which types nothing the supervisor can read. Both rules stop the supervisor reverting a change it cannot prove was its own or the platform's. The decision log records `effort <from> -> <to> on <family> was not injected by the supervisor — latched as a manual choice`.
+
 It never blocks, never advises, and writes nothing at all for a session that was never downgraded. The signal names both models, both families, the refusal category and the scope — never any message content.
 
 | Option       | Values | Default   | Effect                                                                                              |

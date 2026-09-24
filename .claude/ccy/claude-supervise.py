@@ -37,6 +37,13 @@ boundary — the restore fires on the first injectable tick after the
 downgrade. ``CCY_MODEL_RESTORE_SECONDS`` adds an optional EXTRA quiet delay
 (default 0; "off" or negative disables auto-restore).
 
+The floor stands down for the rest of a model spell once the human lowers
+effort: a typed ``/effort <level>`` latches it, and so does any OBSERVED drop
+the supervisor did not type itself, which is how a level picked from the bare
+``/effort`` selector is seen. That trusts an unattributed effort drop, the
+deliberate mirror of the model-downgrade rule, where an unattributed model
+drop opens no restore episode (``_latch_unattributed_effort_drop``).
+
 On a REPEATED downgrade — a flip-flop, where a prior auto-restore was undone
 because the saturated context re-tripped the classifier on the next flagged
 turn — restoring the model alone cannot win. So, opt-in via ``CCY_FLAG_COMPACT``
@@ -3456,6 +3463,14 @@ class CompactStateMachine:
         # coupled effort until the user manually changes model again or
         # manually re-sets effort.
         self._manual_effort_active: str | None = None
+        # Ledger 00422 N7: the last KNOWN effort reading (`session:family:
+        # effort`) and the level the supervisor itself last typed
+        # (`session:level`, consumed when a reading shows it), so an observed
+        # drop can be told apart from the supervisor's own injection landing.
+        self._last_effort_reading: str | None = None
+        self._own_effort_injection: str | None = None
+        # Consume-once decision.log note for a drop latched as manual.
+        self._manual_effort_drop_note: str | None = None
 
     @property
     def effort_pending(self) -> str | None:
@@ -3829,6 +3844,80 @@ class CompactStateMachine:
         self._manual_effort_active = level
         self._coupled_effort_pending = None
 
+    def note_own_effort_injection(self, level: str) -> None:
+        """Record a ``/effort <level>`` the supervisor is about to type (ledger 00422 N7).
+
+        Called at DECISION time by every armed ``/effort`` branch in
+        ``decide_once`` (worker-side, so it deploys by hot-reload), never for
+        a dry-run marker, which types no level. The record is held until a
+        reading SHOWS that level rather than for a time window: the sidecar
+        only refreshes on a status render, so the landing can arrive long
+        after the write, and a window would expire first and make the
+        supervisor's own drop look human.
+        """
+        session = self._last_model_session or ""
+        self._own_effort_injection = f"{session}:{level}"
+
+    def take_manual_effort_drop_note(self) -> str | None:
+        """Return, once, a note about a drop latched as manual (ledger 00422 N7).
+
+        Without it a floor that stops acting is indistinguishable from a
+        broken one; decision.log says which reading switched it off.
+        """
+        note = self._manual_effort_drop_note
+        self._manual_effort_drop_note = None
+        return note
+
+    def _latch_unattributed_effort_drop(
+        self, *, session: str, family: str, effort: str | None
+    ) -> None:
+        """Trust an effort DROP the supervisor did not inject as manual (ledger 00422 N7).
+
+        A bare ``/effort`` opens Claude Code's selector, which types no level
+        the line recogniser can read, so ``note_manual_effort_command`` never
+        runs for it and the floor used to put the level straight back. This
+        reads the OUTCOME instead: a lower level than the last known one, for
+        the same session and the same family, that is not the level the
+        supervisor last typed, is a human's choice and latches exactly as a
+        typed ``/effort <level>`` does.
+
+        DELIBERATE ASYMMETRY with ``_downgrade_is_attributed`` (owner ruling,
+        00422 DECISIONS.md decision 3). An unattributed MODEL drop is NOT
+        acted on -- no restore episode opens -- while an unattributed EFFORT
+        drop IS acted on, by latching. Both answers point the same way: the
+        supervisor never overrides a change it cannot prove it or the platform
+        made. Only a human uses the selector, and a supervisor that silently
+        reverts a human's choice is the worse failure.
+
+        Three things it does not do. An unknown level is no evidence and leaves
+        the last known one in place. A family or session change is not a drop
+        within a spell -- the new spell's own default applies. And unlike the
+        typed command it leaves an armed coupled correction alone: a drop seen
+        between a ``/model`` injection and its ``/effort`` is as likely the
+        switch settling as a human, and that correction keeps fable off xhigh.
+        """
+        if effort is None or effort not in _EFFORT_RANKS:
+            return
+        previous = self._last_effort_reading
+        self._last_effort_reading = f"{session}:{family}:{effort}"
+        if self._own_effort_injection == f"{session}:{effort}":
+            # The supervisor's own level landing. Consumed, so a human who
+            # later returns to that same level is seen as the human.
+            self._own_effort_injection = None
+            return
+        if previous is None:
+            return
+        prev_session, prev_family, prev_effort = previous.split(":", 2)
+        if prev_session != session or prev_family != family:
+            return
+        if prev_effort not in _EFFORT_RANKS or _EFFORT_RANKS[effort] >= _EFFORT_RANKS[prev_effort]:
+            return
+        self._manual_effort_active = effort
+        self._manual_effort_drop_note = (
+            f"effort {prev_effort} -> {effort} on {family} was not injected by the "
+            "supervisor — latched as a manual choice, floor off for this spell"
+        )
+
     def note_machine_downgrade(self, *, session: str, from_family: str, to_family: str) -> None:
         """Record a downgrade CLAUDE CODE attributed to itself (Plan 00328).
 
@@ -3974,6 +4063,12 @@ class CompactStateMachine:
             # Only the EPISODE is withheld. The per-model effort floor below
             # still applies -- the human picked this family, so its configured
             # minimum is exactly what they should get.
+            #
+            # DELIBERATE ASYMMETRY (00422 DECISIONS.md decision 3): an
+            # unattributed EFFORT drop gets the opposite answer and IS acted
+            # on, by latching it as manual -- see
+            # `_latch_unattributed_effort_drop`. Both keep the supervisor from
+            # reverting a change it cannot prove was its own or the platform's.
             if not self._downgrade_is_attributed(session, prev_family, family):
                 if self._unattributed_downgrade_note is None:
                     self._unattributed_downgrade_note = (
@@ -3988,6 +4083,7 @@ class CompactStateMachine:
                     self._downgrade_from_family = prev_family
                     self._downgrade_started_ts = now_wall
                 self._downgrade_episode = f"{session}:{family}"
+        self._latch_unattributed_effort_drop(session=session, family=family, effort=reading.effort)
         if self._manual_effort_active is not None:
             # Plan 00316 Task 2.1: a manual /effort always wins -- neither the
             # downgrade-episode xhigh floor nor the per-model default fires
@@ -4191,6 +4287,9 @@ class CompactStateMachine:
             "manual_effort_active": self._manual_effort_active,
             "attributed_downgrade": self._attributed_downgrade,
             "unattributed_downgrade_note": self._unattributed_downgrade_note,
+            "last_effort_reading": self._last_effort_reading,
+            "own_effort_injection": self._own_effort_injection,
+            "manual_effort_drop_note": self._manual_effort_drop_note,
         }
 
     def import_state(self, state: dict[str, object]) -> None:
@@ -4310,6 +4409,15 @@ class CompactStateMachine:
         if "unattributed_downgrade_note" in state:
             raw = state["unattributed_downgrade_note"]
             self._unattributed_downgrade_note = None if raw is None else str(raw)
+        if "last_effort_reading" in state:
+            raw = state["last_effort_reading"]
+            self._last_effort_reading = None if raw is None else str(raw)
+        if "own_effort_injection" in state:
+            raw = state["own_effort_injection"]
+            self._own_effort_injection = None if raw is None else str(raw)
+        if "manual_effort_drop_note" in state:
+            raw = state["manual_effort_drop_note"]
+            self._manual_effort_drop_note = None if raw is None else str(raw)
 
     def evaluate(
         self,
@@ -5234,6 +5342,13 @@ def decide_once(
     unattributed_note = machine.take_unattributed_downgrade_note()
     if unattributed_note is not None:
         noop_reason_log = f"{_NOOP_LOG_PREFIX}: {unattributed_note}"
+    # Ledger 00422 N7: the mirror case -- an effort drop the supervisor did not
+    # type was latched as manual, so the floor goes quiet; say which reading
+    # did it. Mutually exclusive with the note above by construction: that one
+    # needs a family change, this one needs the family unchanged.
+    effort_drop_note = machine.take_manual_effort_drop_note()
+    if effort_drop_note is not None:
+        noop_reason_log = f"{_NOOP_LOG_PREFIX}: {effort_drop_note}"
     # ── Goal injection (Plan 00269) ─────────────────────────────────────────
     # Strictly SUBORDINATE to compact/continue: the goal branch runs only when
     # this tick decided NOOP with no payload, no compaction signal is pending,
@@ -5343,6 +5458,7 @@ def decide_once(
                 else:
                     payload = effort_command
                     machine.arm_audit(f"{effort_command} (DROP ANCHOR emergency correction)")
+                    machine.note_own_effort_injection(_ANCHOR_TARGET_EFFORT)
                 submit = True
                 is_anchor_injection = True
                 deferred_log = None
@@ -5404,6 +5520,7 @@ def decide_once(
                 # if the PTY write fails, the flush cannot print through
                 # that same broken PTY either, so no false claim surfaces.
                 machine.arm_audit(f"{effort_command} (coupled to model switch)")
+                machine.note_own_effort_injection(coupled_target)
             submit = True
             deferred_log = None
             noop_reason_log = None
@@ -5730,6 +5847,7 @@ def decide_once(
             else:
                 payload = effort_command
                 machine.arm_audit(f"{effort_command} (effort-floor restore)")
+                machine.note_own_effort_injection(target)
             submit = True
             deferred_log = None
             noop_reason_log = None
