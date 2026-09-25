@@ -169,6 +169,17 @@ def _candidate_commands(text: str, programs: frozenset[str]) -> list[str]:
     return candidates
 
 
+def _names_a_full_run(candidate: str, patterns: list[FullQaPattern]) -> bool:
+    """Whether the guard judges a candidate a run of a DECLARED full-QA program.
+
+    The guard also denies code it cannot see (a script path built from a
+    variable the text never sets, say); that is its caution about a command
+    it would have to run, not a printed instruction to run the full suite.
+    """
+    match = find_full_qa_invocation(candidate, patterns)
+    return match is not None and match.pattern_id in {pattern.pattern_id for pattern in patterns}
+
+
 def _full_runs(script: str, patterns: list[FullQaPattern]) -> list[str]:
     """Every printed text that tells its reader to start a full QA run."""
     programs = frozenset(pattern.command for pattern in patterns)
@@ -176,7 +187,7 @@ def _full_runs(script: str, patterns: list[FullQaPattern]) -> list[str]:
         text
         for text in _printed_texts(script)
         if any(
-            find_full_qa_invocation(candidate, patterns) is not None
+            _names_a_full_run(candidate, patterns)
             for candidate in _candidate_commands(text, programs)
         )
     ]

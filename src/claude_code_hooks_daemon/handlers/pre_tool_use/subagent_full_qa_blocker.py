@@ -711,6 +711,16 @@ _SHELL_CODE: Final[str] = "shell"
 _PYTHON_CODE: Final[str] = "python"
 #: A file run by its own path: its first line says which kind of code it is.
 _EXECUTABLE_CODE: Final[str] = "executable"
+#: A file whose text is a command's WORDS: ``$(cat f)`` as the command word,
+#: which bash word-splits and runs as it is, never parsing it (review 8 m1).
+_WORDS_CODE: Final[str] = "words"
+#: Producers whose output is the path of the program they name: ``which X``,
+#: ``command -v X``, ``type -P X``. The flag each needs, None for none.
+_PATH_PRINTERS: Final[Mapping[str, frozenset[str] | None]] = {
+    "which": None,
+    "command": frozenset({"-v"}),
+    "type": frozenset({"-P", "-p"}),
+}
 #: What it yields for code a shell or Python reads that cannot be seen: from
 #: a producer this does not understand, or from another descriptor.
 _UNREAD_CODE: Final[str] = "<code that cannot be read>"
@@ -1219,6 +1229,8 @@ _CWD_VARIABLE_PREFIXES: Final[tuple[str, ...]] = ("$PWD/", "${PWD}/", "$(pwd)/",
 _CWD_VARIABLES: Final[frozenset[str]] = frozenset({"$PWD", "${PWD}", "$(pwd)", "`pwd`"})
 #: A path from the home directory is absolute: it does not depend on the cwd.
 _HOME_PREFIXES: Final[tuple[str, ...]] = ("~/", "$HOME/", "${HOME}/")
+#: What ``os.path.expanduser`` expands, and returns unchanged when it cannot.
+_HOME: Final[str] = "~"
 #: ``cd`` moves the directory later words are looked up in; a target that
 #: starts with an expansion goes somewhere this cannot see.
 _CD: Final[str] = "cd"
@@ -2440,7 +2452,9 @@ def _resolve_opaque(
     ``"$PY" -c code`` and ``$SHELL -c code`` run code, judged as Python and
     as shell; ``"$PY" -m mod`` runs the module (review 6 m6). Otherwise the
     word is yielded as ``_OPAQUE``, to be judged as each program the command
-    names, with ``rest`` as that program's arguments.
+    names, with ``rest`` as that program's arguments. A word that is one
+    whole substitution, and no interpreter by its flags, runs its producer's
+    output (:func:`_substituted_command`).
     """
     index = 0
     while index < len(rest) and _is_flag(rest[index]):
@@ -2464,7 +2478,114 @@ def _resolve_opaque(
     if index < len(rest) and rest[index] in _STDIN_PATHS:
         # `"$PY" - <<'EOF'` runs code from stdin, judged where it is fed.
         return
+    inner = _whole_substitution(word)
+    if inner is not None:
+        yield from _substituted_command(word, inner, rest, segment, depth, hops)
+        return
     yield _OPAQUE, [word, *rest], segment
+
+
+def _substituted_command(
+    word: str, inner: str, rest: list[str], segment: str, depth: int, hops: int
+) -> Iterator[tuple[str, list[str], str]]:
+    """``$(producer) args`` or a backtick span as the command: its OUTPUT runs (review 8 m1).
+
+    Bash word-splits the output and runs it, without parsing it; inside a
+    string another shell parses (``bash -c "x=1; $(cat f)"``) the same text
+    IS parsed. Which one a word came from is not known here, so literal
+    output and a file's text are judged both ways. An empty substitution
+    expands to nothing, and the words after it run. A producer that prints
+    a program's path (``which pytest``) runs that program. Any other
+    producer is judged as each program its own text names (``_OPAQUE``), as
+    the reference documents for a program named at run time; one that reads
+    a FILE prints code that cannot be read (see :func:`_full_run_of`). A
+    producer that only sets up shell state runs nothing.
+    """
+    try:
+        producer = shlex.split(inner)
+    except ValueError as error:
+        logger.debug("Substituted command judged unparsed (%s)", error)
+        yield _UNPARSED, [], segment
+        return
+    if not producer:
+        yield from _resolve(rest, segment, depth, hops + 1)
+        return
+    output = _producer_output(producer)
+    if output.text is not None:
+        yield from _resolve([*output.text.split(), *rest], segment, depth, hops + 1)
+        yield from _nested(output.text, segment, depth)
+        return
+    if output.path is not None:
+        yield _CODE_FILE, [_WORDS_CODE, output.path, *rest], segment
+        yield _CODE_FILE, [_SHELL_CODE, output.path], segment
+        return
+    program = _printed_program(producer)
+    if program is not None:
+        yield from _resolve([program, *rest], segment, depth, hops + 1)
+        return
+    if not _is_environment_setup_producer(producer):
+        yield _OPAQUE, [word, *rest], segment
+
+
+def _reads_a_file(word: str, here: Path | None) -> bool:
+    """Whether a whole-substitution word's producer names a file that exists where it runs.
+
+    Such a producer can print a file's code (``awk 1 f``, ``grep . f``), and
+    what it prints is the command. A word naming no existing file is a
+    program's own output (``$(date +%s)``, ``$(tool generate-docs)``).
+    """
+    inner = _whole_substitution(word)
+    if inner is None or here is None:
+        return False
+    try:
+        words = shlex.split(inner)
+    except ValueError as error:
+        logger.debug("Substitution words unsplittable, read as a file reader (%s)", error)
+        return True
+    # Its operands and what stdin is redirected from are read; where output
+    # is redirected to (`&> /dev/null`) is written, not read.
+    operands: list[str] = []
+    index = 1
+    while index < len(words):
+        word = words[index]
+        following = words[index + 1] if index + 1 < len(words) else ""
+        stdin = _STDIN_REDIRECT.match(word)
+        redirect = stdin or _REDIRECT.match(word)
+        if stdin is not None:
+            operands.append(stdin.group("target") or following)
+        elif redirect is None and not _is_flag(word):
+            operands.append(word)
+        # A bare operator takes the next word as its target.
+        index += 2 if redirect is not None and not redirect.group("target") else 1
+    # A path that cannot be stat'ed may be a file: read as one (fail closed).
+    return any(
+        operand and path_exists(here / operand, unreadable_means=True) for operand in operands
+    )
+
+
+def _printed_program(producer: Sequence[str]) -> str | None:
+    """The program a path-printing producer names (``which X``, ``command -v X``), else None."""
+    argv = _strip_prefixes(list(producer))
+    if not argv or command_word(argv[0]) not in _PATH_PRINTERS:
+        return None
+    needed = _PATH_PRINTERS[command_word(argv[0])]
+    flags = [word for word in argv[1:] if _is_flag(word)]
+    operands = [word for word in argv[1:] if not _is_flag(word)]
+    if len(operands) != 1 or (needed is not None and not needed.intersection(flags)):
+        return None
+    return operands[0]
+
+
+def _word_runs(
+    text: str, rest: Sequence[str], segment: str
+) -> Iterator[tuple[str, list[str], str]]:
+    """What a file's text runs as the command word: its words, never parsed, then ``rest``."""
+    if not _charge(text):
+        yield _OVER_BUDGET, [], segment
+        return
+    words = text.split()
+    if words:
+        yield from _resolve([*words, *rest], segment, 0)
 
 
 def _whole_substitution(word: str) -> str | None:
@@ -3985,7 +4106,7 @@ def _first_full_run(
         elif program in (_CD_POP, _POPD):
             here = directories.pop() if directories else here
         elif program == _CODE_FILE:
-            found = _full_run_in_code_file(arguments, segment, event, here, files_deep)
+            found = _full_run_in_code_file(arguments, segment, event, here, files_deep, source)
         elif program == _UNREAD_CODE:
             found = FullQaMatch(_UNREAD_CODE_ID, segment.strip(), _UNREAD_CODE_REASON)
         elif program == _OVER_BUDGET:
@@ -4029,9 +4150,13 @@ def _full_run_of(
         # a substitution names its program in its own text.
         haystack = _code_text(source, event) if _VARIABLE.fullmatch(word) else word
         shape_only = word == _PYTEST_IN_CODE
-        for pattern in event.patterns:
-            if not _names_program(haystack, pattern.command):
-                continue
+        naming = [p for p in event.patterns if _names_program(haystack, p.command)]
+        if not naming and _reads_a_file(word, here):
+            # A producer not understood that reads a file (`$(awk 1 f)`):
+            # its output IS the command, and it is code that cannot be read
+            # (review 8 m1), as it is when piped into a shell.
+            return FullQaMatch(_UNREAD_CODE_ID, segment.strip(), _UNREAD_CODE_REASON)
+        for pattern in naming:
             opaque_arguments = _with_addopts(pattern, rest, event)
             if _run_verdict(
                 pattern,
@@ -4087,6 +4212,7 @@ def _full_run_in_code_file(
     event: _Event,
     here: Path | None,
     files_deep: int,
+    source: str,
 ) -> FullQaMatch | None:
     """A full run in code read from a file: fed on stdin, or run as a script.
 
@@ -4106,7 +4232,7 @@ def _full_run_in_code_file(
     name = _PROGRAM_ALIASES.get(command_word(path), command_word(path))
     if any(pattern.command == name for pattern in event.patterns):
         return _full_run_of(name, argv, segment, event, here)
-    content = _read_code(path, here, event)
+    content = _read_code(path, here, event, source)
     if content.readable is _Readable.ABSENT:
         return None
     if content.readable is _Readable.UNSEEN:
@@ -4123,7 +4249,8 @@ def _full_run_in_code_file(
     # Code whose judgement never reads its arguments is judged the same
     # whatever it is given, so its argv is no part of its verdict: a script
     # whose usage text names it with other arguments is not parsed again.
-    reads_argv = (
+    # Words take the arguments after them as more words.
+    reads_argv = code_kind == _WORDS_CODE or (
         _python_judged_with_argv(content.text)
         if code_kind == _PYTHON_CODE
         else _SHELL_READS_ARGV.search(content.text) is not None
@@ -4157,7 +4284,11 @@ def _full_run_in_code_file(
         invocations = (
             _invocations(content.text, 0, argv)
             if code_kind == _SHELL_CODE
-            else _python_code_runs(content.text, argv, segment, 0)
+            else (
+                _word_runs(content.text, argv, segment)
+                if code_kind == _WORDS_CODE
+                else _python_code_runs(content.text, argv, segment, 0)
+            )
         )
         found = _first_full_run(invocations, content.text, event, here, files_deep + 1)
     finally:
@@ -4219,20 +4350,71 @@ def _code_kind(text: str) -> str | None:
     return None
 
 
-def _read_code(path: str, here: Path | None, event: _Event) -> _CodeContent:
+#: The variable a path starts with: ``$NAME``, ``${NAME...}``, or a positional.
+_LEADING_VARIABLE: Final[re.Pattern[str]] = re.compile(r"^\$\{?(?P<name>[A-Za-z_]\w*|[0-9@*#])")
+_POSITIONAL_NAMES: Final[str] = "0123456789@*#"
+
+
+def _assigns(source: str, name: str) -> bool:
+    """Whether the code gives ``name`` a value anywhere, in any form bash has.
+
+    ``NAME=`` (``local``/``export``/``declare`` included), ``NAME+=``,
+    ``NAME[i]=``, ``for NAME``, ``read``/``getopts``/``mapfile`` naming it,
+    ``${NAME:=...}``, ``printf -v NAME``; a positional is assigned by
+    ``set --``. Where, and whether it runs, is not asked: the value is the
+    code's own, built at run time, not one it was handed unseen.
+    """
+    if name in _POSITIONAL_NAMES:
+        return re.search(r"\bset\s+--?(?:\s|$)", source) is not None
+    escaped = re.escape(name)
+    return (
+        re.search(
+            rf"(?<![\w$]){escaped}(?:\[[^\]]*\])?\+?="
+            rf"|\bfor\s+{escaped}\b"
+            rf"|\b(?:read|getopts|mapfile|readarray)\b[^;&|\n]*\b{escaped}\b"
+            rf"|\$\{{{escaped}:?="
+            rf"|\bprintf\s+-v\s+{escaped}\b",
+            source,
+        )
+        is not None
+    )
+
+
+def _read_code(path: str, here: Path | None, event: _Event, source: str) -> _CodeContent:
     """A file of code, read at most once per event and within the event's budgets.
 
     ``/dev/null`` is empty. A path this command writes is unseen: what runs
-    is not what is on disk now. A path that cannot be placed (relative, with
-    no known directory, or built at run time) is absent.
+    is not what is on disk now. ``~``, ``$HOME`` and ``$PWD`` are where they
+    point. A path led by a variable ``source`` (the code holding the path)
+    never assigns is unseen (review 8 m1): it names a file this cannot
+    know. One led by a variable the code does assign, or a substitution,
+    is built at run time by the code itself, and a relative path with no
+    known directory cannot be placed: both are absent.
     """
     if path == _EMPTY_DEVICE:
         return _CodeContent(_Readable.TEXT)
     if posixpath.normpath(path) in event.written:
         return _UNSEEN_CODE
-    if path.startswith(_PATH_SEPARATOR):
+    if path.startswith(_HOME_PREFIXES):
+        try:
+            home = Path(_HOME).expanduser()
+        except RuntimeError as error:
+            # No home directory can be found, so where `~` points is unseen.
+            logger.debug("No home directory to place %r in (%s)", path, error)
+            return _UNSEEN_CODE
+        target = posixpath.normpath(posixpath.join(home, path.partition(_PATH_SEPARATOR)[2]))
+    elif path.startswith(_CWD_VARIABLE_PREFIXES) and here is not None:
+        target = posixpath.normpath(posixpath.join(here, path.partition(_PATH_SEPARATOR)[2]))
+    elif path.startswith(_PATH_SEPARATOR):
         target = posixpath.normpath(path)
-    elif here is not None and not path.startswith(_UNSEEN_CD_PREFIXES):
+    elif path.startswith(_UNSEEN_CD_PREFIXES):
+        leading = _LEADING_VARIABLE.match(path)
+        # A path Python computes (`[sys.executable, script]`) names a script
+        # built at run time, as a computed program name does: not seen.
+        if leading is None or path.startswith(_PYTHON_VALUE):
+            return _ABSENT_CODE
+        return _ABSENT_CODE if _assigns(source, leading.group("name")) else _UNSEEN_CODE
+    elif here is not None:
         target = posixpath.normpath(posixpath.join(here, path))
     else:
         return _ABSENT_CODE

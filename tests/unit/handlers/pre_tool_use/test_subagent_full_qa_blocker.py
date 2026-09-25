@@ -1183,12 +1183,20 @@ class TestWhatCannotBeSeenFailsClosed:
         assert find_full_qa_invocation(command, _patterns()) is None
 
     def test_a_program_named_by_a_substitution_says_so(self) -> None:
-        match = find_full_qa_invocation("$(which pytest) tests", _patterns())
+        """A producer this does not understand, naming a program: judged as that program.
+
+        ``which pytest`` is understood (it prints pytest's path), so it is a
+        run SEEN; a producer that is not stays one built at run time.
+        """
+        match = find_full_qa_invocation("$(find-tool pytest) tests", _patterns())
         assert match is not None
         assert "run time" in match.fail_closed
+        seen = find_full_qa_invocation("$(which pytest) tests", _patterns())
+        assert seen is not None
+        assert not seen.fail_closed
 
     def test_the_deny_carries_the_reason(self) -> None:
-        result = _handler().handle(_bash("$(which pytest) tests"))
+        result = _handler().handle(_bash("$(find-tool pytest) tests"))
         assert "run time" in (result.reason or "")
 
     def test_an_unparsed_command_says_it_could_not_be_parsed(self) -> None:
@@ -2078,6 +2086,84 @@ class TestASubstitutionOrAVariableIsReadInEveryPosition:
         command = "bash -s -- tests < arg1.sh"
         assert find_full_qa_invocation(command, _patterns(), cwd=self._scripts(tmp_path))
 
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "$(cat full.sh)",
+            "`cat full.sh`",
+            "$(echo pytest) tests",
+            'bash -c "x=1; $(cat full.sh)"',
+            "$(cat pytest_word.txt) tests",
+            "$(which pytest) tests",
+            "$(command -v pytest) tests",
+        ],
+    )
+    def test_a_substitution_as_the_command_word_runs_its_output(
+        self, tmp_path: Path, command: str
+    ) -> None:
+        """Review 8 m1: bash runs the OUTPUT of `$(cat f)` as the command, word-split."""
+        root = self._scripts(tmp_path)
+        (root / "pytest_word.txt").write_text("pytest\n", encoding="utf-8")
+        assert find_full_qa_invocation(command, _patterns(), cwd=root), command
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "$(cat narrow.txt)",
+            "$(echo ls) -la",
+            "$(which ruff) check .",
+            "$(cat missing.txt)",
+            # A venv's activate script: output redirected to /dev/null is no read.
+            "$(command -v cygpath &> /dev/null)",
+            "`` echo ok",
+        ],
+    )
+    def test_a_substitution_whose_output_runs_nothing_full_is_allowed(
+        self, tmp_path: Path, command: str
+    ) -> None:
+        root = self._scripts(tmp_path)
+        (root / "narrow.txt").write_text("pytest tests/unit/qa\n", encoding="utf-8")
+        assert find_full_qa_invocation(command, _patterns(), cwd=root) is None, command
+
+    @pytest.mark.parametrize(
+        "command", ["$(awk 1 full.sh)", "$(awk 1 < full.sh)", "`grep . full.sh`"]
+    )
+    def test_an_unknown_producer_reading_a_file_is_unseen(
+        self, tmp_path: Path, command: str
+    ) -> None:
+        match = find_full_qa_invocation(command, _patterns(), cwd=self._scripts(tmp_path))
+        assert match is not None, command
+        assert match.fail_closed == _blocker_module._UNREAD_CODE_REASON
+
+    def test_an_unknown_producer_reading_no_file_is_judged_by_what_it_names(
+        self, tmp_path: Path
+    ) -> None:
+        """The reference's rule for a program named at run time: its own text decides."""
+        root = self._scripts(tmp_path)
+        assert find_full_qa_invocation("$(date +%s) x", _patterns(), cwd=root) is None
+        assert find_full_qa_invocation("$(tool generate-docs)", _patterns(), cwd=root) is None
+
+    @pytest.mark.parametrize(
+        "command",
+        ['cat "$SCRIPT" | bash', 'bash "$SCRIPT"', "source $SCRIPT", 'bash "${SCRIPT}/run.sh"'],
+    )
+    def test_a_path_in_a_variable_nothing_sets_is_unseen(
+        self, tmp_path: Path, command: str
+    ) -> None:
+        """Review 8 m1: a path built at run time is unseen, not absent (reference, 'fails closed')."""
+        match = find_full_qa_invocation(command, _patterns(), cwd=self._scripts(tmp_path))
+        assert match is not None, command
+        assert match.fail_closed == _blocker_module._UNREAD_CODE_REASON
+
+    def test_a_path_under_home_is_read_there(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = self._scripts(tmp_path)
+        monkeypatch.setenv("HOME", str(root))
+        for command in ("bash ~/full.sh", 'source "$HOME/full.sh"', "bash ${HOME}/full.sh"):
+            assert find_full_qa_invocation(command, _patterns(), cwd=root), command
+        assert find_full_qa_invocation("bash ~/missing.sh", _patterns(), cwd=root) is None
+
 
 class TestFindExecIsFollowed:
     """Review 7 m4: ``find ... -exec pytest {} +`` was not followed at all.
@@ -2189,6 +2275,7 @@ class _ParseLedger:
         self.charges: list[tuple[int, bool]] = []
         real_shell = _blocker_module._invocations
         real_python = _blocker_module._python_code_runs
+        real_words = _blocker_module._word_runs
         real_charge = _blocker_module._charge
 
         def _shell(
@@ -2203,6 +2290,12 @@ class _ParseLedger:
             self.entries.append(len(code.encode("utf-8")))
             yield from real_python(code, argv, segment, depth)
 
+        def _words(
+            text: str, rest: Sequence[str], segment: str
+        ) -> Iterator[tuple[str, list[str], str]]:
+            self.entries.append(len(text.encode("utf-8")))
+            yield from real_words(text, rest, segment)
+
         def _charge(code: str) -> bool:
             accepted = real_charge(code)
             self.charges.append((len(code.encode("utf-8")), accepted))
@@ -2210,6 +2303,7 @@ class _ParseLedger:
 
         monkeypatch.setattr(_blocker_module, "_invocations", _shell)
         monkeypatch.setattr(_blocker_module, "_python_code_runs", _python)
+        monkeypatch.setattr(_blocker_module, "_word_runs", _words)
         monkeypatch.setattr(_blocker_module, "_charge", _charge)
 
     @property
