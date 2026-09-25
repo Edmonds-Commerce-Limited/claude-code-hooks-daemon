@@ -350,22 +350,26 @@ def test_not_escalated_when_anchor_inactive() -> None:
 # ── Model-aware effort clamp: fable-above-low never survives a misconfig ───
 
 
-def test_coupled_target_for_fable_is_clamped_to_low_even_if_misconfigured() -> None:
-    # An operator env-misconfiguration (CCY_MIN_EFFORT_LEVELS="fable=xhigh")
+def test_coupled_target_for_fable_is_clamped_to_low_even_if_misconfigured(tmp_path: Path) -> None:
+    # An operator settings.json misconfiguration (fable configured at xhigh)
     # must never let the coupled correction carry an Opus-era floor onto
     # Fable -- the anchor ceiling wins unconditionally.
-    policy = _mod.CompactPolicy(
-        min_effort_levels={"fable": "xhigh", "opus": "high", "sonnet": "high", "haiku": "low"}
-    )
+    from tests.unit.supervise.conftest import write_settings_json
+
+    config_dir = tmp_path / "config"
+    write_settings_json(config_dir, model_settings={"claude-fable-5": {"effortLevel": "xhigh"}})
+    policy = _mod.CompactPolicy(settings_path=config_dir / "settings.json")
     machine = _mod.CompactStateMachine(policy)
     machine.arm_coupled_effort(session=_SESSION, family="fable")
     assert machine.coupled_effort_pending == f"{_SESSION}:fable:low"
 
 
-def test_coupled_target_for_fable_still_honours_a_valid_lower_override() -> None:
-    policy = _mod.CompactPolicy(
-        min_effort_levels={"fable": "low", "opus": "high", "sonnet": "high", "haiku": "low"}
-    )
+def test_coupled_target_for_fable_still_honours_a_valid_lower_override(tmp_path: Path) -> None:
+    from tests.unit.supervise.conftest import write_settings_json
+
+    config_dir = tmp_path / "config"
+    write_settings_json(config_dir, model_settings={"claude-fable-5": {"effortLevel": "low"}})
+    policy = _mod.CompactPolicy(settings_path=config_dir / "settings.json")
     machine = _mod.CompactStateMachine(policy)
     machine.arm_coupled_effort(session=_SESSION, family="fable")
     assert machine.coupled_effort_pending == f"{_SESSION}:fable:low"

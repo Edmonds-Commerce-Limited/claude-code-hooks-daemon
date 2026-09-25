@@ -243,12 +243,33 @@ def test_never_lowers_effort_above_floor(tmp_path: Path) -> None:
     assert outcome.payload is None
 
 
-def test_parse_min_effort_levels_overrides_and_ignores_junk() -> None:
-    parsed = _mod._parse_min_effort_levels("opus=xhigh, sonnet = medium, bogus=high, opus=nope")
-    assert parsed["opus"] == "xhigh"
-    assert parsed["sonnet"] == "medium"
-    assert parsed["fable"] == _mod._DEFAULT_MIN_EFFORT_LEVELS["fable"]
-    assert "bogus" not in parsed
+def test_settings_json_configured_floor_overrides_the_default(tmp_path: Path) -> None:
+    # Plan 00466 N47: settings.json's effortLevel is the SSoT for a family's
+    # floor -- opus's built-in default is "high", but the owner's configured
+    # "medium" must be what the floor raises to, not the default.
+    sidecar_dir = tmp_path / "cs"
+    config_dir = tmp_path / "config"
+    from tests.unit.supervise.conftest import write_settings_json
+
+    write_settings_json(config_dir, effort_level="medium")
+    machine = _mod.CompactStateMachine(
+        _mod.CompactPolicy(settings_path=config_dir / "settings.json")
+    )
+    _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="low", ts=_NOW - 1.0)
+    outcome = _decide(sidecar_dir, machine)
+    assert outcome.decision_value == "would-effort"
+    assert outcome.payload == "/effort medium"
+
+
+def test_missing_settings_json_falls_back_to_the_default_table(tmp_path: Path) -> None:
+    sidecar_dir = tmp_path / "cs"
+    machine = _mod.CompactStateMachine(
+        _mod.CompactPolicy(settings_path=tmp_path / "no-such-config" / "settings.json")
+    )
+    _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="low", ts=_NOW - 1.0)
+    outcome = _decide(sidecar_dir, machine)
+    assert outcome.decision_value == "would-effort"
+    assert outcome.payload == "/effort high"
 
 
 def test_reinject_cooldown_suppresses_stale_reading(tmp_path: Path) -> None:
@@ -596,18 +617,43 @@ def test_coupled_target_for_non_top_family_is_downgrade_xhigh() -> None:
     assert machine.coupled_effort_pending == f"{_SESSION}:opus:xhigh"
 
 
-def test_coupled_target_clamps_a_custom_fable_floor_override_above_low() -> None:
+def test_coupled_target_clamps_a_custom_fable_floor_override_above_low(tmp_path: Path) -> None:
     # Plan 00297 (owner ruling, incident 2026-08-31): fable-above-low is
-    # banned UNCONDITIONALLY, not merely by default -- a CCY_MIN_EFFORT_LEVELS
-    # override that configures fable's floor above low is clamped to low
+    # banned UNCONDITIONALLY, not merely by default -- a settings.json
+    # override that configures fable's effort above low is clamped to low
     # rather than honoured, so the coupled correction can never itself hand
     # out a value the DROP ANCHOR invariant would immediately have to undo.
-    policy = _mod.CompactPolicy(
-        min_effort_levels={"fable": "medium", "opus": "high", "sonnet": "high", "haiku": "low"}
-    )
+    from tests.unit.supervise.conftest import write_settings_json
+
+    config_dir = tmp_path / "config"
+    write_settings_json(config_dir, model_settings={"claude-fable-5": {"effortLevel": "medium"}})
+    policy = _mod.CompactPolicy(settings_path=config_dir / "settings.json")
     machine = _mod.CompactStateMachine(policy)
     machine.arm_coupled_effort(session=_SESSION, family="fable")
     assert machine.coupled_effort_pending == f"{_SESSION}:fable:low"
+
+
+def test_coupled_target_for_a_restore_uses_the_configured_effort(tmp_path: Path) -> None:
+    # Plan 00466 N47 THE FIX: a restore back to Opus (not the top family)
+    # must land on Opus's settings.json-configured effort, not xhigh -- the
+    # exact failure the owner reported (medium configured, xhigh injected).
+    from tests.unit.supervise.conftest import write_settings_json
+
+    config_dir = tmp_path / "config"
+    write_settings_json(config_dir, effort_level="medium")
+    policy = _mod.CompactPolicy(settings_path=config_dir / "settings.json")
+    machine = _mod.CompactStateMachine(policy)
+    machine.arm_coupled_effort(session=_SESSION, family="opus", is_restore=True)
+    assert machine.coupled_effort_pending == f"{_SESSION}:opus:medium"
+
+
+def test_coupled_target_for_a_manual_switch_to_non_top_family_stays_xhigh() -> None:
+    # Unchanged: a manual test-trigger switch (never a restore) to a
+    # non-top family still compensates with xhigh -- only `is_restore=True`
+    # (the auto-restore flip-back) targets the configured effort.
+    machine = _machine()
+    machine.arm_coupled_effort(session=_SESSION, family="opus", is_restore=False)
+    assert machine.coupled_effort_pending == f"{_SESSION}:opus:xhigh"
 
 
 def test_coupled_effort_fires_on_the_tick_after_arming(tmp_path: Path) -> None:

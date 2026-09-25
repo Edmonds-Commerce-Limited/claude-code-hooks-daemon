@@ -111,6 +111,18 @@ Then re-run the `ps` check and confirm the pid changed. **Never restart the
 whole ccy session** — which would drop the live `claude` process — merely to
 reload the worker. That is exactly what the two-tier split exists to avoid.
 
+## One exception: settings.json needs no reload at all
+
+Per-model effort (Plan 00466 N47) is the one supervisor behaviour that is
+**not** gated by the hot-reload contract above. The supervisor resolves
+effort from Claude Code's own main `settings.json` (`$CLAUDE_CONFIG_DIR` or
+`~/.claude`), cached and re-read by **mtime**, independent of the
+content-hash code reload `reload_if_stale` performs. Editing `settings.json`
+takes effect on the next tick that resolves effort — no worker reload, no
+`kill <worker-pid>`, nothing to verify via the `ps` check above. Only an
+actual edit to `claude-supervise.py` itself needs the procedure in this
+document.
+
 ## Client installs: edit source, then redeploy
 
 In a client project the supervisor is a **deployed artefact**; editing your

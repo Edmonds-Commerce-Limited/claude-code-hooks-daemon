@@ -31,4 +31,7 @@ Re-render the index: `bin/hooks-daemon remote-docs index`
 | `defence-before-fix.github.io/index.md` | https://defence-before-fix.github.io/ | 2026-09-15 | 2026-12-14 |
 | `defence-before-fix.github.io/raw/TOOLING-SPEC.md` | https://defence-before-fix.github.io/raw/TOOLING-SPEC.md | 2026-09-15 | 2026-12-14 |
 | `docs.ansible.com/projects/ansible/latest/vault_guide/vault_using_encrypted_content.md` | https://docs.ansible.com/projects/ansible/latest/vault_guide/vault_using_encrypted_content.html | 2026-09-24 | 2026-12-23 |
+| `docs.claude.com/en/docs/claude-code/model-config.md` | https://docs.claude.com/en/docs/claude-code/model-config | 2026-09-25 | 2026-12-24 |
+| `docs.claude.com/en/docs/claude-code/settings-reference.md` | https://docs.claude.com/en/docs/claude-code/settings-reference | 2026-09-25 | 2026-12-24 |
+| `docs.claude.com/en/docs/claude-code/settings.md` | https://docs.claude.com/en/docs/claude-code/settings | 2026-09-25 | 2026-12-24 |
 | `raw.githubusercontent.com/ansible/ansible/devel/lib/ansible/parsing/vault/__init__.py.md` | https://raw.githubusercontent.com/ansible/ansible/devel/lib/ansible/parsing/vault/__init__.py | 2026-09-24 | 2026-12-23 |

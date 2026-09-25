@@ -91,3 +91,49 @@ def _isolate_worker_error_log(
     """
     sink = tmp_path_factory.mktemp("worker-error-log") / "worker.err.log"
     monkeypatch.setattr(_mod, "worker_error_log_path", lambda: sink)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_settings_effort(
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    """Point ``CompactPolicy``'s default settings.json at an empty temp dir.
+
+    Plan 00466 N47: ``CompactPolicy.settings_path`` defaults to Claude Code's
+    REAL main settings.json (``$CLAUDE_CONFIG_DIR`` or ``~/.claude``) via
+    ``_main_settings_path()``, resolved fresh at every ``CompactPolicy()``
+    construction. Left ambient, a dogfooding session's own
+    ``~/.claude/settings.json`` (this repo's own container has one) leaks its
+    real ``effortLevel`` into any test that builds a default policy, exactly
+    the ambient-environment hermeticity bug the flag-compact fixture above
+    already exists to prevent for ``CCY_FLAG_COMPACT``. Pointing
+    ``CLAUDE_CONFIG_DIR`` at a fresh, empty per-test directory makes
+    ``_main_settings_path()`` resolve to a file that never exists, so every
+    test gets the built-in default effort table unless it explicitly writes
+    its own settings.json (see ``write_settings_json`` below).
+    """
+    empty_dir = tmp_path_factory.mktemp("claude-config-dir")
+    monkeypatch.setenv(_mod._CLAUDE_CONFIG_DIR_ENV_VAR, str(empty_dir))
+
+
+def write_settings_json(
+    config_dir: Path,
+    *,
+    effort_level: str | None = None,
+    model_settings: dict[str, object] | None = None,
+) -> Path:
+    """Write a ``settings.json`` fixture under ``config_dir`` and return its path.
+
+    ``config_dir`` should be the directory a test pointed ``CLAUDE_CONFIG_DIR``
+    at (or the value returned by ``_isolate_settings_effort``'s monkeypatch),
+    so ``CompactPolicy()``'s default ``settings_path`` resolves to this file.
+    """
+    config_dir.mkdir(parents=True, exist_ok=True)
+    payload: dict[str, object] = {}
+    if effort_level is not None:
+        payload["effortLevel"] = effort_level
+    if model_settings is not None:
+        payload["modelSettings"] = model_settings
+    path = config_dir / _mod._SETTINGS_FILENAME
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path

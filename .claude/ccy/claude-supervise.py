@@ -23,19 +23,23 @@ injects the real ``/compact`` (and ``continue``).
 Two further injection families share the same choke point (idle + empty input
 box, subordinate to compact/continue): a ``/goal`` typed from a daemon-written
 goal-intent signal (Plan 00269), and an ``/effort`` raise (Plan 00278) when
-the sidecar's live effort sits BELOW its model family's configured floor
-(defaults fable=low, opus=high, sonnet=high; override via
-``CCY_MIN_EFFORT_LEVELS``) — with the floor raised to xhigh for a ranked
-model-family DOWNGRADE episode, e.g. a security-triggered fable → opus
-switch falls through to opus at xhigh, not opus at fable's low. This family
-only ever RAISES effort — with one sanctioned exception: the supervisor also
-types ``/model <original family>`` to flip a session-sticky downgrade back
-(capped, flip-flop backoff). The restore is TURN-GATED, not time-gated: the
-classifier flags turns, so recovery is safe the moment the flagged turn ends,
-and the injection choke point (idle + empty input box) is exactly that
-boundary — the restore fires on the first injectable tick after the
-downgrade. ``CCY_MODEL_RESTORE_SECONDS`` adds an optional EXTRA quiet delay
-(default 0; "off" or negative disables auto-restore).
+the sidecar's live effort sits BELOW its model family's configured floor.
+Claude Code's own ``settings.json`` is the single source of truth for that
+floor (Plan 00466 N47): per-model ``modelSettings.<model-id>.effortLevel``
+wins over the top-level ``effortLevel``, resolved for whichever family a
+reading's ``model_id`` belongs to. A family ``settings.json`` leaves
+unconfigured falls back to a small built-in default table (fable=low,
+opus=high, sonnet=high, haiku=low) — with the floor raised to xhigh for a
+ranked model-family DOWNGRADE episode, e.g. a security-triggered fable →
+opus switch falls through to opus at xhigh, not opus at fable's low. This
+family only ever RAISES effort — with one sanctioned exception: the
+supervisor also types ``/model <original family>`` to flip a session-sticky
+downgrade back (capped, flip-flop backoff). The restore is TURN-GATED, not
+time-gated: the classifier flags turns, so recovery is safe the moment the
+flagged turn ends, and the injection choke point (idle + empty input box) is
+exactly that boundary — the restore fires on the first injectable tick after
+the downgrade. ``CCY_MODEL_RESTORE_SECONDS`` adds an optional EXTRA quiet
+delay (default 0; "off" or negative disables auto-restore).
 
 The floor stands down for the rest of a model spell once the human lowers
 effort: a typed ``/effort <level>`` latches it, and so does any OBSERVED drop
@@ -58,15 +62,19 @@ on a qualifying flip-flop the compact fires instead of a re-restore.
 
 Every ``/model <family>`` injection -- this auto-restore AND the manual
 override below alike -- GUARANTEES a coupled ``/effort`` correction on the
-very next injectable tick, unconditionally: switching TO the TOP-ranked
-family (fable) drives effort DOWN to its configured floor (the one
-sanctioned lowering, so fable never idles at xhigh burning account
-allowance); switching to anything else drives effort UP to
-``_DOWNGRADE_TARGET_EFFORT`` (xhigh), so a still-degraded fallback model
-gets maximum compensating effort. This is unconditional — it never waits
-for a downgrade episode to be open, nor for a later sidecar reading to
-confirm the switch landed, which is exactly what a purely reading-driven
-reset previously missed for a manual override.
+very next injectable tick, unconditionally. Switching TO the TOP-ranked
+family (fable), or a successful RESTORE back to the session's own
+pre-downgrade family, drives effort to that family's ``settings.json``-
+configured floor (the sanctioned lowering, so a restored session never idles
+at xhigh burning account allowance) -- Plan 00466 N47 widened this from
+fable-only to every restore, closing the defect where a restore to Opus kept
+landing on xhigh instead of the owner's configured level. Any OTHER
+destination -- a manual switch to a family that is not closing a downgrade
+episode -- still drives effort UP to ``_DOWNGRADE_TARGET_EFFORT`` (xhigh),
+so a still-degraded fallback model gets maximum compensating effort. This is
+unconditional — it never waits for a downgrade episode to be open, nor for a
+later sidecar reading to confirm the switch landed, which is exactly what a
+purely reading-driven reset previously missed for a manual override.
 
 Every ``/model <family>`` injection (the auto-restore above, and the manual
 override below) sends a SECOND, confirming Enter after the normal submit:
@@ -1399,18 +1407,20 @@ _EFFORT_RANKS: dict[str, int] = {"low": 0, "medium": 1, "high": 2, "xhigh": 3, "
 # family: "fable low" falls through to the fallback model at XHIGH, so the
 # downgrade target outranks any configured per-model minimum.
 _DOWNGRADE_TARGET_EFFORT = "xhigh"
-# Per-model minimum effort levels (Plan 00278 Task 2b.2). No official
-# per-model effort mechanism exists in Claude Code (effort is one global
-# setting that survives a safety fallback unchanged), so the supervisor
-# enforces these floors. Override via the env var below, e.g.
-# CCY_MIN_EFFORT_LEVELS="fable=low,opus=xhigh".
+# Per-model minimum effort levels (Plan 00278 Task 2b.2; SSoT moved to
+# Claude Code's own settings.json by Plan 00466 N47 -- see
+# `_resolve_family_effort` and `SettingsEffortCache` below). These are only
+# the FALLBACK a family gets when settings.json configures nothing for it
+# at all -- never a second override channel: the retired
+# ``CCY_MIN_EFFORT_LEVELS`` env var used to let an operator fight
+# settings.json from a second place, which is exactly the class of bug N47
+# closes.
 _DEFAULT_MIN_EFFORT_LEVELS: dict[str, str] = {
     "fable": "low",
     "opus": "high",
     "sonnet": "high",
     "haiku": "low",
 }
-_MIN_EFFORT_ENV_VAR = "CCY_MIN_EFFORT_LEVELS"
 # After a successful /effort injection the sidecar keeps reporting the OLD
 # effort until the next status render; without a cooldown the stale reading
 # would re-open the episode and burn the cap on duplicates.
@@ -1595,31 +1605,6 @@ def _flag_compact_enabled_from_env() -> bool:
     return _parse_flag_compact_enabled(raw)
 
 
-def _parse_min_effort_levels(raw: str) -> dict[str, str]:
-    """Parse ``family=level,...`` overrides onto the default minimum map.
-
-    Unknown families and unknown levels are ignored (the defaults stand) —
-    a typo in the env var must degrade to defaults, never crash the launch.
-    """
-    result = dict(_DEFAULT_MIN_EFFORT_LEVELS)
-    for part in raw.split(","):
-        family, sep, level = part.partition("=")
-        family = family.strip().lower()
-        level = level.strip().lower()
-        if sep and family in _MODEL_FAMILY_RANKS and level in _EFFORT_RANKS:
-            result[_MODEL_FAMILY_CANONICAL.get(family, family)] = level
-    return result
-
-
-def _min_effort_levels_from_env() -> dict[str, str]:
-    """Resolve the effective per-model minimum map (defaults + env overrides).
-
-    Read via the environment so the HOST and the policy WORKER subprocess
-    (which reconstructs its own CompactPolicy) resolve identical maps.
-    """
-    return _parse_min_effort_levels(os.environ.get(_MIN_EFFORT_ENV_VAR, ""))
-
-
 def _model_family(model_id: str) -> str | None:
     """Return the canonical model family for ``model_id``, or None if unknown."""
     lowered = model_id.lower()
@@ -1632,6 +1617,139 @@ def _model_family(model_id: str) -> str | None:
 def _family_rank(family: str) -> int:
     """Return the capability rank of a known family (KeyError on unknown)."""
     return _MODEL_FAMILY_RANKS[family]
+
+
+# ── settings.json effort SSoT (Plan 00466 N47) ──────────────────────────────
+# Claude Code itself reads effort from its own main settings.json:
+# per-model ``modelSettings.<model-id>.effortLevel`` wins over the top-level
+# ``effortLevel`` in the SAME settings file (vendored:
+# remote-docs/docs.claude.com/en/docs/claude-code/settings-reference.md,
+# "modelSettings" -- "A model's effortLevel here takes precedence over the
+# top-level effortLevel in the same settings file"). ``$CLAUDE_CONFIG_DIR``
+# relocates the whole config directory, including settings.json (vendored:
+# remote-docs/docs.claude.com/en/docs/claude-code/settings.md, the
+# "CLAUDE_CONFIG_DIR" note under home-directory files). The supervisor used
+# to keep a SECOND opinion (the retired per-family floor map +
+# ``CCY_MIN_EFFORT_LEVELS``) that fought the owner's own setting -- this
+# resolves the SAME file Claude Code reads, the same way Claude Code
+# resolves it, so there is exactly one place effort is configured.
+_CLAUDE_CONFIG_DIR_ENV_VAR = "CLAUDE_CONFIG_DIR"
+_SETTINGS_FILENAME = "settings.json"
+# How often a fresh mtime is worth checking against disk -- cheap (one
+# stat()) so this stays small; the point is to avoid a stat() on every single
+# resolution call within the same tick's burst of lookups.
+_SETTINGS_RELOAD_CHECK_SECONDS = 2.0
+
+
+def _claude_config_dir() -> Path:
+    """Resolve Claude Code's own config directory, the way Claude Code does.
+
+    ``$CLAUDE_CONFIG_DIR`` wins when set and non-blank; otherwise ``~/.claude``
+    -- the same precedence Claude Code itself uses to find its main
+    ``settings.json``.
+    """
+    raw = os.environ.get(_CLAUDE_CONFIG_DIR_ENV_VAR, "").strip()
+    if raw:
+        return Path(raw).expanduser()
+    return Path.home() / ".claude"
+
+
+def _main_settings_path() -> Path:
+    """Resolve the path to Claude Code's main ``settings.json`` (Plan 00466 N47)."""
+    return _claude_config_dir() / _SETTINGS_FILENAME
+
+
+def _resolve_family_effort(settings: Mapping[str, object] | None, family: str) -> str | None:
+    """Resolve ``family``'s configured effort from a parsed settings.json.
+
+    Precedence matches Claude Code's own: a ``modelSettings`` entry for a
+    model id that belongs to ``family`` wins over the top-level
+    ``effortLevel``. Iterated in sorted key order for a deterministic result
+    when more than one configured model id shares a family. Returns ``None``
+    (never raises) when settings is absent, malformed, or configures nothing
+    usable for this family -- the caller falls back to the built-in default
+    table in that case.
+    """
+    if not settings:
+        return None
+    model_settings = settings.get("modelSettings")
+    if isinstance(model_settings, dict):
+        for model_id in sorted(model_settings, key=str):
+            entry = model_settings.get(model_id)
+            if not isinstance(entry, dict) or _model_family(str(model_id)) != family:
+                continue
+            level = entry.get("effortLevel")
+            if isinstance(level, str) and level.strip().lower() in _EFFORT_RANKS:
+                return level.strip().lower()
+    top_level = settings.get("effortLevel")
+    if isinstance(top_level, str) and top_level.strip().lower() in _EFFORT_RANKS:
+        return top_level.strip().lower()
+    return None
+
+
+class SettingsEffortCache:
+    """Caches Claude Code's main settings.json, re-read whenever it changes.
+
+    Content is re-read by mtime (Plan 00466 N47 Task 5: an edit takes effect
+    with no supervisor relaunch), throttled to at most once per
+    ``_SETTINGS_RELOAD_CHECK_SECONDS`` of wall-clock so a burst of lookups in
+    one tick costs one ``stat()``, not several. Never raises: a missing,
+    unreadable or malformed file degrades to "configures nothing" (callers
+    fall back to the built-in default table), with the reason available via
+    ``last_error`` for a one-time decision-log note.
+    """
+
+    def __init__(self, path: Path | None = None) -> None:
+        self._path = path if path is not None else _main_settings_path()
+        self._mtime: float | None = None
+        self._settings: dict[str, object] | None = None
+        self._last_error: str | None = None
+        self._last_checked_wall: float | None = None
+
+    def _reload_if_stale(self, now_wall: float | None) -> None:
+        if (
+            now_wall is not None
+            and self._last_checked_wall is not None
+            and now_wall - self._last_checked_wall < _SETTINGS_RELOAD_CHECK_SECONDS
+        ):
+            return
+        self._last_checked_wall = now_wall
+        try:
+            mtime = self._path.stat().st_mtime
+        except OSError as exc:
+            if self._mtime is not None:
+                self._mtime = None
+                self._settings = None
+                self._last_error = f"cannot stat {self._path}: {exc}"
+            return
+        if mtime == self._mtime:
+            return
+        try:
+            raw = self._path.read_text(encoding="utf-8")
+            parsed = json.loads(raw)
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            self._mtime = mtime
+            self._settings = None
+            self._last_error = f"cannot parse {self._path}: {exc}"
+            return
+        if not isinstance(parsed, dict):
+            self._mtime = mtime
+            self._settings = None
+            self._last_error = f"{self._path} does not contain a JSON object"
+            return
+        self._mtime = mtime
+        self._settings = parsed
+        self._last_error = None
+
+    def effort_for_family(self, family: str, *, now_wall: float | None = None) -> str | None:
+        """Return ``family``'s settings.json-configured effort, or None."""
+        self._reload_if_stale(now_wall)
+        return _resolve_family_effort(self._settings, family)
+
+    @property
+    def last_error(self) -> str | None:
+        """The most recent load failure reason, or None while the file is fine."""
+        return self._last_error
 
 
 class Decision(enum.Enum):
@@ -1704,9 +1822,12 @@ class CompactPolicy:
     reap_ttl_seconds: float = _DEFAULT_REAP_TTL_SECONDS
     foreground_margin_seconds: float = _DEFAULT_FOREGROUND_MARGIN_SECONDS
     goal_signal_ttl_seconds: float = _DEFAULT_GOAL_SIGNAL_TTL_SECONDS
-    # Plan 00278: per-model effort floors, resolved from the environment so
-    # the host and the policy worker (which rebuilds its own policy) agree.
-    min_effort_levels: dict[str, str] = field(default_factory=_min_effort_levels_from_env)
+    # Plan 00466 N47: the path to Claude Code's own main settings.json, the
+    # single source of truth for per-model effort (retired the separate
+    # per-family floor map + its env-var override channel). Env-resolved via
+    # `_main_settings_path()` so the host and the policy worker (which
+    # rebuilds its own policy) agree, and overridable directly for tests.
+    settings_path: Path = field(default_factory=_main_settings_path)
     # Plan 00278 Task 2b.3: EXTRA quiet delay before the /model flip-back on
     # top of the turn gate (default 0 — the idle/empty-input injection gate
     # already means the flagged turn is over); negative ("off") disables
@@ -3369,6 +3490,10 @@ class CompactStateMachine:
 
     def __init__(self, policy: CompactPolicy) -> None:
         self._policy = policy
+        # Plan 00466 N47: settings.json is re-read by mtime, so an edit takes
+        # effect without a worker restart -- see `SettingsEffortCache`.
+        self._settings_effort = SettingsEffortCache(policy.settings_path)
+        self._last_reported_settings_error: str | None = None
         self.state = SupervisorState.MONITOR
         self._injections = 0
         self._last_action_ts: float | None = None
@@ -3627,41 +3752,77 @@ class CompactStateMachine:
             return False
         return True
 
-    def _coupled_effort_target(self, family: str) -> str:
+    def _resolve_effort_for_family(self, family: str, *, now_wall: float | None = None) -> str:
+        """Resolve ``family``'s configured effort: settings.json, then defaults.
+
+        Claude Code's own main ``settings.json`` is the single source of
+        truth (Plan 00466 N47); the built-in default table is used only for
+        a family settings.json leaves unconfigured. Never raises: a missing
+        or malformed settings.json is handled entirely inside
+        ``SettingsEffortCache`` and simply resolves to the default here.
+        """
+        configured = self._settings_effort.effort_for_family(family, now_wall=now_wall)
+        if configured is not None:
+            return configured
+        return _DEFAULT_MIN_EFFORT_LEVELS.get(family, _DOWNGRADE_TARGET_EFFORT)
+
+    def take_settings_error_note(self) -> str | None:
+        """Return, once, a note about a NEW settings.json load failure.
+
+        Edge-triggered like the other consume-once notes: a missing or
+        malformed main settings.json degrades every effort resolution to the
+        built-in defaults (Plan 00466 N47), and without this a silently
+        degraded read looks identical to a session with nothing configured.
+        Returns None once the same error has already been reported, or once
+        the file is readable again.
+        """
+        current = self._settings_effort.last_error
+        if current == self._last_reported_settings_error:
+            return None
+        self._last_reported_settings_error = current
+        if current is None:
+            return None
+        return f"settings.json effort lookup degraded to defaults: {current}"
+
+    def _coupled_effort_target(self, family: str, *, is_restore: bool = False) -> str:
         """Return the mandatory post-/model-switch effort target for ``family``.
 
         Every ``/model <family>`` injection is followed, unconditionally, by
         an ``/effort`` injection to this target on the next injectable tick
         (the "effort switch MUST follow model switch" invariant) -- entirely
         independent of whether a downgrade episode happens to be open or a
-        later sidecar reading ever confirms the switch landed. The
-        TOP-ranked family (fable) is a SANCTIONED LOWERING to its configured
-        floor -- the fix for the live defect where an opus->fable switch
-        left effort at xhigh and burned account allowance. Any other
-        destination -- a downgrade, or a partial restore that has not yet
-        reached the top family -- targets ``_DOWNGRADE_TARGET_EFFORT``
-        (xhigh) so a still-degraded model gets maximum compensating effort.
-        This BYPASSES the raise-only invariant that governs the floor-based
-        ``_effort_pending`` family: lowering fable to its floor is the
-        entire point.
+        later sidecar reading ever confirms the switch landed.
+
+        Switching TO the TOP-ranked family (fable), or a successful RESTORE
+        back to the session's own pre-downgrade family (``is_restore``), is a
+        SANCTIONED LOWERING to that family's settings.json-configured effort
+        (Plan 00466 N47 widened this from fable-only to every restore -- the
+        fix for the live defect where a restore to Opus kept landing on
+        xhigh instead of the owner's configured medium). Any other
+        destination -- a manual switch to a family that is not closing a
+        downgrade episode -- targets ``_DOWNGRADE_TARGET_EFFORT`` (xhigh) so
+        a still-degraded model gets maximum compensating effort. This
+        BYPASSES the raise-only invariant that governs the floor-based
+        ``_effort_pending`` family: a sanctioned lowering is the entire
+        point.
 
         DROP ANCHOR clamp (Plan 00297): the top-ranked family's configured
         floor is clamped to ``_ANCHOR_TARGET_EFFORT`` when it would resolve
-        ABOVE that ceiling -- e.g. a ``CCY_MIN_EFFORT_LEVELS`` misconfigured
-        with an Opus-era ``fable=xhigh`` override. Fable-above-low is banned
-        unconditionally by the anchor invariant, not merely by the default
-        floor value, so this path must never hand out anything higher.
+        ABOVE that ceiling -- e.g. a settings.json misconfigured with an
+        Opus-era ``fable`` effort. Fable-above-low is banned unconditionally
+        by the anchor invariant, not merely by the default floor value, so
+        this path must never hand out anything higher.
         """
         if _family_rank(family) == _TOP_FAMILY_RANK:
-            configured = self._policy.min_effort_levels.get(
-                family, _DEFAULT_MIN_EFFORT_LEVELS.get(family, _DOWNGRADE_TARGET_EFFORT)
-            )
+            configured = self._resolve_effort_for_family(family)
             if (
                 configured not in _EFFORT_RANKS
                 or _EFFORT_RANKS[configured] > _EFFORT_RANKS[_ANCHOR_TARGET_EFFORT]
             ):
                 return _ANCHOR_TARGET_EFFORT
             return configured
+        if is_restore:
+            return self._resolve_effort_for_family(family)
         return _DOWNGRADE_TARGET_EFFORT
 
     @property
@@ -3669,7 +3830,7 @@ class CompactStateMachine:
         """Pending coupled effort-injection key, or None (Plan 00278 cont.)."""
         return self._coupled_effort_pending
 
-    def arm_coupled_effort(self, *, session: str, family: str) -> None:
+    def arm_coupled_effort(self, *, session: str, family: str, is_restore: bool = False) -> None:
         """Arm the mandatory post-/model-switch effort correction.
 
         Called by the HOST after ANY successful ``/model <family>``
@@ -3679,6 +3840,9 @@ class CompactStateMachine:
         regardless of downgrade-episode state or sidecar timing. A blank
         ``session`` or ``family`` is a no-op (defensive: decide_once only
         ever calls this with values it has just resolved for a real switch).
+        ``is_restore`` is True only for the auto-restore flip-back (Plan
+        00466 N47) -- the manual test-trigger switch always passes the
+        default False, so its non-top-family behaviour (xhigh) is unchanged.
 
         Plan 00316 Task 2.1 (owner clarification): precedence is
         TIME-ORDERED, not absolute -- EVERY model change (manual or
@@ -3693,7 +3857,7 @@ class CompactStateMachine:
         if not session or not family:
             return
         self._manual_effort_active = None
-        target = self._coupled_effort_target(family)
+        target = self._coupled_effort_target(family, is_restore=is_restore)
         self._coupled_effort_pending = f"{session}:{family}:{target}"
 
     def mark_coupled_effort_injection(self) -> None:
@@ -4122,7 +4286,7 @@ class CompactStateMachine:
         elif self._downgrade_episode is not None:
             target = _DOWNGRADE_TARGET_EFFORT
         else:
-            target = self._policy.min_effort_levels.get(family)
+            target = self._resolve_effort_for_family(family, now_wall=now_wall)
         current = reading.effort
         below = target is not None and (
             # An unknown effort is assumed low ONLY inside a downgrade
@@ -6318,10 +6482,14 @@ def _apply_post_injection_bookkeeping(
                 session=outcome.model_switch_session,
             )
         # BOTH paths owe the coupled effort correction, unconditionally.
+        # Plan 00466 N47: only the auto-restore closes a downgrade episode --
+        # `is_restore` tells `arm_coupled_effort` to target the family's
+        # settings.json-configured effort instead of the xhigh compensation.
         if outcome.model_switch_family is not None:
             machine.arm_coupled_effort(
                 session=outcome.model_switch_session or "",
                 family=outcome.model_switch_family,
+                is_restore=outcome.model_switch_is_auto_restore,
             )
     elif outcome.decision_value == Decision.WOULD_COMPACT.value and outcome.is_flag_compact:
         # Plan 00281: only the flip-flop flag-compact counts against the
