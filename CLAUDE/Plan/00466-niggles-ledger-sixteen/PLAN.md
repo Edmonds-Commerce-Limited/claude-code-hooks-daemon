@@ -81,6 +81,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N50 | A handler option named like a method overwrites it, and the handler crashes open                          | N23 review 2       | 🔄 In progress        |
 | N51 | `pipe_blocker` reads an escaped alternation in a quoted grep pattern as a pipe into `head`                | 00421 review 2     | ⬜ Open               |
 | N52 | The sensitive_content commit gate let a matching session UUID into a commit                               | N46 review 2       | 🔄 In progress        |
+| N53 | WorktreeCreate fails with exit 127 when the daemon runs a `git worktree add` that succeeds from a shell   | Coordinator        | 🔄 In progress        |
 
 ## Tasks
 

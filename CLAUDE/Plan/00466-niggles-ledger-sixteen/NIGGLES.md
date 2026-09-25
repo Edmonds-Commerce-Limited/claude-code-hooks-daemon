@@ -9,6 +9,26 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N53 — WorktreeCreate fails with exit 127 when the daemon runs `git worktree add` that succeeds from a shell
+
+**Found by the coordinator.** An Agent dispatch with `isolation: worktree`
+failed. The WorktreeCreate hook reported "Handler exception:
+CalledProcessError: Command \['git', '-C', '/workspace', 'worktree', 'add',
+'-b', '<branch>', '<path>'\] returned non-zero exit status 127". The same
+command, run from the coordinator's shell, exits 0. It takes over 2 minutes
+on this host, with 4,076 files. The main daemon's own PATH includes
+`/usr/bin`, and the repo has no post-checkout hook. So the daemon runs git
+in an environment where something git executes cannot be found. An agent
+dispatch then fails outright, with no fallback.
+
+**Candidate remedy:** reproduce through the handler with the daemon's real
+environment. Suspects: an env the handler builds for the subprocess (PATH
+or HOME stripped, or GIT_EXEC_PATH), or a timeout wrapper. Fix the root
+cause. Make the handler report the command's stderr in the failure, so the
+next such failure names what was not found. Check whether a slow checkout
+on a loaded host needs a longer timeout. RED test: the handler, given the
+daemon's environment, creates a worktree.
+
 ### N52 — The sensitive_content commit gate let a matching session UUID into a commit
 
 **Found by N46 review 2.** Commit `3da8c1ed` on the N46 branch added a review
