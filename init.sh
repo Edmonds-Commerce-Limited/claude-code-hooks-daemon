@@ -1564,6 +1564,25 @@ def _resolve_socket_timeout():
 
 SOCKET_TIMEOUT_SECONDS = _resolve_socket_timeout()
 
+# Timeout.CHAIN_DEADLINE_DEFAULT, which this stdlib-only client cannot import;
+# test_init_sh_pretooluse_fail_closed.py pins the two equal.
+_CHAIN_DEADLINE_DEFAULT_SECONDS = 20
+
+def _socket_timeout_note():
+    '''Name CLAUDE_HOOKS_SOCKET_TIMEOUT when it caused a timeout (Plan 00466 N24).
+
+    Set below the daemon's chain deadline, it makes this client give up
+    before the daemon can answer, so every slow chain is denied. The deny is
+    right; an unexplained one is not.'''
+    raw = os.environ.get('CLAUDE_HOOKS_SOCKET_TIMEOUT', '').strip()
+    if not raw or SOCKET_TIMEOUT_SECONDS > _CHAIN_DEADLINE_DEFAULT_SECONDS:
+        return ''
+    return (f'CLAUDE_HOOKS_SOCKET_TIMEOUT={raw} makes this client wait only '
+            f'{SOCKET_TIMEOUT_SECONDS:g}s, shorter than the daemon\'s chain deadline '
+            f'(daemon.chain.deadline_seconds, {_CHAIN_DEADLINE_DEFAULT_SECONDS}s by '
+            'default): the client gives up before the daemon can answer. '
+            'Unset it, or raise it above the deadline.')
+
 # Plan 00466 n24 security review: filled in once the raw hook_input is
 # parsed, below. Stays None for a failure that fires before parsing (e.g.
 # invalid_hook_input) -- every reader of this name tolerates that.
@@ -1626,6 +1645,9 @@ def emit_error_json(event_name, error_type, error_details):
     Handles event-specific formatting: Stop/SubagentStop vs other events.
     '''
     print(f'HOOKS DAEMON ERROR [{error_type}]: {error_details}', file=sys.stderr)
+    timeout_note = _socket_timeout_note() if error_type == 'socket_timeout' else ''
+    if timeout_note:
+        print(f'HOOKS DAEMON: {timeout_note}', file=sys.stderr)
 
     if error_type == 'invalid_hook_input':
         # A malformed payload never reached the socket, so the daemon state is
@@ -1665,6 +1687,8 @@ def emit_error_json(event_name, error_type, error_details):
             '(or .claude/hooks-daemon/bin/hooks-daemon restart), which stays',
             'allowed even while other calls are denied this way.',
         ]
+        if timeout_note:
+            context_lines[1:1] = ['', timeout_note]
     elif error_type == 'connection_lost':
         # connect() SUCCEEDED (a ConnectionRefusedError, the genuine
         # daemon-down shape, is caught separately and never reaches here) --
@@ -1776,6 +1800,8 @@ def emit_error_json(event_name, error_type, error_details):
         # block the exact commands that would fix it.
         verb = 'responded' if error_type == 'malformed_response' else 'reached'
         reason = f'Hooks daemon {verb} but produced no verdict ({error_type}) - denied for safety'
+        if timeout_note:
+            reason = f'{reason}. {timeout_note}'
         response = {
             'hookSpecificOutput': {
                 'hookEventName': event_name,

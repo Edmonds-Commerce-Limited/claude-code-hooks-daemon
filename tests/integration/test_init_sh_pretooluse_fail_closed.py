@@ -260,6 +260,27 @@ class TestSocketTimeoutFailsClosedForPreToolUse:
         response = _send(project, hanging_socket, "Stop", {})
         assert response == {}
 
+    def test_a_socket_timeout_below_the_chain_deadline_is_named(
+        self, project: Path, hanging_socket: Path
+    ) -> None:
+        """Plan 00466 N24 review 2: the deny stays, and says what caused it.
+
+        An operator's ``CLAUDE_HOOKS_SOCKET_TIMEOUT`` below the daemon's chain
+        deadline makes the client give up before the daemon can answer, so
+        every slow chain is denied. The reason must name the variable.
+        """
+        response = _send(project, hanging_socket, "PreToolUse", _BASH_TOOL_INPUT)
+        reason = response["hookSpecificOutput"]["permissionDecisionReason"]
+        assert f"CLAUDE_HOOKS_SOCKET_TIMEOUT={_FAST_TIMEOUT}" in reason
+        assert "shorter than the daemon's chain deadline" in reason
+
+    def test_the_client_copy_of_the_chain_deadline_matches_the_daemon(self) -> None:
+        """init.sh cannot import the constant, so it carries a pinned copy."""
+        assert (
+            f"_CHAIN_DEADLINE_DEFAULT_SECONDS = {Timeout.CHAIN_DEADLINE_DEFAULT}\n"
+            in INIT_SH.read_text()
+        )
+
 
 class TestMalformedResponseFailsClosedForPreToolUse:
     """The socket round-trip succeeded, but what came back is not a verdict."""
