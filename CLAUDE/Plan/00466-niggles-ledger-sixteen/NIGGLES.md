@@ -9,6 +9,25 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N60 — `curl_pipe_shell` denies a double-quoted `echo` argument that only mentions the pattern
+
+**Found by the coordinator.** It appended a queue note with
+`echo "... <download tool> ... | sh ..." >> file`. The text inside the double
+quotes is data for `echo`: the shell runs no pipe there, and there is no
+substitution in it. R-CURL-PIPE-SHELL denied it anyway. So the handler matches
+the raw command text, not the pipeline structure.
+
+**Candidate remedy:** judge only real pipeline stages. The producer stage must
+be a download command, the consumer stage must be a shell, and both must be
+outside quotes and outside a heredoc body that nothing executes. This belongs
+with the shell-parser consolidation (N22, N32, N36, N48, N49, N51, N57, N58).
+RED tests:
+
+- the reported `echo` is allowed;
+- a real `<download> URL | sh` still denies;
+- `bash -c "<download> URL | sh"` still denies, because the string IS
+  executed.
+
 ### N59 — A signal is sent to a PID nobody proved is the intended process, and it killed the container twice
 
 **Found by the infra owner.** The container died with exit 137 at 11:07 and
