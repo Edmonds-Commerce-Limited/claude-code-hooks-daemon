@@ -727,6 +727,97 @@ class TestAttributionWindow:
         assert machine.export_state()["downgrade_episode"] is None
 
 
+class TestSupersededRecord:
+    """Review 5 finding 2: a record must not attribute a drop the supervisor
+
+    already watched the session recover past. The recorder republishes the
+    SAME record for the rest of the session, so a record whose key is empty,
+    or unrelated to the drop now being judged, can still fall inside the
+    attribution window and the spent-key check without this -- three
+    concrete shapes below.
+    """
+
+    def test_a_manual_fable_then_opus_pick_after_an_unwatched_downgrade_is_not_fought(
+        self, tmp_path: Path
+    ) -> None:
+        """The supervisor's first reading of the session is already Opus (a
+
+        restart, or stale readings caught it after the fact), so no episode
+        ever opens and nothing is spent. The human then picks Fable and Opus
+        themselves, both inside the window -- the record must not refight it.
+        """
+        sidecar_dir = tmp_path / "cs"
+        machine = _machine()
+        _write_downgrade_signal(sidecar_dir, ts=_NOW)
+        _show(sidecar_dir, model_id="claude-opus-5", now=_NOW + 10.0)
+        _decide(sidecar_dir, machine, now=_NOW + 10.0)
+        _show(sidecar_dir, model_id="claude-fable-5", now=_NOW + 100.0)
+        _decide(sidecar_dir, machine, now=_NOW + 100.0)
+
+        typed = _typed_between(
+            sidecar_dir, machine, start=_NOW + 200.0, end=_NOW + 260.0, model_id="claude-opus-5"
+        )
+
+        assert _model_commands(typed) == []
+
+    def test_a_manual_pick_after_an_unpaired_standalone_following_a_recovery_is_not_fought(
+        self, tmp_path: Path
+    ) -> None:
+        """The block record is spent by a genuine recovery. Its own standalone
+
+        record then publishes separately (its own id, a byte-offset republish,
+        or a rewritten transcript), and the supervisor sees the session back on
+        Fable again before the human picks Opus -- the new record's key is
+        never spent, so only the supersede check stops the backoff from later
+        typing `/model fable` over that pick.
+        """
+        sidecar_dir = tmp_path / "cs"
+        machine = _machine()
+        _auto_downgrade_then_recovery(sidecar_dir, machine, now=_NOW)
+        _write_downgrade_signal(sidecar_dir, ts=_NOW + 95.0, record_id="uuid-standalone")
+        _show(sidecar_dir, model_id="claude-fable-5", now=_NOW + 150.0)
+        _decide(sidecar_dir, machine, now=_NOW + 150.0)
+
+        typed = _typed_between(
+            sidecar_dir,
+            machine,
+            start=_NOW + 200.0,
+            end=_NOW + 3800.0,
+            model_id="claude-opus-5",
+            step=60.0,
+        )
+
+        assert _model_commands(typed) == []
+
+    def test_a_manual_pick_after_a_keyless_legacy_downgrade_and_recovery_is_not_fought(
+        self, tmp_path: Path
+    ) -> None:
+        """A keyless legacy record (no id, no timestamp) is never spent, so once
+
+        a genuine recovery is observed only the window and the supersede check
+        stand between it and refighting a manual pick once the backoff would
+        otherwise expire.
+        """
+        sidecar_dir = tmp_path / "cs"
+        machine = _machine()
+        _write_downgrade_signal(sidecar_dir, ts=_NOW, record_ts="", record_id=None)
+        _drive_fable_to_opus(sidecar_dir, machine, now=_NOW)
+        _show(sidecar_dir, model_id="claude-fable-5", now=_NOW + 60.0)
+        _decide(sidecar_dir, machine, now=_NOW + 60.0)
+        assert machine.export_state()["downgrade_episode"] is None
+
+        typed = _typed_between(
+            sidecar_dir,
+            machine,
+            start=_NOW + 120.0,
+            end=_NOW + 3800.0,
+            model_id="claude-opus-5",
+            step=60.0,
+        )
+
+        assert _model_commands(typed) == []
+
+
 class TestRetroAttribution:
     """Review 3 item C and review 4 findings 5 and 8: the reading-before-record latch."""
 
