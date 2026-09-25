@@ -18,7 +18,11 @@ block`` never escalates this check.
 from typing import Final
 
 from claude_code_hooks_daemon.plan_qa.checks.common import journal_edit_target
-from claude_code_hooks_daemon.plan_qa.model import JOURNAL_BODY_FILE_HINT, journal_append_command
+from claude_code_hooks_daemon.plan_qa.model import (
+    JOURNAL_BODY_FILE_HINT,
+    journal_append_command,
+    journal_correction_command,
+)
 from claude_code_hooks_daemon.plan_qa.types import (
     CheckContext,
     CheckSpec,
@@ -36,7 +40,9 @@ def _remediation(plan_dir: str, plan_number: int | None) -> str:
         "problem, so do not tidy or trim one. Add a NEW entry with "
         f"`{journal_append_command(plan_dir, plan_number)}` ({JOURNAL_BODY_FILE_HINT}) "
         "instead of editing or removing earlier ones. Corrections are new "
-        "entries, never rewrites."
+        "entries, never rewrites: to correct an earlier entry, append "
+        f"`{journal_correction_command(plan_dir, plan_number)}`, whose `--ref` "
+        "names the entry being corrected."
     )
 
 

@@ -27,6 +27,12 @@ from typing import Any
 import pytest
 
 from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.daemon.synthetic_traffic import (
+    MANUAL_PROBE,
+    PROBE_AGENT_ID,
+    PROBE_AS_FIELD,
+    SYNTHETIC_SOURCE_FIELD,
+)
 from claude_code_hooks_daemon.handlers.subagent_stop.subagent_report_persistence import (
     SubagentReportPersistenceHandler,
 )
@@ -75,6 +81,27 @@ class TestMatching:
         a re-entry one."""
         hook_input = _subagent_stop_input("short", stop_hook_active=True)
         assert handler.matches(hook_input) is True
+
+
+class TestAProbeIsNotATeammate:
+    """Plan 00466 N12: a `hooks-daemon probe SubagentStop --as sub` stop is
+    fabricated, and persisting it would file a report no agent wrote."""
+
+    def test_a_marked_probe_stop_is_not_matched(
+        self, handler: SubagentReportPersistenceHandler
+    ) -> None:
+        hook_input = _subagent_stop_input(
+            "probe",
+            agent_id=PROBE_AGENT_ID,
+            **{SYNTHETIC_SOURCE_FIELD: MANUAL_PROBE, PROBE_AS_FIELD: "sub"},
+        )
+        assert handler.matches(hook_input) is False
+
+    def test_any_synthetic_stop_is_not_matched(
+        self, handler: SubagentReportPersistenceHandler
+    ) -> None:
+        hook_input = _subagent_stop_input("probe", **{SYNTHETIC_SOURCE_FIELD: "playbook-probe"})
+        assert handler.matches(hook_input) is False
 
 
 class TestPersistence:

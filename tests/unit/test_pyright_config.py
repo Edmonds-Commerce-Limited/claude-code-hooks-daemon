@@ -18,7 +18,6 @@ that ccy clones underneath ``.claude/ccy/``, never this project's code
 import json
 from pathlib import Path
 
-from claude_code_hooks_daemon.constants import ProjectPath
 from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -27,11 +26,14 @@ _CONFIG = _REPO_ROOT / "pyrightconfig.json"
 # Trees that are never this checkout's live code: linked worktrees, venvs,
 # fixtures and canary clones (untracked/), the plan archive's historical
 # probes and archived code, the acceptance-test fixture files, the test
-# fixtures that are broken on purpose, the ccy supervisor's own vendored
-# plugin-marketplace runtime tree (ProjectPath.CCY_PLUGINS_DIR), and the
-# reviewed vendored/build names at any depth (the same set the
-# lsp_noise_checker advisory derives its expectation from, so this repo's
-# own config satisfies its own handler).
+# fixtures that are broken on purpose, the installed Claude Code plugins
+# under this repo's dev container's in-tree Claude home (ccy maps it to
+# `.claude/ccy`), and the reviewed vendored/build names at any depth (the
+# same set the lsp_noise_checker advisory derives its expectation from, so
+# this repo's own config satisfies its own handler). The advisory derives
+# the plugins path from wherever the Claude config dir resolves (Plan 00468
+# G11); this tracked file pins the one this repository's dev container uses.
+_CCY_PLUGINS_DIR = ".claude/ccy/plugins"
 _REQUIRED_EXCLUDES = frozenset(
     {
         "untracked",
@@ -39,7 +41,7 @@ _REQUIRED_EXCLUDES = frozenset(
         "CLAUDE/AcceptanceTests/fixtures",
         "tests/fixtures",
         "remote-docs",
-        ProjectPath.CCY_PLUGINS_DIR,
+        _CCY_PLUGINS_DIR,
     }
     | {f"**/{name}" for name in CORE_VENDORED_BUILD_DIR_NAMES}
 )

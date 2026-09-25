@@ -3,7 +3,7 @@
 The standing policy, its evidence and the reasoning for this plan's
 sub-decision live in one place:
 
-[`../00394-failsafe-cron-coverage-starts-at-first-plan-write/fable-blast-radius-policy-decision.md`](../00394-failsafe-cron-coverage-starts-at-first-plan-write/fable-blast-radius-policy-decision.md)
+[`../Completed/00394-failsafe-cron-coverage-starts-at-first-plan-write/fable-blast-radius-policy-decision.md`](../Completed/00394-failsafe-cron-coverage-starts-at-first-plan-write/fable-blast-radius-policy-decision.md)
 — section "Plan 00414 — an absent protected path is silent".
 
 ## This plan's sub-decisions

@@ -92,6 +92,7 @@ from claude_code_hooks_daemon.constants import (
 )
 from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
+from claude_code_hooks_daemon.utils.command_evasion import strip_reserved_word_prefix
 from claude_code_hooks_daemon.utils.private_io import make_private_dir, open_private_append
 from claude_code_hooks_daemon.utils.retention import cap_log_file
 from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
@@ -202,8 +203,11 @@ _PIPELINE_SEPARATORS: Final[tuple[str, ...]] = ("&&", "||", ";", "|", "&", "\n")
 
 
 def _leading_verb(segment: str) -> str:
-    """Return the command word a pipeline segment starts with, or "" if none."""
-    stripped = segment.strip().lstrip("(){}")
+    """Return the command word a pipeline segment starts with, or "" if none.
+
+    Past grouping punctuation and shell reserved words: `time cat f` runs cat.
+    """
+    stripped = strip_reserved_word_prefix(segment.strip().lstrip("(){}"))
     if not stripped:
         return ""
     return stripped.split(maxsplit=1)[0].rsplit("/", 1)[-1]

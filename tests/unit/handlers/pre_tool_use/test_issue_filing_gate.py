@@ -167,6 +167,26 @@ class TestTheCwdIsAThirdWayToNameARepository:
 
         assert _handler().matches(_bash("gh issue create --title x --body y", cwd=str(clone)))
 
+    def test_a_clone_whose_only_remote_is_named_upstream_is_gated(self, tmp_path: Path) -> None:
+        """Plan 00408 Task 3.8: `gh` resolves from the remote SET, not `origin`.
+
+        Reading only `remote.origin.url` answered "not ours" here, which is the
+        FAIL-OPEN direction for a gate that denies filings against upstream.
+        """
+        clone = tmp_path / "clone"
+        clone.mkdir()
+        run_git(clone, "init", "--quiet")
+        run_git(clone, "remote", "add", "upstream", f"https://github.com/{_UPSTREAM}.git")
+
+        assert _handler().matches(_bash("gh issue create --title x --body y", cwd=str(clone)))
+
+    def test_any_remote_pointing_at_us_is_enough(self, tmp_path: Path) -> None:
+        """A fork whose `upstream` is this repository: `gh` prefers `upstream`."""
+        clone = _git_checkout_with_origin(tmp_path, f"git@github.com:{_CLIENT_REPO}.git")
+        run_git(clone, "remote", "add", "upstream", f"git@github.com:{_UPSTREAM}.git")
+
+        assert _handler().matches(_bash("gh issue create --title x --body y", cwd=str(clone)))
+
     def test_an_explicit_repo_flag_still_wins_over_the_cwd(self, tmp_path: Path) -> None:
         """`gh`'s own precedence: the flag decides when it is present."""
         clone = _git_checkout_with_origin(tmp_path, f"git@github.com:{_UPSTREAM}.git")

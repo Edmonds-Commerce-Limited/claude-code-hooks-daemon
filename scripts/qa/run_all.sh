@@ -407,6 +407,16 @@ else
 fi
 echo ""
 
+echo "32. Running Unreachable-Handle-Branch Check..."
+echo "----------------------------------------"
+if ! "${VENV_PYTHON}" "${SCRIPT_DIR}/check_unreachable_handle_branch.py" --json; then
+    OVERALL_EXIT_CODE=1
+    echo "❌ Unreachable-handle-branch check FAILED"
+else
+    echo "✅ Unreachable-handle-branch check PASSED"
+fi
+echo ""
+
 # Print overall summary
 echo "========================================"
 echo "QA Summary"
@@ -447,6 +457,7 @@ results = {
     "Input Contract": "untracked/qa/input_contract.json",
     "Authored Path Stat": "untracked/qa/authored_path_stat.json",
     "Skip List Substring": "untracked/qa/skip_list_substring.json",
+    "Unreachable Handle Branch": "untracked/qa/unreachable_handle_branch.json",
     "Declared Invariant Pairs": "untracked/qa/declared_invariant_pairs.json",
     "Fail-Open Inventory": "untracked/qa/fail_open_inventory.json",
     "Dangerous Invocation Corpus": "untracked/qa/dangerous_invocation_corpus.json",

@@ -78,6 +78,21 @@ class TestRun:
         assert "unbounded" in remediation or "no size limit" in remediation
         assert "do not tidy" in remediation or "never tidy" in remediation
 
+    def test_remediation_names_the_correction_category(self) -> None:
+        """Ledger 00422 N3: a rewrite is usually an attempt to correct an entry.
+
+        The legal spelling of that is a `correction` entry naming the one it
+        corrects, so the advice says so rather than leaving the reader to pick
+        a category that reads as just another entry.
+        """
+        rewritten = _BEFORE.replace("first entry", "EDITED first entry") + "\n## 10:00\n\nx\n"
+        remediation = journal_append_only.CHECK.run(_ctx(before=_BEFORE, after=rewritten))[
+            0
+        ].remediation
+
+        assert "correction" in remediation
+        assert "--ref" in remediation
+
     def test_earlier_rewrite_advises(self) -> None:
         rewritten = _BEFORE.replace("first entry", "EDITED first entry") + "\n## 10:00\n\nx\n"
         findings = journal_append_only.CHECK.run(_ctx(before=_BEFORE, after=rewritten))

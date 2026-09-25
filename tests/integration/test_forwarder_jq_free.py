@@ -38,8 +38,19 @@ from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.daemon.synthetic_traffic import (
+    PROBE_AS_FIELD,
+    SYNTHETIC_SOURCE_FIELD,
+    TEST_PROBE,
+    ProbeThread,
+)
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _HOOKS_DIR = _REPO_ROOT / ".claude" / "hooks"
+
+#: A probe sent through a hook wrapper is marked (Plan 00466 N12), even to
+#: this module's fake daemon: the wrapper under test is the real one.
+_MAIN_PROBE = {SYNTHETIC_SOURCE_FIELD: TEST_PROBE, PROBE_AS_FIELD: ProbeThread.MAIN.value}
 _INIT_SH = _REPO_ROOT / ".claude" / "init.sh"
 
 # Test-harness timeouts (seconds). Generous — these guard against a hung
@@ -288,7 +299,8 @@ def test_standard_wrapper_wraps_payload(
     )
     server = _RecordingSocketServer(sock_path, canned)
     server.start()
-    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": "ls"}}).encode()
+    hook_input = {"tool_name": "Bash", "tool_input": {"command": "ls"}, **_MAIN_PROBE}
+    payload = json.dumps(hook_input).encode()
 
     result = _run_wrapper(wrapper, payload, sock_path, live_pid_file, strip_jq=strip_jq)
     server.join()
@@ -297,7 +309,7 @@ def test_standard_wrapper_wraps_payload(
     assert server.received is not None, "daemon socket received nothing"
     request = json.loads(server.received)
     assert request["event"] == event
-    assert request["hook_input"] == {"tool_name": "Bash", "tool_input": {"command": "ls"}}
+    assert request["hook_input"] == hook_input
 
 
 # ---------------------------------------------------------------------------
@@ -313,7 +325,7 @@ def test_control_characters_survive_round_trip(
     tricky = 'line1\nline2\ttab "quote" \\ backslash — unicode 🚀'
     server = _RecordingSocketServer(sock_path, b"{}\n")
     server.start()
-    payload = json.dumps({"tool_input": {"command": tricky}}).encode()
+    payload = json.dumps({"tool_input": {"command": tricky}, **_MAIN_PROBE}).encode()
 
     result = _run_wrapper("pre-tool-use", payload, sock_path, live_pid_file, strip_jq=strip_jq)
     server.join()

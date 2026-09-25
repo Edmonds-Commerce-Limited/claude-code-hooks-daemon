@@ -190,21 +190,45 @@ git commit -m "Install Claude Code Hooks Daemon" && git push
 # Check daemon auto-started (lazy startup on first hook call)
 .claude/hooks-daemon/bin/hooks-daemon status
 
-# Test destructive git is blocked
-echo '{"tool_name": "Bash", "tool_input": {"command": "git reset --hard HEAD"}}' \
-  | bash .claude/hooks/pre-tool-use
-# Expected: {"hookSpecificOutput": {"permissionDecision": "deny", ...}}
-
-# Test sed is blocked
-echo '{"tool_name": "Bash", "tool_input": {"command": "sed -i s/foo/bar/ file.txt"}}' \
-  | bash .claude/hooks/pre-tool-use
-# Expected: {"hookSpecificOutput": {"permissionDecision": "deny", ...}}
-
 # Test normal commands pass through
-echo '{"tool_name": "Bash", "tool_input": {"command": "ls -la"}}' \
+echo '{"tool_name": "Bash", "tool_input": {"command": "ls -la"}, "synthetic_source": "manual-probe"}' \
   | bash .claude/hooks/pre-tool-use
 # Expected: {} (empty = allow)
+
+# The same check through the helper, which sets synthetic_source itself
+# and prints the decision:
+.claude/hooks-daemon/bin/hooks-daemon probe PreToolUse --json '{"tool_name": "Bash", "tool_input": {"command": "ls -la"}}'
+# Expected: decision: allow
 ```
+
+To test that the blockers fire, the payload goes in a FILE. The guards judge
+your own Bash command's text too, so a command that spells out
+`git reset --hard` is denied before the probe ever runs. Save each payload
+below with the Write tool, not a shell heredoc, which is judged the same way.
+
+`untracked/scratch/probe-destructive-git.json`:
+
+```json
+{"tool_name": "Bash", "tool_input": {"command": "git reset --hard HEAD"}}
+```
+
+`untracked/scratch/probe-sed.json`:
+
+```json
+{"tool_name": "Bash", "tool_input": {"command": "sed -i s/foo/bar/ file.txt"}}
+```
+
+```bash
+.claude/hooks-daemon/bin/hooks-daemon probe PreToolUse --file untracked/scratch/probe-destructive-git.json
+# Expected: decision: deny
+.claude/hooks-daemon/bin/hooks-daemon probe PreToolUse --file untracked/scratch/probe-sed.json
+# Expected: decision: deny
+```
+
+Every test payload is marked `"synthetic_source": "manual-probe"`, and the
+helper adds it to a payload that leaves it out. Without it, the daemon's
+verdict log records the probe as a real agent's tool call (see
+[DEBUGGING_HOOKS.md](DEBUGGING_HOOKS.md#probing-a-handler-by-hand-hooks-daemon-probe)).
 
 **If all tests pass**: Hooks active.
 
@@ -216,8 +240,8 @@ A successful installation meets ALL of these conditions:
 
 1. **Daemon running**: `.claude/hooks-daemon/bin/hooks-daemon status` shows `RUNNING`
 2. **Hooks deployed**: `.claude/hooks/pre-tool-use` and the other hook scripts exist. The executable bit is NOT a requirement — `settings.json` invokes each wrapper as `bash <path>` precisely so a dropped `+x` cannot break hooks (Plan 00102)
-3. **Blocking works**: `echo '{"tool_name":"Bash","tool_input":{"command":"git reset --hard"}}' | bash .claude/hooks/pre-tool-use` returns a `deny` decision
-4. **Safe commands pass**: `echo '{"tool_name":"Bash","tool_input":{"command":"ls"}}' | bash .claude/hooks/pre-tool-use` returns `{}` (allow)
+3. **Blocking works**: `.claude/hooks-daemon/bin/hooks-daemon probe PreToolUse --file untracked/scratch/probe-destructive-git.json` (the payload file from step 5) prints `decision: deny`
+4. **Safe commands pass**: `echo '{"tool_name":"Bash","tool_input":{"command":"ls"},"synthetic_source":"manual-probe"}' | bash .claude/hooks/pre-tool-use` returns `{}` (allow)
 5. **No DEGRADED MODE**: `.claude/hooks-daemon/bin/hooks-daemon logs` shows no "DEGRADED MODE" warnings
 6. **Git clean**: `.claude/hooks-daemon/` is excluded via `.gitignore`, not tracked by git
 
@@ -490,13 +514,28 @@ handlers:
 | `plan_number_helper`    | Provides the correct next plan number when agents search for it                                                                                                                 |
 | `markdown_organization` | Enforces markdown file placement rules in CLAUDE/ directory                                                                                                                     |
 
-**3. Restart daemon:**
+**3. Point Claude Code's plan mode at the plan directory.** Add this key to
+`.claude/settings.json` (or to `.claude/settings.local.json` for this checkout
+only), using your `plan_workflow.directory` if you changed it:
+
+```json
+{
+  "plansDirectory": "./CLAUDE/Plan"
+}
+```
+
+The installer does not set it, because the plan workflow is opt-in and its
+directory is configurable. Without it, plan mode writes its plans outside the
+project and `markdown_organization` cannot mirror them into numbered plan
+folders.
+
+**4. Restart daemon:**
 
 ```bash
 .claude/hooks-daemon/bin/hooks-daemon restart
 ```
 
-**4. Verify planning handlers loaded:**
+**5. Verify planning handlers loaded:**
 
 ```bash
 .claude/hooks-daemon/bin/hooks-daemon status
@@ -598,8 +637,9 @@ python3 --version
 **Handlers not blocking:**
 
 ```bash
-# Test hook manually
-echo '{"tool_name": "Bash", "tool_input": {"command": "git reset --hard"}}' | bash .claude/hooks/pre-tool-use
+# Test the hook by hand with the step 5 payload file. The helper marks the
+# probe, so the verdict log does not count it as real
+.claude/hooks-daemon/bin/hooks-daemon probe PreToolUse --file untracked/scratch/probe-destructive-git.json
 
 # Check handler config
 grep -A 1 "destructive_git:" .claude/hooks-daemon.yaml

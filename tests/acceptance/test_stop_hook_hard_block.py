@@ -31,7 +31,15 @@ import json
 import subprocess
 from pathlib import Path
 
+from claude_code_hooks_daemon.constants.protocol import HookInputField
 from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.daemon.synthetic_traffic import (
+    PROBE_AGENT_ID,
+    PROBE_AS_FIELD,
+    SYNTHETIC_SOURCE_FIELD,
+    TEST_PROBE,
+    ProbeThread,
+)
 from tests.acceptance.conftest import wrapper_subprocess_env
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -40,6 +48,19 @@ SUBAGENT_STOP_HOOK = REPO_ROOT / ".claude" / "hooks" / "subagent-stop"
 
 _EXIT_HARD_BLOCK = 2
 _EXIT_OK = 0
+
+#: These probes go through the LIVE daemon, whose verdicts.jsonl is the real
+#: record, so each is marked (Plan 00466 N12). A Stop probe stands for the
+#: main thread, which is what `auto_continue_stop` (scoped MAIN) judges.
+_MAIN_PROBE = {SYNTHETIC_SOURCE_FIELD: TEST_PROBE, PROBE_AS_FIELD: ProbeThread.MAIN.value}
+
+#: A SubagentStop stands for a subagent, with the fixed probe identity, so no
+#: sensor records it as a real teammate's stop.
+_SUB_PROBE = {
+    SYNTHETIC_SOURCE_FIELD: TEST_PROBE,
+    PROBE_AS_FIELD: ProbeThread.SUB.value,
+    HookInputField.AGENT_ID: PROBE_AGENT_ID,
+}
 
 #: `daemon_socket` (socket discovery + Plan 00371 staleness check) lives in
 #: tests/acceptance/conftest.py, shared across every acceptance file that
@@ -92,6 +113,7 @@ def test_stop_hook_exits_2_on_block(daemon_socket: Path, tmp_path: Path) -> None
         "transcript_path": str(transcript),
         "session_id": "phase9-block-probe",
         "cwd": str(tmp_path),
+        **_MAIN_PROBE,
     }
 
     result = _invoke_hook(STOP_HOOK, hook_input, daemon_socket)
@@ -124,6 +146,7 @@ def test_subagent_stop_hook_exits_2_on_block(daemon_socket: Path, tmp_path: Path
         "transcript_path": str(transcript),
         "session_id": "phase9-subagent-block-probe",
         "cwd": str(REPO_ROOT),
+        **_SUB_PROBE,
     }
 
     result = _invoke_hook(SUBAGENT_STOP_HOOK, hook_input, daemon_socket)
@@ -171,6 +194,7 @@ def test_stop_hook_exits_0_when_daemon_allows(daemon_socket: Path, tmp_path: Pat
         "transcript_path": str(transcript),
         "session_id": "phase9-allow-probe",
         "cwd": str(REPO_ROOT),
+        **_MAIN_PROBE,
     }
 
     result = _invoke_hook(STOP_HOOK, hook_input, daemon_socket)

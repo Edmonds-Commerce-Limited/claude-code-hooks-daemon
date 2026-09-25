@@ -540,13 +540,19 @@ def _compiled_public_pattern(pattern: str) -> "re.Pattern[str] | None":
 
     A pattern that fails to compile is a documented no-match (never crashes
     the handler) — cached as ``None`` so a broken client config is not
-    re-attempted on every event.
+    re-attempted on every event, and logged at WARNING once, when it is
+    cached, because the guard is then narrower than its config says.
     """
     if pattern in _COMPILED_PATTERN_CACHE:
         return _COMPILED_PATTERN_CACHE[pattern]
     try:
         compiled: re.Pattern[str] | None = re.compile(pattern, re.IGNORECASE)
-    except re.error:
+    except re.error as exc:
+        _LOGGER.warning(
+            "sensitive_content: public pattern %r does not compile (%s) and will never match",
+            pattern,
+            exc,
+        )
         compiled = None
     _COMPILED_PATTERN_CACHE[pattern] = compiled
     return compiled
@@ -1297,7 +1303,9 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
             "If a compound command is denied because an unrelated part of it carries "
             "a term (`grep <term> f && git commit -m 'clean'`), split it into two "
             "calls rather than trying to disguise the term.\n\n"
-            "Missing/empty/comments-only secret file = this source is silently inert."
+            "Missing/empty/comments-only secret file = this source is inert. A list "
+            "the config names but which is missing is reported once at SessionStart "
+            "by `secret_file_hygiene_checker`."
         )
 
     def get_acceptance_tests(self) -> list[Any]:

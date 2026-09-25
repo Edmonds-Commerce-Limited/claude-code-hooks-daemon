@@ -168,8 +168,18 @@ class TestScannedSurface:
     def test_ignores_other_suffixes(self, tmp_path: Path) -> None:
         (tmp_path / "c.txt").write_text("$PYTHON\n")
         (tmp_path / "d.yaml").write_text("$PYTHON\n")
+        # One scanned, clean file: without it the run examines nothing, which
+        # fails as an empty scan (00466 N26) rather than answering this test.
+        (tmp_path / "clean.md").write_text("Run `bin/hooks-daemon status`.\n")
         data = _run_checker(tmp_path)
         assert data["summary"]["passed"], data["violations"]
+        assert data["summary"]["files_scanned"] == 1
+
+    def test_a_directory_with_nothing_to_scan_is_not_a_pass(self, tmp_path: Path) -> None:
+        (tmp_path / "c.txt").write_text("$PYTHON\n")
+        data = _run_checker(tmp_path)
+        assert data["summary"]["passed"] is False
+        assert "found no files" in data["summary"]["vacuous_scan"]
 
 
 class TestShellScriptGuidance:

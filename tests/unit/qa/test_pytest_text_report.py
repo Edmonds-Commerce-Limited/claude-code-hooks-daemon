@@ -15,7 +15,11 @@ polluted with terminal control characters.
 
 from __future__ import annotations
 
-from claude_code_hooks_daemon.qa.pytest_text_report import parse_pytest_text_output
+from claude_code_hooks_daemon.qa.pytest_text_report import (
+    build_json_report_summary,
+    finalize_passed_all,
+    parse_pytest_text_output,
+)
 
 # Captured verbatim from `pytest --tb=short --no-cov` on a fixture package.
 #
@@ -90,10 +94,24 @@ class TestCountsStillParse:
 
 class TestDegradesSafely:
     def test_empty_output_is_handled(self) -> None:
+        """00466 N21: zero tests collected is not a pass, it is not a run.
+
+        Previously ``passed_all`` was ``failed == 0 and errors == 0``, so
+        output naming no tests at all (a pytest usage error, "no tests
+        collected") read as green because nothing had failed -- which is
+        also true of nothing having RUN. "Handled" means the parser does not
+        crash or raise, not that the degenerate case reads as success.
+        """
         report = parse_pytest_text_output("")
         assert report["total"] == 0
         assert report["failed_tests"] == []
-        assert report["passed_all"] is True
+        assert report["passed_all"] is False
+
+    def test_no_tests_collected_is_not_passed_all(self) -> None:
+        """pytest's own "no tests ran" text: zero of everything, exit 5."""
+        report = parse_pytest_text_output("no tests ran in 0.00s\n")
+        assert report["total"] == 0
+        assert report["passed_all"] is False
 
     def test_output_without_a_summary_line_is_handled(self) -> None:
         report = parse_pytest_text_output("collecting ...\ninterrupted\n")
@@ -227,3 +245,78 @@ class TestOnlyPytestsOwnVerdictIsScraped:
         report = parse_pytest_text_output(_GREEN_OUTPUT_WITH_STRAY_ERROR_LOG)
 
         assert not (report["failed_tests"] and report["passed_all"])
+
+
+class TestFinalizePassedAll:
+    """00466 N21: the text parser never sees the runner's own exit code, so
+
+    ``run_tests.sh`` must combine ``parse_pytest_text_output``'s verdict with
+    it -- a runner that exits non-zero for a reason its own summary line does
+    not capture (a coverage-threshold failure, a crash right after the
+    summary printed) must still fail the gate.
+    """
+
+    def test_a_green_parse_with_a_nonzero_exit_is_not_passed(self) -> None:
+        assert finalize_passed_all(True, 1) is False
+
+    def test_a_green_parse_with_a_zero_exit_is_passed(self) -> None:
+        assert finalize_passed_all(True, 0) is True
+
+    def test_a_red_parse_stays_red_regardless_of_exit_code(self) -> None:
+        assert finalize_passed_all(False, 0) is False
+
+
+# Real ``pytest-json-report`` summary shapes (the plugin's own field names).
+_JSON_SUMMARY_CLEAN = {"summary": {"total": 3, "passed": 3, "failed": 0}, "duration": 1.2}
+_JSON_SUMMARY_WITH_FAILURE = {
+    "summary": {"total": 3, "passed": 2, "failed": 1},
+    "duration": 1.2,
+}
+_JSON_SUMMARY_WITH_ERROR = {
+    "summary": {"total": 3, "passed": 2, "failed": 0, "error": 1},
+    "duration": 1.2,
+}
+_JSON_SUMMARY_ZERO_TOTAL = {"summary": {"total": 0}, "duration": 0.0}
+
+
+class TestBuildJsonReportSummary:
+    """00466 N21: the ``pytest-json-report`` branch of ``run_tests.sh`` read
+
+    a missing raw report as ``{}`` and a missing ``"failed"`` key as ``0``,
+    so a runner that crashed before writing ANY report -- or one that
+    collected zero tests -- produced ``passed_all: true``.
+    """
+
+    def test_a_missing_raw_report_is_not_a_pass(self) -> None:
+        summary = build_json_report_summary(None, exit_code=1)
+        assert summary["passed_all"] is False
+        assert summary["total"] == 0
+        assert "error" in summary
+
+    def test_a_missing_raw_report_is_not_a_pass_even_with_exit_zero(self) -> None:
+        """No raw report at all means no verdict -- not zero-findings success."""
+        summary = build_json_report_summary(None, exit_code=0)
+        assert summary["passed_all"] is False
+
+    def test_zero_total_is_not_a_pass(self) -> None:
+        summary = build_json_report_summary(_JSON_SUMMARY_ZERO_TOTAL, exit_code=0)
+        assert summary["passed_all"] is False
+
+    def test_a_clean_run_passes(self) -> None:
+        summary = build_json_report_summary(_JSON_SUMMARY_CLEAN, exit_code=0)
+        assert summary["passed_all"] is True
+        assert summary["total"] == 3
+
+    def test_a_failure_is_not_a_pass(self) -> None:
+        summary = build_json_report_summary(_JSON_SUMMARY_WITH_FAILURE, exit_code=1)
+        assert summary["passed_all"] is False
+        assert summary["failed"] == 1
+
+    def test_an_error_is_not_a_pass_even_with_zero_failed(self) -> None:
+        summary = build_json_report_summary(_JSON_SUMMARY_WITH_ERROR, exit_code=1)
+        assert summary["passed_all"] is False
+
+    def test_a_nonzero_exit_over_a_clean_looking_summary_is_not_a_pass(self) -> None:
+        """The runner's own exit status is not redundant with the counts."""
+        summary = build_json_report_summary(_JSON_SUMMARY_CLEAN, exit_code=1)
+        assert summary["passed_all"] is False

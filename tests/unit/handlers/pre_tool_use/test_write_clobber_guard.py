@@ -59,6 +59,13 @@ def _write(path: str, session: str = _SESSION) -> dict[str, Any]:
     }
 
 
+def _decision(handler: WriteClobberGuardHandler, hook_input: dict[str, Any]) -> Decision:
+    """The chain's verdict: ``handle()`` runs only behind a True ``matches()``."""
+    if not handler.matches(hook_input):
+        return Decision.ALLOW
+    return handler.handle(hook_input).decision
+
+
 @pytest.fixture
 def handler() -> WriteClobberGuardHandler:
     return WriteClobberGuardHandler()
@@ -94,11 +101,17 @@ class TestMatches:
     ) -> None:
         assert handler.matches(_write(existing_file)) is True
 
-    def test_does_not_match_write_to_new_path(
+    def test_write_to_new_path_is_allowed(
         self, handler: WriteClobberGuardHandler, tmp_path: Path
     ) -> None:
-        """Creating a new file is the common case and must stay frictionless."""
-        assert handler.matches(_write(str(tmp_path / "brand-new.txt"))) is False
+        """Creating a new file is the common case and must stay frictionless.
+
+        It is still MATCHED, so ``handle()`` can record the path (Plan 00422
+        N29): the chain never calls ``handle()`` for an unmatched input.
+        """
+        hook_input = _write(str(tmp_path / "brand-new.txt"))
+        assert handler.matches(hook_input) is True
+        assert _decision(handler, hook_input) == Decision.ALLOW
 
     def test_matches_read_so_it_can_record(
         self, handler: WriteClobberGuardHandler, existing_file: str
@@ -106,12 +119,20 @@ class TestMatches:
         """The handler must see Reads to record them; it never denies one."""
         assert handler.matches(_read(existing_file)) is True
 
-    def test_does_not_match_edit(
+    def test_edit_is_matched_to_record_and_never_denied(
         self, handler: WriteClobberGuardHandler, existing_file: str
     ) -> None:
         """Edit is not a clobber - it is a targeted replacement of known text."""
         hook_input = _write(existing_file)
         hook_input["tool_name"] = "Edit"
+        assert handler.matches(hook_input) is True
+        assert _decision(handler, hook_input) == Decision.ALLOW
+
+    def test_does_not_match_other_tools(
+        self, handler: WriteClobberGuardHandler, existing_file: str
+    ) -> None:
+        hook_input = _write(existing_file)
+        hook_input["tool_name"] = "NotebookEdit"
         assert handler.matches(hook_input) is False
 
     def test_does_not_match_missing_file_path(self, handler: WriteClobberGuardHandler) -> None:
@@ -122,23 +143,23 @@ class TestReadClearsTheBlock:
     def test_write_allowed_after_reading_that_path(
         self, handler: WriteClobberGuardHandler, existing_file: str
     ) -> None:
-        handler.handle(_read(existing_file))
-        assert handler.matches(_write(existing_file)) is False
+        _decision(handler, _read(existing_file))
+        assert _decision(handler, _write(existing_file)) == Decision.ALLOW
 
     def test_reading_a_different_path_does_not_clear_it(
         self, handler: WriteClobberGuardHandler, existing_file: str, tmp_path: Path
     ) -> None:
         other = tmp_path / "other.txt"
         other.write_text("unrelated")
-        handler.handle(_read(str(other)))
-        assert handler.matches(_write(existing_file)) is True
+        _decision(handler, _read(str(other)))
+        assert _decision(handler, _write(existing_file)) == Decision.DENY
 
     def test_read_in_another_session_does_not_clear_it(
         self, handler: WriteClobberGuardHandler, existing_file: str
     ) -> None:
         """State is per session -- one session's read is not another's knowledge."""
-        handler.handle(_read(existing_file, session="other-session"))
-        assert handler.matches(_write(existing_file)) is True
+        _decision(handler, _read(existing_file, session="other-session"))
+        assert _decision(handler, _write(existing_file)) == Decision.DENY
 
     def test_allowed_write_records_the_path(
         self, handler: WriteClobberGuardHandler, tmp_path: Path
@@ -149,9 +170,9 @@ class TestReadClearsTheBlock:
         would be blocked on the second write, which would be absurd.
         """
         new_path = tmp_path / "created.txt"
-        handler.handle(_write(str(new_path)))
+        _decision(handler, _write(str(new_path)))
         new_path.write_text("now it exists")
-        assert handler.matches(_write(str(new_path))) is False
+        assert _decision(handler, _write(str(new_path))) == Decision.ALLOW
 
 
 class TestHandle:

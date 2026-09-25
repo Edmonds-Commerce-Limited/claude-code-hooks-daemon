@@ -26,7 +26,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from claude_code_hooks_daemon.config.models import Config, ToolPolicyConfig
+from claude_code_hooks_daemon.config.models import Config, ToolPolicyConfig, handler_options
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision, ProjectContext
@@ -109,15 +109,10 @@ class ToolDisableAdvisorHandler(SessionStartHandlerBase):
 
     def _blocker_source_disable_on(self) -> bool:
         """Is artifact_publish_blocker's own enforcement option enabled?"""
-        handler_config = self._load_config().handlers.pre_tool_use.get(
-            "artifact_publish_blocker", {}
+        options = handler_options(
+            self._load_config().handlers.pre_tool_use.get("artifact_publish_blocker")
         )
-        # The parsed value is a HandlerConfig in a validated config, but a raw
-        # dict survives round-tripping through extra="allow" event blocks.
-        options = getattr(handler_config, "options", None)
-        if options is None and isinstance(handler_config, dict):
-            options = handler_config.get("options", {})
-        return isinstance(options, dict) and options.get("source_disable") is True
+        return options.get("source_disable") is True
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Fire only when the project has declared at least one never-want."""

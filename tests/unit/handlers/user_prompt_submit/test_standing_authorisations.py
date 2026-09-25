@@ -362,6 +362,22 @@ class TestAutomatedPromptsAreIgnored:
             nudge = _hook_input("🤖 [ccy-supervisor 2026-08-28 10:51:04] continue")
             assert handler.handle(nudge).context == []
 
+    @pytest.mark.parametrize(
+        "prompt",
+        [
+            "[tick:watchdog]\n**BACKGROUND WATCHDOG TICK (automated ...)**",
+            "[tick:job:issue-sdlc]\n**ISSUE SDLC TICK (automated hourly ...)**",
+        ],
+    )
+    def test_every_daemon_cron_tick_is_silent(self, prompt: str) -> None:
+        """Plan 00388: the failsafe is not the only cron. Every prompt the
+        daemon supplies carries a tick sentinel, and none is a human prompt."""
+        handler = StandingAuthorisationsHandler()
+        _enable(handler, AUTHORISATION_SUBAGENT_DELEGATION)
+        handler.handle(_hook_input())  # first — full
+        for _ in range(20):
+            assert handler.handle(_hook_input(prompt)).context == []
+
     def test_automated_ticks_do_not_advance_the_prompt_counter(self) -> None:
         """Interleaved automated ticks must not bring a reinforcement forward."""
         handler = StandingAuthorisationsHandler()

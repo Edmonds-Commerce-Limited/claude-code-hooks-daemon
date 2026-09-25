@@ -34,7 +34,10 @@ from typing import Any, Final
 
 import yaml
 
-from claude_code_hooks_daemon.utils.command_evasion import git_subcommand_index
+from claude_code_hooks_daemon.utils.command_evasion import (
+    git_subcommand_index,
+    strip_transparent_reserved_words,
+)
 from claude_code_hooks_daemon.utils.path_exclusion import (
     path_matches_globs,
     resolve_project_root,
@@ -182,17 +185,10 @@ def resolve_configured_patterns() -> tuple[str, ...]:
         return _CONFIGURED_PATTERNS
 
     try:
-        from claude_code_hooks_daemon.config.models import Config, HandlerConfig
+        from claude_code_hooks_daemon.config.models import Config, handler_options
 
         config = Config.load_or_default(ProjectContext.config_path())
-        handler_cfg = config.handlers.pre_tool_use.get("secret_file_guard")
-        # ``Config``'s own ``coerce_handler_configs`` validator turns every
-        # entry into a ``HandlerConfig`` instance (not a plain dict) once the
-        # config has been loaded through the model -- ``.options`` is the
-        # correct access, and a stray ``isinstance(..., dict)`` guard here
-        # silently found nothing and fell through to the shipped defaults on
-        # every real config, never actually reading a project's settings.
-        options = handler_cfg.options if isinstance(handler_cfg, HandlerConfig) else {}
+        options = handler_options(config.handlers.pre_tool_use.get("secret_file_guard"))
         mode = options.get("mode")
         project_patterns = options.get("protected_paths")
         _CONFIGURED_PATTERNS = resolve_protected_patterns(mode, project_patterns)
@@ -366,11 +362,23 @@ def _without_import_module_paths(command: str) -> str:
 
 
 def _normalised_token_forms(token: str) -> list[str]:
-    """Spellings of a token to match against protected globs."""
+    """Spellings of a token to match against protected globs.
+
+    A token that IS a home prefix and nothing else (``~/`` with no name
+    after it) strips to the empty string. That candidate is dropped rather
+    than appended (Ledger 00466 N44): every consumer of this list feeds each
+    form to :func:`~utils.path_exclusion.path_matches_globs`, which computes
+    ``os.path.relpath`` against a project root -- and ``os.path.relpath("",
+    root)`` raises ``ValueError: no path specified``, a live daemon crash on
+    a Bash command as ordinary as ``cp ~/ /tmp/x``. An empty string also
+    never usefully matches a protected glob, so dropping it costs nothing.
+    """
     forms = [token]
     for prefix in _HOME_PREFIXES:
         if token.startswith(prefix):
-            forms.append(token[len(prefix) :])
+            stripped_home = token[len(prefix) :]
+            if stripped_home:
+                forms.append(stripped_home)
     stripped = token.lstrip("./")
     if stripped and stripped != token and token.startswith("./"):
         forms.append(stripped)
@@ -1118,11 +1126,17 @@ def is_exempt_invocation(
     the compound as a whole is judged by the deny rule instead. A single
     leading ``cd <dir> &&`` is removed before that judgement (see
     ``_strip_leading_cd``); everything after it faces the unchanged rule.
+
+    A leading ``time`` or ``!`` is looked past (Plan 00422 N25): neither
+    changes which command runs or what it reads. ``then``, ``do`` and the
+    other compound-only reserved words are NOT, so a fragment of a compound
+    command is never judged as the single command this exemption requires.
     """
     stripped = command.strip()
     if not stripped:
         return False
     stripped = _strip_leading_cd(stripped, patterns) or stripped
+    stripped = strip_transparent_reserved_words(stripped)
     if _PROCESS_SUBSTITUTION in stripped:
         return False
     if any(separator in stripped for separator in _COMMAND_SEPARATORS):
@@ -1303,10 +1317,13 @@ def is_encrypted_target_invocation(
 
     ``is_encrypted`` receives an absolute path and must read the file at the
     time of the call: the answer is not cached here.
+
+    A leading ``time`` or ``!`` is looked past before the head is read, as in
+    ``is_exempt_invocation``; no other reserved word is.
     """
     if any(char in _EXPANSION_CHARS for char in command):
         return False
-    words = _shell_words(command)
+    words = _shell_words(strip_transparent_reserved_words(command))
     if not words or not _is_single_simple_command(words):
         return False
     if not _is_encrypted_target_reader(words):

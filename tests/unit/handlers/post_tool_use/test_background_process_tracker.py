@@ -11,14 +11,17 @@ import json
 
 import pytest
 
+from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.post_tool_use.background_process_tracker import (
     BackgroundProcessTrackerHandler,
     _command_is_backgrounded,
     _mask_heredoc_bodies,
     _mask_quoted_spans,
+    watchdog_cron_prompt,
     write_state_record,
 )
+from claude_code_hooks_daemon.utils.cron_tick import DaemonTick, TickKind, classify_tick
 
 
 def _bash(command="echo hi", *, run_in_background=False, session_id="s1"):
@@ -41,7 +44,7 @@ class TestInit:
         assert handler.name == "background-process-tracker"
 
     def test_priority(self, handler):
-        assert handler.priority == 28
+        assert handler.priority == Priority.BACKGROUND_PROCESS_TRACKER
 
     def test_not_terminal(self, handler):
         assert handler.terminal is False
@@ -256,6 +259,38 @@ class TestWatchdogCronIsNeverStacked:
             "Resident guidance is read before any advisory fires, so it must "
             "carry the same check-first instruction."
         )
+
+
+class TestTheWatchdogPromptIsSuppliedVerbatim:
+    """Plan 00388 option 2'. The watchdog was the one cron whose prompt the
+    daemon never wrote, so no copy existed that could carry a sentinel -- and
+    it was the cron observed wiping the `[awaiting-human]` marker. The daemon
+    now hands over the exact text, exactly as it does for the failsafe cron."""
+
+    def _advisory(self) -> str:
+        handler = BackgroundProcessTrackerHandler()
+        result = handler.handle(_bash("sleep 600 &", run_in_background=True))
+        return "\n".join(result.context)
+
+    def test_the_prompt_is_a_watchdog_tick_by_its_sentinel(self) -> None:
+        assert classify_tick(watchdog_cron_prompt()) == DaemonTick(TickKind.WATCHDOG)
+
+    def test_the_prompt_runs_the_harvester(self) -> None:
+        assert "harvest-background" in watchdog_cron_prompt()
+
+    def test_the_prompt_keeps_the_process_group_rule(self) -> None:
+        assert "kill -- -<pgid>" in watchdog_cron_prompt()
+
+    def test_the_advisory_carries_the_prompt_verbatim(self) -> None:
+        assert watchdog_cron_prompt() in self._advisory()
+
+    def test_the_advisory_says_to_paste_it_verbatim(self) -> None:
+        assert "verbatim" in self._advisory().lower()
+
+    def test_claude_md_names_the_sentinel(self) -> None:
+        claude_md = BackgroundProcessTrackerHandler().get_claude_md()
+        assert claude_md is not None
+        assert "[tick:watchdog]" in claude_md
 
 
 class TestWriteStateRecord:

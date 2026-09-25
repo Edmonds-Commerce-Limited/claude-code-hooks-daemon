@@ -82,6 +82,37 @@ def _write_config(
     )
 
 
+class TestPathModeSkipsGitInternalsAndNestedRepositories:
+    """A ``--path`` tree's ``.git`` and nested checkouts are not its files.
+
+    ``.git`` holds commit messages, packed objects and hook samples; a nested
+    repository (a worktree, a submodule, a vendored clone) is another project.
+    The default mode never saw either, because ``git ls-files`` lists neither.
+    """
+
+    def test_a_term_in_git_internals_or_a_nested_repo_is_not_reported(self, tmp_path: Path) -> None:
+        config = tmp_path / "hooks-daemon.yaml"
+        _write_config(
+            config, public_patterns=[{"name": "alpha", "pattern": "alpha", "description": ""}]
+        )
+        tree = tmp_path / "tree"
+        (tree / ".git").mkdir(parents=True)
+        (tree / ".git" / "COMMIT_EDITMSG").write_text("alpha in a commit message\n")
+        nested = tree / "vendor" / "lib"
+        (nested / ".git").mkdir(parents=True)
+        (nested / "notes.txt").write_text("alpha in another project\n")
+        worktree = tree / "wt"
+        worktree.mkdir()
+        (worktree / ".git").write_text("gitdir: /elsewhere/.git/worktrees/wt\n")
+        (worktree / "file.txt").write_text("alpha in a linked worktree\n")
+        (tree / "real.txt").write_text("alpha in the project\n")
+
+        data = _run_checker(tree, config)
+
+        reported = {Path(v["file"]).relative_to(tree).as_posix() for v in data["violations"]}
+        assert reported == {"real.txt"}
+
+
 class TestPublicPatternScanning:
     def test_no_config_no_violations(self, tmp_path: Path) -> None:
         (tmp_path / "file.txt").write_text("nothing sensitive here\n")
@@ -323,11 +354,25 @@ class TestExcludePaths:
         excluded_dir = tmp_path / "fixtures"
         excluded_dir.mkdir()
         (excluded_dir / "sample.txt").write_text("alpha appears here\n")
+        # Something left to scan, or the run fails as an empty scan (00466 N26).
+        (tmp_path / "clean.txt").write_text("nothing to report\n")
 
         data = _run_checker(tmp_path, config)
 
         assert data["summary"]["passed"] is True
         assert data["summary"]["total_violations"] == 0
+
+    def test_excluding_every_file_is_not_a_pass(self, tmp_path: Path) -> None:
+        config = tmp_path / "hooks-daemon.yaml"
+        _write_config(config, exclude_paths=["fixtures/**"])
+        excluded_dir = tmp_path / "fixtures"
+        excluded_dir.mkdir()
+        (excluded_dir / "sample.txt").write_text("clean\n")
+
+        data = _run_checker(tmp_path, config)
+
+        assert data["summary"]["passed"] is False
+        assert "examined 0 of" in data["summary"]["vacuous_scan"]
 
     def test_non_excluded_path_still_scanned(self, tmp_path: Path) -> None:
         config = tmp_path / "hooks-daemon.yaml"
@@ -459,3 +504,78 @@ class TestFaithfulVendoredCopiesStandPublicPatternsDown:
         data = self._scan(tmp_path, Path("docs") / "hooks.md", content)
 
         assert [v["rule"] for v in data["violations"]] == ["public-pattern:session-uuid"]
+
+
+class TestMalformedConfigFailsRatherThanBeingIgnored:
+    """A config file that exists but fails to parse must fail the gate.
+
+    ``_load_config`` used to turn a ``yaml.YAMLError`` into ``{}`` — exactly
+    what a MISSING config file also produces — so a typo in the YAML
+    silently disabled every public pattern and the secret-word-list lookup,
+    and the gate reported a clean sweep after tacitly checking nothing.
+    """
+
+    def test_malformed_yaml_fails_the_check(self, tmp_path: Path) -> None:
+        config = tmp_path / "hooks-daemon.yaml"
+        config.write_text("handlers: [unclosed\n")
+        (tmp_path / "file.txt").write_text("nothing sensitive here\n")
+
+        data = _run_checker(tmp_path, config)
+
+        assert data["summary"]["passed"] is False
+        assert any(v["rule"] == "config" for v in data["violations"])
+
+
+class TestInvalidPublicPatternIsReported:
+    """Mirrors check_git_history.py: an unparseable pattern is REPORTED, not
+    silently dropped — a rule that cannot compile checked nothing."""
+
+    def test_uncompilable_pattern_is_reported_not_skipped(self, tmp_path: Path) -> None:
+        config = tmp_path / "hooks-daemon.yaml"
+        _write_config(
+            config,
+            public_patterns=[{"name": "broken", "pattern": "[unclosed", "description": ""}],
+        )
+        (tmp_path / "file.txt").write_text("irrelevant\n")
+
+        data = _run_checker(tmp_path, config)
+
+        assert data["summary"]["passed"] is False
+        assert any(v["rule"] == "public-pattern:broken" for v in data["violations"])
+
+
+class TestUnreadableFileIsReportedNotSilentlyDropped:
+    """An unreadable/undecodable tracked file must fail the check, and its
+    NAME must still be checked against every pattern regardless."""
+
+    def test_binary_file_is_reported_as_a_violation(self, tmp_path: Path) -> None:
+        config = tmp_path / "hooks-daemon.yaml"
+        _write_config(config)
+        (tmp_path / "blob.bin").write_bytes(b"\xff\xfe\x00\x01")
+
+        data = _run_checker(tmp_path, config)
+
+        assert data["summary"]["passed"] is False
+        assert any(v["rule"] == "unreadable-file" for v in data["violations"])
+
+    def test_unreadable_files_still_count_toward_files_scanned(self, tmp_path: Path) -> None:
+        config = tmp_path / "hooks-daemon.yaml"
+        _write_config(config)
+        (tmp_path / "blob.bin").write_bytes(b"\xff\xfe\x00\x01")
+
+        data = _run_checker(tmp_path, config)
+
+        assert data["summary"]["files_scanned"] == 1
+
+    def test_unreadable_file_name_check_still_runs(self, tmp_path: Path) -> None:
+        terms_file = tmp_path / "temporary-terms.txt"
+        terms_file.write_text("zzqx-nonsense-term\n")
+        config = tmp_path / "hooks-daemon.yaml"
+        _write_config(config, secret_word_list_path=terms_file.name)
+        (tmp_path / "zzqx-nonsense-term.bin").write_bytes(b"\xff\xfe\x00\x01")
+
+        data = _run_checker(tmp_path, config)
+
+        rules = {v["rule"] for v in data["violations"]}
+        assert "secret-word-list" in rules
+        assert "unreadable-file" in rules

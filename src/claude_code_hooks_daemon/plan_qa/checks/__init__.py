@@ -12,6 +12,7 @@ documentation can be generated from it.
 """
 
 from claude_code_hooks_daemon.plan_qa.checks import (
+    archival_links_resolve,
     archive_immutability,
     archived_status_coherence,
     claim_spotcheck_queue,
@@ -42,6 +43,7 @@ from claude_code_hooks_daemon.plan_qa.checks import (
     row_folder_bijection,
     same_commit_plan_doc,
     staleness_nag,
+    stats_arithmetic,
     stats_recount,
     status_enum_and_date,
     status_line_present,
@@ -89,6 +91,9 @@ def all_checks() -> tuple[CheckSpec, ...]:
         # Plan-index retention window — COMMIT + SWEEP, no EDIT: a mid-archival
         # write is legitimately over the window (Plan 00379 N1).
         *index_retention_window.CHECKS,
+        # Plan-index statistics self-check — EDIT advises, COMMIT + SWEEP
+        # block: a mid-update write is legitimately inconsistent (Plan 00466 N13).
+        *stats_arithmetic.CHECKS,
         # Stage 2 — commit-gate-only checks
         index_at_birth.CHECK,
         counter_sanity.CHECK,
@@ -99,6 +104,9 @@ def all_checks() -> tuple[CheckSpec, ...]:
         journal_entry_with_progress.CHECK,
         journal_completion_entry.CHECK,
         plan_shrink_without_journal.CHECK,
+        # The archival commit is the only moment an archived plan's links are
+        # checked: the sweep exempts the record by design (Plan 00408).
+        archival_links_resolve.CHECK,
         # Stage 3 — sweep-only checks
         # plan-link-resolves is SWEEP-only by design (Plan 00419 N2): docs QA's
         # `pointer-resolves` already blocks a NEW dead link at edit and commit.

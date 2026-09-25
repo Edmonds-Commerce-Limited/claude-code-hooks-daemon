@@ -17,6 +17,12 @@ that any layer under test (the wrapper, the transport, the daemon) is
 itself responsible for injecting, and every assertion checks the RESPONSE
 shape the host actually consumes for that event's class (JSON decision
 object / raw text / exit-code-2), not merely that a response arrived.
+
+The one field added is the probe marker (Plan 00466 N12). These payloads
+reach the LIVE daemon, whose verdicts.jsonl is the real record, and no layer
+under test injects the marker, so carrying it validates nothing on the host's
+behalf. A tool or Stop payload also names the main thread (``probe_as``), so
+the MAIN-scoped ``auto_continue_stop`` still judges the Stop probes.
 """
 
 import json
@@ -26,7 +32,17 @@ from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.daemon.synthetic_traffic import (
+    PROBE_AS_FIELD,
+    SOCKET_STDIN_TEST,
+    SYNTHETIC_SOURCE_FIELD,
+    ProbeThread,
+)
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+_MARKED = {SYNTHETIC_SOURCE_FIELD: SOCKET_STDIN_TEST}
+_MAIN_PROBE = {**_MARKED, PROBE_AS_FIELD: ProbeThread.MAIN.value}
 HOOKS_DIR = REPO_ROOT / ".claude" / "hooks"
 _EXIT_OK = 0
 _EXIT_HARD_BLOCK = 2
@@ -36,7 +52,8 @@ _FORWARDER_TIMEOUT_SECONDS = 60
 
 _PRE_TOOL_USE_PAYLOAD = (
     b'{"tool_name":"Bash","tool_input":{"command":"true"},'
-    b'"hook_event_name":"PreToolUse","session_id":"socket-stdin-test"}'
+    b'"hook_event_name":"PreToolUse","session_id":"socket-stdin-test",'
+    b'"synthetic_source":"socket-stdin-test","probe_as":"main"}'
 )
 # Real PostToolUse shape (core/input_schemas.py: requires tool_name,
 # tool_response, hook_event_name const "PostToolUse" — a Bash tool_response
@@ -44,10 +61,12 @@ _PRE_TOOL_USE_PAYLOAD = (
 _POST_TOOL_USE_PAYLOAD = (
     b'{"tool_name":"Bash","tool_input":{"command":"true"},'
     b'"tool_response":{"stdout":"","stderr":""},'
-    b'"hook_event_name":"PostToolUse","session_id":"socket-stdin-test"}'
+    b'"hook_event_name":"PostToolUse","session_id":"socket-stdin-test",'
+    b'"synthetic_source":"socket-stdin-test","probe_as":"main"}'
 )
 _STATUS_PAYLOAD = (
-    b'{"session_id":"socket-stdin-test","model":{"display_name":"Test"},'
+    b'{"session_id":"socket-stdin-test","synthetic_source":"socket-stdin-test",'
+    b'"model":{"display_name":"Test"},'
     b'"workspace":{"current_dir":"' + str(REPO_ROOT).encode() + b'"}}'
 )
 
@@ -152,6 +171,7 @@ def test_stop_forwarder_exits_2_on_block_with_socket_stdin(tmp_path: Path) -> No
             "transcript_path": str(transcript),
             "session_id": "socket-stdin-stop-block-probe",
             "cwd": str(tmp_path),
+            **_MAIN_PROBE,
         }
     ).encode()
 
@@ -184,6 +204,7 @@ def test_stop_forwarder_exits_0_when_not_blocked_with_socket_stdin(tmp_path: Pat
             "transcript_path": str(transcript),
             "session_id": "socket-stdin-stop-allow-probe",
             "cwd": str(tmp_path),
+            **_MAIN_PROBE,
         }
     ).encode()
 
@@ -224,6 +245,7 @@ def test_worktree_create_forwarder_fails_cleanly_with_no_json_on_stdout(tmp_path
             "name": "socket-stdin-worktree-probe",
             "prompt_id": "socket-stdin-prompt",
             "session_id": "socket-stdin-worktree-session",
+            **_MARKED,
         }
     ).encode()
 

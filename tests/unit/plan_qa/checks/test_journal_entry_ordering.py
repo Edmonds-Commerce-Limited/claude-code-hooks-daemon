@@ -141,6 +141,89 @@ class TestTheRemediationIsLegalUnderTheOtherJournalRules:
 
         assert "append-only" in remediation or "committed" in remediation
 
+    def test_the_remediation_names_the_correction_category(self) -> None:
+        """The legal move must be spelled out, including how to name the entry."""
+        body = _PREAMBLE + _entry("13:00") + _entry("12:50")
+        remediation = _EDIT.run(_ctx(body))[0].remediation
+
+        assert "correction" in remediation
+        assert "--ref" in remediation
+
+
+def _correction(time: str, corrects: str) -> str:
+    return f"## {time} · correction · {corrects}   — the {corrects} stamp was wrong\n\nBody.\n\n"
+
+
+class TestACorrectionVoidsTheTimeOfTheEntryItNames:
+    """Ledger 00422 N3, decision 5: the `correction` category.
+
+    A correction whose honest time is EARLIER than the future-dated entry it
+    corrects cannot be both appended and in order. Naming the corrected entry
+    in the correction's REF declares that entry's clock reading wrong, so it
+    stops setting the high-water mark. The corrected entry stays where it is,
+    and its text is unchanged.
+    """
+
+    def test_correcting_a_future_dated_entry_clears_the_finding(self) -> None:
+        """The N3 shape: 09:50 was stamped when the clock read 09:11."""
+        body = _PREAMBLE + _entry("09:00") + _entry("09:50") + _correction("09:12", "09:50")
+        assert _EDIT.run(_ctx(body)) == []
+
+    def test_the_same_file_without_the_correction_is_a_finding(self) -> None:
+        """Control: the finding the correction clears is real."""
+        body = _PREAMBLE + _entry("09:00") + _entry("09:50") + _entry("09:12")
+        assert len(_EDIT.run(_ctx(body))) == 1
+
+    def test_honest_entries_after_the_correction_are_in_order(self) -> None:
+        body = (
+            _PREAMBLE
+            + _entry("09:00")
+            + _entry("09:50")
+            + _correction("09:12", "09:50")
+            + _entry("09:20")
+        )
+        assert _EDIT.run(_ctx(body)) == []
+
+    def test_an_entry_between_the_wrong_one_and_its_correction_is_in_order(self) -> None:
+        """Every entry is judged once the whole file's corrections are known."""
+        body = (
+            _PREAMBLE
+            + _entry("09:00")
+            + _entry("09:50")
+            + _entry("09:05")
+            + _correction("09:12", "09:50")
+        )
+        assert _EDIT.run(_ctx(body)) == []
+
+    def test_a_correction_naming_a_different_entry_voids_nothing_else(self) -> None:
+        body = (
+            _PREAMBLE
+            + _entry("09:00")
+            + _entry("09:50")
+            + _entry("09:55")
+            + _correction("09:12", "09:50")
+        )
+        findings = _EDIT.run(_ctx(body))
+        assert len(findings) == 1
+        assert "`09:12` appears after `09:55`" in findings[0].message
+
+    def test_a_ref_on_another_category_voids_nothing(self) -> None:
+        """Only a `correction` declares a clock reading wrong."""
+        body = (
+            _PREAMBLE
+            + _entry("09:00")
+            + _entry("09:50")
+            + "## 09:12 · finding · 09:50   — not a correction\n\nBody.\n\n"
+        )
+        assert len(_EDIT.run(_ctx(body))) == 1
+
+    def test_a_cross_day_reference_voids_nothing_in_this_file(self) -> None:
+        """`YY-MM-DD/HH:MM` names an entry in another day-file, not this one."""
+        body = (
+            _PREAMBLE + _entry("09:00") + _entry("09:50") + _correction("09:12", "26-09-10/09:50")
+        )
+        assert len(_EDIT.run(_ctx(body))) == 1
+
 
 class TestWhatIsNotAnEntry:
     def test_a_heading_inside_a_fence_is_not_an_entry(self) -> None:
@@ -245,6 +328,65 @@ def _sweep_check_ids(
     return [f["check_id"] for f in json.loads(capsys.readouterr().out)]
 
 
+def _sweep_check_ids_with_correction(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    earlier_date: date,
+    later_date: date,
+    ref: str,
+) -> list[str]:
+    """Like :func:`_sweep_check_ids`, but two day-files: an earlier one with
+    the out-of-order entries, and a later one holding only the correction."""
+    import argparse
+    import json
+    import subprocess
+
+    from claude_code_hooks_daemon.constants.timeout import Timeout
+    from claude_code_hooks_daemon.daemon.cli import cmd_plan_qa
+
+    root = tmp_path / "repo"
+    plan_dir = root / "CLAUDE" / "Plan"
+    (plan_dir / "Completed").mkdir(parents=True)
+    (plan_dir / "Cancelled").mkdir()
+    (root / ".claude").mkdir()
+    (root / ".claude" / "hooks-daemon.yaml").write_text("plan_workflow:\n  enabled: true\n")
+
+    folder = plan_dir / "00001-first"
+    folder.mkdir()
+    (folder / "PLAN.md").write_text(
+        "# Plan 00001: first\n\n**Status**: In Progress\n\n- [ ] ⬜ **Task 1.1**: x\n"
+    )
+    journal = folder / "JOURNAL"
+    journal.mkdir()
+    (journal / f"00001-Journal-{earlier_date:%y-%m-%d}.md").write_text(
+        _PREAMBLE + _entry("13:00") + _entry("12:50")
+    )
+    (journal / f"00001-Journal-{later_date:%y-%m-%d}.md").write_text(
+        _PREAMBLE + _correction("09:00", ref)
+    )
+    (plan_dir / "README.md").write_text(
+        "# Plans Index\n\n## Active Plans\n\n- [00001: first](00001-first/PLAN.md) - In Progress\n"
+    )
+    subprocess.run(
+        ["git", "init", str(root)],
+        capture_output=True,
+        check=True,
+        timeout=Timeout.GIT_CONTEXT,
+    )
+
+    cmd_plan_qa(
+        argparse.Namespace(
+            project_root=root,
+            sweep=True,
+            check_staged=False,
+            lint=None,
+            json_output=True,
+        )
+    )
+    return [f["check_id"] for f in json.loads(capsys.readouterr().out)]
+
+
 class TestTheSweepSeesItToo:
     """N1 was specifically a SWEEP gap — the edit-time half already worked."""
 
@@ -279,3 +421,38 @@ class TestTheSweepsDeliberateBlindSpots:
         """`archive-immutability` forbids the edit that would fix it."""
         ids = _sweep_check_ids(tmp_path, capsys, archived=True)
         assert "journal-entry-ordering" not in ids
+
+
+class TestACrossDayCorrectionVoidsTheEntryItNames:
+    """A correction can only ever be APPENDED to TODAY's day-file
+    (``mkplan.bash --journal`` has no way to append into an earlier one), so
+    voiding an earlier file's own out-of-order entry needs a REF that crosses
+    files: ``YY-MM-DD/HH:MM``. ``corrected_entry_labels`` deliberately reads
+    only same-file REFs (edit-time has no other file to check against); the
+    sweep is the only stage that sees the whole plan and can resolve one.
+    """
+
+    def test_a_correction_in_a_later_dayfile_voids_the_earlier_ones_finding(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        ids = _sweep_check_ids_with_correction(
+            tmp_path,
+            capsys,
+            earlier_date=date(2026, 9, 11),
+            later_date=date(2026, 9, 12),
+            ref="26-09-11/12:50",
+        )
+        assert "journal-entry-ordering" not in ids
+
+    def test_a_correction_naming_the_wrong_entry_voids_nothing(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Control: the cross-day mechanism only voids the NAMED entry."""
+        ids = _sweep_check_ids_with_correction(
+            tmp_path,
+            capsys,
+            earlier_date=date(2026, 9, 11),
+            later_date=date(2026, 9, 12),
+            ref="26-09-11/09:00",
+        )
+        assert "journal-entry-ordering" in ids

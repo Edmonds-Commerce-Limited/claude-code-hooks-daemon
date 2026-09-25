@@ -440,6 +440,39 @@ path — wherever it next appears, not just at these six coordinates.
   above.
 - Fix: `25c4573e` (the shared matcher), `ebb31e61` (all six sites moved).
 
+**Command heads behind shell reserved words** — thirteen sites that name
+the command a segment runs, against `utils/process_probe.py`'s
+`_COMMAND_POSITION_MARKERS`. Found via 00422 N25: `pipe_blocker` read the
+producer of `for f in a b; do grep x "$f" | head; done` as `do`.
+
+What it allowed: splitting on `;` leaves ` do git commit` or ` then cp ...`,
+and a site that takes the first word, or anchors at the segment start, judges
+the reserved word. `pipe_blocker` denied a whitelisted `grep` and printed a fix
+that whitelisted `^do\b`, which would have exempted every loop body's pipe.
+Behind `then`, `do`, `!` or `time`, a `git commit` passed `staged_lint_gate`, a
+`gh issue create` passed `issue_filing_gate`, a `sed` passed `sed_blocker`, a
+worktree `cp` passed `worktree_file_copy`, and a `mkdir` outside the project
+passed `project_containment`. Five other sites withheld an exemption they
+grant without the prefix.
+
+`process_probe` already treated the loop and branch keywords as command
+position markers. The other sites re-derived "the first word is the command"
+without them. The fix is one primitive in `utils/command_evasion`:
+`RESERVED_WORD_PREFIX` and `COMMAND_POSITION` for anchored patterns, and
+`strip_reserved_word_prefix` for sites that read the first word. Nine
+declared rows bind the sites to it. `bash_flags` is deliberately excluded,
+because it asks whether a `set` still applies afterwards, and a `set` behind
+`then` may never run. The two `secret_file_matching` exemption sites look past
+`time` and `!` only, through `strip_transparent_reserved_words`. Those two words
+change neither which command runs nor what it reads. The compound-only words
+stay fail-closed, because both exemptions accept a single simple command.
+`pipe_blocker` also resolves a subshell producer, `( (grep x) ) | head`, to its
+last command. `(` stays out of the shared primitive.
+
+- Defence: `6be0ae57`, committed deliberately red over 9 declared rows; the
+  follow-up `1cf338c6` added a tenth row (the secret exemptions) red.
+- Fix: `319cdd35`, then the commit following `1cf338c6`.
+
 Nine further table rows are recorded in
 [the consolidated worklist](../Plan/Completed/00412-jobs-recurring-work-and-security-review/subagent-reports/260915-consolidated-defence-worklist.md),
 with the registry's design notes in

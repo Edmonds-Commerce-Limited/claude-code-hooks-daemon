@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
+from claude_code_hooks_daemon.handlers.registry import apply_handler_options
 from claude_code_hooks_daemon.handlers.session_start.hook_registration_checker import (
     HookRegistrationCheckerHandler,
 )
@@ -152,7 +153,7 @@ class TestHookRegistrationCheckerHandle:
         Plan 00185: with ``auto_repair_registrations`` disabled the handler falls
         back to warn-only, so this still exercises the detection reporting.
         """
-        handler.configure({"auto_repair_registrations": False})
+        apply_handler_options(handler, {"auto_repair_registrations": False})
         settings = _build_valid_settings()
         del settings["hooks"]["Stop"]
         del settings["hooks"]["PreToolUse"]
@@ -262,7 +263,7 @@ class TestHookRegistrationCheckerHandle:
         Plan 00185: disable auto-repair so the popped main entry is not silently
         re-added — this test targets misplacement detection, not repair.
         """
-        handler.configure({"auto_repair_registrations": False})
+        apply_handler_options(handler, {"auto_repair_registrations": False})
         settings = _build_valid_settings()
         # Remove Notification from main so the local entry is unique, not duplicate
         settings["hooks"].pop("Notification", None)
@@ -351,7 +352,7 @@ class TestHookRegistrationCheckerMigratesLegacyCommands:
     def test_opt_out_disables_migration(
         self, handler: HookRegistrationCheckerHandler, tmp_path: Path
     ) -> None:
-        handler.configure({"auto_migrate_settings": False})
+        apply_handler_options(handler, {"auto_migrate_settings": False})
 
         settings_path = tmp_path / ".claude" / "settings.json"
         settings_path.parent.mkdir(parents=True)
@@ -446,7 +447,9 @@ class TestHookRegistrationCheckerAutoRepair:
     ) -> None:
         # Disable BOTH self-heal paths so the file is provably untouched; the
         # command-shape migration would otherwise rewrite the bare-path fixture.
-        handler.configure({"auto_repair_registrations": False, "auto_migrate_settings": False})
+        apply_handler_options(
+            handler, {"auto_repair_registrations": False, "auto_migrate_settings": False}
+        )
         settings = _build_valid_settings()
         del settings["hooks"]["Stop"]
 

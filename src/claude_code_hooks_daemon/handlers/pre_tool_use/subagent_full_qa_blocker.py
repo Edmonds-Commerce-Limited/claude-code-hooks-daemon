@@ -4354,7 +4354,10 @@ def _resolved_code_path(path: str, here: Path | None) -> str | None:
         try:
             home = Path(_HOME).expanduser()
         except RuntimeError as error:
-            logger.debug("No home directory to place %r in (%s)", path, error)
+            # Surfaced at warning, not debug (00466 N29): this local's fallback
+            # is what the caller below returns, so a debug-level log here
+            # would be error-hiding-via-local by the audit's own definition.
+            logger.warning("No home directory to place %r in (%s)", path, error)
             home = None
         if home is None:
             return None
@@ -4393,7 +4396,8 @@ def _symlink_declared_name(
         link = Path(resolved)
         target = link.resolve() if link.is_symlink() else None
     except OSError as error:
-        logger.debug("Could not check %r for a symlink target (%s)", resolved, error)
+        # Surfaced at warning, not debug (00466 N29): see _resolved_code_path.
+        logger.warning("Could not check %r for a symlink target (%s)", resolved, error)
         target = None
     if target is None:
         return None
@@ -4753,7 +4757,8 @@ def _path_substitution(code: str, depth: int) -> str | None:
             if segment.strip()
         ]
     except ValueError as error:
-        logger.debug("Substitution not computable, unsplittable (%s): %r", error, code)
+        # Surfaced at warning, not debug (00466 N29): see _resolved_code_path.
+        logger.warning("Substitution not computable, unsplittable (%s): %r", error, code)
         commands = None
     if commands is None:
         return None

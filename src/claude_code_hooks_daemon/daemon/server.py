@@ -27,7 +27,7 @@ from typing import Any, Final, Protocol, runtime_checkable
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.constants.events import wired_event_metas
 from claude_code_hooks_daemon.constants.modes import DaemonMode, ModeConstant
-from claude_code_hooks_daemon.constants.protocol import SocketLimit
+from claude_code_hooks_daemon.constants.protocol import HookInputField, SocketLimit
 from claude_code_hooks_daemon.core.hook_result import HookResult
 from claude_code_hooks_daemon.core.input_schemas import get_input_schema
 from claude_code_hooks_daemon.core.project_context import ProjectContext
@@ -486,6 +486,7 @@ class HooksDaemon:
         "last_activity",
         "server",
         "shutdown_event",
+        "started_event",
     )
 
     def __init__(
@@ -507,6 +508,13 @@ class HooksDaemon:
         self._event_servers: dict[str, asyncio.Server] = {}
         self.last_activity: float = time.time()
         self.shutdown_event = asyncio.Event()
+        # Set once `start()` has finished both binding steps (legacy socket
+        # + per-event listeners, best-effort) -- the deterministic readiness
+        # signal a caller awaits instead of guessing a fixed sleep duration
+        # (Plan 00466 N39 widened: 13 call sites in
+        # test_event_socket_listeners.py raced a fixed 100 ms against these
+        # same two awaited steps under host load).
+        self.started_event = asyncio.Event()
         self._active_requests = 0
         self._shutdown_requested = False
         self._shutdown_task: asyncio.Task[None] | None = None
@@ -716,6 +724,12 @@ class HooksDaemon:
         # the legacy-socket reuse gate above — a start that loses the race
         # (DaemonAlreadyRunningError) never touches the events dir.
         await self._bind_event_sockets(socket_path)
+
+        # Both binding steps above are complete (best-effort for the
+        # per-event listeners -- a partial bind still reaches here). A
+        # caller waiting on `started_event` can now safely assume the
+        # legacy socket is live and `_event_servers` holds its final set.
+        self.started_event.set()
 
         # Setup signal handlers for graceful shutdown
         loop = asyncio.get_running_loop()
@@ -1041,6 +1055,23 @@ class HooksDaemon:
             chunks.append(chunk)
         return b"".join(chunks)
 
+    async def _answer_event(
+        self, event_json_key: str, hook_input: Any, writer: asyncio.StreamWriter
+    ) -> None:
+        """Dispatch one parsed event-socket payload and write its response."""
+        if isinstance(hook_input, dict) and not hook_input.get(HookInputField.HOOK_EVENT_NAME):
+            hook_input[HookInputField.HOOK_EVENT_NAME] = event_json_key
+
+        request_data = json.dumps({"event": event_json_key, "hook_input": hook_input})
+        response = await self._process_request(request_data)
+        response_json = json.dumps(response)
+
+        if is_blocking_response(response):
+            log_blocking_response(response_json, debug_enabled=logger.isEnabledFor(logging.DEBUG))
+
+        writer.write(response_json.encode())
+        await writer.drain()
+
     async def _handle_event_client(
         self, event_json_key: str, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
@@ -1081,22 +1112,8 @@ class HooksDaemon:
                 )
                 writer.write(json.dumps({}).encode())
                 await writer.drain()
-                return
-
-            if isinstance(hook_input, dict) and not hook_input.get("hook_event_name"):
-                hook_input["hook_event_name"] = event_json_key
-
-            request_data = json.dumps({"event": event_json_key, "hook_input": hook_input})
-            response = await self._process_request(request_data)
-            response_json = json.dumps(response)
-
-            if is_blocking_response(response):
-                log_blocking_response(
-                    response_json, debug_enabled=logger.isEnabledFor(logging.DEBUG)
-                )
-
-            writer.write(response_json.encode())
-            await writer.drain()
+            else:
+                await self._answer_event(event_json_key, hook_input, writer)
 
         except (BrokenPipeError, ConnectionResetError):
             self._log_lost_peer(None)
@@ -1224,6 +1241,11 @@ class HooksDaemon:
         if pid_file_path and pid_file_path.exists():
             pid_file_path.unlink()
             logger.debug("Removed PID file: %s", pid_file_path)
+
+        # started_event marks "is currently live", not "has started at
+        # least once" -- clear it so a caller polling `is_set()` observes
+        # the stop (Plan 00466 N39 review1 MEDIUM-2).
+        self.started_event.clear()
 
         # Signal shutdown complete
         self.shutdown_event.set()
@@ -1545,7 +1567,7 @@ class HooksDaemon:
 
         elif action == "log_marker":
             # Log a boundary marker message
-            message = hook_input.get("message", "MARKER")
+            message = hook_input.get(HookInputField.MESSAGE, "MARKER")
             logger.info(f"=== {message} ===")
             response = {"result": {"status": "logged", "message": message}}
 

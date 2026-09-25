@@ -38,7 +38,7 @@ peak — so the state alone does not tell an operator whether to care.
 import time
 from typing import Any
 
-from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.core import AdvisoryResult
 from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
 from claude_code_hooks_daemon.core.handler_bases import StatusLineHandlerBase
@@ -228,7 +228,8 @@ class PromptCacheIndicatorHandler(StatusLineHandlerBase):
         anything the sub-agent sidecar does.
         """
         try:
-            totals = read_subagent_cache_totals(str(hook_input.get("session_id") or ""))
+            session_id = str(hook_input.get(HookInputField.SESSION_ID) or "")
+            totals = read_subagent_cache_totals(session_id)
         except (OSError, RuntimeError, ValueError):
             return []
 

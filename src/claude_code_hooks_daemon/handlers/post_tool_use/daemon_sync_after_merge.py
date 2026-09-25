@@ -79,8 +79,6 @@ def _running_version() -> str:
 #: relocated tree is exactly the kind of thing nobody discovers.
 _DEFAULT_WATCH_PATHS: Final[tuple[str, ...]] = (".claude/project-handlers",)
 
-_CWD_FIELD: Final[str] = "cwd"
-
 _HEADER: Final[str] = (
     "DAEMON MAY BE STALE: this merge/pull/rebase changed daemon configuration "
     "or handler code. The running daemon read its config at startup and imported "
@@ -189,7 +187,7 @@ class DaemonSyncAfterMergeHandler(PostToolUseHandlerBase):
         against THIS project would describe an operation that never happened
         here.
         """
-        cwd_raw = hook_input.get(_CWD_FIELD)
+        cwd_raw = hook_input.get(HookInputField.CWD)
         if not cwd_raw:
             return False
         repo = GitRepo.resolve_for(Path(cwd_raw))

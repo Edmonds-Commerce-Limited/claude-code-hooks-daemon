@@ -646,7 +646,12 @@ end-to-end against a fresh fixture project. Together they catch:
 # banned pattern to warn against — no agent shell ever sets it; Plan 00192).
 source scripts/lib/resolve_venv.sh
 PY="$(resolve_venv_python /workspace)"
-"$PY" -m pytest tests/acceptance/test_diagnostic_scripts.py tests/acceptance/test_install_sh_end_to_end.py tests/acceptance/test_tool_use_error_recovery.py tests/acceptance/test_stop_hook_hard_block.py tests/acceptance/test_skill_install_python_discovery.py tests/acceptance/test_playbook_harness.py -v
+# HOOKS_DAEMON_RELEASE_GATE=1 is the explicit signal blocking_gate_guard.py
+# (tests/acceptance/) requires before it escalates a skip of one of these
+# files to a failure — this IS that release-gate invocation, so it must be
+# set here (Plan 00466 N39 widened). An ad hoc run of these files with no
+# daemon running, and no signal set, gets the ordinary skip instead.
+HOOKS_DAEMON_RELEASE_GATE=1 "$PY" -m pytest tests/acceptance/test_diagnostic_scripts.py tests/acceptance/test_install_sh_end_to_end.py tests/acceptance/test_tool_use_error_recovery.py tests/acceptance/test_stop_hook_hard_block.py tests/acceptance/test_skill_install_python_discovery.py tests/acceptance/test_playbook_harness.py -v
 # Expected: 0 failed, 0 skipped. The pass COUNT is deliberately not stated —
 # see below.
 ```

@@ -531,7 +531,12 @@ class DebugInfoGenerator:
         if pre_tool_use.exists():
             self.output("### Testing PreToolUse hook with simple command")
             self.output("```")
-            test_input = '{"tool_name":"Bash","tool_input":{"command":"echo hello"}}'
+            # Marked as a hand-run probe (Plan 00466 N12), so the verdict log
+            # does not record a diagnostic run as a real agent's tool call.
+            test_input = (
+                '{"tool_name":"Bash","tool_input":{"command":"echo hello"},'
+                '"synthetic_source":"manual-probe","probe_as":"main"}'
+            )
             test_out, _ = self.run_command(["bash", "-c", f"echo '{test_input}' | {pre_tool_use}"])
             self.output(test_out.strip())
             self.output("```")
@@ -539,7 +544,10 @@ class DebugInfoGenerator:
 
             self.output("### Testing PreToolUse hook with destructive git command")
             self.output("```")
-            test_input = '{"tool_name":"Bash","tool_input":{"command":"git reset --hard HEAD"}}'
+            test_input = (
+                '{"tool_name":"Bash","tool_input":{"command":"git reset --hard HEAD"},'
+                '"synthetic_source":"manual-probe","probe_as":"main"}'
+            )
             test_out, _ = self.run_command(["bash", "-c", f"echo '{test_input}' | {pre_tool_use}"])
             self.output(test_out.strip())
             self.output("```")

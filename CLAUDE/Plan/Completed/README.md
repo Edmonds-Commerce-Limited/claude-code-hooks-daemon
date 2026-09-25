@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00425: remote docs index goes stale on delete](00425-remote-docs-index-goes-stale-on-delete/PLAN.md) - Complete at `edd91533`…`9282c9ea` + the archiving commit (from issue #43: `rm` is the one tree mutation that runs no daemon command, so `check` called the corpus fresh while the index named a deleted file. `check` now detects and reports; the network-free `remote-docs index` repairs)
+
 - [00424: remote docs add overwrites existing capture](00424-remote-docs-add-overwrites-existing-capture/PLAN.md) - Complete at `ad8e79b3`…`08f8b9c9` + the archiving commit (from issue #42: a second `add` of one URL silently replaced the first capture. The catch the report could not see is that `check` PRINTS plain `add` as the licence-drift remedy, so the refusal and that remedy moved together, welded by a test — nothing pinned that line before, in either direction)
 
 - [00423: per handler scope main sub](00423-per-handler-scope-main-sub/PLAN.md) - Complete at `93f2a1c0`…`48733f1b` + the archiving commit (from issues #40/#41: handlers declare `scope: ALL|MAIN|SUB`, keyed on `agent_id` presence because `agent_type` was measured empty in 4 of 5 subagent stops; #41's three destructive controls are scoped but deliberately not built)
@@ -34,6 +36,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 - [00404: niggles ledger ten](00404-niggles-ledger-ten/PLAN.md) - Complete at `bd8fd27f` + the archiving commit (one entry, fixed: an unguarded `chmod` one line outside `_bind_event_sockets`' per-socket guard meant a single unsecurable socket aborted daemon startup and cost ALL 31 event sockets — found by reading a CI failure rather than hitting a symptom. The NEXT niggle opens ledger eleven)
 
+- [00402: restart path leaves generated handler doc stale](00402-restart-path-leaves-generated-handler-doc-stale/PLAN.md) - Complete at `40098113`…`d1f9e32a` + the archiving commit (a restart regenerated the `CLAUDE.md` block but never `.claude/HOOKS-DAEMON.md`, and nothing could see the drift. Ruled option 3: a `generated_doc_drift` QA check compares the body against fresh output and never rewrites the deployed-from marker `upgrade.sh` reads)
+
 - [00401: reference repo freshness before read](00401-reference-repo-freshness-before-read/PLAN.md) - Complete at `9e399219`…`7a43abf6` + the archiving commit (one checker over `git_sync` feeds a SessionStart sweep, a cache-only PreToolUse gate and a CLI report, with a third verdict for a clone that is un-fetchable by design; four defects were found by using the finished thing, not by adding tests)
 
 - [00400: niggles ledger nine](00400-niggles-ledger-nine/PLAN.md) - Complete at `35da2e85`…`397cdde3` (CI evidence at `6a8d01da`) + the archiving commit (six entries: N1–N4 found without hitting a symptom; N5 and N6 by refusing the first explanation — 18 acceptance errors read as tool contention were a STALE DAEMON, and the restart clearing them refreshes only one of two generated docs. N6's behaviour graduated to Plan 00402)
@@ -44,6 +48,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 - [00395: running daemon detects source changed underneath it](00395-running-daemon-detects-source-changed-underneath-it/PLAN.md) - Complete at `f912c15b`…`953f9bd6` + the archiving commit (a daemon upgraded by ANOTHER session kept serving what it loaded at startup; a UserPromptSubmit check re-resolves the venv and compares `.daemon-metadata.json` against the running `__version__`, silent when they match, dormant in self-install mode)
 
+- [00394: failsafe cron coverage starts at first plan write](00394-failsafe-cron-coverage-starts-at-first-plan-write/PLAN.md) - Complete at `9370546f`…`3ffd713c` + the archiving commit (ruled options 1 and 2: a declared `failsafe-recovery` job plus a new SessionStart `failsafe_cron_session_advisor` give every session coverage from its first plan write, not only after issue-sdlc/watchdog establish it)
+
 - [00393: niggles ledger seven](00393-niggles-ledger-seven/PLAN.md) - Complete at `a83593eb`…`ed00e582` + the archiving commit (two entries: N1 graduated to Plan 00394 — the failsafe cron has no session-start coverage; N2 fixed — CI on `main` cancelled its own runs, so 13 of 20 runs died and the release gate's evidence with them)
 
 - [00392: niggles ledger six](00392-niggles-ledger-six/PLAN.md) - Complete at `c7c3126c`…`836164e9` + the archiving commit (one entry, graduated not fixed: the `issue-sdlc` cron has no stand-down mechanism at all, and it turned out to be the SAME mechanism as Plan 00388 rather than a sibling — suppression keys on the literal `FAILSAFE RECOVERY CHECK`)
@@ -51,6 +57,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 - [00390: niggles ledger five](00390-niggles-ledger-five/PLAN.md) - Complete at `7e0756af`…`915f168b` + the archiving commit (two entries, both fixed: `normalize_path` let MARKER-LIST order pick a path's root instead of position, and the generated CLAUDE.md announced an inert handler's rule as project policy — which is what left 00386/00389 sitting open on a gate that was switched off)
 
 - [00389: git pull reconciles daemon config and version](00389-git-pull-reconciles-daemon-config-and-version/PLAN.md) - Complete at `263c18f2`…`fece90e2` + the archiving commit (a pull brought in daemon config, handler code or a new version and the running daemon never noticed; advisory only by owner ruling, and it sees an in-session pull only)
+
+- [00388: failsafe marker wiped by other crons in multi cron sessions](00388-failsafe-marker-wiped-by-other-crons-in-multi-cron-sessions/PLAN.md) - Complete at `9370546f`…`3ffd713c` + the archiving commit (ruled approach 2′: cron ticks now carry a daemon-supplied sentinel, so the failsafe suppressor and the declared-cron stand-down both recognise a tick versus a genuine human prompt; a pre-existing agent-composed prompt is the accepted residual)
 
 - [00387: issue sdlc runbook refinements from the first backlog sweep](00387-issue-sdlc-runbook-refinements-from-the-first-backlog-sweep/PLAN.md) - Complete at `377456ac`…`f7fe8e7b` + the archiving commit (a whole-backlog sweep showed three of four untriaged issues were already fixed, so the loop's real output is a closed issue carrying evidence — two new triage checks, a concrete stale-`agent-working` recovery path, and reading a CI run rather than the watcher)
 

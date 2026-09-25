@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.constants.handlers import HandlerID
+from claude_code_hooks_daemon.constants.protocol import HookInputField
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core import AdvisoryResult
 from claude_code_hooks_daemon.core.handler_bases import WorktreeCreateHandlerBase
@@ -40,11 +41,10 @@ logger = logging.getLogger(__name__)
 # This handler is the only one on the WorktreeCreate event; priority is nominal.
 _WORKTREE_CREATE_PRIORITY = 50
 
-# Hook-input keys Claude Code sends (captured from a real WorktreeCreate payload).
-_KEY_CWD = "cwd"
+# Hook-input keys Claude Code sends (captured from a real WorktreeCreate payload)
+# that are not part of the tracked HookInputField protocol (WorktreeCreate-only).
 _KEY_NAME = "name"
 _KEY_PROMPT_ID = "prompt_id"
-_KEY_SESSION_ID = "session_id"
 
 
 class WorktreeCreateHandler(WorktreeCreateHandlerBase):
@@ -77,10 +77,10 @@ class WorktreeCreateHandler(WorktreeCreateHandlerBase):
 
     def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         """Create (or reuse) the worktree and return its absolute path."""
-        cwd = str(hook_input.get(_KEY_CWD) or Path.cwd())
+        cwd = str(hook_input.get(HookInputField.CWD) or Path.cwd())
         name = hook_input.get(_KEY_NAME)
         prompt_id = hook_input.get(_KEY_PROMPT_ID)
-        session_id = hook_input.get(_KEY_SESSION_ID)
+        session_id = hook_input.get(HookInputField.SESSION_ID)
 
         root = self._repo_root(cwd)
         path = worktree_path(root, name, prompt_id, session_id)

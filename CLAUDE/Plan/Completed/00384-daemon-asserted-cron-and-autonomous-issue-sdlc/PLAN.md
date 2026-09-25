@@ -23,6 +23,16 @@ DECLARES the crons it wants and asserts their presence at SessionStart, telling
 the agent to recreate any that are missing. `recovery_cron_advisor` already
 establishes this shape for the failsafe cron.
 
+> **Correction ([Plan 00394](../../00394-failsafe-cron-coverage-starts-at-first-plan-write/PLAN.md)):
+> the sentence above is only half true.** `recovery_cron_advisor` supplies a
+> daemon-authored verbatim prompt, as a declaration does, but it is a
+> PostToolUse handler that speaks at a plan-lifecycle moment. It does NOT
+> assert at SessionStart, so the failsafe cron was left undeclared on an
+> equivalence that fails for the one property that mattered: coverage from the
+> start of a session. Plan 00394 added the SessionStart counterpart
+> (`failsafe_cron_session_advisor`) and declared the failsafe cron in this
+> repository's `persistent_crons`.
+
 That splits the work in two. The declaration/assertion mechanism is a generic
 daemon capability worth having on its own, and the issue SDLC is then just one
 declared cron whose prompt invokes a skill holding the runbook.

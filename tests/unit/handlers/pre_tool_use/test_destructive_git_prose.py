@@ -290,21 +290,10 @@ class TestAFlagIsNotAMessage:
         """The control: the spelling that was never broken."""
         assert _matches(handler, f"git checkout {_DISCARD} f.txt") is True
 
-    @pytest.mark.xfail(
-        reason=(
-            "Known BEHAVIOUR gap, Plan 00408: a QUOTED operand is not recognised, "
-            "and it is not this release's regression -- the plain quoted spelling "
-            "fails identically with no `-m` present, so blanking was never the "
-            "cause. Recorded as Plan 00407 N8 and graduated rather than fixed "
-            "inside a release: the pattern change is broader than the scoping fix "
-            "beside it. Flips to a plain pass when 00408 lands; fails loudly if "
-            "'fixed' by accident."
-        ),
-        strict=True,
-    )
     def test_quoting_the_operand_does_not_hide_it_either(
         self, handler: DestructiveGitHandler
     ) -> None:
+        """Plan 00408 Task 3.0: bash removes the quotes before git sees ``--``."""
         assert _matches(handler, f'git checkout -m "{_DISCARD}" f.txt') is True
 
     def test_a_real_commit_message_is_still_treated_as_prose(

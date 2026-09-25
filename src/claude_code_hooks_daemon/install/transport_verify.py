@@ -36,11 +36,18 @@ import subprocess  # nosec B404
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Final
 
 from claude_code_hooks_daemon.constants.events import wired_event_metas
 from claude_code_hooks_daemon.daemon.paths import (
     get_event_socket_dir,
     get_event_socket_dir_from_untracked,
+)
+from claude_code_hooks_daemon.daemon.synthetic_traffic import (
+    PROBE_AS_FIELD,
+    SYNTHETIC_SOURCE_FIELD,
+    TRANSPORT_VERIFY,
+    ProbeThread,
 )
 from claude_code_hooks_daemon.install.forwarder_generator import (
     RELAY_EXCLUDED_EVENT_FILE_NAMES,
@@ -77,14 +84,24 @@ class ProbeResult:
     detail: str
 
 
+#: Every probe declares itself (Plan 00466 N12), or verdicts.jsonl records
+#: each toggle's verification as a real session's tool call and stop.
+_MARKED: Final[dict[str, str]] = {SYNTHETIC_SOURCE_FIELD: TRANSPORT_VERIFY}
+
+#: A PreToolUse or Stop probe also names the thread it stands for, so the
+#: MAIN-scoped handlers it exists to reach (``auto_continue_stop``) judge it.
+_MARKED_AS_MAIN: Final[dict[str, str]] = {**_MARKED, PROBE_AS_FIELD: ProbeThread.MAIN.value}
+
+
 def _pre_tool_use_payload() -> bytes:
-    """A real PreToolUse payload — exactly the shape Claude Code sends."""
+    """A real PreToolUse payload — the shape Claude Code sends, plus the probe marker."""
     return json.dumps(
         {
             "tool_name": "Bash",
             "tool_input": {"command": "true"},
             "hook_event_name": "PreToolUse",
             "session_id": _PROBE_SESSION_ID,
+            **_MARKED_AS_MAIN,
         }
     ).encode()
 
@@ -103,6 +120,9 @@ def _status_line_payload(project_root: Path) -> bytes:
             "session_id": _PROBE_SESSION_ID,
             "model": {"display_name": "Probe"},
             "workspace": {"current_dir": str(project_root)},
+            # The daemon's own marker, not a host field: no layer under test
+            # injects it, so carrying it validates nothing on the host's behalf.
+            **_MARKED,
         }
     ).encode()
 
@@ -251,6 +271,7 @@ def probe_stop_hard_block(hooks_dir: Path) -> ProbeResult:
                 "transcript_path": str(transcript),
                 "session_id": _PROBE_SESSION_ID,
                 "cwd": str(isolated_cwd),
+                **_MARKED_AS_MAIN,
             }
         ).encode()
         try:

@@ -59,6 +59,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from claude_code_hooks_daemon.constants.protocol import HookInputField
 from claude_code_hooks_daemon.core.chain import HandlerVerdict
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.hook_result import Decision
@@ -113,7 +114,7 @@ _ESCAPE_HATCH_PATTERN = re.compile(r"MUST_[A-Z][A-Z0-9_]*_BECAUSE\s*[:=]")
 
 def _extract_escape_hatch_text(hook_input: dict[str, Any]) -> str:
     """Concatenate the tool_input text fields an escape hatch could appear in."""
-    tool_input = hook_input.get("tool_input")
+    tool_input = hook_input.get(HookInputField.TOOL_INPUT)
     if not isinstance(tool_input, dict):
         return ""
     parts = [value for key in _TEXT_FIELDS if isinstance(value := tool_input.get(key), str)]

@@ -72,6 +72,15 @@ scope decision rather than a bug fix. **That is the entire gate**: the owner
 question is whether the test's blast radius is the whole template or only the
 `status_line` block, and the divergence itself needs no further investigation.
 
+**Decided (unattended, 2026-09-24) and built.** DECISIONS.md #1: the test
+covers the WHOLE template, never an allow-list. Built as
+`tests/integration/test_template_priorities_match_the_constants.py`, which
+found four divergences, not the one already known
+(`security_antipattern`, `account_display`, `git_repo_name`, `host_hostname`).
+The constants won all four; the template now ships the documented priorities.
+Delivered in commit `c1822548` (owner-a), merged to main in `d28b25fa`
+(integration B2, final merge `1166d17dd`).
+
 ### N2 — the linter runs on gitignored scratch output
 
 **Re-filed from [00419 N11](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md).**
@@ -347,6 +356,15 @@ clock passes `09:50`. That wait costs a follow-up. It is the cheapest case
 of N3 there is, and it still needed the clock to move before it could be
 fixed.
 
+**Decided (unattended, 2026-09-24) and built.** DECISIONS.md #5: a
+`correction` category is added to the journal grammar. Both copies of
+`_JOURNAL_TEMPLATE_.md`, `mkplan.bash --journal` (both copies) and
+`PlanJournalling.md` now define the `## HH:MM · correction · REF` grammar,
+with `journal-entry-ordering` exempting the same-file labels a `correction`
+names so the corrected entry sets no high-water mark. Delivered in commit
+`14bdb525` (owner-a), merged to main in `d28b25fa` (integration B2, final
+merge `1166d17dd`).
+
 ### N4 — a cron cannot be both cancelled for a session and declared in config
 
 **Re-filed from [00419 N13](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md).**
@@ -412,6 +430,15 @@ Remedy owner-gated — (1) hands a session the ability to switch off a guard the
 project itself declared, which is a decision about that guard's authority rather
 than a bug fix, and the thing it would be overriding is the owner's own
 instruction.
+
+**Decided (unattended, 2026-09-24) and built.** DECISIONS.md #2: remedy 1, a
+session-scoped pause recorded through an expiring marker (the same mechanism
+as the "blocked only on human input" marker). `hooks-daemon cron-pause <job> --reason` records it; `cron-resume` removes it; `persistent_crons` stays the
+only permanent switch. `cron_stop_enforcer` and `cron_subagent_stop_enforcer`
+both honour a live pause through `verdict_for_missing_crons`, and
+`persistent_cron_assertor` leaves a paused job out of the create list.
+Delivered in commit `8b388a2a` (owner-b), merged to main in `63dea9f08`
+(integration B2, final merge `1166d17dd`).
 
 ### N5 — the v3.65.0 release reviews' NON-defects had no durable home
 
@@ -977,6 +1004,17 @@ reading rather than a drop it inferred.
 Not verified: whether the supervisor process can see this payload at all, or
 whether a daemon-side handler would have to relay it. That is the next check
 before this becomes a candidate rather than an observation.
+
+**Decided (unattended, 2026-09-24) and built.** DECISIONS.md #3: an effort
+drop the supervisor did not inject is trusted as manual and latched (remedy
+1, not remedy 4). `_latch_unattributed_effort_drop` latches
+`_manual_effort_active` when a fresh reading shows a lower known level than
+the last known level, for the same session and family, and the level was not
+one the supervisor itself typed (`note_own_effort_injection`, called at
+decision time by all three armed `/effort` branches). The asymmetry with the
+downgrade logic's deliberate opposite answer is documented beside both rules.
+Delivered in commit `8ffe9ffe` (owner-b), merged to main in `63dea9f08`
+(integration B2, final merge `1166d17dd`).
 
 ### N8 — the socket-path guard fails open exactly where it is needed
 
@@ -1628,6 +1666,17 @@ a Read is recorded, keyed on the same session identity. Add a test that
 Write-then-Write of a new file is allowed, and that a DIFFERENT session's
 Write does not count.
 
+**✅ Remedied** (branch `worktree-n422-guards`, commit `d2ed30a4`, merged
+`fb76d6400`): `matches()` now fires on every Read, Edit and Write that
+carries a path, not only a Read or a clobbering Write, so `handle()` records
+every allowed call — a Write that creates or rewrites a KNOWN file included.
+A denied Write is still not recorded. The class (work sitting under `if not self.matches(...)`, reachable only from a direct test call) is now caught by
+`scripts/qa/check_unreachable_handle_branch.py`, wired into `llm_qa.py` as
+`unreachable_handle_branch`. Tests:
+`tests/unit/handlers/pre_tool_use/test_write_clobber_guard_dispatch.py`.
+Delivery report:
+[subagent-reports/260924-n422-guards-opus-5-5.md](subagent-reports/260924-n422-guards-opus-5-5.md).
+
 ### N28 — `plan_number_helper` resolves a relative `mkdir` against the workspace root
 
 **Found by Plan 00461's agent**: `mkdir mkj/CLAUDE/Plan/00007-probe`, run
@@ -1700,6 +1749,20 @@ exempt every loop body's pipe, including `do pytest … | tail`.
 producer, as the command-wrapper peeling already does for `env`/`nohup`.
 Add a test showing `do pytest x | head` is still judged on `pytest`, and
 make the whitelist suggestion never offer a reserved word.
+
+**✅ Remedied** (branch `worktree-n422-guards`, commit `319cdd35`, merged
+`fb76d6400`): a shared primitive in `utils/command_evasion`
+(`SHELL_RESERVED_COMMAND_PREFIXES`, `strip_reserved_word_prefix`) strips
+`do then else elif if while until ! { time` from the front of a segment
+before a pipe's producer, or a command's first word, is judged. An audit
+found 12 other sites behind the same class (bypasses, false positives and
+both), all fixed with the one primitive; 9 rows (later 10, after a
+secret-exemptions follow-up) were added to
+`scripts/qa/declared-invariant-pairs.yaml` as the DBF defence. Tests:
+`tests/unit/utils/test_reserved_word_command_heads.py`,
+`tests/unit/handlers/pre_tool_use/test_pipe_blocker_reserved_words.py`.
+Delivery report:
+[subagent-reports/260924-n422-guards-opus-5-5.md](subagent-reports/260924-n422-guards-opus-5-5.md).
 
 ### N24 — orchestrator simulate reports denials its blocking mode would never make
 
@@ -2107,7 +2170,7 @@ the ledger's only related entry is the closed N5 row (e).
 ### N16 — the failsafe cron has two zero-token defences; the issue-sdlc cron has neither
 
 > **SUPERSEDED, an hour after filing — this was already recorded.**
-> [Plan 00388](../00388-failsafe-marker-wiped-by-other-crons-in-multi-cron-sessions/PLAN.md)
+> [Plan 00388](../Completed/00388-failsafe-marker-wiped-by-other-crons-in-multi-cron-sessions/PLAN.md)
 > absorbed this finding as graduated Plan 00392 N1 and carries it as **Task
 > 2.4**. Keep this entry for the trail, but 00388 is the live home; do not work
 > it from here.

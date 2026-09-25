@@ -72,18 +72,29 @@ def write_marker(path: Path, session_id: str, *, now: float | None = None) -> bo
         _FIELD_RECORDED_AT: now if now is not None else time.time(),
     }
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        # uuid suffix, not pid: hook events dispatch on concurrent threads of
-        # the one daemon process (same rationale as goal_ledger._save).
-        tmp_path = path.parent / f".{path.name}.{uuid.uuid4().hex}.tmp"
-        fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, FileMode.PRIVATE_FILE)
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload))
-        tmp_path.replace(path)
+        write_json_atomically(path, payload)
         return True
     except OSError as e:
         logger.warning("blockage_marker: failed to write %s: %s", path, e)
         return False
+
+
+def write_json_atomically(path: Path, payload: object) -> None:
+    """Write ``payload`` as JSON to ``path`` owner-only, via rename. Raises OSError.
+
+    The marker's own write, shared with the session-scoped cron pause
+    (``cron_pause``), which records its expiring marker the same way. Raising
+    rather than swallowing is the caller's choice to make: the hook path above
+    fails open, while a CLI verb must be able to say nothing was recorded.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # uuid suffix, not pid: hook events dispatch on concurrent threads of
+    # the one daemon process (same rationale as goal_ledger._save).
+    tmp_path = path.parent / f".{path.name}.{uuid.uuid4().hex}.tmp"
+    fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, FileMode.PRIVATE_FILE)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(json.dumps(payload))
+    tmp_path.replace(path)
 
 
 def read_marker(path: Path) -> BlockageMarker | None:

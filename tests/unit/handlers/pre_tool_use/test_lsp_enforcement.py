@@ -9,8 +9,14 @@ Tests cover:
 - handle() strict mode (always deny)
 - no_lsp_mode options (block, advisory, disable)
 - LSP operation mapping (grep pattern -> suggested LSP operation)
+- Plan 00468 P5: LSP counts as available only where an enabled Claude Code
+  plugin serves the searched file type
+
+Every test sees the LSP servers in ``lsp_servers`` (a Python server unless a
+test changes it), never the real Claude config dir.
 """
 
+from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
@@ -18,6 +24,42 @@ import pytest
 
 from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.handlers.pre_tool_use import lsp_enforcement
+from claude_code_hooks_daemon.utils.claude_plugins import (
+    EnabledPlugin,
+    PluginInventory,
+    PluginLspServer,
+    SettingsScope,
+)
+
+_PYTHON_SERVER = PluginLspServer(
+    "pyright", "pyright-langserver", {".py": "python", ".pyi": "python"}
+)
+_TYPESCRIPT_SERVER = PluginLspServer(
+    "typescript", "typescript-language-server", {".ts": "typescript", ".tsx": "typescriptreact"}
+)
+
+
+@pytest.fixture(autouse=True)
+def lsp_servers(monkeypatch: pytest.MonkeyPatch) -> list[PluginLspServer]:
+    """The LSP servers the enabled plugins declare; edit the list to change them."""
+    servers: list[PluginLspServer] = [_PYTHON_SERVER]
+
+    def _resolve(project_root: Path, **_: Any) -> PluginInventory:
+        plugin = EnabledPlugin(
+            plugin_id="lsp@mkt",
+            name="lsp",
+            marketplace="mkt",
+            enabled_by=SettingsScope.USER,
+            install_scope="user",
+            install_path=Path("/nonexistent"),
+            version=None,
+            lsp_servers=tuple(servers),
+        )
+        return PluginInventory(config_dir=Path("/nonexistent"), enabled=(plugin,))
+
+    monkeypatch.setattr(lsp_enforcement, "resolve_enabled_plugins", _resolve)
+    return servers
 
 
 class TestLspEnforcementHandlerInit:
@@ -792,6 +834,12 @@ class TestLspEnforcementHandleStrict:
         assert result.decision == Decision.DENY
 
 
+_CLASS_LOOKUP: dict[str, Any] = {
+    "tool_name": "Grep",
+    "tool_input": {"pattern": "class MyHandler"},
+}
+
+
 class TestLspEnforcementNoLspMode:
     """Test no_lsp_mode options (behavior when LSP is not configured)."""
 
@@ -812,64 +860,140 @@ class TestLspEnforcementNoLspMode:
 
         return _NoLspModeHandler(no_lsp_mode)
 
-    def test_no_lsp_block_mode_still_matches(self) -> None:
-        """With no_lsp_mode=block, handler matches even without LSP configured."""
+    def test_no_lsp_block_mode_still_matches(self, lsp_servers: list[PluginLspServer]) -> None:
+        """With no_lsp_mode=block, handler matches even without an LSP plugin."""
+        lsp_servers.clear()
         handler = self._make_handler("block")
-        hook_input = {
-            "tool_name": "Grep",
-            "tool_input": {"pattern": "class MyHandler"},
-        }
-        with patch.dict("os.environ", {}, clear=True):
-            assert handler.matches(hook_input) is True
+        assert handler.matches(_CLASS_LOOKUP) is True
 
-    def test_no_lsp_block_mode_includes_setup_guidance(self) -> None:
-        """With no_lsp_mode=block, handle() includes LSP setup instructions."""
+    def test_no_lsp_block_mode_includes_setup_guidance(
+        self, lsp_servers: list[PluginLspServer]
+    ) -> None:
+        """With no_lsp_mode=block, handle() denies and says to install a plugin."""
+        lsp_servers.clear()
         handler = self._make_handler("block")
-        hook_input = {
-            "tool_name": "Grep",
-            "tool_input": {"pattern": "class MyHandler"},
-        }
-        with (
-            patch.dict("os.environ", {}, clear=True),
-            patch.object(handler, "_get_block_count", return_value=0),
-        ):
-            result = handler.handle(hook_input)
+        with patch.object(handler, "_get_block_count", return_value=0):
+            result = handler.handle(_CLASS_LOOKUP)
         assert result.decision == Decision.DENY
-        assert "LSP" in result.reason
+        assert "code intelligence plugin" in result.reason
 
-    def test_no_lsp_advisory_mode_allows(self) -> None:
+    def test_no_lsp_advisory_mode_allows(self, lsp_servers: list[PluginLspServer]) -> None:
         """With no_lsp_mode=advisory, handler downgrades to advisory."""
+        lsp_servers.clear()
         handler = self._make_handler("advisory")
-        hook_input = {
-            "tool_name": "Grep",
-            "tool_input": {"pattern": "class MyHandler"},
-        }
-        with (
-            patch.dict("os.environ", {}, clear=True),
-            patch.object(handler, "_get_block_count", return_value=0),
-        ):
-            result = handler.handle(hook_input)
+        with patch.object(handler, "_get_block_count", return_value=0):
+            result = handler.handle(_CLASS_LOOKUP)
         assert result.decision == Decision.ALLOW
 
-    def test_no_lsp_disable_mode_no_match(self) -> None:
+    def test_no_lsp_disable_mode_no_match(self, lsp_servers: list[PluginLspServer]) -> None:
         """With no_lsp_mode=disable, handler doesn't match when LSP unavailable."""
+        lsp_servers.clear()
         handler = self._make_handler("disable")
-        hook_input = {
-            "tool_name": "Grep",
-            "tool_input": {"pattern": "class MyHandler"},
-        }
-        with patch.dict("os.environ", {}, clear=True):
-            assert handler.matches(hook_input) is False
+        assert handler.matches(_CLASS_LOOKUP) is False
 
     def test_no_lsp_disable_mode_matches_when_lsp_available(self) -> None:
-        """With no_lsp_mode=disable, handler matches when LSP IS configured."""
+        """With no_lsp_mode=disable, handler matches when an LSP plugin is enabled."""
         handler = self._make_handler("disable")
-        hook_input = {
-            "tool_name": "Grep",
-            "tool_input": {"pattern": "class MyHandler"},
-        }
+        assert handler.matches(_CLASS_LOOKUP) is True
+
+    def test_the_environment_variable_alone_is_not_an_lsp(
+        self, lsp_servers: list[PluginLspServer]
+    ) -> None:
+        """ENABLE_LSP_TOOL without a code intelligence plugin leaves the tool inactive."""
+        lsp_servers.clear()
+        handler = self._make_handler("disable")
         with patch.dict("os.environ", {"ENABLE_LSP_TOOL": "1"}):
-            assert handler.matches(hook_input) is True
+            assert handler.matches(_CLASS_LOOKUP) is False
+
+
+def _default_handler() -> Any:
+    return lsp_enforcement.LspEnforcementHandler()
+
+
+class TestLspCoverageFromPlugins:
+    """Plan 00468 P5: the searched file type decides whether LSP can answer."""
+
+    def _handle(self, hook_input: dict[str, Any]) -> Any:
+        handler = _default_handler()
+        with patch.object(handler, "_get_block_count", return_value=0):
+            return handler.handle(hook_input)
+
+    def test_a_glob_no_server_covers_is_advised_not_denied(self) -> None:
+        """The audit's reproduction: a .ts search with only a Python server enabled."""
+        result = self._handle(
+            {
+                "tool_name": "Grep",
+                "tool_input": {"pattern": "class RefreshSpecRunner", "glob": "*.ts"},
+            }
+        )
+        assert result.decision == Decision.ALLOW
+        text = "\n".join(result.context)
+        assert "LSP tool available" not in text
+        assert ".ts" in text
+        assert "code intelligence plugin" in text
+
+    def test_a_glob_a_server_covers_is_enforced(self) -> None:
+        result = self._handle(
+            {"tool_name": "Grep", "tool_input": {"pattern": "class MyHandler", "glob": "**/*.py"}}
+        )
+        assert result.decision == Decision.DENY
+
+    def test_a_brace_glob_is_covered_when_any_extension_is(
+        self, lsp_servers: list[PluginLspServer]
+    ) -> None:
+        lsp_servers[:] = [_TYPESCRIPT_SERVER]
+        result = self._handle(
+            {
+                "tool_name": "Grep",
+                "tool_input": {"pattern": "class MyHandler", "glob": "*.{js,tsx}"},
+            }
+        )
+        assert result.decision == Decision.DENY
+
+    def test_the_grep_type_field_names_the_language(self) -> None:
+        result = self._handle(
+            {"tool_name": "Grep", "tool_input": {"pattern": "class MyHandler", "type": "ts"}}
+        )
+        assert result.decision == Decision.ALLOW
+
+    def test_the_grep_path_names_the_file_type(self) -> None:
+        result = self._handle(
+            {"tool_name": "Grep", "tool_input": {"pattern": "MyHandler", "path": "src/app/main.go"}}
+        )
+        assert result.decision == Decision.ALLOW
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'rg -t ts "class MyHandler" src/',
+            'rg --type=ts "class MyHandler" src/',
+            "rg -g '*.ts' \"class MyHandler\" src/",
+            'grep -rn --include=*.ts "class MyHandler" src/',
+            'grep -rn --include "*.ts" "class MyHandler" src/',
+            'grep -n "class MyHandler" src/a.ts src/b.ts',
+        ],
+    )
+    def test_bash_file_type_flags_and_targets_are_read(self, command: str) -> None:
+        result = self._handle({"tool_name": "Bash", "tool_input": {"command": command}})
+        assert result.decision == Decision.ALLOW
+
+    def test_a_redirect_target_is_not_a_searched_file(self) -> None:
+        result = self._handle(
+            {"tool_name": "Bash", "tool_input": {"command": 'rg "class MyHandler" src/ > out.txt'}}
+        )
+        assert result.decision == Decision.DENY
+
+    def test_an_unknown_file_type_counts_as_covered_when_any_server_is_enabled(self) -> None:
+        result = self._handle({"tool_name": "Grep", "tool_input": {"pattern": "class MyHandler"}})
+        assert result.decision == Decision.DENY
+
+    def test_no_enabled_server_at_all_is_advised_by_default(
+        self, lsp_servers: list[PluginLspServer]
+    ) -> None:
+        lsp_servers.clear()
+        result = self._handle({"tool_name": "Grep", "tool_input": {"pattern": "class MyHandler"}})
+        assert result.decision == Decision.ALLOW
+        assert "code intelligence plugin" in "\n".join(result.context)
 
 
 class TestLspEnforcementLspOperationMapping:

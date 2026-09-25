@@ -420,6 +420,29 @@ class TestDaemonController:
 
         assert health["source_fingerprint"] == compute_daemon_identity_fingerprint()
 
+    def test_get_health_config_fingerprint_is_none_before_initialise(
+        self, controller: DaemonController
+    ) -> None:
+        """Plan 00415: config_fingerprint key is present but None pre-initialise."""
+        health = controller.get_health()
+
+        assert "config_fingerprint" in health
+        assert health["config_fingerprint"] is None
+
+    def test_get_health_reports_the_config_fingerprint_it_was_bound_with(
+        self, controller: DaemonController, workspace_root: Path
+    ) -> None:
+        """Plan 00415: the fingerprint passed at initialise() is reported unchanged."""
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                Mock(returncode=0, stdout="/tmp/test\n"),
+                Mock(returncode=0, stdout="git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
+            ]
+            controller.initialise(workspace_root=workspace_root, config_fingerprint="f" * 64)
+
+        assert controller.get_health()["config_fingerprint"] == "f" * 64
+
     def test_get_handlers(self, controller: DaemonController, workspace_root: Path) -> None:
         """Get handlers returns handler details."""
         with patch("subprocess.run") as mock_run:

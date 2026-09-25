@@ -424,6 +424,12 @@ class HandlerID:
         config_key="agent_isolation_advisor",
         display_name="agent-isolation-advisor",
     )
+    # Plan 00468 G16: a write into an installed Claude Code plugin's files.
+    INSTALLED_PLUGIN_EDIT_ADVISOR = HandlerIDMeta(
+        class_name="InstalledPluginEditAdvisorHandler",
+        config_key="installed_plugin_edit_advisor",
+        display_name="installed-plugin-edit-advisor",
+    )
     GIT_HOOKS_EXECUTABLE_FIXER = HandlerIDMeta(
         class_name="GitHooksExecutableFixerHandler",
         config_key="git_hooks_executable_fixer",
@@ -797,6 +803,15 @@ class HandlerID:
         display_name="hook-registration-checker",
     )
 
+    # Plugin hooks advisor (SessionStart handler) — Plan 00468 G1, G2: name
+    # each enabled Claude Code plugin that ships hooks, singling out
+    # PreToolUse. Never blocks.
+    PLUGIN_HOOKS_ADVISOR = HandlerIDMeta(
+        class_name="PluginHooksAdvisorHandler",
+        config_key="plugin_hooks_advisor",
+        display_name="plugin-hooks-advisor",
+    )
+
     # Guard config drift (SessionStart handler) — Plan 00412 class 2: report a
     # working-tree hooks-daemon.yaml that weakens the guards relative to the
     # committed one. Nothing judges such an edit and nothing records it.
@@ -869,6 +884,14 @@ class HandlerID:
         class_name="PersistentCronAssertorHandler",
         config_key="persistent_cron_assertor",
         display_name="persistent-cron-assertor",
+    )
+    # Plan 00394 option 2: the failsafe recovery cron's SessionStart
+    # counterpart, so a session is covered from its start rather than from its
+    # first plan write. Follows recovery_cron_advisor's switch.
+    FAILSAFE_CRON_SESSION_ADVISOR = HandlerIDMeta(
+        class_name="FailsafeCronSessionAdvisorHandler",
+        config_key="failsafe_cron_session_advisor",
+        display_name="failsafe-cron-session-advisor",
     )
     # Cron Stop enforcer (Stop handler) -- Plan 00416 Task 1.1: the teeth
     # PERSISTENT_CRON_ASSERTOR cannot have. session_crons reaches Stop (unlike
@@ -1015,6 +1038,15 @@ class HandlerID:
         class_name="HedgingLanguageNitpickHandler",
         config_key="hedging_language_nitpick",
         display_name="nitpick-hedging-language",
+    )
+    # Plan 00466 RV3-n5: PreToolUse sensor half of goal_injection's
+    # ground-truth snapshot mechanism -- records a PLAN.md's pre-write
+    # status, keyed by tool_use_id, for goal_injection (PostToolUse) to
+    # consume in place of its old_string/new_string + git-HEAD inference.
+    PLAN_STATUS_SNAPSHOT = HandlerIDMeta(
+        class_name="PlanStatusSnapshotHandler",
+        config_key="plan_status_snapshot",
+        display_name="plan-status-snapshot",
     )
 
 

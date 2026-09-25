@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Final
 
 from claude_code_hooks_daemon.utils.command_evasion import (
-    ENV_PREFIX,
+    COMMAND_POSITION,
     GIT_INVOCATION,
     normalise_line_continuations,
 )
@@ -34,7 +34,7 @@ from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
 _SEGMENT_SEPARATORS: Final[tuple[str, ...]] = ("||", "&&", "|", ";", "\n")
 
 _GIT_MERGE_PULL_REBASE_PATTERN: Final[re.Pattern[str]] = re.compile(
-    rf"^\s*{ENV_PREFIX}{GIT_INVOCATION}(?:merge|pull|rebase)(?=\s|$)"
+    rf"{COMMAND_POSITION}{GIT_INVOCATION}(?:merge|pull|rebase)(?=\s|$)"
 )
 
 

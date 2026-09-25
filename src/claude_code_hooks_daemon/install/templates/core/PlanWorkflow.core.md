@@ -199,9 +199,15 @@ what looks like a complete report while content is missing. The
 `dispatch_declaration` handler (PreToolUse on the `Task` tool) injects this
 contract at dispatch time when a prompt does not already declare it; the
 `subagent_report_size_blocker` handler (SubagentStop) blocks an oversized
-final message until it is re-routed through a file. Work that is NOT plan
-work should instead declare an explicit destination (falling back to
-`untracked/agent-reports/` when none is given).
+final message until it is re-routed through a file.
+
+**The plan folder is the default destination because it is tracked.** Commit
+`subagent-reports/` with the plan: a report nothing commits is evidence that
+lasts only until the container restarts. Work that is NOT plan work declares
+an explicit destination instead, falling back to `untracked/agent-reports/`.
+That directory is gitignored, so it is right only when no plan applies.
+`dispatch_declaration` advises a dispatch that names a plan folder but sends
+its report there.
 
 `subagent-reports/` is a recognised plan-folder member for plan QA purposes —
 its presence never triggers a stray-file or unexpected-content finding.
@@ -404,9 +410,13 @@ a `PLAN.md` is linted against single-file rules on the content the file *would*
 have. New material with a missing/invalid `**Status**:` line, a header that
 contradicts an all-ticked body, or ad-hoc task markers is **blocked** with the
 exact fix (mode `edit_mode`, default `block`). The plan-index `README.md` is
-linted too, against one rule — `index-row-length`: keep every line under 500
+linted too — for example `index-row-length` keeps every line under 500
 characters, because a row is a pointer (link, status, one clause), not a
 summary copied from the linked plan.
+
+`plan-qa --list-checks` prints every check and the stages it runs on. That
+listing comes from the check registry itself, so it is the catalogue; this page
+names checks only as examples.
 
 **Stage 2 — commit gate** (`plan_qa_commit_gate`, PreToolUse on `git commit`):
 checks the **staged** tree against cross-file invariants -- index-at-birth (a
@@ -436,6 +446,7 @@ recount.
 .claude/hooks-daemon/bin/hooks-daemon plan-qa --sweep          # whole tree; exit 1 on findings (CI-able)
 .claude/hooks-daemon/bin/hooks-daemon plan-qa --check-staged   # staged-tree commit-gate checks
 .claude/hooks-daemon/bin/hooks-daemon plan-qa --lint <PLAN.md> # single-file edit-stage checks
+.claude/hooks-daemon/bin/hooks-daemon plan-qa --list-checks    # every check and its stages
 ```
 
 Add `--json` to any of these for machine-readable output.

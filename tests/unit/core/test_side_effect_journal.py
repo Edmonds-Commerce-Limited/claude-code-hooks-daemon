@@ -10,6 +10,7 @@ was denied, so the cooldown was never really spent).
 from dataclasses import dataclass
 
 from claude_code_hooks_daemon.core.side_effect_journal import SideEffectJournal
+from tests.thread_contention import WORKERS, hammer
 
 
 @dataclass
@@ -106,3 +107,39 @@ class TestCommit:
         journal.rollback()
 
         assert store == {"k": 2}
+
+
+class TestConcurrentCalls:
+    """One journal per handler singleton, one dispatch per worker thread.
+
+    ``server.py`` dispatches on a thread pool, and a dispatch runs its
+    handler's ``handle()`` and ``commit_side_effects()`` on the SAME thread, so
+    the undo records of one call must belong to that call's thread alone.
+    Sharing one list across threads lets call A's ``commit()`` discard call B's
+    undo records, lets A's ``rollback()`` undo B's mutations, and lets two
+    rollbacks race on ``while undo: undo.pop()`` into ``IndexError``.
+    """
+
+    def test_each_thread_commits_and_rolls_back_only_its_own_mutations(self) -> None:
+        journal = SideEffectJournal()
+        stores: list[dict[str, int]] = [{"k": -1} for _ in range(WORKERS)]
+        leaks: list[tuple[int, int, int]] = []
+
+        def call(worker: int, index: int) -> None:
+            store = stores[worker]
+            before = store["k"]
+            journal.snapshot(store, "k")
+            store["k"] = index
+            if index % 2:
+                journal.rollback()
+                expected = before
+            else:
+                journal.commit()
+                expected = index
+            if store["k"] != expected:
+                leaks.append((worker, index, store["k"]))
+
+        errors = hammer(call)
+
+        assert not errors, f"concurrent calls raised: {errors[:3]}"
+        assert not leaks, f"another thread's commit or rollback leaked in: {leaks[:3]}"

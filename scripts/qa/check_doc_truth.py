@@ -91,6 +91,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
 
+from claude_code_hooks_daemon.utils.git_repo import git_visible_paths, project_path_is_protected
+from claude_code_hooks_daemon.utils.scan_scope import (
+    relative_parts,
+    vacuous_scan_failure,
+    walk_files,
+)
+
 _PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 _QA_OUTPUT_DIR_PARTS: Final[tuple[str, str]] = ("untracked", "qa")
 _OUTPUT_FILENAME: Final[str] = "doc_truth.json"
@@ -172,6 +179,14 @@ _CLI_INVOCATION_RE: Final[re.Pattern[str]] = re.compile(
 # `worktrees` covers concurrent agents' isolated checkouts (`.claude/worktrees/`,
 # `untracked/worktrees/`): a DIFFERENT branch's tree, judged by its own QA run
 # and again at merge — its in-flight docs must not fail the main tree's gate.
+#
+# Plan 00466 N9: this denylist names `marketplaces` but not its sibling
+# `.claude/ccy/plugins/cache/`, so a gitignored plugin install's CACHED spec
+# markdown could still reach `_check_shell_fences` as a false finding.
+# `_iter_markdown` also filters against `git_visible_paths`, which catches
+# every gitignored directory by construction rather than by name -- this set
+# is only a cheap pre-prune (skip walking a big ignored tree at all); the
+# git filter is the correctness backstop.
 _UNSCANNED_DIR_NAMES: Final[frozenset[str]] = frozenset(
     {
         ".git",
@@ -485,12 +500,35 @@ def known_slash_commands() -> frozenset[str]:
 
 
 def _iter_markdown(root: Path) -> list[Path]:
-    """Every documentation markdown file under ``root``, noise directories aside."""
-    return sorted(
+    """Every documentation markdown file under ``root``, noise directories
+    aside, and further filtered to what ``git`` considers part of the
+    project (Plan 00466 N9). ``None`` from :func:`git_visible_paths` (``root``
+    is not a git repository) means no git-based filtering: every fixture this
+    checker's own test suite builds under a plain ``tmp_path`` must keep
+    scanning everything it writes -- EXCEPT a path matching a protected glob
+    (:func:`project_path_is_protected`, Plan 00412), which is excluded on
+    both branches, git-backed or not.
+
+    The noise names are matched below ``root`` only (00466 N26, via
+    :func:`relative_parts`): an agent's checkout lives at
+    ``untracked/worktrees/<name>/``, and matching the absolute path would drop
+    every file in it.
+    """
+    git_visible = git_visible_paths(root)
+    candidates = (
         path
-        for path in root.rglob(_MARKDOWN_GLOB)
-        if not _UNSCANNED_DIR_NAMES.intersection(path.parts)
+        for path in walk_files(root, _MARKDOWN_GLOB)
+        if not _UNSCANNED_DIR_NAMES.intersection(relative_parts(path, root))
     )
+    kept: list[Path] = []
+    for path in candidates:
+        rel = path.relative_to(root).as_posix()
+        if git_visible is not None and rel not in git_visible:
+            continue
+        if project_path_is_protected(rel):
+            continue
+        kept.append(path)
+    return sorted(kept)
 
 
 def _check_shell_fences(
@@ -605,13 +643,20 @@ def main(argv: list[str] | None = None) -> int:
     # `_iter_markdown` ever returned nothing (wrong root, a broken walk), every
     # rule below would report clean over a tree it never looked at.
     docs_scanned = len(_iter_markdown(root))
+    vacuous = vacuous_scan_failure(
+        examined=docs_scanned,
+        candidates=len(walk_files(root, _MARKDOWN_GLOB)),
+        noun="markdown files",
+        root=root,
+    )
 
     payload: dict[str, object] = {
         "tool": _TOOL_NAME,
         "summary": {
-            "passed": not violations,
+            "passed": not violations and vacuous is None,
             "total_violations": len(violations),
             "docs_scanned": docs_scanned,
+            "vacuous_scan": vacuous,
             "by_rule": {
                 rule: sum(1 for v in violations if v.rule == rule)
                 for rule in (
@@ -633,6 +678,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.report_stdout:
         print(json.dumps(payload, indent=2))
+    elif vacuous is not None:
+        print(f"FAILED: {vacuous}")
     elif violations:
         print(f"Found {len(violations)} doc-truth violation(s):")
         for violation in violations:
@@ -641,7 +688,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print(f"No doc-truth violations found ({docs_scanned} docs scanned)")
 
-    return 1 if violations else 0
+    return 1 if violations or vacuous is not None else 0
 
 
 if __name__ == "__main__":

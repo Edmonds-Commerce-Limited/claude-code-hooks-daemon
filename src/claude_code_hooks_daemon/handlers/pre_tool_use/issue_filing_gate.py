@@ -59,7 +59,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Final
 
-from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
@@ -229,8 +229,8 @@ class IssueFilingGateHandler(PreToolUseHandlerBase):
         return text.strip("/").lower()
 
     @classmethod
-    def _cwd_repo_slug(cls, cwd: str | None) -> str | None:
-        """The slug ``gh`` would resolve from the working directory, or None.
+    def _cwd_repo_slugs(cls, cwd: str | None) -> frozenset[str]:
+        """Every slug ``gh`` could resolve from the working directory's remotes.
 
         This is ``gh``'s DEFAULT answer, not an exotic one: with no ``--repo``
         and no ``GH_REPO`` it reads the base repository from the current
@@ -240,26 +240,33 @@ class IssueFilingGateHandler(PreToolUseHandlerBase):
         ``gh issue create`` typed with the shell inside that clone filed a
         hand-written body against a PUBLIC tracker while the gate stood by.
 
-        Resolution failure answers None rather than "assume upstream". The
+        EVERY remote counts, not only ``origin`` (Plan 00408 Task 3.8). ``gh``
+        chooses from the remote SET and prefers one named ``upstream``, so a
+        clone whose only remote is ``upstream`` resolved to "not ours" here and
+        filed against the public tracker anyway. For this gate "not ours" is the
+        FAIL-OPEN answer, so a remote pointing at us anywhere in the set engages
+        it; a fork filing on its own tracker passes ``--repo``, which still wins.
+
+        Resolution failure answers "no slugs" rather than "assume upstream". The
         alternative would gate a client's ordinary filing on their OWN tracker
         whenever git could not answer, which is the false positive the module
         docstring names as the one that gets this handler switched off.
         """
         if not cwd:
-            return None
+            return frozenset()
         # "Could not resolve" is carried in a variable and returned once below,
         # rather than returned from the handler body: an early return from an
         # except block reads as success to a reader AND is rejected by the
         # error-hiding audit, which matches the shape rather than the intent.
-        url: str | None = None
+        urls: tuple[str, ...] = ()
         try:
             repo = GitRepo.resolve_for(Path(cwd))
             if repo is not None:
-                url = repo.read_config("remote.origin.url")
+                urls = repo.remote_urls()
         except (OSError, ValueError) as exc:  # pragma: no cover - defensive
             logger.debug("Could not resolve the repository for %s: %s", cwd, exc)
-            url = None
-        return cls._repo_slug(url) if url else None
+            urls = ()
+        return frozenset(cls._repo_slug(url) for url in urls)
 
     @classmethod
     def _targets_upstream(cls, segment: str, command: str, cwd: str | None = None) -> bool:
@@ -278,7 +285,7 @@ class IssueFilingGateHandler(PreToolUseHandlerBase):
         env = _GH_REPO_ENV.search(command)
         if env is not None:
             return cls._repo_slug(cls._flag_value(env)) == UPSTREAM_REPO_SLUG
-        return cls._cwd_repo_slug(cwd) == UPSTREAM_REPO_SLUG
+        return UPSTREAM_REPO_SLUG in cls._cwd_repo_slugs(cwd)
 
     @classmethod
     def _filing_segments(cls, command: str, cwd: str | None = None) -> list[str]:
@@ -303,7 +310,7 @@ class IssueFilingGateHandler(PreToolUseHandlerBase):
         command = get_bash_command(hook_input)
         if not command:
             return False
-        if not self._filing_segments(command, hook_input.get("cwd")):
+        if not self._filing_segments(command, hook_input.get(HookInputField.CWD)):
             return False
         return not self._is_self_install()
 
@@ -314,7 +321,7 @@ class IssueFilingGateHandler(PreToolUseHandlerBase):
         path = Path(raw)
         if path.is_absolute():
             return path
-        cwd = hook_input.get("cwd")
+        cwd = hook_input.get(HookInputField.CWD)
         return Path(cwd) / path if isinstance(cwd, str) and cwd else path
 
     @staticmethod
@@ -383,7 +390,7 @@ class IssueFilingGateHandler(PreToolUseHandlerBase):
         """
         command = get_bash_command(hook_input) or ""
         problems: list[str] = []
-        for segment in self._filing_segments(command, hook_input.get("cwd")):
+        for segment in self._filing_segments(command, hook_input.get(HookInputField.CWD)):
             problems.extend(self._segment_problems(segment, hook_input))
 
         if not problems:

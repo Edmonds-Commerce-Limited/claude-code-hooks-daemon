@@ -184,6 +184,22 @@ export HOOKS_DAEMON_ROOT_DIR="$PROJECT_PATH"
 
 This file is sourced by `.claude/init.sh` before any daemon operations.
 
+### Claude Code Settings: `.claude/settings.json` Ships to Every Client
+
+This repository's tracked `.claude/settings.json` is ALSO the template every
+client receives. The shell installers name it as `SETTINGS_JSON_SOURCE`: a
+fresh install copies it whole, and an upgrade's three-way merge delivers any
+top-level key that is new in it. So a key you add there for this checkout
+reaches every client on the next release.
+
+Put a setting that describes only this checkout in the tracked
+`.claude/settings.local.json` instead. Claude Code merges it over
+`settings.json`, and no installer copies it. That covers `enabledPlugins`,
+`extraKnownMarketplaces` (a Claude Code plugin installed here for dogfooding)
+and `plansDirectory` (this repository's own plan directory).
+`tests/unit/install/test_shipped_settings_carry_no_dogfood_keys.py` fails
+when any of the three reaches a client by any install or upgrade route.
+
 ### Source Code
 
 Daemon imports from workspace source:

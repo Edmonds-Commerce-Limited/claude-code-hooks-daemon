@@ -20,6 +20,12 @@ one of two declarations:
 Absent either, the contract is injected as ``additionalContext`` (advisory,
 the default) or the dispatch is denied (strict mode, opt-in via
 ``dispatch_declaration.options.strict``).
+
+The plan folder is the DEFAULT destination because ``subagent-reports/`` is
+tracked, and the fallback directory is gitignored (ledger 00422 N5: twenty
+release-review findings sat one container restart from loss there). A
+dispatch that names a plan folder but sends its report to the fallback is
+advised, never denied.
 """
 
 from __future__ import annotations
@@ -65,16 +71,67 @@ _FALLBACK_PLAN_DIR: Final[str] = "CLAUDE/Plan"
 # "not a plan" substring, so it does not false-fire on unrelated prose.
 _NOT_PLAN_WORK_PATTERN = re.compile(r"\bnot\s+plan\s+work\b", re.IGNORECASE)
 
-# A declared file destination: a verb ("write"/"save"/"report"/"output"/
-# "store") followed by "to"/"in"/"under"/"into" and a path-shaped token
-# (contains a "/"). This is a proxy for "names where files go", not a full
-# path grammar — it only needs to distinguish a destination declaration from
-# its absence.
-_DESTINATION_PATTERN = re.compile(
+# A verb ("write"/"save"/"report"/"output"/"store") followed by
+# "to"/"in"/"under"/"into": the lead of a destination that names a specific
+# directory, used to spot a report sent to the gitignored fallback.
+_DESTINATION_LEAD: Final[str] = (
     r"\b(?:writ(?:e|es|ten)|sav(?:e|es|ed)|report(?:s|ed)?|output(?:s|ted)?|stor(?:e|es|ed))\b"
-    r"\s+(?:it\s+)?(?:to|in|under|into)\s+\S*/",
+    r"\s+(?:it\s+)?(?:to|in|under|into)\s+"
+)
+
+# A write-destination KEYWORD: a verb OR noun that names writing output
+# somewhere ("write"/"save"/"report"/"output"/"store"/"file"). Plan 00466
+# N31: the original grammar required one of these immediately followed by
+# "to"/"in"/"under"/"into" and then whitespace, which missed a brief phrased
+# as a label — "File to write to: <path>" — because the colon after "to"
+# broke the required whitespace, and "file" as a noun was not in the list at
+# all. Matched on its own (no fixed preposition); see
+# ``_prompt_declares_destination`` for how it is paired with a path.
+_DESTINATION_KEYWORD_PATTERN = re.compile(
+    r"\b(?:writ(?:e|es|ten|ing)|sav(?:e|es|ed|ing)|report(?:s|ed|ing)?"
+    r"|output(?:s|ted|ting)?|stor(?:e|es|ed|ing)|files?)\b",
     re.IGNORECASE,
 )
+
+# The report folder inside a plan folder, tracked by git with the plan.
+_PLAN_REPORTS_SUBDIR: Final[str] = "subagent-reports/"
+
+# A path-shaped token: a "/" with non-space characters on both sides (e.g.
+# "CLAUDE/Plan/00307-x/report.md", "/tmp/out.txt", "untracked/scratch/x").
+# Loose by design — this only needs to distinguish "names a path" from
+# "names nothing", not parse a full path grammar.
+_PATH_TOKEN_PATTERN = re.compile(r"\S*/\S+")
+
+# A "clause" boundary: sentence-ending punctuation or a newline. Splitting on
+# this (rather than pairing a keyword with ANY path anywhere in the prompt)
+# is what keeps the Plan 00460 review finding m4 distinction intact — a
+# prompt that names a plan-folder path in one sentence and then says "write
+# your findings there" in the next must NOT count as declaring a
+# destination: the keyword and the path are in different clauses.
+_CLAUSE_BOUNDARY_PATTERN = re.compile(r"[.!?\n]+")
+
+
+def _prompt_declares_destination(prompt: str) -> bool:
+    """True if a destination keyword and a path token appear in the same clause.
+
+    A keyword match that falls INSIDE a path token does not count: a plan
+    folder name like ``00307-subagent-file-based-report-handoff`` contains
+    the substrings "file" and "report" as hyphen-bounded words, and without
+    this exclusion a bare plan-folder mention would wrongly count as
+    declaring a destination (regressing Plan 00460 review finding m4).
+    """
+    for clause in _CLAUSE_BOUNDARY_PATTERN.split(prompt):
+        path_spans = [m.span() for m in _PATH_TOKEN_PATTERN.finditer(clause)]
+        if not path_spans:
+            continue
+        for kw_match in _DESTINATION_KEYWORD_PATTERN.finditer(clause):
+            kw_start, kw_end = kw_match.span()
+            inside_a_path = any(
+                kw_start >= p_start and kw_end <= p_end for p_start, p_end in path_spans
+            )
+            if not inside_a_path:
+                return True
+    return False
 
 
 class DispatchDeclarationHandler(PreToolUseHandlerBase):
@@ -116,11 +173,11 @@ class DispatchDeclarationHandler(PreToolUseHandlerBase):
         # lookup (mirrors subagent_report_size_blocker's identically-named
         # attribute): production resolves lazily via resolve_lookup_root().
         self._project_root: Path | None = None
-        # Test-only override for resolve_agent_can_write's `home_dir` param
+        # Test-only override for resolve_agent_can_write's `config_dir` param
         # (mirrors subagent_report_size_blocker's identically-named
         # attribute, review finding m10): production leaves this None, which
-        # resolve_agent_can_write resolves lazily to the real Path.home().
-        self._home_dir: Path | None = None
+        # resolves lazily to the real Claude config dir (Plan 00468 G13).
+        self._config_dir: Path | None = None
 
     def _plan_dir(self) -> str:
         """Configured plan directory (facade, or the matching default).
@@ -146,7 +203,19 @@ class DispatchDeclarationHandler(PreToolUseHandlerBase):
         punctuation/backticks. ``re.escape`` guards against a configured
         directory that happens to contain regex metacharacters.
         """
-        return re.compile(rf"{re.escape(self._plan_dir())}/\d{{5}}-", re.IGNORECASE)
+        return re.compile(rf"{re.escape(self._plan_dir())}/\d{{5}}-[\w.-]*", re.IGNORECASE)
+
+    def _fallback_destination_pattern(self) -> re.Pattern[str]:
+        """A declared destination under the gitignored fallback directory.
+
+        An optional absolute prefix is allowed, so ``/workspace/untracked/...``
+        counts as well as ``untracked/...``. A bare mention of the directory is
+        not a destination and does not match.
+        """
+        return re.compile(
+            _DESTINATION_LEAD + r"[`'\"]?(?:\S*/)?" + re.escape(self._fallback_report_dir),
+            re.IGNORECASE,
+        )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """True for a subagent dispatch (Task/Agent) carrying a non-empty prompt."""
@@ -163,20 +232,22 @@ class DispatchDeclarationHandler(PreToolUseHandlerBase):
         """True if the prompt names a plan folder OR a non-plan-work destination."""
         if self._plan_path_pattern().search(prompt):
             return True
-        return bool(_NOT_PLAN_WORK_PATTERN.search(prompt) and _DESTINATION_PATTERN.search(prompt))
+        return bool(_NOT_PLAN_WORK_PATTERN.search(prompt) and _prompt_declares_destination(prompt))
 
     def _contract_text(self) -> str:
         return (
             "📋 DISPATCH DECLARATION (Plan 00307): this dispatch prompt does not "
             "declare where long-form output goes. Either:\n\n"
-            "1. Name the plan folder this agent is working in (e.g. "
-            "`CLAUDE/Plan/NNNNN-name/`) — it then IS the canonical home for "
-            "this agent's reports, at "
-            "`<plan-folder>/subagent-reports/{yymmdd}-{agent-name}-{model}.md`, or\n"
-            "2. State explicitly that this is 'not plan work' AND declare where "
-            "any files it creates go (fallback: "
+            "1. DEFAULT — name the plan folder this dispatch belongs to (e.g. "
+            f"`{self._plan_dir()}/NNNNN-name/`). Its reports then go to "
+            f"`<plan-folder>/{_PLAN_REPORTS_SUBDIR}{{yymmdd}}-{{agent-name}}-{{model}}.md`, "
+            "which is TRACKED: commit them with the plan, so the evidence "
+            "survives a container restart. Or:\n"
+            "2. Only when no plan applies, state explicitly that this is 'not "
+            "plan work' AND declare where any files it creates go (fallback: "
             f"`{self._fallback_report_dir}{{yymmdd}}-{{agent-name}}-"
-            "{model}.md`, same filename convention as the plan-folder case).\n\n"
+            "{model}.md`, same filename convention, but gitignored — anything "
+            "written there is lost when the container goes).\n\n"
             "Either way: long-form output goes to a FILE, never inline. The "
             "agent's final message should be a short completion summary plus "
             "the file path — a subagent's return travels over a bounded-size "
@@ -188,6 +259,25 @@ class DispatchDeclarationHandler(PreToolUseHandlerBase):
             "oversized reply, not a substitute for declaring the real "
             "destination its work belongs at."
         )
+
+    def _untracked_plan_report_text(self, plan_folder: str) -> str:
+        """Ledger 00422 N5: plan work declared a gitignored report destination."""
+        return (
+            "📋 UNTRACKED REPORT FOR PLAN WORK (ledger 00422 N5): this dispatch "
+            f"belongs to `{plan_folder}` but sends its report to "
+            f"`{self._fallback_report_dir}`, which is gitignored — a container "
+            "restart loses it and nothing reports the loss. Send it to "
+            f"`{plan_folder}/{_PLAN_REPORTS_SUBDIR}{{yymmdd}}-{{agent-name}}-{{model}}.md` "
+            "instead, which is tracked and is committed with the plan. The "
+            "gitignored directory is the fallback only when no plan applies."
+        )
+
+    def _untracked_plan_report(self, prompt: str) -> str | None:
+        """The N5 advisory text, or None when the dispatch is not that shape."""
+        plan_match = self._plan_path_pattern().search(prompt)
+        if plan_match is None or not self._fallback_destination_pattern().search(prompt):
+            return None
+        return self._untracked_plan_report_text(plan_match.group(0).rstrip("/."))
 
     def _read_only_mismatch_text(self, agent_type: str) -> str:
         """Plan 00460 Task 1.4: the dispatch names a report path but
@@ -214,7 +304,7 @@ class DispatchDeclarationHandler(PreToolUseHandlerBase):
         """The Task 1.4 advisory text, or None when it does not apply.
 
         Only fires when the prompt declares an explicit report DESTINATION
-        (``has_destination``, a caller-supplied ``_DESTINATION_PATTERN``
+        (``has_destination``, a caller-supplied ``_prompt_declares_destination``
         match) — review finding m4: gating this on ``_has_declaration``
         over-fired, because that also matches a prompt that only mentions a
         plan folder as CONTEXT (e.g. "This is Plan 00307 work ... Write your
@@ -230,7 +320,7 @@ class DispatchDeclarationHandler(PreToolUseHandlerBase):
         if not isinstance(subagent_type, str):
             return None
         root = resolve_lookup_root(self._project_root, getattr(self, "_workspace_root", None))
-        if resolve_agent_can_write(subagent_type, root, home_dir=self._home_dir) is False:
+        if resolve_agent_can_write(subagent_type, root, config_dir=self._config_dir) is False:
             return self._read_only_mismatch_text(subagent_type)
         return None
 
@@ -263,9 +353,12 @@ class DispatchDeclarationHandler(PreToolUseHandlerBase):
         prompt = tool_input.get("prompt", "") if isinstance(tool_input, dict) else ""
 
         if self._has_declaration(prompt):
-            has_destination = bool(_DESTINATION_PATTERN.search(prompt))
-            mismatch = self._read_only_dispatch_mismatch(hook_input, has_destination)
-            context = [mismatch] if mismatch is not None else []
+            has_destination = _prompt_declares_destination(prompt)
+            advisories = (
+                self._untracked_plan_report(prompt),
+                self._read_only_dispatch_mismatch(hook_input, has_destination),
+            )
+            context = [text for text in advisories if text is not None]
             return GatingResult(decision=Decision.ALLOW, context=context)
 
         if self._is_strict():
@@ -276,13 +369,18 @@ class DispatchDeclarationHandler(PreToolUseHandlerBase):
     def get_claude_md(self) -> str | None:
         return (
             "## dispatch_declaration — declare where a subagent's reports go\n\n"
-            "Every `Task` dispatch prompt should declare EITHER the plan folder "
-            "this agent is working in (its reports then live under "
-            "`<plan-folder>/subagent-reports/{yymmdd}-{agent-name}-{model}.md`) "
-            "OR that this is 'not plan work' plus where any created files go "
-            "(fallback: `"
+            "Every `Task` dispatch prompt should declare where its reports go. "
+            "**The default is the dispatching plan's folder**: name it, and "
+            "reports live under "
+            "`<plan-folder>/subagent-reports/{yymmdd}-{agent-name}-{model}.md`, "
+            "which is TRACKED — commit them with the plan. Only when no plan "
+            "applies, say this is 'not plan work' plus where any created files "
+            "go (fallback: `"
             f"{_DEFAULT_FALLBACK_REPORT_DIR}{{yymmdd}}-{{agent-name}}-"
-            "{model}.md`, same filename convention as the plan-folder case).\n\n"
+            "{model}.md`, which is gitignored and lost when the container "
+            "goes). A dispatch that names a plan folder but sends its report "
+            "to the gitignored fallback gets an advisory naming the plan's "
+            "`subagent-reports/` instead.\n\n"
             "**Long-form output goes to a file, never inline** — a subagent's "
             "final message travels over a bounded-size wire channel that "
             "silently elides an oversized inline report in the MIDDLE, so a "
@@ -301,8 +399,9 @@ class DispatchDeclarationHandler(PreToolUseHandlerBase):
             "**Separately (Plan 00460 Task 1.4):** when the dispatch DOES "
             "declare a report destination but `subagent_type` resolves to "
             "an agent with no `Write` tool (a documented read-only "
-            "built-in, or a project/user agent whose frontmatter omits "
-            "`Write`), an ADVISORY fires — never a deny — pointing at the "
+            "built-in, or a project, user or enabled Claude Code plugin "
+            "agent whose frontmatter omits `Write`), an ADVISORY fires — "
+            "never a deny — pointing at the "
             "daemon's auto-saved path above and warning against a Bash "
             "write-around."
         )
@@ -346,7 +445,36 @@ class DispatchDeclarationHandler(PreToolUseHandlerBase):
             },
         )
 
+        untracked_plan_report_probe = ToolPayload(
+            tool_name=ToolName.AGENT,
+            tool_input={
+                "description": "review the diff",
+                "prompt": (
+                    "Review the diff for CLAUDE/Plan/00345-harness-payloads-for-"
+                    "shell-and-call-syntax-tests/. Write your report to "
+                    f"{_DEFAULT_FALLBACK_REPORT_DIR}260924-review-sonnet.md."
+                ),
+            },
+        )
+
         return [
+            AcceptanceTest(
+                title="Plan-work dispatch sending its report to the gitignored fallback",
+                command=untracked_plan_report_probe.as_instruction(),
+                tool_payload=untracked_plan_report_probe,
+                description=(
+                    "Ledger 00422 N5: a dispatch that names a plan folder but "
+                    "sends its report to the gitignored fallback is told to use "
+                    "the plan's tracked subagent-reports/ instead"
+                ),
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[r"UNTRACKED REPORT FOR PLAN WORK", r"subagent-reports"],
+                safety_notes="Advisory only, never a deny -- the dispatch is declared.",
+                test_type=TestType.ADVISORY,
+                requires_event="PreToolUse with Task tool",
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=True,
+            ),
             AcceptanceTest(
                 title="Task dispatch without a file-handoff declaration",
                 command=undeclared_probe.as_instruction(),

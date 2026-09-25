@@ -896,6 +896,14 @@ def test_flags_a_closing_sum_whose_operands_contradict_the_bullet(tmp_path: Path
 
     assert exit_code == 1, "a closing sum contradicting its own bullet must fail the gate"
     assert "plan-stats-arithmetic" in _rules(report)
+    # The per-rule summary must count it too; it once listed every rule but this one.
+    assert report["summary"]["by_rule"]["plan-stats-arithmetic"] >= 1
+    # The message names the line to fix: the closing self-check is line 9.
+    assert all(
+        "line 9:" in violation["message"]
+        for violation in report["violations"]
+        if violation["rule"] == "plan-stats-arithmetic"
+    )
 
 
 def test_flags_a_folder_sum_that_does_not_add_up(tmp_path: Path) -> None:
@@ -941,8 +949,19 @@ def test_an_index_without_the_reconciliation_bullet_is_clean(tmp_path: Path) -> 
 
 
 def test_a_repo_without_a_plan_index_is_clean(tmp_path: Path) -> None:
-    repo = _make_repo(tmp_path, {})
+    repo = _make_repo(tmp_path, {"README.md": "# fixture\n"})
 
     exit_code, report = _run_checker(repo)
 
     assert exit_code == 0, f"a repo with no plan index was flagged: {report['violations']}"
+
+
+def test_a_repo_with_nothing_tracked_is_not_a_pass(tmp_path: Path) -> None:
+    """Checking 0 paths verified nothing (00466 N26's empty-root case)."""
+    repo = _make_repo(tmp_path, {})
+
+    exit_code, report = _run_checker(repo)
+
+    assert exit_code == 1
+    assert report["summary"]["passed"] is False
+    assert "found no tracked paths" in report["summary"]["vacuous_scan"]

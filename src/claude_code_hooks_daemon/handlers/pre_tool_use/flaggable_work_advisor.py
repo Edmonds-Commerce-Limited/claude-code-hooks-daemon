@@ -42,6 +42,7 @@ from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
 from claude_code_hooks_daemon.core.utils import get_bash_command
+from claude_code_hooks_daemon.handlers.utils.bounded_fifo_map import BoundedFifoMap
 from claude_code_hooks_daemon.handlers.utils.quarantine import quarantine_agent_relevance
 
 logger = logging.getLogger(__name__)
@@ -116,8 +117,10 @@ class FlaggableWorkAdvisorHandler(PreToolUseHandlerBase):
         self._flaggable_topic_terms: list[str] = []
         self._quarantine_agent: str = _DEFAULT_QUARANTINE_AGENT
 
-        # (session_id, matched key) pairs already advised — bounded FIFO.
-        self._advised: dict[tuple[str, str], None] = {}
+        # (session_id, matched key) pairs already advised — bounded, atomic FIFO.
+        self._advised: BoundedFifoMap[tuple[str, str], None] = BoundedFifoMap(
+            max_entries=_MAX_ADVISED_KEYS
+        )
 
     def get_default_enabled(self) -> bool:
         """Opt-in: the flaggable boundary is project-specific (Plan 00278)."""
@@ -229,10 +232,7 @@ class FlaggableWorkAdvisorHandler(PreToolUseHandlerBase):
         return GatingResult(decision=Decision.ALLOW, context=[self._advisory(pending)])
 
     def _record_advised(self, session_id: str, key: str) -> None:
-        map_key = (session_id, key)
-        if map_key not in self._advised and len(self._advised) >= _MAX_ADVISED_KEYS:
-            del self._advised[next(iter(self._advised))]
-        self._advised[map_key] = None
+        self._advised[(session_id, key)] = None
 
     def _advisory(self, matched_keys: list[str]) -> str:
         matched = ", ".join(matched_keys)

@@ -12,6 +12,7 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_layout import main_repo_code_dirs
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
+from claude_code_hooks_daemon.utils.command_evasion import RESERVED_WORD_PREFIX
 from claude_code_hooks_daemon.utils.shell_segmentation import strip_inert_spans
 
 # Both worktree root prefixes — untracked/ is manually managed, .claude/ is Claude Code managed
@@ -54,8 +55,15 @@ _RELOCATION_VERBS: tuple[str, ...] = ("cp", "mv", "rsync", "install", "dd")
 # The separator class includes the newline: a heredoc body runs each line as
 # its own command, so `cp` starting a line is in command position even though
 # nothing before it on that line is a separator character.
+#
+# Shell reserved words between the separator and the verb (`do cp`, `then mv`)
+# leave the verb in command position, so they are skipped (Plan 00422 N25).
 _RELOCATION_VERB_RE = re.compile(
-    r"""(?:^|[;&|\n"']|\$\()\s*(?:sudo\s+)?(?:\S*/)?(""" + "|".join(_RELOCATION_VERBS) + r")\b",
+    r"""(?:^|[;&|\n"']|\$\()\s*"""
+    + RESERVED_WORD_PREFIX
+    + r"(?:sudo\s+)?(?:\S*/)?("
+    + "|".join(_RELOCATION_VERBS)
+    + r")\b",
     re.IGNORECASE,
 )
 

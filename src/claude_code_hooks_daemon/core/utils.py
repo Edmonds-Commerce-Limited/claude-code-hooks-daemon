@@ -136,9 +136,9 @@ def get_bash_command(hook_input: dict[str, Any]) -> str | None:
     Returns:
         Bash command string, or None if not a Bash tool call
     """
-    if hook_input.get("tool_name") != "Bash":
+    if hook_input.get(HookInputField.TOOL_NAME) != "Bash":
         return None
-    tool_input: dict[str, Any] = hook_input.get("tool_input", {})
+    tool_input: dict[str, Any] = hook_input.get(HookInputField.TOOL_INPUT, {})
     command = tool_input.get("command", "")
     # A Bash call can carry command=None (or an empty string). Both must pass
     # straight through: callers test falsiness, and normalising None would
@@ -162,9 +162,9 @@ def get_file_path(hook_input: dict[str, Any]) -> str | None:
     Returns:
         File path string, or None if not a Write/Edit tool call
     """
-    if hook_input.get("tool_name") not in ["Write", "Edit"]:
+    if hook_input.get(HookInputField.TOOL_NAME) not in ["Write", "Edit"]:
         return None
-    tool_input: dict[str, Any] = hook_input.get("tool_input", {})
+    tool_input: dict[str, Any] = hook_input.get(HookInputField.TOOL_INPUT, {})
     return cast("str", tool_input.get("file_path", ""))
 
 
@@ -177,9 +177,9 @@ def get_file_content(hook_input: dict[str, Any]) -> str | None:
     Returns:
         File content string, or None if not a Write/Edit tool call
     """
-    if hook_input.get("tool_name") not in ["Write", "Edit"]:
+    if hook_input.get(HookInputField.TOOL_NAME) not in ["Write", "Edit"]:
         return None
-    tool_input: dict[str, Any] = hook_input.get("tool_input", {})
+    tool_input: dict[str, Any] = hook_input.get(HookInputField.TOOL_INPUT, {})
     return cast("str", tool_input.get("content", ""))
 
 

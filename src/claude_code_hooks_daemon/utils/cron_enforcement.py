@@ -42,11 +42,27 @@ delivery PATH are different things to reason about.
 from __future__ import annotations
 
 import re
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Final
 
 from claude_code_hooks_daemon.config.models import PersistentCronConfig
 from claude_code_hooks_daemon.constants.protocol import HookInputField
+from claude_code_hooks_daemon.core.hook_result import Decision
+from claude_code_hooks_daemon.core.result_types import BlockingResult
+from claude_code_hooks_daemon.utils.cron_pause import (
+    CronPause,
+    load_live_pauses,
+    render_paused_note,
+)
+from claude_code_hooks_daemon.utils.cron_tick import (
+    TickKind,
+    strip_tick_sentinels,
+    tick_sentinel,
+    with_tick_sentinel,
+)
 
 #: The delivered ``prompt`` (and, per the contract, ``description``/
 #: ``command`` on other capped fields) is truncated to this many characters.
@@ -158,8 +174,11 @@ def _prompts_match(declared: str, delivered: str) -> bool:
     that survives both transformations at once.
     """
     without_marker = _strip_truncation_marker(delivered)
-    delivered_norm = _normalise_whitespace(without_marker)
-    declared_norm = _normalise_whitespace(declared)
+    # The tick sentinel is stripped from both sides (Plan 00388): a cron
+    # created from today's advisory carries it and one created before it
+    # existed does not, and both are the same declared job.
+    delivered_norm = _normalise_whitespace(strip_tick_sentinels(without_marker))
+    declared_norm = _normalise_whitespace(strip_tick_sentinels(declared))
     if _was_truncated(delivered, without_marker):
         # An EMPTY prefix is not a short prefix, it is no evidence at all:
         # every declaration starts with it, so a delivery of nothing but a
@@ -215,6 +234,18 @@ def find_missing_crons(
     return [job for job in declared_jobs if not cron_is_asserted(job, session_crons)]
 
 
+def declared_tick_prompt(job: PersistentCronConfig) -> str:
+    """The prompt the agent is told to paste for a declared job.
+
+    The declared text led by ``[tick:job:<id>]`` (Plan 00388), so the job's
+    ticks are recognisably the daemon's and never read as the owner replying.
+    A prompt that already carries a sentinel -- a declared failsafe job pastes
+    the canonical prompt -- is rendered unchanged. Every surface that hands a
+    declared prompt to an agent renders it through here.
+    """
+    return with_tick_sentinel(job.prompt, tick_sentinel(TickKind.DECLARED, job.id))
+
+
 def render_missing_crons_reason(missing: list[PersistentCronConfig]) -> str:
     """The Stop-block DENY reason naming the exact ``CronCreate`` to run.
 
@@ -245,7 +276,52 @@ def render_missing_crons_reason(missing: list[PersistentCronConfig]) -> str:
         lines.append(heading)
         lines.append(f"    schedule (recurring): {job.schedule}")
         lines.append("    prompt:")
-        lines.extend(f"      {line}" for line in job.prompt.splitlines() or [""])
+        lines.extend(f"      {line}" for line in declared_tick_prompt(job).splitlines())
     lines.append("")
     lines.append("Once CronCreate has been called for every job above, stopping is safe again.")
     return "\n".join(lines)
+
+
+def _pause_advice_key(session_id: str, paused: list[CronPause]) -> str:
+    """Rate-limit key: a NEW pause restarts the count, so it is said at once."""
+    stamps = ",".join(sorted(f"{pause.job_id}@{pause.recorded_at}" for pause in paused))
+    return f"{session_id}|{stamps}"
+
+
+def verdict_for_missing_crons(
+    missing: list[PersistentCronConfig],
+    hook_input: dict[str, Any],
+    *,
+    pauses_path: Path | None,
+    should_advise: Callable[[str], bool],
+    now: float | None = None,
+) -> BlockingResult:
+    """The Stop/SubagentStop verdict once ``missing`` is known to be non-empty.
+
+    A job paused for THIS session (``cron_pause``, ledger 00422 N4) may be
+    missing. Any other missing job denies, and the deny also names the pauses
+    so they are never hidden behind it. When every missing job is paused the
+    stop is allowed and the pause is named in context -- on the first
+    qualifying stop and then every ``PAUSE_ADVISE_INTERVAL``-th, because a
+    Stop ALLOW with context costs the session a turn.
+
+    Args:
+        missing: The declared jobs ``find_missing_crons`` reported absent.
+        hook_input: The Stop/SubagentStop payload, for its ``session_id``.
+        pauses_path: The pause file, or None for "no pauses".
+        should_advise: The handler's per-key rate limiter.
+        now: Injectable clock for tests; defaults to ``time.time()``.
+    """
+    when = time.time() if now is None else now
+    session_id = str(hook_input.get(HookInputField.SESSION_ID) or "")
+    live = load_live_pauses(pauses_path, session_id=session_id, now=when)
+    unpaused = [job for job in missing if job.id not in live]
+    paused = [live[job.id] for job in missing if job.id in live]
+    if unpaused:
+        reason = render_missing_crons_reason(unpaused)
+        if paused:
+            reason = f"{reason}\n\n{render_paused_note(paused, now=when)}"
+        return BlockingResult.deny(reason)
+    if not should_advise(_pause_advice_key(session_id, paused)):
+        return BlockingResult(decision=Decision.ALLOW)
+    return BlockingResult(decision=Decision.ALLOW, context=[render_paused_note(paused, now=when)])
