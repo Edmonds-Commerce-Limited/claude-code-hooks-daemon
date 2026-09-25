@@ -70,9 +70,7 @@ class TestDeadlineBelowClientSocketTimeout:
 
     def test_a_deadline_past_the_socket_timeout_is_rejected(self) -> None:
         with pytest.raises(ValidationError, match="socket timeout"):
-            ChainConfig.model_validate(
-                {"deadline_seconds": Timeout.SOCKET_DISPATCH_ROUNDTRIP + 1}
-            )
+            ChainConfig.model_validate({"deadline_seconds": Timeout.SOCKET_DISPATCH_ROUNDTRIP + 1})
 
     def test_a_deadline_inside_the_timeout_but_without_margin_is_rejected(self) -> None:
         """Even strictly under the socket timeout, too little margin to

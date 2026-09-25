@@ -1269,9 +1269,7 @@ class HooksDaemon:
                 try:
                     health = self.controller.get_health()
                 except Exception:
-                    logger.exception(
-                        "Straggler health check failed; skipping this cycle"
-                    )
+                    logger.exception("Straggler health check failed; skipping this cycle")
                     continue
 
                 stragglers = health.get("stragglers")

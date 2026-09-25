@@ -1150,9 +1150,7 @@ class TestControllerHealthStragglers:
         assert health["stragglers"]["count"] == 1
         assert health["stragglers"]["oldest_age_seconds"] > 0.0
 
-    def test_reaching_the_configured_threshold_reports_degraded(
-        self, workspace_root: Path
-    ) -> None:
+    def test_reaching_the_configured_threshold_reports_degraded(self, workspace_root: Path) -> None:
         controller = self._initialised_controller(
             workspace_root, chain=ChainConfig(straggler_unhealthy_count=2)
         )

@@ -81,7 +81,9 @@ _PYTHON_SURFACES: Final[tuple[str, ...]] = (
 #: N40). A caller's `if isinstance(x, DispatchTimeout)` is therefore a
 #: fail-open DECISION POINT wearing no `except` -- the "isinstance-dispatch
 #: shape" the except-only scanner above cannot see (Plan 00466 N40 m4).
-_DISPATCH_SENTINEL_NAMES: Final[frozenset[str]] = frozenset({"DispatchTimeout", "DispatchSaturated"})
+_DISPATCH_SENTINEL_NAMES: Final[frozenset[str]] = frozenset(
+    {"DispatchTimeout", "DispatchSaturated"}
+)
 _RUST_SURFACES: Final[tuple[str, ...]] = ("relay/hooks_relay.rs",)
 #: `.claude/init.sh` is a symlink to this; the real file is the surface.
 _SHELL_SURFACES: Final[tuple[str, ...]] = ("init.sh",)
@@ -220,7 +222,9 @@ def _isinstance_dispatch_sentinel(test: ast.expr) -> str | None:
     noisy one.
     """
     if not (
-        isinstance(test, ast.Call) and isinstance(test.func, ast.Name) and test.func.id == "isinstance"
+        isinstance(test, ast.Call)
+        and isinstance(test.func, ast.Name)
+        and test.func.id == "isinstance"
     ):
         return None
     if len(test.args) != 2:
@@ -233,7 +237,9 @@ def _isinstance_dispatch_sentinel(test: ast.expr) -> str | None:
     return None
 
 
-def _isinstance_dispatch_boundaries(surface: str, tree: ast.Module, owner: dict[int, str]) -> list[Boundary]:
+def _isinstance_dispatch_boundaries(
+    surface: str, tree: ast.Module, owner: dict[int, str]
+) -> list[Boundary]:
     """`if isinstance(x, DispatchTimeout | DispatchSaturated)` branches.
 
     BoundedDispatcher.run() (Plan 00466 N34/N40) returns a sentinel instead of

@@ -646,7 +646,9 @@ class HandlerChain:
                 f"BoundedDispatcher.run() returned an unexpected type: {type(outcome).__name__}"
             )
         execution_time_ms = (time.perf_counter() - start_time) * 1000
-        if any(HandlerTag.SAFETY in h.tags and HandlerTag.BLOCKING in h.tags for h in self.handlers):
+        if any(
+            HandlerTag.SAFETY in h.tags and HandlerTag.BLOCKING in h.tags for h in self.handlers
+        ):
             denied_result = HookResult.deny(reason=f"chain: not judged in time ({detail})")
             denied_result.context = [f"Chain not judged in time: {detail}"]
             return ChainExecutionResult(result=denied_result, execution_time_ms=execution_time_ms)

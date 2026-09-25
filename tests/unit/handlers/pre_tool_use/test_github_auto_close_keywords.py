@@ -405,7 +405,9 @@ class TestDisclosureLadder:
         finally:
             reset_dispatch_cancellation(ctx_token)
         assert cancelled_result.reason is not None
-        assert "NO ESCAPE HATCH" in cancelled_result.reason  # still a real deny -- only the SIDE EFFECT is skipped
+        assert (
+            "NO ESCAPE HATCH" in cancelled_result.reason
+        )  # still a real deny -- only the SIDE EFFECT is skipped
 
         # A later, un-cancelled call on the SAME transcript must still be
         # the VERBOSE first fire -- the cancelled call above never marked it.

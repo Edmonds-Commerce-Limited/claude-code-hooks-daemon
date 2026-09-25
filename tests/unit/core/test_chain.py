@@ -1704,7 +1704,9 @@ class TestDispatchCancellationReachesStragglingHandlerCode:
     def test_a_late_writes_after_the_deadline_is_skipped_not_written(self) -> None:
         chain = HandlerChain()
         outcome: dict[str, str] = {}
-        writer = _LateStateWriter("late-writer", priority=10, sleep_before_check=0.2, outcome=outcome)
+        writer = _LateStateWriter(
+            "late-writer", priority=10, sleep_before_check=0.2, outcome=outcome
+        )
         chain.add(writer)
 
         result = chain.execute({"tool_name": "Bash"}, deadline_seconds=0.02)
@@ -1723,7 +1725,9 @@ class TestDispatchCancellationReachesStragglingHandlerCode:
         call that finishes comfortably inside its own budget."""
         chain = HandlerChain()
         outcome: dict[str, str] = {}
-        writer = _LateStateWriter("on-time-writer", priority=10, sleep_before_check=0.0, outcome=outcome)
+        writer = _LateStateWriter(
+            "on-time-writer", priority=10, sleep_before_check=0.0, outcome=outcome
+        )
         chain.add(writer)
 
         result = chain.execute({"tool_name": "Bash"}, deadline_seconds=5.0)
