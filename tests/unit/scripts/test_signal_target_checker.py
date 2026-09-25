@@ -104,7 +104,13 @@ class TestEverySpellingOfARawSignalIsFound:
         assert _rules(checker, source) == []
 
 
-class TestAPidFromAVerifiedDaemonPidFileIsProven:
+class TestAPidFileIsNeverProofEvenWhenVerifiedAsADaemon:
+    """``verify_daemon=True`` proves "a daemon", not "THIS project's daemon".
+
+    A stale PID file can name another project's daemon, so ``cmd_stop``'s
+    shape is an instance: only ``utils.safe_signal`` proves the project root.
+    """
+
     def test_read_pid_file_with_verify_daemon_true(self, checker: ModuleType) -> None:
         source = """
             import os, signal
@@ -116,9 +122,9 @@ class TestAPidFromAVerifiedDaemonPidFileIsProven:
                     return
                 os.kill(pid, signal.SIGTERM)
         """
-        assert _rules(checker, source) == []
+        assert _rules(checker, source) == [(9, "raw-signal")]
 
-    def test_read_pid_file_without_verification_is_not(self, checker: ModuleType) -> None:
+    def test_read_pid_file_without_verification(self, checker: ModuleType) -> None:
         source = """
             import os, signal
 
@@ -128,29 +134,16 @@ class TestAPidFromAVerifiedDaemonPidFileIsProven:
         """
         assert _rules(checker, source) == [(6, "raw-signal")]
 
-    def test_a_name_rebound_to_anything_else_is_not(self, checker: ModuleType) -> None:
+    def test_the_helper_route_is_proven(self, checker: ModuleType) -> None:
         source = """
-            import os, signal
+            import signal
+            from claude_code_hooks_daemon.utils.safe_signal import signal_verified_daemon
 
-            def stop(path, other):
-                pid = read_pid_file(path, verify_daemon=True)
-                if other:
-                    pid = other
-                os.kill(pid, signal.SIGTERM)
+            def stop(path, root):
+                pid = read_pid_file(str(path), verify_daemon=True)
+                signal_verified_daemon(pid, signal.SIGTERM, project_root=root)
         """
-        assert _rules(checker, source) == [(8, "raw-signal")]
-
-    def test_a_parameter_of_the_same_name_is_not(self, checker: ModuleType) -> None:
-        source = """
-            import os, signal
-
-            def stop(pid):
-                os.kill(pid, signal.SIGTERM)
-
-            def elsewhere(path):
-                pid = read_pid_file(path, verify_daemon=True)
-        """
-        assert _rules(checker, source) == [(5, "raw-signal")]
+        assert _rules(checker, source) == []
 
 
 class TestAProcessHandleMustBeProvenBeforeItIsSignalled:
@@ -264,6 +257,188 @@ class TestTheHelperIsTheOnePlaceARawSignalIsSent:
         assert checker.scan_file(copy) != []
 
 
+def _shell(checker: ModuleType, source: str) -> list[tuple[int, str]]:
+    violations = checker.scan_shell_source(textwrap.dedent(source), "fixture.sh")
+    return [(v.line, v.rule) for v in violations]
+
+
+class TestTheShellInstancesOnMainAreFound:
+    """Each fixture is the shape main 9f83b9ff9 shipped, cut down to the signal."""
+
+    def test_upgrade_sh_sigterm_of_a_pid_file_pid(self, checker: ModuleType) -> None:
+        source = """
+            _stop_running_daemons() {
+                local pid_file pid
+                for pid_file in "$1"/untracked/daemon-*.pid; do
+                    pid=$(tr -d '[:space:]' < "$pid_file")
+                    if kill -0 "$pid" 2> /dev/null; then
+                        if kill -TERM "$pid" 2> /dev/null; then
+                            any_killed=1
+                        fi
+                    fi
+                done
+            }
+        """
+        assert _shell(checker, source) == [(7, "shell-unproven-kill")]
+
+    def test_dummy_client_group_kill_of_a_pgrep_match(self, checker: ModuleType) -> None:
+        source = """
+            verify_dummy_daemon_stopped() {
+                local survivors pid pgid
+                survivors="$(_surviving_dummy_daemons)"
+                for pid in $survivors; do
+                    if pgid="$(ps -o pgid= -p "$pid" | tr -d ' ')" && [ -n "$pgid" ]; then
+                        if ! kill -- -"$pgid"; then
+                            info "WARNING: could not signal process group $pgid"
+                        fi
+                    fi
+                done
+            }
+        """
+        assert _shell(checker, source) == [(7, "shell-unproven-kill")]
+
+    def test_venv_bootstrap_watchdog_term_on_liveness_alone(self, checker: ModuleType) -> None:
+        source = """
+            _vb_watchdog() {
+                local owner="$1" deadline="$2" probe out
+                while probe="$(kill -0 "$owner" 2>&1)"; do
+                    if [ "$(date +%s)" -ge "$deadline" ]; then
+                        if ! out="$(kill -TERM "$owner" 2>&1)"; then
+                            print_verbose "ended first ($out)"
+                        fi
+                        return 0
+                    fi
+                    sleep 1
+                done
+            }
+        """
+        assert _shell(checker, source) == [(6, "shell-unproven-kill")]
+
+    def test_venv_heartbeat_stop_of_a_passed_in_pid(self, checker: ModuleType) -> None:
+        source = """
+            venv_heartbeat_stop() {
+                local pid="$1" out rc=0
+                [ -n "$pid" ] || return 0
+                if ! out="$(kill "$pid" 2>&1)"; then
+                    return 0
+                fi
+                wait "$pid" || rc=$?
+            }
+        """
+        assert _shell(checker, source) == [(5, "shell-unproven-kill")]
+
+    def test_a_group_helper_that_signals_whatever_group_it_is_given(
+        self, checker: ModuleType
+    ) -> None:
+        source = """
+            _vb_signal_group() {
+                local sig="$1" pgid="$2" out
+                if ! out="$(kill "-$sig" -- "-$pgid" 2>&1)"; then
+                    print_verbose "had already ended"
+                fi
+            }
+        """
+        assert _shell(checker, source) == [(4, "shell-unproven-kill")]
+
+
+class TestEveryShellSpellingIsFound:
+    @pytest.mark.parametrize(
+        "line",
+        [
+            'kill "$(cat daemon.pid)"',
+            "kill -9 `pgrep -f thing`",
+            'kill -s TERM "$pid"',
+            "kill 1234",
+            'pkill -f "venv-"',
+            "killall python3",
+            'x="$(kill -KILL "$pid" 2>&1)"',
+            "trap 'kill \"$pid\"' TERM",
+            'true && kill "$pid"',
+        ],
+    )
+    def test_is_reported(self, checker: ModuleType, line: str) -> None:
+        source = f'f() {{\n    local pid="$1"\n    {line}\n}}\n'
+        assert [rule for _, rule in _shell(checker, source)] == ["shell-unproven-kill"]
+
+
+class TestProvenShellTargetsAreExempt:
+    @pytest.mark.parametrize(
+        "body",
+        [
+            'kill -0 "$pid"',
+            'kill -s 0 "$pid"',
+            'kill -TERM "$$"',
+            'kill "-${sig}" "$$"',
+            'sleep 5 &\nchild=$!\nkill "$child"',
+            'kill "$!"',
+            "kill %1",
+            "kill -l",
+            'if _is_project_daemon_pid "$pid" "$root"; then kill -TERM "$pid"; fi',
+            'if [ "$(_rv_parent_of "$pid")" = "$p" ]; then kill -KILL "$pid"; fi',
+            'if _vb_job_running "$job"; then kill -TERM -- "-$job"; fi',
+            'current="$(_vb_process_identity "$pid")"\nkill -TERM "$pid"',
+            'if _venv_parent_of "$pid"; then kill "$pid"; fi',
+            'if _is_dummy_daemon_pid "$pid"; then kill -TERM "$pid"; fi',
+        ],
+    )
+    def test_is_not_reported(self, checker: ModuleType, body: str) -> None:
+        source = f'f() {{\n    local pid="$1" job="$2" sig="$3"\n    {body}\n}}\n'
+        assert _shell(checker, source) == []
+
+    def test_a_variable_bound_only_from_a_background_job_is_proven(
+        self, checker: ModuleType
+    ) -> None:
+        source = """
+            HEARTBEAT=""
+            start() {
+                sleep 30 &
+                HEARTBEAT="$!"
+            }
+            stop() {
+                kill "$HEARTBEAT"
+            }
+        """
+        assert _shell(checker, source) == []
+
+    def test_a_variable_also_bound_from_anything_else_is_not(self, checker: ModuleType) -> None:
+        source = """
+            start() {
+                sleep 30 &
+                TARGET="$!"
+                TARGET="$(cat other.pid)"
+            }
+            stop() {
+                kill "$TARGET"
+            }
+        """
+        assert _shell(checker, source) == [(8, "shell-unproven-kill")]
+
+    def test_a_verifier_in_another_function_proves_nothing(self, checker: ModuleType) -> None:
+        source = """
+            check() {
+                _is_project_daemon_pid "$pid" "$root"
+            }
+            stop() {
+                kill -TERM "$pid"
+            }
+        """
+        assert _shell(checker, source) == [(6, "shell-unproven-kill")]
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            '# kill -9 "$pid" would be wrong here',
+            'echo "run: kill -TERM $pid"',
+            "cat <<'EOF'\nkill -9 \"$pid\"\nEOF",
+            "printf '%s\\n' \"kill $pid\"",
+        ],
+    )
+    def test_comments_prose_and_heredoc_bodies_are_not_code(
+        self, checker: ModuleType, text: str
+    ) -> None:
+        assert _shell(checker, f"{text}\n") == []
+
+
 class TestTheRepository:
     def test_every_scanned_surface_is_covered(self, checker: ModuleType) -> None:
         roots = {path.relative_to(_REPO_ROOT).as_posix() for path in checker.scanned_files()}
@@ -271,6 +446,25 @@ class TestTheRepository:
         assert "scripts/debug_info.py" in roots
         assert ".claude/ccy/claude-supervise.py" in roots
 
+    def test_every_shell_surface_is_covered(self, checker: ModuleType) -> None:
+        roots = {path.relative_to(_REPO_ROOT).as_posix() for path in checker.scanned_shell_files()}
+        for expected in (
+            "scripts/upgrade.sh",
+            "scripts/dummy-client-repo.sh",
+            "scripts/venv_bootstrap.sh",
+            "scripts/install/venv.sh",
+            "scripts/lib/resolve_venv.sh",
+            "src/claude_code_hooks_daemon/skills/hooks-daemon/scripts/install.sh",
+            "CLAUDE/Plan/_planlib.inc.bash",
+            "bin/hooks-daemon",
+            ".claude/hooks/pre-tool-use",
+        ):
+            assert expected in roots
+        assert not any(root.startswith("tests/") for root in roots)
+
     def test_the_repository_is_clean(self, checker: ModuleType) -> None:
         violations = [v for path in checker.scanned_files() for v in checker.scan_file(path)]
+        violations += [
+            v for path in checker.scanned_shell_files() for v in checker.scan_shell_file(path)
+        ]
         assert violations == []
