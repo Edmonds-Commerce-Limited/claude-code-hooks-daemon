@@ -56,7 +56,7 @@ cannot guarantee.
 
 ### Phase 1: Brainstorm and design
 
-- [ ] 🔄 **Task 1.1**: Brainstorm the levers, from the evidence
+- [x] ✅ **Task 1.1**: Brainstorm the levers, from the evidence
   (subagent-reports/).
 - [ ] 🔄 **Task 1.2**: Owner picks the levers and thresholds from the ranked
   design.
