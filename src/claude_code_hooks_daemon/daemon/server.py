@@ -88,6 +88,44 @@ _OVERSIZED_REQUEST_DRAIN_CAP_BYTES: Final[int] = SocketLimit.REQUEST_BUFFER_BYTE
 # its error response.
 _OVERSIZED_REQUEST_DRAIN_PER_READ_TIMEOUT_SECONDS: Final[float] = 0.5
 
+#: The wire event name PreToolUse requests carry (`EventID.PRE_TOOL_USE`'s
+#: `wire_key.value`, and what ``event_json_key`` is set to for the
+#: ``pre-tool-use.sock`` listener -- see the ``wired_event_metas()`` loop
+#: that builds ``partial(self._handle_event_client, meta.wire_key.value)``).
+#: A plain string rather than importing ``EventID`` here: the two failure
+#: paths below run before ANY parsing of the payload, so nothing else in
+#: this module needs the full event-metadata machinery for this one check.
+_PRE_TOOL_USE_WIRE_KEY: Final[str] = "PreToolUse"
+
+#: Reason text for a transport-level PreToolUse deny (Plan 00466 N40 review 2
+#: MA3): a malformed/oversized/undecodable payload, or an uncaught exception,
+#: on the per-event socket used to answer `{}` -- indistinguishable from a
+#: real judged "allow, nothing to add" verdict to whatever reads it next (the
+#: relay, or a direct per-event-socket client). Neither the legacy socket
+#: (m5) nor the python transport (M1/N25) has ever fabricated that ambiguity;
+#: this closes the one remaining rung that did.
+_TRANSPORT_FAIL_CLOSED_REASON: Final[str] = (
+    "BLOCKED [transport-fail-closed]: the daemon could not produce a verdict "
+    "for this request (payload could not be read, or an internal error "
+    "occurred mid-dispatch). Denying out of caution -- this does not mean "
+    "the action itself is unsafe. If the daemon is wedged, run: "
+    "bin/hooks-daemon restart"
+)
+
+
+def _pre_tool_use_transport_deny_response() -> dict[str, Any]:
+    """A genuine PreToolUse DENY, in the same shape
+    ``HookResult._format_pre_tool_use_response`` emits for a real judged
+    deny -- never the ambiguous ``{}`` a transport failure used to answer.
+    """
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": _PRE_TOOL_USE_WIRE_KEY,
+            "permissionDecision": "deny",
+            "permissionDecisionReason": _TRANSPORT_FAIL_CLOSED_REASON,
+        }
+    }
+
 
 def redacted_blocking_response(response_json: str) -> str:
     """Prepare a blocking response for the DEBUG log: redacted, then truncated.
@@ -1147,7 +1185,12 @@ class HooksDaemon:
                     event_json_key,
                     exc,
                 )
-                writer.write(json.dumps({}).encode())
+                fail_response = (
+                    _pre_tool_use_transport_deny_response()
+                    if event_json_key == _PRE_TOOL_USE_WIRE_KEY
+                    else {}
+                )
+                writer.write(json.dumps(fail_response).encode())
                 await writer.drain()
                 return
 
@@ -1170,8 +1213,13 @@ class HooksDaemon:
             self._log_lost_peer(None)
         except Exception as e:
             logger.exception("Error handling event-socket client (%s): %s", event_json_key, e)
+            fail_response = (
+                _pre_tool_use_transport_deny_response()
+                if event_json_key == _PRE_TOOL_USE_WIRE_KEY
+                else {}
+            )
             with contextlib.suppress(OSError):
-                writer.write(json.dumps({}).encode())
+                writer.write(json.dumps(fail_response).encode())
                 await writer.drain()
         finally:
             self._active_requests -= 1
