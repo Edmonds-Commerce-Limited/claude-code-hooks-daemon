@@ -2231,6 +2231,67 @@ class TestEncryptedTargetInvocationDenies:
         assert not _encrypted_ok(f"cat {_ENC}", cwd=None)
         assert not _encrypted_ok(f"cat {_ENC}", cwd="proj")
 
+
+def _grep_ok(command: str) -> bool:
+    return sfm.is_grep_pattern_only_mention(command, sfm.DEFAULT_PROTECTED_PATTERNS)
+
+
+class TestGrepPatternOnlyMentionAllows:
+    """Plan 00466 niggle (gd5_fp): searching FOR a protected name's literal
+    text is not reading the file -- only a FILE-TARGET argument is."""
+
+    def test_the_reported_false_positive(self) -> None:
+        assert _grep_ok("grep 'id_rsa' docs/ssh-setup.md")
+
+    def test_unquoted_pattern(self) -> None:
+        assert _grep_ok("grep id_rsa file.txt")
+
+    def test_egrep_and_fgrep(self) -> None:
+        assert _grep_ok("egrep id_rsa file.txt")
+        assert _grep_ok("fgrep id_rsa file.txt")
+
+    def test_explicit_e_flag(self) -> None:
+        assert _grep_ok("grep -e id_rsa file.txt")
+        assert _grep_ok("grep --regexp=id_rsa file.txt")
+
+    def test_flags_before_the_pattern(self) -> None:
+        assert _grep_ok("grep -n -i id_rsa file.txt")
+        assert _grep_ok("grep -rn id_rsa .")
+
+    def test_multiple_file_targets_none_protected(self) -> None:
+        assert _grep_ok("grep id_rsa a.txt b.txt c.txt")
+
+
+class TestGrepPatternOnlyMentionDenies:
+    """Every shape where a FILE TARGET (not the pattern) names a protected
+    path, or the command is not a clean single grep invocation, must still
+    deny -- this exemption must never widen past the search-pattern slot."""
+
+    def test_no_mention_is_not_an_exemption(self) -> None:
+        assert not _grep_ok("grep foo file.txt")
+
+    def test_protected_name_as_a_file_target(self) -> None:
+        assert not _grep_ok("grep foo id_rsa")
+
+    def test_protected_name_in_both_pattern_and_target(self) -> None:
+        assert not _grep_ok("grep id_rsa id_rsa")
+
+    def test_non_grep_head(self) -> None:
+        assert not _grep_ok("cat id_rsa")
+
+    def test_tilde_path_fails_closed(self) -> None:
+        assert not _grep_ok("grep pattern ~/.ssh/id_rsa")
+
+    def test_glob_target_fails_closed(self) -> None:
+        assert not _grep_ok("grep -l id_rsa *.txt")
+
+    def test_compound_command_voids_the_exemption(self) -> None:
+        assert not _grep_ok("grep id_rsa file.txt; cat id_rsa")
+        assert not _grep_ok("grep id_rsa file.txt | xargs cat")
+
+    def test_substitution_voids_the_exemption(self) -> None:
+        assert not _grep_ok("grep id_rsa $(cat file.txt)")
+
     def test_commands_that_can_decrypt(self) -> None:
         """Ansible finds the vault password from config without the command naming it."""
         for command in (

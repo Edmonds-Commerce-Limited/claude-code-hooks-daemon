@@ -2306,6 +2306,113 @@ def _renders_a_diff(word: str) -> bool:
     return False
 
 
+#: grep-family binaries: their FIRST positional argument (or an `-e`/`-f`
+#: flag's value) is a search PATTERN, not a filesystem path.
+_GREP_FAMILY_COMMANDS: Final[frozenset[str]] = frozenset({"grep", "egrep", "fgrep"})
+
+#: Flags whose VALUE is pattern content, not a file target.
+_GREP_PATTERN_VALUE_FLAGS: Final[frozenset[str]] = frozenset({"-e", "--regexp", "-f", "--file"})
+
+
+def is_grep_pattern_only_mention(
+    command: str, patterns: tuple[str, ...] = DEFAULT_PROTECTED_PATTERNS
+) -> bool:
+    """True when EVERY protected mention in ``command`` sits only in a
+    grep-family command's PATTERN argument, never in a FILE-TARGET argument
+    (Plan 00466 niggle, gd5_fp review probe).
+
+    Searching FOR a protected name's literal text is not reading the file:
+    ``grep 'id_rsa' docs/ssh-setup.md`` was denied outright, blocking an
+    ordinary documentation search that never opens the real key. The
+    protected mention here is the search PATTERN, not a path.
+
+    Scoped the same way :func:`is_encrypted_target_invocation` is (and
+    reusing its exact primitives): no expansion character anywhere in
+    ``command`` (glob, substitution, tilde -- keeping this to the simple,
+    fully-literal case), one parseable simple command (no separator, pipe,
+    or redirection-that-isn't-a-redirect), head is a bare grep/egrep/fgrep.
+
+    Every OTHER bare positional word (after the pattern slot -- an
+    ``-e``/``--regexp``/``-f``/``--file`` flag's value when present,
+    otherwise the first bare word) is a file-target argument and is
+    checked with the SAME per-token judge (:func:`_token_mention`) the rest
+    of the scan trusts; if ANY of them is itself a protected mention, the
+    exemption does not apply and the deny rule stands -- this is what stops
+    ``grep foo ~/.ssh/id_rsa``-shaped commands (though the tilde alone
+    already fails closed above) or ``grep id_rsa id_rsa`` (the second,
+    file-target occurrence) from slipping through. Misclassifying a
+    numeric-value flag's argument (``-A 3``) as a file-target word is
+    harmless: ``_token_mention`` on ``"3"`` never matches a protected
+    pattern, so over-checking only ever makes the exemption LESS likely to
+    apply, never more -- the safe direction.
+    """
+    if any(char in _EXPANSION_CHARS for char in command):
+        return False
+    words = _shell_words(strip_transparent_reserved_words(command))
+    if not words or not _is_single_simple_command(words):
+        return False
+    head = words[0]
+    if head not in _GREP_FAMILY_COMMANDS:
+        return False
+
+    pattern_value_indices: set[int] = set()
+    positional_indices: list[int] = []
+    cursor = 1
+    end_of_options = False
+    while cursor < len(words):
+        word = words[cursor]
+        if not end_of_options and word == "--":
+            end_of_options = True
+            cursor += 1
+            continue
+        if not end_of_options and word in _GREP_PATTERN_VALUE_FLAGS:
+            if cursor + 1 < len(words):
+                pattern_value_indices.add(cursor + 1)
+            cursor += 2
+            continue
+        if not end_of_options and any(
+            word.startswith(flag + "=") for flag in _GREP_PATTERN_VALUE_FLAGS
+        ):
+            pattern_value_indices.add(cursor)
+            cursor += 1
+            continue
+        if not end_of_options and word.startswith("-") and word != "-":
+            cursor += 1
+            continue
+        positional_indices.append(cursor)
+        cursor += 1
+
+    if not pattern_value_indices and positional_indices:
+        positional_indices = positional_indices[1:]
+
+    mentions = list(iter_protected_mentions(command, patterns))
+    if not mentions:
+        return False
+
+    project_root = resolve_project_root()
+    stem_pairs = _pattern_literal_stems(patterns)
+    both_edges_patterns = tuple(
+        pattern
+        for pattern in patterns
+        if _has_leading_wildcard(pattern) and _has_trailing_wildcard(pattern)
+    )
+    both_edges_stems = tuple(stem for stem, _pattern in _pattern_literal_stems(both_edges_patterns))
+    for index in positional_indices:
+        if (
+            _token_mention(
+                words[index],
+                patterns,
+                stem_pairs,
+                project_root,
+                both_edges_patterns=both_edges_patterns,
+                both_edges_stems=both_edges_stems,
+            )
+            is not None
+        ):
+            return False
+    return True
+
+
 def _mention_is_encrypted(
     token: str,
     literal_words: frozenset[str],

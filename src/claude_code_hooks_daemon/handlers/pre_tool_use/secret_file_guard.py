@@ -1268,6 +1268,13 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
                 command, patterns, cwd=cwd, is_encrypted=self._is_encrypted
             ):
                 return None
+            # Plan 00466 niggle (gd5_fp): a grep-family search PATTERN that
+            # happens to spell a protected name is not a read of that file
+            # -- only a FILE-TARGET argument is (see the function's own
+            # docstring for the position-based distinction and every shape
+            # this must NOT unlock).
+            if sfm.is_grep_pattern_only_mention(command, patterns):
+                return None
             return (mention[0], mention[1], "bash")
 
         path_field = _PATH_FIELD_BY_TOOL.get(str(tool_name or ""))
