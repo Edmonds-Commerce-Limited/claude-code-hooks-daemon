@@ -60,6 +60,7 @@ class SupervisorTickOutcome(Protocol):
     model_switch_family: str | None
     model_switch_session: str | None
     audit_flush_log: str | None
+    settings_status_log: str | None
 
 
 class SupervisorStateMachine(Protocol):
@@ -80,9 +81,11 @@ class SupervisorStateMachine(Protocol):
 
     def note_manual_effort_command(self, level: str, *, now_wall: float) -> None: ...
 
-    def arm_coupled_effort(
-        self, *, session: str, family: str, is_restore: bool = False
-    ) -> None: ...
+    def arm_coupled_effort(self, *, session: str, family: str) -> None: ...
+
+    def resolve_coupled_effort_target(
+        self, *, reading: object | None, now_wall: float
+    ) -> str | None: ...
 
     def arm_audit(self, item: str) -> None: ...
 

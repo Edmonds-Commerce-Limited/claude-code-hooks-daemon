@@ -280,7 +280,7 @@ def test_an_inferred_drop_does_not_cancel_an_armed_coupled_correction() -> None:
     machine.note_model_reading(dropped, now_wall=_NOW + 1.0)
 
     assert machine.export_state()["manual_effort_active"] == "medium"
-    assert machine.coupled_effort_pending == f"{_SESSION}:opus:xhigh"
+    assert machine.coupled_effort_pending == f"{_SESSION}:opus"
 
 
 # ── Hot-reload safety ───────────────────────────────────────────────────────

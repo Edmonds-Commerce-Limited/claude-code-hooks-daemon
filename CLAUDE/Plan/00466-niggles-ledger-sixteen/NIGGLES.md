@@ -29,26 +29,51 @@ Setting medium therefore needed two edits in two formats (`settings.json` and
 `ccy.env`, commits 909f9591 and e52bd9e5). Even then the restore path still
 lands on xhigh.
 
-**Candidate remedy:** make `settings.json` the single source of truth for the
-effort a model runs at.
+**Remedy (redesigned after adversarial review 1**,
+`subagent-reports/260925-n47-review1-opus-5-5.md`**, which rejected a first
+pass that still held too much of its own opinion):** the supervisor holds
+almost no opinion of its own about effort. `settings.json` is the single
+source of truth.
 
-- The supervisor resolves a family's effort from the settings Claude Code
-  itself reads, in its precedence order: per-model `modelSettings` over
-  `effortLevel`, project over user.
-- The separate floor map and `CCY_MIN_EFFORT_LEVELS` are retired, and the
-  `ccy.env` lines go with them.
-- A switch back to a configured model sets that model's configured effort.
-  `xhigh` compensation applies only while a downgrade leaves the session on a
-  fallback model.
-- The fable anchor clamp (Plan 00297) stays as a ceiling.
+- The built-in floor map and `CCY_MIN_EFFORT_LEVELS` are gone entirely, not
+  just superseded — there is no fallback defaults table any more. Nothing
+  configured means Claude Code's own per-model default already applies and
+  is never fought.
+- Exactly two sanctioned interventions remain: (a) while a downgrade episode
+  leaves the session on a fallback model, effort goes to xhigh, decided
+  purely from "an episode is open for this exact destination", never from
+  which path typed `/model`; (b) Fable never runs above low — governed
+  EXCLUSIVELY by the separate, continuously-verified Plan 00297 DROP ANCHOR
+  invariant, not by this mechanism at all.
+- Every OTHER family, once no downgrade episode is open, is corrected (in
+  either direction) toward whatever `settings.json` resolves for the EXACT
+  model id on screen, matching Claude Code's own resolution: per exact model
+  id (never a sibling in the same family; `[1m]`/date/provider suffixes
+  normalised), across local project, shared project, and user files in
+  Claude Code's precedence, a user-file top-level `effortLevel` skipped for
+  Opus 5.5 and later, `"max"` never valid from settings, and
+  `CLAUDE_CODE_EFFORT_LEVEL` outranking all of it. A manual `/effort` latch
+  still wins throughout.
+- `/effort auto` was investigated as a non-mutating reset for the restore
+  path and rejected: it *writes* — it clears the model's saved
+  `modelSettings` entry — so the restore resolves the value itself and
+  injects a plain `/effort <value>`, never touching disk.
+- A settings.json load status change (missing, malformed, unreadable, or
+  recovered) is logged once, not on every tick.
 
-RED tests:
+RED tests (driven through `decide_once`/`_poll_once` with real sidecar
+sequences, never by arming state directly):
 
-- the restore lands on the configured effort, not xhigh;
-- no `/effort` is sent while live effort equals the configured effort;
-- a downgrade still gets xhigh;
-- a missing or unreadable settings file degrades to the current defaults with a
-  logged reason.
+- a Fable session at low sends nothing;
+- an Opus 5.5 session at its configured medium sends nothing, whether or not
+  anything else is configured;
+- project settings override user settings; a sibling model's entry is never
+  used;
+- a downgrade goes to xhigh, and the restore goes back to the configured or
+  default value;
+- a manual switch to Opus with no downgrade episode open gets no `/effort`;
+- a missing settings file is logged once at startup, in decision.log, not
+  just from the resolver directly.
 
 ### N46 — `budget_exhaustion_detector` fires on a tool result that merely contains budget wording
 

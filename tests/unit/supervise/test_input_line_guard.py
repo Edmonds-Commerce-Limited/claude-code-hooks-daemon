@@ -582,7 +582,8 @@ class TestPollOnceInputBoxGuard:
 
     def test_no_deferral_log_when_nothing_pending(self, tmp_path: Path) -> None:
         # Green sidecar + non-empty box: no injection was pending, so nothing
-        # was deferred -- the log must not accumulate noise on every tick.
+        # was deferred -- the only line is the one-time settings-status note
+        # (Plan 00466 N47 finding 7), never a deferral or gate noop.
         _write_sidecar(tmp_path / "sc", red=False)
         log_path = tmp_path / "decision.log"
         _mod._poll_once(
@@ -596,8 +597,10 @@ class TestPollOnceInputBoxGuard:
             freshness_seconds=30.0,
             input_line_empty=False,
         )
-        # Nothing at all was logged: the file was never even created.
-        assert not log_path.exists()
+        contents = log_path.read_text(encoding="utf-8")
+        assert "settings.json status:" in contents
+        assert _DEFERRED not in contents
+        assert "noop:" not in contents
 
     def test_compact_fires_on_later_tick_after_box_cleared(self, tmp_path: Path) -> None:
         # The deferred tick must leave NO side effects (no cooldown, no state

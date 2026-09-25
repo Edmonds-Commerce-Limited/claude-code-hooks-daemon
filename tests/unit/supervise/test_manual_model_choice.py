@@ -307,17 +307,19 @@ def test_manual_effort_wins_within_the_same_model_spell(tmp_path: Path) -> None:
 
 def test_model_change_re_applies_its_own_default_over_a_prior_manual_effort() -> None:
     """Owner clarification: precedence is TIME-ORDERED, not absolute. EVERY
-    model change (manual switch or auto-restore) starts a fresh spell and
-    re-applies ITS default -- even over a manual /effort set under the
-    PREVIOUS model. `arm_coupled_effort` only ever runs right after a real
-    /model switch, so it must win regardless of an earlier manual latch."""
+    real /model switch starts a fresh spell and clears an earlier manual
+    /effort latch set under the PREVIOUS model -- `arm_coupled_effort` wins
+    regardless of an earlier manual latch. (Plan 00466 N47 review 1: the
+    coupled mechanism no longer bakes in a per-family default target at arm
+    time -- `resolve_coupled_effort_target` decides later, from settings.json
+    or an open downgrade episode -- so this test now only pins the manual
+    latch being cleared, not what the eventual target turns out to be.)"""
     machine = _machine()
     # The human set effort low while on fable...
     machine.note_manual_effort_command("low", now_wall=_NOW)
-    # ...then manually switches to sonnet: the switch is armed with sonnet's
-    # OWN default (xhigh, the non-top-family target), not fable's low.
+    # ...then manually switches to sonnet: the switch starts a fresh spell.
     machine.arm_coupled_effort(session=_SESSION, family="sonnet")
-    assert machine.coupled_effort_pending == f"{_SESSION}:sonnet:xhigh"
+    assert machine.coupled_effort_pending == f"{_SESSION}:sonnet"
     assert machine.export_state()["manual_effort_active"] is None
 
 
@@ -408,7 +410,7 @@ def test_legacy_state_with_the_deleted_manual_fields_imports_cleanly() -> None:
     fresh = _machine()
     fresh.import_state(legacy_state)
     fresh.arm_coupled_effort(session=_SESSION, family="fable")
-    assert fresh.coupled_effort_pending == f"{_SESSION}:fable:low"
+    assert fresh.coupled_effort_pending == f"{_SESSION}:fable"
 
 
 # ── TickFacts / worker JSON round-trip ───────────────────────────────────────

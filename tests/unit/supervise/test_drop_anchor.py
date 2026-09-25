@@ -347,13 +347,20 @@ def test_not_escalated_when_anchor_inactive() -> None:
     assert machine.anchor_escalated_at(_NOW + 1_000_000.0) is False
 
 
-# ── Model-aware effort clamp: fable-above-low never survives a misconfig ───
+# ── Fable gets NO opinion from the coupled mechanism, misconfigured or not ──
+#
+# Plan 00466 N47 review 1: the coupled mechanism's raise-only floor/settings
+# opinion has been deleted for Fable entirely -- DROP ANCHOR (above) is
+# Fable's SOLE authority on effort, continuously verified against observed
+# state rather than a one-shot post-switch guess. So arming a coupled
+# correction for family "fable" must resolve to nothing and clear itself,
+# regardless of what settings.json says for the fable model id -- there is
+# no clamp to test because there is no opinion left to clamp.
 
 
-def test_coupled_target_for_fable_is_clamped_to_low_even_if_misconfigured(tmp_path: Path) -> None:
-    # An operator settings.json misconfiguration (fable configured at xhigh)
-    # must never let the coupled correction carry an Opus-era floor onto
-    # Fable -- the anchor ceiling wins unconditionally.
+def test_coupled_target_for_fable_resolves_to_nothing_regardless_of_settings(
+    tmp_path: Path,
+) -> None:
     from tests.unit.supervise.conftest import write_settings_json
 
     config_dir = tmp_path / "config"
@@ -361,18 +368,10 @@ def test_coupled_target_for_fable_is_clamped_to_low_even_if_misconfigured(tmp_pa
     policy = _mod.CompactPolicy(settings_path=config_dir / "settings.json")
     machine = _mod.CompactStateMachine(policy)
     machine.arm_coupled_effort(session=_SESSION, family="fable")
-    assert machine.coupled_effort_pending == f"{_SESSION}:fable:low"
-
-
-def test_coupled_target_for_fable_still_honours_a_valid_lower_override(tmp_path: Path) -> None:
-    from tests.unit.supervise.conftest import write_settings_json
-
-    config_dir = tmp_path / "config"
-    write_settings_json(config_dir, model_settings={"claude-fable-5": {"effortLevel": "low"}})
-    policy = _mod.CompactPolicy(settings_path=config_dir / "settings.json")
-    machine = _mod.CompactStateMachine(policy)
-    machine.arm_coupled_effort(session=_SESSION, family="fable")
-    assert machine.coupled_effort_pending == f"{_SESSION}:fable:low"
+    assert machine.coupled_effort_pending == f"{_SESSION}:fable"
+    target = machine.resolve_coupled_effort_target(reading=None, now_wall=_NOW)
+    assert target is None
+    assert machine.coupled_effort_pending is None
 
 
 # ── State round-trip (worker hot-reload contract) ───────────────────────────

@@ -485,9 +485,28 @@ class TestPollOnceNoopLogging:
         }
         (directory / "s.json").write_text(json.dumps(payload), encoding="utf-8")
 
-    def _poll(self, sc: Path, log: object, *, idle: bool) -> None:
+    def _poll(
+        self,
+        sc: Path,
+        log: object,
+        *,
+        idle: bool,
+        machine: object = None,
+    ) -> object:
+        # Plan 00466 N47: a real HOST constructs ONE ``CompactStateMachine``
+        # and reuses/mutates it across every tick (state travels via
+        # export/import through the worker, never through a fresh instance).
+        # Defaulting to a fresh machine per call still matches that for a
+        # single-poll test; a multi-poll test passes its own machine back in
+        # so the settings-status dedup (``_last_reported_settings_error``)
+        # behaves as it would in production. Typed loosely as ``object``,
+        # like this file's other dynamically-loaded-module helpers, since
+        # ``CompactStateMachine`` is a runtime attribute of an ``Any``-typed
+        # module, not a usable type annotation under mypy --strict.
+        if machine is None:
+            machine = CompactStateMachine(CompactPolicy())
         _mod._poll_once(
-            CompactStateMachine(CompactPolicy()),
+            machine,
             sidecar_dir=sc,
             now_wall=1000.0,
             idle=idle,
@@ -496,26 +515,36 @@ class TestPollOnceNoopLogging:
             log=log,
             freshness_seconds=30.0,
         )
+        return machine
 
     def test_benign_green_noop_is_silent(self, tmp_path: Path) -> None:
         # A positively not-red, non-stale context is the common idle tick with
-        # nothing to do -- it carries no diagnostic value, so the log stays empty
-        # (the blind-spot gates below are what DO get recorded).
+        # nothing to do w.r.t. GATE noise -- the only line here is the
+        # settings-status note every fresh machine's first tick reports once
+        # (Plan 00466 N47 finding 7) since no settings.json exists in this
+        # isolated test environment.
         sc = tmp_path / "sc"
         self._sidecar(sc, red=False, tier="green")
         log_path = tmp_path / "decision.log"
         self._poll(sc, DecisionLog(log_path), idle=True)
-        assert not log_path.exists()
+        contents = log_path.read_text(encoding="utf-8")
+        assert "settings.json status:" in contents
+        assert "noop:" not in contents
 
     def test_consecutive_identical_gate_noop_is_deduped(self, tmp_path: Path) -> None:
-        # A red context gated on a busy TUI, held for several ticks, logs ONCE.
+        # A red context gated on a busy TUI, held for several ticks, logs the
+        # gate ONCE -- plus the one-time settings-status note from the first
+        # tick (Plan 00466 N47 finding 7), also never repeated.
         sc = tmp_path / "sc"
         self._sidecar(sc, red=True, tier="red")
         log = DecisionLog(tmp_path / "decision.log")
+        machine = CompactStateMachine(CompactPolicy())
         for _ in range(4):
-            self._poll(sc, log, idle=False)
+            self._poll(sc, log, idle=False, machine=machine)
         lines = (tmp_path / "decision.log").read_text(encoding="utf-8").splitlines()
-        assert len(lines) == 1
+        assert len(lines) == 2
+        assert "settings.json status:" in lines[0]
+        assert _mod._REASON_BUSY_COMPOSING in lines[1]
 
     def test_red_busy_noop_names_gate_and_red_band(self, tmp_path: Path) -> None:
         # Red context + a busy TUI (idle=False) -> gated on "session busy"; the

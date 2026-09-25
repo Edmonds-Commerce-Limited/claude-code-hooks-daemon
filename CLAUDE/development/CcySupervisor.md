@@ -111,17 +111,30 @@ Then re-run the `ps` check and confirm the pid changed. **Never restart the
 whole ccy session** — which would drop the live `claude` process — merely to
 reload the worker. That is exactly what the two-tier split exists to avoid.
 
-## One exception: settings.json needs no reload at all
+## One exception: settings.json DATA needs no reload at all
 
-Per-model effort (Plan 00466 N47) is the one supervisor behaviour that is
-**not** gated by the hot-reload contract above. The supervisor resolves
-effort from Claude Code's own main `settings.json` (`$CLAUDE_CONFIG_DIR` or
-`~/.claude`), cached and re-read by **mtime**, independent of the
-content-hash code reload `reload_if_stale` performs. Editing `settings.json`
-takes effect on the next tick that resolves effort — no worker reload, no
-`kill <worker-pid>`, nothing to verify via the `ps` check above. Only an
-actual edit to `claude-supervise.py` itself needs the procedure in this
-document.
+Effort resolution (Plan 00466 N47, redesigned after adversarial review —
+see `CLAUDE/Plan/00466-niggles-ledger-sixteen/NIGGLES.md` N47) reads
+Claude Code's own settings across all three files it honours — local
+(`.claude/settings.local.json`), shared project (`.claude/settings.json`),
+and user (`$CLAUDE_CONFIG_DIR`/`~/.claude`) — each cached and re-read by
+**mtime**, independent of the content-hash code reload `reload_if_stale`
+performs. Editing any of those three files' CONTENT takes effect on the
+next tick that resolves effort — no worker reload, no `kill <worker-pid>`,
+nothing to verify via the `ps` check above.
+
+This is about the DATA only. The LOGIC that decides what to do with that
+data — which family gets a coupled correction, when a downgrade episode's
+xhigh compensation applies, when to defer to a matching reading — lives in
+`decide_once` and its helpers (`resolve_coupled_effort_target`,
+`note_model_reading`'s settings branch), which are ordinary pure,
+WORKER-side functions. An edit to THAT code is a normal `claude-supervise.py`
+change and needs the standard hot-reload procedure above like anything
+else in this file — including this very redesign, which moved the coupled-
+target resolution from one-shot HOST-side arming (never hot-reloadable) to
+per-tick WORKER-side decision (hot-reloadable). If your running ccy session
+predates this change, relaunch it (or force the worker reload above) to
+pick up the new resolution logic; a settings.json edit alone will not.
 
 ## Client installs: edit source, then redeploy
 

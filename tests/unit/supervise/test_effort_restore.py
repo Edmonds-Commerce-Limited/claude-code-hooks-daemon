@@ -1,11 +1,22 @@
 """Plan 00278 — supervisor effort restore on model downgrade.
 
-A session downgraded from a higher-ranked model family (fable/mythos) to a
-lower one (opus) inherits its previous effort setting — "fable low" must fall
-through to "opus xhigh", not "opus low". The supervisor tracks the foreground
-sidecar's model family per session and, on a ranked downgrade with the live
-effort not already xhigh/max, injects ``/effort xhigh`` once, at the same
-injection choke point (idle + empty input box) as the other families.
+Redesigned by Plan 00466 N47 (adversarial review 1,
+``subagent-reports/260925-n47-review1-opus-5-5.md``): the supervisor holds
+almost no opinion of its own about effort. Exactly two sanctioned
+interventions exist:
+
+- (a) a ranked DOWNGRADE for the same session raises effort to xhigh
+  (RAISE-ONLY) until the family recovers, e.g. "fable low" falls through to
+  "opus xhigh" while the session sits on the security fallback;
+- (b) the top family (fable) is governed EXCLUSIVELY by the separate,
+  continuously-verified DROP ANCHOR invariant (Plan 00297,
+  ``test_drop_anchor.py``) -- this file's mechanism holds no opinion of its
+  own for it.
+
+Any OTHER family, once no downgrade episode is open, is corrected in EITHER
+direction toward whatever Claude Code's own settings.json resolves for the
+model on screen; nothing configured means Claude Code's own per-model
+default already applies and is never fought.
 """
 
 from __future__ import annotations
@@ -14,7 +25,7 @@ import json
 from typing import TYPE_CHECKING
 
 from tests.unit.supervise._load import load_supervisor_module
-from tests.unit.supervise.conftest import write_attributed_downgrade
+from tests.unit.supervise.conftest import write_attributed_downgrade, write_settings_json
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -67,16 +78,23 @@ def _write_sidecar(
     return path
 
 
-def _machine(restore_delay: float | None = None):
+def _machine(restore_delay: float | None = None, *, settings_path: Path | None = None):
     """A machine with the default policy, or an explicit restore delay.
 
     ``restore_delay=-1.0`` disables auto-restore (isolates the effort
     family); a positive value adds an extra quiet delay; the default policy
     restores on the first injectable tick after a downgrade (turn-gated).
+    ``settings_path`` points the USER settings.json cache somewhere real; by
+    default (None) it resolves to the isolated empty dir the autouse
+    ``_isolate_settings_effort`` fixture points ``CLAUDE_CONFIG_DIR`` at, so
+    nothing is configured unless a test says otherwise.
     """
-    if restore_delay is None:
-        return _mod.CompactStateMachine(_mod.CompactPolicy())
-    return _mod.CompactStateMachine(_mod.CompactPolicy(model_restore_delay_seconds=restore_delay))
+    kwargs: dict[str, object] = {}
+    if restore_delay is not None:
+        kwargs["model_restore_delay_seconds"] = restore_delay
+    if settings_path is not None:
+        kwargs["settings_path"] = settings_path
+    return _mod.CompactStateMachine(_mod.CompactPolicy(**kwargs))
 
 
 def _decide(sidecar_dir: Path, machine, *, dry_run: bool = False, facts: object | None = None):
@@ -126,7 +144,7 @@ def test_family_ranking_orders_fable_above_opus_above_sonnet_above_haiku() -> No
     assert len(set(ranks)) == 4
 
 
-# ── Downgrade detection → injection ──────────────────────────────────────────
+# ── Downgrade detection → xhigh compensation (sanctioned intervention a) ────
 
 
 def test_fable_to_opus_downgrade_injects_effort_xhigh(tmp_path: Path) -> None:
@@ -197,22 +215,32 @@ def test_unknown_effort_still_injects_after_downgrade(tmp_path: Path) -> None:
     assert outcome.payload == "/effort xhigh"
 
 
-# ── Per-model minimum effort (no downgrade needed) ───────────────────────────
-
-
-def test_opus_below_default_minimum_injects_high(tmp_path: Path) -> None:
-    sidecar_dir = tmp_path / "cs"
-    machine = _machine()
-    _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="low", ts=_NOW - 1.0)
-    outcome = _decide(sidecar_dir, machine)
+def test_downgrade_target_outranks_configured_minimum(tmp_path: Path) -> None:
+    # After a fable → opus downgrade the target is xhigh even when opus is
+    # already at "high" — the downgrade compensation always wins.
+    outcome = _downgrade(tmp_path / "cs", _machine(), effort="high")
     assert outcome.decision_value == "would-effort"
-    assert outcome.payload == "/effort high"
+    assert outcome.payload == "/effort xhigh"
 
 
-def test_fable_low_meets_its_minimum(tmp_path: Path) -> None:
+# ── No opinion outside a downgrade episode, unless settings.json says so ────
+
+
+def test_fable_gets_no_opinion_here_regardless_of_live_effort(tmp_path: Path) -> None:
+    # Sanctioned intervention (b): DROP ANCHOR (test_drop_anchor.py) is
+    # fable's sole authority; this raise/restore mechanism holds none.
     sidecar_dir = tmp_path / "cs"
     machine = _machine()
     _write_sidecar(sidecar_dir, model_id="claude-fable-5", effort="low", ts=_NOW - 1.0)
+    assert _decide(sidecar_dir, machine).payload is None
+
+
+def test_nothing_configured_at_all_sends_nothing(tmp_path: Path) -> None:
+    # Plan 00466 N47 findings 1 and 5: Claude Code has already applied its
+    # own per-model default; a second table must never fight it.
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    _write_sidecar(sidecar_dir, model_id="claude-opus-5-5", effort="medium", ts=_NOW - 1.0)
     outcome = _decide(sidecar_dir, machine)
     assert outcome.payload is None
 
@@ -225,56 +253,84 @@ def test_unknown_effort_without_downgrade_does_not_inject(tmp_path: Path) -> Non
     assert outcome.payload is None
 
 
-def test_downgrade_target_outranks_configured_minimum(tmp_path: Path) -> None:
-    # After a fable → opus downgrade the target is xhigh, not opus's plain
-    # "high" minimum — even an effort already at "high" gets raised.
-    outcome = _downgrade(tmp_path / "cs", _machine(), effort="high")
-    assert outcome.decision_value == "would-effort"
-    assert outcome.payload == "/effort xhigh"
-
-
-def test_never_lowers_effort_above_floor(tmp_path: Path) -> None:
-    # INVARIANT (joseph): this family only ever RAISES effort — a session
-    # running above its configured floor is never touched.
-    sidecar_dir = tmp_path / "cs"
-    machine = _machine()
-    _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="max", ts=_NOW - 1.0)
-    outcome = _decide(sidecar_dir, machine)
-    assert outcome.payload is None
-
-
-def test_settings_json_configured_floor_overrides_the_default(tmp_path: Path) -> None:
-    # Plan 00466 N47: settings.json's effortLevel is the SSoT for a family's
-    # floor -- opus's built-in default is "high", but the owner's configured
-    # "medium" must be what the floor raises to, not the default.
+def test_configured_value_raises_when_live_is_below(tmp_path: Path) -> None:
     sidecar_dir = tmp_path / "cs"
     config_dir = tmp_path / "config"
-    from tests.unit.supervise.conftest import write_settings_json
-
     write_settings_json(config_dir, effort_level="medium")
-    machine = _mod.CompactStateMachine(
-        _mod.CompactPolicy(settings_path=config_dir / "settings.json")
-    )
+    machine = _machine(settings_path=config_dir / "settings.json")
     _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="low", ts=_NOW - 1.0)
     outcome = _decide(sidecar_dir, machine)
     assert outcome.decision_value == "would-effort"
     assert outcome.payload == "/effort medium"
 
 
-def test_missing_settings_json_falls_back_to_the_default_table(tmp_path: Path) -> None:
+def test_configured_value_lowers_when_live_is_above(tmp_path: Path) -> None:
+    # The ONE sanctioned lowering outside the top family: settings.json is
+    # the SSoT in both directions, not a raise-only floor.
     sidecar_dir = tmp_path / "cs"
-    machine = _mod.CompactStateMachine(
-        _mod.CompactPolicy(settings_path=tmp_path / "no-such-config" / "settings.json")
-    )
-    _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="low", ts=_NOW - 1.0)
+    config_dir = tmp_path / "config"
+    write_settings_json(config_dir, effort_level="medium")
+    machine = _machine(settings_path=config_dir / "settings.json")
+    _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="xhigh", ts=_NOW - 1.0)
     outcome = _decide(sidecar_dir, machine)
     assert outcome.decision_value == "would-effort"
-    assert outcome.payload == "/effort high"
+    assert outcome.payload == "/effort medium"
+
+
+def test_equal_to_configured_sends_nothing(tmp_path: Path) -> None:
+    # Owner-shaped settings: top-level medium, per-model medium for both
+    # opus-5 and opus-5-5.
+    sidecar_dir = tmp_path / "cs"
+    config_dir = tmp_path / "config"
+    write_settings_json(
+        config_dir,
+        effort_level="medium",
+        model_settings={
+            "claude-opus-5": {"effortLevel": "medium"},
+            "claude-opus-5-5": {"effortLevel": "medium"},
+        },
+    )
+    machine = _machine(settings_path=config_dir / "settings.json")
+    _write_sidecar(sidecar_dir, model_id="claude-opus-5-5", effort="medium", ts=_NOW - 1.0)
+    outcome = _decide(sidecar_dir, machine)
+    assert outcome.payload is None
+
+
+def test_project_settings_overrides_user_settings(monkeypatch, tmp_path: Path) -> None:
+    # Plan 00466 N47 finding 2.
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path / "project"))
+    write_settings_json(tmp_path / "project" / ".claude", effort_level="low")
+    write_settings_json(tmp_path / "user", effort_level="high")
+    machine = _machine(settings_path=tmp_path / "user" / "settings.json")
+    sidecar_dir = tmp_path / "cs"
+    _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="high", ts=_NOW - 1.0)
+    outcome = _decide(sidecar_dir, machine)
+    assert outcome.decision_value == "would-effort"
+    assert outcome.payload == "/effort low"
+
+
+def test_a_sibling_models_settings_entry_is_never_used(tmp_path: Path) -> None:
+    # Plan 00466 N47 finding 3.
+    sidecar_dir = tmp_path / "cs"
+    config_dir = tmp_path / "config"
+    write_settings_json(
+        config_dir,
+        model_settings={
+            "claude-opus-5": {"effortLevel": "xhigh"},
+            "claude-opus-5-5": {"effortLevel": "medium"},
+        },
+    )
+    machine = _machine(settings_path=config_dir / "settings.json")
+    _write_sidecar(sidecar_dir, model_id="claude-opus-5-5", effort="medium", ts=_NOW - 1.0)
+    outcome = _decide(sidecar_dir, machine)
+    assert outcome.payload is None  # claude-opus-5's xhigh must never apply here
 
 
 def test_reinject_cooldown_suppresses_stale_reading(tmp_path: Path) -> None:
     sidecar_dir = tmp_path / "cs"
-    machine = _machine()
+    config_dir = tmp_path / "config"
+    write_settings_json(config_dir, effort_level="medium")
+    machine = _machine(settings_path=config_dir / "settings.json")
     _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="low", ts=_NOW - 1.0)
     assert _decide(sidecar_dir, machine).decision_value == "would-effort"
     machine.mark_effort_injection(now_wall=_NOW)
@@ -282,7 +338,7 @@ def test_reinject_cooldown_suppresses_stale_reading(tmp_path: Path) -> None:
     # The sidecar has not caught up yet — the stale "low" must not re-fire...
     outcome = _decide(sidecar_dir, machine)
     assert outcome.payload is None
-    # ...until the cooldown has passed and the effort is STILL below minimum.
+    # ...until the cooldown has passed and the effort is STILL disagreeing.
     later = _NOW + _mod._EFFORT_REINJECT_COOLDOWN_SECONDS + 1.0
     _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="low", ts=later - 1.0)
     # The first `/effort` is the supervisor's own unconfirmed line, so the
@@ -295,15 +351,15 @@ def test_reinject_cooldown_suppresses_stale_reading(tmp_path: Path) -> None:
     assert retry.decision_value == "would-effort"
 
 
-# ── Gates, retry, cap ────────────────────────────────────────────────────────
+# ── Gates, retry, cap (downgrade-episode xhigh path) ─────────────────────────
 
 
 def test_deferred_while_input_box_not_empty_then_retries(tmp_path: Path) -> None:
     sidecar_dir = tmp_path / "cs"
-    machine = _machine()
-    _write_sidecar(sidecar_dir, model_id="claude-fable-5", ts=_NOW - 2.0)
-    _decide(sidecar_dir, machine)
-    _write_sidecar(sidecar_dir, model_id="claude-opus-5", ts=_NOW - 0.5)
+    config_dir = tmp_path / "config"
+    write_settings_json(config_dir, effort_level="medium")
+    machine = _machine(settings_path=config_dir / "settings.json")
+    _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="low", ts=_NOW - 2.0)
     busy = _decide(sidecar_dir, machine, facts=_facts(input_line_empty=False))
     assert busy.payload is None
     # Pending survives the deferral; the next unobstructed tick fires.
@@ -412,39 +468,6 @@ def test_floor_effort_injection_sets_confirm_enters(tmp_path: Path) -> None:
     assert outcome.confirm_enters >= 1
 
 
-def test_coupled_effort_injection_sets_confirm_enters(tmp_path: Path) -> None:
-    sidecar_dir = tmp_path / "cs"
-    _write_sidecar(sidecar_dir)
-    machine = _machine()
-    machine.arm_coupled_effort(session=_SESSION, family="fable")
-    outcome = _decide(sidecar_dir, machine)
-    assert outcome.decision_value == "would-effort"
-    assert outcome.confirm_enters == _mod._DEFAULT_EFFORT_CONFIRM_ENTERS
-
-
-def test_coupled_effort_fires_even_when_session_not_idle(tmp_path: Path) -> None:
-    # The coupled correction must land on the first tick after the /model
-    # switch: gated on an empty input box ONLY, never on the idle floor —
-    # otherwise turns can run the forced model at the pre-switch effort.
-    sidecar_dir = tmp_path / "cs"
-    _write_sidecar(sidecar_dir)
-    machine = _machine()
-    machine.arm_coupled_effort(session=_SESSION, family="fable")
-    outcome = _decide(sidecar_dir, machine, facts=_facts(idle=False))
-    assert outcome.decision_value == "would-effort"
-    assert outcome.payload is not None
-
-
-def test_coupled_effort_still_deferred_while_input_box_not_empty(tmp_path: Path) -> None:
-    sidecar_dir = tmp_path / "cs"
-    _write_sidecar(sidecar_dir)
-    machine = _machine()
-    machine.arm_coupled_effort(session=_SESSION, family="fable")
-    busy = _decide(sidecar_dir, machine, facts=_facts(idle=False, input_line_empty=False))
-    assert busy.payload is None
-    assert machine.coupled_effort_pending is not None
-
-
 def test_effort_confirm_enters_env_parsing() -> None:
     assert _mod._parse_effort_confirm_enters("2") == 2
     assert _mod._parse_effort_confirm_enters("0") == 0
@@ -485,12 +508,12 @@ def test_model_restore_backoff_after_recent_restore(tmp_path: Path) -> None:
     assert outcome.decision_value != "would-model"
 
 
-def test_effort_resets_to_floor_after_successful_flip_back(tmp_path: Path) -> None:
-    # The ONE sanctioned effort LOWERING: after our /model restore lands,
-    # xhigh drops back to fable's floor. This is now driven by the
-    # unconditional coupled-effort mechanism (Plan 00278 continuation) --
-    # armed by the HOST the moment the /model injection succeeds, not by a
-    # later sidecar reading confirming the switch landed.
+def test_drop_anchor_resets_effort_after_successful_flip_back_to_fable(tmp_path: Path) -> None:
+    # A restore always lands back on the TOP family (fable is the only
+    # family a downgrade episode can start from, Plan 00328's scope rule),
+    # so DROP ANCHOR -- not this raise/restore mechanism -- is what brings
+    # effort back down once the injected "/model fable" lands and a fresh
+    # reading shows it still at xhigh.
     sidecar_dir = tmp_path / "cs"
     machine, later = _restore_ready_machine(sidecar_dir)
     writes: list[bytes] = []
@@ -506,27 +529,6 @@ def test_effort_resets_to_floor_after_successful_flip_back(tmp_path: Path) -> No
         freshness_seconds=policy.freshness_seconds,
     )
     after = later + 30.0
-    _write_sidecar(sidecar_dir, model_id="claude-fable-5", effort="xhigh", ts=after - 1.0)
-    outcome = _decide(sidecar_dir, machine, facts=_facts(after))
-    assert outcome.decision_value == "would-effort"
-    assert outcome.payload == "/effort low"
-
-
-def test_no_effort_reset_without_our_restore(tmp_path: Path) -> None:
-    # A recovery we did not cause (human flipped back) is left alone BY THIS
-    # (raise-only) floor family specifically -- fable observed at xhigh is
-    # not "below its floor" so this mechanism has nothing to say about it.
-    # Plan 00297: the separate DROP ANCHOR invariant DOES still correct it
-    # (fable-above-low is banned unconditionally, regardless of who caused
-    # it or which mechanism would otherwise apply) -- that is the whole
-    # point of a read-back-verified safety net that does not depend on this
-    # family's raise-only assumptions.
-    sidecar_dir = tmp_path / "cs"
-    machine = _machine()
-    _downgrade(sidecar_dir, machine)
-    machine.mark_effort_injection(now_wall=_NOW)
-    machine.mark_audit_injection()  # consume the decision-time audit backlog
-    after = _NOW + 60.0
     _write_sidecar(sidecar_dir, model_id="claude-fable-5", effort="xhigh", ts=after - 1.0)
     outcome = _decide(sidecar_dir, machine, facts=_facts(after))
     assert outcome.decision_value == "would-effort"
@@ -560,12 +562,12 @@ def test_model_restore_disabled_when_delay_off(tmp_path: Path) -> None:
 
 def test_effort_state_round_trips_through_export_import(tmp_path: Path) -> None:
     sidecar_dir = tmp_path / "cs"
-    machine = _machine()
-    _write_sidecar(sidecar_dir, model_id="claude-fable-5", ts=_NOW - 2.0)
-    _decide(sidecar_dir, machine)
-    _write_sidecar(sidecar_dir, model_id="claude-opus-5", ts=_NOW - 0.5)
+    config_dir = tmp_path / "config"
+    write_settings_json(config_dir, effort_level="medium")
+    machine = _machine(settings_path=config_dir / "settings.json")
+    _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="low", ts=_NOW - 1.0)
     _decide(sidecar_dir, machine, facts=_facts(input_line_empty=False))  # pending, deferred
-    clone = _machine()
+    clone = _machine(settings_path=config_dir / "settings.json")
     clone.import_state(machine.export_state())
     # The clone (a fresh worker) fires from the imported pending state.
     outcome = _decide(sidecar_dir, clone)
@@ -575,129 +577,103 @@ def test_effort_state_round_trips_through_export_import(tmp_path: Path) -> None:
     assert clone.effort_injections == 1
 
 
-# ── Coupled effort: "/model switch MUST be followed by /effort" (cont.) ──────
+# ── Coupled effort: "/model switch is followed by /effort WHEN owed" ────────
 #
-# Plan 00278 continuation. The post-flip effort correction must be
-# UNCONDITIONAL, never gated on a downgrade episode being open or on a
-# later sidecar reading confirming the switch landed -- that gating is
-# exactly what let a live defect through: switching opus->fable left effort
-# at xhigh (fable's floor is "low"), burning account allowance, because the
-# old reset only fired once `note_model_reading` observed the recovery,
-# which a manual/no-episode switch never triggers.
+# Plan 00466 N47 finding 6: the TARGET is resolved at decision time from
+# OBSERVED state (an open downgrade episode for the exact destination, or
+# settings.json for the model actually on screen), never from which path
+# armed the correction. A manual switch to a family with no episode open now
+# gets settings-resolved (or nothing), never an automatic xhigh.
 
 
-def test_model_switch_to_fable_forces_coupled_effort_to_floor_without_downgrade_episode(
-    tmp_path: Path,
-) -> None:
-    """THE SAFETY TEST: switching TO fable always drives effort to its floor.
-
-    No downgrade episode is ever opened here (a fresh machine, exactly the
-    manual test-trigger shape) -- the coupled mechanism must still fire.
-    """
+def test_arm_coupled_effort_for_fable_resolves_to_nothing_here(tmp_path: Path) -> None:
+    # Fable has no opinion in this mechanism at all -- DROP ANCHOR alone.
     sidecar_dir = tmp_path / "cs"
     machine = _machine()
-    # Simulate: the HOST just successfully injected "/model fable" (manual
-    # test-trigger path) while the session's live effort is still xhigh.
     machine.arm_coupled_effort(session=_SESSION, family="fable")
+    assert machine.coupled_effort_pending == f"{_SESSION}:fable"
     outcome = _decide(sidecar_dir, machine)
-    assert outcome.decision_value == "would-effort"
-    assert outcome.payload == "/effort low"
-    assert outcome.submit is True
+    assert outcome.payload is None
+    assert machine.coupled_effort_pending is None  # cleared: nothing was ever owed here
 
 
-def test_coupled_target_for_top_family_is_its_configured_floor() -> None:
+def test_coupled_target_is_xhigh_while_its_downgrade_episode_is_open(tmp_path: Path) -> None:
+    sidecar_dir = tmp_path / "cs"
     machine = _machine()
-    machine.arm_coupled_effort(session=_SESSION, family="fable")
-    assert machine.coupled_effort_pending == f"{_SESSION}:fable:low"
+    _downgrade(sidecar_dir, machine, effort="xhigh")  # episode open: session:opus
+    machine.arm_coupled_effort(session=_SESSION, family="opus")
+    target = machine.resolve_coupled_effort_target(reading=None, now_wall=_NOW)
+    assert target == "xhigh"  # resolvable with no reading -- the level never depends on model id
 
 
-def test_coupled_target_for_non_top_family_is_downgrade_xhigh() -> None:
+def test_manual_switch_to_opus_with_no_episode_open_gets_no_effort(tmp_path: Path) -> None:
+    # THE FIX: this is the shape of the owner's real "restore to Opus"
+    # report -- a manual switch, no downgrade episode, nothing configured.
+    sidecar_dir = tmp_path / "cs"
     machine = _machine()
     machine.arm_coupled_effort(session=_SESSION, family="opus")
-    assert machine.coupled_effort_pending == f"{_SESSION}:opus:xhigh"
+    _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="medium", ts=_NOW - 1.0)
+    outcome = _decide(sidecar_dir, machine)
+    assert outcome.payload is None
+    assert machine.coupled_effort_pending is None  # nothing configured -> satisfied, cleared
 
 
-def test_coupled_target_clamps_a_custom_fable_floor_override_above_low(tmp_path: Path) -> None:
-    # Plan 00297 (owner ruling, incident 2026-08-31): fable-above-low is
-    # banned UNCONDITIONALLY, not merely by default -- a settings.json
-    # override that configures fable's effort above low is clamped to low
-    # rather than honoured, so the coupled correction can never itself hand
-    # out a value the DROP ANCHOR invariant would immediately have to undo.
-    from tests.unit.supervise.conftest import write_settings_json
-
-    config_dir = tmp_path / "config"
-    write_settings_json(config_dir, model_settings={"claude-fable-5": {"effortLevel": "medium"}})
-    policy = _mod.CompactPolicy(settings_path=config_dir / "settings.json")
-    machine = _mod.CompactStateMachine(policy)
-    machine.arm_coupled_effort(session=_SESSION, family="fable")
-    assert machine.coupled_effort_pending == f"{_SESSION}:fable:low"
-
-
-def test_coupled_target_for_a_restore_uses_the_configured_effort(tmp_path: Path) -> None:
-    # Plan 00466 N47 THE FIX: a restore back to Opus (not the top family)
-    # must land on Opus's settings.json-configured effort, not xhigh -- the
-    # exact failure the owner reported (medium configured, xhigh injected).
-    from tests.unit.supervise.conftest import write_settings_json
-
+def test_manual_switch_to_opus_with_no_episode_open_honours_settings(tmp_path: Path) -> None:
+    sidecar_dir = tmp_path / "cs"
     config_dir = tmp_path / "config"
     write_settings_json(config_dir, effort_level="medium")
-    policy = _mod.CompactPolicy(settings_path=config_dir / "settings.json")
-    machine = _mod.CompactStateMachine(policy)
-    machine.arm_coupled_effort(session=_SESSION, family="opus", is_restore=True)
-    assert machine.coupled_effort_pending == f"{_SESSION}:opus:medium"
+    machine = _machine(settings_path=config_dir / "settings.json")
+    machine.arm_coupled_effort(session=_SESSION, family="opus")
+    _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="xhigh", ts=_NOW - 1.0)
+    outcome = _decide(sidecar_dir, machine)
+    assert outcome.decision_value == "would-effort"
+    assert outcome.payload == "/effort medium"
 
 
-def test_coupled_target_for_a_manual_switch_to_non_top_family_stays_xhigh() -> None:
-    # Unchanged: a manual test-trigger switch (never a restore) to a
-    # non-top family still compensates with xhigh -- only `is_restore=True`
-    # (the auto-restore flip-back) targets the configured effort.
-    machine = _machine()
-    machine.arm_coupled_effort(session=_SESSION, family="opus", is_restore=False)
-    assert machine.coupled_effort_pending == f"{_SESSION}:opus:xhigh"
-
-
-def test_coupled_effort_fires_on_the_tick_after_arming(tmp_path: Path) -> None:
+def test_coupled_effort_waits_for_a_reading_of_the_new_family(tmp_path: Path) -> None:
+    # No sidecar reading exists yet showing the destination family -- the
+    # correction cannot resolve settings for an unknown model id, so it
+    # waits rather than guessing.
     sidecar_dir = tmp_path / "cs"
     machine = _machine()
     machine.arm_coupled_effort(session=_SESSION, family="opus")
     outcome = _decide(sidecar_dir, machine)
-    assert outcome.decision_value == "would-effort"
-    assert outcome.payload == "/effort xhigh"
+    assert outcome.payload is None
+    assert machine.coupled_effort_pending == f"{_SESSION}:opus"  # still armed, not cleared
 
 
 def test_coupled_effort_subordinate_to_pending_compaction(tmp_path: Path) -> None:
     sidecar_dir = tmp_path / "cs"
     machine = _machine()
-    machine.arm_coupled_effort(session=_SESSION, family="fable")
-    sidecar_dir.mkdir(parents=True, exist_ok=True)
+    _downgrade(sidecar_dir, machine, effort="xhigh")
+    machine.arm_coupled_effort(session=_SESSION, family="opus")
     compacting = sidecar_dir / f"{_SESSION}.compacting"
     compacting.write_text(json.dumps({"ts": _NOW - 1.0, "session_id": _SESSION}), encoding="utf-8")
     outcome = _decide(sidecar_dir, machine)
     assert outcome.decision_value == "would-continue"
     # Untouched -- the coupled branch never even ran this tick.
-    assert machine.coupled_effort_pending == f"{_SESSION}:fable:low"
+    assert machine.coupled_effort_pending == f"{_SESSION}:opus"
 
 
-def test_coupled_effort_deferred_while_input_box_not_empty_then_retries(
-    tmp_path: Path,
-) -> None:
+def test_coupled_effort_deferred_while_input_box_not_empty_then_retries(tmp_path: Path) -> None:
     sidecar_dir = tmp_path / "cs"
     machine = _machine()
-    machine.arm_coupled_effort(session=_SESSION, family="fable")
+    _downgrade(sidecar_dir, machine, effort="xhigh")
+    machine.arm_coupled_effort(session=_SESSION, family="opus")
     busy = _decide(sidecar_dir, machine, facts=_facts(input_line_empty=False))
     assert busy.payload is None
-    assert machine.coupled_effort_pending == f"{_SESSION}:fable:low"
+    assert machine.coupled_effort_pending == f"{_SESSION}:opus"
     retry = _decide(sidecar_dir, machine)
     assert retry.decision_value == "would-effort"
-    assert retry.payload == "/effort low"
+    assert retry.payload == "/effort xhigh"
 
 
 def test_coupled_effort_pending_round_trips_through_export_import() -> None:
     machine = _machine()
-    machine.arm_coupled_effort(session=_SESSION, family="fable")
+    machine.arm_coupled_effort(session=_SESSION, family="opus")
     clone = _machine()
     clone.import_state(machine.export_state())
-    assert clone.coupled_effort_pending == f"{_SESSION}:fable:low"
+    assert clone.coupled_effort_pending == f"{_SESSION}:opus"
 
 
 def test_coupled_effort_pending_defaults_to_none_for_legacy_state() -> None:
@@ -712,7 +688,7 @@ def test_coupled_effort_pending_defaults_to_none_for_legacy_state() -> None:
 def test_manual_model_switch_arms_coupled_effort_via_poll_once(tmp_path: Path) -> None:
     sidecar_dir = tmp_path / "cs"
     machine = _machine()
-    _mod.write_model_switch_signal(sidecar_dir, session_id=_SESSION, family="fable", now=_NOW)
+    _mod.write_model_switch_signal(sidecar_dir, session_id=_SESSION, family="opus", now=_NOW)
     writes: list[bytes] = []
     policy = _mod.CompactPolicy()
     _mod._poll_once(
@@ -725,7 +701,7 @@ def test_manual_model_switch_arms_coupled_effort_via_poll_once(tmp_path: Path) -
         log=None,
         freshness_seconds=policy.freshness_seconds,
     )
-    assert machine.coupled_effort_pending == f"{_SESSION}:fable:low"
+    assert machine.coupled_effort_pending == f"{_SESSION}:opus"
     # A manual test-trigger switch must NOT eat into the auto-restore
     # cap/backoff budget -- that bookkeeping is reserved for the AUTO path.
     assert machine.export_state()["model_restores"] == 0
@@ -746,15 +722,16 @@ def test_auto_model_restore_arms_coupled_effort_via_poll_once(tmp_path: Path) ->
         log=None,
         freshness_seconds=policy.freshness_seconds,
     )
-    assert machine.coupled_effort_pending == f"{_SESSION}:fable:low"
+    assert machine.coupled_effort_pending == f"{_SESSION}:fable"
     # The AUTO path DOES count against the restore cap/backoff.
     assert machine.export_state()["model_restores"] == 1
 
 
 def test_coupled_effort_consumed_once_via_poll_once(tmp_path: Path) -> None:
     sidecar_dir = tmp_path / "cs"
-    machine = _machine()
-    machine.arm_coupled_effort(session=_SESSION, family="fable")
+    machine = _machine(restore_delay=-1.0)  # isolate from auto-restore
+    _downgrade(sidecar_dir, machine, effort="xhigh")
+    machine.arm_coupled_effort(session=_SESSION, family="opus")
     writes: list[bytes] = []
     policy = _mod.CompactPolicy()
     _mod._poll_once(
