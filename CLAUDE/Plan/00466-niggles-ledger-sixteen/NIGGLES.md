@@ -9,6 +9,37 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N55 — `register_all` ignores a handler's `get_default_enabled()` when its config block is absent
+
+**Found by goal-flip review 8 (RV8-n3), filed at review 9's request.** When a
+handler has no block in `.claude/hooks-daemon.yaml`, `register_all` registers
+it as enabled whatever its `get_default_enabled()` says. So a handler that is
+opt-in by design runs on an install whose config never mentions it, such as
+one made by `init minimal`. The goal-flip branch changed the docs to describe
+this behaviour accurately, but the underlying behaviour is still unsettled.
+
+**Candidate remedy:** decide which source is authoritative for an absent
+block: `get_default_enabled()` or "absent means enabled". Make
+`register_all`, `init minimal`'s generated config and the docs agree on it.
+RED test: an opt-in handler with no config block is not registered, or the
+docs and the handler's own default are changed to say it is.
+
+### N54 — Every Stop and SubagentStop pays about 50 ms rebuilding `Config()` while the config is broken
+
+**Found by goal-flip review 8, measured again by review 9.** With an
+unloadable `.claude/hooks-daemon.yaml`, five callers fall back to building a
+default `Config()` on every event, and each build costs about 50 ms.
+`cron_stop_enforcer` and `cron_subagent_stop_enforcer` are among them, so
+every Stop and SubagentStop pays it for as long as the config stays broken.
+The evidence is in `untracked/scratch/probe_gf9_cache/callers_out.txt` in the
+goal-flip worktree. The config cache already caches the load failure itself;
+the fallback default is what is rebuilt each time.
+
+**Candidate remedy:** build the fallback default once per cached failure (key
+it on the same `(st_mtime_ns, st_size)` signature) or share one immutable
+default instance. RED test: two consecutive events on a broken config build
+the default once.
+
 ### N53 — WorktreeCreate fails with exit 127 when the daemon runs `git worktree add` that succeeds from a shell
 
 **Found by the coordinator.** An Agent dispatch with `isolation: worktree`

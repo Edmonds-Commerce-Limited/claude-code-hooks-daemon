@@ -82,6 +82,8 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N51 | `pipe_blocker` reads an escaped alternation in a quoted grep pattern as a pipe into `head`                | 00421 review 2     | ⬜ Open               |
 | N52 | The sensitive_content commit gate let a matching session UUID into a commit                               | N46 review 2       | 🔄 In progress        |
 | N53 | WorktreeCreate fails with exit 127 when the daemon runs a `git worktree add` that succeeds from a shell   | Coordinator        | 🔄 In progress        |
+| N54 | Every Stop and SubagentStop rebuilds a default `Config()` (about 50 ms) while the config is broken        | Goal-flip review 8 | ⬜ Open               |
+| N55 | `register_all` ignores a handler's `get_default_enabled()` when its config block is absent                | Goal-flip review 8 | ⬜ Open               |
 
 ## Tasks
 
