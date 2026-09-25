@@ -388,6 +388,60 @@ class TestUpgradeRecognisedByWhatItIs:
         assert handler.matches(_bash(command)) is True
 
 
+class TestSteeredRunOnAnUnresolvableScriptFailsClosed:
+    """Plan 00376 review3 MAJOR 1 — the N29 evasion shape.
+
+    A shell run on a script this handler cannot READ (unreadable) or cannot
+    RESOLVE STATICALLY (a `$`-path, `/dev/stdin`, `/dev/fd/*`, a process
+    substitution, or `-s`/no-operand stdin) used to fall through to the
+    argument-shape heuristic, which sees nothing when the arguments are also
+    variables -- Layer 2's own positional call shape
+    (`bash "$s" "$p" "$d" "$v"`, no `--project-root` flag, no literal
+    `.claude/hooks-daemon` text) gives it nothing to match. `BASH_ENV` runs
+    inside Layer 2 before `_sanitise_layer2_env` ever gets a say, so this
+    combination -- steering assignment present, script unresolvable -- must
+    itself count as running the upgrade. The argument heuristic stays the
+    only signal for the UNSTEERED case (no regression: see
+    `test_allows_other_uses` and `test_allows_an_override_on_a_script_that_is_not_the_upgrade`).
+    """
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            # A read failure on an existing-but-unreadable script.
+            'BASH_ENV=/tmp/evil.sh bash /tmp/unreadable-steered.sh "$p" "$d" "$v"',
+            # A `$`-path: never resolved statically at all.
+            's=/tmp/copy.sh; BASH_ENV=/tmp/evil.sh bash "$s" "$p" "$d" "$v"',
+            # `/dev/stdin`: whatever this process's own stdin holds is not
+            # what the real subprocess would read from its OWN redirect.
+            'BASH_ENV=/tmp/evil.sh bash /dev/stdin "$p" "$d" "$v" < /tmp/copy.sh',
+            # `/dev/fd/N`: same class as `/dev/stdin`.
+            'BASH_ENV=/tmp/evil.sh bash /dev/fd/63 "$p" "$d" "$v"',
+            # Process substitution: not a real path the shell parser exposes.
+            'BASH_ENV=/tmp/evil.sh bash <(cat /tmp/copy.sh) "$p" "$d" "$v"',
+            # `-s`: the script comes from stdin, so there is no path at all.
+            'cat /tmp/copy.sh | BASH_ENV=/tmp/evil.sh bash -s -- "$p" "$d" "$v"',
+            # An exported function steering variable, same unresolvable script.
+            's=/tmp/copy.sh; env \'BASH_FUNC_unset%%=() { :; }\' bash "$s" "$p" "$d" "$v"',
+        ],
+    )
+    def test_a_steering_assignment_on_an_unresolvable_script_is_denied(
+        self, handler: UpgradeApprovalGuardHandler, command: str
+    ) -> None:
+        hook_input = _bash(command)
+        assert handler.matches(hook_input) is True, command
+        result = handler.handle(hook_input)
+        assert result.reason is not None
+        assert result.reason.startswith(f"BLOCKED [{ENV_RULE_ID}]")
+
+    def test_an_unresolvable_script_with_no_steering_is_still_allowed(
+        self, handler: UpgradeApprovalGuardHandler
+    ) -> None:
+        """No regression: the unsteered case still needs argument shape."""
+        command = 's=/tmp/copy.sh; bash "$s" "$p" "$d" "$v"'
+        assert handler.matches(_bash(command)) is False
+
+
 class TestManualCheckoutOfTheDaemonClone:
     """Fresh review MAJOR 1: moving the daemon clone by hand IS an upgrade."""
 

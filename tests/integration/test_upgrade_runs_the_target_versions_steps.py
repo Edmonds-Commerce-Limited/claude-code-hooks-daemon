@@ -79,9 +79,10 @@ class TestLayerOneChecksOutBeforeDelegating:
 
         checkout = re.search(r'git -C "\$DAEMON_DIR" checkout "\$TARGET_VERSION"', content)
         # Plan 00376 review3: the interpreter is no longer the literal word
-        # `bash` -- it is resolved from a trusted system location
-        # (`_gate_tool bash`) into `$_LAYER2_BASH`, never the caller's PATH.
-        delegate = re.search(r'"\$_LAYER2_BASH" "\$LAYER2_SCRIPT"', content)
+        # `bash` -- Layer 2 is launched via `_LAYER2_LAUNCH`, an array built
+        # from `_gate_tool bash`/`_gate_tool env` plus an explicit env
+        # allowlist, never a bare word looked up on the caller's PATH.
+        delegate = re.search(r'"\$\{_LAYER2_LAUNCH\[@\]\}" "\$LAYER2_SCRIPT"', content)
 
         assert checkout is not None, "Layer 1 no longer checks out the target version"
         assert delegate is not None, "Layer 1 no longer delegates to Layer 2"

@@ -101,8 +101,13 @@ truth_changes:
       config-changes manifest, a critical pre-upgrade task with hits or an
       unreadable installed version exits 4 instead, and also needs the
       project owner's approval, given in their own terminal with a typed
-      phrase; an agent reports and stops, and cannot record that approval.
-      Checking out, pulling or resetting `.claude/hooks-daemon` by hand no
+      phrase; an agent reports and stops. `upgrade_approval_guard` denies the
+      ways it could otherwise force or forge that approval (running
+      `approve-upgrade` itself, touching the marker, steering the upgrade
+      with an environment variable), on a best-effort recognition of the
+      upgrade route's shape, not a boundary against a same-user process
+      installing by hand instead. Checking out, pulling or resetting
+      `.claude/hooks-daemon` by hand no
       longer counts as an upgrade: an agent is denied it, and a venv stamp
       that already names the target counts as installed only when the gate
       itself let that version through.

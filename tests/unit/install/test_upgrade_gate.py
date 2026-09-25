@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -395,6 +396,42 @@ class TestAlreadyInstalled:
         ]
         assert main(argv) == GateVerdict.NEEDS_ACKNOWLEDGEMENT.exit_code
         assert gated_install_stamp(untracked, daemon_dir=daemon_dir, project_root=project) is None
+
+
+class TestGatedInstallStampFailsClosedOnAnUnreadableReceipt:
+    """Plan 00376 review3 item 1: check the OTHER error-hiding fixes the same
+    way as MAJOR 1 -- with a probe proving which way each falls.
+
+    ``gated_install_stamp`` used to catch only ``json.JSONDecodeError``
+    around ``path.read_text(...)`` + ``json.loads(...)``. A receipt file
+    that cannot be READ at all -- invalid UTF-8 bytes (``UnicodeDecodeError``,
+    a ``ValueError`` subclass) or a permission-denied open (``OSError``) --
+    was never caught, so the gate crashed instead of falling back to
+    "unknown", the fail-closed answer every other read failure here takes.
+    """
+
+    def test_invalid_utf8_bytes_fail_closed_instead_of_crashing(
+        self, daemon_dir: Path, project: Path, untracked: Path
+    ) -> None:
+        path = untracked / APPROVAL_SUBDIR / "gated-install.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"\xff\xfe\x00not valid utf-8")
+
+        assert gated_install_stamp(untracked, daemon_dir=daemon_dir, project_root=project) is None
+
+    def test_a_permission_denied_receipt_fails_closed_instead_of_crashing(
+        self, daemon_dir: Path, project: Path, untracked: Path
+    ) -> None:
+        if os.geteuid() == 0:
+            pytest.skip("running as root defeats permission-based checks")
+        path = untracked / APPROVAL_SUBDIR / "gated-install.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('{"stamp": "v3.65.0"}', encoding="utf-8")
+        path.chmod(0o000)
+        try:
+            assert gated_install_stamp(untracked, daemon_dir=daemon_dir, project_root=project) is None
+        finally:
+            path.chmod(0o644)
 
 
 class TestUnknownRange:

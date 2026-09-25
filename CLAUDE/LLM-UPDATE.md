@@ -261,14 +261,24 @@ needs, not a way to change what code runs.
 Layer 1 launching Layer 2 on a bare `bash` from the caller's `PATH` was the
 same class of gap, one level up: a caller able to plant a fake `bash` ahead
 of the real one would control what interprets Layer 2 before sanitisation
-ever got a chance to run. Layer 1 now resolves `bash` the same way the gate
-subprocess resolves its own tools: `_gate_tool bash`
-(`scripts/install/env_sanitise.sh`, sourced from the daemon dir Layer 1 has
-just checked out to the target -- the same tree `$LAYER2_SCRIPT` itself is
-read from), a fixed, root-owned, non-group/world-writable system location,
-never the caller's `PATH`. A target predating this file (a downgrade below
-the release that introduced it) has no such resolver to fall back on, so the
-caller's `PATH` is used there -- the prior behaviour, not a new gap.
+ever got a chance to run, and a caller-set `BASH_ENV`/`ENV` or an exported
+shell function would run inside Layer 2 before `_sanitise_layer2_env` itself
+got a say -- sanitising Layer 2's OWN environment closes nothing about what
+LAUNCHES it. Layer 1 now resolves `bash` the same way the gate subprocess
+resolves its own tools: `_gate_tool bash` (`scripts/install/env_sanitise.sh`,
+sourced from the daemon dir Layer 1 has just checked out to the target -- the
+same tree `$LAYER2_SCRIPT` itself is read from), a fixed, root-owned,
+non-group/world-writable system location, never the caller's `PATH`. It then
+launches Layer 2 through the same trusted `env` with `-i` and an explicit
+allowlist (`PATH`, the handoff/flags variables, `HOME`/`LANG`/proxy/`uv`
+settings and the `UV_*`/`PIP_*` families), rather than a bare inherited
+environment -- so nothing outside that list, including `BASH_ENV`, `ENV` or
+any `BASH_FUNC_*`, reaches Layer 2 at all; no in-bash drop loop can promise
+that, because the exact name an exported function lands under is not
+reliably enumerable. A target predating this file (a downgrade below the
+release that introduced it) has no such resolver to fall back on, so the
+caller's `PATH` and environment are used there -- the prior behaviour, not a
+new gap.
 
 What this does NOT cover: the sanitisation above is a fixed, named list of
 variable FAMILIES known to steer execution, not a default-deny `env -i`

@@ -36,11 +36,21 @@ _TIMEOUT_SECONDS = 120
 # The stub Layer 2 committed into the fixture daemon repository. `$BASH` is
 # the bash builtin naming the interpreter CURRENTLY running this script --
 # exactly the fact these tests need to pin down which `bash` Layer 1 chose.
+# It also reports BASH_ENV and whether a caller-exported function (any
+# BASH_FUNC_* import) survived into ITS OWN environment.
 _STUB_LAYER2 = """\
 #!/bin/bash
 set -euo pipefail
 echo "STUB_LAYER2_ARGS: $*"
 echo "STUB_LAYER2_INTERPRETER: $BASH"
+echo "STUB_LAYER2_BASH_ENV: ${BASH_ENV:-<unset>}"
+# grep -c exits 1 on zero matches, which is the expected, common case here
+# (no imported function survived) -- not an error to hide, so set -e is
+# toggled off around it rather than masking it with `|| true`.
+set +e
+STUB_FUNC_COUNT=$(env | grep -c '^BASH_FUNC_')
+set -e
+echo "STUB_LAYER2_IMPORTED_FUNC_COUNT: $STUB_FUNC_COUNT"
 """
 
 
@@ -123,12 +133,25 @@ def hostile_bash(tmp_path: Path) -> tuple[Path, Path]:
     return bin_dir, marker
 
 
-def _run_layer1(project: Path, path_prefix: Path | None = None) -> subprocess.CompletedProcess[str]:
+def _run_layer1(
+    project: Path,
+    path_prefix: Path | None = None,
+    extra_env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
     env = {k: v for k, v in os.environ.items() if not k.startswith("HOOKS_DAEMON_UNSAFE")}
     env["NO_COLOR"] = "1"
     env.pop("HOOKS_DAEMON_UPGRADE_PREVIOUS_VERSION", None)
+    # This suite's own test harness hermetically isolates ~/.gitconfig via
+    # GIT_CONFIG_GLOBAL (tests/conftest.py) so tests never touch a real one --
+    # but that would mask exactly what TestLayer1FetchIgnoresAHostileGlobalGitConfig
+    # probes: a REAL caller's global config, with no such hermetic override.
+    # Drop it here so Layer 1's OWN sanitisation is what is under test.
+    env.pop("GIT_CONFIG_GLOBAL", None)
+    env.pop("GIT_CONFIG_NOSYSTEM", None)
     if path_prefix is not None:
         env["PATH"] = f"{path_prefix}{os.pathsep}{env.get('PATH', '')}"
+    if extra_env is not None:
+        env.update(extra_env)
     return subprocess.run(
         [REAL_BASH, str(LAYER1_UPGRADE_SH), "--project-root", str(project), "v1.0.0"],
         capture_output=True,
@@ -137,6 +160,11 @@ def _run_layer1(project: Path, path_prefix: Path | None = None) -> subprocess.Co
         timeout=_TIMEOUT_SECONDS,
         check=False,
     )
+
+
+def _stub_field(stdout: str, name: str) -> str:
+    line = next(line for line in stdout.splitlines() if line.startswith(f"{name}:"))
+    return line.split(":", 1)[1].strip()
 
 
 class TestLayer2IsLaunchedOnATrustedBash:
@@ -167,6 +195,87 @@ class TestLayer2IsLaunchedOnATrustedBash:
     def test_without_a_hostile_path_the_upgrade_still_succeeds(self, client_project: Path) -> None:
         """The fix must not break the ordinary, non-hostile case."""
         result = _run_layer1(client_project)
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "STUB_LAYER2_ARGS:" in result.stdout
+
+
+class TestLayer2EnvIsIsolatedFromTheCaller:
+    """Plan 00376 review3 MAJOR 2 -- the trusted-bash fix closed PATH only.
+
+    `BASH_ENV` runs inside Layer 2 before its own `_sanitise_layer2_env`
+    ever gets a say, and no importing shell can strip an exported function
+    from what it hands to a child (the name it lands under is not
+    predictable enough to `env -u` it away). Layer 1 now launches Layer 2
+    through the trusted `env -i` with an explicit allowlist instead of a
+    bare inherited environment, so nothing not on that list -- BASH_ENV,
+    ENV, or any BASH_FUNC_* -- reaches it at all.
+    """
+
+    def test_bash_env_does_not_reach_layer2(self, client_project: Path) -> None:
+        result = _run_layer1(client_project, extra_env={"BASH_ENV": "/tmp/does-not-exist-evil.sh"})
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert _stub_field(result.stdout, "STUB_LAYER2_BASH_ENV") == "<unset>"
+
+    def test_an_exported_function_does_not_reach_layer2(self, client_project: Path) -> None:
+        """A hostile exported `unset` is the shape that defeats an in-bash
+        drop loop -- `env -i` defeats it differently, by never handing the
+        child an environment to import a function FROM in the first place.
+        """
+        harness = (
+            "unset() { :; }\n"
+            "export -f unset\n"
+            f'exec {REAL_BASH} "{LAYER1_UPGRADE_SH}" --project-root "{client_project}" v1.0.0\n'
+        )
+        env = {k: v for k, v in os.environ.items() if not k.startswith("HOOKS_DAEMON_UNSAFE")}
+        env["NO_COLOR"] = "1"
+        env.pop("HOOKS_DAEMON_UPGRADE_PREVIOUS_VERSION", None)
+        result = subprocess.run(
+            [REAL_BASH, "-c", harness],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=_TIMEOUT_SECONDS,
+            check=False,
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert _stub_field(result.stdout, "STUB_LAYER2_IMPORTED_FUNC_COUNT") == "0"
+
+
+class TestLayer1FetchIgnoresAHostileGlobalGitConfig:
+    """Plan 00376 review3 MINOR m2 (review-2 M2 residual).
+
+    ``git -C "$DAEMON_DIR" fetch --tags --force`` (Layer 1, ``upgrade.sh``)
+    honoured whatever `~/.gitconfig` the caller happened to have -- so
+    `git config --global url.<evil>.insteadOf <real-remote-prefix>` silently
+    rewrote where the fetch actually went, with no `git -C`/`remote set-url`
+    shape for the approval guard to catch. Layer 1 now runs every git
+    invocation with `GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1`, so a
+    hostile global config is never read at all.
+    """
+
+    def test_a_global_insteadof_rewrite_does_not_redirect_the_fetch(
+        self, tmp_path: Path, client_project: Path, daemon_remote: Path
+    ) -> None:
+        # The decoy is not a git repository at all -- if the redirect were
+        # honoured, `git fetch` would fail to reach it (non-zero exit, `set
+        # -euo pipefail` aborts Layer 1). If the redirect is ignored, the
+        # fetch reaches the REAL remote and the upgrade proceeds normally.
+        # Whether the fetch succeeded is therefore itself the signal.
+        decoy_remote = tmp_path / "decoy-not-a-repo"
+        decoy_remote.mkdir()
+
+        fake_home = tmp_path / "fake-home"
+        fake_home.mkdir()
+        gitconfig = fake_home / ".gitconfig"
+        gitconfig.write_text(
+            "[url \"" + str(decoy_remote) + "\"]\n"
+            "    insteadOf = " + str(daemon_remote) + "\n"
+        )
+
+        result = _run_layer1(client_project, extra_env={"HOME": str(fake_home)})
 
         assert result.returncode == 0, result.stdout + result.stderr
         assert "STUB_LAYER2_ARGS:" in result.stdout

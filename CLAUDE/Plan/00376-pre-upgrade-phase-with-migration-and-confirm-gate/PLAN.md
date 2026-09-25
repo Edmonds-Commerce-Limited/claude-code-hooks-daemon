@@ -315,8 +315,16 @@ rather than only matching syntax.
 
   - (b) Every function that feeds or decides the gate (the installed
     version, the target release, the restore target, the abort) declares
-    `local PATH="$GATE_SAFE_PATH"`, and Layer 1 and Layer 2 drop every
-    imported shell function before anything runs. Reason: an exported
+    `local PATH="$GATE_SAFE_PATH"`. Layer 1 unsets every shell function
+    `declare -F` names before anything else runs, but review3 found this is
+    not a guarantee in pure bash: any builtin, including `unset` itself, can
+    be shadowed by an exported function first, so this loop is best-effort
+    against an ordinary planted function, not a boundary against one crafted
+    to survive it. review3 MAJOR 2 closes the launch of Layer 2 differently
+    and completely: Layer 1 now runs Layer 2 through the trusted `env -i`
+    with an explicit allowlist, so no imported function -- however it is
+    named -- reaches Layer 2's process at all; there is nothing to drop
+    because there is nothing inherited to import from. Reason: an exported
     `timeout()` or `git()` shadows the tool by name, whatever `PATH` says.
 
   - (c) The installed == target shortcut counts only when the gate itself
@@ -357,6 +365,18 @@ rather than only matching syntax.
     behaviour, not a new gap. Pinned by
     `test_layer1_launches_layer2_via_trusted_bash.py`: a hostile `bash`
     planted ahead on `PATH` never runs, against the REAL `upgrade.sh`.
+
+    Closing the interpreter left the LAUNCH environment open (review3 MAJOR
+    2): `BASH_ENV`/`ENV` run inside Layer 2 before its own
+    `_sanitise_layer2_env` ever gets a say, and no importing shell can strip
+    an exported function by name reliably enough to promise none survives.
+    Layer 1 now launches Layer 2 through the same trusted `env` with `-i` and
+    an explicit allowlist (`PATH`, the handoff/flags variables,
+    `HOME`/`LANG`/proxy/`uv` settings, the `UV_*`/`PIP_*` families) instead of
+    a bare inherited environment, so nothing outside that list reaches Layer
+    2 at all. Pinned by `TestLayer2EnvIsIsolatedFromTheCaller`: a planted
+    `BASH_ENV` and an exported `unset() { :; }` both fail to reach the real
+    Layer 2 process.
 
     Once that `bash` process starts, Layer 2's OWN first action is
     `_sanitise_layer2_env` (`scripts/install/env_sanitise.sh`), sourced and

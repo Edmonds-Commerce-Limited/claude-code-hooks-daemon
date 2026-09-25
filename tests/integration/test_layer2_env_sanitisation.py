@@ -346,6 +346,45 @@ class TestDataVariablesAreLeftAlone:
         assert "UV_CACHE_DIR=/home/example/.cache/uv" in result.stdout
 
 
+class TestTheIncludeGuardCannotBeInherited:
+    """Plan 00376 review3 MAJOR 2 -- a pre-exported guard variable used to
+    skip the whole file, function definitions included.
+
+    ``ENV_SANITISE_SH_LOADED`` guarded a `readonly` reassignment the same way
+    ``output.sh`` guards its colour constants. But a caller able to export
+    ``ENV_SANITISE_SH_LOADED=1`` (plus a hostile exported ``_gate_tool``)
+    made THIS file skip its own definitions entirely, leaving Layer 1 to
+    call the CALLER's ``_gate_tool`` instead of the real one. Nothing here
+    needs the guard -- functions redefine harmlessly, and the file's only
+    plain-assigned variable is `GATE_SAFE_PATH` -- so the fix removes the
+    skip path outright: sourcing this file always redefines everything.
+    """
+
+    def test_a_pre_exported_loaded_flag_does_not_skip_the_real_definitions(
+        self, tmp_path: Path
+    ) -> None:
+        hostile_bin = tmp_path / "hostile-bin"
+        hostile_bin.mkdir()
+        marker = tmp_path / "hostile_gate_tool_ran"
+        harness = (
+            "set -euo pipefail\n"
+            'export ENV_SANITISE_SH_LOADED=1\n'
+            "_gate_tool() {\n"
+            f'    touch "{marker}"\n'
+            f'    printf \'%s\\n\' "{hostile_bin}/bash"\n'
+            "}\n"
+            "export -f _gate_tool\n"
+            f'source "{ENV_SANITISE_SH}"\n'
+            "_gate_tool bash\n"
+        )
+        result = _run(harness, _base_env())
+
+        assert result.returncode == 0, result.stderr
+        assert not marker.exists(), "the inherited (hostile) _gate_tool ran, not the real one"
+        assert result.stdout.strip() != f"{hostile_bin}/bash"
+        assert result.stdout.strip() in ("/usr/bin/bash", "/bin/bash")
+
+
 class TestLayer2SourcesItFirst:
     def test_upgrade_version_sh_sanitises_before_sourcing_any_other_library(self) -> None:
         """The library must be sourced, and the function called, before the

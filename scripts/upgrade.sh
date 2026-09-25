@@ -538,6 +538,15 @@ _stop_running_daemons "$DAEMON_DIR"
 # (Plan 00109), so this line protects the entire installed base as soon as it
 # lands on main — including clients still running much older daemon versions.
 _info "Fetching latest tags..."
+# Plan 00376 review3 m2: a caller's `git config --global url.<evil>.insteadOf
+# <this-remote>` would silently redirect this fetch -- no `git -C`/`remote
+# set-url` shape for the approval guard to catch, since the redirect lives in
+# the CALLER's own global config, never the command line. GIT_CONFIG_GLOBAL
+# points git at an empty, throwaway file instead of the caller's
+# ~/.gitconfig; GIT_CONFIG_NOSYSTEM drops /etc/gitconfig the same way. Every
+# git invocation below this point inherits both.
+export GIT_CONFIG_GLOBAL=/dev/null
+export GIT_CONFIG_NOSYSTEM=1
 git -C "$DAEMON_DIR" fetch --tags --force --quiet
 
 # Plan 00291: the guarded branch-install gate. First-party only: BOTH
@@ -713,18 +722,25 @@ _HANDOFF_DIR="$(mktemp -d "${TMPDIR:-/tmp}/hooks_daemon_upgrade_handoff_XXXXXX")
 HOOKS_DAEMON_UPGRADE_HANDOFF="$_HANDOFF_DIR/handoff"
 (umask 077 && printf '%s %s\n' "$$" "$_PREVIOUS_REF" > "$HOOKS_DAEMON_UPGRADE_HANDOFF")
 export HOOKS_DAEMON_UPGRADE_HANDOFF
-# review2 MAJOR 1 (residual, closed): `bash "$LAYER2_SCRIPT"` used to resolve
-# `bash` from the caller's own PATH, so a caller able to plant a fake `bash`
-# ahead of the real one controlled what interpreted Layer 2 before its own
-# `_sanitise_layer2_env` ever got to run. `_gate_tool` (env_sanitise.sh,
-# sourced from the CHECKED-OUT target -- it is always present by this point,
-# the same tree $LAYER2_SCRIPT itself is read from) resolves `bash` from a
-# fixed, root-owned, non-group/world-writable system location instead, the
-# same trust check the gate subprocess already used. A target predating this
-# file (a downgrade below the release that introduced it) has no such
-# resolver to fall back on, so the caller's PATH is used there -- the same
-# behaviour this replaces, not a new gap.
+# review2 MAJOR 1 (residual): `bash "$LAYER2_SCRIPT"` used to resolve `bash`
+# from the caller's own PATH, so a caller able to plant a fake `bash` ahead
+# of the real one controlled what interpreted Layer 2 before its own
+# `_sanitise_layer2_env` ever got to run. review3 MAJOR 2: PATH was only
+# half of it -- BASH_ENV/ENV run inside Layer 2 before that function gets a
+# say, and no importing shell can strip an exported function (BASH_FUNC_*)
+# from what it hands a child; the name it lands under is not predictable
+# enough to `env -u` it away. `env_sanitise.sh` (sourced from the
+# CHECKED-OUT target -- it is always present by this point, the same tree
+# $LAYER2_SCRIPT itself is read from) resolves both `bash` and `env` from a
+# fixed, root-owned, non-group/world-writable system location, the same
+# trust check the gate subprocess already used; launching through `env -i`
+# with an explicit allowlist means nothing not on that list reaches Layer 2
+# at all. A target predating this file (a downgrade below the release that
+# introduced it) has no such resolver to fall back on, so a bare `bash` from
+# the caller's PATH is used there -- the same behaviour this replaces, not a
+# new gap.
 _LAYER2_BASH="bash"
+_LAYER2_LAUNCH=("$_LAYER2_BASH")
 _ENV_SANITISE_SH="$DAEMON_DIR/scripts/install/env_sanitise.sh"
 if [ -f "$_ENV_SANITISE_SH" ]; then
     # shellcheck source=install/env_sanitise.sh
@@ -734,13 +750,41 @@ if [ -f "$_ENV_SANITISE_SH" ]; then
     else
         _fail "No trusted bash found in a fixed system location (\$GATE_SAFE_PATH). The upgrade never launches Layer 2 on a bash an environment variable or the caller's PATH names; install bash in one of those locations (or link one there)."
     fi
+    if _trusted_env="$(_gate_tool env)"; then
+        # DATA the rest of the upgrade legitimately needs (building a venv,
+        # running uv, deploying files) -- never a variable that steers what
+        # code runs or which tools answer for it. Only what is explicitly
+        # listed here survives `env -i`; everything else, including
+        # BASH_ENV/ENV and any BASH_FUNC_*, does not.
+        _LAYER2_ENV_ALLOWLIST=(
+            "PATH=$(_gate_trusted_path)"
+            "HOOKS_DAEMON_UPGRADE_HANDOFF=$HOOKS_DAEMON_UPGRADE_HANDOFF"
+            "UPGRADE_FLAGS=$UPGRADE_FLAGS"
+        )
+        for _allow_name in HOME LANG LC_ALL LC_CTYPE TMPDIR USER LOGNAME \
+                HTTP_PROXY HTTPS_PROXY NO_PROXY http_proxy https_proxy no_proxy \
+                SSL_CERT_FILE REQUESTS_CA_BUNDLE CURL_CA_BUNDLE XDG_CACHE_HOME \
+                HOOKS_DAEMON_PYTHON; do
+            if [ -n "${!_allow_name+x}" ]; then
+                _LAYER2_ENV_ALLOWLIST+=("$_allow_name=${!_allow_name}")
+            fi
+        done
+        for _allow_name in "${!UV_@}" "${!PIP_@}"; do
+            _LAYER2_ENV_ALLOWLIST+=("$_allow_name=${!_allow_name}")
+        done
+        _LAYER2_LAUNCH=("$_trusted_env" -i "${_LAYER2_ENV_ALLOWLIST[@]}" "$_LAYER2_BASH")
+    else
+        _fail "No trusted env found in a fixed system location (\$GATE_SAFE_PATH). The upgrade never launches Layer 2 through a caller-named env; install env in one of those locations (or link one there)."
+    fi
+else
+    _LAYER2_LAUNCH=("$_LAYER2_BASH")
 fi
 # Non-zero = abort without emitting metadata, with Layer 2's own exit code:
 # the pre-deploy gate's stop codes tell the caller WHY it stopped. Captured
 # with `||`, not inside `if !`, where $? is the negation's status (always 0).
 export UPGRADE_FLAGS
 LAYER2_EXIT=0
-"$_LAYER2_BASH" "$LAYER2_SCRIPT" "$PROJECT_ROOT" "$DAEMON_DIR" "$TARGET_VERSION" || LAYER2_EXIT=$?
+"${_LAYER2_LAUNCH[@]}" "$LAYER2_SCRIPT" "$PROJECT_ROOT" "$DAEMON_DIR" "$TARGET_VERSION" || LAYER2_EXIT=$?
 if [ "$LAYER2_EXIT" -ne 0 ]; then
     exit "$LAYER2_EXIT"
 fi

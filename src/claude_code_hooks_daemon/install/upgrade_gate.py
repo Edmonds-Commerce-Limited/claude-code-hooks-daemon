@@ -54,8 +54,6 @@ from pathlib import Path
 from typing import Final, TextIO
 
 from claude_code_hooks_daemon.daemon.install_layout import get_untracked_dir
-
-logger = logging.getLogger(__name__)
 from claude_code_hooks_daemon.install.upgrade_guides import (
     UNRELEASED_DIRNAME,
     UPGRADES_SUBPATH,
@@ -72,6 +70,8 @@ from claude_code_hooks_daemon.install.upgrade_tasks import (
 )
 from claude_code_hooks_daemon.install.version_parse import strip_tag_prefix
 from claude_code_hooks_daemon.utils.one_shot_approval import OneShotApprovalStore
+
+logger = logging.getLogger(__name__)
 
 #: Sub-directory of the daemon's untracked dir holding upgrade approvals.
 APPROVAL_SUBDIR: Final[str] = "upgrade-approvals"
@@ -425,12 +425,17 @@ def gated_install_stamp(untracked_dir: Path, *, daemon_dir: Path, project_root: 
         return None
     try:
         recorded: object = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        # A corrupt or truncated receipt is not distinguished from "no
-        # receipt" below (both mean the gate cannot vouch for this stamp),
-        # but the reason is worth a record: unlike a missing file, a
-        # malformed one usually points at something worth investigating.
-        logger.debug("gated_install_stamp: %s is not valid JSON (%s)", path, exc)
+    except (ValueError, OSError) as exc:
+        # A corrupt, undecodable or unreadable receipt is not distinguished
+        # from "no receipt" below (both mean the gate cannot vouch for this
+        # stamp), but the reason is worth a record: unlike a missing file,
+        # one that exists but cannot be read usually points at something
+        # worth investigating. `ValueError` also catches `UnicodeDecodeError`
+        # (invalid bytes) and `json.JSONDecodeError` (its own subclass);
+        # `OSError` catches a permission-denied or otherwise unreadable
+        # file. Either way this must fail CLOSED (review3 item 1): a read
+        # error on a security-relevant receipt is not license to crash.
+        logger.debug("gated_install_stamp: %s is not readable/valid JSON (%s)", path, exc)
         recorded = None
     if not isinstance(recorded, dict):
         return None

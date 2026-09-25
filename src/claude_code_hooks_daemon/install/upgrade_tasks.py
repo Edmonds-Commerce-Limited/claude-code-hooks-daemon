@@ -35,8 +35,6 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Final
 
-logger = logging.getLogger(__name__)
-
 from claude_code_hooks_daemon.install.install_stamp import is_branch_install
 from claude_code_hooks_daemon.install.upgrade_guides import (
     UNRELEASED_DIRNAME,
@@ -45,6 +43,8 @@ from claude_code_hooks_daemon.install.upgrade_guides import (
     default_upgrades_dir,
 )
 from claude_code_hooks_daemon.install.version_parse import strip_tag_prefix
+
+logger = logging.getLogger(__name__)
 
 
 class TaskKind(Enum):

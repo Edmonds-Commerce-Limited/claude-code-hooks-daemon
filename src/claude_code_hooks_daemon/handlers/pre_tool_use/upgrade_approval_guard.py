@@ -190,6 +190,9 @@ _UPGRADE_ONLY_ARG_RE: Final[re.Pattern[str]] = re.compile(r"(?:^|\s)--skip-readi
 _UPGRADE_SHAPED_ARG_RE: Final[re.Pattern[str]] = re.compile(
     r"(?:^|\s)--project-root\b|\.claude/hooks-daemon/?[\"']?(?:\s|$)"
 )
+#: This process's own stdin/fd, which is NEVER what a real subprocess would
+#: read from its own redirect -- reading it here answers a different question.
+_UNRESOLVABLE_STDIN_RE: Final[re.Pattern[str]] = re.compile(r"^/dev/(?:stdin|fd/\d+)$")
 #: Text every copy of Layer 1 and Layer 2 carries, whatever the file is named.
 _UPGRADE_SCRIPT_SIGNATURE: Final[str] = "HOOKS_DAEMON_UPGRADE_HANDOFF"
 #: Enough of a script to find the signature without reading a huge file.
@@ -368,29 +371,63 @@ def _script_carries_the_upgrade(script: Path) -> bool | None:
     return _UPGRADE_SCRIPT_SIGNATURE.encode() in content
 
 
-def _script_run_is_upgrade(script: str, arguments: list[str], cwd: str | None) -> bool:
+def _script_is_statically_unresolvable(script: str) -> bool:
+    """Whether ``script`` cannot be judged by content AT ALL, whatever
+    ``path_is_file``/``open`` say about it (review3 MAJOR 1, the N29 shape).
+
+    A ``$``-path is a variable reference this handler never expands: there is
+    no file to read, ever. ``/dev/stdin``/``/dev/fd/N`` name THIS process's
+    own descriptor, not the real subprocess's later redirect -- reading it
+    here answers a different question, and could even happen to succeed by
+    accident. Unexpanded process-substitution syntax (``<(...)``) is not a
+    path the shell parser hands back either.
+    """
+    if "$" in script:
+        return True
+    if _UNRESOLVABLE_STDIN_RE.match(script):
+        return True
+    return script.startswith("<(")
+
+
+def _script_run_is_upgrade(
+    script: str, arguments: list[str], cwd: str | None, *, steered: bool
+) -> bool:
     """Whether running ``script`` with ``arguments`` is an upgrade.
 
-    A script this handler can read is judged by its content (every copy of
-    Layer 1 and Layer 2 carries the handoff variable, whatever the file is
-    named); one it cannot (a `$tmp`, a path not there yet) by its arguments.
+    A script this handler can read AND resolve statically is judged by its
+    content (every copy of Layer 1 and Layer 2 carries the handoff variable,
+    whatever the file is named). Otherwise -- statically unresolvable
+    (`_script_is_statically_unresolvable`), or resolved but the READ failed --
+    a command that also carries a steering assignment counts as running the
+    upgrade outright: ``BASH_ENV`` runs inside Layer 2 before
+    ``_sanitise_layer2_env`` ever gets a say, so "cannot tell" must not mean
+    "allow" once something is already steering it. A RELATIVE path this
+    handler never attempted to resolve (no ``cwd``) is a separate, pre-existing
+    gap -- not this fix's shape -- and keeps falling to the argument-shape
+    heuristic, the same as the unsteered case.
     """
-    if "$" not in script:
-        path = Path(script)
-        if not path.is_absolute() and cwd is not None:
-            path = Path(cwd) / path
-        if path.is_absolute():
-            carries = _script_carries_the_upgrade(path)
-            if carries is not None:
-                return carries
+    if _script_is_statically_unresolvable(script):
+        if steered:
+            return True
+        return _UPGRADE_SHAPED_ARG_RE.search(" ".join(arguments)) is not None
+    path = Path(script)
+    if not path.is_absolute() and cwd is not None:
+        path = Path(cwd) / path
+    if path.is_absolute():
+        carries = _script_carries_the_upgrade(path)
+        if carries is not None:
+            return carries
+        if steered:
+            return True
     return _UPGRADE_SHAPED_ARG_RE.search(" ".join(arguments)) is not None
 
 
-def _shell_run_is_upgrade(operands: list[str], cwd: str | None, depth: int) -> bool:
+def _shell_run_is_upgrade(operands: list[str], cwd: str | None, depth: int, *, steered: bool) -> bool:
     """Whether a shell given ``operands`` runs the upgrade.
 
     `-c` runs its string, which is scanned as a command; `-s` (or no script
-    operand) reads the script from stdin, so only its arguments can tell.
+    operand) reads the script from stdin, so only its arguments -- or, when
+    steered, the steering assignment itself -- can tell.
     """
     inline = False
     reads_stdin = False
@@ -402,13 +439,17 @@ def _shell_run_is_upgrade(operands: list[str], cwd: str | None, depth: int) -> b
             inline = inline or "c" in flag[1:]
             reads_stdin = reads_stdin or "s" in flag[1:]
     if inline:
-        return bool(operands) and _command_runs_upgrade(operands[0], cwd, depth + 1)
+        return bool(operands) and _command_runs_upgrade(
+            operands[0], cwd, depth + 1, steered=steered
+        )
     if reads_stdin or not operands:
+        if steered:
+            return True
         return _UPGRADE_SHAPED_ARG_RE.search(" ".join(operands)) is not None
-    return _script_run_is_upgrade(operands[0], operands[1:], cwd)
+    return _script_run_is_upgrade(operands[0], operands[1:], cwd, steered=steered)
 
 
-def _segment_runs_upgrade(segment: str, cwd: str | None, depth: int) -> bool:
+def _segment_runs_upgrade(segment: str, cwd: str | None, depth: int, *, steered: bool) -> bool:
     """Whether ``segment`` runs the upgrade, by name, argument or content."""
     if _UPGRADE_ENTRY_RE.search(segment) or _UPGRADE_ONLY_ARG_RE.search(segment):
         return True
@@ -417,17 +458,20 @@ def _segment_runs_upgrade(segment: str, cwd: str | None, depth: int) -> bool:
         return False
     head = command_word(words[0])
     if head in _SHELL_HEADS:
-        return _shell_run_is_upgrade(words[1:], cwd, depth)
+        return _shell_run_is_upgrade(words[1:], cwd, depth, steered=steered)
     if "/" in words[0] or words[0].startswith("$"):
-        return _script_run_is_upgrade(words[0], words[1:], cwd)
+        return _script_run_is_upgrade(words[0], words[1:], cwd, steered=steered)
     return False
 
 
-def _command_runs_upgrade(command: str, cwd: str | None, depth: int = 0) -> bool:
+def _command_runs_upgrade(command: str, cwd: str | None, depth: int = 0, *, steered: bool = False) -> bool:
     """Whether any stage of ``command`` runs the upgrade."""
     if depth > _MAX_INLINE_DEPTH:
         return False
-    return any(_segment_runs_upgrade(segment, cwd, depth) for segment in _live_segments(command))
+    return any(
+        _segment_runs_upgrade(segment, cwd, depth, steered=steered)
+        for segment in _live_segments(command)
+    )
 
 
 def _bash_sets_bypass_env_var(command: str, cwd: str | None) -> bool:
@@ -436,7 +480,9 @@ def _bash_sets_bypass_env_var(command: str, cwd: str | None) -> bool:
     if any(_ENV_VAR_ASSIGN_RE.search(segment) for segment in segments):
         return True
     steers = any(_STEERING_ASSIGN_RE.search(segment) for segment in segments)
-    return steers and _command_runs_upgrade(command, cwd)
+    if not steers:
+        return False
+    return _command_runs_upgrade(command, cwd, steered=True)
 
 
 def _remote_mutates(words: list[str], index: int) -> bool:
