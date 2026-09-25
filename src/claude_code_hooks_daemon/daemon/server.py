@@ -1239,6 +1239,11 @@ class HooksDaemon:
             pid_file_path.unlink()
             logger.debug("Removed PID file: %s", pid_file_path)
 
+        # started_event marks "is currently live", not "has started at
+        # least once" -- clear it so a caller polling `is_set()` observes
+        # the stop (Plan 00466 N39 review1 MEDIUM-2).
+        self.started_event.clear()
+
         # Signal shutdown complete
         self.shutdown_event.set()
 

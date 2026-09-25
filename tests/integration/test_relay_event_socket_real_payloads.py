@@ -63,6 +63,7 @@ from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
 from claude_code_hooks_daemon.daemon.paths import get_event_socket_dir_from_untracked
 from claude_code_hooks_daemon.daemon.server import HooksDaemon
 from claude_code_hooks_daemon.install.forwarder_generator import generate_forwarder_content
+from tests.daemon._start_wait import wait_for_daemon_started
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _HOOKS_DIR = _REPO_ROOT / ".claude" / "hooks"
@@ -219,7 +220,7 @@ async def running_daemon(
     config = _make_strict_config(isolated_untracked_dir)
     daemon = HooksDaemon(config=config, controller=front_controller)
     server_task = asyncio.create_task(daemon.start())
-    await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
+    await wait_for_daemon_started(daemon, server_task, timeout=Timeout.SOCKET_CONNECT)
     yield daemon, isolated_untracked_dir
     await daemon.shutdown()
     await server_task

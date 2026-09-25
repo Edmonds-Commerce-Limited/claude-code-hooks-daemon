@@ -187,18 +187,22 @@ jobs:
       - name: Start daemon (for the acceptance gates)
         if: ${{ !cancelled() }}
         run: |
-          printf 'HOOKS_DAEMON_ROOT_DIR="%s"\n' "$GITHUB_WORKSPACE" \
-            > .claude/hooks-daemon.env
-          ./bin/hooks-daemon restart
-          ./bin/hooks-daemon status
           # blocking_gate_guard.py (tests/acceptance/) only escalates a skip
           # of a declared release-gate file to a failure when this is set
           # (Plan 00466 N39 widened) -- without it, a daemon that failed to
           # start here would leave those tests skipping quietly instead of
           # failing the job, exactly the Plan 00250 silence this workflow
           # exists to remove. Persisted via GITHUB_ENV for the pytest step
-          # below.
+          # below. Written FIRST, before restart/status: `run:` steps use
+          # `bash -e`, so a failure in either of those would otherwise abort
+          # the script before this line runs, leaving the acceptance tests
+          # to skip quietly instead of failing loudly alongside the red
+          # start step (Plan 00466 N39 review1 LOW-1).
           echo "HOOKS_DAEMON_RELEASE_GATE=1" >> "$GITHUB_ENV"
+          printf 'HOOKS_DAEMON_ROOT_DIR="%s"\n' "$GITHUB_WORKSPACE" \
+            > .claude/hooks-daemon.env
+          ./bin/hooks-daemon restart
+          ./bin/hooks-daemon status
 
       # Plan 00350: fourteen transport gates skipped on every runner for want
       # of a compiled binary — 11 in test_transport_toggle_cycle.py and 3 in

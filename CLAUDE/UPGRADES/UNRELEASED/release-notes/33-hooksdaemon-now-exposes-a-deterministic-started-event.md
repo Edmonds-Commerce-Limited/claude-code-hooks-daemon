@@ -9,3 +9,7 @@ binding. A test or embedding harness that previously guessed readiness with
 a fixed `asyncio.sleep(...)` after `create_task(daemon.start())` can instead
 `await asyncio.wait_for(daemon.started_event.wait(), timeout=...)` for a
 result that does not race under host load.
+
+The event tracks "is currently live", not "has started at least once":
+`shutdown()` clears it, so an embedder polling `started_event.is_set()`
+observes a clean stop.

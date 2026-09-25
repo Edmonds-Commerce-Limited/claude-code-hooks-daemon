@@ -20,6 +20,7 @@ from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import HookResult
 from claude_code_hooks_daemon.daemon.config import DaemonConfig
 from claude_code_hooks_daemon.daemon.server import HooksDaemon
+from tests.daemon._start_wait import wait_for_daemon_started
 
 
 class TestServerHandler(Handler):
@@ -96,7 +97,7 @@ class TestServerResponseSchema:
         """
         daemon = HooksDaemon(config=daemon_config, controller=front_controller)
         server_task = asyncio.create_task(daemon.start())
-        await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
+        await wait_for_daemon_started(daemon, server_task, timeout=Timeout.SOCKET_CONNECT)
 
         reader, writer = await asyncio.open_unix_connection(str(daemon_config.socket_path))
 
@@ -137,7 +138,7 @@ class TestServerResponseSchema:
 
         daemon = HooksDaemon(config=daemon_config, controller=controller)
         server_task = asyncio.create_task(daemon.start())
-        await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
+        await wait_for_daemon_started(daemon, server_task, timeout=Timeout.SOCKET_CONNECT)
 
         reader, writer = await asyncio.open_unix_connection(str(daemon_config.socket_path))
 

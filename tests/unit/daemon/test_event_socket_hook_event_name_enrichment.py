@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from tests.daemon._start_wait import wait_for_daemon_started
 
 from claude_code_hooks_daemon.config.models import (
     DaemonConfig,
@@ -127,7 +128,7 @@ class TestHookEventNameEnrichment:
         config = _make_strict_config(isolated_untracked_dir)
         daemon = HooksDaemon(config=config, controller=front_controller)
         server_task = asyncio.create_task(daemon.start())
-        await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
+        await wait_for_daemon_started(daemon, server_task, timeout=Timeout.SOCKET_CONNECT)
 
         events_dir = get_event_socket_dir_from_untracked(isolated_untracked_dir)
         socket_path = events_dir / "status-line.sock"
@@ -159,7 +160,7 @@ class TestHookEventNameEnrichment:
         config = _make_strict_config(isolated_untracked_dir)
         daemon = HooksDaemon(config=config, controller=front_controller)
         server_task = asyncio.create_task(daemon.start())
-        await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
+        await wait_for_daemon_started(daemon, server_task, timeout=Timeout.SOCKET_CONNECT)
 
         events_dir = get_event_socket_dir_from_untracked(isolated_untracked_dir)
         socket_path = events_dir / "pre-tool-use.sock"

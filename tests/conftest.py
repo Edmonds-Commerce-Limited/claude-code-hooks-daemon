@@ -650,9 +650,11 @@ def no_test_writes_tracked_generated_docs():
             f" This project's own daemon pid file ({pid_path}) changed mtime "
             f"during this test's window ({pid_mtime_before!r} -> "
             f"{pid_mtime_after!r}) — that means an external daemon "
-            "restart/start/stop happened WHILE THIS TEST RAN and is almost "
-            "certainly the real cause, not this test. Do not restart this "
-            "project's daemon during a test run."
+            "restart/start/stop happened WHILE THIS TEST RAN and is LIKELY "
+            "the real cause, not this test (though the daemon also touches "
+            "its own pid file on an hourly background cadence, unrelated to "
+            "a restart, so this is a lead, not a certainty). Do not restart "
+            "this project's daemon during a test run."
         )
 
     raise AssertionError(
