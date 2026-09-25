@@ -1794,18 +1794,30 @@ def _steers_a_listing(word: str) -> bool:
 
 
 def _is_merge_base_substitution(word: str) -> bool:
-    """Whether a word is a substitution whose code is ``git merge-base <rev>...``."""
+    """Whether a word is a substitution whose code is EXACTLY ``git merge-base <rev>...``.
+
+    Split on the same boundaries a command is split on first (review 8 minor
+    m2): the code must be exactly ONE command, or ``git merge-base x HEAD ||
+    echo <empty tree>`` -- accepted before because it merely STARTED with
+    ``git merge-base`` -- resolves to the empty tree's listing whenever the
+    revision does not exist, and a trailing ``| git mktree`` runs something
+    else again. A flag is refused too: ``-a`` prints every merge base, not
+    one, and ``--fork-point`` uses the reflog, so neither is "as safe as a
+    literal SHA" the way a bare ``git merge-base <rev> <rev>`` is.
+    """
     if not word.startswith((_SUBSTITUTION_OPENER, _BACKTICK)):
         return False
+    code = _substitution_code(word)
+    segments = split_unquoted(code, _COMMAND_BOUNDARIES)
+    if len(segments) != 1:
+        return False
     try:
-        words = shlex.split(_substitution_code(word))
+        words = shlex.split(segments[0])
     except ValueError:
         return False
-    return (
-        len(words) >= 3
-        and command_word(words[0]) == _GIT
-        and words[1] == _GIT_MERGE_BASE_SUBCOMMAND
-    )
+    if len(words) < 3 or command_word(words[0]) != _GIT or words[1] != _GIT_MERGE_BASE_SUBCOMMAND:
+        return False
+    return all(operand == END_OF_OPTIONS or not _is_flag(operand) for operand in words[2:])
 
 
 def _lists_changed_files(word: str) -> bool:

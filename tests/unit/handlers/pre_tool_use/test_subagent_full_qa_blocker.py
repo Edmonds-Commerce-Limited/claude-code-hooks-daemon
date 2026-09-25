@@ -1774,6 +1774,24 @@ class TestTheMergeBaseListingIsAccepted:
         assert match is not None
         assert match.fail_closed
 
+    @pytest.mark.parametrize(
+        "substitution",
+        [
+            '"$(git merge-base nosuchref HEAD || echo 4b825dc642cb6eb9a060e54bf8d69288fbee4904)"',
+            '"$(git merge-base -a main HEAD)"',
+            '"$(git merge-base --fork-point main HEAD)"',
+            '"$(git merge-base main HEAD | git mktree)"',
+        ],
+    )
+    def test_a_substitution_that_runs_more_than_plain_merge_base_still_refuses_the_listing(
+        self, tmp_path: Path, substitution: str
+    ) -> None:
+        """Review 8 minor m2: the check accepted any code that STARTED `git merge-base`."""
+        command = f"git diff --name-only {substitution} -- tests | xargs -r pytest"
+        match = find_full_qa_invocation(command, _patterns(), cwd=self._tree(tmp_path))
+        assert match is not None
+        assert match.fail_closed
+
 
 class TestAFileUnderTheParseCapIsParsedOnce:
     """Review 7 M1: a file under the parse cap was re-parsed at every reference.
