@@ -54,7 +54,7 @@ from claude_code_hooks_daemon.strategies.lint.protocol import LintStrategy
 from claude_code_hooks_daemon.strategies.lint.registry import LintStrategyRegistry
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 from claude_code_hooks_daemon.utils.command_evasion import (
-    ENV_PREFIX,
+    COMMAND_POSITION,
     GIT_INVOCATION,
     normalise_line_continuations,
 )
@@ -83,7 +83,7 @@ _CWD_FIELD: Final[str] = "cwd"
 _SEGMENT_SEPARATORS: Final[tuple[str, ...]] = ("||", "&&", "|", ";", "\n")
 
 _GIT_COMMIT_PATTERN: Final[re.Pattern[str]] = re.compile(
-    rf"^\s*{ENV_PREFIX}{GIT_INVOCATION}commit(?=\s|$)"
+    rf"{COMMAND_POSITION}{GIT_INVOCATION}commit(?=\s|$)"
 )
 
 # `git diff --cached --diff-filter=ACM` letters: Added, Copied, Modified. A

@@ -115,20 +115,7 @@ Commands piped to `tail` or `head` are **blocked** — piping truncates output a
 
 **Do NOT do the theatre** of capturing output to a file and then echoing the WHOLE file to stdout — that defeats the point and just bloats tokens.
 
-**Preferred — the deployed `bin/echd-capture` helper**: capture the FULL output, see only a preview. Run it by the path below from the project root (the block message prints the absolute form); it is not on `PATH`, so never type the bare name.
-
-```bash
-# WRONG — blocked (and truncates):
-pytest tests/ 2>&1 | tail -20
-
-# RIGHT — full capture, bounded preview + path to the rest:
-set -o pipefail
-pytest tests/ 2>&1 | bin/echd-capture 20
-# prints the last 20 lines + '(full output: /…/command-output-….txt)'.
-# Use --head N for the first N lines. pipefail keeps pytest's exit code visible.
-```
-
-**Always-works alternative** (no helper, no pipe): `pytest tests/ > untracked/scratch/out.txt 2>&1` then read the file selectively. Keep the capture IN-REPO — `project_containment` denies a redirect to a path outside the repository, and a capture written outside it is gone on the next container restart.
+**Redirect to a file, then read a bounded slice** (no pipe): `pytest tests/ > untracked/scratch/out.txt 2>&1` then read the file selectively. Keep the capture IN-REPO — `project_containment` denies a redirect to a path outside the repository, and a capture written outside it is gone on the next container restart.
 
 **Allowed** (whitelisted): `grep`, `rg`, `awk`, `sed`, `jq`, `ls`, `cat`, `git log`, `git tag`, `git branch`, and other cheap filtering commands.
 
@@ -558,6 +545,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - flaggable_work_advisor — delegate flaggable work BEFORE reading it
 
+<!-- handler: background-process-tracker -->
+
+- background_process_tracker — backgrounded processes are tracked
+
 <!-- handler: budget-exhaustion-detector -->
 
 - budget_exhaustion_detector — hidden agent budgets are surfaced
@@ -578,6 +569,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - goal_injection — plan-start goal signal for the ccy supervisor
 
+<!-- handler: markdown-table-formatter -->
+
+- markdown_table_formatter — markdown tables are auto-aligned
+
 <!-- handler: merge-qa-report -->
 
 - merge_qa_report — post-hoc plan/docs QA report after a merge
@@ -585,14 +580,6 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 <!-- handler: model-downgrade-recorder -->
 
 - model_downgrade_recorder — the automatic model downgrade is written down
-
-<!-- handler: background-process-tracker -->
-
-- background_process_tracker — backgrounded processes are tracked
-
-<!-- handler: markdown-table-formatter -->
-
-- markdown_table_formatter — markdown tables are auto-aligned
 
 <!-- handler: recovery-cron-advisor -->
 
@@ -614,6 +601,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - git_upstream_checker — additive fetch + pull/cleanup advice on session start
 
+<!-- handler: hook-registration-checker -->
+
+- hook_registration_checker — hooks configuration policy
+
 <!-- handler: model-fallback-detector -->
 
 - model_fallback_detector — silent model substitution is surfaced
@@ -630,25 +621,13 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - plan_workflow_asset_checker — plan tooling provisioning alert
 
-<!-- handler: reference-repo-sweep -->
-
-- reference_repo_sweep — reference clones are made fresh before you read them
-
-<!-- handler: tool-disable-advisor -->
-
-- tool_disable_advisor — declared never-want tools are checked at session start
-
 <!-- handler: project-handler-load-checker -->
 
 - project_handler_load_checker — project protection degraded alert
 
-<!-- handler: hook-registration-checker -->
+<!-- handler: reference-repo-sweep -->
 
-- hook_registration_checker — hooks configuration policy
-
-<!-- handler: session-actions-directive -->
-
-- session_actions_directive — the must-do list is delivered as a turn
+- reference_repo_sweep — reference clones are made fresh before you read them
 
 <!-- handler: routine-qa-sweep -->
 
@@ -657,6 +636,18 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 <!-- handler: secret-file-hygiene-checker -->
 
 - secret_file_hygiene_checker -- on-disk hygiene for protected paths
+
+<!-- handler: session-actions-directive -->
+
+- session_actions_directive — the must-do list is delivered as a turn
+
+<!-- handler: tool-disable-advisor -->
+
+- tool_disable_advisor — declared never-want tools are checked at session start
+
+<!-- handler: daemon-upgrade-detector -->
+
+- daemon_upgrade_detector — a running daemon notices its own upgrade
 
 <!-- handler: idle-housekeeping-advisory -->
 

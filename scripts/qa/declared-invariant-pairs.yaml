@@ -125,6 +125,21 @@
     file: src/claude_code_hooks_daemon/handlers/pre_tool_use/github_auto_close_keywords.py
     function: _message_file_texts
 
+- id: automated-prompt-classifiers-reach-the-tick-classifier
+  relation: reaches
+  helper: classify_tick
+  reason: >
+    both decide whether a UserPromptSubmit prompt is the human or a daemon
+    cron tick, so a classifier that knows only the failsafe literal reads
+    every other cron's tick as the owner -- the defect that wiped the
+    `[awaiting-human]` marker in multi-cron sessions (Plan 00388).
+  left:
+    file: src/claude_code_hooks_daemon/handlers/user_prompt_submit/failsafe_cron_blockage_suppressor.py
+    function: handle
+  right:
+    file: src/claude_code_hooks_daemon/handlers/user_prompt_submit/standing_authorisations.py
+    function: _is_automated_prompt
+
 - id: installer-file-writers-reach-the-backup-helper
   relation: reaches
   helper: _free_backup_path
@@ -171,3 +186,151 @@
     file: src/claude_code_hooks_daemon/routines/qa.py
     symbol: _COVERING
     extract: enum_members
+
+# --- reserved-word rows (Plan 00422 N25) --------------------------------------
+#
+# `do`, `then`, `!`, `{`, `time` and the other words in
+# `command_evasion.SHELL_RESERVED_COMMAND_PREFIXES` can stand in front of a
+# command, so `for i in 1; do git commit; done` splits into a segment whose first
+# word is `do`. Every site that names the command a segment runs must look past
+# them. A site that READS the first word reaches `strip_reserved_word_prefix`; a
+# pattern anchored at a segment start interpolates `COMMAND_POSITION` or
+# `RESERVED_WORD_PREFIX`. `_segment_command_word` is the reference reading.
+
+- id: pipe-producer-reaches-the-reserved-word-strip
+  relation: reaches
+  helper: strip_reserved_word_prefix
+  reason: >
+    both name the command a segment runs, so a producer read as `do` is denied
+    as unrecognised and the printed fix whitelists `^do\b`, exempting every loop
+    body's pipe.
+  left:
+    file: src/claude_code_hooks_daemon/handlers/pre_tool_use/pipe_blocker.py
+    function: _extract_producer
+  right:
+    file: src/claude_code_hooks_daemon/utils/shell_segmentation.py
+    function: _segment_command_word
+
+- id: message-owner-reaches-the-reserved-word-strip
+  relation: reaches
+  helper: strip_reserved_word_prefix
+  reason: >
+    both name the command a segment runs, so a `git commit -m` inside `then`
+    keeps its message un-blanked and the message prose is judged as commands.
+  left:
+    file: src/claude_code_hooks_daemon/utils/shell_segmentation.py
+    function: _segment_binary
+  right:
+    file: src/claude_code_hooks_daemon/utils/shell_segmentation.py
+    function: _segment_command_word
+
+- id: containment-destinations-reach-the-reserved-word-strip
+  relation: reaches
+  helper: strip_reserved_word_prefix
+  reason: >
+    both name the command a segment runs, so a `mkdir` behind `then` names no
+    destination and a write outside the project goes unjudged.
+  left:
+    file: src/claude_code_hooks_daemon/handlers/pre_tool_use/project_containment.py
+    function: _destination_targets
+  right:
+    file: src/claude_code_hooks_daemon/utils/shell_segmentation.py
+    function: _segment_command_word
+
+- id: bash-file-writes-reach-the-reserved-word-strip
+  relation: reaches
+  helper: strip_reserved_word_prefix
+  reason: >
+    both name the command a segment runs, so an interpreter write or a `cd`
+    behind `do` is invisible to the guards built on this analysis.
+  left:
+    file: src/claude_code_hooks_daemon/handlers/utils/bash_file_writes.py
+    function: _words
+  right:
+    file: src/claude_code_hooks_daemon/utils/shell_segmentation.py
+    function: _segment_command_word
+
+- id: reference-reads-reach-the-reserved-word-strip
+  relation: reaches
+  helper: strip_reserved_word_prefix
+  reason: >
+    both name the command a segment runs, so the freshness gate fires on its
+    own remedy behind `do` and misses a read behind `then`.
+  left:
+    file: src/claude_code_hooks_daemon/handlers/pre_tool_use/reference_repo_freshness.py
+    function: _governed_reads
+  right:
+    file: src/claude_code_hooks_daemon/utils/shell_segmentation.py
+    function: _segment_command_word
+
+- id: passthrough-verb-reaches-the-reserved-word-strip
+  relation: reaches
+  helper: strip_reserved_word_prefix
+  reason: >
+    both name the command a segment runs, so `time cat f` loses the passthrough
+    exemption that `cat f` has.
+  left:
+    file: src/claude_code_hooks_daemon/handlers/post_tool_use/budget_exhaustion_detector.py
+    function: _leading_verb
+  right:
+    file: src/claude_code_hooks_daemon/utils/shell_segmentation.py
+    function: _segment_command_word
+
+- id: git-subcommand-anchors-interpolate-the-command-position
+  relation: interpolates
+  helper: COMMAND_POSITION
+  reason: >
+    both anchor a git subcommand at a segment start, so an anchor without the
+    reserved-word prefix misses `if true; then git commit; fi`.
+  left:
+    file: src/claude_code_hooks_daemon/handlers/pre_tool_use/staged_lint_gate.py
+    symbol: _GIT_COMMIT_PATTERN
+  right:
+    file: src/claude_code_hooks_daemon/utils/merge_scope.py
+    symbol: _GIT_MERGE_PULL_REBASE_PATTERN
+
+- id: command-head-anchors-interpolate-the-reserved-word-prefix
+  relation: interpolates
+  helper: RESERVED_WORD_PREFIX
+  reason: >
+    both recognise a command by its position after a separator, so an anchor
+    without the reserved-word prefix lets `do sed` and `then cp` through.
+  left:
+    file: src/claude_code_hooks_daemon/handlers/pre_tool_use/sed_blocker.py
+    symbol: _SED_AS_COMMAND_HEAD
+  right:
+    file: src/claude_code_hooks_daemon/handlers/pre_tool_use/worktree_file_copy.py
+    symbol: _RELOCATION_VERB_RE
+
+- id: command-name-anchors-interpolate-the-command-position
+  relation: interpolates
+  helper: COMMAND_POSITION
+  reason: >
+    both anchor a command name at a span start, so an anchor without the
+    reserved-word prefix lets `then gh issue create` and `do git push` through.
+  left:
+    file: src/claude_code_hooks_daemon/utils/command_evasion.py
+    symbol: _NAMED_COMMAND_HEAD
+  right:
+    file: src/claude_code_hooks_daemon/handlers/pre_tool_use/verification_result_gate.py
+    symbol: _GIT_SPAN_HEAD
+
+- id: secret-exemptions-reach-the-transparent-word-strip
+  relation: reaches
+  helper: strip_transparent_reserved_words
+  reason: >
+    both grant a secret-file exemption to one simple command, and `time` or `!`
+    in front changes neither which command runs nor what it reads, so an
+    exemption that sees only the bare form denies `time ansible-playbook
+    --vault-password-file ...` and `! cat <encrypted file>` falsely.
+  left:
+    file: src/claude_code_hooks_daemon/utils/secret_file_matching.py
+    function: is_exempt_invocation
+  right:
+    file: src/claude_code_hooks_daemon/utils/secret_file_matching.py
+    function: is_encrypted_target_invocation
+
+# `bash_flags._SET_STATEMENT` has no row on purpose. It asks whether a `set`
+# still applies to the statements AFTER it, not which command a segment runs,
+# so only `{`, `!` and `time` count there: a `set` behind `then`/`do`/`else`
+# may never run.

@@ -1,5 +1,53 @@
 version: "3.67.0"
 truth_changes:
+  - topic: tool-controls
+    id: subagent-report-destination
+    was: >
+      `dispatch_declaration` offers two equal ways to declare where a
+      dispatched subagent's long-form report goes: a plan folder's
+      `subagent-reports/{yymmdd}-{agent-name}-{model}.md`, or an explicit
+      "not plan work" destination falling back to `untracked/agent-reports/`.
+      A dispatch that names a plan folder but writes its report to the
+      gitignored fallback draws nothing.
+    now: >
+      A subagent's final message travels over a bounded-size channel that
+      can silently elide the MIDDLE of an oversized inline report, so
+      long-form output goes to a FILE and the reply is a short summary plus
+      the path (`subagent_report_size_blocker` denies an oversized reply).
+      `dispatch_declaration` asks every dispatch to declare where that file
+      goes, and the DEFAULT is the dispatching plan's folder:
+      `<plan-folder>/subagent-reports/{yymmdd}-{agent-name}-{model}.md`, which
+      is tracked and is committed with the plan (ledger 00422 N5). The
+      gitignored `untracked/agent-reports/` (`fallback_report_dir`) is only
+      for dispatches with no plan, declared as "not plan work". A report
+      written there is lost when the container goes. A dispatch that names a
+      plan folder but declares a destination under the fallback now gets an
+      advisory naming the plan's `subagent-reports/`. It is never a deny.
+      IF YOUR PROJECT'S DOCS OR AGENT BRIEFS SEND PLAN WORK'S REPORTS TO
+      `untracked/agent-reports/`, POINT THEM AT THE PLAN FOLDER INSTEAD.
+  - topic: plan-journalling
+    id: journal-correction-entry
+    was: >
+      The journal entry grammar has six categories (`action`, `finding`,
+      `decision`, `thought`, `blocker`, `handoff`), and `mkplan.bash
+      --journal` rejects any other. A correction is an ordinary new entry,
+      usually a `finding`, and nothing marks it as a correction. A correction
+      of a future-dated entry is stamped earlier than the entry it corrects,
+      so `journal-entry-ordering` reports it as out of order and no legal
+      move clears that.
+    now: >
+      The grammar has a seventh category, `correction` (ledger 00422 N3).
+      Append one with `mkplan.bash --journal <plan-number> correction
+      <body-file> --ref <HH:MM>` for an entry in today's day-file, or
+      `--ref <YY-MM-DD/HH:MM>` for one in an earlier day-file. The `--ref` is
+      required and must name an entry that exists. Otherwise the script
+      refuses and writes nothing. The corrected entry is never edited or
+      moved. An entry that a correction in the same day-file names no longer
+      counts for `journal-entry-ordering`, so a future-dated stamp can be
+      corrected at the honest time with no ordering finding. Only a
+      `correction` does this. A `--ref` on any other category is still a task
+      reference. IF YOUR PROJECT'S DOCS OR AGENT BRIEFS LIST SIX JOURNAL
+      CATEGORIES, OR SAY TO CORRECT AN ENTRY WITH A `finding`, UPDATE THEM.
   - topic: blocking-handlers
     id: protected-file-contents
     was: >
@@ -118,3 +166,61 @@ truth_changes:
       RE-CHECK THAT CLAIM FOR THE VERSION BEFORE THIS CHANGE: A SINGLE SLOW
       HANDLER WITH NOTHING AHEAD OF IT IN PRIORITY ORDER WAS NOT BOUNDED AT
       ALL.
+  - topic: plan-workflow
+    was: >
+      A `STOPPING BECAUSE: [awaiting-human]` stop turns the failsafe recovery
+      cron off until a real message arrives, and only that cron. Any other
+      prompt, including another cron's tick, counts as the owner replying. The
+      background watchdog cron's prompt is written by the agent from a
+      description.
+    now: >
+      Every cron prompt the daemon supplies starts with a sentinel line:
+      `[tick:failsafe]`, `[tick:watchdog]` or `[tick:job:<id>]` for a
+      `persistent_crons` job (Plan 00388). A tick carrying one never counts as
+      the owner, so the marker and the failsafe cadence survive other crons.
+      While the marker is live, declared jobs' ticks are dropped too; the
+      watchdog's are not. The watchdog prompt is now supplied verbatim. Paste
+      every daemon-supplied cron prompt verbatim, first line included. A prompt
+      you compose yourself still counts as the owner.
+  - topic: plan-workflow
+    was: >
+      A session is told to create the failsafe recovery cron at its first plan
+      write (plan creation, progress or completion), and not before.
+    now: >
+      A new session is told at SessionStart as well, by
+      `failsafe_cron_session_advisor`, with the same CronList-first reconcile
+      and canonical prompt (Plan 00394). It is silent on a resumed session,
+      when `recovery_cron_advisor` is disabled, and when the failsafe cron is
+      declared under `persistent_crons`. A declared failsafe cron is never
+      advised for deletion at plan completion.
+  - topic: blocking-handlers
+    was: >
+      A job declared under `persistent_crons` cannot be cancelled for one
+      session. `cron_stop_enforcer` blocks every stop while the job is missing
+      from the session, so after `CronDelete` the only ways out are
+      re-creating the job or editing `persistent_crons`, which stops it for
+      every session on every branch.
+    now: >
+      Session-scoped cron pause (ledger 00422 N4): `hooks-daemon cron-pause
+      <job> --reason "..."` pauses one active declared job for the current
+      session only. The stop enforcers then accept it as missing and name the
+      job, the reason and the expiry. `persistent_cron_assertor` stops asking
+      for it within that session. The pause expires within 24 hours, and
+      `hooks-daemon cron-resume <job>` ends it early. An unknown job id is
+      refused. `persistent_crons` stays the only permanent switch, so the next
+      session is asked to create the job again.
+  - topic: ccy-supervisor
+    was: >
+      The ccy supervisor's per-model effort floor stands down only for an
+      effort level TYPED as `/effort <level>`. A level picked from the bare
+      `/effort` selector types nothing the supervisor can read, so the floor
+      puts the old level back. To keep a lower effort, type the level.
+    now: >
+      Effort drops are trusted (ledger 00422 N7): any observed effort drop the
+      supervisor did not inject itself is latched as the human's choice,
+      exactly like a typed `/effort <level>`. The floor stays off for the rest
+      of that model spell, whether the level came from the selector, was typed,
+      or came by any other route. The supervisor's own `/effort` injections are
+      recognised when they land and are never latched. This deliberately
+      mirrors the model-downgrade rule, where an unattributed model change gets
+      no restore.

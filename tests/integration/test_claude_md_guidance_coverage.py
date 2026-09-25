@@ -312,6 +312,13 @@ _EARNS_GUIDANCE: dict[str, str] = {
         "covered by that other section"
     ),
     "PlanWorkflowAssetCheckerHandler": "T3 names a provisioning command to run later",
+    "FailsafeCronSessionAdvisorHandler": (
+        "T3 the reconcile happens after the advisory — the agent runs CronList and "
+        "CronCreate itself — and the rule that governs it holds for every session: the "
+        "daemon cannot read session memory, so the advice says what to check, never that "
+        "the failsafe cron is missing, and when it stays silent (resumed session, "
+        "recovery_cron_advisor off, failsafe declared) is part of what a reader relies on"
+    ),
     "PersistentCronAssertorHandler": (
         "T3 the reconcile happens after the advisory — the agent has to run CronList "
         "and CronCreate itself — and the rule that decides what to do with the report "

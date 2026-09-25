@@ -25,8 +25,8 @@ unfinished remedy, not the finding.
 size warning with N29.
 
 **In progress again.** The ledger was Blocked on six owner questions. They
-are now decided in [DECISIONS.md](DECISIONS.md), so every open row has
-buildable work.
+are now decided AND built (DECISIONS.md), so the four inherited entries
+(N1, N3, N4, N7) are all terminal.
 
 **One of the four carries a class that now has three sightings**, and naming it
 is a goal of this plan rather than a footnote in it. 00419's N3 (the two
@@ -63,13 +63,13 @@ ledger's shape is readable without opening it:
 
 | #   | Verdict                                                                        | Origin                                                              | Status                                                                                                                                                                                                                                                                 |
 | --- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| N1  | the `Priority` constants are not the numbers a fresh install ships             | [00419 N8](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md)   | ⏸ Owner question 1 — stated, waiting                                                                                                                                                                                                                                   |
+| N1  | the `Priority` constants are not the numbers a fresh install ships             | [00419 N8](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md)   | ✅ Decided (unattended, 2026-09-24) and built — whole-template test; four divergences found, constants won all four; `c1822548`, merged `d28b25fa`                                                                                                                     |
 | N2  | the linter runs on gitignored scratch output                                   | [00419 N11](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md)  | ✅ Resolved — depth-scoped exclusions shipped                                                                                                                                                                                                                          |
-| N3  | a committed future-dated entry makes the journal uncorrectable                 | [00419 N12](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md)  | 🔄 Remediation fixed; (2) owner-gated, advisory expired                                                                                                                                                                                                                |
-| N4  | a cron cannot be both cancelled for a session and declared in config           | [00419 N13](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md)  | ⏸ Owner question 2 — stated, waiting                                                                                                                                                                                                                                   |
+| N3  | a committed future-dated entry makes the journal uncorrectable                 | [00419 N12](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md)  | ✅ Decided (unattended, 2026-09-24) and built — `correction` journal category; `14bdb525`, merged `d28b25fa`                                                                                                                                                           |
+| N4  | a cron cannot be both cancelled for a session and declared in config           | [00419 N13](../Completed/00419-niggles-ledger-fourteen/NIGGLES.md)  | ✅ Decided (unattended, 2026-09-24) and built — session-scoped `cron-pause`/`cron-resume`; `8b388a2a`, merged `63dea9f08`                                                                                                                                              |
 | N5  | the v3.65.0 release reviews' NON-defects had no durable home                   | the v3.65.0 release reviews                                         | ✅ CLOSED — all twelve rows resolved; (f) corrected, not built                                                                                                                                                                                                         |
 | N6  | a worktree cannot run the acceptance gates, and says the wrong reason          | Plan 00424                                                          | ✅ CLOSED — fault 1 by Plans 00431/00443; fault 2 by Plan 00445, and it was never a worktree fault: the autouse env-isolation fixture stripped the documented `CLAUDE_HOOKS_SOCKET_PATH` workaround from every wrapper subprocess. 14.75s against a run killed at 480s |
-| N7  | the supervisor's effort floor cannot see an effort set from the selector       | owner report, in session                                            | ⏸ Owner question 3 — stated, waiting                                                                                                                                                                                                                                   |
+| N7  | the supervisor's effort floor cannot see an effort set from the selector       | owner report, in session                                            | ✅ Decided (unattended, 2026-09-24) and built — an unattributed drop is latched as manual; `8ffe9ffe`, merged `63dea9f08`                                                                                                                                              |
 | N8  | the socket-path guard fails open exactly where it is needed                    | in session, hours after N6 fault 1 shipped                          | ✅ Remedied by Plan 00431                                                                                                                                                                                                                                              |
 | N9  | worktree isolation plus an explicit worktree instruction nests them            | in session, by causing it                                           | ✅ Remedied by Plan 00433                                                                                                                                                                                                                                              |
 | N10 | a QA checker's own tests overwrite that checker's real QA artefact             | a full `llm_qa all` run's intermediate artefacts                    | ✅ Remedied by Plan 00432                                                                                                                                                                                                                                              |
@@ -87,70 +87,19 @@ ledger's shape is readable without opening it:
 | N22 | the local "full QA" never runs shellcheck                                      | verifying Plan 00456's final QA before merge                        | ✅ Remedied by "Ledger 00422 N22: wire shellcheck into llm_qa.py so full QA covers it" — `shell_check` is now a `TOOL_REGISTRY` entry wrapping `run_shell_check.sh`; a wiring test pins every `run_all.sh` script against the registry so the next gap fails a test    |
 | N23 | a worktree commit is judged against the main checkout's staged tree            | Plan 00462's agent, denied over a path only main had staged         | 🔄 Graduated to Plan 00464 — a teammate's payload `cwd` is the main checkout, and the commit gates pick their repo from it, so worktree commits are wrongly denied AND their own staged content is never checked                                                       |
 | N24 | orchestrator simulate reports denials its blocking mode would never make       | a Plan 00463 review corrected the coordinator                       | ⬜ Open — simulate judges "not a coordination tool" (so every `Bash` is "would have been denied") while blocking denies only `Write`/`Edit`/`NotebookEdit`; the record meant to preview enforcement overstates it                                                      |
-| N25 | `pipe_blocker` names the loop keyword `do` as a pipe's producer                | a coordinator `for … do grep … \| head`                             | ⬜ Open — `do grep x f \| head` is blocked as producer `do`, and the fix it prints whitelists `^do\b`, which would exempt every loop body                                                                                                                              |
+| N25 | `pipe_blocker` names the loop keyword `do` as a pipe's producer                | a coordinator `for … do grep … \| head`                             | ✅ Remedied — shared `strip_reserved_word_prefix` primitive, 12 other sites fixed with it; `319cdd35`, merged `fb76d640`                                                                                                                                               |
 | N26 | commit gates never see content staged earlier in the same command              | Plan 00464's agent, with a probe                                    | 🔄 Graduated to Plan 00465 — `git add f && git commit` passes every staged-content gate unexamined (the secret-term scan included), and a same-command `git mv` makes plan QA falsely deny                                                                             |
 | N27 | a worktree daemon idles out in the middle of a full QA run                     | Plan 00461's agent                                                  | ✅ Remedied (B1) — `llm_qa` now starts an idled-out daemon before a live consumer such as `smoke_test`, so no keep-alive is needed                                                                                                                                     |
 | N28 | `plan_number_helper` resolves a relative `mkdir` against the workspace root    | Plan 00461's agent                                                  | ⬜ Open — `mkdir mkj/CLAUDE/Plan/00007-probe` run from `untracked/scratch/` was denied as a plan-folder creation; same class as N23, so the fix is 00464's command-directory resolver                                                                                  |
-| N29 | `write_clobber_guard` blocks a Write to a file this session created with Write | the coordinator rewriting its own gate script                       | ⬜ Open — the deny text says "a file you wrote or read earlier in this session is not blocked", yet a Write-created `untracked/scratch/gate.sh` was denied as unread                                                                                                   |
+| N29 | `write_clobber_guard` blocks a Write to a file this session created with Write | the coordinator rewriting its own gate script                       | ✅ Remedied — `matches()` fires on every Read/Edit/Write, so every allowed call is recorded; `d2ed30a4`, merged `fb76d640`                                                                                                                                             |
 
 ## Questions waiting on the owner
 
-**All six are decided** in [DECISIONS.md](DECISIONS.md). An unattended session
-took the recommended option for each and stated the assumption beside it, so
-the owner can reverse any one with a single message. The questions are kept
-below as they were put: each is ONE question, with what each answer costs.
-
-1. **N1 — how loud may a template-versus-constants test be?** `priority.py` and
-   the `init_config.py` template disagree across the whole `status_line` block
-   and have for longer than the handler that surfaced it has existed; relative
-   order is preserved, so nothing misbehaves and no check can see it. A
-   consistency test would fix that permanently. **Does it get to fail across the
-   WHOLE template, or only across the `status_line` block?** Whole-template may
-   surface more than the divergence found, which is a scope call, not a bug fix.
-   Unanswered: the constants keep documenting a relationship a fresh install
-   cannot have.
-
-2. **N4 — may a session suppress a cron the project declared?** Obeying an
-   instruction to cancel `issue-sdlc` makes the next Stop block, because the
-   enforcer refuses a session missing a declared job — correctly. The only
-   existing knob (edit `persistent_crons`) stops the job for every session on
-   every branch. **Is there to be a session-scoped pause, recorded through an
-   expiring marker like the "blocked only on human input" one, or does
-   "cancelled for now" remain unspellable?** A pause hands a session the ability
-   to switch off a guard the project declared. Unanswered: the two moves stay
-   mutually exclusive and whoever hits it re-derives that from two failures.
-
-3. **N7 — is an unattributed effort drop a human choice?** A bare `/effort`
-   opens Claude Code's own selector, which names nothing the supervisor can
-   read, so the manual-effort latch never sets and the floor puts it back.
-   **Should an effort drop the supervisor did not itself inject be trusted as
-   manual and latched?** The downgrade logic deliberately answers the
-   mirror-image question NO — an unattributed model change gets no restore — so
-   answering YES here is a real asymmetry to accept, not an oversight to
-   correct. Unanswered: setting effort from the selector keeps getting undone.
-
-4. **N11 — may the acceptance fixtures leave the human scratch directory?** The
-   lint strategies write their probe fixtures under `untracked/scratch/`, the
-   same directory agents are told to use for working notes, which is what forced
-   the depth-scoped exclusion N2 shipped. A dedicated `untracked/acceptance/`
-   root separates them properly. **Is that move worth making?** It renames a
-   path ten strategies, the playbook harness and client-facing docs all name.
-   Unanswered: the coupling stays, and the next exclusion has to rediscover it.
-
-5. **N3 — may a `correction` category be added to the journal grammar?** It is
-   the only implementable remedy for the three-rule contradiction, and the
-   grammar lives in `_JOURNAL_TEMPLATE_.md`, which ships to every client. **Is
-   that a template change worth making?** Unanswered: nothing breaks — the
-   contradiction is self-limiting, since the ordering sweep only reads live
-   plans — but a correction stays illegible as a correction.
-
-6. **N5 — should a review dispatch default to a TRACKED report destination?**
-   `dispatch_declaration` currently recommends `untracked/agent-reports/`, which
-   is gitignored; that is how twenty release-review non-defects came within one
-   container restart of being lost. **Should the default move somewhere git can
-   see?** It changes what every client project is told, not just this one.
-   Unanswered: the next reviewer's evidence lands somewhere nothing durable
-   reads.
+**All six are decided, and all six are now built.** An unattended session took
+the recommended option for each and stated the assumption beside it, so the
+owner can reverse any one with a single message. The original questions, the
+decisions and the delivering commits are all in
+[DECISIONS.md](DECISIONS.md).
 
 ## Tasks
 
@@ -189,19 +138,22 @@ below as they were put: each is ONE question, with what each answer costs.
 
 ### Phase 2: the release-review carry-over
 
-- [ ] 🔄 **Task 2.1**: N5 — work the twelve-row table in
+- [x] ✅ **Task 2.1**: N5 — work the twelve-row table in
   [NIGGLES.md](NIGGLES.md). Rows (a) and (d) are done by Plan 00435, which also
   found a third disagreement in the same table and left a test behind so it
   cannot drift silently again. Row (f) is corrected rather than built: the class
   it names is already guarded by the integration test that reads the real
   config. All three rows the reviewers flagged as having teeth are done: (g) by Plan
-  00436, (c) by 00437 and (i) by 00438. Six rows remain, and every one of them
-  is a correctness-of-documentation or tidiness item rather than a defect.
+  00436, (c) by 00437 and (i) by 00438. The other rows are done too: (b) by
+  Plan 00440, (e) by 00442, (h) by 00439, and (j), (k) and (l) by 00441. Every
+  row is terminal, each checked against the code by the owner-a agent
+  ([report](subagent-reports/260924-n422-owner-a-opus-5-5.md)).
 
-- [ ] ⬜ **Task 2.2**: N5 remedy (2), owner-gated — decide whether a review
-  dispatch should default to a TRACKED report destination, so a reviewer's
-  evidence lands where git can see it without the coordinator remembering.
-  `dispatch_declaration` currently recommends the gitignored path.
+- [x] ✅ **Task 2.2**: N5 remedy (2) — Decided (unattended, 2026-09-24) and
+  built. `dispatch_declaration` and `get_claude_md` now name the dispatching
+  plan's `subagent-reports/` as the DEFAULT, tracked destination; the
+  gitignored `fallback_report_dir` is only for when no plan applies. Commit
+  `f013ac65` (owner-a), merged `d28b25fa`.
 
 ### Phase 3: the owner-reported entry
 
@@ -229,17 +181,19 @@ changing.
   shipped agent that does not declare `Bash` now fails.
 
 - [x] ❌ **Task 4.3**: N16 — **CANCELLED, nothing to do here.** The work already
-  lives in [Plan 00388](../00388-failsafe-marker-wiped-by-other-crons-in-multi-cron-sessions/PLAN.md)
+  lives in [Plan 00388](../Completed/00388-failsafe-marker-wiped-by-other-crons-in-multi-cron-sessions/PLAN.md)
   Task 2.4, graduated there from Plan 00392 N1 before this entry was written.
   Leaving a duplicate task open would split one owner ruling across two plans,
   which is the failure the ledger's own dedupe convention exists to stop.
 
 ## Success Criteria
 
-- [ ] ⬜ Each of the four inherited entries reaches a terminal state IN THIS
+- [x] ✅ Each of the four inherited entries reaches a terminal state IN THIS
   LEDGER — fixed with a RED-first test, determined from the record, or graduated
   to its own numbered plan. Re-filing any of them into ledger sixteen is a
-  failure of this criterion, not a way of satisfying it.
+  failure of this criterion, not a way of satisfying it. All four (N1, N3, N4,
+  N7) are Decided (unattended, 2026-09-24) and built — see DECISIONS.md and
+  NIGGLES.md.
 
 - [ ] ⬜ **Assessed when this ledger closes, not before**: every entry is
   terminal by the same test. Open while this is the current ledger, because a

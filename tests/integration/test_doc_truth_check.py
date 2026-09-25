@@ -327,6 +327,77 @@ def test_does_not_scan_agent_worktrees(tmp_path: Path) -> None:
     )
 
 
+def test_a_checkout_inside_a_worktrees_directory_is_still_scanned(tmp_path: Path) -> None:
+    """The noise-directory names are judged below ``--root``, never above it.
+
+    An agent's own checkout lives at ``untracked/worktrees/<name>/``. Judged on
+    the ABSOLUTE path, every file in it sits under ``untracked`` and
+    ``worktrees``, so the gate scanned nothing and passed on any prose.
+    """
+    root = _make_docs(tmp_path / "untracked" / "worktrees" / "wt", "## Usage\n\n")
+    (root / "README.md").write_text("## Usage\n\n```bash\n/release\n```\n", encoding="utf-8")
+
+    exit_code, report = _run_checker(root)
+
+    assert report["summary"]["docs_scanned"] > 0
+    assert exit_code == 1, "a violation in a checkout under untracked/worktrees/ passed unseen"
+
+
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(  # nosec B603 B607 - trusted git binary, fixed argv, test fixture only
+        ["git", "-C", str(repo), *args],
+        capture_output=True,
+        check=True,
+        timeout=_TIMEOUT_SECONDS,
+    )
+
+
+def test_does_not_scan_a_gitignored_vendored_plugin_install(tmp_path: Path) -> None:
+    """Plan 00466 N9: installing a Claude Code plugin lands vendored markdown
+    under the gitignored ``.claude/ccy/plugins/`` tree. ``_UNSCANNED_DIR_NAMES``
+    already names ``marketplaces`` but not the plugin ``cache/`` directory --
+    a gap this reproduces directly, closed by filtering against ``git``'s view
+    of the tree rather than an ever-growing directory-name denylist.
+    """
+    root = _make_docs(tmp_path, "## Fine\n\nAccurate prose only.\n")
+    _git(root, "init")
+    _git(root, "config", "user.email", "t@example.com")
+    _git(root, "config", "user.name", "T")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-m", "initial")
+    (root / ".gitignore").write_text("/.claude/ccy/\n")
+    vendored = root / ".claude" / "ccy" / "plugins" / "cache" / "some-plugin" / "README.md"
+    vendored.parent.mkdir(parents=True)
+    vendored.write_text("## Usage\n\n```bash\n/release\n```\n", encoding="utf-8")
+
+    exit_code, report = _run_checker(root)
+
+    assert exit_code == 0, (
+        "a violation inside a gitignored plugin install failed the gate: " f"{report['violations']}"
+    )
+
+
+def test_does_not_scan_a_protected_pattern_file_outside_a_git_repo(tmp_path: Path) -> None:
+    """Plan 00412: closing the non-git fallback residual -- ``root`` here is
+    never a git repository, so ``_iter_markdown``'s ``git_visible_paths``
+    call returns ``None`` and has no git truth to filter by; the protected
+    file must still be excluded on its own."""
+    from claude_code_hooks_daemon.utils import secret_file_matching as sfm
+
+    both_edges_pattern = next(p for p in sfm.DEFAULT_PROTECTED_PATTERNS if p.count("*") == 2)
+    protected_name = f"{both_edges_pattern.replace('*', 'x')}.md"
+
+    root = _make_docs(tmp_path, "## Fine\n\nAccurate prose only.\n")
+    protected = root / protected_name
+    protected.write_text("## Usage\n\n```bash\n/release\n```\n", encoding="utf-8")
+
+    exit_code, report = _run_checker(root)
+
+    assert exit_code == 0, (
+        "a violation inside a protected-pattern file was scanned: " f"{report['violations']}"
+    )
+
+
 def test_real_repository_docs_are_truthful() -> None:
     """The gate itself: this repository's prose must match generated truth."""
     exit_code, report = _run_checker(REPO_ROOT)

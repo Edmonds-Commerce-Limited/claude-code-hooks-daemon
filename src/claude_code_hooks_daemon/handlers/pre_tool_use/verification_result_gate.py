@@ -56,7 +56,7 @@ from claude_code_hooks_daemon.utils.bash_flags import (
     split_statements,
 )
 from claude_code_hooks_daemon.utils.command_evasion import (
-    ENV_PREFIX,
+    COMMAND_POSITION,
     GIT_INVOCATION,
     compile_command_name_pattern,
 )
@@ -145,6 +145,10 @@ _MUTATOR_HEAD_WORDS: Final[frozenset[str]] = frozenset(
 
 _GIT: Final = "git"
 
+# A span's start up to a git subcommand: reserved words, `env`, assignments,
+# then `git` and its global options.
+_GIT_SPAN_HEAD: Final = rf"{COMMAND_POSITION}{GIT_INVOCATION}"
+
 
 def _compile_signature(name: str) -> re.Pattern[str]:
     """Anchor ``name`` at the start of a command span.
@@ -158,7 +162,7 @@ def _compile_signature(name: str) -> re.Pattern[str]:
     if words[0] != _GIT or len(words) < 2:
         return compile_command_name_pattern(name)
     subcommand = r"\s+".join(re.escape(word) for word in words[1:])
-    return re.compile(rf"^\s*{ENV_PREFIX}{GIT_INVOCATION}{subcommand}(?=\s|$)")
+    return re.compile(rf"{_GIT_SPAN_HEAD}{subcommand}(?=\s|$)")
 
 
 def _compile_table(

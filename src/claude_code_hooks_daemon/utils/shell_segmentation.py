@@ -31,7 +31,10 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 
-from claude_code_hooks_daemon.utils.command_evasion import git_subcommand_index
+from claude_code_hooks_daemon.utils.command_evasion import (
+    git_subcommand_index,
+    strip_reserved_word_prefix,
+)
 
 # Bash quoting characters. Inside single quotes NOTHING is special except the
 # closing quote -- in particular a backslash is a literal backslash, which is
@@ -336,6 +339,11 @@ class _SegmentTracker:
     since the previous match rather than restarted from the beginning --
     those gaps are disjoint and sum to at most `len(command)` over the whole
     scan.
+
+    Leading reserved words are dropped from the window before splitting, so
+    the segment of `if x; then git commit -m m; fi` starts at `git` (Plan
+    00422 N25) -- merged in alongside the N25 performance fix above (Plan
+    00466 N40 review 2 MA4).
     """
 
     __slots__ = ("_binary", "_command", "_scanned_to", "_segment_start", "_subcommand")
@@ -350,7 +358,10 @@ class _SegmentTracker:
 
     def _resolve(self, start: int) -> None:
         """(Re)compute the binary/subcommand for the segment beginning at ``start``."""
-        window = self._command[start : start + _SEGMENT_WORD_SCAN_BOUND].split()
+        window_text = strip_reserved_word_prefix(
+            self._command[start : start + _SEGMENT_WORD_SCAN_BOUND]
+        )
+        window = window_text.split()
         self._binary = window[0].rpartition(_PATH_SEPARATOR)[2] if window else ""
         position = git_subcommand_index(window, 0) if window else None
         self._subcommand = window[position] if position is not None else ""
@@ -878,8 +889,12 @@ def _segment_command_word(segment: str) -> str | None:
 
     None means the segment names no command at all, which every caller here
     treats as unknown rather than safe.
+
+    Leading reserved words are skipped the same way (Plan 00422 N25): in
+    `do cat <<'EOF'` the receiver is `cat`, and reading `do` withheld the
+    exemption from every heredoc in a loop body.
     """
-    for word in segment.split():
+    for word in strip_reserved_word_prefix(segment).split():
         if not word or word.startswith("-"):
             continue
         resolved = command_word(word)
