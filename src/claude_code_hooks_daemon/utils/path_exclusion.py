@@ -118,12 +118,15 @@ def _candidate_paths(file_path: str, project_root: str | os.PathLike[str] | None
     the project-relative path when ``project_root`` is given and the file lives
     under it (so leading-``/`` anchored patterns resolve against the root).
 
-    Total on an empty ``file_path`` (N5, Plan 00466): ``os.path.relpath``
-    rejects an empty PATH argument with ``ValueError: no path specified``,
-    regardless of ``start`` -- a caller that (however it happened) ends up
-    asking whether "" matches a glob gets the defined answer, an empty
-    candidate list that matches nothing, not an exception it must have
-    guarded against first.
+    An empty ``file_path`` answers no candidates at all (Ledger 00466 N44):
+    every caller of this module derives ``file_path`` from something the
+    daemon does not fully control -- a hook payload's own ``file_path``, or
+    (via the secret-mention scanner) a token peeled off tool-call CONTENT --
+    and ``os.path.relpath("", root)`` raises ``ValueError: no path
+    specified`` on that degenerate input. An empty string also never
+    usefully matches a real glob, so "no match" is the correct answer here,
+    not just the safe one -- the same contract this function already gives
+    an out-of-root path.
     """
     raw = file_path.replace("\\", "/")
     if not raw:

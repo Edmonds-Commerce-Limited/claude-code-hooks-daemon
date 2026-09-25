@@ -2170,7 +2170,7 @@ the ledger's only related entry is the closed N5 row (e).
 ### N16 — the failsafe cron has two zero-token defences; the issue-sdlc cron has neither
 
 > **SUPERSEDED, an hour after filing — this was already recorded.**
-> [Plan 00388](../00388-failsafe-marker-wiped-by-other-crons-in-multi-cron-sessions/PLAN.md)
+> [Plan 00388](../Completed/00388-failsafe-marker-wiped-by-other-crons-in-multi-cron-sessions/PLAN.md)
 > absorbed this finding as graduated Plan 00392 N1 and carries it as **Task
 > 2.4**. Keep this entry for the trail, but 00388 is the live home; do not work
 > it from here.

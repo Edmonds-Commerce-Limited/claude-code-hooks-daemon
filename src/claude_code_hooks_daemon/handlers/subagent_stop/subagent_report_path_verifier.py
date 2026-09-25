@@ -32,7 +32,7 @@ import re
 from pathlib import Path
 from typing import Any, Final
 
-from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.core import BlockingResult, Decision, ProjectContext
 from claude_code_hooks_daemon.core.handler_bases import SubagentStopHandlerBase
 
@@ -159,7 +159,7 @@ class SubagentReportPathVerifierHandler(SubagentStopHandlerBase):
         non-string, or out-of-root ``cwd`` falls back to ``root`` unchanged,
         which is exactly today's behaviour.
         """
-        cwd = hook_input.get("cwd")
+        cwd = hook_input.get(HookInputField.CWD)
         if isinstance(cwd, str) and cwd:
             candidate = Path(os.path.normpath(cwd))
             if candidate.is_relative_to(root):

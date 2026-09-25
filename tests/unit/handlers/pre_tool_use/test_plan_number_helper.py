@@ -955,6 +955,37 @@ class TestHandRolledPlanFolderCreation:
         for command in variants:
             assert handler.matches(_bash(command)), f"Should still match: {command}"
 
+    @pytest.mark.parametrize(
+        ("command", "folder"),
+        [
+            ('bash -c "mkdir -p CLAUDE/Plan/00250-some-feature"', "CLAUDE/Plan/00250-some-feature"),
+            ("sh -c 'mkdir CLAUDE/Plan/00250-some-feature'", "CLAUDE/Plan/00250-some-feature"),
+            ('mkdir -p "CLAUDE/Plan/00250-some-feature"', "CLAUDE/Plan/00250-some-feature"),
+            ("mkdir -p CLAUDE/Plan/'00250-some-feature'", "CLAUDE/Plan/00250-some-feature"),
+        ],
+    )
+    def test_a_quoted_creation_is_still_a_creation(
+        self, handler: PlanNumberHelperHandler, command: str, folder: str
+    ) -> None:
+        """Plan 00408 Task 3.4: blanking literals decided whether a mkdir EXISTED.
+
+        ``bash -c "mkdir ..."`` runs the mkdir, and quoting the path changes
+        nothing about the folder created. The shape Plan 00407 N12 corrected in
+        both sibling guards: blanking literals answers "what is the target?",
+        never "is there a command here at all?".
+        """
+        assert handler.matches(_bash(command))
+        result = handler.handle(_bash(command))
+        assert f"`mkdir {folder}`" in (result.reason or "")
+
+    def test_a_commit_message_naming_a_creation_is_still_prose(
+        self, handler: PlanNumberHelperHandler
+    ) -> None:
+        """The inert spans that ARE data stay blanked after the fix."""
+        assert not handler.matches(
+            _bash("git commit -m 'document mkdir -p CLAUDE/Plan/00250-some-feature'")
+        )
+
 
 class TestGetRules:
     """get_rules() declares the 2 Rule objects (Decision B)."""

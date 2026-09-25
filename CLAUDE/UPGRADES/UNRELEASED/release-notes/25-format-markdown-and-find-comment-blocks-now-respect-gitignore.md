@@ -23,7 +23,9 @@ no-op outside a git repository.
 that is itself gitignored, rather than rewriting it: `format-markdown .claude/ccy/plugins` prints an error and exits non-zero instead of touching
 vendored plugin content.
 
-Not covered by this note: always excluding the in-project Claude config
-directory regardless of git visibility. That is deferred to the
-`claude_config_dir()` resolver another workstream is building; this
-project's own case is already covered because `.claude/ccy` is gitignored.
+Both walkers also skip Claude Code's config directory (`$CLAUDE_CONFIG_DIR`,
+else `~/.claude`) whenever it sits inside the project, whether or not git
+would show it. This covers a tracked config dir, a project that is not a git
+repository, and a home that is a symlink into the project, or the reverse.
+A config dir that contains the whole project excludes nothing.
+`markdown_organization` uses the same test.

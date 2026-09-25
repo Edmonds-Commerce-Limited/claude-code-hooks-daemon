@@ -1,0 +1,100 @@
+# Plan 00470: persistent session optimisation
+
+**Status**: Not Started
+**Created**: 2026-09-25
+**Owner**: dev
+**Priority**: Medium
+**Recommended Executor**: Sonnet
+**Execution Strategy**: Sub-Agent Orchestration
+
+## Overview
+
+The owner runs one session permanently on a datacentre server to monitor
+GitHub issues and resolve them; that session is the dogfood. This plan tracks
+everything an "always on" session needs that a normal session does not.
+
+The sharpest gap is cron expiry: recurring crons auto-expire, and in an idle
+session the cron tick is the only thing that produces a Stop, so when every job
+expires together nothing ever fires again and `cron_stop_enforcer` never runs.
+The next gaps are recovery after a usage limit (the weekly limit killed every
+sub-agent with nothing to resume them) and restarts, both of which need durable
+state rather than session memory. The last question is the orchestrator's model.
+
+Evidence, with verified facts marked apart from inferences, is in
+[RESEARCH.md](RESEARCH.md).
+
+## Goals
+
+- Declared crons are refreshed before they expire, and never die silently.
+- A usage-limit stop, auth failure or restart leaves a durable record from
+  which the orchestrator re-dispatches the lost work without a human.
+- Work in flight lives in a durable queue file, never only in context.
+- The orchestrator model is chosen from a measured comparison.
+
+## Non-Goals
+
+- Making crons durable inside Claude Code (not ours to change).
+- Auto-merging on a cheap model's free-text judgement.
+- Changing any other plan's scope.
+
+## Tasks
+
+### Phase 1: Probes (owner: orchestrator, main thread)
+
+- [ ] ⬜ **Task 1.1**: Vendor `scheduled-tasks`, `model-config` and `interactive-mode` docs via `hooks-daemon remote-docs add`.
+- [ ] ⬜ **Task 1.2**: Probe the four open questions in RESEARCH.md §4 and record the results in RESEARCH.md.
+
+### Phase 2: Cron expiry (owner: python-developer sub-agent, TDD)
+
+- [ ] ⬜ **Task 2.1**: PostToolUse handler records CronCreate/CronDelete (`session_id`, id, schedule, prompt hash, created_at) in a daemon state file. Tests: record, delete, prune dead sessions.
+- [ ] ⬜ **Task 2.2**: `cron_stop_enforcer` (and its SubagentStop twin) block a stop when a live job's record is older than `refresh_after`, naming the CronDelete + CronCreate. Unrecorded jobs get stamped, not blocked. Tests: age boundary, unknown age, pause respected, priority/terminal invariants unchanged.
+- [ ] ⬜ **Task 2.3**: ccy supervisor watchdog: no hook traffic while every recorded job is past expiry triggers the reconcile prompt. Tests in the supervisor suite.
+- [ ] ⬜ **Task 2.4**: Make the background-process watchdog cron a standing job. The owner's decision: it is a sensible safety net for a long-running session, so every session gets it.
+  - Declare it under `persistent_crons` next to `issue-sdlc` and `failsafe-recovery`.
+  - Its prompt must be byte-identical to `background_process_tracker`'s canonical `[tick:watchdog]` text, pinned by a test the way the failsafe prompt is pinned.
+  - A declared job is required by `cron_stop_enforcer` for the whole session. So the canonical prompt must stop telling the agent to CronDelete it once no background work remains: an idle tick is a no-op, not a reason to delete.
+  - `background_process_tracker` must stop asking for a second watchdog when the declared one exists.
+  - Fix `harvest-background` listing the same process group twice. It was observed in this session, and the doubled group was a wanted QA gate.
+  - Tests: the declaration is re-asserted at SessionStart; the prompt pin; the stop enforcer requires the job; an idle tick is a no-op; each group is listed once.
+
+### Phase 3: Limits, restarts, durable queue (owner: python-developer sub-agent, TDD)
+
+- [ ] ⬜ **Task 3.1**: StopFailure handler package: record `rate_limit`, `authentication_failed`, `cloud_credential_error` to a durable file and surface them in the status line.
+
+- [ ] ⬜ **Task 3.2**: Notification handler records `quota_auto_resume_*`; on resume, inject a re-brief pointing at the queue. Also surface a BACKGROUND or teammate agent killed by a session or weekly limit, naming the agent so it can be re-briefed. Plan 00466 N46 covers only foreground dispatches, whose death arrives as a PostToolUse:Agent result. The 264 of 351 real dispatches that ran in the background report their death through a task notification instead.
+
+- [ ] ⬜ **Task 3.3**: Durable work-queue file format + the `issue-sdlc` skill writes and reads it; SessionStart (`resume`/`compact`) re-briefs from it. Observed on 2026-09-25, in two separate ways:
+
+  - After a usage-limit restart, a new session had no teammates.
+  - A user interrupt of the lead's turn killed all 11 running in-process agents.
+
+  Both times, each agent had to be re-briefed by hand from its worktree state. The queue must hold enough per agent (worktree, task brief, last sha) that a respawn is mechanical.
+
+- [ ] ⬜ **Task 3.4**: Regression test that a teammate or sub-agent stop never writes the lead's `[awaiting-human]` marker.
+
+- [ ] ⬜ **Task 3.5**: Server runbook: systemd/ccy restart with `--continue`, `autoContinueAtUsageLimit` on.
+
+### Phase 4: Housekeeping and cost (owner: orchestrator; code by sub-agents)
+
+- [ ] ⬜ **Task 4.1**: Measure disk/log growth on the server; add rotation where it is unbounded.
+- [ ] ⬜ **Task 4.2**: Extend `idle_housekeeping_advisor` to report stale worktrees and daemons (report-first).
+- [ ] ⬜ **Task 4.4**: Keep the prompt cache warm. The owner's intent is that the cache never expires in an always-on session. The design and the arithmetic belong to [Plan 00452](../00452-prompt-cache-observability-and-invalidation-protection/PLAN.md) Tasks 4.1–4.3. That plan rejected a fixed-interval warming cron, because warming loses when the probability of a next event is low. Its warming work is blocked on Task 2.4, which needs real idle-gap profiles.
+  - This task feeds 00452. Collect this always-on session's gap profile, which unblocks 00452 Task 2.4.
+  - Note for 00452: the declared crons at :23 and :47 already keep gaps under 60 minutes. But the daemon DROPS ticks when the session is blocked on a human or has backed off (R-FAILSAFE-CRON-SUPPRESSED, R-FAILSAFE-CRON-BACKED-OFF), which is exactly when the cache goes cold. So the warming decision must account for suppressed ticks.
+- [ ] ⬜ **Task 4.3**: A/B the orchestrator: Sonnet main loop vs Opus, Opus sub-agents with pinned `model:` and structured verdict files; compare cost per tick, guard denies, and triage/verdict errors. Owner decides from the record.
+
+## Success Criteria
+
+- [ ] A job older than `refresh_after` is refreshed at a Stop, proven by test.
+- [ ] Total cron expiry is recovered by the supervisor watchdog, proven by test.
+- [ ] After a simulated usage-limit stop, the session re-dispatches queued work from the queue file alone.
+- [ ] A teammate stop cannot silence the lead's ticks, proven by test.
+- [ ] The orchestrator model decision cites the Phase 4 measurements.
+
+## Delivery & Milestones
+
+<!-- Curated milestones + delivery commit hashes only (git is the SSoT for
+     "when" — do not add dates). The blow-by-blow activity log lives in
+     JOURNAL/00470-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
+
+- Research and plan drafted.

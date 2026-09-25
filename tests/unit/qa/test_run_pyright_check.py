@@ -190,7 +190,7 @@ class TestInterpreterIsPassedExplicitly:
         fake.write_text(
             "#!/bin/sh\n"
             f"printf '%s\\n' \"$@\" > {argv_log}\n"
-            'echo \'{"version":"x","generalDiagnostics":[],"summary":{"filesAnalyzed":0}}\'\n',
+            'echo \'{"version":"x","generalDiagnostics":[],"summary":{"filesAnalyzed":1}}\'\n',
             encoding="utf-8",
         )
         fake.chmod(0o755)
@@ -269,6 +269,22 @@ class TestReportBuilding:
         }
         assert report["errors"][1]["file"] == "/elsewhere/b.py"
         assert report["errors"][1]["rule"] == ""
+
+    def test_no_files_analyzed_is_not_a_pass(self, checker: types.ModuleType) -> None:
+        """Plan 00466 N21: pyright's "No source files found" case emits
+        filesAnalyzed 0 with an empty generalDiagnostics list and exits 0 --
+        zero errors read alone says nothing was wrong, when in fact nothing
+        was CHECKED. Mirrors the mypy gate's analysed-count requirement
+        (scripts/qa/run_type_check.sh)."""
+        raw = {
+            "version": "1.1.413",
+            "generalDiagnostics": [],
+            "summary": {"filesAnalyzed": 0, "errorCount": 0, "warningCount": 0},
+        }
+        report = checker.build_report(raw, Path("/root"))
+        assert report["summary"]["passed"] is False
+        assert report["summary"]["total_errors"] == 0
+        assert report["summary"]["files_analyzed"] == 0
 
     def test_unparseable_output_is_operational(
         self, checker: types.ModuleType, tmp_path: Path

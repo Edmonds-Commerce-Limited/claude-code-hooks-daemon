@@ -13,6 +13,13 @@ from claude_code_hooks_daemon.skill_scan.constants import STATE_FILE_NAME
 from claude_code_hooks_daemon.skill_scan.state import load_state, record_success
 
 
+@pytest.fixture(autouse=True)
+def _hermetic_claude_config_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The skill inventory reads the Claude config dir (Plan 00468 G14); never
+    the real one."""
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "hermetic-claude-config"))
+
+
 def _args(
     project_root: Path,
     force: bool = False,

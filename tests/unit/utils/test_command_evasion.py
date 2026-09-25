@@ -310,3 +310,52 @@ class TestCompileCommandNamePattern:
         from claude_code_hooks_daemon.utils.command_evasion import compile_command_name_pattern
 
         assert compile_command_name_pattern("pytest").search("   pytest tests/") is not None
+
+
+class TestRemoveWordQuoting:
+    """Quoting INSIDE a word is removed by bash before the command sees it.
+
+    ``git checkout "--" f.txt`` hands git a bare ``--``, and ``cd
+    .claude/'hooks-daemon'`` changes into the same directory as the unquoted
+    spelling. A pattern written against the plain word missed both (Plan 00408
+    Tasks 3.0 and 3.9). The helper only ever removes quoting that cannot change
+    where one word ends, so it can reveal a token but never invent a separator.
+    """
+
+    @pytest.mark.parametrize(
+        ("command", "expected"),
+        [
+            ('git checkout "--" f.txt', "git checkout -- f.txt"),
+            ("git checkout '--' f.txt", "git checkout -- f.txt"),
+            ("cd .claude/'hooks-daemon'", "cd .claude/hooks-daemon"),
+            ('cd .claude/"hooks-daemon"', "cd .claude/hooks-daemon"),
+            (r"cd .cl\aude/hooks-daemon", "cd .claude/hooks-daemon"),
+            ('git reset ""--hard', "git reset --hard"),
+            ("git push origin '+main'", "git push origin +main"),
+        ],
+    )
+    def test_quoting_within_a_word_is_removed(self, command: str, expected: str) -> None:
+        from claude_code_hooks_daemon.utils.command_evasion import remove_word_quoting
+
+        assert remove_word_quoting(command) == expected
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'echo "two words"',
+            "echo 'two words'",
+            r"find . -name x -exec rm {} \;",
+            'echo ";"',
+            "echo '&&'",
+            'git commit -m "$(pwd)"',
+            "grep 'a\\b' notes.txt",
+            '''echo "it's"''',
+            r'echo "say \"hi\""',
+            "echo 'unterminated",
+        ],
+    )
+    def test_quoting_that_protects_anything_but_a_plain_word_is_kept(self, command: str) -> None:
+        """Whitespace, separators, substitutions and escapes keep their quotes."""
+        from claude_code_hooks_daemon.utils.command_evasion import remove_word_quoting
+
+        assert remove_word_quoting(command) == command

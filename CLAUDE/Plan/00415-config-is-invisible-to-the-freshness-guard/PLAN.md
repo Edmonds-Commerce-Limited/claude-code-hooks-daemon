@@ -1,6 +1,6 @@
 # Plan 00415: config is invisible to the freshness guard
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-15
 **Owner**: joseph
 **Priority**: Medium
@@ -76,6 +76,12 @@ These need settling before implementation, and they are genuinely open:
   Pydantic versions — an unstable one produces a guard that cries stale at
   random, which is worse than the gap it closes.
 
+  **Decided (unattended, 2026-09-24)**: hash the resolved config model as
+  canonical JSON (`model_dump(mode="json")`, sorted keys), not the file.
+  It matches what the daemon bound, and a comment-only edit is not drift.
+  Assumption: the owner's 'no known defects' instruction; the owner can
+  reverse this with one message.
+
 - **Extend the existing fingerprint, or report a second one alongside?** N17's
   own wording was "mix the resolved config into the identity fingerprint", but
   a single blended digest cannot say which half moved, which the second goal
@@ -85,51 +91,70 @@ These need settling before implementation, and they are genuinely open:
   one is then silently no better off than today. That last point is the
   decisive one and should be weighed, not assumed away.
 
+  **Decided (unattended, 2026-09-24)**: a separate `config_fingerprint` in
+  the health payload, with every consumer reading one combined-verdict helper
+  (`describe_daemon_staleness`, which takes the whole payload), so no
+  consumer can check only half. The semgrep rule
+  `freshness-verdict-read-piecemeal` enforces it. Assumption: the owner's
+  'no known defects' instruction; the owner can reverse this with one message.
+
 - **What does an unreadable config mean here?** `compute_current_project_fingerprint`
   deliberately falls back to defaults on a malformed config so a freshness CHECK
   never crashes on an already-broken config. Whatever is hashed must keep that
   property, and must not make "broken config" and "no config" hash alike if the
   daemon would treat them differently.
 
+  **Decided (unattended, 2026-09-24)**: a config that fails to load hashes to
+  a distinct parse-failed sentinel (`config-parse-failed`), never to the
+  defaults' digest. The daemon runs on defaults with no config but refuses a
+  broken one. Assumption: the owner's 'no known defects' instruction; the
+  owner can reverse this with one message.
+
 ## Tasks
 
 ### Phase 1: Decide and build
 
-- [ ] ⬜ **Task 1.1**: Settle the three open questions above with the owner. The
+- [x] ✅ **Task 1.1**: Settle the three open questions above with the owner. The
   second is load-bearing: it decides whether existing consumers need changing
-  or inherit the fix for free.
+  or inherit the fix for free. Settled by the three rulings above.
 
-- [ ] ⬜ **Task 1.2**: Read Plan 00371's non-goals and Plan 00395's own
+- [x] ✅ **Task 1.2**: Read Plan 00371's non-goals and Plan 00395's own
   exclusion note before designing. Both deferred exactly this work, and each
-  recorded a reason that deserves an answer rather than a rediscovery.
+  recorded a reason that deserves an answer rather than a rediscovery. 00371
+  deferred to `daemon_restart_verifier`, which advises at commit time and so
+  never reaches a harness grading a live dispatch before a commit; 00395
+  deferred to 00389, which reconciles only after a `git pull`.
 
-- [ ] ⬜ **Task 1.3**: Failing test first, and the test must not be the Detector
+- [x] ✅ **Task 1.3**: Failing test first, and the test must not be the Detector
   (Defence Before Fix clause 3.2): a daemon whose config changed on disk without
   a restart reports STALE, and one whose config is untouched still reports FRESH
   across repeated runs. The second half guards against an unstable
-  serialisation passing as a fix.
+  serialisation passing as a fix. The detector is the semgrep rule
+  `freshness-verdict-read-piecemeal`; the behaviour tests are separate.
 
-- [ ] ⬜ **Task 1.4**: Implement, and prove the determinism property explicitly
+- [x] ✅ **Task 1.4**: Implement, and prove the determinism property explicitly
   — the same config resolved twice in separate processes hashes identically.
+  Proven across hash seeds and working directories.
 
-- [ ] ⬜ **Task 1.5**: Sweep the consumers: the acceptance harness, `smoke_test`,
+- [x] ✅ **Task 1.5**: Sweep the consumers: the acceptance harness, `smoke_test`,
   `bin/hooks-daemon check-source-fresh`, and the `_system`/`health` socket
   payload. A consumer left reading only the code fingerprint is the failure
   mode Task 1.1's second question is about, so this sweep is where that decision
-  gets enforced rather than assumed.
+  gets enforced rather than assumed. Three consumer instances fixed;
+  `smoke_test` inherits the verdict through `check-source-fresh`.
 
 ## Success Criteria
 
-- [ ] ⬜ Editing `.claude/hooks-daemon.yaml` without restarting makes the
+- [x] ✅ Editing `.claude/hooks-daemon.yaml` without restarting makes the
   freshness check report stale, demonstrated end to end against a live daemon
   rather than only in unit tests.
 
-- [ ] ⬜ Re-running the check with nothing changed reports fresh every time — no
+- [x] ✅ Re-running the check with nothing changed reports fresh every time — no
   flapping from an unstable serialisation.
 
-- [ ] ⬜ The reader of a stale verdict can tell whether code or config moved.
+- [x] ✅ The reader of a stale verdict can tell whether code or config moved.
 
-- [ ] ⬜ A malformed config still produces a verdict rather than a crash.
+- [x] ✅ A malformed config still produces a verdict rather than a crash.
 
 - [ ] ⬜ Full QA passes, the daemon is restarted, and CI is green.
 

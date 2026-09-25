@@ -58,8 +58,8 @@ from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.daemon.cli import send_daemon_request
 from claude_code_hooks_daemon.daemon.paths import socket_path_diagnosis
 from claude_code_hooks_daemon.daemon.source_fingerprint import (
-    compute_current_project_fingerprint,
-    describe_fingerprint_mismatch,
+    compute_current_project_fingerprints,
+    describe_daemon_staleness,
 )
 from tests.acceptance.blocking_gate_guard import pytest_runtest_makereport
 
@@ -153,10 +153,11 @@ def _no_socket_reason() -> str:
 
 
 def assert_daemon_source_fresh(socket_path: Path) -> None:
-    """Fail loudly, by name, if the daemon at ``socket_path`` looks stale (Plan 00371).
+    """Fail loudly, by name, if the daemon at ``socket_path`` looks stale (Plans 00371, 00415).
 
-    A daemon never hot-reloads: every handler module is imported once, at
-    startup. Plan 00371's field incident was a live-dispatch acceptance
+    A daemon never hot-reloads: every handler module is imported, and the
+    config resolved, once at startup -- so both halves are judged together
+    by ``describe_daemon_staleness``. Plan 00371's field incident was a live-dispatch acceptance
     probe failing for a reason nothing named, because the daemon answering
     it still held pre-merge code and nothing compared what it had loaded
     against the working tree. This is the single place that comparison
@@ -167,14 +168,13 @@ def assert_daemon_source_fresh(socket_path: Path) -> None:
     response = send_daemon_request(
         socket_path, {"event": "_system", "hook_input": {"action": "health"}}
     )
-    running_fingerprint = None
+    health = None
     if response is not None and "result" in response:
-        running_fingerprint = response["result"].get("source_fingerprint")
+        health = response["result"]
 
-    current_fingerprint = compute_current_project_fingerprint(REPO_ROOT)
-    mismatch = describe_fingerprint_mismatch(running_fingerprint, current_fingerprint)
-    if mismatch is not None:
-        pytest.fail(mismatch)
+    staleness = describe_daemon_staleness(health, compute_current_project_fingerprints(REPO_ROOT))
+    if staleness is not None:
+        pytest.fail(staleness)
 
 
 @pytest.fixture(scope="module")

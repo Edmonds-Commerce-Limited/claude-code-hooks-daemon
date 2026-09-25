@@ -793,6 +793,16 @@ plugins:
 - No arbitrary code execution from config
 - Plugin paths restricted to project directory
 
+### Claude Code plugin hooks are outside the daemon's reach
+
+A hook shipped by an enabled Claude Code plugin runs beside the daemon's, and
+the daemon never sees it. A daemon deny still wins, but a plugin `PreToolUse`
+hook can replace the input of a call the daemon allowed. The limit and its
+evidence are in
+[ClaudeCodePlugins.md § Plugin hooks run in parallel with the daemon's](ClaudeCodePlugins.md#plugin-hooks-run-in-parallel-with-the-daemons).
+`plugin_hooks_advisor` names each such plugin at session start, and
+`hooks-daemon health` lists them.
+
 ---
 
 ## Testing Strategy

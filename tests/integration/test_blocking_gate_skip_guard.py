@@ -17,6 +17,7 @@ nothing". Most of what follows is aimed at that.
 
 from __future__ import annotations
 
+import os
 import subprocess  # nosec B404 - trusted interpreter, list form, for a nested pytest run
 import sys
 import textwrap
@@ -126,7 +127,9 @@ class TestASkipInADeclaredGateBecomesAFailure:
     """
 
     @staticmethod
-    def _run_nested_pytest(tmp_path: Path) -> subprocess.CompletedProcess[str]:
+    def _run_nested_pytest(
+        tmp_path: Path, env_extra: dict[str, str] | None = None
+    ) -> subprocess.CompletedProcess[str]:
         declared_name = declared_blocking_gate_files()[0]
 
         (tmp_path / "conftest.py").write_text(
@@ -154,6 +157,17 @@ class TestASkipInADeclaredGateBecomesAFailure:
         (tmp_path / declared_name).write_text(skipping_test, encoding="utf-8")
         (tmp_path / "test_not_declared.py").write_text(skipping_test, encoding="utf-8")
 
+        # Build the child's environment explicitly rather than inheriting
+        # ambient os.environ verbatim: this repo's own `run_tests.sh` exports
+        # HOOKS_DAEMON_RELEASE_GATE=1 (Plan 00466 N39 widened), so an outer
+        # invocation via that script would otherwise leak the signal into
+        # the "no signal set" case below and silently pass it for the wrong
+        # reason. Deleting it first, then layering env_extra on top, makes
+        # both cases deterministic regardless of how THIS test was invoked.
+        env = os.environ.copy()
+        env.pop("HOOKS_DAEMON_RELEASE_GATE", None)
+        env.update(env_extra or {})
+
         return subprocess.run(  # nosec B603 - trusted interpreter, list form
             [
                 sys.executable,
@@ -166,6 +180,7 @@ class TestASkipInADeclaredGateBecomesAFailure:
                 str(tmp_path),
             ],
             cwd=tmp_path,
+            env=env,
             check=False,
             capture_output=True,
             text=True,
@@ -174,17 +189,36 @@ class TestASkipInADeclaredGateBecomesAFailure:
     def test_the_declared_gate_fails_and_the_undeclared_one_still_skips(
         self, tmp_path: Path
     ) -> None:
-        result = self._run_nested_pytest(tmp_path)
+        """With the release-gate signal set (as RELEASING.md Step 12.0 and CI
+        both set it), a skip of the declared file still escalates to a
+        failure — the pre-existing contract, now reached deliberately rather
+        than unconditionally (Plan 00466 N39 widened)."""
+        result = self._run_nested_pytest(tmp_path, env_extra={"HOOKS_DAEMON_RELEASE_GATE": "1"})
 
         assert result.returncode != 0, (
-            "a skip of a declared-blocking gate must fail the run\n"
-            f"{result.stdout}\n{result.stderr}"
+            "a skip of a declared-blocking gate must fail the run when the "
+            f"release-gate signal is set\n{result.stdout}\n{result.stderr}"
         )
         assert "1 failed" in result.stdout
         assert "1 skipped" in result.stdout
         assert declared_blocking_gate_files()[0] in result.stdout
         assert "Step 12.0" in result.stdout
         assert "Daemon not running" in result.stdout
+
+    def test_without_the_release_gate_signal_the_declared_gate_just_skips(
+        self, tmp_path: Path
+    ) -> None:
+        """An ordinary ad hoc run with no daemon and no signal gets the same
+        harmless skip every other daemon-dependent test in the suite gets —
+        it must not ERROR (Plan 00466 N39 widened)."""
+        result = self._run_nested_pytest(tmp_path)
+
+        assert result.returncode == 0, (
+            "a skip with no release-gate signal must not fail the run\n"
+            f"{result.stdout}\n{result.stderr}"
+        )
+        assert "2 skipped" in result.stdout
+        assert "failed" not in result.stdout
 
     def test_the_guard_reports_against_the_real_releasing_md(self) -> None:
         """The nested run reads the same declaration this repo ships."""

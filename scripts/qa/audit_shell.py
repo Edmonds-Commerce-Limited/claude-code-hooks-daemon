@@ -46,7 +46,7 @@ Usage:
 
 Exit codes:
     0 - clean
-    1 - violations found
+    1 - violations found, or scripts were found but none examined (00466 N26)
 """
 
 from __future__ import annotations
@@ -57,6 +57,12 @@ import re
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
+
+from claude_code_hooks_daemon.utils.scan_scope import (
+    relative_parts,
+    vacuous_scan_failure,
+    walk_files,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 DEFAULT_SCAN_DIR = REPO_ROOT / "scripts"
@@ -90,6 +96,60 @@ _MARKER_WITHOUT_REASON = re.compile(r"#\s*shell-audit:\s*allow\b")
 _BOOTSTRAP_BEGIN_MARKER = "SELF-BOOTSTRAP BEGIN"
 _BOOTSTRAP_END_MARKER = "SELF-BOOTSTRAP END"
 _DOLLAR0_RELATIVE_PATTERN = re.compile(r'dirname\s+"?\$0"?|\$\{0%/\*\}')
+
+# Plan 00466 N30 DBF static complement: scripts that exist to survive a
+# hostile or stripped PATH (see scripts/lib/resolve_venv.sh's own
+# docstring) calling a command that IS looked up on PATH, with no
+# `command -v` guard anywhere in the file. This is a proxy, not a full
+# data-flow analysis -- the dynamic empty-PATH integration tests
+# (tests/integration/test_venv_bootstrap_hostile_path_epoch.py and
+# siblings) are the primary guard; this rule exists so a REGRESSION (the
+# guard silently removed, or a new unguarded call added) fails a fast,
+# file-scoped check too, per the brief's "a static rule is fine as a
+# complement, but must not be the only guard".
+#
+# Deliberately a SHORT, DECLARED list, not "every .sh file": the class is
+# specific to bootstrap/install scripts, and scanning `date`/`pgrep` (both
+# ordinary words) across the whole repo would be far too noisy to enforce.
+_HOSTILE_PATH_EXACT_FILES = frozenset(
+    {
+        "scripts/lib/resolve_venv.sh",
+        "scripts/lib/portable_time.sh",
+        "scripts/venv_bootstrap.sh",
+    }
+)
+_HOSTILE_PATH_INSTALL_DIR_PATTERN = re.compile(r"(^|/)scripts/install/[^/]+\.sh$")
+
+# Commands looked up on PATH that this class has caught so far (Plan 00466
+# N1 `sleep`, N30 `date`/`pgrep`). `sleep` is deliberately NOT included:
+# resolve_venv.sh's own `_rv_wait_secs` already IS the guarded wrapper for
+# it, so every `sleep` call site left in these files calls that wrapper,
+# not `sleep` directly -- flagging the word `sleep` itself would just flag
+# the wrapper's own definition.
+_HOSTILE_PATH_RISKY_COMMANDS = ("date", "pgrep")
+# A real invocation, not an arbitrary `\b`-bounded substring: `\b` alone
+# treats a hyphen as a word boundary too, so a bare `\bdate\b` misfires on
+# ordinary prose like "venv up-to-date at $venv_path" (a real false
+# positive this caught in scripts/install/venv.sh). Require the command
+# name to START right after something that can actually precede a command:
+# start of line, whitespace, `;`, `&`, `|`, `(` (covers `$(cmd`), or a
+# backtick -- a hyphen right before it (as in "up-to-date") is excluded.
+_RISKY_COMMAND_PATTERN = re.compile(
+    r"(?:^|[\s;&|(`])(" + "|".join(_HOSTILE_PATH_RISKY_COMMANDS) + r")\b"
+)
+_COMMAND_V_GUARD_PATTERN = re.compile(
+    r"command\s+-v\s+(" + "|".join(_HOSTILE_PATH_RISKY_COMMANDS) + r")\b"
+)
+
+
+def _is_hostile_path_file(filepath: str) -> bool:
+    """True if ``filepath`` is on the declared hostile-PATH file list."""
+    normalized = filepath.replace("\\", "/")
+    if normalized in _HOSTILE_PATH_EXACT_FILES or any(
+        normalized.endswith("/" + f) for f in _HOSTILE_PATH_EXACT_FILES
+    ):
+        return True
+    return bool(_HOSTILE_PATH_INSTALL_DIR_PATTERN.search(normalized))
 
 
 @dataclass
@@ -170,6 +230,51 @@ def audit_text(source: str, filepath: str) -> list[Violation]:
         )
 
     violations.extend(_audit_bootstrap_reexec_dollar0(lines, filepath))
+    violations.extend(_audit_hostile_path_unguarded_command(lines, filepath))
+    return violations
+
+
+def _audit_hostile_path_unguarded_command(lines: list[str], filepath: str) -> list[Violation]:
+    """Plan 00466 N30: an unguarded `date`/`pgrep` call in a declared
+    hostile-PATH file. "Guarded" is file-wide (a `command -v date` ANYWHERE
+    in the file silences every `date` line in it) -- a proxy for "this file
+    still has the fallback", not a per-call-site data-flow check; the
+    dynamic empty-PATH tests are what actually prove each call site's
+    behaviour.
+    """
+    if not _is_hostile_path_file(filepath):
+        return []
+
+    guarded_commands = {
+        m.group(1) for line in lines for m in _COMMAND_V_GUARD_PATTERN.finditer(line)
+    }
+
+    violations: list[Violation] = []
+    for idx, raw_line in enumerate(lines):
+        code = _strip_inline_comment(raw_line)
+        for match in _RISKY_COMMAND_PATTERN.finditer(code):
+            command = match.group(1)
+            if command in guarded_commands:
+                continue
+            if _has_marker_with_reason(raw_line):
+                continue
+            if idx > 0 and _has_marker_with_reason(lines[idx - 1]):
+                continue
+            violations.append(
+                Violation(
+                    file=filepath,
+                    line=idx + 1,
+                    rule="hostile-path-unguarded-command",
+                    message=(
+                        f"'{command}' is looked up on PATH, and this file exists to "
+                        "survive a hostile/stripped one (Plan 00466 N1/N30) -- guard it "
+                        f"with 'command -v {command}' and a fallback (see "
+                        "scripts/lib/portable_time.sh for the date/epoch-seconds case), "
+                        "or add '# shell-audit: allow -- <reason>' if this call "
+                        "genuinely cannot be reached with a hostile PATH"
+                    ),
+                )
+            )
     return violations
 
 
@@ -246,19 +351,28 @@ _EXCLUDE_DIR_PARTS = {
 }
 
 
-def _is_excluded(path: Path) -> bool:
-    return any(part in _EXCLUDE_DIR_PARTS for part in path.parts)
+def _is_excluded(path: Path, root: Path) -> bool:
+    """Is ``path`` in an excluded directory BELOW ``root`` (00466 N26)?"""
+    return any(part in _EXCLUDE_DIR_PARTS for part in relative_parts(path, root))
 
 
-def audit_directory(root: Path) -> list[Violation]:
+@dataclass
+class DirectoryAudit:
+    """One scan root's findings, and how many scripts it found and examined."""
+
+    violations: list[Violation]
+    examined: int
+    candidates: int
+
+
+def audit_directory(root: Path) -> DirectoryAudit:
     """Audit every .sh / .bash file under root (recursively)."""
-    violations: list[Violation] = []
-    for pattern in ("*.sh", "*.bash"):
-        for script in sorted(root.rglob(pattern)):
-            if _is_excluded(script):
-                continue
-            violations.extend(audit_file(script))
-    return violations
+    candidates = sorted(
+        script for pattern in ("*.sh", "*.bash") for script in walk_files(root, pattern)
+    )
+    kept = [script for script in candidates if not _is_excluded(script, root)]
+    violations = [violation for script in kept for violation in audit_file(script)]
+    return DirectoryAudit(violations, examined=len(kept), candidates=len(candidates))
 
 
 def _format_text_report(violations: list[Violation]) -> str:
@@ -270,12 +384,16 @@ def _format_text_report(violations: list[Violation]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _write_json(violations: list[Violation], output_path: Path) -> None:
+def _write_json(
+    violations: list[Violation], output_path: Path, *, examined: int, vacuous: str | None
+) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     data = {
         "summary": {
-            "passed": len(violations) == 0,
+            "passed": not violations and vacuous is None,
             "total_violations": len(violations),
+            "files_scanned": examined,
+            "vacuous_scan": vacuous,
         },
         "violations": [asdict(v) for v in violations],
     }
@@ -317,14 +435,21 @@ def main(argv: list[str] | None = None) -> int:
             print(f"shell-audit: scan dir does not exist: {scan_dir}", file=sys.stderr)
             return 1
 
-    violations = [v for scan_dir in scan_dirs for v in audit_directory(scan_dir)]
+    audits = [audit_directory(scan_dir) for scan_dir in scan_dirs]
+    violations = [v for audit in audits for v in audit.violations]
+    examined = sum(audit.examined for audit in audits)
+    vacuous = vacuous_scan_failure(
+        examined=examined, candidates=sum(audit.candidates for audit in audits), noun="scripts"
+    )
 
     if args.json:
-        _write_json(violations, args.output)
+        _write_json(violations, args.output, examined=examined, vacuous=vacuous)
     else:
         sys.stdout.write(_format_text_report(violations))
+    if vacuous is not None:
+        print(f"shell-audit: FAILED: {vacuous}", file=sys.stderr)
 
-    return 1 if violations else 0
+    return 1 if violations or vacuous is not None else 0
 
 
 if __name__ == "__main__":

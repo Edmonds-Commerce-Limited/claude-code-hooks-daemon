@@ -133,12 +133,12 @@ class LockFileEditBlockerHandler(PreToolUseHandlerBase):
             True if Write/Edit tool is targeting a lock file
         """
         # Only process Write and Edit tools
-        tool_name = hook_input.get("tool_name")
+        tool_name = hook_input.get(HookInputField.TOOL_NAME)
         if tool_name not in [ToolName.WRITE, ToolName.EDIT]:
             return False
 
         # Extract file path
-        tool_input = hook_input.get("tool_input", {})
+        tool_input = hook_input.get(HookInputField.TOOL_INPUT, {})
         file_path = tool_input.get("file_path")
         if not file_path:
             return False
@@ -169,7 +169,7 @@ class LockFileEditBlockerHandler(PreToolUseHandlerBase):
         if not self.matches(hook_input):
             return GatingResult(decision=Decision.ALLOW)
 
-        tool_input = hook_input.get("tool_input", {})
+        tool_input = hook_input.get(HookInputField.TOOL_INPUT, {})
         file_path = tool_input.get("file_path", "")
 
         # Extract lock file name from path

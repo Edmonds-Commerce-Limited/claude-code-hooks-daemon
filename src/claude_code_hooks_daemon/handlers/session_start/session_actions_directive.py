@@ -40,7 +40,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
@@ -56,8 +56,6 @@ from claude_code_hooks_daemon.utils.session_actions_signal import (
 )
 
 logger = logging.getLogger(__name__)
-
-_SESSION_ID_KEY = "session_id"
 
 
 class SessionActionsDirectiveHandler(SessionStartHandlerBase):
@@ -133,7 +131,7 @@ class SessionActionsDirectiveHandler(SessionStartHandlerBase):
         """
         silent = AdvisoryResult(decision=Decision.ALLOW, context=[])
 
-        session_id = str(hook_input.get(_SESSION_ID_KEY) or "").strip()
+        session_id = str(hook_input.get(HookInputField.SESSION_ID) or "").strip()
         if not session_id:
             # The supervisor matches a signal to its OWN sessions by the file
             # stem. A signal naming no session could be delivered into any

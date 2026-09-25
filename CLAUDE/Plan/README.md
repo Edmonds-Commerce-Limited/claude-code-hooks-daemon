@@ -4,6 +4,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00472: subagent model tier selection](00472-subagent-model-tier-selection/PLAN.md) - In Progress (owner request, not urgent: a top-tier main thread often gives subagents the top tier too, where Sonnet or Opus would do; record each dispatch's model and advise a cheaper tier when it fits, the model-choice twin of 00471 and a neighbour of 00470's orchestrator-model choice)
+
+- [00471: subagent token budget protection](00471-subagent-token-budget-protection/PLAN.md) - In Progress (owner request after a usage-limit burn: subagents compacted only at about 570k tokens, finished agents were resumed with thousands of prior messages, and about nine Opus agents ran at once; the daemon sees every Agent, SendMessage and tool call plus the transcript's usage, so it can measure and bound the spend)
+
+- [00470: persistent session optimisation](00470-persistent-session-optimisation/PLAN.md) - Not Started (owner request: the always-on issue-monitoring server session is the dogfood; cron refresh before expiry, usage-limit and restart recovery from a durable queue, and a measured orchestrator-model choice)
+
 - [00468: claude code plugins are supported properly](00468-claude-code-plugins-are-supported-properly/PLAN.md) - In Progress (from the 00467 plugin audit: 8 defects, 3 release-blocking, and 16 gaps, most resting on one missing resolver for the Claude config dir and its enabled plugins)
 
 - [00467: recommend the defence before fix plugin to client projects](00467-recommend-the-defence-before-fix-plugin-to-client-projects/PLAN.md) - Blocked (owner request: dogfood the DBF plugin, then recommend it to clients. Phase 1 is done, with shortfalls filed upstream as #4-#6 and recommendation no-go for now. Waiting on the owner's go/no-go, and on one logged-in auto-trigger probe)
@@ -48,11 +54,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00396: detect a plan written without reading its domain docs](00396-detect-a-plan-written-without-reading-its-domain-docs/PLAN.md) - Not Started (a plan was filed about deployment by a session that had read none of the deployment docs; the signature is mechanical — a PLAN.md filled about domain X with zero reads of X's owning docs — and `write_clobber_guard` already tracks per-session reads. Advisory, inert until a project declares a topic map)
 
-- [00394: failsafe cron coverage starts at first plan write](00394-failsafe-cron-coverage-starts-at-first-plan-write/PLAN.md) - Not Started (the cron that resumes a stalled session is established by a PostToolUse handler gated on a plan write, so a session has no recovery net until it touches a plan file; Plan 00384 left it undeclared believing `recovery_cron_advisor` already asserted at SessionStart, and it does not. Blocked on an owner ruling between three options)
-
 - [00391: plan close requires proven definition of done](00391-plan-close-requires-proven-definition-of-done/PLAN.md) - Not Started (a project declares its DoD in config; the close is denied until each item is CHECKED or attested with evidence in the plan's JOURNAL/, and a three-way policy — human_gate, encourage, neutral — subsumes Plan 00367's boolean. `encourage` is the direction that would have caught 00386/00389 sitting finished-but-open)
-
-- [00388: failsafe marker wiped by other crons in multi cron sessions](00388-failsafe-marker-wiped-by-other-crons-in-multi-cron-sessions/PLAN.md) - Not Started (`[awaiting-human]` never suppresses a tick in a session with more than one cron — any non-failsafe tick reads as "the owner is back" and clears the marker and cadence; reproduced against the real handler, blocked on an owner ruling between three approaches)
 
 - [00344: stop hook deny rate classification](00344-stop-hook-deny-rate-classification/PLAN.md) - Not Started (Plan 00337 Task 5.0 shipped the instrumentation but the classification needs telemetry across many sessions — 49 instrumented rows exist and 48 are acceptance probes, because a real Stop event fires roughly once per session)
 
@@ -284,15 +286,15 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 469 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 405 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 407 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 41 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 42 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
 - **Cancelled/Abandoned**: 13 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00108 superseded by 00117, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213, 00135 superseded by the supervisor workstream)
 
-- **Folder-to-number reconciliation**: 41 + 405 + 13 = **459 folders**, spanning
+- **Folder-to-number reconciliation**: 39 + 407 + 13 = **459 folders**, spanning
   **456 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names

@@ -190,17 +190,10 @@ def resolve_configured_patterns() -> tuple[str, ...]:
         return _CONFIGURED_PATTERNS
 
     try:
-        from claude_code_hooks_daemon.config.models import Config, HandlerConfig
+        from claude_code_hooks_daemon.config.models import Config, handler_options
 
         config = Config.load_or_default(ProjectContext.config_path())
-        handler_cfg = config.handlers.pre_tool_use.get("secret_file_guard")
-        # ``Config``'s own ``coerce_handler_configs`` validator turns every
-        # entry into a ``HandlerConfig`` instance (not a plain dict) once the
-        # config has been loaded through the model -- ``.options`` is the
-        # correct access, and a stray ``isinstance(..., dict)`` guard here
-        # silently found nothing and fell through to the shipped defaults on
-        # every real config, never actually reading a project's settings.
-        options = handler_cfg.options if isinstance(handler_cfg, HandlerConfig) else {}
+        options = handler_options(config.handlers.pre_tool_use.get("secret_file_guard"))
         mode = options.get("mode")
         project_patterns = options.get("protected_paths")
         _CONFIGURED_PATTERNS = resolve_protected_patterns(mode, project_patterns)
@@ -376,20 +369,21 @@ def _without_import_module_paths(command: str) -> str:
 def _normalised_token_forms(token: str) -> list[str]:
     """Spellings of a token to match against protected globs.
 
-    Never yields ``""`` (N5, Plan 00466): a token EQUAL to a home/pwd prefix
-    (``"~/"`` as a bare quoted Python string literal, observed live) strips
-    to an empty residual, and an empty form reaching
-    ``path_matches_globs`` with a real ``project_root`` used to raise --
-    ``os.path.relpath`` rejects an empty PATH argument outright. An empty
-    spelling can never usefully match a protected filename anyway (a bare
-    ``~/`` or ``$PWD/`` names a directory, not a specific file), so it is
-    dropped rather than "normalised" to an empty string -- the same guard
-    shape the ``./``-stripping branch immediately below already uses.
+    A token that IS a home prefix and nothing else (``~/`` with no name
+    after it) strips to the empty string. That candidate is dropped rather
+    than appended (Ledger 00466 N44): every consumer of this list feeds each
+    form to :func:`~utils.path_exclusion.path_matches_globs`, which computes
+    ``os.path.relpath`` against a project root -- and ``os.path.relpath("",
+    root)`` raises ``ValueError: no path specified``, a live daemon crash on
+    a Bash command as ordinary as ``cp ~/ /tmp/x``. An empty string also
+    never usefully matches a protected glob, so dropping it costs nothing.
     """
     forms = [token]
     for prefix in _HOME_PREFIXES:
-        if token.startswith(prefix) and len(token) > len(prefix):
-            forms.append(token[len(prefix) :])
+        if token.startswith(prefix):
+            stripped_home = token[len(prefix) :]
+            if stripped_home:
+                forms.append(stripped_home)
     stripped = token.lstrip("./")
     if stripped and stripped != token and token.startswith("./"):
         forms.append(stripped)

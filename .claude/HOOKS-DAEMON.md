@@ -1,10 +1,10 @@
 # Hooks Daemon - Active Configuration
 
-> Generated on 2026-09-24 (v3.66.0) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
+> Generated on 2026-09-25 (v3.66.0) by `generate-docs`. Regenerate: `bin/hooks-daemon generate-docs`
 
 ## Active Handlers
 
-### PreToolUse (64 handlers)
+### PreToolUse (66 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -38,6 +38,7 @@
 | 21 | pip_break_system | TERMINAL | Block pip install --break-system-packages commands |
 | 22 | sudo_pip | TERMINAL | Block sudo pip install commands |
 | 23 | ask_user_question_blocker | TERMINAL | Allow AskUserQuestion only when every question is prefix-justified |
+| 30 | plan_status_snapshot | ADVISORY | Record a PLAN.md's pre-write status for `goal_injection` to consume |
 | 30 | qa_suppression | BLOCKING | Block QA suppression comments across all supported languages |
 | 31 | comment_changelog | BLOCKING | Block Write/Edit content that writes historical narrative into a comment |
 | 31 | plan_journal_guard | BLOCKING | Deny a journal entry written by hand rather than through `mkplan.bash --journal` |
@@ -54,6 +55,7 @@
 | 40 | gh_issue_comments | BLOCKING | Ensure gh issue view commands always include --comments flag |
 | 40 | gh_pr_comments | BLOCKING | Ensure gh pr view commands always include --comments flag |
 | 42 | global_npm_advisor | NON-TERMINAL | Advise on global npm/yarn package installations |
+| 42 | installed_plugin_edit_advisor | ADVISORY | Say so when a write lands in an installed Claude Code plugin's files |
 | 43 | plan_close_approval | BLOCKING | Deny an agent's terminal status flip of a PLAN.md while the key is on |
 | 43 | staged_lint_gate | NON-TERMINAL | Warn-first cheap-syntax-check backstop over staged files on git commit |
 | 44 | plan_qa_commit_gate | NON-TERMINAL | Warn-first cross-file plan QA gate on git commit |
@@ -79,18 +81,18 @@
 |----------|---------|----------|-------------|
 | 20 | validate_eslint_on_write | ADVISORY | Run ESLint validation on TypeScript/TSX files after write |
 | 25 | lint_on_edit | BLOCKING | Run language-aware lint validation on files after Write/Edit |
-| 26 | markdown_table_formatter | NON-TERMINAL | Auto-format markdown tables after Write/Edit of .md files |
-| 27 | git_hooks_executable_fixer | NON-TERMINAL | Detect git's "not set as executable" hint and fix the hooks automatically |
-| 28 | background_process_tracker | ADVISORY | Track backgrounded Bash processes and advise on watchdog/harvest (never kills) |
-| 29 | command_hints | ADVISORY | Inject a rate-limited advisory HINT when a configured command is detected |
-| 30 | recovery_cron_advisor | ADVISORY | Advisory handler that manages failsafe recovery cron across plan lifecycle |
-| 31 | goal_injection | ADVISORY | Write a goal-intent signal when a plan flips to In Progress |
+| 26 | git_hooks_executable_fixer | NON-TERMINAL | Detect git's "not set as executable" hint and fix the hooks automatically |
+| 27 | background_process_tracker | ADVISORY | Track backgrounded Bash processes and advise on watchdog/harvest (never kills) |
+| 28 | command_hints | ADVISORY | Inject a rate-limited advisory HINT when a configured command is detected |
+| 29 | recovery_cron_advisor | ADVISORY | Advisory handler that manages failsafe recovery cron across plan lifecycle |
+| 30 | goal_injection | ADVISORY | Write a goal-intent signal when a plan TRANSITIONS to In Progress |
+| 31 | markdown_table_formatter | NON-TERMINAL | Auto-format markdown tables after Write/Edit of .md files |
 | 32 | budget_exhaustion_detector | ADVISORY | Advisory PostToolUse handler that flags budget/quota-exhaustion messaging |
 | 33 | model_downgrade_recorder | ADVISORY | Publish Claude Code's own automatic model-downgrade record, silently |
 | 34 | merge_qa_report | ADVISORY | Post-hoc plan/docs QA report over what a merge/pull/rebase just introduced |
 | 35 | daemon_sync_after_merge | ADVISORY | Advise a restart when a merge/pull/rebase changed daemon config or handlers |
 
-### SessionStart (29 handlers)
+### SessionStart (30 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -98,6 +100,7 @@
 | 49 | guard_config_drift | ADVISORY | Name any uncommitted change that weakens this project's guards |
 | 50 | project_handler_load_checker | ADVISORY | Loudly alert at session start when project handlers failed to load |
 | 51 | hook_registration_checker | ADVISORY | Validate hook registrations in Claude Code settings on session start |
+| 51 | plugin_hooks_advisor | ADVISORY | Name the enabled plugins whose hooks run beside the daemon's |
 | 52 | optimal_config_checker | ADVISORY | Check Claude Code environment for optimal configuration on session start |
 | 53 | git_filemode_checker | ADVISORY | Warn when git core.fileMode=false is detected |
 | 54 | gitignore_safety_checker | ADVISORY | Warn when required .claude/ paths are absent from .gitignore |
