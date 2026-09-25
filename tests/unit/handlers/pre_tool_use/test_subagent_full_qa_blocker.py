@@ -1618,10 +1618,20 @@ class TestReadingAScriptDoesNotMisreadItsProse:
         )
         assert find_full_qa_invocation("python lint.py", _patterns(), cwd=tmp_path) is None
 
-    def test_a_large_script_whose_only_mention_of_pytest_is_a_comment(self, tmp_path: Path) -> None:
+    def test_a_script_too_large_to_parse_is_scanned_raw_so_a_comment_counts(
+        self, tmp_path: Path
+    ) -> None:
+        """Review 8 M2: past the parse cap nothing is blanked, a comment included.
+
+        A scan cannot tell a comment from a line that runs, and review 7's
+        comment stripping was the same move as blanking Python's strings,
+        which hid real runners. So the conservative raw scan denies.
+        """
         body = "# pytest is run by CI, not here\necho build\n" + ("# padding\n" * 3_400)
         (tmp_path / "build.sh").write_text(body, encoding="utf-8")
-        assert find_full_qa_invocation("bash build.sh", _patterns(), cwd=tmp_path) is None
+        match = find_full_qa_invocation("bash build.sh", _patterns(), cwd=tmp_path)
+        assert match is not None
+        assert match.fail_closed == _blocker_module._SCANNED_FILE_REASON
 
     def test_a_docstring_that_genuinely_runs_the_suite_is_still_found(self, tmp_path: Path) -> None:
         (tmp_path / "run.py").write_text(
@@ -1639,36 +1649,141 @@ class TestReadingAScriptDoesNotMisreadItsProse:
         assert match is not None
 
 
+class TestAFileTooLargeToParseIsNeverBlanked:
+    """Review 8 M2: the scan past the parse cap blanked every Python string.
+
+    A Python runner names its program in a string (``["pytest", "tests"]``),
+    so a 43 KB runner, or any runner after a file that used the budget, was
+    allowed. A Python file that fits the parse meter is now parsed; past it,
+    any file is scanned raw, and a declared program named anywhere denies.
+    """
+
+    _PADDING = "# padding line for a large runner\n" * 1_300
+
+    def _runner(self, tmp_path: Path, name: str, call: str, padding: str) -> str:
+        (tmp_path / name).write_text(
+            f"import subprocess\nimport sys\n{padding}{call}\n", encoding="utf-8"
+        )
+        return f"python3 {name}"
+
+    def test_a_43_kb_python_runner_is_parsed_and_denied(self, tmp_path: Path) -> None:
+        call = 'subprocess.run([sys.executable, "-m", "pytest", "tests"])'
+        command = self._runner(tmp_path, "big_runner.py", call, self._PADDING)
+        assert (tmp_path / "big_runner.py").stat().st_size > 43_000
+        assert find_full_qa_invocation(command, _patterns(), cwd=tmp_path) is not None
+
+    @pytest.mark.parametrize(
+        "call",
+        [
+            'subprocess.run([sys.executable, "-m", "pytest", "tests"])',
+            'subprocess.run(["./scripts/qa/llm_qa.py", "all"])',
+        ],
+    )
+    def test_a_python_runner_past_the_whole_budget_is_scanned_raw(
+        self, tmp_path: Path, call: str
+    ) -> None:
+        command = self._runner(tmp_path, "huge_runner.py", call, self._PADDING * 3)
+        assert (tmp_path / "huge_runner.py").stat().st_size > _blocker_module._MAX_PARSED_BYTES
+        match = find_full_qa_invocation(command, _patterns(), cwd=tmp_path)
+        assert match is not None
+        assert match.fail_closed == _blocker_module._SCANNED_FILE_REASON
+
+    def test_a_quoted_name_in_a_large_shell_script_is_not_blanked(self, tmp_path: Path) -> None:
+        body = 'RUN="pytest tests"\n' + ("# padding\n" * 3_400) + "$RUN\n"
+        (tmp_path / "big.sh").write_text(body, encoding="utf-8")
+        match = find_full_qa_invocation("bash big.sh", _patterns(), cwd=tmp_path)
+        assert match is not None
+
+
+class _ReadLedger:
+    """The bytes one judgement reads from files, and hands to the comment stripper."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self.reads: list[int] = []
+        self.stripped: list[int] = []
+        real_read = _blocker_module._read_new
+        real_strip = _blocker_module._without_comments
+
+        def _read(target: str, event: Any) -> Any:
+            content = real_read(target, event)
+            self.reads.append(len(content.text.encode("utf-8")))
+            return content
+
+        def _strip(text: str) -> str:
+            self.stripped.append(len(text))
+            return real_strip(text)
+
+        monkeypatch.setattr(_blocker_module, "_read_new", _read)
+        monkeypatch.setattr(_blocker_module, "_without_comments", _strip)
+
+
 class TestTheCodeFileReaderIsBounded:
     """Review 6 M1: a 67-byte command made the handler read and parse for 312 s.
 
-    One budget per event covers every file read, each path is read once, and
-    file content past the parse cap is only scanned for a program's name.
+    One read budget per event covers every file read, and each path is read
+    once. A file too large to parse is scanned raw; code past the parse
+    meter denies the command. Work is counted, never timed (review 8 M4):
+    the timed version of the fan-out test flaked under load, and the
+    regression it half-caught was a per-file comment strip on the scan path.
     """
-
-    _BUDGET_SECONDS = 1.0
 
     @staticmethod
     def _plain(tmp_path: Path) -> Path:
         (tmp_path / "plain64k.sh").write_text("#" * 65_535 + "\n", encoding="utf-8")
         return tmp_path
 
-    def test_eighty_feeds_of_one_large_file_take_under_a_second(self, tmp_path: Path) -> None:
+    def test_eighty_feeds_of_one_large_file_read_it_once(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         root = self._plain(tmp_path)
         command = "cat plain64k.sh | bash; " * 80
-        began = time.perf_counter()
+        reads = _ReadLedger(monkeypatch)
+        ledger = _ParseLedger(monkeypatch)
         assert find_full_qa_invocation(command, _patterns(), cwd=root) is None
-        assert time.perf_counter() - began < self._BUDGET_SECONDS
+        ledger.assert_metered()
+        assert reads.reads == [65_536]
 
-    def test_a_file_that_feeds_itself_and_others_takes_under_a_second(self, tmp_path: Path) -> None:
+    def test_a_file_that_feeds_itself_and_others_is_bounded_in_work(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         root = self._plain(tmp_path)
         lines = [f"cat part{n}.sh | bash" for n in range(1_300)]
         (root / "fanout.sh").write_text("\n".join(lines) + "\n", encoding="utf-8")
         for n in range(1_300):
             (root / f"part{n}.sh").write_text("cat plain64k.sh | bash\n" * 40, encoding="utf-8")
-        began = time.perf_counter()
-        find_full_qa_invocation("cat fanout.sh | bash", _patterns(), cwd=root)
-        assert time.perf_counter() - began < self._BUDGET_SECONDS
+        reads = _ReadLedger(monkeypatch)
+        ledger = _ParseLedger(monkeypatch)
+        match = find_full_qa_invocation("cat fanout.sh | bash", _patterns(), cwd=root)
+        ledger.assert_metered()
+        # More code than one judgement parses: denied, not judged by halves.
+        assert match is not None
+        assert match.pattern_id == _blocker_module._OVER_BUDGET_ID
+        assert sum(reads.reads) <= _blocker_module._MAX_READ_BYTES
+        # Only text that was charged to the parse meter is ever stripped.
+        assert sum(reads.stripped) <= 2 * ledger.accepted
+
+    def test_a_huge_file_is_scanned_without_being_stripped(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Review 8 n1: stripping 15 MiB of comments took 6 s; the scan reads it raw."""
+        (tmp_path / "huge.sh").write_text("# quiet\n" * (15 * 1024 * 128), encoding="utf-8")
+        reads = _ReadLedger(monkeypatch)
+        assert find_full_qa_invocation("bash huge.sh", _patterns(), cwd=tmp_path) is None
+        assert reads.reads == [15 * 1024 * 1024]
+        assert sum(reads.stripped) < 1024
+
+    def test_reading_stops_at_the_read_budget(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        for n in range(3):
+            (tmp_path / f"huge{n}.sh").write_text("# quiet\n" * (7 * 1024 * 128), encoding="utf-8")
+        reads = _ReadLedger(monkeypatch)
+        match = find_full_qa_invocation(
+            "bash huge0.sh; bash huge1.sh; bash huge2.sh", _patterns(), cwd=tmp_path
+        )
+        assert sum(reads.reads) <= _blocker_module._MAX_READ_BYTES
+        assert match is not None
+        assert match.pattern_id == _blocker_module._UNREAD_CODE_ID
 
     def test_past_the_budget_a_named_program_fails_closed(self, tmp_path: Path) -> None:
         root = self._plain(tmp_path)
@@ -2199,6 +2314,29 @@ class TestConfigParsing:
         patterns, problems = parse_full_qa_patterns([entry, dict(entry)])
         assert len(patterns) == 1
         assert problems
+
+    @pytest.mark.parametrize(
+        "command",
+        ["capped.py", "capped.py tests", 'capped.py "$BASE"', "capped.py $(git rev-parse HEAD)"],
+    )
+    def test_a_program_no_word_makes_full_is_never_full(self, command: str) -> None:
+        """``full_words: []`` declares a QA runner that caps its own reach.
+
+        Declared, it is judged by its pattern rather than by reading its code;
+        and with no full word, no full path and no bare run, even an operand
+        built at run time cannot make it full.
+        """
+        patterns, problems = parse_full_qa_patterns(
+            [{"id": "capped", "command": "capped.py", "full_words": []}]
+        )
+        assert problems == []
+        assert find_full_qa_invocation(command, patterns) is None
+
+    def test_the_repositorys_targeted_runner_is_declared_and_never_full(self) -> None:
+        """``run_changed_tests.py`` is ``llm_qa.py changed``'s test half: the same selection."""
+        command = "python3 scripts/qa/run_changed_tests.py --base main --allow-unmapped"
+        assert find_full_qa_invocation(command, _patterns(), cwd=_REPO_ROOT) is None
+        assert "run_changed_tests.py" in {pattern.command for pattern in _patterns()}
 
 
 # ── The handler ────────────────────────────────────────────────────────────

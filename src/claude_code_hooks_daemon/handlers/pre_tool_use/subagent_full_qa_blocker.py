@@ -62,14 +62,12 @@ NAME is built at run time from pieces (``$(printf 'py%s' test)``, or
 from __future__ import annotations
 
 import errno
-import io
 import logging
 import posixpath
 import re
 import shlex
 import stat
 import sys
-import tokenize
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -724,8 +722,9 @@ _POPD: Final[str] = "popd"
 
 #: Why a match was judged without being seen, as the deny states it.
 _UNPARSED_REASON: Final[str] = (
-    "this command could not be parsed (an unbalanced quote, or nesting deeper than is "
-    "followed), and it names a full-suite program, so it is judged as the full run it may be. "
+    "this command could not be parsed (an unbalanced quote, nesting deeper than is "
+    "followed, or code too long to parse in one piece), and it names a full-suite program, so "
+    "it is judged as the full run it may be. "
     "Quote it plainly, or split it into simpler commands."
 )
 _OPAQUE_REASON: Final[str] = (
@@ -773,8 +772,10 @@ _UNREAD_CODE_REASON: Final[str] = (
     "the Bash call itself."
 )
 _SCANNED_FILE_REASON: Final[str] = (
-    "a file of code here is larger than is parsed, and it names a full-suite program, so it "
-    "is judged as the full run it may be. Run the targeted command directly."
+    "a file of code here is larger than is parsed, and it names a full-suite program "
+    "somewhere in its text (a comment or a string counts: a scan cannot tell them from a "
+    "line that runs), so it is judged as the full run it may be. Run the targeted command "
+    "directly."
 )
 _OVER_BUDGET_REASON: Final[str] = (
     "this command, with the code it runs, is more than one judgement parses, and code that "
@@ -795,9 +796,9 @@ _MAX_COMMAND_LENGTH: Final[int] = 32 * 1024
 #: B1): the command's own, each nested ``bash -c``, each file's and each
 #: Python literal's, re-parses included. Past it the command is DENIED.
 _MAX_PARSED_BYTES: Final[int] = 96 * 1024
-#: One event scans at most this much file content in all; a file past it is
-#: unseen.
-_MAX_SCANNED_FILE_BYTES: Final[int] = 16 * 1024 * 1024
+#: One event reads at most this many bytes of files in all, counted as they
+#: are read (``/proc`` reports a size of 0); a file past it is unseen.
+_MAX_READ_BYTES: Final[int] = 16 * 1024 * 1024
 #: A file with a NUL byte this early is a binary, judged by its name alone.
 _BINARY_PROBE_BYTES: Final[int] = 1024
 _NUL: Final[str] = "\x00"
@@ -1242,53 +1243,6 @@ def _without_comments(text: str) -> str:
     return "".join(out)
 
 
-#: PEP 701 (Python 3.12+) splits an f-string into STRING-like parts; older
-#: Pythons (this project runs 3.11) tokenize a whole f-string as one STRING,
-#: already covered below. ``getattr`` rather than a direct attribute access
-#: (review 8 M4): pyright resolves ``tokenize`` against the project's own
-#: 3.11 stub, where ``FSTRING_MIDDLE`` does not exist, so a static
-#: ``tokenize.FSTRING_MIDDLE`` is a reported error however it is guarded at
-#: runtime.
-_FSTRING_MIDDLE: Final[int | None] = getattr(tokenize, "FSTRING_MIDDLE", None)
-_FSTRING_MIDDLE_TYPE: Final[tuple[int, ...]] = (
-    (_FSTRING_MIDDLE,) if _FSTRING_MIDDLE is not None else ()
-)
-
-
-def _without_python_prose(text: str) -> str:
-    """Python code judged only for a declared program's name: comments and string content dropped.
-
-    Python's own tokenizer finds every comment and string, so a triple-quoted
-    docstring, an f-string and an escaped quote are all read the way Python
-    reads them -- unlike a hand-rolled quote toggle, which a single stray
-    quote character (inside a docstring, say) can desynchronise for the rest
-    of the file. A program's name inside a string is data, not a line that
-    runs it, and a scan too coarse to parse the file in full must not read
-    it as one (review 7 M2). A file that fails to tokenize (a syntax error)
-    is scanned unchanged: the same behaviour as before this fix.
-    """
-    try:
-        tokens = list(tokenize.generate_tokens(io.StringIO(text).readline))
-    except (tokenize.TokenError, IndentationError, SyntaxError, ValueError):
-        return text
-    line_starts = [0]
-    for line in text.splitlines(keepends=True):
-        line_starts.append(line_starts[-1] + len(line))
-    chars = list(text)
-    blanked_types = {tokenize.STRING, tokenize.COMMENT, *_FSTRING_MIDDLE_TYPE}
-    for token in tokens:
-        if token.type not in blanked_types:
-            continue
-        start = line_starts[token.start[0] - 1] + token.start[1]
-        end = line_starts[token.end[0] - 1] + token.end[1]
-        # The string's own quotes stay, so later text is still read as code.
-        edge = 1 if token.type == tokenize.STRING else 0
-        for index in range(start + edge, end - edge):
-            if chars[index] != "\n":
-                chars[index] = " "
-    return "".join(chars)
-
-
 def _decode_ansi_c(text: str, index: int) -> tuple[str, int]:
     """Decode an ANSI-C body from ``index``; return it and the index after its quote."""
     decoded: list[str] = []
@@ -1420,6 +1374,11 @@ def _invocations(
     ``_WRITES``, so code read from one of them is judged unseen. Code past
     the parse meter is ``_OVER_BUDGET`` and nothing else (review 8 B1).
     """
+    if len(command) > _MAX_COMMAND_LENGTH:
+        # Past what the shell parser takes in one piece (a long Python
+        # literal, say): scanned raw for a program's name, never parsed.
+        yield _UNPARSED, [], command
+        return
     if not _charge(command):
         yield _OVER_BUDGET, [], command[:_QUOTED_SEGMENT_LENGTH]
         return
@@ -1867,8 +1826,12 @@ def _consumers_of_a_listing(text: str) -> frozenset[str]:
     """Each ``xargs -r`` stage whose stdin is a listing of changed files, as written.
 
     Without ``-r`` an empty listing runs the command bare, so such a stage is
-    not a targeted run (review 6 M2).
+    not a targeted run (review 6 M2). Text that never spells ``xargs`` has no
+    such stage, and is not split at all: a stage found here only ever makes
+    a run targeted, so a quoted spelling this misses is denied, never let by.
     """
+    if _XARGS not in text:
+        return frozenset()
     consumers: set[str] = set()
     for pipeline in split_unquoted(text, _PIPELINE_BOUNDARIES):
         stages = split_unquoted(pipeline, _PIPE)
@@ -3410,8 +3373,12 @@ def _run_verdict(
     the command runs (moved by any ``cd``), ``start`` where the event began,
     which ``full_args`` are relative to. A verdict that rests on an operand
     that cannot be seen says so (review 6 n2). ``marked`` caches repository
-    marker lookups across one event.
+    marker lookups across one event. A pattern with no full word, no full
+    path and no bare run (``full_words: []``, a runner that caps its own
+    reach) is never full: no operand, seen or unseen, can make it one.
     """
+    if pattern.full_args == frozenset() and not pattern.full_words and not pattern.bare_is_full:
+        return _NOT_FULL
     operands = _Operands(
         every_word_targets=pattern.flag_options is not None and not shape_only,
         module_names=pattern.flag_options is not None and _PYARGS in arguments,
@@ -3550,11 +3517,10 @@ def find_full_qa_invocation(
 class _Readable(Enum):
     """What reading a file of code found."""
 
-    #: Parsed in full.
+    #: Read in full. Whether it is parsed or only scanned is its size's
+    #: business, judged against its kind's parse cap when it is run.
     TEXT = "text"
-    #: Too large to parse: only scanned for a program's name.
-    SCANNED = "scanned"
-    #: Cannot be seen at all: a FIFO, a device, or too large to scan.
+    #: Cannot be seen at all: a FIFO, a device, or past the read budget.
     UNSEEN = "unseen"
     #: Nothing to run: missing, a directory, or nowhere this can place.
     ABSENT = "absent"
@@ -3614,7 +3580,7 @@ _VerdictKey = tuple[str, str, tuple[str, ...], str]
 class _Event:
     """What one event's judgement shares: the declaration, and the bounded file reads.
 
-    Every file read in the event draws on one scan budget, and each path is
+    Every file read in the event draws on one read budget, and each path is
     read at most once (review 6 M1). Parsing draws on the per-call
     :class:`_ParseMeter`. Each distinct (path, kind, argv, directory) is
     PARSED at most once: repeat references reuse the memoised verdict
@@ -3628,7 +3594,8 @@ class _Event:
     files: dict[str, _CodeContent] = field(default_factory=dict)
     named: dict[str, FullQaPattern | None] = field(default_factory=dict)
     marked: dict[str, bool] = field(default_factory=dict)
-    scan_budget: int = _MAX_SCANNED_FILE_BYTES
+    code_texts: dict[str, str] = field(default_factory=dict)
+    read_budget: int = _MAX_READ_BYTES
     verdicts: dict[_VerdictKey, FullQaMatch | None] = field(default_factory=dict)
     verdicts_pending: set[_VerdictKey] = field(default_factory=set)
 
@@ -3714,8 +3681,9 @@ def _full_run_of(
     if program == _OPAQUE:
         word, rest = arguments[0], arguments[1:]
         # A variable the code does not set may hold any program the code
-        # names; a substitution names its program in its own text.
-        haystack = source if _VARIABLE.fullmatch(word) else word
+        # names -- in code, never in a comment, which no value comes from;
+        # a substitution names its program in its own text.
+        haystack = _code_text(source, event) if _VARIABLE.fullmatch(word) else word
         shape_only = word == _PYTEST_IN_CODE
         for pattern in event.patterns:
             if not _names_program(haystack, pattern.command):
@@ -3748,6 +3716,20 @@ def _full_run_of(
         if verdict.full:
             return FullQaMatch(pattern.pattern_id, segment.strip(), fail_closed=verdict.unseen)
     return None
+
+
+def _code_text(source: str, event: _Event) -> str:
+    """``source`` without its comments, stripped once per event and only when asked.
+
+    Only an unset variable in command position asks, so a file that never
+    has one is never stripped here, and one that has a thousand is stripped
+    once (review 8 n1).
+    """
+    stripped = event.code_texts.get(source)
+    if stripped is None:
+        stripped = _without_comments(source)
+        event.code_texts[source] = stripped
+    return stripped
 
 
 def _with_addopts(pattern: FullQaPattern, arguments: list[str], event: _Event) -> list[str]:
@@ -3788,8 +3770,8 @@ def _full_run_in_code_file(
     code_kind = _code_kind(content.text) if kind == _EXECUTABLE_CODE else kind
     if code_kind is None:
         return None
-    if content.readable is _Readable.SCANNED or files_deep >= _MAX_NESTING:
-        return _scanned_verdict(content, code_kind, event, segment)
+    if len(content.text) > _parse_cap(code_kind) or files_deep >= _MAX_NESTING:
+        return _scanned_verdict(content, event, segment)
     key: _VerdictKey = (
         content.path,
         code_kind,
@@ -3815,9 +3797,7 @@ def _full_run_in_code_file(
             if code_kind == _SHELL_CODE
             else _python_code_runs(content.text, argv, segment, 0)
         )
-        found = _first_full_run(
-            invocations, _without_comments(content.text), event, here, files_deep + 1
-        )
+        found = _first_full_run(invocations, content.text, event, here, files_deep + 1)
     finally:
         event.verdicts_pending.discard(key)
     event.verdicts[key] = found
@@ -3827,23 +3807,28 @@ def _full_run_in_code_file(
     )
 
 
-def _scanned_verdict(
-    content: _CodeContent, code_kind: str, event: _Event, segment: str
-) -> FullQaMatch | None:
-    """The verdict for a file too large to parse: a scan for a declared program's name.
+def _parse_cap(code_kind: str) -> int:
+    """The largest file of this kind that is parsed rather than scanned.
 
-    Comments are dropped first (review 7 M2): a large script's only mention
-    of a declared program can be a comment saying it is run elsewhere, not a
-    line that runs it. A Python file also has every string's content blanked,
-    so a docstring or a message quoting a program's name is not read as one.
+    Shell goes through the shell parser in one piece, which is superlinear
+    in heredoc openers, so it keeps the command's cap. Python is parsed as
+    Python, and only its string literals reach the shell parser, each
+    charged to the meter on its own, so it may use the whole meter.
+    """
+    return _MAX_COMMAND_LENGTH if code_kind == _SHELL_CODE else _MAX_PARSED_BYTES
+
+
+def _scanned_verdict(content: _CodeContent, event: _Event, segment: str) -> FullQaMatch | None:
+    """The verdict for a file too large to parse: a RAW scan for a declared program's name.
+
+    Nothing is dropped first (review 8 M2). A Python runner names its program
+    in a string and a shell script can hold it in a quoted variable, so
+    blanking strings hid real runners; a comment cannot be told from a line
+    that runs either, by a scan. Any declared program named anywhere denies.
+    The scan is linear and cached per path.
     """
     if content.path not in event.named:
-        scanned = (
-            _without_python_prose(content.text)
-            if code_kind == _PYTHON_CODE
-            else _without_comments(content.text)
-        )
-        event.named[content.path] = _named_pattern(scanned, event.patterns)
+        event.named[content.path] = _named_pattern(content.text, event.patterns)
     named = event.named[content.path]
     if named is None:
         return None
@@ -3900,13 +3885,14 @@ def _read_new(target: str, event: _Event) -> _CodeContent:
     """Read a file not yet read in this event.
 
     Missing, a directory, or a name the filesystem refuses: nothing runs. A
-    FIFO or a device: unseen, and never opened, since a FIFO blocks. Within
-    the parse cap: readable in full, TEXT -- whether it is actually PARSED
-    or only scanned is decided per verdict key, against the parse budget
-    (review 8 B1), not here at read time: the bytes are read once regardless.
-    Past the parse cap: scanned while the scan budget lasts, and unseen after
-    it. Any other ``OSError`` propagates, which the daemon turns into a deny:
-    the code may be a run, and it could not be seen.
+    FIFO or a device: unseen, and never opened, since a FIFO blocks. A
+    regular file is read while the event's read budget lasts, and unseen
+    past it. The budget is charged with the bytes actually read, not the
+    reported size, which ``/proc`` gives as 0, and a read never takes more
+    than one byte past what is left. Whether the text is then parsed or
+    scanned is decided when it runs, by its kind's parse cap. Any other
+    ``OSError`` propagates, which the daemon turns into a deny: the code may
+    be a run, and it could not be seen.
     """
     try:
         status = Path(target).stat()
@@ -3920,18 +3906,17 @@ def _read_new(target: str, event: _Event) -> _CodeContent:
         return _ABSENT_CODE
     if not stat.S_ISREG(status.st_mode):
         return _UNSEEN_CODE
-    size = status.st_size
-    if size <= _MAX_COMMAND_LENGTH:
-        return _CodeContent(_Readable.TEXT, _decoded(target), target)
-    if size > event.scan_budget:
+    left = event.read_budget
+    if status.st_size > left:
         return _UNSEEN_CODE
-    event.scan_budget -= size
-    return _CodeContent(_Readable.SCANNED, _decoded(target), target)
-
-
-def _decoded(target: str) -> str:
-    """A file's bytes as text; undecodable bytes are replaced, never an error."""
-    return Path(target).read_bytes().decode("utf-8", errors="replace")
+    with Path(target).open("rb") as handle:
+        data = handle.read(left + 1)
+    event.read_budget = max(0, left - len(data))
+    if len(data) > left:
+        # More than its reported size, and more than is left: /proc, or growing.
+        return _UNSEEN_CODE
+    # Undecodable bytes are replaced, never an error.
+    return _CodeContent(_Readable.TEXT, data.decode("utf-8", errors="replace"), target)
 
 
 def _names_program(text: str, program: str) -> bool:

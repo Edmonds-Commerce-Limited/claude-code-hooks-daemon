@@ -473,6 +473,14 @@ handlers:
             command: run_tests.sh
           - id: validate-worktrees
             command: validate_worktrees.sh
+          # The test half of `llm_qa.py changed`, which is targeted above: it
+          # runs the tests mapped from what changed, and refuses (unmaps) any
+          # file whose reach passes MAX_IMPORT_SELECTION test files. Declared,
+          # it is judged as that same targeted selection, not by reading code
+          # whose pytest paths exist only at run time.
+          - id: run-changed-tests
+            command: run_changed_tests.py
+            full_words: []
           # `tests/unit` is 883 of 1,097 test files, so it is the whole suite
           # here in all but name. A narrower directory is targeted.
           - id: pytest-whole-suite
