@@ -237,8 +237,12 @@ _WEB_SEARCH_BUDGET_RE: Final[re.Pattern[str]] = re.compile(
 # the harness's own stable tail (the rate-limit error-type clause) to appear
 # nearby too -- a structural marker that a bare quote of the opening clause
 # alone does not carry.
+# N46 review 3, NIT-5: a leading U+FEFF byte-order mark defeats `\s` (Python's
+# `\s` does not match a BOM), so an optional BOM is tolerated ahead of the
+# anchor too -- the same fix applied to the PostToolUseFailure sibling's
+# `_AGENT_TERMINATED_EARLY_FAILURE_RE`.
 _AGENT_TERMINATED_EARLY_RE: Final[re.Pattern[str]] = re.compile(
-    r"\A\s*Agent terminated early due to an API error: You've hit your "
+    r"\A﻿?\s*Agent terminated early due to an API error: You've hit your "
     r"(?:session|weekly) limit(?=.{0,300}?\(error type rate_limit, HTTP 429)",
     re.DOTALL,
 )
@@ -519,9 +523,10 @@ def dispatch_identity(tool_input: Any, tool_response: Any) -> str:
     shape) is the last identifying fallback before "an unnamed dispatch".
 
     Public (no leading underscore): the PostToolUseFailure sibling signal,
-    ``agent_terminated_early_detector`` (N46 review 2's follow-up), imports
-    this directly rather than duplicating it -- the same cross-event-package
-    reuse shape as ``recovery_cron_advisor``'s ``declares_failsafe_cron``."""
+    ``agent_terminated_early_failure_detector`` (N46 review 2's follow-up),
+    imports this directly rather than duplicating it -- the same
+    cross-event-package reuse shape as ``recovery_cron_advisor``'s
+    ``declares_failsafe_cron``."""
     if isinstance(tool_input, dict):
         for key in ("name", "description", "subagent_type"):
             value = tool_input.get(key)

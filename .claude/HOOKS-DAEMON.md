@@ -203,7 +203,7 @@
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
-| 10 | agent_terminated_early_failure_detector | ADVISORY | PostToolUseFailure advisory: a foreground Agent/Task dispatch killed |
+| 10 | agent_terminated_early_failure_detector | ADVISORY | PostToolUseFailure advisory: surfaces a foreground Agent/Task dispatch killed by a harness usage limit |
 
 ### Daemon Plugin (1 handler)
 

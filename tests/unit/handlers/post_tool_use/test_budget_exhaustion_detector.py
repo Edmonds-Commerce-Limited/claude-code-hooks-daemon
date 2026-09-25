@@ -495,6 +495,14 @@ class TestAgentTerminatedEarlySignal:
         assert "review the diff for N23" in combined
         assert "re-brief" in combined.lower() or "rebrief" in combined.lower()
 
+    def test_a_leading_bom_does_not_defeat_the_anchor(
+        self, handler: BudgetExhaustionDetectorHandler
+    ) -> None:
+        """N46 review 3, NIT-5: Python's `\\s` does not match a U+FEFF
+        byte-order mark, so a leading BOM must be tolerated separately."""
+        hook_input = _tool_input("Task", _real_dispatch_result("﻿" + self._WEEKLY_LIMIT))
+        assert handler.matches(hook_input) is True
+
 
 class TestIsErrorVariantIsOutOfPostToolUseScope:
     """N46 review 2, BLOCKER-1: the real ``is_error: true`` occurrence's

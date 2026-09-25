@@ -272,8 +272,12 @@ imports `dispatch_identity` (renamed from `_dispatch_identity`, now public
 for this cross-package reuse, the same shape `recovery_cron_advisor`'s
 `declares_failsafe_cron` already has) rather than duplicating the identity
 logic. Replaying all four real occurrences through BOTH handlers together
-(`probe_n46r3_combined_replay.py`) now fires 4 of 4, 0 false positives over
-362 ordinary results. For dispatch
+(`probe_n46r3_combined_replay.py`) was reported as firing 4 of 4 at the
+time, 0 false positives over 362 ordinary results -- but that replay fed
+the failure handler the transcript's `toolUseResult` string (`"Error: " + content`), not the bare `error` field the live daemon actually sends;
+review 3 (below) found this made the count vacuous for the real shape --
+against the real hook it was 3 of 4 (the three `completed` occurrences
+only) until the anchor was fixed. For dispatch
 tools specifically, `_stringify_tool_response` no longer falls back to
 `json.dumps` of the whole `tool_response` dict when `content` is absent
 (an `async_launched`/`teammate_spawned` launch, 264 of 351 real results):
@@ -301,6 +305,33 @@ release note's number (34, which also collided on sibling worktree
 branches) are addressed separately per the coordinator's own instructions
 for this round (history rewrite onto a clean branch; renumbered to 33
 against main's actual maximum of 32).
+
+**Review 3 found the new PostToolUseFailure handler's anchor required a
+prefix the live daemon never sends.** The regex demanded a leading
+`Error:\s*`, but Claude Code v2.1.282's real `error` field carries the BARE
+tool_result content (`error: ur`) -- the `Error: ` prefix belongs only to
+the transcript's own SEPARATE `toolUseResult` recording of the same
+occurrence (`toolUseResult == "Error: " + content`, confirmed across 2906
+real is_error results; the vendored contract's own Bash example,
+`"Exit code 1\n..."`, is unprefixed too). So the handler missed the one
+real death it exists for. Fixed by making the prefix optional
+(`(?:Error:\s*)?`), keeping the anchor; the test suite's primary fixture is
+now the bare-content shape, with the prefixed transcript shape kept as a
+second case. Re-running the combined replay -- this time feeding the
+failure handler the tool_result block's own CONTENT rather than
+`toolUseResult` -- fires 4 of 4 real occurrences, 0 false positives over
+366 ordinary results. A separate check against every real `is_error: true`
+tool_result content across the whole corpus (all tools, not just Task/
+Agent -- 3216+ such contents; the exact count grows as the corpus does)
+confirms the fixed anchor fires on the one real death among them, with 0
+false positives over the rest (`probe_n46r7_fixcheck.py`). Also caught in
+this round: a leading U+FEFF byte-order mark defeated `\s` in both this
+anchor and its PostToolUse sibling's (`_AGENT_TERMINATED_EARLY_RE`), fixed
+by tolerating an optional BOM in each; a stale sibling-module name
+(`agent_terminated_early_detector`, missing `_failure`) in
+`budget_exhaustion_detector.py`'s `dispatch_identity` docstring, corrected;
+and the new handler's class docstring broke mid-sentence on its first
+line, truncating its row in the generated `.claude/HOOKS-DAEMON.md`.
 
 ### N45 — A NUL byte in a configured word-list path makes the never-raising secret-term lookup raise
 

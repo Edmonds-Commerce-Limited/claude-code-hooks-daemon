@@ -14,18 +14,24 @@ handler and structurally never receives this event, so this real weekly-
 limit death went unsurfaced until this handler existed.
 
 Matches ONLY the harness's own text for a dispatched sub-agent cut off
-mid-task by a usage-limit rejection -- ``Error: Agent terminated early due
-to an API error: You've hit your (session|weekly) limit...`` (observed live
-in this project's own transcripts: the real is_error occurrence's
-``toolUseResult`` is a bare string beginning with exactly this text) --
-anchored at the response's START (the harness's own text opens with the
-fixed ``"Error: "`` prefix followed immediately by the sentence) and
-requiring the same stable ``(error type rate_limit, HTTP 429`` tail nearby
-that the PostToolUse sibling requires (N46 review 2, NIT-6 parity), so a
-report that merely opens with the bare sentence and nothing else does not
-match. Channel-scoped to ``SUBAGENT_DISPATCH_TOOL_NAMES`` (Task/Agent) only
--- the same error text through, say, a failed Bash command's own stderr
-must never fire.
+mid-task by a usage-limit rejection -- ``Agent terminated early due to an
+API error: You've hit your (session|weekly) limit...``, with an OPTIONAL
+``Error: `` prefix (N46 review 3: the live daemon's own PostToolUseFailure
+``error`` field carries the BARE tool_result content, never prefixed --
+Claude Code v2.1.282, ``error: ur``, the same unprefixed value the model
+itself receives. The prefixed form is a DIFFERENT recording: the
+transcript's ``toolUseResult`` for the same occurrence IS
+``"Error: " + content``, confirmed across 2906 real ``is_error`` results,
+and the vendored contract's own Bash example, ``"Exit code 1\n..."``, is
+unprefixed too -- so the prefix is kept optional, never required, and the
+bare form is the one that actually reaches this handler live) -- anchored
+at the response's START either way, and requiring the same stable
+``(error type rate_limit, HTTP 429`` tail nearby that the PostToolUse
+sibling requires (N46 review 2, NIT-6 parity), so a report that merely
+opens with the bare sentence and nothing else does not match. Channel-
+scoped to ``SUBAGENT_DISPATCH_TOOL_NAMES`` (Task/Agent) only -- the same
+error text through, say, a failed Bash command's own stderr must never
+fire.
 
 On a match: ALLOW with an advisory naming which dispatch died (preferring
 ``tool_input.name``, via the shared ``dispatch_identity`` helper imported
@@ -60,16 +66,20 @@ from claude_code_hooks_daemon.handlers.post_tool_use.budget_exhaustion_detector 
 )
 
 # The harness's own text for a dispatched sub-agent cut off mid-task by a
-# usage-limit rejection, as delivered via PostToolUseFailure's `error` field:
-# a bare string prefixed "Error: " (unlike PostToolUse's own list-of-text-
-# blocks `tool_response.content` -- see budget_exhaustion_detector for that
-# sibling signal's shape). Anchored at the response's true start and
+# usage-limit rejection, as delivered via PostToolUseFailure's `error` field.
+# N46 review 3: the LIVE daemon's `error` field carries the BARE content --
+# no "Error: " prefix -- so the prefix is OPTIONAL, never required. Only the
+# TRANSCRIPT's own `toolUseResult` recording adds "Error: " on top (a
+# different field, a different event's after-the-fact log, not what this
+# handler reads). Anchored at the response's true start either way, and
 # requiring the harness's stable "(error type rate_limit, HTTP 429" tail
 # nearby, mirroring budget_exhaustion_detector's own anchor (N46 review 2,
-# NIT-6).
+# NIT-6). N46 review 3 NIT-5: a leading U+FEFF byte-order mark defeats `\s`
+# (Python's `\s` does not match a BOM), so an optional BOM is tolerated
+# ahead of the anchor too.
 _AGENT_TERMINATED_EARLY_FAILURE_RE: Final[re.Pattern[str]] = re.compile(
-    r"\A\s*Error:\s*Agent terminated early due to an API error: You've hit your "
-    r"(?:session|weekly) limit(?=.{0,300}?\(error type rate_limit, HTTP 429)",
+    r"\A﻿?\s*(?:Error:\s*)?Agent terminated early due to an API error: You've hit "
+    r"your (?:session|weekly) limit(?=.{0,300}?\(error type rate_limit, HTTP 429)",
     re.DOTALL,
 )
 
@@ -95,9 +105,10 @@ def _advisory(tool_name: str, tool_input: Any, matched_fragment: str) -> str:
 
 
 class AgentTerminatedEarlyFailureDetectorHandler(PostToolUseFailureHandlerBase):
-    """PostToolUseFailure advisory: a foreground Agent/Task dispatch killed
-    by a harness usage limit surfaces here, through its ``error`` field --
-    the event ``budget_exhaustion_detector`` (its PostToolUse sibling) never
+    """PostToolUseFailure advisory: surfaces a foreground Agent/Task dispatch killed by a harness usage limit.
+
+    It fires through the event's ``error`` field -- the event
+    ``budget_exhaustion_detector`` (its PostToolUse sibling) never
     receives, since a failed tool call fires PostToolUseFailure instead.
     Channel-scoped to Task/Agent; anchored at the response's start with the
     same stable-tail requirement as the PostToolUse sibling. Never blocks:
@@ -156,10 +167,13 @@ class AgentTerminatedEarlyFailureDetectorHandler(PostToolUseFailureHandlerBase):
             "delivers its death through PostToolUseFailure's `error` field, "
             "NOT through PostToolUse — `budget_exhaustion_detector` (its "
             "PostToolUse sibling) never receives this event. This handler "
-            "matches the harness's own `Error: Agent terminated early due to "
-            "an API error: You've hit your session/weekly limit...` text, "
-            "anchored at the response's start with the same stable-tail "
-            "requirement as its sibling, scoped to Task/Agent only.\n\n"
+            "matches the harness's own `Agent terminated early due to an API "
+            "error: You've hit your session/weekly limit...` text — a live "
+            "`error` field carries it BARE, with no `Error: ` prefix (N46 "
+            "review 3; that prefix is only the transcript's own separate "
+            "recording, and is matched too, optionally) — anchored at the "
+            "response's start with the same stable-tail requirement as its "
+            "sibling, scoped to Task/Agent only.\n\n"
             "**When this fires: tell the user this agent died mid-task on a "
             "usage limit, name WHICH dispatch died (preferring its `name`), "
             "and re-brief the same assignment to a fresh dispatch once the "
@@ -184,10 +198,12 @@ class AgentTerminatedEarlyFailureDetectorHandler(PostToolUseFailureHandlerBase):
                 title="A foreground sub-agent killed by a usage limit triggers a re-brief advisory",
                 command=(
                     "Simulate a PostToolUseFailure event for tool 'Agent' whose "
-                    'error field is "Error: Agent terminated early due to an '
-                    "API error: You've hit your weekly limit · resets Sep "
-                    "27, 8am (UTC) (error type rate_limit, HTTP 429, request id "
-                    'req_example, model claude-sonnet-5)."'
+                    'error field is "Agent terminated early due to an API '
+                    "error: You've hit your weekly limit · resets Sep 27, 8am "
+                    "(UTC) (error type rate_limit, HTTP 429, request id "
+                    'req_example, model claude-sonnet-5)." -- the BARE shape '
+                    "the live daemon actually delivers (N46 review 3), with "
+                    "no `Error: ` prefix."
                 ),
                 harness_cannot_produce=(
                     "This handler reads the top-level `error` field of a "
@@ -199,11 +215,12 @@ class AgentTerminatedEarlyFailureDetectorHandler(PostToolUseFailureHandlerBase):
                     "test_agent_terminated_early_failure_detector.py."
                 ),
                 description=(
-                    "N46 review 2's follow-up: the harness's own usage-limit "
-                    "termination text, delivered through PostToolUseFailure's "
-                    "error field for a foreground Agent/Task dispatch, "
-                    "triggers an advisory naming the dispatch and demanding a "
-                    "re-brief once the limit resets."
+                    "N46 review 2's follow-up (shape corrected by review 3): "
+                    "the harness's own usage-limit termination text, "
+                    "delivered BARE through PostToolUseFailure's error field "
+                    "for a foreground Agent/Task dispatch, triggers an "
+                    "advisory naming the dispatch and demanding a re-brief "
+                    "once the limit resets."
                 ),
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[
@@ -220,8 +237,8 @@ class AgentTerminatedEarlyFailureDetectorHandler(PostToolUseFailureHandlerBase):
                 title="The same error text through a non-dispatch tool never fires",
                 command=(
                     "Simulate a PostToolUseFailure event for tool 'Bash' whose "
-                    'error field is "Error: Agent terminated early due to an '
-                    "API error: You've hit your weekly limit (error type "
+                    'error field is "Agent terminated early due to an API '
+                    "error: You've hit your weekly limit (error type "
                     'rate_limit, HTTP 429)."'
                 ),
                 harness_cannot_produce=(
