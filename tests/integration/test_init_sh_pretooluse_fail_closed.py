@@ -64,7 +64,10 @@ def _fake_server(*, respond: bytes | None, delay: float = 0.0) -> Iterator[Path]
     to terminate that thread loudly (Python prints its traceback), which
     is a test-infra concern, not something to hide.
     """
-    short_dir = Path(tempfile.mkdtemp(prefix="hd-", dir="/tmp"))  # nosec B108
+    # No `dir="/tmp"` — mkdtemp's own default tempdir keeps the path short
+    # enough for AF_UNIX's ~108-byte sun_path cap (pytest's `tmp_path` nests
+    # too deep) without hardcoding a literal path bandit's B108 flags.
+    short_dir = Path(tempfile.mkdtemp(prefix="hd-"))
     sock_path = short_dir / "fake.sock"
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     server.bind(str(sock_path))
@@ -128,7 +131,8 @@ def connection_reset_socket() -> Iterator[Path]:
     mA1), the shape a legacy-socket peer past its drain cap produces on a
     large enough payload. ``connect()`` still succeeds first, so this is
     distinct from ``ConnectionRefusedError`` (never reached at all)."""
-    short_dir = Path(tempfile.mkdtemp(prefix="hd-", dir="/tmp"))  # nosec B108
+    # See _fake_server above: no `dir="/tmp"`, same reasoning.
+    short_dir = Path(tempfile.mkdtemp(prefix="hd-"))
     sock_path = short_dir / "fake.sock"
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     server.bind(str(sock_path))
@@ -332,6 +336,84 @@ class TestConnectionLostFailsClosedForPreToolUse:
             "tool_input": {"command": "bin/hooks-daemon restart"},
         }
         response = _send(project, connection_reset_socket, "PreToolUse", recovery_input)
+        hso = response["hookSpecificOutput"]
+        assert "permissionDecision" not in hso
+
+
+@pytest.fixture
+def backlog_full_socket() -> Iterator[Path]:
+    """A real AF_UNIX socket that is listening but never calls ``accept()``,
+    with its kernel accept backlog pre-filled -- the shape review 3's MA1
+    found: a GIL-wedged daemon has stopped accepting, so once the backlog is
+    full a fresh ``connect()`` no longer blocks until the client's socket
+    timeout, it raises ``BlockingIOError``/``EAGAIN`` immediately. That used
+    to fall into the generic ``except Exception`` -> an opaque error_type
+    never in the PreToolUse fail-closed allowlist -> silent ALLOW, even
+    though the daemon process is provably still there (just wedged).
+    """
+    short_dir = Path(tempfile.mkdtemp(prefix="hd-"))
+    sock_path = short_dir / "fake.sock"
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server.bind(str(sock_path))
+    server.listen(100)  # matches asyncio's own default backlog
+
+    held: list[socket.socket] = []
+    try:
+        # Never call server.accept(): each of these queues in the kernel
+        # backlog until it overflows, at which point connect() itself starts
+        # failing instead of completing -- mirroring review 3's probe
+        # (probe_n24r3_gil.py), which filled a live daemon's asyncio-default
+        # backlog (100) the same way and hit BlockingIOError right after.
+        # The attempt bound is generous headroom above `somaxconn`, which can
+        # exceed the requested backlog on some kernels.
+        # Unlike AF_INET, an AF_UNIX stream connect() has no handshake to be
+        # "in progress" -- it either completes immediately or fails
+        # immediately, so BlockingIOError here means the queue is full, not
+        # "retry me later".
+        err: OSError | None = None
+        for _ in range(5000):
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            s.setblocking(False)
+            try:
+                s.connect(str(sock_path))
+                held.append(s)
+            except OSError as exc:
+                err = exc
+                s.close()
+                break
+        assert err is not None, (
+            "backlog never overflowed -- the fixture's assumption "
+            "(a small listen() backlog fills after a handful of connects) "
+            "no longer holds on this platform"
+        )
+        yield sock_path
+    finally:
+        for s in held:
+            s.close()
+        server.close()
+        shutil.rmtree(short_dir, ignore_errors=True)
+
+
+class TestBacklogFullFailsClosedForPreToolUse:
+    """Plan 00466 N24 review 3 MA1: connect() raising BlockingIOError/EAGAIN
+    because the daemon's accept backlog is full must DENY PreToolUse, the
+    same as a reached-but-stuck daemon -- not ALLOW like a genuinely absent
+    one."""
+
+    def test_a_pretooluse_call_is_denied(self, project: Path, backlog_full_socket: Path) -> None:
+        response = _send(project, backlog_full_socket, "PreToolUse", _BASH_TOOL_INPUT)
+        hso = response["hookSpecificOutput"]
+        assert hso["permissionDecision"] == "deny"
+        assert "denied for safety" in hso["permissionDecisionReason"]
+
+    def test_the_recovery_command_is_not_denied(
+        self, project: Path, backlog_full_socket: Path
+    ) -> None:
+        recovery_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "bin/hooks-daemon restart"},
+        }
+        response = _send(project, backlog_full_socket, "PreToolUse", recovery_input)
         hso = response["hookSpecificOutput"]
         assert "permissionDecision" not in hso
 
