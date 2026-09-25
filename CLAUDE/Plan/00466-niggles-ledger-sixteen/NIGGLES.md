@@ -9,6 +9,25 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N52 — The sensitive_content commit gate let a matching session UUID into a commit
+
+**Found by N46 review 2.** Commit `3da8c1ed` on the N46 branch added a review
+report containing a real session UUID. The project's `session-uuid` public
+pattern matches that blob, and no `exclude_paths` entry covers
+`CLAUDE/Plan/`. Yet the commit gate, which scans the added lines of staged
+files, allowed the commit. Nothing later caught it either:
+`check_sensitive_content.py` scans only the current tree, and
+`check_git_history.py` scans metadata but not historical blobs. A `--no-ff`
+merge followed by a push would have published it permanently.
+
+**Candidate remedy:** reproduce the miss in a scratch repo first. The
+reviewer's untested hypothesis is that the commit ran with a cwd or `-C`
+target different from the checkout the gate diffed, which is the Plan 00464
+class. Then fix the gate. Add a merge and push check that runs the public
+patterns over the added lines of `git log -p <upstream>..HEAD`, since that
+is exactly the window this leak survived in. RED tests: the reproduced
+commit shape is denied; a merge carrying the blob is denied.
+
 ### N51 — `pipe_blocker` reads an escaped alternation inside a quoted grep pattern as a pipe into `head`
 
 **Found by Plan 00421 review 2.** `grep -i -n "a\|HEAD\|b" file` was denied.
