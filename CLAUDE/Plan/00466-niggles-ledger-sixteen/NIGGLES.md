@@ -9,6 +9,29 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N89 — A data-sink receiver is trusted after the command redefines it
+
+**Found by N38 review 6 (ledger candidate 3).** `cat() { bash; }; cat <<'E'`
+and `alias cat=bash` both fail open on every tree. The heredoc blanking treats
+`cat` as a data sink, so the body is never judged, but bash runs it.
+
+**Remedy:** a receiver name is not trusted as a data sink once the same
+command defines a function or alias of that name, or runs `alias`, `eval` or
+`source` beforehand. In that case the body is judged. It builds on the N38
+lexer, so it goes on the executed-body branch with N87 and N88.
+
+### N88 — A data sink whose output feeds an executing process substitution hides the body
+
+**Found by N38 review 6 (ledger candidate 2).** In
+`tee >(bash) <<'E'` followed by `git reset --hard HEAD` and `E`, bash runs
+the reset. HEAD, base and main all allow it. `_downstream_is_all_data_sinks`
+looks at pipes only, not at `>(...)` redirect targets. This bypasses every
+guard that relies on heredoc blanking.
+
+**Remedy:** a `>(...)` or `<(...)` target that runs a shell (or anything
+off the data-sink list) makes the heredoc body executed. It goes on the
+executed-body branch with N87 and N89.
+
 ### N87 — ANSI-C quoting in text handed to a shell is never decoded, so the command it carries is unseen
 
 **Found by N38 fix round 6.** In `bash -c $'echo a\ngit reset --hard HEAD'`,
