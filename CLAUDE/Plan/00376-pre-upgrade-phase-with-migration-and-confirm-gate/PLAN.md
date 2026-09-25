@@ -267,8 +267,10 @@ rather than only matching syntax.
   always with `-I`. Layer 1 still honours `HOOKS_DAEMON_PYTHON` to build the
   venv, a legitimate non-gate use. (b) The installed version is read only from
   one of the daemon's own `untracked/venv-*` directories, checked on the
-  physical path, because the resolver's cache serves an override's result to a
-  later call that sets none. (c) The `**Detect**` scan honours only the
+  physical path. The resolver served an override's cached result to a later
+  call that set none; that is fixed at its source (00466 N37: an override
+  call neither reads nor writes the cache, and only the daemon's own venvs are
+  cached), and the check stays as defence in depth. (c) The `**Detect**` scan honours only the
   project's own `.gitignore` files and drops every `GIT_*` variable, so
   `.git/info/exclude`, `core.excludesFile` and `GIT_INDEX_FILE` cannot hide a
   call site. (d) `upgrade_approval_guard` denies, on a command that runs an

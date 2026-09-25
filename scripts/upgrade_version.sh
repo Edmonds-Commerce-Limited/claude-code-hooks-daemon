@@ -536,9 +536,9 @@ fi
 # interpreter runs the daemon, but either could name a "venv" whose stamp
 # already says the target, and the pre-deploy gate takes that stamp as the
 # installed version. VENV_PYTHON above keeps honouring them for daemon control.
-# The resolver also serves a path it cached from an earlier run, overrides
-# included, so the answer counts only when it is one of THIS daemon dir's own
-# fingerprint venvs (untracked/venv-*), compared as physical paths.
+# The answer counts only when it is one of THIS daemon dir's own fingerprint
+# venvs (untracked/venv-*), compared as physical paths: defence in depth over
+# the resolver's own cache rule (Plan 00466 N37).
 INSTALLED_VENV_PYTHON="$VENV_PYTHON"
 if [ -n "${HOOKS_DAEMON_PYTHON:-}${HOOKS_DAEMON_VENV_PATH:-}" ]; then
     INSTALLED_VENV_PYTHON="$(unset HOOKS_DAEMON_PYTHON HOOKS_DAEMON_VENV_PATH; resolve_existing_venv_python "$DAEMON_DIR")" || INSTALLED_VENV_PYTHON=""

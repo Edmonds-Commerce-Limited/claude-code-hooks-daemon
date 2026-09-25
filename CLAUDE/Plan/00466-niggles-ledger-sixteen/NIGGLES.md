@@ -3,6 +3,30 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
+### N37 — ✅ Remedied — `resolve_venv.sh` caches an override's interpreter for later callers that set no override
+
+**Found by the Plan 00376 agent** while closing the upgrade gate's
+interpreter bypass. `scripts/lib/resolve_venv.sh` writes
+`untracked/.python-cmd-cache` even when the answer came from
+`HOOKS_DAEMON_PYTHON` or `HOOKS_DAEMON_VENV_PATH`. A later call that sets
+neither override is then served the overridden interpreter from the cache.
+So a one-off override sticks, and a caller that deliberately runs without
+overrides still inherits one. Layer 2 of the upgrade now works around this
+with its own containment check. Every other caller still inherits it.
+
+**Candidate remedy:** never write the cache from an override-derived answer.
+Also key the cache on the absence of overrides, or skip it whenever an
+override is set. RED test: resolve with `HOOKS_DAEMON_PYTHON=/x`, then with
+no override, and the second call must not return `/x`.
+
+**Remedied on `worktree-d-00376`.** A call with either override set neither
+reads nor writes the cache, and a cache entry is written and served only when
+it names one of the daemon's own `untracked/venv-*/bin/python(3)`
+interpreters, so a cache an older resolver poisoned is ignored too. Layer 2's
+containment check stays as defence in depth. Pinned by
+`tests/integration/test_resolve_venv_override_cache.py` (four tests, all RED
+before the fix).
+
 ### N21 — the semgrep QA gate passes when a rule times out
 
 **Found by the 00414/00415 agent.** Its first version of a new semgrep rule timed out on `daemon/cli.py`, and `scripts/qa/run_semgrep_check.sh` reported PASS. A rule that times out has checked nothing for that file, so the gate fails OPEN, and the slower and more complex a rule is, the more likely it is to be silently skipped on exactly the large files it exists for.
