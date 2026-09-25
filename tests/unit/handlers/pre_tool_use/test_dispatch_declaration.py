@@ -24,6 +24,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from tests.claude_plugin_fixture import READ_ONLY_TOOLS, install_fake_plugin
 
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.pre_tool_use.dispatch_declaration import (
@@ -60,8 +61,8 @@ def handler(tmp_path: Any) -> DispatchDeclarationHandler:
     lookups (`resolve_agent_can_write`'s two bases) at fresh `tmp_path`
     subdirectories by default, neither of which exists. Left unset, a test
     that never sets `_project_root` resolves against the REAL checkout via
-    `resolve_lookup_root`'s cwd fallback, and `_home_dir` unset resolves
-    against the real `Path.home()` -- a real risk now that review finding M4
+    `resolve_lookup_root`'s cwd fallback, and `_config_dir` unset resolves
+    against the real Claude home -- a real risk now that review finding M4
     makes project/user agents consulted BEFORE the built-in table: this
     repo's own real `.claude/agents/` (or a developer's real `~/.claude/
     agents/`) could silently answer a lookup a test meant to be hermetic.
@@ -70,7 +71,7 @@ def handler(tmp_path: Any) -> DispatchDeclarationHandler:
     `_project_root` explicitly."""
     instance = DispatchDeclarationHandler()
     instance._project_root = tmp_path / "project"
-    instance._home_dir = tmp_path / "home"
+    instance._config_dir = tmp_path / "config"
     return instance
 
 
@@ -79,7 +80,7 @@ def strict_handler(tmp_path: Any) -> DispatchDeclarationHandler:
     instance = DispatchDeclarationHandler()
     instance._strict = True
     instance._project_root = tmp_path / "project"
-    instance._home_dir = tmp_path / "home"
+    instance._config_dir = tmp_path / "config"
     return instance
 
 
@@ -440,6 +441,54 @@ class TestReadOnlyDispatchAdvisory:
         assert result.decision == Decision.ALLOW
         assert len(result.context) == 1
         assert "code-reviewer" in result.context[0]
+
+    def test_plugin_agent_without_write_tool_is_advised(
+        self, handler: DispatchDeclarationHandler, tmp_path: Any
+    ) -> None:
+        """Plan 00468 P2: the audit's reproduction. A Write-less plugin agent
+        dispatched with a declared report path got nothing; `Explore` got the
+        advisory."""
+        project = tmp_path / "plugin-project"
+        (project / ".claude").mkdir(parents=True)
+        config = tmp_path / "plugin-config"
+        install_fake_plugin(
+            config,
+            project,
+            agents={
+                "conformance-reviewer.md": (
+                    f"name: conformance-reviewer\ndescription: d\ntools: {READ_ONLY_TOOLS}"
+                )
+            },
+        )
+        handler._project_root = project
+        handler._config_dir = config
+        agent = "defence-before-fix:conformance-reviewer"
+        hook_input = _task_input(_DECLARED_PROMPT_WITH_DESTINATION, subagent_type=agent)
+
+        result = handler.handle(hook_input)
+
+        assert result.decision == Decision.ALLOW
+        assert len(result.context) == 1
+        assert agent in result.context[0]
+        assert "no `Write` tool" in result.context[0]
+
+    def test_project_agent_with_a_colon_in_its_description_is_advised(
+        self, handler: DispatchDeclarationHandler, tmp_path: Any
+    ) -> None:
+        """Plan 00468 P6: this repository's real code-reviewer.md shape."""
+        agents_dir = tmp_path / ".claude" / "agents"
+        agents_dir.mkdir(parents=True)
+        (agents_dir / "code-reviewer.md").write_text(
+            "---\nname: code-reviewer\ndescription: Analyzes real quality issues: dead code\n"
+            "tools: Read, Glob, Grep, Bash\n---\n\nBody.\n"
+        )
+        handler._project_root = tmp_path
+        hook_input = _task_input(_DECLARED_PROMPT_WITH_DESTINATION, subagent_type="code-reviewer")
+
+        result = handler.handle(hook_input)
+
+        assert len(result.context) == 1
+        assert "no `Write` tool" in result.context[0]
 
 
 class TestConfiguredPlanDirectory:

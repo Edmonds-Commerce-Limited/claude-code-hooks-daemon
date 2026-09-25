@@ -24,7 +24,7 @@ Usage:
 
 Exit codes:
     0 - No violations found
-    1 - Violations found
+    1 - Violations found, or no file was examined
 """
 
 from __future__ import annotations
@@ -414,12 +414,19 @@ def main() -> int:
         if arg == "--config" and index + 1 < len(args):
             config_path = Path(args[index + 1]).resolve()
 
+    # Unguarded for the reason `_without_protected_paths` gives: a scan that
+    # cannot tell what it examined must not report clean.
+    from claude_code_hooks_daemon.utils.scan_scope import vacuous_scan_failure, walk_files
+
     if path_override is not None:
-        files = sorted(p for p in path_override.rglob("*") if p.is_file())
+        # The walk skips `.git` and nested checkouts, which `git ls-files`
+        # never lists either: neither is this tree's content.
+        files = [p for p in walk_files(path_override) if p.is_file()]
         scan_root_for_terms = path_override
     else:
         files = _tracked_files(repo_root)
         scan_root_for_terms = repo_root
+    candidates = len(files)
 
     public_patterns = load_public_patterns(config_path)
     compiled_patterns = _compile_public_patterns(public_patterns)
@@ -459,10 +466,15 @@ def main() -> int:
             )
         )
 
+    vacuous = vacuous_scan_failure(
+        examined=len(files), candidates=candidates, noun="files", root=scan_root_for_terms
+    )
+
     output = {
         "tool": "sensitive_content",
         "summary": {
-            "passed": len(violations) == 0,
+            "passed": len(violations) == 0 and vacuous is None,
+            "vacuous_scan": vacuous,
             "total_violations": len(violations),
             "files_scanned": len(files),
             # Two corpora, so two denominators. A healthy `files_scanned` says
@@ -486,7 +498,9 @@ def main() -> int:
         output_file.parent.mkdir(parents=True, exist_ok=True)
         output_file.write_text(json.dumps(output, indent=2))
 
-    if violations:
+    if vacuous is not None:
+        print(f"FAILED: {vacuous}")
+    elif violations:
         print(f"Found {len(violations)} sensitive-content violation(s):")
         for violation in violations:
             print(f"  {violation.file}:{violation.line} [{violation.rule}] {violation.message}")
@@ -497,7 +511,7 @@ def main() -> int:
             f"{len(compiled_patterns)} public patterns compiled)"
         )
 
-    return 1 if violations else 0
+    return 1 if violations or vacuous is not None else 0
 
 
 if __name__ == "__main__":

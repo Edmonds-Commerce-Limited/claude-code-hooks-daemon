@@ -41,6 +41,54 @@ config_changes:
       recommended: true
       dormant: false
 
+    - key: handlers.pre_tool_use.installed_plugin_edit_advisor
+      description: >-
+        Advises, never blocks, when a Write, Edit, NotebookEdit or plain Bash
+        write lands in an installed Claude Code plugin's files: plugins/cache/
+        or plugins/marketplaces/ under the Claude config dir, both the
+        daemon's and the session's own (read from the payload's transcript
+        path). Claude Code replaces those files on the next plugin update, so
+        the change is lost without a word, and it alters a third-party prompt,
+        hook or script as its author published it. The advisory names each
+        file and says to fork the plugin or send the change upstream. A
+        plugin's own data store, plugins/data/, is not covered.
+      example_yaml: |
+        handlers:
+          pre_tool_use:
+            installed_plugin_edit_advisor:
+              enabled: true
+              priority: 42
+      migration_note: >-
+        On by default and silent unless a write targets an installed plugin's
+        files. Disable with
+        handlers.pre_tool_use.installed_plugin_edit_advisor.enabled: false.
+      recommended: true
+      dormant: false
+
+    - key: handlers.session_start.plugin_hooks_advisor
+      description: >-
+        At the start of a new session, names each enabled Claude Code plugin
+        that ships hooks and the events they cover. The daemon never sees a
+        plugin hook, so none of its guards applies to one. A plugin with a
+        PreToolUse hook is singled out: it can return updatedInput, which
+        replaces a call's input after the daemon allowed the original. Never
+        blocks. `hooks-daemon health` lists the same plugins.
+      example_yaml: |
+        handlers:
+          session_start:
+            plugin_hooks_advisor:
+              enabled: true
+              priority: 51
+              options:
+                acknowledged_plugins: []
+      migration_note: >-
+        On by default and silent when no enabled plugin ships hooks. To stop
+        the advisory for a plugin you have reviewed and trust, add its id
+        (name@marketplace) to options.acknowledged_plugins; health still
+        lists it, marked acknowledged.
+      recommended: true
+      dormant: false
+
     - key: handlers.session_start.failsafe_cron_session_advisor
       description: >-
         The failsafe recovery cron's SessionStart counterpart (Plan 00394). A
@@ -69,6 +117,30 @@ config_changes:
   removed: []
 
   changed:
+    - key: handlers.pre_tool_use.lsp_enforcement.options.no_lsp_mode
+      description: >-
+        "No LSP" now means no enabled Claude Code plugin declares a language
+        server for the searched file type (taken from the Grep glob, type or
+        path, or a grep/rg command's --include, -g, -t and file arguments).
+        ENABLE_LSP_TOOL is no longer consulted: Claude Code keeps the LSP tool
+        inactive until a code intelligence plugin is installed. The default
+        moves from block to advisory, so by default the handler enforces only
+        where a language server can answer, and otherwise allows the search
+        and suggests installing a code intelligence plugin.
+      example_yaml: |
+        handlers:
+          pre_tool_use:
+            lsp_enforcement:
+              options:
+                no_lsp_mode: advisory  # advisory | block | disable
+      migration_note: >-
+        A config that sets no_lsp_mode: block keeps denying symbol searches no
+        enabled plugin covers, now with advice to install a code intelligence
+        plugin. Change it to advisory (the new default) to enforce only where
+        an LSP can answer. ENABLE_LSP_TOOL can be left set; it has no effect
+        on this handler.
+      recommended: true
+      dormant: false
     # Ledger 00422 N1: the init template now ships each handler's Priority
     # constant. Documentation-only (no recommended_value): a project that set
     # its own priority chose it, and must not be told to change it.

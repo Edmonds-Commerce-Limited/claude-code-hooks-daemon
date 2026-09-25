@@ -36,6 +36,12 @@ import sys
 from pathlib import Path
 from typing import Any, Final
 
+from claude_code_hooks_daemon.utils.scan_scope import (
+    relative_parts,
+    vacuous_scan_failure,
+    walk_files,
+)
+
 _PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 _QA_OUTPUT_DIR: Final[Path] = _PROJECT_ROOT / "untracked" / "qa"
 _ARTEFACT_NAME: Final[str] = "github_urls.json"
@@ -110,16 +116,28 @@ def _is_allowed(relative: str, owner: str) -> bool:
     return relative.startswith("tests/") and owner in _FIXTURE_OWNERS
 
 
-def _candidate_files(root: Path) -> list[Path]:
-    """Every file worth reading, hidden directories INCLUDED."""
+def _walk(root: Path) -> tuple[list[Path], int]:
+    """Every file worth reading, and how many files the walk saw in total.
+
+    Hidden directories are INCLUDED; ``.git`` and nested checkouts are not
+    this project's files. Directory names are matched below ``root`` only
+    (00466 N26): matched on the absolute path, a checkout under
+    ``untracked/worktrees/`` read nothing.
+    """
     found: list[Path] = []
-    for path in sorted(root.rglob("*")):
-        if any(part in _SKIP_DIRS for part in path.parts):
+    walked = walk_files(root)
+    for path in walked:
+        if any(part in _SKIP_DIRS for part in relative_parts(path, root)):
             continue
         if not path.is_file() or path.is_symlink():
             continue
         found.append(path)
-    return found
+    return found, len(walked)
+
+
+def _candidate_files(root: Path) -> list[Path]:
+    """Every file worth reading, hidden directories INCLUDED."""
+    return _walk(root)[0]
 
 
 def find_violations(root: Path, *, unreadable: list[str] | None = None) -> list[dict[str, Any]]:
@@ -179,7 +197,11 @@ def main() -> int:
     args = parser.parse_args()
 
     root = Path(args.path).resolve()
-    files_scanned = len(_candidate_files(root))
+    candidate_files, files_seen = _walk(root)
+    files_scanned = len(candidate_files)
+    vacuous = vacuous_scan_failure(
+        examined=files_scanned, candidates=files_seen, noun="files", root=root
+    )
     unreadable: list[str] = []
     violations = find_violations(root, unreadable=unreadable)
 
@@ -198,7 +220,8 @@ def main() -> int:
             json.dumps(
                 {
                     "summary": {
-                        "passed": not violations,
+                        "passed": not violations and vacuous is None,
+                        "vacuous_scan": vacuous,
                         "total_violations": len(violations),
                         # The input count: how many files were candidates for
                         # scanning. Distinct from `unreadable_files`, which
@@ -222,8 +245,10 @@ def main() -> int:
         print(f"\n{len(violations)} violation(s) ({files_scanned} files scanned)")
         if unreadable:
             print(f"{len(unreadable)} file(s) could not be decoded and were not checked")
+    if vacuous is not None:
+        print(f"FAILED: {vacuous}", file=sys.stderr)
 
-    return 1 if violations else 0
+    return 1 if violations or vacuous is not None else 0
 
 
 if __name__ == "__main__":

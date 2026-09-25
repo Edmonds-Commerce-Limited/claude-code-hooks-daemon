@@ -18,10 +18,11 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from claude_code_hooks_daemon.utils.claude_config import claude_project_dir
 
 logger = logging.getLogger(__name__)
 
@@ -35,12 +36,6 @@ logger = logging.getLogger(__name__)
 # smaller; multi-megabyte lines are file bodies or pathological content the
 # analyser has no business loading.
 MAX_LINE_CHARS = 4_000_000
-
-# Claude Code slugs a project path into a transcripts directory name by
-# replacing every non-alphanumeric character with a dash (observed:
-# ``/workspace`` → ``-workspace``; a nested ``/tmp/claude-0/-workspace/...``
-# scratchpad path slugs every separator the same way).
-_SLUG_PATTERN = re.compile(r"[^A-Za-z0-9-]")
 
 
 @dataclass(frozen=True)
@@ -67,14 +62,14 @@ def transcripts_root_for(project_root: Path, claude_home: Path | None = None) ->
 
     Args:
         project_root: Absolute project root path.
-        claude_home: Override for ``~/.claude`` (tests use a tmp dir).
+        claude_home: Override for the Claude config dir (tests use a tmp
+            dir); defaults to :func:`claude_config_dir` (Plan 00468 G13).
 
     Returns:
-        ``<claude_home>/projects/<slug>`` for the project.
+        Claude Code's directory for the project, from the shared
+        :func:`claude_project_dir` derivation (00466 N27).
     """
-    home = claude_home if claude_home is not None else Path.home() / ".claude"
-    slug = _SLUG_PATTERN.sub("-", str(project_root))
-    return home / "projects" / slug
+    return claude_project_dir(project_root, config_dir=claude_home)
 
 
 def _session_key(transcript: Path, root: Path) -> str:

@@ -29,6 +29,7 @@ from claude_code_hooks_daemon.handlers.utils.plan_numbering import (
     next_plan_number_for_target,
     record_plan_allocation,
 )
+from claude_code_hooks_daemon.utils.claude_config import is_in_claude_config_dir
 from claude_code_hooks_daemon.utils.path_predicates import path_is_file
 from claude_code_hooks_daemon.utils.scratch_dir import project_dir_path
 
@@ -52,12 +53,16 @@ _RULE_WRONG_LOCATION = Rule(
         "3. ./eslint-rules/ - ESLint rule documentation\n"
         "4. ./untracked/ - Ad-hoc temporary docs\n"
         "5. ./RELEASES/ - Release notes\n"
-        "6. ./.claude/commands/, ./.claude/agents/, ./.claude/rules/ - "
-        "Claude Code command/agent/rules definitions\n"
+        "6. ./.claude/commands/, ./.claude/agents/, ./.claude/rules/, ./.claude/skills/ - "
+        "Claude Code command/agent/rules/skill definitions\n"
         "7. ./vendor/, ./node_modules/ - Third-party dependencies\n"
         "8. Standard repo-root files (exact root only): README.md, CHANGELOG.md,\n"
         "   CONTRIBUTING.md, LICENSE.md, SECURITY.md, CODE_OF_CONDUCT.md,\n"
-        "   AUTHORS.md, NOTICE.md, MAINTAINERS.md\n\n"
+        "   AUTHORS.md, NOTICE.md, MAINTAINERS.md\n"
+        "9. A Claude Code plugin's agents/, commands/, skills/ and output-styles/,\n"
+        "   under a directory holding .claude-plugin/plugin.json or marketplace.json\n"
+        "10. Claude Code's own config dir ($CLAUDE_CONFIG_DIR, else ~/.claude),\n"
+        "   apart from auto-memory, which has its own policy\n\n"
         "CHOOSE THE RIGHT LOCATION:\n"
         "- Is this for LLMs/agents? -> CLAUDE/\n"
         "- Is this for the current plan? -> CLAUDE/Plan/{plan-number}-*/\n"
@@ -133,6 +138,11 @@ _FALLBACK_REMOTE_DOCS_DIR: Final[str] = "remote-docs"
 _FALLBACK_PLAN_DIR: Final[str] = "CLAUDE/Plan"
 _FALLBACK_PLAN_ARCHIVE_DIRS: Final[tuple[str, ...]] = ("Completed",)
 
+# The two Claude Code settings files a checkout keeps under `.claude/`, in
+# precedence order, lowest first: the local file overrides the project file.
+_PROJECT_SETTINGS_FILENAME: Final[str] = "settings.json"
+_LOCAL_SETTINGS_FILENAME: Final[str] = "settings.local.json"
+
 # Legacy plan-archive subdirectory names that predate plan_workflow.qa's
 # completed_dir/cancelled_dir config and have no config home of their own —
 # kept as permanent additive extras alongside the facade's archive dir names.
@@ -173,6 +183,15 @@ DEFAULT_ALLOW_UNTRACKED_CLAUDE_MEMORY: Final[bool] = False
 # Path markers identifying a Claude Code auto-memory file
 # (e.g. ~/.claude/projects/<slug>/memory/MEMORY.md and per-fact files).
 _CLAUDE_MEMORY_PATH_MARKERS: Final[tuple[str, str]] = ("/.claude/projects/", "/memory/")
+
+# A Claude Code plugin root holds one of these manifests under `.claude-plugin/`,
+# and keeps its markdown components in these directories (plugins-reference,
+# "File locations reference"). Plan 00468 G8.
+_PLUGIN_META_DIRNAME: Final[str] = ".claude-plugin"
+_PLUGIN_ROOT_MANIFESTS: Final[tuple[str, str]] = ("plugin.json", "marketplace.json")
+_PLUGIN_MARKDOWN_COMPONENT_DIRS: Final[frozenset[str]] = frozenset(
+    {"agents", "commands", "skills", "output-styles"}
+)
 
 # Shell write-to-file patterns used to close the bash side-door to memory paths.
 # Redirect (> / >>) and tee targets are WRITES; reads (cat/grep/less path) have no
@@ -243,6 +262,8 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
         # knowledge belongs in tracked, reviewed project docs, not per-checkout memory.
         # Set allow_untracked_claude_memory: true to opt out and restore the old behaviour.
         self._allow_untracked_claude_memory: bool = DEFAULT_ALLOW_UNTRACKED_CLAUDE_MEMORY
+        # Claude Code's config dir; None means claude_config_dir() (test seam).
+        self._config_dir: Path | None = None
 
     def _agent_docs_dir(self) -> str:
         """Root of the agent-facing doc tree (facade, or the matching default)."""
@@ -351,7 +372,13 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
         return normalized
 
     def is_adhoc_instruction_file(self, file_path: str) -> bool:
-        """Check if this is CLAUDE.md, README.md, CHANGELOG.md, SKILL.md, agent, command, or rules file (allowed anywhere)."""
+        """Is this an instruction file allowed wherever it is written?
+
+        CLAUDE.md, README.md and CHANGELOG.md are allowed anywhere. Markdown
+        under a ``.claude/skills/``, ``.claude/commands/``, ``.claude/rules/``
+        or ``.claude/agents/`` directory is allowed at any depth. A SKILL.md
+        elsewhere is not; a plugin root's is (see ``_is_plugin_component``).
+        """
         filename = Path(file_path).name.lower()
 
         # CLAUDE.md, README.md, and CHANGELOG.md allowed anywhere
@@ -653,7 +680,13 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
     def _check_claude_code_sync(
         self, hook_input: dict[str, Any] | None = None
     ) -> GatingResult | None:
-        """Check if plansDirectory in .claude/settings.json matches plan_workflow.directory.
+        """Check if the effective plansDirectory matches plan_workflow.directory.
+
+        The effective value is Claude Code's: ``.claude/settings.local.json``
+        overrides ``.claude/settings.json``. A checkout-specific value belongs
+        in the local file, because the project file is the one an installer
+        ships (Plan 00468 Task 1.2), so a check reading only the project file
+        would deny a correctly configured checkout.
 
         Args:
             hook_input: The originating hook event, used only to key the
@@ -667,11 +700,16 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
         if not self._enforce_claude_code_sync or not self._track_plans_in_project:
             return None
 
-        settings_path = self._workspace_root / ".claude" / "settings.json"
+        claude_dir = self._workspace_root / ".claude"
         expected_value = f"./{self._track_plans_in_project}"
 
-        # eacces-safe-exempt: the project's own .claude/settings.json.
-        if not settings_path.exists():
+        present = [
+            claude_dir / name
+            for name in (_PROJECT_SETTINGS_FILENAME, _LOCAL_SETTINGS_FILENAME)
+            # eacces-safe-exempt: the project's own .claude/settings{,.local}.json.
+            if (claude_dir / name).exists()
+        ]
+        if not present:
             return self._deny_plan_sync(
                 "settings.json not found.\n\n"
                 "Plan workflow requires plansDirectory to be configured.\n\n"
@@ -681,17 +719,22 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
                 hook_input,
             )
 
-        try:
-            settings_data = json.loads(settings_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError) as e:
-            logger.error(f"Failed to read .claude/settings.json: {e}")
-            return self._deny_plan_sync(
-                f"Cannot read .claude/settings.json.\n\nError: {e}\n\n"
-                "Fix the file and restart your session.",
-                hook_input,
-            )
+        plans_directory: Any = None
+        settings_name = _PROJECT_SETTINGS_FILENAME
+        for settings_path in present:
+            try:
+                settings_data = json.loads(settings_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError) as e:
+                logger.error(f"Failed to read .claude/{settings_path.name}: {e}")
+                return self._deny_plan_sync(
+                    f"Cannot read .claude/{settings_path.name}.\n\nError: {e}\n\n"
+                    "Fix the file and restart your session.",
+                    hook_input,
+                )
+            if isinstance(settings_data, dict) and "plansDirectory" in settings_data:
+                plans_directory = settings_data["plansDirectory"]
+                settings_name = settings_path.name
 
-        plans_directory = settings_data.get("plansDirectory")
         if plans_directory is None:
             return self._deny_plan_sync(
                 "plansDirectory not set in .claude/settings.json.\n\n"
@@ -703,16 +746,16 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
             )
 
         # Normalise for comparison: strip leading "./" from both
-        normalised_actual = plans_directory.lstrip("./")
+        normalised_actual = str(plans_directory).lstrip("./")
         normalised_expected = self._track_plans_in_project.lstrip("./")
 
         if normalised_actual != normalised_expected:
             return self._deny_plan_sync(
                 "plansDirectory mismatch.\n\n"
-                f'  .claude/settings.json: "{plans_directory}"\n'
-                f'  hooks daemon config:   "{self._track_plans_in_project}"\n\n'
+                f'  .claude/{settings_name}: "{plans_directory}"\n'
+                f'  hooks daemon config: "{self._track_plans_in_project}"\n\n'
                 "These must match for plan workflow to work correctly.\n\n"
-                "Fix: Update .claude/settings.json:\n"
+                f"Fix: Update .claude/{settings_name}:\n"
                 f'  "plansDirectory": "{expected_value}"\n\n'
                 "Then restart your session.",
                 hook_input,
@@ -993,6 +1036,17 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
         if self._is_claude_memory_path(file_path):
             return not self._allow_untracked_claude_memory
 
+        # Claude Code's own config dir holds user agents, skills and plugin
+        # data, not project docs, even when it is symlinked into the project
+        # (Plan 00468 P4). Judged before any resolve() re-roots the path.
+        if self._is_in_claude_config_dir(file_path):
+            return False
+
+        # A Claude Code plugin's component markdown, judged on the path as
+        # written, before worktree re-rooting below (Plan 00468 G8).
+        if self._is_plugin_component(file_path):
+            return False
+
         # CRITICAL: Only enforce rules for files WITHIN the project root
         # Files outside project root (like Claude Code auto memory) should be allowed
         # Only check absolute paths - relative paths are always within project
@@ -1085,6 +1139,37 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
         """The on-disk path a Write/Edit names: absolute as given, else under the workspace."""
         candidate = Path(file_path)
         return candidate if candidate.is_absolute() else self._workspace_root / candidate
+
+    def _is_in_claude_config_dir(self, file_path: str) -> bool:
+        """Is the target inside Claude Code's config dir, by either spelling?
+
+        See :func:`is_in_claude_config_dir`: a config dir that contains the
+        project exempts nothing.
+        """
+        return is_in_claude_config_dir(
+            self._candidate_on_disk(file_path), self._workspace_root, config_dir=self._config_dir
+        )
+
+    def _is_plugin_component(self, file_path: str) -> bool:
+        """Is the target component markdown of a Claude Code plugin root?
+
+        The nearest ancestor holding ``.claude-plugin/plugin.json`` or
+        ``.claude-plugin/marketplace.json`` is the plugin root; markdown under
+        its ``agents/``, ``commands/``, ``skills/`` or ``output-styles/`` is
+        where Claude Code loads it from. The walk stops at the workspace root.
+        """
+        candidate = self._candidate_on_disk(file_path)
+        for directory in candidate.parents:
+            meta = directory / _PLUGIN_META_DIRNAME
+            # An unreadable manifest is not a plugin root: the layout rules apply.
+            if any(
+                path_is_file(meta / name, unreadable_means=False) for name in _PLUGIN_ROOT_MANIFESTS
+            ):
+                parts = candidate.relative_to(directory).parts
+                return len(parts) > 1 and parts[0] in _PLUGIN_MARKDOWN_COMPONENT_DIRS
+            if directory == self._workspace_root:
+                break
+        return False
 
     def _is_invalid_location(self, normalized: str, *, repo_relative: str | None = None) -> bool:
         """Check if a normalized path is in an invalid markdown location.
@@ -1391,6 +1476,12 @@ class MarkdownOrganizationHandler(PreToolUseHandlerBase):
             "apply (e.g. `vendor/acme/lib/docs/guide.md` is allowed, "
             "`vendor/acme/lib/random/notes.md` is blocked), at every nesting level "
             "(`vendor/a/b/vendor/c/d/docs/x.md` is judged as `docs/x.md`).\n\n"
+            "**Claude Code's own files are not project docs.** Markdown under Claude Code's "
+            "config dir (`$CLAUDE_CONFIG_DIR`, else `~/.claude`, even when symlinked into the "
+            "project) is never judged by these rules; auto-memory keeps its own policy. Nor is "
+            "a Claude Code plugin's `agents/`, `commands/`, `skills/` or `output-styles/` "
+            "markdown, under a directory holding `.claude-plugin/plugin.json` or "
+            "`marketplace.json`.\n\n"
             "**A declared project wins.** A `projects:` entry may name ANY directory as its "
             "`root` — under `vendor/`, inside another declared project, at any depth — and is "
             "consulted before the dependency inference, so a first-party clone that Composer "

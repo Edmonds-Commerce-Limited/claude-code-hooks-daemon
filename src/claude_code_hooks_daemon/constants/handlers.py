@@ -424,6 +424,12 @@ class HandlerID:
         config_key="agent_isolation_advisor",
         display_name="agent-isolation-advisor",
     )
+    # Plan 00468 G16: a write into an installed Claude Code plugin's files.
+    INSTALLED_PLUGIN_EDIT_ADVISOR = HandlerIDMeta(
+        class_name="InstalledPluginEditAdvisorHandler",
+        config_key="installed_plugin_edit_advisor",
+        display_name="installed-plugin-edit-advisor",
+    )
     GIT_HOOKS_EXECUTABLE_FIXER = HandlerIDMeta(
         class_name="GitHooksExecutableFixerHandler",
         config_key="git_hooks_executable_fixer",
@@ -795,6 +801,15 @@ class HandlerID:
         class_name="HookRegistrationCheckerHandler",
         config_key="hook_registration_checker",
         display_name="hook-registration-checker",
+    )
+
+    # Plugin hooks advisor (SessionStart handler) — Plan 00468 G1, G2: name
+    # each enabled Claude Code plugin that ships hooks, singling out
+    # PreToolUse. Never blocks.
+    PLUGIN_HOOKS_ADVISOR = HandlerIDMeta(
+        class_name="PluginHooksAdvisorHandler",
+        config_key="plugin_hooks_advisor",
+        display_name="plugin-hooks-advisor",
     )
 
     # Guard config drift (SessionStart handler) — Plan 00412 class 2: report a

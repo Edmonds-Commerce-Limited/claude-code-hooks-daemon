@@ -82,6 +82,37 @@ def _write_config(
     )
 
 
+class TestPathModeSkipsGitInternalsAndNestedRepositories:
+    """A ``--path`` tree's ``.git`` and nested checkouts are not its files.
+
+    ``.git`` holds commit messages, packed objects and hook samples; a nested
+    repository (a worktree, a submodule, a vendored clone) is another project.
+    The default mode never saw either, because ``git ls-files`` lists neither.
+    """
+
+    def test_a_term_in_git_internals_or_a_nested_repo_is_not_reported(self, tmp_path: Path) -> None:
+        config = tmp_path / "hooks-daemon.yaml"
+        _write_config(
+            config, public_patterns=[{"name": "alpha", "pattern": "alpha", "description": ""}]
+        )
+        tree = tmp_path / "tree"
+        (tree / ".git").mkdir(parents=True)
+        (tree / ".git" / "COMMIT_EDITMSG").write_text("alpha in a commit message\n")
+        nested = tree / "vendor" / "lib"
+        (nested / ".git").mkdir(parents=True)
+        (nested / "notes.txt").write_text("alpha in another project\n")
+        worktree = tree / "wt"
+        worktree.mkdir()
+        (worktree / ".git").write_text("gitdir: /elsewhere/.git/worktrees/wt\n")
+        (worktree / "file.txt").write_text("alpha in a linked worktree\n")
+        (tree / "real.txt").write_text("alpha in the project\n")
+
+        data = _run_checker(tree, config)
+
+        reported = {Path(v["file"]).relative_to(tree).as_posix() for v in data["violations"]}
+        assert reported == {"real.txt"}
+
+
 class TestPublicPatternScanning:
     def test_no_config_no_violations(self, tmp_path: Path) -> None:
         (tmp_path / "file.txt").write_text("nothing sensitive here\n")
@@ -323,11 +354,25 @@ class TestExcludePaths:
         excluded_dir = tmp_path / "fixtures"
         excluded_dir.mkdir()
         (excluded_dir / "sample.txt").write_text("alpha appears here\n")
+        # Something left to scan, or the run fails as an empty scan (00466 N26).
+        (tmp_path / "clean.txt").write_text("nothing to report\n")
 
         data = _run_checker(tmp_path, config)
 
         assert data["summary"]["passed"] is True
         assert data["summary"]["total_violations"] == 0
+
+    def test_excluding_every_file_is_not_a_pass(self, tmp_path: Path) -> None:
+        config = tmp_path / "hooks-daemon.yaml"
+        _write_config(config, exclude_paths=["fixtures/**"])
+        excluded_dir = tmp_path / "fixtures"
+        excluded_dir.mkdir()
+        (excluded_dir / "sample.txt").write_text("clean\n")
+
+        data = _run_checker(tmp_path, config)
+
+        assert data["summary"]["passed"] is False
+        assert "examined 0 of" in data["summary"]["vacuous_scan"]
 
     def test_non_excluded_path_still_scanned(self, tmp_path: Path) -> None:
         config = tmp_path / "hooks-daemon.yaml"

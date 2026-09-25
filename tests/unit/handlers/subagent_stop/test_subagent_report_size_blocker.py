@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from tests.claude_plugin_fixture import READ_ONLY_TOOLS, install_fake_plugin
 
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.subagent_stop.subagent_report_size_blocker import (
@@ -55,8 +56,8 @@ def _subagent_stop_input(message: str, **extra: Any) -> dict[str, Any]:
 @pytest.fixture
 def handler(tmp_path: Path) -> SubagentReportSizeBlockerHandler:
     """Review m10: without an explicit test seam, `_agent_can_write` falls
-    back to `Path.cwd()` for the project-agent lookup and `Path.home()` for
-    the user-agent one -- both real, live filesystem locations that can
+    back to `Path.cwd()` for the project-agent lookup and the real Claude
+    config dir for the user-agent one -- both real, live filesystem locations that can
     hold a `.claude/agents/*.md` this dogfooding checkout genuinely ships
     (a real risk since review M4 now consults project/user agents BEFORE
     the built-in table). Rooting both at fresh, empty tmp_path
@@ -65,7 +66,7 @@ def handler(tmp_path: Path) -> SubagentReportSizeBlockerHandler:
     directories."""
     instance = SubagentReportSizeBlockerHandler()
     instance._project_root = tmp_path / "project"
-    instance._home_dir = tmp_path / "home"
+    instance._config_dir = tmp_path / "config"
     return instance
 
 
@@ -282,6 +283,86 @@ class TestReadOnlyAgent:
         assert result.reason is not None
         assert "subagent-reports" not in result.reason
         assert "code-reviewer" in result.reason
+
+
+_PLUGIN_AGENT = "defence-before-fix:conformance-reviewer"
+
+
+class TestPluginAgent:
+    """Plan 00468 P2: a Write-less plugin agent was told "Write the full
+    report to a file now", and with an ``agent_id`` it missed the no-heredoc
+    warning ``qa-runner`` gets. A Bash heredoc is such an agent's only route
+    to a file, and it bypasses the content guards."""
+
+    def _install(self, handler: SubagentReportSizeBlockerHandler, tmp_path: Path) -> None:
+        project = tmp_path / "plugin-project"
+        (project / ".claude").mkdir(parents=True)
+        config = tmp_path / "plugin-config"
+        install_fake_plugin(
+            config,
+            project,
+            agents={
+                "conformance-reviewer.md": (
+                    f"name: conformance-reviewer\ndescription: d\ntools: {READ_ONLY_TOOLS}"
+                )
+            },
+        )
+        handler._project_root = project
+        handler._config_dir = config
+
+    def test_a_write_less_plugin_agent_gets_the_condense_message(
+        self, handler: SubagentReportSizeBlockerHandler, tmp_path: Path
+    ) -> None:
+        self._install(handler, tmp_path)
+        oversized = "x" * (handler._threshold_chars + 1)
+        hook_input = _subagent_stop_input(oversized, agent_type=_PLUGIN_AGENT)
+        del hook_input["agent_id"]
+
+        result = handler.handle(hook_input)
+
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "Write the full report to a file now" not in result.reason
+        assert "no `Write` tool" in result.reason
+        assert _PLUGIN_AGENT in result.reason
+
+    def test_a_saved_reply_carries_the_no_heredoc_warning(
+        self, handler: SubagentReportSizeBlockerHandler, tmp_path: Path
+    ) -> None:
+        self._install(handler, tmp_path)
+        assert handler._project_root is not None
+        report_dir = handler._project_root / "untracked" / "agent-reports" / "auto"
+        report_dir.mkdir(parents=True)
+        oversized = "x" * (handler._threshold_chars + 1)
+        saved = report_dir / "260924-134530-defence-before-fix_conformance-reviewer-agent-7.md"
+        saved.write_text(oversized)
+
+        result = handler.handle(
+            _subagent_stop_input(oversized, agent_type=_PLUGIN_AGENT, agent_id="agent-7")
+        )
+
+        assert result.reason is not None
+        assert str(saved) in result.reason
+        assert "Do NOT write your own copy via a Bash heredoc" in result.reason
+
+
+class TestPrescribedPathIsSanitised:
+    """Plan 00468 G12: the persister writes ``my-plugin_agent``; the prescribed
+    fallback path kept the raw colon, so the two names disagreed."""
+
+    def test_a_scoped_agent_type_is_sanitised_in_the_prescribed_path(
+        self, handler: SubagentReportSizeBlockerHandler
+    ) -> None:
+        oversized = "x" * (handler._threshold_chars + 1)
+
+        result = handler.handle(_subagent_stop_input(oversized, agent_type="other-plugin:helper"))
+
+        assert result.reason is not None
+        yymmdd = datetime.now(tz=UTC).strftime("%y%m%d")
+        assert f"untracked/agent-reports/{yymmdd}-other-plugin_helper-{{model}}.md" in (
+            result.reason
+        )
+        assert "other-plugin:helper-" not in result.reason
 
 
 class TestPersistedReportLookup:

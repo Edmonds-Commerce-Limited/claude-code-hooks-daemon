@@ -32,7 +32,7 @@ Usage:
 
 Exit codes:
     0 - No violations found
-    1 - Violations found
+    1 - Violations found, or the target is not a git repository
 """
 
 from __future__ import annotations
@@ -532,10 +532,18 @@ def main() -> int:
         )
         violations = invalid_patterns + violations
 
+    # A sweep of no history has verified nothing, so it is not a pass (00466 N26).
+    # 0 commits in a repository is not the same gap: a history baseline at HEAD
+    # leaves nothing new to sweep, and that is a genuine clean result.
+    vacuous = (
+        None if repo_present else f"{repo} is not a git repository, so there is no history to sweep"
+    )
+
     output = {
         "tool": _TOOL_NAME,
         "summary": {
-            "passed": len(violations) == 0,
+            "passed": len(violations) == 0 and vacuous is None,
+            "vacuous_scan": vacuous,
             "total_violations": len(violations),
             "commits_scanned": commits_scanned,
             "refs_scanned": refs_scanned,
@@ -562,15 +570,15 @@ def main() -> int:
                 f"  [{violation.surface}] {violation.locator} "
                 f"[{violation.rule}] {violation.message}"
             )
-    elif not repo_present:
-        print(f"Not a git repository, nothing to sweep: {repo}")
+    elif vacuous is not None:
+        print(f"FAILED: {vacuous}")
     else:
         print(
             f"No git-history violations found "
             f"({commits_scanned} commits, {refs_scanned} refs scanned)"
         )
 
-    return 1 if violations else 0
+    return 1 if violations or vacuous is not None else 0
 
 
 def _public_patterns(config_path: Path) -> list[dict[str, str]]:

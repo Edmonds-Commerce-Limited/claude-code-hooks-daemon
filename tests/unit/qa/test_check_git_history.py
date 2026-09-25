@@ -142,14 +142,25 @@ class TestCleanHistory:
         assert data["summary"]["passed"] is True
         assert data["summary"]["total_violations"] == 0
 
-    def test_non_repo_is_inert(self, tmp_path: Path) -> None:
-        """A directory that is not a git repo is not a finding — it is not a repo."""
+    def test_a_missing_repo_is_not_a_pass(self, tmp_path: Path) -> None:
+        """A sweep of no history has verified nothing (00466 N26's missing-root case)."""
         config = tmp_path / "hooks-daemon.yaml"
         _write_config(config)
 
         data = _run_checker(tmp_path / "not-a-repo", config)
 
-        assert data["summary"]["passed"] is True
+        assert data["summary"]["passed"] is False
+        assert "not a git repository" in data["summary"]["vacuous_scan"]
+
+    def test_a_directory_that_is_not_a_repo_is_not_a_pass(self, tmp_path: Path) -> None:
+        plain = tmp_path / "plain"
+        plain.mkdir()
+        config = tmp_path / "hooks-daemon.yaml"
+        _write_config(config)
+
+        data = _run_checker(plain, config)
+
+        assert data["summary"]["passed"] is False
 
     def test_missing_secret_file_is_inert(self, tmp_path: Path) -> None:
         repo = tmp_path / "repo"

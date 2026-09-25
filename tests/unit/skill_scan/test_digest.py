@@ -15,6 +15,7 @@ from claude_code_hooks_daemon.skill_scan.digest import (
     existing_skill_names,
 )
 from claude_code_hooks_daemon.skill_scan.models import Cluster, Prompt
+from tests.claude_plugin_fixture import install_fake_plugin
 
 
 def _cluster(text: str, sessions: int = 1) -> Cluster:
@@ -67,7 +68,7 @@ class TestExistingSkillNames:
     def test_lists_skill_and_command_dirs(self, tmp_path: Path) -> None:
         (tmp_path / ".claude" / "skills" / "release").mkdir(parents=True)
         (tmp_path / ".claude" / "commands" / "deploy").mkdir(parents=True)
-        names = existing_skill_names(tmp_path)
+        names = existing_skill_names(tmp_path, config_dir=tmp_path / "config")
         assert "release" in names
         assert "deploy" in names
 
@@ -75,10 +76,37 @@ class TestExistingSkillNames:
         commands = tmp_path / ".claude" / "commands"
         commands.mkdir(parents=True)
         (commands / "ship.md").write_text("do the ship")
-        assert "ship" in existing_skill_names(tmp_path)
+        assert "ship" in existing_skill_names(tmp_path, config_dir=tmp_path / "config")
 
     def test_missing_dirs_yield_empty(self, tmp_path: Path) -> None:
-        assert existing_skill_names(tmp_path) == []
+        assert existing_skill_names(tmp_path, config_dir=tmp_path / "config") == []
+
+    def test_user_skills_and_commands_are_listed(self, tmp_path: Path) -> None:
+        """Plan 00468 G14: personal skills under the Claude config dir are
+        just as available as the project's, so proposing one is a duplicate."""
+        config = tmp_path / "config"
+        (config / "skills" / "personal-skill").mkdir(parents=True)
+        (config / "commands").mkdir(parents=True)
+        (config / "commands" / "mine.md").write_text("x")
+        names = existing_skill_names(tmp_path / "project", config_dir=config)
+        assert "personal-skill" in names
+        assert "mine" in names
+
+    def test_enabled_plugin_skills_are_listed_by_scoped_name(self, tmp_path: Path) -> None:
+        """Plan 00468 G14: `/defence-before-fix:dbf` already covers a
+        fix-the-failing-check workload, so skill-scan must not propose it."""
+        project = tmp_path / "project"
+        (project / ".claude").mkdir(parents=True)
+        config = tmp_path / "config"
+        install_fake_plugin(config, project, skills={"dbf": "name: dbf\ndescription: d"})
+        assert "defence-before-fix:dbf" in existing_skill_names(project, config_dir=config)
+
+    def test_a_name_is_listed_once(self, tmp_path: Path) -> None:
+        project = tmp_path / "project"
+        (project / ".claude" / "skills" / "same").mkdir(parents=True)
+        config = tmp_path / "config"
+        (config / "skills" / "same").mkdir(parents=True)
+        assert existing_skill_names(project, config_dir=config).count("same") == 1
 
 
 class TestBuildModelPrompt:

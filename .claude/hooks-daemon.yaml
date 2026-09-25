@@ -525,7 +525,7 @@ handlers:
       priority: 38
       options:
         mode: block_once       # advisory | block_once | strict
-        no_lsp_mode: block     # block | advisory | disable
+        no_lsp_mode: advisory  # advisory | block | disable (no enabled plugin serves the file type)
 
     reference_repo_freshness:  # Gates a READ of a stale reference clone (Plan 00401)
       enabled: true            # Cache-only: this handler never touches the network
@@ -549,6 +549,10 @@ handlers:
     agent_isolation_advisor:  # Advises worktree isolation for concurrent agents
       enabled: true
       priority: 46
+
+    installed_plugin_edit_advisor:  # Advises when a write lands in an installed Claude Code plugin (Plan 00468 G16)
+      enabled: true
+      priority: 42
 
     dispatch_declaration:  # Advises a file-handoff declaration on Task dispatch (Plan 00307)
       enabled: true
@@ -796,6 +800,13 @@ handlers:
         # backup at settings.json.bak.pre-bash-migration. Set false to
         # opt out (e.g. if your team manages settings.json by hand).
         auto_migrate_settings: true
+
+    plugin_hooks_advisor:  # Names enabled Claude Code plugins that ship hooks (Plan 00468 G1, G2)
+      enabled: true
+      priority: 51
+      options:
+        # Plugin ids (name@marketplace) whose hooks the user has accepted.
+        acknowledged_plugins: []
 
     optimal_config_checker:  # Checks Claude Code env for optimal settings
       enabled: true

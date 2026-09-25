@@ -28,6 +28,7 @@ from claude_code_hooks_daemon.utils.option_coercion import coerce_int_option
 from claude_code_hooks_daemon.utils.subagent_report_paths import (
     DEFAULT_PERSISTED_REPORT_DIR,
     find_persisted_report,
+    sanitise_component,
 )
 from claude_code_hooks_daemon.utils.subagent_tool_resolution import (
     resolve_agent_can_write,
@@ -96,11 +97,11 @@ class SubagentReportSizeBlockerHandler(SubagentStopHandlerBase):
         # handler is never pinned to whatever directory the daemon happened
         # to start in.
         self._project_root: Path | None = None
-        # Test-only override for the user-agent lookup (review m10):
-        # without one, `resolve_agent_can_write` falls back to the real
-        # `Path.home()`, which a test never intends to consult. Production
-        # leaves this None, which IS that documented fallback.
-        self._home_dir: Path | None = None
+        # Test-only override for the user-agent and plugin lookups (review
+        # m10): without one, `resolve_agent_can_write` falls back to the real
+        # Claude config dir, which a test never intends to consult.
+        # Production leaves this None, which IS that documented fallback.
+        self._config_dir: Path | None = None
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """True for every SubagentStop except a re-entry (loop guard)."""
@@ -114,29 +115,32 @@ class SubagentReportSizeBlockerHandler(SubagentStopHandlerBase):
         folder's ``subagent-reports/``) — a real path an agent can write to
         immediately, not vague "write to a file" guidance. ``{yymmdd}`` is
         rendered from today's date (always known); the agent name comes from
-        ``agent_type`` when the hook input carries it, else the literal
-        placeholder token (documented in the deny message); the model is
-        always the placeholder token — it is not part of the SubagentStop
-        contract at all.
+        ``agent_type`` when the hook input carries it, sanitised exactly as
+        the persister names its files (a plugin agent's ``:`` becomes ``_``,
+        Plan 00468 G12), else the literal placeholder token (documented in
+        the deny message); the model is always the placeholder token — it is
+        not part of the SubagentStop contract at all.
         """
         yymmdd = datetime.now(tz=UTC).strftime("%y%m%d")
         agent_type = hook_input.get("agent_type")
         agent_name = (
-            agent_type if isinstance(agent_type, str) and agent_type else (_AGENT_NAME_PLACEHOLDER)
+            sanitise_component(agent_type)
+            if isinstance(agent_type, str) and agent_type
+            else _AGENT_NAME_PLACEHOLDER
         )
         return f"{self._fallback_report_dir}{yymmdd}-{agent_name}-{_MODEL_PLACEHOLDER}.md"
 
     def _agent_can_write(self, hook_input: dict[str, Any]) -> bool | None:
         """Plan 00460 Task 1.1: whether the stopping agent has a `Write` tool.
 
-        True/False when resolvable (a documented built-in, or a project/user
-        `.claude/agents/*.md` file), else None (unknown — callers must keep
-        today's behaviour, never guess).
+        True/False when resolvable (a documented built-in, a project/user
+        agent file, or an enabled plugin's agent), else None (unknown —
+        callers must keep today's behaviour, never guess).
         """
         agent_type = hook_input.get("agent_type")
         root = resolve_lookup_root(self._project_root, getattr(self, "_workspace_root", None))
         return resolve_agent_can_write(
-            agent_type if isinstance(agent_type, str) else None, root, home_dir=self._home_dir
+            agent_type if isinstance(agent_type, str) else None, root, config_dir=self._config_dir
         )
 
     def _find_persisted_report(self, hook_input: dict[str, Any], message: str) -> Path | None:
@@ -339,8 +343,9 @@ class SubagentReportSizeBlockerHandler(SubagentStopHandlerBase):
             "exists at this surface), then reply with a short completion "
             "summary plus the file path.\n\n"
             "**Fix (fallback — persistence unavailable or failed, agent has "
-            "no `Write` tool, e.g. `Explore`/`Plan`, or a project agent "
-            "whose frontmatter omits `Write`)**: condense the "
+            "no `Write` tool, e.g. `Explore`/`Plan`, or a project, user or "
+            "Claude Code plugin agent whose frontmatter omits `Write`)**: "
+            "condense the "
             "reply to a short summary under the threshold instead — never "
             "write the file another way. A Bash heredoc/redirect/`tee` "
             "reaches disk WITHOUT the content guards (sensitive-content, "

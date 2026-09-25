@@ -270,11 +270,11 @@ handlers:
       priority: 32
 
     lsp_enforcement:       # Steers LLMs toward LSP tools instead of Grep/Bash grep
-      enabled: false       # Enable when LSP is configured
+      enabled: false       # Enable once a code intelligence plugin is installed
       priority: 38
       options:
         mode: block_once       # advisory | block_once | strict
-        no_lsp_mode: block     # block | advisory | disable
+        no_lsp_mode: advisory  # advisory | block | disable (no enabled plugin serves the file type)
 
     reference_repo_freshness:  # Gates a READ of a stale reference clone (Plan 00401)
       enabled: true            # Silent unless the project actually governs repos
@@ -298,6 +298,10 @@ handlers:
     agent_isolation_advisor:  # Advises worktree isolation when agents share a checkout
       enabled: false          # Enable if you dispatch concurrent agents
       priority: 46
+
+    installed_plugin_edit_advisor:  # Advises when a write lands in an installed Claude Code plugin's files
+      enabled: true
+      priority: 42
 
     dispatch_declaration:  # Advises/enforces a file-handoff declaration on Task dispatch
       enabled: true          # On by default (Plan 00307 Task 4.3); set false to opt out
@@ -523,6 +527,12 @@ handlers:
     hook_registration_checker:  # Validates hook registrations in Claude Code settings
       enabled: true             # Alerts when expected hooks are missing or misconfigured
       priority: 51
+
+    plugin_hooks_advisor:  # Names enabled Claude Code plugins that ship hooks
+      enabled: true        # Never blocks; singles out PreToolUse hooks
+      priority: 51
+      options:
+        acknowledged_plugins: []  # Plugin ids (name@marketplace) the user has accepted
 
     optimal_config_checker:  # Checks Claude Code env for optimal settings
       enabled: true

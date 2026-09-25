@@ -60,7 +60,7 @@ Usage:
 
 Exit codes:
     0 -- no violations
-    1 -- at least one violation
+    1 -- at least one violation, or no Python file was examined
 """
 
 from __future__ import annotations
@@ -72,6 +72,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
+
+from claude_code_hooks_daemon.utils.scan_scope import vacuous_scan_failure, walk_files
 
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 _QA_OUTPUT_DIR: Final[Path] = _REPO_ROOT / "untracked" / "qa"
@@ -297,7 +299,7 @@ def scan_file(path: Path) -> list[Violation]:
 
 def scan_tree(scan_root: Path) -> list[Violation]:
     violations: list[Violation] = []
-    for path in sorted(scan_root.rglob("*.py")):
+    for path in walk_files(scan_root, "*.py"):
         violations.extend(scan_file(path))
     return violations
 
@@ -315,12 +317,14 @@ def main() -> int:
             scan_root = Path(args[index + 1]).resolve()
 
     violations = scan_tree(scan_root) if scan_root.is_dir() else []
-    files_scanned = sum(1 for _ in scan_root.rglob("*.py")) if scan_root.is_dir() else 0
+    files_scanned = len(walk_files(scan_root, "*.py"))
+    vacuous = vacuous_scan_failure(examined=files_scanned, noun="Python files", root=scan_root)
 
     output = {
         "tool": "skip_list_substring",
         "summary": {
-            "passed": len(violations) == 0,
+            "passed": len(violations) == 0 and vacuous is None,
+            "vacuous_scan": vacuous,
             "total_violations": len(violations),
             "files_scanned": files_scanned,
         },
@@ -338,7 +342,9 @@ def main() -> int:
         output_file.parent.mkdir(parents=True, exist_ok=True)
         output_file.write_text(json.dumps(output, indent=2))
 
-    if violations:
+    if vacuous is not None:
+        print(f"FAILED: {vacuous}")
+    elif violations:
         print(f"Found {len(violations)} unbounded skip-list membership test(s):")
         for violation in violations:
             print(f"  {violation.file}:{violation.line}")
@@ -346,7 +352,7 @@ def main() -> int:
     else:
         print(f"No unbounded skip-list membership tests found ({files_scanned} files scanned)")
 
-    return 1 if violations else 0
+    return 1 if violations or vacuous is not None else 0
 
 
 if __name__ == "__main__":

@@ -47,13 +47,35 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import re
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from types import ModuleType
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+
+
+def _load_scan_scope() -> ModuleType:
+    """The walkers' shared ``scan_scope`` module, loaded by file path.
+
+    This audit runs under a bare ``python3`` (``run_capture_corruption_check.sh``),
+    where importing the daemon package fails on its third-party dependencies.
+    ``scan_scope`` itself is stdlib-only, so it is loaded without the package.
+    """
+    location = REPO_ROOT / "src" / "claude_code_hooks_daemon" / "utils" / "scan_scope.py"
+    spec = importlib.util.spec_from_file_location("_qa_scan_scope", location)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load the shared scan scope from {location}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_SCAN_SCOPE = _load_scan_scope()
+
 DEFAULT_SCAN_DIRS = (
     REPO_ROOT / "scripts",
     REPO_ROOT / "src" / "claude_code_hooks_daemon" / "skills",
@@ -725,7 +747,7 @@ def _collect_shell_files(roots: list[Path]) -> list[Path]:
         if not root.is_dir():
             continue
         for pattern in ("*.sh", "*.bash"):
-            for script in sorted(root.rglob(pattern)):
+            for script in _SCAN_SCOPE.walk_files(root, pattern):
                 if _is_excluded(script, root):
                     continue
                 resolved = script.resolve()

@@ -2074,12 +2074,14 @@ handlers:
 
 **Grep is still correct for:** text patterns in content, log searching, and finding strings in config files. Those are never blocked.
 
+**When LSP counts as available:** only where an enabled Claude Code plugin provides a language server for the searched file type. Claude Code keeps the LSP tool inactive until you install a code intelligence plugin for the language. The file type comes from the Grep `glob`, `type` or `path`, or from a grep/rg command's `--include`, `-g`/`--glob`, `-t`/`--type` and file arguments. A search that names no file type counts as covered by any enabled language server. `ENABLE_LSP_TOOL` is not consulted.
+
 **Options:**
 
-| Option        | Values                             | Default      | Description                                                                                                                                        |
-| ------------- | ---------------------------------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `mode`        | `block_once`, `advisory`, `strict` | `block_once` | `block_once` denies the first symbol-lookup grep per session with guidance and allows retries; `strict` denies every one; `advisory` never denies. |
-| `no_lsp_mode` | `block`, `advisory`, `disable`     | `block`      | Behaviour when no LSP server is configured. `disable` switches the handler off entirely in that case.                                              |
+| Option        | Values                             | Default      | Description                                                                                                                                                               |
+| ------------- | ---------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mode`        | `block_once`, `advisory`, `strict` | `block_once` | `block_once` denies the first symbol-lookup grep per session with guidance and allows retries; `strict` denies every one; `advisory` never denies.                        |
+| `no_lsp_mode` | `advisory`, `block`, `disable`     | `advisory`   | Behaviour when no enabled plugin serves the searched file type. `advisory` allows and suggests a code intelligence plugin; `block` denies anyway; `disable` stays silent. |
 
 **Config example:**
 
@@ -2091,7 +2093,7 @@ handlers:
       priority: 38
       options:
         mode: block_once
-        no_lsp_mode: disable  # no LSP configured? stay out of the way
+        no_lsp_mode: disable  # no plugin serves this file type? stay out of the way
 ```
 
 ---

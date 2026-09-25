@@ -526,7 +526,7 @@ branch) and `secret_file_matching` (after the guard-defects branch merges,
 in the shell-parser consolidation). Mark Remedied when 00464 lands; the
 siblings are tracked in the coordinator's consolidation work.
 
-### N27 — `skill_scan` and `tool_report` build the transcript directory name two different ways
+### N27 — ✅ Remedied — `skill_scan` and `tool_report` build the transcript directory name two different ways
 
 **Found by the 00468 core agent** (report on its branch,
 `subagent-reports/260924-p468-core-opus-5-5.md`). Claude Code keeps a
@@ -544,7 +544,29 @@ The helper raises, not returns empty, when the directory does not exist and
 the caller asked for it. RED test: a project path with `.` and `_` resolves
 to the same directory from both commands.
 
-### N26 — `check_skill_references.py` scans zero files when run from a worktree
+**Remedy** (branch `worktree-p468-core`): Claude Code's real rule was read
+from its shipped bundle. The per-project directory is
+`join(<config dir>, "projects", uC(realpath(cwd)))`. `uC` replaces each UTF-16
+code unit outside `[a-zA-Z0-9]` with `-`, and a name over 200 characters is
+cut to 200 and suffixed with `-` plus the base-36 absolute value of a 32-bit
+Java-style string hash. No real `projects/` entry for a path with `.` or `_`
+exists in this container (only `-workspace`). So the expected values in the
+tests were computed by running that JavaScript under node.
+
+- `utils/claude_config.project_dir_name()` and `claude_project_dir(project_root, *, config_dir=None, must_exist=False)`
+  implement it. `must_exist` raises `FileNotFoundError` naming the directory.
+- Every derivation site delegates: `skill_scan.extraction.derive_transcript_dir`,
+  `tool_report.analyser.transcripts_root_for` (which `block_report` re-exports),
+  and the `cache-gaps` auto-discovery.
+- `cache-gaps` names the directory it looked in. `tool-report` and
+  `block-report` name a missing derived directory on stderr.
+- Tests: `tests/unit/utils/test_transcript_dir_derivations_agree.py` (RED:
+  skill_scan named the wrong directory), `TestProjectDirName`,
+  `TestClaudeProjectDir`, and a
+  `test_a_missing_derived_directory_is_named_on_stderr` test in both cli
+  report test files. Release note 36.
+
+### N26 — ✅ Remedied — `check_skill_references.py` scans zero files when run from a worktree
 
 **Found by the 00468 core agent.** Run from any worktree, the skill
 references QA check reports success after scanning 0 files. A check that
@@ -574,6 +596,112 @@ file whose path contains a noise-directory name such as `untracked` or
 - `check_skill_references.py` (this entry): `_EXCLUDED_DIRS` holds both names
   and is tested against `path.parts`, so it is very likely the same cause.
   `check_github_urls.py` tests `path.parts` the same way and should be checked.
+
+**Remedy** (branch `worktree-p468-core`):
+
+- **Cause.** Not the `.git` file: `_should_exclude` matched `_EXCLUDED_DIRS`
+  against the ABSOLUTE path's parts. `untracked` and `worktrees` are
+  excluded names, and every worktree lives under `untracked/worktrees/`.
+
+- **Audit.** All 22 `check_*.py` were audited. Two more had the same shape:
+  `check_doc_truth.py` (0 docs from a worktree) and `check_github_urls.py`
+  (0 files). `check_magic_values.py` matched `constants`, `fixtures` and
+  `test` the same way, which is latent here and live for a checkout under
+  such a directory. Only `check_project_handler_tests.py` had a zero guard.
+
+- **Fix.** New `utils/scan_scope.py`:
+
+  - `relative_parts(path, root)` gives the components below the scan root;
+  - `vacuous_scan_failure(examined=, candidates=, noun=)` turns "examined 0 of
+    N" into a failure.
+
+  The four checks use both. From this worktree they now scan 699 (skill
+  refs), 1,774 (doc truth), 4,038 (GitHub URLs) and 1,763 (magic values)
+  files, with no new violations.
+
+- **Class pin.** `tests/integration/test_qa_walkers_examine_files_from_any_checkout.py`
+  copies the tracked tree under a path made of every excluded name
+  (`test/fixtures/constants/build/examples/Completed/venv/ccy/untracked/worktrees/wt`).
+  It runs each of the 14 tree-walking checks there and requires a non-zero
+  examined count. RED: 4 failed (skill refs, doc truth, GitHub URLs, magic
+  values). A second test requires every `check_*.py` to be listed as a
+  walker or a fixed-input check, so a new check cannot skip the pin.
+
+- **Existing tests.** The exclusion tests that asserted `passed` over a tree
+  holding only the excluded file (the vacuous shape itself) now scan a clean
+  companion file and assert the examined count. Release note 37.
+
+The other 10 walkers are worktree-safe, and are pinned by the integration
+test rather than given their own zero guard.
+
+- **`audit_*.py` too.** The first audit globbed only `check_*.py`, so it
+  missed `audit_shell.py`, which had the same absolute-path exclusion
+  (`untracked`) and passed on 0 scripts from a worktree (the B2 integration
+  found it too). It now uses `relative_parts`, reports `files_scanned`
+  (62 from this worktree) and fails on examining 0 of N scripts. The pin
+  classifies `audit_*.py` as well. `audit_error_hiding.py` and
+  `audit_capture_corruption.py` were already relative, and already exit 1
+  when they collect nothing (Plan 00364 Task 5.4). They are pinned by
+  requiring their artefact from the hostile location.
+
+- **Reconciled with B2.** B2's doc_truth fix (08c4be0e) and its git-visible
+  and protected-path filter (fd6c5438) are kept. The noise-name test in
+  `_iter_markdown` now goes through `scan_scope.relative_parts`, the one
+  mechanism. B2's `test_a_checkout_inside_a_worktrees_directory_is_still_scanned`
+  is kept. There was no duplicate helper to delete: B2 had used an inline
+  `relative_to`. B2's new `check_unreachable_handle_branch.py` is classified in
+  the pin as a counted walker.
+
+- **The missing-root variant.** A walker could also examine 0 of 0, and pass,
+  when its scan root was absent or empty. `check_unreachable_handle_branch`
+  was the first one found. `vacuous_scan_failure` now fails on 0 examined in
+  every case, and names the root as missing or empty. Every walker applies it
+  now:
+
+  - the five that already used it get the stricter rule;
+  - it is added to `check_authored_path_stat`, `check_british_english`,
+    `check_doc_snippets`, `check_eacces_safe_predicates`,
+    `check_python_var_guidance`, `check_repo_hygiene`,
+    `check_security_downgrade_flags`, `check_sensitive_content`,
+    `check_skip_list_substring` and `check_unreachable_handle_branch`;
+  - `check_git_history` fails on a `--repo` that is not a git repository. It
+    no longer passes as "inert". 0 commits in a real repository still passes:
+    a baseline at HEAD leaves nothing new to sweep.
+  - `check_python_var_guidance` also fails when one of its declared default
+    roots or files is gone, rather than skipping it.
+
+  Pins in the same integration test:
+
+  - every walker, run from a checkout that holds only `scripts/qa/` minus its
+    shell scripts, fails or examines something. RED: 6 walkers passed on 0.
+  - every walker pointed at a missing root, and at an empty one, through its
+    own root option, exits non-zero. RED: 3 more (`check_git_history`,
+    `check_python_var_guidance`, `check_sensitive_content`), then
+    `check_repo_hygiene` on an empty git repository.
+  - `ROOT_OPTIONS` must name every walker's root option except
+    `check_magic_values`, which has none (the gutted checkout covers it), and
+    `audit_error_hiding`.
+
+  Tests that asserted a pass over a tree with nothing to scan now add a clean
+  scanned file, or assert the failure. Release note 37.
+
+- **`.git` and nested checkouts.** In `--path` mode, `check_sensitive_content`
+  walked the tree with a raw `rglob("*")`. That read `.git` internals (commit
+  messages, hook samples) and nested repositories as the tree's own files.
+  `git ls-files` lists neither in the default mode. Sixteen walkers had the
+  same raw recursive walk (`rglob`, or a `**/` glob in `check_doc_snippets`).
+
+  - **Fix.** New `scan_scope.walk_files(root, pattern)` never enters `.git`, and
+    it skips any directory below the root that holds a `.git` entry (a
+    worktree, submodule or clone). Every walker now enumerates through it.
+    `audit_capture_corruption` runs under a bare `python3`, so it loads the
+    stdlib-only module by file path. A test pins that `scan_scope` imports only
+    the standard library.
+  - **RED.** A `--path` tree reported a planted term from `.git/COMMIT_EDITMSG`,
+    from a nested repository and from a linked worktree. Only `real.txt` is
+    reported now. The pin
+    `test_a_walker_enumerates_through_the_shared_walk` failed for all 16
+    walkers. Examined counts on this repository are unchanged.
 
 ### N25 — a slow handler runs out the client's 30 s budget, and a timeout is an ALLOW for the whole PreToolUse chain
 

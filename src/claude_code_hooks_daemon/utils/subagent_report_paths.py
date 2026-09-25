@@ -88,8 +88,13 @@ _GITIGNORE_FILENAME: Final[str] = ".gitignore"
 _GITIGNORE_CONTENT: Final[str] = "*\n"
 
 
-def _sanitise(value: str) -> str:
-    """A filesystem-safe filename component, or ``""`` for an empty input."""
+def sanitise_component(value: str) -> str:
+    """A filesystem-safe filename component, or ``""`` for an empty input.
+
+    Public because a report path this module does not write must still name
+    an agent the same way: ``subagent_report_size_blocker`` prescribes a
+    fallback path from the same agent type (Plan 00468 G12).
+    """
     return _SAFE_COMPONENT_RE.sub("_", value)
 
 
@@ -152,8 +157,8 @@ def report_filename(agent_type: str, agent_id: str, *, when: datetime) -> str:
     renders a documented placeholder rather than an ugly double-hyphen.
     """
     stamp = when.strftime(_FILENAME_TIMESTAMP_FORMAT)
-    safe_type = _sanitise(agent_type) or _PLACEHOLDER_AGENT_TYPE
-    safe_id = _sanitise(agent_id) or _PLACEHOLDER_AGENT_ID
+    safe_type = sanitise_component(agent_type) or _PLACEHOLDER_AGENT_TYPE
+    safe_id = sanitise_component(agent_id) or _PLACEHOLDER_AGENT_ID
     return f"{stamp}-{safe_type}-{safe_id}{_MD_SUFFIX}"
 
 
@@ -252,8 +257,8 @@ def find_persisted_report(directory: Path, agent_type: str, agent_id: str) -> Pa
         return None
     if not directory.is_dir():
         return None
-    safe_type = _sanitise(agent_type) or _PLACEHOLDER_AGENT_TYPE
-    safe_id = _sanitise(agent_id)
+    safe_type = sanitise_component(agent_type) or _PLACEHOLDER_AGENT_TYPE
+    safe_id = sanitise_component(agent_id)
     pattern = f"*-{safe_type}-{safe_id}*{_MD_SUFFIX}"
     try:
         matches = list(directory.glob(pattern))

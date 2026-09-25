@@ -24,6 +24,7 @@ from typing import Any
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
+from claude_code_hooks_daemon.handlers.status_line.settings_reader import get_settings_path
 from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 
 logger = logging.getLogger(__name__)
@@ -58,9 +59,10 @@ class OptimalConfigCheckerHandler(SessionStartHandlerBase):
         """Get path to Claude global settings file.
 
         Returns:
-            Path to ~/.claude/settings.json
+            Path to ``<config dir>/settings.json`` (``$CLAUDE_CONFIG_DIR``, else
+            ``~/.claude``; Plan 00468 G13)
         """
-        return Path.home() / ".claude" / "settings.json"
+        return get_settings_path()
 
     def _read_global_settings(self) -> dict[str, Any]:
         """Read ~/.claude/settings.json.

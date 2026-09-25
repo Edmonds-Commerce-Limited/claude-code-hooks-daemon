@@ -19,7 +19,7 @@ from unittest.mock import patch
 import psutil
 import pytest
 
-from claude_code_hooks_daemon.constants import DaemonPath, ProjectPath
+from claude_code_hooks_daemon.constants import DaemonPath
 from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
@@ -34,6 +34,13 @@ from claude_code_hooks_daemon.handlers.session_start.lsp_noise_checker import (
 from claude_code_hooks_daemon.strategies.lsp_noise.registry import LspNoiseStrategyRegistry
 
 _NEW_SESSION = {"hook_event_name": "SessionStart", "source": "startup"}
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_claude_config_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The required set now depends on where the Claude config dir is (Plan
+    00468 G11); pin it outside every test project unless a test says otherwise."""
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path.parent / f"{tmp_path.name}-claude"))
 
 
 @dataclass
@@ -267,7 +274,6 @@ class TestRequiredExcludes:
         assert DaemonPath.UNTRACKED_DIR in required
         assert "docs/plans" in required
         assert "vendored" in required
-        assert ProjectPath.CCY_PLUGINS_DIR in required
         for name in CORE_VENDORED_BUILD_DIR_NAMES:
             assert f"**/{name}" in required
 
@@ -276,7 +282,38 @@ class TestRequiredExcludes:
         default = ProjectLayout.built_in_default()
         assert default.plan_dir in required
         assert default.remote_docs_dir in required
-        assert ProjectPath.CCY_PLUGINS_DIR in required
+
+
+class TestInProjectClaudeConfigDir:
+    """Plan 00468 G11: the plugin runtime tree is excluded wherever the
+    Claude config dir actually is, not only under a directory named ``ccy``."""
+
+    def test_the_ccy_layout_excludes_its_plugins_tree(self, tmp_path: Path) -> None:
+        config = tmp_path / ".claude" / "ccy"
+        config.mkdir(parents=True)
+        required = required_excludes(None, tmp_path, config_dir=config)
+        assert ".claude/ccy/plugins" in required
+
+    def test_any_other_in_project_config_dir_is_derived(self, tmp_path: Path) -> None:
+        config = tmp_path / "tooling" / "claude-home"
+        config.mkdir(parents=True)
+        required = required_excludes(None, tmp_path, config_dir=config)
+        assert "tooling/claude-home/plugins" in required
+        assert ".claude/ccy/plugins" not in required
+
+    def test_a_config_dir_outside_the_project_adds_nothing(self, tmp_path: Path) -> None:
+        project = tmp_path / "project"
+        project.mkdir()
+        required = required_excludes(None, project, config_dir=tmp_path / "home" / ".claude")
+        assert not any(entry.endswith("/plugins") for entry in required)
+
+    def test_the_handler_derives_it_from_the_resolved_config_dir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        config = tmp_path / "in-tree-claude"
+        config.mkdir()
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config))
+        assert "in-tree-claude/plugins" in required_excludes(None, tmp_path)
 
 
 # ── The process scan ─────────────────────────────────────────────────

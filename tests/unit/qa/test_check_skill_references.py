@@ -5,6 +5,7 @@ instead of bare 'python -m claude_code_hooks_daemon' or '/hooks-daemon' slash sy
 """
 
 import json
+import os
 import subprocess  # nosec B404 - subprocess used for running QA checker only
 import sys
 from pathlib import Path
@@ -18,13 +19,17 @@ CHECKER = SCRIPT_DIR / "check_skill_references.py"
 PYTHON = Path(sys.executable)
 
 
-def _run_checker(*args: str) -> dict[str, Any]:
-    """Run the checker with --json and return parsed output."""
+def _run_checker(*args: str, env: dict[str, str] | None = None) -> dict[str, Any]:
+    """Run the checker with --json and return parsed output.
+
+    ``env`` adds to the inherited environment, e.g. a ``CLAUDE_CONFIG_DIR``.
+    """
     subprocess.run(  # nosec B603 B607 - trusted checker script
         [str(PYTHON), str(CHECKER), "--json", *args],
         capture_output=True,
         text=True,
         check=False,
+        env={**os.environ, **(env or {})},
     )
     # A scoped run reports beside what it scanned, never into this checkout's
     # published artefact (Plan 00432). Reading the scoped file is also what
@@ -116,11 +121,12 @@ class TestCorrectPatterns:
         data = _run_checker("--path", str(tmp_path))
         assert data["summary"]["passed"]
 
-    def test_no_python_files_passes(self, tmp_path: Path) -> None:
-        """Directory with no Python files should pass."""
+    def test_a_directory_with_nothing_to_scan_is_not_a_pass(self, tmp_path: Path) -> None:
+        """Examining 0 files verified nothing (00466 N26's empty-root case)."""
         (tmp_path / "readme.txt").write_text("hello")
         data = _run_checker("--path", str(tmp_path))
-        assert data["summary"]["passed"]
+        assert not data["summary"]["passed"]
+        assert "found no files" in data["summary"]["vacuous_scan"]
 
 
 class TestBashScripts:
@@ -180,6 +186,15 @@ class TestMarkdownFiles:
         assert data["summary"]["passed"]
 
 
+def _write_clean_companion(directory: Path) -> None:
+    """A clean file beside an excluded one, so the scan examines something.
+
+    00466 N26: a scan that examines nothing fails. An exclusion test therefore
+    shows the excluded file was skipped by the examined count, not by a pass.
+    """
+    (directory / "clean.md").write_text("Use the hooks-daemon skill.\n", encoding="utf-8")
+
+
 class TestExclusions:
     """Verify certain files/dirs are excluded from scanning."""
 
@@ -195,17 +210,23 @@ class TestExclusions:
 
         data = _run_checker("--path", str(tmp_path), "--include", CHECKER.name)
 
-        assert data["summary"]["passed"]
+        assert data["summary"]["total_violations"] == 0
         assert (
             data["summary"]["files_scanned"] == 0
         ), f"the checker scanned its own copy instead of excluding it; {data['violations']}"
+        # 00466 N26: the only candidate was excluded, so nothing was examined.
+        # That is reported as a failure, never as a pass.
+        assert not data["summary"]["passed"]
+        assert data["summary"]["vacuous_scan"]
 
     def test_excludes_test_files(self, tmp_path: Path) -> None:
         """Test files should be excluded (they test the patterns)."""
         source = tmp_path / "test_something.py"
         source.write_text('msg = "Run python -m claude_code_hooks_daemon.daemon.cli restart"\n')
+        _write_clean_companion(tmp_path)
         data = _run_checker("--path", str(tmp_path))
         assert data["summary"]["passed"]
+        assert data["summary"]["files_scanned"] == 1
 
     def test_excludes_ccy_runtime_tree(self, tmp_path: Path) -> None:
         """The claude-yolo `ccy` runtime/memory tree is gitignored state, not
@@ -217,8 +238,54 @@ class TestExclusions:
         memory = tmp_path / ".claude" / "ccy" / "projects" / "-workspace" / "memory"
         memory.mkdir(parents=True)
         (memory / "MEMORY.md").write_text("- wired into /hooks-daemon skill as `check`\n")
+        _write_clean_companion(tmp_path)
         data = _run_checker("--path", str(tmp_path))
         assert data["summary"]["passed"]
+        assert data["summary"]["files_scanned"] == 1
+
+    def test_excludes_an_in_tree_claude_config_dir_of_any_name(self, tmp_path: Path) -> None:
+        """Plan 00468 G11: the Claude config dir holds transcripts, memory and
+        third-party plugin code wherever it is, not only under a `ccy` dir."""
+        memory = tmp_path / "tooling" / "claude-home" / "projects" / "-x" / "memory"
+        memory.mkdir(parents=True)
+        (memory / "MEMORY.md").write_text("- wired into /hooks-daemon skill as `check`\n")
+        _write_clean_companion(tmp_path)
+        data = _run_checker(
+            "--path",
+            str(tmp_path),
+            env={"CLAUDE_CONFIG_DIR": str(tmp_path / "tooling" / "claude-home")},
+        )
+        assert data["summary"]["passed"]
+        assert data["summary"]["files_scanned"] == 1
+
+    def test_a_tree_inside_an_agent_worktree_is_scanned(self, tmp_path: Path) -> None:
+        """00466 N26: excluded names are judged below the scan root, so a
+        checkout under `untracked/worktrees/` is scanned, not skipped whole."""
+        tree = tmp_path / "untracked" / "worktrees" / "wt"
+        tree.mkdir(parents=True)
+        (tree / "guide.md").write_text("Run /hooks-daemon restart\n", encoding="utf-8")
+        data = _run_checker("--path", str(tree))
+        assert data["summary"]["files_scanned"] == 1
+        assert not data["summary"]["passed"]
+
+    def test_an_excluded_directory_inside_the_tree_is_still_skipped(self, tmp_path: Path) -> None:
+        scratch = tmp_path / "untracked" / "scratch"
+        scratch.mkdir(parents=True)
+        (scratch / "notes.md").write_text("Run /hooks-daemon restart\n", encoding="utf-8")
+        _write_clean_companion(tmp_path)
+        data = _run_checker("--path", str(tmp_path))
+        assert data["summary"]["passed"]
+        assert data["summary"]["files_scanned"] == 1
+
+    def test_the_same_tree_is_scanned_when_it_is_not_the_config_dir(self, tmp_path: Path) -> None:
+        """Control: the exclusion follows the config dir, not the name."""
+        memory = tmp_path / "tooling" / "claude-home" / "projects" / "-x" / "memory"
+        memory.mkdir(parents=True)
+        (memory / "MEMORY.md").write_text("- wired into /hooks-daemon skill as `check`\n")
+        data = _run_checker(
+            "--path", str(tmp_path), env={"CLAUDE_CONFIG_DIR": str(tmp_path / "elsewhere")}
+        )
+        assert not data["summary"]["passed"]
 
 
 class TestJsonOutput:

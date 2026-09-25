@@ -54,27 +54,33 @@ first, and the other fixes build on it.
   plugin keys are now in the tracked `.claude/settings.local.json`, which no
   installer ships, and `.claude/settings.json` is restored byte-for-byte to
   its content before the install.
-- [ ] ⬜ **Task 1.2**: A test fails when the shipped settings template carries
+- [x] ✅ **Task 1.2**: A test fails when the shipped settings template carries
   `enabledPlugins` or `extraKnownMarketplaces`, on every install and upgrade
   route (shell copy, three-way merge, Python generator). Review
   `plansDirectory` under the same rule. Add a SELF_INSTALL.md line saying
-  that `.claude/settings.json` ships to clients (G6).
+  that `.claude/settings.json` ships to clients (G6). **Decided (unattended,
+  2026-09-24)**: `plansDirectory` is dogfood-only (the plan workflow is
+  opt-in and its directory configurable), so it moved to
+  `settings.local.json` and the test covers it too.
 
 ### Phase 2: one resolver for the config dir and enabled plugins (G13, P2, P6, P7, G11, G12, G14, G15)
 
-- [ ] ⬜ **Task 2.1**: `claude_config_dir()`, and an enabled-plugins resolver
+- [x] ✅ **Task 2.1**: `claude_config_dir()`, and an enabled-plugins resolver
   that reads `installed_plugins.json` and `enabledPlugins` per scope, honours
   `projectPath` for project scope, and lists each plugin's agents, skills,
   hooks and LSP servers. `project_containment` (G10's docstring) and every
   later task use it.
-- [ ] ⬜ **Task 2.2**: `subagent_tool_resolution` gains a plugin tier with
+- [x] ✅ **Task 2.2**: `subagent_tool_resolution` gains a plugin tier with
   scoped ids (P2). A YAML failure falls back to a lenient frontmatter parser
   (P6). The resolver returns the frontmatter, so `agent_isolation_advisor`
   honours `isolation: worktree` (P7). The size blocker's path is sanitised
   (G12).
-- [ ] ⬜ **Task 2.3**: The LSP exclude advice and skill-reference checks
+- [x] ✅ **Task 2.3**: The LSP exclude advice and skill-reference checks
   derive the config dir (G11). `skill-scan` knows plugin and user skills
   (G14). `tool-report` sums enabled plugins' always-on cost (G15).
+  **Decided (unattended, 2026-09-24)**: `check_skill_references.py` keeps
+  its `ccy` name exclusion beside the derived one, because `.claude/ccy/`
+  also holds tracked supervisor files that CI does not scan today.
 - [x] ✅ **Task 2.4**: File the upstream DBF issue: both agents lack `Write`
   but are told to write a report. Filed as
   [Defence-Before-Fix/claude-plugin#3](https://github.com/Defence-Before-Fix/claude-plugin/issues/3).
@@ -83,31 +89,41 @@ first, and the other fixes build on it.
 
 - [x] ✅ **Task 3.1**: `format-markdown`, `housekeeping` and
   `find-comment-blocks` walk git-visible files through the shared helper from
-  00466 N9 (P3). The in-project config dir exclusion is deferred: another
-  branch is building `claude_config_dir()`, and git-visibility already covers
-  this repository's case because `.claude/ccy` is gitignored.
-- [ ] ⬜ **Task 3.2**: `markdown_organization` classifies the raw path
+  00466 N9 (P3). They also always exclude an in-project config dir, resolved
+  by `claude_config_dir()`, so a tracked config dir inside the project is
+  never walked either.
+- [x] ✅ **Task 3.2**: `markdown_organization` classifies the raw path
   before resolving it: the Claude config dir is exempt from the project
   layout rules, and the memory policy is unchanged (P4). A plugin root is
   recognised by `.claude-plugin/plugin.json` or `marketplace.json`, and its
   component markdown is allowed (G8).
-- [ ] ⬜ **Task 3.3**: An advisory on writes under the installed plugin cache
+- [x] ✅ **Task 3.3**: An advisory on writes under the installed plugin cache
   or marketplaces (G16). `project_containment` reads the Claude home per
   session (G10).
 
 ### Phase 4: plugin hooks and LSP plugins (G1, G2, G7, G9, P5)
 
-- [ ] ⬜ **Task 4.1**: A SessionStart advisory, and a `health` line, name
+- [x] ✅ **Task 4.1**: A SessionStart advisory, and a `health` line, name
   each enabled plugin that ships hooks, singling out PreToolUse hooks and
   their `updatedInput` power, with a per-plugin acknowledgement (G1, G2).
-  Document the limit in the security docs.
+  Document the limit in the security docs. **Decided (unattended,
+  2026-09-24)**: the security note is in `CLAUDE/ARCHITECTURE.md` § Security
+  Considerations, since `CLAUDE/Security/` registers defect classes with a
+  Detector, not limits. The optional PostToolUse input comparison (G2) is
+  not built: the daemon cannot see a plugin hook's output, and the tool's
+  own PostToolUse input would have to be matched to the judged input by
+  `tool_use_id` across events.
 - [ ] ⬜ **Task 4.2**: `settings_repair` re-reads before it replaces, and the
   writer count is corrected (G7). `daemon_sync_after_merge` and
   `merge_qa_report` judge the repository the command ran in, using 00464's
   resolver once it merges (G9).
-- [ ] ⬜ **Task 4.3**: `lsp_enforcement` enforces only when an enabled LSP
+- [x] ✅ **Task 4.3**: `lsp_enforcement` enforces only when an enabled LSP
   plugin covers the searched language. Its advice names installing a
-  code-intelligence plugin (P5).
+  code-intelligence plugin (P5). **Decided (unattended, 2026-09-24)**:
+  `ENABLE_LSP_TOOL` is no longer read (the vendored tools-reference makes the
+  plugin the switch), `no_lsp_mode` defaults to `advisory`, and a search that
+  names no file type counts as covered by any enabled server; the audit's
+  dominant-language fallback is not built.
 
 ### Phase 5: documentation (G3, G4, G5, P8)
 
@@ -118,9 +134,15 @@ first, and the other fixes build on it.
   home is `CLAUDE/ClaudeCodePlugins.md`, with a human summary at
   `docs/guides/CLAUDE_CODE_PLUGINS.md`. Task 4.1's security-docs note should
   link to it rather than restate the `updatedInput` limit.
-- [ ] ⬜ **Task 5.2**: P8 is 00422 N24 (the orchestrator simulation says
+- [x] ✅ **Task 5.2**: P8 is 00422 N24 (the orchestrator simulation says
   "would have been denied" for Bash). Confirm Plan 00463's fix covers it, or
-  fix it here.
+  fix it here. **Confirmed (unattended)**: Plan 00463's `e467a5cc` covers it.
+  Its `TestTheSimulatedRecordTellsTheTruth` checks that "would have been
+  denied" appears exactly when the armed handler denies, across Bash, Write
+  (plan and non-plan), Edit, NotebookEdit and an unknown tool. That class
+  passed at 00463's `01f9ef51`. The fix is not ported here, since both
+  branches would edit the same lines. It reaches main only with Plan 00463, so
+  00468 must not archive before 00463 lands.
 
 ## Success Criteria
 

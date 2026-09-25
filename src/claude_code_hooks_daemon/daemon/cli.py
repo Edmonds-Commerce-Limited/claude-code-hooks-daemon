@@ -49,7 +49,7 @@ from pydantic import ValidationError as PydanticValidationError
 
 from claude_code_hooks_daemon.config.loader import ConfigLoader
 from claude_code_hooks_daemon.config.models import Config
-from claude_code_hooks_daemon.constants import Timeout
+from claude_code_hooks_daemon.constants import HandlerID, Timeout
 from claude_code_hooks_daemon.constants.modes import DaemonMode
 from claude_code_hooks_daemon.constants.permissions import FileMode
 from claude_code_hooks_daemon.core.event import EventType
@@ -97,6 +97,8 @@ from claude_code_hooks_daemon.install.install_stamp import read_install_stamp
 from claude_code_hooks_daemon.install.release_notes import load_release_notes_between
 from claude_code_hooks_daemon.issue_report.build import build_report
 from claude_code_hooks_daemon.issue_report.upstream import filing_command
+from claude_code_hooks_daemon.utils.claude_config import claude_config_dir, is_in_claude_config_dir
+from claude_code_hooks_daemon.utils.claude_plugins import resolve_enabled_plugins
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
 from claude_code_hooks_daemon.utils.git_repo import (
     git_visible_ancestor_dirs,
@@ -113,6 +115,7 @@ from claude_code_hooks_daemon.utils.hook_registration import (
     validate_settings_hooks,
 )
 from claude_code_hooks_daemon.utils.markdown_format import format_markdown_text
+from claude_code_hooks_daemon.utils.plugin_hooks import ACKNOWLEDGED_PLUGINS_OPTION, health_lines
 from claude_code_hooks_daemon.utils.report_scrubbing import scrub_report
 from claude_code_hooks_daemon.utils.secret_redaction import get_active_secret_terms
 from claude_code_hooks_daemon.utils.session_action_items import (
@@ -1124,6 +1127,25 @@ def check_hook_registration_warnings(project_path: Path) -> list[str]:
     return warnings
 
 
+def _acknowledged_plugins(project_path: Path) -> list[str]:
+    """The plugin ids ``plugin_hooks_advisor`` is told to leave out.
+
+    An unreadable config acknowledges nothing, so every plugin is shown
+    without the mark; the reason is logged.
+    """
+    config_path = project_path / ".claude" / "hooks-daemon.yaml"
+    try:
+        config = Config.load_or_default(config_path)
+    except (ValueError, OSError) as exc:
+        logger.warning("health: cannot read %s, no plugin acknowledged: %s", config_path, exc)
+        return []
+    options = config.get_handler_config(
+        "session_start", HandlerID.PLUGIN_HOOKS_ADVISOR.config_key
+    ).options
+    value = options.get(ACKNOWLEDGED_PLUGINS_OPTION)
+    return [item for item in value if isinstance(item, str)] if isinstance(value, list) else []
+
+
 def cmd_health(args: argparse.Namespace) -> int:
     """Check daemon health status.
 
@@ -1192,6 +1214,13 @@ def cmd_health(args: argparse.Namespace) -> int:
             "Port legacy-style scripts to project-level handlers via "
             "`init-project-handlers`."
         )
+
+    # Plan 00468 G1: advisory, never changes the exit code.
+    print("\nClaude Code plugin hooks:")
+    for line in health_lines(
+        resolve_enabled_plugins(project_path), _acknowledged_plugins(project_path)
+    ):
+        print(line)
 
     # Project-handler protection signal (Plan 00143). Unlike hook-registration
     # drift, this DOES drive the exit code: a skipped project handler is a
@@ -3682,15 +3711,20 @@ def _resolve_transcript(args: argparse.Namespace) -> Path | None:
     Auto-discovery is a convenience, never a guess made silently — the caller
     prints which file was chosen, because analysing the wrong session produces
     a perfectly plausible report about somebody else's work.
+
+    Raises:
+        FileNotFoundError: auto-discovery found no project directory; the
+            message names the directory looked in (00466 N27).
     """
     named = getattr(args, "transcript", None)
     if named:
         candidate = Path(named)
         return candidate if candidate.is_file() else None
 
+    from claude_code_hooks_daemon.utils.claude_config import claude_project_dir
+
     project_path = get_project_path(getattr(args, "project_root", None))
-    slug = str(project_path).replace("/", "-")
-    session_dir = Path.home() / ".claude" / "projects" / slug
+    session_dir = claude_project_dir(project_path, must_exist=True)
     try:
         transcripts = sorted(
             session_dir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True
@@ -3741,7 +3775,11 @@ def cmd_cache_gaps(args: argparse.Namespace) -> int:
     """
     from claude_code_hooks_daemon.daemon.cache_gap_analysis import analyse_transcript
 
-    transcript = _resolve_transcript(args)
+    try:
+        transcript = _resolve_transcript(args)
+    except FileNotFoundError as e:
+        print(f"ERROR: {e}. Pass --transcript PATH explicitly.", file=sys.stderr)
+        return 2
     if transcript is None:
         print(
             "ERROR: no transcript found. Pass --transcript PATH explicitly.",
@@ -5414,10 +5452,14 @@ def _iter_markdown_candidates(
       -- even when ``project_root`` is not a git repository and the filter
       above is inert, so ``format-markdown`` never rewrites (or reports a
       would-reformat finding for) a protected file's content.
+    - Claude Code's config dir, when it sits in the project, is pruned
+      (Plan 00468 P3): it may be tracked, or the project may not be a git
+      repository, so git visibility alone does not keep it out.
     """
     from claude_code_hooks_daemon.utils.path_exclusion import is_path_excluded
 
     project_root_str = str(project_root)
+    config_dir = claude_config_dir()
     git_visible = git_visible_paths(project_root)
     descend_roots = None if git_visible is None else git_visible_ancestor_dirs(git_visible)
     for dirpath, dirnames, filenames in os.walk(root):
@@ -5426,6 +5468,8 @@ def _iter_markdown_candidates(
         for name in sorted(dirnames):
             child = current / name
             if _is_nested_git_repo_root(child):
+                continue
+            if is_in_claude_config_dir(child, project_root, config_dir=config_dir):
                 continue
             if descend_roots is not None and not _rel_is_git_visible(
                 child, project_root, descend_roots
@@ -5443,6 +5487,8 @@ def _iter_markdown_candidates(
                 # this skips it rather than handing it to read_text() to fail.
                 continue
             if is_path_excluded(str(candidate), exclude_paths, project_root=project_root_str):
+                continue
+            if is_in_claude_config_dir(candidate, project_root, config_dir=config_dir):
                 continue
             if git_visible is not None and not _rel_is_git_visible(
                 candidate, project_root, git_visible
@@ -7268,6 +7314,25 @@ def cmd_housekeeping(args: argparse.Namespace) -> int:
     return 0
 
 
+def _report_transcripts_root(args: argparse.Namespace, project_root: Path) -> Path:
+    """The transcripts directory a report reads: ``--transcripts-dir``, else derived.
+
+    A derived directory that does not exist is named on stderr. The report
+    still runs (a fresh project has no transcripts yet), but an empty report
+    must never hide WHERE it looked (00466 N27).
+    """
+    from claude_code_hooks_daemon.utils.claude_config import claude_project_dir
+
+    override = getattr(args, "transcripts_dir", None)
+    if override:
+        return Path(override)
+    try:
+        return claude_project_dir(project_root, must_exist=True)
+    except FileNotFoundError as e:
+        print(f"NOTE: {e}; reporting no transcripts.", file=sys.stderr)
+        return claude_project_dir(project_root)
+
+
 def cmd_tool_report(args: argparse.Namespace) -> int:
     """Produce the tools-vs-tokens usage report (Plan 00293).
 
@@ -7287,15 +7352,14 @@ def cmd_tool_report(args: argparse.Namespace) -> int:
         2 on operational errors.
     """
     from claude_code_hooks_daemon.config.models import Config
-    from claude_code_hooks_daemon.tool_report.analyser import (
-        analyse_transcripts,
-        transcripts_root_for,
-    )
+    from claude_code_hooks_daemon.tool_report.analyser import analyse_transcripts
+    from claude_code_hooks_daemon.tool_report.plugin_costs import plugin_listing_costs
     from claude_code_hooks_daemon.tool_report.report import (
         build_report,
         render_markdown,
         report_to_json,
     )
+    from claude_code_hooks_daemon.utils.claude_plugins import resolve_enabled_plugins
 
     resolved_root = resolve_tree_root(args)
     if resolved_root is None:
@@ -7303,14 +7367,14 @@ def cmd_tool_report(args: argparse.Namespace) -> int:
     project_root = resolved_root
     config = Config.load_or_default(project_root / ".claude" / "hooks-daemon.yaml")
 
-    override = getattr(args, "transcripts_dir", None)
-    transcripts_root = Path(override) if override else transcripts_root_for(project_root)
+    transcripts_root = _report_transcripts_root(args, project_root)
 
     summary = analyse_transcripts(transcripts_root)
     report = build_report(
         summary,
         never_want=config.tool_policy.never_want_map(),
         low_use_max_calls=config.tool_policy.low_use_max_calls,
+        plugin_costs=plugin_listing_costs(resolve_enabled_plugins(project_root)),
     )
     markdown = render_markdown(report)
     payload = report_to_json(report)
@@ -7358,10 +7422,7 @@ def cmd_block_report(args: argparse.Namespace) -> int:
         0 on success (a project with no transcripts yet still reports),
         2 on operational errors.
     """
-    from claude_code_hooks_daemon.block_report.analyser import (
-        analyse_transcripts,
-        transcripts_root_for,
-    )
+    from claude_code_hooks_daemon.block_report.analyser import analyse_transcripts
     from claude_code_hooks_daemon.block_report.report import (
         build_report,
         render_markdown,
@@ -7384,8 +7445,7 @@ def cmd_block_report(args: argparse.Namespace) -> int:
     # _init_project_context_for_cli's own docstring for the failure modes.
     _init_project_context_for_cli(args)
 
-    override = getattr(args, "transcripts_dir", None)
-    transcripts_root = Path(override) if override else transcripts_root_for(project_root)
+    transcripts_root = _report_transcripts_root(args, project_root)
 
     summary = analyse_transcripts(transcripts_root)
     report = build_report(
