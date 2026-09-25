@@ -244,6 +244,67 @@ class TestShellWordNormalisationThroughTheHandler:
         assert not handler.matches(_hook_input("Bash", {"command": cmd}))
 
 
+class TestBothEdgesTextualIntersectionThroughTheHandler:
+    """m-2 (n466-n24 review 4 addendum), end-to-end through the real
+    handler: a ``?``-only interior truncation of a both-edges stem denies
+    textually, whatever the caller's cwd or the filesystem's current
+    contents -- folded into the DP intersection, not the FS-truth route."""
+
+    def test_cd_elsewhere_still_denies_an_interior_question_mark_truncation(self) -> None:
+        handler = _handler()
+        cmd = "cd /tmp && cat /elsewhere/demo.se?ret"
+        hook_input = _hook_input("Bash", {"command": cmd})
+        hook_input["cwd"] = "/tmp"
+        assert handler.matches(hook_input)
+
+    def test_a_file_created_later_in_the_same_command_still_denies(self) -> None:
+        handler = _handler()
+        cmd = "echo hi > /tmp/demo.secret && cat /tmp/demo.se?ret"
+        hook_input = _hook_input("Bash", {"command": cmd})
+        hook_input["cwd"] = "/tmp"
+        assert handler.matches(hook_input)
+
+    def test_an_unrelated_star_bearing_token_stays_allowed(self) -> None:
+        handler = _handler()
+        hook_input = _hook_input("Bash", {"command": "cat report-[0-9]*.txt"})
+        hook_input["cwd"] = "/tmp"
+        assert not handler.matches(hook_input)
+
+
+class TestContentContextThroughTheHandler:
+    """n466-n24 review 4 addendum, false-positive fold-in, end-to-end: a
+    Write/Edit of ordinary Python source that merely LOOKS glob-shaped to
+    the crude tokeniser must stay allowed, while a real protected-path
+    reference in the same kind of file still denies."""
+
+    def test_python_unpacking_subscript_snippet_is_allowed(self) -> None:
+        handler = _handler()
+        hook_input = _hook_input(
+            "Edit",
+            {
+                "file_path": "/proj/helper.py",
+                "new_string": "combined = [*words[:subcommand_index], extra_word]\n",
+            },
+        )
+        assert not handler.matches(hook_input)
+        assert handler.handle(hook_input).decision == Decision.ALLOW
+
+    def test_a_quoted_literal_mention_in_python_still_denies(self) -> None:
+        handler = _handler()
+        hook_input = _hook_input(
+            "Write",
+            {"file_path": "/proj/helper.py", "content": 'x = open(".vault-password")\n'},
+        )
+        assert handler.matches(hook_input)
+
+    def test_a_shell_script_brace_sequence_mention_still_denies(self) -> None:
+        handler = _handler()
+        hook_input = _hook_input(
+            "Write", {"file_path": "/proj/helper.sh", "content": "cat id_rs{a..a}\n"}
+        )
+        assert handler.matches(hook_input)
+
+
 class TestContentScan:
     """Task 4.3: authored SCRIPTS referencing a protected path are denied."""
 

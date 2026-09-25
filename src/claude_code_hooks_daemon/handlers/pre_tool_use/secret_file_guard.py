@@ -477,6 +477,13 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         ``exclude_paths`` (handler option + project-wide ``daemon.exclude_paths``)
         scopes THIS surface only: the guard's own source and tests legitimately
         name protected paths. A protected path itself is never excludable.
+
+        Scanned with ``context="content"`` (n466-n24 review 4 addendum,
+        false-positive fold-in b): authored content is source code, never
+        shell text a shell will expand, so the AGGRESSIVE glob-shaped
+        heuristics stay off here -- only an exact/glob-pattern LITERAL match
+        (a quoted path string, a script's own protected-name reference)
+        still denies. See ``sfm.MentionContext`` for the full rationale.
         """
         if not any(path.endswith(extension) for extension in _SCRIPT_EXTENSIONS):
             return None
@@ -489,7 +496,11 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             return None
         content = str(tool_input.get(_FIELD_CONTENT, "") or tool_input.get(_FIELD_NEW_STRING, ""))
         return sfm.find_protected_mention_detail(
-            content, patterns, deadline=time.monotonic() + sfm.SCAN_DEADLINE_SECONDS, cwd=cwd
+            content,
+            patterns,
+            deadline=time.monotonic() + sfm.SCAN_DEADLINE_SECONDS,
+            cwd=cwd,
+            context="content",
         )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:

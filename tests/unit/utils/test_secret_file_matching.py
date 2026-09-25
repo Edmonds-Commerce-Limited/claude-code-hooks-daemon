@@ -1791,17 +1791,184 @@ class TestShellWordNormalisation:
         assert result is None
 
 
+class TestBothEdgesTextualIntersectionIsCwdAndExistenceIndependent:
+    """m-2 (n466-n24 review 4 addendum): the both-edges FS-truth route
+    denies a genuine ``?``-only interior truncation of a both-edges stem
+    only when the file actually EXISTS and is reachable from the caller's
+    cwd -- so a `cd` elsewhere in the same command, or a file the command
+    creates later in the SAME command, hid a real mention from it. Folding
+    the ``?``-only case into the textual DP (``_glob_intersection_mention``,
+    via ``_dp_intersection_is_meaningful``'s both-edges branch) needs
+    neither: it judges what the token's own text asserts, not what the
+    filesystem currently holds."""
+
+    def test_cd_elsewhere_still_denies_an_interior_question_mark_truncation(self) -> None:
+        result = sfm.find_protected_mention_detail(
+            "cd /tmp && cat /elsewhere/demo.se?ret",
+            sfm.DEFAULT_PROTECTED_PATTERNS,
+            cwd="/tmp",
+        )
+        assert result is not None
+        assert result[0] == "*.secret*"
+
+    def test_a_file_created_later_in_the_same_command_still_denies(self) -> None:
+        """The create-then-read shape: nothing on disk when the scan runs,
+        proving this does not depend on filesystem truth at all."""
+        result = sfm.find_protected_mention_detail(
+            "echo hi > /tmp/demo.secret && cat /tmp/demo.se?ret",
+            sfm.DEFAULT_PROTECTED_PATTERNS,
+            cwd="/tmp",
+        )
+        assert result is not None
+        assert result[0] == "*.secret*"
+
+    def test_an_unrelated_star_bearing_token_stays_allowed(self) -> None:
+        """The over-promiscuity control (Plan 00306/00311): a token that
+        carries its own ``*`` does not glob-intersect a both-edges pattern
+        just because some substring happens to line up -- a both-edges
+        pattern's own wildcards could absorb ANY such token, which is
+        exactly why only the bounded ``?`` case is folded in here."""
+        result = sfm.find_protected_mention_detail(
+            "cat report-[0-9]*.txt", sfm.DEFAULT_PROTECTED_PATTERNS, cwd="/tmp"
+        )
+        assert result is None
+
+    def test_another_unrelated_star_bearing_token_stays_allowed(self) -> None:
+        result = sfm.find_protected_mention_detail(
+            "cat secret*.py", sfm.DEFAULT_PROTECTED_PATTERNS, cwd="/tmp"
+        )
+        assert result is None
+
+
+class TestContentContextSkipsAggressiveGlobIntersection:
+    """n466-n24 review 4 addendum, false-positive fold-in: a Python
+    unpacking-plus-subscript token (``*words[subcommand_index``, from a real
+    list literal ``[*words[:subcommand_index], ...]``) is glob-shaped by the
+    crude tokeniser's own delimiter split, but names no real path and no
+    shell will ever expand it -- it is not Bash text at all. The AGGRESSIVE
+    glob-shaped heuristics (edge-overlap, DP intersection -- both-edges
+    included, per m-2 -- and the both-edges FS-truth route) are Bash-only;
+    ``context="content"`` restricts Write/Edit content scanning to the
+    literal matcher, per team-lead's explicit remedy: "the aggressive glob
+    intersection is for Bash command words, which the shell really
+    expands."""
+
+    def test_the_reported_python_unpacking_snippet_is_allowed_as_content(self) -> None:
+        content = "combined = [*words[:subcommand_index], extra_word]\n"
+        result = sfm.find_protected_mention_detail(
+            content, sfm.DEFAULT_PROTECTED_PATTERNS, context="content"
+        )
+        assert result is None
+
+    def test_the_same_snippet_denies_on_the_bash_route(self) -> None:
+        """Control: this is a context-gated allowance, not a blanket one --
+        confirms the default context is unaffected (though this specific
+        shape happens not to trip the bash-route heuristics either, since
+        the unclosed-bracket residue fix (a) also applies there)."""
+        content = "combined = [*words[:subcommand_index], extra_word]\n"
+        result = sfm.find_protected_mention_detail(content, sfm.DEFAULT_PROTECTED_PATTERNS)
+        assert result is None
+
+    def test_an_interior_wildcard_string_literal_denies_on_bash_but_not_content(self) -> None:
+        """The genuinely context-dependent case: an interior-wildcard glob
+        trips the DP intersection check on the Bash route (N10's own live
+        example, an everyday agent-typed command), but the SAME text as a
+        quoted Python string literal is source code, not a shell word a
+        shell will ever expand -- content scanning must not run the
+        aggressive glob-shaped heuristics on it."""
+        bash_command = "cat prod.vault-passw*rd"
+        assert (
+            sfm.find_protected_mention_detail(bash_command, sfm.DEFAULT_PROTECTED_PATTERNS)
+            is not None
+        )
+        source_line = "pattern = 'prod.vault-passw*rd'\n"
+        assert (
+            sfm.find_protected_mention_detail(
+                source_line, sfm.DEFAULT_PROTECTED_PATTERNS, context="content"
+            )
+            is None
+        )
+
+    def test_a_quoted_literal_mention_still_denies_as_content(self) -> None:
+        content = 'x = open(".vault-password")\n'
+        result = sfm.find_protected_mention_detail(
+            content, sfm.DEFAULT_PROTECTED_PATTERNS, context="content"
+        )
+        assert result is not None
+
+    def test_a_script_brace_sequence_mention_still_denies_as_content(self) -> None:
+        """The literal matcher still catches a script's own protected-name
+        reference after brace-sequence expansion decodes it to the exact
+        name -- content scanning is restricted, not disabled."""
+        content = "cat id_rs{a..a}\n"
+        result = sfm.find_protected_mention_detail(
+            content, sfm.DEFAULT_PROTECTED_PATTERNS, context="content"
+        )
+        assert result is not None
+
+    def test_a_both_edges_interior_question_mark_glob_stays_allowed_as_content(self) -> None:
+        """The both-edges textual intersection (m-2) is itself Bash-only for
+        the identical reason -- a code token is not a shell word, so a
+        string literal that happens to look like a ``?``-only interior
+        truncation must not deny under content scanning."""
+        content = "pattern = 'demo.se?ret'\n"
+        assert (
+            sfm.find_protected_mention_detail("cat demo.se?ret", sfm.DEFAULT_PROTECTED_PATTERNS)
+            is not None
+        )
+        result = sfm.find_protected_mention_detail(
+            content, sfm.DEFAULT_PROTECTED_PATTERNS, context="content"
+        )
+        assert result is None
+
+
+class TestUnclosedBracketResidueIsLiteral:
+    """n466-n24 review 4 addendum, false-positive fold-in a: a ``[`` with no
+    matching ``]`` INSIDE the token is not a bracket class -- bash, like
+    ``fnmatch``, reads an unterminated bracket expression as a literal
+    character. ``_token_literal_residue`` used to strip it anyway (it was
+    listed in ``_GLOB_CHARS``, the same table used to compute a PATTERN's
+    stem), silently shortening a token's residue for no linguistic reason."""
+
+    def test_unmatched_bracket_survives_in_the_residue(self) -> None:
+        assert sfm._token_literal_residue("*words[subcommand_index") == "words[subcommand_index"
+
+    def test_a_complete_bracket_expression_is_still_removed_whole(self) -> None:
+        assert sfm._token_literal_residue("id_r[sx]a") == "id_ra"
+
+
 class TestBothEdgesFilesystemTruthRoute:
     """M2c (Plan 00466 guard-defects review 2): a both-edges pattern
     (``*.secret*``, ``*vault_pass*``) asserts only "contains this text
-    anywhere", so a bare interior-wildcard spelling of it stays deliberately
-    unreachable through the DP/overlap heuristics -- those would over-fire on
-    ordinary prose (see ``_both_edges_residue_is_near_total_stem_match``'s
-    own docstring). The filesystem is the only oracle that cannot itself
-    false-positive: expand the token's glob against the HOOK's cwd (passed
-    explicitly here, never the daemon process's own) and deny only when a
-    REAL protected-shaped file is what it names.
+    anywhere", so an interior-wildcard spelling of it stays deliberately
+    unreachable through the edge-overlap heuristic -- that check is gated on
+    an open edge by construction, exactly so it does not re-litigate the
+    N4/m1 false positives.
+
+    m-2 (n466-n24 review 4 addendum) folded a ``?``-only interior spelling
+    INTO the textual DP intersection (``_glob_intersection_mention``,
+    gated by ``_dp_intersection_is_meaningful``'s both-edges branch): a
+    ``?`` can only absorb one character, so a genuine intersection needs the
+    token's literal text to closely resemble the stem already -- a real
+    signal, denied whatever exists on disk or in which cwd. A token
+    carrying its own ``*`` stays excluded from that textual test (a both-
+    edges pattern's own wildcards can absorb an arbitrary run on either side
+    of an inserted literal, so ANY ``*``-bearing token trivially
+    "intersects" -- Plan 00306/00311's own false-positive class,
+    ``report-[0-9]*.txt``/``secret*.py``), so THIS class is what the
+    filesystem is still the one oracle for: expand the token's glob against
+    the HOOK's cwd (passed explicitly here, never the daemon process's own)
+    and deny only when a REAL protected-shaped file is what it names.
     """
+
+    def test_interior_question_mark_spelling_denies_textually_with_no_real_file(self) -> None:
+        """m-2: the ``?``-only case denies from the token's text alone,
+        independent of whether the file exists."""
+        result = sfm.find_protected_mention_detail(
+            "cat demo.se?ret", sfm.DEFAULT_PROTECTED_PATTERNS, cwd="/tmp"
+        )
+        assert result is not None
+        assert result[0] == "*.secret*"
 
     def test_interior_question_mark_spelling_denies_when_the_file_is_real(
         self, tmp_path: Path
@@ -1831,11 +1998,15 @@ class TestBothEdgesFilesystemTruthRoute:
         assert result is not None
         assert result[0] == "*vault_pass*"
 
-    def test_a_glob_that_expands_to_nothing_does_not_deny(self, tmp_path: Path) -> None:
+    def test_a_star_glob_that_expands_to_nothing_does_not_deny(self, tmp_path: Path) -> None:
         """No real file named this way exists here -- a glob to nothing
-        reads nothing, so there is genuinely no disclosure to stop."""
+        reads nothing, so there is genuinely no disclosure to stop. Uses the
+        ``*`` spelling specifically (m-2): that shape is EXCLUDED from the
+        textual DP by design, so this still tests the FS route's own
+        allow-on-no-match behaviour, unlike the ``?`` spelling which now
+        denies textually regardless of what this test's tmp_path holds."""
         result = sfm.find_protected_mention_detail(
-            "cat demo.se?ret", sfm.DEFAULT_PROTECTED_PATTERNS, cwd=str(tmp_path)
+            "cat demo.s*t", sfm.DEFAULT_PROTECTED_PATTERNS, cwd=str(tmp_path)
         )
         assert result is None
 

@@ -430,6 +430,28 @@ Verified end-to-end through the real `SecretFileGuardHandler`, both shipped
 defaults and a project-configured exact pattern. Full detail:
 `subagent-reports/260924-n466-guards-review4-fix-sonnet-5.md`.
 
+**Correction (addendum, guard-defects review 4)**: two more gaps folded into
+the same class. (1) A false positive: ordinary Python (`[*words[:subcommand_index], ...]`) tripped the guard, because `_token_literal_residue` treated an
+UNCLOSED `[` as a wildcard character to strip (bash reads it as literal),
+and because Write/Edit CONTENT scanning ran the same AGGRESSIVE glob-shaped
+heuristics a real shell command needs, on source code that no shell ever
+expands. Fixed both: the residue fix, and a `context="bash"|"content"`
+parameter threaded through the whole mention-scan API, restricting content
+scanning to the literal/glob-pattern matcher only. (2) m-2 (the both-edges
+FS-truth route is cwd/existence-dependent): a `?`-only interior spelling of
+a both-edges pattern (`demo.se?ret`, `vault?passwords.yml`) now denies
+TEXTUALLY, via a both-edges branch in `_dp_intersection_is_meaningful` that
+treats the DP call as meaningful only when the token carries no `*` — a
+both-edges pattern's own wildcards can absorb the required substring
+adjacent to ANY `*` the token has, making the DP trivially satisfiable and
+reopening Plan 00306/00311's false-positive class otherwise
+(`report-[0-9]*.txt`, `secret*.py`); a `?` can only absorb one character
+each, so a genuine `?`-only intersection is a real signal. A `*`-bearing
+both-edges truncation (`demo.s*t`) still needs the FS-truth route
+unchanged — flagged to team-lead as a judgement call, not a full resolution
+of every example in the addendum's own RED-test wording. Full detail:
+`subagent-reports/260924-n466-guards-review4-fix-sonnet-5.md`, Addenda 1-2.
+
 ### N9 — ✅ Remedied — `docs_qa` judges gitignored markdown, so installing a Claude Code plugin fails local full QA
 
 **Found by the coordinator** right after installing the Defence Before Fix plugin at project scope (Plan 00467). In this container Claude Code's config directory is `.claude/ccy/`, so the plugin's cache (`.claude/ccy/plugins/cache/...`) and marketplace clone (`.claude/ccy/plugins/marketplaces/...`) land inside the repository. Both are gitignored (`.claude/ccy/.gitignore:3: *`). `llm_qa.py docs_qa` then reported 12 `source-tree-markdown` findings, one per vendored spec file, and the tool FAILED. It reported 0 findings at batch A's gate, before the install. CI does not see this, because a fresh checkout has no `.claude/ccy/`. Every local full QA run, including the coordinator's integration gate, now fails on files that are not part of the project.
