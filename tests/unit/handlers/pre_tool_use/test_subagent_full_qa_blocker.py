@@ -24,8 +24,10 @@ without looking broken:
 from __future__ import annotations
 
 import os
+import shlex
 import time
 from collections.abc import Iterator, Sequence
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
@@ -514,16 +516,20 @@ class TestTheParserEdges:
         assert find_full_qa_invocation(command, _patterns()) is None, command
 
     def test_nesting_is_followed_to_a_fixed_depth_then_fails_closed(self) -> None:
-        """Past three levels the code is not read, so naming a program denies (review 5)."""
+        """Past three levels the code is not read, so it is denied (review 5, review 8 n2).
+
+        Whether or not it names a program: the deepest code may run a file,
+        and a file's name is no program's.
+        """
         three_deep = find_full_qa_invocation("eval 'eval \"eval pytest\"'", _patterns())
         assert three_deep is not None
         assert not three_deep.fail_closed
-        four_deep = 'eval "eval \'eval \\"eval pytest\\"\'"'
-        match = find_full_qa_invocation(four_deep, _patterns())
-        assert match is not None
-        assert "could not be parsed" in match.fail_closed
-        narrow = 'eval "eval \'eval \\"eval ls\\"\'"'
-        assert find_full_qa_invocation(narrow, _patterns()) is None
+        for innermost in ("pytest", "ls"):
+            four_deep = f'eval "eval \'eval \\"eval {innermost}\\"\'"'
+            match = find_full_qa_invocation(four_deep, _patterns())
+            assert match is not None, innermost
+            assert match.fail_closed == _blocker_module._TOO_DEEP_REASON
+        assert find_full_qa_invocation("eval 'eval \"eval ls\"'", _patterns()) is None
 
     def test_a_word_no_path_can_hold_names_nothing(self, tmp_path: Path) -> None:
         """An embedded NUL cannot be looked up, so without a grammar it does not target the run.
@@ -2017,6 +2023,78 @@ class TestAFileUnderTheParseCapIsParsedOnce:
         )
         match = find_full_qa_invocation("bash selfrun.sh", _patterns(), cwd=tmp_path)
         assert match is not None
+
+
+class TestTheMemoKeyCarriesWhatAVerdictDependsOn:
+    """Review 8 n2: a memoised verdict was reused where it no longer held.
+
+    ``PYTEST_ADDOPTS`` set by a file sourced after the first judgement, and
+    a verdict computed deep in a chain reused at the top, each gave a stale
+    ALLOW. Code nested deeper than is followed is denied, never name-scanned:
+    a name scan cannot see a file that the deep code runs in turn.
+    """
+
+    @staticmethod
+    def _files(tmp_path: Path, files: dict[str, str]) -> Path:
+        (tmp_path / ".git").mkdir()
+        (tmp_path / "tests" / "unit" / "qa").mkdir(parents=True)
+        for name, text in files.items():
+            (tmp_path / name).write_text(text, encoding="utf-8")
+        return tmp_path
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "bash x_tgt.sh; source y_addopts.sh; bash x_tgt.sh",
+            "bash x_tgt.sh; . y_addopts.sh && bash x_tgt.sh",
+        ],
+    )
+    def test_addopts_set_after_a_first_verdict_are_seen(self, tmp_path: Path, command: str) -> None:
+        root = self._files(
+            tmp_path,
+            {"x_tgt.sh": "pytest tests/unit/qa\n", "y_addopts.sh": "export PYTEST_ADDOPTS=tests\n"},
+        )
+        assert find_full_qa_invocation(command, _patterns(), cwd=root) is not None
+
+    def test_a_verdict_from_deep_in_a_chain_is_not_reused_at_the_top(self, tmp_path: Path) -> None:
+        chain = ["p", "q", "x", "y", "z"]
+        files = {f"{a}.sh": f"bash {b}.sh\n" for a, b in pairwise(chain)}
+        files["z.sh"] = "pytest tests\n"
+        root = self._files(tmp_path, files)
+        for command in ("bash p.sh; bash x.sh", "bash p.sh", "bash x.sh"):
+            assert find_full_qa_invocation(command, _patterns(), cwd=root), command
+
+    def test_files_nested_deeper_than_is_followed_are_denied(self, tmp_path: Path) -> None:
+        depth = _blocker_module._MAX_FILE_DEPTH + 1
+        files = {f"f{n}.sh": f"bash f{n + 1}.sh\n" for n in range(depth)}
+        files[f"f{depth}.sh"] = "ls\n"
+        root = self._files(tmp_path, files)
+        match = find_full_qa_invocation("bash f0.sh", _patterns(), cwd=root)
+        assert match is not None
+        assert match.fail_closed == _blocker_module._TOO_DEEP_REASON
+
+    def test_a_chain_within_the_depth_that_runs_nothing_full_is_allowed(
+        self, tmp_path: Path
+    ) -> None:
+        depth = _blocker_module._MAX_FILE_DEPTH - 1
+        files = {f"f{n}.sh": f"bash f{n + 1}.sh\n" for n in range(depth)}
+        files[f"f{depth}.sh"] = "ls\n"
+        root = self._files(tmp_path, files)
+        assert find_full_qa_invocation("bash f0.sh", _patterns(), cwd=root) is None
+
+    def test_a_file_that_feeds_itself_is_not_denied_for_depth(self, tmp_path: Path) -> None:
+        root = self._files(tmp_path, {"a.sh": "bash b.sh\n", "b.sh": "bash a.sh\nls\n"})
+        assert find_full_qa_invocation("bash a.sh", _patterns(), cwd=root) is None
+
+    def test_shell_code_nested_deeper_than_is_followed_is_denied(self, tmp_path: Path) -> None:
+        """Past the depth, code that spells no program may still run a file that does."""
+        root = self._files(tmp_path, {"full.sh": "pytest tests\n"})
+        command = "bash full.sh"
+        for _ in range(_blocker_module._MAX_NESTING + 1):
+            command = f"bash -c {shlex.quote(command)}"
+        match = find_full_qa_invocation(command, _patterns(), cwd=root)
+        assert match is not None
+        assert match.fail_closed == _blocker_module._TOO_DEEP_REASON
 
 
 class TestTheParseBudgetIsPerEventNotPerMemoKey:

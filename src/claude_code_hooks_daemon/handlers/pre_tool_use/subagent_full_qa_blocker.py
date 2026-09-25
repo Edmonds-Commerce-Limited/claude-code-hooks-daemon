@@ -710,6 +710,8 @@ _EXECUTABLE_CODE: Final[str] = "executable"
 _UNREAD_CODE: Final[str] = "<code that cannot be read>"
 #: Marks code the parse meter refused: more than one judgement parses.
 _OVER_BUDGET: Final[str] = "<more code than one judgement parses>"
+#: Marks code nested deeper than is followed.
+_TOO_DEEP: Final[str] = "<code nested deeper than is followed>"
 #: What it yields for the paths a command writes (``>``, ``>>``, ``tee``):
 #: code read from one of them is not what is on disk now.
 _WRITES: Final[str] = "<paths this command writes>"
@@ -722,9 +724,8 @@ _POPD: Final[str] = "popd"
 
 #: Why a match was judged without being seen, as the deny states it.
 _UNPARSED_REASON: Final[str] = (
-    "this command could not be parsed (an unbalanced quote, nesting deeper than is "
-    "followed, or code too long to parse in one piece), and it names a full-suite program, so "
-    "it is judged as the full run it may be. "
+    "this command could not be parsed (an unbalanced quote, or code too long to parse in one "
+    "piece), and it names a full-suite program, so it is judged as the full run it may be. "
     "Quote it plainly, or split it into simpler commands."
 )
 _OPAQUE_REASON: Final[str] = (
@@ -786,6 +787,13 @@ _OVER_BUDGET_REASON: Final[str] = (
 _UNREAD_CODE_ID: Final[str] = "code-that-cannot-be-read"
 #: The pattern id a deny past the parse budget names: nothing matched.
 _OVER_BUDGET_ID: Final[str] = "too-much-code-to-judge"
+_TOO_DEEP_REASON: Final[str] = (
+    "code here runs code nested deeper than is followed (a shell's `-c` inside another's, or "
+    "a script that runs a script, and so on), and what the deepest runs cannot be seen, so "
+    "it is judged as the full run it may be. Run the innermost command directly."
+)
+#: The pattern id a deny past the nesting followed names: nothing matched.
+_TOO_DEEP_ID: Final[str] = "code-nested-too-deep"
 
 #: Past this many characters a command is not parsed (review 5 n5): shlex
 #: builds each token a character at a time, and a 1 MB word took 36 s. The
@@ -1151,8 +1159,11 @@ _HATCH_TEST_FLAGS: Final[frozenset[str]] = frozenset(
 )
 
 #: How deep ``bash -c '...'`` is followed. Deeper nesting is not a way anyone
-#: runs a test suite by accident.
+#: runs a test suite by accident, and past it the command is denied.
 _MAX_NESTING: Final[int] = 3
+#: How many files deep a script that runs a script is followed. Each level
+#: is parsed against the one parse meter; past it the command is denied.
+_MAX_FILE_DEPTH: Final[int] = 8
 
 _LONG_FLAG_PREFIX: Final[str] = "--"
 _FLAG_VALUE_SEPARATOR: Final[str] = "="
@@ -1466,11 +1477,15 @@ def _renamed(words: list[str], renames: Mapping[str, list[str]]) -> list[str]:
 
 
 def _nested(code: str, segment: str, depth: int) -> Iterator[tuple[str, list[str], str]]:
-    """The invocations of code the shell runs one level down, or unparsed past the depth."""
+    """The invocations of code the shell runs one level down, or too deep past the depth.
+
+    Past the depth the code is denied, not scanned for a program's name: the
+    deepest code may run a file, and a file's name is no program's.
+    """
     if depth < _MAX_NESTING:
         yield from _invocations(code, depth + 1)
     else:
-        yield _UNPARSED, [], segment
+        yield _TOO_DEEP, [], segment
 
 
 def _protect_substitutions(text: str) -> tuple[str, list[str]]:
@@ -3570,10 +3585,14 @@ def _charge(code: str) -> bool:
     return True
 
 
-#: A parsed file's verdict, memoised by the resolved path, the kind it was
-#: read as, its argv, and the directory it ran from (review 7 M1): a file
-#: referenced many times, or one that feeds itself, is parsed once.
-_VerdictKey = tuple[str, str, tuple[str, ...], str]
+#: What a file's verdict depends on besides its depth: the resolved path,
+#: the kind it was read as, its argv, the directory it ran from (review 7
+#: M1), and the ``PYTEST_ADDOPTS`` words in force (review 8 n2). A file that
+#: feeds itself is recognised by this key, at any depth.
+_ChainKey = tuple[str, str, tuple[str, ...], str, tuple[str, ...]]
+#: A parsed file's memoised verdict: its chain key and the files-deep it was
+#: judged at, since a verdict judged deeper had less depth left to follow.
+_VerdictKey = tuple[_ChainKey, int]
 
 
 @dataclass
@@ -3597,7 +3616,8 @@ class _Event:
     code_texts: dict[str, str] = field(default_factory=dict)
     read_budget: int = _MAX_READ_BYTES
     verdicts: dict[_VerdictKey, FullQaMatch | None] = field(default_factory=dict)
-    verdicts_pending: set[_VerdictKey] = field(default_factory=set)
+    verdicts_pending: set[_ChainKey] = field(default_factory=set)
+    addopts_read: set[str] = field(default_factory=set)
 
 
 def _addopts(text: str) -> list[str]:
@@ -3657,6 +3677,9 @@ def _first_full_run(
         elif program == _OVER_BUDGET:
             quoted = segment.strip()[:_QUOTED_SEGMENT_LENGTH]
             found = FullQaMatch(_OVER_BUDGET_ID, quoted, _OVER_BUDGET_REASON)
+        elif program == _TOO_DEEP:
+            quoted = segment.strip()[:_QUOTED_SEGMENT_LENGTH]
+            found = FullQaMatch(_TOO_DEEP_ID, quoted, _TOO_DEEP_REASON)
         else:
             found = _full_run_of(program, arguments, segment, event, here, source)
         if found is not None:
@@ -3749,11 +3772,11 @@ def _full_run_in_code_file(
     A program the project declares is judged by its pattern, whatever its
     code holds (``llm_qa.py`` calls pytest itself). Otherwise the code is
     read and judged with its own argv; a cd inside it stays inside it. Code
-    that cannot be seen fails closed: an unreadable file is denied, and one
-    too large to parse, or past the nesting followed, is denied when it names
-    a declared program (review 6 M1, m2). A file's BYTES are read at most
-    once per event, and each (path, kind, argv, directory) is parsed at most
-    once; every parse is charged to the call's one parse meter, and a parse
+    that cannot be seen fails closed: an unreadable file is denied, one too
+    large to parse is denied when it names a declared program (review 6 M1,
+    m2), and one past the files followed is denied (review 8 n2). A file's
+    BYTES are read at most once per event, and each verdict key is parsed at
+    most once; every parse is charged to the call's one parse meter, and a parse
     it cannot afford denies the command (review 8 B1). So a file referenced
     with a different argv or directory each time (``bash f.sh a0``, ``a1``,
     ...) is parsed only while the meter lasts.
@@ -3770,18 +3793,22 @@ def _full_run_in_code_file(
     code_kind = _code_kind(content.text) if kind == _EXECUTABLE_CODE else kind
     if code_kind is None:
         return None
-    if len(content.text) > _parse_cap(code_kind) or files_deep >= _MAX_NESTING:
+    if len(content.text) > _parse_cap(code_kind):
         return _scanned_verdict(content, event, segment)
-    key: _VerdictKey = (
+    chain: _ChainKey = (
         content.path,
         code_kind,
         tuple(argv),
         str(here) if here is not None else "",
+        tuple(event.addopts),
     )
-    if key in event.verdicts_pending:
+    if chain in event.verdicts_pending:
         # A file feeding itself back in: already being explored higher in
-        # this same chain, so this reference adds nothing new to find.
+        # this same chain, with less depth used, so this adds nothing new.
         return None
+    if files_deep >= _MAX_FILE_DEPTH:
+        return FullQaMatch(_TOO_DEEP_ID, segment.strip(), _TOO_DEEP_REASON)
+    key: _VerdictKey = (chain, files_deep)
     if key in event.verdicts:
         found = event.verdicts[key]
         return (
@@ -3789,9 +3816,11 @@ def _full_run_in_code_file(
             if found is None
             else FullQaMatch(found.pattern_id, segment.strip(), found.fail_closed)
         )
-    event.verdicts_pending.add(key)
+    event.verdicts_pending.add(chain)
     try:
-        event.addopts.extend(_addopts(content.text))
+        if content.path not in event.addopts_read:
+            event.addopts_read.add(content.path)
+            event.addopts.extend(_addopts(content.text))
         invocations = (
             _invocations(content.text, 0, argv)
             if code_kind == _SHELL_CODE
@@ -3799,7 +3828,7 @@ def _full_run_in_code_file(
         )
         found = _first_full_run(invocations, content.text, event, here, files_deep + 1)
     finally:
-        event.verdicts_pending.discard(key)
+        event.verdicts_pending.discard(chain)
     event.verdicts[key] = found
     # The deny quotes the command that ran the file, never the file's own text.
     return (
