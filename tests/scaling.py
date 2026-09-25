@@ -73,3 +73,21 @@ def scaling_ratio(work_at: Callable[[int], object], n: int, large_text: str) -> 
     small = min_cpu_seconds(lambda: work_at(n))
     large = min_cpu_seconds(lambda: work_at(SIZE_FACTOR * n))
     return large / max(small, linear_baseline_seconds(large_text))
+
+
+def counted_ratio(count_at: Callable[[int], int], n: int) -> float:
+    """Cost of ``count_at(SIZE_FACTOR * n)`` over the cost of ``count_at(n)``,
+    where "cost" is a caller-supplied unit count rather than elapsed time.
+
+    Plan 00466 N24 review 3 MA5: ``scaling_ratio`` measures real handler
+    dispatch, which has no operation count to read back, only elapsed CPU
+    time -- inherently noisy under a loaded host. A test that exists purely
+    to pin the RATIO ARITHMETIC (does an 8x/64x growth clear the same
+    ``SUPERLINEAR_RATIO`` threshold) has no need for that noise: it can
+    count exactly how much work its own linear/quadratic reference
+    functions do and compare counts directly, with the same threshold and
+    the same shape, deterministically on any host under any load.
+    """
+    small = count_at(n)
+    large = count_at(SIZE_FACTOR * n)
+    return large / max(small, 1)

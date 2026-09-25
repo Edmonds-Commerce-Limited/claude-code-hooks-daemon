@@ -40,7 +40,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from tests.scaling import SIZE_FACTOR, SUPERLINEAR_RATIO, cpu_seconds, scaling_ratio
+from tests.scaling import SIZE_FACTOR, SUPERLINEAR_RATIO, counted_ratio, cpu_seconds, scaling_ratio
 
 from claude_code_hooks_daemon.config.loader import ConfigLoader
 from claude_code_hooks_daemon.config.models import Config
@@ -514,19 +514,31 @@ class TestGilStarvationAcrossEveryPreToolUseHandler:
         )
 
     def test_the_ratio_separates_linear_from_quadratic_work(self) -> None:
-        """The measure itself: a linear scan stays under the threshold and a
-        quadratic one clears it, on the same inputs the sweep uses."""
+        """The measure itself: a linear operation count stays under the
+        threshold and a quadratic one clears it, on the same growth shape the
+        sweep uses.
+
+        Plan 00466 N24 review 3 MA5: this used to drive ``scaling_ratio``
+        (elapsed CPU time) on a C-level ``str.count`` linear reference, whose
+        cost sits close to the timing floor and so was sensitive to
+        scheduler noise under a loaded gate -- flaky, not a hole in the
+        ratio sweep itself (review 3 separately proved the sweep catches a
+        REAL quadratic regression, ``probe_n24r3_red_ratio.out``). Using
+        ``counted_ratio`` on an explicit operation count removes the clock
+        from this self-test entirely, so it is deterministic on any host.
+        """
         build = _GIL_STARVATION_SHAPES["quote_run"]
-        large_text = build(SIZE_FACTOR * _GIL_SHAPE_SIZE)
 
-        def quadratic(size: int) -> None:
-            text = build(size)
-            for i in range(0, len(text), 8):
-                text.count("'", i)
+        def linear_ops(size: int) -> int:
+            return len(build(size))  # one comparison per character
 
-        linear = scaling_ratio(lambda size: build(size).count("'"), _GIL_SHAPE_SIZE, large_text)
+        def quadratic_ops(size: int) -> int:
+            n = len(build(size))
+            return sum(n - i for i in range(0, n, 8))  # each scan-start rescans the rest
+
+        linear = counted_ratio(linear_ops, _GIL_SHAPE_SIZE)
         assert linear <= SUPERLINEAR_RATIO
-        assert scaling_ratio(quadratic, _GIL_SHAPE_SIZE, large_text) > SUPERLINEAR_RATIO
+        assert counted_ratio(quadratic_ops, _GIL_SHAPE_SIZE) > SUPERLINEAR_RATIO
 
 
 class TestCombinatorialSmallInputShapesStayLinear:
