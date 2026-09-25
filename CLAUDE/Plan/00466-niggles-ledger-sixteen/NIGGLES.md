@@ -9,6 +9,20 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N51 — `pipe_blocker` reads an escaped alternation inside a quoted grep pattern as a pipe into `head`
+
+**Found by Plan 00421 review 2.** `grep -i -n "a\|HEAD\|b" file` was denied.
+The `\|HEAD` inside the double-quoted pattern is a basic-regex alternation,
+not a pipe. The blocker split on the `|` and matched the next word
+case-insensitively against `head`. That is the N32 class (a `|` inside quotes
+read as a pipe stage), plus a case-insensitive match on the producer name.
+
+**Candidate remedy:** find pipe stages with the shared shell segmentation, so
+a `|` inside any quoted span, or escaped, never splits. Match the stage's
+command name case-sensitively, as bash does. RED tests: this grep is allowed;
+`pytest | head` is still denied. This belongs to the shell-parser consolidation
+(N41) alongside N32.
+
 ### N50 — A handler option whose name matches a method overwrites that method, and the handler then crashes open
 
 **Found by N23 review 2.** `registry.py:592` injects each configured option onto
