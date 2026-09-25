@@ -9,6 +9,26 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N57 — `secret_file_guard` misses a protected path reached through an earlier assignment, alias or written file
+
+**Found by the guard-defects fix (gd6_shell2 probe).** The Bash scanner reads a
+command once, forward, with no memory of what an earlier statement in the same
+command bound. So four shapes reach a protected file without a deny:
+
+- a variable assigned the path, then used in `bash -c "$V"`;
+- the same, used via `eval "$V"`;
+- an `alias` defined to read the file, then invoked;
+- a file written earlier in the command (a redirect with the path in its
+  content), then run with `sh <file>`.
+
+These are real fail-opens, not accepted residuals.
+
+**Candidate remedy:** this is assignment and side-effect tracking, which Plan
+00464's resolver already does for git (`_substitute_known_path_vars`, disk
+writes read back by path). Build one shared tracker in the shell-parser
+consolidation and have both secret_file_guard and the commit gates consume
+it. RED tests: the four gd6_shell2 rows through the real guard.
+
 ### N56 — Tests skip when run as root, so this container never runs them
 
 **Found by the owner, who set the rule:** every test must run as root, and
