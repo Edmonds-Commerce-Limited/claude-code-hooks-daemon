@@ -87,10 +87,17 @@ def acquire_full_qa_lock(project_root: Path, *, blocking: bool = True) -> Genera
 
     The descriptor is yielded so a caller that launches Python subprocesses
     can pass it explicitly (`subprocess.run(..., pass_fds=(fd,))`) --
-    `subprocess` closes every descriptor above stderr by default. A caller
-    that instead `exec`s a shell command (bash, `os.execve`) needs no such
-    step: an ordinary descriptor without `FD_CLOEXEC` survives exec and is
-    inherited by every further child of that shell for free.
+    `subprocess` closes every descriptor above stderr by default, AND
+    `open_lock_fd`'s `os.open()` itself returns a non-inheritable descriptor
+    (PEP 446's Python 3.4+ default), so this step is required, not optional.
+    `pass_fds` clears `FD_CLOEXEC` for exactly the fds it lists before that
+    child's own exec, so from THAT POINT ON the descriptor behaves like an
+    ordinary, non-CLOEXEC one: a shell child spawned this way (bash,
+    `run_tests.sh`'s own `exec {FD}>>`) passes it to every further child of
+    ITS OWN for free, with no further `pass_fds` needed at that level. A
+    caller that instead `os.execve`s directly, replacing this process,
+    must call `os.set_inheritable(fd, True)` itself first -- `pass_fds`
+    only helps a `subprocess`-spawned child.
 
     Args:
         project_root: any checkout (main or worktree) of this repository.
@@ -186,6 +193,14 @@ def full_qa_lock_is_held(project_root: Path) -> bool:
             skipped_not_the_holder += 1
             continue
         else:
+            # Review 10 m1: mark it CLOEXEC now that possession is PROVEN, so
+            # a further descendant of THIS process (a test fixture that
+            # backgrounds an orphan, review 10's H repro) does not silently
+            # inherit it onward and leak the lock past this process's own
+            # exit. Set only after the proof, not before: pytest itself
+            # still needs the ordinary, non-CLOEXEC inheritance across
+            # fork/exec to have carried the fd this far.
+            fcntl.fcntl(fd, fcntl.F_SETFD, fcntl.fcntl(fd, fcntl.F_GETFD) | fcntl.FD_CLOEXEC)
             return True
     if skipped_unresolvable or skipped_not_the_holder:
         logger.debug(

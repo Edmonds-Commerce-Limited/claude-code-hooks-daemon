@@ -82,8 +82,15 @@ class TestLockIsHeldIsProvenNotClaimed:
         assert full_qa_lock_is_held(main) is False
 
     def test_true_in_a_child_that_inherits_the_locked_fd(self, tmp_path: Path) -> None:
+        """The fd `os.open` returns is non-inheritable by default (PEP 446),
+        so a Python child must be handed it explicitly via `pass_fds` --
+        `close_fds=False` alone does not survive `exec` for it. The prior
+        version of this test asserted `"HELD" in probe.stdout`, which is also
+        true of `"NOT-HELD"` and so passed without proving inheritance at
+        all; tightened to an exact match."""
         main, _ = _init_repo_with_worktree(tmp_path)
-        with acquire_full_qa_lock(main):
+        with acquire_full_qa_lock(main) as fd:
+            os.set_inheritable(fd, True)
             probe = subprocess.run(
                 [
                     sys.executable,
@@ -95,13 +102,13 @@ class TestLockIsHeldIsProvenNotClaimed:
                     str(PROJECT_ROOT / "src"),
                     str(main),
                 ],
-                close_fds=False,
+                pass_fds=(fd,),
                 capture_output=True,
                 text=True,
                 timeout=Timeout.QA_TEST_TIMEOUT,
                 check=False,
             )
-        assert "HELD" in probe.stdout, f"stdout={probe.stdout!r} stderr={probe.stderr!r}"
+        assert probe.stdout.strip() == "HELD", f"stdout={probe.stdout!r} stderr={probe.stderr!r}"
 
     def test_false_when_the_inherited_fd_itself_is_unlocked_even_if_another_holds_it(
         self, tmp_path: Path
@@ -173,6 +180,56 @@ class TestLockIsHeldIsProvenNotClaimed:
             check=False,
         )
         assert "NOT-HELD" in probe.stdout, f"stdout={probe.stdout!r} stderr={probe.stderr!r}"
+
+
+class TestProvenFdIsMarkedCloexec:
+    def test_the_fd_that_proved_possession_is_cloexec_afterwards(self, tmp_path: Path) -> None:
+        """Review 10 m1: once a candidate fd has PROVEN it holds the lock,
+        marking it CLOEXEC stops it leaking into further descendants THIS
+        process forks (a test fixture that backgrounds an orphan process, the
+        exact shape of review 10's H repro) -- it must still reach pytest
+        itself via inheritance across `fork`/`exec`, so this only applies
+        AFTER the proof, never before."""
+        main, _ = _init_repo_with_worktree(tmp_path)
+        script = (
+            "import sys, os, fcntl; sys.path.insert(0, sys.argv[1])\n"
+            "from claude_code_hooks_daemon.qa.full_qa_lock import (\n"
+            "    full_qa_lock_is_held, host_lock_path,\n"
+            ")\n"
+            "from pathlib import Path\n"
+            "root = Path(sys.argv[2])\n"
+            "held = full_qa_lock_is_held(root)\n"
+            "lock_path = host_lock_path(root).resolve()\n"
+            "found = None\n"
+            "for entry in os.listdir('/proc/self/fd'):\n"
+            "    try:\n"
+            "        target = Path(os.readlink(f'/proc/self/fd/{entry}'))\n"
+            "    except OSError:\n"
+            "        continue\n"
+            "    if target != lock_path:\n"
+            "        continue\n"
+            "    flags = fcntl.fcntl(int(entry), fcntl.F_GETFD)\n"
+            "    found = bool(flags & fcntl.FD_CLOEXEC)\n"
+            "    break\n"
+            "print('HELD' if held else 'NOT-HELD')\n"
+            "print('CLOEXEC' if found else 'NOT-CLOEXEC')\n"
+        )
+        with acquire_full_qa_lock(main) as fd:
+            os.set_inheritable(fd, True)
+            probe = subprocess.run(
+                [sys.executable, "-c", script, str(PROJECT_ROOT / "src"), str(main)],
+                pass_fds=(fd,),
+                capture_output=True,
+                text=True,
+                timeout=Timeout.QA_TEST_TIMEOUT,
+                check=False,
+            )
+        assert (
+            "HELD" in probe.stdout.splitlines()
+        ), f"stdout={probe.stdout!r} stderr={probe.stderr!r}"
+        assert (
+            "CLOEXEC" in probe.stdout.splitlines()
+        ), f"stdout={probe.stdout!r} stderr={probe.stderr!r}"
 
 
 class TestSecondAcquisitionIsRefused:
