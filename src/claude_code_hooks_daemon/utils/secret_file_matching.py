@@ -283,10 +283,13 @@ def protecting_pattern(file_path: str, patterns: tuple[str, ...]) -> str | None:
     matches = [first_matching_glob(file_path, patterns, project_root=project_root)]
     try:
         real = realpath(file_path)
-    except (OSError, ValueError):
+    except (OSError, ValueError) as exc:
         # Plan 00466 N24 follow-up: a NUL-bearing path raises ValueError,
         # not OSError -- the OS itself cannot realpath it, so it cannot BE
-        # a symlink to anything; nothing for this check to discover.
+        # a symlink to anything; nothing for this check to discover. The
+        # spelled path is still matched, above. Logged without the path,
+        # which may itself be a protected name.
+        logger.debug("protecting_pattern: no realpath (%s); matched as spelled", type(exc).__name__)
         real = file_path
     if real != file_path:
         matches.append(first_matching_glob(real, patterns, project_root=project_root))

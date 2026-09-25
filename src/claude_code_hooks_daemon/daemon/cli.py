@@ -794,19 +794,22 @@ def cmd_stop(args: argparse.Namespace) -> int:
     # only once it is proven to serve THIS project: a stale pid file whose pid
     # was reused by another project's daemon must not get that daemon killed.
     own_root = os.path.realpath(project_path)
-    pid_root = daemon_process_project_root(pid)
-    if pid_root is None:
+    proof = daemon_process_project_root(pid)
+    if proof.root is None:
+        print(f"ERROR: {proof.refusal}; refusing to signal it", file=sys.stderr)
+        return 1
+    if proof.root != own_root:
+        # Refuse, and delete nothing (Plan 00466 N24 review 3 mi1): the PID
+        # file may be stale while this project's own daemon still serves the
+        # socket, or the attribution itself may be wrong, and deleting either
+        # file orphans a live daemon.
         print(
-            f"ERROR: PID {pid} is a daemon server whose project cannot be determined; "
-            "refusing to signal it",
+            f"ERROR: PID {pid} is attributed by {proof.source} to {proof.root}, not to "
+            f"{own_root}; refusing to signal it or delete its PID file and socket. "
+            f"If that is wrong, stop it by hand.",
             file=sys.stderr,
         )
         return 1
-    if pid_root != own_root:
-        print(f"PID {pid} is the daemon for {pid_root}, not this project (stale PID file)")
-        cleanup_pid_file(str(pid_path))
-        cleanup_socket(str(socket_path))
-        return 0
 
     # Send SIGTERM
     try:
@@ -845,7 +848,7 @@ def cmd_stop(args: argparse.Namespace) -> int:
         # kernel and cannot be caught, blocked or ignored.
         # Re-prove before SIGKILL: the grace period is long enough for the pid
         # to have exited and been reused.
-        if daemon_process_project_root(pid) != own_root:
+        if daemon_process_project_root(pid).root != own_root:
             print(
                 f"ERROR: PID {pid} no longer proves to be this project's daemon; "
                 "refusing to escalate to SIGKILL",

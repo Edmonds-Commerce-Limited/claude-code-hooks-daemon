@@ -30,6 +30,7 @@ from claude_code_hooks_daemon.daemon.cli import (
     get_project_path,
     send_daemon_request,
 )
+from claude_code_hooks_daemon.daemon.process_verification import RootProof
 
 
 @pytest.fixture(autouse=True)
@@ -63,7 +64,7 @@ def pid_proven_ours(tmp_path: Path) -> Iterator[None]:
     """Attribute the stopped pid to ``tmp_path``'s daemon, as a real one would be."""
     with patch(
         "claude_code_hooks_daemon.daemon.cli.daemon_process_project_root",
-        return_value=os.path.realpath(tmp_path),
+        return_value=RootProof(root=os.path.realpath(tmp_path), refusal=None),
     ):
         yield
 
@@ -572,7 +573,15 @@ class TestCmdStopSignalsOnlyThisProjectsDaemon:
         (claude_dir / "hooks-daemon.yaml").write_text("version: '1.0'\n")
         return argparse.Namespace(project_root=tmp_path)
 
-    def test_another_projects_daemon_is_never_signalled(self, tmp_path: Path) -> None:
+    def test_another_projects_daemon_is_never_signalled_and_nothing_is_deleted(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Plan 00466 N24 review 3 mi1: a root mismatch refuses and says why.
+
+        Deleting the PID file and socket on a mismatch removed THIS project's
+        live socket when the PID file named another root, and orphaned a daemon
+        whose root was misattributed through its venv path.
+        """
         sent: list[int] = []
 
         def record(pid: int, sig: int) -> None:
@@ -582,19 +591,27 @@ class TestCmdStopSignalsOnlyThisProjectsDaemon:
             patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=_UNREAL_PID),
             patch(
                 "claude_code_hooks_daemon.daemon.cli.daemon_process_project_root",
-                return_value=_OTHER_PROJECT_ROOT,
+                return_value=RootProof(
+                    root=_OTHER_PROJECT_ROOT, refusal=None, source="its interpreter's venv path"
+                ),
             ),
             patch("os.kill", side_effect=record),
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_pid_file") as cleanup_pid,
-            patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket"),
+            patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket") as cleanup_sock,
         ):
             result = cmd_stop(self._args(tmp_path))
 
         assert [sig for sig in sent if sig != 0] == []
-        assert result == 0
-        cleanup_pid.assert_called_once()
+        assert result == 1
+        cleanup_pid.assert_not_called()
+        cleanup_sock.assert_not_called()
+        err = capsys.readouterr().err
+        assert _OTHER_PROJECT_ROOT in err
+        assert "its interpreter's venv path" in err
 
-    def test_an_unattributable_daemon_is_never_signalled(self, tmp_path: Path) -> None:
+    def test_an_unattributable_daemon_is_never_signalled(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         """When the daemon's project cannot be determined, stop refuses and says so."""
         sent: list[int] = []
 
@@ -605,7 +622,9 @@ class TestCmdStopSignalsOnlyThisProjectsDaemon:
             patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=_UNREAL_PID),
             patch(
                 "claude_code_hooks_daemon.daemon.cli.daemon_process_project_root",
-                return_value=None,
+                return_value=RootProof(
+                    root=None, refusal="PID 7 cannot be inspected (AccessDenied)"
+                ),
             ),
             patch("os.kill", side_effect=record),
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_pid_file") as cleanup_pid,
@@ -615,6 +634,7 @@ class TestCmdStopSignalsOnlyThisProjectsDaemon:
         assert [sig for sig in sent if sig != 0] == []
         assert result == 1
         cleanup_pid.assert_not_called()
+        assert "cannot be inspected (AccessDenied)" in capsys.readouterr().err
 
     def test_sigkill_is_withheld_when_the_pid_stops_being_ours_during_the_grace(
         self, tmp_path: Path
@@ -622,8 +642,8 @@ class TestCmdStopSignalsOnlyThisProjectsDaemon:
         """The proof is re-taken right before SIGKILL: after SIGTERM's grace the
         pid may belong to something else, and only a fresh proof may be acted on."""
         sent: list[int] = []
-        ours = os.path.realpath(tmp_path)
-        roots = iter([ours, _OTHER_PROJECT_ROOT])
+        ours = RootProof(root=os.path.realpath(tmp_path), refusal=None)
+        roots = iter([ours, RootProof(root=_OTHER_PROJECT_ROOT, refusal=None)])
 
         def record(pid: int, sig: int) -> None:
             sent.append(sig)

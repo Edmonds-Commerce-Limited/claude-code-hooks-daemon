@@ -6,7 +6,9 @@ particularly useful in container environments for single-process enforcement.
 
 import logging
 import os
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Final
 
 import psutil
 
@@ -155,11 +157,29 @@ def _root_from_interpreter(interpreter: str) -> str | None:
     return None
 
 
-def daemon_process_project_root(pid: int) -> str | None:
-    """Return the real project root a live daemon SERVER pid serves, if provable.
+@dataclass(frozen=True)
+class RootProof:
+    """Which project a pid's daemon serves, or why that cannot be proven.
+
+    Exactly one of ``root`` and ``refusal`` is set. ``source`` says where the
+    root came from, so a caller refusing on a mismatch can say how the pid was
+    attributed.
+    """
+
+    root: str | None
+    refusal: str | None
+    source: str | None = None
+
+
+_FLAG_SOURCE: Final = f"its {_PROJECT_ROOT_FLAG} flag"
+_VENV_SOURCE: Final = "its interpreter's venv path"
+
+
+def daemon_process_project_root(pid: int) -> RootProof:
+    """Prove which real project root a live daemon SERVER pid serves.
 
     This is the proof a caller needs before it signals ``pid`` on behalf of one
-    project: compare the result with that project's own ``os.path.realpath``.
+    project: compare ``root`` with that project's own ``os.path.realpath``.
     ``realpath`` is safe here, unlike in :func:`_normalize_root`, because a pid
     this process can signal lives in its own mount namespace.
 
@@ -167,23 +187,30 @@ def daemon_process_project_root(pid: int) -> str | None:
         pid: Candidate process id.
 
     Returns:
-        The resolved project root, or ``None`` when ``pid`` is not a real
-        ``int`` above 1, is this process, is gone or inaccessible, is not a
-        daemon server, or serves a root its command line does not name.
+        A proof with the resolved root, or with the reason there is none:
+        ``pid`` is not a real ``int`` above 1, is this process, is gone or
+        inaccessible, is not a daemon server, or its command line names no root.
     """
     # type() rather than isinstance(): a bool is an int, and a MagicMock pid
     # coerces to 1 through __index__ (Plan 00466 N59), so neither is a pid.
     if type(pid) is not int or pid <= 1 or pid == os.getpid():
-        return None
+        return RootProof(root=None, refusal=f"{pid!r} is not a pid another process can own")
     try:
         cmdline = psutil.Process(pid).cmdline()
     except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess) as e:
         logger.debug("Cannot inspect PID %d cmdline: %s", pid, e)
-        return None
+        return RootProof(root=None, refusal=f"PID {pid} cannot be inspected ({type(e).__name__})")
     if not _is_daemon_server_process(cmdline):
-        return None
-    root = _extract_project_root(cmdline)
-    return os.path.realpath(root) if root is not None else None
+        return RootProof(root=None, refusal=f"PID {pid} is not a hooks daemon server")
+    flag_root = _root_from_flag(cmdline)
+    if flag_root is not None:
+        return RootProof(root=os.path.realpath(flag_root), refusal=None, source=_FLAG_SOURCE)
+    venv_root = _root_from_interpreter(cmdline[0]) if cmdline else None
+    if venv_root is not None:
+        return RootProof(root=os.path.realpath(venv_root), refusal=None, source=_VENV_SOURCE)
+    return RootProof(
+        root=None, refusal=f"PID {pid} is a daemon server whose command line names no project"
+    )
 
 
 def kill_daemon_process(pid: int) -> bool:

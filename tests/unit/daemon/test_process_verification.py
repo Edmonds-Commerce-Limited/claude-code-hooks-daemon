@@ -536,16 +536,16 @@ class TestDaemonProcessProjectRoot:
 
     def test_returns_the_root_a_daemon_server_names(self) -> None:
         with patch("psutil.Process", return_value=self._process(_DAEMON_CMDLINE)):
-            assert daemon_process_project_root(_UNREAL_PID) == os.path.realpath(_OWN_ROOT)
+            assert daemon_process_project_root(_UNREAL_PID).root == os.path.realpath(_OWN_ROOT)
 
     def test_a_non_daemon_process_has_no_root(self) -> None:
         with patch("psutil.Process", return_value=self._process(["/usr/bin/vim", _OWN_ROOT])):
-            assert daemon_process_project_root(_UNREAL_PID) is None
+            assert daemon_process_project_root(_UNREAL_PID).root is None
 
     def test_a_daemon_whose_root_cannot_be_attributed_has_no_root(self) -> None:
         unattributable = ["/usr/bin/python3", "-m", "claude_code_hooks_daemon.daemon.cli", "start"]
         with patch("psutil.Process", return_value=self._process(unattributable)):
-            assert daemon_process_project_root(_UNREAL_PID) is None
+            assert daemon_process_project_root(_UNREAL_PID).root is None
 
     def test_a_vanished_or_inaccessible_process_has_no_root(self) -> None:
         for error in (
@@ -554,7 +554,7 @@ class TestDaemonProcessProjectRoot:
             psutil.ZombieProcess(pid=_UNREAL_PID),
         ):
             with patch("psutil.Process", side_effect=error):
-                assert daemon_process_project_root(_UNREAL_PID) is None
+                assert daemon_process_project_root(_UNREAL_PID).root is None
 
     def test_init_our_own_pid_and_non_positive_pids_are_never_attributed(self) -> None:
         """Even a daemon-shaped cmdline cannot make pid 1, 0, a negative pid or
@@ -562,13 +562,33 @@ class TestDaemonProcessProjectRoot:
         killed the container)."""
         with patch("psutil.Process", return_value=self._process(_DAEMON_CMDLINE)) as proc_cls:
             for pid in (1, 0, -1, os.getpid()):
-                assert daemon_process_project_root(pid) is None
+                assert daemon_process_project_root(pid).root is None
             proc_cls.assert_not_called()
 
     def test_a_non_int_pid_is_never_attributed(self) -> None:
         """A MagicMock pid coerces to 1 through ``__index__``; it must be refused
         before anything reads it as a number."""
         with patch("psutil.Process", return_value=self._process(_DAEMON_CMDLINE)) as proc_cls:
-            assert daemon_process_project_root(MagicMock()) is None
-            assert daemon_process_project_root(True) is None
+            assert daemon_process_project_root(MagicMock()).root is None
+            assert daemon_process_project_root(True).root is None
             proc_cls.assert_not_called()
+
+    def test_every_unproven_pid_says_why(self) -> None:
+        """Plan 00466 N24 review 3 MA5: "no root" is a typed refusal with a
+        reason the caller prints, never a bare None."""
+        with patch("psutil.Process", side_effect=psutil.AccessDenied(pid=_UNREAL_PID)):
+            inaccessible = daemon_process_project_root(_UNREAL_PID)
+        with patch("psutil.Process", return_value=self._process(["/usr/bin/vim"])):
+            not_a_daemon = daemon_process_project_root(_UNREAL_PID)
+
+        assert inaccessible.root is None
+        assert "cannot be inspected" in (inaccessible.refusal or "")
+        assert not_a_daemon.root is None
+        assert "not a hooks daemon server" in (not_a_daemon.refusal or "")
+
+    def test_the_proof_names_how_the_root_was_attributed(self) -> None:
+        with patch("psutil.Process", return_value=self._process(_DAEMON_CMDLINE)):
+            proof = daemon_process_project_root(_UNREAL_PID)
+
+        assert proof.refusal is None
+        assert proof.source in ("its --project-root flag", "its interpreter's venv path")
