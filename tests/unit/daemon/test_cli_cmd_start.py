@@ -275,6 +275,8 @@ class TestCmdStartChildProcess:
         args = argparse.Namespace(project_root=tmp_path)
 
         mock_config = MagicMock()
+        # Startup hashes the loaded config (Plan 00415); a mock has no model.
+        mock_config.model_dump.return_value = {}
         mock_config.daemon.socket_path = None
         mock_config.daemon.pid_file_path = None
         mock_config.daemon.get_socket_path.return_value = tmp_path / "sock"
@@ -346,6 +348,8 @@ class TestCmdStartChildProcess:
         args = argparse.Namespace(project_root=tmp_path)
 
         mock_config = MagicMock()
+        # Startup hashes the loaded config (Plan 00415); a mock has no model.
+        mock_config.model_dump.return_value = {}
         mock_config.daemon.socket_path = None
         mock_config.daemon.pid_file_path = None
         mock_config.daemon.get_socket_path.return_value = tmp_path / "sock"
@@ -420,6 +424,8 @@ class TestCmdStartChildProcess:
         args = argparse.Namespace(project_root=tmp_path)
 
         mock_config = MagicMock()
+        # Startup hashes the loaded config (Plan 00415); a mock has no model.
+        mock_config.model_dump.return_value = {}
         mock_config.daemon.socket_path = None
         mock_config.daemon.pid_file_path = None
         mock_config.daemon.get_socket_path.return_value = tmp_path / "sock"
@@ -500,6 +506,8 @@ class TestCmdStartChildProcess:
         args = argparse.Namespace(project_root=tmp_path)
 
         mock_config = MagicMock()
+        # Startup hashes the loaded config (Plan 00415); a mock has no model.
+        mock_config.model_dump.return_value = {}
         # Paths already set - should NOT call getters
         mock_config.daemon.socket_path = "/existing/socket"
         mock_config.daemon.pid_file_path = "/existing/pid"

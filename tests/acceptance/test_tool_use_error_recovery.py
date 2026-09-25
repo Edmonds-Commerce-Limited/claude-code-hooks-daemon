@@ -28,8 +28,19 @@ import socket
 from pathlib import Path
 
 from claude_code_hooks_daemon.constants import Timeout
+from claude_code_hooks_daemon.daemon.synthetic_traffic import (
+    PROBE_AS_FIELD,
+    SYNTHETIC_SOURCE_FIELD,
+    TEST_PROBE,
+    ProbeThread,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+#: The probe goes through the LIVE daemon, whose verdicts.jsonl is the real
+#: record, so it is marked (Plan 00466 N12), and stands for the main thread
+#: that `auto_continue_stop` (scoped MAIN) judges.
+_MAIN_PROBE = {SYNTHETIC_SOURCE_FIELD: TEST_PROBE, PROBE_AS_FIELD: ProbeThread.MAIN.value}
 
 _RECOVERY_REASON_FRAGMENT = "TOOL ERROR RECOVERY:"
 _DEFAULT_REASON_FRAGMENT = "STOPPING BECAUSE:"
@@ -67,6 +78,7 @@ def _send_stop_event(sock_path: Path, transcript_path: Path, session_id: str, cw
             "transcript_path": str(transcript_path),
             "session_id": session_id,
             "cwd": str(cwd),
+            **_MAIN_PROBE,
         },
     }
     request = json.dumps(payload).encode("utf-8") + b"\n"

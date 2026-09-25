@@ -17,7 +17,7 @@ import pkgutil
 import re
 from typing import Any, ClassVar
 
-from claude_code_hooks_daemon.config.models import LogLevel
+from claude_code_hooks_daemon.config.models import LogLevel, handler_options
 from claude_code_hooks_daemon.constants import (
     RETIRED_HANDLERS,
     ConfigKey,
@@ -585,9 +585,7 @@ class ConfigValidator:
         Returns:
             A single-element list with the hard-error message, or empty.
         """
-        options = handler_config.get(ConfigKey.OPTIONS)
-        if not isinstance(options, dict):
-            return []
+        options = handler_options(handler_config)
         if _REMOVED_MONOREPO_SUBPROJECT_PATTERNS_OPTION not in options:
             return []
 

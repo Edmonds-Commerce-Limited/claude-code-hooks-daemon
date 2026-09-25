@@ -82,6 +82,19 @@ class TestItStaysSilentWithNothingDeclared:
         handler = _RootedCronSubagentStopEnforcerHandler(tmp_path)
         assert handler.matches({}) is False
 
+    def test_a_pathologically_nested_config_degrades_to_silence(self, tmp_path: Path) -> None:
+        """RV9-n1: a config nested too deep to parse raises ValueError out of
+        ``Config.load`` (converted from ``RecursionError``), which this
+        handler's own ``except`` clause already lists -- it must not escape
+        ``matches()`` and take every other SubagentStop handler down with
+        it."""
+        config_dir = tmp_path / ".claude"
+        config_dir.mkdir()
+        (config_dir / "hooks-daemon.yaml").write_text("[" * 5000 + "]" * 5000)
+        handler = _RootedCronSubagentStopEnforcerHandler(tmp_path)
+
+        assert handler.matches({}) is False
+
 
 class TestAbsentSessionCronsNeverBlocks:
     def test_a_missing_session_crons_field_allows(self, monkeypatch: pytest.MonkeyPatch) -> None:

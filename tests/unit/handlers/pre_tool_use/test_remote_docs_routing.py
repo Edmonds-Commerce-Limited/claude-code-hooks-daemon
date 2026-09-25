@@ -288,3 +288,18 @@ class TestScope:
         _seed(tree)
 
         assert handler.matches({"tool_name": "WebFetch", "tool_input": {}}) is False
+
+
+class TestConfigReaderDegradesOnAnUnreadableConfig:
+    def test_a_pathologically_nested_config_returns_none_not_a_raise(
+        self, handler: RemoteDocsRoutingHandler, tmp_path: Path
+    ) -> None:
+        """RV9-n1: a config nested too deep to parse raises ValueError out of
+        ``Config.load`` (converted from ``RecursionError``), which
+        ``_config_reader``'s own ``except`` clause already lists -- it must
+        not escape and take the rest of the PreToolUse chain down with it."""
+        config_dir = tmp_path / ".claude"
+        config_dir.mkdir()
+        (config_dir / "hooks-daemon.yaml").write_text("[" * 5000 + "]" * 5000)
+
+        assert handler._config_reader() is None

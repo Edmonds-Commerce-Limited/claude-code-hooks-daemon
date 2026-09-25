@@ -8,6 +8,7 @@ its behaviour so all three call sites stay identical.
 
 from claude_code_hooks_daemon.utils.markdown_format import (
     format_markdown_text,
+    parse_frontmatter_lenient,
     parse_frontmatter_yaml,
 )
 
@@ -73,3 +74,69 @@ class TestParseFrontmatterYaml:
     def test_returns_none_when_frontmatter_is_not_a_mapping(self) -> None:
         doc = "---\n- just\n- a\n- list\n---\n\nBody.\n"
         assert parse_frontmatter_yaml(doc) is None
+
+
+class TestParseFrontmatterLenient:
+    """``parse_frontmatter_lenient`` (Plan 00468, audit P6): strict YAML
+    first, then a top-level ``key: rest-of-line`` fallback.
+
+    Claude Code loads agent files that ``yaml.safe_load`` rejects — this
+    repository's own ``code-reviewer.md`` has ``: `` inside its description —
+    so a strict-only parse made the daemon blind to agents Claude Code runs.
+    """
+
+    def test_valid_yaml_parses_exactly_as_strict_yaml_does(self) -> None:
+        doc = "---\nname: x\ntools:\n  - Read\n  - Grep\nmaxTurns: 3\n---\n\nBody.\n"
+        assert parse_frontmatter_lenient(doc) == parse_frontmatter_yaml(doc)
+
+    def test_a_colon_in_a_description_no_longer_loses_the_file(self) -> None:
+        doc = (
+            "---\nname: code-reviewer\n"
+            "description: Expert review. Analyzes real quality issues: dead code, confusion\n"
+            "tools: Read, Glob, Grep, Bash\n---\n\nBody.\n"
+        )
+        assert parse_frontmatter_yaml(doc) is None
+        parsed = parse_frontmatter_lenient(doc)
+        assert parsed is not None
+        assert parsed["name"] == "code-reviewer"
+        assert parsed["tools"] == "Read, Glob, Grep, Bash"
+        assert parsed["description"] == (
+            "Expert review. Analyzes real quality issues: dead code, confusion"
+        )
+
+    def test_a_block_list_is_collected_in_the_fallback(self) -> None:
+        doc = "---\nname: x\ndescription: a: b\ntools:\n  - Read\n  - Grep\n---\n"
+        parsed = parse_frontmatter_lenient(doc)
+        assert parsed is not None
+        assert parsed["tools"] == ["Read", "Grep"]
+
+    def test_quotes_around_a_scalar_are_removed(self) -> None:
+        doc = "---\nname: \"quoted\"\ndescription: a: b\nisolation: 'worktree'\n---\n"
+        parsed = parse_frontmatter_lenient(doc)
+        assert parsed is not None
+        assert parsed["name"] == "quoted"
+        assert parsed["isolation"] == "worktree"
+
+    def test_an_indented_continuation_folds_into_the_value(self) -> None:
+        doc = "---\nname: x\ndescription: first: part\n  second part\n---\n"
+        parsed = parse_frontmatter_lenient(doc)
+        assert parsed is not None
+        assert parsed["description"] == "first: part second part"
+
+    def test_an_empty_value_is_none(self) -> None:
+        doc = "---\nname: x\ndescription: a: b\ntools:\n---\n"
+        parsed = parse_frontmatter_lenient(doc)
+        assert parsed is not None
+        assert parsed["tools"] is None
+
+    def test_comments_and_blank_lines_are_skipped(self) -> None:
+        doc = "---\n# a comment\n\nname: x\ndescription: a: b\n---\n"
+        parsed = parse_frontmatter_lenient(doc)
+        assert parsed == {"name": "x", "description": "a: b"}
+
+    def test_no_frontmatter_is_still_none(self) -> None:
+        assert parse_frontmatter_lenient("# Heading\n\nBody.\n") is None
+
+    def test_a_block_with_no_key_lines_is_none(self) -> None:
+        doc = "---\n- just\n- a\n- list\n---\n\nBody.\n"
+        assert parse_frontmatter_lenient(doc) is None

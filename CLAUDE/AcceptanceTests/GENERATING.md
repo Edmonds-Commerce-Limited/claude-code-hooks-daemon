@@ -314,6 +314,23 @@ Generated playbooks contain tests in this format:
 - **OBSERVABLE**: Check system-reminders for expected messages
 - **VERIFIED_BY_LOAD**: Skip test - verified by daemon load + unit tests
 
+### Re-checking One Payload Without a Tool Call
+
+To re-read one handler's verdict on a test's payload without making a real
+tool call, send the payload with the probe helper:
+
+```bash
+bin/hooks-daemon probe PreToolUse --file untracked/scratch/payload.json
+```
+
+It marks the event `synthetic_source: manual-probe`. The daemon's verdict log
+then records it as a probe, not as a real agent's call. The automated harness
+(`tests/acceptance/test_playbook_harness.py`) marks its own events
+`playbook-probe` for the same reason. If you pipe a payload into
+`.claude/hooks/` yourself, set the field by hand. The details, including why a
+guarded command belongs in a `--file` payload, are in
+[DEBUGGING_HOOKS.md](../DEBUGGING_HOOKS.md#probing-a-handler-by-hand-hooks-daemon-probe).
+
 ---
 
 ## 🔍 HANDLER TEST DEFINITIONS

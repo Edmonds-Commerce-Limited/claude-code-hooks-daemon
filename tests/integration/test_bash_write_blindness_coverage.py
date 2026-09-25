@@ -90,6 +90,13 @@ _BASH_BLINDNESS_VERDICT: dict[str, tuple[str, str]] = {
         "vocabulary reaching disk via heredoc body is not scanned. Advisory "
         "only -- the resident guidance names the routes it covers",
     ),
+    "InstalledPluginEditAdvisorHandler": (
+        _COVERED,
+        "reads get_bash_write_targets alongside the Write/Edit/NotebookEdit "
+        "path, as project_containment does, so a redirect, tee, heredoc or cp "
+        "into an installed plugin's files is advised like a Write; advisory "
+        "only, and bounded by the accessor's conservatism",
+    ),
     "ProjectContainmentHandler": (
         _COVERED,
         "reads get_bash_write_targets alongside the Write/Edit/NotebookEdit "

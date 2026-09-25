@@ -646,6 +646,10 @@ class TestWrapperPidWaits:
             # shell script, so the pid it was given is the pid that runs.
             "nohup ./job.bash & pid=$!",
             "nohup ./job.bash > j.log 2>&1 & until ! kill -0 $!; do sleep 5; done",
+            # GNU `env` execs in place too, so its pid is the job's (Plan 00408
+            # Task 3.1).
+            "env FOO=1 ./job.bash & wait $!",
+            "env -u PYTHONPATH ./job.bash & wait $!",
             # `setsid -w` waits for its child, so the wrapper outlives the job
             # and `$!` tracks it honestly.
             "setsid -w ./job.bash & wait $!",
@@ -668,7 +672,7 @@ class TestWrapperPidWaits:
             ("nohup sh -c './job.bash > j.log 2>&1' & wait $!", "nohup sh -c"),
             ("nohup bash -c './job.bash' & wait $!", "nohup bash -c"),
             ("timeout 600 ./job.bash & wait $!", "timeout"),
-            ("env FOO=1 ./job.bash & wait $!", "env"),
+            ("env FOO=1 sh -c './job.bash' & wait $!", "env sh -c"),
         ],
     )
     def test_a_forking_wrapper_is_named_but_does_not_detach(

@@ -68,7 +68,11 @@ def test_bash_invocation_succeeds_without_exec_bit(tmp_path: Path) -> None:
 
     result = subprocess.run(
         ["bash", str(copy)],
-        input='{"tool_name":"Bash","tool_input":{"command":"echo hi"}}',
+        # A probe sent through a hook wrapper is marked (Plan 00466 N12).
+        input=(
+            '{"tool_name":"Bash","tool_input":{"command":"echo hi"},'
+            '"synthetic_source":"test-probe","probe_as":"main"}'
+        ),
         capture_output=True,
         text=True,
         check=False,
@@ -86,7 +90,7 @@ def test_bash_invocation_succeeds_without_exec_bit(tmp_path: Path) -> None:
 
 _STATUS_LINE_SCRIPT = _PROJECT_ROOT / ".claude" / "hooks" / "status-line"
 _STATUS_LINE_PAYLOAD = (
-    '{"hook_event_name":"Status","session_id":"exec-bit-probe",'
+    '{"hook_event_name":"Status","session_id":"exec-bit-probe","synthetic_source":"test-probe",'
     '"model":{"id":"claude-opus-5","display_name":"Opus 5"},'
     '"workspace":{"current_dir":"/tmp","project_dir":"/tmp"}}'
 )

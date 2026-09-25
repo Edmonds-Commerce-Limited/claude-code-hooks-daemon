@@ -95,11 +95,20 @@ class TestReadClaudeSettings:
         assert first == {"effortLevel": "low"}
         assert second == {"effortLevel": "high"}
 
-    def test_default_path_is_home_claude_settings(self) -> None:
-        """get_settings_path resolves to ~/.claude/settings.json."""
+    def test_default_path_is_home_claude_settings(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """get_settings_path resolves to ~/.claude/settings.json by default."""
+        monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
         path = settings_reader.get_settings_path()
 
         assert path == Path.home() / ".claude" / "settings.json"
+
+    def test_the_path_honours_claude_config_dir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Plan 00468 G13: user settings live under ``$CLAUDE_CONFIG_DIR``."""
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
+
+        assert settings_reader.get_settings_path() == tmp_path / "cfg" / "settings.json"
 
     def test_clear_settings_cache_empties_cache(self, tmp_path: Path) -> None:
         """clear_settings_cache forces a re-read on the next call."""
