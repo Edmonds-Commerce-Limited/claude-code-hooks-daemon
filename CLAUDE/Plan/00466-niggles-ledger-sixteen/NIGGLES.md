@@ -9,6 +9,21 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N50 — A handler option whose name matches a method overwrites that method, and the handler then crashes open
+
+**Found by N23 review 2.** `registry.py:592` injects each configured option onto
+the handler with `setattr`. An option named like one of the handler's methods
+replaces the method. For example, the pre-Plan-00288 option `human_docs_dir`, or
+`pauses_path`. The handler then raises on every dispatch. For
+`markdown_organization` that lets a misplaced `.md` file through.
+
+**Candidate remedy:** never let an option overwrite a callable or any attribute
+the class defines. Options go into a dedicated mapping, or the injection
+refuses a name that collides with a class attribute, with a clear config error
+naming the option and the handler. Known renamed options get a migration
+message. RED tests: a colliding option gives a config error and never crashes
+the handler; `markdown_organization` still denies with the stale option set.
+
 ### N49 — `daemon_location_guard` denies a `cd` into the daemon directory that is only text inside a quoted argument
 
 **Found by the coordinator.** A `printf '...'` whose single-quoted string

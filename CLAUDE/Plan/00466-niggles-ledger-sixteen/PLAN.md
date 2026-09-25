@@ -78,6 +78,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N47 | The ccy supervisor and Claude Code's settings.json both own effort, and they fight                        | Owner              | 🔄 In progress        |
 | N48 | `sed_blocker`'s git-commit exemption reaches across a newline                                             | N38 review 2       | ⬜ Open               |
 | N49 | `daemon_location_guard` denies a daemon-directory `cd` that is only text inside a quoted argument         | Coordinator        | ⬜ Open               |
+| N50 | A handler option named like a method overwrites it, and the handler crashes open                          | N23 review 2       | 🔄 In progress        |
 
 ## Tasks
 
