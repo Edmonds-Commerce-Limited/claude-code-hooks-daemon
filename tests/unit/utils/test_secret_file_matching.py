@@ -1869,18 +1869,37 @@ class TestContentContextSkipsAggressiveGlobIntersection:
         result = sfm.find_protected_mention_detail(content, sfm.DEFAULT_PROTECTED_PATTERNS)
         assert result is None
 
-    def test_an_interior_wildcard_string_literal_denies_on_bash_but_not_content(self) -> None:
-        """The genuinely context-dependent case: an interior-wildcard glob
-        trips the DP intersection check on the Bash route (N10's own live
-        example, an everyday agent-typed command), but the SAME text as a
-        quoted Python string literal is source code, not a shell word a
-        shell will ever expand -- content scanning must not run the
-        aggressive glob-shaped heuristics on it."""
-        bash_command = "cat prod.vault-passw*rd"
+    def test_an_interior_wildcard_glob_denies_under_bash_context_regardless_of_source(
+        self,
+    ) -> None:
+        """Review 5: pins that ``context="bash"`` is not a per-language
+        exemption -- it is what the HANDLER now selects for anything a shell
+        genuinely executes (a typed Bash command, but also authored `.sh`/
+        `.bash`/Makefile/CI-YAML/shebang-shell content, per MAJOR-2's
+        scoping in secret_file_guard.py). The SAME interior-wildcard text
+        denies identically whether it arrived as a typed command or as
+        script content scanned with ``context="bash"`` -- there is no
+        content-shaped carve-out at the module level, only a caller-selected
+        context. ``context="content"`` stays the narrow exemption it always
+        was, for source that is genuinely NOT shell text (see the sibling
+        test below)."""
+        text = "cat prod.vault-passw*rd"
+        assert sfm.find_protected_mention_detail(text, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
         assert (
-            sfm.find_protected_mention_detail(bash_command, sfm.DEFAULT_PROTECTED_PATTERNS)
+            sfm.find_protected_mention_detail(
+                text, sfm.DEFAULT_PROTECTED_PATTERNS, context="bash"
+            )
             is not None
         )
+
+    def test_the_same_glob_as_a_python_string_literal_stays_allowed_under_content_context(
+        self,
+    ) -> None:
+        """The genuinely context-dependent case: the identical text, quoted
+        as a Python string literal, is source code in a non-shell language
+        -- no shell will ever expand it -- so ``context="content"`` (what
+        secret_file_guard.py now selects only for non-shell-executed
+        content) must not run the aggressive glob-shaped heuristics on it."""
         source_line = "pattern = 'prod.vault-passw*rd'\n"
         assert (
             sfm.find_protected_mention_detail(
@@ -2420,3 +2439,35 @@ class TestResolveConfiguredPatterns:
         via_handler = handler._patterns()
 
         assert via_resolver == via_handler == ("*.my-custom-secret-shape",)
+
+
+class TestNestedDashCAndEvalCommandsDeny:
+    """n466-n24 review 5 minor-1: `bash -c '…'`/`sh -c '…'`/`eval '…'` whose
+    ARGUMENT spells a protected name across a nested quote splice -- the
+    argument only reveals the real filename on a SECOND decode pass, which
+    :func:`shell_expansion.iter_normalised_shell_words` now performs
+    recursively (bounded by depth and by bytes)."""
+
+    def test_the_reported_bash_dash_c_nested_splice_denies(self) -> None:
+        command = "bash -c 'cat id_'\\''rs'\\''a'"
+        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+
+    def test_the_equivalent_eval_nested_splice_denies(self) -> None:
+        command = "eval 'cat id_'\\''rs'\\''a'"
+        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+
+    def test_two_levels_of_bash_dash_c_nesting_denies(self) -> None:
+        """RED test requested by team-lead: two levels of nesting."""
+        inner = "bash -c 'cat id_'\\''rs'\\''a'"
+        escaped_inner = inner.replace("'", "'\\''")
+        command = f"bash -c '{escaped_inner}'"
+        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+
+    def test_mixed_double_and_single_quoting_denies(self) -> None:
+        """RED test requested by team-lead: mixed quoting."""
+        command = "bash -c \"cat id_'rs'a\""
+        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+
+    def test_an_unrelated_bash_dash_c_command_stays_allowed(self) -> None:
+        command = "bash -c 'echo hello world'"
+        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is None

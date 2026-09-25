@@ -26,6 +26,7 @@ from claude_code_hooks_daemon.utils.shell_expansion import (
     bounded_recursive_glob,
     expand_braces,
     iter_brace_words,
+    iter_normalised_shell_words,
 )
 
 
@@ -271,3 +272,70 @@ class TestBoundedRecursiveGlob:
         )
         with pytest.raises(PermissionError):
             list(bounded_recursive_glob(tmp_path, "**/*.zzz-marker-9f2c", max_entries_visited=100))
+
+
+class TestIterNormalisedShellWordsNestedCommands:
+    """n466-n24 review 5 minor-1: a `bash -c '…'`/`sh -c '…'`/`eval '…'`
+    ARGUMENT is itself a nested shell command, whose own quotes only
+    resolve on a SECOND decode pass -- these tests use a benign word split
+    across a mid-word quote splice (``wor'ld`` decodes, on its own, to
+    ``world``) so the mechanism is pinned without naming any protected
+    pattern; the end-to-end deny is pinned separately, through
+    ``find_protected_mention_detail``, in test_secret_file_matching.py."""
+
+    def test_a_dash_c_argument_is_reparsed_as_a_nested_command(self) -> None:
+        command = "bash -c 'cat wor'\\''ld'"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_an_eval_argument_is_reparsed_as_a_nested_command(self) -> None:
+        command = "eval 'echo wor'\\''ld'"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_an_interpreter_with_a_leading_path_is_recognised(self) -> None:
+        command = "/bin/bash -c 'cat wor'\\''ld'"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_two_levels_of_bash_dash_c_nesting_are_both_reparsed(self) -> None:
+        """RED test requested by team-lead: two levels of nesting."""
+        inner = "bash -c 'cat wor'\\''ld'"
+        # Escape `inner` for embedding inside a single-quoted outer word,
+        # the same way a shell requires: close, escaped quote, reopen.
+        escaped_inner = inner.replace("'", "'\\''")
+        command = f"bash -c '{escaped_inner}'"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_mixed_double_and_single_quoting_is_reparsed(self) -> None:
+        """RED test requested by team-lead: mixed quoting."""
+        command = 'bash -c "cat wor\'ld"'
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_a_flag_between_interpreter_and_dash_c_is_not_recognised(self) -> None:
+        """Documented simplification: adjacency only, matching the reported
+        shape -- a flag in between is a known, accepted residual."""
+        command = "bash --norc -c 'cat wor'\\''ld'"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" not in words
+
+    def test_unrelated_dash_c_content_is_unaffected(self) -> None:
+        command = "bash -c 'echo hello world'"
+        words = list(iter_normalised_shell_words(command))
+        assert words == ["bash", "-c", "echo hello world", "echo", "hello", "world"]
+
+    def test_excessive_nesting_fails_closed_rather_than_hanging_or_allowing(
+        self,
+    ) -> None:
+        """Bounded by BOTH depth and total re-parsed bytes (whichever is
+        hit first) -- past either, this is a nested command that could NOT
+        be examined, which must raise (fail closed), not silently stop
+        recursing and report nothing wrong."""
+        nested = "echo hello"
+        for _ in range(12):
+            escaped = nested.replace("'", "'\\''")
+            nested = f"bash -c '{escaped}'"
+        with pytest.raises(TooManyToEnumerateError):
+            list(iter_normalised_shell_words(nested))

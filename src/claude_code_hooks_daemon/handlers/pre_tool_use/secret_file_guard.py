@@ -28,6 +28,7 @@ RESEARCH-read-routes.md for the class-(b)/(c)/(d) route classification.
 """
 
 import logging
+import re
 import time
 from dataclasses import dataclass
 from typing import Any, ClassVar, Final
@@ -185,6 +186,62 @@ _SCRIPT_EXTENSIONS: Final[tuple[str, ...]] = (
     ".mjs",
     ".ts",
 )
+
+# n466-n24 review 4, review 5 MAJOR-2: the SUBSET of `_SCRIPT_EXTENSIONS`
+# whose content IS shell text a shell will actually expand when the script
+# runs (`bash deploy.sh`) -- these get `context="bash"` (the AGGRESSIVE
+# glob-shaped heuristics), not `context="content"`. A `.py`/`.js`/`.rb` file
+# is source in some OTHER language; nothing here glob-expands its text the
+# way a shell would, so it stays scanned literal-only.
+_SHELL_SCRIPT_EXTENSIONS: Final[tuple[str, ...]] = (".sh", ".bash")
+
+# review 5 MAJOR-2 (further scoping): shell text also shows up with no
+# `.sh`/`.bash` extension at all -- a Makefile recipe line, a CI workflow's
+# `run:` step, an extensionless script a shebang alone identifies. Each of
+# these routes gets `context="bash"` too, and -- for Makefile/CI YAML, which
+# `_SCRIPT_EXTENSIONS` does not otherwise recognise as script-like -- also
+# widens the initial "is this worth scanning at all" gate below. Scanning the
+# WHOLE file rather than isolating just the recipe/`run:` lines is a
+# deliberate simplification: this guard's failure mode is "scans a bit too
+# much of a YAML/Makefile", never "misses a shell word in it".
+_MAKEFILE_BASENAMES: Final[frozenset[str]] = frozenset({"Makefile", "makefile", "GNUmakefile"})
+_MAKEFILE_EXTENSION: Final[str] = ".mk"
+_CI_YAML_EXTENSIONS: Final[tuple[str, ...]] = (".yml", ".yaml")
+_CI_YAML_BASENAMES: Final[frozenset[str]] = frozenset({".gitlab-ci.yml", ".gitlab-ci.yaml"})
+_CI_YAML_DIR_MARKER: Final[str] = "/.github/workflows/"
+_SHEBANG_SHELL_RE: Final[re.Pattern[str]] = re.compile(
+    r"^#!\s*\S*/(?:env\s+)?(?:sh|bash|zsh|dash|ksh|ash)\b"
+)
+
+
+def _path_basename(path: str) -> str:
+    """The final path component, independent of the caller's path separator style."""
+    return path.rsplit("/", 1)[-1]
+
+
+def _is_makefile_path(path: str) -> bool:
+    basename = _path_basename(path)
+    return basename in _MAKEFILE_BASENAMES or basename.endswith(_MAKEFILE_EXTENSION)
+
+
+def _is_ci_yaml_path(path: str) -> bool:
+    if not any(path.endswith(extension) for extension in _CI_YAML_EXTENSIONS):
+        return False
+    basename = _path_basename(path)
+    if basename in _CI_YAML_BASENAMES:
+        return True
+    return _CI_YAML_DIR_MARKER in path or path.startswith(".github/workflows/")
+
+
+def _has_shell_shebang(content: str) -> bool:
+    """Does the content's first line name a shell interpreter?
+
+    Identifies an extensionless shell script (`install`, `configure`,
+    conventionally shebang-only, no `.sh`) that `_SCRIPT_EXTENSIONS` alone
+    would never recognise as script-like at all.
+    """
+    first_line = content.splitlines()[0] if content else ""
+    return bool(_SHEBANG_SHELL_RE.match(first_line.strip()))
 
 # Plan 00459 acceptance probes: an encrypted vars file and its decrypted twin,
 # at the vault-vars name the default `*vault_pass*` glob matches.
@@ -478,14 +535,33 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         scopes THIS surface only: the guard's own source and tests legitimately
         name protected paths. A protected path itself is never excludable.
 
-        Scanned with ``context="content"`` (n466-n24 review 4 addendum,
-        false-positive fold-in b): authored content is source code, never
-        shell text a shell will expand, so the AGGRESSIVE glob-shaped
-        heuristics stay off here -- only an exact/glob-pattern LITERAL match
-        (a quoted path string, a script's own protected-name reference)
-        still denies. See ``sfm.MentionContext`` for the full rationale.
+        Scanned with ``context="content"`` for source in a non-shell language
+        (n466-n24 review 4 addendum, false-positive fold-in b): authored
+        source code is never shell text a shell will expand, so the
+        AGGRESSIVE glob-shaped heuristics stay off -- only an exact/glob-
+        pattern LITERAL match (a quoted path string, a script's own
+        protected-name reference) still denies. See ``sfm.MentionContext``
+        for the full rationale.
+
+        Genuinely shell-executed content is the exception (review 5
+        MAJOR-2): a ``.sh``/``.bash`` extension, a Makefile recipe, a CI
+        workflow's ``run:`` step, or a shebang alone naming a shell on an
+        otherwise extensionless script -- all of these are text a shell
+        will actually expand when the file runs (`bash deploy.sh`, `make`,
+        a CI job), so scanning them with the weaker ``"content"`` matcher
+        would reopen the write-then-execute gap this whole surface exists to
+        close. Scanned with ``context="bash"`` instead, matching the
+        aggressive heuristics a real shell invocation gets. The Makefile/CI
+        YAML routes scan the WHOLE file rather than isolating just the
+        recipe/``run:`` lines -- see ``_MAKEFILE_BASENAMES`` above for why
+        that simplification is the safe direction to err in.
         """
-        if not any(path.endswith(extension) for extension in _SCRIPT_EXTENSIONS):
+        content = str(tool_input.get(_FIELD_CONTENT, "") or tool_input.get(_FIELD_NEW_STRING, ""))
+        is_extension_script = any(path.endswith(extension) for extension in _SCRIPT_EXTENSIONS)
+        is_makefile = _is_makefile_path(path)
+        is_ci_yaml = _is_ci_yaml_path(path)
+        is_shebang_shell = _has_shell_shebang(content)
+        if not (is_extension_script or is_makefile or is_ci_yaml or is_shebang_shell):
             return None
         if handler_excludes_path(
             path,
@@ -494,13 +570,20 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             layout=self.layout_for(path),
         ):
             return None
-        content = str(tool_input.get(_FIELD_CONTENT, "") or tool_input.get(_FIELD_NEW_STRING, ""))
+        is_shell_extension = any(
+            path.endswith(extension) for extension in _SHELL_SCRIPT_EXTENSIONS
+        )
+        context: sfm.MentionContext = (
+            "bash"
+            if (is_shell_extension or is_makefile or is_ci_yaml or is_shebang_shell)
+            else "content"
+        )
         return sfm.find_protected_mention_detail(
             content,
             patterns,
             deadline=time.monotonic() + sfm.SCAN_DEADLINE_SECONDS,
             cwd=cwd,
-            context="content",
+            context=context,
         )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:

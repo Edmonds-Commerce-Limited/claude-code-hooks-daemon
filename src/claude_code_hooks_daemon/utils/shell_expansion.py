@@ -286,6 +286,36 @@ DEFAULT_MAX_NORMALISED_WORDS: Final[int] = 2000
 #: quote/``$``/backtick characters this module decodes instead of discarding.
 _WORD_SEPARATOR_CHARS: Final[str] = " \t\n;|&<>()"
 
+# n466-n24 review 5 minor-1: a `bash -c '...'`/`sh -c '...'`/`eval '...'`
+# ARGUMENT is itself a nested shell command -- its own quotes only resolve
+# once the outer word decode has already spliced them together (a filename
+# split across an escaped mid-word quote decodes on the outer pass to a word
+# that STILL carries a literal quote character -- only a SECOND decode pass,
+# run on that word as its own command, reveals the real one-word filename).
+# Names the recognised interpreter basenames (a leading path like
+# `/bin/bash` is stripped before comparing) and the recursion's two
+# independent bounds.
+_SHELL_INTERPRETER_BASENAMES: Final[frozenset[str]] = frozenset(
+    {"sh", "bash", "zsh", "dash", "ksh", "ash"}
+)
+_EVAL_COMMAND_NAME: Final[str] = "eval"
+
+#: Nesting levels of `-c`/`eval` re-parsing followed (`bash -c 'bash -c
+#: "..."'` could recurse arbitrarily) -- independent of the per-level
+#: word-count bound above, which does not limit how deep the nesting goes.
+_MAX_NESTED_SHELL_DEPTH: Final[int] = 4
+
+#: Total bytes of nested `-c`/`eval` ARGUMENT text re-parsed across the
+#: WHOLE call (shared across every level, not reset per level) -- bounds the
+#: aggregate re-parsing cost regardless of how the nesting is shaped, the
+#: same direction the other bounds in this module cap their own cost.
+_MAX_NESTED_SHELL_BYTES: Final[int] = 32768
+
+
+def _interpreter_basename(word: str) -> str:
+    """``word`` with any leading path stripped (e.g. `/bin/bash` -> `bash`)."""
+    return word.rsplit("/", 1)[-1]
+
 #: ANSI-C (`$'...'`) single-character escapes with no numeric argument.
 _ANSI_C_SIMPLE_ESCAPES: Final[dict[str, str]] = {
     "a": "\a",
@@ -521,10 +551,39 @@ def iter_normalised_shell_words(
 
     Bounded to the first ``max_words`` words, the same direction
     :func:`iter_brace_words` bounds its own volume.
+
+    n466-n24 review 5 minor-1: the ARGUMENT immediately after a recognised
+    interpreter's ``-c`` (``bash -c '…'``, ``sh -c '…'``, …) or immediately
+    after ``eval`` is re-parsed with this SAME function, recursively -- it
+    is itself a nested command, and its own quotes only resolve once this
+    outer decode has already spliced them together once. See
+    ``_MAX_NESTED_SHELL_DEPTH``/``_MAX_NESTED_SHELL_BYTES`` above for the two
+    independent bounds this recursion is held to. Only the single word
+    directly after ``-c``/``eval`` is treated as the nested command (bash's
+    own ``-c`` semantics: anything past it is positional arguments, not
+    command text; a multi-argument ``eval a b`` is not reassembled -- a
+    documented simplification, not a claim of full ``eval`` generality). A
+    flag between the interpreter and ``-c`` (`bash --norc -c '…'`) is not
+    recognised -- adjacency only, matching the reported shape.
     """
+    remaining_bytes = [_MAX_NESTED_SHELL_BYTES]
+    yield from _iter_normalised_shell_words(
+        command, max_words=max_words, depth=0, remaining_bytes=remaining_bytes
+    )
+
+
+def _iter_normalised_shell_words(
+    command: str,
+    *,
+    max_words: int,
+    depth: int,
+    remaining_bytes: list[int],
+) -> Iterator[str]:
     count = 0
     i = 0
     n = len(command)
+    previous: str | None = None
+    before_previous: str | None = None
     while i < n:
         if command[i] in _WORD_SEPARATOR_CHARS:
             i += 1
@@ -535,6 +594,39 @@ def iter_normalised_shell_words(
         count += 1
         yield decoded
         i = end
+
+        is_dash_c_argument = (
+            previous == "-c"
+            and before_previous is not None
+            and _interpreter_basename(before_previous) in _SHELL_INTERPRETER_BASENAMES
+        )
+        is_eval_argument = previous == _EVAL_COMMAND_NAME
+        if is_dash_c_argument or is_eval_argument:
+            # Past either bound this is a nested command we could NOT
+            # examine -- raising (rather than silently declining to
+            # recurse) matches this module's existing fail-closed doctrine
+            # for :func:`expand_braces`/:func:`bounded_recursive_glob`:
+            # "cannot rule out a protected path" is not the same fact as
+            # "no protected path", and the caller must not conflate them.
+            if depth >= _MAX_NESTED_SHELL_DEPTH:
+                raise TooManyToEnumerateError(
+                    "nested -c/eval re-parsing exceeded its depth bound"
+                )
+            if remaining_bytes[0] <= 0:
+                raise TooManyToEnumerateError(
+                    "nested -c/eval re-parsing exceeded its byte budget"
+                )
+            spend = min(len(decoded), remaining_bytes[0])
+            remaining_bytes[0] -= spend
+            yield from _iter_normalised_shell_words(
+                decoded,
+                max_words=max_words,
+                depth=depth + 1,
+                remaining_bytes=remaining_bytes,
+            )
+
+        before_previous = previous
+        previous = decoded
 
 
 # ── Bounded recursive glob walk ──────────────────────────────────────────

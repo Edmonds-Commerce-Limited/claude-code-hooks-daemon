@@ -14,16 +14,20 @@ Two boundaries are load-bearing and are asserted here rather than assumed:
   durable.
 """
 
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
 import pytest
 
+from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.chain import HandlerChain
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
+from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.handlers.pre_tool_use.project_containment import (
     ProjectContainmentHandler,
 )
@@ -33,10 +37,33 @@ _ROOT = Path("/repo")
 
 @pytest.fixture(autouse=True)
 def _project_root() -> Any:
-    """Pin the repository root so the boundary under test is deterministic."""
+    """Pin the repository root so the boundary under test is deterministic.
+
+    A test that needs `ProjectContext.project_root` to behave differently
+    (raise, return something else) MUST reconfigure THIS fixture's own
+    `mock` (e.g. ``mock.side_effect = ...``) rather than layering a second,
+    independent patcher on the same target with `monkeypatch.setattr`
+    (Plan 00466 N39): `monkeypatch`'s finalizer runs AFTER this `with
+    patch(...)` block has already exited and restored the real classmethod,
+    so a second patcher's teardown overwrites it AGAIN -- with whatever it
+    captured as "current" at `setattr()` time, which is THIS fixture's own
+    `MagicMock`. That leaves `ProjectContext.project_root` permanently
+    pointing at a stale mock for the rest of the pytest PROCESS, silently
+    corrupting every later test in the same run that calls it.
+    """
     with patch("claude_code_hooks_daemon.core.project_context.ProjectContext.project_root") as mock:
         mock.return_value = _ROOT
         yield mock
+    # Tripwire (Plan 00466 N39): if some test in this file DID leave a
+    # second patcher's teardown behind, `project_root` is no longer the
+    # plain classmethod this `with patch(...)` block just restored -- catch
+    # it here, at the FIXTURE boundary, rather than as a mystifying failure
+    # in some unrelated, later-running test file.
+    assert isinstance(ProjectContext.__dict__["project_root"], classmethod), (
+        "ProjectContext.project_root leaked past this fixture's teardown "
+        "(Plan 00466 N39) -- a test double-patched it instead of "
+        "reconfiguring this fixture's own mock"
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -457,15 +484,16 @@ class TestFailsClosedOnEvaluationError:
     """
 
     def test_an_uninitialised_project_root_still_denies(
-        self, handler: ProjectContainmentHandler, monkeypatch: pytest.MonkeyPatch
+        self, handler: ProjectContainmentHandler, _project_root: Any
     ) -> None:
+        """Reconfigures the class-wide `_project_root` fixture's OWN mock
+        rather than layering a second `monkeypatch.setattr` patcher on the
+        same target (Plan 00466 N39) -- see that fixture's docstring."""
+
         def _raise() -> Path:
             raise RuntimeError("ProjectContext not initialized")
 
-        monkeypatch.setattr(
-            "claude_code_hooks_daemon.core.project_context.ProjectContext.project_root",
-            classmethod(lambda cls: _raise()),
-        )
+        _project_root.side_effect = _raise
         hook_input = _write("/tmp/notes.md")
 
         assert handler.matches(hook_input) is True
@@ -475,15 +503,14 @@ class TestFailsClosedOnEvaluationError:
         assert "RuntimeError" in result.reason
 
     def test_an_evaluation_error_denial_uses_its_own_rule_id(
-        self, handler: ProjectContainmentHandler, monkeypatch: pytest.MonkeyPatch
+        self, handler: ProjectContainmentHandler, _project_root: Any
     ) -> None:
+        """Same fixture-reconfiguration fix as the test above (N39)."""
+
         def _raise() -> Path:
             raise RuntimeError("synthetic")
 
-        monkeypatch.setattr(
-            "claude_code_hooks_daemon.core.project_context.ProjectContext.project_root",
-            classmethod(lambda cls: _raise()),
-        )
+        _project_root.side_effect = _raise
         result = handler.handle(_write("/tmp/notes.md"))
 
         assert result.reason is not None
@@ -592,15 +619,16 @@ class TestChainLevelFailClosedBehaviour:
         assert result.result.decision == Decision.DENY
 
     def test_an_evaluation_exception_still_denies_through_the_chain(
-        self, handler: ProjectContainmentHandler, monkeypatch: pytest.MonkeyPatch
+        self, handler: ProjectContainmentHandler, _project_root: Any
     ) -> None:
+        """Reconfigures the class-wide `_project_root` fixture's OWN mock
+        rather than layering a second `monkeypatch.setattr` patcher on the
+        same target (Plan 00466 N39) -- see that fixture's docstring."""
+
         def _raise() -> Path:
             raise RuntimeError("synthetic chain-level evaluation failure")
 
-        monkeypatch.setattr(
-            "claude_code_hooks_daemon.core.project_context.ProjectContext.project_root",
-            classmethod(lambda cls: _raise()),
-        )
+        _project_root.side_effect = _raise
         chain = HandlerChain()
         chain.add(handler)
         hook_input = _write("/tmp/notes.md")
@@ -920,3 +948,38 @@ class TestATildeIsADestinationLikeAnyOther:
         assert handler.matches(_bash("curl -s https://x/y -o ~/in-repo.txt", cwd="/workspace")) is (
             False
         )
+
+
+class TestProjectRootDoublePatchDoesNotLeakAcrossFiles:
+    """Plan 00466 N39 regression: the polluter/victim PAIR from the
+    bisection, run together in one pytest PROCESS -- the shape the leak
+    actually needs to reproduce (the polluter's `monkeypatch` teardown ran
+    AFTER this file's `_project_root` fixture had already restored the real
+    classmethod, in the SAME process, for a LATER test to inherit). Neither
+    test alone shows the defect; this is why the pair, not either file's
+    own suite, is what pins it.
+    """
+
+    def test_the_polluter_and_a_victim_pass_together_in_one_process(self) -> None:
+        polluter = (
+            "tests/unit/handlers/pre_tool_use/test_project_containment.py"
+            "::TestFailsClosedOnEvaluationError"
+            "::test_an_uninitialised_project_root_still_denies"
+        )
+        victim = (
+            "tests/unit/handlers/test_absolute_path.py"
+            "::TestAbsolutePathHandler"
+            "::test_handle_omits_the_example_rather_than_guessing_a_root"
+        )
+        completed = subprocess.run(
+            [sys.executable, "-m", "pytest", "-p", "no:xdist", "-q", polluter, victim],
+            cwd=Path(__file__).resolve().parents[4],
+            capture_output=True,
+            text=True,
+            timeout=Timeout.REQUEST_LONG,
+        )
+        assert completed.returncode == 0, (
+            "the polluter/victim pair failed together (Plan 00466 N39 "
+            f"regression) -- stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}"
+        )
+        assert "2 passed" in completed.stdout

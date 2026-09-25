@@ -217,3 +217,151 @@ passed, 9 failed (the identical, pre-existing 4-file order-dependence set,
 one more test passing overall than before this addendum since it added
 tests of its own); `run_format_check.sh` clean; `audit_error_hiding.py` 0
 violations; `llm_qa.py` 7/7 PASSED.
+
+## Addendum 3: review 5 MAJOR-2, minor-1, and N39 (fixed in this pass)
+
+Review 5 (`260925-guard-defects-review5-opus-5-5.md`, committed alongside
+this addendum) found MAJOR-1 (this worktree was not clean during the
+review -- resolved automatically by committing addendum 1/2's work),
+MAJOR-2 (a real gap Addendum 1's own fix opened), and minor-1 (a
+pre-existing, documented residual). Team-lead's own follow-up message
+widened MAJOR-2's required fix beyond the review's own finding. All three
+are fixed in this pass.
+
+**MAJOR-2 — `context="content"` was too broad, reopening `.sh`/`.bash`
+write-then-execute.** Addendum 1's fix applied `context="content"`
+uniformly across every `_SCRIPT_EXTENSIONS` entry, including `.sh`/`.bash`
+-- but that content genuinely IS shell text a shell expands when the
+script runs (`bash deploy.sh`), so the weaker literal-only matcher reopened
+exactly the vulnerability class Task 4.3 exists to close (`cat prod.vault-pass*`, `cat id_rs?`, `cat id*a` in a `.sh` file's content were
+ALLOWED). Checked first whether the narrower `_token_literal_residue`
+fix (item a) alone resolved the original Python-splat false positive
+without any context split at all (team-lead's stated preference, if
+true): confirmed empirically that it does for THAT shape, but also
+confirmed it reopens a DIFFERENT false positive the context split was
+built for -- an ordinary Python string literal that merely LOOKS
+glob-shaped (`pattern = 'prod.vault-passw*rd'`) would deny under a
+context-free "always aggressive" design, which is real source code, not a
+mention. Went with the primary path instead: scope `context="bash"` (the
+aggressive route) to content that genuinely IS shell text, and keep
+`context="content"` (literal-only) for everything else.
+
+`secret_file_guard.py`'s `_script_content_mention` now classifies by
+FOUR signals, matching team-lead's explicit widened ask: (1) a
+`.sh`/`.bash` extension, (2) a Makefile (`Makefile`/`makefile`/
+`GNUmakefile` basename, or `.mk` extension -- and `_SCRIPT_EXTENSIONS`
+itself is widened to scan these at all, since neither was in it before),
+(3) a CI workflow YAML (`.github/workflows/*.yml`/`.yaml`, or a
+`.gitlab-ci.yml`/`.gitlab-ci.yaml` basename -- also newly scanned), (4) a
+shebang alone naming a shell interpreter (`sh`/`bash`/`zsh`/`dash`/`ksh`/
+`ash`, with or without a leading path) on an otherwise extensionless
+script -- the fourth signal also widens the scan gate, since an
+extensionless file matches none of `_SCRIPT_EXTENSIONS`. Any of the four
+selects `context="bash"`; everything else that still reaches the scan
+(a `.py`/`.js`/`.rb`/... file, or a non-shell-shebang extensionless file)
+keeps `context="content"`. The Makefile/CI-YAML routes scan the WHOLE
+file rather than isolating recipe/`run:` lines specifically -- a
+deliberate simplification in the safe direction (this guard's failure
+mode is "scans a bit too much", never "misses a shell word").
+
+RED-pinned end-to-end through the real handler
+(`TestContentContextThroughTheHandler`, new tests): `.sh`/`.bash`/
+`Makefile`/`.mk`/GitHub-workflow-YAML/`.gitlab-ci.yml`/shebang-only-shell
+content carrying an interior-wildcard or `?`-glob mention still denies;
+the identical text in `.py` content, an ordinary (non-CI) `.yml`, and an
+extensionless file with a non-shell (`python3`) shebang all stay allowed
+(controls). Reverting the classification (back to the Addendum-1 shape)
+makes every new denial-side test fail while both controls still pass --
+confirmed by direct revert-and-run.
+
+The module-level WIP test flagged in team-lead's message
+(`test_an_interior_wildcard_string_literal_denies_on_bash_but_not_content`)
+is renamed/inverted: it now pins that `context="bash"` denies the SAME
+text whether it arrived as a typed Bash command or as content scanned
+with that context -- `context="bash"` is not a per-language exemption, it
+is what the handler now selects for anything a shell genuinely executes.
+`context="content"` stays the narrow exemption for genuinely non-shell
+source, pinned by a sibling test.
+
+**minor-1 — `bash -c '…'`/`sh -c '…'`/`eval '…'` nested quote-splice.**
+The review's own repro (`bash -c 'cat id_'\''rs'\''a'`) was ALLOWED
+because M-1's word normaliser (`iter_normalised_shell_words`) reads the
+`-c` argument as ONE already-decoded word (`cat id_'rs'a`) but never
+RE-PARSES that word as a nested command, so the inner quote-splice was
+never resolved. Team-lead's follow-up: "re-parse the string argument of
+`bash|sh|zsh|dash -c` and of `eval` with the SAME normaliser, recursively,
+bounded by depth and by bytes."
+
+Implemented directly in `shell_expansion.iter_normalised_shell_words`:
+the word immediately following a recognised interpreter's `-c` (leading
+path stripped before comparing, e.g. `/bin/bash`), or immediately
+following `eval`, is re-parsed with the SAME function, recursively. Two
+independent bounds, both new: `_MAX_NESTED_SHELL_DEPTH` (4 levels) and
+`_MAX_NESTED_SHELL_BYTES` (32 KiB, shared across the whole call, not
+reset per level). Past EITHER bound this raises `TooManyToEnumerateError`
+rather than silently declining to recurse -- matching this module's own
+existing fail-closed doctrine for `expand_braces`/`bounded_recursive_glob`:
+"cannot rule out a protected path" must never be conflated with "no
+match". Two documented, accepted simplifications, matching the reported
+shape exactly rather than claiming full generality: only the SINGLE word
+directly after `-c`/`eval` is treated as the nested command (bash's own
+`-c` semantics: anything past it is positional arguments, not command
+text; a multi-argument `eval a b` is not reassembled), and a flag
+between the interpreter and `-c` (`bash --norc -c '…'`) is not
+recognised (adjacency only).
+
+RED-pinned at both layers: `TestIterNormalisedShellWordsNestedCommands`
+(module-level, `shell_expansion`, using a benign quote-split word so the
+mechanism is pinned without naming any protected pattern) and
+`TestNestedDashCAndEvalCommandsDeny` (end-to-end via
+`find_protected_mention_detail`, using the review's own literal shape)
+each cover: the single-level report shape, the `eval` equivalent, an
+interpreter with a leading path, two levels of `bash -c` nesting
+(team-lead's requested RED test), mixed double/single quoting
+(team-lead's other requested RED test), the documented flag-adjacency
+limitation (control), an unrelated `bash -c` command staying allowed
+(control), and excessive nesting raising `TooManyToEnumerateError`
+rather than hanging or silently allowing. Reverting the recursive
+re-parse (back to the pre-fix single-level tokeniser) makes 11 of these
+13 tests fail (the 2 controls still pass, as they must) -- confirmed by
+direct revert-and-run.
+
+**N39 — the 9-failures-only-in-a-whole-suite-run leak (not a review-5
+finding; a parallel diagnosis handed to this worktree).** A companion
+agent bisected the leak to `test_project_containment.py`'s class-wide
+`_project_root` autouse fixture (`with patch(...) as mock`) being
+double-patched by three tests that ALSO called
+`monkeypatch.setattr(..., classmethod(lambda cls: _raise()))` on the
+exact same target -- `monkeypatch`'s finalizer runs AFTER the fixture's
+own `with patch(...)` block has already restored the real classmethod,
+so the second patcher's teardown overwrote it AGAIN with the fixture's
+stale `MagicMock`, permanently, for the rest of the pytest PROCESS. Fixed
+per the diagnosed recipe: the three tests now reconfigure the fixture's
+own `mock` (`mock.side_effect = ...`) instead of introducing a second
+patcher; the fixture itself gained a post-teardown tripwire assertion
+(`isinstance(ProjectContext.__dict__["project_root"], classmethod)`) so
+any FUTURE double-patch in this file fails immediately, at the fixture
+boundary, with a clear message, rather than silently corrupting an
+unrelated downstream file; and a new regression test
+(`TestProjectRootDoublePatchDoesNotLeakAcrossFiles`) runs the exact
+polluter/victim pair from the bisection together in one subprocess pytest
+invocation and asserts both pass -- the shape the leak actually needs to
+reproduce, which neither test alone exercises. RED-pinned by reverting
+only the polluter test back to the double-patch shape: the regression
+test fails with the IDENTICAL symptom the original bisection found
+(`'Example:' is contained here: Example: /repo/test.py`), confirming the
+new test is a genuine pin, not a vacuous one.
+
+Verified per team-lead's instruction (targeted, not the whole suite, host
+overloaded): the polluter file plus all four originally-diagnosed victim
+files together, sequential, no `-p xdist` -- 215 passed. The broader
+targeted suite across every file touched this round (secret_file_matching,
+shell_expansion, secret_file_guard, project_containment,
+quarantine_artefact_read_guard, enforce_llm_qa, rule_ids, absolute_path,
+model_fallback_detector, rule_explain/test_lookup,
+dangerous_invocation_corpus_checker) -- 809 passed. `llm_qa.py` run
+against every `check_*.py`-backed detector plus `lint`/`type_check`/
+`security`/`error_hiding` -- 27/27 PASSED (one `magic_values` violation
+found and fixed along the way: the regression test's own subprocess
+`timeout=60` moved to `Timeout.REQUEST_LONG`). The full unit suite was
+NOT re-run this pass per team-lead's explicit host-overload instruction.

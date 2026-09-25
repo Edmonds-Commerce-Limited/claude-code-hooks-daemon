@@ -304,6 +304,112 @@ class TestContentContextThroughTheHandler:
         )
         assert handler.matches(hook_input)
 
+    def test_a_shell_script_interior_wildcard_glob_still_denies(self) -> None:
+        """Review 5 MAJOR-2: a `.sh`/`.bash` file's content IS shell text a
+        shell will expand when the script runs (`bash deploy.sh`) -- an
+        interior-wildcard glob-shaped reference must still deny under the
+        AGGRESSIVE (bash-route) heuristics, not fall through to the weaker
+        literal-only content matcher a `.py`/`.js` file gets."""
+        handler = _handler()
+        hook_input = _hook_input(
+            "Write",
+            {"file_path": "/proj/deploy.sh", "content": "#!/bin/bash\ncat prod.vault-pass*\n"},
+        )
+        assert handler.matches(hook_input)
+
+    def test_a_bash_extension_interior_wildcard_glob_still_denies(self) -> None:
+        handler = _handler()
+        hook_input = _hook_input(
+            "Write", {"file_path": "/proj/deploy.bash", "content": "cat id_rs?\n"}
+        )
+        assert handler.matches(hook_input)
+
+    def test_a_python_interior_wildcard_string_literal_stays_allowed(self) -> None:
+        """Control: the SAME interior-wildcard text stays allowed in a
+        non-shell extension, where it is genuinely just source code."""
+        handler = _handler()
+        hook_input = _hook_input(
+            "Write",
+            {"file_path": "/proj/helper.py", "content": "pattern = 'prod.vault-pass*'\n"},
+        )
+        assert not handler.matches(hook_input)
+
+    def test_a_makefile_recipe_glob_shaped_mention_denies(self) -> None:
+        """Review 5 MAJOR-2 (further scoping): a Makefile recipe line IS
+        shell text `make` will expand -- and `_SCRIPT_EXTENSIONS` alone would
+        never even scan an extensionless `Makefile` at all."""
+        handler = _handler()
+        hook_input = _hook_input(
+            "Write",
+            {"file_path": "/proj/Makefile", "content": "deploy:\n\tcat prod.vault-pass*\n"},
+        )
+        assert handler.matches(hook_input)
+
+    def test_a_dotmk_file_glob_shaped_mention_denies(self) -> None:
+        handler = _handler()
+        hook_input = _hook_input(
+            "Write", {"file_path": "/proj/rules.mk", "content": "cat id_rs?\n"}
+        )
+        assert handler.matches(hook_input)
+
+    def test_a_github_workflow_run_step_glob_shaped_mention_denies(self) -> None:
+        """A CI workflow's `run:` step is shell text the CI runner expands --
+        `.yml`/`.yaml` alone is not in `_SCRIPT_EXTENSIONS`, so this also
+        widens the initial scan gate, not just the context choice."""
+        handler = _handler()
+        hook_input = _hook_input(
+            "Write",
+            {
+                "file_path": "/proj/.github/workflows/ci.yml",
+                "content": "jobs:\n  build:\n    steps:\n      - run: cat id_rs?\n",
+            },
+        )
+        assert handler.matches(hook_input)
+
+    def test_a_gitlab_ci_yaml_glob_shaped_mention_denies(self) -> None:
+        handler = _handler()
+        hook_input = _hook_input(
+            "Write",
+            {"file_path": "/proj/.gitlab-ci.yml", "content": "script:\n  - cat id_rs?\n"},
+        )
+        assert handler.matches(hook_input)
+
+    def test_an_ordinary_yaml_file_stays_unaffected_by_ci_scanning(self) -> None:
+        """Control: a plain YAML config (not a CI workflow path) is not in
+        `_SCRIPT_EXTENSIONS` and matches none of the CI markers, so it is not
+        scanned at all -- same as before this fix."""
+        handler = _handler()
+        hook_input = _hook_input(
+            "Write",
+            {"file_path": "/proj/config.yml", "content": "pattern: 'prod.vault-pass*'\n"},
+        )
+        assert not handler.matches(hook_input)
+
+    def test_an_extensionless_shell_shebang_script_glob_shaped_mention_denies(self) -> None:
+        """A shebang alone identifies an extensionless shell script
+        (`install`, `configure`) that `_SCRIPT_EXTENSIONS` would otherwise
+        never even scan."""
+        handler = _handler()
+        hook_input = _hook_input(
+            "Write",
+            {"file_path": "/proj/install", "content": "#!/usr/bin/env bash\ncat id_rs?\n"},
+        )
+        assert handler.matches(hook_input)
+
+    def test_an_extensionless_python_shebang_script_stays_unaffected(self) -> None:
+        """Control: a non-shell shebang (`python3`) does not trip shell
+        classification, and an extensionless file with no script marker at
+        all is not scanned -- same as before this fix."""
+        handler = _handler()
+        hook_input = _hook_input(
+            "Write",
+            {
+                "file_path": "/proj/generate",
+                "content": "#!/usr/bin/env python3\npattern = 'prod.vault-pass*'\n",
+            },
+        )
+        assert not handler.matches(hook_input)
+
 
 class TestContentScan:
     """Task 4.3: authored SCRIPTS referencing a protected path are denied."""

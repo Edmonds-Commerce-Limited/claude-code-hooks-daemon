@@ -6,6 +6,40 @@ candidate remedies.
 N34 is taken on the `worktree-n466-n24` branch (the chain deadline cannot
 interrupt a running handler) and lands with that branch.
 
+### N39 — Nine unit tests fail in a whole-suite run and pass when their files run alone
+
+**Found by the guard-defects agent** (its review-4 fix round): a plain
+whole-suite `pytest tests/unit` on this worktree gave 9 failures across
+`test_model_fallback_detector.py` (6), `test_absolute_path.py` (1),
+`rule_explain/test_lookup.py` (1) and
+`test_dangerous_invocation_corpus_checker.py` (1); the same four files run
+alone gave 0 failed. **Diagnosed by a parallel agent** (a companion
+worktree, full write-up cross-referenced from there): `main` does not
+reproduce it; this worktree does. Bisected to
+`test_project_containment.py`'s class-wide `_project_root` autouse fixture
+(`with patch(...) as mock`) being double-patched by three tests
+(`TestFailsClosedOnEvaluationError::test_an_uninitialised_project_root_still_denies`,
+`::test_an_evaluation_error_denial_uses_its_own_rule_id`,
+`TestChainLevelFailClosedBehaviour::test_an_evaluation_exception_still_denies_through_the_chain`)
+that ALSO called `monkeypatch.setattr(..., classmethod(lambda cls: _raise()))` on the exact same target.
+`monkeypatch`'s finalizer runs AFTER the fixture's own `with patch(...)`
+block has already restored the real classmethod, so the second patcher's
+teardown overwrote it AGAIN with the fixture's own stale `MagicMock` --
+permanently, for the rest of the pytest PROCESS. Every later test calling
+`ProjectContext.project_root()` in that process then inherited the fake
+root, explaining all four victim files.
+
+**Fixed** (guard-defects agent, review-5 fix round): the three tests now
+reconfigure the fixture's own `mock` (`mock.side_effect = ...`) instead of
+introducing a second patcher; the fixture gained a post-teardown tripwire
+assertion so any FUTURE double-patch in this file fails immediately, at
+the fixture boundary; a regression test
+(`TestProjectRootDoublePatchDoesNotLeakAcrossFiles`) runs the exact
+polluter/victim pair together in one subprocess pytest invocation and
+asserts both pass. RED-pinned by reverting the polluter test alone: the
+regression test reproduces the identical original symptom
+(`Example: /repo/test.py` leaking into a reason string). ✅ Remedied.
+
 ### N36 — `destructive_git` denies a `grep` whose search pattern is the text of a force branch delete
 
 **Found by the Plan 00463 agent** (review-5 fix round, its nit n9). Searching
@@ -451,6 +485,21 @@ both-edges truncation (`demo.s*t`) still needs the FS-truth route
 unchanged — flagged to team-lead as a judgement call, not a full resolution
 of every example in the addendum's own RED-test wording. Full detail:
 `subagent-reports/260924-n466-guards-review4-fix-sonnet-5.md`, Addenda 1-2.
+
+**Correction (addendum, guard-defects review 5)**: review 5 found the
+addendum-4 `context` fix above was itself too broad -- `context="content"`
+was applied uniformly to EVERY `_SCRIPT_EXTENSIONS` entry, including
+`.sh`/`.bash`, whose content genuinely IS shell text a shell expands when
+the script runs, reopening the write-then-execute gap for those two
+extensions specifically. Fixed, and per team-lead's own follow-up widened
+further: `context="bash"` now applies to a `.sh`/`.bash` extension, a
+Makefile (`Makefile`/`makefile`/`GNUmakefile`/`.mk`), a CI workflow YAML
+(`.github/workflows/*.yml`/`.yaml`, `.gitlab-ci.yml`/`.yaml`), or an
+extensionless script identified by its own shebang naming a shell
+interpreter -- all newly recognised as scan-worthy at all, not just
+reclassified, since none but `.sh`/`.bash` was previously in
+`_SCRIPT_EXTENSIONS`. Full detail:
+`subagent-reports/260924-n466-guards-review4-fix-sonnet-5.md`, Addendum 3.
 
 ### N9 — ✅ Remedied — `docs_qa` judges gitignored markdown, so installing a Claude Code plugin fails local full QA
 
