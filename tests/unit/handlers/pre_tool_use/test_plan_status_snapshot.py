@@ -341,11 +341,16 @@ class TestGoalInjectionGate:
         plan = self._write_plan("Not Started")
         assert handler.matches(self._hook_input(plan)) is True
 
-    def test_gate_runs_before_the_trigger_match_so_a_non_plan_write_is_still_false(
+    def test_matches_returns_false_for_a_non_plan_write_even_with_goal_injection_on(
         self, handler: PlanStatusSnapshotHandler, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The gate must not accidentally widen `matches()` -- a write that
-        is not a plan trigger stays unmatched even when goal_injection is on."""
+        is not a plan trigger stays unmatched even when goal_injection is on.
+
+        RV8-m1: this test's OLD name claimed to cover the RV7-M1 order swap,
+        but it passes under EITHER order (a non-plan write is False either
+        way) -- it only pins the RESULT, not the ORDER. The real order guard
+        is `test_trigger_match_runs_before_the_gate...` below."""
         monkeypatch.setattr(
             PlanStatusSnapshotHandler,
             "_load_config",
@@ -360,6 +365,95 @@ class TestGoalInjectionGate:
             "tool_use_id": "tu-other",
         }
         assert handler.matches(hook_input) is False
+
+    def test_trigger_match_runs_before_the_gate_so_a_non_plan_event_never_loads_config(
+        self, handler: PlanStatusSnapshotHandler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """RV7-M1 / RV8-m1: THE real order guard. `matched_plan_write_or_edit`
+        (cheap: tuple membership + a path check, no I/O) must run BEFORE
+        `_goal_injection_enabled` (config-backed: `Path.resolve()`/`stat()`/
+        lock) -- so a Bash call, a Read, and a Write outside the plan
+        directory never reach the gate at all. Restoring the pre-RV7-M1 order
+        (gate first) makes `_goal_injection_enabled` get called for all three
+        below, failing the final assert -- that is what this test catches
+        that `test_matches_returns_false_for_a_non_plan_write...` above
+        cannot: that test's result is True either way the order runs."""
+        calls: list[None] = []
+        monkeypatch.setattr(
+            PlanStatusSnapshotHandler,
+            "_goal_injection_enabled",
+            lambda self: calls.append(None) or True,
+        )
+        bash_input: dict[str, Any] = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "echo hi"},
+            "tool_use_id": "tu-bash",
+        }
+        assert handler.matches(bash_input) is False
+
+        read_target = self._project / "notes.md"
+        read_target.parent.mkdir(parents=True, exist_ok=True)
+        read_target.write_text("hello\n", encoding="utf-8")
+        read_input: dict[str, Any] = {
+            "tool_name": "Read",
+            "tool_input": {"file_path": str(read_target)},
+            "tool_use_id": "tu-read",
+        }
+        assert handler.matches(read_input) is False
+
+        non_plan_write: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(read_target), "content": "hello\n"},
+            "tool_use_id": "tu-write",
+        }
+        assert handler.matches(non_plan_write) is False
+
+        assert calls == []
+
+    def test_goal_injection_enabled_memoises_the_verdict_per_config_object(
+        self, handler: PlanStatusSnapshotHandler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """RV8-m2: while `_load_config()` returns the SAME `Config` object
+        (which `load_config_cached` does whenever the file is unchanged),
+        the gate must not rebuild the handler_config mapping on every call --
+        that mapping build is `model_dump()` over every event's handler
+        blocks, roughly half of what the snapshot it gates exists to save."""
+        from claude_code_hooks_daemon.handlers import registry as registry_module
+
+        cfg = _config_declaring_goal_injection(enabled=True)
+        monkeypatch.setattr(PlanStatusSnapshotHandler, "_load_config", lambda self: cfg)
+        calls: list[Config] = []
+        original = registry_module.build_handler_config_mapping
+
+        def spy(config: Config) -> dict[str, Any]:
+            calls.append(config)
+            return original(config)
+
+        monkeypatch.setattr(registry_module, "build_handler_config_mapping", spy)
+
+        assert handler._goal_injection_enabled() is True
+        assert handler._goal_injection_enabled() is True
+        assert handler._goal_injection_enabled() is True
+
+        assert len(calls) == 1
+
+    def test_goal_injection_enabled_rebuilds_when_the_config_object_changes(
+        self, handler: PlanStatusSnapshotHandler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The memoisation in RV8-m2 is keyed on the `Config` object's
+        IDENTITY, not merely "called before" -- a genuinely NEW object (an
+        edited config, reparsed by `load_config_cached`) must be re-read, not
+        served the previous verdict."""
+        configs = iter(
+            [
+                _config_declaring_goal_injection(enabled=True),
+                _config_declaring_goal_injection(enabled=False),
+            ]
+        )
+        monkeypatch.setattr(PlanStatusSnapshotHandler, "_load_config", lambda self: next(configs))
+
+        assert handler._goal_injection_enabled() is True
+        assert handler._goal_injection_enabled() is False
 
     @pytest.mark.parametrize(
         "post_tool_use_block",

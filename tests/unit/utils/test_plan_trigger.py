@@ -20,6 +20,7 @@ from claude_code_hooks_daemon.utils.plan_trigger import (
     matched_plan_write_or_edit,
     plan_dir_for,
     plan_path_pattern,
+    reset_warned_unresolved_paths,
 )
 
 _PLAN_FOLDER = "00123-example"
@@ -156,6 +157,33 @@ class TestMatchedPlanWriteOrEdit:
         result = matched_plan_write_or_edit(_hook_input(linked_plan), None)
 
         assert result == (str(linked_plan), "00300-c")
+
+    def test_a_resolved_path_outside_the_pattern_warns_only_once_per_path(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """RV8-n4: `matched_plan_write_or_edit` runs once at PreToolUse and
+        once at PostToolUse for the SAME tool call (`plan_status_snapshot`
+        and `goal_injection` each call it), so an unchanged resolved-outside-
+        pattern path (a symlinked alias) would otherwise log the WARNING
+        TWICE per call. It must fire only the first time for a given path."""
+        reset_warned_unresolved_paths()
+        target = self._project / "CLAUDE" / "Plan" / "Completed" / "00300-c"
+        target.mkdir(parents=True)
+        (target / "PLAN.md").write_text("# Example\n", encoding="utf-8")
+        link_dir = self._project / "CLAUDE" / "Plan" / "00301-l"
+        link_dir.symlink_to(target, target_is_directory=True)
+        linked_plan = link_dir / "PLAN.md"
+
+        import logging
+
+        with caplog.at_level(logging.WARNING, logger="claude_code_hooks_daemon.utils.plan_trigger"):
+            first = matched_plan_write_or_edit(_hook_input(linked_plan), None)
+            second = matched_plan_write_or_edit(_hook_input(linked_plan), None)
+
+        assert first is None
+        assert second is None
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warnings) == 1
 
     def test_honours_a_non_default_plan_dir_from_the_layout(self) -> None:
         layout = ProjectLayout(

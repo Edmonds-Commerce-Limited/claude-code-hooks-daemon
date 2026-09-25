@@ -142,6 +142,103 @@ class TestABrokenConfigIsCachedByFailure:
         assert load_config_cached(config_file).daemon.enabled is True
 
 
+class TestABrokenConfigNeverGrowsATraceback:
+    """RV8-M1: re-raising the CACHED exception INSTANCE prepends each call's
+    frames to its one shared ``__traceback__`` forever -- a daemon-lifetime
+    leak, and a splice of unrelated threads' frames into one chain. A hit
+    must raise a FRESH exception object every time, with no growing chain."""
+
+    def test_a_cache_hit_never_returns_the_same_exception_object(self, tmp_path: Path) -> None:
+        config_file = tmp_path / "hooks-daemon.yaml"
+        _write(config_file, _BROKEN_YAML)
+
+        with pytest.raises(ValueError) as first:
+            load_config_cached(config_file)
+        with pytest.raises(ValueError) as second:
+            load_config_cached(config_file)
+
+        assert first.value is not second.value
+
+    def test_traceback_depth_does_not_grow_with_repeated_hits(self, tmp_path: Path) -> None:
+        config_file = tmp_path / "hooks-daemon.yaml"
+        _write(config_file, _BROKEN_YAML)
+
+        def _tb_depth(exc: BaseException) -> int:
+            depth = 0
+            tb = exc.__traceback__
+            while tb is not None:
+                depth += 1
+                tb = tb.tb_next
+            return depth
+
+        depths = []
+        for _ in range(50):
+            with pytest.raises(ValueError) as caught:
+                load_config_cached(config_file)
+            depths.append(_tb_depth(caught.value))
+
+        # The FIRST call is a genuine MISS -- it propagates straight out of
+        # Config.load_or_default's own parse, a different (and irrelevant)
+        # call shape from every later HIT. Every hit after it raises its OWN
+        # fresh exception from the SAME call site inside load_config_cached,
+        # so THEIR depth is constant -- not merely bounded, which a
+        # growing-but-capped chain would also satisfy.
+        assert len(set(depths[1:])) == 1
+
+
+class TestATransientOSErrorIsNeverCached:
+    """RV8-M2: the cache key identifies the file's CONTENT
+    (``st_mtime_ns``/``st_size``); a transient read failure (EMFILE, EACCES,
+    a momentary EIO) is a property of the READ, not of the content, so
+    caching it under that signature makes a VALID config read as broken
+    until an edit changes the signature -- which a permission fix alone
+    never does."""
+
+    def test_a_flaky_read_recovers_on_the_very_next_call(self, tmp_path: Path) -> None:
+        config_file = tmp_path / "hooks-daemon.yaml"
+        _write(config_file, _YAML)
+
+        calls = {"n": 0}
+        real_load_or_default = Config.load_or_default
+
+        def flaky(path: str | Path | None = None) -> Config:
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise OSError(24, "Too many open files")
+            return real_load_or_default(path)
+
+        with patch.object(Config, "load_or_default", side_effect=flaky):
+            with pytest.raises(OSError):
+                load_config_cached(config_file)
+            assert load_config_cached(config_file).daemon.enabled is True
+
+    def test_a_chmod_only_fix_is_picked_up_without_an_mtime_change(self, tmp_path: Path) -> None:
+        """A permission repair changes neither mtime nor size, so if the
+        OSError were cached by signature (as a deterministic failure is),
+        this second call would still see the cached failure."""
+        config_file = tmp_path / "hooks-daemon.yaml"
+        _write(config_file, _YAML)
+        signature_before = (config_file.stat().st_mtime_ns, config_file.stat().st_size)
+
+        calls = {"n": 0}
+        real_load_or_default = Config.load_or_default
+
+        def deny_once(path: str | Path | None = None) -> Config:
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise OSError(13, "Permission denied")
+            return real_load_or_default(path)
+
+        with patch.object(Config, "load_or_default", side_effect=deny_once):
+            with pytest.raises(OSError):
+                load_config_cached(config_file)
+            result = load_config_cached(config_file)
+
+        signature_after = (config_file.stat().st_mtime_ns, config_file.stat().st_size)
+        assert signature_after == signature_before
+        assert result.daemon.enabled is True
+
+
 class TestConcurrentCallersShareOneEntry:
     """Dispatch is threaded; the cache is a daemon-lifetime singleton."""
 

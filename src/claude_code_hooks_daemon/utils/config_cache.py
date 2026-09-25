@@ -12,6 +12,25 @@ days, and a config that quietly stops taking effect is a worse bug than a slow
 one. A file that does not exist caches as the defaults under a sentinel key, so
 appearing later is also picked up.
 
+Only DETERMINISTIC parse/validation failures are cached (``ValueError`` --
+``ValidationError`` is itself a ``ValueError`` subclass, and the YAML-syntax
+path in ``Config.load`` already converts ``yaml.YAMLError`` to one too). A
+cached failure is stored as a plain record (:class:`_CachedFailure`), never
+the raised exception object, and a hit raises a FRESH
+:class:`CachedConfigLoadError` every time (Ledger 00466 RV8-M1) — re-raising
+the SAME instance repeatedly prepends every call's frames to its one shared
+``__traceback__`` forever, which is a daemon-lifetime memory leak and, under
+the threaded dispatch this module already accounts for, splices unrelated
+threads' frames into one chain.
+
+``OSError`` (``EMFILE``, ``EACCES``, a momentary ``EIO``, and so on) is NEVER
+cached (RV8-M2). The cache key identifies the file's CONTENT; an ``OSError``
+is a property of the READ, not the content, so caching it under that
+signature would make a config that is perfectly valid keep reading as broken
+until an edit changes the signature — and a permission fix alone never does
+that. Every caller already retries on the next event by simply calling this
+function again.
+
 The lock is not defensive decoration. The daemon dispatches through
 ``await loop.run_in_executor(None, ...)`` in ``daemon/server.py``, whose default
 executor is a ``ThreadPoolExecutor``, and this cache is a module-level
@@ -26,34 +45,63 @@ import threading
 from pathlib import Path
 from typing import Final
 
-from pydantic import ValidationError
-
 from claude_code_hooks_daemon.config.models import Config
 
 #: Stat signature of a path that does not exist. Distinct from any real
 #: ``(st_mtime_ns, st_size)``, so a file appearing later misses the cache.
 _ABSENT: Final[tuple[int, int]] = (-1, -1)
 
-#: Exceptions ``Config.load_or_default`` can raise on a file that exists but
-#: fails to parse or validate -- the same set every caller of
-#: :func:`load_config_cached` already catches (``recovery_cron_advisor``,
-#: ``plan_status_snapshot``, ``cron_stop_enforcer``,
+#: Exceptions ``Config.load_or_default`` can raise that are a DETERMINISTIC
+#: function of the file's bytes -- the same input always fails the same way,
+#: which is what makes caching them by content signature safe. Both derive
+#: from ``ValueError`` (``ValidationError`` is a ``ValueError`` subclass;
+#: ``Config.load``'s own ``yaml.YAMLError`` path already converts to one), so
+#: a single entry covers both. Deliberately excludes ``OSError`` (RV8-M2: a
+#: property of the READ, not the content -- see the module docstring) and
+#: ``RuntimeError`` (nothing in ``Config.load``/``load_or_default`` documents
+#: raising one; the only ``RuntimeError`` in this codebase's config path is
+#: ``_check_wired_event_field_coverage``, which runs at IMPORT time, never
+#: from a per-call load). Every caller of :func:`load_config_cached`
+#: (``recovery_cron_advisor``, ``plan_status_snapshot``, ``cron_stop_enforcer``,
 #: ``failsafe_cron_session_advisor``, ``cron_subagent_stop_enforcer``,
-#: ``remote_docs_routing``). Caching a MEMBER of this set, keyed by the same
-#: ``(st_mtime_ns, st_size)`` signature as a successful parse, is what makes a
-#: config broken by an edit after startup cost one re-parse per change rather
-#: than one per event (Ledger 00466 RV7-M1 item 3) -- a caller's own ``except``
-#: still decides how to degrade; this module only avoids re-parsing the same
-#: broken bytes on every call in between.
-_CACHEABLE_LOAD_FAILURES: Final[tuple[type[Exception], ...]] = (
-    ValidationError,
-    OSError,
-    ValueError,
-    RuntimeError,
-)
+#: ``remote_docs_routing``) already catches ``ValueError``, so narrowing the
+#: cacheable set to it changes nothing about what a caller sees -- only
+#: whether a broken config is re-parsed once per event or once per edit
+#: (Ledger 00466 RV7-M1 item 3).
+_CACHEABLE_LOAD_FAILURES: Final[tuple[type[Exception], ...]] = (ValueError,)
 
 _LOCK: Final[threading.Lock] = threading.Lock()
-_CACHE: dict[Path, tuple[tuple[int, int], Config | Exception]] = {}
+
+
+class CachedConfigLoadError(ValueError):
+    """Raised on a cache hit for a config that previously failed to load.
+
+    A FRESH instance every time (RV8-M1) -- the cache never re-raises the
+    original exception object, so no traceback ever grows across calls or
+    threads. Subclasses ``ValueError``, which is what every existing
+    :func:`load_config_cached` caller's ``except`` clause already tests for.
+    """
+
+    def __init__(self, original_type: type[Exception], message: str) -> None:
+        super().__init__(f"{original_type.__name__}: {message}")
+        #: The exception type that failed the ORIGINAL parse, for a caller
+        #: that wants to distinguish causes without depending on message text.
+        self.original_type = original_type
+
+
+class _CachedFailure:
+    """A cached record of a deterministic load failure -- never the raised
+    exception object itself (RV8-M1). Immutable: nothing mutates a cache
+    entry in place."""
+
+    __slots__ = ("message", "original_type")
+
+    def __init__(self, original_type: type[Exception], message: str) -> None:
+        self.original_type = original_type
+        self.message = message
+
+
+_CACHE: dict[Path, tuple[tuple[int, int], Config | _CachedFailure]] = {}
 
 
 def _signature(path: Path) -> tuple[int, int]:
@@ -75,11 +123,14 @@ def load_config_cached(path: str | Path) -> Config:
     Raises whatever ``Config.load_or_default`` raises — callers that need to
     degrade on an invalid config keep their own ``except``, because "this
     config is broken" is a decision about the handler, not about the cache.
-    A raised failure is cached under the SAME signature as a successful parse
-    would be (RV7-M1 item 3): while the file's ``(st_mtime_ns, st_size)``
-    stays unchanged, a second call re-raises the cached exception instead of
-    re-parsing the same broken bytes, so a syntactically broken config costs
-    one parse per edit rather than one per hook event.
+    A DETERMINISTIC parse/validation failure (``ValueError``, which
+    ``ValidationError`` derives from) is cached under the SAME signature as a
+    successful parse would be (RV7-M1 item 3): while the file's
+    ``(st_mtime_ns, st_size)`` stays unchanged, a second call raises a FRESH
+    :class:`CachedConfigLoadError` instead of re-parsing the same broken
+    bytes, so a syntactically broken config costs one parse per edit rather
+    than one per hook event. An ``OSError`` is never cached (RV8-M2) and
+    propagates uncached on every call until the read succeeds.
     """
     resolved = Path(path).resolve()
     signature = _signature(resolved)
@@ -98,14 +149,14 @@ def load_config_cached(path: str | Path) -> Config:
         cached = _CACHE.get(resolved)
         if cached is not None and cached[0] == signature:
             result = cached[1]
-            if isinstance(result, Exception):
-                raise result
+            if isinstance(result, _CachedFailure):
+                raise CachedConfigLoadError(result.original_type, result.message)
             return result
 
         try:
             config = Config.load_or_default(resolved)
         except _CACHEABLE_LOAD_FAILURES as exc:
-            _CACHE[resolved] = (signature, exc)
+            _CACHE[resolved] = (signature, _CachedFailure(type(exc), str(exc)))
             raise
         _CACHE[resolved] = (signature, config)
         return config

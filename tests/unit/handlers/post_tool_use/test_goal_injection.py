@@ -402,6 +402,15 @@ class TestGoalInjectionHandler:
         assert handler.priority == Priority.GOAL_INJECTION
         assert handler.terminal is False
 
+    def test_class_level_tags_match_the_instance_tags(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """RV8-m2: ``plan_status_snapshot``'s gate reads ``GoalInjectionHandler
+        .TAGS`` instead of constructing a throwaway instance -- this pins the
+        class constant against drifting away from what ``__init__`` actually
+        passes to ``super().__init__``."""
+        assert set(GoalInjectionHandler.TAGS) == set(handler.tags)
+
     def test_default_disabled(self, handler: GoalInjectionHandler) -> None:
         assert handler.get_default_enabled() is False
 

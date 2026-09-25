@@ -15,6 +15,8 @@ delegating wrappers for compatibility).
 
 import logging
 import re
+import threading
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Final
 
@@ -28,6 +30,41 @@ logger = logging.getLogger(__name__)
 
 FALLBACK_PLAN_DIR: Final[str] = "CLAUDE/Plan"
 COMPLETED_SEGMENT: Final[str] = "/Completed/"
+
+#: RV8-n4: a symlinked/aliased PLAN.md that resolves outside the trigger
+#: pattern logs a WARNING -- but `matched_plan_write_or_edit` runs once at
+#: PreToolUse (`plan_status_snapshot`) and once at PostToolUse
+#: (`goal_injection`) for the SAME tool call, so an unfixed alias would log
+#: it twice per call, forever. Bounded FIFO of paths already warned about,
+#: so a long-lived daemon does not grow this without limit; guarded by a
+#: lock because dispatch runs on a thread pool.
+_WARNED_UNRESOLVED_PATHS: Final[OrderedDict[str, None]] = OrderedDict()
+_WARN_LOCK: Final[threading.Lock] = threading.Lock()
+_MAX_WARNED_UNRESOLVED_PATHS: Final[int] = 256
+
+
+def reset_warned_unresolved_paths() -> None:
+    """Drop every remembered path. For tests, and a deliberate reload."""
+    with _WARN_LOCK:
+        _WARNED_UNRESOLVED_PATHS.clear()
+
+
+def _warn_unresolved_once(file_path: str, unresolved_folder: str) -> None:
+    """Log the "resolves outside the pattern" WARNING at most once per
+    ``file_path`` -- see :data:`_WARNED_UNRESOLVED_PATHS`."""
+    with _WARN_LOCK:
+        if file_path in _WARNED_UNRESOLVED_PATHS:
+            return
+        _WARNED_UNRESOLVED_PATHS[file_path] = None
+        if len(_WARNED_UNRESOLVED_PATHS) > _MAX_WARNED_UNRESOLVED_PATHS:
+            _WARNED_UNRESOLVED_PATHS.popitem(last=False)
+    logger.warning(
+        "plan_trigger: %r resolves to a path outside the plan pattern "
+        "(unresolved capture was %r) -- treating as unmatched rather "
+        "than ledgering it under an alias that cannot retire",
+        file_path,
+        unresolved_folder,
+    )
 
 
 class PlanUnreadable(Exception):
@@ -114,13 +151,7 @@ def matched_plan_write_or_edit(
         file_path, pattern, unresolved_folder=match.group(1)
     )
     if resolved_folder is None:
-        logger.warning(
-            "plan_trigger: %r resolves to a path outside the plan pattern "
-            "(unresolved capture was %r) -- treating as unmatched rather "
-            "than ledgering it under an alias that cannot retire",
-            file_path,
-            match.group(1),
-        )
+        _warn_unresolved_once(file_path, match.group(1))
         return None
     return file_path, resolved_folder
 

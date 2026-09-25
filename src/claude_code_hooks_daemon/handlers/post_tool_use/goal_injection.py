@@ -669,12 +669,23 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
     # CLAUDE/Code/WorkspaceResolution.md).
     workspace_scope: ClassVar[WorkspaceScope] = WorkspaceScope.REPO
 
+    #: RV8-m2: a class-level mirror of the tags passed to ``super().__init__``
+    #: below, so a caller that only needs the tags (``plan_status_snapshot``'s
+    #: config gate) can read them without constructing a throwaway instance.
+    #: Kept in sync with ``__init__`` by ``test_goal_injection.py``'s own
+    #: assertion that the two are equal.
+    TAGS: ClassVar[tuple[str, ...]] = (
+        HandlerTag.WORKFLOW,
+        HandlerTag.ADVISORY,
+        HandlerTag.NON_TERMINAL,
+    )
+
     def __init__(self) -> None:
         super().__init__(
             handler_id=HandlerID.GOAL_INJECTION,
             priority=Priority.GOAL_INJECTION,
             terminal=False,
-            tags=[HandlerTag.WORKFLOW, HandlerTag.ADVISORY, HandlerTag.NON_TERMINAL],
+            tags=list(GoalInjectionHandler.TAGS),
         )
         # Config options — injected by the registry via setattr; typed and
         # defaulted here so mypy sees real attributes.

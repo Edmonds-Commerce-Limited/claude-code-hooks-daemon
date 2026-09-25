@@ -22,6 +22,7 @@ from claude_code_hooks_daemon.utils.vendor_paths import VendorScope
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.config.models import (
+        Config,
         DocumentationConfig,
         PlanWorkflowConfig,
         ReferenceReposConfig,
@@ -289,6 +290,53 @@ def handler_is_enabled(
         config_skip_reason(block.get(config_key), registry_disabled=registry_disabled) is None
         and tag_skip_reason(block, tags) is None
     )
+
+
+def build_handler_config_mapping(config: "Config") -> dict[str, dict[str, Any]]:
+    """Build the per-event handler_config mapping passed to ``register_all``.
+
+    Derived from every field on the ``HandlersConfig`` model rather than a
+    hand-maintained list inlined here, so any event type the model declares —
+    ``status_line`` included, whose omission from the old inline list was the
+    original bug — is covered automatically. A missing event type here makes
+    ``register_all`` fall back to ``enabled=True`` for every handler in that
+    group, which is exactly what made ``handlers.status_line.<name>.enabled:
+    false`` inert.
+
+    ``HandlersConfig`` declares one field per WIRED event and refuses to
+    import otherwise (``_check_wired_event_field_coverage``), so iterating its
+    fields IS iterating the event registry: config under any wired event
+    reaches the registry whether or not a built-in handler directory exists
+    for it yet.
+
+    Each event's values are ``HandlerConfig`` instances (coerced by the model);
+    they are dumped to plain dicts because the registry reads them with
+    ``dict.get(...)``. Tag-filter keys (``enable_tags`` / ``disable_tags``) are
+    preserved as-is (lists), not dumped.
+
+    Lives here (RV8-m2), not in ``daemon.cli``, so a handler-side gate (e.g.
+    ``plan_status_snapshot``'s ``_goal_injection_enabled``) that needs this
+    mapping does not have to import a CLI module to get it — ``daemon.cli``
+    itself now delegates to this function rather than the other way round.
+
+    Args:
+        config: Loaded daemon configuration.
+
+    Returns:
+        Mapping of event-type config key -> {handler_key -> settings dict}.
+    """
+    from claude_code_hooks_daemon.config.models import HandlerConfig, HandlersConfig
+
+    mapping: dict[str, dict[str, Any]] = {}
+    for event_key in HandlersConfig.model_fields:
+        event_config = getattr(config.handlers, event_key, {})
+        if not isinstance(event_config, dict):
+            continue
+        mapping[event_key] = {
+            handler_key: (value.model_dump() if isinstance(value, HandlerConfig) else value)
+            for handler_key, value in event_config.items()
+        }
+    return mapping
 
 
 class HandlerRegistry:

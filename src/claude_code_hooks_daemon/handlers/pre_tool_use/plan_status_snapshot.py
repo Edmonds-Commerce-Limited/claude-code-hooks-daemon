@@ -101,6 +101,11 @@ class PlanStatusSnapshotHandler(PreToolUseHandlerBase):
             terminal=False,
             tags=[HandlerTag.WORKFLOW, HandlerTag.ADVISORY, HandlerTag.NON_TERMINAL],
         )
+        # RV8-m2: the last (Config identity, verdict) pair -- `_load_config`
+        # returns the SAME object from `load_config_cached` while the file
+        # is unchanged, so a matching identity means the mapping build and
+        # tag lookup below are already known-good and can be skipped.
+        self._goal_injection_verdict_cache: tuple[Config, bool] | None = None
 
     def get_default_enabled(self) -> bool:
         """RV4-m4: opt-OUT -- see the module docstring. Always-on is the
@@ -119,8 +124,13 @@ class PlanStatusSnapshotHandler(PreToolUseHandlerBase):
         Mirrors ``recovery_cron_advisor._load_config``: defaults mean "not
         declared", which for THIS gate (:meth:`_goal_injection_enabled`)
         resolves the same way a config the registry itself cannot parse
-        would -- falling back to defaults, under which ``goal_injection``
-        (opt-in) is not registered.
+        would -- falling back to defaults, under which the gate treats
+        ``goal_injection`` as ENABLED. An absent block is registered exactly
+        like an explicit ``enabled: true`` (RV7-m1), regardless of
+        ``GoalInjectionHandler.get_default_enabled() -> False`` (its own
+        opt-in default, which ``register_all`` never consults for a missing
+        block) -- bare ``Config()`` defaults present as "no block at all"
+        to the gate below, so this is the SAME outcome, not a special case.
         """
         try:
             config_path = ProjectContext.project_root() / ".claude" / "hooks-daemon.yaml"
@@ -132,10 +142,15 @@ class PlanStatusSnapshotHandler(PreToolUseHandlerBase):
     def _goal_injection_enabled(self) -> bool:
         """RV6-m1/RV7-m1: whether `goal_injection` (PostToolUse) is enabled
         in this project's resolved config -- decided by the SAME predicate
-        `register_all` itself uses, so this gate can never disagree with
-        what the daemon actually runs (RV7-m1 measured two shapes where the
-        earlier hand-rolled reading did: an ABSENT `goal_injection` block,
-        and `disable_tags` covering it).
+        `register_all` itself uses, so this gate reads the SAME state
+        `register_all` did at the daemon's LAST startup (RV7-m1 measured two
+        shapes where the earlier hand-rolled reading did not even do that:
+        an ABSENT `goal_injection` block, and `disable_tags` covering it).
+        It can still disagree with what the daemon is CURRENTLY running,
+        because the registry is fixed at startup while this reads the
+        config file live -- a config edit not yet followed by a restart is
+        exactly that window, and is outside what a static per-event mapping
+        can close (RV7-m1's own registry-injected-state option, not taken).
 
         Gates :meth:`matches` so a project running this sensor with
         `goal_injection` off -- the common case, since this sensor ships
@@ -144,30 +159,49 @@ class PlanStatusSnapshotHandler(PreToolUseHandlerBase):
         write for a store nothing then consumes (measured ~290 microsec per
         write, `probe_gf6_gate_cost_out.txt`).
 
+        RV8-m2: the verdict is memoised against the resolved `Config`
+        object's IDENTITY (:attr:`_goal_injection_verdict_cache`) --
+        `_load_config` returns the SAME object from `load_config_cached`
+        while the file is unchanged, so rebuilding the mapping and
+        re-deciding on every call was paying roughly half of what the
+        snapshot this gates exists to save.
+
         `handlers.registry.handler_is_enabled` is the checklist's own
         predicate for "would `register_all` register this handler" -- it
         reads `config_skip_reason` (absent block means ENABLED, the
         registration default) and `tag_skip_reason` (`enable_tags`/
         `disable_tags`) together, over the same per-event mapping
-        `daemon.cli._build_handler_config_mapping` builds for
-        `register_all` itself. `GoalInjectionHandler`'s own
-        `get_default_enabled() -> False` (opt-in) is NOT consulted here,
-        deliberately: `register_all` never consults it either (RV7-m1) --
-        an absent block is registered exactly like an explicit
-        `enabled: true` -- so a gate that honoured the opt-in default would
-        disagree with the daemon it is meant to mirror.
+        `handlers.registry.build_handler_config_mapping` builds for
+        `register_all` itself (RV8-m2: moved out of `daemon.cli`, which a
+        handler importing from ran the module layering backwards).
+        `GoalInjectionHandler.TAGS` (RV8-m2: a class constant, so this no
+        longer constructs a throwaway instance just to read its tags) is
+        NOT `get_default_enabled() -> False` (opt-in) -- that default is NOT
+        consulted here, deliberately: `register_all` never consults it
+        either (RV7-m1) -- an absent block is registered exactly like an
+        explicit `enabled: true` -- so a gate that honoured the opt-in
+        default would disagree with the daemon it is meant to mirror.
         """
-        from claude_code_hooks_daemon.daemon.cli import _build_handler_config_mapping
+        config = self._load_config()
+        cached = self._goal_injection_verdict_cache
+        if cached is not None and cached[0] is config:
+            return cached[1]
+
         from claude_code_hooks_daemon.handlers.post_tool_use.goal_injection import (
             GoalInjectionHandler,
         )
-        from claude_code_hooks_daemon.handlers.registry import handler_is_enabled
-
-        mapping = _build_handler_config_mapping(self._load_config())
-        event_config = mapping.get("post_tool_use", {})
-        return handler_is_enabled(
-            event_config, HandlerID.GOAL_INJECTION.config_key, GoalInjectionHandler().tags
+        from claude_code_hooks_daemon.handlers.registry import (
+            build_handler_config_mapping,
+            handler_is_enabled,
         )
+
+        mapping = build_handler_config_mapping(config)
+        event_config = mapping.get("post_tool_use", {})
+        verdict = handler_is_enabled(
+            event_config, HandlerID.GOAL_INJECTION.config_key, GoalInjectionHandler.TAGS
+        )
+        self._goal_injection_verdict_cache = (config, verdict)
+        return verdict
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """True for a Write/Edit landing on an ACTIVE plan's PLAN.md, when
