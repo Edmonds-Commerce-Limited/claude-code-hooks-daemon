@@ -1129,6 +1129,21 @@ class TestExemptions:
             "cat .claude/block-words.secret", sfm.DEFAULT_ALLOWED_CONSUMERS
         )
 
+    def test_deadline_is_forwarded_to_the_per_word_flag_position_check(self) -> None:
+        """Plan 00466 review 8 L1: an already-expired deadline must reach
+        `_paths_only_in_flag_position`'s own `find_protected_mention` calls
+        (via `find_protected_mention_detail` -> `iter_protected_mentions`)
+        and RAISE, the same fail-closed shape
+        `test_scan_deadline_denies_via_the_fail_closed_route` proves for the
+        ordinary scan -- deterministic (an already-past deadline), not a
+        wall-clock timing assertion. Before the fix this parameter did not
+        exist at all, so the deadline was silently dropped."""
+        cmd = "ansible-playbook site.yml .vault-pass"
+        with pytest.raises(TimeoutError):
+            sfm.is_exempt_invocation(
+                cmd, sfm.DEFAULT_ALLOWED_CONSUMERS, deadline=time.monotonic() - 1
+            )
+
 
 class TestLeadingCdPrefix:
     """Client report: a trusted consumer stopped being exempt the moment it
@@ -2231,6 +2246,20 @@ class TestEncryptedTargetInvocationDenies:
         assert not _encrypted_ok(f"cat {_ENC}", cwd=None)
         assert not _encrypted_ok(f"cat {_ENC}", cwd="proj")
 
+    def test_deadline_is_forwarded_to_iter_protected_mentions(self) -> None:
+        """Plan 00466 review 8 L1: an already-expired deadline must reach
+        the `iter_protected_mentions` call inside
+        `is_encrypted_target_invocation` and RAISE -- deterministic (an
+        already-past deadline), not a wall-clock timing assertion."""
+        with pytest.raises(TimeoutError):
+            sfm.is_encrypted_target_invocation(
+                f"cat {_ENC}",
+                sfm.DEFAULT_PROTECTED_PATTERNS,
+                cwd=_CWD,
+                is_encrypted=lambda path: path in _ENCRYPTED,
+                deadline=time.monotonic() - 1,
+            )
+
 
 def _grep_ok(command: str) -> bool:
     return sfm.is_grep_pattern_only_mention(command, sfm.DEFAULT_PROTECTED_PATTERNS)
@@ -2310,6 +2339,18 @@ class TestGrepPatternOnlyMentionDenies:
     def test_exclude_from_flag_value_is_a_real_file_target(self) -> None:
         assert not _grep_ok("grep --exclude-from=id_rsa -r x docs")
         assert not _grep_ok("grep --exclude-from id_rsa -r x docs")
+
+    def test_deadline_is_forwarded_to_iter_protected_mentions(self) -> None:
+        """Plan 00466 review 8 L1: an already-expired deadline must reach
+        the `iter_protected_mentions` call inside
+        `is_grep_pattern_only_mention` and RAISE -- deterministic (an
+        already-past deadline), not a wall-clock timing assertion."""
+        with pytest.raises(TimeoutError):
+            sfm.is_grep_pattern_only_mention(
+                "grep id_rsa file.txt",
+                sfm.DEFAULT_PROTECTED_PATTERNS,
+                deadline=time.monotonic() - 1,
+            )
 
     def test_compound_command_voids_the_exemption(self) -> None:
         assert not _grep_ok("grep id_rsa file.txt; cat id_rsa")

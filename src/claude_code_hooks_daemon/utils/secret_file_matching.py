@@ -1193,7 +1193,11 @@ MentionContext = Literal["bash", "content"]
 
 
 def find_protected_mention(
-    command: str, patterns: tuple[str, ...], *, context: MentionContext = "bash"
+    command: str,
+    patterns: tuple[str, ...],
+    *,
+    deadline: float | None = None,
+    context: MentionContext = "bash",
 ) -> str | None:
     """First protected glob a token of ``command`` mentions, else ``None``.
 
@@ -1204,11 +1208,13 @@ def find_protected_mention(
 
     Thin wrapper over :func:`find_protected_mention_detail`, which also
     reports WHICH token matched. Kept as the primary entry point so the
-    callers that only need the glob are unaffected. ``context`` -- see
+    callers that only need the glob are unaffected. ``deadline`` (Plan 00466
+    review 8 L1) is forwarded straight through -- see
+    :func:`find_protected_mention_detail`'s own docstring. ``context`` -- see
     :data:`MentionContext` -- defaults to ``"bash"``, so every pre-existing
     caller keeps its exact prior behaviour unchanged.
     """
-    detail = find_protected_mention_detail(command, patterns, context=context)
+    detail = find_protected_mention_detail(command, patterns, deadline=deadline, context=context)
     return None if detail is None else detail[0]
 
 
@@ -2048,6 +2054,8 @@ def is_exempt_invocation(
     command: str,
     consumers: tuple[ConsumerSpec, ...],
     patterns: tuple[str, ...] = DEFAULT_PROTECTED_PATTERNS,
+    *,
+    deadline: float | None = None,
 ) -> bool:
     """True when ``command`` is one of the two sanctioned path-mention shapes.
 
@@ -2074,6 +2082,9 @@ def is_exempt_invocation(
     changes which command runs or what it reads. ``then``, ``do`` and the
     other compound-only reserved words are NOT, so a fragment of a compound
     command is never judged as the single command this exemption requires.
+
+    ``deadline`` (Plan 00466 review 8 L1) is forwarded to
+    :func:`_paths_only_in_flag_position`'s per-word mention checks.
     """
     stripped = command.strip()
     if not stripped:
@@ -2102,7 +2113,7 @@ def is_exempt_invocation(
             continue
         if _denied_subcommand_used(words, consumer):
             return False
-        return _paths_only_in_flag_position(words, consumer, patterns)
+        return _paths_only_in_flag_position(words, consumer, patterns, deadline=deadline)
     return False
 
 
@@ -2155,7 +2166,11 @@ def _denied_subcommand_used(words: list[str], consumer: ConsumerSpec) -> bool:
 
 
 def _paths_only_in_flag_position(
-    words: list[str], consumer: ConsumerSpec, patterns: tuple[str, ...]
+    words: list[str],
+    consumer: ConsumerSpec,
+    patterns: tuple[str, ...],
+    *,
+    deadline: float | None = None,
 ) -> bool:
     """True when no bare word other than a flag VALUE looks path-mention-risky.
 
@@ -2165,6 +2180,10 @@ def _paths_only_in_flag_position(
     a ``--flag=value`` form). Any other placement voids the exemption — the
     deny rule then applies. ``patterns`` are the caller's EFFECTIVE globs —
     see ``is_exempt_invocation`` for why the defaults must not be used here.
+    ``deadline`` (Plan 00466 review 8 L1) is forwarded to
+    :func:`find_protected_mention` per word -- this loop's own total cost
+    across many words is otherwise unbounded the same way B1 found for
+    :func:`iter_protected_mentions`.
     """
     flag_value_positions: set[int] = set()
     for index, word in enumerate(words):
@@ -2181,7 +2200,7 @@ def _paths_only_in_flag_position(
         bare = word.strip("\"'")
         if bare.startswith("-"):
             continue
-        if find_protected_mention(bare, patterns) is not None:
+        if find_protected_mention(bare, patterns, deadline=deadline) is not None:
             return False
     return True
 
@@ -2242,6 +2261,7 @@ def is_encrypted_target_invocation(
     *,
     cwd: str | None,
     is_encrypted: Callable[[str], bool],
+    deadline: float | None = None,
 ) -> bool:
     """True when ``command`` names only protected files confirmed encrypted,
     in a command that cannot decrypt them (Plan 00459).
@@ -2263,6 +2283,9 @@ def is_encrypted_target_invocation(
 
     A leading ``time`` or ``!`` is looked past before the head is read, as in
     ``is_exempt_invocation``; no other reserved word is.
+
+    ``deadline`` (Plan 00466 review 8 L1) is forwarded to
+    :func:`iter_protected_mentions`.
     """
     if any(char in _EXPANSION_CHARS for char in command):
         return False
@@ -2271,7 +2294,7 @@ def is_encrypted_target_invocation(
         return False
     if not _is_encrypted_target_reader(words):
         return False
-    mentions = list(iter_protected_mentions(command, patterns))
+    mentions = list(iter_protected_mentions(command, patterns, deadline=deadline))
     if not mentions:
         return False
     literal_words = frozenset(words)
@@ -2357,7 +2380,10 @@ _GREP_SHORT_VALUE_OPTS: Final[frozenset[str]] = (
 
 
 def is_grep_pattern_only_mention(
-    command: str, patterns: tuple[str, ...] = DEFAULT_PROTECTED_PATTERNS
+    command: str,
+    patterns: tuple[str, ...] = DEFAULT_PROTECTED_PATTERNS,
+    *,
+    deadline: float | None = None,
 ) -> bool:
     """True when EVERY protected mention in ``command`` sits only in a
     grep-family command's PATTERN argument, never in a FILE-TARGET argument
@@ -2394,6 +2420,9 @@ def is_grep_pattern_only_mention(
     stands -- this is what stops ``grep foo ~/.ssh/id_rsa``-shaped commands
     (though the tilde alone already fails closed above) or ``grep id_rsa
     id_rsa`` (the second, file-target occurrence) from slipping through.
+
+    ``deadline`` (Plan 00466 review 8 L1) is forwarded to
+    :func:`iter_protected_mentions`.
     """
     if any(char in _EXPANSION_CHARS for char in command):
         return False
@@ -2469,7 +2498,7 @@ def is_grep_pattern_only_mention(
     if not saw_explicit_pattern_source and positional_indices:
         positional_indices = positional_indices[1:]
 
-    mentions = list(iter_protected_mentions(command, patterns))
+    mentions = list(iter_protected_mentions(command, patterns, deadline=deadline))
     if not mentions:
         return False
 

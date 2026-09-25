@@ -1311,10 +1311,10 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             # the flag-position check re-tests bare consumer arguments, and
             # testing the shipped defaults there would blind it to every
             # project-configured pattern — all of them under mode: replace.
-            if sfm.is_exempt_invocation(command, self._consumers(), patterns):
+            if sfm.is_exempt_invocation(command, self._consumers(), patterns, deadline=deadline):
                 return None
             if sfm.is_encrypted_target_invocation(
-                command, patterns, cwd=cwd, is_encrypted=self._is_encrypted
+                command, patterns, cwd=cwd, is_encrypted=self._is_encrypted, deadline=deadline
             ):
                 return None
             # Plan 00466 niggle (gd5_fp): a grep-family search PATTERN that
@@ -1322,7 +1322,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             # -- only a FILE-TARGET argument is (see the function's own
             # docstring for the position-based distinction and every shape
             # this must NOT unlock).
-            if sfm.is_grep_pattern_only_mention(command, patterns):
+            if sfm.is_grep_pattern_only_mention(command, patterns, deadline=deadline):
                 return None
             return (mention[0], mention[1], "bash")
 
