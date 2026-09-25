@@ -9,30 +9,38 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
-### N44 — A PreToolUse handler raises `ValueError: no path specified` on an Edit, and the Edit goes through
+### N44 — A PreToolUse handler raises `ValueError: no path specified` on an Edit, and the Edit goes through — Remedied
 
 **Found by the Plan 00464 agent** while editing
 `src/claude_code_hooks_daemon/utils/git_command_target.py` in its worktree,
 with its hooks served by the main `/workspace` daemon. The hook context
 returned `Handler exception: ValueError: no path specified`, and the Edit was
-allowed. That message is what `os.path.relpath("")` raises. So some handler
-computes a relative path from an EMPTY candidate. The replaced text contained
-`Path(xdg).joinpath(*_XDG_CONFIG_PATH)`, a `*name` shape like the
-`secret_file_guard` false positive on `*words[`. So the secret-path candidate
-extraction is the first suspect, but this is unverified.
+allowed. That message is what `os.path.relpath("")` raises.
 
-Nothing identifies the handler yet: the in-memory log had already rolled
-over, and an in-process run without the main config did not reproduce it.
-Two defects are here:
+**Root cause, confirmed by reproducing through the real chain with the
+project's real config and word list**: the `secret_file_guard` Bash-mention
+scanner (`R-SECRET-BASH-MENTION`, `utils/secret_file_matching.py`) tokenises a
+command and, for a token that starts with a home-directory prefix such as
+`~/`, appends the token with the prefix stripped as an additional spelling to
+match against protected globs. A token that IS the prefix and nothing else
+(a bare `~/`, as in `cp ~/ /tmp/x`) strips to the EMPTY string. That empty
+candidate then reaches `utils/path_exclusion.path_matches_globs` (via
+`utils/path_segments.matches_path_segment` on a second call path), the shared
+chokepoint every content-guard handler funnels a candidate path through,
+which computed `os.path.relpath("", project_root)` and raised. The exception
+propagated out of the handler and was swallowed upstream, so the command it
+was judging went through unblocked — the fail-open half of this defect is
+ledger N24's class, closed separately on the n24 branch.
 
-- a handler raises on ordinary content;
-- the raise fails open. That is ledger N24's class, being closed on the n24
-  branch.
-
-**Candidate remedy:** reproduce through the real chain with the project's
-real config and word list. Name the handler, guard the empty candidate at its
-source, and add a RED test. Also sweep for other `relpath` and `commonpath`
-calls that can receive an empty or foreign path.
+**Fix**: `_normalised_token_forms` now drops the stripped-home form when it is
+empty instead of appending it, and — independently, since other callers can
+still hand these two chokepoints an empty candidate — both
+`path_exclusion._candidate_paths` and `path_segments._project_relative_or_none`
+now treat an empty `file_path` as "no match"/`None`, the same answer they
+already give a path that resolves outside `project_root`, before it ever
+reaches `os.path.relpath`. Swept the rest of `src/` for `relpath`/`commonpath`
+calls on hook-input-derived paths: no other call site was reachable with an
+empty candidate.
 
 ### N43 — Log and payload redaction is inert while the daemon runs degraded on an unloadable config
 

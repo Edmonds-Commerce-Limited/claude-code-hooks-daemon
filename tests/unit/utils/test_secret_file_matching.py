@@ -10,6 +10,8 @@ position).
 import time
 from pathlib import Path
 
+import pytest
+
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 
 #: Wall-clock ceiling for the wide-range tests below. The rejected path does
@@ -122,6 +124,41 @@ class TestBashMentionsProtectedPath:
 
     def test_home_variable_prefix_is_matched(self) -> None:
         assert self._match('cat "$HOME/.vault-pass"') is not None
+
+    def test_bare_tilde_slash_token_does_not_raise(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Ledger 00466 N44: a token that IS a home prefix and nothing else
+        (``~/`` with no name after it) strips to the empty string. That empty
+        candidate must never reach ``os.path.relpath`` — it raises
+        ``ValueError: no path specified`` there, a live daemon crash caught
+        on a Bash command as ordinary as ``cp ~/ /tmp/x``. Only reachable
+        with a real ``project_root``: the crashing branch in
+        ``path_exclusion._candidate_paths`` is skipped entirely when it is
+        ``None`` (the ordinary unit-test default)."""
+        from claude_code_hooks_daemon.core import project_context as pc
+
+        monkeypatch.setattr(pc.ProjectContext, "_initialized", True, raising=False)
+        monkeypatch.setattr(
+            pc.ProjectContext, "project_root", classmethod(lambda cls: Path("/proj")), raising=False
+        )
+        assert self._match("cp ~/ /tmp/x") is None
+
+    def test_bare_home_variable_token_does_not_raise(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``$`` is itself a token delimiter, so a ``$HOME/``-prefixed token
+        never reaches ``_normalised_token_forms`` with its ``$`` intact --
+        this passes today regardless of the fix. Kept as a companion
+        regression guard: if the tokenizer's delimiter set ever changes to
+        let ``$HOME/`` survive as a whole token, this must still not crash."""
+        from claude_code_hooks_daemon.core import project_context as pc
+
+        monkeypatch.setattr(pc.ProjectContext, "_initialized", True, raising=False)
+        monkeypatch.setattr(
+            pc.ProjectContext, "project_root", classmethod(lambda cls: Path("/proj")), raising=False
+        )
+        assert self._match('cat "$HOME/"') is None
 
     def test_glob_shaped_mention_is_matched(self) -> None:
         """A glob token that could expand to a protected name is matched."""
