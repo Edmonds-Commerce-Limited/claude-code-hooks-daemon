@@ -216,31 +216,37 @@ class TestATransientOSErrorIsNeverCached:
                 load_config_cached(config_file)
             assert load_config_cached(config_file).daemon.enabled is True
 
-    def test_a_chmod_only_fix_is_picked_up_without_an_mtime_change(self, tmp_path: Path) -> None:
-        """A permission repair changes neither mtime nor size, so if the
-        OSError were cached by signature (as a deterministic failure is),
-        this second call would still see the cached failure.
+    def test_a_repair_is_picked_up_without_an_mtime_change(self, tmp_path: Path) -> None:
+        """A repair that changes neither mtime nor size must still be picked
+        up, so if the OSError were cached by signature (as a deterministic
+        failure is), this second call would still see the cached failure.
 
-        A REAL ``chmod 000``/``chmod 644``, not a mocked ``OSError`` (RV9-n3)
-        -- the mocked version proved only that this cache does not add its
-        own caching on top of a caller-supplied side effect, never that an
-        actual filesystem permission denial goes uncached. Root ignores file
-        permission bits entirely, so ``chmod 000`` would not deny the read
-        and this is skipped when running as root.
+        A REAL filesystem-level OSError, not a mocked one (RV9-n3) -- a
+        mocked side effect proves only that this cache does not add its own
+        caching on top of whatever the caller raises, never that an actual
+        filesystem failure goes uncached. ``chmod 000`` cannot demonstrate
+        that: root ignores ordinary permission bits, and every test here
+        must run (and pass) as root (RV9-review10). Swapping the path for a
+        DIRECTORY instead works unconditionally -- ``Path.open()`` raises
+        ``IsADirectoryError`` at the io layer before permission bits are
+        even consulted, root included -- and the swap-back restores the
+        original bytes and mtime, so the signature is provably unchanged.
         """
-        if os.geteuid() == 0:
-            pytest.skip("root ignores file permission bits; chmod 000 does not deny reads")
-
         config_file = tmp_path / "hooks-daemon.yaml"
         _write(config_file, _YAML)
-        signature_before = (config_file.stat().st_mtime_ns, config_file.stat().st_size)
+        original_bytes = config_file.read_bytes()
+        stat_before = config_file.stat()
+        signature_before = (stat_before.st_mtime_ns, stat_before.st_size)
 
-        config_file.chmod(0o000)
+        config_file.unlink()
+        config_file.mkdir()
         try:
             with pytest.raises(OSError):
                 load_config_cached(config_file)
         finally:
-            config_file.chmod(0o644)
+            config_file.rmdir()
+            config_file.write_bytes(original_bytes)
+            os.utime(config_file, ns=(stat_before.st_atime_ns, stat_before.st_mtime_ns))
 
         signature_after = (config_file.stat().st_mtime_ns, config_file.stat().st_size)
         assert signature_after == signature_before
