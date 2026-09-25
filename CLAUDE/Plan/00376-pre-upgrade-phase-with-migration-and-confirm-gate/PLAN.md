@@ -340,17 +340,27 @@ rather than only matching syntax.
     the name-only check never saw.
   - (e) Layer 1 is NOT re-executed through a canonical path or under
     `env -i`, and Layer 1's own launch of Layer 2 (`bash "$LAYER2_SCRIPT"`,
-    `upgrade.sh:721`) stays an ordinary child process with the caller's `PATH`
-    and full environment inherited. Reason: after (a) and (b) only the GATE
-    SUBPROCESS itself (the standalone script Layer 2 runs under `env -i`
-    with a fixed `PATH`) no longer depends on the caller's environment --
-    Layer 1 and Layer 2 still do, because a whitelisting re-exec of either
-    would drop settings the rest of the upgrade legitimately honours, such as
-    `HOOKS_DAEMON_PYTHON` for building the venv (a user's choice) or a proxy,
-    and Layer 2 does real work (building a venv, running `uv`, deploying
-    files) that is not something a fixed-tool sandbox can do. review2 MAJOR 1:
-    the approval gate is therefore a procedural control against an agent
-    following the documented route, backed by `upgrade_approval_guard`'s
+    `upgrade.sh:721`) still resolves `bash` from the caller's `PATH` -- a
+    caller able to plant a fake `bash` ahead of the real one controls what
+    interprets Layer 2 before anything below gets to run. Once that `bash`
+    process starts, though, Layer 2's OWN first action is
+    `_sanitise_layer2_env` (`scripts/install/env_sanitise.sh`), sourced and
+    called before any other library: it resets `PATH` to the same fixed
+    system locations the gate subprocess trusts, and unsets `BASH_ENV`,
+    `ENV`, `CDPATH`, `GLOBIGNORE`, `NODE_OPTIONS`, every
+    `PYTHON*`/`LD_*`/`DYLD_*`/`GIT_*`/`PERL5*`/`RUBY*` variable and resets
+    `IFS`; `SHELLOPTS`/`BASHOPTS` are bash-maintained and readonly, so the
+    options they primed at shell startup are turned back off instead of the
+    variable being unset. `HOOKS_DAEMON_PYTHON` (a user's venv-python
+    choice), `HOME`, proxy variables and `uv`/cache settings are
+    deliberately NOT touched -- they are data the rest of the upgrade
+    legitimately needs (building a venv, running `uv`, deploying files is
+    not something a fixed-tool sandbox can do), not a way to change what
+    code runs. review2 MAJOR 1: this is a fixed, named list of variable
+    FAMILIES known to steer execution, not a default-deny `env -i`
+    allowlist -- a variable the list has not anticipated still reaches
+    Layer 2. The approval gate is therefore a procedural control against an
+    agent following the documented route, backed by `upgrade_approval_guard`'s
     best-effort recognition of that route's shape -- not a boundary against a
     same-user process determined to install by hand instead, which no
     in-process check can be. The guard keeps an agent from steering the rest.

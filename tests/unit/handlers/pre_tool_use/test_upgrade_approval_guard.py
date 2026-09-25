@@ -24,6 +24,7 @@ guards already grant.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -369,6 +370,22 @@ class TestUpgradeRecognisedByWhatItIs:
         )
         command = "PATH=/x/bin:$PATH bash install.sh v4.0.0"
         assert handler.matches(_bash(command, cwd=str(tmp_path))) is True
+
+    def test_an_unstattable_script_path_does_not_crash_the_guard(
+        self, handler: UpgradeApprovalGuardHandler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`check_eacces_safe_predicates`: a raw `.is_file()` on a caller-named
+        absolute path raises `PermissionError` when an ancestor directory is
+        not traversable, which must not propagate out of `matches()`. The
+        command's own argument SHAPE (`--project-root`) still recognises it.
+        """
+
+        def _denied(self: Path) -> bool:
+            raise PermissionError(13, "Permission denied", str(self))
+
+        monkeypatch.setattr(Path, "is_file", _denied)
+        command = 'PATH=/x bash /tmp/unreadable-ancestor/script.sh --project-root "$PWD" v4.0.0'
+        assert handler.matches(_bash(command)) is True
 
 
 class TestManualCheckoutOfTheDaemonClone:

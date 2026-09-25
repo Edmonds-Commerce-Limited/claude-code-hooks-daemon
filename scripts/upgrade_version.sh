@@ -34,6 +34,16 @@ done < <(declare -F)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_LIB_DIR="$SCRIPT_DIR/install"
 
+# Plan 00376 review2 MAJOR 1: sanitise the inherited environment before any
+# other library is sourced. A hostile BASH_ENV/ENV that already ran at THIS
+# shell's own startup cannot be undone, but resetting it here stops it (and
+# every other steering variable) from reaching a single subshell or child
+# process any library sourced below goes on to spawn. See
+# install/env_sanitise.sh for the full rationale per variable family.
+# shellcheck source=install/env_sanitise.sh
+source "$INSTALL_LIB_DIR/env_sanitise.sh"
+_sanitise_layer2_env
+
 # Source all library modules
 # shellcheck source=install/output.sh
 source "$INSTALL_LIB_DIR/output.sh"
@@ -214,54 +224,13 @@ GATE_NEEDS_APPROVAL=4
 # pattern on a long line): the timeout is a crash, so it stops the upgrade.
 GATE_TIMEOUT_SECONDS=300
 GATE_TIMED_OUT=124
-# Where the gate and what feeds it take their tools from: fixed system
-# locations, never the caller's PATH, so a planted timeout, git, awk or python
-# cannot answer for the gate (fresh review BLOCKER 1). A listed LOCATION is
-# not necessarily trusted CONTENT, though (review2 MAJOR 2): Homebrew's
-# /opt/homebrew/bin and /usr/local/bin are user-owned by default on macOS, so
-# each function below that decides or feeds the gate resolves its tools from
-# `_gate_trusted_path` (below), the entries of this list that
-# `_gate_dir_is_trusted` accepts, never this raw variable directly.
-# install/upgrade_tasks.py TRUSTED_TOOL_PATH is the same list, with the same
-# ownership and permission filter applied by its own `_trusted_dirs`.
-GATE_SAFE_PATH="/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin"
-
-# _gate_dir_is_trusted() - True when $1 is root-owned and neither group- nor
-# world-writable (review2 MAJOR 2). A GATE_SAFE_PATH entry is a fixed system
-# LOCATION, not a fixed system CONTENT: a directory this same process could
-# itself write to -- Homebrew's /opt/homebrew/bin and /usr/local/bin are
-# user-owned by default on macOS -- is not trusted merely for being listed,
-# because that user could plant a tool there. `stat` itself is resolved from
-# the unfiltered GATE_SAFE_PATH (not this check), same trust level `env`/`od`
-# had before this fix: /usr/bin or /bin, first in that list, ship the real
-# one on every host this matters for. An agent running AS root defeats this
-# check by construction (root owns every directory here regardless of its
-# permission bits); no in-process check can defend against that, and
-# LLM-UPDATE says so.
-_gate_dir_is_trusted() {
-    local PATH="$GATE_SAFE_PATH"
-    local dir="$1" owner="" perms=""
-    [ -d "$dir" ] || return 1
-    owner="$(stat -c '%u' "$dir" 2> /dev/null)" || owner="$(stat -f '%u' "$dir" 2> /dev/null)" || return 1
-    [ "$owner" = "0" ] || return 1
-    perms="$(stat -c '%a' "$dir" 2> /dev/null)" || perms="$(stat -f '%Lp' "$dir" 2> /dev/null)" || return 1
-    case "$perms" in *[!0-7]*) return 1 ;; esac
-    [ $(($((8#$perms)) & 8#022)) -eq 0 ]
-}
-
-# _gate_trusted_path() - Print GATE_SAFE_PATH with every entry
-# `_gate_dir_is_trusted` rejects removed.
-_gate_trusted_path() {
-    local dir
-    local -a dirs
-    local -a trusted=()
-    IFS=: read -r -a dirs <<< "$GATE_SAFE_PATH"
-    for dir in "${dirs[@]}"; do
-        _gate_dir_is_trusted "$dir" && trusted+=("$dir")
-    done
-    local IFS=:
-    printf '%s\n' "${trusted[*]}"
-}
+# GATE_SAFE_PATH, _gate_dir_is_trusted() and _gate_trusted_path() are defined
+# in install/env_sanitise.sh, sourced before any other library above --
+# _sanitise_layer2_env() needs the trusted path to reset PATH at entry, so
+# those three moved there rather than staying here. Every function below
+# that decides or feeds the gate resolves its tools from `_gate_trusted_path`,
+# the entries of GATE_SAFE_PATH that `_gate_dir_is_trusted` accepts, never the
+# raw GATE_SAFE_PATH variable directly.
 
 # _gate_tool() - Print the absolute path of $1 from a trusted GATE_SAFE_PATH
 # entry; return 1 when no trusted location has it.

@@ -433,7 +433,7 @@ handlers:
 
 To inspect daemon source for debugging, use the `Read` tool with an absolute path rather than changing directory into it.
 
-**Example trigger:**
+**Example trigger (BLOCKED-EXAMPLE — this is the denied shape, not an instruction to run it):**
 
 ```bash
 cd .claude/hooks-daemon && ./bin/hooks-daemon status

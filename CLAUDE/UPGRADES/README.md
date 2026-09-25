@@ -97,9 +97,8 @@ CLAUDE/UPGRADES/
 1. **Determine your current version**:
 
    ```bash
-   cd .claude/hooks-daemon
-   cat src/claude_code_hooks_daemon/version.py
-   # Or: git describe --tags
+   cat .claude/hooks-daemon/src/claude_code_hooks_daemon/version.py
+   # Or: git -C .claude/hooks-daemon describe --tags
    ```
 
 2. **Find the right upgrade path**:
@@ -292,8 +291,7 @@ print(__version__)  # "2.0.0"
 ### Git-Based Detection
 
 ```bash
-cd .claude/hooks-daemon
-git describe --tags  # v2.0.0-3-gabcdef
+git -C .claude/hooks-daemon describe --tags  # v2.0.0-3-gabcdef
 ```
 
 ### Config-Based Detection

@@ -85,7 +85,11 @@ from claude_code_hooks_daemon.core.utils import get_bash_command, get_file_path
 from claude_code_hooks_daemon.handlers.utils.bash_file_writes import bash_file_writes
 from claude_code_hooks_daemon.install.install_stamp import STAMP_FILENAME
 from claude_code_hooks_daemon.install.upgrade_gate import APPROVAL_SUBDIR
-from claude_code_hooks_daemon.utils.path_predicates import TextOrReason, read_text_or_reason
+from claude_code_hooks_daemon.utils.path_predicates import (
+    TextOrReason,
+    path_is_file,
+    read_text_or_reason,
+)
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     command_word,
     split_unquoted,
@@ -340,8 +344,17 @@ def _past_wrappers(words: list[str]) -> list[str]:
 
 
 def _script_carries_the_upgrade(script: Path) -> bool | None:
-    """Whether ``script`` is a copy of Layer 1 or 2; None when it cannot be read."""
-    if not script.is_file():
+    """Whether ``script`` is a copy of Layer 1 or 2; None when it cannot be read.
+
+    ``script`` is a caller-supplied path (`check_eacces_safe_predicates`): a
+    raw ``is_file`` predicate raises ``PermissionError`` when an ancestor
+    directory is not traversable, and an uncaught raise here would crash
+    ``matches()`` for the whole handler, not just misjudge this one script.
+    Unreadable is answered as "not a file", the same outcome ``open()``
+    below already gives on any other read failure: the caller falls back to
+    judging by the command's own argument shape instead.
+    """
+    if not path_is_file(script, unreadable_means=False):
         return None
     try:
         with script.open("rb") as handle:

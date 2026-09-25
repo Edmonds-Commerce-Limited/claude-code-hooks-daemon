@@ -22,18 +22,7 @@ This upgrade is **fully backwards-compatible**. Your v2.12.0 configuration will 
 ## Quick Upgrade
 
 ```bash
-# Navigate to installation
-cd .claude/hooks-daemon/
-
-# Pull v2.13.0
-git fetch --tags
-git checkout v2.13.0
-
-# Reinstall
-untracked/venv/bin/pip install -e .
-
-# Restart daemon
-untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart
+bash .claude/hooks-daemon/scripts/upgrade.sh --project-root "$PWD" v2.13.0
 
 # Verify upgrade (optional)
 bash CLAUDE/UPGRADES/v2/v2.12-to-v2.13/verification.sh

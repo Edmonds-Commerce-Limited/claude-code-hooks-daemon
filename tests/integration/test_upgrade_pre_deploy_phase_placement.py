@@ -27,6 +27,13 @@ from typing import Final
 from claude_code_hooks_daemon.install.upgrade_gate import SKIP_READING_FLAG, GateVerdict
 
 _LAYER2: Final[Path] = Path(__file__).resolve().parents[2] / "scripts" / "upgrade_version.sh"
+# GATE_SAFE_PATH, _gate_dir_is_trusted() and _gate_trusted_path() moved here
+# (Plan 00376 review2 MAJOR 1): _sanitise_layer2_env() needs the trusted path
+# to reset PATH at Layer 2 entry, before any other library -- including this
+# one -- is sourced.
+_ENV_SANITISE: Final[Path] = (
+    Path(__file__).resolve().parents[2] / "scripts" / "install" / "env_sanitise.sh"
+)
 _GATE: Final[str] = "run_pre_deploy_phase"
 _COMPAT: Final[str] = "run_config_compatibility_check"
 _FAST_PATH_START: Final[str] = "Running idempotent deployment steps"
@@ -38,7 +45,7 @@ _STEP_8: Final[str] = 'log_step "8"'
 
 
 def _script() -> str:
-    return _LAYER2.read_text(encoding="utf-8")
+    return _LAYER2.read_text(encoding="utf-8") + "\n" + _ENV_SANITISE.read_text(encoding="utf-8")
 
 
 def _call(text: str, name: str, start: int) -> int:
@@ -49,7 +56,15 @@ def _call(text: str, name: str, start: int) -> int:
 
 def _function_body(text: str, name: str) -> str:
     start = text.index(f"{name}() {{")
-    return text[start : text.index("\n}\n", start)]
+    # The closing brace may be indented (Plan 00376 review2 MAJOR 1 moved
+    # some functions into a guarded `if ...; then ... fi` block in
+    # env_sanitise.sh, following the same indentation output.sh already
+    # uses), so this tolerates leading whitespace rather than assuming the
+    # unindented top-level style every OTHER function in upgrade_version.sh
+    # still uses.
+    match = re.compile(r"\n[ \t]*\}\n").search(text, start)
+    assert match is not None, f"no closing brace found for {name}"
+    return text[start : match.start()]
 
 
 def test_the_idempotent_path_gates_before_the_venv_and_checks_compat_before_deploying() -> None:
@@ -162,7 +177,7 @@ def test_everything_that_feeds_the_gate_runs_on_the_fixed_system_path() -> None:
         "abort_before_deploy",
     ):
         assert 'PATH="$(_gate_trusted_path)"' in _function_body(text, name), name
-    assert re.search(r'^GATE_SAFE_PATH="/usr/bin:/bin:', text, re.MULTILINE)
+    assert re.search(r'^\s*GATE_SAFE_PATH="/usr/bin:/bin:', text, re.MULTILINE)
 
 
 def test_gate_tool_resolves_only_trusted_locations() -> None:

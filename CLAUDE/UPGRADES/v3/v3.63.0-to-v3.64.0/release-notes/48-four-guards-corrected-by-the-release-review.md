@@ -20,8 +20,9 @@ receiving command verbatim, so naming the daemon directory there is not
 entering it. This was found by the daemon denying an agent that was writing a
 report ABOUT the first defect.
 
-**Both fixes stop at the heredoc, and deliberately so.** An earlier draft of
-them also blanked every quoted string, which would have spared
+**Both fixes stop at the heredoc, and deliberately so (BLOCKED-EXAMPLE below
+names the denied shape as documentation, not an instruction).** An earlier
+draft of them also blanked every quoted string, which would have spared
 `echo 'cd …'` too. It was removed before release because a quoted string can
 itself BE a command: the shell executes the argument of
 `bash -c "cd .claude/hooks-daemon"`, so blanking it hid a real directory

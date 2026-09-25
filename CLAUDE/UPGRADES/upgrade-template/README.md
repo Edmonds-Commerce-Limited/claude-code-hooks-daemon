@@ -402,7 +402,7 @@ approve it. This folds into Step 4 below; skip Options B and C if you use it:
 bash .claude/hooks-daemon/scripts/upgrade.sh --project-root "$PWD" v{PREV_VERSION}
 ```
 
-**Option B - Manual git checkout, OWNER ONLY.** `cd`-ing into
+**Option B - Manual git checkout, OWNER-ONLY.** `cd`-ing into
 `.claude/hooks-daemon/`, and any `git checkout`/`switch`/`reset` (etc.) of
 that clone, is denied for an agent -- it is exactly the route the pre-deploy
 gate exists to require approval for. The project owner runs this in their own

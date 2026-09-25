@@ -246,15 +246,33 @@ for it:
 
 **What this does and does not defend against.** The hardening above is scoped
 to the gate subprocess and its detection scan; it is what stands between the
-CALLER'S environment and the DECISION. Layer 1 still starts Layer 2 as an
-ordinary `bash` resolved from the caller's `PATH`, with the caller's
-environment inherited (Layer 2 needs that: building a venv, running `uv` and
-deploying files are not sandboxed operations). So the approval gate is a
-procedural control against an agent following the documented upgrade route,
-backed by a best-effort guard (`upgrade_approval_guard`) that recognises that
-route's shape. It is not a boundary against a same-user process determined to
-install by hand instead -- no in-process check can be that, because the same
-user can always run the daemon's own code directly.
+CALLER'S environment and the DECISION. Layer 2 as a whole also sanitises its
+OWN environment at entry, before any library is sourced
+(`_sanitise_layer2_env`, `scripts/install/env_sanitise.sh`): it resets `PATH`
+to the same fixed system locations the gate trusts, and unsets `BASH_ENV`,
+`ENV`, `CDPATH`, `GLOBIGNORE`, `NODE_OPTIONS`, every `PYTHON*`/`LD_*`/`DYLD_*`/
+`GIT_*`/`PERL5*`/`RUBY*` variable and resets `IFS`. `SHELLOPTS`/`BASHOPTS` are
+bash-maintained and readonly, so `unset` on them would error under `set -e`;
+the options they could have primed at shell startup (command tracing, most
+notably) are turned back off instead. `HOME`, `LANG`, proxy variables and
+`uv`/cache settings are left alone -- they are data the install legitimately
+needs, not a way to change what code runs.
+
+What this does NOT cover: Layer 1 still resolves `bash` to run Layer 2 from
+the caller's own `PATH` (`bash "$LAYER2_SCRIPT" ...`), so a caller able to
+plant a fake `bash` ahead of the real one controls what interprets Layer 2
+before sanitisation ever gets to run -- the same class of limitation the gate
+subprocess isolation above always had, one level up. And the sanitisation is
+a fixed, named list of variable FAMILIES known to steer execution, not a
+default-deny `env -i` allowlist: Layer 2 needs an inherited environment to
+build a venv, run `uv` and deploy files, so anything not on that list --
+including a variable this list has not anticipated -- still reaches it. So
+the approval gate is a procedural control against an agent following the
+documented upgrade route, backed by a best-effort guard
+(`upgrade_approval_guard`) that recognises that route's shape. It is not a
+boundary against a same-user process determined to install by hand instead --
+no in-process check can be that, because the same user can always run the
+daemon's own code directly.
 
 `upgrade_approval_guard` also denies an agent that steers the rest of the
 upgrade. It recognises an upgrade by what the command is, not by the file's
@@ -490,8 +508,6 @@ To find handlers you're missing:
 The most targeted approach — tells you exactly which new config options are available for your specific upgrade path:
 
 ```bash
-cd .claude/hooks-daemon
-
 # Replace with your actual versions
 PREVIOUS_VERSION="2.8.0"
 NEW_VERSION="2.15.2"
@@ -600,7 +616,6 @@ Handlers are tagged by language, function, and specificity. Use tags to filter:
 **You MUST run this after every upgrade to verify your handler configuration is complete.**
 
 ```bash
-cd .claude/hooks-daemon
 .claude/hooks-daemon/bin/hooks-daemon handlers
 ```
 
@@ -783,8 +798,7 @@ diff CLAUDE/PlanWorkflow.md .claude/hooks-daemon/CLAUDE/PlanWorkflow.md || echo 
 Contains detailed release notes for each version. Use for understanding what changed between versions.
 
 ```bash
-cd .claude/hooks-daemon
-cat RELEASES/v2.2.0.md
+cat .claude/hooks-daemon/RELEASES/v2.2.0.md
 ```
 
 ### UPGRADES Directory
@@ -819,21 +833,18 @@ When upgrading across multiple versions, follow sequential upgrade path:
 ### 1. Determine Current and Target Versions
 
 ```bash
-cd .claude/hooks-daemon
-
-CURRENT=$(cat src/claude_code_hooks_daemon/version.py | grep "__version__" | cut -d'"' -f2)
+CURRENT=$(cat .claude/hooks-daemon/src/claude_code_hooks_daemon/version.py | grep "__version__" | cut -d'"' -f2)
 echo "Current: $CURRENT"
 
-git fetch --tags
-LATEST=$(git describe --tags $(git rev-list --tags --max-count=1))
+git -C .claude/hooks-daemon fetch --tags
+LATEST=$(git -C .claude/hooks-daemon describe --tags $(git -C .claude/hooks-daemon rev-list --tags --max-count=1))
 echo "Latest: $LATEST"
 ```
 
 ### 2. Find Available Upgrade Guides
 
 ```bash
-cd .claude/hooks-daemon
-ls -la CLAUDE/UPGRADES/v*/
+ls -la .claude/hooks-daemon/CLAUDE/UPGRADES/v*/
 ```
 
 ### 3. Follow Sequential Upgrades
@@ -995,13 +1006,11 @@ You only need to act if incompatibilities are reported.
 After updating code, compare your config with the new template:
 
 ```bash
-cd .claude/hooks-daemon
-
 # Generate new default config
 .claude/hooks-daemon/bin/hooks-daemon init-config --stdout > untracked/scratch/new_default_config.yaml
 
 # Diff against your config
-diff ../hooks-daemon.yaml untracked/scratch/new_default_config.yaml
+diff .claude/hooks-daemon.yaml untracked/scratch/new_default_config.yaml
 ```
 
 ### Config Preservation CLI
@@ -1038,8 +1047,6 @@ The daemon includes CLI commands for config operations:
 ### Quick Verification
 
 ```bash
-cd .claude/hooks-daemon
-
 # 1. Version check — the notes header names the INSTALLED version
 .claude/hooks-daemon/bin/hooks-daemon release-notes
 
@@ -1047,19 +1054,17 @@ cd .claude/hooks-daemon
 .claude/hooks-daemon/bin/hooks-daemon status
 
 # 3. Hook test
-echo '{"tool_name":"Bash","tool_input":{"command":"ls"}}' | bash ../../.claude/hooks/pre-tool-use
+echo '{"tool_name":"Bash","tool_input":{"command":"ls"}}' | bash .claude/hooks/pre-tool-use
 ```
 
 ### Full Verification (for major upgrades)
 
 ```bash
-cd .claude/hooks-daemon
-
 # Run tests (optional - for thorough verification)
-./scripts/qa/run_tests.sh
+.claude/hooks-daemon/scripts/qa/run_tests.sh
 
 # Check all QA passes
-./scripts/qa/llm_qa.py all
+.claude/hooks-daemon/scripts/qa/llm_qa.py all
 ```
 
 ---
