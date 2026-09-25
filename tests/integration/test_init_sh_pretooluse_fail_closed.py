@@ -222,7 +222,8 @@ def _send(
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip(), f"no stdout; stderr was: {result.stderr}"
-    return json.loads(result.stdout.strip())
+    parsed: dict[str, Any] = json.loads(result.stdout.strip())
+    return parsed
 
 
 _BASH_TOOL_INPUT = {"tool_name": "Bash", "tool_input": {"command": "echo hi"}}
@@ -483,5 +484,59 @@ class TestDaemonNotReachableFailsClosedForPreToolUse:
         """Only PreToolUse changed; every other event keeps the original
         fail-open `additionalContext` contract."""
         response = _send(project, nonexistent_socket, "PostToolUse", _BASH_TOOL_INPUT)
+        hso = response["hookSpecificOutput"]
+        assert "permissionDecision" not in hso
+
+
+class TestConnectionRefusedFailsClosedForPreToolUse:
+    """Plan 00466 N24 review 3 MA4 follow-up: a socket FILE that exists but
+    nothing is listening behind it is a distinct transport failure from
+    ``socket_not_found`` (no file at all) -- ``connect()`` raises
+    ``ConnectionRefusedError`` rather than ``FileNotFoundError`` -- and must
+    DENY PreToolUse the same way. init.sh's ``connection_refused`` branch was
+    added alongside ``socket_not_found`` in MA4 itself but, per that round's
+    own handoff notes, never got its own dedicated end-to-end test; this is
+    that test."""
+
+    @pytest.fixture
+    def refused_socket(self) -> Iterator[Path]:
+        """A real AF_UNIX socket file that is bound but never ``listen()``s,
+        so a client's ``connect()`` gets ``ECONNREFUSED`` immediately rather
+        than queuing or timing out -- the daemon crashed/shut down after
+        creating its socket file but before (or instead of) accepting
+        connections on it, leaving the stale file behind."""
+        short_dir = Path(tempfile.mkdtemp(prefix="hd-"))
+        sock_path = short_dir / "fake.sock"
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        server.bind(str(sock_path))
+        # Deliberately no listen()/accept(): an unbound-to-nothing socket
+        # file refuses every connection attempt outright.
+        try:
+            yield sock_path
+        finally:
+            server.close()
+            shutil.rmtree(short_dir, ignore_errors=True)
+
+    def test_a_pretooluse_call_is_denied(self, project: Path, refused_socket: Path) -> None:
+        response = _send(project, refused_socket, "PreToolUse", _BASH_TOOL_INPUT)
+        hso = response["hookSpecificOutput"]
+        assert hso["permissionDecision"] == "deny"
+        assert "denied for safety" in hso["permissionDecisionReason"]
+
+    def test_the_recovery_command_is_not_denied(self, project: Path, refused_socket: Path) -> None:
+        recovery_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "bin/hooks-daemon restart"},
+        }
+        response = _send(project, refused_socket, "PreToolUse", recovery_input)
+        hso = response["hookSpecificOutput"]
+        assert "permissionDecision" not in hso
+
+    def test_still_fails_open_for_a_non_pretooluse_event(
+        self, project: Path, refused_socket: Path
+    ) -> None:
+        """Only PreToolUse changed; every other event keeps the original
+        fail-open `additionalContext` contract."""
+        response = _send(project, refused_socket, "PostToolUse", _BASH_TOOL_INPUT)
         hso = response["hookSpecificOutput"]
         assert "permissionDecision" not in hso
