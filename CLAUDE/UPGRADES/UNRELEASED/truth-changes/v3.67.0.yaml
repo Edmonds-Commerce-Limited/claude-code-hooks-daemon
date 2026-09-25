@@ -135,9 +135,22 @@ truth_changes:
       (Plan 00466 N47 review 2). Claude Code saves every interactively-typed
       `/effort <level>` into your own settings.json under `modelSettings`, so
       any supervisor-typed level permanently overwrote your own saved choice --
-      the fight this removal ends. The floor and the downgrade compensation are
-      now `modelSettings` entries you add yourself (see
+      the fight this removal ends. Fable at `low` and its fallback models at
+      `xhigh` are now per-model `modelSettings` levels you add yourself (see
       `CLAUDE/development/CcySupervisor.md`), and they apply only in a session
       that has never set its own effort via `/effort`, an effort pick in
       `/model`, `--effort`, or the env var -- any of those pins one value
       across every later model change for the rest of that session.
+  - topic: tool-controls
+    was: >
+      `hooks-daemon check` has an "Effort Level" line that passes only at
+      `high`, and its fix recommends `effortLevel: high` or
+      `export CLAUDE_CODE_EFFORT_LEVEL=high`.
+    now: >
+      The daemon holds no effort opinion (Plan 00466 N47). The line is
+      "Effort Source": it never recommends a level, and it shows `[WARN]` only
+      when something pins ONE level on every model and overrides the per-model
+      `modelSettings` levels -- `CLAUDE_CODE_EFFORT_LEVEL`, or a top-level
+      `effortLevel` in the project's `.claude/settings.json` or
+      `.claude/settings.local.json`. IF YOU SET `CLAUDE_CODE_EFFORT_LEVEL`
+      BECAUSE `check` TOLD YOU TO, UNSET IT.
