@@ -420,11 +420,27 @@ venv_build_record_field() {
 # be held.
 #
 _venv_detached_build_wait() {
-    local daemon_dir="$1" started bound remaining
+    local daemon_dir="$1" started bound remaining now
     started="$(venv_build_record_field "$daemon_dir" started)" || return 1
     bound="$(venv_build_record_field "$daemon_dir" bound)" || return 1
     [[ "$started" =~ ^[0-9]+$ ]] && [[ "$bound" =~ ^[0-9]+$ ]] || return 1
-    remaining=$((started + bound + VENV_BUILD_KILL_GRACE_SECONDS - $(date +%s)))
+    # Plan 00466 N30: `date +%s` is looked up on PATH; lazily source the
+    # portable epoch-second helper (mirrors venv_lock_hash_matches's own
+    # lazy load of resolve_venv.sh above, for the same reason -- venv.sh has
+    # historical callers that may run before scripts/lib/ exists). An
+    # unknown "now" returns 1, exactly like an unrecorded/malformed record
+    # above -- the caller (_venv_lock_wait_bound) already treats that as
+    # "fall back to the generic wait bound", so this never needs to guess.
+    if ! command -v _hp_epoch_seconds > /dev/null; then
+        local _vdbw_install_dir _vdbw_lib
+        _vdbw_install_dir="$(dirname "${BASH_SOURCE[0]}")"
+        _vdbw_lib="${_vdbw_install_dir%/install}/lib/portable_time.sh"
+        [ -f "$_vdbw_lib" ] || return 1
+        # shellcheck disable=SC1090
+        source "$_vdbw_lib"
+    fi
+    now="$(_hp_epoch_seconds)" || return 1
+    remaining=$((started + bound + VENV_BUILD_KILL_GRACE_SECONDS - now))
     [ "$remaining" -gt 0 ] || return 1
     echo "$remaining"
 }

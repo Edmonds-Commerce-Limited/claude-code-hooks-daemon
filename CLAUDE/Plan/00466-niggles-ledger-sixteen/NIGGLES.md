@@ -449,7 +449,7 @@ command above is allowed; `pytest | head -1` is still denied; and
 **Widened (Plan 00463 agent, review-5 n9):** an UNESCAPED `|` inside double
 quotes trips it too, not only `\|`. The RED tests must cover both spellings.
 
-### N31 — the dispatch-declaration advisory does not recognise "File to write to: <path>"
+### N31 — ✅ Remedied — the dispatch-declaration advisory does not recognise "File to write to: <path>"
 
 **Found by the 00467 dogfood agent.** A dispatch brief that named its report
 path as `File to write to: <path>` still drew the Plan 00307
@@ -463,7 +463,23 @@ people to skim it.
 only fixed phrases. RED tests: the phrasing above is recognised, and a brief
 with no path at all still draws the advisory.
 
-### N30 — more shell code that must survive a hostile PATH depends on a PATH command
+**Remedy:** `dispatch_declaration.py`'s destination check no longer requires
+a fixed "verb + to/in/under/into + path" grammar. `_prompt_declares_destination`
+now pairs any destination KEYWORD ("write"/"save"/"report"/"output"/"store",
+now including the noun "file") with a path-shaped token in the SAME CLAUSE
+(split on sentence-ending punctuation or a newline) — a keyword match that
+falls INSIDE the path token itself (e.g. "file"/"report" as hyphen-bounded
+substrings of a plan-folder name like `...-file-based-report-handoff`) is
+excluded, which is what keeps the Plan 00460 review finding m4 distinction
+intact (a bare plan-folder mention in one sentence, with the actual verb in
+the next, still does not count). Five new RED-then-GREEN tests in
+`TestDestinationPhrasingRecognition`
+(`tests/unit/handlers/pre_tool_use/test_dispatch_declaration.py`) cover the
+exact reported phrasing, two other natural phrasings ("save ... at ...", a
+bare "<label>: <path>"), a keyword-with-no-path prompt (still advises), and
+the m4 clause-boundary regression guard.
+
+### N30 — ✅ Remedied — more shell code that must survive a hostile PATH depends on a PATH command
 
 **Found by the 00467 dogfood agent**, applying the Defence Before Fix method
 to the watchdog defect fixed at 766677c1 (00466 N1's follow-up). An
@@ -492,6 +508,60 @@ tools are broken, exactly as `resolve_venv.sh` does.
    a test that runs each such script's functions under an empty `PATH`. It
    must catch the original watchdog shape, verified by reverting 766677c1 in
    a scratch copy.
+
+**Remedy:** a new shared library, `scripts/lib/portable_time.sh`
+(`_hp_epoch_seconds`, `_hp_timestamp <fmt> [--utc]`), gives every hostile-PATH
+script a PATH-lookup-free way to get the time: bash's own `printf '%(...)T'`
+builtin (>= 4.2) first, `date` on PATH second (the bash-3.2/macOS fallback,
+since that builtin needs 4.2+), a loud stderr diagnostic + non-zero return
+last — never a silently-empty/zero value feeding a decision. All five
+`venv_bootstrap.sh` call sites, `venv.sh`'s `_venv_detached_build_wait`, and
+three more instances the sweep (below) found in `config_preserve.sh`,
+`rollback.sh` (x2) and `settings_deploy.sh` now go through it, each restructured
+so a failure is either an explicit loud abort (`set -e` on a standalone
+assignment, or an explicit `state=error`/`print_error` + `return 1`) or a
+documented graceful fallback (`_venv_detached_build_wait` returning 1, which
+its caller already treats as "use the generic wait bound") — never a garbled
+or wrongly-branching value. `daemon_control.sh`'s `_daemon_process_exists`
+gained a `/proc/*/cmdline` fallback (pure bash glob + `read -d ''`, no
+external command) for when `pgrep` is unreachable, and when NEITHER is
+available it says so loudly and answers "maybe" (assumes the daemon might be
+running) rather than silently "no" — the caller only uses the answer to
+decide whether to retry a status poll a little longer, so a false positive
+costs a few seconds and a false negative costs a failed restart report.
+`bin/hooks-daemon` and `bin/echd-capture` were reviewed and found not to need
+this: the wrapper's PATH-dependent lookups are all standalone assignments
+under `set -euo pipefail`, which already abort loudly, and the capture
+helper's `date` use already has an explicit `|| echo 0` fallback for a
+non-decision-affecting filename-uniqueness suffix.
+
+The detector has both halves DBF asks for. Dynamic (primary): empty/narrowed-PATH
+integration tests exercise every fixed call site directly —
+`tests/integration/test_venv_bootstrap_hostile_path_epoch.py` (9 tests, all
+five `venv_bootstrap.sh` sites), `test_venv_lock_wait_hostile_path.py` (3
+tests), `test_daemon_control_pgrep_portability.py` (+3 new hostile-PATH
+tests, using a FIXTURE `/proc` via the test-only `_HP_PROC_DIR` seam rather
+than the host's real `/proc`, which could already hold an unrelated real
+daemon process in this shared container). Static (complement, not the only
+guard): `audit_shell.py` gained a `hostile-path-unguarded-command` rule,
+scoped to the declared file list, flagging `date`/`pgrep` used without a
+file-wide `command -v` guard — it does not judge control flow, just "the
+fallback is still there". `test_hostile_path_detector_proof.py` is the DBF
+step-3 proof: a scratch copy of `resolve_venv.sh` with 766677c1's fix
+literally reverted (`_rv_wait_secs` swapped back for the bare `( sleep ...; kill -KILL ... ) &` list) reproducibly fails under a `sleep`-less PATH
+(RED), while the real, current file passes the same scenario (GREEN) — using
+a candidate that takes ~2 real seconds via a pure-bash `$SECONDS` busy-wait
+(no external `sleep`/`date` needed in the fixture itself) so the proof is
+not a timing race.
+
+The sweep found and fixed 3 more instances beyond the 4 named in this
+niggle's candidate remedy (all `date`, all `scripts/install/*.sh` siblings
+of `daemon_control.sh`, sourced only from the same interactive
+`install_version.sh`/`upgrade_version.sh` entry points as `daemon_control.sh`
+itself — so architecturally the same class, not scope creep): a backup
+timestamp in `config_preserve.sh`, a snapshot ID + manifest timestamp in
+`rollback.sh`, and a backup timestamp in `settings_deploy.sh`. Total
+instance count: 7 (4 named + 3 swept), all fixed.
 
 ### N29 — ✅ Remedied — `error_hiding`'s return-None-in-except check is evaded by returning a local assigned in the handler
 

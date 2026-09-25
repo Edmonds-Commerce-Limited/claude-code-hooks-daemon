@@ -29,6 +29,14 @@ if ! declare -F resolve_existing_venv_python > /dev/null; then
     unset _rb_helper_dir
 fi
 
+# Ensure portable_time.sh (_hp_timestamp, Plan 00466 N30) is loaded.
+if ! declare -F _hp_timestamp > /dev/null; then
+    _rb_lib_dir="$(dirname "${BASH_SOURCE[0]}")"
+    # shellcheck source=../lib/portable_time.sh
+    source "${_rb_lib_dir%/install}/lib/portable_time.sh"
+    unset _rb_lib_dir
+fi
+
 # Snapshot directory structure
 readonly SNAPSHOT_BASE_DIR="untracked/upgrade-snapshots"
 
@@ -87,7 +95,10 @@ create_state_snapshot() {
 
     # Create snapshot ID (timestamp)
     local snapshot_id
-    snapshot_id=$(date +%Y%m%d_%H%M%S)
+    if ! snapshot_id=$(_hp_timestamp '%Y%m%d_%H%M%S'); then
+        print_error "create_state_snapshot: cannot determine a snapshot ID (see stderr above)"
+        return 1
+    fi
     local snapshot_dir="$snapshot_base/$snapshot_id"
 
     print_info "Creating state snapshot: $snapshot_id"
@@ -123,10 +134,15 @@ create_state_snapshot() {
     fi
 
     # Write manifest
+    local manifest_timestamp
+    if ! manifest_timestamp=$(_hp_timestamp '%Y-%m-%dT%H:%M:%SZ' --utc); then
+        print_error "create_state_snapshot: cannot determine a manifest timestamp (see stderr above)"
+        return 1
+    fi
     cat > "$manifest" <<EOF
 {
   "snapshot_id": "$snapshot_id",
-  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "timestamp": "$manifest_timestamp",
   "project_root": "$project_root",
   "daemon_dir": "$daemon_dir",
   "install_mode": "$install_mode",

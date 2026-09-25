@@ -34,12 +34,46 @@ fi
 # `claude-hooks-daemon` console-script name (removed in v3.38.0 / Plan 00155)
 # never appeared in the real daemon's argv, so its pgrep was dead code — dropped.
 #
+# Plan 00466 N30: `pgrep` is looked up on PATH, and a hostile/stripped PATH
+# gives a false "not found" here that silently no-ops the restart poll's
+# retry fallback below -- the same class of hazard BUG 3 above fixed for
+# BSD's `\|`. `/proc/*/cmdline` is a Linux kernel interface, not an external
+# command, so a pure-bash scan (glob + `read -d ''` on the NUL-separated
+# argv) needs no PATH lookup at all; macOS/BSD have no /proc, so this only
+# covers Linux. `_HP_PROC_DIR` overrides the scanned root -- production
+# never sets it, tests use it to exercise the "neither available" branch
+# without needing a real macOS host.
+#
 # Returns:
-#   0 if a daemon process is found, 1 otherwise
+#   0 if a daemon process is found (or genuinely unknown -- see below), 1 if
+#   definitely not found.
 #
 _daemon_process_exists() {
-    pgrep -f "claude_code_hooks_daemon" > /dev/null && return 0
-    return 1
+    if command -v pgrep > /dev/null; then
+        pgrep -f "claude_code_hooks_daemon" > /dev/null && return 0
+        return 1
+    fi
+    local proc_dir="${_HP_PROC_DIR:-/proc}"
+    if [ -d "$proc_dir" ]; then
+        local cmdline_file arg
+        for cmdline_file in "$proc_dir"/[0-9]*/cmdline; do
+            [ -r "$cmdline_file" ] || continue
+            while IFS= read -r -d '' arg; do
+                case "$arg" in
+                    *claude_code_hooks_daemon*) return 0 ;;
+                esac
+            done < "$cmdline_file"
+        done
+        return 1
+    fi
+    # Neither pgrep nor /proc: cannot determine. A silent "not found" here
+    # would make the restart poll's retry fallback skip itself even when a
+    # daemon really is running -- say so loudly, and answer "maybe" (0)
+    # rather than "no" (1): the caller only uses this to decide whether to
+    # retry the status poll a little longer, so a false positive costs a
+    # few seconds and a false negative costs a failed restart report.
+    print_error "_daemon_process_exists: no pgrep on PATH and no $proc_dir — cannot check for a running daemon; assuming one might be running"
+    return 0
 }
 
 #

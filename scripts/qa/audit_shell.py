@@ -97,6 +97,60 @@ _BOOTSTRAP_BEGIN_MARKER = "SELF-BOOTSTRAP BEGIN"
 _BOOTSTRAP_END_MARKER = "SELF-BOOTSTRAP END"
 _DOLLAR0_RELATIVE_PATTERN = re.compile(r'dirname\s+"?\$0"?|\$\{0%/\*\}')
 
+# Plan 00466 N30 DBF static complement: scripts that exist to survive a
+# hostile or stripped PATH (see scripts/lib/resolve_venv.sh's own
+# docstring) calling a command that IS looked up on PATH, with no
+# `command -v` guard anywhere in the file. This is a proxy, not a full
+# data-flow analysis -- the dynamic empty-PATH integration tests
+# (tests/integration/test_venv_bootstrap_hostile_path_epoch.py and
+# siblings) are the primary guard; this rule exists so a REGRESSION (the
+# guard silently removed, or a new unguarded call added) fails a fast,
+# file-scoped check too, per the brief's "a static rule is fine as a
+# complement, but must not be the only guard".
+#
+# Deliberately a SHORT, DECLARED list, not "every .sh file": the class is
+# specific to bootstrap/install scripts, and scanning `date`/`pgrep` (both
+# ordinary words) across the whole repo would be far too noisy to enforce.
+_HOSTILE_PATH_EXACT_FILES = frozenset(
+    {
+        "scripts/lib/resolve_venv.sh",
+        "scripts/lib/portable_time.sh",
+        "scripts/venv_bootstrap.sh",
+    }
+)
+_HOSTILE_PATH_INSTALL_DIR_PATTERN = re.compile(r"(^|/)scripts/install/[^/]+\.sh$")
+
+# Commands looked up on PATH that this class has caught so far (Plan 00466
+# N1 `sleep`, N30 `date`/`pgrep`). `sleep` is deliberately NOT included:
+# resolve_venv.sh's own `_rv_wait_secs` already IS the guarded wrapper for
+# it, so every `sleep` call site left in these files calls that wrapper,
+# not `sleep` directly -- flagging the word `sleep` itself would just flag
+# the wrapper's own definition.
+_HOSTILE_PATH_RISKY_COMMANDS = ("date", "pgrep")
+# A real invocation, not an arbitrary `\b`-bounded substring: `\b` alone
+# treats a hyphen as a word boundary too, so a bare `\bdate\b` misfires on
+# ordinary prose like "venv up-to-date at $venv_path" (a real false
+# positive this caught in scripts/install/venv.sh). Require the command
+# name to START right after something that can actually precede a command:
+# start of line, whitespace, `;`, `&`, `|`, `(` (covers `$(cmd`), or a
+# backtick -- a hyphen right before it (as in "up-to-date") is excluded.
+_RISKY_COMMAND_PATTERN = re.compile(
+    r"(?:^|[\s;&|(`])(" + "|".join(_HOSTILE_PATH_RISKY_COMMANDS) + r")\b"
+)
+_COMMAND_V_GUARD_PATTERN = re.compile(
+    r"command\s+-v\s+(" + "|".join(_HOSTILE_PATH_RISKY_COMMANDS) + r")\b"
+)
+
+
+def _is_hostile_path_file(filepath: str) -> bool:
+    """True if ``filepath`` is on the declared hostile-PATH file list."""
+    normalized = filepath.replace("\\", "/")
+    if normalized in _HOSTILE_PATH_EXACT_FILES or any(
+        normalized.endswith("/" + f) for f in _HOSTILE_PATH_EXACT_FILES
+    ):
+        return True
+    return bool(_HOSTILE_PATH_INSTALL_DIR_PATTERN.search(normalized))
+
 
 @dataclass
 class Violation:
@@ -176,6 +230,51 @@ def audit_text(source: str, filepath: str) -> list[Violation]:
         )
 
     violations.extend(_audit_bootstrap_reexec_dollar0(lines, filepath))
+    violations.extend(_audit_hostile_path_unguarded_command(lines, filepath))
+    return violations
+
+
+def _audit_hostile_path_unguarded_command(lines: list[str], filepath: str) -> list[Violation]:
+    """Plan 00466 N30: an unguarded `date`/`pgrep` call in a declared
+    hostile-PATH file. "Guarded" is file-wide (a `command -v date` ANYWHERE
+    in the file silences every `date` line in it) -- a proxy for "this file
+    still has the fallback", not a per-call-site data-flow check; the
+    dynamic empty-PATH tests are what actually prove each call site's
+    behaviour.
+    """
+    if not _is_hostile_path_file(filepath):
+        return []
+
+    guarded_commands = {
+        m.group(1) for line in lines for m in _COMMAND_V_GUARD_PATTERN.finditer(line)
+    }
+
+    violations: list[Violation] = []
+    for idx, raw_line in enumerate(lines):
+        code = _strip_inline_comment(raw_line)
+        for match in _RISKY_COMMAND_PATTERN.finditer(code):
+            command = match.group(1)
+            if command in guarded_commands:
+                continue
+            if _has_marker_with_reason(raw_line):
+                continue
+            if idx > 0 and _has_marker_with_reason(lines[idx - 1]):
+                continue
+            violations.append(
+                Violation(
+                    file=filepath,
+                    line=idx + 1,
+                    rule="hostile-path-unguarded-command",
+                    message=(
+                        f"'{command}' is looked up on PATH, and this file exists to "
+                        "survive a hostile/stripped one (Plan 00466 N1/N30) -- guard it "
+                        f"with 'command -v {command}' and a fallback (see "
+                        "scripts/lib/portable_time.sh for the date/epoch-seconds case), "
+                        "or add '# shell-audit: allow -- <reason>' if this call "
+                        "genuinely cannot be reached with a hostile PATH"
+                    ),
+                )
+            )
     return violations
 
 
