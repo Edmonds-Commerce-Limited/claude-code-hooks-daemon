@@ -26,3 +26,12 @@ that has confirmed its own CLI reports a genuine quota signal through Bash
 can set `excluded_tools` explicitly to a list WITHOUT `Bash` and pair it
 with a specific `extra_patterns` regex of its own (adding `Bash` to
 `excluded_tools` excludes it — the opposite).
+
+A new sibling handler, `agent_terminated_early_failure_detector`
+(PostToolUseFailure, on by default), closes the other half of the gap: a
+foreground dispatch that dies with `is_error: true` delivers its death
+through PostToolUseFailure's `error` field, an event `budget_exhaustion_detector`
+never receives at all, so that occurrence previously went unsurfaced
+regardless of this fix. It matches the same harness text, anchored and
+tail-gated the same way, channel-scoped to Task/Agent, and gives the same
+re-brief advisory.

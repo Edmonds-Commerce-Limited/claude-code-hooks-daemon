@@ -64,6 +64,37 @@ config_changes:
       recommended: true
       dormant: false
 
+    - key: handlers.post_tool_use_failure.agent_terminated_early_failure_detector
+      description: >-
+        N46 (Plan 00466 ledger 16, review 2's follow-up): the first handler on
+        the PostToolUseFailure event. A foreground Agent/Task dispatch killed
+        by a harness usage limit with `is_error: true` delivers its death
+        through PostToolUseFailure's `error` field, not through PostToolUse --
+        `budget_exhaustion_detector` (the PostToolUse sibling that matches the
+        same wording on a *completed* dispatch) never receives this event at
+        all, so this occurrence went unsurfaced until now. Matches the same
+        harness text ("Agent terminated early due to an API error: You've hit
+        your session/weekly limit..."), anchored and tail-gated the same way,
+        channel-scoped to Task/Agent only. The advisory names which dispatch
+        died (preferring its `name`) and demands a re-brief once the limit
+        resets. Foreground dispatches only -- see the PostToolUse sibling's
+        own entry above for why a background/teammate dispatch is out of
+        scope for both handlers.
+      example_yaml: |
+        handlers:
+          post_tool_use_failure:
+            agent_terminated_early_failure_detector:
+              enabled: true
+              priority: 10
+      migration_note: >-
+        On by default (opt-out), advisory only, never blocks. A project that
+        dispatches sub-agents and wants to be told when one dies on a usage
+        limit gets this for free; disable with
+        handlers.post_tool_use_failure.agent_terminated_early_failure_detector.enabled:
+        false if the advisory is unwanted.
+      recommended: true
+      dormant: false
+
   renamed: []
 
   removed: []

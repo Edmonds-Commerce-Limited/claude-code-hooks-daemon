@@ -773,6 +773,12 @@ handlers:
       # This repo is the self-install, so `.claude/project-handlers` IS the
       # project-handlers path -- the default is correct here and needs no override.
 
+  # PostToolUseFailure handlers (run after a tool call FAILS)
+  post_tool_use_failure:
+    agent_terminated_early_failure_detector:  # Dogfood: a foreground Agent/Task dispatch killed by a usage limit surfaces here, not PostToolUse (Plan 00466 N46 review 2)
+      enabled: true  # On by default (opt-out); advisory-only, never blocks.
+      priority: 10
+
   # SessionStart handlers (run when session starts)
   session_start:
     disclosure_reset_session_start:  # Reset per-agent rule-disclosure state on every SessionStart (Plan 00116 Phase 4)

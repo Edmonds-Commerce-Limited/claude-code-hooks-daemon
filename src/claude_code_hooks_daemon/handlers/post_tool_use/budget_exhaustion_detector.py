@@ -506,7 +506,7 @@ def _advisory(tool_name: str, matched_fragment: str) -> str:
     )
 
 
-def _dispatch_identity(tool_input: Any, tool_response: Any) -> str:
+def dispatch_identity(tool_input: Any, tool_response: Any) -> str:
     """A human-readable identity for a Task/Agent dispatch.
 
     N46 review 2, MINOR-4: ``name`` -- the handle a re-brief via SendMessage
@@ -516,7 +516,12 @@ def _dispatch_identity(tool_input: Any, tool_response: Any) -> str:
     the same purpose but without a re-brief handle to prefer). If
     ``tool_input`` names nothing at all, the ``tool_response``'s own
     ``agentId`` (present on every real ``completed``/``async_launched``
-    shape) is the last identifying fallback before "an unnamed dispatch"."""
+    shape) is the last identifying fallback before "an unnamed dispatch".
+
+    Public (no leading underscore): the PostToolUseFailure sibling signal,
+    ``agent_terminated_early_detector`` (N46 review 2's follow-up), imports
+    this directly rather than duplicating it -- the same cross-event-package
+    reuse shape as ``recovery_cron_advisor``'s ``declares_failsafe_cron``."""
     if isinstance(tool_input, dict):
         for key in ("name", "description", "subagent_type"):
             value = tool_input.get(key)
@@ -536,7 +541,7 @@ def _agent_terminated_advisory(
     a usage limit (N46 review 1, MINOR-5) -- names WHICH agent died and
     demands a re-brief, since its work is incomplete and silently treating
     the dispatch as done loses the assignment."""
-    identity = _dispatch_identity(tool_input, tool_response)
+    identity = dispatch_identity(tool_input, tool_response)
     return (
         f"🚨 SUB-AGENT DIED ON A USAGE LIMIT ({tool_name}: {identity!r}) 🚨\n\n"
         f"The harness terminated this dispatch early. Matched text: "

@@ -227,6 +227,12 @@ class Priority:
     # 00315, sits after goal_injection in the same PostToolUse advisory band)
     BUDGET_EXHAUSTION_DETECTOR = 32
 
+    # Agent-terminated-early failure detector (Priority: 10 - PostToolUseFailure
+    # advisory; Plan 00466 N46 review 2's follow-up, the first and only handler
+    # on this event today, so its own numbering starts fresh rather than
+    # sharing PostToolUse's band)
+    AGENT_TERMINATED_EARLY_FAILURE_DETECTOR = 10
+
     # Model-downgrade recorder (Priority: 33 - PostToolUse sensor; Plan 00328,
     # next to goal_injection because it is the same kind of thing: a silent
     # writer of a per-session signal file the ccy supervisor consumes)

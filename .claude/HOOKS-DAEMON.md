@@ -199,6 +199,12 @@
 |----------|---------|----------|-------------|
 | 50 | worktree_remove | TERMINAL | Prune stale worktree registrations (and remove a named worktree) |
 
+### PostToolUseFailure (1 handler)
+
+| Priority | Handler | Behaviour | Description |
+|----------|---------|----------|-------------|
+| 10 | agent_terminated_early_failure_detector | ADVISORY | PostToolUseFailure advisory: a foreground Agent/Task dispatch killed |
+
 ### Daemon Plugin (1 handler)
 
 | Priority | Handler | Behaviour | Description |

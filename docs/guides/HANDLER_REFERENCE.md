@@ -3186,6 +3186,28 @@ handlers:
 
 ---
 
+#### agent_terminated_early_failure_detector
+
+| Property       | Value                                     |
+| -------------- | ----------------------------------------- |
+| **Config key** | `agent_terminated_early_failure_detector` |
+| **Type**       | Advisory                                  |
+| **Event**      | PostToolUseFailure                        |
+
+**Description:** The PostToolUseFailure sibling of `budget_exhaustion_detector`'s Agent/Task signal. A foreground Agent/Task dispatch that dies with `is_error: true` delivers its death through PostToolUseFailure's `error` field, not PostToolUse — `budget_exhaustion_detector` never receives this event. Matches the harness's own `Error: Agent terminated early due to an API error: You've hit your session/weekly limit...` text, anchored at the response's start with the same stable `(error type rate_limit, HTTP 429` tail requirement as its sibling, channel-scoped to Task/Agent only. The advisory names which dispatch died (preferring `name`) and tells you to re-brief it once the limit resets. **Foreground dispatches only** — a background/teammate dispatch killed after moving to the background never reaches PostToolUse or PostToolUseFailure at all; see Plan 00470 Tasks 3.1/3.2 (StopFailure/Notification) for that channel. Never blocks.
+
+**Config example:**
+
+```yaml
+handlers:
+  post_tool_use_failure:
+    agent_terminated_early_failure_detector:
+      enabled: true
+      priority: 10
+```
+
+---
+
 #### model_downgrade_recorder
 
 | Property       | Value                      |

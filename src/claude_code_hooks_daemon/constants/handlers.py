@@ -579,6 +579,16 @@ class HandlerID:
         config_key="budget_exhaustion_detector",
         display_name="budget-exhaustion-detector",
     )
+    # Agent-terminated-early failure detector (PostToolUseFailure) -- Plan
+    # 00466 N46 review 2's follow-up: a foreground Agent/Task dispatch that
+    # dies with is_error: true delivers the harness's usage-limit-termination
+    # text via PostToolUseFailure's `error` field, a DIFFERENT event
+    # budget_exhaustion_detector (its PostToolUse sibling) never receives.
+    AGENT_TERMINATED_EARLY_FAILURE_DETECTOR = HandlerIDMeta(
+        class_name="AgentTerminatedEarlyFailureDetectorHandler",
+        config_key="agent_terminated_early_failure_detector",
+        display_name="agent-terminated-early-failure-detector",
+    )
     FAILSAFE_CRON_BLOCKAGE_SUPPRESSOR = HandlerIDMeta(
         class_name="FailsafeCronBlockageSuppressorHandler",
         config_key="failsafe_cron_blockage_suppressor",

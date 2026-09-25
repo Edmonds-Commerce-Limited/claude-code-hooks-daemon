@@ -262,11 +262,18 @@ order; re-running the same replay after the fix fires 3 of 4 real
 occurrences (all `completed`-status), 0 false positives over 347 ordinary
 results. The 4th real occurrence (`is_error: true`) is delivered as a bare
 string to `PostToolUseFailure`, a DIFFERENT event this PostToolUse handler
-does not receive (hooks.md:2108-2151) -- dropped from the "occurrences
-covered" claim rather than built out, since standing up a whole new
-`handlers/post_tool_use_failure/` registration for one string is
-speculative infrastructure for a single confirmed occurrence; a follow-up
-niggle can pick it up if a second one is ever caught live. For dispatch
+does not receive (hooks.md:2108-2151). The coordinator rejected leaving
+this as a follow-up niggle: a new sibling handler,
+`agent_terminated_early_failure_detector` (the first handler on
+`handlers/post_tool_use_failure/`), matches the same harness text -- as
+the top-level `error` field's own shape, `Error: Agent terminated early...`,
+anchored and tail-gated the same way -- channel-scoped to Task/Agent, and
+imports `dispatch_identity` (renamed from `_dispatch_identity`, now public
+for this cross-package reuse, the same shape `recovery_cron_advisor`'s
+`declares_failsafe_cron` already has) rather than duplicating the identity
+logic. Replaying all four real occurrences through BOTH handlers together
+(`probe_n46r3_combined_replay.py`) now fires 4 of 4, 0 false positives over
+362 ordinary results. For dispatch
 tools specifically, `_stringify_tool_response` no longer falls back to
 `json.dumps` of the whole `tool_response` dict when `content` is absent
 (an `async_launched`/`teammate_spawned` launch, 264 of 351 real results):
