@@ -134,6 +134,35 @@ class TestTheWriteEditSurface:
         assert handler.matches(hook_input) is True
 
 
+class TestAnInProjectLinkOutOfTheRoot:
+    """Plan 00466 N24 review 3 B1: a link inside the root that points outside it.
+
+    Spelled with a run of ``/.`` past PATH_MAX, the path resolved to itself
+    rather than through the link, so the Write was allowed.
+    """
+
+    @pytest.fixture()
+    def linked_root(self, tmp_path: Path, _project_root: Any) -> Path:
+        root = tmp_path / "proj"
+        root.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (root / "l_out").symlink_to(outside)
+        _project_root.return_value = root
+        return root
+
+    @pytest.mark.parametrize("filler", ["", "/." * 2_100, "/" * 4_200])
+    def test_a_write_through_the_link_matches(
+        self, handler: ProjectContainmentHandler, linked_root: Path, filler: str
+    ) -> None:
+        assert handler.matches(_write(f"{linked_root}{filler}/l_out/escape.txt")) is True
+
+    def test_a_write_beside_the_link_does_not_match(
+        self, handler: ProjectContainmentHandler, linked_root: Path
+    ) -> None:
+        assert handler.matches(_write(f"{linked_root}{'/.' * 2_100}/inside.txt")) is False
+
+
 class TestTheBashSurface:
     @pytest.mark.parametrize(
         "command",

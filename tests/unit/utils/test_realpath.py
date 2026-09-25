@@ -9,6 +9,8 @@ path cost seconds across the chain.
 from __future__ import annotations
 
 import os
+import random
+from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import patch
 
@@ -100,10 +102,120 @@ def test_a_nul_byte_raises_like_os_path_realpath() -> None:
         realpath("/a\0b")
 
 
+#: Plan 00466 N24 review 3 B1: each atom is one path component. They cover
+#: dirs, a file, relative and absolute links, a dangling link, loops, a chain,
+#: link targets holding `..` and `missing/..`, a link to `.` and to `/`, and
+#: a component too long for NAME_MAX.
+_ATOMS = [
+    *("d1", "d2", "d3", "e1", "f1", "f2", "l_d1", "l_abs_d2", "l_f1", "l_dangling"),
+    *("l_loop_a", "l_loop_b", "l_self", "l_up_e1", "l_parent", "l_chain"),
+    *("l_dotdot_target", "l_missing_dotdot", "l_missing_dotdot_up", "l_dot", "l_root"),
+    *("missing", "zz", "..", ".", "", "x" * 300),
+]
+_DIFFERENTIAL_CASES = 24_000
+_DIFFERENTIAL_SEED = 466_24
+
+
+@pytest.fixture
+def adversarial_tree(tmp_path: Path) -> Path:
+    """Every symlink shape review 3 found the fast path getting wrong."""
+    (tmp_path / "d1" / "d2" / "d3").mkdir(parents=True)
+    (tmp_path / "e1").mkdir()
+    (tmp_path / "f1").write_text("")
+    (tmp_path / "d1" / "f2").write_text("")
+    links = {
+        "l_d1": "d1",
+        "l_abs_d2": str(tmp_path / "d1" / "d2"),
+        "l_f1": "f1",
+        "l_dangling": "missing/x",
+        "l_loop_a": "l_loop_b",
+        "l_loop_b": "l_loop_a",
+        "l_self": "l_self",
+        "d1/l_up_e1": "../e1",
+        "d1/d2/l_parent": "..",
+        "l_chain": "l_d1/d2",
+        "l_dotdot_target": "d1/../e1/../d1/d2/l_parent/f2",
+        "l_missing_dotdot": "nope/../d1",
+        "l_missing_dotdot_up": "nope/deeper/../../e1",
+        "l_dot": ".",
+        "l_root": "/",
+    }
+    for name, target in links.items():
+        (tmp_path / name).symlink_to(target)
+    return tmp_path
+
+
+def _generated_path(rng: random.Random, base: Path) -> str:
+    parts = [rng.choice(_ATOMS) for _ in range(rng.randint(0, 7))]
+    if rng.random() < 0.04:
+        # A spelling at or past PATH_MAX made of components realpath skips.
+        parts = [rng.choice([".", ""])] * rng.choice([1_500, 2_100, 3_000, 4_200]) + parts
+    path = "/".join(parts)
+    anchor = rng.random()
+    if anchor < 0.45:
+        path = f"{base}/{path}"
+    elif anchor < 0.5:
+        path = f"/{path}"
+    elif anchor < 0.55:
+        path = f"//{path}"
+    if rng.random() < 0.15:
+        path += "/"
+    return path
+
+
+def _outcome(function: Callable[[str], str], path: str) -> tuple[str, str]:
+    try:
+        return ("ok", function(path))
+    except (OSError, ValueError, RuntimeError) as exc:
+        return ("raised", type(exc).__name__)
+
+
+def test_matches_os_path_realpath_on_generated_adversarial_paths(
+    adversarial_tree: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Plan 00466 N24 review 3 B1: a differential test, not a list of shapes.
+
+    The earlier exhaustive test could not reach two classes, and each let a
+    Write through an in-project link to /tmp past project_containment: a
+    spelling past PATH_MAX, and a link whose target holds `missing/..`.
+    """
+    monkeypatch.chdir(adversarial_tree)
+    rng = random.Random(_DIFFERENTIAL_SEED)
+    mismatches = []
+    for _ in range(_DIFFERENTIAL_CASES):
+        path = _generated_path(rng, adversarial_tree)
+        expected = _outcome(os.path.realpath, path)
+        if _outcome(realpath, path) != expected:
+            mismatches.append(path[:200])
+    assert not mismatches, f"{len(mismatches)} differ, e.g. {mismatches[:3]}"
+
+
+@pytest.mark.parametrize(
+    "spelled",
+    [
+        "/".join(["."] * 2_100) + "/l_d1/f2",
+        "/".join([""] * 4_200) + "/l_d1/f2",
+        "l_missing_dotdot/l_up_e1",
+        "l_missing_dotdot_up/x",
+    ],
+)
+def test_the_two_classes_review_3_found(adversarial_tree: Path, spelled: str) -> None:
+    path = f"{adversarial_tree}/{spelled}"
+    assert realpath(path) == os.path.realpath(path)
+
+
+def test_a_nul_byte_after_a_missing_component_still_raises(tree: Path) -> None:
+    path = f"{tree}/missing/deeper/a\0b"
+    with pytest.raises(ValueError):
+        os.path.realpath(path)
+    with pytest.raises(ValueError):
+        realpath(path)
+
+
 def test_a_deep_missing_path_costs_logarithmically_many_lstat_calls(tree: Path) -> None:
     """The point of the helper: not one lstat per component. A deterministic
-    count: a binary search over the depth, plus resolving the few components
-    that exist."""
+    count: one per component that exists, and one for the first that does
+    not."""
     depth = 4_096
     deep = str(tree / "real" / ("pkg/" * depth) / "module.py")
     expected = os.path.realpath(deep)
