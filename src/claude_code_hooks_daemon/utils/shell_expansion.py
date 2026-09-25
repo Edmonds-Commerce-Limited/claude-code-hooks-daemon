@@ -882,14 +882,22 @@ def _heredoc_body_skip_ranges(command: str) -> list[tuple[int, int]]:
 
     A quoted-delimiter heredoc body is inert data handed to a CONSUMER
     (``cat > f <<'EOF'``, ``tee``, ``git commit -F- <<'EOF'``) -- nothing
-    in it can be a shell trigger, since the surrounding shell expands
+    in it can be a shell TRIGGER, since the surrounding shell expands
     NOTHING in it either. It can legitimately be large (long prose, a
     generated file), so counting its every word against the volume cap
     :func:`_iter_normalised_shell_words` enforces would deny an everyday
-    command for no security benefit -- the OTHER token streams
-    (``_tokenise``/``_brace_expansion_tokens`` in ``secret_file_matching``)
-    still scan this same span for a literal mention, unaffected by this
-    exclusion, which is scoped to nested-COMMAND discovery only.
+    command for no security benefit.
+
+    The name says "skip", but review 7's own follow-up narrowed what that
+    means: a word inside one of these ranges is EXEMPT from the cap
+    (never counted, never the reason the cap raises) but is still decoded
+    and yielded exactly like any other word -- a first version that
+    skipped decoding entirely regressed three gd6 probe rows
+    (``cat <<'EOF' | bash``, ``bash <<'EOF'``, ``sh <<-'X'``) whose
+    mention only the ORDINARY quote-splice decode revealed, needing no
+    recursion at all. A heredoc body large enough to matter for TIME is
+    still bounded by the whole-scan deadline ``secret_file_guard``
+    supplies.
 
     ``<<-`` (the tab-stripping form) is honoured: the closing line may be
     indented with tabs, stripped before comparing to the delimiter.
@@ -1101,25 +1109,40 @@ def _iter_normalised_shell_words(
             and i >= heredoc_skip_ranges[heredoc_skip_index][1]
         ):
             heredoc_skip_index += 1
-        if (
+        in_heredoc_body = (
             heredoc_skip_index < len(heredoc_skip_ranges)
             and heredoc_skip_ranges[heredoc_skip_index][0] <= i
-        ):
-            i = heredoc_skip_ranges[heredoc_skip_index][1]
-            continue
+        )
         char = command[i]
         if char in _WORD_SEPARATOR_CHARS:
             if char not in " \t\n":
                 last_operators += char
             i += 1
             continue
-        if count >= max_words:
+        if count >= max_words and not in_heredoc_body:
             # Review 7 MAJOR-1: fail CLOSED past the word cap, the same
             # direction `iter_brace_words` raises -- a caller that saw a
             # quiet `return` here and treated exhaustion as "no more words"
             # would allow a mention placed only past the cap, exactly the
             # fail-open the module's own docstring says every bound here
             # must not reintroduce.
+            #
+            # Review 7 follow-up: a quoted-delimiter heredoc-body word is
+            # exempt from the CAP (never counted, never the reason this
+            # raises) but is still DECODED AND YIELDED below like any
+            # other word -- unlike the module's other bounds, this cap
+            # exists to bound RECURSIVE/combinatorial cost (nested-command
+            # re-parsing, brace expansion), and flat heredoc prose has
+            # none: an earlier version of this fix skipped decoding the
+            # body entirely, which silently lost the ordinary quote-splice
+            # decode a heredoc word gets like any other -- regressing
+            # three gd6 probe rows that never needed RECURSION to begin
+            # with, only decoding (`cat <<'EOF' | bash`, `bash <<'EOF'`,
+            # `sh <<-'X'`). A heredoc body large enough to matter for TIME
+            # is still bounded by the whole-scan deadline
+            # `secret_file_guard` supplies (`iter_protected_mentions`'s
+            # own backstop), the same layered defence the module's
+            # "ordinary volume content" tests already rely on.
             raise TooManyToEnumerateError(
                 f"more than {max_words} normalised shell words in a single command"
             )
@@ -1130,7 +1153,13 @@ def _iter_normalised_shell_words(
         decoded, end = _decode_span(
             command, i, _WORD_SEPARATOR_CHARS, substitutions=nested_substitutions
         )
-        count += 1
+        if not in_heredoc_body:
+            # A heredoc-body word never counts against the cap (see the
+            # exemption above) -- not counting it here too is what makes
+            # that exemption structural rather than a one-shot escape: an
+            # arbitrarily long heredoc body never eats into the budget
+            # ordinary words outside it still need.
+            count += 1
         yield decoded
         # Review 7 MAJOR-2: every `$(...)`/backtick body this word's decode
         # just collapsed to a bare `*` is a genuine nested COMMAND -- judged

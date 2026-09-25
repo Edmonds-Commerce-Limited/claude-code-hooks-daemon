@@ -315,6 +315,46 @@ _PERCENT_LITERAL_DELIMITERS: Final[dict[str, str]] = {
 _PYTHON_SHELL_CALL_RE: Final[re.Pattern[str]] = re.compile(
     r"\b(?:os\.system|os\.popen|subprocess\.\w+)\s*\("
 )
+# Review 7 follow-up (team-lead): the regex fallback's alias resolution --
+# a best-effort, line-based scan, not a parser, but reaching the SAME
+# local-name -> (module, attr) mapping `_PythonImportAliases` builds from
+# the AST, for the two modules this route's calls ever come from.
+_PY_MODULE_ALIAS_RE: Final[re.Pattern[str]] = re.compile(
+    r"^\s*import\s+(os|subprocess)\s+as\s+(\w+)", re.MULTILINE
+)
+_PY_FROM_IMPORT_RE: Final[re.Pattern[str]] = re.compile(
+    r"^\s*from\s+(os|subprocess)\s+import\s+(.+)$", re.MULTILINE
+)
+_PY_FROM_IMPORT_NAME_RE: Final[re.Pattern[str]] = re.compile(
+    r"(\w+)(?:\s+as\s+(\w+))?"
+)
+#: `shell=True`/`shell = True`/`shell\n=\nTrue` -- any whitespace around
+#: `=`, matching what `ast` already normalises away for the AST path.
+_PY_SHELL_TRUE_RE: Final[re.Pattern[str]] = re.compile(r"\bshell\s*=\s*True\b")
+
+
+def _python_regex_fallback_aliases(content: str) -> dict[str, tuple[str, str]]:
+    """Best-effort ``local name -> (module, attr)`` alias map for the regex
+    fallback, mirroring :class:`_PythonImportAliases`'s AST-built one --
+    line-based regex scanning, since ``content`` is (by construction) not
+    standalone-parseable here. Only ``os``/``subprocess`` attributes are
+    tracked, since those are the only modules :func:`_python_call_is_shell_
+    exec` ever recognises.
+    """
+    aliases: dict[str, tuple[str, str]] = {}
+    for match in _PY_FROM_IMPORT_RE.finditer(content):
+        module = match.group(1)
+        for name_match in _PY_FROM_IMPORT_NAME_RE.finditer(match.group(2)):
+            attr = name_match.group(1)
+            local = name_match.group(2) or attr
+            aliases[local] = (module, attr)
+    return aliases
+
+
+def _python_regex_fallback_module_aliases(content: str) -> dict[str, str]:
+    """Best-effort ``local module alias -> real module name`` map for the
+    regex fallback (``import subprocess as sp``)."""
+    return {alias: module for module, alias in _PY_MODULE_ALIAS_RE.findall(content)}
 # Review 7 MINOR-2: the paren-free form (`system 'x'`, idiomatic Ruby) is
 # matched too, the same optional-paren shape Perl's `system` already uses
 # -- `_call_span` is a bounded text window, not a real paren matcher, so it
@@ -611,28 +651,83 @@ def _python_shell_exec_literals_ast(content: str) -> list[str] | None:
     return literals[:_MAX_SHELL_EXEC_LITERALS]
 
 
+def _regex_fallback_call_counts(
+    module: str, attr: str, span: str, span_literals: list[str]
+) -> bool:
+    """Review 7 follow-up: the regex fallback's gating, made equivalent to
+    :func:`_python_call_is_shell_exec`'s AST gating for the two modules
+    this route covers -- ``os.system``/``os.popen`` always count;
+    ``subprocess.getoutput``/``getstatusoutput`` always count (MINOR-1:
+    they take no ``shell=`` keyword at all); any other ``subprocess``
+    attribute counts only with ``shell=True`` (any whitespace) or an argv
+    literal naming a shell interpreter.
+    """
+    if module == "os":
+        return attr in ("system", "popen")
+    if module == "subprocess":
+        if attr in _PY_SUBPROCESS_ALWAYS_SHELL_FUNC_NAMES:
+            return True
+        names_a_shell = any(literal in _SHELL_INTERPRETER_NAMES for literal in span_literals)
+        return bool(_PY_SHELL_TRUE_RE.search(span)) or names_a_shell
+    return False
+
+
 def _python_shell_exec_literals(content: str) -> list[str]:
     """String-literal arguments to a Python shell-executing call.
 
     AST-based (review 6 minor-2) when ``content`` parses as standalone
-    Python -- handles from-imports and aliases, ``shell=True`` regardless
-    of spacing, absolute interpreter paths, ``asyncio.
+    Python (via :func:`_parse_python_fragment`'s dedent/function-wrap
+    recovery too) -- handles from-imports and aliases, ``shell=True``
+    regardless of spacing, absolute interpreter paths, ``asyncio.
     create_subprocess_shell``, ``os.exec*``/``os.spawn*`` and ``pty.spawn``.
-    Falls back to the pre-ast regex heuristic (``os.system``/``os.popen``/
-    ``subprocess.*``, gated on ``shell=True`` or an argv list naming a
-    shell) when ``ast.parse`` cannot handle the content standalone.
+
+    Falls back to a regex heuristic -- reached only for content genuinely
+    unparseable even after recovery (e.g. a real unterminated string) --
+    made equivalent to the AST path for what it DOES cover (review 7
+    follow-up, team-lead): ``import X as Y``/``from os|subprocess import
+    ... as ...`` aliases are resolved via a best-effort regex scan
+    (:func:`_python_regex_fallback_aliases`/``_module_aliases``), and
+    gating (:func:`_regex_fallback_call_counts`) matches the AST path's
+    ``shell=True``-any-spacing and always-shell-function rules. Narrower
+    than the AST path in ONE respect it does not attempt to close: it
+    cannot fold adjacent string literals (`'a' 'b'`) the way the real
+    Python parser does -- that needs an actual parser, not regex.
     """
     ast_literals = _python_shell_exec_literals_ast(content)
     if ast_literals is not None:
         return ast_literals
-    literals: list[str] = []
+
+    module_aliases = _python_regex_fallback_module_aliases(content)
+    from_aliases = _python_regex_fallback_aliases(content)
+
+    candidates: list[tuple[int, str, str]] = []
     for match in _PYTHON_SHELL_CALL_RE.finditer(content):
-        span = _call_span(content, match.end())
-        span_literals = _quoted_literals_in_span(span, limit=_MAX_SHELL_EXEC_LITERALS)
-        if match.group(0).startswith("subprocess."):
-            names_a_shell = any(literal in _SHELL_INTERPRETER_NAMES for literal in span_literals)
-            if "shell=True" not in span and not names_a_shell:
+        text = match.group(0)
+        module = "os" if text.startswith("os.") else "subprocess"
+        attr = text[len(module) + 1 : -1].strip()
+        candidates.append((match.start(), module, attr))
+    for alias, real_module in module_aliases.items():
+        for match in re.finditer(rf"\b{re.escape(alias)}\.(\w+)\s*\(", content):
+            attr = match.group(1)
+            if real_module == "os" and attr not in ("system", "popen"):
                 continue
+            candidates.append((match.start(), real_module, attr))
+    for local, (real_module, attr) in from_aliases.items():
+        if real_module == "os" and attr not in ("system", "popen"):
+            continue
+        for match in re.finditer(rf"\b{re.escape(local)}\s*\(", content):
+            candidates.append((match.start(), real_module, attr))
+    candidates.sort(key=lambda item: item[0])
+
+    literals: list[str] = []
+    for start, module, attr in candidates:
+        call_open = content.find("(", start)
+        if call_open == -1:
+            continue
+        span = _call_span(content, call_open + 1)
+        span_literals = _quoted_literals_in_span(span, limit=_MAX_SHELL_EXEC_LITERALS)
+        if not _regex_fallback_call_counts(module, attr, span, span_literals):
+            continue
         literals.extend(span_literals)
         if len(literals) >= _MAX_SHELL_EXEC_LITERALS:
             break

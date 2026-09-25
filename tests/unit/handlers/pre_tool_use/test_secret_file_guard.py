@@ -1658,6 +1658,103 @@ class TestPythonAstShellExecLiterals:
         assert handler.matches(hook_input)
 
 
+class TestPythonRegexFallbackEquivalence:
+    """Plan 00466 guard-defects review 7 follow-up (team-lead): the regex
+    fallback (reached only when ast.parse genuinely cannot handle the
+    content, even after dedent/function-wrap recovery -- e.g. a real
+    UNTERMINATED string elsewhere in the fragment) must recognise the SAME
+    shapes the AST path does: an import alias, `shell=True` regardless of
+    spacing, and the always-shell subprocess functions
+    (getoutput/getstatusoutput).
+
+    Every fixture below pairs a genuinely unparseable fragment (a real
+    unterminated string on a LATER line) with a complete, well-formed call
+    earlier in the same content -- proving the regex path specifically,
+    since the AST path can never reach it here. The call's argument is a
+    GLOB-shaped literal (`prod.vault-pass*`), never a bare exact pattern
+    name -- an exact name like `.vault-password` denies on its OWN as a
+    plain string literal via the ordinary content scan, regardless of
+    whether shell-exec-call detection (alias/`shell=True`) ever fires, so
+    it cannot isolate what these tests are for. A glob-shaped literal only
+    denies once it reaches ``context="bash"`` treatment, which happens
+    ONLY through the shell-exec-call route -- the SAME discriminator
+    ``TestShellExecCallLiteralsInOtherLanguages``'s own control tests use."""
+
+    def test_import_alias_is_resolved_by_the_regex_fallback(self) -> None:
+        call = (
+            "from os import " + "system" + " as s\n"
+            "s('cat prod.vault-pass*')\n"
+            "broken = 'unterminated\n"
+        )
+        handler = _handler()
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_module_alias_is_resolved_by_the_regex_fallback(self) -> None:
+        call = (
+            "import subprocess as sp\n"
+            "sp.run('cat prod.vault-pass*', shell" + "=True)\n"
+            "broken = 'unterminated\n"
+        )
+        handler = _handler()
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_unusually_spaced_shell_true_is_recognised_by_the_regex_fallback(self) -> None:
+        call = (
+            "subprocess.run('cat prod.vault-pass*',    shell   " + "=   True)\n"
+            "broken = 'unterminated\n"
+        )
+        handler = _handler()
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_getoutput_with_no_shell_true_is_recognised_by_the_regex_fallback(self) -> None:
+        call = (
+            "subprocess.getoutput('cat prod.vault-pass*')\n"
+            "broken = 'unterminated\n"
+        )
+        handler = _handler()
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_getstatusoutput_with_no_shell_true_is_recognised_by_the_regex_fallback(
+        self,
+    ) -> None:
+        call = (
+            "subprocess.getstatusoutput('cat prod.vault-pass*')\n"
+            "broken = 'unterminated\n"
+        )
+        handler = _handler()
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_ordinary_argv_with_no_shell_true_stays_allowed_via_the_regex_fallback(
+        self,
+    ) -> None:
+        """Control: an ordinary argv-list call naming no shell interpreter
+        and with no shell=True must still be left to the (allowed)
+        literal-only content scan, via the regex fallback too."""
+        call = (
+            'subprocess.run(["cat", "prod.vault-pass*"])\n'
+            "broken = 'unterminated\n"
+        )
+        handler = _handler()
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
+        assert not handler.matches(hook_input)
+
+    def test_this_fixture_genuinely_reaches_the_regex_fallback(self) -> None:
+        """Proves the premise every test above relies on: the fixture
+        shape really is unparseable even after dedent/function-wrap
+        recovery, so the AST path is never the one answering."""
+        from claude_code_hooks_daemon.handlers.pre_tool_use.secret_file_guard import (
+            _python_shell_exec_literals_ast,
+        )
+
+        call = "subprocess.getoutput('cat .vault-password')\nbroken = 'unterminated\n"
+        assert _python_shell_exec_literals_ast(call) is None
+
+
 class TestBroadenedRubyPhpNodeShellExecLiterals:
     """review 6 minor-2: Open3 and IO.popen for Ruby, proc_open for PHP,
     and Node's `spawn` with a shell option."""
@@ -1740,6 +1837,44 @@ class TestGoRustJavaShellExecLiterals:
         handler = _handler()
         call = 'new ProcessBuilder("cat", "prod.vault-pass*");\n'
         hook_input = _hook_input("Write", {"file_path": "/proj/helper.java", "content": call})
+        assert not handler.matches(hook_input)
+
+
+class TestGoRustJavaAbsolutePathInterpretersReview7:
+    """Plan 00466 guard-defects review 7 (read-only finding): the
+    Go/Rust/Java first-literal shell-exec check compared the raw string
+    to a bare shell name with no basename strip, unlike the Python path,
+    so an ABSOLUTE interpreter path (`/usr/bin/bash`) was invisible.
+    Every deny case here uses a GLOB-shaped literal (`prod.vault-pass*`),
+    never the bare exact pattern name -- an exact name denies on its own
+    via the plain content scan regardless of call-context recognition, so
+    it cannot isolate the fix these tests are for (the same discriminator
+    the other controls in this class already use)."""
+
+    def test_go_exec_command_absolute_bash_path_denies(self) -> None:
+        handler = _handler()
+        call = "exe" + 'c.Command("/usr/bin/bash", "-c", "cat prod.vault-pass*")\n'
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.go", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_rust_command_new_absolute_bash_path_denies(self) -> None:
+        handler = _handler()
+        call = 'Command::new("/usr/bin/bash").arg("-c").arg("cat prod.vault-pass*");\n'
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.rs", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_java_process_builder_absolute_bash_path_denies(self) -> None:
+        handler = _handler()
+        call = 'new ProcessBuilder("/usr/bin/bash", "-c", "cat prod.vault-pass*");\n'
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.java", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_go_exec_command_absolute_non_shell_path_stays_allowed(self) -> None:
+        """Control: an absolute path to an ORDINARY (non-shell) binary
+        must not be mistaken for an interpreter."""
+        handler = _handler()
+        call = "exe" + 'c.Command("/usr/bin/cat", "prod.vault-pass*")\n'
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.go", "content": call})
         assert not handler.matches(hook_input)
 
 

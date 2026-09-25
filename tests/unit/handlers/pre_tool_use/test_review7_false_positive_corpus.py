@@ -220,6 +220,39 @@ EVERYDAY_COMMANDS: list[str] = [
 ]
 # fmt: on
 
+#: Team-lead's review 7 follow-up: the longest REAL shapes a normal
+#: session produces -- a long git commit message, a long quoted-delimiter
+#: heredoc body, and a long `gh` issue/PR body -- must all stay allowed
+#: even though each easily carries thousands of prose words. Built here
+#: (rather than hand-typed) so the word counts are realistic and visibly
+#: past DEFAULT_MAX_NORMALISED_WORDS (2000).
+_LONG_PROSE_PARAGRAPH = (
+    "This change updates the pagination handler to correctly account for "
+    "the boundary condition where the requested page exceeds the total "
+    "number of available pages, and adds a regression test covering the "
+    "previously silent off-by-one error that surfaced during the audit. "
+)
+_LONG_BODY = (_LONG_PROSE_PARAGRAPH * 200).strip()  # ~2400+ words
+
+LONG_SHAPE_COMMANDS: list[str] = [
+    # A long git commit -m body -- the message is ONE shell word (single
+    # quoted), so it never actually hits the word cap, but is pinned here
+    # as the shape team-lead explicitly named.
+    f"git commit -m '{_LONG_BODY}'",
+    # A long quoted-delimiter heredoc body -- exempted from the word cap
+    # entirely (TestIterNormalisedShellWordsQuotedHeredocBodyIsSkipped).
+    f"cat > /tmp/notes.md <<'EOF'\n{_LONG_BODY}\nEOF\n",
+    # The `"$(cat <<'EOF' ... EOF)"` idiom used to build a git/gh message
+    # from a quoted-delimiter heredoc -- doubly exempt (heredoc body, and
+    # a git -m value is one shell word).
+    f"git commit -F- <<'EOF'\n{_LONG_BODY}\nEOF\n",
+    # A long `gh` issue/PR body, inline -- also one shell word (quoted).
+    f"gh issue comment 123 --body '{_LONG_BODY}'",
+    f"gh pr create --title 'fix: pagination boundary' --body '{_LONG_BODY}'",
+]
+
+EVERYDAY_COMMANDS.extend(LONG_SHAPE_COMMANDS)
+
 
 class TestReview7FalsePositiveCorpus:
     """Every command above must stay ALLOWED after the review 7 fixes."""
