@@ -313,6 +313,16 @@ quote-aware pass. Pin every shape through the real chain.
 
 ### N39 — Nine unit tests fail in a whole-suite run and pass when their files run alone
 
+**Partially Remedied on this branch (main-based worktree, commit below):**
+the widened-scope items 2 (socket-listener fixed-sleep race,
+`started_event`) and 3 (`blocking_gate_guard` skip-to-failure escalation) are
+fixed here. Widened item 1 (docs-rewrite mid-run) is recorded as a procedure
+note plus a sharpened teardown-guard message, not a code fix (no test-side
+leak was found). **The original defect** (the two-layer-patch leak in
+`test_project_containment.py`) is diagnosed but NOT fixed on this branch — it
+is being fixed on `worktree-n466-guard-defects` by a different agent, per the
+fix recipe below.
+
 **Found by the guard-defects agent** (its review-4 fix round). A plain whole
 unit-suite run on `worktree-n466-guard-defects` (main merged at `e14cdca4`)
 gave 9 failures. They were in `test_model_fallback_detector.py`,
@@ -325,13 +335,296 @@ workers.
 
 A suite that fails in one order is a hidden defect: it can hide a real
 failure behind a "flaky" label, and it breaks the first time the ordering
-shifts. It has not yet been confirmed whether `main` alone reproduces it;
-that is the first step.
+shifts.
 
-**Candidate remedy:** reproduce it on `main` with a plain sequential run, then
-bisect for the polluting test. Fix the leak at its source with real isolation
-(a fixture that restores the state), not by reordering. Pin it with a test
-that runs the polluter and the victim in sequence.
+**Diagnosed by a follow-up agent.** `main` does NOT reproduce it: a plain
+sequential `pytest tests/unit -p no:xdist -q` on `main` at `c92bfbc1` gives
+22451 passed, 0 failed. The same run on `worktree-n466-guard-defects` at
+`ef0600ed` reproduces exactly 9 failures (22606 passed) in
+`tests/unit/handlers/session_start/test_model_fallback_detector.py` (6),
+`tests/unit/handlers/test_absolute_path.py` (1),
+`tests/unit/rule_explain/test_lookup.py` (1, NOT
+`tests/unit/remote_docs/test_lookup.py` — the two victim files share a
+basename) and `tests/unit/scripts/test_dangerous_invocation_corpus_checker.py`
+(1). So the leak's source exists only on `worktree-n466-guard-defects`, not
+on `main`.
+
+**Root cause, bisected to two exact test methods and confirmed with an
+isolated 20-line repro (independent of this project's own code).**
+`tests/unit/handlers/pre_tool_use/test_project_containment.py` carries a
+class-wide `autouse` fixture, `_project_root` (added long before this defect):
+
+```python
+@pytest.fixture(autouse=True)
+def _project_root() -> Any:
+    with patch("...ProjectContext.project_root") as mock:
+        mock.return_value = _ROOT  # Path("/repo")
+        yield mock
+```
+
+Two tests added by commit `d0de526d1`
+(`TestFailsClosedOnEvaluationError::test_an_uninitialised_project_root_still_denies`
+and `::test_an_evaluation_error_denial_uses_its_own_rule_id`), plus one added
+by commit `3e3164bd`
+(`TestChainLevelFailClosedBehaviour::test_an_evaluation_exception_still_denies_through_the_chain`),
+each ALSO calls
+`monkeypatch.setattr("...ProjectContext.project_root", classmethod(lambda cls: _raise()))`
+— a SECOND, independent patcher layered on top of the first,
+targeting the exact same attribute. `monkeypatch`'s own finalizer runs AFTER
+the `_project_root` fixture's `with patch(...)` block has already exited and
+restored the TRUE original classmethod, so `monkeypatch.setattr`'s teardown
+overwrites it AGAIN — with whatever it had captured as "current" at
+`setattr()` time, which is the `_project_root` fixture's own `MagicMock`.
+Result: `ProjectContext.project_root` is left PERMANENTLY pointing at that
+mock (`return_value=Path("/repo")`, no `_initialized` check at all) for the
+rest of the pytest PROCESS. Confirmed with a minimal repro outside this
+project (`untracked/scratch/repro_fixture_order/test_order.py`, not
+committed): a class with the same two-layer-patch shape leaves the SAME kind
+of leak, reproducibly.
+
+Every later test that calls `ProjectContext.project_root()` in that process
+then gets the fake `/repo` root, unconditionally — explaining all four victim
+files:
+
+- `test_absolute_path.py`: `_absolute_example()` calls
+  `ProjectContext.project_root()` directly; the leak makes it return `/repo`
+  instead of raising `RuntimeError`, so `"Example: /repo/test.py"` appears
+  where the test expects it omitted.
+- `test_model_fallback_detector.py` (6 tests): `_resolve_snapshot_dir()`
+  (`model_fallback_detector.py:558`) returns `ProjectContext.project_root() / configured` once "initialised", instead of falling back to the cwd its own
+  `handler` fixture `monkeypatch.chdir`s to `tmp_path` for; snapshots land
+  under `/repo/reports` (off the sandboxed `tmp_path`), so every
+  `(tmp_path / "reports").glob("*.md")` in these tests finds nothing.
+- `rule_explain/test_lookup.py::TestProjectHandlersAreDiscoverable:: test_project_handlers_included_when_requested`: project-handler discovery
+  resolves against the fake `/repo` instead of the real project root, so it
+  cannot find `.claude/project-handlers/`'s `daemon_restart_verifier`.
+- `test_dangerous_invocation_corpus_checker.py::TestRealTree:: test_the_real_corpus_matches_the_real_chain`: the REAL chain's
+  `ProjectContainmentHandler` resolves its containment boundary via the same
+  leaked mock, so `supply-pip-index-url` is newly (and wrongly, for the
+  corpus's purposes) denied via `enforce-project-containment` against a
+  boundary of `/repo` instead of the real repository root.
+
+Bisection evidence (`worktree-n466-guard-defects`, read-only, its own venv):
+`pytest -p no:xdist -q TestFailsClosedOnEvaluationError:: test_an_uninitialised_project_root_still_denies test_absolute_path.py::...test_handle_omits_the_example_rather_than_guessing_a_root`
+→ 1 failed, 1 passed (same failure as the whole-suite run). Each of the three
+leaking test methods reproduces it alone paired with the victim;
+`test_get_rules_includes_the_evaluation_error_rule` (same class, does not
+touch `project_root`) does not.
+
+**Status.** This agent's own worktree is based on `main`
+(`c92bfbc1`), which does not contain this defect — `test_project_containment.py`
+there has no `TestFailsClosedOnEvaluationError`/
+`TestChainLevelFailClosedBehaviour` classes at all, so there is nothing to
+edit or commit here. `worktree-n466-guard-defects` is a separate, git-isolated
+worktree this agent could read but not write or commit to. **The original
+leak (the two-layer-patch in `test_project_containment.py`) stays diagnosed
+but unfixed here — the fix is being applied on
+`worktree-n466-guard-defects`** (a different agent has been handed the recipe
+below; not yet landed there as of this writing). Items 2 and 3 of the widened
+scope below (the socket-listener race and `blocking_gate_guard`'s escalation)
+turned out to live on `main` itself, reachable from this worktree, and **are
+Remedied here** — see each item for the commit. Item 1 (docs-rewrite) is
+recorded as a procedure note only; no test-side leak was found to fix.
+
+**Fix recipe (for `worktree-n466-guard-defects`):** in the three offending
+tests, stop introducing a second patcher. Request the class's own
+`_project_root` fixture by name (it already yields its `mock`) and reconfigure
+THAT mock instead of calling `monkeypatch.setattr` on the same target —
+e.g. `mock.side_effect = _raise` in place of the `monkeypatch.setattr(..., classmethod(lambda cls: _raise()))` call, dropping the `monkeypatch` parameter
+from tests that no longer need it. As a structural tripwire against the same
+class of bug from ANY future test in this file, add a post-`yield` assertion
+to `_project_root` itself:
+
+```python
+    yield mock
+    assert isinstance(ProjectContext.__dict__["project_root"], classmethod), (
+        "ProjectContext.project_root leaked past this fixture's teardown "
+        "(Plan 00466 N39) -- a test double-patched it instead of "
+        "reconfiguring this fixture's own mock"
+    )
+```
+
+Pin the specific pair with a regression test appended to the file (runs after
+the fixed `TestFailsClosedOnEvaluationError`, so it exercises real,
+unpatched behaviour exactly like `test_absolute_path.py` does downstream):
+mirror that test's own assertion — `monkeypatch.setattr` `ProjectContext. _initialized`/`_instance` to a clean, uninitialised state, run
+`AbsolutePathHandler().handle(...)`, assert `"Example:"` is absent from the
+reason.
+
+**Candidate remedy (superseded by the diagnosis above):** ~~reproduce it on
+`main` with a plain sequential run, then bisect for the polluting test.~~
+Done; see above.
+
+**Widened scope (coordinator directive).** A separate agent's whole-suite
+`pytest tests/ -q` on `worktree-n466-goal-flip` (tip `95ac6de9`) found three
+more defects in the same suite-isolation class: 1 failed, 26782 passed, 35
+skipped, 3 xfailed, 13 errors. `worktree-n466-goal-flip` is, like
+`worktree-n466-guard-defects`, a separate git-isolated worktree: this agent
+verified directly that even `git worktree add` of a brand-new path from its
+own worktree is refused ("a worktree-isolated agent's git operations must
+target its own worktree"), so none of the three fixes below could be
+committed from here either. All three are diagnosed to a concrete fix.
+
+**Follow-up (coordinator directive): items 2 and 3 are NOT branch-only — the
+affected files (`tests/unit/daemon/test_event_socket_listeners.py`,
+`tests/acceptance/blocking_gate_guard.py`) are on `main`, hence reachable
+from this agent's own `main`-based worktree. Both are Remedied HERE** (see
+each item for the commit and tests added); the fix does not need to land on
+`worktree-n466-goal-flip` separately — merging `main` forward carries it.
+Item 1 remains diagnosis-only: the coordinator accepted the external-daemon-
+restart evidence and asked for a procedure note plus, if cheap, a sharper
+teardown-guard message — also done here, see item 1.
+
+1. **Docs-rewrite-mid-run, evidence points to an EXTERNAL daemon restart, not
+   a test.** `tests/conftest.py`'s `no_test_writes_tracked_generated_docs`
+   fixture (autouse, per-test baseline+diff) caught `CLAUDE.md` mutated during
+   the run, attributed to whichever test's window the write fell into (3
+   errors: `test_skill_scripts_venv_resolution.py`,
+   `test_skipif_reasons_match_their_conditions.py` x2 — the fixture already
+   names these as VICTIMS, not culprits, and its own docstring anticipates
+   exactly this). Timestamp correlation: `CLAUDE.md`'s mtime is
+   `2026-09-25 01:48:53`, to the second the same moment a REAL
+   `claude_code_hooks_daemon.daemon.cli --project-root .../worktree-n466-goal-flip restart` process (pid 612977, still running)
+   started — squarely inside the run's `01:37`-`01:58` window. `CLAUDE.md`'s
+   own header states it is regenerated on daemon restart. This reads as a
+   live, concurrent session restarting that worktree's own daemon while the
+   21-minute suite happened to be running — an external edit landing inside
+   an unrelated test's window, not a test bug. A `grep` for
+   `ClaudeMdInjector`/`DaemonController(` still names ~19 candidate test
+   files that construct a real controller, so an actual test-side leak is not
+   fully ruled out, but the second-precision timestamp match is strong
+   evidence against it. **Recipe if further evidence implicates a test
+   instead:** point its `workspace_root` at `tmp_path` (as the fixture's own
+   docstring instructs) rather than the real repo.
+
+   **Accepted as a procedure note (coordinator directive): do not restart
+   this project's own daemon while a test run is in progress.** A restart
+   re-runs `ClaudeMdInjector` against the real repository exactly like a
+   misconfigured test would, and lands inside whichever test's window the
+   restart happens to overlap — there is nothing test-side to fix for this
+   part.
+
+   **Guard sharpened (cheap, done here on `main`):**
+   `no_test_writes_tracked_generated_docs` now also stats this project's own
+   daemon pid file (`get_pid_path(_REPO_ROOT)`) at fixture setup and
+   teardown. When a mutation is caught AND the pid file's mtime changed
+   across that same window, the assertion names the pid file and its
+   before/after mtimes directly ("an external daemon restart/start/stop
+   happened WHILE THIS TEST RAN") instead of only the generic "IF NO TEST
+   TOUCHES THESE FILES, suspect an EXTERNAL edit" text — precisely the signal
+   that would have named pid 612977's restart above without needing the
+   manual timestamp correlation. The extracted helper,
+   `_daemon_pid_file_mtime`, has 3 regression tests in
+   `tests/unit/test_conftest_docs_guard_culprit.py` (does-not-exist ->
+   `None`, exists -> its mtime, restart-shaped unlink+recreate -> mtimes
+   differ). This does not fully close the gap (an external edit that does
+   NOT touch the pid file, e.g. a hand edit, still falls back to the generic
+   text — the fixture still cannot distinguish that from a test's own write),
+   but it now names the one external cause actually observed here.
+
+2. **`test_bind_time_rmtree_failure_is_logged_not_swallowed[asyncio]` is a
+   plain fixed-sleep race.** `tests/unit/daemon/test_event_socket_listeners.py`:
+   `server_task = asyncio.create_task(daemon.start()); await asyncio.sleep(0.1); assert len(daemon._event_servers) > 0`.
+   `HooksDaemon.start()` (`src/claude_code_hooks_daemon/daemon/server.py:687`)
+   awaits `_acquire_socket_and_bind` then `_bind_event_sockets` (which sets
+   `self._event_servers`) before reaching `shutdown_event.wait()` — under host
+   load those two awaits can outlast a fixed 100 ms, and the test observes
+   `_event_servers` still empty. **The same fixed-`asyncio.sleep(0.1)` +
+   assert shape appears 13 times in this ONE file** (lines 104, 119, 137, 167,
+   195, 246, 291, 315, 330, 362, 396, 445, 470) — a pre-existing, repo-wide
+   copy-paste pattern this defect merely surfaced once under load; every one
+   of the 13 is equally racy. **Fix recipe:** replace the fixed sleep with a
+   bounded poll shared by all 13 call sites, e.g.
+   `for _ in range(100): \n    if daemon._event_servers or server_task.done(): break \n    await asyncio.sleep(0.01)`
+   (1 s bound, typically resolves in under 10 ms), or — more robust — give
+   `HooksDaemon` its own `self.started_event = asyncio.Event()` set right
+   after `_bind_event_sockets()` (there is currently no such readiness
+   signal, only `shutdown_event`) and `await asyncio.wait_for(daemon.started_event.wait(), timeout=1.0)` in the tests.
+
+   **Remedied here, on `main`.** Added `HooksDaemon.started_event: asyncio.Event()` (`src/claude_code_hooks_daemon/daemon/server.py`,
+   `__slots__` + `__init__`), `.set()`'d in `start()` immediately after both
+   `_acquire_socket_and_bind` and `_bind_event_sockets` complete — TDD'd via
+   `TestStartedEvent` in `test_event_socket_listeners.py` (RED: attribute
+   missing; GREEN: 3 tests, added before implementing, 2 of which exercise
+   the new readiness signal directly). All 13 original
+   `asyncio.sleep(0.1)`-then-assert call sites in that file now await
+   `daemon.started_event.wait()` bounded by
+   `Timeout.SOCKET_CONNECT` (5 s; `magic_values` QA forbids the bare literal).
+   **Swept the rest of `tests/` for the identical daemon-startup-race shape**
+   (not the generic `asyncio.sleep` pattern, which has legitimate unrelated
+   uses elsewhere) and found the same
+   `create_task(daemon.start()); await asyncio.sleep(0.1)` idiom in 4 more
+   files, all converted the same way:
+   `tests/daemon/test_server_response_schema.py` (2),
+   `tests/integration/test_relay_event_socket_real_payloads.py` (1),
+   `tests/unit/daemon/test_event_socket_hook_event_name_enrichment.py` (2),
+   `tests/daemon/test_server.py` (34), `tests/daemon/test_log_level_override.py`
+   (11). `tests/unit/daemon/test_server_liveness_reuse.py` and
+   `tests/integration/test_parallel_start_reuse.py` were inspected and left
+   alone — both already use a bounded poll or an unrelated background-thread
+   loop, not the broken fixed-sleep-then-assert shape. All 132 tests across
+   the 6 converted files pass; `magic_values` QA: 0 violations.
+
+3. **10 BLOCKING-release-gate acceptance tests ERROR on a plain run by
+   design, not by accident — but the design over-fires.**
+   `tests/acceptance/blocking_gate_guard.py` is a session-wide
+   `pytest_runtest_makereport` hook: it reads `CLAUDE/development/RELEASING.md`
+   Step 12.0's own pytest command line (the SOLE declaration of the blocking
+   set — `test_diagnostic_scripts.py`, `test_install_sh_end_to_end.py`,
+   `test_tool_use_error_recovery.py`, `test_stop_hook_hard_block.py`,
+   `test_skill_install_python_discovery.py`, `test_playbook_harness.py`) and
+   turns ANY skip of those files into a hard failure, unconditionally —
+   Plan 00250's fix for CI silently reporting a never-run gate as green.
+   `.github/workflows/qa.yml` starts a real daemon BEFORE running the whole
+   suite, so in CI these tests never skip (they run and pass genuinely) and
+   the hook is inert there; RELEASING.md's own Step 12.0 invocation also
+   always runs with the daemon already started, so the hook firing there is
+   correct — that IS an abort condition. The break is a THIRD case neither
+   of those anticipated: any OTHER whole-suite run with no daemon running
+   (exactly the ad hoc `pytest tests/ -q` that produced this run) now hard
+   ERRORs instead of getting the ordinary, harmless skip every other
+   daemon-dependent test in the suite gets. **Fix recipe:** gate the
+   skip-to-failure escalation on an explicit signal that THIS invocation
+   means to be the release gate, not on file identity alone — e.g. an
+   environment variable (`HOOKS_DAEMON_ACCEPTANCE_GATE=1`) that RELEASING.md
+   Step 12.0's own command block sets before the `pytest` call, checked
+   alongside `skip_is_an_abort_condition(item.path)` in
+   `pytest_runtest_makereport`. CI needs no change (the tests never skip
+   there, daemon or no signal), and RELEASING.md's own invocation still fails
+   closed once it sets the variable — a marker-based `addopts` deselection
+   was considered and rejected: it would also deselect these tests from CI's
+   OWN full-suite run, which the coordinator's brief explicitly said not to
+   weaken.
+
+   **Remedied here, on `main`.** `blocking_gate_guard.py` gained
+   `_RELEASE_GATE_ENV_VAR = "HOOKS_DAEMON_RELEASE_GATE"`,
+   `release_gate_invocation()` (exact `"1"` match only — a stray truthy
+   string set for an unrelated purpose must not silently opt a run in) and
+   `should_escalate_skip(test_file)` (`declared_blocking_gate_files()` match
+   AND `release_gate_invocation()`, both required — the signal alone is not
+   enough, or every skip anywhere would fail). `pytest_runtest_makereport`
+   now calls `should_escalate_skip` in place of the old
+   `skip_is_an_abort_condition`. `CLAUDE/development/RELEASING.md` Step 12.0's
+   command block now sets `HOOKS_DAEMON_RELEASE_GATE=1` before the `pytest`
+   call; `.github/workflows/qa.yml`'s daemon-start step now exports the same
+   variable via `GITHUB_ENV` so CI's protective behaviour (a daemon that
+   silently failed to start there still fails the job) is preserved, not
+   weakened. A third caller was found by checking every acceptance-reaching
+   entry point named in the coordinator's directive:
+   `scripts/qa/run_tests.sh` (the `tests` tool in `llm_qa.py`, `live_daemon=True`)
+   calls `ensure_live_daemon` first, but a daemon-start failure there does
+   not abort the script — it only prints a message and `run_tests.sh` still
+   runs. That script now also exports `HOOKS_DAEMON_RELEASE_GATE=1` before
+   invoking pytest, for the identical reason. `run_smoke_test.sh` was checked
+   and does not invoke pytest against `tests/acceptance/` at all (a separate
+   live-daemon-probe mechanism), so it needed no change. Verified end-to-end
+   against a real acceptance file
+   (`test_playbook_harness.py`, no daemon running): plain run — 5 skipped,
+   exit 0; `HOOKS_DAEMON_RELEASE_GATE=1` — 5 errors naming the file as a
+   BLOCKING release gate, exit 1. 6 new unit tests in
+   `tests/unit/scripts/test_blocking_gate_guard.py` cover both functions and
+   both modes (absent/exact-match/wrong-value for the env var; declared vs
+   undeclared file under each).
 
 ### N38 — The PreToolUse chain takes quadratic time on a command of quoted heredoc openers
 

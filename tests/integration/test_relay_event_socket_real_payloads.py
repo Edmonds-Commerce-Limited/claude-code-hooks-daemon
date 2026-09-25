@@ -55,7 +55,7 @@ from claude_code_hooks_daemon.config.models import (
     LogLevel,
     TransportConfig,
 )
-from claude_code_hooks_daemon.constants import HandlerID, Priority
+from claude_code_hooks_daemon.constants import HandlerID, Priority, Timeout
 from claude_code_hooks_daemon.constants.events import EventID, EventIDMeta, wired_event_metas
 from claude_code_hooks_daemon.core.front_controller import FrontController
 from claude_code_hooks_daemon.core.handler import Handler
@@ -69,6 +69,7 @@ from claude_code_hooks_daemon.daemon.synthetic_traffic import (
     ProbeThread,
 )
 from claude_code_hooks_daemon.install.forwarder_generator import generate_forwarder_content
+from tests.daemon._start_wait import wait_for_daemon_started
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _HOOKS_DIR = _REPO_ROOT / ".claude" / "hooks"
@@ -240,7 +241,7 @@ async def running_daemon(
     config = _make_strict_config(isolated_untracked_dir)
     daemon = HooksDaemon(config=config, controller=front_controller)
     server_task = asyncio.create_task(daemon.start())
-    await asyncio.sleep(0.1)
+    await wait_for_daemon_started(daemon, server_task, timeout=Timeout.SOCKET_CONNECT)
     yield daemon, isolated_untracked_dir
     await daemon.shutdown()
     await server_task
