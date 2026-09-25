@@ -69,6 +69,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N36 | `destructive_git` denies a `grep` whose search pattern is the text of a force branch delete               | Plan 00463 agent   | ⬜ Open               |
 | N37 | `resolve_venv.sh` caches an override's interpreter for later callers that set no override                 | Plan 00376 agent   | 🔄 In progress        |
 | N38 | The PreToolUse chain takes quadratic time on a command of quoted heredoc openers                          | 463 review 6       | 🔄 In progress        |
+| N46 | `budget_exhaustion_detector` fires on a tool result that merely contains budget wording                   | Guard review 6     | ⬜ Open               |
 | N45 | A NUL byte in a configured word-list path makes the never-raising secret-term lookup raise                | Plan 00421 agent   | 🔄 In progress        |
 | N44 | A PreToolUse handler raises `ValueError: no path specified` on an Edit, and the Edit goes through         | Plan 00464 agent   | 🔄 In progress        |
 | N43 | Log and payload redaction is inert while the daemon runs degraded on an unloadable config                 | Plan 00421 agent   | 🔄 In progress        |

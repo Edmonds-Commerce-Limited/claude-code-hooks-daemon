@@ -9,6 +9,19 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N46 — `budget_exhaustion_detector` fires on a tool result that merely contains budget wording
+
+**Found by the guard-defects review-6 agent.** Reading a diff whose source
+code contained the string "exceeded its byte budget" raised the "budget
+exhausted" alert. That text belonged to the file under review; the agent's
+own budget had not run out. So the detector matches words anywhere in tool
+output. A false alarm like this teaches agents to ignore the real one.
+
+**Candidate remedy:** match only the harness's own budget-exhaustion signal,
+meaning its exact shape and source. Never match free text inside a tool
+result's content, such as a file or a diff. Add a RED test that reads a file
+containing the phrase and expects no alert, and keep the real signal firing.
+
 ### N45 — A NUL byte in a configured word-list path makes the never-raising secret-term lookup raise
 
 **Found by the Plan 00421 agent** while fixing N43. A NUL byte in a HEALTHY
