@@ -1,6 +1,6 @@
 # Plan 00449: unlocked eviction race survives in other handlers
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-21
 **Owner**: dev
 **Priority**: Medium
@@ -140,9 +140,10 @@ can reverse this with one message.
   except any recorded as exempt with a stated reason. None is exempt; the
   semgrep gate reports 0.
 - [x] A test pins FIFO eviction order at each migrated site.
-- [ ] `llm_qa.py all` passes — read the `QA: N/35 PASSED` line and the
+- [x] `llm_qa.py all` passes — read the `QA: N/35 PASSED` line and the
   per-gate markers, not the wrapper exit code, which has returned 0 over
-  failing gates in this project before.
+  failing gates in this project before. CI green on main's HEAD `34c588dc`
+  (run 36066507383), which includes this plan's delivered code.
 - [x] Release-bound consequence recorded in the holding area, or an explicit
   statement that there is none:
   `CLAUDE/UPGRADES/UNRELEASED/release-notes/23-concurrent-requests-no-longer-crash-handler-bookkeeping.md`.
