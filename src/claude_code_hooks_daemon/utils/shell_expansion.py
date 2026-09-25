@@ -861,75 +861,11 @@ def _resolve_collected_producer_text(head: str | None, words: list[str]) -> str:
     return " ".join(content)
 
 
-#: A heredoc introducer whose delimiter is QUOTED or backslash-escaped
-#: (`<<'EOF'`, `<<"EOF"`, `<<\EOF`, `<<-'EOF'`) -- review 7 follow-up
-#: (team-lead): this spelling means bash treats the BODY as literal data,
-#: expanding nothing in it (no `$(...)`, no `$VAR`, no backtick) -- exactly
-#: the inverse of an UNQUOTED delimiter (`<<EOF`), which still undergoes
-#: expansion and so stays fully scanned by :func:`_iter_normalised_shell_
-#: words` the ordinary way.
-_HEREDOC_QUOTED_INTRODUCER_RE: Final[re.Pattern[str]] = re.compile(
-    r"<<(-)?[ \t]*(?:'([A-Za-z_][A-Za-z0-9_]*)'"
-    r"|\"([A-Za-z_][A-Za-z0-9_]*)\""
-    r"|\\([A-Za-z_][A-Za-z0-9_]*))"
-)
-
-
-def _heredoc_body_skip_ranges(command: str) -> list[tuple[int, int]]:
-    """``(start, end)`` byte ranges of every QUOTED-delimiter heredoc BODY
-    in ``command`` -- the body only, not its introducer or closing-
-    delimiter line.
-
-    A quoted-delimiter heredoc body is inert data handed to a CONSUMER
-    (``cat > f <<'EOF'``, ``tee``, ``git commit -F- <<'EOF'``) -- nothing
-    in it can be a shell TRIGGER, since the surrounding shell expands
-    NOTHING in it either. It can legitimately be large (long prose, a
-    generated file), so counting its every word against the volume cap
-    :func:`_iter_normalised_shell_words` enforces would deny an everyday
-    command for no security benefit.
-
-    The name says "skip", but review 7's own follow-up narrowed what that
-    means: a word inside one of these ranges is EXEMPT from the cap
-    (never counted, never the reason the cap raises) but is still decoded
-    and yielded exactly like any other word -- a first version that
-    skipped decoding entirely regressed three gd6 probe rows
-    (``cat <<'EOF' | bash``, ``bash <<'EOF'``, ``sh <<-'X'``) whose
-    mention only the ORDINARY quote-splice decode revealed, needing no
-    recursion at all. A heredoc body large enough to matter for TIME is
-    still bounded by the whole-scan deadline ``secret_file_guard``
-    supplies.
-
-    ``<<-`` (the tab-stripping form) is honoured: the closing line may be
-    indented with tabs, stripped before comparing to the delimiter.
-    """
-    ranges: list[tuple[int, int]] = []
-    n = len(command)
-    for match in _HEREDOC_QUOTED_INTRODUCER_RE.finditer(command):
-        strip_tabs = match.group(1) is not None
-        delimiter = match.group(2) or match.group(3) or match.group(4)
-        newline = command.find("\n", match.end())
-        if newline == -1:
-            continue  # no body at all (introducer is the last line)
-        body_start = newline + 1
-        cursor = body_start
-        closing_start = n
-        while cursor <= n:
-            line_end = command.find("\n", cursor)
-            line_stop = line_end if line_end != -1 else n
-            line = command[cursor:line_stop]
-            candidate = line.lstrip("\t") if strip_tabs else line
-            if candidate == delimiter:
-                closing_start = cursor
-                break
-            if line_end == -1:
-                break
-            cursor = line_end + 1
-        ranges.append((body_start, closing_start))
-    return ranges
-
-
 def iter_normalised_shell_words(
-    command: str, *, max_words: int = DEFAULT_MAX_NORMALISED_WORDS
+    command: str,
+    *,
+    max_words: int = DEFAULT_MAX_NORMALISED_WORDS,
+    deadline: float | None = None,
 ) -> Iterator[str]:
     """Every shell WORD in ``command``, quote/escape-decoded, with any
     statically-unresolvable substitution collapsed to a single ``*``.
@@ -943,8 +879,33 @@ def iter_normalised_shell_words(
     Fails toward denying more, never toward silently dropping a
     substitution's contribution to a word.
 
-    Bounded to the first ``max_words`` words, the same direction
-    :func:`iter_brace_words` bounds its own volume.
+    Review 7 follow-up (team-lead): flat, non-recursive word decoding is
+    LINEAR in ``command``'s length -- no word here multiplies into more
+    work the way a brace group or a nested re-parse can, so a hard
+    per-command word-COUNT cap was the wrong instrument for it. Denying
+    "every command/file over ~2000 words" this way cost real everyday
+    input -- a long plan document, a long commit message, an ordinary
+    source file -- for no matching security benefit: nothing about a
+    flat word stream explodes.
+
+    ``max_words`` therefore no longer bounds this stream at all (kept as a
+    parameter only for signature/API stability with :func:`iter_brace_words`,
+    whose OWN cap -- brace expansion genuinely IS combinatorial -- is
+    unaffected). The real backstop for VOLUME is ``deadline`` (a
+    ``time.monotonic()`` cutoff, checked periodically as words are
+    produced): past it this raises ``TimeoutError``, the SAME fail-closed
+    signal :func:`secret_file_matching.iter_protected_mentions` already
+    treats as "cannot rule out a protected path" for its own whole-scan
+    deadline -- one doctrine, not two competing ones. A caller that omits
+    ``deadline`` gets an unbounded-in-principle generator, same as before
+    this fix; every caller inside this project supplies one.
+
+    Genuine combinatorial growth stays capped exactly as before: brace
+    expansion (:func:`iter_brace_words`/:func:`expand_braces`, their own
+    spelling/depth caps) and nested `-c`/`eval`/process-substitution
+    re-parsing (``_MAX_NESTED_SHELL_DEPTH``/``_MAX_NESTED_SHELL_BYTES``
+    below) are unchanged -- those are the loci where a small input really
+    can expand into disproportionate work, which a flat word scan is not.
 
     n466-n24 review 5 minor-1 / review 6: several shapes feed a NESTED
     command through as literal text, whose own quotes/escapes only resolve
@@ -990,7 +951,7 @@ def iter_normalised_shell_words(
     """
     remaining_bytes = [_MAX_NESTED_SHELL_BYTES]
     yield from _iter_normalised_shell_words(
-        command, max_words=max_words, depth=0, remaining_bytes=remaining_bytes
+        command, max_words=max_words, depth=0, remaining_bytes=remaining_bytes, deadline=deadline
     )
 
 
@@ -1000,22 +961,35 @@ def _recurse_into_nested_command(
     max_words: int,
     depth: int,
     remaining_bytes: list[int],
+    deadline: float | None,
 ) -> Iterator[str]:
     """Shared recursion entry point for every nested-command trigger in
     :func:`_iter_normalised_shell_words` -- one place enforcing both
     bounds identically, and failing CLOSED (raising) past either: "cannot
     rule out a protected path" must never be conflated with "no protected
     path" (this module's existing doctrine for
-    :func:`expand_braces`/:func:`bounded_recursive_glob`).
+    :func:`expand_braces`/:func:`bounded_recursive_glob`). ``deadline`` is
+    forwarded, not re-armed, so a chain of nested re-parses shares the
+    SAME clock as the flat scan around it (review 7 follow-up).
     """
     if depth >= _MAX_NESTED_SHELL_DEPTH:
         raise TooManyToEnumerateError("nested shell re-parsing exceeded its depth bound")
     if remaining_bytes[0] <= 0:
         raise TooManyToEnumerateError("nested shell re-parsing exceeded its byte budget")
+    if deadline is not None and time.monotonic() > deadline:
+        raise TimeoutError("nested shell re-parsing exceeded its deadline")
     remaining_bytes[0] -= min(len(text), remaining_bytes[0])
     yield from _iter_normalised_shell_words(
-        text, max_words=max_words, depth=depth + 1, remaining_bytes=remaining_bytes
+        text, max_words=max_words, depth=depth + 1, remaining_bytes=remaining_bytes, deadline=deadline
     )
+
+
+#: How many words pass between ``deadline`` checks -- cheap enough
+#: (``time.monotonic()`` is a handful of nanoseconds) to check every word,
+#: but batched anyway so the per-word cost stays dominated by the actual
+#: decode work, not clock reads, on the common case where ``deadline`` is
+#: still comfortably far off.
+_DEADLINE_CHECK_INTERVAL: Final[int] = 200
 
 
 def _iter_normalised_shell_words(
@@ -1024,6 +998,7 @@ def _iter_normalised_shell_words(
     max_words: int,
     depth: int,
     remaining_bytes: list[int],
+    deadline: float | None,
 ) -> Iterator[str]:
     """One linear word-by-word state machine (Plan 00466 review 6): every
     trigger below shares the same mutable per-call state (which word is
@@ -1034,13 +1009,6 @@ def _iter_normalised_shell_words(
     count = 0
     i = 0
     n = len(command)
-    # Review 7 follow-up: quoted-delimiter heredoc bodies are inert data,
-    # not command text -- skipped entirely from word decoding/counting
-    # (see `_heredoc_body_skip_ranges`'s docstring). Sorted by
-    # construction (`finditer` runs left to right), so a single advancing
-    # pointer suffices.
-    heredoc_skip_ranges = _heredoc_body_skip_ranges(command)
-    heredoc_skip_index = 0
 
     # `<interpreter> [options...] -c <code>` option walk (also entered for
     # the `su`/`script`/`flock` wrapper shapes below).
@@ -1104,48 +1072,26 @@ def _iter_normalised_shell_words(
     last_operators = ""
 
     while i < n:
-        while (
-            heredoc_skip_index < len(heredoc_skip_ranges)
-            and i >= heredoc_skip_ranges[heredoc_skip_index][1]
-        ):
-            heredoc_skip_index += 1
-        in_heredoc_body = (
-            heredoc_skip_index < len(heredoc_skip_ranges)
-            and heredoc_skip_ranges[heredoc_skip_index][0] <= i
-        )
         char = command[i]
         if char in _WORD_SEPARATOR_CHARS:
             if char not in " \t\n":
                 last_operators += char
             i += 1
             continue
-        if count >= max_words and not in_heredoc_body:
-            # Review 7 MAJOR-1: fail CLOSED past the word cap, the same
-            # direction `iter_brace_words` raises -- a caller that saw a
-            # quiet `return` here and treated exhaustion as "no more words"
-            # would allow a mention placed only past the cap, exactly the
-            # fail-open the module's own docstring says every bound here
-            # must not reintroduce.
-            #
-            # Review 7 follow-up: a quoted-delimiter heredoc-body word is
-            # exempt from the CAP (never counted, never the reason this
-            # raises) but is still DECODED AND YIELDED below like any
-            # other word -- unlike the module's other bounds, this cap
-            # exists to bound RECURSIVE/combinatorial cost (nested-command
-            # re-parsing, brace expansion), and flat heredoc prose has
-            # none: an earlier version of this fix skipped decoding the
-            # body entirely, which silently lost the ordinary quote-splice
-            # decode a heredoc word gets like any other -- regressing
-            # three gd6 probe rows that never needed RECURSION to begin
-            # with, only decoding (`cat <<'EOF' | bash`, `bash <<'EOF'`,
-            # `sh <<-'X'`). A heredoc body large enough to matter for TIME
-            # is still bounded by the whole-scan deadline
-            # `secret_file_guard` supplies (`iter_protected_mentions`'s
-            # own backstop), the same layered defence the module's
-            # "ordinary volume content" tests already rely on.
-            raise TooManyToEnumerateError(
-                f"more than {max_words} normalised shell words in a single command"
-            )
+        # Review 7 follow-up (team-lead, superseding review 7 MAJOR-1's
+        # word-COUNT cap): flat per-word decoding is linear cost, so it is
+        # bounded by TIME, not by how many words happen to be in the
+        # command -- checked every `_DEADLINE_CHECK_INTERVAL` words so an
+        # ordinary long command (a plan document, a long commit message, a
+        # large source file) never trips a volume wall a real shell never
+        # would either. A heredoc body's words are still decoded and
+        # yielded exactly like any other word's, unaffected by this check.
+        if (
+            deadline is not None
+            and count % _DEADLINE_CHECK_INTERVAL == 0
+            and time.monotonic() > deadline
+        ):
+            raise TimeoutError("normalised shell word scan exceeded its deadline")
 
         this_word_operators = last_operators
         last_operators = ""
@@ -1153,13 +1099,7 @@ def _iter_normalised_shell_words(
         decoded, end = _decode_span(
             command, i, _WORD_SEPARATOR_CHARS, substitutions=nested_substitutions
         )
-        if not in_heredoc_body:
-            # A heredoc-body word never counts against the cap (see the
-            # exemption above) -- not counting it here too is what makes
-            # that exemption structural rather than a one-shot escape: an
-            # arbitrarily long heredoc body never eats into the budget
-            # ordinary words outside it still need.
-            count += 1
+        count += 1
         yield decoded
         # Review 7 MAJOR-2: every `$(...)`/backtick body this word's decode
         # just collapsed to a bare `*` is a genuine nested COMMAND -- judged
@@ -1167,7 +1107,11 @@ def _iter_normalised_shell_words(
         # content already is, not left unexamined behind the `*`.
         for nested_body in nested_substitutions:
             yield from _recurse_into_nested_command(
-                nested_body, max_words=max_words, depth=depth, remaining_bytes=remaining_bytes
+                nested_body,
+                max_words=max_words,
+                depth=depth,
+                remaining_bytes=remaining_bytes,
+                deadline=deadline,
             )
         # Peek PAST any pure whitespace (not other operators) to find the
         # real next boundary -- a plain space right after this word does
@@ -1250,6 +1194,7 @@ def _iter_normalised_shell_words(
                     max_words=max_words,
                     depth=depth,
                     remaining_bytes=remaining_bytes,
+                    deadline=deadline,
                 )
                 # This word is ALSO an interpreter in its own right -- let
                 # its own flags/`-c` be walked normally, e.g. `echo … |
@@ -1301,7 +1246,7 @@ def _iter_normalised_shell_words(
                 scanning_tolerant = False
             else:
                 yield from _recurse_into_nested_command(
-                    decoded, max_words=max_words, depth=depth, remaining_bytes=remaining_bytes
+                    decoded, max_words=max_words, depth=depth, remaining_bytes=remaining_bytes, deadline=deadline
                 )
             previous_word = decoded
             continue
@@ -1328,7 +1273,7 @@ def _iter_normalised_shell_words(
             scanning_interpreter_options = False
             scanning_tolerant = False
             yield from _recurse_into_nested_command(
-                decoded, max_words=max_words, depth=depth, remaining_bytes=remaining_bytes
+                decoded, max_words=max_words, depth=depth, remaining_bytes=remaining_bytes, deadline=deadline
             )
             previous_word = decoded
             continue
@@ -1354,7 +1299,7 @@ def _iter_normalised_shell_words(
                 direct_wrapper_value_is_code = False
                 scanning_direct_wrapper = None
                 yield from _recurse_into_nested_command(
-                    decoded, max_words=max_words, depth=depth, remaining_bytes=remaining_bytes
+                    decoded, max_words=max_words, depth=depth, remaining_bytes=remaining_bytes, deadline=deadline
                 )
             previous_word = decoded
             continue
@@ -1415,6 +1360,7 @@ def _iter_normalised_shell_words(
                     max_words=max_words,
                     depth=depth,
                     remaining_bytes=remaining_bytes,
+                    deadline=deadline,
                 )
                 previous_word = decoded
                 continue
@@ -1445,7 +1391,7 @@ def _iter_normalised_shell_words(
             scanning_interpreter_options = False
             if this_word_operators.endswith(_HERE_STRING_OPERATOR):
                 yield from _recurse_into_nested_command(
-                    decoded, max_words=max_words, depth=depth, remaining_bytes=remaining_bytes
+                    decoded, max_words=max_words, depth=depth, remaining_bytes=remaining_bytes, deadline=deadline
                 )
                 previous_word = decoded
                 continue
@@ -1461,7 +1407,7 @@ def _iter_normalised_shell_words(
             if this_word_operators.endswith(_HERE_STRING_OPERATOR):
                 awaiting_bare_interpreter_herestring = False
                 yield from _recurse_into_nested_command(
-                    decoded, max_words=max_words, depth=depth, remaining_bytes=remaining_bytes
+                    decoded, max_words=max_words, depth=depth, remaining_bytes=remaining_bytes, deadline=deadline
                 )
                 previous_word = decoded
                 continue
@@ -1505,7 +1451,7 @@ def _iter_normalised_shell_words(
                     fed_content = pending_output_procsub_content
                     pending_output_procsub_content = None
                     yield from _recurse_into_nested_command(
-                        joined, max_words=max_words, depth=depth, remaining_bytes=remaining_bytes
+                        joined, max_words=max_words, depth=depth, remaining_bytes=remaining_bytes, deadline=deadline
                     )
                     if fed_content:
                         yield from _recurse_into_nested_command(
@@ -1513,10 +1459,11 @@ def _iter_normalised_shell_words(
                             max_words=max_words,
                             depth=depth,
                             remaining_bytes=remaining_bytes,
+                            deadline=deadline,
                         )
                 else:
                     yield from _recurse_into_nested_command(
-                        joined, max_words=max_words, depth=depth, remaining_bytes=remaining_bytes
+                        joined, max_words=max_words, depth=depth, remaining_bytes=remaining_bytes, deadline=deadline
                     )
             previous_word = decoded
             continue
@@ -1537,7 +1484,7 @@ def _iter_normalised_shell_words(
             awaiting_source_stdin_herestring = False
             if this_word_operators.endswith(_HERE_STRING_OPERATOR):
                 yield from _recurse_into_nested_command(
-                    decoded, max_words=max_words, depth=depth, remaining_bytes=remaining_bytes
+                    decoded, max_words=max_words, depth=depth, remaining_bytes=remaining_bytes, deadline=deadline
                 )
                 previous_word = decoded
                 continue
@@ -1624,7 +1571,7 @@ def _iter_normalised_shell_words(
         joined = _resolve_collected_producer_text(collecting_head, collecting_words)
         if collecting_purpose == "output_procsub":
             yield from _recurse_into_nested_command(
-                joined, max_words=max_words, depth=depth, remaining_bytes=remaining_bytes
+                joined, max_words=max_words, depth=depth, remaining_bytes=remaining_bytes, deadline=deadline
             )
             if pending_output_procsub_content:
                 yield from _recurse_into_nested_command(
@@ -1632,13 +1579,14 @@ def _iter_normalised_shell_words(
                     max_words=max_words,
                     depth=depth,
                     remaining_bytes=remaining_bytes,
+                    deadline=deadline,
                 )
         elif collecting_purpose != "pipe_echo":
             # A `pipe_echo` collection ending at end-of-string was never
             # piped/redirected to anything -- its words were already
             # scanned individually, matching the mid-command behaviour.
             yield from _recurse_into_nested_command(
-                joined, max_words=max_words, depth=depth, remaining_bytes=remaining_bytes
+                joined, max_words=max_words, depth=depth, remaining_bytes=remaining_bytes, deadline=deadline
             )
 
 

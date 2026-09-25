@@ -658,20 +658,24 @@ class TestIterNormalisedShellWordsProducerEscapes:
 
 
 class TestIterNormalisedShellWordsCapsFailClosed:
-    """Plan 00466 guard-defects review 7 MAJOR-1: past EITHER volume cap,
-    the generator must RAISE rather than silently stop -- a caller that
-    saw quiet exhaustion and treated it as "no more words" would allow a
-    mention placed only past the cap."""
+    """Plan 00466 guard-defects review 7 MAJOR-1 established the doctrine --
+    fail CLOSED past a genuine bound, never silently stop. The review 7
+    follow-up (team-lead) found this had been applied to the WRONG bound
+    for FLAT (non-recursive) word decoding: that is LINEAR cost, so a
+    word-COUNT cap denied ordinary large content (a long plan document, a
+    long commit message, an ordinary source file) for no matching risk --
+    nothing about a flat scan is combinatorial. ``max_words`` no longer
+    bounds :func:`iter_normalised_shell_words` (kept as a parameter only
+    for signature stability); see ``TestIterNormalisedShellWordsDeadline``
+    below for its real volume backstop. Brace expansion genuinely IS
+    combinatorial and is UNCHANGED."""
 
-    def test_the_normalised_word_cap_raises_rather_than_stopping(self) -> None:
-        command = " ".join(["w"] * 2001)
-        with pytest.raises(TooManyToEnumerateError):
-            list(iter_normalised_shell_words(command, max_words=2000))
-
-    def test_under_the_normalised_word_cap_does_not_raise(self) -> None:
-        command = " ".join(["w"] * 1999)
+    def test_a_normalised_word_count_far_past_the_old_cap_does_not_raise(self) -> None:
+        """5000 ordinary words -- well past the old 2000-word cap -- are
+        all decoded and yielded, not denied."""
+        command = " ".join(["w"] * 5000)
         words = list(iter_normalised_shell_words(command, max_words=2000))
-        assert len(words) == 1999
+        assert len(words) == 5000
 
     def test_the_brace_word_cap_raises_rather_than_stopping(self) -> None:
         text = " ".join(["{a,b}"] * 501)
@@ -684,78 +688,125 @@ class TestIterNormalisedShellWordsCapsFailClosed:
         assert len(words) == 499
 
 
-class TestIterNormalisedShellWordsQuotedHeredocBodyIsExemptFromTheCap:
-    """Team-lead's review 7 follow-up: a quoted-delimiter heredoc body is
-    inert DATA handed to a consumer (`cat`, `tee`, `git commit -F-`) --
-    real bash expands NOTHING in it. It can legitimately be large (long
-    prose), so counting its every word against the volume cap would deny
-    an everyday command for no security benefit -- but its words are
-    still DECODED AND YIELDED exactly like any other word (a first
-    version of this fix skipped decoding entirely, which regressed three
-    existing probe rows whose mention only the ordinary quote-splice
-    decode reveals, no recursion needed: ``cat <<'EOF' | bash``,
-    ``bash <<'EOF'``, ``sh <<-'X'``). Only the CAP accounting is exempt."""
+class TestIterNormalisedShellWordsDeadline:
+    """Review 7 follow-up (team-lead): flat, non-recursive word decoding is
+    bounded by TIME (``deadline``), not by word count -- the correct
+    instrument for volume, matching the SAME fail-closed doctrine
+    ``secret_file_matching.iter_protected_mentions`` already uses for its
+    own whole-scan deadline (``TimeoutError`` means "cannot rule out a
+    protected path", never "no protected path")."""
 
-    def test_a_long_quoted_heredoc_body_does_not_exhaust_the_word_cap(self) -> None:
+    def test_an_expired_deadline_raises_timeout_error(self) -> None:
+        command = " ".join(["w"] * 5000)
+        with pytest.raises(TimeoutError):
+            list(iter_normalised_shell_words(command, deadline=time.monotonic() - 1))
+
+    def test_a_generous_deadline_does_not_raise(self) -> None:
+        command = " ".join(["w"] * 5000)
+        words = list(iter_normalised_shell_words(command, deadline=time.monotonic() + 5))
+        assert len(words) == 5000
+
+    def test_no_deadline_supplied_does_not_raise(self) -> None:
+        """The default (``deadline=None``): unbounded-in-principle, same
+        as every pre-review-7 caller relied on."""
+        command = " ".join(["w"] * 5000)
+        words = list(iter_normalised_shell_words(command))
+        assert len(words) == 5000
+
+
+class TestIterNormalisedShellWordsHeredocBodyDecoding:
+    """A quoted-delimiter heredoc body is inert DATA handed to a consumer
+    (`cat`, `tee`, `git commit -F-`) -- real bash expands NOTHING in it.
+    It is still decoded and yielded exactly like any other word (quotes
+    stripped, escapes resolved), so a mention split across quotes inside
+    one is still found. There is no cap left for a heredoc body to be
+    exempt FROM (review 7 follow-up removed the word-count cap entirely
+    for flat decoding) -- these tests now pin ordinary decoding only."""
+
+    def test_a_long_quoted_heredoc_body_is_fully_decoded(self) -> None:
         body = " ".join(["word"] * 3000)
         command = f"cat > /tmp/out.txt <<'EOF'\n{body}\nEOF\n"
-        words = list(iter_normalised_shell_words(command, max_words=2000))
+        words = list(iter_normalised_shell_words(command))
         assert words.count("word") == 3000
 
-    def test_a_long_double_quoted_heredoc_body_does_not_exhaust_the_word_cap(self) -> None:
+    def test_a_long_double_quoted_heredoc_body_is_fully_decoded(self) -> None:
         body = " ".join(["word"] * 3000)
         command = f'cat > /tmp/out.txt <<"EOF"\n{body}\nEOF\n'
-        words = list(iter_normalised_shell_words(command, max_words=2000))
+        words = list(iter_normalised_shell_words(command))
         assert words.count("word") == 3000
 
-    def test_a_long_backslash_delimiter_heredoc_body_does_not_exhaust_the_word_cap(
-        self,
-    ) -> None:
+    def test_a_long_backslash_delimiter_heredoc_body_is_fully_decoded(self) -> None:
         body = " ".join(["word"] * 3000)
         command = f"cat > /tmp/out.txt <<\\EOF\n{body}\nEOF\n"
-        words = list(iter_normalised_shell_words(command, max_words=2000))
+        words = list(iter_normalised_shell_words(command))
         assert words.count("word") == 3000
 
     def test_the_dash_form_strips_tabs_from_the_closing_delimiter(self) -> None:
         body = " ".join(["word"] * 3000)
         command = f"cat > /tmp/out.txt <<-'EOF'\n{body}\n\tEOF\n"
-        words = list(iter_normalised_shell_words(command, max_words=2000))
+        words = list(iter_normalised_shell_words(command))
         assert words.count("word") == 3000
 
-    def test_ordinary_words_after_a_long_heredoc_body_still_count_towards_the_cap(
-        self,
-    ) -> None:
-        """The exemption is structural, not a one-shot escape: an
-        arbitrarily long heredoc body must never eat into the budget
-        ordinary words OUTSIDE it still need -- past the cap on THOSE
-        words, this still raises."""
+    def test_ordinary_words_after_a_long_heredoc_body_are_also_decoded(self) -> None:
+        """A heredoc body's words never displace ordinary words OUTSIDE
+        it -- both are present, since neither is capped any more."""
         body = " ".join(["word"] * 3000)
         tail = " ".join(["w"] * 2001)
         command = f"cat > /tmp/out.txt <<'EOF'\n{body}\nEOF\necho {tail}\n"
-        with pytest.raises(TooManyToEnumerateError):
-            list(iter_normalised_shell_words(command, max_words=2000))
+        words = list(iter_normalised_shell_words(command))
+        assert words.count("word") == 3000
+        assert words.count("w") == 2001
 
     def test_a_command_substitution_inside_a_quoted_heredoc_body_is_still_scanned(
         self,
     ) -> None:
         """Real bash expands NOTHING inside a quoted-delimiter heredoc, so
         this over-scans relative to a real shell -- an accepted, fail-
-        toward-denying-more residual (unchanged from before this fix: the
-        cap exemption is scoped to CAP ACCOUNTING only, never to which
-        triggers a heredoc-body word can still fire)."""
+        toward-denying-more residual."""
         command = "cat > /tmp/out.txt <<'EOF'\n$(cat wor'ld)\nEOF\n"
         words = list(iter_normalised_shell_words(command))
         assert "world" in words
 
-    def test_an_unquoted_heredoc_delimiter_is_not_exempt(self) -> None:
+    def test_an_unquoted_heredoc_delimiter_is_also_fully_decoded(self) -> None:
         """Control: an UNQUOTED delimiter (`<<EOF`) undergoes expansion in
-        real bash, so its body stays fully scanned -- a long one still
-        exhausts the cap and raises, the pre-existing (correct) MAJOR-1
-        behaviour."""
+        real bash too -- its body is decoded exactly the same way as a
+        quoted one's, there being no cap left to distinguish them by."""
         body = " ".join(["word"] * 3000)
         command = f"cat > /tmp/out.txt <<EOF\n{body}\nEOF\n"
+        words = list(iter_normalised_shell_words(command))
+        assert words.count("word") == 3000
+
+
+class TestIterNormalisedShellWordsNestedRecursionStillFailsClosed:
+    """Review 7 follow-up: removing the flat word-COUNT cap must not touch
+    the caps that bound GENUINE combinatorial/recursive growth -- nested
+    `-c`/`eval`/process-substitution re-parsing is still bounded by
+    ``_MAX_NESTED_SHELL_DEPTH`` and ``_MAX_NESTED_SHELL_BYTES``, and still
+    raises ``TooManyToEnumerateError`` past either, exactly as before this
+    fix."""
+
+    def test_deeply_nested_command_substitution_exceeds_the_depth_bound_and_raises(
+        self,
+    ) -> None:
+        """`$(...)` nested 6 levels deep -- past the depth cap (4) -- must
+        still raise -- nothing about the flat-decode fix loosens this."""
+        command = "x=" + "$(" * 6 + "echo hi" + ")" * 6
         with pytest.raises(TooManyToEnumerateError):
-            list(iter_normalised_shell_words(command, max_words=2000))
+            list(iter_normalised_shell_words(command))
+
+    def test_several_large_command_substitutions_exceed_the_byte_bound_and_raise(
+        self,
+    ) -> None:
+        """Three separate `$(...)` bodies, each under the shared 32 KB
+        nested-reparse byte budget alone, cumulatively exceed it -- the
+        THIRD recursion must still raise (the budget is checked at the
+        START of each recursive call, against what earlier calls already
+        consumed) -- this is genuine recursive volume, unaffected by the
+        flat-scan fix."""
+        chunk = "a" * 20_000
+        command = f"$({chunk})$({chunk})$({chunk})"
+        with pytest.raises(TooManyToEnumerateError):
+            list(iter_normalised_shell_words(command))
 
 
 class TestIterNormalisedShellWordsCommandSubstitution:

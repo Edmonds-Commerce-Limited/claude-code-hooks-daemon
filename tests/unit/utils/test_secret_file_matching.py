@@ -1359,11 +1359,12 @@ class TestInteriorWildcardDpIsBounded:
         no single token here is pathological, the cost is volume across
         250k short tokens. This is exactly what the whole-scan deadline
         exists for: with one supplied (as ``secret_file_guard`` supplies),
-        the call returns -- either with a real answer, a ``TimeoutError``,
-        or a ``TooManyToEnumerateError`` (review 7 MAJOR-1: 250k words is
-        also past the normalised-word-stream cap, which now fails CLOSED
-        rather than silently truncating) -- well inside the deadline
-        instead of running past it, whichever outcome it is."""
+        the call returns -- either with a real answer or a ``TimeoutError``
+        -- well inside the deadline instead of running past it, whichever
+        outcome it is. (Review 7 follow-up: the normalised-word stream no
+        longer has its own word-count cap, so ``TooManyToEnumerateError``
+        is no longer a possible outcome here -- ``TimeoutError`` or a real
+        answer are the only two.)"""
         content = "a*b " * 250_000
         start = time.perf_counter()
         outcome = "completed"
@@ -1425,9 +1426,20 @@ class TestOrdinaryVolumeContentCompletesFast:
     (content with NO repetition at all, i.e. a fresh unique token every
     time) -- these tests pin the COMMON case, which is now fast on its own
     merits rather than merely bounded by hitting a timeout.
+
+    Review 7 follow-up (team-lead): ``_BUDGET_SECONDS`` was raised from 1.0
+    to 3.5 -- the WORD-CAP fix restored these tests to actually running the
+    stream to completion (they previously "passed" by raising early, past
+    the now-removed cap, before ever reaching this cost) and review 7's own
+    per-word wrapper/interpreter option-walk (MAJOR-3/MAJOR-5) added real
+    state-machine cost per decoded word that this class's original 1.0s pin
+    predates. 1 MB measures ~1.0-1.4s on a quiet machine; 3.5s keeps a real
+    margin against ordinary CI/container load noise while staying
+    comfortably inside the production whole-scan deadline
+    (``SCAN_DEADLINE_SECONDS`` = 5.0s).
     """
 
-    _BUDGET_SECONDS = 1.0
+    _BUDGET_SECONDS = 3.5
 
     @staticmethod
     def _vocabulary_command(target_bytes: int) -> str:
@@ -1452,43 +1464,45 @@ class TestOrdinaryVolumeContentCompletesFast:
         return " ".join(words)[:target_bytes]
 
     def test_one_megabyte_bash_command_completes_well_under_a_second(self) -> None:
-        """Review 7 MAJOR-1: a command this size is also past the
-        normalised-word-stream cap, which now fails CLOSED (raises)
-        instead of silently truncating -- the timing guarantee this class
-        exists to pin (fast, not merely bounded by a deadline) still
-        holds: it fails fast, not slow."""
+        """Restored to this class's original contract (review 7 follow-up,
+        team-lead): large ORDINARY content -- no genuine mention, nothing
+        combinatorial about it -- completes fast AND answers correctly
+        (no mention found), rather than being denied outright. The
+        normalised-word stream no longer has a word-count cap of its own
+        (review 7 MAJOR-1's cap on this stream was the wrong instrument
+        for flat, linear-cost decoding; see
+        ``shell_expansion.TestIterNormalisedShellWordsDeadline`` for its
+        replacement, a TIME-based deadline)."""
         command = self._vocabulary_command(1024 * 1024)
         start = time.perf_counter()
-        with pytest.raises(TooManyToEnumerateError):
-            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS)
+        result = sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS)
         elapsed = time.perf_counter() - start
+        assert result is None
         assert elapsed < self._BUDGET_SECONDS, f"took {elapsed:.3f}s"
 
     def test_one_megabyte_write_content_completes_well_under_a_second(self) -> None:
         # The script-content route (Write/Edit to a .py/.sh/...) scans
         # CONTENT the identical way the Bash route scans a command line --
         # same `find_protected_mention_detail` call, same cost profile.
-        # Review 7 MAJOR-1: fails CLOSED (raises), fast, same as above.
+        # Restored to this class's original contract: fast AND correct,
+        # not denied (see the sibling Bash test's docstring above).
         content = self._vocabulary_command(1024 * 1024)
         start = time.perf_counter()
-        with pytest.raises(TooManyToEnumerateError):
-            sfm.find_protected_mention_detail(content, sfm.DEFAULT_PROTECTED_PATTERNS)
+        result = sfm.find_protected_mention_detail(content, sfm.DEFAULT_PROTECTED_PATTERNS)
         elapsed = time.perf_counter() - start
+        assert result is None
         assert elapsed < self._BUDGET_SECONDS, f"took {elapsed:.3f}s"
 
     def test_repeated_identical_tokens_benefit_from_the_per_scan_cache(self) -> None:
         """The review's own pre-existing 'a*b ' x 250000 shape -- still
-        fast (the per-scan cache this class pins), but review 7 MAJOR-1
-        means 250k words past the normalised-word-stream cap now fails
-        CLOSED (raises) rather than silently truncating and answering "no
-        mention" (contrast ``test_ordinary_one_megabyte_write_content_
-        stays_bounded_by_the_deadline`` above, which accepts this as one
-        of its valid outcomes too)."""
+        fast (the per-scan cache this class pins), and restored to this
+        class's original contract: completes and answers correctly (no
+        mention), not denied outright."""
         content = "a*b " * 250_000
         start = time.perf_counter()
-        with pytest.raises(TooManyToEnumerateError):
-            sfm.find_protected_mention_detail(content, sfm.DEFAULT_PROTECTED_PATTERNS)
+        result = sfm.find_protected_mention_detail(content, sfm.DEFAULT_PROTECTED_PATTERNS)
         elapsed = time.perf_counter() - start
+        assert result is None
         assert elapsed < self._BUDGET_SECONDS, f"took {elapsed:.3f}s"
 
     def test_a_genuine_mention_is_still_found_in_realistic_volume_content(self) -> None:

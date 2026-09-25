@@ -967,7 +967,7 @@ def _bash_interpreter_one_liner_mention(
     quote/escape decoding (including the second-parse tricks a nested `-c`
     argument already gets) rather than a fresh, narrower regex.
     """
-    words = list(shell_expansion.iter_normalised_shell_words(command))
+    words = list(shell_expansion.iter_normalised_shell_words(command, deadline=deadline))
     for index, word in enumerate(words):
         basename = word.rsplit("/", 1)[-1]
         family = _match_one_liner_family(basename)

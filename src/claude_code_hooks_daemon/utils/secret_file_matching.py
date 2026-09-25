@@ -1342,8 +1342,8 @@ def iter_protected_mentions(
     tokens = itertools.chain(
         _tokenise(import_stripped),
         _brace_expansion_tokens(import_stripped),
-        _normalised_word_tokens(import_stripped),
-        _file_url_path_tokens(import_stripped),
+        _normalised_word_tokens(import_stripped, deadline=deadline),
+        _file_url_path_tokens(import_stripped, deadline=deadline),
     )
     # Own live finding (team-lead's 1 MB timing follow-up to review 3): real
     # content is full of REPEATED short tokens (log lines, minified code,
@@ -1415,7 +1415,7 @@ def _brace_expansion_tokens(command: str) -> Iterator[str]:
             yield shell_expansion.normalise_word(spelling)
 
 
-def _normalised_word_tokens(command: str) -> Iterator[str]:
+def _normalised_word_tokens(command: str, *, deadline: float | None = None) -> Iterator[str]:
     """Lazily yield every shell WORD in ``command``, quote/escape/ANSI-C
     decoded, with any statically-unresolvable substitution collapsed to a
     single ``*`` (n466-n24 review 4, M-1).
@@ -1431,8 +1431,14 @@ def _normalised_word_tokens(command: str) -> Iterator[str]:
     intersection (:func:`_globs_can_intersect`) decides whether it could
     reach a protected path, denying only when a match is genuinely
     possible.
+
+    ``deadline`` (review 7 follow-up) is forwarded straight through -- flat
+    word decoding is no longer bounded by a word COUNT (that capped
+    ordinary large content, not just adversarial input), so THIS deadline,
+    the same one ``iter_protected_mentions`` already checks per token, is
+    now the only volume backstop for this stream too.
     """
-    yield from shell_expansion.iter_normalised_shell_words(command)
+    yield from shell_expansion.iter_normalised_shell_words(command, deadline=deadline)
 
 
 #: `file:///path`, `file://localhost/path`, or the rarer single-slash
@@ -1448,7 +1454,7 @@ _FILE_URL_RE: Final[re.Pattern[str]] = re.compile(
 )
 
 
-def _file_url_path_tokens(command: str) -> Iterator[str]:
+def _file_url_path_tokens(command: str, *, deadline: float | None = None) -> Iterator[str]:
     """Lazily yield the percent-decoded filesystem PATH named by every
     ``file:`` URL in ``command`` (review 7: guard-defects review 6's own
     probe found `curl -s file:///root/.ssh/id_r%73a` invisible to every
@@ -1475,7 +1481,7 @@ def _file_url_path_tokens(command: str) -> Iterator[str]:
     """
     for match in _FILE_URL_RE.finditer(command):
         yield urllib.parse.unquote(match.group(1))
-    for word in shell_expansion.iter_normalised_shell_words(command):
+    for word in shell_expansion.iter_normalised_shell_words(command, deadline=deadline):
         for match in _FILE_URL_RE.finditer(word):
             yield urllib.parse.unquote(match.group(1))
 
