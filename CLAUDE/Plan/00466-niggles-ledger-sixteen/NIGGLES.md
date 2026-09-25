@@ -6,6 +6,28 @@ candidate remedies.
 N34 is taken on the `worktree-n466-n24` branch (the chain deadline cannot
 interrupt a running handler) and lands with that branch.
 
+### N39 — Nine unit tests fail in a whole-suite run and pass when their files run alone
+
+**Found by the guard-defects agent** (its review-4 fix round). A plain whole
+unit-suite run on `worktree-n466-guard-defects` (main merged at `e14cdca4`)
+gave 9 failures. They were in `test_model_fallback_detector.py`,
+`test_absolute_path.py`, `test_lookup.py` and
+`test_dangerous_invocation_corpus_checker.py`. The same four files run alone
+gave 105 passed, 0 failed. So some earlier test leaks state (a module global,
+a singleton, the environment or the cwd) into these. The full gate passed on
+`main`, so the leak depends on order or on how the suite is split across
+workers.
+
+A suite that fails in one order is a hidden defect: it can hide a real
+failure behind a "flaky" label, and it breaks the first time the ordering
+shifts. It has not yet been confirmed whether `main` alone reproduces it;
+that is the first step.
+
+**Candidate remedy:** reproduce it on `main` with a plain sequential run, then
+bisect for the polluting test. Fix the leak at its source with real isolation
+(a fixture that restores the state), not by reordering. Pin it with a test
+that runs the polluter and the victim in sequence.
+
 ### N38 — The PreToolUse chain takes quadratic time on a command of quoted heredoc openers
 
 **Found by the Plan 00463 sixth review** (its nit n6), measured on `main` and

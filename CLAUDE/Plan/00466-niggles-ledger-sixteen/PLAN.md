@@ -69,6 +69,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N36 | `destructive_git` denies a `grep` whose search pattern is the text of a force branch delete               | Plan 00463 agent   | ⬜ Open               |
 | N37 | `resolve_venv.sh` caches an override's interpreter for later callers that set no override                 | Plan 00376 agent   | 🔄 In progress        |
 | N38 | The PreToolUse chain takes quadratic time on a command of quoted heredoc openers                          | 463 review 6       | 🔄 In progress        |
+| N39 | Nine unit tests fail in a whole-suite run and pass when their files run alone                             | guard-defects fix  | 🔄 In progress        |
 
 ## Tasks
 
