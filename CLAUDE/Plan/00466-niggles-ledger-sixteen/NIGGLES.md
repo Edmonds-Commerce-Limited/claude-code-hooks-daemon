@@ -49,11 +49,9 @@ ever**:
   to their own `modelSettings` — a `claude-fable-5-1` entry at `low`
   (replacing DROP ANCHOR) and `claude-opus-5`/`claude-opus-4-8` entries at
   `xhigh` (replacing the downgrade compensation, covering Fable's two
-  automatic-fallback targets). Claude Code applies a model's saved level
-  itself whenever that model serves a request — including a request
-  automatic fallback re-runs on a different model — with no supervisor
-  involvement at all. See `CLAUDE/development/CcySupervisor.md` for the
-  exact entries and the doc citations.
+  automatic-fallback targets, and now broader than the old compensation
+  since it applies whenever Opus 5 or 4.8 serve, not only a fable-origin
+  episode). See `CLAUDE/development/CcySupervisor.md` for the exact entries.
 - MAJOR 4 fixed alongside: `model_downgrade_recorder`'s signal republishes
   the SAME record for the life of a session, even after its episode fully
   closed. A human who later manually switched back to the fallback family
@@ -63,14 +61,48 @@ ever**:
   opening-then-closing an episode for, and refuses to reopen from the same
   one — only a genuinely NEW downgrade record can open a fresh episode.
 
+**Correction (review 3**, `subagent-reports/260925-n47-review3.md`**): the
+`modelSettings` claim above is CONDITIONAL, and review 2's design doc
+overstated it.** Claude Code tracks ONE session-level effort value
+(`sessionEffort`), which starts `inherit` (per-model `modelSettings` applies)
+but is PINNED to a fixed value by ANY of: `/effort <level>`, `/effort auto`,
+an effort pick made in the `/model` picker's slider, `--effort`, or
+`CLAUDE_CODE_EFFORT_LEVEL`. Once pinned, that ONE value follows the session
+across every later model AND every automatic fallback — confirmed against
+`model-config.md:544-548` (explicit choice ranks first, no per-model
+qualifier) and the installed Claude Code 2.1.282 binary's `sessionEffort`
+resolver. `/effort auto` does NOT return to `inherit`; it pins to the
+model's BUILT-IN default (ignoring `modelSettings`) and additionally WRITES
+— it clears the current model's saved `modelSettings` entry
+(`settings-reference.md:1211`). **Nothing found un-pins a session mid-flight.**
+So: **`modelSettings` alone can make Fable run at low and its fallback run
+at xhigh only for a session that never touches `/effort`, an effort slider
+pick, `--effort`, or the env var.** If the owner wants a specific level
+right now, typing `/effort` remains a deliberate one-time choice that pins
+the REST of that session — exactly as before this plan — and no
+settings-only configuration recovers per-model behaviour within it. The
+owner decides whether that trade-off is acceptable; the fix here only
+removes the SUPERVISOR as a second party to the fight.
+
 RED tests (driven through `decide_once`/`_poll_once` with real sidecar
-sequences, never by arming state directly) prove the supervisor emits NO
-`/effort` in any scenario: a downgrade, a manual model switch, compaction, a
-settings.json change, or a human-typed `/effort`. `test_settings_effort.py`,
+sequences, never by arming state directly) prove the supervisor never
+EMITS `/effort` in any scenario: a downgrade, a manual model switch,
+compaction, a settings.json change, or a human-typed `/effort`. Some of
+these assert only on exported state keys (the recogniser is gone, so there
+is no `/effort` field to observe); `probe_n47r3_scenarios.py`-style
+payload-level assertions cover the rest. `test_settings_effort.py`,
 `test_drop_anchor.py`, `test_effort_restore.py` and
 `test_unattributed_effort_drop.py` are deleted outright (the behaviour they
-covered no longer exists); `test_attributed_downgrade.py` gained the MAJOR 4
-regression pair (a spent record does not reopen; a fresh record still does).
+covered no longer exists) — `test_effort_restore.py`'s NON-effort tests
+(live `/model` auto-restore: backoff, delay, the off setting, confirm
+enters, family ranks, the dry-run marker) are restored under
+`test_model_restore.py`, since deleting the whole file silently dropped
+mutation coverage for behaviour that is still live. `test_attributed_downgrade.py`
+gained the MAJOR 4 regression pair (a spent record does not reopen; a fresh
+record still does) plus RED tests for the four edges review 3 found: a
+downgrade whose reading renders before its record publishes, an empty
+`record_ts`, an episode open across a hot reload, and the `spent_downgrade_record_ts`
+export round-trip.
 
 ### N46 — `budget_exhaustion_detector` fires on a tool result that merely contains budget wording
 

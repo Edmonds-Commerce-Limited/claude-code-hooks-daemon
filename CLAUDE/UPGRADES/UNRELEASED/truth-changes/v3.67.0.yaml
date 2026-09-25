@@ -126,16 +126,18 @@ truth_changes:
       session is asked to create the job again.
   - topic: ccy-supervisor
     was: >
-      The ccy supervisor's per-model effort floor stands down only for an
-      effort level TYPED as `/effort <level>`. A level picked from the bare
-      `/effort` selector types nothing the supervisor can read, so the floor
-      puts the old level back. To keep a lower effort, type the level.
+      The ccy supervisor kept its own opinion of per-model effort: a built-in
+      floor table, a downgrade-restore compensation to `xhigh`, and a Fable
+      ceiling at `low` (DROP ANCHOR) -- each enforced by typing a real
+      `/effort <level>`.
     now: >
-      Effort drops are trusted (ledger 00422 N7): any observed effort drop the
-      supervisor did not inject itself is latched as the human's choice,
-      exactly like a typed `/effort <level>`. The floor stays off for the rest
-      of that model spell, whether the level came from the selector, was typed,
-      or came by any other route. The supervisor's own `/effort` injections are
-      recognised when they land and are never latched. This deliberately
-      mirrors the model-downgrade rule, where an unattributed model change gets
-      no restore.
+      The supervisor injects no `/effort` command of any kind, for any reason
+      (Plan 00466 N47 review 2). Claude Code saves every interactively-typed
+      `/effort <level>` into your own settings.json under `modelSettings`, so
+      any supervisor-typed level permanently overwrote your own saved choice --
+      the fight this removal ends. The floor and the downgrade compensation are
+      now `modelSettings` entries you add yourself (see
+      `CLAUDE/development/CcySupervisor.md`), and they apply only in a session
+      that has never set its own effort via `/effort`, an effort pick in
+      `/model`, `--effort`, or the env var -- any of those pins one value
+      across every later model change for the rest of that session.

@@ -321,9 +321,15 @@ class OptimalConfigCheckerHandler(SessionStartHandlerBase):
     def _enforce_settings_sync(self) -> list[str]:
         """Ensure critical settings exist in ~/.claude/settings.json.
 
-        When effortLevel or alwaysThinkingEnabled are missing from settings,
-        writes optimal defaults so the statusline and config stay in sync.
-        Claude Code defaults to medium effort when unset, but we want high.
+        When alwaysThinkingEnabled is missing from settings, writes the
+        optimal default so the statusline and config stay in sync.
+
+        Effort is deliberately NOT enforced here (Plan 00466 N47 review 3
+        finding 10): the ccy supervisor redesign removed the supervisor as a
+        second, silent opinion fighting the owner's own settings.json —
+        auto-writing `effortLevel` here would reintroduce exactly that
+        problem through a different handler. Effort stays advisory-only; see
+        `_check_effort_level` (surfaced via `cli check`).
 
         Reads the file directly (not via _read_global_settings) to distinguish
         between "file missing/empty" (safe to create) and "read error" (abort
@@ -349,10 +355,6 @@ class OptimalConfigCheckerHandler(SessionStartHandlerBase):
 
         written: list[str] = []
 
-        if "effortLevel" not in settings:
-            settings["effortLevel"] = "high"
-            written.append("effortLevel=high")
-
         if "alwaysThinkingEnabled" not in settings:
             settings["alwaysThinkingEnabled"] = True
             written.append("alwaysThinkingEnabled=true")
@@ -365,9 +367,10 @@ class OptimalConfigCheckerHandler(SessionStartHandlerBase):
     def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         """Run config checks and return advisory context.
 
-        Also enforces that critical settings (effortLevel, alwaysThinkingEnabled)
-        are explicitly set in ~/.claude/settings.json so the statusline stays
-        in sync with actual configuration.
+        Also enforces that alwaysThinkingEnabled is explicitly set in
+        ~/.claude/settings.json so the statusline stays in sync with actual
+        configuration. Effort is advisory-only, never auto-written (Plan
+        00466 N47 review 3 finding 10).
 
         Args:
             hook_input: SessionStart hook input
@@ -406,9 +409,10 @@ class OptimalConfigCheckerHandler(SessionStartHandlerBase):
                 title="optimal config checker - announces settings sync",
                 command='echo "test"',
                 description=(
-                    "Tests that the handler silently enforces critical settings "
-                    "(effort level, extended thinking) on a new session and announces "
-                    "an actual settings.json write via a 'CONFIG SYNC' line."
+                    "Tests that the handler silently enforces extended thinking on a "
+                    "new session and announces an actual settings.json write via a "
+                    "'CONFIG SYNC' line. Effort level is advisory-only and never "
+                    "auto-written."
                 ),
                 expected_decision=Decision.ALLOW,
                 # handle() only emits 'CONFIG SYNC: ...' and only on first run /

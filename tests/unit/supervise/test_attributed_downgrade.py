@@ -315,6 +315,145 @@ class TestSpentRecordDoesNotReopen:
         assert machine.export_state()["downgrade_episode"] is not None
 
 
+class TestReview3Edges:
+    """Plan 00466 N47 review 3, item 4 (the four MAJOR-4 gaps)."""
+
+    def test_a_reading_that_renders_before_its_record_is_attributed_once_the_record_arrives(
+        self, tmp_path: Path
+    ) -> None:
+        """Item C: the reading can render one tick before the recorder
+        publishes its signal (both write on the same PostToolUse-adjacent
+        window, in either order). The old code judged the drop unattributed
+        on that first tick and never looked again, since nothing about the
+        family changes on the later tick the record actually arrives."""
+        sidecar_dir = tmp_path / "cs"
+        machine = _machine()
+        _write_sidecar(sidecar_dir, model_id="claude-fable-5", effort="low", ts=_NOW - 5.0)
+        _decide(sidecar_dir, machine, now=_NOW - 4.0)
+
+        # The reading shows opus BEFORE any downgrade signal exists on disk.
+        _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="high", ts=_NOW - 3.0)
+        first = _decide(sidecar_dir, machine, now=_NOW - 2.0)
+        assert first.noop_reason_log is not None
+        assert "unattributed" in first.noop_reason_log
+        assert machine.export_state()["downgrade_episode"] is None
+
+        # The record arrives now, one tick later, with the session STILL on
+        # opus (same sidecar reading, no new render needed).
+        _write_downgrade_signal(sidecar_dir, ts=_NOW - 1.0, session_id=_SESSION)
+        _decide(sidecar_dir, machine, now=_NOW)
+
+        assert machine.export_state()["downgrade_episode"] is not None
+
+    def test_the_latch_is_dropped_if_the_session_leaves_the_fallback_before_the_record_arrives(
+        self, tmp_path: Path
+    ) -> None:
+        """The bridging window has a natural end: if the human moves off the
+        fallback family before the record ever shows up, a later record must
+        not retroactively resurrect a stale episode."""
+        sidecar_dir = tmp_path / "cs"
+        machine = _machine()
+        _write_sidecar(sidecar_dir, model_id="claude-fable-5", effort="low", ts=_NOW - 5.0)
+        _decide(sidecar_dir, machine, now=_NOW - 4.0)
+        _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="high", ts=_NOW - 3.0)
+        _decide(sidecar_dir, machine, now=_NOW - 2.0)
+        assert machine.export_state()["downgrade_episode"] is None
+
+        # The human moves to sonnet -- never mind, no record ever showed up.
+        _write_sidecar(sidecar_dir, model_id="claude-sonnet-5", effort="high", ts=_NOW - 1.0)
+        _decide(sidecar_dir, machine, now=_NOW)
+
+        # A stale/unrelated record for the ORIGINAL fable->opus drop now
+        # appears -- it must not open anything; the window already closed.
+        _write_downgrade_signal(sidecar_dir, ts=_NOW + 1.0, session_id=_SESSION)
+        _decide(sidecar_dir, machine, now=_NOW + 2.0)
+
+        assert machine.export_state()["downgrade_episode"] is None
+
+    def test_an_empty_record_ts_does_not_block_a_later_empty_record_ts_downgrade(
+        self, tmp_path: Path
+    ) -> None:
+        """Item E: `record_ts` falls back to `""` when the transcript record
+        has no timestamp. Spending `""` as though it were a real record_ts
+        would refuse EVERY later untimestamped downgrade in the session."""
+        sidecar_dir = tmp_path / "cs"
+        machine = _machine()
+        _write_downgrade_signal(sidecar_dir, ts=_NOW, session_id=_SESSION, record_ts="")
+
+        _drive_fable_to_opus(sidecar_dir, machine, now=_NOW)
+        assert machine.export_state()["downgrade_episode"] is not None
+        _write_sidecar(sidecar_dir, model_id="claude-fable-5", effort="low", ts=_NOW + 1.0)
+        _decide(sidecar_dir, machine, now=_NOW + 2.0)
+        assert machine.export_state()["downgrade_episode"] is None
+        assert machine.export_state()["spent_downgrade_record_ts"] is None
+
+        # A SECOND, genuinely new downgrade whose record also carries no
+        # timestamp -- it must still open a fresh episode.
+        _write_downgrade_signal(sidecar_dir, ts=_NOW + 5.0, session_id=_SESSION, record_ts="")
+        _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="high", ts=_NOW + 10.0)
+        _decide(sidecar_dir, machine, now=_NOW + 11.0)
+
+        assert machine.export_state()["downgrade_episode"] is not None
+
+    def test_an_episode_open_across_a_hot_reload_still_spends_its_record_on_close(
+        self, tmp_path: Path
+    ) -> None:
+        """Item: an episode opened by an OLDER worker (or a legacy payload
+        with `downgrade_episode_record_ts` stripped) has no record_ts to
+        spend when a fresh worker later closes it. Backfilled from
+        `attributed_downgrade`, which the daemon's signal keeps supplying,
+        as long as it still names this exact open episode."""
+        sidecar_dir = tmp_path / "cs"
+        original = _machine()
+        _write_downgrade_signal(sidecar_dir, ts=_NOW, session_id=_SESSION)
+        _drive_fable_to_opus(sidecar_dir, original, now=_NOW)
+        assert original.export_state()["downgrade_episode"] is not None
+
+        # Simulate a hot reload that lost `downgrade_episode_record_ts` --
+        # legacy state, or a pre-fix export.
+        legacy_state = original.export_state()
+        legacy_state["downgrade_episode_record_ts"] = None
+        reloaded = _machine()
+        reloaded.import_state(legacy_state)
+        assert reloaded.export_state()["downgrade_episode_record_ts"] is not None  # backfilled
+
+        # Close it (family recovers), and confirm the record was genuinely
+        # spent -- not silently dropped.
+        _write_sidecar(sidecar_dir, model_id="claude-fable-5", effort="low", ts=_NOW + 1.0)
+        _decide(sidecar_dir, reloaded, now=_NOW + 2.0)
+        assert reloaded.export_state()["downgrade_episode"] is None
+        assert reloaded.export_state()["spent_downgrade_record_ts"] is not None
+
+        # The MAJOR 4 regression does not recur: the same still-published
+        # record does not reopen the episode on a later manual drop back.
+        _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="high", ts=_NOW + 10.0)
+        _decide(sidecar_dir, reloaded, now=_NOW + 11.0)
+        assert reloaded.export_state()["downgrade_episode"] is None
+
+    def test_spent_downgrade_record_ts_round_trips_through_export_import(
+        self, tmp_path: Path
+    ) -> None:
+        """The export/import hop must carry this key every tick, or MAJOR 4
+        comes back the moment a worker restarts mid-session."""
+        sidecar_dir = tmp_path / "cs"
+        machine = _machine()
+        _write_downgrade_signal(sidecar_dir, ts=_NOW, session_id=_SESSION)
+        _drive_fable_to_opus(sidecar_dir, machine, now=_NOW)
+        _write_sidecar(sidecar_dir, model_id="claude-fable-5", effort="low", ts=_NOW + 1.0)
+        _decide(sidecar_dir, machine, now=_NOW + 2.0)
+        spent = machine.export_state()["spent_downgrade_record_ts"]
+        assert spent is not None
+
+        clone = _machine()
+        clone.import_state(machine.export_state())
+        assert clone.export_state()["spent_downgrade_record_ts"] == spent
+
+        # And the clone genuinely honours it: no reopen on a later manual drop.
+        _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="high", ts=_NOW + 10.0)
+        _decide(sidecar_dir, clone, now=_NOW + 11.0)
+        assert clone.export_state()["downgrade_episode"] is None
+
+
 class TestReaping:
     def test_a_stale_downgrade_signal_is_reaped(self, tmp_path: Path) -> None:
         """Otherwise a dead session's signal accumulates in the shared dir."""

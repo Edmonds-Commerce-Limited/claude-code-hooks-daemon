@@ -493,16 +493,16 @@ class TestPollOnceNoopLogging:
         idle: bool,
         machine: object = None,
     ) -> object:
-        # Plan 00466 N47: a real HOST constructs ONE ``CompactStateMachine``
-        # and reuses/mutates it across every tick (state travels via
+        # A real HOST constructs ONE ``CompactStateMachine`` and
+        # reuses/mutates it across every tick (state travels via
         # export/import through the worker, never through a fresh instance).
         # Defaulting to a fresh machine per call still matches that for a
         # single-poll test; a multi-poll test passes its own machine back in
-        # so the settings-status dedup (``_last_reported_settings_error``)
-        # behaves as it would in production. Typed loosely as ``object``,
-        # like this file's other dynamically-loaded-module helpers, since
-        # ``CompactStateMachine`` is a runtime attribute of an ``Any``-typed
-        # module, not a usable type annotation under mypy --strict.
+        # so gate dedup behaves as it would in production. Typed loosely as
+        # ``object``, like this file's other dynamically-loaded-module
+        # helpers, since ``CompactStateMachine`` is a runtime attribute of an
+        # ``Any``-typed module, not a usable type annotation under mypy
+        # --strict.
         if machine is None:
             machine = CompactStateMachine(CompactPolicy())
         _mod._poll_once(
@@ -519,16 +519,13 @@ class TestPollOnceNoopLogging:
 
     def test_benign_green_noop_is_silent(self, tmp_path: Path) -> None:
         # A positively not-red, non-stale context is the common idle tick with
-        # nothing to do w.r.t. GATE noise -- no line is logged at all (Plan
-        # 00466 N47 review 2: the settings-status note is gone along with the
-        # settings resolver it reported on).
+        # nothing to do -- it carries no diagnostic value, so the log stays
+        # empty (the blind-spot gates below are what DO get recorded).
         sc = tmp_path / "sc"
         self._sidecar(sc, red=False, tier="green")
         log_path = tmp_path / "decision.log"
         self._poll(sc, DecisionLog(log_path), idle=True)
-        assert not log_path.exists() or log_path.read_text(encoding="utf-8") == ""
-        contents = log_path.read_text(encoding="utf-8") if log_path.exists() else ""
-        assert "noop:" not in contents
+        assert not log_path.exists()
 
     def test_consecutive_identical_gate_noop_is_deduped(self, tmp_path: Path) -> None:
         # A red context gated on a busy TUI, held for several ticks, logs the

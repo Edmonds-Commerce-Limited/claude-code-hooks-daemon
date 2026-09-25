@@ -305,6 +305,36 @@ def test_legacy_state_with_the_deleted_manual_fields_imports_cleanly() -> None:
     assert fresh.export_state()["downgrade_episode"] is None
 
 
+def test_a_legacy_unconfirmed_effort_own_line_is_dropped_on_import() -> None:
+    """Plan 00466 N47 review 3 finding 5.
+
+    A worker hot-reloaded within about 45s of an old `/effort xhigh`
+    injection can still be handed an unconfirmed own line for it. This
+    machine must not press Enter to CONFIRM that line -- doing so would
+    still complete the exact settings.json write the redesign exists to
+    stop, even though the code that TYPED it is long gone.
+    """
+    machine = _machine()
+    legacy_state = machine.export_state()
+    legacy_state["own_line_text"] = "/effort xhigh"
+    legacy_state["own_line_ts"] = _NOW
+    fresh = _machine()
+    fresh.import_state(legacy_state)
+    assert fresh.export_state()["own_line_text"] is None
+
+
+def test_a_legacy_own_line_for_a_different_command_still_imports() -> None:
+    """Only an `/effort` own line is dropped -- `/model`/`/compact` still
+    need their confirming Enter to land after a hot reload."""
+    machine = _machine()
+    legacy_state = machine.export_state()
+    legacy_state["own_line_text"] = "/model fable"
+    legacy_state["own_line_ts"] = _NOW
+    fresh = _machine()
+    fresh.import_state(legacy_state)
+    assert fresh.export_state()["own_line_text"] == "/model fable"
+
+
 # ── TickFacts / worker JSON round-trip ───────────────────────────────────────
 
 

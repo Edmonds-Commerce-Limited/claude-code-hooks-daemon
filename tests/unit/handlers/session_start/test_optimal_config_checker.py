@@ -564,8 +564,14 @@ class TestEnforceSettingsSync:
 
         return OptimalConfigCheckerHandler()
 
-    def test_writes_effort_level_when_missing(self, handler: Any, tmp_path: Any) -> None:
-        """Should write effortLevel=high when missing from settings."""
+    def test_does_not_write_effort_level_when_missing(self, handler: Any, tmp_path: Any) -> None:
+        """Never auto-writes effortLevel (Plan 00466 N47 review 3 finding 10).
+
+        Writing an effort opinion into the owner's settings.json is exactly
+        the second-party-to-the-fight problem the ccy supervisor redesign
+        removed; this handler must not reintroduce it via a different path.
+        Effort stays advisory-only (`_check_effort_level`, `cli check`).
+        """
         import json
 
         settings_path = tmp_path / ".claude" / "settings.json"
@@ -575,9 +581,9 @@ class TestEnforceSettingsSync:
         with patch.object(handler, "_get_settings_path", return_value=settings_path):
             written = handler._enforce_settings_sync()
 
-        assert "effortLevel=high" in written
+        assert not any("effortLevel" in item for item in written)
         updated = json.loads(settings_path.read_text())
-        assert updated["effortLevel"] == "high"
+        assert "effortLevel" not in updated
         assert updated["alwaysThinkingEnabled"] is True
 
     def test_writes_thinking_when_missing(self, handler: Any, tmp_path: Any) -> None:
@@ -596,8 +602,8 @@ class TestEnforceSettingsSync:
         assert updated["alwaysThinkingEnabled"] is True
         assert updated["effortLevel"] == "high"
 
-    def test_writes_both_when_both_missing(self, handler: Any, tmp_path: Any) -> None:
-        """Should write both settings when both are missing."""
+    def test_writes_only_thinking_when_both_missing(self, handler: Any, tmp_path: Any) -> None:
+        """Should write alwaysThinkingEnabled only; effortLevel is never auto-set."""
         import json
 
         settings_path = tmp_path / ".claude" / "settings.json"
@@ -607,9 +613,9 @@ class TestEnforceSettingsSync:
         with patch.object(handler, "_get_settings_path", return_value=settings_path):
             written = handler._enforce_settings_sync()
 
-        assert len(written) == 2
+        assert written == ["alwaysThinkingEnabled=true"]
         updated = json.loads(settings_path.read_text())
-        assert updated["effortLevel"] == "high"
+        assert "effortLevel" not in updated
         assert updated["alwaysThinkingEnabled"] is True
         assert updated["model"] == "opus"
 
@@ -653,7 +659,7 @@ class TestEnforceSettingsSync:
         with patch.object(handler, "_get_settings_path", return_value=settings_path):
             written = handler._enforce_settings_sync()
 
-        assert len(written) == 2
+        assert written == ["alwaysThinkingEnabled=true"]
 
     def test_aborts_on_read_error_to_avoid_clobbering(self, handler: Any, tmp_path: Any) -> None:
         """Should NOT write when settings file read fails (avoids clobbering)."""
