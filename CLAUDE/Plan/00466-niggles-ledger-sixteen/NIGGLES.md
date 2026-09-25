@@ -9,6 +9,36 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N42 — Quoted-heredoc blanking hides text that bash executes from the Bash command guards
+
+**Found by the N38 review** (its M3), confirmed against real bash, and
+unchanged between the old regex and the new N38 scanner. `shell_segmentation`
+treats a quoted-heredoc body as inert data. Several guards then blank that
+text and never judge it, among them destructive_git, pipe_blocker,
+curl_pipe_shell, force-push detection and, for one shape, sed_blocker. There
+are seven shapes where the blanked text is not a heredoc body at all, and
+bash runs it:
+
+- an EMPTY body (`cat > n <<'E'` with `E` on the very next line, followed by
+  a command and a second `E` line), with its `<<-` form and a
+  `git commit -F -` form;
+- an opener inside a `#` comment;
+- an opener inside a double-quoted string;
+- a `<<<'E'` here-string read as an opener;
+- a quoted opener inside an UNQUOTED heredoc's body;
+- the same inside a multi-line double-quoted string;
+- an unquoted heredoc followed by a quoted one on the same line.
+
+In each shape, a destructive or piped command is ALLOWED. The probes are in
+`untracked/scratch/probe_n38r_*`. This is a fail-open in the guards
+themselves, so it is fixed now on the N38 branch and not deferred to the
+consolidation.
+
+**Candidate remedy:** recognise an opener only where bash would: outside
+quotes, comments and here-strings, and not inside another heredoc's body.
+Close an empty body on the first delimiter line. Keep the scan to one linear,
+quote-aware pass. Pin every shape through the real chain.
+
 ### N39 — Nine unit tests fail in a whole-suite run and pass when their files run alone
 
 **Found by the guard-defects agent** (its review-4 fix round). A plain whole
