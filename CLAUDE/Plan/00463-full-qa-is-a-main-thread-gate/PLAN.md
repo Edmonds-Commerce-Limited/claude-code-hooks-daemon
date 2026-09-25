@@ -284,6 +284,74 @@ one place every route ends up, whatever launched it: pytest itself.
   a child that calls `full_qa_lock_is_held`), which returned `True` before
   the fix and `False` after
   (`test_false_when_the_inherited_fd_itself_is_unlocked_even_if_another_holds_it`).
+- **B1 fixed (the part that can be, from inside pytest).** The gate's own
+  count (`_total_test_file_count`/`_test_root`) anchored on
+  `config.rootpath`, which `--rootdir` lets the caller repoint at an empty
+  directory (with or without `-c /dev/null`); the old `total == 0` early
+  return then read that as "nothing to protect" and let the run straight
+  through. It now anchors on `_gate_anchor`: the directory of the
+  conftest.py that actually IMPORTED this hook, found by identity through
+  `config.pluginmanager`, which `--rootdir` never moves. `total` being `0`
+  or unresolvable now REFUSES (`_UNABLE_TO_JUDGE_MESSAGE`) rather than
+  allowing. RED-proven for both `--rootdir=<empty>` and
+  `-c /dev/null --rootdir=<empty>` (review 10's D/D2 repros).
+- **B1's remaining part needs a decision, not a fix from inside pytest.**
+  `--noconftest` removes the plugin before it can run at all; a future
+  `pytest11` entry point would be closable by the SAME-scoped
+  `-p no:<name>` / `PYTEST_DISABLE_PLUGIN_AUTOLOAD` shapes, but none of
+  these can be closed from the checking process itself. Per the
+  coordinator's decision: the handler (`subagent_full_qa_blocker`) now
+  DENIES a Bash-seen pytest invocation carrying `--noconftest`,
+  `-p no:<the gate plugin>`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD` (with the gate
+  not force-loaded), `-c`/`--config-file`, or `-o addopts=`/
+  `--override-ini addopts` -- these are SEEN text, not the UNSEEN policy.
+  Registering the plugin as an installed `pytest11` entry point AND `-p <module>` in `addopts` (so `--noconftest` alone cannot drop it) is
+  follow-up work, tracked as an owner referral below, not accepted as a
+  residual.
+- **m2 fixed.** `pytest_collection_modifyitems` runs `@pytest.hookimpl(trylast=True)`
+  so the file count is taken AFTER other plugins' deselection (`-k`), not
+  before. RED-proven: `-k test_ok_0` over an 8-file fixture suite was
+  refused (100% selected, pre-deselection) and now passes.
+- **m3 fixed.** `whole_suite_refusal_message` and `_UNABLE_TO_JUDGE_MESSAGE`
+  no longer say `llm_qa.py changed` acquires the lock -- only
+  `scripts/qa/run_tests.sh` and `llm_qa.py all` do.
+- **m4 fixed.** The module docstring's xdist paragraph claimed the
+  controller's own collection "has already run and would have refused" --
+  false: the xdist controller's `pytest_collection` short-circuits and does
+  not collect items the way a plain run does. Rewritten to state plainly
+  that xdist is not a proven guarantee here (and is not installed in this
+  repository's own environment).
+- **M2 fixed.** `test_relay_mid_exchange_timeout_fails_open.py` dropped its
+  two wall-clock `elapsed` bounds (forbidden by the owner's binding rules);
+  the `b"timeout" in result.stderr` assertion already proves the relay's own
+  budget fired.
+- **m1 fixed.** `scripts/qa/run_tests.sh`'s `flock "${FULL_QA_LOCK_FD}"` had
+  no bound and no diagnostic -- review 10's H repro (an orphan backgrounded
+  by the holder, outliving it, keeping the non-CLOEXEC inherited descriptor
+  open) left the next run blocked forever with nothing to act on. The
+  acquisition moved to a small sourceable library,
+  `scripts/qa/acquire_full_qa_lock.bash`, whose `acquire_full_qa_lock_or_die`
+  uses `flock -w "${FULL_QA_LOCK_WAIT_SECONDS:-600}"` and, on timeout, names
+  every pid with an open fd on the lock file (via `/proc/*/fd`). Also:
+  `full_qa_lock_is_held` (Python side) now marks the fd `FD_CLOEXEC` once
+  possession is PROVEN, so a further descendant THIS process forks (a test
+  fixture backgrounding an orphan) does not silently inherit the lock
+  onward past this process's own exit -- set only AFTER the proof, never
+  before, since pytest itself still needs ordinary non-CLOEXEC inheritance
+  across fork/exec to receive the fd at all. Both proven with dedicated RED
+  tests (`tests/unit/scripts/test_acquire_full_qa_lock_bash.py`,
+  `TestProvenFdIsMarkedCloexec`).
+- **Incidental fix, in code this round touches.** `full_qa_lock.py`'s own
+  test, `test_true_in_a_child_that_inherits_the_locked_fd`, asserted
+  `"HELD" in probe.stdout`, which is also true of `"NOT-HELD"` (`"HELD"` is
+  a substring of it) -- so it passed without ever proving inheritance. The
+  fd `open_lock_fd`'s `os.open()` returns is non-inheritable by default
+  (PEP 446); the test never called `pass_fds`/`set_inheritable`, so the
+  child never actually held the lock, and the weak assertion masked it.
+  Fixed to `pass_fds=(fd,)` plus `os.set_inheritable` and an exact-match
+  assertion; `acquire_full_qa_lock`'s own docstring corrected to match
+  (`pass_fds` is required for a Python-subprocess child; only a shell
+  child spawned THAT way inherits further for free after that).
 
 ### Phase 2: Deliver
 

@@ -44,7 +44,15 @@ def _write_fixture_suite(root: Path, file_count: int) -> None:
     tests_dir = root / "tests"
     tests_dir.mkdir()
     (tests_dir / "conftest.py").write_text(
-        "pytest_plugins = ['claude_code_hooks_daemon.qa.full_qa_gate']\n"
+        # Review 10 B1: the SAME re-export shape as the real tests/conftest.py
+        # -- `pytest_plugins = [...]` registers the daemon's OWN module as
+        # the plugin (anchoring on its `qa/` source directory, not this
+        # fixture's tests dir), which `_gate_anchor` would find but count
+        # zero real test files under, refusing every run. Importing the
+        # function makes THIS conftest.py the plugin pytest registers, so
+        # its own directory is the anchor -- exactly the production shape.
+        "from claude_code_hooks_daemon.qa.full_qa_gate import pytest_collection_modifyitems\n"
+        "__all__ = ['pytest_collection_modifyitems']\n"
     )
     for i in range(file_count):
         (tests_dir / f"test_f{i}.py").write_text(
@@ -136,6 +144,37 @@ class TestWholeSuiteSizedRunIsRefusedWithoutTheLock:
             check=False,
         )
         assert result.returncode == 1
+
+    def test_rootdir_pointed_at_an_empty_directory_is_still_refused(self, tmp_path: Path) -> None:
+        """Review 10 B1: `--rootdir` repoints `config.rootpath`, but never
+        where conftest.py is discovered from -- the count must anchor on the
+        conftest's own directory, not the caller-controlled rootdir."""
+        _write_fixture_suite(tmp_path, file_count=4)
+        empty = tmp_path.parent / f"{tmp_path.name}-empty"
+        empty.mkdir()
+        result = _run_pytest_subprocess(tmp_path, ["-q", f"--rootdir={empty}", "tests/"])
+        assert result.returncode == 1
+        assert "REFUSED" in result.stdout, result.stdout + result.stderr
+
+    def test_config_file_dev_null_with_empty_rootdir_is_still_refused(self, tmp_path: Path) -> None:
+        """Review 10 B1, the D2 composite shape."""
+        _write_fixture_suite(tmp_path, file_count=4)
+        empty = tmp_path.parent / f"{tmp_path.name}-empty2"
+        empty.mkdir()
+        result = _run_pytest_subprocess(
+            tmp_path, ["-q", "-c", "/dev/null", f"--rootdir={empty}", "tests/"]
+        )
+        assert result.returncode == 1
+        assert "REFUSED" in result.stdout, result.stdout + result.stderr
+
+    def test_k_selecting_one_test_is_not_refused(self, tmp_path: Path) -> None:
+        """Review 10 m2: `-k` deselects AFTER this hook's default ordering
+        runs, so the file count must be taken post-deselection
+        (`trylast=True`) or a single selected test is wrongly refused."""
+        _write_fixture_suite(tmp_path, file_count=4)
+        result = _run_pytest_subprocess(tmp_path, ["-q", "-k", "test_ok_0", "tests/"])
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "REFUSED" not in result.stdout
 
 
 class TestWholeSuiteSizedRunSucceedsWithTheLock:
