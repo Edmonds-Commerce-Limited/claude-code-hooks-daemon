@@ -9,6 +9,25 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N86 — A discovery-file miss leaves the forwarders unable to find or start the daemon
+
+**Found by the upgrade refused-cases investigation**
+(`subagent-reports/260925-upgrade-refused-rootcause-opus-5-5.md` on
+`worktree-upgrade-scripts`, section 4.2). The daemon publishes its
+socket-path discovery file under the OS hostname. A forwarder running with a
+different `HOSTNAME` cannot find it. The upgrade apply's `env -i` dropped
+`HOSTNAME`, and that is fixed on that branch, but a deleted file or a crash
+lands in the same state. Then `cmd_start` sees a socket path over the
+AF_UNIX limit, reports "socket exists but its liveness is indeterminate",
+and refuses. The file does not exist, so the message is false, and the
+forwarder can never start a daemon from that state. Every PreToolUse call
+then fails open until N24 lands, and fails closed after it.
+
+**Remedy:** an absent socket path is NOT_LIVE, not indeterminate. The
+forwarder (`init.sh`) computes the same `/tmp` fallback name the Python CLI
+does, instead of depending only on the discovery file. It touches `init.sh`,
+so it starts after N24 merges.
+
 ### N85 — `_MESSAGE_BODY_PATTERN` reads `\'` as an escape inside single quotes, which hides a command from every guard
 
 **Found by N38 review 5 (ledger candidate 2).** In
