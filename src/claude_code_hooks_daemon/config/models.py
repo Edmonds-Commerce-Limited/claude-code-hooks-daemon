@@ -1608,10 +1608,17 @@ class ChainConfig(BaseModel):
             ``CLAUDE/Plan/00242-terminal-handlers-are-a-flawed-primitive/
             MEASUREMENTS.md`` records the numbers.
         deadline_seconds: Per-event chain deadline (Plan 00466 N25/N34/N40),
-            well under the client's own socket timeout (30s): that
-            client-side timeout fails the WHOLE chain open on expiry, so a
-            merely slow handler bypassed every guard behind it, not just
-            itself. Checked BETWEEN handlers, and (Plan 00466 N40 m1) the
+            well under the client's own socket timeout (30s). Originally
+            motivated by that client-side timeout failing the WHOLE chain
+            open on expiry, so a merely slow handler bypassed every guard
+            behind it, not just itself; the client itself now fails CLOSED
+            on its own timeout for PreToolUse (Plan 00466 N40 M1/N25,
+            ``.claude/init.sh``), but this deadline still matters on its own
+            terms -- it is what tells a slow, merely-overloaded host apart
+            from an actually-malicious payload, denying only the
+            ``SAFETY``+``BLOCKING`` handlers that did not get to run rather
+            than the whole call. Checked BETWEEN handlers, and (Plan 00466
+            N40 m1) the
             WHOLE per-handler loop is dispatched as ONE bounded call, on its
             own fresh daemon thread (Plan 00466 N40 n1: not a thread pool —
             see ``BoundedDispatcher``) — a handler slow enough within its own
@@ -1626,9 +1633,13 @@ class ChainConfig(BaseModel):
             timeout, which fails the whole chain open with no guard getting
             a say).
         max_safety_input_bytes: Defence in depth alongside
-            ``deadline_seconds`` (Plan 00466 N34 remedy 3): the combined size
-            of a SAFETY handler's bulk-text input fields (Bash's ``command``,
-            Write's ``content``, Edit's ``old_string``/``new_string``) is
+            ``deadline_seconds`` (Plan 00466 N34 remedy 3): the serialised
+            size of the WHOLE ``tool_input`` dict (Plan 00466 n24 review B1,
+            m5 -- a fixed field list missed MultiEdit's ``edits[]``,
+            NotebookEdit's ``new_source`` and, most importantly, Write/Edit's
+            own ``file_path``: B2's actual attack vector was a ~90 KB path
+            that never touched ``content`` at all; see
+            ``chain._safety_payload_size``) is
             checked BEFORE dispatch is even attempted, so a truly pathological
             payload fails fast and cheaply rather than paying dispatch
             overhead only to be cut off by the deadline anyway. 2 MB (the
