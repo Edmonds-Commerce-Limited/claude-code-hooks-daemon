@@ -330,6 +330,22 @@ _FULL_RUNS: list[tuple[str, str]] = [
     ("python3 <<< 'import pytest; pytest.main()'", "pytest-whole-suite"),
     ("echo 'import pytest; pytest.main()' | python3", "pytest-whole-suite"),
     (f"python3 -c 'import os; {_SHELL_OUT}(\"pytest tests\")'", "pytest-whole-suite"),
+    # Review 10 B1 (coordinator decision): a SEEN pytest invocation carrying a
+    # plugin-disabling flag denies exactly as the same command without the
+    # flag would -- the flag consumes its own value under the pytest option
+    # grammar, leaving `tests/` as an ordinary operand matching `full_args`.
+    # The sink-side gap these flags open (full_qa_gate.py, review 10 B1's
+    # other half) is a DIFFERENT layer: this pins that the FIRST line still
+    # denies every one of these when it can see them.
+    ("pytest --noconftest tests/", "pytest-whole-suite"),
+    ("pytest -p no:tests.conftest tests/", "pytest-whole-suite"),
+    ("PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 pytest tests/", "pytest-whole-suite"),
+    ("pytest -c /dev/null tests/", "pytest-whole-suite"),
+    ("pytest --config-file /dev/null tests/", "pytest-whole-suite"),
+    ("pytest -o addopts= tests/", "pytest-whole-suite"),
+    ("pytest --override-ini addopts= tests/", "pytest-whole-suite"),
+    ("pytest --noconftest", "pytest-whole-suite"),
+    ("pytest -c /dev/null --rootdir=/tmp/empty tests/", "pytest-whole-suite"),
 ]
 
 _NOT_FULL_RUNS: list[str] = [

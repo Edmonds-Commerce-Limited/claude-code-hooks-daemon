@@ -352,6 +352,29 @@ one place every route ends up, whatever launched it: pytest itself.
   assertion; `acquire_full_qa_lock`'s own docstring corrected to match
   (`pass_fds` is required for a Python-subprocess child; only a shell
   child spawned THAT way inherits further for free after that).
+- **B1 (the handler-denies-what-it-can-see part): already true, now pinned.**
+  Checked directly against `find_full_qa_invocation` and this project's real
+  `full_qa_patterns`: `pytest --noconftest tests/`, `pytest -p no:tests.conftest tests/`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 pytest tests/`, `pytest -c /dev/null tests/`, `pytest --config-file /dev/null tests/`, `pytest -o addopts= tests/`, `pytest --override-ini addopts= tests/`, bare `pytest --noconftest`, and the D2 composite
+  (`-c /dev/null --rootdir=<empty> tests/`) all already DENY today -- the
+  flag consumes its own value under `option_grammar: pytest`, leaving
+  `tests/` (or nothing, under `bare_is_full`) matched exactly as it would be
+  without the flag. Pinned in `_FULL_RUNS` so this cannot silently regress.
+
+### Owner referral (Round 10)
+
+`--noconftest` (and, if the gate plugin moves to a `pytest11` entry point,
+`-p no:<name>` / `PYTEST_DISABLE_PLUGIN_AUTOLOAD`) removes the sink BEFORE it
+can run at all, or bypasses its registration -- neither is closable from
+inside the process being checked, and the handler above only helps when the
+disabling flag is SEEN in the same Bash command as a matched full-suite
+invocation. A launcher that hides the flag from the handler (a wrapper
+script this parser cannot read, or a two-step "set env var, then run pytest
+in a later command") still reaches an unprotected pytest. This is the
+owner's threat-model question -- accidental overload (which the sink now
+handles for every route it CAN see, after B1's anchor fix) versus
+deliberate evasion (which no sink inside the checked process can close) --
+and is NOT accepted as a residual; it is recorded here for a decision, not
+left silent.
 
 ### Phase 2: Deliver
 
