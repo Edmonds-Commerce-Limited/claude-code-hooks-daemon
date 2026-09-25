@@ -410,13 +410,14 @@ class TestIterNormalisedShellWordsEvalAndLiteralShellFeeds:
         words = list(iter_normalised_shell_words(command))
         assert "world" in words
 
-    def test_source_process_substitution_of_a_non_literal_producer_fails_closed(
+    def test_source_process_substitution_of_a_non_literal_producer_is_scanned(
         self,
     ) -> None:
-        """`source <(cat somefile)` -- the substituted command is not a
-        recognised literal producer, so its content cannot be ruled out."""
-        with pytest.raises(TooManyToEnumerateError):
-            list(iter_normalised_shell_words("source <(cat somefile)"))
+        """review 6 MAJOR-2: `source <(cat somefile)` -- the substituted
+        command is not echo/printf, but its OWN command text is judged like
+        any other nested command (no longer failed closed wholesale)."""
+        words = list(iter_normalised_shell_words("source <(cat somefile)"))
+        assert "somefile" in words
 
     def test_an_ordinary_source_invocation_is_unaffected(self) -> None:
         """Control: `source file.sh arg1` (no process substitution at all)
@@ -455,3 +456,199 @@ class TestIterNormalisedShellWordsEvalAndLiteralShellFeeds:
         command = "echo cat 'wor'\\''l'\\''d' | grep x"
         words = list(iter_normalised_shell_words(command))
         assert "world" not in words
+
+
+class TestIterNormalisedShellWordsPlusOptions:
+    """review 6 MAJOR-1: bash's `+`-form options (`+x`, `+O value`) must not
+    stop the option walk before a following `-c` is found."""
+
+    def test_a_plus_flag_before_dash_c_is_recognised(self) -> None:
+        command = "bash +x -c 'cat wor'\\''ld'"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_a_value_taking_plus_flag_before_dash_c_is_recognised(self) -> None:
+        command = "bash +O extglob -c 'cat wor'\\''ld'"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+        assert "extglob" in words
+
+
+class TestIterNormalisedShellWordsHereStringOperands:
+    """review 6 MAJOR-1: the here-string trigger must recognise the operand
+    forms bash accepts for "read the script from stdin" -- `-`,
+    `/dev/stdin` -- not just bare adjacency or `-s`."""
+
+    def test_dash_operand_before_here_string_is_recognised(self) -> None:
+        command = "bash - <<<'cat wor'\\''ld'"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_dev_stdin_operand_before_here_string_is_recognised(self) -> None:
+        command = "bash /dev/stdin <<<'cat wor'\\''ld'"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_source_dev_stdin_here_string_is_recognised(self) -> None:
+        command = "source /dev/stdin <<<'cat wor'\\''ld'"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_dot_dev_stdin_here_string_is_recognised(self) -> None:
+        command = ". /dev/stdin <<<'cat wor'\\''ld'"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+
+class TestIterNormalisedShellWordsPipeToShellExtended:
+    """review 6 MAJOR-1: pipe-to-shell resolution must survive the shell
+    carrying its own flags, a wrapper (`sudo`/`env`) in front of it, and a
+    `tee` passthrough stage -- not just bare `producer | shell`."""
+
+    def test_pipe_to_shell_with_a_flag_is_recognised(self) -> None:
+        command = "echo cat 'wor'\\''l'\\''d' | bash -s"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_pipe_to_sudo_wrapped_shell_is_recognised(self) -> None:
+        command = "echo cat 'wor'\\''l'\\''d' | sudo bash"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_pipe_to_env_wrapped_shell_is_recognised(self) -> None:
+        command = "echo cat 'wor'\\''l'\\''d' | env bash"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_pipe_through_tee_to_a_shell_is_recognised(self) -> None:
+        command = "echo cat 'wor'\\''l'\\''d' | tee /dev/null | bash"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_pipe_through_tee_with_no_further_shell_drops_content(self) -> None:
+        """Control: `tee` not itself followed by a shell -- no recursion."""
+        command = "echo cat 'wor'\\''l'\\''d' | tee /tmp/out"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" not in words
+
+    def test_bash_reading_a_process_substitution_as_its_script_is_recognised(
+        self,
+    ) -> None:
+        """`bash <(echo …)` -- the substitution's own content is the
+        script, matching the pipe-to-shell direction."""
+        command = "bash <(echo cat 'wor'\\''l'\\''d')"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+
+class TestIterNormalisedShellWordsProcessSubstitutionGeneralised:
+    """review 6 MAJOR-2: a process substitution's substituted command is
+    judged by its OWN command text like any other nested command -- a
+    non-literal (non echo/printf) producer is no longer failed closed."""
+
+    def test_non_literal_producer_argument_is_still_scanned(self) -> None:
+        """`source <(cat somefile)` -- `cat`'s own argument is scanned like
+        any other command's, so a protected-shaped argument is still found."""
+        words = list(iter_normalised_shell_words("source <(cat wor'ld)"))
+        assert "world" in words
+
+    def test_non_literal_producer_with_no_mention_does_not_raise(self) -> None:
+        """The false positive review 6 MAJOR-2 exists to fix: a completion
+        setup line must not be denied wholesale."""
+        words = list(iter_normalised_shell_words("source <(kubectl completion bash)"))
+        assert "kubectl" in words
+        assert "completion" in words
+
+    def test_common_completion_lines_do_not_raise(self) -> None:
+        for command in (
+            "source <(kubectl completion bash)",
+            "source <(gh completion -s bash)",
+            "source <(helm completion bash)",
+            "eval \"$(pip completion --bash)\"",
+        ):
+            list(iter_normalised_shell_words(command))  # must not raise
+
+
+class TestIterNormalisedShellWordsMoreShellsAndWrappers:
+    """review 6 minor-1: mksh/csh/tcsh/fish, versioned binary names, and the
+    wrappers `script -c`, `su -c`, `flock -c`, `watch`."""
+
+    def test_mksh_is_recognised(self) -> None:
+        words = list(iter_normalised_shell_words("mksh -c 'cat wor'\\''ld'"))
+        assert "world" in words
+
+    def test_csh_is_recognised(self) -> None:
+        words = list(iter_normalised_shell_words("csh -c 'cat wor'\\''ld'"))
+        assert "world" in words
+
+    def test_tcsh_is_recognised(self) -> None:
+        words = list(iter_normalised_shell_words("tcsh -c 'cat wor'\\''ld'"))
+        assert "world" in words
+
+    def test_fish_is_recognised(self) -> None:
+        words = list(iter_normalised_shell_words("fish -c 'cat wor'\\''ld'"))
+        assert "world" in words
+
+    def test_versioned_bash_is_recognised(self) -> None:
+        words = list(iter_normalised_shell_words("bash5 -c 'cat wor'\\''ld'"))
+        assert "world" in words
+
+    def test_versioned_bash_with_dotted_version_is_recognised(self) -> None:
+        words = list(iter_normalised_shell_words("bash5.1 -c 'cat wor'\\''ld'"))
+        assert "world" in words
+
+    def test_script_dash_c_is_recognised(self) -> None:
+        command = "script -qc 'cat wor'\\''ld' /dev/null"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_su_dash_c_is_recognised(self) -> None:
+        command = "su -c 'cat wor'\\''ld' root"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_flock_dash_c_after_a_positional_lockfile_is_recognised(self) -> None:
+        command = "flock /tmp/l -c 'cat wor'\\''ld'"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_flock_tolerant_scan_does_not_leak_into_the_next_command(self) -> None:
+        """The tolerant option walk (flock keeps looking for `-c` past
+        positional words) must still stop at a command terminator -- `ls
+        -c` in a SECOND statement must not be mistaken for flock's own
+        `-c` (which would wrongly recurse into its quoted argument)."""
+        command = "flock /tmp/l true; ls -c 'wor'\\''ld'"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" not in words
+
+    def test_watch_implicit_code_is_recognised(self) -> None:
+        command = "watch -n1 'cat wor'\\''ld'"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_watch_with_long_interval_flag_is_recognised(self) -> None:
+        command = "watch --interval 5 'cat wor'\\''ld'"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+
+class TestIterNormalisedShellWordsProducerEscapes:
+    """review 6 MAJOR-1: printf and `echo -e` are NOT literal producers --
+    their backslash escapes must be evaluated, not passed through raw."""
+
+    def test_echo_dash_e_decodes_backslash_escapes(self) -> None:
+        command = "echo -e 'c\\x61t wor\\x6cd' | bash"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_printf_decodes_backslash_escapes_in_its_format(self) -> None:
+        command = "source <(printf 'cat wor\\x6cd')"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_echo_without_dash_e_does_not_decode_escapes(self) -> None:
+        """Control: plain `echo` (no `-e`) must NOT interpret `\\n` -- the
+        literal backslash-n stays in the text, unlike an actual newline."""
+        command = "echo 'a\\nb' | bash"
+        words = list(iter_normalised_shell_words(command))
+        assert "a\\nb" in words or any("a\\nb" in word for word in words)

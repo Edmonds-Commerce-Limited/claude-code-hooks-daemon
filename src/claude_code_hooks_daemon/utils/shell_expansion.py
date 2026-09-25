@@ -296,9 +296,64 @@ _WORD_SEPARATOR_CHARS: Final[str] = " \t\n;|&<>()"
 # `/bin/bash` is stripped before comparing) and the recursion's two
 # independent bounds.
 _SHELL_INTERPRETER_BASENAMES: Final[frozenset[str]] = frozenset(
-    {"sh", "bash", "zsh", "dash", "ksh", "ash"}
+    {"sh", "bash", "zsh", "dash", "ksh", "ash", "mksh", "csh", "tcsh", "fish"}
 )
+
+#: A version-suffixed shell binary name (`bash5`, `bash5.1`) -- review 6
+#: minor-1. Only a bare trailing digit run (optionally dotted) counts;
+#: `bash-static`/`zshrc` are ordinary non-matches, not shells with a weird
+#: suffix.
+_VERSIONED_SHELL_NAME_RE: Final[re.Pattern[str]] = re.compile(
+    r"^(?:sh|bash|zsh|dash|ksh|ash|mksh|csh|tcsh)\d[\d.]*$"
+)
+
+
+def _is_shell_interpreter(basename: str) -> bool:
+    """Is ``basename`` (already stripped of any leading path) a recognised
+    shell -- a literal name, or a version-suffixed one (`bash5`)?"""
+    return basename in _SHELL_INTERPRETER_BASENAMES or bool(
+        _VERSIONED_SHELL_NAME_RE.match(basename)
+    )
+
+
 _EVAL_COMMAND_NAME: Final[str] = "eval"
+
+# review 6 minor-1: three wrapper SHAPES whose own `-c`-style (or implicit)
+# code argument is not preceded by a recognised SHELL name at all, so the
+# per-word "any shell name anywhere" trigger never fires for them on its
+# own.
+#
+#: `su -c CMD` / `script -c CMD` (or clustered, `script -qc CMD`) -- the
+#: code flag is never preceded by a positional word, so the existing STRICT
+#: option walk (stop at the first non-option word) already finds it once
+#: these names are recognised as triggers in their own right.
+_DASH_C_WRAPPER_BASENAMES: Final[frozenset[str]] = frozenset({"su", "script"})
+
+#: `flock <file> -c CMD` -- the code flag can follow one or more POSITIONAL
+#: words first, so the option walk must not stop at the first non-option
+#: word the way a real interpreter's (or the set above's) does.
+_TOLERANT_DASH_C_WRAPPER_BASENAMES: Final[frozenset[str]] = frozenset({"flock"})
+
+#: `watch [options] COMMAND` runs `COMMAND` via a shell internally with NO
+#: introducing flag at all -- the first non-option word (after skipping the
+#: wrapper's own flags, including `-n`/`--interval`'s separate value) IS
+#: the code.
+_IMPLICIT_CODE_WRAPPER_BASENAMES: Final[frozenset[str]] = frozenset({"watch"})
+_IMPLICIT_CODE_VALUE_FLAGS: Final[frozenset[str]] = frozenset({"-n", "--interval"})
+
+#: Wrappers that pass an EXISTING pipeline's stdin straight through to
+#: whatever comes next -- `echo … | sudo bash`, `… | env bash` still feed
+#: the echoed text to `bash`. Consulted only while resolving a pending
+#: echo/printf-to-shell pipe; elsewhere these names carry no special
+#: meaning (each is ALSO an ordinary word, still yielded).
+_PIPE_WRAPPER_BASENAMES: Final[frozenset[str]] = frozenset(
+    {"sudo", "env", "nice", "timeout", "nohup", "exec", "command", "doas"}
+)
+
+#: `echo … | tee /dev/null | bash` -- `tee` forwards the SAME bytes on to
+#: its own stdout (as well as to a file), so pending pipe content must
+#: survive a `tee` stage rather than being dropped there.
+_PIPE_PASSTHROUGH_BASENAMES: Final[frozenset[str]] = frozenset({"tee"})
 
 #: Nesting levels of `-c`/`eval` re-parsing followed (`bash -c 'bash -c
 #: "..."'` could recurse arbitrarily) -- independent of the per-level
@@ -375,10 +430,21 @@ def _classify_interpreter_option_word(word: str) -> str:
       `-lc` is handled by "dash_c" above since it contains `c`).
     - ``"non_option"`` -- not an option word -- this is a `<interpreter>`
       invocation with no `-c` found; option-walking stops here.
+
+    Two operand spellings of "read the script from stdin" (`bash -`, `bash
+    /dev/stdin`) are recognised as ``"plain"`` (review 6 MAJOR-1) -- the
+    same direction `-s` already was -- so a following here-string is still
+    found rather than the walk stopping here as an ordinary non-option word.
     """
+    if word in ("-", "/dev/stdin"):
+        return "plain"
     if word.startswith("--"):
         return "value_separate" if word in _LONG_OPTIONS_WITH_ARG else "plain"
-    if word.startswith("-") and len(word) > 1:
+    # bash's `+`-form options (`+x`, `+O value`) are the mirror image of
+    # `-x`/`-O value` and walked identically (review 6 MAJOR-1) -- the sign
+    # character only changes the FLAG's runtime effect, never how many
+    # words it occupies.
+    if len(word) > 1 and word[0] in "-+":
         for position in range(1, len(word)):
             char = word[position]
             if char == "c":
@@ -606,6 +672,48 @@ def normalise_word(word: str) -> str:
     return decoded
 
 
+#: `echo -e`/`-ne`/`-en` -- the common, single-token spellings of "turn on
+#: backslash-escape interpretation". A combined cluster carrying anything
+#: else (`-ne x`) is deliberately NOT matched here -- see
+#: :func:`_resolve_collected_producer_text`'s docstring for the scope this
+#: leaves out.
+_ECHO_ESCAPE_FLAGS: Final[frozenset[str]] = frozenset({"-e", "-ne", "-en"})
+
+
+def _resolve_collected_producer_text(head: str | None, words: list[str]) -> str:
+    """The text a collected ``eval``/``echo``/``printf``/other-producer
+    argument list resolves to, once joined -- review 6 MAJOR-1: "printf and
+    echo -e are NOT literal producers", so a plain space-join (correct for
+    ``eval`` and for a bare ``echo``) is no longer applied unconditionally.
+
+    - ``echo`` with a leading ``-e``/``-ne``/``-en`` flag word: that flag is
+      dropped and the REST is backslash-escape decoded (reusing the same
+      decoder :func:`_consume_dollar` uses for ``$'...'`` bodies -- echo's
+      escape table is a subset of ANSI-C's, so this is a safe superset, not
+      an exact match).
+    - ``printf``: backslash escapes are ALWAYS interpreted in printf's
+      format (unconditionally, unlike echo), so the whole joined text is
+      decoded the same way.
+    - Anything else (plain ``echo``, ``eval``, or a non-producer command's
+      own text inside a process substitution): an unmodified space join --
+      exactly the previous behaviour.
+
+    Deliberately NOT a printf format-directive engine: ``%s``/``%d`` are
+    left as literal text in the output, with every operand word still
+    present (space-joined) alongside them. That is sufficient for MENTION
+    detection -- a protected word supplied as an operand is still findable
+    as its own word -- even though the reconstructed text does not
+    positionally substitute it the way real ``printf`` would.
+    """
+    content = list(words)
+    if head == "echo" and content and content[0] in _ECHO_ESCAPE_FLAGS:
+        content = content[1:]
+        return _decode_ansi_c_body(" ".join(content))
+    if head == "printf":
+        return _decode_ansi_c_body(" ".join(content))
+    return " ".join(content)
+
+
 def iter_normalised_shell_words(
     command: str, *, max_words: int = DEFAULT_MAX_NORMALISED_WORDS
 ) -> Iterator[str]:
@@ -631,26 +739,40 @@ def iter_normalised_shell_words(
     ``_MAX_NESTED_SHELL_BYTES`` (shared across every shape and every
     nesting level):
 
-    - ``<interpreter> [options...] -c <code>`` -- a proper option walk
-      (long options, short clusters with `-c` recognised anywhere in one,
-      `-o`/`-O`/`--rcfile`/`--init-file` consuming a value glued or
-      separate), not bare adjacency; see
-      :func:`_classify_interpreter_option_word`.
+    - ``<interpreter> [options...] -c <code>`` -- a proper option walk,
+      including bash's `+`-form options (`+x`, `+O value`), not just their
+      `-`-form mirrors; long options, short clusters with `-c` recognised
+      anywhere in one, `-o`/`-O`/`--rcfile`/`--init-file` consuming a value
+      glued or separate; see :func:`_classify_interpreter_option_word`.
+      Also entered for `su -c`/`script -c` (never preceded by a positional
+      word) and, tolerantly, `flock <file> -c` (a positional word first is
+      fine); `watch [options] CODE` has no introducing flag at all and is
+      handled separately.
     - ``eval <words...>`` -- every argument word is reassembled with a
       SINGLE space each (matching eval's own semantics) and the join is
       re-parsed, not just the first word. ``builtin eval ...``/
       ``command eval ...`` are covered for free (this triggers on the
       literal word ``eval`` appearing at all).
-    - ``source <(echo|printf ...)`` / ``. <(echo|printf ...)`` -- the
-      producer's joined, literal output is what gets sourced, so it is
-      re-parsed the same way. A NON-literal (or unrecognised) producer
-      inside ``<(...)`` cannot be examined at all, and FAILS CLOSED
-      (raises) rather than silently passing through.
+    - A process substitution ``<(...)`` ANYWHERE (after `source`/`.`, as an
+      interpreter's own script `bash <(...)`, or as a plain argument to any
+      other command) -- collected and re-parsed as its own nested command,
+      the same way `eval`'s argument is. `echo`/`printf` are joined the way
+      they actually print (see below); anything else is judged by its OWN
+      command text -- denied only if THAT text mentions a protected path,
+      never failed closed just for being an unrecognised producer.
     - ``echo|printf '...' | <interpreter>`` (no ``-c``, i.e. reading
       stdin) -- the producer's joined output is what the shell executes,
-      re-parsed the same way.
-    - ``<interpreter> [-s] <<<'...'`` (a here-string, with no ``-c``) --
-      bash reads its own stdin as the script.
+      re-parsed the same way. The pipeline may carry the shell behind a
+      wrapper (`sudo`/`env`/`nice`/`timeout`/`nohup`/`exec`/`command`/
+      `doas`), the shell may carry its own flags (`bash -s`, `bash -x`),
+      and a `tee` stage in between still forwards the content on.
+    - ``<interpreter> [-s|-|/dev/stdin] <<<'...'`` (a here-string, with no
+      ``-c``) -- bash reads its own stdin as the script; `source`/`.
+      /dev/stdin <<<...` reads the same way.
+    - ``echo``'s ``-e``/``-ne``/``-en`` and ``printf``'s ALWAYS-interpreted
+      format both undergo backslash-escape decoding before being re-parsed
+      -- see :func:`_resolve_collected_producer_text` for what is (and is
+      not) simulated.
     """
     remaining_bytes = [_MAX_NESTED_SHELL_BYTES]
     yield from _iter_normalised_shell_words(
@@ -689,19 +811,42 @@ def _iter_normalised_shell_words(
     depth: int,
     remaining_bytes: list[int],
 ) -> Iterator[str]:
+    """One linear word-by-word state machine (Plan 00466 review 6): every
+    trigger below shares the same mutable per-call state (which word is
+    pending what), so the sections stay numbered comments in one function
+    rather than several small ones that would each need the same state
+    threaded through them.
+    """
     count = 0
     i = 0
     n = len(command)
 
-    # `<interpreter> [options...] -c <code>` option walk.
+    # `<interpreter> [options...] -c <code>` option walk (also entered for
+    # the `su`/`script`/`flock` wrapper shapes below).
     scanning_interpreter_options = False
+    scanning_tolerant = False  # flock: a positional word does not end the walk
     awaiting_dash_c_argument = False
     awaiting_option_value = False
 
-    # `eval`/`source <(echo ...)`/`echo ... | <shell>` word-joining.
+    # `eval`/a process substitution's content/`echo|printf ... | <shell>`
+    # word-joining.
     collecting_words: list[str] | None = None
-    collecting_purpose: str | None = None  # "eval" | "source_echo" | "pipe_echo"
-    pending_pipe_content: str | None = None
+    collecting_purpose: str | None = None  # "eval" | "procsub" | "pipe_echo"
+    collecting_head: str | None = None  # the trigger word, for echo/printf decode
+
+    # `echo|printf '...' | <shell>` -- content captured, looking for the
+    # pipeline stage that actually consumes it.
+    pipe_content: str | None = None
+    pipe_stage_awaiting_head = False
+    pipe_stage_passthrough = False  # inside a `tee` stage; content survives it
+
+    # `watch [options] CODE` -- CODE is implicit (no introducing flag).
+    awaiting_implicit_code_word = False
+    awaiting_implicit_code_value = False
+
+    # `source`/`.` immediately followed by `/dev/stdin` -- looking for a
+    # trailing here-string on the NEXT word.
+    awaiting_source_stdin_herestring = False
 
     # Single-word lookback for `source`/`.` immediately followed by `<(`.
     previous_word: str | None = None
@@ -737,31 +882,90 @@ def _iter_normalised_shell_words(
         is_terminator_next = stop_char is None or stop_char in _COMMAND_TERMINATOR_CHARS
         i = end
 
-        # 1. Resolve a pending pipe-echo decision: is THIS word the shell
-        #    on the right-hand side of `echo '...' | <shell>`?
-        if pending_pipe_content is not None:
-            content = pending_pipe_content
-            pending_pipe_content = None
-            if _interpreter_basename(decoded) in _SHELL_INTERPRETER_BASENAMES and is_terminator_next:
+        # 0a. A tolerant (flock-style) option walk must not run past a
+        #     genuine command terminator -- unlike a real interpreter's
+        #     STRICT walk, it does not stop on the first ordinary word, so
+        #     this is the only thing that ends it short of finding `-c`.
+        if scanning_interpreter_options and scanning_tolerant and any(
+            ch in _COMMAND_TERMINATOR_CHARS for ch in this_word_operators
+        ):
+            scanning_interpreter_options = False
+            scanning_tolerant = False
+
+        # 0b. A `tee`-passthrough stage: once it ends, does it still hand
+        #     captured pipe content on to a FURTHER stage? This can only
+        #     set up the NEXT word to be a stage head -- captured BEFORE
+        #     updating, so 0c below (which resolves THIS word) never
+        #     mistakes tee's own trailing argument for the stage head that
+        #     update was arming.
+        entering_pipe_stage_awaiting_head = pipe_stage_awaiting_head
+        if pipe_stage_passthrough and is_terminator_next:
+            pipe_stage_passthrough = False
+            pipe_stage_awaiting_head = stop_char == _PIPE_OPERATOR
+            if not pipe_stage_awaiting_head:
+                pipe_content = None
+
+        # 0c. Resolve the head of a pipeline stage pending content is
+        #     waiting on: a wrapper (keep looking), a shell (recurse), a
+        #     `tee` passthrough (keep content alive), or neither (drop).
+        if entering_pipe_stage_awaiting_head:
+            pipe_stage_awaiting_head = False
+            basename = _interpreter_basename(decoded)
+            if basename in _PIPE_WRAPPER_BASENAMES:
+                pipe_stage_awaiting_head = True
+            elif _is_shell_interpreter(basename):
+                content = pipe_content
+                pipe_content = None
                 yield from _recurse_into_nested_command(
-                    content, max_words=max_words, depth=depth, remaining_bytes=remaining_bytes
+                    content or "",
+                    max_words=max_words,
+                    depth=depth,
+                    remaining_bytes=remaining_bytes,
                 )
+                # This word is ALSO an interpreter in its own right -- let
+                # its own flags/`-c` be walked normally, e.g. `echo … |
+                # bash -c '…'`.
+                scanning_interpreter_options = True
+                scanning_tolerant = False
+            elif basename in _PIPE_PASSTHROUGH_BASENAMES:
+                pipe_stage_passthrough = True
+            else:
+                pipe_content = None
+            previous_word = decoded
+            continue
+
+        # 0d. `watch [options] CODE` -- CODE has no introducing flag.
+        if awaiting_implicit_code_word:
+            if awaiting_implicit_code_value:
+                awaiting_implicit_code_value = False
                 previous_word = decoded
                 continue
-            # Not a stdin-shell-feed after all -- fall through so `decoded`
-            # is still checked as an ordinary/fresh trigger below.
-
-        # 2. Resolve a pending `-c` code argument.
-        if awaiting_dash_c_argument:
-            awaiting_dash_c_argument = False
-            scanning_interpreter_options = False
+            if decoded in _IMPLICIT_CODE_VALUE_FLAGS:
+                awaiting_implicit_code_value = True
+                previous_word = decoded
+                continue
+            if decoded.startswith("-"):
+                previous_word = decoded
+                continue
+            awaiting_implicit_code_word = False
             yield from _recurse_into_nested_command(
                 decoded, max_words=max_words, depth=depth, remaining_bytes=remaining_bytes
             )
             previous_word = decoded
             continue
 
-        # 3. Resolve a pending plain option VALUE (not code) -- resume
+        # 1. Resolve a pending `-c` code argument.
+        if awaiting_dash_c_argument:
+            awaiting_dash_c_argument = False
+            scanning_interpreter_options = False
+            scanning_tolerant = False
+            yield from _recurse_into_nested_command(
+                decoded, max_words=max_words, depth=depth, remaining_bytes=remaining_bytes
+            )
+            previous_word = decoded
+            continue
+
+        # 2. Resolve a pending plain option VALUE (not code) -- resume
         #    walking for `-c` afterward.
         if awaiting_option_value:
             awaiting_option_value = False
@@ -769,7 +973,8 @@ def _iter_normalised_shell_words(
             previous_word = decoded
             continue
 
-        # 4. Currently walking an interpreter's option words.
+        # 3. Currently walking an interpreter's (or code-flag wrapper's)
+        #    option words.
         if scanning_interpreter_options:
             kind = _classify_interpreter_option_word(decoded)
             if kind == "dash_c":
@@ -787,8 +992,13 @@ def _iter_normalised_shell_words(
             if kind == "plain":
                 previous_word = decoded
                 continue
-            # "non_option": the option walk concluded with no `-c` found;
-            # `decoded` is the first non-option word.
+            # "non_option": for a TOLERANT wrapper (flock), a positional
+            # word does not end the walk -- keep looking for `-c`.
+            if scanning_tolerant:
+                previous_word = decoded
+                continue
+            # For everything else, the option walk concluded with no `-c`
+            # found; `decoded` is the first non-option word.
             scanning_interpreter_options = False
             if this_word_operators == _HERE_STRING_OPERATOR:
                 yield from _recurse_into_nested_command(
@@ -799,17 +1009,19 @@ def _iter_normalised_shell_words(
             # Not a here-string -- fall through, `decoded` may still be a
             # fresh trigger in its own right (checked below).
 
-        # 5. Currently collecting eval/source-echo/pipe-echo argument words.
+        # 4. Currently collecting eval/procsub/pipe-echo argument words.
         if collecting_words is not None:
             collecting_words.append(decoded)
             if is_terminator_next:
-                joined = " ".join(collecting_words)
+                joined = _resolve_collected_producer_text(collecting_head, collecting_words)
                 purpose = collecting_purpose
                 collecting_words = None
                 collecting_purpose = None
+                collecting_head = None
                 if purpose == "pipe_echo":
                     if stop_char == _PIPE_OPERATOR:
-                        pending_pipe_content = joined
+                        pipe_content = joined
+                        pipe_stage_awaiting_head = True
                     # else: not piped to anything -- no recursion; the
                     # words were already scanned individually above.
                 else:
@@ -819,29 +1031,55 @@ def _iter_normalised_shell_words(
             previous_word = decoded
             continue
 
-        # 6. `source <(...)` / `. <(...)` -- resolve what the substituted
-        #    command is. A literal `echo`/`printf` producer's output is
-        #    collected and recursed into like `eval`'s. Anything else
-        #    cannot be examined and FAILS CLOSED (raises).
-        if previous_word in _SOURCE_COMMAND_NAMES and this_word_operators == _PROCESS_SUBSTITUTION_OPERATOR:
-            if decoded in _LITERAL_PRODUCER_COMMANDS:
-                collecting_words = []
-                collecting_purpose = "source_echo"
+        # 5. `source`/`.` immediately followed by `/dev/stdin` -- looking
+        #    for a trailing here-string on THIS word.
+        if previous_word in _SOURCE_COMMAND_NAMES and decoded == "/dev/stdin":
+            awaiting_source_stdin_herestring = True
+            previous_word = decoded
+            continue
+        if awaiting_source_stdin_herestring:
+            awaiting_source_stdin_herestring = False
+            if this_word_operators == _HERE_STRING_OPERATOR:
+                yield from _recurse_into_nested_command(
+                    decoded, max_words=max_words, depth=depth, remaining_bytes=remaining_bytes
+                )
                 previous_word = decoded
                 continue
-            raise TooManyToEnumerateError(
-                "source/. <(...) with unrecognised (non-literal) content cannot be ruled out"
-            )
+            # Not a here-string after all -- `decoded` still checked below.
+
+        # 6. A process substitution `<(...)` ANYWHERE -- its own command
+        #    text is judged like any other nested command (review 6
+        #    MAJOR-1's `bash <(echo …)`, and MAJOR-2's false-positive fix:
+        #    a non-literal producer such as `kubectl completion bash` is no
+        #    longer failed closed, just scanned the same way `eval` is).
+        if this_word_operators == _PROCESS_SUBSTITUTION_OPERATOR:
+            collecting_words = []
+            collecting_purpose = "procsub"
+            collecting_head = decoded
+            previous_word = decoded
+            continue
 
         # 7. Fresh triggers.
-        if _interpreter_basename(decoded) in _SHELL_INTERPRETER_BASENAMES:
+        basename = _interpreter_basename(decoded)
+        if _is_shell_interpreter(basename):
             scanning_interpreter_options = True
+            scanning_tolerant = False
+        elif basename in _DASH_C_WRAPPER_BASENAMES:
+            scanning_interpreter_options = True
+            scanning_tolerant = False
+        elif basename in _TOLERANT_DASH_C_WRAPPER_BASENAMES:
+            scanning_interpreter_options = True
+            scanning_tolerant = True
+        elif basename in _IMPLICIT_CODE_WRAPPER_BASENAMES:
+            awaiting_implicit_code_word = True
         elif decoded == _EVAL_COMMAND_NAME:
             collecting_words = []
             collecting_purpose = "eval"
+            collecting_head = None
         elif decoded in _LITERAL_PRODUCER_COMMANDS:
             collecting_words = []
             collecting_purpose = "pipe_echo"
+            collecting_head = decoded
 
         previous_word = decoded
 

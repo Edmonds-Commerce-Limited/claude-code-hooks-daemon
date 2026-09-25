@@ -2512,18 +2512,40 @@ class TestReview6ClosedShellFeedShapes:
         command = "source <(echo cat id_'\\''rs'\\''a')"
         assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
 
-    def test_source_process_substitution_of_a_non_literal_producer_fails_closed(
+    def test_source_process_substitution_of_a_non_literal_producer_with_no_mention_allows(
         self,
     ) -> None:
-        """A non-literal producer cannot be ruled out and must fail
-        CLOSED -- verified as a raise, not a silent allow, since a
-        find_protected_mention_detail caller that does not catch it
-        propagates straight through (secret_file_guard's own N11 wrapper
-        turns this into a deny)."""
-        with pytest.raises(TooManyToEnumerateError):
+        """review 6 MAJOR-2: a non-literal producer's own command text is
+        judged like any other nested command -- `cat somefile` mentions
+        nothing protected, so this is no longer failed closed just for
+        being an unrecognised producer."""
+        assert (
             sfm.find_protected_mention_detail(
                 "source <(cat somefile)", sfm.DEFAULT_PROTECTED_PATTERNS
             )
+            is None
+        )
+
+    def test_source_process_substitution_of_a_non_literal_producer_with_a_protected_argument_denies(
+        self,
+    ) -> None:
+        """The other half of MAJOR-2: a non-literal producer's OWN command
+        text is still scanned, so a protected path IN that text is caught."""
+        command = "source <(cat id_'\\''rs'\\''a')"
+        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+
+    def test_source_process_substitution_of_a_completion_line_allows(self) -> None:
+        """The false positive review 6 MAJOR-2 exists to fix: common
+        shell-completion setup lines must not be denied wholesale."""
+        for command in (
+            "source <(kubectl completion bash)",
+            "source <(gh completion -s bash)",
+            "source <(helm completion bash)",
+            "eval \"$(pip completion --bash)\"",
+        ):
+            assert (
+                sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is None
+            ), command
 
     def test_a_here_string_to_a_shell_denies(self) -> None:
         command = "bash <<<'cat id_'\\''rs'\\''a'"
