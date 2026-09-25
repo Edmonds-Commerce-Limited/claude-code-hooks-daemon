@@ -15,6 +15,7 @@ rather than chasing each new CPython edge case by hand.
 
 from __future__ import annotations
 
+import errno
 import os
 
 
@@ -25,3 +26,30 @@ def realpath(path: str | os.PathLike[str]) -> str:
         ValueError: For a path ``os.path.realpath`` itself rejects (a NUL byte).
     """
     return os.path.realpath(path, strict=False)
+
+
+def has_symlink_loop(path: str | os.PathLike[str]) -> bool:
+    """True when resolving ``path`` passes through a symlink loop.
+
+    Plan 00466 N24 review 4 (team-lead follow-up on R4-B1): once a loop is
+    hit, ``os.path.realpath``'s OWN answer for the rest of the path is
+    version-dependent -- 3.11 gives up and appends the remainder unresolved,
+    3.13 backs out of the loop and keeps resolving -- so ``realpath()``
+    above, which now equals ``os.path.realpath`` exactly, cannot itself give
+    a version-INDEPENDENT containment answer for this shape. A security
+    check that must agree on every Python version asks this directly
+    instead: ``strict=True`` resolution fails with ``ELOOP`` for the
+    existing prefix precisely when a loop is on the path, distinct from a
+    plain missing component (``ENOENT``/``ENOTDIR``), which is the ordinary,
+    harmless case of a Write to a path that does not exist yet.
+    """
+    try:
+        os.path.realpath(path, strict=True)
+    except OSError as exc:
+        return exc.errno == errno.ELOOP
+    except ValueError:
+        # A NUL byte: os.path.realpath itself rejects it, so it cannot BE a
+        # symlink loop -- realpath() above raises the same ValueError for
+        # any caller that goes on to actually resolve the path.
+        return False
+    return False

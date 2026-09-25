@@ -62,7 +62,7 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
     handler_excludes_path,
     resolve_project_root,
 )
-from claude_code_hooks_daemon.utils.realpath import realpath
+from claude_code_hooks_daemon.utils.realpath import has_symlink_loop, realpath
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
 _LOGGER = logging.getLogger(__name__)
@@ -1132,6 +1132,13 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         project_root = resolve_project_root()
         if project_root is None:
             return ""
+        if has_symlink_loop(file_path):
+            # Plan 00466 N24 review 4 (team-lead follow-up on R4-B1): once a
+            # loop is hit, os.path.realpath's own answer for the rest of the
+            # path is version-dependent, so relative_to below cannot be
+            # trusted to say "outside the root" consistently. Fail closed by
+            # scanning the path AS SPELLED rather than skipping it outright.
+            return file_path
         try:
             return str(Path(realpath(file_path)).relative_to(realpath(project_root)))
         except ValueError:
@@ -1184,6 +1191,14 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         """
         configured = self._resolved_secret_list_path()
         if configured is None:
+            return False
+        if has_symlink_loop(file_path) or has_symlink_loop(configured):
+            # Plan 00466 N24 review 4 (team-lead follow-up on R4-B1): once a
+            # loop is hit, os.path.realpath's own answer is version-
+            # dependent, so an equality test built on it cannot be trusted
+            # either way. Never grant the "this IS the list itself"
+            # exemption on an unreliable comparison -- fail closed by
+            # falling through to normal scanning.
             return False
         try:
             return realpath(file_path) == realpath(configured)

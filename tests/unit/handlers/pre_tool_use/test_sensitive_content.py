@@ -149,6 +149,29 @@ class TestFilePathIsCheckedNotJustContent:
         assert result.decision == Decision.DENY
         assert "zulu-host" not in (result.reason or "")
 
+    def test_secret_term_in_filename_reached_through_a_symlink_loop_still_matches(
+        self, tmp_path: Path
+    ) -> None:
+        """Plan 00466 N24 review 4 (team-lead follow-up on R4-B1): the
+        relative path text is normally built from ``realpath()``, which
+        ``os.path.realpath`` answers differently across Python versions once
+        a loop is on the path. A loop must not be able to make this check
+        silently stop scanning the path text on one version but not
+        another."""
+        secret_file = tmp_path / "terms-list.txt"
+        secret_file.write_text("zulu-host\n")
+        handler = _handler_with_secret_file(secret_file)
+
+        loop = tmp_path / "loop"
+        loop.symlink_to(loop)
+        routed = f"{loop}/../zulu-host-report.md"
+
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content.resolve_project_root",
+            return_value=str(tmp_path),
+        ):
+            assert handler.matches(_write_input(routed, "clean body\n")) is True
+
     def test_clean_path_and_clean_content_does_not_match(self) -> None:
         handler = _handler_with_public_patterns(
             [{"name": "x", "pattern": "secretpath", "description": "d"}]
@@ -443,6 +466,24 @@ class TestSecretListSelfExclusion:
             return_value=str(tmp_path),
         ):
             assert handler.matches(_write_input(str(secret_file), "alpha-term\n")) is False
+
+    def test_a_symlink_loop_does_not_grant_the_self_exclusion(self, tmp_path: Path) -> None:
+        """Plan 00466 N24 review 4 (team-lead follow-up on R4-B1): the
+        self-exclusion compares ``realpath()`` results, which
+        ``os.path.realpath`` itself answers differently across Python
+        versions once a loop is on the path. A loop must never GRANT the
+        exemption -- otherwise which Python version is running decides
+        whether a write is scanned."""
+        list_name = "custom-terms-list.cfg"
+        secret_file = tmp_path / list_name
+        secret_file.write_text("alpha-term\nbeta-term\n")
+        handler = _handler_with_secret_file(secret_file)
+
+        loop = tmp_path / "loop"
+        loop.symlink_to(loop)
+        routed_through_loop = f"{loop}/../{list_name}"
+
+        assert handler.matches(_write_input(routed_through_loop, "beta-term")) is True
 
     def test_example_seed_file_is_still_checked(self, tmp_path: Path) -> None:
         """`.example` is TRACKED, so a real term pasted into it would be published."""

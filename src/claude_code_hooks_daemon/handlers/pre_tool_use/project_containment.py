@@ -68,7 +68,7 @@ from claude_code_hooks_daemon.core.utils import (
     get_bash_write_targets,
 )
 from claude_code_hooks_daemon.utils.command_evasion import strip_reserved_word_prefix
-from claude_code_hooks_daemon.utils.realpath import realpath
+from claude_code_hooks_daemon.utils.realpath import has_symlink_loop, realpath
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
 
@@ -470,7 +470,21 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
         ``relative_to`` is component-wise, which is the point: a string prefix
         test would read ``/repo-backup`` as being inside ``/repo``, and that is
         the usual way a containment check fails.
+
+        A symlink LOOP anywhere on ``candidate`` is never "within" anything
+        (Plan 00466 N24 review 4, team-lead follow-up on R4-B1): once a loop
+        is hit, ``os.path.realpath``'s own answer for the rest of the path is
+        version-dependent (3.11 gives up and appends the remainder
+        unresolved; 3.13 backs out and keeps resolving), so ``realpath()``
+        cannot give a version-independent containment answer for this shape.
+        Returning ``False`` here denies it whichever of the two roles called
+        this: the root-containment check (a loop candidate is never within
+        the project root, so it is flagged as offending) and every exemption
+        check (a loop candidate is never within an allowed path either, so
+        it is never exempted) both fail CLOSED.
         """
+        if has_symlink_loop(candidate):
+            return False
         try:
             Path(realpath(candidate)).relative_to(container)
         except ValueError:

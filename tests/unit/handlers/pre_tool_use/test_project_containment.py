@@ -14,7 +14,6 @@ Two boundaries are load-bearing and are asserted here rather than assumed:
   durable.
 """
 
-import os
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -173,11 +172,13 @@ class TestASymlinkLoopFollowedByDotDotOutOfTheRoot:
     ``os.path.realpath`` gives up and appends the rest of the path
     unresolved (so ``..`` cancels lexically and the write never reaches
     ``l_out`` at all), while 3.13 backs out of the loop and keeps resolving,
-    reaching ``l_out`` and following it outside the root. Because
-    ``utils.realpath`` now delegates straight to ``os.path.realpath``, this
-    handler's verdict must equal that per-interpreter answer exactly -- not
-    hardcode one of them -- which is what a bare ``os.path.realpath(path)``
-    call at test time also gives, so it is the test's own oracle.
+    reaching ``l_out`` and following it outside the root. A version-dependent
+    containment answer is not acceptable for a security check -- review 4
+    proved a REAL Write escapes through this shape -- so the handler must
+    DENY on every Python version, not merely agree with whichever answer
+    ``os.path.realpath`` happens to give. ``_is_within`` achieves this by
+    asking ``has_symlink_loop`` directly rather than inferring the loop from
+    ``realpath()``'s resolved string.
     """
 
     @pytest.fixture()
@@ -191,17 +192,27 @@ class TestASymlinkLoopFollowedByDotDotOutOfTheRoot:
         _project_root.return_value = root
         return root
 
-    def test_it_agrees_with_os_path_realpath_end_to_end(
+    def test_it_denies_end_to_end(
         self, handler: ProjectContainmentHandler, looped_root: Path
     ) -> None:
+        """Hardcoded DENY -- must hold on every Python version this daemon
+        supports, not just whichever one ``os.path.realpath`` currently
+        resolves this shape outside the root on."""
         target = f"{looped_root}/l_loop/../l_out/escape.txt"
-        resolved = os.path.realpath(target)
-        actually_escapes = os.path.commonpath([resolved, str(looped_root)]) != str(looped_root)
 
-        result = handler.handle(_write(target))
+        assert handler.matches(_write(target)) is True
+        assert handler.handle(_write(target)).decision == Decision.DENY
 
-        assert handler.matches(_write(target)) is actually_escapes
-        assert result.decision == (Decision.DENY if actually_escapes else Decision.ALLOW)
+    def test_a_loop_that_never_leaves_the_root_still_denies(
+        self, handler: ProjectContainmentHandler, looped_root: Path
+    ) -> None:
+        """Even when the eventual target stays inside the root, a loop on the
+        path is denied outright -- the point is that its resolution cannot be
+        trusted, not that this particular target happens to be safe."""
+        target = f"{looped_root}/l_loop/../l_loop/inside.txt"
+
+        assert handler.matches(_write(target)) is True
+        assert handler.handle(_write(target)).decision == Decision.DENY
 
 
 class TestTheBashSurface:

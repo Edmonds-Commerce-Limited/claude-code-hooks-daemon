@@ -43,7 +43,7 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
     path_matches_globs,
     resolve_project_root,
 )
-from claude_code_hooks_daemon.utils.realpath import realpath
+from claude_code_hooks_daemon.utils.realpath import has_symlink_loop, realpath
 
 logger = logging.getLogger(__name__)
 
@@ -279,6 +279,14 @@ def protecting_pattern(file_path: str, patterns: tuple[str, ...]) -> str | None:
     """
     if not file_path or not patterns:
         return None
+    if has_symlink_loop(file_path):
+        # Plan 00466 N24 review 4 (team-lead follow-up on R4-B1): once a
+        # loop is hit, os.path.realpath's own answer for the rest of the
+        # path is version-dependent, so the realpath comparison below cannot
+        # be trusted to catch a protected file reached through one. Treat a
+        # loop as protected by every pattern rather than let a version
+        # difference decide whether a secret is guarded.
+        return patterns[0]
     project_root = resolve_project_root()
     matches = [first_matching_glob(file_path, patterns, project_root=project_root)]
     try:

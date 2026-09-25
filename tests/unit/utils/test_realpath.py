@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from claude_code_hooks_daemon.utils.realpath import realpath
+from claude_code_hooks_daemon.utils.realpath import has_symlink_loop, realpath
 from tests.scaling import SIZE_FACTOR, SUPERLINEAR_RATIO, scaling_ratio
 
 
@@ -225,3 +225,31 @@ def test_cost_grows_linearly_with_depth(tree: Path) -> None:
     segments = 2_812
     ratio = scaling_ratio(lambda size: realpath(deep(size)), segments, deep(SIZE_FACTOR * segments))
     assert ratio <= SUPERLINEAR_RATIO
+
+
+class TestHasSymlinkLoop:
+    """Plan 00466 N24 review 4 (team-lead follow-up): a version-INDEPENDENT
+    loop signal, because ``os.path.realpath``'s own answer for a loop
+    followed by ``..`` differs between 3.11 and 3.13 (see the module
+    docstring) -- a security check needing the same answer everywhere must
+    ask this directly rather than infer it from ``realpath()``'s string."""
+
+    def test_true_for_a_path_through_a_loop(self, tree: Path) -> None:
+        assert has_symlink_loop(tree / "loop_a" / "child") is True
+
+    def test_true_for_a_loop_followed_by_dotdot(self, tree: Path) -> None:
+        assert has_symlink_loop(f"{tree}/loop_a/../real/inner") is True
+
+    def test_false_for_an_ordinary_existing_path(self, tree: Path) -> None:
+        assert has_symlink_loop(tree / "real" / "inner" / "file.txt") is False
+
+    def test_false_for_a_plain_missing_component(self, tree: Path) -> None:
+        """A Write to a path that does not exist yet must NOT be flagged --
+        that is the ordinary, harmless case ENOENT/ENOTDIR covers."""
+        assert has_symlink_loop(tree / "missing" / "deeper" / "file.txt") is False
+
+    def test_false_for_a_dangling_link(self, tree: Path) -> None:
+        assert has_symlink_loop(tree / "dangling") is False
+
+    def test_false_for_a_nul_byte(self, tree: Path) -> None:
+        assert has_symlink_loop(f"{tree}/a\0b") is False
