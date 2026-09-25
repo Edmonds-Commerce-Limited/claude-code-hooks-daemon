@@ -1520,8 +1520,14 @@ class TestOrdinaryVolumeContentCompletesFast:
         )
         return large_result
 
-    def test_one_megabyte_bash_command_completes_well_under_a_second(self) -> None:
-        """Restored to this class's original contract (review 7 follow-up,
+    def test_ordinary_vocabulary_bash_command_scan_cost_scales_linearly(self) -> None:
+        """Plan 00466 review 8 L9: renamed from
+        ``test_one_megabyte_bash_command_completes_well_under_a_second`` --
+        this class moved off a fixed wall-clock budget onto the RATIO check
+        (see the class docstring), so the old name no longer described what
+        the test asserts.
+
+        Restored to this class's original contract (review 7 follow-up,
         team-lead): large ORDINARY content -- no genuine mention, nothing
         combinatorial about it -- completes fast AND answers correctly
         (no mention found), rather than being denied outright. The
