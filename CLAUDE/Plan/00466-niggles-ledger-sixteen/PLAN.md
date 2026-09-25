@@ -38,13 +38,13 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | --- | --------------------------------------------------------------------------------------------------------- | ------------------ | --------------------------------------------------- |
 | N1  | `resolve_venv_python`'s fallback accepts a venv interpreter that cannot run on this host                  | Plan 00457's agent | ✅ Remedied                                         |
 | N2  | `setup_worktree.sh` tells every agent to run the full suite through the denied `run_all.sh`               | Coordinator        | 🔄 Graduated to 00463                               |
-| N3  | `goal_injection` treats any edit of an In Progress plan as the plan starting, and displaces the live goal | Coordinator        | 🔄 In progress                                      |
+| N3  | `goal_injection` treats any edit of an In Progress plan as the plan starting, and displaces the live goal | Coordinator        | ✅ Remedied                                         |
 | N7  | The regenerated CLAUDE.md guidance block is not deterministic, so a restart commits a reorder             | Coordinator        | ✅ Remedied                                         |
 | N8  | `reference_repo_freshness` says BLOCKED on a call it allows                                               | Coordinator        | ✅ Remedied                                         |
 | N9  | `docs_qa` judges gitignored markdown, so installing a Claude Code plugin fails local full QA              | Coordinator        | ✅ Remedied                                         |
 | N10 | A wildcard in the middle of a protected filename gets past `secret_file_guard`                            | 00466 review       | 🔄 In progress                                      |
 | N11 | Any exception in `secret_file_guard.matches()` lets the call through unless `strict_mode` is on           | 00466 review       | 🔄 In progress                                      |
-| N12 | A hand-built probe payload is logged as real traffic, because nothing tells a prober to mark it           | 00467 audit        | ⬜ Open                                             |
+| N12 | A hand-built probe payload is logged as real traffic, because nothing tells a prober to mark it           | 00467 audit        | ✅ Remedied                                         |
 | N13 | The plan-index statistics arithmetic is checked only by full QA, so a wrong count reaches main            | Coordinator        | ✅ Remedied                                         |
 | N14 | Log and payload redaction ignore a configured secret word list path                                       | 00414 agent        | ✅ Remedied                                         |
 | N15 | `remote-docs add` scans a capture with an unconfigured `sensitive_content` handler                        | 00468 docs agent   | ✅ Remedied                                         |
@@ -71,7 +71,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N38 | The PreToolUse chain takes quadratic time on a command of quoted heredoc openers                          | 463 review 6       | 🔄 In progress                                      |
 | N46 | `budget_exhaustion_detector` fires on a tool result that merely contains budget wording                   | Guard review 6     | ⬜ Open                                             |
 | N45 | A NUL byte in a configured word-list path makes the never-raising secret-term lookup raise                | Plan 00421 agent   | 🔄 In progress                                      |
-| N44 | A PreToolUse handler raises `ValueError: no path specified` on an Edit, and the Edit goes through         | Plan 00464 agent   | 🔄 In progress                                      |
+| N44 | A PreToolUse handler raises `ValueError: no path specified` on an Edit, and the Edit goes through         | Plan 00464 agent   | ✅ Remedied                                         |
 | N43 | Log and payload redaction is inert while the daemon runs degraded on an unloadable config                 | Plan 00421 agent   | 🔄 In progress                                      |
 | N42 | Quoted-heredoc blanking hides text that bash executes from the Bash command guards                        | N38 review         | 🔄 In progress                                      |
 | N39 | Nine unit tests fail in a whole-suite run and pass when their files run alone                             | guard-defects fix  | 🔄 In progress (widened items 2/3 ✅ Remedied here) |

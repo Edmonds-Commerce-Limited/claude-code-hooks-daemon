@@ -1293,11 +1293,13 @@ N16 is filed on the unmerged `worktree-n466-guard-defects` branch; it joins this
 
 **Remedy** (`worktree-n466-n13n14`, 724c2d7f): the check moved into plan QA as `plan_qa/checks/stats_arithmetic.py`, and `check_repo_hygiene.py` keeps only a thin adapter, so there is one implementation (pinned). It blocks at commit when the commit stages the plan index and the disagreement is not already in HEAD, advises otherwise so inherited drift traps no unrelated commit, blocks in the sweep and advises at edit time. The denial names the line (`TestPlanStatsArithmetic`). Release note 58. It also delivers Plan 00408 Task 3.2.
 
-### N12 — a hand-built probe payload is logged as real traffic, because nothing tells a prober to mark it
+### N12 — ✅ Remedied — a hand-built probe payload is logged as real traffic, because nothing tells a prober to mark it
 
 **Found by the Plan 00467 plugin audit.** The audit fed synthetic PreToolUse payloads through `.claude/hooks/pre-tool-use` to probe handler verdicts. They carried no `synthetic_source` field, and their session ids (`plugin-audit-probe` and similar) match no known synthetic shape. So `daemon/synthetic_traffic.py` classed them as REAL traffic in `verdicts.jsonl`, including the orchestrator-simulate record that Plan 00418's enforcement decision will be read from. The marker (`SYNTHETIC_SOURCE_FIELD`, `synthetic_traffic.py:39`) is documented only in that module's docstring. CLAUDE/DEBUGGING_HOOKS.md, the handler-development guide and the agent-facing docs never mention it, so a prober cannot know to set it.
 
 **Candidate remedy:** document the marker wherever probing a handler is taught (DEBUGGING_HOOKS.md, HANDLER_DEVELOPMENT.md, and the acceptance and playbook guidance), with a copy-paste payload that sets it. Consider a small `bin/hooks-daemon probe <event> <json>` helper that sets the marker itself. Add a test that the probing docs name the field.
+
+**Remedied on `worktree-n466-n12`** (8fa4c354 to f813156a, merged in integration B3). `hooks-daemon probe <event> --json|--file [--as main|sub]` sends a payload through the project's own hook script with `synthetic_source: manual-probe` filled in, and refuses a marker the classifier would ignore. A probe names the thread it stands for with `probe_as`, so marking it no longer costs it the scoped handler it was probing. Every test and script that probes the live daemon is marked, and a guard pins that class. The probing docs name the field. Detail: [subagent-reports/260924-n466-n12-opus-5-5.md](subagent-reports/260924-n466-n12-opus-5-5.md).
 
 ### N11 — any exception in `secret_file_guard.matches()` lets the call through unless `strict_mode` is on
 
@@ -1337,7 +1339,7 @@ An AST-based static sweep of every handler for `Decision.ALLOW` built from `form
 
 The class-wide guard lives at `tests/integration/test_allow_never_carries_deny_headline.py`: it drives every handler's own declared BLOCKING acceptance test twice against the SAME instance, replicating the history-recording step `DaemonController.dispatch()` performs after every route (`daemon/controller.py`) so a handler whose block-once state lives in the shared `HandlerHistory` data layer (not an in-instance dict, e.g. `lsp_enforcement`) genuinely sees its repeat call transition to ALLOW — and asserts the repeat's `reason`/`context` never contains the `"BLOCKED ["` signature. Confirmed RED against a deliberately reintroduced defect in `lsp_enforcement` (caught it), then GREEN once reverted. `reference_repo_freshness`'s own regression coverage lives in its unit tests (`TestBlockOnce`, `TestConfiguredModes`, `TestNotVerified`) instead, RED/GREEN-verified the same way — its only DENY acceptance test declares `harness_cannot_produce` (no fixture can build a real governed checkout), so the integration harness cannot reach it.
 
-### N7 — the regenerated CLAUDE.md guidance block is not deterministic, so every daemon restart can commit a reorder
+### N7 — ✅ Remedied — the regenerated CLAUDE.md guidance block is not deterministic, so every daemon restart can commit a reorder
 
 **Found by the coordinator** at the batch A merge. The integration worktree's daemon had just regenerated CLAUDE.md, and that result was committed. The main checkout's daemon then restarted on the same tree and auto-committed `ce31d6d8` ("Auto: hooks daemon regenerated CLAUDE.md handler guidance"). The commit changed 18 lines both ways. Every change is the same handler markers in a new order: `tool-disable-advisor`, `project-handler-load-checker`, `hook-registration-checker`, `routine-qa-sweep` and `secret-file-hygiene-checker` among them. The earlier 00462 merge restart committed `6359ad0c`, changing 83 lines both ways, with the same shape.
 
@@ -1398,7 +1400,7 @@ author-chosen intent. Pinned by
 `test_promoted_tier_follows_the_authors_promoted_handlers_order` (RED
 against the pre-fix alphabetical code).
 
-### N3 — `goal_injection` treats any edit of an In Progress plan as the plan starting, and displaces the live goal
+### N3 — ✅ Remedied — `goal_injection` treats any edit of an In Progress plan as the plan starting, and displaces the live goal
 
 **Found by the coordinator**, live. The supervisor had set the goal to Plan
 00461\. The coordinator then added a table row to this ledger's PLAN.md. That
