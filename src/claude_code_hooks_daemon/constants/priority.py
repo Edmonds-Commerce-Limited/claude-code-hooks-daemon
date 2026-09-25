@@ -202,26 +202,35 @@ class Priority:
     # Lint on edit (Priority: 25 - code quality range)
     LINT_ON_EDIT = 25
 
-    # Markdown table formatter (Priority: 26 - adjacent to lint_on_edit)
-    MARKDOWN_TABLE_FORMATTER = 26
+    # Git hooks executable fixer (Priority: 26 - adjacent to other PostToolUse fixers)
+    GIT_HOOKS_EXECUTABLE_FIXER = 26
 
-    # Git hooks executable fixer (Priority: 27 - adjacent to other PostToolUse fixers)
-    GIT_HOOKS_EXECUTABLE_FIXER = 27
+    # Background-process tracker (Priority: 27 - PostToolUse advisory)
+    BACKGROUND_PROCESS_TRACKER = 27
 
-    # Background-process tracker (Priority: 28 - PostToolUse advisory)
-    BACKGROUND_PROCESS_TRACKER = 28
-
-    # Command hints (Priority: 29 - PostToolUse advisory reminders after
+    # Command hints (Priority: 28 - PostToolUse advisory reminders after
     # specific commands; sits between background_process_tracker and
     # recovery_cron_advisor)
-    COMMAND_HINTS = 29
+    COMMAND_HINTS = 28
 
-    # PostToolUse advisory handlers (Priority: 30)
-    RECOVERY_CRON_ADVISOR = 30
+    # PostToolUse advisory handlers (Priority: 29)
+    RECOVERY_CRON_ADVISOR = 29
 
-    # Goal injection (Priority: 31 - PostToolUse plan-execution-start sensor;
-    # sits after recovery_cron_advisor, which watches the same PLAN.md writes)
-    GOAL_INJECTION = 31
+    # Goal injection (Priority: 30 - PostToolUse plan-execution-start sensor;
+    # sits after recovery_cron_advisor, which watches the same PLAN.md
+    # writes). Ledger 00466 RV6-M1: MUST run BEFORE markdown_table_formatter
+    # (below) -- it hashes the file it reads here against a PREDICTED
+    # post-image computed from the tool's own pre-write text
+    # (`_snapshot_is_fresh`), never against anything a later formatter
+    # rewrites the file into. A guard test
+    # (test_goal_injection_precedes_markdown_table_formatter) pins this
+    # ordering so a future priority shuffle cannot silently reintroduce the
+    # STALE-on-every-non-canonical-write regression RV6-M1 found.
+    GOAL_INJECTION = 30
+
+    # Markdown table formatter (Priority: 31 - adjacent to goal_injection,
+    # which it must run AFTER; see the ordering note on GOAL_INJECTION above)
+    MARKDOWN_TABLE_FORMATTER = 31
 
     # Budget-exhaustion detector (Priority: 32 - PostToolUse advisory; Plan
     # 00315, sits after goal_injection in the same PostToolUse advisory band)
@@ -253,7 +262,7 @@ class Priority:
     DAEMON_STATS = 30
     # Plan 00466 RV3-n5: PreToolUse sensor for goal_injection's ground-truth
     # snapshot mechanism. Same band as its PostToolUse counterpart
-    # (GOAL_INJECTION = 31) -- both are workflow-support infrastructure for
+    # (GOAL_INJECTION = 30) -- both are workflow-support infrastructure for
     # the same feature, never blocking, so their relative order among
     # other PreToolUse handlers is not load-bearing.
     PLAN_STATUS_SNAPSHOT = 30

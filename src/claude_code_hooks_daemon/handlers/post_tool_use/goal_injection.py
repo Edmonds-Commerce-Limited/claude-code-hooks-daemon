@@ -906,13 +906,41 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         can (RV3-m1/m2), and is not subject to git HEAD lagging an
         uncommitted flip (RV3-m6) the way the Write-only fallback is. The
         inference machinery is kept and used ONLY when no FRESH snapshot
-        exists for this ``tool_use_id`` -- a daemon restart between the Pre
-        and Post dispatch of this same call, a payload carrying no
-        ``tool_use_id`` at all, or RV5-M2's staleness check below rejecting
-        one whose PREDICTED post-image no longer matches the file this
-        write actually replaced -- and that fallback use is logged, since
-        it is the narrower, sometimes-ambiguous signal being kept for
-        exactly that narrow window rather than the common path.
+        exists for this ``tool_use_id``, and that fallback use is always
+        logged.
+
+        RV6-m3: this is the single authoritative list of why that happens
+        -- earlier docstrings (this module's and
+        ``handlers.pre_tool_use.plan_status_snapshot``'s) called it "the
+        narrow window" and named only the first two, which understated it.
+        No snapshot recorded at all (INFO log, "no pre-write status
+        snapshot"):
+
+        - a daemon restart between the Pre and Post dispatch of this same
+          call (the store is in-process only);
+        - a payload carrying no ``tool_use_id`` at all;
+        - the Pre handler could not predict the post-write text
+          (:func:`~handlers.utils.would_be_content.would_be_content`
+          returned ``None``, e.g. an Edit's ``old_string`` was not found
+          verbatim in the pre-write text -- Claude Code normalises curly
+          quotes before matching its OWN ``old_string`` against the file,
+          so a straight-quote ``old_string`` can match the TOOL call while
+          failing this prediction), or the plan file could not be read at
+          Pre time (``PlanUnreadable``);
+        - the store evicted this ``tool_use_id`` before Post ran (a flood
+          of other snapshots pushed it out of the bounded FIFO store,
+          RV5-M2 -- bounded by entry count, never by time).
+
+        A snapshot recorded but rejected as STALE (WARNING log, "is
+        stale"): its PREDICTED post-image no longer matches the file this
+        write actually produced -- see :meth:`_snapshot_is_fresh` and,
+        for a Write specifically, RV6-m2's narrower guarantee. RV6-M1: a
+        later PostToolUse handler rewriting the same file before this
+        one's own dispatch (e.g. ``markdown_table_formatter`` mis-ordered
+        ahead of this handler) is one concrete source of STALE; this is
+        why ``Priority.GOAL_INJECTION`` must stay below
+        ``Priority.MARKDOWN_TABLE_FORMATTER`` (see the guard test
+        ``test_goal_injection_precedes_markdown_table_formatter``).
         """
         tool_use_id = str(hook_input.get(HookInputField.TOOL_USE_ID, "") or "")
         snapshot = plan_status_snapshots.consume_snapshot(tool_use_id)
@@ -959,12 +987,29 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         was still perfectly correct after a slow prompt (a real flip
         missed) while a backward clock step could make a genuinely stale
         snapshot look fresh again. Forward prediction sidesteps the clock
-        question entirely, and covers every shape uniformly -- a Write (no
-        reconstruction was ever possible for one), a ``replace_all`` Edit
-        (reconstruction is genuinely ambiguous whenever an unrelated
-        occurrence of the same text pre-existed, RV3-m1's table-cell/title
-        collisions), and a deletion Edit (``new_string=""``) alike, since
-        none of them need reversing.
+        question entirely, and needs no reconstruction for any shape -- a
+        Write (no reconstruction was ever possible for one), a
+        ``replace_all`` Edit (reconstruction is genuinely ambiguous
+        whenever an unrelated occurrence of the same text pre-existed,
+        RV3-m1's table-cell/title collisions), and a deletion Edit
+        (``new_string=""``) alike.
+
+        RV6-m2: that is NOT the same as detecting every race uniformly. A
+        Write's predicted image is :func:`would_be_content`'s ``content``
+        field verbatim -- independent of whatever pre-write text was on
+        disk -- so this comparison can only ever catch a LATER write
+        landing on the file before this one's own Post dispatch runs (a
+        formatter, another handler, a concurrent process); it is blind to
+        an EARLIER write that changed the plan's status between this Pre
+        snapshot and this Write landing (probe W1: S2's Pre reads "Not
+        Started", S1 flips the plan during S2's permission prompt, S2's
+        Write of its own unrelated content still lands and still hashes
+        "fresh"). An Edit's predicted image is instead built from ITS OWN
+        ``old_string``/``new_string`` applied to the pre-write text, so an
+        earlier race that changes that text changes the prediction too and
+        is correctly caught as stale (probe W1e). Claude Code's own
+        "modified since read" guard on Write (``recheckBeforeWrite``)
+        narrows this in practice, but this method does not rely on it.
         """
         return hash_plan_text(post_edit_text) == snapshot.predicted_post_hash
 

@@ -12,6 +12,7 @@ from typing import Any
 
 import pytest
 
+from claude_code_hooks_daemon.config.models import Config, HandlersConfig
 from claude_code_hooks_daemon.constants import HandlerID, Priority
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.pre_tool_use.plan_status_snapshot import (
@@ -21,6 +22,14 @@ from claude_code_hooks_daemon.plan_qa.model import PlanStatus
 from claude_code_hooks_daemon.utils.plan_status_snapshot import plan_status_snapshots
 
 _PLAN_FOLDER = "00269-supervisor-goal-message-injection"
+
+
+def _config_declaring_goal_injection(*, enabled: bool | None) -> Config:
+    """A resolved daemon config naming (or omitting) `goal_injection`'s
+    `enabled` key -- `enabled=None` omits the block entirely."""
+    block: dict[str, Any] = {} if enabled is None else {"enabled": enabled}
+    post_tool_use: dict[str, Any] = {} if enabled is None else {"goal_injection": block}
+    return Config(handlers=HandlersConfig(post_tool_use=post_tool_use))
 
 
 class TestPlanStatusSnapshotHandler:
@@ -33,6 +42,19 @@ class TestPlanStatusSnapshotHandler:
             )
             self._project = tmp_path
             yield
+
+    @pytest.fixture(autouse=True)
+    def goal_injection_enabled_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """RV6-m1: `matches()` is gated on `goal_injection`'s resolved
+        config state. Every test in this class predates that gate and
+        exercises the SENSOR's own behaviour, not the gate itself, so it
+        defaults to "goal_injection enabled" here -- :class:`TestGoalInjectionGate`
+        below overrides this per case to test the gate directly."""
+        monkeypatch.setattr(
+            PlanStatusSnapshotHandler,
+            "_load_config",
+            lambda self: _config_declaring_goal_injection(enabled=True),
+        )
 
     @pytest.fixture
     def handler(self) -> PlanStatusSnapshotHandler:
@@ -229,3 +251,110 @@ class TestPlanStatusSnapshotHandler:
         text = handler.get_claude_md()
         assert text is not None
         assert "plan_status_snapshot" in text
+
+
+class TestGoalInjectionGate:
+    """RV6-m1: `matches()` is gated on `goal_injection`'s resolved config
+    state -- the NIGGLES claim that no primitive lets one handler read
+    another's resolved enabled-state was wrong (five other handlers already
+    do it via `utils.config_cache.load_config_cached`); this closes the gap
+    the finding measured (~290 microsec/write ungated, on the common
+    default install where `goal_injection` is off)."""
+
+    @pytest.fixture(autouse=True)
+    def mock_project_context(self, tmp_path: Path):
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                "claude_code_hooks_daemon.utils.plan_trigger.ProjectContext.project_root",
+                classmethod(lambda cls: tmp_path),
+            )
+            self._project = tmp_path
+            yield
+
+    @pytest.fixture
+    def handler(self) -> PlanStatusSnapshotHandler:
+        return PlanStatusSnapshotHandler()
+
+    def _write_plan(self, status: str, folder: str = _PLAN_FOLDER) -> Path:
+        plan_dir = self._project / "CLAUDE" / "Plan" / folder
+        plan_dir.mkdir(parents=True, exist_ok=True)
+        plan = plan_dir / "PLAN.md"
+        plan.write_text(f"# Example\n\n**Status**: {status}\n", encoding="utf-8")
+        return plan
+
+    def _hook_input(self, file_path: Path, tool_use_id: str = "tu-gate") -> dict[str, Any]:
+        return {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(file_path), "content": "**Status**: Not Started\n"},
+            "tool_use_id": tool_use_id,
+        }
+
+    def test_matches_false_when_goal_injection_has_no_config_block(
+        self, handler: PlanStatusSnapshotHandler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An ABSENT `goal_injection` block resolves to THAT handler's own
+        opt-in default (False) -- not `config_skip_reason`'s generic
+        "absent means enabled" convention, which is tuned for the common
+        opt-out handler shape and would misread a project that never
+        mentions `goal_injection` as having it on."""
+        monkeypatch.setattr(
+            PlanStatusSnapshotHandler,
+            "_load_config",
+            lambda self: _config_declaring_goal_injection(enabled=None),
+        )
+        plan = self._write_plan("Not Started")
+        assert handler.matches(self._hook_input(plan)) is False
+
+    def test_matches_false_when_goal_injection_explicitly_disabled(
+        self, handler: PlanStatusSnapshotHandler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            PlanStatusSnapshotHandler,
+            "_load_config",
+            lambda self: _config_declaring_goal_injection(enabled=False),
+        )
+        plan = self._write_plan("Not Started")
+        assert handler.matches(self._hook_input(plan)) is False
+
+    def test_matches_true_when_goal_injection_explicitly_enabled(
+        self, handler: PlanStatusSnapshotHandler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            PlanStatusSnapshotHandler,
+            "_load_config",
+            lambda self: _config_declaring_goal_injection(enabled=True),
+        )
+        plan = self._write_plan("Not Started")
+        assert handler.matches(self._hook_input(plan)) is True
+
+    def test_a_config_load_failure_resolves_like_an_absent_block(
+        self, handler: PlanStatusSnapshotHandler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`_load_config` already degrades an unreadable/invalid config to
+        bare defaults (mirrors `recovery_cron_advisor._load_config`) -- so a
+        read failure resolves exactly like a config that never mentions
+        `goal_injection`, matching what the real registry would do with the
+        same broken config (fall back to defaults, under which
+        `goal_injection` is not registered)."""
+        plan = self._write_plan("Not Started")
+        assert handler.matches(self._hook_input(plan)) is False
+
+    def test_gate_runs_before_the_trigger_match_so_a_non_plan_write_is_still_false(
+        self, handler: PlanStatusSnapshotHandler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The gate must not accidentally widen `matches()` -- a write that
+        is not a plan trigger stays unmatched even when goal_injection is on."""
+        monkeypatch.setattr(
+            PlanStatusSnapshotHandler,
+            "_load_config",
+            lambda self: _config_declaring_goal_injection(enabled=True),
+        )
+        other = self._project / "notes.md"
+        other.parent.mkdir(parents=True, exist_ok=True)
+        other.write_text("hello\n", encoding="utf-8")
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(other), "content": "hello\n"},
+            "tool_use_id": "tu-other",
+        }
+        assert handler.matches(hook_input) is False

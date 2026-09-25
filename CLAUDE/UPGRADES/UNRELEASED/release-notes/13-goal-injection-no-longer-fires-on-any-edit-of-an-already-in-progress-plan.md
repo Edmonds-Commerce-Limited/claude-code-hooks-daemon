@@ -28,11 +28,19 @@ falling back to reconstruction, same as when none was recorded at all —
 if the text the write actually produced does not match that prediction:
 PreToolUse runs before the permission prompt, so another session's write
 can land in the gap between the snapshot and this one's own write
-landing. There is no time bound of any kind on this comparison — a slow
-permission prompt or a backward clock step cannot make a genuinely fresh
-snapshot look stale, or a genuinely stale one look fresh; an orphaned
-snapshot (its own write never landed) is bounded only by how many other
-snapshots have since been recorded. `plan_status_snapshot`
+landing. That protection is not uniform across tool shapes: for an Edit
+the predicted image is built from ITS OWN before/after span, so a race
+that changes the pre-write text also changes the prediction and is caught
+as stale; for a Write the predicted image is simply the write's own
+`content` field, independent of whatever was on disk before, so this
+comparison can only ever catch something rewriting the file AFTER this
+Write lands (another handler, a concurrent process) — never a race that
+changed the plan's status BEFORE it, which a Write overwrites
+unconditionally regardless. There is no time bound of any kind on this
+comparison — a slow permission prompt or a backward clock step cannot make
+a genuinely fresh snapshot look stale, or a genuinely stale one look
+fresh; an orphaned snapshot (its own write never landed) is bounded only
+by how many other snapshots have since been recorded. `plan_status_snapshot`
 ships enabled by default so this ground-truth path is the common case; an
 operator who has explicitly disabled it loses it and runs on inference
 alone. When no snapshot exists for a given call (a

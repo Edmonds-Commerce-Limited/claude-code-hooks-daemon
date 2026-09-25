@@ -21,6 +21,7 @@ from tests.support.git_fixtures import run_git as _git
 
 from claude_code_hooks_daemon.constants import HandlerID, Priority
 from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.core.chain import HandlerChain
 from claude_code_hooks_daemon.handlers.post_tool_use.goal_injection import (
     _CLEAR_SUFFIX,
     _HEADER_TEXT,
@@ -36,6 +37,12 @@ from claude_code_hooks_daemon.handlers.post_tool_use.goal_injection import (
     render_combined_goal_line,
     render_goal_line,
     write_goal_signal,
+)
+from claude_code_hooks_daemon.handlers.post_tool_use.markdown_table_formatter import (
+    MarkdownTableFormatterHandler,
+)
+from claude_code_hooks_daemon.handlers.pre_tool_use.plan_status_snapshot import (
+    PlanStatusSnapshotHandler,
 )
 from claude_code_hooks_daemon.utils.goal_ledger import LEDGER_FILENAME, GoalLedger
 
@@ -2785,3 +2792,155 @@ class TestReview4Fixes(_ReassertionFixtures):
             "S1's combined text named B -- S1 must have been made an owner "
             "of B, so B's own completion retracts S1's now-stale signal"
         )
+
+
+class TestFormatterOrderingChain:
+    """RV6-M1: ``markdown_table_formatter`` reformats ``PLAN.md`` in place
+    on every matching Write/Edit; ``goal_injection``'s RV5-M2 freshness
+    check compares the REAL post-edit text against a PREDICTED post-image
+    hashed at Pre time from the tool's OWN ``old_string``/``new_string`` (or
+    ``content``) -- never against anything a LATER handler rewrites the
+    file into. So the formatter must run strictly AFTER ``goal_injection``
+    in the real PostToolUse chain: reversed, every write whose markdown is
+    not already mdformat's canonical form goes STALE and falls back to the
+    conservative inference the ground-truth snapshot exists to replace.
+
+    Unlike the rest of this file, these tests build a REAL
+    :class:`~claude_code_hooks_daemon.core.chain.HandlerChain` from real
+    handler instances (not just calling ``GoalInjectionHandler.handle``
+    directly) -- the regression is about handler ORDER, which only a chain
+    dispatch can exercise.
+    """
+
+    @pytest.fixture(autouse=True)
+    def mock_project_context(self, tmp_path: Path):
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                "claude_code_hooks_daemon.core.project_context.ProjectContext."
+                "daemon_untracked_dir",
+                classmethod(lambda cls: tmp_path / "untracked"),
+            )
+            mp.setattr(
+                "claude_code_hooks_daemon.core.project_context.ProjectContext.project_root",
+                classmethod(lambda cls: tmp_path),
+            )
+            self._untracked = tmp_path / "untracked"
+            self._project = tmp_path
+            yield
+
+    def _plan_path(self, folder: str = _PLAN_FOLDER) -> Path:
+        plan_dir = self._project / "CLAUDE" / "Plan" / folder
+        plan_dir.mkdir(parents=True, exist_ok=True)
+        return plan_dir / "PLAN.md"
+
+    def _signal_path(self, session: str = _SESSION) -> Path:
+        return self._untracked / _SIGNAL_SUBDIR / f"{session}{_SIGNAL_SUFFIX}"
+
+    def _clear_path(self, session: str = _SESSION) -> Path:
+        return self._untracked / _SIGNAL_SUBDIR / f"{session}{_CLEAR_SUFFIX}"
+
+    @staticmethod
+    def _post_chain() -> HandlerChain:
+        """The two real PostToolUse handlers RV6-M1 is about, added in
+        REVERSE priority order -- ``HandlerChain.handlers`` sorts by
+        priority regardless of insertion order, so this also proves the
+        test would fail to protect anything if it silently relied on
+        insertion order instead of the ``Priority`` constants."""
+        chain = HandlerChain()
+        chain.add(MarkdownTableFormatterHandler())
+        chain.add(GoalInjectionHandler())
+        return chain
+
+    def test_goal_injection_precedes_markdown_table_formatter(self) -> None:
+        """Ordering guard (RV6-M1 Direction #2). A future priority shuffle
+        that puts the formatter back ahead of goal_injection must fail
+        here, not silently reintroduce the STALE-on-every-non-canonical-
+        write regression this class's other tests pin."""
+        assert Priority.GOAL_INJECTION < Priority.MARKDOWN_TABLE_FORMATTER
+        chain = self._post_chain()
+        names = [handler.name for handler in chain.handlers]
+        assert names.index(HandlerID.GOAL_INJECTION.display_name) < names.index(
+            HandlerID.MARKDOWN_TABLE_FORMATTER.display_name
+        )
+
+    def test_fe_edit_flip_adding_an_unpadded_table_still_writes_a_signal(self) -> None:
+        """RV6-M1's FE: a plain flip Edit whose ``new_string`` adds an
+        unpadded table. Reversed, this went STALE (the formatter had
+        already re-padded the table by the time goal_injection hashed the
+        file) and the real flip was missed."""
+        plan = self._plan_path()
+        pre_edit = "# Plan\n\n**Status**: Not Started\n\nBody.\n"
+        old_string = "**Status**: Not Started\n\nBody.\n"
+        new_string = (
+            "**Status**: In Progress\n\n"
+            "| Field | Key |\n|---|---|\n| Snapshot Taken At | x |\n\n"
+            "Body.\n"
+        )
+        plan.write_text(pre_edit, encoding="utf-8")
+        hook_input: dict[str, Any] = {
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": str(plan),
+                "old_string": old_string,
+                "new_string": new_string,
+            },
+            "session_id": _SESSION,
+            "tool_use_id": "tu-fe",
+        }
+
+        # PreToolUse: the snapshot handler reads the plan BEFORE the tool
+        # lands, exactly like the real dispatch order.
+        pre_result = PlanStatusSnapshotHandler().handle(hook_input)
+        assert pre_result.decision == Decision.ALLOW
+
+        # The Edit tool itself lands the write -- the daemon never performs
+        # it, it only observes the file afterward.
+        landed_text = pre_edit.replace(old_string, new_string, 1)
+        plan.write_text(landed_text, encoding="utf-8")
+
+        result = self._post_chain().execute(hook_input)
+
+        assert result.result.decision == Decision.ALLOW
+        assert self._signal_path().exists(), (
+            "the real flip must still be detected with the formatter "
+            "enabled and correctly ordered after goal_injection"
+        )
+        # The formatter DID still run and reformat the unpadded table --
+        # this is not passing merely because the formatter never fired.
+        assert plan.read_text(encoding="utf-8") != landed_text
+
+    def test_ft4_write_reopening_a_complete_plan_with_an_unpadded_table_still_writes_a_signal(
+        self,
+    ) -> None:
+        """RV6-M1's FT4: a Write reopening Complete -> In Progress whose
+        content includes an unpadded table."""
+        plan = self._plan_path()
+        pre_write = (
+            "# Plan\n\n**Status**: Complete\n\n"
+            "| Field | Key |\n| ----- | --- |\n| A | x |\n"
+        )
+        plan.write_text(pre_write, encoding="utf-8")
+        landed_text = (
+            "# Plan\n\n**Status**: In Progress\n\n"
+            "| Field | Key |\n|---|---|\n| A | x |\n| B | y |\n"
+        )
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(plan), "content": landed_text},
+            "session_id": _SESSION,
+            "tool_use_id": "tu-ft4",
+        }
+
+        pre_result = PlanStatusSnapshotHandler().handle(hook_input)
+        assert pre_result.decision == Decision.ALLOW
+
+        plan.write_text(landed_text, encoding="utf-8")
+
+        result = self._post_chain().execute(hook_input)
+
+        assert result.result.decision == Decision.ALLOW
+        assert self._signal_path().exists(), (
+            "reopening a Complete plan through an unpadded-table Write must "
+            "still be detected as a genuine flip with the formatter enabled"
+        )
+        assert plan.read_text(encoding="utf-8") != landed_text

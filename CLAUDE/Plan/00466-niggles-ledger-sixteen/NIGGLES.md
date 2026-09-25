@@ -1343,6 +1343,17 @@ majors, 6 minors, 5 nits, all fixed with a RED test first for each:**
   reconstruction, no clock, and it handles a deletion Edit (T7,
   `new_string=""`) uniformly, which the OLD reverse-reconstruction design
   could not (`_reconstruct_pre_edit_candidates` returned `[]` for it).
+  **Correction (RV6-m2): "uniformly" here is about needing no
+  reconstruction for any tool shape, not about detecting every race
+  uniformly.** For a Write the predicted image is the write's own
+  `content` field, independent of the pre-write text, so the freshness
+  check can only ever catch a LATER write landing on the file before this
+  one's own Post dispatch runs — it is blind to an EARLIER write that
+  changed the plan's status between the Pre snapshot and this Write
+  landing (probe W1). An Edit's prediction is built from its own
+  before/after span, so the same race IS caught for it (probe W1e). Stated
+  explicitly now in `_snapshot_is_fresh`'s own docstring and release note
+  13, per the review's Direction.
   `PlanStatusSnapshot.text_hash`/`recorded_at` renamed/removed to
   `predicted_post_hash`; `PlanStatusSnapshotStore`'s `ttl_seconds`
   constructor param and `TestTtlExpiry` removed outright (the whole
@@ -1393,7 +1404,24 @@ majors, 6 minors, 5 nits, all fixed with a RED test first for each:**
   warrants. Took team-lead's explicit alternative instead: corrected the
   module docstring and `get_claude_md()` to state the true, unconditional
   cost plainly, and to drop the stale "TTL'd" description (RV5-M2 removed
-  the TTL).
+  the TTL — RV6-n1 found the phrase had survived in two OTHER spots this
+  pass missed, `plan_status_snapshot.py:13` and its acceptance-test
+  `safety_notes`; both fixed now).
+  **Correction (RV6-m1): the "no existing primitive" claim above was
+  wrong.** Five handlers already read a resolved config at runtime via
+  `utils.config_cache.load_config_cached` (`recovery_cron_advisor.py`,
+  `cron_stop_enforcer.py`, `cron_subagent_stop_enforcer.py`,
+  `failsafe_cron_session_advisor.py`, `remote_docs_routing.py`), and the
+  registry's own `handlers.registry.config_skip_reason` decides "enabled"
+  from exactly that with a one-line rule. `Handler.depends_on` genuinely
+  has zero consumers, as stated — that just was not the only route, and a
+  smaller one existed. Fixed properly instead of documented: `matches()`
+  is now gated on `goal_injection`'s resolved `enabled` state
+  (`PlanStatusSnapshotHandler._goal_injection_enabled`), with an ABSENT
+  block resolving to `goal_injection`'s OWN opt-in default (`False`), not
+  `config_skip_reason`'s generic "absent means enabled" convention (which
+  is tuned for the common opt-out handler shape). Pinned by
+  `TestGoalInjectionGate` in `test_plan_status_snapshot.py`.
 - **RV5-m2 — registration docs were missing.** Added
   `handlers.pre_tool_use.plan_status_snapshot` to
   `CLAUDE/UPGRADES/UNRELEASED/config-changes/v3.67.0.yaml` and a full
@@ -1486,6 +1514,105 @@ majors, 6 minors, 5 nits, all fixed with a RED test first for each:**
   calls, now 3-argument) is confirmed NOT a defect** — the reviewer's own
   report already states this explicitly ("superseded by
   `probe_gf5_threads.py`"); no action taken.
+
+**Review 6 (`260925-goal-flip-review6-opus-5-5.md`).**
+
+- **RV6-M1 — `markdown_table_formatter` rewrote `PLAN.md` before it was hashed.**
+  It runs at PostToolUse priority 26, ahead of `goal_injection` at 31, so
+  RV5-M2's forward-hash freshness check read STALE on any write whose
+  markdown was not already mdformat's canonical form -- worse than main on
+  exactly the Write/reopen/bulk-edit shapes RV5-M2 set out to rescue
+  (probe `probe_gf6_formatter.py`'s FE and FT4). This project enables all
+  three handlers. Fixed by reordering: `Priority.GOAL_INJECTION` is now
+  `30` and `Priority.MARKDOWN_TABLE_FORMATTER` is `31`
+  (`constants/priority.py`), with the same swap in
+  `.claude/hooks-daemon.yaml`, so `goal_injection` hashes exactly what the
+  tool wrote, before the formatter ever touches the file. A guard test
+  (`test_goal_injection_precedes_markdown_table_formatter`) pins
+  `Priority.GOAL_INJECTION < Priority.MARKDOWN_TABLE_FORMATTER` and the
+  real chain's resolved handler order, so a future priority shuffle fails
+  loudly instead of silently reintroducing this. Two chain-level tests in
+  `TestFormatterOrderingChain` (`test_goal_injection.py`) --
+  `test_fe_edit_flip_adding_an_unpadded_table_still_writes_a_signal` and
+  `test_ft4_write_reopening_a_complete_plan_with_an_unpadded_table_still_writes_a_signal`
+  -- build a REAL `HandlerChain` from `PlanStatusSnapshotHandler` +
+  `GoalInjectionHandler` + `MarkdownTableFormatterHandler` and confirm
+  both that the flip is still detected AND that the formatter still runs
+  (not passing merely because it never fired); the old (pre-fix) priority
+  order was confirmed to reproduce the miss via a throwaway script,
+  matching the reviewer's own repro. The report's Direction #3 ("check
+  every other non-terminal Post handler that can rewrite a `.md` file
+  before priority 31") was not separately audited this pass --
+  `markdown_table_formatter` is the only PostToolUse handler below the new
+  `goal_injection` priority that rewrites file CONTENT at all
+  (`git_hooks_executable_fixer` only chmods); left as a standing check for
+  a future PostToolUse handler that also rewrites `.md` content. The same
+  stale ordering was also baked into `.claude/hooks-daemon.yaml.example`
+  (the shipped template every fresh client install copies) and
+  `daemon/init_config.py`'s generated project config (the string
+  `hooks-daemon init` itself writes) -- both fixed the same way, with the
+  same `MUST stay below/above` comments, or a fresh install would have
+  reproduced this exact regression from day one. Also fixed a stale
+  cross-reference comment (`constants/priority.py`'s
+  `PLAN_STATUS_SNAPSHOT` docstring cited `GOAL_INJECTION = 31`, the OLD
+  value). `tests/integration/test_template_priorities_match_the_constants.py`
+  (pre-existing) confirms all three sources now agree with the code.
+- **RV6-m1 — the RV5-m1 NIGGLES claim that "no existing primitive...
+  lets one handler read another's resolved enabled-state at runtime" was
+  wrong**, corrected in place above. Fixed properly instead of merely
+  re-documented: `plan_status_snapshot.matches()` is now gated on
+  `goal_injection`'s resolved config state
+  (`PlanStatusSnapshotHandler._goal_injection_enabled`, via
+  `utils.config_cache.load_config_cached`), with an absent block
+  resolving to `goal_injection`'s OWN opt-in default (`False`) rather than
+  the generic opt-out-shaped "absent means enabled" convention. Pinned by
+  `TestGoalInjectionGate` (`test_plan_status_snapshot.py`, PreToolUse).
+- **RV6-m2 — a Write's RV5-M2 freshness check only ever catches a LATER
+  writer, and three docs claimed it "covers every shape uniformly."**
+  `would_be_content` returns a Write's `content` field verbatim,
+  independent of the pre-write text, so the comparison cannot see a race
+  that changed the plan's status BEFORE this Write landed (probe W1); an
+  Edit's prediction is built from its own before/after span and DOES
+  catch that race (probe W1e). "Uniformly" in the RV5-M2 design was about
+  needing no reconstruction for any tool shape, not about detecting every
+  race uniformly — the claim was imprecise, not the design. Corrected in
+  `_snapshot_is_fresh`'s own docstring
+  (`handlers/post_tool_use/goal_injection.py`), release note 13, and the
+  RV5-M2 NIGGLES entry above (this file).
+- **RV6-m3 — the "narrow window" framing for `goal_injection`'s inference
+  fallback undersold it in three places.** Besides a daemon restart
+  between the Pre/Post dispatch of the same call and a payload carrying
+  no `tool_use_id`, the fallback is also taken whenever nothing could be
+  predicted at Pre time (`would_be_content` returned `None`, or the plan
+  file could not be read), whenever the bounded store evicted the entry
+  under load, and whenever a recorded snapshot is rejected as STALE
+  (RV6-M1 is one concrete source of STALE, not the only one). Consolidated
+  into one authoritative list in `_resolve_transition`'s own docstring
+  (`goal_injection.py`), with `plan_status_snapshot.py`'s module docstring
+  and `get_claude_md()` now pointing at it instead of re-narrating a
+  shorter, stale version.
+- **RV6-n1 — "TTL'd" survived RV5-m1's claimed removal**, at
+  `plan_status_snapshot.py:13` and its acceptance-test `safety_notes`.
+  Both fixed (see the RV5-m1 correction above).
+- **RV6-n2 — `.claude/hooks-daemon.yaml`'s `plan_status_snapshot` comment
+  said "Opt-in (false) elsewhere" while shipping `enabled: true`
+  (`hooks-daemon.yaml.example`).** Fixed to state the true, unconditional
+  default plainly.
+- **RV6-n3 — a symlinked plan folder is ledgered under the link's number,
+  not the target's.** Confirmed harmless (the snapshot path itself
+  behaves correctly, no log noise) and an unusual layout the reviewer
+  explicitly did not compare against main; no direction was given, so no
+  code change made.
+- **RV6-n4 — the snapshot store hand-rolled its own select-then-evict.**
+  Correct under its own lock (the `unlocked-eviction` semgrep rule exempts
+  a held lock) but a duplicate of exactly what `goal_injection`'s own
+  `_fired`/`_reasserted` latches already use. Fixed: `PlanStatusSnapshotStore`
+  is now backed by `handlers.utils.bounded_fifo_map.BoundedFifoMap` (Plan
+  00449 P2), removing the second implementation; pinned by
+  `TestUsesTheSharedBoundedMap` in `tests/unit/utils/test_plan_status_snapshot.py`.
+  All of `TestRecordAndConsume`, `TestConsumeSnapshot`, `TestBoundedGrowth`
+  and `TestConcurrency` (the existing black-box regression suite for this
+  store) still pass unchanged.
 
 ### N2 — `setup_worktree.sh` tells every agent to run the full suite through `run_all.sh`
 

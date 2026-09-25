@@ -3010,7 +3010,7 @@ These handlers run **after** a tool call completes. They analyse output and prov
 | Property       | Value           |
 | -------------- | --------------- |
 | **Config key** | `command_hints` |
-| **Priority**   | 29              |
+| **Priority**   | 28              |
 | **Type**       | Advisory        |
 | **Event**      | PostToolUse     |
 
@@ -3031,7 +3031,7 @@ handlers:
   post_tool_use:
     command_hints:
       enabled: true
-      priority: 29
+      priority: 28
       options:
         mode: additive          # additive (default) | replace
         hints:
@@ -3049,7 +3049,7 @@ handlers:
 | Property       | Value            |
 | -------------- | ---------------- |
 | **Config key** | `goal_injection` |
-| **Priority**   | 31               |
+| **Priority**   | 30               |
 | **Type**       | Advisory         |
 | **Event**      | PostToolUse      |
 
@@ -3078,7 +3078,7 @@ handlers:
   post_tool_use:
     goal_injection:
       enabled: true
-      priority: 31
+      priority: 30
       options:
         mode: additive
         once_per_plan_per_session: true
@@ -4116,8 +4116,8 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | `web_search_year`          | PreToolUse       | 55       | Warns about outdated search years              |
 | `british_english`          | PreToolUse       | 60       | Warns about American spellings                 |
 | `validate_eslint_on_write` | PostToolUse      | 10       | Runs ESLint after .ts/.tsx writes              |
-| `command_hints`            | PostToolUse      | 29       | Config-driven reminder after a command         |
-| `goal_injection`           | PostToolUse      | 31       | Goal-intent signal on plan flip to In Progress |
+| `command_hints`            | PostToolUse      | 28       | Config-driven reminder after a command         |
+| `goal_injection`           | PostToolUse      | 30       | Goal-intent signal on plan flip to In Progress |
 | `optimal_config_checker`   | SessionStart     | 52       | Audits Claude Code settings                    |
 | `git_filemode_checker`     | SessionStart     | 53       | Warns when core.fileMode=false                 |
 | `suggest_status_line`      | SessionStart     | 55       | Suggests status line setup                     |

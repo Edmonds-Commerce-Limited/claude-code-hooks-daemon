@@ -10,14 +10,25 @@ lagging an uncommitted flip (RV3-m6).
 This handler removes the need to infer anything in the common case: it
 runs immediately BEFORE the SAME Write/Edit `goal_injection` will see
 AFTER it lands, reads the plan's CURRENT (pre-write) status straight off
-disk, and records it in the shared, bounded, TTL'd
-:mod:`utils.plan_status_snapshot` store, keyed by ``tool_use_id`` (unique
-per Claude Code tool invocation, carried by both the PreToolUse and
-PostToolUse payloads for the SAME call). ``goal_injection`` consumes the
-snapshot as ground truth; its old inference remains as the fallback for
-the narrow window where no snapshot exists (a daemon restart between this
-handler's Pre dispatch and `goal_injection`'s Post dispatch of the same
-call, or a payload carrying no ``tool_use_id`` at all).
+disk, and records it in the shared, bounded (never TTL'd -- RV5-M2 removed
+the time bound entirely; see :mod:`utils.plan_status_snapshot`'s own
+docstring) :mod:`utils.plan_status_snapshot` store, keyed by
+``tool_use_id`` (unique per Claude Code tool invocation, carried by both
+the PreToolUse and PostToolUse payloads for the SAME call). `goal_injection`
+consumes the snapshot as ground truth when it is FRESH (RV5-M2: the
+predicted post-image hash still matches what this write actually
+produced); its old inference remains the fallback otherwise. RV6-m3: that
+fallback is not a narrow window -- besides the two genuinely rare cases (a
+daemon restart between this handler's Pre dispatch and `goal_injection`'s
+Post dispatch of the same call, or a payload carrying no ``tool_use_id``
+at all), it is also taken on a STALE snapshot (something rewrote the file
+between Pre and Post -- a formatter running after `goal_injection` in the
+same chain is one source, which is why `goal_injection`'s own docstring
+requires it run first), on NO-PREDICT (this handler could not predict the
+post-write text at all, e.g. a curly-quote/straight-quote mismatch in
+``old_string``), and whenever the store evicts an orphaned entry under
+sustained load. See `goal_injection.GoalInjectionHandler._resolve_transition`
+for the full, single list.
 
 Shares its trigger definition with ``goal_injection`` via
 :mod:`utils.plan_trigger` (Plan 00466 RV3-n5) -- both handlers must agree
@@ -27,36 +38,46 @@ definition could be consumed under a different one.
 RV4-m4: opt-OUT (``get_default_enabled() -> True``), unlike ``goal_injection``
 itself. A static per-handler default cannot read another handler's resolved
 config, so genuine "on wherever goal_injection is on" coupling is not
-achievable through this mechanism -- the closest correct approximation is to
-make this handler's OWN default effectively unconditional, so an operator
-who enables ONLY `goal_injection` still gets ground-truth snapshots instead
-of silently falling back to inference on every write.
+achievable through THAT mechanism -- the closest correct approximation
+available to a static default is to make this handler's OWN default
+effectively unconditional, so an operator who enables ONLY `goal_injection`
+still gets ground-truth snapshots instead of silently falling back to
+inference on every write.
 
-RV5-m1: this genuinely runs -- a file read, a `PlanDoc.parse`, a SHA-256
-hash -- on EVERY active plan's `PLAN.md` Write/Edit in EVERY client where
-this handler is enabled (the shipped default), whether or not
-`goal_injection` is enabled and whether or not a ccy supervisor is armed.
-`get_relevance` (below) is NOT a runtime gate: it is consulted only by the
-config-optimisation REVIEW (`daemon/cli.py`'s `optimise` command), never by
-real dispatch, and `matches()` does not consult it either. The cost per
-write is modest (bounded by plan-file size, no network, no lock contention
-beyond the shared store's own), and an unconsumed snapshot is bounded by
-`max_entries` (RV5-M2), never by time -- but "harmless" previously
-overstated this as conditional on `goal_injection` or the supervisor being
-armed, which it never was. Never blocks, never denies.
+RV5-m1/RV6-m1: `matches()` IS gated on `goal_injection`'s resolved config
+state (:meth:`PlanStatusSnapshotHandler._goal_injection_enabled`), read via
+`utils.config_cache.load_config_cached` -- the RV5-m1 review's claim that
+no primitive in this codebase supports that was wrong (five other handlers
+already read a resolved config this way) and is corrected here and in
+NIGGLES.md. A project running this sensor (the shipped default) with
+`goal_injection` off no longer pays the read/`PlanDoc.parse`/SHA-256 cost
+on every active plan's `PLAN.md` write -- `get_relevance` (below) remains
+NOT a runtime gate (it is consulted only by the config-optimisation REVIEW,
+`daemon/cli.py`'s `optimise` command), but `matches()` itself now is. The
+cost when `goal_injection` IS enabled is unchanged and modest (bounded by
+plan-file size, no network, no lock contention beyond the shared store's
+own), and an unconsumed snapshot is bounded by `max_entries` (RV5-M2),
+never by time. Never blocks, never denies.
 """
 
 import logging
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from pydantic import ValidationError
+
+from claude_code_hooks_daemon.config.models import Config, HandlerConfig
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants.config import ConfigKey
 from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
 from claude_code_hooks_daemon.handlers.utils.would_be_content import would_be_content
 from claude_code_hooks_daemon.plan_qa.model import PlanDoc
 from claude_code_hooks_daemon.utils.ccy_supervisor import supervisor_relevance
+from claude_code_hooks_daemon.utils.config_cache import load_config_cached
 from claude_code_hooks_daemon.utils.path_predicates import path_is_file
 from claude_code_hooks_daemon.utils.plan_status_snapshot import (
     hash_plan_text,
@@ -94,8 +115,66 @@ class PlanStatusSnapshotHandler(PreToolUseHandlerBase):
         """Relevant only under an armed ccy supervisor (mirrors `goal_injection`)."""
         return supervisor_relevance(context)
 
+    def _load_config(self) -> Config:
+        """The project's daemon config; bare defaults when it cannot be read.
+
+        Mirrors ``recovery_cron_advisor._load_config``: defaults mean "not
+        declared", which for THIS gate (:meth:`_goal_injection_enabled`)
+        resolves the same way a config the registry itself cannot parse
+        would -- falling back to defaults, under which ``goal_injection``
+        (opt-in) is not registered.
+        """
+        try:
+            config_path = ProjectContext.project_root() / ".claude" / "hooks-daemon.yaml"
+            return load_config_cached(config_path)
+        except (ValidationError, OSError, ValueError, RuntimeError) as exc:
+            logger.debug("plan_status_snapshot: config unavailable: %s", exc)
+            return Config()
+
+    def _goal_injection_enabled(self) -> bool:
+        """RV6-m1: whether `goal_injection` (PostToolUse) is enabled in this
+        project's resolved config.
+
+        Gates :meth:`matches` so a project running this sensor with
+        `goal_injection` off -- the common case, since this sensor ships
+        opt-out and `goal_injection` ships opt-in -- does not pay the
+        read/`PlanDoc.parse`/SHA-256 cost on every active plan's `PLAN.md`
+        write for a store nothing then consumes (measured ~290 microsec per
+        write, `probe_gf6_gate_cost_out.txt`; the NIGGLES claim that no
+        primitive supports this was wrong -- five other handlers already
+        read a resolved config this way via
+        `utils.config_cache.load_config_cached`, and the registry's own
+        `handlers.registry.config_skip_reason` decides "enabled" with the
+        same one-line rule this mirrors).
+
+        An ABSENT `goal_injection` block resolves to THAT handler's own
+        opt-in default (`GoalInjectionHandler.get_default_enabled() ->
+        False`) -- not `config_skip_reason`'s "absent means enabled"
+        convention, which is tuned for the common opt-out handler shape and
+        would misread a project that never mentions `goal_injection` as
+        having it on.
+
+        `HandlersConfig.post_tool_use` is typed `dict[str, Any]`, but a
+        `mode="before"` validator (`coerce_handler_configs`) already turns
+        every declared block into a real `HandlerConfig` before this ever
+        runs -- the `Mapping` branch below is a defensive fallback for a
+        `Config` assembled another way (e.g. `model_construct`), never the
+        normal load path.
+        """
+        block = self._load_config().handlers.post_tool_use.get(
+            HandlerID.GOAL_INJECTION.config_key
+        )
+        if isinstance(block, HandlerConfig):
+            return block.enabled
+        if isinstance(block, Mapping):
+            return bool(block.get(ConfigKey.ENABLED, True))
+        return False
+
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        """True for a Write/Edit landing on an ACTIVE plan's PLAN.md."""
+        """True for a Write/Edit landing on an ACTIVE plan's PLAN.md, when
+        `goal_injection` is enabled in this project's config (RV6-m1)."""
+        if not self._goal_injection_enabled():
+            return False
         return matched_plan_write_or_edit(hook_input, self._project_layout) is not None
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
@@ -193,9 +272,11 @@ class PlanStatusSnapshotHandler(PreToolUseHandlerBase):
     def get_claude_md(self) -> str | None:
         return (
             "## plan_status_snapshot — pre-write PLAN.md status snapshot\n\n"
-            "PreToolUse sensor (never blocks; ships enabled, opt-out — RV4-m4; runs "
-            "unconditionally on every matching write, whether or not `goal_injection` "
-            "is enabled — RV5-m1). Runs immediately before a `PLAN.md` Write/Edit "
+            "PreToolUse sensor (never blocks; ships enabled, opt-out — RV4-m4; "
+            "`matches()` is gated on `goal_injection`'s resolved config state — "
+            "RV6-m1 — so it only runs a matching write's read/parse/hash when "
+            "`goal_injection` is actually enabled). Runs immediately before a "
+            "`PLAN.md` Write/Edit "
             "under the active plan directory (never `Completed/`), reads the plan's "
             "CURRENT status, and records it plus the SHA-256 of the PREDICTED "
             "post-write text (applying the same Write/Edit forward — RV5-M2), keyed "
@@ -207,9 +288,13 @@ class PlanStatusSnapshotHandler(PreToolUseHandlerBase):
             "00466 RV3-n5) — removing collisions a bare status VALUE could have "
             "with a table cell or a plan title, and git HEAD's own lag behind an "
             "uncommitted flip. The old inference remains as `goal_injection`'s own "
-            "fallback for the narrow window where no snapshot exists (a daemon "
-            "restart between this handler's dispatch and `goal_injection`'s, or a "
-            "payload with no `tool_use_id`), and that fallback use is logged.\n\n"
+            "fallback whenever no FRESH snapshot exists for a call (RV6-m3: not "
+            "just a daemon restart or a payload with no `tool_use_id` — also a "
+            "prediction that could not be made, a store eviction under load, or a "
+            "snapshot rejected as stale because something rewrote the file before "
+            "`goal_injection` read it; see "
+            "`GoalInjectionHandler._resolve_transition`'s docstring for the full "
+            "list), and that fallback use is logged.\n\n"
             "Shares its trigger definition with `goal_injection` via "
             "`utils.plan_trigger`, so the two handlers cannot silently disagree "
             "about what counts as a matching Write/Edit."
@@ -242,8 +327,8 @@ class PlanStatusSnapshotHandler(PreToolUseHandlerBase):
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
                 safety_notes=(
-                    "Observe-only: records an in-memory (session-local, "
-                    "bounded, TTL'd) snapshot; writes nothing to disk."
+                    "Observe-only: records an in-memory (process-local, "
+                    "bounded, no TTL) snapshot; writes nothing to disk."
                 ),
                 test_type=TestType.CONTEXT,
                 recommended_model=RecommendedModel.SONNET,

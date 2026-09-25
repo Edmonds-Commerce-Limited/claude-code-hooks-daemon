@@ -658,7 +658,7 @@ handlers:
       priority: 60
 
     plan_status_snapshot:  # Dogfood: PreToolUse ground-truth sensor feeding goal_injection (Plan 00466 RV3-n5)
-      enabled: true  # Opt-in (false) elsewhere; only useful alongside goal_injection, itself opt-in
+      enabled: true  # On by default (opt-out) elsewhere too -- RV6-n2: ships enabled: true, not opt-in
       priority: 30
 
   # PostToolUse handlers (run after tool execution)
@@ -716,21 +716,17 @@ handlers:
           - "/untracked/qa/**"
           - "/untracked/worktrees/**"
 
-    markdown_table_formatter:  # Auto-format markdown tables via mdformat + mdformat-gfm
+    git_hooks_executable_fixer:  # Auto-chmod +x git hooks git skipped as non-executable
       enabled: true
       priority: 26
 
-    git_hooks_executable_fixer:  # Auto-chmod +x git hooks git skipped as non-executable
+    background_process_tracker:  # Tracks backgrounded processes; advises harvest-background + watchdog cron (never kills)
       enabled: true
       priority: 27
 
-    background_process_tracker:  # Tracks backgrounded processes; advises harvest-background + watchdog cron (never kills)
-      enabled: true
-      priority: 28
-
     command_hints:  # Generic config-driven advisory reminder after a configured command (Plan 00212)
       enabled: true
-      priority: 29
+      priority: 28
       # options:
       #   mode: additive          # additive (default) | replace
       #   hints:
@@ -742,12 +738,16 @@ handlers:
 
     recovery_cron_advisor:  # Advises on failsafe recovery cron lifecycle (creation, progress, completion)
       enabled: true         # On by default everywhere (opt-out); also the switch for failsafe_cron_session_advisor
-      priority: 30
+      priority: 29
       # progress_cooldown_events: 20  # Events between repeat progress reminders (default: 20)
 
     goal_injection:  # Dogfood: write <session>.goal-intent when a plan flips to In Progress (Plan 00269)
       enabled: true  # Opt-in (false) elsewhere; harmless without an armed supervisor
-      priority: 31
+      priority: 30  # Ledger 00466 RV6-M1: MUST stay below markdown_table_formatter's priority
+
+    markdown_table_formatter:  # Auto-format markdown tables via mdformat + mdformat-gfm
+      enabled: true
+      priority: 31  # Ledger 00466 RV6-M1: MUST stay above goal_injection's priority
       # options:
       #   mode: additive                  # additive (default) | replace (fixed header line always kept)
       #   once_per_plan_per_session: true

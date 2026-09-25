@@ -167,3 +167,19 @@ class TestConcurrency:
             t.join()
 
         assert errors == []
+
+
+class TestUsesTheSharedBoundedMap:
+    """RV6-n4: this store used to hand-roll its own select-then-evict --
+    correct under its own lock (the ``unlocked-eviction`` semgrep rule
+    exempts a held lock), but a duplicate of exactly what
+    ``goal_injection``'s ``_fired``/``_reasserted`` latches already use
+    (``handlers.utils.bounded_fifo_map.BoundedFifoMap``, Plan 00449 P2).
+    Pinned so a future edit does not reintroduce the second
+    implementation."""
+
+    def test_the_store_is_backed_by_bounded_fifo_map(self) -> None:
+        from claude_code_hooks_daemon.handlers.utils.bounded_fifo_map import BoundedFifoMap
+
+        store = PlanStatusSnapshotStore()
+        assert isinstance(store._entries, BoundedFifoMap)

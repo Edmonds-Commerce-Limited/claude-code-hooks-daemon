@@ -48,9 +48,10 @@ wall clock can step backward, and nothing about "how long ago" answers
 """
 
 import hashlib
-import threading
 from dataclasses import dataclass
 from typing import Final
+
+from claude_code_hooks_daemon.handlers.utils.bounded_fifo_map import BoundedFifoMap
 
 _MAX_ENTRIES: Final[int] = 256
 
@@ -84,16 +85,20 @@ class PlanStatusSnapshot:
 class PlanStatusSnapshotStore:
     """Bounded map from ``tool_use_id`` to a pre-write PlanDoc status.
 
-    RV4-m1: every mutation holds ``_lock`` -- see the module docstring for
-    why this store, unlike a per-call-only structure, genuinely races.
+    RV4-m1: every mutation is atomic -- see the module docstring for why
+    this store, unlike a per-call-only structure, genuinely races.
     RV5-M2: bounded by ``max_entries`` alone, no TTL -- see the module
-    docstring.
+    docstring. RV6-n4: backed by :class:`~handlers.utils.bounded_fifo_map.
+    BoundedFifoMap` (Plan 00449 P2's atomic FIFO-bounded map), the same
+    type ``goal_injection``'s own ``_fired``/``_reasserted`` latches use --
+    this store used to hand-roll the identical select-then-evict pattern
+    Plan 00449 replaced there; reusing it here removes the second copy.
     """
 
     def __init__(self, *, max_entries: int = _MAX_ENTRIES) -> None:
-        self._max_entries = max_entries
-        self._entries: dict[str, PlanStatusSnapshot] = {}
-        self._lock = threading.Lock()
+        self._entries: BoundedFifoMap[str, PlanStatusSnapshot] = BoundedFifoMap(
+            max_entries=max_entries
+        )
 
     def record(self, tool_use_id: str, status: str | None, predicted_post_hash: str) -> None:
         """Record ``status``/``predicted_post_hash`` for ``tool_use_id``; a
@@ -105,12 +110,9 @@ class PlanStatusSnapshotStore:
         against it."""
         if not tool_use_id:
             return
-        with self._lock:
-            if tool_use_id not in self._entries and len(self._entries) >= self._max_entries:
-                self._entries.pop(next(iter(self._entries)), None)
-            self._entries[tool_use_id] = PlanStatusSnapshot(
-                status=status, predicted_post_hash=predicted_post_hash
-            )
+        self._entries[tool_use_id] = PlanStatusSnapshot(
+            status=status, predicted_post_hash=predicted_post_hash
+        )
 
     def consume(self, tool_use_id: str) -> tuple[str | None, bool]:
         """Pop and return ``(status, found)``.
@@ -134,8 +136,7 @@ class PlanStatusSnapshotStore:
         snapshot as ground truth."""
         if not tool_use_id:
             return None
-        with self._lock:
-            return self._entries.pop(tool_use_id, None)
+        return self._entries.pop(tool_use_id, None)
 
 
 # One shared instance: plan_status_snapshot (PreToolUse) writes, goal_injection
