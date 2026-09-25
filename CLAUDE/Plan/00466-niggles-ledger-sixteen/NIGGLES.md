@@ -9,6 +9,63 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N79 — The guard-defects false-positive corpus is smaller than review 7 asked
+
+**Found by guard-defects review 8 (L8).** The in-repo corpus holds 171
+commands and asserts `>= 150`. Review 7 asked for 200 or more.
+
+**Remedy:** grow the corpus to at least 200 real commands (from session
+transcripts, not invented) and raise the assertion to match.
+
+### N78 — Three exotic-shape mismatches in the `gd5_exotic` baseline
+
+**Found by guard-defects review 8 (L6), unchanged since review 5.** A
+trailing `#c` after the key name, backslash-octal in an unquoted word, and
+one prose false positive.
+
+**Remedy:** decode backslash-octal in an unquoted word, treat `#` after a
+word as a comment only at a word start, and fix the prose case. A RED test for each.
+
+### N77 — Four shell shapes still run a protected-path read unjudged
+
+**Found by guard-defects review 8 (L5, gd6_shell2 class d).** They are
+`x=...; bash -c "$x"`, `x=...; eval "$x"`, an alias, and a file written and
+then run with `sh`. Each lets a protected path be read.
+
+**Remedy:** resolve a literal assignment into `bash -c "$x"` and `eval "$x"`
+as the Plan 00464 walker does. Treat an alias definition or a written-then-run
+script as unjudged when it could read a protected path.
+
+### N76 — Python's regex fallback and the Go reader miss argv shell launches
+
+**Found by guard-defects review 8 (L4).** The Python regex fallback misses
+an argv `['/bin/bash','-c',...]`, although the AST path catches it. Both the
+Python AST path and Go miss an argv `env bash -c`.
+
+**Remedy:** bring the fallback to parity with the AST path, and peel `env`
+in both. Parity tests run the same fixture through both paths.
+
+### N75 — The Write/Edit content route misses 26 script-launch shapes
+
+**Found by guard-defects review 8 (L3, probe_gd6_files).** The misses cover
+Python (a variable-held command, a literal past the 500-character span,
+`.pyw`, an extensionless shebang), Ruby `spawn`, PHP `passthru`/`popen`,
+Perl (bare `exec`, `open -|`, 2-arg pipe `open`, `.pm`), and Node (template
+`exec`, `spawn('sh',['-c'])`, `execFile('bash',['-c'])`, `.cjs`/`.tsx`/`.mts`,
+zx `$`, `Bun.$`). They also cover Kotlin, Swift, Dockerfile `RUN`, justfile,
+toml tasks, `package.json` scripts and PowerShell.
+
+**Remedy:** Task 4.3 scope. Extend each language strategy, and route an
+unknown script-bearing extension to a generic shell-text scan.
+
+### N74 — A recursive grep over a protected directory is allowed
+
+**Found by guard-defects review 8 (L2).** `grep -r '' <protected dir>` is
+allowed on main and on the branch, and `HANDLER_REFERENCE.md` documents it
+as a residual. A documented residual is not a terminal state.
+
+**Remedy:** deny a recursive read rooted at, or above, a protected path.
+
 ### N73 — Two everyday idioms are still denied by the Plan 00464 script walker
 
 **Found by Plan 00464 review 5 (m3).** PLAN Task 1.12 lists them as not

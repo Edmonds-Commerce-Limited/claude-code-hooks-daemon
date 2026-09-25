@@ -98,6 +98,12 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N67 | The daemon-down repair carve-out trusts the command text, not the binary it runs                          | N24 review 4       | ⬜ Open                                             |
 | N68 | A moved-away daemon checkout reads as NOT_INSTALLED, which fails open                                     | N24 review 4       | ⬜ Open                                             |
 | N69 | Two fail-closed deny messages misname what happened                                                       | N24 reviews 3–4    | ⬜ Open                                             |
+| N74 | A recursive grep over a protected directory is allowed                                                    | GD review 8        | ⬜ Open                                             |
+| N75 | The Write/Edit content route misses 26 script-launch shapes                                               | GD review 8        | ⬜ Open                                             |
+| N76 | Python's regex fallback and the Go reader miss argv shell launches                                        | GD review 8        | ⬜ Open                                             |
+| N77 | Four shell shapes still run a protected-path read unjudged                                                | GD review 8        | ⬜ Open                                             |
+| N78 | Three exotic-shape mismatches in the `gd5_exotic` baseline                                                | GD review 8        | ⬜ Open                                             |
+| N79 | The guard-defects false-positive corpus is smaller than review 7 asked                                    | GD review 8        | ⬜ Open                                             |
 | N71 | The commit-gate script walk's check-to-run race is undocumented                                           | 464 review 5       | ⬜ Open                                             |
 | N72 | A Python script's computed subprocess argv is dropped, not judged unresolved                              | 464 review 5       | ⬜ Open                                             |
 | N73 | Two everyday idioms are still denied by the Plan 00464 script walker                                      | 464 review 5       | ⬜ Open                                             |
