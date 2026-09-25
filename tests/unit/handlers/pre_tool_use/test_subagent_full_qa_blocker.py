@@ -1629,6 +1629,66 @@ class TestASubstitutionOrAVariableIsReadInEveryPosition:
         assert find_full_qa_invocation(command, _patterns(), cwd=self._scripts(tmp_path))
 
 
+class TestFindExecIsFollowed:
+    """Review 7 m4: ``find ... -exec pytest {} +`` was not followed at all.
+
+    ``{}`` is the files find selects: its start paths when nothing narrows
+    them, and unseen (fail closed) once a ``-name``/``-path`` test could
+    have narrowed them to something this handler cannot read.
+    """
+
+    @staticmethod
+    def _tree(tmp_path: Path) -> Path:
+        (tmp_path / ".git").mkdir()
+        (tmp_path / "tests" / "unit" / "qa").mkdir(parents=True)
+        return tmp_path
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "find tests -name 'test_*.py' -exec pytest {} +",
+            "find tests/unit -name 'test_*.py' -exec pytest -q {} \\;",
+            "find . -maxdepth 1 -name tests -exec pytest {} \\;",
+            "find tests -maxdepth 0 -exec pytest {} \\;",
+            "find tests/unit -exec pytest -q {} +",
+        ],
+    )
+    def test_find_exec_naming_the_whole_tree_is_denied(
+        self, tmp_path: Path, command: str
+    ) -> None:
+        assert find_full_qa_invocation(command, _patterns(), cwd=self._tree(tmp_path)), command
+
+    def test_find_exec_on_a_narrow_start_path_is_not(self, tmp_path: Path) -> None:
+        command = "find tests/unit/qa -exec pytest {} +"
+        assert find_full_qa_invocation(command, _patterns(), cwd=self._tree(tmp_path)) is None
+
+
+class TestTheMergeBaseListingIsAccepted:
+    """Review 7 m3: a listing narrowed to the merge base was refused.
+
+    ``git merge-base`` always prints one commit, never the empty tree, so a
+    revision built this way is as safe as a literal SHA.
+    """
+
+    @staticmethod
+    def _tree(tmp_path: Path) -> Path:
+        (tmp_path / ".git").mkdir()
+        (tmp_path / "tests" / "unit" / "qa").mkdir(parents=True)
+        return tmp_path
+
+    def test_a_merge_base_substitution_is_a_targeted_listing(self, tmp_path: Path) -> None:
+        command = (
+            'git diff --name-only "$(git merge-base main HEAD)" -- tests | xargs -r pytest'
+        )
+        assert find_full_qa_invocation(command, _patterns(), cwd=self._tree(tmp_path)) is None
+
+    def test_an_unrelated_substitution_still_refuses_the_listing(self, tmp_path: Path) -> None:
+        command = 'git diff --name-only "$(cat rev.txt)" -- tests | xargs -r pytest'
+        match = find_full_qa_invocation(command, _patterns(), cwd=self._tree(tmp_path))
+        assert match is not None
+        assert match.fail_closed
+
+
 class TestAFileUnderTheParseCapIsParsedOnce:
     """Review 7 M1: a file under the parse cap was re-parsed at every reference.
 

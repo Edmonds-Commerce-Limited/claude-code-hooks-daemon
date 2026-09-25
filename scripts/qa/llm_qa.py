@@ -2179,7 +2179,10 @@ def _print_verdict(outcome: MainMoved, main_ref: str, root: Path) -> None:
         print(f"  2. ./scripts/qa/llm_qa.py {MAIN_MOVED_COMMAND}   (again, until unmoved)")
     else:
         print("NEXT, in this integration worktree:")
-        print(f"  1. git merge --no-edit {main_ref}")
+        # Merge the exact commit judged (outcome.main), not main_ref: if
+        # main_ref has moved further since, merging it would put HEAD past
+        # what the recheck below covers, wasting the recheck (review 7 m5).
+        print(f"  1. git merge --no-edit {outcome.main}")
         print(f"  2. {_recheck_command(outcome)}")
         print(f"  3. ./scripts/qa/llm_qa.py {MAIN_MOVED_COMMAND} {_ADVANCE_OPTION}")
         print(f"  4. ./scripts/qa/llm_qa.py {MAIN_MOVED_COMMAND}   (again, until unmoved)")

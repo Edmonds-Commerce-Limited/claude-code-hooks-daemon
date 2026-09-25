@@ -1000,6 +1000,28 @@ class TestTheGateIsNotRunTwiceOnOneHead:
         _certify(repo, llm_qa.DOCS_ONLY_TOOL_NAMES)
         assert llm_qa.main_moved(repo, "main").verdict == llm_qa.VERDICT_HEAD_MOVED
 
+    def test_the_merge_step_names_the_judged_commit_not_the_moved_ref(
+        self, repo: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Review 7 m5: main moved again before the printed merge step ran.
+
+        The recheck range (base..judged) is only right for HEAD holding
+        exactly ``judged`` merged in; printing ``git merge main`` would pull
+        in the newer, unmerged commit too and waste the recheck.
+        """
+        _start(repo)
+        judged = _on_main(repo, {_LONELY: "# 2\n"})
+        _merge_main(repo)
+        _on_main(repo, {"src/app.py": "x = 2\n"})
+        outcome = llm_qa.main_moved(repo, "main")
+        assert outcome.verdict == llm_qa.VERDICT_DOCS_ONLY
+        assert outcome.main == judged
+        capsys.readouterr()
+        llm_qa.main_moved_command([], root=repo)
+        out = capsys.readouterr().out
+        assert f"git merge --no-edit {judged}" in out
+        assert "git merge --no-edit main" not in out
+
     def test_a_dirty_tree_after_the_merge_of_main_is_still_head_moved(self, repo: Path) -> None:
         _start(repo)
         _on_main(repo, {_LONELY: "# 2\n"})

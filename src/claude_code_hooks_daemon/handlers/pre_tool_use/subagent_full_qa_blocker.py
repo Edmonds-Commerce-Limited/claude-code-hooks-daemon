@@ -550,6 +550,9 @@ _PLACEHOLDER: Final[re.Pattern[str]] = re.compile(f"{_PLACEHOLDER_OPEN}(\\d+){_P
 #: format is given, and a format can print any word (review 6 M2).
 _GIT: Final[str] = "git"
 _GIT_LISTING_SUBCOMMAND: Final[str] = "diff"
+#: Always prints a commit, never the empty tree, so it cannot steer a
+#: listing the way an arbitrary run-time word can (review 7 m3).
+_GIT_MERGE_BASE_SUBCOMMAND: Final[str] = "merge-base"
 _GIT_NAME_ONLY: Final[str] = "--name-only"
 #: Options that make a listing print words other than the changed paths.
 _GIT_STEERING_OPTIONS: Final[tuple[str, ...]] = (
@@ -606,6 +609,20 @@ _COMMAND_LOOKUP_FLAGS: Final[frozenset[str]] = frozenset({"-v", "-V"})
 _EVAL: Final[str] = "eval"
 #: ``source x`` and ``. x`` run the script ``x`` in this shell.
 _SOURCE_COMMANDS: Final[frozenset[str]] = frozenset({"source", "."})
+#: ``find [paths] [tests] -exec cmd {} ;`` runs ``cmd`` on what find selects
+#: (review 7 m4): its start paths, when nothing narrows them below that, and
+#: unseen otherwise -- which files matched cannot be read from the command.
+_FIND: Final[str] = "find"
+_FIND_PLACEHOLDER: Final[str] = "{}"
+_FIND_EXEC_ACTIONS: Final[frozenset[str]] = frozenset({"-exec", "-execdir", "-ok", "-okdir"})
+_FIND_ACTION_TERMINATORS: Final[frozenset[str]] = frozenset({";", "+"})
+_FIND_PATH_STOP: Final[frozenset[str]] = frozenset({"!", "("})
+#: A test that can select fewer files than the start paths hold: with one of
+#: these present, ``{}`` is not the start paths, and cannot be seen.
+_FIND_NARROWING_TESTS: Final[frozenset[str]] = frozenset(
+    {"-name", "-iname", "-path", "-ipath", "-regex", "-iregex", "-wholename", "-iwholename"}
+)
+_FIND_SELECTED_FILES: Final[str] = "the files find selects"
 #: ``xargs [options] cmd args`` runs ``cmd`` with ``args`` plus words from
 #: stdin, which cannot be seen: the explicit arguments are judged alone.
 _XARGS: Final[str] = "xargs"
@@ -729,6 +746,11 @@ _EMPTY_LISTING_REASON: Final[str] = (
 _STDIN_WORDS_REASON: Final[str] = (
     "xargs reads this run's arguments from stdin, which cannot be seen, and with none it "
     "runs the bare command, which is the whole suite. Name the test paths on the command line."
+)
+_FIND_SELECTED_FILES_REASON: Final[str] = (
+    "find's `-exec ... {} ...` names the files find selects, narrowed by a `-name`/`-path` "
+    "test this handler does not read, so it may name the whole suite. Name the test paths "
+    "directly instead of narrowing find."
 )
 _AT_FILE_REASON: Final[str] = (
     "pytest reads more arguments from the `@file` named here, which is not read, so they may "
@@ -1746,7 +1768,15 @@ def _is_a_listing(stages: Sequence[str]) -> bool:
 
 
 def _steers_a_listing(word: str) -> bool:
-    """A git word that makes a listing print more than the changed paths."""
+    """A git word that makes a listing print more than the changed paths.
+
+    A substitution whose code is exactly ``git merge-base <rev>...`` is an
+    exception (review 7 m3): it always prints a commit, never the empty
+    tree, so ``git diff --name-only "$(git merge-base main HEAD)" -- tests``
+    means the same as ``git diff --name-only main...HEAD -- tests``.
+    """
+    if _is_merge_base_substitution(word):
+        return False
     if word.startswith(_GIT_STEERING_OPTIONS) or any(char in word for char in _UNBUILT_CHARACTERS):
         return True
     if _PLACEHOLDER_OPEN in word:
@@ -1754,6 +1784,21 @@ def _steers_a_listing(word: str) -> bool:
     return any(
         len(run) >= _ABBREVIATED_OBJECT and _EMPTY_TREE.startswith(run.lower())
         for run in _HEX_RUN.findall(word)
+    )
+
+
+def _is_merge_base_substitution(word: str) -> bool:
+    """Whether a word is a substitution whose code is ``git merge-base <rev>...``."""
+    if not word.startswith((_SUBSTITUTION_OPENER, _BACKTICK)):
+        return False
+    try:
+        words = shlex.split(_substitution_code(word))
+    except ValueError:
+        return False
+    return (
+        len(words) >= 3
+        and command_word(words[0]) == _GIT
+        and words[1] == _GIT_MERGE_BASE_SUBCOMMAND
     )
 
 
@@ -2234,6 +2279,10 @@ def _resolve_command(
         yield from _resolve_parallel(rest, segment, depth, hops)
         return
 
+    if name == _FIND:
+        yield from _resolve_find(rest, segment, depth, hops)
+        return
+
     runner = _PROJECT_RUNNERS.get(name)
     if runner is not None:
         yield from _resolve_runner(name, runner, rest, segment, depth, hops)
@@ -2499,6 +2548,46 @@ def _resolve_parallel(
         else:
             for value in inputs:
                 yield from _resolve([*command, value], segment, depth, hops + 1)
+
+
+def _resolve_find(
+    rest: list[str], segment: str, depth: int, hops: int
+) -> Iterator[tuple[str, list[str], str]]:
+    """``find [paths] [tests] -exec cmd {} ;`` (or ``+``) runs ``cmd`` on what find selects.
+
+    ``{}`` is find's start paths when no test narrows them below that (no
+    ``-name``, ``-path`` or similar); a ``-name``/``-path`` test present
+    anywhere means the files actually selected cannot be read from the
+    command line, so ``{}`` is judged unseen instead (review 7 m4).
+    ``-execdir``/``-ok``/``-okdir`` are followed the same way as ``-exec``.
+    """
+    start_paths: list[str] = []
+    index = 0
+    while (
+        index < len(rest)
+        and not _is_flag(rest[index])
+        and rest[index] not in _FIND_PATH_STOP
+    ):
+        start_paths.append(rest[index])
+        index += 1
+    narrowed = any(word in _FIND_NARROWING_TESTS for word in rest)
+    selected = start_paths if start_paths and not narrowed else [_FIND_SELECTED_FILES]
+    while index < len(rest):
+        word = rest[index]
+        index += 1
+        if word not in _FIND_EXEC_ACTIONS:
+            continue
+        action: list[str] = []
+        while index < len(rest) and rest[index] not in _FIND_ACTION_TERMINATORS:
+            action.append(rest[index])
+            index += 1
+        index += 1  # step past the `;` or `+` terminator, if one was found
+        if not action:
+            continue
+        argv: list[str] = []
+        for action_word in action:
+            argv.extend(selected if action_word == _FIND_PLACEHOLDER else [action_word])
+        yield from _resolve(argv, segment, depth, hops + 1)
 
 
 def _resolve_runner(
@@ -3263,6 +3352,8 @@ def _add_operand(
         operands.targets += 1
     elif word == _STDIN_WORDS:
         operands.maybe_bare = operands.maybe_bare or _STDIN_WORDS_REASON
+    elif word == _FIND_SELECTED_FILES:
+        operands.unseen_full = operands.unseen_full or _FIND_SELECTED_FILES_REASON
     elif _lists_changed_files(word):
         # Empty, it leaves the run bare: targeted only beside another target.
         operands.maybe_bare = operands.maybe_bare or _EMPTY_LISTING_REASON
