@@ -4,7 +4,8 @@ Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
 N34 is taken on the `worktree-n466-n24` branch (the chain deadline cannot
-interrupt a running handler) and lands with that branch.
+interrupt a running handler) and lands with that branch. N40 is taken there too
+(the fail-open classes behind that branch's security-review blockers).
 
 ### N39 — Nine unit tests fail in a whole-suite run and pass when their files run alone
 
