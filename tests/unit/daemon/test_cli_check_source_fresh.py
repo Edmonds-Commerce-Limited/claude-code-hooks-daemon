@@ -18,7 +18,9 @@ import pytest
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.daemon.cli import cmd_check_source_fresh, main
 from claude_code_hooks_daemon.daemon.source_fingerprint import (
-    compute_current_project_fingerprint,
+    HEALTH_KEY_CONFIG_FINGERPRINT,
+    HEALTH_KEY_SOURCE_FINGERPRINT,
+    compute_current_project_fingerprints,
 )
 
 
@@ -73,8 +75,13 @@ class TestCmdCheckSourceFresh:
         """A daemon reporting the same fingerprint as the working tree is fresh."""
         project_path = _make_project(tmp_path)
         args = argparse.Namespace(project_root=project_path)
-        current = compute_current_project_fingerprint(project_path)
-        mock_response = {"result": {"source_fingerprint": current}}
+        current = compute_current_project_fingerprints(project_path)
+        mock_response = {
+            "result": {
+                HEALTH_KEY_SOURCE_FINGERPRINT: current.source,
+                HEALTH_KEY_CONFIG_FINGERPRINT: current.config,
+            }
+        }
 
         with (
             patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=12345),
@@ -91,7 +98,13 @@ class TestCmdCheckSourceFresh:
         """A daemon reporting a DIFFERENT fingerprint than the working tree is stale."""
         project_path = _make_project(tmp_path)
         args = argparse.Namespace(project_root=project_path)
-        mock_response = {"result": {"source_fingerprint": "0" * 64}}
+        current = compute_current_project_fingerprints(project_path)
+        mock_response = {
+            "result": {
+                HEALTH_KEY_SOURCE_FINGERPRINT: "0" * 64,
+                HEALTH_KEY_CONFIG_FINGERPRINT: current.config,
+            }
+        }
 
         with (
             patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=12345),
@@ -103,6 +116,63 @@ class TestCmdCheckSourceFresh:
             result = cmd_check_source_fresh(args)
 
         assert result == 1
+
+    def test_config_edited_without_restart_exits_one(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Plan 00415: code unchanged, config edited on disk, daemon not restarted.
+
+        The running daemon still reports the fingerprints it bound at startup;
+        the working tree's config has moved on. The verdict must be STALE and
+        must say the config is what moved.
+        """
+        project_path = _make_project(tmp_path)
+        args = argparse.Namespace(project_root=project_path)
+        bound = compute_current_project_fingerprints(project_path)
+        mock_response = {
+            "result": {
+                HEALTH_KEY_SOURCE_FINGERPRINT: bound.source,
+                HEALTH_KEY_CONFIG_FINGERPRINT: bound.config,
+            }
+        }
+        (project_path / ".claude" / "hooks-daemon.yaml").write_text(
+            "version: '1.0'\ndaemon:\n  idle_timeout_seconds: 901\n"
+        )
+
+        with (
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=12345),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.send_daemon_request",
+                return_value=mock_response,
+            ),
+        ):
+            result = cmd_check_source_fresh(args)
+
+        assert result == 1
+        assert "config" in capsys.readouterr().out
+
+    def test_config_unchanged_is_fresh_on_every_run(self, tmp_path: Path) -> None:
+        """No flapping: the same untouched config reads FRESH repeatedly."""
+        project_path = _make_project(tmp_path)
+        args = argparse.Namespace(project_root=project_path)
+        bound = compute_current_project_fingerprints(project_path)
+        mock_response = {
+            "result": {
+                HEALTH_KEY_SOURCE_FINGERPRINT: bound.source,
+                HEALTH_KEY_CONFIG_FINGERPRINT: bound.config,
+            }
+        }
+
+        with (
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=12345),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.send_daemon_request",
+                return_value=mock_response,
+            ),
+        ):
+            results = [cmd_check_source_fresh(args) for _ in range(3)]
+
+        assert results == [0, 0, 0]
 
     def test_no_response_exits_one(self, tmp_path: Path) -> None:
         """The daemon does not answer the health request at all."""

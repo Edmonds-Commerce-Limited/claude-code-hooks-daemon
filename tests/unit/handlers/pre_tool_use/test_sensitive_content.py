@@ -247,6 +247,18 @@ class TestPublicPatternMatching:
         # Must not raise; invalid pattern simply never matches.
         assert handler.matches(hook_input) is False
 
+    def test_an_invalid_regex_pattern_is_said_at_warning(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """00466 N29: a pattern that never matches leaves the guard narrower
+        than its config says, so the skip is logged at WARNING, naming it."""
+        handler = _handler_with_public_patterns(
+            [{"name": "broken", "pattern": "([n29-unclosed", "description": "d"}]
+        )
+        with caplog.at_level(logging.WARNING):
+            handler.matches(_write_input("/tmp/f.txt", "anything"))
+        assert "([n29-unclosed" in caplog.text
+
     def test_multiple_patterns_first_match_wins(self) -> None:
         handler = _handler_with_public_patterns(
             [

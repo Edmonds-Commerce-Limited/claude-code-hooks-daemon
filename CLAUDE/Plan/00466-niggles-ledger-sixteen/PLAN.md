@@ -52,7 +52,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N18 | PlanWorkflow.core.md says the plan index is linted against one rule                                       | N13/N14 agent      | 🔄 In progress        |
 | N19 | The registry's options-collection failure is logged at debug level                                        | N13/N14 agent      | 🔄 In progress        |
 | N20 | The capture-corruption auditor judges a multi-line single-quoted string one line at a time                | B1 integration     | ⬜ Open               |
-| N21 | The semgrep QA gate passes when a rule times out                                                          | 00414 agent        | 🔄 In progress        |
+| N21 | The semgrep QA gate passes when a rule times out                                                          | 00414 agent        | ✅ Remedied           |
 | N22 | `lsp_enforcement` takes another command's argument for a grep symbol lookup                               | Coordinator        | ⬜ Open               |
 | N23 | `recovery_cron_advisor` hands one request's lifecycle phase to another through the singleton              | Plan 00449's agent | ⬜ Open               |
 | N24 | `daemon.strict_mode` never reaches the live daemon, so every guard fails open on a handler exception      | guards review 2    | 🔄 In progress        |
@@ -60,7 +60,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N26 | `check_skill_references.py` scans zero files when run from a worktree, and passes                         | 00468 core agent   | ✅ Remedied           |
 | N27 | `skill_scan` and `tool_report` build the transcript directory name two different ways                     | 00468 core agent   | ✅ Remedied           |
 | N28 | `project_containment` resolves a relative target against the payload cwd, ignoring a same-command `cd`    | Plan 00464 agent   | 🔄 In progress        |
-| N29 | `error_hiding`'s return-None-in-except check is evaded by returning a local assigned in the handler       | Coordinator        | ⬜ Open               |
+| N29 | `error_hiding`'s return-None-in-except check is evaded by returning a local assigned in the handler       | Coordinator        | ✅ Remedied           |
 | N30 | More shell code that must survive a hostile PATH depends on a PATH command (`date`, `pgrep`)              | 00467 dogfood      | ⬜ Open               |
 | N31 | The dispatch-declaration advisory does not recognise "File to write to: <path>"                           | 00467 dogfood      | ⬜ Open               |
 | N32 | `pipe_blocker` splits at a `\|` inside double quotes and reads the next word as a pipe stage              | Plan 00463 agent   | ⬜ Open               |

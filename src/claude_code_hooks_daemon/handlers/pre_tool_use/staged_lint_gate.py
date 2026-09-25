@@ -312,12 +312,17 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
                 )
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
-            # A missing binary or a timed-out subprocess is feature detection,
-            # not a failure to hide: the file's syntax was never actually
-            # checked, so there is nothing to report. Logged (not silent) so
-            # the daemon log records that the check did not run, matching
-            # `lint_on_edit`'s identical never-block-on-absence convention.
-            logger.debug("staged_lint_gate: %s unavailable for %s: %s", parts[0], file_path, exc)
+            # A tool that cannot run or times out never looked at the file, so
+            # there is no diagnosis to block on (`lint_on_edit`'s identical
+            # never-block-on-absence convention). It is logged at WARNING: the
+            # commit goes through with this file unchecked, which is not the
+            # same as the file passing.
+            logger.warning(
+                "staged_lint_gate: %s was NOT checked: %s could not run (%s)",
+                file_path,
+                parts[0],
+                exc,
+            )
             result = None
 
         if result is None:

@@ -1570,8 +1570,10 @@ Two sources, with **deliberately different disclosure rules**:
   not open the file: it is itself read-protected by
   [`secret_file_guard`](#secret_file_guard) (Plan 00272).
 
-A missing, empty or comments-only secret file makes that source silently inert
-by design, so a checkout without the file still works.
+A missing, empty or comments-only secret file makes that source inert by
+design, so a checkout without the file still works. When the config names the
+list and it is missing, [`secret_file_hygiene_checker`](#secret_file_hygiene_checker)
+says so once at SessionStart.
 
 **Four surfaces, one guard.** The same two sources judge everything a tool call
 would introduce:
@@ -3408,7 +3410,7 @@ handlers:
 | **Type**       | Advisory                      |
 | **Event**      | SessionStart                  |
 
-**Description:** Session-start half of the on-disk hygiene the `secret-meta` CLI already reports on demand for one path at a time (Plan 00272 Task 6.1). For every configured protected path (the effective `secret_file_guard` globs) that EXISTS on disk, advises — never blocks — when it is not gitignored, is git-tracked, or is group/world-readable. A file whose content is a whole-file Ansible Vault payload is ciphertext that is meant to be committed, so it gets none of that advice, and the advisory stays silent when nothing else is wrong (Plan 00459). Ciphertext that is untracked or gitignored, which is where the old advice left some projects, is told to come back: remove the ignore rule or add `!/<path>` after it, then `git add <path>`. `gitignore_safety_checker` applies the same rule to `.gitignore` lines: when it advises a protected glob, a `!/<path>` negation follows it for every existing encrypted file it would catch, and it reports encrypted files a present rule already ignores. A YAML file with inline `!vault` values gets a conditional statement in place of the untrack advice. Files are found with `git ls-files` and judged with `stat()` plus that one format check, which runs inside the daemon and returns only a format name, so content never reaches the advisory.
+**Description:** Session-start half of the on-disk hygiene the `secret-meta` CLI already reports on demand for one path at a time (Plan 00272 Task 6.1). For every configured protected path (the effective `secret_file_guard` globs) that EXISTS on disk, advises — never blocks — when it is not gitignored, is git-tracked, or is group/world-readable. A file whose content is a whole-file Ansible Vault payload is ciphertext that is meant to be committed, so it gets none of that advice, and the advisory stays silent when nothing else is wrong (Plan 00459). Ciphertext that is untracked or gitignored, which is where the old advice left some projects, is told to come back: remove the ignore rule or add `!/<path>` after it, then `git add <path>`. `gitignore_safety_checker` applies the same rule to `.gitignore` lines: when it advises a protected glob, a `!/<path>` negation follows it for every existing encrypted file it would catch, and it reports encrypted files a present rule already ignores. A YAML file with inline `!vault` values gets a conditional statement in place of the untrack advice. Files are found with `git ls-files` and judged with `stat()` plus that one format check, which runs inside the daemon and returns only a format name, so content never reaches the advisory. A path the config names that is ABSENT is reported too, once, naming the guard it leaves inert (Plan 00414): `sensitive_content`'s `secret_word_list_path` option, or a path-shaped literal in `secret_file_guard`'s `protected_paths`, with that handler enabled. A default nobody configured is not reported. It repeats only when the config or the file's presence changes.
 
 **Options:** none.
 

@@ -32,6 +32,7 @@ import ast
 import json
 import re
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -46,12 +47,20 @@ VIOLATION_TYPES = {
     "silent-pass": "Silent try/except/pass - error is completely ignored",
     "silent-continue": "Silent try/except/continue - error skipped in loop",
     "return-none-on-error": "Returns None on error instead of raising",
+    "return-none-via-local": (
+        "Handler binds None or an empty default to a local that is returned "
+        "after the try - return-none-on-error spelt so the token is not seen"
+    ),
     "log-and-continue": "Logs error but continues execution",
     "bare-except": "Bare except clause without specific exception type",
     "warning-instead-of-error": "Uses logger.warning() for critical failures",
     "silent-fallback": (
         "Exception handler assigns a fallback value with no logging or "
         "re-raise - failure becomes indistinguishable from success"
+    ),
+    "unauditable-file": (
+        "The file could not be opened or decoded, so it was never checked "
+        "for error-hiding patterns - reported rather than silently skipped"
     ),
 }
 
@@ -126,6 +135,224 @@ _PYTHON_HEREDOC_START_RE = re.compile(
 _BASH_FUNCTION_START_RE = re.compile(r"^([A-Za-z_]\w*)\s*\(\)\s*\{?\s*$")
 
 
+# Logger methods that report a failure where an operator will see it.
+_SURFACING_LOG_LEVELS: frozenset[str] = frozenset(
+    {"warning", "warn", "error", "exception", "critical", "fatal"}
+)
+
+# Methods that record a problem on a list, set or similar collection.
+_LIST_RECORDING_METHODS: frozenset[str] = frozenset({"append", "extend", "add", "insert"})
+
+# A callee whose name contains one of these hands its arguments to a reader.
+_REPORTING_CALL_WORDS: tuple[str, ...] = ("report", "render", "emit")
+
+# Empty constructors a handler substitutes for a result it could not compute.
+_EMPTY_DEFAULT_CALLS: frozenset[str] = frozenset({"list", "dict", "tuple", "set", "frozenset"})
+
+
+def _is_none(value: ast.expr | None) -> bool:
+    return value is None or (isinstance(value, ast.Constant) and value.value is None)
+
+
+def _is_fallback_value(value: ast.expr | None) -> bool:
+    """None, or an empty default indistinguishable from "nothing found"."""
+    if _is_none(value):
+        return True
+    if isinstance(value, ast.Constant):
+        return isinstance(value.value, str | bytes) and not value.value
+    if isinstance(value, ast.List | ast.Tuple | ast.Set):
+        return not value.elts
+    if isinstance(value, ast.Dict):
+        return not value.keys
+    return (
+        isinstance(value, ast.Call)
+        and isinstance(value.func, ast.Name)
+        and value.func.id in _EMPTY_DEFAULT_CALLS
+        and not value.args
+        and not value.keywords
+    )
+
+
+def _walk_own_scope(node: ast.AST) -> Iterator[ast.AST]:
+    """Every node in ``node``'s body, not descending into nested scopes."""
+    for child in ast.iter_child_nodes(node):
+        yield child
+        if not isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+            yield from _walk_own_scope(child)
+
+
+def _handler_surfaces_the_error(handler: ast.ExceptHandler, surfaced_lists: set[str]) -> bool:
+    """Does the handler re-raise, log at warning or above, or record a
+    problem on a list that its function returns, raises, logs or reports?"""
+    for child in _walk_own_scope(handler):
+        if isinstance(child, ast.Raise):
+            return True
+        if isinstance(child, ast.Call) and isinstance(child.func, ast.Attribute):
+            if child.func.attr in _SURFACING_LOG_LEVELS:
+                return True
+            if (
+                child.func.attr in _LIST_RECORDING_METHODS
+                and ast.unparse(child.func.value) in surfaced_lists
+            ):
+                return True
+    return False
+
+
+def _lists_surfaced_in(scope: list[ast.AST]) -> set[str]:
+    """Every name or attribute path that is returned, raised, or passed to a
+    logging or reporting call somewhere in the function."""
+    carriers: list[ast.AST] = []
+    for node in scope:
+        if isinstance(node, ast.Return) and node.value is not None:
+            carriers.append(node.value)
+        elif isinstance(node, ast.Raise):
+            carriers.extend(part for part in (node.exc, node.cause) if part is not None)
+        elif isinstance(node, ast.Call) and _is_reporting_call(node):
+            carriers.extend(node.args)
+            carriers.extend(keyword.value for keyword in node.keywords)
+    return {
+        ast.unparse(expr)
+        for carrier in carriers
+        for expr in ast.walk(carrier)
+        if isinstance(expr, ast.Name | ast.Attribute)
+    }
+
+
+def _is_reporting_call(call: ast.Call) -> bool:
+    func = call.func
+    if isinstance(func, ast.Attribute):
+        if func.attr in _SURFACING_LOG_LEVELS:
+            return True
+        if func.attr == "write" and ast.unparse(func.value) == "sys.stderr":
+            return True
+        name = func.attr
+    elif isinstance(func, ast.Name):
+        name = func.id
+    else:
+        return False
+    lowered = name.lower()
+    return lowered == "print" or any(word in lowered for word in _REPORTING_CALL_WORDS)
+
+
+def _fallback_bindings(stmt: ast.stmt) -> Iterator[ast.Name]:
+    """The names ``stmt`` binds to a fallback value, tuple unpacking included."""
+    if isinstance(stmt, ast.Assign):
+        for target in stmt.targets:
+            yield from _paired_fallback_names(target, stmt.value)
+    elif (
+        isinstance(stmt, ast.AnnAssign)
+        and isinstance(stmt.target, ast.Name)
+        and stmt.value is not None
+        and _is_fallback_value(stmt.value)
+    ):
+        yield stmt.target
+
+
+def _paired_fallback_names(target: ast.expr, value: ast.expr) -> Iterator[ast.Name]:
+    if isinstance(target, ast.Name):
+        if _is_fallback_value(value):
+            yield target
+    elif (
+        isinstance(target, ast.Tuple | ast.List)
+        and isinstance(value, ast.Tuple | ast.List)
+        and len(target.elts) == len(value.elts)
+    ):
+        for sub_target, sub_value in zip(target.elts, value.elts, strict=True):
+            yield from _paired_fallback_names(sub_target, sub_value)
+
+
+def _names_bound_to_a_fallback(handler: ast.ExceptHandler) -> dict[str, int]:
+    """Each name the handler binds to a fallback, with the line of the last binding."""
+    names: dict[str, int] = {}
+    for stmt in _walk_own_scope(handler):
+        if isinstance(stmt, ast.stmt):
+            for target in _fallback_bindings(stmt):
+                names[target.id] = max(names.get(target.id, 0), stmt.lineno)
+    return names
+
+
+def _returns_of_a_local(scope: list[ast.AST]) -> list[tuple[str, int]]:
+    """``(name, line)`` for each return that hands back a local's fallback.
+
+    Either ``return name``, or ``return None`` / a bare ``return`` directly
+    under ``if name is None:`` / ``if not name:``.
+    """
+    found: list[tuple[str, int]] = []
+    for node in scope:
+        if isinstance(node, ast.Return) and isinstance(node.value, ast.Name):
+            found.append((node.value.id, node.lineno))
+        elif isinstance(node, ast.If):
+            name = _name_tested_for_emptiness(node.test)
+            if name is None:
+                continue
+            found.extend(
+                (name, stmt.lineno)
+                for stmt in node.body
+                if isinstance(stmt, ast.Return) and _is_none(stmt.value)
+            )
+    return found
+
+
+def _name_tested_for_emptiness(test: ast.expr) -> str | None:
+    if (
+        isinstance(test, ast.Compare)
+        and isinstance(test.left, ast.Name)
+        and len(test.ops) == 1
+        and isinstance(test.ops[0], ast.Is)
+        and _is_none(test.comparators[0])
+    ):
+        return test.left.id
+    if (
+        isinstance(test, ast.UnaryOp)
+        and isinstance(test.op, ast.Not)
+        and isinstance(test.operand, ast.Name)
+    ):
+        return test.operand.id
+    return None
+
+
+def _flow_start(
+    try_node: ast.Try, handler: ast.ExceptHandler, bound_line: int, return_line: int
+) -> int | None:
+    """The line after which a rebinding would stop the handler's fallback
+    reaching ``return_line``, or None when it cannot reach it at all."""
+    try_end: int = try_node.end_lineno or try_node.lineno
+    if return_line > try_end:
+        return try_end
+    if try_node.finalbody:
+        finally_start = try_node.finalbody[0].lineno
+        if finally_start <= return_line <= try_end:
+            return finally_start - 1
+    handler_end: int = handler.end_lineno or handler.lineno
+    if bound_line < return_line <= handler_end:
+        return bound_line
+    return None
+
+
+def _is_rebound_between(scope: list[ast.AST], name: str, after: int, before: int) -> bool:
+    """Is ``name`` given a real value on a line strictly between the two?
+
+    Binding the same kind of fallback again (an outer handler's ``x = None``)
+    is not a rebinding: the value still means "the call failed". Nor is an
+    augmented assignment, which builds on the fallback rather than replacing it.
+    """
+    fallback_targets = {
+        id(target)
+        for node in scope
+        if isinstance(node, ast.stmt)
+        for target in _fallback_bindings(node)
+    }
+    fallback_targets.update(id(node.target) for node in scope if isinstance(node, ast.AugAssign))
+    return any(
+        isinstance(node, ast.Name)
+        and node.id == name
+        and isinstance(node.ctx, ast.Store)
+        and id(node) not in fallback_targets
+        and after < node.lineno < before
+        for node in scope
+    )
+
+
 class ErrorHidingVisitor(ast.NodeVisitor):
     """AST visitor to detect error hiding patterns."""
 
@@ -133,7 +360,7 @@ class ErrorHidingVisitor(ast.NodeVisitor):
         self.filepath = filepath
         self.violations: list[dict[str, Any]] = []
         self._seen: set[tuple[str, int, str]] = set()
-        self.in_test_file = "test_" in filepath.name or filepath.parts[-2] == "tests"
+        self.in_test_file = "test_" in filepath.name or filepath.parent.name == "tests"
         self._function_stack: list[str] = []
 
     def visit_Try(self, node: ast.Try) -> None:
@@ -194,31 +421,63 @@ class ErrorHidingVisitor(ast.NodeVisitor):
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         """Check function definitions for return-none-on-error pattern."""
+        self._check_function(node)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        """An async function hides errors the same ways a plain one does."""
+        self._check_function(node)
+
+    def _check_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
         self._function_stack.append(node.name)
-        # Look for try/except that returns None
         for child in ast.walk(node):
             if isinstance(child, ast.Try):
                 for handler in child.handlers:
                     for stmt in handler.body:
-                        if isinstance(stmt, ast.Return):
-                            # Check if returning None
-                            if stmt.value is None or (
-                                isinstance(stmt.value, ast.Constant) and stmt.value.value is None
-                            ):
-                                self._add_violation(
-                                    child,
-                                    "return-none-on-error",
-                                    "Returns None on error instead of raising",
-                                )
+                        if isinstance(stmt, ast.Return) and _is_none(stmt.value):
+                            self._add_violation(
+                                child,
+                                "return-none-on-error",
+                                "Returns None on error instead of raising",
+                            )
+        self._check_fallback_returned_through_a_local(node)
 
         self.generic_visit(node)
         self._function_stack.pop()
 
-    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-        """Delegate to visit_FunctionDef for async functions."""
-        self._function_stack.append(node.name)
-        self.generic_visit(node)
-        self._function_stack.pop()
+    def _check_fallback_returned_through_a_local(
+        self, node: ast.FunctionDef | ast.AsyncFunctionDef
+    ) -> None:
+        """00466 N29: judge the flow, not the ``return None`` token.
+
+        A handler that binds None (or an empty default) to a local, which the
+        function then returns with nothing rebinding it, behaves exactly like
+        ``return None`` in the handler. The return may come later in the same
+        handler, in the ``try``'s ``finally:``, or anywhere after the ``try``;
+        the ``try``'s own ``else:`` never runs after a handler. It is not
+        hiding when the handler re-raises, logs at warning or above, or records
+        the problem on a list the function surfaces.
+        """
+        scope = list(_walk_own_scope(node))
+        returns = _returns_of_a_local(scope)
+        surfaced_lists = _lists_surfaced_in(scope)
+        for try_node in (stmt for stmt in scope if isinstance(stmt, ast.Try)):
+            for handler in try_node.handlers:
+                if _handler_surfaces_the_error(handler, surfaced_lists):
+                    continue
+                for name, bound_line in _names_bound_to_a_fallback(handler).items():
+                    if any(
+                        returned == name
+                        and (start := _flow_start(try_node, handler, bound_line, line)) is not None
+                        and not _is_rebound_between(scope, name, start, line)
+                        for returned, line in returns
+                    ):
+                        self._add_violation(
+                            handler,
+                            "return-none-via-local",
+                            f"Handler binds a fallback to '{name}' that is returned "
+                            "with no warning-or-above log, no re-raise and no "
+                            "surfaced problem",
+                        )
 
     def _is_log_and_continue(self, handler: ast.ExceptHandler) -> bool:
         """Check if handler just logs and continues."""
@@ -265,9 +524,23 @@ def audit_file(filepath: Path) -> list[dict[str, Any]]:
     except SyntaxError:
         # Skip files with syntax errors
         return []
-    except Exception as e:
-        print(f"Error auditing {filepath}: {e}", file=sys.stderr)
-        return []
+    except (OSError, UnicodeDecodeError) as exc:
+        # The file could not be opened or decoded at all — reported as a
+        # finding rather than silently contributing zero violations, which
+        # was indistinguishable from "this file is clean". A bare
+        # `except Exception: print(...); return []` here used to be the
+        # exact shape this auditor exists to catch, committed by the
+        # auditor itself.
+        return [
+            {
+                "file": str(filepath),
+                "line": 0,
+                "function": None,
+                "rule": "unauditable-file",
+                "message": f"Could not read {filepath} for error-hiding audit: {exc}",
+                "description": VIOLATION_TYPES["unauditable-file"],
+            }
+        ]
 
 
 def audit_directory(

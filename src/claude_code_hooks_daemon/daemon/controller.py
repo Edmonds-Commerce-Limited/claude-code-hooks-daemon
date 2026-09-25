@@ -28,6 +28,10 @@ from claude_code_hooks_daemon.core.pseudo_event import (
     merge_pseudo_results,
 )
 from claude_code_hooks_daemon.core.router import EventRouter
+from claude_code_hooks_daemon.daemon.source_fingerprint import (
+    HEALTH_KEY_CONFIG_FINGERPRINT,
+    HEALTH_KEY_SOURCE_FINGERPRINT,
+)
 from claude_code_hooks_daemon.daemon.verdict_log import append_verdicts
 from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
 
@@ -133,6 +137,7 @@ class DaemonController:
         "_chain_config",
         "_config",
         "_config_errors",
+        "_config_fingerprint",
         "_degraded",
         "_initialised",
         "_mode_manager",
@@ -175,6 +180,9 @@ class DaemonController:
         # after that -- staying stale IS the point, so a caller can detect
         # when the on-disk source has moved on without a restart.
         self._source_fingerprint: str | None = None
+        # Fingerprint of the config bound at startup (Plan 00415), supplied by
+        # the caller that loaded it; the same never-recomputed contract.
+        self._config_fingerprint: str | None = None
 
     def initialise(
         self,
@@ -195,6 +203,7 @@ class DaemonController:
         write_claude_md_in_linked_worktree: bool = False,
         worktree: "WorktreeConfig | None" = None,
         reference_repos: "ReferenceReposConfig | None" = None,
+        config_fingerprint: str | None = None,
     ) -> None:
         """Initialise the controller with handlers.
 
@@ -229,6 +238,11 @@ class DaemonController:
                 Daemon startup leaves it False, so a worktree's branch never
                 carries an auto-committed regeneration that conflicts with
                 main's on merge; ``regenerate-docs`` passes True.
+            config_fingerprint: ``compute_config_fingerprint`` of the config
+                these slices came from (Plan 00415), reported by
+                ``get_health`` so a config edit without a restart reads as
+                stale. ``None`` reports no config fingerprint, which the
+                freshness verdict treats as unverifiable.
 
         Raises:
             ValueError: If workspace_root is None (FAIL FAST requirement)
@@ -315,6 +329,7 @@ class DaemonController:
         self._source_fingerprint = self._compute_startup_source_fingerprint(
             workspace_root, project_handlers_config
         )
+        self._config_fingerprint = config_fingerprint
 
         # Inject handler guidance into project CLAUDE.md (advisory, never raises).
         # Pseudo-event handlers must be included: they dispatch through the
@@ -1120,7 +1135,10 @@ class DaemonController:
             # Plan 00371: content fingerprint of the code loaded at startup,
             # so a caller can detect a daemon whose loaded code has fallen
             # behind the working tree. None until initialise() runs.
-            "source_fingerprint": self._source_fingerprint,
+            HEALTH_KEY_SOURCE_FINGERPRINT: self._source_fingerprint,
+            # Plan 00415: fingerprint of the config bound at startup, the
+            # other half of the freshness verdict. None until initialise().
+            HEALTH_KEY_CONFIG_FINGERPRINT: self._config_fingerprint,
         }
 
         if self._degraded:

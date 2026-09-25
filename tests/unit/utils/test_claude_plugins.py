@@ -372,6 +372,20 @@ class TestCanonicalRepoRoot:
         (impostor / ".git").write_text(f"gitdir: {entry}\n")
         assert canonical_repo_root(impostor) == impostor.resolve()
 
+    def test_an_unreadable_git_file_is_its_own_root_and_says_so(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A `.git` file that exists but cannot be decoded falls back like
+        Claude Code does, and is logged at WARNING rather than hidden."""
+        checkout = tmp_path / "checkout"
+        checkout.mkdir()
+        (checkout / ".git").write_bytes(b"gitdir: \xff\xfe\n")
+
+        with caplog.at_level("WARNING"):
+            assert canonical_repo_root(checkout) == checkout.resolve()
+
+        assert any("cannot read" in record.getMessage() for record in caplog.records)
+
 
 # ── Agents ──────────────────────────────────────────────────────────
 

@@ -111,14 +111,92 @@ def parse_pytest_text_output(content: str) -> dict[str, Any]:
         if node_id not in failed_tests:
             failed_tests.append(node_id)
 
+    total = passed + failed + skipped + errors
     return {
-        "total": passed + failed + skipped + errors,
+        "total": total,
         "passed": passed,
         "failed": failed,
         "skipped": skipped,
         "errors": errors,
         # An ERRORED run is a red run. Deriving this from the failed count
         # alone let a suite whose fixtures blew up report itself as green.
-        "passed_all": failed == 0 and errors == 0,
+        #
+        # total > 0 (00466 N21): a run that collected NOTHING -- a pytest
+        # usage error, "no tests ran", empty output -- has not passed, it has
+        # not run. failed == 0 and errors == 0 was also true of that case,
+        # so it read as green. This parser never sees the runner's own exit
+        # code; callers that have it must also combine it in via
+        # finalize_passed_all, because a runner can exit non-zero for a
+        # reason its summary line does not capture.
+        "passed_all": failed == 0 and errors == 0 and total > 0,
         "failed_tests": failed_tests,
+    }
+
+
+def finalize_passed_all(parsed_passed_all: bool, exit_code: int) -> bool:
+    """Combine the text parser's verdict with the runner's own exit status.
+
+    ``parse_pytest_text_output`` scrapes console text and never sees the
+    process exit code, so a runner that exits non-zero for a reason its
+    summary line does not capture (a coverage-threshold failure, a crash
+    immediately after the summary printed) would otherwise still read green.
+
+    Args:
+        parsed_passed_all: ``parse_pytest_text_output(...)["passed_all"]``.
+        exit_code: The runner's own process exit status.
+
+    Returns:
+        ``True`` only when both agree the run was clean.
+    """
+    return exit_code == 0 and parsed_passed_all
+
+
+#: The ``pytest-json-report`` plugin's own summary field for setup/teardown
+#: failures, mirroring what this module calls ``errors`` for the text path.
+_JSON_REPORT_ERROR_KEY: str = "error"
+
+
+def build_json_report_summary(pytest_data: dict[str, Any] | None, exit_code: int) -> dict[str, Any]:
+    """The verdict for the ``pytest-json-report`` plugin's native JSON shape.
+
+    Mirrors ``parse_pytest_text_output``'s ``passed_all`` rule (a positive
+    total, no failures, no errors) and additionally requires the runner's own
+    exit code to be zero, the same combination ``finalize_passed_all``
+    applies to the text-scraping path.
+
+    Args:
+        pytest_data: The parsed contents of the plugin's raw JSON report, or
+            ``None`` when that file never existed. A runner that crashed
+            before writing one produced no verdict at all — a real tool
+            failure, not an absence of findings — so this must NOT be
+            conflated with a report that legitimately says "0 found".
+        exit_code: The runner's own process exit status.
+
+    Returns:
+        The ``summary`` mapping this report publishes: ``total``, ``passed``,
+        ``failed``, ``skipped``, ``duration``, ``passed_all``, and (only when
+        the raw report was missing) ``error``.
+    """
+    if pytest_data is None:
+        return {
+            "total": 0,
+            "passed": 0,
+            "failed": 0,
+            "skipped": 0,
+            "duration": 0,
+            "passed_all": False,
+            "error": ("pytest-json-report produced no raw report; pytest recorded no verdict"),
+        }
+
+    summary_data = pytest_data.get("summary", {})
+    total = summary_data.get("total", 0)
+    failed = summary_data.get("failed", 0)
+    error_count = summary_data.get(_JSON_REPORT_ERROR_KEY, 0)
+    return {
+        "total": total,
+        "passed": summary_data.get("passed", 0),
+        "failed": failed,
+        "skipped": summary_data.get("skipped", 0),
+        "duration": pytest_data.get("duration", 0),
+        "passed_all": exit_code == 0 and failed == 0 and error_count == 0 and total > 0,
     }

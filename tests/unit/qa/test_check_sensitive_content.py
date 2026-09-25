@@ -504,3 +504,78 @@ class TestFaithfulVendoredCopiesStandPublicPatternsDown:
         data = self._scan(tmp_path, Path("docs") / "hooks.md", content)
 
         assert [v["rule"] for v in data["violations"]] == ["public-pattern:session-uuid"]
+
+
+class TestMalformedConfigFailsRatherThanBeingIgnored:
+    """A config file that exists but fails to parse must fail the gate.
+
+    ``_load_config`` used to turn a ``yaml.YAMLError`` into ``{}`` — exactly
+    what a MISSING config file also produces — so a typo in the YAML
+    silently disabled every public pattern and the secret-word-list lookup,
+    and the gate reported a clean sweep after tacitly checking nothing.
+    """
+
+    def test_malformed_yaml_fails_the_check(self, tmp_path: Path) -> None:
+        config = tmp_path / "hooks-daemon.yaml"
+        config.write_text("handlers: [unclosed\n")
+        (tmp_path / "file.txt").write_text("nothing sensitive here\n")
+
+        data = _run_checker(tmp_path, config)
+
+        assert data["summary"]["passed"] is False
+        assert any(v["rule"] == "config" for v in data["violations"])
+
+
+class TestInvalidPublicPatternIsReported:
+    """Mirrors check_git_history.py: an unparseable pattern is REPORTED, not
+    silently dropped — a rule that cannot compile checked nothing."""
+
+    def test_uncompilable_pattern_is_reported_not_skipped(self, tmp_path: Path) -> None:
+        config = tmp_path / "hooks-daemon.yaml"
+        _write_config(
+            config,
+            public_patterns=[{"name": "broken", "pattern": "[unclosed", "description": ""}],
+        )
+        (tmp_path / "file.txt").write_text("irrelevant\n")
+
+        data = _run_checker(tmp_path, config)
+
+        assert data["summary"]["passed"] is False
+        assert any(v["rule"] == "public-pattern:broken" for v in data["violations"])
+
+
+class TestUnreadableFileIsReportedNotSilentlyDropped:
+    """An unreadable/undecodable tracked file must fail the check, and its
+    NAME must still be checked against every pattern regardless."""
+
+    def test_binary_file_is_reported_as_a_violation(self, tmp_path: Path) -> None:
+        config = tmp_path / "hooks-daemon.yaml"
+        _write_config(config)
+        (tmp_path / "blob.bin").write_bytes(b"\xff\xfe\x00\x01")
+
+        data = _run_checker(tmp_path, config)
+
+        assert data["summary"]["passed"] is False
+        assert any(v["rule"] == "unreadable-file" for v in data["violations"])
+
+    def test_unreadable_files_still_count_toward_files_scanned(self, tmp_path: Path) -> None:
+        config = tmp_path / "hooks-daemon.yaml"
+        _write_config(config)
+        (tmp_path / "blob.bin").write_bytes(b"\xff\xfe\x00\x01")
+
+        data = _run_checker(tmp_path, config)
+
+        assert data["summary"]["files_scanned"] == 1
+
+    def test_unreadable_file_name_check_still_runs(self, tmp_path: Path) -> None:
+        terms_file = tmp_path / "temporary-terms.txt"
+        terms_file.write_text("zzqx-nonsense-term\n")
+        config = tmp_path / "hooks-daemon.yaml"
+        _write_config(config, secret_word_list_path=terms_file.name)
+        (tmp_path / "zzqx-nonsense-term.bin").write_bytes(b"\xff\xfe\x00\x01")
+
+        data = _run_checker(tmp_path, config)
+
+        rules = {v["rule"] for v in data["violations"]}
+        assert "secret-word-list" in rules
+        assert "unreadable-file" in rules

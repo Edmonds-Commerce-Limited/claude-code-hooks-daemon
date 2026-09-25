@@ -347,6 +347,10 @@ _SCANNERS = {
 }
 
 
+def _is_project_root(directory: Path) -> bool:
+    return (directory / "pyproject.toml").exists() and (directory / "src").exists()
+
+
 def _collect_files(directory: Path, include_filter: str | None = None) -> tuple[list[Path], int]:
     """Collect scannable files, using _SCAN_DIRS when at project root.
 
@@ -355,9 +359,8 @@ def _collect_files(directory: Path, include_filter: str | None = None) -> tuple[
         exclusions, so a scan that excluded everything can say so.
     """
     files: list[Path] = []
-    is_project_root = (directory / "pyproject.toml").exists() and (directory / "src").exists()
 
-    if is_project_root:
+    if _is_project_root(directory):
         # At project root: scan focused directories + root-level files
         for scan_entry in _SCAN_DIRS:
             target = directory / scan_entry
@@ -398,10 +401,19 @@ def scan_directory(
         scanner = _SCANNERS[filepath.suffix]
         try:
             violations.extend(scanner(filepath))
-        except OSError:
-            # Skip unreadable files (broken symlinks, permission errors)
-            continue
-        files_scanned += 1
+        except OSError as exc:
+            # One unreadable file must not abort the sweep, and must not read
+            # as a clean one either (00466 N21): it is a finding of its own.
+            violations.append(
+                _Violation(
+                    str(filepath),
+                    0,
+                    "unreadable-file",
+                    f"could not be read, so it was never checked: {exc}",
+                )
+            )
+        else:
+            files_scanned += 1
 
     violations.sort(key=lambda v: (v.file, v.line))
     return violations, files_scanned, candidates

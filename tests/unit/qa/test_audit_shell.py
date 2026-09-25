@@ -287,6 +287,20 @@ class TestScansFromAnyCheckoutLocation:
         assert summary["files_scanned"] == 0
         assert summary["vacuous_scan"]
 
+    def test_a_scan_of_no_scripts_fails(self, tmp_path: Path) -> None:
+        """00466 N21: an audit of no scripts is no evidence of clean scripts."""
+        scripts_dir = tmp_path / "scripts"
+        scripts_dir.mkdir()
+        output_json = tmp_path / "shell_audit.json"
+
+        result = _scan(scripts_dir, output_json)
+
+        summary = json.loads(output_json.read_text())["summary"]
+        assert result.returncode == 1
+        assert summary["passed"] is False
+        assert summary["files_scanned"] == 0
+        assert summary["vacuous_scan"]
+
 
 class TestRealRepoScan:
     """Self-scan: once markers are added, the repo's own scripts must pass.

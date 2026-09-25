@@ -61,6 +61,16 @@ VIOLATION_PATTERN='for[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]+in[[:space:]
 # Internal scan
 # ----------------------------------------------------------------
 violations=()
+# 00466 N21: grep exits 2 when it cannot OPEN/READ the file (unreadable,
+# vanished mid-scan) -- a different outcome from exit 1 ("no match"), which
+# "if ! grep ...; then return 0; fi" could not tell apart. A file grep could
+# not check has not been verified clean.
+grep_errors=()
+# 00466 N21: find's own traversal errors (a subdirectory it could not read)
+# were discarded by "2>/dev/null" and never checked against find's exit
+# status, so a directory find could not fully walk was silently treated as
+# fully scanned.
+find_errors=()
 
 _ccc_check_file() {
     local file="$1"
@@ -71,7 +81,15 @@ _ccc_check_file() {
         *) return 0 ;;
     esac
 
-    if ! grep -q -E "$VIOLATION_PATTERN" "$file"; then
+    local grep_rc
+    grep -q -E "$VIOLATION_PATTERN" "$file" && grep_rc=0 || grep_rc=$?
+
+    if [ "$grep_rc" -eq 2 ]; then
+        grep_errors+=("$file")
+        return 0
+    fi
+
+    if [ "$grep_rc" -ne 0 ]; then
         return 0
     fi
 
@@ -97,9 +115,21 @@ _ccc_scan_dir() {
     local dir="$1"
     [ -d "$dir" ] || return 0
     local f
+    # A temp file rather than process substitution so find's own exit status
+    # is observable: find keeps walking past a traversal error (e.g. a
+    # subdirectory it cannot read) but still exits non-zero, and that must
+    # not be discarded the way "2>/dev/null" discarded it before.
+    local find_list
+    find_list="$(mktemp "${REPO_ROOT}/untracked/scratch/ccc-find.XXXXXX")"
+    local find_rc=0
+    find "$dir" -type f \( -name '*.sh' -o -name '*.bash' \) -print0 > "$find_list" || find_rc=$?
+    if [ "$find_rc" -ne 0 ]; then
+        find_errors+=("$dir (find exited ${find_rc})")
+    fi
     while IFS= read -r -d '' f; do
         _ccc_check_file "$f"
-    done < <(find "$dir" -type f \( -name '*.sh' -o -name '*.bash' \) -print0 2>/dev/null)
+    done < "$find_list"
+    rm -f "$find_list"
 }
 
 _ccc_scan_dir "$REPO_ROOT/scripts"
@@ -125,6 +155,33 @@ done
 # ----------------------------------------------------------------
 # Report
 # ----------------------------------------------------------------
+# A file or directory this check could not read has not been verified
+# clean, whether or not any violation was also found — fail closed rather
+# than silently treating "could not check" as "checked and found nothing".
+if [ "${#grep_errors[@]}" -gt 0 ] || [ "${#find_errors[@]}" -gt 0 ]; then
+    {
+        echo "check_canonical_callers: could not check every file"
+        echo ""
+        if [ "${#grep_errors[@]}" -gt 0 ]; then
+            echo "grep could not read ${#grep_errors[@]} file(s):"
+            for g in "${grep_errors[@]}"; do
+                echo "  $g"
+            done
+            echo ""
+        fi
+        if [ "${#find_errors[@]}" -gt 0 ]; then
+            echo "find reported ${#find_errors[@]} traversal error(s):"
+            for d in "${find_errors[@]}"; do
+                echo "  $d"
+            done
+            echo ""
+        fi
+        echo "A file or directory this check cannot read has not been verified"
+        echo "clean; the gate fails closed rather than silently skipping it."
+    } >&2
+    exit 1
+fi
+
 if [ "${#violations[@]}" -eq 0 ]; then
     echo "check_canonical_callers: 0 violations"
     exit 0

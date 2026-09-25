@@ -2,9 +2,10 @@
 #
 # Run live daemon smoke tests - probe the running daemon via hook scripts
 #
-# First runs `bin/hooks-daemon check-source-fresh` (Plan 00371): a
-# general-purpose comparison of the running daemon's actually-loaded code
-# against the working tree, independent of which handler drifted. Only then
+# First runs `bin/hooks-daemon check-source-fresh` (Plans 00371, 00415): a
+# general-purpose comparison of the running daemon's actually-loaded code AND
+# bound config against the working tree, independent of which handler
+# drifted. Only then
 # sends 3 known inputs to hook scripts and verifies expected responses.
 #
 # Probes:
@@ -74,7 +75,8 @@ fi
 # specific handlers, so a stale daemon whose drift lies elsewhere (e.g. a
 # probe not covered here) sailed straight through. check-source-fresh is the
 # general-purpose version: it compares the running daemon's actually-loaded
-# code against the current working tree, independent of which handler drifted.
+# code and bound config against the current working tree, independent of
+# which handler drifted.
 FRESHNESS_OUTPUT="$("${PROJECT_ROOT}/bin/hooks-daemon" check-source-fresh 2>&1)"
 FRESHNESS_EXIT=$?
 if [[ ${FRESHNESS_EXIT} -ne 0 ]]; then

@@ -205,6 +205,23 @@ def main() -> int:
     unreadable: list[str] = []
     violations = find_violations(root, unreadable=unreadable)
 
+    # An unreadable file was counted but never gated on: `passed` read only
+    # `violations`, so a swathe of the tree going unreadable (a permissions
+    # mistake, an encoding change) still reported a clean sweep —
+    # indistinguishable from a genuinely clean one. Each unreadable file is
+    # now its own violation, so the failure both fails the gate and carries
+    # matching detail in `violations[]`.
+    for entry in unreadable:
+        relative, _, reason = entry.partition(": ")
+        violations.append(
+            {
+                "file": relative,
+                "line": 0,
+                "rule": "unreadable-file",
+                "message": f"could not be decoded, so it was never checked: {reason}",
+            }
+        )
+
     if args.json_output:
         # A --path scan answers "is this DIRECTORY clean", which is not the
         # question the repository artefact answers. llm_qa publishes that

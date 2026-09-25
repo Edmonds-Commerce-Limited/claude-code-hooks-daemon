@@ -741,14 +741,24 @@ def _main_checkout(git_root: Path) -> Path:
 
 
 def _read_text(path: Path) -> str | None:
-    """A small git bookkeeping file, stripped; None when it cannot be read."""
+    """A small git bookkeeping file, stripped; None when absent or unreadable.
+
+    Claude Code falls back to the checkout's own root on any failure here, and
+    the caller does the same with None. An absent file is an ordinary stale
+    pointer; one that exists but cannot be read is logged at WARNING, since
+    plugin resolution then silently answers for the wrong root.
+    """
+    if not path.is_file():
+        return None
     text: str | None
     try:
         text = path.read_text(encoding="utf-8").strip()
     except (OSError, UnicodeDecodeError) as exc:
-        # Claude Code falls back to the checkout's own root on any failure
-        # here; the caller does the same with None.
-        logger.debug("claude_plugins: cannot read %s: %s", path, exc)
+        logger.warning(
+            "claude_plugins: cannot read %s (%s); treating this checkout as its own root",
+            path,
+            exc,
+        )
         text = None
     return text
 

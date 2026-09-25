@@ -15,14 +15,36 @@ one contiguous literal in this file — otherwise editing this very file would
 trip the live handler. (It did, on the first draft.)
 """
 
+import importlib.util
 import json
+import shutil
 import subprocess  # nosec B404 - subprocess used for git fixtures and the QA checker
 import sys
 from pathlib import Path
+from types import ModuleType
 from typing import Any
+
+import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _CHECKER = _REPO_ROOT / "scripts" / "qa" / "check_git_history.py"
+
+
+def _load_module() -> ModuleType:
+    """Import the checker in-process, for asserting against its internals
+    (``is_git_repo``, ``GitScanError``) rather than only its JSON output."""
+    spec = importlib.util.spec_from_file_location("check_git_history_under_test", _CHECKER)
+    assert spec is not None and spec.loader is not None, f"cannot load {_CHECKER}"
+    module = importlib.util.module_from_spec(spec)
+    # Registered under its own spec name BEFORE exec: the module's frozen
+    # dataclass resolves its (string, `from __future__ import annotations`)
+    # field types via `sys.modules[cls.__module__]`, which fails with an
+    # AttributeError on a module that was never registered.
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 _JSON_OUTPUT = _REPO_ROOT / "untracked" / "qa" / "git_history.json"
 
 _TERM = "zzqx-nonsense-term"
@@ -513,3 +535,107 @@ class TestHistoryBaseline:
 
         assert data["summary"]["passed"] is False
         assert "ref-name" in {v["surface"] for v in data["violations"]}
+
+
+class TestGitFailuresAreNotReadAsClean:
+    """A git command failing on the repository BEING CHECKED must fail the
+    gate -- never silently read as "no repo" or "zero commits, clean".
+
+    ``_git`` used to turn ANY non-zero exit into ``None``, and every caller
+    treated ``None`` as an absence of data rather than a failure to report.
+    ``git`` itself exits 128 for reasons that are not "there is no repo here"
+    -- dubious ownership, a corrupt object -- and those must not be read as
+    a clean sweep of nothing.
+    """
+
+    def test_git_log_failure_fails_the_check(self, tmp_path: Path) -> None:
+        """``rev-parse`` succeeds (it IS a repo) but ``git log`` fails."""
+        repo = tmp_path / "repo"
+        _init_repo(repo)
+        shutil.rmtree(repo / ".git" / "objects")
+        (repo / ".git" / "objects").mkdir()
+        config = tmp_path / "hooks-daemon.yaml"
+        _write_config(config)
+
+        data = _run_checker(repo, config)
+
+        assert data["summary"]["passed"] is False
+        assert data["summary"]["is_git_repo"] is True
+
+    def test_zero_commits_fails_the_check(self, tmp_path: Path) -> None:
+        """``git log`` succeeding with ZERO commits swept nothing -- not clean."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _git(repo, "init", "-q", "-b", "main")
+        config = tmp_path / "hooks-daemon.yaml"
+        _write_config(config)
+
+        data = _run_checker(repo, config)
+
+        assert data["summary"]["passed"] is False
+        assert data["summary"]["commits_scanned"] == 0
+
+    def test_a_genuinely_absent_repo_is_read_as_absence_not_a_git_failure(
+        self, tmp_path: Path
+    ) -> None:
+        """Regression: a directory that really is not a repo is not a git malfunction.
+
+        It still fails, as a vacuous sweep (00466 N26), but on that ground alone:
+        no scan-error finding is raised for it.
+        """
+        config = tmp_path / "hooks-daemon.yaml"
+        _write_config(config)
+
+        data = _run_checker(tmp_path / "not-a-repo", config)
+
+        assert data["summary"]["is_git_repo"] is False
+        assert data["violations"] == []
+        assert data["summary"]["vacuous_scan"]
+
+
+class TestIsGitRepoDistinguishesFailureFromAbsence:
+    """Unit-level: ``is_git_repo`` must raise on a real git malfunction."""
+
+    def test_a_genuinely_missing_repo_is_reported_as_absent(self, tmp_path: Path) -> None:
+        module = _load_module()
+        assert module.is_git_repo(tmp_path / "nowhere") is False
+
+    def test_a_git_failure_other_than_not_a_repo_raises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        module = _load_module()
+        repo = tmp_path / "repo"
+        repo.mkdir()
+
+        class _Result:
+            returncode = 128
+            stdout = ""
+            stderr = "fatal: detected dubious ownership in repository at 'x'\n"
+
+        monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _Result())
+
+        with pytest.raises(module.GitScanError):
+            module.is_git_repo(repo)
+
+
+class TestMalformedConfigFailsRatherThanBeingIgnored:
+    """A config file that exists but fails to parse must fail the gate.
+
+    ``_load_config`` used to turn a ``yaml.YAMLError`` into ``{}`` -- exactly
+    what a MISSING config file also produces -- so a typo in the YAML
+    silently disabled every public pattern and the secret-word-list lookup,
+    and the gate reported a clean sweep after tacitly checking nothing.
+    """
+
+    def test_malformed_yaml_fails_the_check(self, tmp_path: Path) -> None:
+        repo = tmp_path / "repo"
+        _init_repo(repo)
+        _secret_list(repo)
+        _git(repo, "commit", "-q", "--allow-empty", "-m", f"fixes {_TERM} handling")
+        config = tmp_path / "hooks-daemon.yaml"
+        config.write_text("handlers: [unclosed\n")
+
+        data = _run_checker(repo, config)
+
+        assert data["summary"]["passed"] is False
+        assert any(v["surface"] == "config" for v in data["violations"])

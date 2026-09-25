@@ -10,6 +10,7 @@ at all. Ships DISABLED (opt-in); when enabled it DENIES.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import pytest
@@ -189,6 +190,18 @@ class TestModeMerging:
         instance._extra_content_revealing_patterns = ["("]  # invalid regex
         # Built-in shapes still work; the bad pattern is skipped, not fatal.
         assert instance.matches(_bash("git diff firewall/edge/rules.yml")) is True
+
+    def test_an_invalid_custom_pattern_is_said_at_warning(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """00466 N29: a guard shape that cannot compile never matches, so the
+        guard is narrower than configured, and that must not be silent."""
+        instance = FlaggableContentChannelGuardHandler()
+        instance._flaggable_path_globs = ["firewall/**"]
+        instance._extra_content_revealing_patterns = ["(n29-unclosed"]
+        with caplog.at_level(logging.WARNING):
+            instance.matches(_bash("git diff firewall/edge/rules.yml"))
+        assert "(n29-unclosed" in caplog.text
 
 
 class TestHandle:

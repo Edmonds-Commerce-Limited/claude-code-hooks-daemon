@@ -195,6 +195,21 @@ def _write_clean_companion(directory: Path) -> None:
     (directory / "clean.md").write_text("Use the hooks-daemon skill.\n", encoding="utf-8")
 
 
+class TestScansWhatItClaims:
+    """00466 N21: an empty project sweep fails rather than reading as clean."""
+
+    def test_a_project_sweep_that_scans_nothing_fails(self, tmp_path: Path) -> None:
+        root = tmp_path / "project"
+        (root / "src").mkdir(parents=True)
+        (root / "pyproject.toml").write_text("[project]\nname = 'x'\n")
+
+        data = _run_checker("--path", str(root))
+
+        assert data["summary"]["files_scanned"] == 0
+        assert not data["summary"]["passed"]
+        assert data["summary"]["vacuous_scan"]
+
+
 class TestExclusions:
     """Verify certain files/dirs are excluded from scanning."""
 

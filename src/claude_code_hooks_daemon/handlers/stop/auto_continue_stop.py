@@ -435,9 +435,10 @@ def _parse_iso_timestamp(value: object) -> datetime | None:
     try:
         parsed = datetime.fromisoformat(text)
     except ValueError:
-        # A malformed timestamp means "age unknown", a valid domain outcome
-        # (not a swallowed error) — surface it at debug and fall through.
-        logger.debug("Ignoring unparseable transcript timestamp: %r", value)
+        # A malformed timestamp means "age unknown", a documented outcome that
+        # also turns the staleness check off for this message -- so it is
+        # said at WARNING, where a transcript format change would show.
+        logger.warning("Ignoring unparseable transcript timestamp: %r", value)
         parsed = None
     if parsed is None:
         return None

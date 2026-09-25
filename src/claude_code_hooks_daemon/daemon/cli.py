@@ -1236,28 +1236,28 @@ def cmd_health(args: argparse.Namespace) -> int:
 
 
 def cmd_check_source_fresh(args: argparse.Namespace) -> int:
-    """Verify the running daemon's loaded code matches the working tree (Plan 00371).
+    """Verify the running daemon's loaded code and bound config match the working tree.
 
-    A daemon never hot-reloads: every handler module is imported once, at
-    startup, and a source edit afterwards has no effect until it is
-    restarted. This compares the running daemon's reported
-    ``source_fingerprint`` (from its ``_system``/``health`` socket action)
-    against a fresh fingerprint computed from the current on-disk source, so
-    a QA run or a script (``scripts/qa/run_smoke_test.sh``) can detect and
-    fail on a stale daemon by name instead of a live-dispatch result silently
-    grading the wrong code.
+    A daemon never hot-reloads: every handler module is imported, and the
+    config resolved, once at startup (Plans 00371, 00415), so a source or
+    config edit afterwards has no effect until it is restarted. This hands
+    the running daemon's whole ``_system``/``health`` payload, plus both
+    fingerprints computed from disk now, to the one combined verdict, so a
+    QA run or a script (``scripts/qa/run_smoke_test.sh``) can fail on a stale
+    daemon by name instead of a live-dispatch result silently grading the
+    wrong code or config.
 
     Args:
         args: Command-line arguments.
 
     Returns:
-        0 if the running daemon's loaded code matches the working tree,
-        1 if it does not, or if freshness could not be verified at all
-        (daemon not running, unreachable, or an error response).
+        0 if the running daemon's code and config both match the working
+        tree, 1 if either does not, or if freshness could not be verified at
+        all (daemon not running, unreachable, or an error response).
     """
     from claude_code_hooks_daemon.daemon.source_fingerprint import (
-        compute_current_project_fingerprint,
-        describe_fingerprint_mismatch,
+        compute_current_project_fingerprints,
+        describe_daemon_staleness,
     )
 
     project_path = get_project_path(getattr(args, "project_root", None))
@@ -1274,19 +1274,22 @@ def cmd_check_source_fresh(args: argparse.Namespace) -> int:
     request = {"event": "_system", "hook_input": {"action": "health"}}
     response = send_daemon_request(socket_path, request)
 
-    running_fingerprint: str | None = None
+    health: dict[str, Any] | None = None
     if response is not None and "result" in response:
-        running_fingerprint = response["result"].get("source_fingerprint")
+        health = response["result"]
     elif response is not None and "error" in response:
         print(f"Daemon health query failed: {response['error']}")
 
-    current_fingerprint = compute_current_project_fingerprint(project_path)
-    mismatch = describe_fingerprint_mismatch(running_fingerprint, current_fingerprint)
-    if mismatch is not None:
-        print(mismatch)
+    current = compute_current_project_fingerprints(project_path)
+    staleness = describe_daemon_staleness(health, current)
+    if staleness is not None:
+        print(staleness)
         return 1
 
-    print(f"Daemon source is fresh (source_fingerprint {current_fingerprint[:12]}).")
+    print(
+        f"Daemon is fresh: loaded code and bound config match the working tree "
+        f"(source_fingerprint {current.source[:12]}, config_fingerprint {current.config[:12]})."
+    )
     return 0
 
 
@@ -1693,9 +1696,16 @@ def _print_mode_advisory(pre_mode: dict[str, Any]) -> None:
 #: harness to print an advisory.
 _QA_RUN_LOCK_RELPATH: Final[str] = "untracked/qa/.llm_qa.lock"
 
+_QA_LOCK_CANNOT_TELL: Final[str] = (
+    "Could not tell whether a QA run is in progress: %s. Restarting without the warning."
+)
+
 
 def _qa_run_lock_holder(project_root: Path) -> str | None:
     """Return the pid recorded in the QA run lock, or None when nothing holds it.
+
+    A held lock whose pid cannot be read answers ``"unknown"``. None also
+    means "cannot tell", which is logged at WARNING where it happens.
 
     Held-ness is decided by a NON-BLOCKING ``flock`` attempt, never by the file
     existing — the kernel releases an ``flock`` when its holder exits, so a lock
@@ -1708,51 +1718,58 @@ def _qa_run_lock_holder(project_root: Path) -> str | None:
         return None
 
     # Every other OSError answers "I cannot tell", which for an ADVISORY means
-    # no warning. Propagating instead ended `hooks-daemon restart` with a
-    # traceback — a stronger refusal than the one the caller's docstring
+    # no restart warning. Propagating instead ended `hooks-daemon restart` with
+    # a traceback — a stronger refusal than the one the caller's docstring
     # promises never to make, on the daemon's most-used recovery verb (Plan
     # 00407 N10). The window is ordinary rather than exotic: `is_file()` and
     # `os.open` are two calls, so a QA run that finishes between them unlinks
     # the file; a lock owned by another user answers EACCES to the O_RDWR open;
-    # and NFS or overlayfs can refuse `flock` outright.
-    # "Cannot tell" is carried in a variable and returned once at the end rather
-    # than by a `return None` inside each handler: an early return from an
-    # except body is indistinguishable from success to a reader AND to the
-    # error-hiding audit, which rejects the shape outright. Same degradation,
-    # stated where it can be seen.
+    # and NFS or overlayfs can refuse `flock` outright. "Cannot tell" is logged
+    # at WARNING, so it is never mistaken for "no run in progress".
     fd: int | None = None
     try:
         fd = os.open(lock_path, os.O_RDWR)
     except OSError as exc:
-        logger.debug("QA run lock could not be opened (%s); reporting no holder", exc)
+        logger.warning(_QA_LOCK_CANNOT_TELL, f"its lock could not be opened ({exc})")
         fd = None
 
     if fd is None:
         return None
 
-    holder: str | None = None
     try:
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            # Contention is the ANSWER here, not an error: a run holds the lock.
-            # Only this errno means held; reading the pid may still fail, and an
-            # unnamed holder is better than no warning at all.
-            try:
-                recorded = lock_path.read_text(encoding="utf-8").strip() or "unknown"
-            except OSError as exc:
-                logger.debug("QA run lock is held but unreadable (%s)", exc)
-                holder = None
-            else:
-                holder = recorded.removeprefix("pid=")
-        except OSError as exc:
-            logger.debug("QA run lock could not be tested (%s); reporting no holder", exc)
-            holder = None
-        else:
-            fcntl.flock(fd, fcntl.LOCK_UN)
+        held = _qa_lock_is_held(fd)
+    except OSError as exc:
+        logger.warning(_QA_LOCK_CANNOT_TELL, f"its lock could not be tested ({exc})")
+        held = False
     finally:
         os.close(fd)
-    return holder
+    return _recorded_qa_lock_holder(lock_path) if held else None
+
+
+def _qa_lock_is_held(fd: int) -> bool:
+    """Probe with a NON-BLOCKING ``flock``; any other ``OSError`` propagates."""
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        # Contention is the ANSWER here, not an error: a run holds the lock.
+        return True
+    fcntl.flock(fd, fcntl.LOCK_UN)
+    return False
+
+
+def _recorded_qa_lock_holder(lock_path: Path) -> str:
+    """The pid a HELD lock records, or ``"unknown"`` when it cannot be read.
+
+    Only called once contention has proved the lock is held, so an unreadable
+    pid still answers "held": an unnamed holder keeps the restart warning,
+    where "nothing holds it" would drop it for a run that is in progress.
+    """
+    try:
+        recorded = lock_path.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        logger.warning("QA run lock is held but its pid is unreadable (%s)", exc)
+        recorded = ""
+    return recorded.removeprefix("pid=") or "unknown"
 
 
 def _warn_if_qa_run_in_progress(args: argparse.Namespace) -> None:
@@ -3036,8 +3053,12 @@ def _build_initialised_controller(
     from claude_code_hooks_daemon.core.project_layout import ProjectLayout
     from claude_code_hooks_daemon.core.workspace import ProjectRegistry
     from claude_code_hooks_daemon.daemon.controller import DaemonController
+    from claude_code_hooks_daemon.daemon.source_fingerprint import compute_config_fingerprint
 
     controller = DaemonController()
+    # Hashed before initialise() touches anything, so it is the config as
+    # loaded -- the same model `check-source-fresh` resolves from disk.
+    config_fingerprint = compute_config_fingerprint(config)
     handler_config = _build_handler_config_mapping(config)
     controller.initialise(
         handler_config,
@@ -3057,6 +3078,7 @@ def _build_initialised_controller(
         write_claude_md_in_linked_worktree=write_claude_md_in_linked_worktree,
         worktree=config.worktree,
         reference_repos=config.reference_repos,
+        config_fingerprint=config_fingerprint,
     )
     return controller
 
