@@ -30,6 +30,21 @@ This is the model-choice twin of
 bounds how much context a subagent spends; this one looks at which model spends
 it. The owner marked it not urgent. It goes into the normal pipeline.
 
+**Workflow fan-out (the costliest case).** The owner saw a Fable main thread
+launch a `Workflow` of 60 parallel Fable agents. One ultracode run can spend
+millions of tokens in minutes that way. Work that fans out 60 wide is almost
+always Sonnet-level. The `Workflow` tool call is a PreToolUse event whose
+input carries the whole script. So, unlike an ad-hoc `Agent` call, the daemon
+can see the fan-out and each `agent()` call's model option BEFORE any agent
+starts. Phase 2 covers it.
+
+**Kept separate from 00471, cross-linked.** The owner asked whether to merge
+this into the token-economy plan (00471). Both plans have a brainstorm and an
+owner decision list of their own. 00471 bounds how MUCH context an agent
+spends; this plan governs WHICH model spends it, and how many agents a
+workflow launches at that tier. The owner can still merge them with one
+message. The decisions are listed side by side in each plan's Task 1.2.
+
 ## Goals
 
 - Record, per session, the model each subagent was dispatched on, whether it
@@ -51,12 +66,24 @@ it. The owner marked it not urgent. It goes into the normal pipeline.
 
 ### Phase 1: Brainstorm
 
-- [ ] 🔄 **Task 1.1**: A fresh subagent brainstorms what the daemon can
+- [x] ✅ **Task 1.1**: A fresh subagent brainstorms what the daemon can
   observe, which signals mark a task as safe for a lower tier, levers from
   advisory to enforcing, the false-positive risks, and how this interacts
-  with Plan 00471. Report into `subagent-reports/`.
+  with Plan 00471. Report:
+  `subagent-reports/260925-p472-brainstorm-opus-5-5.md` (levers T0 to T7,
+  and seven owner decisions in its section 6).
 - [ ] ⬜ **Task 1.2**: The owner picks the levers and thresholds from the
-  brainstorm.
+  brainstorm and the Phase 2 research.
+
+### Phase 2: Workflow fan-out
+
+- [ ] 🔄 **Task 2.1**: Research what PreToolUse(`Workflow`) exposes (the
+  inline script, `scriptPath`, a named workflow), how an `agent()` call's
+  model is chosen when it has no `model` option, and whether workflow agents
+  fire SubagentStart. Then design levers: a static count of the script's
+  fan-out, an explicit `model` required on fanned-out `agent()` calls when the
+  session runs the top tier, and a fan-out ceiling per tier, advisory or
+  deny. Report into `subagent-reports/`.
 
 ## Success Criteria
 
