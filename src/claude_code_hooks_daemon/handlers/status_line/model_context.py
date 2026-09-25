@@ -22,14 +22,15 @@ Bars are always orange when active, dim grey when inactive.
 
 Effort level source (in priority order):
 1. hook_input["effort"]["level"] — the LIVE, authoritative value Claude Code
-   sends on every status-line request. This is the ONLY way to see a
-   session-only override (e.g. `/effort max` for "this session only"), since
-   those are never written to ~/.claude/settings.json.
-2. effortLevel key in ~/.claude/settings.json (set explicitly via /model or a
-   persisted /effort default) — fallback for older Claude Code versions whose
-   hook_input doesn't include the live field.
-3. Default "high" for Claude 4+ models (daemon default — optimal_config_checker
-   enforces high) when neither of the above is available.
+   sends on every status-line request: the level actually resolved for this
+   session and model. Only this shows a session-only level (`max`, or a level
+   applied with `s` in the effort slider), which Claude Code never saves, and a
+   pin (`/effort`, `--effort`, CLAUDE_CODE_EFFORT_LEVEL) that outranks the
+   per-model level saved in settings.json.
+2. effortLevel key in ~/.claude/settings.json — fallback for older Claude Code
+   versions whose hook_input doesn't include the live field.
+3. Default "high" for Claude 4+ models when neither of the above is available
+   — Claude Code's own built-in default on most models.
 4. No bars for pre-4.x models (effort feature not available).
 
 An unrecognized effort level string (a future tier the daemon doesn't know
@@ -112,11 +113,12 @@ _EFFORT_DIM = "\033[2;37m"
 # segments. `ultracode` is a separate boolean toggle, not a 6th tier here.
 _EFFORT_LEVELS_ORDERED = ("low", "medium", "high", "xhigh", "max")
 
-# Daemon default effort level when no effort data is available at all (absent
-# from both hook_input and settings). Claude Code itself defaults to "medium",
-# but daemon users expect "high" because optimal_config_checker enforces high
-# effort. Also used as the bar-count fallback for an unrecognized effort
-# string (e.g. a future tier the daemon doesn't know about yet).
+# Effort level shown when no effort data is available at all (absent from
+# both hook_input and settings): Claude Code's own built-in default on every
+# model that supports effort except Opus 5.5 (medium) and Opus 4.7 (xhigh)
+# (remote-docs model-config.md). Also used as the bar-count fallback for an
+# unrecognized effort string (e.g. a future tier the daemon doesn't know
+# about yet).
 _EFFORT_DEFAULT = "high"
 
 # Minimum Claude major version that supports effort configuration
@@ -258,12 +260,12 @@ class ModelContextHandler(StatusLineHandlerBase):
 
         Priority:
         1. hook_input["effort"]["level"] — the LIVE value Claude Code sends on
-           every status-line request. This is the only way to see a session-only
-           /effort override, since those are never written to settings.json.
-        2. effortLevel from ~/.claude/settings.json (explicitly set via /model,
-           or a persisted /effort default) — fallback for older Claude Code
-           versions whose hook_input doesn't include the live field.
-        3. _EFFORT_DEFAULT ("high") for Claude 4+ models (daemon optimal default)
+           every status-line request, as resolved for this session and model
+           (see the module docstring for what only this can show).
+        2. effortLevel from ~/.claude/settings.json — fallback for older Claude
+           Code versions whose hook_input doesn't include the live field.
+        3. _EFFORT_DEFAULT ("high") for Claude 4+ models (Claude Code's own
+           default on most models)
         4. None for pre-4.x models (effort not supported)
 
         Args:

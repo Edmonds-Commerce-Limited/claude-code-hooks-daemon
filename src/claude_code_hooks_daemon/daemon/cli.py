@@ -1297,11 +1297,18 @@ def cmd_check(args: argparse.Namespace) -> int:
     _print_degraded_config_block(_query_daemon_config_degraded(socket_path, pid))
 
     # 1. Claude Code optimal configuration (the verbose report SessionStart hides)
-    checks = OptimalConfigCheckerHandler()._run_checks()
+    checks = OptimalConfigCheckerHandler()._run_checks(project_path)
     passed = [c for c in checks if c["passed"]]
     print(f"Claude Code configuration: {len(passed)}/{len(checks)} optimal")
     for check in checks:
-        marker = "OK  " if check["passed"] else "MISS"
+        # A failing check flagged `warn` is an override to remove, not a
+        # setting that is missing (e.g. an effort pin, Plan 00466 N47).
+        if check["passed"]:
+            marker = "OK  "
+        elif check.get("warn"):
+            marker = "WARN"
+        else:
+            marker = "MISS"
         print(f"  [{marker}] {check['name']}: {check['current']}")
         if not check["passed"]:
             print(f"         Why:   {check['why']}")

@@ -4,14 +4,16 @@
 **Audience**: operators
 
 Claude Code saves every interactively-typed `/effort <level>` into your own
-`settings.json` under `modelSettings`, so a supervisor-typed "restore" or
-"floor" permanently overwrote your own saved level — the exact fight the
-supervisor was meant to end. It now holds no effort opinion and types no
-`/effort` command at all, ever. The Fable-at-low ceiling and the downgrade
-xhigh compensation are now `modelSettings` entries you add yourself, which
+`settings.json` under `modelSettings`, so any level the supervisor typed
+permanently overwrote your own saved level — the exact fight the supervisor
+was meant to end. It now holds no effort opinion and types no
+`/effort` command at all, ever. Fable at `low` and its fallback models at
+`xhigh` are now per-model `modelSettings` levels you add yourself, which
 apply only in a session that never sets its own effort (`/effort`, an
-effort pick in `/model`, `--effort`, or the env var); see the post-upgrade
-task for the exact entries and `CLAUDE/development/CcySupervisor.md` for the
-full explanation. **Relaunch ccy** after upgrading — a worker reload alone
-leaves the old in-process fallback able to type `/effort` until the host
-restarts too.
+effort pick in `/model`, `--effort`, or the env var); the exact entries are
+in `CLAUDE/development/CcySupervisor.md`, and the post-upgrade task walks
+through adding them. `hooks-daemon check` no longer recommends an effort
+level either: its "Effort Source" line warns when `CLAUDE_CODE_EFFORT_LEVEL`
+or a project/local top-level `effortLevel` pins one level on every model.
+**Relaunch ccy** after upgrading — a worker reload alone leaves the old
+in-process fallback able to type `/effort` until the host restarts too.

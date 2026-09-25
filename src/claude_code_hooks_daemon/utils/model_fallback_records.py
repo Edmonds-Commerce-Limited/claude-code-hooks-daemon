@@ -18,6 +18,14 @@ that plan's field scan:
   ``apiRefusalCategory`` and ``scope``.
 
 They pair but not exactly, so a consumer takes whichever it sees and dedupes.
+:func:`scan_transcript_tail` does the pairing: a standalone record written
+right after the block for the same two models is the SAME downgrade, and keeps
+the block's identity and event time.
+
+Every record carries an identity (``record_id``): the transcript entry's own
+``uuid``, or, for an entry without one, the byte offset of its line -- the
+transcript is append-only, so that offset never changes. The supervisor spends
+a record by this identity once the episode it opened has run its course.
 
 This module is the single home for that recognition:
 :class:`~claude_code_hooks_daemon.handlers.session_start.model_fallback_detector.ModelFallbackDetectorHandler`
@@ -29,7 +37,8 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
 
@@ -47,6 +56,7 @@ KEY_FALLBACK_MODEL: Final[str] = "fallbackModel"
 KEY_REFUSAL_CATEGORY: Final[str] = "apiRefusalCategory"
 KEY_SCOPE: Final[str] = "scope"
 KEY_TIMESTAMP: Final[str] = "timestamp"
+KEY_UUID: Final[str] = "uuid"
 KEY_FROM: Final[str] = "from"
 KEY_TO: Final[str] = "to"
 KEY_MODEL: Final[str] = "model"
@@ -67,8 +77,17 @@ PREFILTER_TOKENS: Final[tuple[str, ...]] = (FALLBACK_SUBTYPE, f'"{FALLBACK_BLOCK
 # two bounded readers in this codebase consistent.
 _DEFAULT_TAIL_BYTES: Final[int] = 1_048_576
 
-_NEWLINE: Final[str] = "\n"
+_NEWLINE: Final[bytes] = b"\n"
 _FILE_START_OFFSET: Final[int] = 0
+
+#: Identity of a record whose entry has no ``uuid``: its line's byte offset.
+OFFSET_RECORD_ID_PREFIX: Final[str] = "offset:"
+
+#: The standalone record lands 7-90s after the block in the Plan 00328 field
+#: scan. Twice the observed maximum pairs every real pair while keeping a
+#: genuinely NEW downgrade of the same two models (a restore, then a second
+#: refusal) its own record.
+PAIR_WINDOW_SECONDS: Final[float] = 180.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,6 +105,25 @@ class FallbackFacts:
     category: str
     scope: str
     timestamp: str
+    #: The transcript entry's ``uuid``; empty when it has none, in which case
+    #: :func:`scan_transcript_tail` substitutes the line's byte offset.
+    record_id: str = ""
+
+
+def event_epoch(timestamp: str) -> float | None:
+    """The record's transcript timestamp as epoch seconds, or ``None``.
+
+    A timestamp without a zone is UTC, which is how Claude Code writes them.
+    """
+    if not timestamp:
+        return None
+    try:
+        parsed = datetime.fromisoformat(timestamp)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.timestamp()
 
 
 def _as_str(value: Any, default: str = UNKNOWN_MODEL) -> str:
@@ -132,6 +170,7 @@ def parse_fallback_payload(payload: dict[str, Any]) -> FallbackFacts | None:
             category=_as_str(payload.get(KEY_REFUSAL_CATEGORY)),
             scope=_as_str(payload.get(KEY_SCOPE)),
             timestamp=_as_str(payload.get(KEY_TIMESTAMP), default=""),
+            record_id=_as_str(payload.get(KEY_UUID), default=""),
         )
 
     block = _fallback_block(payload)
@@ -145,11 +184,12 @@ def parse_fallback_payload(payload: dict[str, Any]) -> FallbackFacts | None:
         category=UNKNOWN_MODEL,
         scope=UNKNOWN_MODEL,
         timestamp=_as_str(payload.get(KEY_TIMESTAMP), default=""),
+        record_id=_as_str(payload.get(KEY_UUID), default=""),
     )
 
 
-def parse_fallback_line(line: str) -> FallbackFacts | None:
-    """Recognise either record shape in one raw JSONL line.
+def _parse_payload_line(line: str) -> dict[str, Any] | None:
+    """Parse one raw JSONL line into an object, or ``None``.
 
     Fail-silent per line: a malformed or non-object line is simply not a
     record. A transcript is appended to live, so the last line can be a partial
@@ -162,25 +202,60 @@ def parse_fallback_line(line: str) -> FallbackFacts | None:
         payload = json.loads(stripped)
     except ValueError:
         return None
-    if not isinstance(payload, dict):
-        return None
-    return parse_fallback_payload(payload)
+    return payload if isinstance(payload, dict) else None
 
 
-def _read_tail(path: Path, max_bytes: int) -> str:
-    """Return the last ``max_bytes`` of ``path``, realigned to a line boundary."""
+def parse_fallback_line(line: str) -> FallbackFacts | None:
+    """Recognise either record shape in one raw JSONL line."""
+    payload = _parse_payload_line(line)
+    return None if payload is None else parse_fallback_payload(payload)
+
+
+def _read_tail_lines(path: Path, max_bytes: int) -> list[tuple[int, str]]:
+    """The whole lines in the last ``max_bytes`` of ``path``, each with its byte offset.
+
+    Read as BYTES so each offset is exact: it is a record's identity when its
+    entry has no ``uuid``, so it must come out the same on every scan whatever
+    the tail window, and a text-mode seek cannot promise that.
+    """
     size = path.stat().st_size
     if size <= _FILE_START_OFFSET:
-        return ""
+        return []
     start = max(_FILE_START_OFFSET, size - max_bytes)
-    with path.open("r", encoding="utf-8", errors="replace") as stream:
+    with path.open("rb") as stream:
         stream.seek(start)
         chunk = stream.read()
+    offset = start
     if start > _FILE_START_OFFSET:
         # A mid-file seek lands inside a record; that fragment is not a line.
-        _, separator, remainder = chunk.partition(_NEWLINE)
-        chunk = remainder if separator else ""
-    return chunk
+        newline = chunk.find(_NEWLINE)
+        if newline < 0:
+            return []
+        offset += newline + 1
+        chunk = chunk[newline + 1 :]
+    lines: list[tuple[int, str]] = []
+    for raw in chunk.split(_NEWLINE):
+        lines.append((offset, raw.decode("utf-8", errors="replace")))
+        offset += len(raw) + len(_NEWLINE)
+    return lines
+
+
+def _is_pair(block: FallbackFacts, refusal: FallbackFacts) -> bool:
+    """Whether ``refusal`` is the standalone record of ``block``'s downgrade.
+
+    Same two models, written after the block and within the pairing window.
+    Both times must parse: without them, nothing shows it is the same event.
+    """
+    if (block.original_model, block.fallback_model) != (
+        refusal.original_model,
+        refusal.fallback_model,
+    ):
+        return False
+    block_time = event_epoch(block.timestamp)
+    refusal_time = event_epoch(refusal.timestamp)
+    if block_time is None or refusal_time is None:
+        return False
+    return 0.0 <= refusal_time - block_time <= PAIR_WINDOW_SECONDS
 
 
 def scan_transcript_tail(
@@ -193,21 +268,36 @@ def scan_transcript_tail(
     record wins because the supervisor acts on the CURRENT state of the
     session, not its history.
 
+    Every returned record has an identity (see the module docstring), and a
+    standalone record that pairs with the block right before it keeps that
+    block's identity and event time, so one downgrade never looks like two.
+
     Never raises. A missing, unreadable or directory path is "no record" — the
     consumers are advisory, and a scan that throws would take a hook dispatch
     down with it.
     """
     try:
-        chunk = _read_tail(path, max_bytes)
+        lines = _read_tail_lines(path, max_bytes)
     except OSError as exc:
         logger.debug("model_fallback_records: cannot read transcript %s: %s", path, exc)
         return None
 
     latest: FallbackFacts | None = None
-    for line in chunk.split(_NEWLINE):
+    latest_is_block = False
+    for offset, line in lines:
         if not any(token in line for token in PREFILTER_TOKENS):
             continue
-        facts = parse_fallback_line(line)
-        if facts is not None:
-            latest = facts
+        payload = _parse_payload_line(line)
+        if payload is None:
+            continue
+        facts = parse_fallback_payload(payload)
+        if facts is None:
+            continue
+        if not facts.record_id:
+            facts = replace(facts, record_id=f"{OFFSET_RECORD_ID_PREFIX}{offset}")
+        is_block = payload.get(KEY_SUBTYPE) != FALLBACK_SUBTYPE
+        if not is_block and latest is not None and latest_is_block and _is_pair(latest, facts):
+            facts = replace(facts, record_id=latest.record_id, timestamp=latest.timestamp)
+        latest = facts
+        latest_is_block = is_block
     return latest

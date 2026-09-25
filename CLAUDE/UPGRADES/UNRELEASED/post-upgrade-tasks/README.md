@@ -88,7 +88,7 @@ This file's lower half should list the tasks currently in this directory, so an 
 | File                                                        | Type             | Severity    | Applies to                                                                              | One-line summary                                                                                                                 |
 | ----------------------------------------------------------- | ---------------- | ----------- | --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
 | `01-remove-vendor-from-a-php-intelephense-override.md`      | audit            | recommended | PHP projects whose intelephense override followed the old `R-LSP-CONFIG-EXCLUDE` advice | Remove a bare `**/vendor` exclude entry, which undefines every Composer-installed type; use the printed nested entries instead.  |
-| `02-add-modelsettings-entries-for-ccy-supervisor-effort.md` | config-migration | recommended | ccy users who relied on the supervisor's own effort floor or downgrade compensation     | Add `modelSettings` entries for Fable (low) and the downgrade fallback models (xhigh); the supervisor no longer types `/effort`. |
+| `02-add-modelsettings-entries-for-ccy-supervisor-effort.md` | config-migration | recommended | ccy users who relied on the supervisor's own `/effort` injections                       | Add `modelSettings` entries for Fable (low) and the downgrade fallback models (xhigh); the supervisor no longer types `/effort`. |
 
 <!-- END TASK INDEX -->
 

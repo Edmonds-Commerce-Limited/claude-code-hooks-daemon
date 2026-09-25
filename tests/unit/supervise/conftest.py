@@ -38,7 +38,8 @@ def write_attributed_downgrade(
     session_id: str,
     original_family: str = "fable",
     fallback_family: str = "opus",
-    record_ts: str = "2026-08-27T09:34:10.341Z",
+    record_ts: str = "",
+    record_id: str = "uuid-attributed-1",
 ) -> Path:
     """Write the `.model-downgrade` signal the daemon's recorder publishes.
 
@@ -49,11 +50,13 @@ def write_attributed_downgrade(
     draw, and leaving it implicit is what let the supervisor override a human
     in the field.
 
-    ``record_ts`` identifies the underlying transcript record (Plan 00466 N47
-    review 2 MAJOR 4): a test proving a NEW downgrade re-opens an episode after
-    a prior one closed must pass a record_ts that DIFFERS from the earlier
-    call, since the state machine refuses to re-open from a record_ts it has
-    already spent.
+    ``record_id`` identifies the underlying transcript record (Plan 00466 N47):
+    a test proving a NEW downgrade re-opens an episode after a prior one
+    closed must pass a DIFFERENT id, since the state machine refuses to
+    re-open from a record it has already spent. A record explains only a drop
+    observed within the attribution window of its event time; the default
+    empty ``record_ts`` makes that the moment the supervisor first reads the
+    signal, which suits a test that writes it just before driving the drop.
     """
     sidecar_dir.mkdir(parents=True, exist_ok=True)
     path = sidecar_dir / f"{session_id}{_mod._MODEL_DOWNGRADE_SIGNAL_SUFFIX}"
@@ -69,6 +72,7 @@ def write_attributed_downgrade(
                 "category": "cyber",
                 "scope": "session",
                 "record_ts": record_ts,
+                "record_id": record_id,
             }
         ),
         encoding="utf-8",

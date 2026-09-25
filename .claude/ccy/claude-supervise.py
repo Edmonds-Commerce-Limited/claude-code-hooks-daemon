@@ -1521,10 +1521,11 @@ class SidecarReading:
     writer_pid: int
     compacting: bool
     stale: bool
-    # Plan 00278: model identity and live effort level, for the model-downgrade
-    # effort-restore family. Defaults cover sidecars predating the fields.
+    # Plan 00278: model identity, for the model-downgrade `/model` restore.
+    # The default covers sidecars predating the field. The sidecar's effort
+    # level is deliberately not read: the supervisor holds no effort opinion
+    # (Plan 00466 N47).
     model_id: str = ""
-    effort: str | None = None
     # Plan 00399: who started the compaction, from the daemon's record ("" when
     # no record or an unattributed one). Meaningful only while ``compacting``.
     compaction_origin: str = ""
@@ -2296,13 +2297,7 @@ def _build_sidecar_reading(
         compacting=bool(data.get("compacting", False)),
         stale=(now - ts) > freshness_seconds,
         model_id=str(data.get("model_id", "")),
-        effort=_coerce_optional_str(data.get("effort")),
     )
-
-
-def _coerce_optional_str(value: object) -> str | None:
-    """Return ``value`` as a string, or None for anything non-string."""
-    return value if isinstance(value, str) else None
 
 
 def load_compaction_signal(
@@ -2861,31 +2856,77 @@ _MODEL_DOWNGRADE_SIGNAL_GLOB = f"*{_MODEL_DOWNGRADE_SIGNAL_SUFFIX}"
 _DOWNGRADE_FIELD_ORIGINAL_FAMILY = "original_family"
 _DOWNGRADE_FIELD_FALLBACK_FAMILY = "fallback_family"
 _DOWNGRADE_FIELD_RECORD_TS = "record_ts"
+_DOWNGRADE_FIELD_RECORD_ID = "record_id"
+
+# Plan 00466 N47 review 4 items 3/4: a record explains a family drop only when
+# the downgrade it records happened within this many seconds of the drop being
+# observed. The recorder republishes one record for the rest of the session,
+# so without a bound an old record attributes a human's much later pick of the
+# same fallback. The status line renders the new model within seconds of the
+# switch and the standalone record lands at most ~90s after the block; five
+# minutes covers both with room for a slow tick, and is far shorter than any
+# gap after which a human's own pick could be mistaken for the machine's.
+_DOWNGRADE_ATTRIBUTION_WINDOW_SECONDS = 300.0
+
+
+@dataclass(frozen=True)
+class DowngradeRecord:
+    """One published automatic-downgrade record, as the supervisor uses it.
+
+    ``record_key`` identifies the transcript record: its ``record_id`` (the
+    entry's uuid, or its line's byte offset), or ``record_ts`` for a signal
+    from a daemon that predates ``record_id``; empty when it has neither.
+    ``event_ts`` is when the downgrade happened (the record's transcript
+    timestamp), or ``None`` when that is missing or unparseable.
+    """
+
+    session_id: str
+    from_family: str
+    to_family: str
+    record_key: str
+    event_ts: float | None
+
+
+def _record_event_epoch(timestamp: str) -> float | None:
+    """A transcript timestamp as epoch seconds, or ``None``; zone-less means UTC.
+
+    Mirrors ``model_fallback_records.event_epoch``, which this standalone
+    script cannot import.
+    """
+    if not timestamp:
+        return None
+    try:
+        parsed = datetime.fromisoformat(timestamp)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.timestamp()
 
 
 def load_model_downgrade_signal(
     directory: Path,
     *,
     own_sessions: frozenset[str] | None = None,
-) -> tuple[str, str, str, str] | None:
-    """Return ``(session_id, original_family, fallback_family, record_ts)``, or ``None``.
+) -> DowngradeRecord | None:
+    """Return the in-scope published downgrade record, or ``None``.
 
     Deliberately NOT time-windowed, unlike the goal and model-switch signals.
     The record's own ``scope`` is ``session``: the substitution lasts until the
     session ends, so a signal written an hour ago is still true. Staleness is
     handled where it belongs -- ``reap_stale_sidecars`` removes the file once
-    the session is long dead.
+    the session is long dead. Which DROP a record may explain is bounded by
+    its ``event_ts`` instead, in the state machine.
 
     Fail-silent per file, mirroring ``load_model_switch_signal``: a malformed
     or unreadable signal is simply no signal. A family the recorder could not
     resolve comes back as ``None`` in the payload and is rejected here rather
     than passed on -- acting on it would aim a restore at nothing.
 
-    ``record_ts`` identifies the underlying transcript record (Plan 00466 N47
-    review 2 finding 4), not the publish time -- the recorder republishes the
-    SAME record for as long as the session lives, so a caller that wants to
-    tell "the same downgrade, seen again" from "a NEW downgrade" needs this,
-    not the file's own ``ts``.
+    The record key identifies the underlying transcript record, not the
+    publish time -- the recorder republishes the SAME record for as long as
+    the session lives, so a caller that wants to tell "the same downgrade,
+    seen again" from "a NEW downgrade" needs this, not the file's own ``ts``.
     """
     if not directory.is_dir():
         return None
@@ -2908,7 +2949,16 @@ def load_model_downgrade_signal(
         record_ts = data.get(_DOWNGRADE_FIELD_RECORD_TS)
         if not isinstance(record_ts, str):
             record_ts = ""
-        return session_id, original, fallback, record_ts
+        record_id = data.get(_DOWNGRADE_FIELD_RECORD_ID)
+        if not isinstance(record_id, str):
+            record_id = ""
+        return DowngradeRecord(
+            session_id=session_id,
+            from_family=original,
+            to_family=fallback,
+            record_key=record_id or record_ts,
+            event_ts=_record_event_epoch(record_ts),
+        )
     return None
 
 
@@ -3271,20 +3321,23 @@ class CompactStateMachine:
         self._restore_awaiting: str | None = None
         self._restore_awaiting_ts: float | None = None
         self._unavailable_families: list[str] = []
-        # Plan 00328 Task 2.2: `session:from:to:record_ts` of a downgrade
+        # Plan 00328 Task 2.2: `session:from:to:record_key` of a downgrade
         # CLAUDE CODE RECORDED, read from the daemon's `.model-downgrade`
         # signal. Nothing else opens a downgrade episode -- see
-        # `note_machine_downgrade`.
+        # `note_machine_downgrade`. Its event time (Plan 00466 N47 review 4)
+        # is the record's own timestamp, or when this machine first saw a
+        # record that has none; only a drop observed within
+        # `_DOWNGRADE_ATTRIBUTION_WINDOW_SECONDS` of it is attributed.
         self._attributed_downgrade: str | None = None
-        # Plan 00466 N47 review 2 finding 4: the record_ts backing the
-        # CURRENTLY open episode (None when none is open), and the record_ts
-        # of the most recently CLOSED episode -- once a record's episode has
-        # been opened and later closed by an observed recovery, that SAME
-        # record (the recorder republishes it for the rest of the session)
-        # must never reopen a fresh episode on its own; only a genuinely NEW
-        # record_ts can.
-        self._downgrade_episode_record_ts: str | None = None
-        self._spent_downgrade_record_ts: str | None = None
+        self._attributed_downgrade_event_ts: float | None = None
+        # Plan 00466 N47: the record key backing the CURRENTLY open episode
+        # (None when none is open), and the key of the most recently CLOSED
+        # episode -- once a record's episode has been opened and later closed
+        # by an observed recovery, that SAME record (the recorder republishes
+        # it for the rest of the session) must never reopen a fresh episode;
+        # only a genuinely NEW record can.
+        self._downgrade_episode_record_id: str | None = None
+        self._spent_downgrade_record_id: str | None = None
         # Consume-once note for a ranked drop that arrived with no such
         # record, so a disabled/failing recorder is diagnosable from
         # decision.log rather than looking like "no downgrade ever happened".
@@ -3292,11 +3345,16 @@ class CompactStateMachine:
         # Plan 00466 N47 review 3 item C: `session:from_family:to_family` of a
         # ranked drop judged unattributed because its record had not been
         # published YET (the reading renders before `model_downgrade_recorder`
-        # writes the signal, same tick order issue as a slow PostToolUse).
-        # Cleared once the record arrives (attributing it retroactively -- see
-        # `note_machine_downgrade`) or once the session leaves that fallback
-        # family without ever getting one.
+        # writes the signal), and when that drop was observed. Held only
+        # while the session stays on that fallback (`note_model_reading`
+        # clears it otherwise); a record that arrives meanwhile and explains
+        # the drop attributes it retroactively -- see `settle_pending_drop`.
         self._pending_unattributed_drop: str | None = None
+        self._pending_unattributed_drop_ts: float | None = None
+        # Consume-once note for a drop attributed retroactively (review 4
+        # finding 8): the decision log's previous word on that drop was
+        # "unattributed -- no restore", so the restore needs saying why.
+        self._retro_attribution_note: str | None = None
 
     def mark_model_restore(
         self,
@@ -3438,14 +3496,12 @@ class CompactStateMachine:
         """The most recently observed foreground session id, or None (Plan 00278)."""
         return self._last_model_session
 
-    def note_machine_downgrade(
-        self, *, session: str, from_family: str, to_family: str, record_ts: str, now_wall: float
-    ) -> None:
+    def note_machine_downgrade(self, record: DowngradeRecord, *, now_wall: float) -> None:
         """Record a downgrade CLAUDE CODE attributed to itself (Plan 00328).
 
         Fed from ``load_model_downgrade_signal``, which reads what the daemon's
         ``model_downgrade_recorder`` copied out of the session transcript. This
-        is the ONLY thing that opens a downgrade episode: the auto-restore's
+        is the ONLY evidence that opens a downgrade episode: the auto-restore's
         whole remit is the automated fable security downgrade, so requiring the
         platform's own record of it means a human model change can never be
         mistaken for one -- it emits no such record.
@@ -3453,57 +3509,116 @@ class CompactStateMachine:
         Idempotent. The recorder republishes the same fact for as long as the
         session lives, and re-noting it must not disturb an episode already
         open (or reopen one the human has since closed by switching models
-        themselves).
+        themselves). Nothing is opened here: ``note_model_reading`` attributes
+        a drop as it is observed, and ``settle_pending_drop`` one observed
+        before this record was published.
 
-        ``record_ts`` (Plan 00466 N47 review 2 finding 4) identifies the
-        underlying transcript record, not the publish time -- see
-        ``_downgrade_is_attributed`` for why this matters.
-
-        Plan 00466 N47 review 3 item C: this runs BEFORE ``note_model_reading``
-        on every tick (see ``decide_once``), so a downgrade whose READING
-        rendered before its RECORD was published was judged unattributed on
-        that earlier tick and never looked at again -- the family stayed the
-        fallback, but ``family_changed`` never re-fires without another
-        change. If the record arrives now while the session is STILL latched
-        as that exact pending unattributed drop and still sitting on the
-        fallback family, attribute it retroactively and open the episode here.
+        A record without a timestamp keeps the moment it was FIRST seen as its
+        event time, so republishing it every tick never makes it look fresh.
         """
-        self._attributed_downgrade = f"{session}:{from_family}:{to_family}:{record_ts}"
-        if (
-            self._pending_unattributed_drop == f"{session}:{from_family}:{to_family}"
-            and self._downgrade_episode is None
-            and self._last_model_session == session
-            and self._last_model_family == to_family
-            and (not record_ts or record_ts != self._spent_downgrade_record_ts)
+        attributed = (
+            f"{record.session_id}:{record.from_family}:{record.to_family}:{record.record_key}"
+        )
+        if record.event_ts is not None:
+            self._attributed_downgrade_event_ts = record.event_ts
+        elif (
+            attributed != self._attributed_downgrade or self._attributed_downgrade_event_ts is None
         ):
-            self._downgrade_from_family = from_family
-            self._downgrade_started_ts = now_wall
-            self._downgrade_episode_record_ts = record_ts
-            self._downgrade_episode = f"{session}:{to_family}"
-            self._pending_unattributed_drop = None
+            self._attributed_downgrade_event_ts = now_wall
+        self._attributed_downgrade = attributed
 
-    def _downgrade_is_attributed(self, session: str, from_family: str, to_family: str) -> bool:
+    def _downgrade_is_attributed(
+        self, session: str, from_family: str, to_family: str, *, observed_wall: float
+    ) -> bool:
         """True when the platform recorded THIS session making THIS drop, freshly.
 
-        Compares session/from/to AND requires the record's own ``record_ts``
-        not be one this machine has already spent opening (and later closing,
-        by observing the family recover) an episode for. Without this, a
-        MANUAL switch back to the fallback family long after a full recovery
-        re-matches the SAME still-published record -- the recorder never
-        clears it, it just keeps republishing the original downgrade fact for
-        the rest of the session -- and reopens an episode the human never
-        asked for (Plan 00466 N47 review 2 finding 4).
+        Three conditions, each closing a way the supervisor came to type
+        `/model fable` at a human who had chosen otherwise:
+
+        - the record names this session, from-family and to-family;
+        - its key is not one this machine already SPENT opening (and later
+          closing, by observing the family recover) an episode for -- the
+          recorder republishes the same record for the rest of the session,
+          so a manual switch back to the fallback would otherwise re-match it
+          (Plan 00466 N47 review 2 finding 4);
+        - the downgrade it records happened within
+          ``_DOWNGRADE_ATTRIBUTION_WINDOW_SECONDS`` of ``observed_wall``, when
+          the drop was seen -- an old record says nothing about a drop now,
+          including one whose episode never opened and so was never spent
+          (review 4 findings 3 and 4).
+
+        An empty key is never spent (spending it would refuse every later
+        keyless record); for such a record the window is the only bound.
         """
         recorded = self._attributed_downgrade
-        if recorded is None:
+        event_ts = self._attributed_downgrade_event_ts
+        if recorded is None or event_ts is None:
             return False
         parts = recorded.split(":", 3)
         if len(parts) != 4:
             return False
-        rec_session, rec_from, rec_to, rec_ts = parts
+        rec_session, rec_from, rec_to, rec_key = parts
         if rec_session != session or rec_from != from_family or rec_to != to_family:
             return False
-        return rec_ts != self._spent_downgrade_record_ts
+        if rec_key and rec_key == self._spent_downgrade_record_id:
+            return False
+        return abs(observed_wall - event_ts) <= _DOWNGRADE_ATTRIBUTION_WINDOW_SECONDS
+
+    def _open_downgrade_episode(
+        self, *, session: str, from_family: str, to_family: str, now_wall: float
+    ) -> None:
+        """Open an episode backed by the current record, whose key it will spend."""
+        recorded = self._attributed_downgrade
+        self._downgrade_from_family = from_family
+        self._downgrade_started_ts = now_wall
+        self._downgrade_episode_record_id = None if recorded is None else recorded.split(":", 3)[-1]
+        self._downgrade_episode = f"{session}:{to_family}"
+
+    def settle_pending_drop(self, *, now_wall: float) -> None:
+        """Attribute a drop retroactively once its record arrives (review 3 item C).
+
+        Runs every tick AFTER both ``note_machine_downgrade`` and
+        ``note_model_reading``. A downgrade whose READING rendered before its
+        RECORD was published is judged unattributed on that tick and latched;
+        ``family_changed`` never re-fires without another change, so this is
+        the only place it can still be attributed.
+
+        After the reading, not before: the record and the human's next pick
+        can land between the same two ticks, and only this tick's reading says
+        whether the session is still on the fallback. The latch exists only
+        while it is (``note_model_reading`` drops it otherwise), so session and
+        family need no second check here. The attribution itself is the same
+        judgement a drop gets when it is observed -- ``_downgrade_is_attributed``
+        -- applied at the moment the drop was observed, so a record of some
+        LATER downgrade cannot claim it (review 4 finding 3).
+        """
+        pending = self._pending_unattributed_drop
+        observed = self._pending_unattributed_drop_ts
+        if pending is None or observed is None or self._downgrade_episode is not None:
+            return
+        parts = pending.split(":", 2)
+        if len(parts) != 3:
+            return
+        session, from_family, to_family = parts
+        if not self._downgrade_is_attributed(
+            session, from_family, to_family, observed_wall=observed
+        ):
+            return
+        self._open_downgrade_episode(
+            session=session, from_family=from_family, to_family=to_family, now_wall=now_wall
+        )
+        self._pending_unattributed_drop = None
+        self._pending_unattributed_drop_ts = None
+        self._retro_attribution_note = (
+            f"downgrade {from_family} -> {to_family} attributed retroactively "
+            "(its model_downgrade_recorder record arrived after the reading) — restore armed"
+        )
+
+    def take_retro_attribution_note(self) -> str | None:
+        """Return, once, the note that a drop was attributed retroactively."""
+        note = self._retro_attribution_note
+        self._retro_attribution_note = None
+        return note
 
     def take_unattributed_downgrade_note(self) -> str | None:
         """Return, once, a note about a drop that arrived with no attribution.
@@ -3573,24 +3688,24 @@ class CompactStateMachine:
                 # fallback family (recovered another way, or switched again)
                 # without the record ever arriving -- the window this latch
                 # existed to bridge has closed, so drop it rather than let a
-                # much-later record retroactively open a stale episode.
+                # later record retroactively open a stale episode.
                 self._pending_unattributed_drop = None
+                self._pending_unattributed_drop_ts = None
         if self._downgrade_episode is not None:
             ep_session, _, ep_family = self._downgrade_episode.partition(":")
             if session != ep_session or _family_rank(family) > _family_rank(ep_family):
                 # Plan 00466 N47 review 2 finding 4: the episode is closing
                 # because the family recovered (or the session changed) --
-                # spend this episode's record_ts so the SAME still-published
+                # spend this episode's record key so the SAME still-published
                 # attribution record can never reopen a fresh episode later
-                # on a manual switch back to the fallback family. Plan 00466
-                # N47 review 3 item E: an EMPTY record_ts means the transcript
-                # record carried no timestamp -- never spend it, or every
-                # later untimestamped downgrade in the session would compare
-                # equal to it and be refused.
-                if self._downgrade_episode_record_ts:
-                    self._spent_downgrade_record_ts = self._downgrade_episode_record_ts
+                # on a manual switch back to the fallback family. An EMPTY
+                # key (a record with neither id nor timestamp) is never
+                # spent, or every later keyless downgrade in the session
+                # would compare equal to it and be refused.
+                if self._downgrade_episode_record_id:
+                    self._spent_downgrade_record_id = self._downgrade_episode_record_id
                 self._downgrade_episode = None
-                self._downgrade_episode_record_ts = None
+                self._downgrade_episode_record_id = None
                 self._downgrade_from_family = None
                 self._downgrade_started_ts = None
         family_changed = (
@@ -3615,34 +3730,41 @@ class CompactStateMachine:
             # exactly, and acting on the shape alone is how the supervisor came
             # to type `/model fable` at a human who had just chosen otherwise.
             # Claude Code records its OWN downgrades; require that record --
-            # and that the record is not one whose episode already ran its
-            # course (finding 4, `_downgrade_is_attributed`).
-            if not self._downgrade_is_attributed(session, prev_family, family):
+            # fresh, and not one whose episode already ran its course
+            # (`_downgrade_is_attributed`).
+            if not self._downgrade_is_attributed(
+                session, prev_family, family, observed_wall=now_wall
+            ):
                 # Plan 00466 N47 review 3 item C: latch it. The record may
                 # simply not have been PUBLISHED yet (the reading renders
                 # before the daemon's PostToolUse recorder writes the
                 # signal) -- if it arrives while the session is still
-                # sitting on this exact fallback, `note_machine_downgrade`
+                # sitting on this exact fallback, `settle_pending_drop`
                 # attributes it retroactively and opens the episode there.
                 self._pending_unattributed_drop = f"{session}:{prev_family}:{family}"
+                self._pending_unattributed_drop_ts = now_wall
                 if self._unattributed_downgrade_note is None:
                     self._unattributed_downgrade_note = (
                         f"downgrade {prev_family} -> {family} is unattributed "
-                        "(no model_downgrade_recorder signal) — no restore"
+                        "(no fresh, unspent model_downgrade_recorder record) — no restore"
                     )
             else:
                 self._pending_unattributed_drop = None
+                self._pending_unattributed_drop_ts = None
                 if self._downgrade_episode is None:
                     # A fresh episode: remember where we fell FROM and when, for
                     # the delayed /model flip-back (Task 2b.3), and which record
-                    # backs it so a later recovery can spend it. A further drop
-                    # inside an open episode keeps the original from/started.
-                    self._downgrade_from_family = prev_family
-                    self._downgrade_started_ts = now_wall
-                    recorded = self._attributed_downgrade
-                    if recorded is not None:
-                        self._downgrade_episode_record_ts = recorded.split(":", 3)[-1]
-                self._downgrade_episode = f"{session}:{family}"
+                    # backs it so a later recovery can spend it.
+                    self._open_downgrade_episode(
+                        session=session,
+                        from_family=prev_family,
+                        to_family=family,
+                        now_wall=now_wall,
+                    )
+                else:
+                    # A further drop inside an open episode keeps the original
+                    # from/started/record and follows the session down.
+                    self._downgrade_episode = f"{session}:{family}"
 
     @property
     def goal_injections(self) -> int:
@@ -3801,10 +3923,13 @@ class CompactStateMachine:
             "restore_awaiting_ts": self._restore_awaiting_ts,
             "unavailable_families": list(self._unavailable_families),
             "attributed_downgrade": self._attributed_downgrade,
-            "downgrade_episode_record_ts": self._downgrade_episode_record_ts,
-            "spent_downgrade_record_ts": self._spent_downgrade_record_ts,
+            "attributed_downgrade_event_ts": self._attributed_downgrade_event_ts,
+            "downgrade_episode_record_id": self._downgrade_episode_record_id,
+            "spent_downgrade_record_id": self._spent_downgrade_record_id,
             "unattributed_downgrade_note": self._unattributed_downgrade_note,
             "pending_unattributed_drop": self._pending_unattributed_drop,
+            "pending_unattributed_drop_ts": self._pending_unattributed_drop_ts,
+            "retro_attribution_note": self._retro_attribution_note,
         }
 
     def import_state(self, state: dict[str, object]) -> None:
@@ -3900,31 +4025,53 @@ class CompactStateMachine:
         if "attributed_downgrade" in state:
             raw = state["attributed_downgrade"]
             self._attributed_downgrade = None if raw is None else str(raw)
-        if "downgrade_episode_record_ts" in state:
-            raw = state["downgrade_episode_record_ts"]
-            self._downgrade_episode_record_ts = None if raw is None else str(raw)
-        if "spent_downgrade_record_ts" in state:
-            raw = state["spent_downgrade_record_ts"]
-            self._spent_downgrade_record_ts = None if raw is None else str(raw)
+        if "attributed_downgrade_event_ts" in state:
+            raw = state["attributed_downgrade_event_ts"]
+            self._attributed_downgrade_event_ts = None if raw is None else _coerce_float(raw)
+        # A worker from before record ids exported these keys as `*_record_ts`
+        # (the record's timestamp was its key then); read those when the new
+        # key is absent so a hot reload keeps the episode and the spent record.
+        episode_key = (
+            "downgrade_episode_record_id"
+            if "downgrade_episode_record_id" in state
+            else "downgrade_episode_record_ts"
+        )
+        if episode_key in state:
+            raw = state[episode_key]
+            self._downgrade_episode_record_id = None if raw is None else str(raw)
+        spent_key = (
+            "spent_downgrade_record_id"
+            if "spent_downgrade_record_id" in state
+            else "spent_downgrade_record_ts"
+        )
+        if spent_key in state:
+            raw = state[spent_key]
+            self._spent_downgrade_record_id = None if raw is None else str(raw)
         if "unattributed_downgrade_note" in state:
             raw = state["unattributed_downgrade_note"]
             self._unattributed_downgrade_note = None if raw is None else str(raw)
         if "pending_unattributed_drop" in state:
             raw = state["pending_unattributed_drop"]
             self._pending_unattributed_drop = None if raw is None else str(raw)
+        if "pending_unattributed_drop_ts" in state:
+            raw = state["pending_unattributed_drop_ts"]
+            self._pending_unattributed_drop_ts = None if raw is None else _coerce_float(raw)
+        if "retro_attribution_note" in state:
+            raw = state["retro_attribution_note"]
+            self._retro_attribution_note = None if raw is None else str(raw)
         # Plan 00466 N47 review 3: an episode already open when this state was
-        # exported by an OLDER worker (pre-dating `downgrade_episode_record_ts`,
-        # or a legacy payload with the key stripped) imports with no record_ts
-        # to spend on close, so the MAJOR 4 bug would recur once for that one
-        # episode. Backfill it from `attributed_downgrade` when it still names
-        # this exact open episode's session and fallback family.
-        if self._downgrade_episode is not None and self._downgrade_episode_record_ts is None:
+        # exported by an OLDER worker (pre-dating the episode's record key, or
+        # a legacy payload with the key stripped) imports with no key to spend
+        # on close, so the MAJOR 4 bug would recur once for that one episode.
+        # Backfill it from `attributed_downgrade` when it still names this
+        # exact open episode's session and fallback family.
+        if self._downgrade_episode is not None and self._downgrade_episode_record_id is None:
             ep_session, _, ep_family = self._downgrade_episode.partition(":")
             recorded = self._attributed_downgrade
             if recorded is not None:
                 parts = recorded.split(":", 3)
                 if len(parts) == 4 and parts[0] == ep_session and parts[2] == ep_family:
-                    self._downgrade_episode_record_ts = parts[3]
+                    self._downgrade_episode_record_id = parts[3]
 
     def evaluate(
         self,
@@ -4752,18 +4899,17 @@ def decide_once(
     # first observed and the episode would open. Nothing else opens one.
     attributed = load_model_downgrade_signal(sidecar_dir, own_sessions=own_sessions)
     if attributed is not None:
-        machine.note_machine_downgrade(
-            session=attributed[0],
-            from_family=attributed[1],
-            to_family=attributed[2],
-            record_ts=attributed[3],
-            now_wall=facts.now_wall,
-        )
-    # Plan 00278: track the foreground model family so a ranked downgrade
-    # opens an effort-restore episode (fired further below, subordinate to
-    # every other family). Synthetic/stale readings are ignored.
+        machine.note_machine_downgrade(attributed, now_wall=facts.now_wall)
+    # Plan 00278: track the foreground model family so an attributed downgrade
+    # opens a model-restore episode (the `/model` flip-back, fired further
+    # below, subordinate to every other family). Synthetic/stale readings are
+    # ignored.
     if reading is not None and not reading.stale:
         machine.note_model_reading(reading, now_wall=facts.now_wall)
+    # Plan 00466 N47 review 3 item C: a drop observed before its record was
+    # published, attributed now that it is -- after this tick's reading, so a
+    # human who has since left the fallback is never restored.
+    machine.settle_pending_drop(now_wall=facts.now_wall)
     evaluation = machine.evaluate(
         reading,
         idle=can_inject,
@@ -4845,6 +4991,13 @@ def decide_once(
     unattributed_note = machine.take_unattributed_downgrade_note()
     if unattributed_note is not None:
         noop_reason_log = f"{_NOOP_LOG_PREFIX}: {unattributed_note}"
+    # Plan 00466 N47 review 4 finding 8: the log's last word on a drop
+    # attributed retroactively was "unattributed -- no restore", so the change
+    # of verdict is said out loud too. A restore on this same tick replaces
+    # this line with its own, so it carries the note in its reason (below).
+    retro_note = machine.take_retro_attribution_note()
+    if retro_note is not None:
+        noop_reason_log = f"{_NOOP_LOG_PREFIX}: {retro_note}"
     # ── Goal injection (Plan 00269) ─────────────────────────────────────────
     # Strictly SUBORDINATE to compact/continue: the goal branch runs only when
     # this tick decided NOOP with no payload, no compaction signal is pending,
@@ -5212,6 +5365,8 @@ def decide_once(
                 decision_value = Decision.WOULD_MODEL.value
                 model_command = f"{_MODEL_COMMAND} {restore_family}"
                 reason = f"downgrade quiet delay elapsed -> would inject {model_command}"
+                if retro_note is not None:
+                    reason = f"{reason} [{retro_note}]"
                 model_switch_family = restore_family
                 model_switch_session = machine.last_model_session
                 model_switch_is_auto_restore = True

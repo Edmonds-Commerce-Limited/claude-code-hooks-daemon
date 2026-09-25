@@ -29,17 +29,19 @@ def _subtype_line(
     category: str = "cyber",
     scope: str = "session",
     timestamp: str = "2026-08-27T09:34:10.341Z",
+    uuid: str | None = None,
 ) -> str:
-    return json.dumps(
-        {
-            "subtype": "model_refusal_fallback",
-            "originalModel": original,
-            "fallbackModel": fallback,
-            "apiRefusalCategory": category,
-            "scope": scope,
-            "timestamp": timestamp,
-        }
-    )
+    payload: dict[str, object] = {
+        "subtype": "model_refusal_fallback",
+        "originalModel": original,
+        "fallbackModel": fallback,
+        "apiRefusalCategory": category,
+        "scope": scope,
+        "timestamp": timestamp,
+    }
+    if uuid is not None:
+        payload["uuid"] = uuid
+    return json.dumps(payload)
 
 
 def _block_line(
@@ -47,24 +49,26 @@ def _block_line(
     original: str = "claude-fable-5",
     fallback: str = "claude-opus-4-8",
     timestamp: str = "2026-08-27T09:33:41.549Z",
+    uuid: str | None = None,
 ) -> str:
-    return json.dumps(
-        {
-            "type": "assistant",
-            "timestamp": timestamp,
-            "message": {
-                "role": "assistant",
-                "content": [
-                    {"type": "text", "text": "hello"},
-                    {
-                        "type": "fallback",
-                        "from": {"model": original},
-                        "to": {"model": fallback},
-                    },
-                ],
-            },
-        }
-    )
+    payload: dict[str, object] = {
+        "type": "assistant",
+        "timestamp": timestamp,
+        "message": {
+            "role": "assistant",
+            "content": [
+                {"type": "text", "text": "hello"},
+                {
+                    "type": "fallback",
+                    "from": {"model": original},
+                    "to": {"model": fallback},
+                },
+            ],
+        },
+    }
+    if uuid is not None:
+        payload["uuid"] = uuid
+    return json.dumps(payload)
 
 
 class TestParseFallbackLine:
@@ -262,3 +266,140 @@ class TestScanTranscriptTail:
         directory.mkdir()
 
         assert scan_transcript_tail(directory) is None
+
+
+class TestRecordIdentity:
+    """Plan 00466 N47 review 4 item 4: every record has an identity of its own.
+
+    The ccy supervisor spends a record once the episode it opened has run its
+    course, so the same record republished for the rest of the session can
+    never reopen one. That needs an identity that is unique per downgrade and
+    stable across scans. The timestamp alone is neither guaranteed (a record
+    can lack one) nor shared by the two shapes of ONE downgrade.
+    """
+
+    def test_a_record_carries_its_transcript_uuid_as_its_identity(self) -> None:
+        facts = parse_fallback_line(_subtype_line(uuid="uuid-subtype-1"))
+
+        assert facts is not None
+        assert facts.record_id == "uuid-subtype-1"
+
+    def test_a_block_record_carries_its_messages_uuid(self) -> None:
+        facts = parse_fallback_line(_block_line(uuid="uuid-block-1"))
+
+        assert facts is not None
+        assert facts.record_id == "uuid-block-1"
+
+    def test_a_record_without_a_uuid_is_identified_by_its_byte_offset(self, tmp_path: Path) -> None:
+        """The offset of an append-only file's line never changes, so it identifies it."""
+        transcript = tmp_path / "session.jsonl"
+        head = json.dumps(
+            {"type": "user", "message": {"role": "user", "content": "é" * 40}}, ensure_ascii=False
+        )
+        transcript.write_text(f"{head}\n{_subtype_line(timestamp='')}\n", encoding="utf-8")
+        offset = len(f"{head}\n".encode())
+
+        facts = scan_transcript_tail(transcript)
+
+        assert facts is not None
+        assert facts.record_id == f"offset:{offset}"
+
+    def test_an_offset_identity_is_stable_as_the_transcript_grows(self, tmp_path: Path) -> None:
+        """A later scan, with a different tail window, must name the SAME record."""
+        transcript = tmp_path / "session.jsonl"
+        filler = json.dumps(
+            {"type": "user", "message": {"role": "user", "content": "ü" * 150}},
+            ensure_ascii=False,
+        )
+        transcript.write_text(
+            "\n".join([filler] * 5) + f"\n{_subtype_line(timestamp='')}\n", encoding="utf-8"
+        )
+        first = scan_transcript_tail(transcript)
+        with transcript.open("a", encoding="utf-8") as stream:
+            stream.write("\n".join([filler] * 3) + "\n")
+
+        second = scan_transcript_tail(transcript, max_bytes=2000)
+
+        assert first is not None
+        assert second is not None
+        assert second.record_id == first.record_id
+
+    def test_the_two_shapes_of_one_downgrade_share_the_first_records_identity(
+        self, tmp_path: Path
+    ) -> None:
+        """The block and the standalone record 7-90s later are ONE downgrade.
+
+        The subtype supplies the category and scope; the identity and the
+        event time stay the block's, so a supervisor that spent the block's
+        record does not meet a "new" one when the subtype is written after the
+        episode closed.
+        """
+        transcript = tmp_path / "session.jsonl"
+        transcript.write_text(
+            f"{_block_line(uuid='uuid-block', timestamp='2026-08-27T09:33:41.549Z')}\n"
+            f"{_subtype_line(uuid='uuid-sub', timestamp='2026-08-27T09:34:10.341Z')}\n",
+            encoding="utf-8",
+        )
+
+        facts = scan_transcript_tail(transcript)
+
+        assert facts is not None
+        assert facts.category == "cyber"
+        assert facts.record_id == "uuid-block"
+        assert facts.timestamp == "2026-08-27T09:33:41.549Z"
+
+    def test_a_subtype_for_different_models_is_a_downgrade_of_its_own(self, tmp_path: Path) -> None:
+        transcript = tmp_path / "session.jsonl"
+        transcript.write_text(
+            f"{_block_line(uuid='uuid-block', fallback='claude-opus-5')}\n"
+            f"{_subtype_line(uuid='uuid-sub', fallback='claude-opus-4-8')}\n",
+            encoding="utf-8",
+        )
+
+        facts = scan_transcript_tail(transcript)
+
+        assert facts is not None
+        assert facts.record_id == "uuid-sub"
+
+    def test_a_subtype_long_after_the_block_is_a_downgrade_of_its_own(self, tmp_path: Path) -> None:
+        """Beyond the pairing window, the same models downgraded AGAIN."""
+        transcript = tmp_path / "session.jsonl"
+        transcript.write_text(
+            f"{_block_line(uuid='uuid-block', timestamp='2026-08-27T09:00:00.000Z')}\n"
+            f"{_subtype_line(uuid='uuid-sub', timestamp='2026-08-27T10:00:00.000Z')}\n",
+            encoding="utf-8",
+        )
+
+        facts = scan_transcript_tail(transcript)
+
+        assert facts is not None
+        assert facts.record_id == "uuid-sub"
+
+    def test_a_subtype_whose_times_cannot_be_compared_is_not_paired(self, tmp_path: Path) -> None:
+        """Pairing needs both event times: an unparseable one proves nothing."""
+        transcript = tmp_path / "session.jsonl"
+        transcript.write_text(
+            f"{_block_line(uuid='uuid-block', timestamp='')}\n"
+            f"{_subtype_line(uuid='uuid-sub')}\n",
+            encoding="utf-8",
+        )
+
+        facts = scan_transcript_tail(transcript)
+
+        assert facts is not None
+        assert facts.record_id == "uuid-sub"
+
+    def test_a_subtype_pairs_only_with_the_record_right_before_it(self, tmp_path: Path) -> None:
+        """An earlier block is a different downgrade, however close in time."""
+        transcript = tmp_path / "session.jsonl"
+        transcript.write_text(
+            f"{_block_line(uuid='uuid-block-1', timestamp='2026-08-27T09:33:00.000Z')}\n"
+            f"{_block_line(uuid='uuid-block-2', timestamp='2026-08-27T09:33:30.000Z')}\n"
+            f"{_subtype_line(uuid='uuid-sub', timestamp='2026-08-27T09:34:00.000Z')}\n",
+            encoding="utf-8",
+        )
+
+        facts = scan_transcript_tail(transcript)
+
+        assert facts is not None
+        assert facts.record_id == "uuid-block-2"

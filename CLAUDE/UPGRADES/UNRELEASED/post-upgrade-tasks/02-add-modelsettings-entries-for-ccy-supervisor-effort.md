@@ -3,18 +3,19 @@
 **Type**: config-migration
 **Severity**: recommended
 **Applies to**: all versions before this fix (Plan 00466) whose ccy session
-relied on the supervisor's own effort floor or downgrade compensation
+relied on the supervisor's own `/effort` injections
 **Idempotent**: yes
 
 ## Why
 
-The ccy supervisor used to type `/effort low` (a Fable ceiling, Plan 00297
-DROP ANCHOR) and `/effort xhigh` (downgrade compensation) itself. Claude Code
-saves every interactively-typed `/effort <level>` into `modelSettings` in
-your own `settings.json`, so those injections permanently overwrote your own
-saved level — the fight the redesign exists to end. The supervisor now
-injects no `/effort` command at all; both behaviors are `modelSettings` data
-you add yourself.
+The ccy supervisor used to type `/effort low` whenever Fable ran above low
+(Plan 00297's DROP ANCHOR) and `/effort xhigh` on a downgrade's fallback model
+(downgrade compensation) itself. Claude Code saves every interactively-typed
+`/effort <level>` into `modelSettings` in your own `settings.json`, so those
+injections permanently overwrote your own saved level — the fight the redesign
+exists to end. The supervisor now injects no `/effort` command at all; the
+levels those injections aimed for are per-model `modelSettings` entries you
+add yourself.
 
 **This only applies while the session's own effort has never been set.**
 Claude Code applies a model's saved `modelSettings` level automatically only
@@ -42,34 +43,24 @@ If nothing matches (including because the file does not exist — check that
 separately, `2>/dev/null` on the sample above would hide an unreadable file
 too), the entries are missing.
 
+Then run `hooks-daemon check`: its "Effort Source" line is `[WARN]` when
+`CLAUDE_CODE_EFFORT_LEVEL`, or a top-level `effortLevel` in the project or
+local settings file, pins one level on every model — which would override
+these per-model entries. Remove any pin it names.
+
 ## How to handle
 
-Add (or merge into an existing `modelSettings` object) the following to the
-settings file the owner wants this applied to:
-
-```json
-{
-  "modelSettings": {
-    "claude-fable-5-1": { "effortLevel": "low" },
-    "claude-opus-5": { "effortLevel": "xhigh" },
-    "claude-opus-4-8": { "effortLevel": "xhigh" }
-  }
-}
-```
-
-- `claude-fable-5-1` at `low` replaces the DROP ANCHOR ceiling. It does not
-  cover Fable 5 (`claude-fable-5`, what a gateway resolves `fable` to) or
-  `mythos` ids; add those too if the project's gateway can serve them.
-- `claude-opus-5` and `claude-opus-4-8` at `xhigh` cover Fable's two
-  automatic-fallback targets (biology-flagged requests land on Opus 5,
-  cybersecurity-flagged requests land on Opus 4.8). This is BROADER than the
-  old compensation: it now applies an xhigh floor to Opus 5 and Opus 4.8
-  wherever they serve in this session (an Opus 5.5 → Opus 4.8 cyber
-  fallback, or a manual pick of either), not just a fable-origin episode.
+Merge three entries into the `modelSettings` object of the settings file the
+owner wants this applied to: `claude-fable-5-1` at `low`, and `claude-opus-5`
+and `claude-opus-4-8` at `xhigh`. The exact JSON, and what each entry covers
+and does not cover, is in `CLAUDE/development/CcySupervisor.md`, section "What
+the owner should add to `modelSettings`" (in a client install, under
+`.claude/hooks-daemon/`). Leave `claude-opus-5-5` out: it stays at its own
+`medium` default.
 
 Never edit the owner's real settings file without asking first — this task
-is advisory; report the exact JSON above and let the owner (or an
-authorised session) apply it.
+is advisory; report the exact JSON and let the owner (or an authorised
+session) apply it.
 
 ## How to confirm
 

@@ -27,9 +27,8 @@ Every injection decision (`/compact`, `continue`, `/goal`, `/model`) runs in a
 **`--worker` subprocess**, not in the long-lived PTY host that owns the `claude`
 process (the two-tier design from Plan 00164 Phase 4). The host hot-reloads that
 subprocess — swapping in new code **without a full Claude Code session restart**
-— but only when it notices the file changed. (`/effort` was a fifth family here
-before Plan 00466 N47 review 2; the supervisor injects no effort of any kind
-now — see below.)
+— but only when it notices the file changed. (There is no `/effort` family:
+the supervisor injects no effort of any kind — see below.)
 
 **Since Plan 00317 this includes typed-command RECOGNITION, not just the
 decision.** Parsing what the human typed (`/compact`) runs in the
@@ -179,7 +178,8 @@ they want it to apply — most commonly their user settings), naming exact
 model ids per `settings-reference.md:1197` ("Claude Code writes each entry
 under the model's canonical name... and matches that model's alias,
 date-suffixed, `[1m]`, and recognized provider-specific IDs to the same
-entry"):
+entry"). This is the canonical copy of these entries; post-upgrade task 02
+points here:
 
 ```json
 {
@@ -191,20 +191,26 @@ entry"):
 }
 ```
 
-- `claude-fable-5-1` (Fable 5.1, the `fable` alias's target) at `low` replaces
-  the old DROP ANCHOR injection: a low ceiling for the model that does the
-  fable-anchor work. This entry does NOT cover Fable 5 (`claude-fable-5`, what
-  a gateway resolves `fable` to) or the `mythos` ids the supervisor treats as
-  the same family (`_MODEL_FAMILY_CANONICAL`); add those ids too if the
-  project's gateway can serve them.
-- `claude-opus-5` and `claude-opus-4-8` at `xhigh` replace the old downgrade
-  compensation: Fable's two automatic-fallback targets
+- `claude-fable-5-1` (Fable 5.1, the `fable` alias's target) at `low` is the
+  level the old DROP ANCHOR injection typed. This entry does NOT cover Fable 5
+  (`claude-fable-5`, what a gateway resolves `fable` to) or the `mythos` ids
+  the supervisor treats as the same family (`_MODEL_FAMILY_CANONICAL`); add
+  those ids too if the project's gateway can serve them.
+- `claude-opus-5` and `claude-opus-4-8` at `xhigh` are the level the old
+  downgrade compensation typed, for Fable's two automatic-fallback targets
   (`model-config.md:486` — biology-flagged requests land on Opus 5,
   cybersecurity-flagged requests land on Opus 4.8). This is BROADER than the
   old compensation, which fired only for a drop that started at Fable: these
-  two entries now apply an xhigh floor to Opus 5 and Opus 4.8 wherever they
-  serve a request in this session (including an Opus 5.5 → Opus 4.8 cyber
-  fallback, or a manual pick of either), not just a fable-origin episode.
+  two entries set Opus 5 and Opus 4.8 to `xhigh` wherever they serve a
+  request in this session (including an Opus 5.5 → Opus 4.8 cyber fallback,
+  or a manual pick of either), not just in a fable-origin episode.
+- `claude-opus-5-5` gets NO entry: Opus 5.5 stays at its built-in `medium`
+  default (`model-config.md:548`), and a top-level `effortLevel` in the user
+  file does not apply to it either (`model-config.md:550`). A top-level
+  `effortLevel` in the project, local or managed settings file, or
+  `CLAUDE_CODE_EFFORT_LEVEL`, WOULD apply to every model, Opus 5.5 included,
+  and override all three entries above; `hooks-daemon check` reports either
+  as `[WARN] Effort Source`.
 
 Since none of this is code, **no worker reload applies to it at all** —
 editing `modelSettings` is an ordinary Claude Code settings edit, not a

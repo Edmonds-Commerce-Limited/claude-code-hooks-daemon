@@ -57,9 +57,18 @@ ever**:
   closed. A human who later manually switched back to the fallback family
   produced the identical observation the old `session:from:to` attribution
   key matched again, reopening an episode and firing `/model fable` at them.
-  The state machine now tracks which `record_ts` it has already spent
-  opening-then-closing an episode for, and refuses to reopen from the same
-  one — only a genuinely NEW downgrade record can open a fresh episode.
+  A record now has an identity (`record_id`: the transcript entry's `uuid`,
+  or its line's byte offset; the standalone record of a downgrade keeps its
+  block's identity), the state machine spends that identity when the episode
+  recovers, and a record attributes only a drop observed within
+  `_DOWNGRADE_ATTRIBUTION_WINDOW_SECONDS` (300s) of the downgrade it records
+  (review 4 findings 3 and 4). Retroactive attribution of a drop seen before
+  its record was published applies the same judgement at the moment the drop
+  was seen, after the tick's reading, and writes a decision-log line.
+- `hooks-daemon check` holds no effort opinion either (review 4 finding 2):
+  "Effort Level" (which failed anything but `high` and recommended
+  `CLAUDE_CODE_EFFORT_LEVEL=high`, a pin on every model) is replaced by
+  "Effort Source", which warns only about such pins.
 
 **Correction (review 3**, `subagent-reports/260925-n47-review3.md`**): the
 `modelSettings` claim above is CONDITIONAL, and review 2's design doc
@@ -84,25 +93,22 @@ settings-only configuration recovers per-model behaviour within it. The
 owner decides whether that trade-off is acceptable; the fix here only
 removes the SUPERVISOR as a second party to the fight.
 
-RED tests (driven through `decide_once`/`_poll_once` with real sidecar
-sequences, never by arming state directly) prove the supervisor never
-EMITS `/effort` in any scenario: a downgrade, a manual model switch,
-compaction, a settings.json change, or a human-typed `/effort`. Some of
-these assert only on exported state keys (the recogniser is gone, so there
-is no `/effort` field to observe); `probe_n47r3_scenarios.py`-style
-payload-level assertions cover the rest. `test_settings_effort.py`,
-`test_drop_anchor.py`, `test_effort_restore.py` and
-`test_unattributed_effort_drop.py` are deleted outright (the behaviour they
-covered no longer exists) — `test_effort_restore.py`'s NON-effort tests
+`tests/unit/supervise/test_no_effort_injection.py` asserts on the PAYLOADS
+that the supervisor never types `/effort`, driving `decide_once` (and
+`run_worker` for the raw-input tap) through real sidecar sequences: Fable at
+medium, high, xhigh and max (the removed DROP ANCHOR's trigger), a whole
+attributed downgrade episode through restore and recovery, a manual model
+pick, the operator `/model` switch signal, a compaction and its resume, and a
+human-typed `/effort max`. Each scenario also asserts it reached its path.
+`test_settings_effort.py`, `test_drop_anchor.py`, `test_effort_restore.py`
+and `test_unattributed_effort_drop.py` are deleted outright (the behaviour
+they covered no longer exists) — `test_effort_restore.py`'s NON-effort tests
 (live `/model` auto-restore: backoff, delay, the off setting, confirm
-enters, family ranks, the dry-run marker) are restored under
-`test_model_restore.py`, since deleting the whole file silently dropped
-mutation coverage for behaviour that is still live. `test_attributed_downgrade.py`
-gained the MAJOR 4 regression pair (a spent record does not reopen; a fresh
-record still does) plus RED tests for the four edges review 3 found: a
-downgrade whose reading renders before its record publishes, an empty
-`record_ts`, an episode open across a hot reload, and the `spent_downgrade_record_ts`
-export round-trip.
+enters, family ranks, the dry-run marker, and the restore cap pinned as the
+literal 2) are restored under `test_model_restore.py`. `test_attributed_downgrade.py`
+covers the record identity, the attribution window, every retro-attribution
+and hot-reload backfill guard (each asserted on the `/model` payload or the
+exported state it owns), and the export round-trips.
 
 ### N46 — `budget_exhaustion_detector` fires on a tool result that merely contains budget wording
 

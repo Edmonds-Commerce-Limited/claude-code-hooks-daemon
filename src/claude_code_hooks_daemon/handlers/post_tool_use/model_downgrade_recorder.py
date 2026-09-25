@@ -94,6 +94,7 @@ def build_signal(facts: FallbackFacts, *, session_id: str) -> DowngradeSignal:
         category=facts.category,
         scope=facts.scope,
         record_ts=facts.timestamp,
+        record_id=facts.record_id,
     )
 
 

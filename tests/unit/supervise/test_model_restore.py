@@ -221,12 +221,43 @@ def test_model_restore_dry_run_marker(tmp_path: Path) -> None:
     assert "dry-run" in outcome.payload
 
 
-def test_model_restore_cap(tmp_path: Path) -> None:
+def test_model_restore_cap_is_two_per_process(tmp_path: Path) -> None:
+    """The cap is pinned as a LITERAL: the second restore fires, the third never.
+
+    Looping ``_MAX_MODEL_RESTORES`` times would pass for any value of it
+    (review 4 finding 6), so this states the number the design relies on:
+    two tries, then the classifier has evidently won and typing again only
+    fights it.
+    """
     sidecar_dir = tmp_path / "cs"
     machine, later = _restore_ready_machine(sidecar_dir)
-    for _ in range(_mod._MAX_MODEL_RESTORES):
-        machine.mark_model_restore(now_wall=_NOW - 100_000.0)
-    outcome = _decide(sidecar_dir, machine, facts=_facts(later))
+    machine.mark_model_restore(now_wall=_NOW - 100_000.0)
+
+    second = _decide(sidecar_dir, machine, facts=_facts(later))
+    machine.mark_model_restore(now_wall=_NOW - 100_000.0)
+    third = _decide(sidecar_dir, machine, facts=_facts(later))
+
+    assert second.payload == "/model fable"
+    assert third.payload is None
+
+
+def test_an_episode_closes_when_the_foreground_session_changes(tmp_path: Path) -> None:
+    """A restore belongs to the session that was downgraded.
+
+    If the foreground becomes another session while the episode waits, typing
+    `/model fable` would land in a session nobody downgraded.
+    """
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine(restore_delay=900.0)
+    _downgrade(sidecar_dir, machine)
+    assert machine.export_state()["downgrade_episode"] is not None
+    (sidecar_dir / f"{_SESSION}.json").unlink()
+
+    later = _NOW + 1_000.0
+    _write_sidecar(sidecar_dir, session_id="another-sess", model_id="claude-opus-5", ts=later)
+    outcome = _decide(sidecar_dir, machine, facts=_facts(later + 1.0))
+
+    assert machine.export_state()["downgrade_episode"] is None
     assert outcome.payload is None
 
 

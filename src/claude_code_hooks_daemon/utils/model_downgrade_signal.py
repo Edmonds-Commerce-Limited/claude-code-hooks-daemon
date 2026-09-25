@@ -57,6 +57,10 @@ FIELD_FALLBACK_FAMILY: Final[str] = "fallback_family"
 FIELD_CATEGORY: Final[str] = "category"
 FIELD_SCOPE: Final[str] = "scope"
 FIELD_RECORD_TS: Final[str] = "record_ts"
+#: The transcript record's own identity (its ``uuid``, or its line's byte
+#: offset); the supervisor spends a record by it. Empty in a signal written
+#: by a daemon that predates the field.
+FIELD_RECORD_ID: Final[str] = "record_id"
 
 # Fields compared to decide whether a published signal still describes the
 # current record. ``ts`` is excluded on purpose: it is the publish time, so
@@ -67,6 +71,7 @@ _IDENTITY_FIELDS: Final[tuple[str, ...]] = (
     FIELD_CATEGORY,
     FIELD_SCOPE,
     FIELD_RECORD_TS,
+    FIELD_RECORD_ID,
 )
 
 
@@ -82,6 +87,7 @@ class DowngradeSignal:
     category: str
     scope: str
     record_ts: str
+    record_id: str = ""
 
     def attributes(self, *, from_family: str, to_family: str) -> bool:
         """Whether this record attributes a ``from_family`` → ``to_family`` drop.
@@ -104,6 +110,7 @@ class DowngradeSignal:
             FIELD_CATEGORY: self.category,
             FIELD_SCOPE: self.scope,
             FIELD_RECORD_TS: self.record_ts,
+            FIELD_RECORD_ID: self.record_id,
         }
 
 
@@ -148,6 +155,7 @@ def _parse(payload: object) -> DowngradeSignal | None:
         category=_text(FIELD_CATEGORY),
         scope=_text(FIELD_SCOPE),
         record_ts=_text(FIELD_RECORD_TS),
+        record_id=_text(FIELD_RECORD_ID),
     )
 
 

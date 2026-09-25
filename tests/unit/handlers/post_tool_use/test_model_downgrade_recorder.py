@@ -153,6 +153,21 @@ class TestRecording:
         assert payload["scope"] == "session"
         assert payload["record_ts"] == "2026-08-27T09:34:10.341Z"
 
+    def test_the_published_record_names_its_identity(
+        self, handler: ModelDowngradeRecorderHandler, tmp_path: Path, untracked: Path
+    ) -> None:
+        """Plan 00466 N47 review 4 item 4: the supervisor spends a record by
+        this identity, so it must reach the signal file. The record here has
+        no uuid, so its identity is the line's byte offset in the transcript."""
+        transcript = tmp_path / "t.jsonl"
+        ordinary = _ordinary_line()
+        transcript.write_text(f"{ordinary}\n{_subtype_line()}\n", encoding="utf-8")
+
+        handler.handle(_hook_input(transcript))
+
+        payload = json.loads(_signal_path(untracked).read_text(encoding="utf-8"))
+        assert payload["record_id"] == f"offset:{len(ordinary) + 1}"
+
     def test_the_signal_resolves_model_ids_to_families(
         self, handler: ModelDowngradeRecorderHandler, tmp_path: Path, untracked: Path
     ) -> None:
