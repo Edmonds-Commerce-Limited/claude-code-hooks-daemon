@@ -71,6 +71,7 @@ import stat
 import sys
 import tokenize
 from collections.abc import Iterable, Iterator, Mapping, Sequence
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from enum import Enum
 from itertools import islice, pairwise
@@ -709,6 +710,8 @@ _EXECUTABLE_CODE: Final[str] = "executable"
 #: What it yields for code a shell or Python reads that cannot be seen: from
 #: a producer this does not understand, or from another descriptor.
 _UNREAD_CODE: Final[str] = "<code that cannot be read>"
+#: Marks code the parse meter refused: more than one judgement parses.
+_OVER_BUDGET: Final[str] = "<more code than one judgement parses>"
 #: What it yields for the paths a command writes (``>``, ``>>``, ``tee``):
 #: code read from one of them is not what is on disk now.
 _WRITES: Final[str] = "<paths this command writes>"
@@ -773,17 +776,25 @@ _SCANNED_FILE_REASON: Final[str] = (
     "a file of code here is larger than is parsed, and it names a full-suite program, so it "
     "is judged as the full run it may be. Run the targeted command directly."
 )
+_OVER_BUDGET_REASON: Final[str] = (
+    "this command, with the code it runs, is more than one judgement parses, and code that "
+    "is not judged may run the whole suite, so it is judged as one. Run each script in its "
+    "own Bash call, or run the targeted command directly."
+)
 #: The pattern id a deny for unreadable code names: it matched no declaration.
 _UNREAD_CODE_ID: Final[str] = "code-that-cannot-be-read"
+#: The pattern id a deny past the parse budget names: nothing matched.
+_OVER_BUDGET_ID: Final[str] = "too-much-code-to-judge"
 
 #: Past this many characters a command is not parsed (review 5 n5): shlex
 #: builds each token a character at a time, and a 1 MB word took 36 s. The
 #: cap is on the raw text, because blanking a heredoc body is itself
 #: quadratic in the number of unclosed openers. File content is capped alike.
 _MAX_COMMAND_LENGTH: Final[int] = 32 * 1024
-#: One event parses at most this much file content in all (review 6 M1);
-#: each path is read once. Past it, a file is only scanned for a program.
-_MAX_PARSED_FILE_BYTES: Final[int] = 32 * 1024
+#: One judgement hands the parsers at most this many bytes in all (review 8
+#: B1): the command's own, each nested ``bash -c``, each file's and each
+#: Python literal's, re-parses included. Past it the command is DENIED.
+_MAX_PARSED_BYTES: Final[int] = 96 * 1024
 #: One event scans at most this much file content in all; a file past it is
 #: unseen.
 _MAX_SCANNED_FILE_BYTES: Final[int] = 16 * 1024 * 1024
@@ -1406,8 +1417,12 @@ def _invocations(
     boundary, and joining twice changes nothing. ``positional`` is the argv
     of the script this code is, which ``$@`` and ``$1`` expand to; outside a
     script they stay unseen. The paths the code writes come first, as
-    ``_WRITES``, so code read from one of them is judged unseen.
+    ``_WRITES``, so code read from one of them is judged unseen. Code past
+    the parse meter is ``_OVER_BUDGET`` and nothing else (review 8 B1).
     """
+    if not _charge(command):
+        yield _OVER_BUDGET, [], command[:_QUOTED_SEGMENT_LENGTH]
+        return
     text = _without_comments(_ansi_c_to_single_quoted(normalise_line_continuations(command)))
     scan_target = strip_inert_spans(text)
     written = _written_paths(scan_target)
@@ -2896,8 +2911,12 @@ def _python_code_runs(
     (review 7 M2). Code that imports or runs a module named only at run time
     is yielded as ``_OPAQUE``, so the caller can fail closed. pytest is
     yielded as ``_PYTEST_IN_CODE``: its operands are every string in the
-    code, so only a path-shaped one targets the run.
+    code, so only a path-shaped one targets the run. Code past the parse
+    meter is ``_OVER_BUDGET`` and nothing else (review 8 B1).
     """
+    if not _charge(code):
+        yield _OVER_BUDGET, [], segment
+        return
     if _starts_a_process(code):
         for span in _process_call_spans(code):
             for literal in _string_literals(span):
@@ -3521,7 +3540,11 @@ def find_full_qa_invocation(
         quoted = command[:_QUOTED_SEGMENT_LENGTH] + _ELLIPSIS
         return FullQaMatch(named.pattern_id, quoted, fail_closed=_OVERSIZED_REASON)
     event = _Event(patterns=patterns, start=cwd, addopts=_addopts(command))
-    return _first_full_run(_invocations(command), command, event, cwd, 0)
+    token = _PARSE_METER.set(_ParseMeter(remaining=_MAX_PARSED_BYTES))
+    try:
+        return _first_full_run(_invocations(command), command, event, cwd, 0)
+    finally:
+        _PARSE_METER.reset(token)
 
 
 class _Readable(Enum):
@@ -3550,6 +3573,37 @@ _ABSENT_CODE: Final[_CodeContent] = _CodeContent(_Readable.ABSENT)
 _UNSEEN_CODE: Final[_CodeContent] = _CodeContent(_Readable.UNSEEN)
 
 
+@dataclass
+class _ParseMeter:
+    """What is left of one judgement's parse budget, in bytes (review 8 B1)."""
+
+    remaining: int
+
+
+#: The meter of the judgement in progress, set per call by
+#: :func:`find_full_qa_invocation`. A ContextVar, never handler state: the
+#: daemon may judge events concurrently on the one handler instance.
+_PARSE_METER: Final[ContextVar[_ParseMeter]] = ContextVar("subagent_full_qa_parse_meter")
+
+
+def _charge(code: str) -> bool:
+    """Charge ``code`` to this judgement's meter: False when it would pass the budget.
+
+    Once refused, every later charge is refused too, so a judgement never
+    parses past the first thing it could not afford. With no meter set,
+    nothing was budgeted, and the charge is refused (fail closed).
+    """
+    meter = _PARSE_METER.get(None)
+    if meter is None:
+        return False
+    size = len(code.encode("utf-8"))
+    if size > meter.remaining:
+        meter.remaining = 0
+        return False
+    meter.remaining -= size
+    return True
+
+
 #: A parsed file's verdict, memoised by the resolved path, the kind it was
 #: read as, its argv, and the directory it ran from (review 7 M1): a file
 #: referenced many times, or one that feeds itself, is parsed once.
@@ -3560,10 +3614,11 @@ _VerdictKey = tuple[str, str, tuple[str, ...], str]
 class _Event:
     """What one event's judgement shares: the declaration, and the bounded file reads.
 
-    Every file read in the event draws on one parse budget and one scan
-    budget, and each path is read at most once (review 6 M1). Each distinct
-    (path, kind, argv, directory) is PARSED at most once: repeat references
-    reuse the memoised verdict instead of re-parsing (review 7 M1).
+    Every file read in the event draws on one scan budget, and each path is
+    read at most once (review 6 M1). Parsing draws on the per-call
+    :class:`_ParseMeter`. Each distinct (path, kind, argv, directory) is
+    PARSED at most once: repeat references reuse the memoised verdict
+    instead of re-parsing (review 7 M1).
     """
 
     patterns: Sequence[FullQaPattern]
@@ -3573,7 +3628,6 @@ class _Event:
     files: dict[str, _CodeContent] = field(default_factory=dict)
     named: dict[str, FullQaPattern | None] = field(default_factory=dict)
     marked: dict[str, bool] = field(default_factory=dict)
-    parse_budget: int = _MAX_PARSED_FILE_BYTES
     scan_budget: int = _MAX_SCANNED_FILE_BYTES
     verdicts: dict[_VerdictKey, FullQaMatch | None] = field(default_factory=dict)
     verdicts_pending: set[_VerdictKey] = field(default_factory=set)
@@ -3633,6 +3687,9 @@ def _first_full_run(
             found = _full_run_in_code_file(arguments, segment, event, here, files_deep)
         elif program == _UNREAD_CODE:
             found = FullQaMatch(_UNREAD_CODE_ID, segment.strip(), _UNREAD_CODE_REASON)
+        elif program == _OVER_BUDGET:
+            quoted = segment.strip()[:_QUOTED_SEGMENT_LENGTH]
+            found = FullQaMatch(_OVER_BUDGET_ID, quoted, _OVER_BUDGET_REASON)
         else:
             found = _full_run_of(program, arguments, segment, event, here, source)
         if found is not None:
@@ -3713,14 +3770,11 @@ def _full_run_in_code_file(
     that cannot be seen fails closed: an unreadable file is denied, and one
     too large to parse, or past the nesting followed, is denied when it names
     a declared program (review 6 M1, m2). A file's BYTES are read at most
-    once per event; but the parse budget is charged at every actual PARSE,
-    not at the read (review 8 B1) -- a distinct (path, kind, argv, directory)
-    key still reuses its own memoised verdict, but a NEW key past the budget
-    falls back to the scan already used for an oversized file, rather than
-    parsing again. Otherwise a file referenced with a different argv or
-    directory each time (``bash f.sh a0``, ``a1``, ...) defeated the memo:
-    each key was new, so each was parsed in full, and the budget -- charged
-    only once, at the first read -- never bounded the total parse work.
+    once per event, and each (path, kind, argv, directory) is parsed at most
+    once; every parse is charged to the call's one parse meter, and a parse
+    it cannot afford denies the command (review 8 B1). So a file referenced
+    with a different argv or directory each time (``bash f.sh a0``, ``a1``,
+    ...) is parsed only while the meter lasts.
     """
     kind, path, argv = arguments[0], arguments[1], arguments[2:]
     name = _PROGRAM_ALIASES.get(command_word(path), command_word(path))
@@ -3753,14 +3807,6 @@ def _full_run_in_code_file(
             if found is None
             else FullQaMatch(found.pattern_id, segment.strip(), found.fail_closed)
         )
-    size = len(content.text.encode("utf-8"))
-    if size > event.parse_budget:
-        # A NEW key, but the shared budget is spent: fall back to the same
-        # scan an oversized file gets, cached per PATH (not per key), so
-        # every further distinct-key reference to this file costs one cheap
-        # scan lookup rather than another full parse (review 8 B1).
-        return _scanned_verdict(content, code_kind, event, segment)
-    event.parse_budget -= size
     event.verdicts_pending.add(key)
     try:
         event.addopts.extend(_addopts(content.text))

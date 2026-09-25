@@ -1814,6 +1814,59 @@ class TestTheMergeBaseListingIsAccepted:
         assert match.fail_closed
 
 
+class _ParseLedger:
+    """What one judgement hands the parsers, and what the parse meter accepted.
+
+    Both parser entry points (shell and Python) are wrapped, and so is the
+    meter's ``_charge``. A parse that bypassed the meter would show as an
+    entry with no charge; a meter that let too much through shows in
+    ``accepted``. Work is counted, never timed: a wall-clock bound flakes on
+    a loaded host and hides a real regression when it is widened.
+    """
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self.entries: list[int] = []
+        self.charges: list[tuple[int, bool]] = []
+        real_shell = _blocker_module._invocations
+        real_python = _blocker_module._python_code_runs
+        real_charge = _blocker_module._charge
+
+        def _shell(
+            text: str, depth: int = 0, positional: Sequence[str] | None = None
+        ) -> Iterator[tuple[str, list[str], str]]:
+            self.entries.append(len(text.encode("utf-8")))
+            yield from real_shell(text, depth, positional)
+
+        def _python(
+            code: str, argv: Sequence[str], segment: str, depth: int
+        ) -> Iterator[tuple[str, list[str], str]]:
+            self.entries.append(len(code.encode("utf-8")))
+            yield from real_python(code, argv, segment, depth)
+
+        def _charge(code: str) -> bool:
+            accepted = real_charge(code)
+            self.charges.append((len(code.encode("utf-8")), accepted))
+            return accepted
+
+        monkeypatch.setattr(_blocker_module, "_invocations", _shell)
+        monkeypatch.setattr(_blocker_module, "_python_code_runs", _python)
+        monkeypatch.setattr(_blocker_module, "_charge", _charge)
+
+    @property
+    def accepted(self) -> int:
+        """Bytes the meter let through to a parser."""
+        return sum(size for size, accepted in self.charges if accepted)
+
+    def parses_of(self, size: int) -> int:
+        """How many accepted parses were exactly ``size`` bytes long."""
+        return sum(1 for charged, accepted in self.charges if accepted and charged == size)
+
+    def assert_metered(self) -> None:
+        """Every parse was charged, and one call parsed no more than one budget."""
+        assert self.entries == [size for size, _ in self.charges]
+        assert self.accepted <= _blocker_module._MAX_PARSED_BYTES, self.accepted
+
+
 class TestAFileUnderTheParseCapIsParsedOnce:
     """Review 7 M1: a file under the parse cap was re-parsed at every reference.
 
@@ -1822,31 +1875,26 @@ class TestAFileUnderTheParseCapIsParsedOnce:
     parsed once per event; every other reference reuses the memoised verdict.
     """
 
-    _BUDGET_SECONDS = 1.0
-
-    def test_a_self_feeding_file_is_judged_within_a_second(self, tmp_path: Path) -> None:
-        (tmp_path / "self60.sh").write_text("bash self60.sh\n" * 60, encoding="utf-8")
-        began = time.perf_counter()
-        assert find_full_qa_invocation("bash self60.sh", _patterns(), cwd=tmp_path) is None
-        assert time.perf_counter() - began < self._BUDGET_SECONDS
-
-    def test_a_self_feeding_file_of_a_hundred_lines_is_judged_within_a_second(
-        self, tmp_path: Path
+    def test_a_self_feeding_file_is_parsed_once(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        (tmp_path / "self100.sh").write_text("bash self100.sh\n" * 100, encoding="utf-8")
-        began = time.perf_counter()
-        assert find_full_qa_invocation("bash self100.sh", _patterns(), cwd=tmp_path) is None
-        assert time.perf_counter() - began < self._BUDGET_SECONDS
+        text = "bash self60.sh\n" * 60
+        (tmp_path / "self60.sh").write_text(text, encoding="utf-8")
+        ledger = _ParseLedger(monkeypatch)
+        assert find_full_qa_invocation("bash self60.sh", _patterns(), cwd=tmp_path) is None
+        ledger.assert_metered()
+        assert ledger.parses_of(len(text)) == 1
 
-    def test_two_hundred_references_to_one_file_are_judged_within_a_second(
-        self, tmp_path: Path
+    def test_two_hundred_references_to_one_file_parse_it_once(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         heredoc = "cat <<'E'\n" + ("x" * 13_000) + "\nE\n"
         (tmp_path / "heredocs32k.sh").write_text(heredoc, encoding="utf-8")
+        ledger = _ParseLedger(monkeypatch)
         command = "bash heredocs32k.sh; " * 200
-        began = time.perf_counter()
         assert find_full_qa_invocation(command, _patterns(), cwd=tmp_path) is None
-        assert time.perf_counter() - began < self._BUDGET_SECONDS
+        ledger.assert_metered()
+        assert ledger.parses_of(len(heredoc)) == 1
 
     def test_a_self_feeding_file_that_runs_the_suite_is_still_found(self, tmp_path: Path) -> None:
         (tmp_path / "selfrun.sh").write_text(
@@ -1861,64 +1909,79 @@ class TestTheParseBudgetIsPerEventNotPerMemoKey:
 
     The memo key (path, kind, argv, directory) let a distinct key re-parse a
     file every time, since the parse budget was only ever charged once, at
-    the file's first READ. Charging it at every PARSE instead bounds the
-    total bytes parsed in one event, however many distinct keys reference
-    the same file.
+    the file's first READ. Every byte handed to a parser -- the command's own,
+    a nested ``bash -c``, a file's, a Python literal's -- is now charged to ONE
+    meter per call, and a call that would pass it is DENIED: code the handler
+    has not judged may be a full run, so it is never allowed unseen.
     """
 
-    _BUDGET_SECONDS = 1.0
-
-    def test_two_hundred_distinct_argv_references_are_judged_within_a_second(
-        self, tmp_path: Path
-    ) -> None:
+    @staticmethod
+    def _words(tmp_path: Path) -> Path:
         (tmp_path / "words32k.sh").write_text("x " * 16_000 + "\n", encoding="utf-8")
-        command = "".join(f'bash words32k.sh "a{n}"; ' for n in range(200))
-        began = time.perf_counter()
-        assert find_full_qa_invocation(command, _patterns(), cwd=tmp_path) is None
-        assert time.perf_counter() - began < self._BUDGET_SECONDS
+        return tmp_path
 
-    def test_thirty_distinct_directory_references_are_judged_within_a_second(
-        self, tmp_path: Path
+    def test_two_hundred_distinct_argv_references_exhaust_the_meter_and_deny(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        command = "".join(f'bash words32k.sh "a{n}"; ' for n in range(200))
+        ledger = _ParseLedger(monkeypatch)
+        match = find_full_qa_invocation(command, _patterns(), cwd=self._words(tmp_path))
+        ledger.assert_metered()
+        assert match is not None
+        assert match.pattern_id == _blocker_module._OVER_BUDGET_ID
+        assert match.fail_closed == _blocker_module._OVER_BUDGET_REASON
+        # The deny quotes the command that referenced the file, not its text.
+        assert "words32k.sh" in match.segment
+
+    def test_thirty_distinct_directory_references_exhaust_the_meter_and_deny(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         script = tmp_path / "cd30.sh"
         script.write_text("x " * 8_000 + "\n", encoding="utf-8")
         for n in range(30):
             (tmp_path / f"d{n}").mkdir()
         command = "; ".join(f"cd d{n} && bash {script}" for n in range(30))
-        began = time.perf_counter()
-        assert find_full_qa_invocation(command, _patterns(), cwd=tmp_path) is None
-        assert time.perf_counter() - began < self._BUDGET_SECONDS
+        ledger = _ParseLedger(monkeypatch)
+        match = find_full_qa_invocation(command, _patterns(), cwd=tmp_path)
+        ledger.assert_metered()
+        assert match is not None
+        assert match.pattern_id == _blocker_module._OVER_BUDGET_ID
 
-    def test_bytes_parsed_in_one_event_stay_within_a_small_multiple_of_the_budget(
+    def test_a_full_run_past_the_budget_is_denied(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        (tmp_path / "words32k.sh").write_text("x " * 16_000 + "\n", encoding="utf-8")
-        command = "".join(f'bash words32k.sh "a{n}"; ' for n in range(200))
-        parsed: list[int] = []
-        real_invocations = _blocker_module._invocations
-
-        def _counting_invocations(
-            text: str, depth: int = 0, positional: Sequence[str] | None = None
-        ) -> Iterator[tuple[str, list[str], str]]:
-            parsed.append(len(text.encode("utf-8")))
-            yield from real_invocations(text, depth, positional)
-
-        monkeypatch.setattr(_blocker_module, "_invocations", _counting_invocations)
-        find_full_qa_invocation(command, _patterns(), cwd=tmp_path)
-        # The command itself is one parse; past the budget every further
-        # distinct-argv reference to the file is only scanned, not re-parsed,
-        # so the total stays well under 200 x 16 KiB.
-        assert sum(parsed) < 100_000, sum(parsed)
-
-    def test_a_full_run_past_the_budget_is_still_reached_at_the_top_level(
-        self, tmp_path: Path
-    ) -> None:
-        (tmp_path / "words32k.sh").write_text("x " * 16_000 + "\n", encoding="utf-8")
         command = "".join(f'bash words32k.sh "a{n}"; ' for n in range(200)) + "pytest tests"
-        began = time.perf_counter()
-        match = find_full_qa_invocation(command, _patterns(), cwd=tmp_path)
-        assert time.perf_counter() - began < self._BUDGET_SECONDS
+        ledger = _ParseLedger(monkeypatch)
+        match = find_full_qa_invocation(command, _patterns(), cwd=self._words(tmp_path))
+        ledger.assert_metered()
         assert match is not None
+
+    def test_a_small_runner_after_a_file_that_fills_the_budget_is_still_judged(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Review 8 M2: a 32 KiB harmless script first must not hide the runner after it."""
+        (tmp_path / "filler.sh").write_text("echo x\n" * 4_600, encoding="utf-8")
+        (tmp_path / "runner.py").write_text(
+            'import subprocess\nsubprocess.run(["pytest", "tests"])\n', encoding="utf-8"
+        )
+        ledger = _ParseLedger(monkeypatch)
+        match = find_full_qa_invocation(
+            "bash filler.sh; python3 runner.py", _patterns(), cwd=tmp_path
+        )
+        ledger.assert_metered()
+        assert match is not None
+
+    def test_code_within_the_budget_is_judged_not_denied(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        command = 'bash words32k.sh "a0"; bash words32k.sh "a1"'
+        ledger = _ParseLedger(monkeypatch)
+        assert find_full_qa_invocation(command, _patterns(), cwd=self._words(tmp_path)) is None
+        ledger.assert_metered()
+
+    def test_a_charge_outside_a_judgement_is_refused(self) -> None:
+        """No meter means nothing was budgeted: fail closed, never parse unmetered."""
+        assert _blocker_module._charge("pytest tests") is False
 
 
 class TestAnOpaqueWordIsAnInterpreterWhenItsFlagsSaySo:
