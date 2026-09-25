@@ -1589,6 +1589,7 @@ def _token_mention(
     both_edges_patterns: tuple[str, ...] = (),
     both_edges_stems: tuple[str, ...] = (),
     context: MentionContext = "bash",
+    realpath_cache: dict[str, str | None] | None = None,
 ) -> str | None:
     """The first protected glob ``token`` names (or could glob-expand to), else None.
 
@@ -1604,6 +1605,18 @@ def _token_mention(
     ``[*words[:subcommand_index], ...]``) is glob-shaped by the crude
     tokeniser's own delimiter split, but it names no real path and a shell
     will never expand it -- it is not a Bash word at all.
+
+    ``realpath_cache`` (review 7 follow-up, team-lead's memoisation cut):
+    an optional dict, LOCAL to one caller's scan (never module-level --
+    per-request state on a shared object is exactly what N23 forbids),
+    memoising the ``os.path.realpath`` syscall the symlink-alias check
+    below makes. ``iter_protected_mentions`` already dedups repeated
+    TOKENS before ever reaching this function (its own ``mention_cache``),
+    so this only helps a caller that invokes ``_token_mention`` directly,
+    outside that loop, for a genuinely repeated token (e.g.
+    ``is_grep_pattern_only_mention`` checking several file-target words).
+    ``None`` (the default) skips the cache entirely -- identical behaviour
+    to before this parameter existed.
     """
     for raw_form in _normalised_token_forms(token):
         # A token whose bracket expressions are all finite denotes exactly
@@ -1734,7 +1747,12 @@ def _token_mention(
     # 1 MB command built of ordinary glob-shaped tokens did one real
     # syscall per token for no security benefit).
     if not _is_glob_shaped(token):
-        real = _realpath_if_resolvable(token)
+        if realpath_cache is not None and token in realpath_cache:
+            real = realpath_cache[token]
+        else:
+            real = _realpath_if_resolvable(token)
+            if realpath_cache is not None:
+                realpath_cache[token] = real
         if real is not None:
             for pattern in patterns:
                 if path_matches_globs(real, (pattern,), project_root=project_root):
@@ -2397,6 +2415,12 @@ def is_grep_pattern_only_mention(
         if _has_leading_wildcard(pattern) and _has_trailing_wildcard(pattern)
     )
     both_edges_stems = tuple(stem for stem, _pattern in _pattern_literal_stems(both_edges_patterns))
+    # Team-lead's memoisation cut: this loop calls `_token_mention` directly,
+    # outside `iter_protected_mentions`'s own per-scan `mention_cache`, so a
+    # file-target word repeated across several positional arguments would
+    # otherwise pay for a fresh `os.path.realpath` syscall every occurrence.
+    # LOCAL to this one call, never module-level (N23).
+    realpath_cache: dict[str, str | None] = {}
     for index in positional_indices:
         if (
             _token_mention(
@@ -2406,6 +2430,7 @@ def is_grep_pattern_only_mention(
                 project_root,
                 both_edges_patterns=both_edges_patterns,
                 both_edges_stems=both_edges_stems,
+                realpath_cache=realpath_cache,
             )
             is not None
         ):

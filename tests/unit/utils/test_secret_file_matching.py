@@ -2292,6 +2292,40 @@ class TestGrepPatternOnlyMentionDenies:
     def test_substitution_voids_the_exemption(self) -> None:
         assert not _grep_ok("grep id_rsa $(cat file.txt)")
 
+    def test_repeated_file_target_resolves_the_symlink_once(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Review 7 follow-up (team-lead's memoisation cut): this function
+        calls `_token_mention` directly for each file-target word, OUTSIDE
+        `iter_protected_mentions`'s own per-scan `mention_cache` -- so
+        without its own cache, the SAME repeated file-target word would
+        pay for a fresh `os.path.realpath` syscall every occurrence. The
+        cache is a dict LOCAL to this one call (never module-level, per
+        N23)."""
+        target = tmp_path / "real.vault-password"
+        target.write_text("x\n")
+        link = tmp_path / "innocuous-name"
+        link.symlink_to(target)
+        calls: list[str] = []
+        real_realpath_if_resolvable = sfm._realpath_if_resolvable
+
+        def counting_realpath_if_resolvable(token: str) -> str | None:
+            calls.append(token)
+            return real_realpath_if_resolvable(token)
+
+        monkeypatch.setattr(sfm, "_realpath_if_resolvable", counting_realpath_if_resolvable)
+        assert not sfm.is_grep_pattern_only_mention(
+            f"grep pattern {link} {link} {link}", sfm.DEFAULT_PROTECTED_PATTERNS
+        )
+        # The repeated link path is resolved at most TWICE in total: once
+        # inside `iter_protected_mentions`'s own internal mention scan
+        # (already deduped there by its pre-existing `mention_cache`), and
+        # once more from THIS function's own file-target check over the
+        # three repeated positional words -- deduped by ITS new cache, not
+        # three separate resolutions (which is what this test would show
+        # without the fix: one per positional occurrence).
+        assert calls.count(str(link)) == 2
+
     def test_commands_that_can_decrypt(self) -> None:
         """Ansible finds the vault password from config without the command naming it."""
         for command in (
