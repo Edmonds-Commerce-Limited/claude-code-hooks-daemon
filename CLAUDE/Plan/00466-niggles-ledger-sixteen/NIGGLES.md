@@ -21,9 +21,12 @@ the raw command text, not the pipeline structure.
 be a download command, the consumer stage must be a shell, and both must be
 outside quotes and outside a heredoc body that nothing executes. This belongs
 with the shell-parser consolidation (N22, N32, N36, N48, N49, N51, N57, N58).
-RED tests:
+A second shape was denied too: a QUOTED-delimiter heredoc fed to `cat >>`.
+The body of such a heredoc is literal text, and `pipe_blocker` already
+exempts it. RED tests:
 
 - the reported `echo` is allowed;
+- `cat >> f <<'EOF'` whose body mentions the pattern is allowed;
 - a real `<download> URL | sh` still denies;
 - `bash -c "<download> URL | sh"` still denies, because the string IS
   executed.
