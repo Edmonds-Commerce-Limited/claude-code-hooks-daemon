@@ -187,5 +187,56 @@ class TestWholeSuiteSizedRunSucceedsWithTheLock:
         assert "REFUSED" not in result.stdout
 
 
+_FORCED_PLUGIN_ARGS: list[str] = ["-p", "claude_code_hooks_daemon.qa.full_qa_gate"]
+
+
+class TestNoconftestNoLongerDropsTheSink:
+    """Round 10 M1: `-p claude_code_hooks_daemon.qa.full_qa_gate` in this
+    project's own `addopts` is the production shape being proven here --
+    the fixture suite has no `pyproject.toml` of its own, so it is passed
+    explicitly on the command line, exactly as `addopts` would inject it."""
+
+    def test_noconftest_alone_evades_the_gate_today(self, tmp_path: Path) -> None:
+        """Baseline: without the forced plugin, `--noconftest` drops the
+        sink entirely and the whole-suite-sized run is never refused."""
+        _write_fixture_suite(tmp_path, file_count=4)
+        result = _run_pytest_subprocess(tmp_path, ["--noconftest", "tests/"])
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "REFUSED" not in result.stdout
+
+    def test_noconftest_with_the_forced_plugin_is_refused(self, tmp_path: Path) -> None:
+        """The RED case this round closes: `--noconftest` can no longer
+        drop the sink when it is also force-loaded via `-p`."""
+        _write_fixture_suite(tmp_path, file_count=4)
+        result = _run_pytest_subprocess(tmp_path, ["--noconftest", *_FORCED_PLUGIN_ARGS, "tests/"])
+        assert result.returncode == 1
+        assert "REFUSED" in result.stdout, result.stdout + result.stderr
+
+
+class TestDoubleRegistrationIsANoOp:
+    """When a project's own conftest.py imports the hook AND `addopts`
+    force-loads the same module via `-p`, both plugin objects carry the
+    hook -- the conftest-registered anchor must win cleanly rather than
+    this module's own (test-file-less) source directory."""
+
+    def test_under_threshold_selection_still_runs_normally(self, tmp_path: Path) -> None:
+        _write_fixture_suite(tmp_path, file_count=4)
+        result = _run_pytest_subprocess(tmp_path, [*_FORCED_PLUGIN_ARGS, "tests/test_f0.py"])
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "REFUSED" not in result.stdout
+
+    def test_whole_suite_selection_is_refused_with_the_real_percentage(
+        self, tmp_path: Path
+    ) -> None:
+        """Must show the ordinary `whole_suite_refusal_message` (naming the
+        real N of M files) -- not the anchor-could-not-be-found message,
+        which is what a wrong (self) anchor pick would produce."""
+        _write_fixture_suite(tmp_path, file_count=4)
+        result = _run_pytest_subprocess(tmp_path, [*_FORCED_PLUGIN_ARGS, "tests/"])
+        assert result.returncode == 1
+        assert "4 of 4 test files" in result.stdout, result.stdout + result.stderr
+        assert "could not establish" not in result.stdout
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -822,6 +822,47 @@ _TOO_DEEP_REASON: Final[str] = (
 #: The pattern id a deny past the nesting followed names: nothing matched.
 _TOO_DEEP_ID: Final[str] = "code-nested-too-deep"
 
+#: Round 10 M1's second referral: rather than widen a finite list of known
+#: interpreter NAMES (perl, node, ruby, php, and whatever comes next), any
+#: program this parser does not otherwise recognise is judged by this SHAPE
+#: instead -- these are the inline-code flags shared across the common
+#: scripting interpreters (Perl's `-e`/`-E`, Ruby's and Node's `-e`, PHP's
+#: `-r`, and the long `--eval` some others use), and a program run with one
+#: of them may be running code this handler cannot see, whatever its name is.
+_INLINE_CODE_FLAGS: Final[frozenset[str]] = frozenset({"-e", "-E", "-c", "-r", "--eval"})
+#: The pattern id an unrecognised-interpreter-with-inline-code match names:
+#: it matched no declaration, like `_UNREAD_CODE_ID`.
+_UNSEEN_INTERPRETER_ID: Final[str] = "unrecognised-interpreter-inline-code"
+_UNSEEN_INTERPRETER_REASON: Final[str] = (
+    "this program is not one the parser recognises, and it is run with an inline-code flag "
+    "(`-e`, `-E`, `-c`, `-r` or `--eval`) -- any program run this way may execute arbitrary "
+    "code this handler cannot see, so it is judged UNSEEN rather than silently allowed. Run "
+    "the targeted QA command directly instead."
+)
+
+
+#: Programs this parser already recognises by name elsewhere in this module
+#: (never as an interpreter), for which one of `_INLINE_CODE_FLAGS` is a
+#: FLAG of its OWN with an unrelated meaning, not evidence of inline code.
+#: `git -c key=value` is a config override; `git` is not "a list of
+#: interpreters" here, it is the one collision this small flag set creates
+#: with a program this file already understands in full elsewhere (`_GIT`,
+#: used for its listing-producer recognition).
+_INLINE_CODE_FLAG_EXEMPT_PROGRAMS: Final[frozenset[str]] = frozenset({_GIT})
+
+
+def _runs_inline_code(program: str, arguments: Sequence[str]) -> bool:
+    """Whether ``arguments`` names one of the flags that hand an interpreter code inline.
+
+    Exact-token matched, like every other flag check here: a clustered short
+    option (``-xe``) is not this shape, and neither is a flag that merely
+    starts with one of these letters (``--effect``).
+    """
+    if program in _INLINE_CODE_FLAG_EXEMPT_PROGRAMS:
+        return False
+    return any(argument in _INLINE_CODE_FLAGS for argument in arguments)
+
+
 #: Past this many characters a command is not parsed (review 5 n5): shlex
 #: builds each token a character at a time, and a 1 MB word took 36 s. The
 #: cap is on the raw text, because blanking a heredoc body is itself
@@ -4254,9 +4295,11 @@ def _full_run_of(
     shape_only = program == _PYTEST_IN_CODE
     if shape_only:
         program = _PYTEST
+    declared = False
     for pattern in event.patterns:
         if pattern.command != program:
             continue
+        declared = True
         verdict = _run_verdict(
             pattern,
             _with_addopts(pattern, arguments, event),
@@ -4267,6 +4310,14 @@ def _full_run_of(
         )
         if verdict.full:
             return FullQaMatch(pattern.pattern_id, segment.strip(), fail_closed=verdict.unseen)
+    if not declared and _runs_inline_code(program, arguments):
+        # Round 10 M1's second referral: `program` is not python, a shell, a
+        # launcher, a project runner, or a declared full-QA command -- the
+        # only thing known about it is that it is run with a flag that hands
+        # an interpreter code inline, which this parser cannot read.
+        return FullQaMatch(
+            _UNSEEN_INTERPRETER_ID, segment.strip(), fail_closed=_UNSEEN_INTERPRETER_REASON
+        )
     return None
 
 

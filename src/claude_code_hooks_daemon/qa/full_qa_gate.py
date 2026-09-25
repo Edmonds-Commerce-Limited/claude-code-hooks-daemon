@@ -54,6 +54,20 @@ def _is_xdist_worker(config: pytest.Config) -> bool:
     return hasattr(config, "workerinput")
 
 
+#: This module's own directory (`src/claude_code_hooks_daemon/qa/`). Round
+#: 10 M1: `addopts` now force-loads this module itself as a plugin via
+#: `-p claude_code_hooks_daemon.qa.full_qa_gate`, so that `--noconftest`
+#: (which drops the conftest-import route entirely) cannot silently remove
+#: the sink. When a project's own conftest.py ALSO imports and re-exports
+#: `pytest_collection_modifyitems` (the normal, non---noconftest case), BOTH
+#: routes register a plugin object carrying this exact function, and
+#: `_gate_anchor` below must not pick whichever one the pluginmanager's
+#: iteration order happens to put first -- this module's own directory
+#: holds no project test files at all, so anchoring here by accident turns
+#: every run, however small, into an "unable to judge" refusal.
+_OWN_DIR: Final[Path] = Path(__file__).resolve().parent
+
+
 def _gate_anchor(config: pytest.Config) -> Path | None:
     """The directory of the conftest.py that registered this very hook.
 
@@ -69,13 +83,28 @@ def _gate_anchor(config: pytest.Config) -> Path | None:
     flag examined here. Found by identity: `config.pluginmanager` registers
     each conftest.py as a plugin object, and only the one that re-exports
     this exact function carries it as an attribute equal to it.
+
+    Round 10 M1: double registration (the `-p` route above AND a project's
+    own conftest import both active at once) is made a no-op here rather
+    than at registration time -- pytest does not raise for this shape (the
+    two plugin objects are registered under distinct names), it just calls
+    the hook twice, and both a plugin's own directory and a conftest's are
+    valid identity matches. The conftest-registered anchor always wins over
+    this module's own directory when both are present, since it is the one
+    that actually sits inside the project's real test tree; this module's
+    own directory is used only when it is the sole match (e.g. under
+    `--noconftest`, where the conftest route is not registered at all).
     """
+    candidates: list[Path] = []
     for plugin in config.pluginmanager.get_plugins():
         if getattr(plugin, "pytest_collection_modifyitems", None) is pytest_collection_modifyitems:
             plugin_file = getattr(plugin, "__file__", None)
             if plugin_file:
-                return Path(plugin_file).resolve().parent
-    return None
+                candidates.append(Path(plugin_file).resolve().parent)
+    if not candidates:
+        return None
+    non_self = [candidate for candidate in candidates if candidate != _OWN_DIR]
+    return non_self[0] if non_self else candidates[0]
 
 
 def _test_root(config: pytest.Config) -> Path | None:

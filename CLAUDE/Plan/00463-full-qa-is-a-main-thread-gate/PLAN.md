@@ -381,29 +381,52 @@ one place every route ends up, whatever launched it: pytest itself.
   a parser-scope change, not a wording change, and is left as follow-up
   (tracked alongside the owner referral below, not accepted as a residual).
 
+### Round 10 M1 (fix round 10b): the two referrals closed
+
+- **The `--noconftest` referral closed.** `-p claude_code_hooks_daemon.qa.full_qa_gate`
+  is now in `pyproject.toml`'s `addopts`, so the sink plugin loads even when
+  `--noconftest` drops the conftest-import route. `_gate_anchor` (the sink,
+  `full_qa_gate.py`) now handles the resulting double registration (both the
+  forced `-p` route and a project's own conftest import active at once): the
+  conftest-registered anchor wins over this module's own directory, which
+  holds no project test files. RED-proven both ways: a real-subprocess
+  `pytest --noconftest <fixture suite>` with no lock held was allowed to run
+  before this fix and is refused after it
+  (`TestNoconftestNoLongerDropsTheSink`); a small under-threshold selection
+  with both routes active was wrongly refused (anchor picked this module's
+  own directory) before the fix and runs normally after it
+  (`TestDoubleRegistrationIsANoOp`).
+- **The second referral closed.** `find_full_qa_invocation` judges any
+  program it does not otherwise recognise (not python, a shell, a launcher,
+  a project runner, or a declared full-QA command) by SHAPE rather than by
+  a widened name list: run with one of the inline-code flags shared across
+  common scripting interpreters (`-e`, `-E`, `-c`, `-r`, `--eval`), it is now
+  UNSEEN (judged by `unseen_policy`, advisory by default) instead of a
+  silent, contextless `None`. `git` is the one exempted program name (`-c`
+  is its own config-override flag, not inline code) -- not a widened
+  interpreter list, the one collision this small flag set creates with a
+  program this file already recognises elsewhere. RED-proven for `perl -e`,
+  `perl -E`, `node -e`, `ruby -e`, `php -r` and an unnamed future interpreter
+  with `--eval` (`TestUnrecognisedInterpreterRunningInlineCode`); the
+  positive-deny corpus and the everyday-allow corpus (including
+  `git status` and `git -c core.pager=cat log`, both still fully unmatched)
+  stay green.
+
 ### Owner referral (Round 10)
 
-`--noconftest` (and, if the gate plugin moves to a `pytest11` entry point,
-`-p no:<name>` / `PYTEST_DISABLE_PLUGIN_AUTOLOAD`) removes the sink BEFORE it
-can run at all, or bypasses its registration -- neither is closable from
-inside the process being checked, and the handler above only helps when the
-disabling flag is SEEN in the same Bash command as a matched full-suite
-invocation. A launcher that hides the flag from the handler (a wrapper
-script this parser cannot read, or a two-step "set env var, then run pytest
-in a later command") still reaches an unprotected pytest. This is the
-owner's threat-model question -- accidental overload (which the sink now
-handles for every route it CAN see, after B1's anchor fix) versus
-deliberate evasion (which no sink inside the checked process can close) --
-and is NOT accepted as a residual; it is recorded here for a decision, not
-left silent.
-
-**Second referral (M1's follow-up):** `perl`/`node`/other interpreters not on
-the parser's known-interpreter list run arbitrary code the handler cannot
-see, and `find_full_qa_invocation` currently returns `None` for them --
-UNSEEN-with-advisory is never reached; it is a silent ALLOW with no context
-at all. Widening the known-interpreter list (or a generic "unrecognised
-program running with `-e`/`-c`-shaped code" rule) is parser-scope work, not
-covered by this round.
+`--noconftest` is now CLOSED (round 10 M1, above): `-p <the gate module>` in
+`addopts` force-loads the sink regardless, so the flag no longer removes it.
+What remains is deliberate evasion hidden from the handler entirely: a
+launcher that hides the flag from the handler (a wrapper script this parser
+cannot read, or a two-step "set env var, then run pytest in a later
+command") still reaches an unprotected pytest, and, if the gate plugin ever
+moves to a `pytest11` entry point, `-p no:<name>` / `PYTEST_DISABLE_PLUGIN_AUTOLOAD`
+would reopen the same class of bypass. Neither is closable from inside the
+process being checked. This is the owner's threat-model question --
+accidental overload (which the sink now handles for every route it CAN see)
+versus deliberate evasion (which no sink inside the checked process can
+close) -- and is NOT accepted as a residual; it is recorded here for a
+decision, not left silent.
 
 ### Phase 2: Deliver
 

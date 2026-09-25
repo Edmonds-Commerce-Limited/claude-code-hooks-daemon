@@ -3022,6 +3022,60 @@ class TestTheUnseenAdvisory:
         assert "ADVISORY [" not in (result.reason or "")
 
 
+class TestUnrecognisedInterpreterRunningInlineCode:
+    """Round 10 M1's second referral: an interpreter this parser has no name
+    for (perl, node, ruby, php, and anything else) is judged by SHAPE --
+    an inline-code flag (`-e`, `-E`, `-c`, `-r`, `--eval`) -- rather than by
+    widening a finite name list. Before this fix `find_full_qa_invocation`
+    returned `None` for every one of these: a silent ALLOW with no context.
+    """
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "perl -e 'system(\"pytest tests/\")'",
+            "perl -E 'say 1'",
+            'node -e \'require("child_process").execSync("pytest")\'',
+            "ruby -e 'system(\"pytest\")'",
+            "php -r 'system(\"pytest\");'",
+            "some-future-interpreter --eval 'run_everything()'",
+        ],
+    )
+    def test_an_unrecognised_interpreter_with_an_inline_code_flag_is_unseen(
+        self, command: str
+    ) -> None:
+        match = find_full_qa_invocation(command, _patterns())
+        assert match is not None, command
+        assert match.fail_closed, command
+
+    def test_the_advisory_allows_by_default(self) -> None:
+        result = _handler().handle(_bash("perl -e 'pytest tests/'", cwd=str(_REPO_ROOT)))
+        assert result.decision is Decision.ALLOW
+        context = "\n".join(result.context)
+        assert "UNSEEN" in context
+
+    def test_the_deny_policy_denies_it_instead(self) -> None:
+        result = _handler(unseen_policy="deny").handle(
+            _bash("perl -e 'pytest tests/'", cwd=str(_REPO_ROOT))
+        )
+        assert result.decision is Decision.DENY
+
+    def test_an_unrecognised_program_with_no_inline_code_flag_is_unaffected(self) -> None:
+        """The generic rule is the FLAG shape, not the bare program name --
+        an ordinary invocation of an unrecognised program stays fully
+        unmatched, exactly as before this fix."""
+        assert find_full_qa_invocation("perl script.pl", _patterns()) is None
+        assert find_full_qa_invocation("git status", _patterns()) is None
+        assert find_full_qa_invocation("git -c core.pager=cat log", _patterns()) is None
+
+    def test_a_declared_command_with_its_own_narrow_flag_is_unaffected(self) -> None:
+        """`pytest -c pytest.ini tests/unit/x.py` is an ordinary, narrow,
+        already-DECLARED invocation -- `-c` here is pytest's own config-file
+        flag, not evidence of an unrecognised interpreter, and must not
+        become UNSEEN."""
+        assert find_full_qa_invocation("pytest -c pytest.ini tests/unit/x.py", _patterns()) is None
+
+
 class TestUnseenPolicyIsConfigurable:
     """Review 10 M1: the UNSEEN ruling is an OPTION, not a fact baked into
     shipped code -- and the advisory never claims a backstop a project does
