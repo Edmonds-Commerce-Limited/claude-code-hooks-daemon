@@ -5,7 +5,256 @@ candidate remedies.
 
 N34 is taken on the `worktree-n466-n24` branch (the chain deadline cannot
 interrupt a running handler) and lands with that branch. N40 is taken there too
-(the fail-open classes behind that branch's security-review blockers).
+(the fail-open classes behind that branch's security-review blockers). N41 is
+taken on the N38 fix branch (the chain's remaining linear per-token cost, which
+waits for the shell-parser consolidation).
+
+### N53 — WorktreeCreate fails with exit 127 when the daemon runs `git worktree add` that succeeds from a shell
+
+**Found by the coordinator.** An Agent dispatch with `isolation: worktree`
+failed. The WorktreeCreate hook reported "Handler exception:
+CalledProcessError: Command \['git', '-C', '/workspace', 'worktree', 'add',
+'-b', '<branch>', '<path>'\] returned non-zero exit status 127". The same
+command, run from the coordinator's shell, exits 0. It takes over 2 minutes
+on this host, with 4,076 files. The main daemon's own PATH includes
+`/usr/bin`, and the repo has no post-checkout hook. So the daemon runs git
+in an environment where something git executes cannot be found. An agent
+dispatch then fails outright, with no fallback.
+
+**Candidate remedy:** reproduce through the handler with the daemon's real
+environment. Suspects: an env the handler builds for the subprocess (PATH
+or HOME stripped, or GIT_EXEC_PATH), or a timeout wrapper. Fix the root
+cause. Make the handler report the command's stderr in the failure, so the
+next such failure names what was not found. Check whether a slow checkout
+on a loaded host needs a longer timeout. RED test: the handler, given the
+daemon's environment, creates a worktree.
+
+### N52 — The sensitive_content commit gate let a matching session UUID into a commit
+
+**Found by N46 review 2.** Commit `3da8c1ed` on the N46 branch added a review
+report containing a real session UUID. The project's `session-uuid` public
+pattern matches that blob, and no `exclude_paths` entry covers
+`CLAUDE/Plan/`. Yet the commit gate, which scans the added lines of staged
+files, allowed the commit. Nothing later caught it either:
+`check_sensitive_content.py` scans only the current tree, and
+`check_git_history.py` scans metadata but not historical blobs. A `--no-ff`
+merge followed by a push would have published it permanently.
+
+**Candidate remedy:** reproduce the miss in a scratch repo first. The
+reviewer's untested hypothesis is that the commit ran with a cwd or `-C`
+target different from the checkout the gate diffed, which is the Plan 00464
+class. Then fix the gate. Add a merge and push check that runs the public
+patterns over the added lines of `git log -p <upstream>..HEAD`, since that
+is exactly the window this leak survived in. RED tests: the reproduced
+commit shape is denied; a merge carrying the blob is denied.
+
+### N51 — `pipe_blocker` reads an escaped alternation inside a quoted grep pattern as a pipe into `head`
+
+**Found by Plan 00421 review 2.** `grep -i -n "a\|HEAD\|b" file` was denied.
+The `\|HEAD` inside the double-quoted pattern is a basic-regex alternation,
+not a pipe. The blocker split on the `|` and matched the next word
+case-insensitively against `head`. That is the N32 class (a `|` inside quotes
+read as a pipe stage), plus a case-insensitive match on the producer name.
+
+**Candidate remedy:** find pipe stages with the shared shell segmentation, so
+a `|` inside any quoted span, or escaped, never splits. Match the stage's
+command name case-sensitively, as bash does. RED tests: this grep is allowed;
+`pytest | head` is still denied. This belongs to the shell-parser consolidation
+(N41) alongside N32.
+
+### N50 — A handler option whose name matches a method overwrites that method, and the handler then crashes open
+
+**Found by N23 review 2.** `registry.py:592` injects each configured option onto
+the handler with `setattr`. An option named like one of the handler's methods
+replaces the method. For example, the pre-Plan-00288 option `human_docs_dir`, or
+`pauses_path`. The handler then raises on every dispatch. For
+`markdown_organization` that lets a misplaced `.md` file through.
+
+**Candidate remedy:** never let an option overwrite a callable or any attribute
+the class defines. Options go into a dedicated mapping, or the injection
+refuses a name that collides with a class attribute, with a clear config error
+naming the option and the handler. Known renamed options get a migration
+message. RED tests: a colliding option gives a config error and never crashes
+the handler; `markdown_organization` still denies with the stale option set.
+
+### N49 — `daemon_location_guard` denies a `cd` into the daemon directory that is only text inside a quoted argument
+
+**Found by the coordinator.** A `printf '...'` whose single-quoted string
+mentioned the words cd, then the daemon directory path, was denied
+R-DAEMON-DIR-CD. The command appended a note to a queue file and changed no
+directory. So the guard matches the shape anywhere in the command text and
+does not look for a real `cd` command.
+
+**Candidate remedy:** judge real command heads through the shared shell
+segmentation, so only an actual `cd` (or `pushd`) whose target resolves into
+the daemon directory is denied. Text inside a quoted argument, a heredoc body
+or a commit message is not a directory change. RED tests: the printf case is
+allowed; a real `cd` and a `cd` after `&&` or `;` are still denied. This
+belongs to the shell-parser consolidation (N41).
+
+### N48 — `sed_blocker`'s git-commit exemption reaches across a newline
+
+**Found by N38 review 2** (pre-existing, not caused by that branch). The
+exemption lets `sed` through when it follows `git commit` with no command
+separator in between. A newline is a command separator, but the exemption
+does not treat it as one. So `git commit -m x` on one line, followed by a
+line that runs `sed -i`, is allowed. The command runs sed.
+
+**Candidate remedy:** use the shared shell segmentation, so that a newline
+ends the `git commit` segment. The exemption then covers only a `sed` inside
+that segment's message argument. RED tests: sed on the next line is denied;
+sed after a newline inside a quoted message is still exempt. This belongs to
+the shell-parser consolidation (N41).
+
+### N47 — The ccy supervisor and Claude Code's settings.json both own effort, and they fight
+
+**Found by the owner.** They asked for medium effort. Claude Code reads effort
+from `settings.json` (`effortLevel`, and `modelSettings.<model-id>.effortLevel`
+per model). The supervisor (`.claude/ccy/claude-supervise.py`) keeps its own
+answer and types `/effort` over it:
+
+- `_DEFAULT_MIN_EFFORT_LEVELS` (opus=high, sonnet=high) is a floor the
+  supervisor raises live effort to. It knows nothing of `settings.json`, and
+  has a second override channel of its own, the `CCY_MIN_EFFORT_LEVELS` env
+  var in `ccy.env`.
+- `_coupled_effort_target` sends `/effort xhigh` after EVERY `/model` switch to
+  a non-top family, including the restore back to the session's own Opus. And
+  the floor only ever raises. So one downgrade-and-restore cycle leaves the
+  session at xhigh for good, whatever `settings.json` says.
+
+Setting medium therefore needed two edits in two formats (`settings.json` and
+`ccy.env`, commits 909f9591 and e52bd9e5). Even then the restore path still
+lands on xhigh.
+
+**Candidate remedy:** make `settings.json` the single source of truth for the
+effort a model runs at.
+
+- The supervisor resolves a family's effort from the settings Claude Code
+  itself reads, in its precedence order: per-model `modelSettings` over
+  `effortLevel`, project over user.
+- The separate floor map and `CCY_MIN_EFFORT_LEVELS` are retired, and the
+  `ccy.env` lines go with them.
+- A switch back to a configured model sets that model's configured effort.
+  `xhigh` compensation applies only while a downgrade leaves the session on a
+  fallback model.
+- The fable anchor clamp (Plan 00297) stays as a ceiling.
+
+RED tests:
+
+- the restore lands on the configured effort, not xhigh;
+- no `/effort` is sent while live effort equals the configured effort;
+- a downgrade still gets xhigh;
+- a missing or unreadable settings file degrades to the current defaults with a
+  logged reason.
+
+### N46 — `budget_exhaustion_detector` fires on a tool result that merely contains budget wording
+
+**Found by the guard-defects review-6 agent.** Reading a diff whose source
+code contained the string "exceeded its byte budget" raised the "budget
+exhausted" alert. That text belonged to the file under review; the agent's
+own budget had not run out. So the detector matches words anywhere in tool
+output. A false alarm like this teaches agents to ignore the real one.
+
+**Candidate remedy:** match only the harness's own budget-exhaustion signal,
+meaning its exact shape and source. Never match free text inside a tool
+result's content, such as a file or a diff. Add a RED test that reads a file
+containing the phrase and expects no alert, and keep the real signal firing.
+
+### N45 — A NUL byte in a configured word-list path makes the never-raising secret-term lookup raise
+
+**Found by the Plan 00421 agent** while fixing N43. A NUL byte in a HEALTHY
+config's `sensitive_content.secret_word_list_path` gets through
+`normalise_repo_relative_path`. It then reaches `get_cached_secret_terms`,
+where `path.stat()` raises ValueError, and the code there catches only
+OSError. So `get_active_secret_terms` raises, although it is documented as
+never raising. It does so on every leak-vector call site: the router's debug
+log, the front controller and payload capture. That is where redaction must
+never fail.
+
+**Candidate remedy:**
+
+- Validate every configured path option at config load, and reject NUL and
+  other non-path bytes with a clear config error.
+- Make the term lookup honour its never-raise contract: catch ValueError
+  beside OSError, and treat a list that cannot be resolved as a reported
+  problem that never means "redact nothing".
+- Sweep the other `Path.stat`, `open` and `resolve` calls on config-supplied
+  paths for the same gap.
+
+RED tests cover the config error and each leak-vector site.
+
+### N44 — A PreToolUse handler raises `ValueError: no path specified` on an Edit, and the Edit goes through
+
+**Found by the Plan 00464 agent** while editing
+`src/claude_code_hooks_daemon/utils/git_command_target.py` in its worktree,
+with its hooks served by the main `/workspace` daemon. The hook context
+returned `Handler exception: ValueError: no path specified`, and the Edit was
+allowed. That message is what `os.path.relpath("")` raises. So some handler
+computes a relative path from an EMPTY candidate. The replaced text contained
+`Path(xdg).joinpath(*_XDG_CONFIG_PATH)`, a `*name` shape like the
+`secret_file_guard` false positive on `*words[`. So the secret-path candidate
+extraction is the first suspect, but this is unverified.
+
+Nothing identifies the handler yet: the in-memory log had already rolled
+over, and an in-process run without the main config did not reproduce it.
+Two defects are here:
+
+- a handler raises on ordinary content;
+- the raise fails open. That is ledger N24's class, being closed on the n24
+  branch.
+
+**Candidate remedy:** reproduce through the real chain with the project's
+real config and word list. Name the handler, guard the empty candidate at its
+source, and add a RED test. Also sweep for other `relpath` and `commonpath`
+calls that can receive an empty or foreign path.
+
+### N43 — Log and payload redaction is inert while the daemon runs degraded on an unloadable config
+
+**Found by the Plan 00421 agent** while closing Task 4.9 on `worktree-d-00421`.
+`secret_redaction._resolve_active_path` resolves the secret word list through
+the configuration. When the config cannot load (the Plan 00421 degraded
+mode), that lookup raises ValueError, and redaction falls back to inert. So a
+degraded daemon writes its logs and payload captures UNREDACTED, which is
+exactly when a broken config makes a protective fallback matter most. The
+same root cause left degraded `sensitive_content` with no secret terms; that
+was fixed on the branch by pinning the default list explicitly.
+
+**Candidate remedy:** while degraded, redaction uses the default word list
+UNION the last-known-good snapshot's lists, the same set degraded
+`sensitive_content` uses. A redaction failure to resolve a list must never
+mean "redact nothing". Pin it with a degraded-start test that captures a
+payload containing a term and asserts the term is redacted. Being fixed on
+`worktree-d-00421`.
+
+### N42 — Quoted-heredoc blanking hides text that bash executes from the Bash command guards
+
+**Found by the N38 review** (its M3), confirmed against real bash, and
+unchanged between the old regex and the new N38 scanner. `shell_segmentation`
+treats a quoted-heredoc body as inert data. Several guards then blank that
+text and never judge it, among them destructive_git, pipe_blocker,
+curl_pipe_shell, force-push detection and, for one shape, sed_blocker. There
+are seven shapes where the blanked text is not a heredoc body at all, and
+bash runs it:
+
+- an EMPTY body (`cat > n <<'E'` with `E` on the very next line, followed by
+  a command and a second `E` line), with its `<<-` form and a
+  `git commit -F -` form;
+- an opener inside a `#` comment;
+- an opener inside a double-quoted string;
+- a `<<<'E'` here-string read as an opener;
+- a quoted opener inside an UNQUOTED heredoc's body;
+- the same inside a multi-line double-quoted string;
+- an unquoted heredoc followed by a quoted one on the same line.
+
+In each shape, a destructive or piped command is ALLOWED. The probes are in
+`untracked/scratch/probe_n38r_*`. This is a fail-open in the guards
+themselves, so it is fixed now on the N38 branch and not deferred to the
+consolidation.
+
+**Candidate remedy:** recognise an opener only where bash would: outside
+quotes, comments and here-strings, and not inside another heredoc's body.
+Close an empty body on the first delimiter line. Keep the scan to one linear,
+quote-aware pass. Pin every shape through the real chain.
 
 ### N39 — Nine unit tests fail in a whole-suite run and pass when their files run alone
 

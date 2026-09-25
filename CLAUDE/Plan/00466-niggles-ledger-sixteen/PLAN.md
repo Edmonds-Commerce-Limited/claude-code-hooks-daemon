@@ -69,7 +69,19 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N36 | `destructive_git` denies a `grep` whose search pattern is the text of a force branch delete               | Plan 00463 agent   | ⬜ Open               |
 | N37 | `resolve_venv.sh` caches an override's interpreter for later callers that set no override                 | Plan 00376 agent   | ✅ Remedied           |
 | N38 | The PreToolUse chain takes quadratic time on a command of quoted heredoc openers                          | 463 review 6       | 🔄 In progress        |
+| N46 | `budget_exhaustion_detector` fires on a tool result that merely contains budget wording                   | Guard review 6     | ⬜ Open               |
+| N45 | A NUL byte in a configured word-list path makes the never-raising secret-term lookup raise                | Plan 00421 agent   | 🔄 In progress        |
+| N44 | A PreToolUse handler raises `ValueError: no path specified` on an Edit, and the Edit goes through         | Plan 00464 agent   | 🔄 In progress        |
+| N43 | Log and payload redaction is inert while the daemon runs degraded on an unloadable config                 | Plan 00421 agent   | 🔄 In progress        |
+| N42 | Quoted-heredoc blanking hides text that bash executes from the Bash command guards                        | N38 review         | 🔄 In progress        |
 | N39 | Nine unit tests fail in a whole-suite run and pass when their files run alone                             | guard-defects fix  | 🔄 In progress        |
+| N47 | The ccy supervisor and Claude Code's settings.json both own effort, and they fight                        | Owner              | 🔄 In progress        |
+| N48 | `sed_blocker`'s git-commit exemption reaches across a newline                                             | N38 review 2       | ⬜ Open               |
+| N49 | `daemon_location_guard` denies a daemon-directory `cd` that is only text inside a quoted argument         | Coordinator        | ⬜ Open               |
+| N50 | A handler option named like a method overwrites it, and the handler crashes open                          | N23 review 2       | 🔄 In progress        |
+| N51 | `pipe_blocker` reads an escaped alternation in a quoted grep pattern as a pipe into `head`                | 00421 review 2     | ⬜ Open               |
+| N52 | The sensitive_content commit gate let a matching session UUID into a commit                               | N46 review 2       | 🔄 In progress        |
+| N53 | WorktreeCreate fails with exit 127 when the daemon runs a `git worktree add` that succeeds from a shell   | Coordinator        | 🔄 In progress        |
 
 ## Tasks
 
