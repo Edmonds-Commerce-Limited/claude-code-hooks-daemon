@@ -371,16 +371,6 @@ _VB_CHILD_WATCHDOG=""
 VENV_BUILD_WATCHDOG_POLL_SECONDS=1
 
 #
-# _vb_signal_group() - Send a signal to a whole process group, reporting a miss.
-#
-_vb_signal_group() {
-    local sig="$1" pgid="$2" out
-    if ! out="$(kill "-$sig" -- "-$pgid" 2>&1)"; then
-        print_verbose "venv bootstrap: process group $pgid had already ended ($sig: $out)"
-    fi
-}
-
-#
 # _vb_job_running() - Is this job still running, by this shell's own job table?
 #
 # The job table is what proves a job's process group is still ours: its
@@ -398,9 +388,14 @@ _vb_job_running() {
 #
 # _vb_signal_job() - Signal a job's process group, only while it is still ours.
 #
+# The job-table check sits in this function, beside the kill, so no caller can
+# reach the group kill without it (Plan 00466 N59).
+#
 _vb_signal_job() {
-    if _vb_job_running "$2"; then
-        _vb_signal_group "$1" "$2"
+    local sig="$1" job="$2" out
+    _vb_job_running "$job" || return 0
+    if ! out="$(kill "-$sig" -- "-$job" 2>&1)"; then
+        print_verbose "venv bootstrap: process group $job had already ended ($sig: $out)"
     fi
 }
 

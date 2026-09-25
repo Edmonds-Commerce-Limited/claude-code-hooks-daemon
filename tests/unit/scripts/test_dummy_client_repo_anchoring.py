@@ -142,9 +142,20 @@ set -euo pipefail
 info() { printf '%s\n' "$*" >&2; }
 fail() { printf 'FAIL %s\n' "$*" >&2; return 1; }
 source <(awk '/^_surviving_dummy_daemons\(\) \{/,/^\}$/' "$SCRIPT")
+source <(awk '/^_is_dummy_daemon_pid\(\) \{/,/^\}$/' "$SCRIPT")
 source <(awk '/^verify_dummy_daemon_stopped\(\) \{/,/^\}$/' "$SCRIPT")
 verify_dummy_daemon_stopped
 """
+
+#: Runs the identity check alone on "$PID"; its exit status is the verdict.
+_IDENTITY_HARNESS: Final[str] = r"""
+set -euo pipefail
+source <(awk '/^_is_dummy_daemon_pid\(\) \{/,/^\}$/' "$SCRIPT")
+_is_dummy_daemon_pid "$PID"
+"""
+
+#: Above Linux's default pid_max, so no process can have it.
+_NONEXISTENT_PID: Final[int] = 2**22 + 7
 
 #: A group leader that starts a stand-in dummy daemon and an unrelated
 #: sibling in ITS group, prints both pids, and waits.
@@ -202,6 +213,54 @@ class TestTeardownSignalsOnlyTheProvenPid:
         finally:
             signal_own_session_child(leader, signal.SIGKILL)
             leader.wait(timeout=_REAP_SECONDS)
+
+
+class TestTheSurvivorIsReIdentifiedImmediatelyBeforeTheSignal:
+    """Plan 00466 N59: pgrep's answer is a moment old, and its pid may since be reused.
+
+    ``_is_dummy_daemon_pid`` re-reads the pid's command line right before the
+    kill, so a pid that no longer runs out of the dummy venv is not signalled.
+    """
+
+    def _verdict(self, daemon_dir: Path, pid: int) -> int:
+        return subprocess.run(
+            ["bash", "-c", _IDENTITY_HARNESS],
+            capture_output=True,
+            env={
+                **os.environ,
+                "SCRIPT": str(_FIXTURE_SCRIPT),
+                "DUMMY_DAEMON_DIR": str(daemon_dir),
+                "PID": str(pid),
+            },
+            check=False,
+        ).returncode
+
+    def test_a_process_running_out_of_the_dummy_venv(self, tmp_path: Path) -> None:
+        daemon_dir = tmp_path / ".claude" / "hooks-daemon"
+        interpreter = daemon_dir / "untracked" / "venv-dummy" / "bin" / "python"
+        interpreter.parent.mkdir(parents=True)
+        interpreter.symlink_to(sys.executable)
+        stand_in = subprocess.Popen(
+            [str(interpreter), "-c", "import time; time.sleep(60)"], start_new_session=True
+        )
+        try:
+            assert self._verdict(daemon_dir, stand_in.pid) == 0
+        finally:
+            signal_own_session_child(stand_in, signal.SIGKILL)
+            stand_in.wait(timeout=_REAP_SECONDS)
+
+    def test_a_process_that_does_not(self, tmp_path: Path) -> None:
+        bystander = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(60)"], start_new_session=True
+        )
+        try:
+            assert self._verdict(tmp_path / ".claude" / "hooks-daemon", bystander.pid) == 1
+        finally:
+            signal_own_session_child(bystander, signal.SIGKILL)
+            bystander.wait(timeout=_REAP_SECONDS)
+
+    def test_a_pid_nobody_has(self, tmp_path: Path) -> None:
+        assert self._verdict(tmp_path / ".claude" / "hooks-daemon", _NONEXISTENT_PID) == 1
 
 
 def _is_running(pid: int) -> bool:

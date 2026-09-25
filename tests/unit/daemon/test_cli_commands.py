@@ -11,10 +11,14 @@ Focused tests covering critical CLI paths including:
 import argparse
 import json
 import socket
+import subprocess
+import sys
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock, patch
 
+import psutil
 import pytest
 
 from claude_code_hooks_daemon.constants import Timeout
@@ -309,131 +313,157 @@ class TestCmdStop:
             result = cmd_stop(args)
             assert result == 0
 
-    def test_successful_stop(self, tmp_path: Path) -> None:
-        """cmd_stop successfully stops daemon."""
-        claude_dir = tmp_path / ".claude"
-        claude_dir.mkdir()
-        hooks_daemon_dir = claude_dir / "hooks-daemon"
-        hooks_daemon_dir.mkdir()
 
-        # Create valid config
-        config_file = claude_dir / "hooks-daemon.yaml"
-        config_file.write_text("version: '1.0'\ndaemon:\n  log_level: INFO\n")
+def _stop_project(tmp_path: Path) -> argparse.Namespace:
+    """A project root with a valid config, and ``cmd_stop``'s arguments for it."""
+    claude_dir = tmp_path / ".claude"
+    (claude_dir / "hooks-daemon").mkdir(parents=True)
+    (claude_dir / "hooks-daemon.yaml").write_text("version: '1.0'\ndaemon:\n  log_level: INFO\n")
+    return argparse.Namespace(project_root=tmp_path)
 
-        args = argparse.Namespace(project_root=tmp_path)
 
-        # Track kill calls
-        kill_count = [0]
+_SLEEP = "import time; time.sleep(600)"
+_IGNORE_TERM = (
+    "import signal, sys, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+    "print('ready', flush=True); time.sleep(600)"
+)
+#: Above Linux's default pid_max, so no process can have it.
+_NONEXISTENT_PID = 2**22 + 7
 
-        def mock_kill_func(pid: int, sig: int) -> None:
-            kill_count[0] += 1
-            if kill_count[0] == 1:
-                # First call (SIGTERM) - succeeds
-                return
-            else:
-                # Second call (check if alive) - process gone
-                raise ProcessLookupError()
 
+@pytest.fixture
+def children() -> Iterator[list[subprocess.Popen[bytes]]]:
+    started: list[subprocess.Popen[bytes]] = []
+    yield started
+    for child in started:
+        if child.poll() is None:
+            child.kill()
+        child.wait(timeout=Timeout.PROCESS_SAMPLE)
+
+
+def _spawn(
+    children: list[subprocess.Popen[bytes]], code: str, *argv: str
+) -> subprocess.Popen[bytes]:
+    child = subprocess.Popen(
+        [sys.executable, "-c", code, *argv], stdout=subprocess.PIPE, start_new_session=True
+    )
+    children.append(child)
+    if code == _IGNORE_TERM:
+        assert child.stdout is not None
+        assert child.stdout.readline() == b"ready\n"
+    return child
+
+
+def _daemon_for(
+    children: list[subprocess.Popen[bytes]], root: Path, code: str = _SLEEP
+) -> subprocess.Popen[bytes]:
+    """A real process whose command line is a daemon server for ``root``."""
+    return _spawn(
+        children, code, "claude_code_hooks_daemon.daemon.cli", "--project-root", str(root), "start"
+    )
+
+
+class TestCmdStopSignalsOnlyThisProjectsDaemon:
+    """Plan 00466 N59: the PID file names a pid, and nothing but its command line proves it."""
+
+    def test_stops_this_projects_daemon(
+        self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
+    ) -> None:
+        args = _stop_project(tmp_path)
+        daemon = _daemon_for(children, tmp_path)
         with (
-            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=12345),
-            patch("os.kill", side_effect=mock_kill_func),
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=daemon.pid),
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_pid_file") as mock_cleanup_pid,
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket") as mock_cleanup_sock,
-            patch("time.sleep"),
         ):
-            result = cmd_stop(args)
-            assert result == 0
-            assert kill_count[0] >= 2
-            mock_cleanup_pid.assert_called_once()
-            mock_cleanup_sock.assert_called_once()
+            assert cmd_stop(args) == 0
+        assert not psutil.pid_exists(daemon.pid) or daemon.poll() is not None
+        mock_cleanup_pid.assert_called_once()
+        mock_cleanup_sock.assert_called_once()
 
-    def test_stop_process_not_found(self, tmp_path: Path) -> None:
-        """cmd_stop handles stale PID file."""
-        claude_dir = tmp_path / ".claude"
-        claude_dir.mkdir()
-        hooks_daemon_dir = claude_dir / "hooks-daemon"
-        hooks_daemon_dir.mkdir()
-
-        # Create valid config
-        config_file = claude_dir / "hooks-daemon.yaml"
-        config_file.write_text("version: '1.0'\ndaemon:\n  log_level: INFO\n")
-
-        args = argparse.Namespace(project_root=tmp_path)
-
+    def test_refuses_another_projects_daemon(
+        self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
+    ) -> None:
+        args = _stop_project(tmp_path / "mine")
+        other = _daemon_for(children, tmp_path / "theirs")
         with (
-            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=12345),
-            patch("os.kill", side_effect=ProcessLookupError()),
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=other.pid),
+            patch("claude_code_hooks_daemon.daemon.cli.cleanup_pid_file") as mock_cleanup_pid,
+        ):
+            assert cmd_stop(args) == 1
+        assert other.poll() is None
+        mock_cleanup_pid.assert_not_called()
+
+    def test_refuses_a_live_process_that_is_not_a_daemon(
+        self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
+    ) -> None:
+        args = _stop_project(tmp_path)
+        bystander = _spawn(children, _SLEEP)
+        with patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=bystander.pid):
+            assert cmd_stop(args) == 1
+        assert bystander.poll() is None
+
+    def test_refuses_a_mock_pid(self, tmp_path: Path) -> None:
+        args = _stop_project(tmp_path)
+        with patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=Mock().pid):
+            assert cmd_stop(args) == 1
+
+    def test_a_pid_nobody_has_is_a_stale_pid_file(self, tmp_path: Path) -> None:
+        args = _stop_project(tmp_path)
+        with (
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=_NONEXISTENT_PID
+            ),
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_pid_file") as mock_cleanup_pid,
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket") as mock_cleanup_sock,
         ):
-            result = cmd_stop(args)
-            assert result == 0
-            mock_cleanup_pid.assert_called_once()
-            mock_cleanup_sock.assert_called_once()
+            assert cmd_stop(args) == 0
+        mock_cleanup_pid.assert_called_once()
+        mock_cleanup_sock.assert_called_once()
 
-    def test_stop_permission_denied(self, tmp_path: Path) -> None:
-        """cmd_stop handles permission denied."""
-        claude_dir = tmp_path / ".claude"
-        claude_dir.mkdir()
-        hooks_daemon_dir = claude_dir / "hooks-daemon"
-        hooks_daemon_dir.mkdir()
-
-        # Create valid config
-        config_file = claude_dir / "hooks-daemon.yaml"
-        config_file.write_text("version: '1.0'\ndaemon:\n  log_level: INFO\n")
-
-        args = argparse.Namespace(project_root=tmp_path)
-
+    def test_a_daemon_that_outlives_the_wait_is_reported(
+        self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
+    ) -> None:
+        args = _stop_project(tmp_path)
+        daemon = _daemon_for(children, tmp_path, _IGNORE_TERM)
         with (
-            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=12345),
-            patch("os.kill", side_effect=PermissionError("Permission denied")),
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=daemon.pid),
+            patch.object(Timeout, "SOCKET_CONNECT", 0.2),
+            patch("claude_code_hooks_daemon.daemon.cli.cleanup_pid_file") as mock_cleanup_pid,
         ):
-            result = cmd_stop(args)
-            assert result == 1
+            assert cmd_stop(args) == 1
+        assert daemon.poll() is None
+        mock_cleanup_pid.assert_not_called()
 
-    def test_stop_timeout(self, tmp_path: Path) -> None:
-        """cmd_stop handles daemon not exiting within timeout."""
-        claude_dir = tmp_path / ".claude"
-        claude_dir.mkdir()
-        hooks_daemon_dir = claude_dir / "hooks-daemon"
-        hooks_daemon_dir.mkdir()
-
-        # Create valid config
-        config_file = claude_dir / "hooks-daemon.yaml"
-        config_file.write_text("version: '1.0'\ndaemon:\n  log_level: INFO\n")
-
-        args = argparse.Namespace(project_root=tmp_path)
-
+    def test_permission_denied(
+        self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
+    ) -> None:
+        args = _stop_project(tmp_path)
+        daemon = _daemon_for(children, tmp_path)
         with (
-            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=12345),
-            patch("os.kill", return_value=None),  # Process stays alive
-            patch("time.sleep"),
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=daemon.pid),
+            patch.object(psutil.Process, "terminate", side_effect=psutil.AccessDenied(daemon.pid)),
         ):
-            result = cmd_stop(args)
-            assert result == 1
+            assert cmd_stop(args) == 1
+        assert daemon.poll() is None
 
 
 class TestCmdStopGenericException:
-    """Tests for cmd_stop generic exception path (line 373-375)."""
+    """Tests for cmd_stop's generic exception path."""
 
     def test_stop_generic_exception(self, tmp_path: Path) -> None:
         """cmd_stop returns 1 on unexpected exception."""
-        claude_dir = tmp_path / ".claude"
-        claude_dir.mkdir()
-        hooks_daemon_dir = claude_dir / "hooks-daemon"
-        hooks_daemon_dir.mkdir()
-
-        config_file = claude_dir / "hooks-daemon.yaml"
-        config_file.write_text("version: '1.0'\ndaemon:\n  log_level: INFO\n")
-
-        args = argparse.Namespace(project_root=tmp_path)
-
+        args = _stop_project(tmp_path)
         with (
-            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=12345),
-            patch("os.kill", side_effect=RuntimeError("unexpected")),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=_NONEXISTENT_PID
+            ),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.verified_daemon_process",
+                side_effect=RuntimeError("unexpected"),
+            ),
         ):
-            result = cmd_stop(args)
-            assert result == 1
+            assert cmd_stop(args) == 1
 
 
 class TestCmdConfig:

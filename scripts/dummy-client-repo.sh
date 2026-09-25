@@ -115,6 +115,22 @@ _surviving_dummy_daemons() {
     fi
 }
 
+# _is_dummy_daemon_pid PID — does PID run out of the dummy venv, right now?
+#
+# pgrep's answer is a moment old by the time a survivor is signalled, and its
+# pid may have been reused since, so the command line is read again here,
+# immediately before the signal. A pid with no process fails the check.
+_is_dummy_daemon_pid() {
+    local args
+    if ! args="$(ps -o args= -p "$1")"; then
+        return 1
+    fi
+    case "$args" in
+        *"${DUMMY_DAEMON_DIR}/untracked/venv-"*) return 0 ;;
+    esac
+    return 1
+}
+
 # verify_dummy_daemon_stopped — post-condition for teardown.
 #
 # A stop that TARGETS the wrong project exits 0 while the real daemon lives on,
@@ -136,6 +152,8 @@ verify_dummy_daemon_stopped() {
     for pid in $survivors; do
         if [ "$pid" -le 1 ] || [ "$pid" -eq "$$" ]; then
             info "WARNING: refusing to signal pid $pid"
+        elif ! _is_dummy_daemon_pid "$pid"; then
+            info "pid $pid no longer runs out of the dummy venv; not signalling it"
         elif ! kill -TERM "$pid"; then
             info "WARNING: could not signal pid $pid"
         fi

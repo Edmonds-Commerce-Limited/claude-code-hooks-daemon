@@ -34,7 +34,6 @@ import logging
 import os
 import platform
 import shutil
-import signal
 import socket
 import subprocess  # nosec B404 - subprocess used for daemon management (systemctl) only
 import sys
@@ -45,6 +44,7 @@ from typing import TYPE_CHECKING, Any, Final, Literal, cast
 
 logger = logging.getLogger(__name__)
 
+import psutil
 from pydantic import ValidationError as PydanticValidationError
 
 from claude_code_hooks_daemon.config.loader import ConfigLoader
@@ -114,6 +114,10 @@ from claude_code_hooks_daemon.utils.hook_registration import (
 )
 from claude_code_hooks_daemon.utils.markdown_format import format_markdown_text
 from claude_code_hooks_daemon.utils.report_scrubbing import scrub_report
+from claude_code_hooks_daemon.utils.safe_signal import (
+    RefusedSignalTarget,
+    verified_daemon_process,
+)
 from claude_code_hooks_daemon.utils.secret_redaction import get_active_secret_terms
 from claude_code_hooks_daemon.utils.session_action_items import (
     SessionActionItem,
@@ -775,57 +779,43 @@ def cmd_stop(args: argparse.Namespace) -> int:
     pid_path = _resolve_pid_path(args, project_path)
     socket_path = _resolve_socket_path(args, project_path)
 
-    # Read PID. verify_daemon guards against a stale PID file (after reboot /
-    # PID reuse) pointing at an unrelated live process we would otherwise
-    # SIGTERM.
     pid = read_pid_file(str(pid_path), verify_daemon=True)
     if pid is None:
         print("Daemon not running")
         return 0
 
-    # Send SIGTERM
+    # Plan 00466 N59: verify_daemon proves only that the pid is SOME daemon. The
+    # handle proves it serves THIS project root, and its start-time check keeps
+    # a pid reused during the wait from being mistaken for the daemon.
+    timeout = Timeout.SOCKET_CONNECT
     try:
-        os.kill(pid, signal.SIGTERM)
+        daemon = verified_daemon_process(pid, project_root=project_path)
+        daemon.terminate()
         print(f"Sent SIGTERM to daemon (PID: {pid})")
-
-        # Wait for process to exit (up to 5 seconds)
-        timeout = Timeout.SOCKET_CONNECT
-        interval = 0.1
-        elapsed = 0.0
-
-        while elapsed < timeout:
-            try:
-                os.kill(pid, 0)  # Check if still alive
-                time.sleep(interval)
-                elapsed += interval
-            except ProcessLookupError:
-                # Process exited
-                break
-
-        # Check if still running
-        try:
-            os.kill(pid, 0)
-            print(f"WARNING: Daemon still running after {timeout}s", file=sys.stderr)
-            print(f"Try: kill -9 {pid}", file=sys.stderr)
-            return 1
-        except ProcessLookupError:
-            # Process exited successfully
-            print("Daemon stopped")
-            cleanup_pid_file(str(pid_path))
-            cleanup_socket(str(socket_path))
-            return 0
-
-    except ProcessLookupError:
+        daemon.wait(timeout=timeout)
+    except (ProcessLookupError, psutil.NoSuchProcess):
         print(f"Process {pid} not found (stale PID file)")
         cleanup_pid_file(str(pid_path))
         cleanup_socket(str(socket_path))
         return 0
-    except PermissionError:
+    except psutil.TimeoutExpired:
+        print(f"WARNING: Daemon still running after {timeout}s", file=sys.stderr)
+        print(f"Try: kill -9 {pid}", file=sys.stderr)
+        return 1
+    except RefusedSignalTarget as refused:
+        print(f"ERROR: Not signalling PID {pid}: {refused}", file=sys.stderr)
+        return 1
+    except (PermissionError, psutil.AccessDenied):
         print(f"ERROR: Permission denied to signal PID {pid}", file=sys.stderr)
         return 1
     except Exception as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 1
+
+    print("Daemon stopped")
+    cleanup_pid_file(str(pid_path))
+    cleanup_socket(str(socket_path))
+    return 0
 
 
 def _query_daemon_config_degraded(
