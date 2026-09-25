@@ -88,6 +88,8 @@ class TestEverySpellingOfARawSignalIsFound:
             "import os\nos.kill(123, 9)\n",
             "import os\ndef f(target):\n    os.kill(*target)\n",
             "import os\ndef f(pid, rest):\n    os.killpg(pid, *rest)\n",
+            "import signal\ndef f(fd, s):\n    signal.pidfd_send_signal(fd, s)\n",
+            "from signal import pidfd_send_signal as pfs\ndef f(fd):\n    pfs(fd, 9)\n",
         ],
     )
     def test_is_reported(self, checker: ModuleType, source: str) -> None:
@@ -95,13 +97,38 @@ class TestEverySpellingOfARawSignalIsFound:
 
     def test_the_existence_probe_is_exempt(self, checker: ModuleType) -> None:
         source = """
-            import os
+            import os, signal
 
-            def alive(pid):
+            def alive(pid, fd):
                 os.kill(pid, 0)
                 os.killpg(pid, 0)
+                signal.pidfd_send_signal(fd, 0)
         """
         assert _rules(checker, source) == []
+
+
+class TestAPidfdSendSignalIsTheSameClassAsRawKill:
+    """`os.pidfd_open` + `signal.pidfd_send_signal` is the same unproven-target
+    class through a different syscall: N24's branch signalled through it with
+    tests that patched only `os.kill`, so a real SIGKILL reached pid 12345
+    (Plan 00466 N59 extension). `os.pidfd_open` itself opens nothing
+    dangerous; the SEND is `signal.pidfd_send_signal`, so that is what is
+    reported -- exactly mirroring `os.kill`/`os.killpg`."""
+
+    def test_pidfd_open_immediately_followed_by_send_is_reported_once(
+        self, checker: ModuleType
+    ) -> None:
+        source = """
+            import os, signal
+
+            def stop(pid, sig):
+                fd = os.pidfd_open(pid)
+                try:
+                    signal.pidfd_send_signal(fd, sig)
+                finally:
+                    os.close(fd)
+        """
+        assert _rules(checker, source) == [(7, "raw-signal")]
 
 
 class TestAPidFileIsNeverProofEvenWhenVerifiedAsADaemon:

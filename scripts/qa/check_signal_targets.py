@@ -18,8 +18,14 @@ given as anything but the literal ``0`` is treated as nonzero.
 
 Python rules:
 
-* ``raw-signal`` -- ``os.kill``, ``os.killpg`` or ``signal.pthread_kill``,
-  however imported, with an unproven target.
+* ``raw-signal`` -- ``os.kill``, ``os.killpg``, ``signal.pthread_kill`` or
+  ``signal.pidfd_send_signal``, however imported, with an unproven target.
+  ``os.pidfd_open`` itself opens nothing dangerous -- the SEND is
+  ``pidfd_send_signal``, so that call is what is reported, the same way
+  ``os.killpg(os.getpgid(pid), sig)`` reports the ``killpg``, not the
+  ``getpgid`` (Plan 00466 N59 extension: N24's branch signalled through
+  ``os.pidfd_open``/``signal.pidfd_send_signal`` with tests that patched only
+  ``os.kill``, so a real SIGKILL reached pid 12345).
 * ``unproven-process-handle`` -- ``.terminate()``, ``.kill()`` or
   ``.send_signal()`` on a ``psutil.Process`` built from a raw pid or taken from
   ``psutil.process_iter()``; and ``.send_signal()`` on any receiver not proven
@@ -121,7 +127,7 @@ UNPROVEN_HANDLE: Final[str] = "unproven-process-handle"
 KILL_COMMAND: Final[str] = "kill-command"
 
 _RAW_SIGNAL_CALLS: Final[frozenset[str]] = frozenset(
-    {"os.kill", "os.killpg", "signal.pthread_kill"}
+    {"os.kill", "os.killpg", "signal.pthread_kill", "signal.pidfd_send_signal"}
 )
 _POPEN_FACTORIES: Final[frozenset[str]] = frozenset(
     {

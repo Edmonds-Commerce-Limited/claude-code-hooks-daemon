@@ -12,6 +12,9 @@ not:
 
 * :func:`signal_verified_daemon` / :func:`verified_daemon_process` — the pid's
   command line is a daemon SERVER for THIS project root, not merely any daemon.
+* :func:`signal_verified_daemon_via_pidfd` — the same proof, delivered via
+  ``os.pidfd_open``/``signal.pidfd_send_signal`` instead of ``psutil``, so a
+  pid reused between the proof and the send still cannot receive the signal.
 * :func:`signal_own_session_child` — a group kill, only to a child this code
   spawned with ``start_new_session=True`` that is still running and still
   leads its own group.
@@ -25,6 +28,7 @@ callers fail closed, so a pid whose identity cannot be read is refused too.
 from __future__ import annotations
 
 import os
+import signal
 from enum import Enum
 from pathlib import Path
 from typing import Protocol
@@ -127,6 +131,32 @@ def signal_verified_daemon(pid: object, sig: int, *, project_root: Path | str) -
         raise ProcessLookupError(f"daemon pid {process.pid} has exited") from gone
     except psutil.AccessDenied as denied:
         raise PermissionError(f"not permitted to signal daemon pid {process.pid}") from denied
+
+
+def signal_verified_daemon_via_pidfd(pid: object, sig: int, *, project_root: Path | str) -> None:
+    """Send ``sig`` to ``pid`` via a pidfd, only once proven this project's daemon.
+
+    The identity proof is identical to :func:`signal_verified_daemon`; only the
+    delivery syscall differs. A pidfd is immune to pid reuse mid-flight: once
+    opened it is bound to the exact process the proof verified, so a pid
+    reused by something else between the proof and the send still cannot
+    receive this signal -- ``pidfd_send_signal`` reports
+    :class:`ProcessLookupError` instead. Linux-only (``os.pidfd_open``,
+    Python 3.9+); there is no fallback here, so a caller that must run
+    elsewhere should use :func:`signal_verified_daemon`.
+
+    Raises:
+        RefusedSignalTarget: See :func:`verified_daemon_process`.
+        ProcessLookupError: The process is gone, or exited between the proof
+            and the send.
+        PermissionError: This process may not signal it.
+    """
+    process = verified_daemon_process(pid, project_root=project_root)
+    pidfd = os.pidfd_open(process.pid)
+    try:
+        signal.pidfd_send_signal(pidfd, sig)
+    finally:
+        os.close(pidfd)
 
 
 class DaemonStop(Enum):

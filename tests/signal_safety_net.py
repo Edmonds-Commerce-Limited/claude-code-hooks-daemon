@@ -5,12 +5,19 @@ that coerces to 1 through ``__index__``, so ``os.killpg(os.getpgid(pid),
 SIGKILL)`` became ``killpg(1, SIGKILL)`` and took out ``tini``, the container's
 init, with every agent and session under it.
 
-``tests/conftest.py`` installs :class:`SignalSafetyNet` over ``os.kill`` and
-``os.killpg`` for the whole session. A nonzero signal whose target is pid 1,
-group 1, this process, its group, any ancestor or a Claude Code process raises
+``tests/conftest.py`` installs :class:`SignalSafetyNet` over ``os.kill``,
+``os.killpg``, ``os.pidfd_open`` and ``signal.pidfd_send_signal`` for the
+whole session. A nonzero signal whose target is pid 1, group 1, this process,
+its group, any ancestor or a Claude Code process raises
 :class:`DangerousSignalError` and is never delivered; everything else passes
 through unchanged. Signal 0 is the existence probe, delivers nothing, and is
 never refused.
+
+``pidfd_open``/``pidfd_send_signal`` is the same class through a different
+syscall (Plan 00466 N59 extension): a pid never reaches a signal directly,
+only via an fd, so the net remembers which pid each fd it saw opened names,
+and checks a later ``pidfd_send_signal`` on that fd exactly as it would
+``kill`` the same pid. Opening is never refused -- it sends nothing.
 
 The net deliberately shares no code with ``claude_code_hooks_daemon.utils.
 safe_signal``, the production helper it backstops: a safety layer that reuses
@@ -25,6 +32,7 @@ from __future__ import annotations
 
 import operator
 import os
+import signal
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -138,7 +146,7 @@ def _as_int(value: object) -> int | None:
 
 
 class SignalSafetyNet:
-    """``os.kill``/``os.killpg`` replacements that refuse a protected target."""
+    """``os.kill``/``os.killpg``/pidfd replacements that refuse a protected target."""
 
     # The delegates are typed Any-in because they receive exactly what the
     # caller passed: the real call must see, and reject, a non-integer itself.
@@ -147,12 +155,22 @@ class SignalSafetyNet:
         *,
         real_kill: Callable[[Any, Any], None],
         real_killpg: Callable[[Any, Any], None],
+        real_pidfd_open: Callable[..., int],
+        real_pidfd_send_signal: Callable[..., None],
         protected_targets: Callable[[], ProtectedTargets],
     ) -> None:
         self._real_kill = real_kill
         self._real_killpg = real_killpg
+        self._real_pidfd_open = real_pidfd_open
+        self._real_pidfd_send_signal = real_pidfd_send_signal
         self._protected_targets = protected_targets
         self._violations: list[str] = []
+        #: fd -> the pid it was opened for, so a later `pidfd_send_signal` on
+        #: it can be checked like `kill` would be. An fd this net never saw
+        #: opened maps to nothing, so a send through it is not provably
+        #: dangerous and passes through -- the same direction `kill` takes
+        #: for a pid outside the protected set.
+        self._pidfd_pids: dict[int, int] = {}
         self._lock = threading.Lock()
 
     def refusal_for_kill(self, pid: object, sig: object) -> str | None:
@@ -207,6 +225,45 @@ class SignalSafetyNet:
             raise self._refuse(reason, sig)
         self._real_killpg(pgid, sig)
 
+    def refusal_for_pidfd_send_signal(self, pidfd: object, sig: object) -> str | None:
+        """Why ``signal.pidfd_send_signal(pidfd, sig)`` must not run, or None when it may.
+
+        Reuses :meth:`refusal_for_kill` against the pid this fd was opened
+        for, once that pid is known -- the danger classes are identical,
+        only the syscall differs.
+        """
+        if _as_int(sig) == 0:
+            return None
+        fd = _as_int(pidfd)
+        if fd is None:
+            return None
+        with self._lock:
+            target = self._pidfd_pids.get(fd)
+        if target is None:
+            return None
+        return self.refusal_for_kill(target, sig)
+
+    def pidfd_open(self, pid: object, flags: object = 0) -> int:
+        """``os.pidfd_open`` that also remembers which pid the fd names.
+
+        Never refused -- opening an fd sends nothing -- but the fd it
+        returns is recorded so a later :meth:`pidfd_send_signal` on it is
+        checked exactly like ``kill`` would be.
+        """
+        fd = self._real_pidfd_open(pid, flags)
+        target = _as_int(pid)
+        if target is not None:
+            with self._lock:
+                self._pidfd_pids[fd] = target
+        return fd
+
+    def pidfd_send_signal(self, pidfd: object, sig: object, *args: Any, **kwargs: Any) -> None:
+        """``signal.pidfd_send_signal`` that raises instead of signalling a protected target."""
+        reason = self.refusal_for_pidfd_send_signal(pidfd, sig)
+        if reason is not None:
+            raise self._refuse(reason, sig)
+        self._real_pidfd_send_signal(pidfd, sig, *args, **kwargs)
+
     def drain_violations(self) -> list[str]:
         """Every refusal since the last drain, oldest first."""
         with self._lock:
@@ -223,26 +280,34 @@ def installed_net() -> SignalSafetyNet | None:
 
 
 def install() -> SignalSafetyNet:
-    """Wrap ``os.kill`` and ``os.killpg`` for the rest of the process."""
+    """Wrap ``os.kill``, ``os.killpg``, ``os.pidfd_open`` and
+    ``signal.pidfd_send_signal`` for the rest of the process."""
     global _installed
     if _installed is not None:
         raise RuntimeError("signal safety net is already installed")
     net = SignalSafetyNet(
         real_kill=os.kill,
         real_killpg=os.killpg,
+        real_pidfd_open=os.pidfd_open,
+        real_pidfd_send_signal=signal.pidfd_send_signal,
         protected_targets=_live_protected_targets,
     )
     os.kill = net.kill
     os.killpg = net.killpg
+    os.pidfd_open = net.pidfd_open
+    signal.pidfd_send_signal = net.pidfd_send_signal
     _installed = net
     return net
 
 
 def uninstall(net: SignalSafetyNet) -> None:
-    """Restore the real ``os.kill`` and ``os.killpg``."""
+    """Restore the real ``os.kill``, ``os.killpg``, ``os.pidfd_open`` and
+    ``signal.pidfd_send_signal``."""
     global _installed
     if _installed is not net:
         raise RuntimeError("uninstall called with a net that is not the installed one")
     os.kill = net._real_kill
     os.killpg = net._real_killpg
+    os.pidfd_open = net._real_pidfd_open
+    signal.pidfd_send_signal = net._real_pidfd_send_signal
     _installed = None

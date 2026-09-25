@@ -6,7 +6,7 @@ target pid was not proven to be the intended process. Its four rules:
 
 | Rule id                   | What it reads                                                                                                                                               |
 | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `raw-signal`              | Python `os.kill`, `os.killpg`, `signal.pthread_kill`, however imported                                                                                      |
+| `raw-signal`              | Python `os.kill`, `os.killpg`, `signal.pthread_kill`, `signal.pidfd_send_signal`, however imported                                                          |
 | `unproven-process-handle` | Python `terminate`/`kill`/`send_signal` on a `psutil` handle built from a raw pid or `process_iter()`, and `send_signal` on anything not a Popen we spawned |
 | `kill-command`            | A `kill`/`pkill`/`killall` argv run through `subprocess`                                                                                                    |
 | `shell-unproven-kill`     | `kill`/`pkill`/`killall` in every tracked `*.sh`/`*.bash` and shell-shebang script outside a `fixtures`/`assets` directory                                  |
@@ -22,7 +22,7 @@ rests on anything weaker than one of these proofs:
 
 | Proof                                                                 | Where it lives                                                                                                                                                                                                     |
 | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| The command line is a daemon server for THIS project root             | `utils/safe_signal.py` `verified_daemon_process` and its callers                                                                                                                                                   |
+| The command line is a daemon server for THIS project root             | `utils/safe_signal.py` `verified_daemon_process` and its callers, including `signal_verified_daemon_via_pidfd` (the pidfd route -- same proof, delivered via `os.pidfd_open`/`signal.pidfd_send_signal`)           |
 | A still-running child we spawned that leads its own group             | `utils/safe_signal.py` `signal_own_session_child`                                                                                                                                                                  |
 | A `subprocess.Popen` object's own methods                             | Popen signals only its own unreaped child                                                                                                                                                                          |
 | A shell identity check run earlier in the same function as the `kill` | `upgrade.sh` `_is_project_daemon_pid`, `dummy-client-repo.sh` `_is_dummy_daemon_pid`, `venv_bootstrap.sh` `_vb_process_identity`/`_vb_job_running`, `venv.sh` `_venv_parent_of`, `resolve_venv.sh` `_rv_parent_of` |
@@ -65,7 +65,12 @@ something else.
 It refuses, without delivering, any nonzero `os.kill`/`os.killpg` from the test
 process to pid 0, 1 or -1, group 1, the test process, its group, any ancestor
 or a Claude Code process. It records each refusal, so code that swallows the
-error still fails its test.
+error still fails its test. The net also wraps `os.pidfd_open`/
+`signal.pidfd_send_signal`: opening is never refused (it sends nothing), but
+the fd it returns is remembered so a later send through it is checked exactly
+like `kill` would be against the same pid (Plan 00466 N59 extension: N24's
+branch signalled a daemon through this route with tests that patched only
+`os.kill`, so a real SIGKILL reached pid 12345 unguarded).
 
 ## Instances
 

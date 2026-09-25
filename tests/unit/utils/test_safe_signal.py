@@ -24,6 +24,7 @@ from claude_code_hooks_daemon.utils.safe_signal import (
     RefusedSignalTarget,
     signal_own_session_child,
     signal_verified_daemon,
+    signal_verified_daemon_via_pidfd,
     stop_verified_daemon,
     verified_daemon_process,
 )
@@ -191,6 +192,54 @@ class TestADaemonProvenOnlyByItsRecordedEnvironmentIsSignalled:
         with pytest.raises(RefusedSignalTarget, match="project root"):
             signal_verified_daemon(daemon.pid, signal.SIGTERM, project_root=tmp_path)
         assert daemon.poll() is None, "the other project's daemon must still be running"
+
+
+class TestADaemonIsSignalledViaPidfdOnlyWhenItIsThisProjectsDaemon:
+    """`signal_verified_daemon_via_pidfd` -- the pidfd route (Plan 00466 N59
+    extension). The identity proof is identical to `signal_verified_daemon`;
+    only the syscall used to deliver the signal differs, so refusal is
+    exercised once here rather than for every proof shape again."""
+
+    def test_this_projects_daemon_is_signalled(
+        self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
+    ) -> None:
+        daemon = _fake_daemon(children, tmp_path)
+
+        signal_verified_daemon_via_pidfd(daemon.pid, signal.SIGTERM, project_root=tmp_path)
+
+        assert daemon.wait(timeout=Timeout.PROCESS_SAMPLE) == -signal.SIGTERM
+
+    def test_a_daemon_of_another_project_root_is_refused(
+        self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
+    ) -> None:
+        daemon = _fake_daemon(children, tmp_path / "other-project")
+
+        with pytest.raises(RefusedSignalTarget, match="project root"):
+            signal_verified_daemon_via_pidfd(daemon.pid, signal.SIGTERM, project_root=tmp_path)
+        assert daemon.poll() is None, "the other project's daemon must still be running"
+
+    def test_a_magicmock_pid_is_refused(self, tmp_path: Path) -> None:
+        with pytest.raises(RefusedSignalTarget):
+            signal_verified_daemon_via_pidfd(MagicMock().pid, signal.SIGTERM, project_root=tmp_path)
+
+    def test_a_pid_with_no_process_raises_process_lookup_error(self, tmp_path: Path) -> None:
+        with pytest.raises(ProcessLookupError):
+            signal_verified_daemon_via_pidfd(
+                _NONEXISTENT_PID, signal.SIGTERM, project_root=tmp_path
+            )
+
+    def test_an_already_reaped_daemon_pid_is_a_lookup_error(
+        self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
+    ) -> None:
+        """A pid that WAS this project's daemon, now exited and reaped,
+        raises ProcessLookupError rather than silently doing nothing or
+        signalling whatever the pid has since been recycled to."""
+        daemon = _fake_daemon(children, tmp_path)
+        daemon.kill()
+        daemon.wait(timeout=Timeout.PROCESS_SAMPLE)
+
+        with pytest.raises(ProcessLookupError):
+            signal_verified_daemon_via_pidfd(daemon.pid, signal.SIGTERM, project_root=tmp_path)
 
 
 class TestStoppingADaemonTermsThenKillsOnlyThisProjectsDaemon:
