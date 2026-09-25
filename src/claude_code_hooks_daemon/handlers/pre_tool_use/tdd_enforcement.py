@@ -711,11 +711,10 @@ class TddEnforcementHandler(PreToolUseHandlerBase):
         if len(after_src) >= 1:
             # after_src[:-1] = ALL subdirectories to mirror (including package)
             # after_src[-1] = filename (replaced with test_filename)
-            sub_dirs = after_src[:-1]
-            test_file_path = workspace_root / test_dir
-            for sub_dir in sub_dirs:
-                test_file_path = test_file_path / sub_dir
-            return test_file_path / test_filename
+            # One joinpath, not a `/` per segment: each `/` copies every part
+            # before it, which is quadratic in the path's depth (Plan 00466
+            # N40 review 2 nit 4: seconds on a 90 KB file_path).
+            return workspace_root.joinpath(test_dir, *after_src[:-1], test_filename)
         return None
 
     @staticmethod
@@ -740,11 +739,10 @@ class TddEnforcementHandler(PreToolUseHandlerBase):
             # after_src[0] = package name (skip)
             # after_src[1:-1] = subdirectories to mirror
             # after_src[-1] = filename (replaced with test_filename)
-            sub_dirs = after_src[1:-1]
-            test_file_path = workspace_root / test_dir / _TEST_UNIT_DIR
-            for sub_dir in sub_dirs:
-                test_file_path = test_file_path / sub_dir
-            return test_file_path / test_filename
+            # One joinpath for the same reason as _map_src_to_tests_mirror.
+            return workspace_root.joinpath(
+                test_dir, _TEST_UNIT_DIR, *after_src[1:-1], test_filename
+            )
         elif len(after_src) == 2:
             # src/{package}/file.ext -> <test_dir>/unit/test_file.ext
             return workspace_root / test_dir / _TEST_UNIT_DIR / test_filename

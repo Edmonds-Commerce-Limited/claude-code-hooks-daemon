@@ -481,8 +481,38 @@ def path_matches_globs(
     Returns:
         True if any pattern matches any candidate form of the path.
     """
+    return (
+        first_matching_glob(file_path, patterns, project_root=project_root, layout=layout)
+        is not None
+    )
+
+
+def first_matching_glob(
+    file_path: str,
+    patterns: Sequence[str] | None,
+    *,
+    project_root: str | os.PathLike[str] | None = None,
+    layout: VendoredPathJudge | None = None,
+) -> str | None:
+    """The first pattern, in order, that ``file_path`` matches; else ``None``.
+
+    :func:`path_matches_globs` for a caller that must also say WHICH pattern
+    matched. Asking that question one pattern at a time re-derives the
+    candidate paths (an ``os.path.relpath`` each) and discards the shared
+    step cache on every call -- for ``secret_file_guard``, which asks per
+    token of a Bash command, that repetition was most of its cost.
+
+    Args:
+        file_path: Absolute or relative path being considered.
+        patterns: Glob patterns, tried in order. ``None`` or empty never matches.
+        project_root: As for :func:`path_matches_globs`.
+        layout: As for :func:`path_matches_globs`.
+
+    Returns:
+        The first matching pattern, or ``None``.
+    """
     if not patterns:
-        return False
+        return None
     candidates = _candidate_paths(file_path, project_root)
     # A realistic exclude list is mostly `**/<name>/**` patterns that share
     # an identical prefix and diverge only at the literal name -- see
@@ -503,13 +533,13 @@ def path_matches_globs(
             # the relative form -- never gets a say, making a declared
             # carve-out silently unreachable.
             if _resolves_vendor_token(candidates[0], layout):
-                return True
+                return pattern
             continue
         if any(
             _glob_fullmatch(pattern, candidate, step_cache=step_cache) for candidate in candidates
         ):
-            return True
-    return False
+            return pattern
+    return None
 
 
 def is_path_excluded(

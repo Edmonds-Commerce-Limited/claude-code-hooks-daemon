@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from claude_code_hooks_daemon.core.project_layout import ProjectLayout
+from claude_code_hooks_daemon.utils.realpath import realpath
 from claude_code_hooks_daemon.utils.vendor_paths import VendorScope
 
 if TYPE_CHECKING:
@@ -104,9 +105,12 @@ def _resolve_or_self(file_path: Path) -> Path:
     resolved declared root, resolution falls through to the same
     root-project/root-layout fallback an ordinary undeclared path gets --
     never a crash, and never a bypass of anything these two methods decide.
+
+    ``utils.realpath`` gives ``resolve()``'s answer without an ``lstat`` per
+    component of a missing tail (Plan 00466 N40 review 2 nit 4).
     """
     try:
-        return file_path.resolve()
+        return Path(realpath(file_path))
     except (OSError, ValueError):
         return file_path
 

@@ -1,9 +1,11 @@
 """Comprehensive tests for TddEnforcementHandler."""
 
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import pytest
+from tests.scaling import SIZE_FACTOR, SUPERLINEAR_RATIO, scaling_ratio
 
 from claude_code_hooks_daemon.config.models import LayoutConfig
 from claude_code_hooks_daemon.core.workspace import DeclaredProject, ProjectRegistry
@@ -2639,3 +2641,43 @@ class TestConventionalUppercaseTestsDirIsInferred:
         rule = tmp_path.joinpath(*self._RULE_REL)
 
         assert handler.handle(_php_write(rule)).decision == "deny"
+
+
+class TestMirrorMappingScalesLinearlyWithDepth:
+    """Plan 00466 N40 review 2 nit 4: a 90 KB-deep Write ``file_path`` spent
+    seconds here, building the mirrored test path one ``Path / segment`` at a
+    time -- every ``/`` copies all the parts before it, so the cost was
+    quadratic in the depth. Asserted as growth, not wall clock."""
+
+    _SEGMENTS = 2_000
+
+    @staticmethod
+    def _parts(segments: int) -> tuple[str, ...]:
+        return Path("/proj/src/" + "pkg/" * segments + "module.py").parts
+
+    @pytest.mark.parametrize(
+        "mapper",
+        [
+            pytest.param(TddEnforcementHandler._map_src_to_tests_mirror, id="full-mirror"),
+            pytest.param(TddEnforcementHandler._map_src_to_test_path, id="package-stripped"),
+        ],
+    )
+    def test_cost_grows_linearly(self, mapper: Any) -> None:
+        large = self._parts(SIZE_FACTOR * self._SEGMENTS)
+
+        ratio = scaling_ratio(
+            lambda size: mapper(self._parts(size), "test_module.py"),
+            self._SEGMENTS,
+            "/".join(large),
+        )
+
+        assert ratio <= SUPERLINEAR_RATIO, f"cost grew {ratio:.0f}x for {SIZE_FACTOR}x depth"
+
+    def test_the_mapping_itself_is_unchanged(self) -> None:
+        parts = Path("/proj/src/pkg/sub/deeper/module.py").parts
+        assert TddEnforcementHandler._map_src_to_tests_mirror(parts, "test_module.py") == Path(
+            "/proj/tests/pkg/sub/deeper/test_module.py"
+        )
+        assert TddEnforcementHandler._map_src_to_test_path(parts, "test_module.py") == Path(
+            "/proj/tests/unit/sub/deeper/test_module.py"
+        )

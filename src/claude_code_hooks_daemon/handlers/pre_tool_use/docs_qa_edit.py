@@ -55,6 +55,7 @@ from claude_code_hooks_daemon.docs_qa.runner import run_stage
 from claude_code_hooks_daemon.docs_qa.types import CheckStage, Finding, Severity
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
 from claude_code_hooks_daemon.utils.path_predicates import path_is_file
+from claude_code_hooks_daemon.utils.realpath import realpath
 
 _MODE_BLOCK: Final[str] = "block"
 
@@ -146,7 +147,7 @@ class DocsQaEditHandler(PreToolUseHandlerBase):
         # re-resolve (or fail to) independently (Plan 00295 Task 1.2).
         project_root = ProjectContext.project_root().resolve()
         tool_input = hook_input.get(HookInputField.TOOL_INPUT, {})
-        file_path = Path(tool_input.get(_FIELD_FILE_PATH, "")).resolve()
+        file_path = Path(realpath(tool_input.get(_FIELD_FILE_PATH, "")))
         # Tri-state, matching plan_qa_edit: `CheckContext` types this field
         # `bool | None` because "I could not stat it" is a third answer, not a
         # flavour of False. Claiming True would send the read below into a
@@ -220,7 +221,7 @@ class DocsQaEditHandler(PreToolUseHandlerBase):
     @staticmethod
     def _rel_path(file_path: Path, project_root: Path) -> str | None:
         try:
-            return str(file_path.resolve().relative_to(project_root.resolve()))
+            return str(Path(realpath(file_path)).relative_to(project_root.resolve()))
         except ValueError:
             return None
 

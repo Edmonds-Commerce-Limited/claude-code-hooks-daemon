@@ -62,6 +62,7 @@ from claude_code_hooks_daemon.utils.path_exclusion import (
     handler_excludes_path,
     resolve_project_root,
 )
+from claude_code_hooks_daemon.utils.realpath import realpath
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
 _LOGGER = logging.getLogger(__name__)
@@ -1132,7 +1133,7 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         if project_root is None:
             return ""
         try:
-            return str(Path(file_path).resolve().relative_to(Path(project_root).resolve()))
+            return str(Path(realpath(file_path)).relative_to(realpath(project_root)))
         except ValueError:
             # Outside the project root: not ours to judge.
             return ""
@@ -1185,7 +1186,7 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         if configured is None:
             return False
         try:
-            return Path(file_path).resolve() == configured.resolve()
+            return realpath(file_path) == realpath(configured)
         except (OSError, ValueError):
             # An unresolvable path is simply not the list; fall through to
             # normal scanning rather than failing open on the whole check.

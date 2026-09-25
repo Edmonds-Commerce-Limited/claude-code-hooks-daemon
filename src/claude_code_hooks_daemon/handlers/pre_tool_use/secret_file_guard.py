@@ -261,15 +261,13 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         if path_field is None:
             return None
         path = str(tool_input.get(path_field, ""))
-        for pattern in patterns:
-            if not sfm.path_is_protected(path, (pattern,)):
-                continue
+        protecting = sfm.protecting_pattern(path, patterns)
+        if protecting is not None:
             # Ciphertext is not the secret (Plan 00459). Checked on EVERY
             # call, so a file decrypted in place is denied at the next one.
             absolute = sfm.resolve_against_cwd(path, cwd)
-            if absolute is not None and self._is_encrypted(absolute):
-                break
-            return (pattern, path, "read")
+            if absolute is None or not self._is_encrypted(absolute):
+                return (protecting, path, "read")
 
         if tool_name == ToolName.GREP and path:
             # Partial enforcement for directory-rooted content search

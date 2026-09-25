@@ -68,6 +68,7 @@ from claude_code_hooks_daemon.core.utils import (
     get_bash_write_targets,
 )
 from claude_code_hooks_daemon.utils.command_evasion import strip_reserved_word_prefix
+from claude_code_hooks_daemon.utils.realpath import realpath
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
 
@@ -471,7 +472,7 @@ class ProjectContainmentHandler(PreToolUseHandlerBase):
         the usual way a containment check fails.
         """
         try:
-            Path(candidate).resolve().relative_to(container)
+            Path(realpath(candidate)).relative_to(container)
         except ValueError:
             return False
         return True

@@ -39,9 +39,11 @@ from claude_code_hooks_daemon.utils.command_evasion import (
     strip_transparent_reserved_words,
 )
 from claude_code_hooks_daemon.utils.path_exclusion import (
+    first_matching_glob,
     path_matches_globs,
     resolve_project_root,
 )
+from claude_code_hooks_daemon.utils.realpath import realpath
 
 logger = logging.getLogger(__name__)
 
@@ -264,21 +266,32 @@ def path_is_protected(file_path: str, patterns: tuple[str, ...]) -> bool:
     innocuous while the target is protected, and vice versa — both spellings
     must be guarded or the symlink is a one-call bypass.
     """
+    return protecting_pattern(file_path, patterns) is not None
+
+
+def protecting_pattern(file_path: str, patterns: tuple[str, ...]) -> str | None:
+    """The first of ``patterns``, in order, protecting ``file_path`` or its realpath.
+
+    :func:`path_is_protected` for a caller that must also name the glob. It
+    resolves the realpath ONCE for the whole list: asked one pattern at a
+    time, each call walked every component of the path again, which for a
+    90 KB-deep ``file_path`` cost seconds (Plan 00466 N40 review 2 nit 4).
+    """
     if not file_path or not patterns:
-        return False
+        return None
     project_root = resolve_project_root()
-    if path_matches_globs(file_path, patterns, project_root=project_root):
-        return True
+    matches = [first_matching_glob(file_path, patterns, project_root=project_root)]
     try:
-        real = os.path.realpath(file_path)
+        real = realpath(file_path)
     except (OSError, ValueError):
         # Plan 00466 N24 follow-up: a NUL-bearing path raises ValueError,
         # not OSError -- the OS itself cannot realpath it, so it cannot BE
         # a symlink to anything; nothing for this check to discover.
-        return False
+        real = file_path
     if real != file_path:
-        return path_matches_globs(real, patterns, project_root=project_root)
-    return False
+        matches.append(first_matching_glob(real, patterns, project_root=project_root))
+    found = [pattern for pattern in matches if pattern is not None]
+    return min(found, key=patterns.index) if found else None
 
 
 def _tokenise(command: str) -> list[str]:
@@ -798,9 +811,9 @@ def _token_mention(
         # named `x[0].secret` is reachable under that exact name.
         literal_forms = [raw_form] if expansions == [raw_form] else [raw_form, *expansions]
         for form in literal_forms:
-            for pattern in patterns:
-                if path_matches_globs(form, (pattern,), project_root=project_root):
-                    return pattern
+            matched = first_matching_glob(form, patterns, project_root=project_root)
+            if matched is not None:
+                return matched
         for form in expansions:
             if not _is_glob_shaped(form):
                 continue
@@ -888,9 +901,7 @@ def _token_mention(
                     return pattern
     real = _realpath_if_resolvable(token)
     if real is not None:
-        for pattern in patterns:
-            if path_matches_globs(real, (pattern,), project_root=project_root):
-                return pattern
+        return first_matching_glob(real, patterns, project_root=project_root)
     return None
 
 
@@ -917,18 +928,18 @@ def find_protected_mention_strict(command: str, patterns: tuple[str, ...]) -> st
     project_root = resolve_project_root()
     for token in _tokenise(command):
         for form in _normalised_token_forms(token):
-            for pattern in patterns:
-                if path_matches_globs(form, (pattern,), project_root=project_root):
-                    return pattern
+            matched = first_matching_glob(form, patterns, project_root=project_root)
+            if matched is not None:
+                return matched
             if _is_glob_shaped(form):
                 match = _expand_glob_token(form, patterns, project_root)
                 if match is not None:
                     return match
         real = _realpath_if_resolvable(token)
         if real is not None:
-            for pattern in patterns:
-                if path_matches_globs(real, (pattern,), project_root=project_root):
-                    return pattern
+            matched = first_matching_glob(real, patterns, project_root=project_root)
+            if matched is not None:
+                return matched
     return None
 
 
@@ -972,10 +983,9 @@ def _expand_glob_token(
         # fail the calling security handler open). Consumed lazily, still.
         try:
             for match in base.glob(pattern_str):
-                match_str = str(match)
-                for pattern in patterns:
-                    if path_matches_globs(match_str, (pattern,), project_root=project_root):
-                        return pattern
+                matched = first_matching_glob(str(match), patterns, project_root=project_root)
+                if matched is not None:
+                    return matched
         except (OSError, ValueError):
             # A token the filesystem cannot expand names nothing on disk, which
             # is exactly the "expands to nothing" case: no mention. Registered

@@ -36,38 +36,31 @@ own project handlers are real, in-scope code, not a fixture.
 
 from __future__ import annotations
 
-import threading
-import time
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
+from tests.scaling import SIZE_FACTOR, SUPERLINEAR_RATIO, cpu_seconds, scaling_ratio
 
+from claude_code_hooks_daemon.config.loader import ConfigLoader
+from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.constants import HandlerTag
+from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.project_context import ProjectContext
-from claude_code_hooks_daemon.handlers.registry import iter_builtin_handler_classes
+from claude_code_hooks_daemon.core.router import EventRouter
+from claude_code_hooks_daemon.daemon.cli import _build_handler_config_mapping
+from claude_code_hooks_daemon.handlers.registry import (
+    HandlerRegistry,
+    iter_builtin_handler_classes,
+)
 
 # Generous relative to a genuinely linear scan of ~100 KB (milliseconds), but
 # far below what even a modestly quadratic handler would take on an input
 # this size, and well below the 30s client socket timeout (Plan 00466 N25).
+# One bound for every handler: it is measured in the handler thread's own CPU
+# time (see `_timed_dispatch`), so a loaded host does not inflate it.
 _MAX_SECONDS = 5.0
-
-# Handlers with a KNOWN, already-tracked linear-but-expensive constant factor
-# (Plan 00466 N40 review 2 MA1): `SecretFileGuardHandler` measured at 5.2s/
-# 10.9s/6.4s against the 5s bound above on a loaded CI host -- not
-# superlinear (the guard-defects branch's own N34 finding already tracks the
-# constant-factor cost), but close enough to `_MAX_SECONDS` that ordinary
-# host contention flakes this harness. Each override stays comfortably under
-# the 30s client socket timeout (Plan 00466 N25) -- generous enough to absorb
-# load, not so generous it would miss a genuine regression. A handler not
-# listed here uses `_MAX_SECONDS` unchanged.
-_KNOWN_CONSTANT_FACTOR_BOUNDS: dict[str, float] = {
-    "SecretFileGuardHandler": 20.0,
-}
-
-
-def _bound_for(handler_cls: type[Handler]) -> float:
-    return _KNOWN_CONSTANT_FACTOR_BOUNDS.get(handler_cls.__name__, _MAX_SECONDS)
 
 
 # Large enough to make an O(n^2) handler's blowup obvious (Task 2's repros
@@ -162,29 +155,20 @@ def _safety_pre_tool_use_handlers() -> list[type[Handler]]:
     return classes
 
 
-def _timed_dispatch(handler: Handler, hook_input: dict) -> float:
-    """Time ``matches()`` (and ``handle()`` when it matches); return elapsed seconds."""
-    start = time.perf_counter()
+def _dispatch(handler: Handler, hook_input: dict) -> None:
+    """Run ``matches()``, and ``handle()`` when it matches."""
     if handler.matches(hook_input):
         handler.handle(hook_input)
-    return time.perf_counter() - start
 
 
-class TestKnownConstantFactorBound:
-    """The override mechanism itself (Plan 00466 N40 review 2 MA1)."""
+def _timed_dispatch(handler: Handler, hook_input: dict) -> float:
+    """CPU seconds this thread spends in :func:`_dispatch`.
 
-    def test_an_unlisted_handler_uses_the_default_bound(self) -> None:
-        class _Unlisted(Handler):
-            pass
-
-        assert _bound_for(_Unlisted) == _MAX_SECONDS
-
-    def test_a_listed_handler_uses_its_own_wider_bound(self) -> None:
-        class SecretFileGuardHandler(Handler):
-            pass
-
-        assert _bound_for(SecretFileGuardHandler) == 20.0
-        assert _bound_for(SecretFileGuardHandler) > _MAX_SECONDS
+    Thread CPU time, not wall clock: the review 2 gate saw
+    ``SecretFileGuardHandler`` at 5.2s-10.9s wall on a host running other
+    gates, when its own work was a fraction of that.
+    """
+    return cpu_seconds(lambda: _dispatch(handler, hook_input))
 
 
 class TestNoVacuousDiscovery:
@@ -208,7 +192,7 @@ class TestBashCommandShapesStayLinear:
         for handler_cls in _safety_pre_tool_use_handlers():
             handler = handler_cls()
             elapsed = _timed_dispatch(handler, hook_input)
-            if elapsed >= _bound_for(handler_cls):
+            if elapsed >= _MAX_SECONDS:
                 slow.append(f"{handler_cls.__name__} took {elapsed:.2f}s on shape={shape!r}")
         assert not slow, "superlinear SAFETY handler(s) found:\n" + "\n".join(slow)
 
@@ -228,7 +212,7 @@ class TestWriteContentShapesStayLinear:
         for handler_cls in _safety_pre_tool_use_handlers():
             handler = handler_cls()
             elapsed = _timed_dispatch(handler, hook_input)
-            if elapsed >= _bound_for(handler_cls):
+            if elapsed >= _MAX_SECONDS:
                 slow.append(f"{handler_cls.__name__} took {elapsed:.2f}s on shape={shape!r}")
         assert not slow, "superlinear SAFETY handler(s) found:\n" + "\n".join(slow)
 
@@ -371,131 +355,178 @@ def _all_swept_handlers() -> list[Handler]:
 # whitespace-run and quote-run shapes below: 73.5s and 37.5s, holding the
 # GIL for the handler's ENTIRE run so nothing else in the daemon process
 # could run meanwhile (not the chain deadline's own timed wait, not the
-# asyncio loop, not the straggler watchdog). A wall-clock bound on the
-# calling thread cannot distinguish "this callable ran slow" from "this
-# callable blocked every other thread too"; a concurrent ticker's own wakeup
-# gap can, and is what review 2's own probe (`probe_n24r2_e_gilstarve.py`)
-# used to find both defects.
+# asyncio loop, not the straggler watchdog).
+#
+# Both were quadratic, and a call only holds the GIL for seconds on 100 KB
+# when its cost grows faster than its input. So this sweep asserts on GROWTH:
+# each handler's CPU cost at N and at 8N (`tests/scaling.py`), which neither
+# host load nor a slow CI machine moves, where a wall-clock gap bound did.
 # ---------------------------------------------------------------------------
 
 
-def _whitespace_run_command() -> str:
+def _whitespace_run_command(size: int) -> str:
     """A harmless command followed by a long run of newlines.
 
     The exact shape that froze `enforce-lsp-usage` for 73.5s: `_BASH_GREP_PATTERN`
     had a `\\s` alternative directly beside `\\s*`, both able to claim the same
     whitespace run.
     """
-    return "true" + "\n" * _HOSTILE_SIZE
+    return "true" + "\n" * size
 
 
-def _quote_run_command() -> str:
+def _quote_run_command(size: int) -> str:
     """An `echo` followed by a long run of single quotes.
 
     The exact shape that froze `plan-number-helper` for 37.5s: the argument
     gap `[ \\t]+` sat directly beside a negated class that also accepts
     space/tab.
     """
-    return "echo " + "'" * _HOSTILE_SIZE
+    return "echo " + "'" * size
 
 
-#: Shape name -> hostile Bash command. Kept separate from `_SHAPES` above:
-#: those shapes are wrapped inside a larger command (`git commit -m 'x' &&
-#: echo <body>`), which would place the run mid-command rather than at the
-#: exact position that triggered both real regressions.
-_GIL_STARVATION_SHAPES: dict[str, str] = {
-    "whitespace_run": _whitespace_run_command(),
-    "quote_run": _quote_run_command(),
+#: Shape name -> hostile Bash command of a given run length. Kept separate
+#: from `_SHAPES` above: those shapes are wrapped inside a larger command
+#: (`git commit -m 'x' && echo <body>`), which would place the run
+#: mid-command rather than at the exact position that triggered both real
+#: regressions.
+_GIL_STARVATION_SHAPES: dict[str, Callable[[int], str]] = {
+    "whitespace_run": _whitespace_run_command,
+    "quote_run": _quote_run_command,
 }
 
-_TICKER_INTERVAL_SECONDS = 0.01
-
-# Generous: a genuinely linear handler finishes this shape in milliseconds,
-# nowhere near this bound. Tight enough that neither fixed regression (73.5s,
-# 37.5s) would pass.
-_MAX_GIL_GAP_SECONDS = 5.0
-
-# Upper bound on how long one handler-shape combination may run before the
-# sweep gives up on it and moves on, so ONE still-broken handler cannot hang
-# the whole suite indefinitely. Below the 30s client socket timeout (Plan
-# 00466 N25) is deliberately not required here -- this is a test bound, not a
-# production one -- but stays in the same order of magnitude.
-_GIL_PROBE_TIMEOUT_SECONDS = 20.0
-
-# How long to wait for the daemon ticker thread to notice `done` and exit,
-# once the worker thread has already returned (or been given up on above).
-_TICKER_JOIN_TIMEOUT_SECONDS = 1.0
+# Large enough that either old quadratic regex already costs far more than
+# its fixed overhead at N (so its ratio shows the full ~64x); the 8N run of a
+# still-broken handler then takes seconds, not minutes.
+_GIL_SHAPE_SIZE = 4_000
 
 
-def _all_pre_tool_use_handler_classes() -> list[type[Handler]]:
-    """Every registered ``pre_tool_use`` handler class, SAFETY-tagged or not.
+def _all_pre_tool_use_handlers() -> list[Handler]:
+    """Every built-in ``pre_tool_use`` handler, SAFETY-tagged or not, CONFIGURED.
 
     Unlike ``_safety_pre_tool_use_handlers()``, this applies NO tag filter --
     the GIL-starvation class of defect is not specific to SAFETY handlers,
     and both regressions this sweep exists to catch (`lsp_enforcement`,
     `plan_number_helper`) carry the ``workflow``/``blocking`` tags instead.
+
+    Configured, not default-constructed: `plan_number_helper` does nothing at
+    all until `register_all()` injects the plan directory from the project's
+    config, so a bare ``handler_cls()`` swept its quadratic regex vacuously.
+    Each handler is built the way daemon startup builds it, from this
+    project's own config (read-only -- a ``DaemonController`` would also
+    regenerate ``CLAUDE.md``). A handler that config disables is still swept,
+    default-constructed.
     """
     if not ProjectContext.is_initialized():
         ProjectContext.initialize(_project_root() / ".claude" / "hooks-daemon.yaml")
-    return [
-        ref.handler_cls for ref in iter_builtin_handler_classes() if ref.event_dir == "pre_tool_use"
-    ]
+    config = Config.model_validate(
+        ConfigLoader.load(_project_root() / ".claude" / "hooks-daemon.yaml")
+    )
+    registry = HandlerRegistry()
+    registry.discover()
+    router = EventRouter()
+    registry.register_all(
+        router,
+        config=_build_handler_config_mapping(config),
+        workspace_root=_project_root(),
+        project_languages=config.daemon.languages,
+        project_exclude_paths=config.daemon.exclude_paths,
+        plan_workflow=config.plan_workflow,
+        documentation=config.documentation,
+    )
+    handlers: list[Handler] = list(router.get_chain(EventType.PRE_TOOL_USE).handlers)
+    configured = {type(handler) for handler in handlers}
+    handlers.extend(
+        ref.handler_cls()
+        for ref in iter_builtin_handler_classes()
+        if ref.event_dir == "pre_tool_use" and ref.handler_cls not in configured
+    )
+    return handlers
 
 
-def _longest_gil_gap_seconds(handler: Handler, hook_input: dict) -> float:
-    """Run ``matches()``+``handle()`` on a worker thread; return the longest
-    gap a concurrent 10ms ticker thread saw between its own wakeups.
+def _bash_input(command: str) -> dict:
+    return {"tool_name": "Bash", "tool_input": {"command": command}}
 
-    A gap close to the handler's own run time means the handler held the GIL
-    for that whole call: a single C-level ``re`` call holds the GIL for its
-    entire duration, during which nothing else on the process runs -- not a
-    ``Future.result(timeout=...)`` waiter, not the asyncio event loop, not the
-    straggler-health monitor. Mirrors review 2's own probe
-    (``probe_n24r2_e_gilstarve.py``).
-    """
-    done = threading.Event()
-    gaps: list[float] = []
 
-    def tick() -> None:
-        last = time.perf_counter()
-        while not done.is_set():
-            time.sleep(_TICKER_INTERVAL_SECONDS)
-            now = time.perf_counter()
-            gaps.append(now - last)
-            last = now
+# 8x this is ~32 KB of path, deep enough that a quadratic per-segment cost
+# dominates at N already, and shallow enough that sweeping every handler at
+# 8N stays quick.
+_DEEP_PATH_SEGMENTS = 1_000
 
-    def work() -> None:
-        if handler.matches(hook_input):
-            handler.handle(hook_input)
 
-    ticker = threading.Thread(target=tick, daemon=True)
-    ticker.start()
-    worker = threading.Thread(target=work, daemon=True)
-    worker.start()
-    worker.join(timeout=_GIL_PROBE_TIMEOUT_SECONDS)
-    done.set()
-    ticker.join(timeout=_TICKER_JOIN_TIMEOUT_SECONDS)
-    return max(gaps) if gaps else 0.0
+def _deep_write_path(segments: int) -> str:
+    """A ``src/`` file under the project root, ``segments`` directories deep:
+    the shape of review 1's B2 ``file_path`` (90 KB at 22,500 segments)."""
+    return str(_project_root() / ("src/" + "pkg/" * segments + "module.py"))
+
+
+def _write_input(file_path: str) -> dict:
+    return {"tool_name": "Write", "tool_input": {"file_path": file_path, "content": "x = 1\n"}}
 
 
 class TestGilStarvationAcrossEveryPreToolUseHandler:
-    """Every PreToolUse handler must never hold the GIL long enough to starve
-    a concurrent thread, on whitespace-run and quote-run hostile shapes."""
+    """No PreToolUse handler's cost may grow superlinearly on the whitespace-run
+    and quote-run shapes: that growth is what let one call hold the GIL for
+    tens of seconds."""
 
     @pytest.mark.parametrize("shape_name", sorted(_GIL_STARVATION_SHAPES))
-    def test_no_handler_starves_the_gil(self, shape_name: str) -> None:
-        command = _GIL_STARVATION_SHAPES[shape_name]
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": command}}
-        starved: list[str] = []
-        for handler_cls in _all_pre_tool_use_handler_classes():
-            handler = handler_cls()
-            gap = _longest_gil_gap_seconds(handler, hook_input)
-            if gap >= _MAX_GIL_GAP_SECONDS:
-                starved.append(
-                    f"{handler_cls.__name__} starved the GIL for {gap:.2f}s "
-                    f"on shape={shape_name!r}"
+    def test_no_handler_grows_superlinearly(self, shape_name: str) -> None:
+        build = _GIL_STARVATION_SHAPES[shape_name]
+        large_text = build(SIZE_FACTOR * _GIL_SHAPE_SIZE)
+        superlinear: list[str] = []
+        for handler in _all_pre_tool_use_handlers():
+            ratio = scaling_ratio(
+                lambda size, h=handler: _dispatch(h, _bash_input(build(size))),
+                _GIL_SHAPE_SIZE,
+                large_text,
+            )
+            if ratio > SUPERLINEAR_RATIO:
+                superlinear.append(
+                    f"{type(handler).__name__} cost grew {ratio:.0f}x for "
+                    f"{SIZE_FACTOR}x input on shape={shape_name!r}"
                 )
-        assert not starved, "GIL-starving PreToolUse handler(s) found:\n" + "\n".join(starved)
+        assert not superlinear, "superlinear PreToolUse handler(s) found:\n" + "\n".join(
+            superlinear
+        )
+
+    def test_no_handler_grows_superlinearly_on_a_deep_write_path(self) -> None:
+        """Review 2 nit 4: a 90 KB-deep Write ``file_path`` still took 9.4s.
+
+        Most of it was `tdd_enforcement` building the mirrored test path one
+        ``Path / segment`` at a time -- each step copies every segment before
+        it, so quadratic in the depth.
+        """
+        segments = _DEEP_PATH_SEGMENTS
+        large_path = _deep_write_path(SIZE_FACTOR * segments)
+        superlinear: list[str] = []
+        for handler in _all_pre_tool_use_handlers():
+            ratio = scaling_ratio(
+                lambda size, h=handler: _dispatch(h, _write_input(_deep_write_path(size))),
+                segments,
+                large_path,
+            )
+            if ratio > SUPERLINEAR_RATIO:
+                superlinear.append(
+                    f"{type(handler).__name__} cost grew {ratio:.0f}x for "
+                    f"{SIZE_FACTOR}x path depth"
+                )
+        assert not superlinear, "superlinear PreToolUse handler(s) found:\n" + "\n".join(
+            superlinear
+        )
+
+    def test_the_ratio_separates_linear_from_quadratic_work(self) -> None:
+        """The measure itself: a linear scan stays under the threshold and a
+        quadratic one clears it, on the same inputs the sweep uses."""
+        build = _GIL_STARVATION_SHAPES["quote_run"]
+        large_text = build(SIZE_FACTOR * _GIL_SHAPE_SIZE)
+
+        def quadratic(size: int) -> None:
+            text = build(size)
+            for i in range(0, len(text), 8):
+                text.count("'", i)
+
+        linear = scaling_ratio(lambda size: build(size).count("'"), _GIL_SHAPE_SIZE, large_text)
+        assert linear <= SUPERLINEAR_RATIO
+        assert scaling_ratio(quadratic, _GIL_SHAPE_SIZE, large_text) > SUPERLINEAR_RATIO
 
 
 class TestCombinatorialSmallInputShapesStayLinear:

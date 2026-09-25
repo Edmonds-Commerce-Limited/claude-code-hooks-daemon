@@ -17,6 +17,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from claude_code_hooks_daemon.utils.realpath import realpath
+
 # Single source of truth for worktree subtree locations. The
 # worktree_file_copy handler reuses this tuple.
 WORKTREE_DIR_PATTERNS: tuple[str, ...] = (
@@ -58,7 +60,7 @@ def enclosing_checkout(abs_path: str, project_root: Path) -> tuple[Path, Path] |
     Returns ``None`` when ``abs_path`` is not inside ``project_root`` at all, or
     when it is a worktree marker path with no in-worktree subpath.
     """
-    absolute = Path(abs_path).resolve()
+    absolute = Path(realpath(abs_path))
     root = project_root.resolve()
     if not absolute.is_relative_to(root):
         # Path is outside the project entirely — not a classification target.
