@@ -30,17 +30,48 @@ pid from a `daemon*.pid` file and sends SIGTERM, then SIGKILL, with no identity
 check. PID files survive a container restart, and a restarted container reuses
 small PIDs, so a stale file can name `claude` itself.
 
-**Remedy (in progress):**
+**Remedy (landed on `worktree-n466-n59`):** the class is registered in
+[`CLAUDE/Security/UnprovenSignalTarget.md`](../../Security/UnprovenSignalTarget.md).
 
-- a signal with a nonzero number goes only to a pid proven to be the intended
-  process: a verified daemon, or a child this code started in its own session
-  that still leads its group;
-- a detector that fails QA on any `os.kill` or `os.killpg` whose pid is not
-  proven that way;
-- a test-suite safety net that refuses any signal to pid 1, to init's group,
-  or to the test runner's own group or ancestors;
-- a guard on N53's branch in `_kill_process_group`: only a real int pid above
-  1 that leads its own group, and never this process's own group.
+- **One helper sends every nonzero signal.** `utils/safe_signal.py` refuses a
+  pid that is not a plain `int` above 1, as well as this process, the leader
+  of its group and its ancestors. It signals a daemon only when the daemon's command line shows
+  THIS project root (`signal_verified_daemon`, `stop_verified_daemon`). A
+  group gets a signal only when it is led by a still-running child we spawned
+  (`signal_own_session_child`).
+
+- **The Detector.** `scripts/qa/check_signal_targets.py` is `llm_qa`
+  `signal_targets` and `run_all.sh` check 33. It was RED on main at
+  `client_validator.py:320,329` and `process_verification.py:184,192`, and on
+  the N53 `killpg(getpgid(process.pid))` shape. It now finds nothing in the
+  653 files it scans.
+
+- **Python sites fixed.** The installer's `_check_running_daemon` and
+  container enforcement now go through the helper. Enforcement signals
+  nothing when it has no project root. `kill_daemon_process` is removed.
+
+- **Shell sites fixed.** Each now proves identity before it signals:
+
+  - `upgrade.sh` checks for a daemon server of this project root;
+  - `dummy-client-repo.sh` signals the proven pid, never its group;
+  - the venv bootstrap watchdog checks the build's start time;
+  - the venv lock heartbeat and the resolver probe watchdog check that the
+    pid still has the parent recorded when it was started.
+
+- **The test-suite safety net.** `tests/signal_safety_net.py` is installed by
+  a session-wide autouse fixture in `tests/conftest.py`. It refuses, without
+  delivering, any nonzero `os.kill`/`os.killpg` to:
+
+  - pid 0, 1 or -1, or group 1;
+  - the pytest process, its group or any ancestor;
+  - a Claude Code process.
+
+  It also records each refusal, so a test whose code swallows the error still
+  fails.
+
+- **N53's branch.** Its `_kill_process_group` should call
+  `signal_own_session_child`. The Detector reports the raw `killpg` when that
+  branch rebases.
 
 ### N58 — R-CHMOD-WORLD-WRITABLE denies a safe chmod when a later argument contains digits
 
