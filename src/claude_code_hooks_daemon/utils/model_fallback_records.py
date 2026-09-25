@@ -125,7 +125,7 @@ def event_epoch(timestamp: str) -> float | None:
     try:
         parsed = datetime.fromisoformat(timestamp)
     except ValueError as exc:
-        logger.debug("model_fallback_records: unparseable timestamp %r: %s", timestamp, exc)
+        logger.warning("model_fallback_records: unparseable timestamp %r: %s", timestamp, exc)
         parsed = None
     if parsed is None:
         return None
