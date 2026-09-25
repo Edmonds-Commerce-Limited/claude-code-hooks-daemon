@@ -356,11 +356,14 @@ def _script_carries_the_upgrade(script: Path) -> bool | None:
     """
     if not path_is_file(script, unreadable_means=False):
         return None
+    content: bytes | None
     try:
         with script.open("rb") as handle:
             content = handle.read(_SCRIPT_READ_LIMIT)
     except OSError as exc:
         logger.debug("upgrade_approval_guard: cannot read %s (%s)", script, exc)
+        content = None
+    if content is None:
         return None
     return _UPGRADE_SCRIPT_SIGNATURE.encode() in content
 

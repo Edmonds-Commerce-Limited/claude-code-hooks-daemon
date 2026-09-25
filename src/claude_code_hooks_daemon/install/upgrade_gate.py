@@ -43,6 +43,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import logging
 import os
 import re
 import sys
@@ -53,6 +54,8 @@ from pathlib import Path
 from typing import Final, TextIO
 
 from claude_code_hooks_daemon.daemon.install_layout import get_untracked_dir
+
+logger = logging.getLogger(__name__)
 from claude_code_hooks_daemon.install.upgrade_guides import (
     UNRELEASED_DIRNAME,
     UPGRADES_SUBPATH,
@@ -421,9 +424,14 @@ def gated_install_stamp(untracked_dir: Path, *, daemon_dir: Path, project_root: 
     if not path.is_file():
         return None
     try:
-        recorded = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return None
+        recorded: object = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        # A corrupt or truncated receipt is not distinguished from "no
+        # receipt" below (both mean the gate cannot vouch for this stamp),
+        # but the reason is worth a record: unlike a missing file, a
+        # malformed one usually points at something worth investigating.
+        logger.debug("gated_install_stamp: %s is not valid JSON (%s)", path, exc)
+        recorded = None
     if not isinstance(recorded, dict):
         return None
     binding = _install_binding(daemon_dir, project_root)

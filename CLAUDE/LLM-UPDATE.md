@@ -258,21 +258,28 @@ notably) are turned back off instead. `HOME`, `LANG`, proxy variables and
 `uv`/cache settings are left alone -- they are data the install legitimately
 needs, not a way to change what code runs.
 
-What this does NOT cover: Layer 1 still resolves `bash` to run Layer 2 from
-the caller's own `PATH` (`bash "$LAYER2_SCRIPT" ...`), so a caller able to
-plant a fake `bash` ahead of the real one controls what interprets Layer 2
-before sanitisation ever gets to run -- the same class of limitation the gate
-subprocess isolation above always had, one level up. And the sanitisation is
-a fixed, named list of variable FAMILIES known to steer execution, not a
-default-deny `env -i` allowlist: Layer 2 needs an inherited environment to
-build a venv, run `uv` and deploy files, so anything not on that list --
-including a variable this list has not anticipated -- still reaches it. So
-the approval gate is a procedural control against an agent following the
-documented upgrade route, backed by a best-effort guard
-(`upgrade_approval_guard`) that recognises that route's shape. It is not a
-boundary against a same-user process determined to install by hand instead --
-no in-process check can be that, because the same user can always run the
-daemon's own code directly.
+Layer 1 launching Layer 2 on a bare `bash` from the caller's `PATH` was the
+same class of gap, one level up: a caller able to plant a fake `bash` ahead
+of the real one would control what interprets Layer 2 before sanitisation
+ever got a chance to run. Layer 1 now resolves `bash` the same way the gate
+subprocess resolves its own tools: `_gate_tool bash`
+(`scripts/install/env_sanitise.sh`, sourced from the daemon dir Layer 1 has
+just checked out to the target -- the same tree `$LAYER2_SCRIPT` itself is
+read from), a fixed, root-owned, non-group/world-writable system location,
+never the caller's `PATH`. A target predating this file (a downgrade below
+the release that introduced it) has no such resolver to fall back on, so the
+caller's `PATH` is used there -- the prior behaviour, not a new gap.
+
+What this does NOT cover: the sanitisation above is a fixed, named list of
+variable FAMILIES known to steer execution, not a default-deny `env -i`
+allowlist: Layer 2 needs an inherited environment to build a venv, run `uv`
+and deploy files, so anything not on that list -- including a variable this
+list has not anticipated -- still reaches it. So the approval gate is a
+procedural control against an agent following the documented upgrade route,
+backed by a best-effort guard (`upgrade_approval_guard`) that recognises that
+route's shape. It is not a boundary against a same-user process determined to
+install by hand instead -- no in-process check can be that, because the same
+user can always run the daemon's own code directly.
 
 `upgrade_approval_guard` also denies an agent that steers the rest of the
 upgrade. It recognises an upgrade by what the command is, not by the file's

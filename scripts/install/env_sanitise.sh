@@ -86,6 +86,23 @@ if [ -z "${ENV_SANITISE_SH_LOADED+x}" ]; then
         printf '%s\n' "${trusted[*]}"
     }
 
+    # _gate_tool() - Print the absolute path of $1 from a trusted
+    # GATE_SAFE_PATH entry; return 1 when no trusted location has it. Shared
+    # by Layer 1 (to resolve the `bash` it launches Layer 2 with) and every
+    # function in upgrade_version.sh that feeds the gate.
+    _gate_tool() {
+        local dir
+        local -a dirs
+        IFS=: read -r -a dirs <<< "$(_gate_trusted_path)"
+        for dir in "${dirs[@]}"; do
+            if [ -x "$dir/$1" ]; then
+                printf '%s\n' "$dir/$1"
+                return 0
+            fi
+        done
+        return 1
+    }
+
     # _sanitise_layer2_env() - Reset the class of variables that can steer
     # what code Layer 2 runs, or where it looks for its inputs. See the
     # file header for the full rationale per family.

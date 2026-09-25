@@ -713,12 +713,34 @@ _HANDOFF_DIR="$(mktemp -d "${TMPDIR:-/tmp}/hooks_daemon_upgrade_handoff_XXXXXX")
 HOOKS_DAEMON_UPGRADE_HANDOFF="$_HANDOFF_DIR/handoff"
 (umask 077 && printf '%s %s\n' "$$" "$_PREVIOUS_REF" > "$HOOKS_DAEMON_UPGRADE_HANDOFF")
 export HOOKS_DAEMON_UPGRADE_HANDOFF
+# review2 MAJOR 1 (residual, closed): `bash "$LAYER2_SCRIPT"` used to resolve
+# `bash` from the caller's own PATH, so a caller able to plant a fake `bash`
+# ahead of the real one controlled what interpreted Layer 2 before its own
+# `_sanitise_layer2_env` ever got to run. `_gate_tool` (env_sanitise.sh,
+# sourced from the CHECKED-OUT target -- it is always present by this point,
+# the same tree $LAYER2_SCRIPT itself is read from) resolves `bash` from a
+# fixed, root-owned, non-group/world-writable system location instead, the
+# same trust check the gate subprocess already used. A target predating this
+# file (a downgrade below the release that introduced it) has no such
+# resolver to fall back on, so the caller's PATH is used there -- the same
+# behaviour this replaces, not a new gap.
+_LAYER2_BASH="bash"
+_ENV_SANITISE_SH="$DAEMON_DIR/scripts/install/env_sanitise.sh"
+if [ -f "$_ENV_SANITISE_SH" ]; then
+    # shellcheck source=install/env_sanitise.sh
+    source "$_ENV_SANITISE_SH"
+    if _trusted_bash="$(_gate_tool bash)"; then
+        _LAYER2_BASH="$_trusted_bash"
+    else
+        _fail "No trusted bash found in a fixed system location (\$GATE_SAFE_PATH). The upgrade never launches Layer 2 on a bash an environment variable or the caller's PATH names; install bash in one of those locations (or link one there)."
+    fi
+fi
 # Non-zero = abort without emitting metadata, with Layer 2's own exit code:
 # the pre-deploy gate's stop codes tell the caller WHY it stopped. Captured
 # with `||`, not inside `if !`, where $? is the negation's status (always 0).
 export UPGRADE_FLAGS
 LAYER2_EXIT=0
-bash "$LAYER2_SCRIPT" "$PROJECT_ROOT" "$DAEMON_DIR" "$TARGET_VERSION" || LAYER2_EXIT=$?
+"$_LAYER2_BASH" "$LAYER2_SCRIPT" "$PROJECT_ROOT" "$DAEMON_DIR" "$TARGET_VERSION" || LAYER2_EXIT=$?
 if [ "$LAYER2_EXIT" -ne 0 ]; then
     exit "$LAYER2_EXIT"
 fi

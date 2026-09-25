@@ -224,28 +224,16 @@ GATE_NEEDS_APPROVAL=4
 # pattern on a long line): the timeout is a crash, so it stops the upgrade.
 GATE_TIMEOUT_SECONDS=300
 GATE_TIMED_OUT=124
-# GATE_SAFE_PATH, _gate_dir_is_trusted() and _gate_trusted_path() are defined
-# in install/env_sanitise.sh, sourced before any other library above --
-# _sanitise_layer2_env() needs the trusted path to reset PATH at entry, so
-# those three moved there rather than staying here. Every function below
-# that decides or feeds the gate resolves its tools from `_gate_trusted_path`,
-# the entries of GATE_SAFE_PATH that `_gate_dir_is_trusted` accepts, never the
+# GATE_SAFE_PATH, _gate_dir_is_trusted(), _gate_trusted_path() and
+# _gate_tool() are defined in install/env_sanitise.sh, sourced before any
+# other library above -- _sanitise_layer2_env() needs the trusted path to
+# reset PATH at entry, and Layer 1 (upgrade.sh) needs _gate_tool to resolve
+# the `bash` it launches Layer 2 with from the same trusted locations, so
+# those four moved there rather than staying here. Every function below that
+# decides or feeds the gate resolves its tools from `_gate_trusted_path`, the
+# entries of GATE_SAFE_PATH that `_gate_dir_is_trusted` accepts, never the
 # raw GATE_SAFE_PATH variable directly.
 
-# _gate_tool() - Print the absolute path of $1 from a trusted GATE_SAFE_PATH
-# entry; return 1 when no trusted location has it.
-_gate_tool() {
-    local dir
-    local -a dirs
-    IFS=: read -r -a dirs <<< "$(_gate_trusted_path)"
-    for dir in "${dirs[@]}"; do
-        if [ -x "$dir/$1" ]; then
-            printf '%s\n' "$dir/$1"
-            return 0
-        fi
-    done
-    return 1
-}
 # The owner's approval the gate accepted; removed once the upgrade completes,
 # so a failure after the gate does not spend it.
 APPROVAL_MARKER_USED=""

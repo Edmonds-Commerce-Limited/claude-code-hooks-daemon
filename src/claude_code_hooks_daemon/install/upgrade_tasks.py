@@ -24,6 +24,7 @@ venv exists (see ``upgrade_gate_standalone.py``).
 from __future__ import annotations
 
 import fnmatch
+import logging
 import os
 import re
 import shutil
@@ -33,6 +34,8 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Any, Final
+
+logger = logging.getLogger(__name__)
 
 from claude_code_hooks_daemon.install.install_stamp import is_branch_install
 from claude_code_hooks_daemon.install.upgrade_guides import (
@@ -318,7 +321,13 @@ def _trusted_dirs(candidates: list[str] | None = None) -> list[str]:
     for candidate in TRUSTED_TOOL_PATH.split(os.pathsep) if candidates is None else candidates:
         try:
             info = Path(candidate).stat()
-        except OSError:
+        except OSError as exc:
+            # Expected for most hosts: TRUSTED_TOOL_PATH lists locations that
+            # exist on SOME platform (e.g. /opt/homebrew/bin only on macOS),
+            # not every one of them on this host. Logged so a genuinely
+            # unexpected stat failure (permissions, not absence) is still
+            # visible, rather than indistinguishable from "not on this OS".
+            logger.debug("_trusted_dirs: %s unavailable (%s)", candidate, exc)
             continue
         if _dir_trust_from_stat(info):
             trusted.append(candidate)

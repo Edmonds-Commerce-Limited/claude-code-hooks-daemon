@@ -312,11 +312,13 @@ rather than only matching syntax.
     without that file stops the upgrade (exit 1). Reason: a planted
     `timeout`, `git` or `python3.99` on the caller's `PATH` answered for the
     gate, and a stdout verdict line is what any wrapper can print.
+
   - (b) Every function that feeds or decides the gate (the installed
     version, the target release, the restore target, the abort) declares
     `local PATH="$GATE_SAFE_PATH"`, and Layer 1 and Layer 2 drop every
     imported shell function before anything runs. Reason: an exported
     `timeout()` or `git()` shadows the tool by name, whatever `PATH` says.
+
   - (c) The installed == target shortcut counts only when the gate itself
     recorded letting that exact stamp through
     (`upgrade-approvals/gated-install.json` in the daemon's untracked dir, written on PROCEED,
@@ -325,6 +327,7 @@ rather than only matching syntax.
     owner. Reason: `git checkout` of the target plus `hooks-daemon repair`
     writes the target's stamp legitimately, and the shortcut then waved a
     MAJOR through.
+
   - (d) `upgrade_approval_guard` recognises an upgrade by what the command
     is, not the file's name. It matches an entry point by name, Layer 1's
     `--skip-reading-confirmation`, or a readable script carrying
@@ -338,12 +341,24 @@ rather than only matching syntax.
     denied under the agent-action rule; fetch, show, log and describe are
     not. Reason: the documented route runs Layer 1 from a temp file, which
     the name-only check never saw.
+
   - (e) Layer 1 is NOT re-executed through a canonical path or under
-    `env -i`, and Layer 1's own launch of Layer 2 (`bash "$LAYER2_SCRIPT"`,
-    `upgrade.sh:721`) still resolves `bash` from the caller's `PATH` -- a
-    caller able to plant a fake `bash` ahead of the real one controls what
-    interprets Layer 2 before anything below gets to run. Once that `bash`
-    process starts, though, Layer 2's OWN first action is
+    `env -i`. Its own launch of Layer 2 used to resolve `bash` from the
+    caller's `PATH` (`bash "$LAYER2_SCRIPT"`) -- a caller able to plant a
+    fake `bash` ahead of the real one controlled what interprets Layer 2
+    before anything below got to run. review3: closed. Layer 1 now resolves
+    `bash` via `_gate_tool` (`scripts/install/env_sanitise.sh`, sourced from
+    the daemon dir it has just checked out to the target -- the same tree
+    `$LAYER2_SCRIPT` itself is read from), the same fixed, root-owned,
+    non-group/world-writable system location the gate subprocess already
+    trusts, never the caller's `PATH`. A target predating this file (a
+    downgrade below the release that introduced it) has no such resolver to
+    fall back on, so the caller's `PATH` is used there -- the prior
+    behaviour, not a new gap. Pinned by
+    `test_layer1_launches_layer2_via_trusted_bash.py`: a hostile `bash`
+    planted ahead on `PATH` never runs, against the REAL `upgrade.sh`.
+
+    Once that `bash` process starts, Layer 2's OWN first action is
     `_sanitise_layer2_env` (`scripts/install/env_sanitise.sh`), sourced and
     called before any other library: it resets `PATH` to the same fixed
     system locations the gate subprocess trusts, and unsets `BASH_ENV`,
