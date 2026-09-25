@@ -23,17 +23,25 @@ answering it:
    one-shot handoff file ``scripts/upgrade.sh`` writes for
    ``scripts/upgrade_version.sh`` (Layer 2 believes that file only when its
    parent wrote it; a command that sets the variable and runs Layer 2 IS that
-   parent); or, on a command that runs an upgrade entry point, setting a
-   variable that picks its interpreter, venv, forwarded flags or code
-   (``_UPGRADE_STEERING_VARS``).
+   parent); or, on a command that runs the upgrade, setting a variable that
+   picks its interpreter, venv, tools, forwarded flags or code
+   (``_UPGRADE_STEERING_VARS``), or exporting a shell function. The upgrade
+   is recognised by what it is, not its file name: an entry point by name,
+   Layer 1's own ``--skip-reading-confirmation`` flag, a script whose content
+   carries the handoff variable (every copy of Layer 1 and Layer 2 does), or
+   a script that cannot be read (``bash "$tmp"``) run with the upgrade's
+   arguments (``--project-root``, or the daemon clone as Layer 2's operand).
 4. **Forging the installer's own version stamp** — writing a venv's
    ``.daemon-version`` file (under ``untracked/venv*/``) by any of the same
    routes as (2), which would make the gate believe the target is already
    installed.
+5. **Moving the daemon clone by hand** — ``checkout``/``switch``/``pull``/
+   ``merge``/``reset`` (and the other ref-moving subcommands) on
+   ``.claude/hooks-daemon``, which installs a version the gate never saw.
 
 Two distinct Rules (Decision B): route 3 is a different failure mode from
-1/2/4 — steering the gate's control flow, rather than forging what it
-protects — so it gets its own rule_id and its own remedy text.
+1/2/4/5 — steering the gate's control flow, rather than forging or skipping
+what it protects — so it gets its own rule_id and its own remedy text.
 
 **Reading is never denied.** ``ls``/``cat``/``stat``/``grep``/``find ...
 -print``/``test -f`` over an approvals path or a version stamp, and merely
@@ -129,33 +137,82 @@ _ENV_VAR_ASSIGN_RE: Final[re.Pattern[str]] = re.compile(
 
 #: Variables the upgrade path reads to choose the interpreter, the venv whose
 #: stamp is the installed version, the forwarded flags and pass state, the
-#: files git lists for detection, or the code it runs. Denied only on a
-#: command that also runs an upgrade entry point: each has ordinary uses
-#: elsewhere.
+#: files git lists for detection, the tools and shell code it runs, or where it
+#: writes. Denied only on a command that also runs an upgrade: each has
+#: ordinary uses elsewhere. The gate itself takes none of them (it runs under
+#: `env -i` with fixed tool locations); this keeps an agent off the rest.
 _UPGRADE_STEERING_VARS: Final[tuple[str, ...]] = (
     "HOOKS_DAEMON_PYTHON",
     "HOOKS_DAEMON_VENV_PATH",
     "PATH",
     "HOSTNAME",
+    "HOME",
+    "TMPDIR",
     "HOOKS_DAEMON_CLONE_URL",
     "HOOKS_DAEMON_UPGRADE_BASE_URL",
     "HOOKS_DAEMON_UPGRADE_PREVIOUS_VERSION",
     "HOOKS_DAEMON_UPGRADE_SECOND_PASS",
     "UPGRADE_FLAGS",
     "GIT_*",
+    "BASH_ENV",
+    "ENV",
+    "BASH_FUNC_*",
+    "SHELLOPTS",
+    "BASHOPTS",
+    "LD_*",
+    "DYLD_*",
+    "PYTHON*",
 )
+#: A wildcard name part; exported functions travel as `BASH_FUNC_<name>%%`.
+_WILDCARD_NAME: Final[str] = r"[A-Za-z0-9_]+(?:%%)?"
 _STEERING_GROUP: Final[str] = "|".join(
-    re.escape(name).replace(r"\*", r"[A-Z0-9_]+") for name in _UPGRADE_STEERING_VARS
+    re.escape(name).replace(r"\*", _WILDCARD_NAME) for name in _UPGRADE_STEERING_VARS
 )
 _STEERING_ASSIGN_RE: Final[re.Pattern[str]] = re.compile(
     rf"\b(?:{_STEERING_GROUP})="
     rf"|\b(?:export|declare\s+-x|typeset\s+-x)\s+(?:{_STEERING_GROUP})\b"
+    # A function exported to the environment, which shadows a tool by name.
+    r"|\bexport\s+-f\b|\b(?:declare|typeset)\s+-(?=[a-z]*f)(?=[a-z]*x)[a-z]+\b"
 )
-#: The upgrade's entry points: Layer 1 (and the skill shim of the same name),
-#: Layer 2, and the gate itself.
+#: The upgrade's entry points by name: Layer 1 (and the skill shim of the same
+#: name), Layer 2, and the gate itself.
 _UPGRADE_ENTRY_RE: Final[re.Pattern[str]] = re.compile(
     r"(?:^|[\s/])(?:upgrade\.sh|upgrade_version\.sh|upgrade_gate_standalone\.py)\b"
 )
+#: An argument only the upgrade takes: Layer 1's acknowledgement flag.
+_UPGRADE_ONLY_ARG_RE: Final[re.Pattern[str]] = re.compile(r"(?:^|\s)--skip-reading-confirmation\b")
+#: Arguments the upgrade's scripts take: Layer 1's required `--project-root`,
+#: or Layer 2's daemon-dir positional (the clone itself).
+_UPGRADE_SHAPED_ARG_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?:^|\s)--project-root\b|\.claude/hooks-daemon/?[\"']?(?:\s|$)"
+)
+#: Text every copy of Layer 1 and Layer 2 carries, whatever the file is named.
+_UPGRADE_SCRIPT_SIGNATURE: Final[str] = "HOOKS_DAEMON_UPGRADE_HANDOFF"
+#: Enough of a script to find the signature without reading a huge file.
+_SCRIPT_READ_LIMIT: Final[int] = 4_194_304
+#: How deep `bash -c '...'` strings are followed before the scan stops.
+_MAX_INLINE_DEPTH: Final[int] = 4
+#: Shells that run a script file named as their first operand.
+_SHELL_HEADS: Final[frozenset[str]] = frozenset({"bash", "sh", "dash", "zsh", "ksh", "source", "."})
+#: Words that run the rest of the segment as a command.
+_WRAPPER_HEADS: Final[frozenset[str]] = frozenset(
+    {"env", "exec", "nohup", "command", "time", "timeout", "nice", "setsid", "stdbuf", "sudo"}
+)
+
+# --- the daemon clone moved by hand ------------------------------------------
+
+#: A path naming the client's daemon clone (or its `.git`).
+_DAEMON_CLONE_PATH_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?:^|/)\.claude/hooks-daemon(?:/\.git)?/?$"
+)
+#: git subcommands that move the checkout to another commit.
+_HEAD_MOVING_GIT_SUBCOMMANDS: Final[frozenset[str]] = frozenset(
+    {"checkout", "switch", "pull", "merge", "rebase", "reset", "cherry-pick", "am", "revert"}
+)
+#: git global options whose value names the repository or work tree.
+_GIT_PATH_OPTIONS: Final[frozenset[str]] = frozenset({"-C", "--git-dir", "--work-tree"})
+#: git global options that take a separate value to skip.
+_GIT_VALUE_OPTIONS: Final[frozenset[str]] = frozenset({"-c", "--namespace", "--exec-path"})
 
 # --- segmentation and the inert-text exemption ------------------------------
 
@@ -235,17 +292,167 @@ def _bash_runs_guarded_action(command: str) -> bool:
     return False
 
 
-def _bash_sets_bypass_env_var(command: str) -> bool:
-    """Whether ``command`` sets the handoff variable, or steers an upgrade it runs."""
-    segments = [
+def _live_segments(command: str) -> list[str]:
+    """The stages of ``command`` that run something rather than mention it."""
+    return [
         segment
         for segment in _executable_segments(command)
         if not _is_inert_mention_segment(segment)
     ]
+
+
+def _past_wrappers(words: list[str]) -> list[str]:
+    """``words`` from the command a wrapper chain finally runs.
+
+    Skips `VAR=value` prefixes and the wrappers in `_WRAPPER_HEADS` with their
+    options, `env`'s assignments and `timeout`'s duration.
+    """
+    index = 0
+    while index < len(words):
+        word = words[index]
+        if _ASSIGNMENT_RE.match(word):
+            index += 1
+            continue
+        head = command_word(word)
+        if head not in _WRAPPER_HEADS:
+            return words[index:]
+        index += 1
+        while index < len(words) and (words[index].startswith("-") or "=" in words[index]):
+            index += 1
+        if head == "timeout" and index < len(words):
+            index += 1
+    return []
+
+
+def _script_carries_the_upgrade(script: Path) -> bool | None:
+    """Whether ``script`` is a copy of Layer 1 or 2; None when it cannot be read."""
+    if not script.is_file():
+        return None
+    try:
+        with script.open("rb") as handle:
+            content = handle.read(_SCRIPT_READ_LIMIT)
+    except OSError as exc:
+        logger.debug("upgrade_approval_guard: cannot read %s (%s)", script, exc)
+        return None
+    return _UPGRADE_SCRIPT_SIGNATURE.encode() in content
+
+
+def _script_run_is_upgrade(script: str, arguments: list[str], cwd: str | None) -> bool:
+    """Whether running ``script`` with ``arguments`` is an upgrade.
+
+    A script this handler can read is judged by its content (every copy of
+    Layer 1 and Layer 2 carries the handoff variable, whatever the file is
+    named); one it cannot (a `$tmp`, a path not there yet) by its arguments.
+    """
+    if "$" not in script:
+        path = Path(script)
+        if not path.is_absolute() and cwd is not None:
+            path = Path(cwd) / path
+        if path.is_absolute():
+            carries = _script_carries_the_upgrade(path)
+            if carries is not None:
+                return carries
+    return _UPGRADE_SHAPED_ARG_RE.search(" ".join(arguments)) is not None
+
+
+def _shell_run_is_upgrade(operands: list[str], cwd: str | None, depth: int) -> bool:
+    """Whether a shell given ``operands`` runs the upgrade.
+
+    `-c` runs its string, which is scanned as a command; `-s` (or no script
+    operand) reads the script from stdin, so only its arguments can tell.
+    """
+    inline = False
+    reads_stdin = False
+    while operands and operands[0].startswith("-"):
+        flag, operands = operands[0], operands[1:]
+        if flag == "--":
+            break
+        if not flag.startswith("--"):
+            inline = inline or "c" in flag[1:]
+            reads_stdin = reads_stdin or "s" in flag[1:]
+    if inline:
+        return bool(operands) and _command_runs_upgrade(operands[0], cwd, depth + 1)
+    if reads_stdin or not operands:
+        return _UPGRADE_SHAPED_ARG_RE.search(" ".join(operands)) is not None
+    return _script_run_is_upgrade(operands[0], operands[1:], cwd)
+
+
+def _segment_runs_upgrade(segment: str, cwd: str | None, depth: int) -> bool:
+    """Whether ``segment`` runs the upgrade, by name, argument or content."""
+    if _UPGRADE_ENTRY_RE.search(segment) or _UPGRADE_ONLY_ARG_RE.search(segment):
+        return True
+    words = _past_wrappers(_shell_words(segment))
+    if not words:
+        return False
+    head = command_word(words[0])
+    if head in _SHELL_HEADS:
+        return _shell_run_is_upgrade(words[1:], cwd, depth)
+    if "/" in words[0] or words[0].startswith("$"):
+        return _script_run_is_upgrade(words[0], words[1:], cwd)
+    return False
+
+
+def _command_runs_upgrade(command: str, cwd: str | None, depth: int = 0) -> bool:
+    """Whether any stage of ``command`` runs the upgrade."""
+    if depth > _MAX_INLINE_DEPTH:
+        return False
+    return any(_segment_runs_upgrade(segment, cwd, depth) for segment in _live_segments(command))
+
+
+def _bash_sets_bypass_env_var(command: str, cwd: str | None) -> bool:
+    """Whether ``command`` sets the handoff variable, or steers an upgrade it runs."""
+    segments = _live_segments(command)
     if any(_ENV_VAR_ASSIGN_RE.search(segment) for segment in segments):
         return True
-    runs_upgrade = any(_UPGRADE_ENTRY_RE.search(segment) for segment in segments)
-    return runs_upgrade and any(_STEERING_ASSIGN_RE.search(segment) for segment in segments)
+    steers = any(_STEERING_ASSIGN_RE.search(segment) for segment in segments)
+    return steers and _command_runs_upgrade(command, cwd)
+
+
+def _git_moves_daemon_clone(words: list[str], clone_cwd: bool) -> bool:
+    """Whether a `git ...` word list moves the daemon clone to another commit.
+
+    ``clone_cwd`` says an earlier stage changed into the clone, so a git with
+    no `-C` acts on it.
+    """
+    names_clone = clone_cwd
+    index = 1
+    while index < len(words):
+        word = words[index]
+        option, _, value = word.partition("=")
+        if option in _GIT_PATH_OPTIONS:
+            if not value and index + 1 < len(words):
+                index += 1
+                value = words[index]
+            if _DAEMON_CLONE_PATH_RE.search(value):
+                names_clone = True
+            elif option == "-C":
+                names_clone = False
+            index += 1
+            continue
+        if word in _GIT_VALUE_OPTIONS:
+            index += 2
+            continue
+        if word.startswith("-"):
+            index += 1
+            continue
+        return names_clone and word in _HEAD_MOVING_GIT_SUBCOMMANDS
+    return False
+
+
+def _bash_moves_daemon_clone(command: str) -> bool:
+    """Whether ``command`` checks out, pulls or resets the daemon clone by hand."""
+    in_clone = False
+    for segment in _live_segments(command):
+        words = _past_wrappers(_shell_words(segment))
+        if not words:
+            continue
+        head = command_word(words[0])
+        if head in ("cd", "pushd"):
+            in_clone = len(words) > 1 and _DAEMON_CLONE_PATH_RE.search(words[-1]) is not None
+            continue
+        if head == "git" and _git_moves_daemon_clone(words, in_clone):
+            return True
+    return False
 
 
 def _extra_write_targets(command: str) -> list[str]:
@@ -323,7 +530,8 @@ class UpgradeApprovalGuardHandler(PreToolUseHandlerBase):
             blocked=(
                 "an agent action that grants or forges the owner's upgrade approval "
                 "(running `approve-upgrade`, writing/touching a marker under "
-                "`upgrade-approvals/`, or forging a venv `.daemon-version` stamp)"
+                "`upgrade-approvals/`, forging a venv `.daemon-version` stamp, or moving "
+                "the `.claude/hooks-daemon` clone to another ref by hand)"
             ),
             why=(
                 "Approving a breaking upgrade is the project OWNER's step, not the "
@@ -344,8 +552,12 @@ class UpgradeApprovalGuardHandler(PreToolUseHandlerBase):
                 "`approve-upgrade` (or the standalone gate's `approve` subcommand) "
                 "itself, writing or touching the `<version>.approved` marker under "
                 "`upgrade-approvals/` by any Bash route or with Write/Edit/NotebookEdit, "
-                "or forging a venv's `.daemon-version` stamp (which would make the gate "
-                "believe the target is already installed).\n\n"
+                "forging a venv's `.daemon-version` stamp (which would make the gate "
+                "believe the target is already installed), or moving the "
+                "`.claude/hooks-daemon` clone to another ref by hand (`checkout`, "
+                "`switch`, `pull`, `merge`, `reset`, `rebase` and the like), which "
+                "installs a version the gate never read. Upgrade through "
+                "`scripts/upgrade.sh`, which runs the gate first.\n\n"
                 "What to do instead: report the gate's reasons to the user and STOP. "
                 "The owner decides, in their own terminal."
             ),
@@ -364,17 +576,24 @@ class UpgradeApprovalGuardHandler(PreToolUseHandlerBase):
                 "(Layer 2). Layer 2 believes it only when its parent process wrote it, and "
                 "a command that sets the variable and runs Layer 2 is that parent, so "
                 "setting it anywhere impersonates Layer 1.\n\n"
-                "On a command that runs an upgrade entry point (`upgrade.sh`, "
-                "`upgrade_version.sh`, `upgrade_gate_standalone.py`), these are denied "
-                f"too: {', '.join(f'`{name}`' for name in _UPGRADE_STEERING_VARS)}. They "
-                "choose the interpreter, the venv whose stamp is the installed version, the "
-                "forwarded flags or the code that runs, which is how a crafted interpreter "
-                "or a forged venv could answer for the pre-deploy gate. Layer 2 takes "
-                "neither the gate's interpreter nor the installed version from them, and "
-                "this rule keeps an agent from steering the rest.\n\n"
-                "Run the upgrade with none of them set. If it genuinely needs one (an "
-                "interpreter that is not on PATH, say), tell the user, who can run it "
-                "themselves."
+                "On a command that runs the upgrade, these are denied too: "
+                f"{', '.join(f'`{name}`' for name in _UPGRADE_STEERING_VARS)}, and "
+                "exporting a shell function (`export -f`). The upgrade is recognised by "
+                "what it is, not its file name: `upgrade.sh`, `upgrade_version.sh` or "
+                "`upgrade_gate_standalone.py` by name; Layer 1's "
+                "`--skip-reading-confirmation`; a script whose content carries the "
+                "handoff variable, as every copy of Layer 1 and Layer 2 does; or a "
+                'script that cannot be read (`bash "$tmp"`, stdin) run with the '
+                "upgrade's arguments (`--project-root`, or the `.claude/hooks-daemon` "
+                "clone). The variables choose the interpreter, the venv whose stamp is "
+                "the installed version, the tools and shell code that run, or the "
+                "forwarded flags. The gate itself takes none of them: it runs from fixed "
+                "system locations under a cleared environment and hands its verdict back "
+                "in a file bound to a one-time nonce. This rule keeps an agent from "
+                "steering the rest of the upgrade.\n\n"
+                "Run the upgrade with none of them set. If it genuinely needs one (a "
+                "Python 3.11+ outside the system locations, say), tell the user, who "
+                "can run it themselves."
             ),
         )
         self._formatter = RuleFormatter()
@@ -416,7 +635,10 @@ class UpgradeApprovalGuardHandler(PreToolUseHandlerBase):
         if not command:
             return None
 
-        if _bash_sets_bypass_env_var(command):
+        raw_cwd = hook_input.get(HookInputField.CWD)
+        cwd = raw_cwd if isinstance(raw_cwd, str) and raw_cwd else None
+
+        if _bash_sets_bypass_env_var(command, cwd):
             return _Violation(
                 rule_id=RuleID.UPGRADE_APPROVAL_ENV_BYPASS,
                 note=f"COMMAND: {command}",
@@ -428,8 +650,16 @@ class UpgradeApprovalGuardHandler(PreToolUseHandlerBase):
                 note=f"COMMAND: {command}",
             )
 
-        raw_cwd = hook_input.get(HookInputField.CWD)
-        cwd = raw_cwd if isinstance(raw_cwd, str) and raw_cwd else None
+        if _bash_moves_daemon_clone(command):
+            return _Violation(
+                rule_id=RuleID.UPGRADE_APPROVAL_AGENT_ACTION,
+                note=(
+                    f"COMMAND: {command}\n\nMoving `.claude/hooks-daemon` to another ref by "
+                    "hand installs that version without the pre-deploy gate. Run the "
+                    "upgrade through `scripts/upgrade.sh`, which runs the gate first."
+                ),
+            )
+
         writes = bash_file_writes(command, cwd, _read_text)
         destinations = list(writes.destinations) + _extra_write_targets(command)
         for destination in destinations:
@@ -486,13 +716,21 @@ class UpgradeApprovalGuardHandler(PreToolUseHandlerBase):
             "directory) or with Write/Edit/NotebookEdit.\n"
             "3. Assigning, exporting or `env`-setting `HOOKS_DAEMON_UPGRADE_HANDOFF`, "
             "which impersonates the upgrade's Layer 1 (`scripts/upgrade.sh`); or, on a "
-            "command that runs `upgrade.sh`, `upgrade_version.sh` or "
-            "`upgrade_gate_standalone.py`, setting a variable that picks its "
-            "interpreter, venv, flags, pass state, git view or code: "
-            f"{', '.join(f'`{name}`' for name in _UPGRADE_STEERING_VARS)}. Run the "
-            "upgrade with none of them set.\n"
+            "command that runs the upgrade, setting a variable that picks its "
+            "interpreter, venv, tools, flags, pass state, git view or code: "
+            f"{', '.join(f'`{name}`' for name in _UPGRADE_STEERING_VARS)}, or "
+            "exporting a shell function. The upgrade is recognised by what it is, not "
+            "its file name: `upgrade.sh`/`upgrade_version.sh`/"
+            "`upgrade_gate_standalone.py` by name, `--skip-reading-confirmation`, a "
+            "script carrying `HOOKS_DAEMON_UPGRADE_HANDOFF`, or an unreadable script "
+            '(`bash "$tmp"`) run with `--project-root` or the daemon clone as an '
+            "argument. Run the upgrade with none of them set.\n"
             "4. Forging a venv's `.daemon-version` stamp under `untracked/venv*/`, by "
-            "any of the routes in (2).\n\n"
+            "any of the routes in (2).\n"
+            "5. Moving the `.claude/hooks-daemon` clone to another ref by hand "
+            "(`git -C .claude/hooks-daemon checkout|switch|pull|merge|reset|rebase ...`): "
+            "that installs a version the gate never read. Upgrade through "
+            "`scripts/upgrade.sh`; fetching, `show`, `log` and `describe` are fine.\n\n"
             "**If you hit this**: report the gate's reasons to the user and STOP. Do "
             "not retry with a different spelling — ask the owner to run the approval "
             "command themselves.\n\n"

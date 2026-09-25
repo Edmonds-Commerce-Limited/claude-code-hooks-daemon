@@ -20,7 +20,9 @@ Upgrade the Claude Code Hooks Daemon and commit the result atomically.
    pre-upgrade task whose `**Detect**` pattern found a call site in this
    project, at `file:line`. When there is anything to read, the run stops
    with `UPGRADE STOPPED before anything was deployed`, puts the daemon
-   checkout back on the installed version, and exits non-zero:
+   checkout back on the installed version when it can tell which that is (the
+   stop says so, and prints the command to run, when it cannot), and exits
+   non-zero:
 
    - **Exit 3: read, act, re-run.** Read every listed document. Carry out each
      listed pre-upgrade task in the project as its file says (its `## How to handle`), and commit that work separately. Then re-run the same command with
@@ -35,10 +37,19 @@ Upgrade the Claude Code Hooks Daemon and commit the result atomically.
      typed phrase, so you cannot record it; do not try. After the owner has
      approved, re-run with the same `--skip-reading-confirmation=<digest>`.
 
-   Any other non-zero exit is an upgrade failure; report it. No metadata block
-   is emitted on any stop. If the output says `THE UPGRADE DID NOT COMPLETE`,
-   the upgrade stopped even though the command exited 0: an old installed
-   upgrade script ran it. Run the command printed below that line.
+   Any other non-zero exit is an upgrade failure; report it with the printed
+   error (exit 1 before deploying can also mean no Python 3.11+ in a system
+   location, which the user installs, or a checkout the stop could not put
+   back; see "The pre-deploy gate" in `CLAUDE/LLM-UPDATE.md`). No metadata
+   block is emitted on any stop. If the output says `THE UPGRADE DID NOT COMPLETE`, the upgrade stopped even though the command exited 0: an old
+   installed upgrade script ran it. Run the command printed below that line.
+
+   Run the upgrade with no environment variable set in front of it. An
+   agent that sets `PATH`, `HOOKS_DAEMON_PYTHON` or another variable the
+   upgrade reads on an upgrade command is denied (`upgrade_approval_guard`),
+   and so is checking out, pulling or resetting `.claude/hooks-daemon` by
+   hand. If the upgrade genuinely needs `HOOKS_DAEMON_PYTHON` (no Python
+   3.11+ it can find), ask the user to run it themselves.
 
 2. **Parse the metadata block** emitted on stdout between the
    `<<<UPGRADE_METADATA` and `UPGRADE_METADATA>>>` sentinels. Fields:
@@ -160,7 +171,7 @@ Upgrade the Claude Code Hooks Daemon and commit the result atomically.
 
    ```bash
    .claude/hooks-daemon/bin/hooks-daemon check-post-upgrade-tasks \
-       --from ${from_version} --to ${to_version}
+       --from ${from_version} --to ${to_version} --project-root "$PWD"
    ```
 
    Exit code `0` means there are no tasks, so skip to the next step. Exit

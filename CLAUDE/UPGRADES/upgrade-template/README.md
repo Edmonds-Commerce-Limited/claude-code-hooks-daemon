@@ -99,40 +99,44 @@ handlers:
 
 ## Step-by-Step Upgrade Instructions
 
-### 1. Update Daemon Code
+### 1. Fetch the New Version
 
-**Option A - Using Git** (recommended if you cloned the repo):
-
-```bash
-cd .claude/hooks-daemon
-git fetch origin
-git checkout vX.Z  # Specific tag
-# Or: git pull origin main  # Latest main branch
-```
-
-**Option B - Manual Download** (if not using git):
+Do NOT check the new version out yourself, and do not replace the clone by
+hand: the upgrade checks it out, runs the pre-deploy gate against what is
+installed, and puts the clone back if the gate stops. Moving
+`.claude/hooks-daemon` to another ref by hand installs a version the gate
+never read, and `upgrade_approval_guard` denies it.
 
 ```bash
-cd .claude
-mv hooks-daemon hooks-daemon.backup
-wget https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/archive/vX.Z.tar.gz
-tar -xzf vX.Z.tar.gz
-mv claude-code-hooks-daemon-X.Z hooks-daemon
-cd hooks-daemon
+git -C .claude/hooks-daemon fetch --tags
 ```
 
-### 2. Update Dependencies
+### 2. Run the New Version's Own Upgrade Script
 
 Run the TARGET's own Layer 1: the one installed before the upgrade may predate
-the pre-deploy gate, and then reports a stopped upgrade as success. After
-Option B there is no clone to read it from; the unpacked tree's own
-`scripts/upgrade.sh` is the target's.
+the pre-deploy gate, and then reports a stopped upgrade as success.
+
+**Option A - from the clone** (after step 1):
 
 ```bash
 tmp="$(mktemp)"
 git -C .claude/hooks-daemon show "v{NEW_VERSION}:scripts/upgrade.sh" > "$tmp"
 bash "$tmp" --project-root "$PWD" v{NEW_VERSION}
 ```
+
+**Option B - from GitHub** (no usable clone; the script clones one when
+`.claude/hooks-daemon/` is missing):
+
+```bash
+mkdir -p untracked/scratch
+curl -fsSL "https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/v{NEW_VERSION}/scripts/upgrade.sh" \
+    -o untracked/scratch/upgrade.sh
+bash untracked/scratch/upgrade.sh --project-root "$PWD" v{NEW_VERSION}
+```
+
+If the gate stops (exit `3` or `4`), follow "The pre-deploy gate" in
+`CLAUDE/LLM-UPDATE.md` and re-run the same command with
+`--skip-reading-confirmation=<digest>`.
 
 **Expected output**:
 

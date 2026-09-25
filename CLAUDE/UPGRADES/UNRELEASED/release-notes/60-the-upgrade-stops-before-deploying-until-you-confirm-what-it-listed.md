@@ -18,14 +18,16 @@ The gate compares the target with the version you have INSTALLED, not with
 whatever the daemon checkout holds: the venv's version stamp, else the version
 in your committed `.claude/HOOKS-DAEMON.md`. So a fresh clone of your project,
 a checkout moved by hand and a re-run all see the real range. On a stop it
-puts the checkout back on that installed version. If neither source names a
-version, the gate cannot rule anything out and asks for the owner (see "a
-breaking upgrade needs the owner's one-shot approval").
+puts the checkout back on that installed version when it can tell which that
+is; when nothing names it, or the reset fails, the stop says so and prints the
+command that does it. If neither source names a version, the gate cannot rule
+anything out and asks for the owner (see "a breaking upgrade needs the owner's
+one-shot approval").
 
 An upgrade script older than the gate (an installed daemon's own
 `scripts/upgrade.sh`, or a pinned `HOOKS_DAEMON_UPGRADE_REF` older than this
 release) cannot pass the flag and still reports a stop as success. The new
-version's own script restores the checkout anyway and prints
+version's own script restores the checkout anyway (on the same terms) and prints
 `THE UPGRADE DID NOT COMPLETE` with the command that runs the new release's
 `upgrade.sh` from your clone. `scripts/upgrade.sh` now also exits with the
 version-specific script's own code; it used to exit `0` when that script

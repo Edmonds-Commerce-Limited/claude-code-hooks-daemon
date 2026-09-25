@@ -114,17 +114,24 @@ MAX_SCANNED_LINE_CHARS: Final[int] = 4096
 _GIT_LIST_TIMEOUT_SECONDS: Final[int] = 60
 #: Tracked files, plus untracked files the project's own `.gitignore` files do
 #: not exclude. Not `--exclude-standard`: `.git/info/exclude` and
-#: `core.excludesFile` are local state that could hide a call site.
+#: `core.excludesFile` are local state that could hide a call site. No
+#: fsmonitor either: the project's own config could name one, and git would
+#: run it in the scan.
 _GIT_LIST_ARGS: Final[tuple[str, ...]] = (
+    "-c",
+    "core.fsmonitor=false",
     "ls-files",
     "-z",
     "--cached",
     "--others",
     "--exclude-per-directory=.gitignore",
 )
-#: Git reads these to pick its repository, index and config; none may steer
-#: which files the scan sees.
-_GIT_ENV_PREFIX: Final[str] = "GIT_"
+#: Where the scan's git is looked up: fixed system locations, never the
+#: caller's PATH, so a planted `git` cannot choose which files the scan sees
+#: (Plan 00376 fresh review BLOCKER 1). Layer 2's GATE_SAFE_PATH is the same list.
+TRUSTED_TOOL_PATH: Final[str] = "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin"
+#: The only variable git gets from the caller: HOME, for its own safe.directory.
+_GIT_ENV_PASSED: Final[tuple[str, ...]] = ("HOME",)
 #: A NUL byte marks a binary file, which has no lines to report.
 _NUL_BYTE: Final[bytes] = b"\x00"
 _HIT_TEXT_WIDTH: Final[int] = 160
@@ -288,12 +295,11 @@ def _is_skipped(rel: str) -> bool:
 
 def _git_listed_files(project_root: Path) -> list[str] | None:
     """The files git would track or offer to track, or None outside a work tree."""
-    git = shutil.which("git")
+    git = shutil.which("git", path=TRUSTED_TOOL_PATH)
     if git is None:
         return None
-    env = {
-        name: value for name, value in os.environ.items() if not name.startswith(_GIT_ENV_PREFIX)
-    }
+    env = {name: os.environ[name] for name in _GIT_ENV_PASSED if name in os.environ}
+    env["PATH"] = TRUSTED_TOOL_PATH
     result = subprocess.run(
         [git, "-C", str(project_root), *_GIT_LIST_ARGS],
         capture_output=True,

@@ -37,6 +37,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import sys
 from dataclasses import dataclass, field
@@ -89,11 +90,20 @@ _RELEASE_RE: Final[re.Pattern[str]] = re.compile(r"^[vV]?\d+(?:\.\d+){0,2}(?:\+\
 _DOC_MARKER_RE: Final[re.Pattern[str]] = re.compile(r"Generated on [^(\n]*\(v(\d+\.\d+\.\d+)\)")
 _DIGEST_LENGTH: Final[int] = 12
 _RULE: Final[str] = "=" * 70
-_APPROVAL_PHRASE: Final[str] = "approve upgrade from v{frm} to v{to}"
+_APPROVAL_PHRASE: Final[str] = "approve upgrade from {frm} to v{to}"
+_UNKNOWN_FROM_PHRASE: Final[str] = "an unknown version"
 _STANDALONE_REL: Final[str] = "src/claude_code_hooks_daemon/install/upgrade_gate_standalone.py"
 _APPROVAL_USED_PREFIX: Final[str] = "approval-marker="
-_VERDICT_PREFIX: Final[str] = "gate-verdict="
+_VERDICT_PREFIX: Final[str] = "verdict="
+_NONCE_PREFIX: Final[str] = "nonce="
+#: Only the gate's own user may read or write its verdict file.
+_VERDICT_FILE_MODE: Final[int] = 0o600
 _EARLIEST_RELEASE: Final[str] = "0.0.0"
+#: What the gate last let through, in the approvals directory the upgrade
+#: guard already keeps agents from writing.
+GATED_INSTALL_FILENAME: Final[str] = "gated-install.json"
+_FIELD_STAMP: Final[str] = "stamp"
+_FIELD_RECORDED_AT: Final[str] = "recorded_at"
 
 _FIELD_TO: Final[str] = "to"
 _FIELD_FROM: Final[str] = "from"
@@ -363,6 +373,53 @@ def check_approval(
     return ApprovalState.VALID if matches else ApprovalState.INVALID
 
 
+def _gated_install_path(untracked_dir: Path) -> Path:
+    return untracked_dir / APPROVAL_SUBDIR / GATED_INSTALL_FILENAME
+
+
+def _install_binding(daemon_dir: Path, project_root: Path) -> dict[str, str]:
+    return {
+        _FIELD_DAEMON_DIR: str(daemon_dir.resolve()),
+        _FIELD_PROJECT_ROOT: str(project_root.resolve()),
+    }
+
+
+def record_gated_install(
+    untracked_dir: Path, *, stamp: str, daemon_dir: Path, project_root: Path
+) -> Path:
+    """Record that the gate let an upgrade to ``stamp`` through; return the record's path.
+
+    Only an upgrade recorded here counts as installed when the venv stamp
+    already equals the target (fresh review MAJOR 1): ``hooks-daemon repair``
+    after a manual checkout writes the same stamp with no gate involved.
+    """
+    payload = _install_binding(daemon_dir, project_root)
+    payload[_FIELD_STAMP] = stamp
+    payload[_FIELD_RECORDED_AT] = datetime.now(UTC).isoformat(timespec="seconds")
+    path = _gated_install_path(untracked_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def gated_install_stamp(untracked_dir: Path, *, daemon_dir: Path, project_root: Path) -> str | None:
+    """The stamp the gate last let through for this install, or None."""
+    path = _gated_install_path(untracked_dir)
+    if not path.is_file():
+        return None
+    try:
+        recorded = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(recorded, dict):
+        return None
+    binding = _install_binding(daemon_dir, project_root)
+    if any(recorded.get(name) != value for name, value in binding.items()):
+        return None
+    stamp = recorded.get(_FIELD_STAMP)
+    return stamp if isinstance(stamp, str) else None
+
+
 def _decide(
     *,
     daemon_dir: Path,
@@ -426,6 +483,7 @@ def _unknown_range_report(
     include_unreleased: bool,
     acknowledgement: str | None,
     untracked_dir: Path,
+    unknown_reason: str | None = None,
 ) -> GateReport:
     """A range the gate cannot read: detect everything, and send it to the owner."""
     findings: list[TaskFinding] = []
@@ -442,7 +500,9 @@ def _unknown_range_report(
             include_unreleased=include_unreleased,
         )
         findings = evaluate(tasks, project_root)
-    if not _is_release(from_version):
+    if unknown_reason is not None:
+        escalations.append(unknown_reason)
+    elif not _is_release(from_version):
         escalations.append(
             "the installed version is unknown (no venv stamp and no version in "
             f"{HOOKS_DAEMON_DOC.as_posix()}), so no MAJOR bump or breaking change can be "
@@ -504,6 +564,23 @@ def evaluate_gate(
     ref = target_ref or (f"v{approval_key(to_version)}" if _is_release(to_version) else to_version)
     store = OneShotApprovalStore(APPROVAL_SUBDIR)
     if installed_stamp and target_stamp and installed_stamp == target_stamp:
+        gated = gated_install_stamp(untracked_dir, daemon_dir=daemon_dir, project_root=project_root)
+        if gated != target_stamp:
+            return _unknown_range_report(
+                daemon_dir=daemon_dir,
+                project_root=project_root,
+                from_version=None,
+                to_version=to_version,
+                target_ref=ref,
+                include_unreleased=include_unreleased,
+                acknowledgement=acknowledgement,
+                untracked_dir=untracked_dir,
+                unknown_reason=(
+                    f"the venv stamp says {target_stamp} is already installed, but no upgrade "
+                    "through this gate installed it (a repair after a manual checkout writes "
+                    "the same stamp), so the version installed before it cannot be told"
+                ),
+            )
         return GateReport(
             daemon_dir=daemon_dir,
             project_root=project_root,
@@ -579,10 +656,20 @@ def evaluate_gate(
     )
 
 
+def _from_label(from_version: str | None) -> str:
+    """``v3.66.0``, or words a human can read (and type) for an unknown version."""
+    key = _version_key(from_version)
+    return _UNKNOWN_FROM_PHRASE if key == UNKNOWN_VERSION else f"v{key}"
+
+
 def _reading_lines(report: GateReport) -> list[str]:
     to = strip_tag_prefix(report.to_version)
-    frm = _version_key(report.from_version)
-    lines = ["", "📚 REQUIRED READING: Upgrade Guides", _RULE, f"Upgrading from v{frm} to v{to}"]
+    lines = [
+        "",
+        "📚 REQUIRED READING: Upgrade Guides",
+        _RULE,
+        f"Upgrading from {_from_label(report.from_version)} to v{to}",
+    ]
     if not report.range_known:
         lines.extend(
             [
@@ -632,9 +719,10 @@ def _approval_lines(report: GateReport) -> list[str]:
             "asks them to type a confirmation phrase naming both versions). With a daemon",
             "that has the command:",
             f"  .claude/hooks-daemon/bin/{APPROVE_COMMAND} {to} --from {frm}",
-            "or, from ANY installed version, with this release's own code:",
+            "or, from ANY installed version, with this release's own code (the gate's own",
+            "Python 3.11+ runs it):",
             f'  tmp="$(mktemp -d)" && git -C "{daemon_dir}" archive {report.target_ref} src '
-            f'| tar -x -C "$tmp" && python3 "$tmp/{_STANDALONE_REL}" approve '
+            f'| tar -x -C "$tmp" && "{sys.executable}" "$tmp/{_STANDALONE_REL}" approve '
             f'--daemon-dir "{daemon_dir}" --project-root "{report.project_root}" '
             f"--from {frm} --to {to}",
             f"Then re-run the upgrade with {SKIP_READING_FLAG}={report.digest}",
@@ -718,16 +806,35 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Where approvals live (default: the project's daemon untracked dir)",
     )
+    parser.add_argument(
+        "--verdict-file",
+        type=Path,
+        default=None,
+        help="Where to write the verdict, in a directory only the caller created",
+    )
+    parser.add_argument("--nonce", default="", help="The caller's nonce, echoed in the verdict")
     return parser
+
+
+def _write_verdict(path: Path, nonce: str, report: GateReport) -> None:
+    lines = [f"{_NONCE_PREFIX}{nonce}", f"{_VERDICT_PREFIX}{report.verdict.value}"]
+    if report.approval_used is not None:
+        lines.append(f"{_APPROVAL_USED_PREFIX}{report.approval_used}")
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, _VERDICT_FILE_MODE)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        handle.write("\n".join(lines) + "\n")
 
 
 def main(argv: list[str] | None = None) -> int:
     """Evaluate the gate, print its report to stderr, return the verdict's exit code.
 
-    Stdout carries ``gate-verdict=<verdict>``, which the caller requires before
-    it believes a zero exit, and, when an owner's approval let the upgrade
-    through, ``approval-marker=<path>`` for the caller to remove once the
-    upgrade completes.
+    With ``--verdict-file`` the verdict is written there, first line the
+    caller's ``--nonce``, then ``verdict=<verdict>`` and, when an owner's
+    approval let the upgrade through, ``approval-marker=<path>`` for the
+    caller to remove once the upgrade completes. The caller believes a zero
+    exit only with that file (fresh review BLOCKER 1): a stdout line is what
+    any wrapper process can print. A PROCEED for a target stamp is recorded
+    (:func:`record_gated_install`) as what the gate let through.
     """
     args = _build_parser().parse_args(argv)
     project_root = Path(args.project_root).resolve()
@@ -755,9 +862,15 @@ def main(argv: list[str] | None = None) -> int:
         target_ref=args.target_ref,
     )
     print(format_gate_report(report), file=sys.stderr)
-    print(f"{_VERDICT_PREFIX}{report.verdict.value}")
-    if report.approval_used is not None:
-        print(f"{_APPROVAL_USED_PREFIX}{report.approval_used}")
+    if report.verdict is GateVerdict.PROCEED and args.target_stamp and not report.already_installed:
+        record_gated_install(
+            untracked_dir,
+            stamp=str(args.target_stamp),
+            daemon_dir=Path(args.daemon_dir).resolve(),
+            project_root=project_root,
+        )
+    if args.verdict_file is not None:
+        _write_verdict(Path(args.verdict_file), str(args.nonce), report)
     return report.verdict.exit_code
 
 
@@ -777,7 +890,7 @@ def run_approval(
     the phrase names both versions, so a human confirms the exact upgrade the
     gate stopped. Returns 0 when the marker was written, 1 otherwise.
     """
-    frm = _version_key(from_version)
+    frm = _from_label(from_version)
     to = approval_key(to_version)
     if not stdin.isatty():
         print(
@@ -787,7 +900,7 @@ def run_approval(
         )
         return 1
     phrase = _APPROVAL_PHRASE.format(frm=frm, to=to)
-    print(f"To approve ONE upgrade of {project_root} from v{frm} to v{to}, type:", file=stdout)
+    print(f"To approve ONE upgrade of {project_root} from {frm} to v{to}, type:", file=stdout)
     print(f"  {phrase}", file=stdout)
     stdout.flush()
     answer = stdin.readline().strip()
@@ -801,7 +914,7 @@ def run_approval(
         daemon_dir=daemon_dir,
         project_root=project_root,
     )
-    print(f"Approved one upgrade from v{frm} to v{to}; marker: {marker}", file=stdout)
+    print(f"Approved one upgrade from {frm} to v{to}; marker: {marker}", file=stdout)
     print(
         f"The upgrade re-run with {SKIP_READING_FLAG}=<digest> uses it, and removes it once "
         "that upgrade completes.",

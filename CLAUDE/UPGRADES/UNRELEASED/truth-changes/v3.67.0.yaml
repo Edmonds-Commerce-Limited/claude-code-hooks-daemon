@@ -92,15 +92,20 @@ truth_changes:
       Every upgrade runs a pre-deploy gate once the target is checked out and
       before anything is deployed (Plan 00376). When it lists something (the
       crossed upgrade guides, a pre-upgrade task whose Detect pattern found a
-      call site in the project, a breaking change), the upgrade stops, puts
-      the daemon checkout back on the installed version, deploys nothing, and
-      exits 3. The caller reads the list, carries out the pre-upgrade tasks
+      call site in the project, a breaking change), the upgrade stops,
+      deploys nothing, and exits 3; it puts the daemon checkout back on the
+      installed version when that version can be told (otherwise, or when the
+      reset fails, it prints the command that does). The caller reads the list, carries out the pre-upgrade tasks
       it names, and re-runs with `--skip-reading-confirmation=<digest>`, the
       digest the stop printed. A MAJOR version, a crossed `breaking: true`
       config-changes manifest, a critical pre-upgrade task with hits or an
       unreadable installed version exits 4 instead, and also needs the
       project owner's approval, given in their own terminal with a typed
       phrase; an agent reports and stops, and cannot record that approval.
+      Checking out, pulling or resetting `.claude/hooks-daemon` by hand no
+      longer counts as an upgrade: an agent is denied it, and a venv stamp
+      that already names the target counts as installed only when the gate
+      itself let that version through.
 
       IF YOUR PROJECT'S DOCS OR AUTOMATION SAY A DAEMON UPGRADE ALWAYS RUNS
       TO COMPLETION UNATTENDED, OR TREAT ANY NON-ZERO EXIT OF THE UPGRADE AS

@@ -125,28 +125,55 @@ def test_no_environment_override_picks_the_gate_interpreter() -> None:
     text = _script()
     body = _function_body(text, _GATE)
     assert "HOOKS_DAEMON_PYTHON" not in body
-    assert '"$GATE_PYTHON" -I ' in body, "isolated mode: no PYTHON* variable reaches the gate"
+    assert '"$GATE_PYTHON" -I -S ' in body, "no PYTHON* variable, site-packages or .pth code"
     picker = _function_body(text, "_pick_gate_python")
     assert "unset HOOKS_DAEMON_PYTHON HOOKS_DAEMON_VENV_PATH" in picker
+    assert "venv" not in picker.split("{", 1)[1], "the project's venv is agent-writable"
 
 
 def test_the_installed_version_ignores_the_venv_overrides() -> None:
     """HOOKS_DAEMON_VENV_PATH to a forged venv made the gate see the target installed."""
     text = _script()
-    assert re.search(
-        r'^\s*INSTALLED_VENV_PYTHON="\$\(unset HOOKS_DAEMON_PYTHON HOOKS_DAEMON_VENV_PATH;',
-        text,
-        re.MULTILINE,
-    )
-    assert re.search(
-        r'^\s*INSTALLED_VERSION="\$\(get_venv_version .*INSTALLED_VENV_PYTHON', text, re.M
-    )
+    body = _function_body(text, "_read_installed_version")
+    assert "(unset HOOKS_DAEMON_PYTHON HOOKS_DAEMON_VENV_PATH; resolve_existing_venv_python" in body
+    assert "/untracked/venv-*)" in body, "only this daemon dir's own venvs count"
+    assert 'INSTALLED_VERSION="$(get_venv_version "$venv_dir")"' in body
+    assert re.search(r"^_read_installed_version$", text, re.MULTILINE)
 
 
-def test_the_gate_runs_under_a_timeout_and_a_zero_exit_needs_its_verdict() -> None:
+def test_everything_that_feeds_the_gate_runs_on_the_fixed_system_path() -> None:
+    """Fresh review BLOCKER 1b: a tool planted on PATH answered for the gate."""
+    text = _script()
+    for name in (
+        _GATE,
+        "_pick_gate_python",
+        "_read_installed_version",
+        "_installed_release_from_docs",
+        "_target_release",
+        "_restore_target",
+        "abort_before_deploy",
+    ):
+        assert 'local PATH="$GATE_SAFE_PATH"' in _function_body(text, name), name
+    assert re.search(r'^GATE_SAFE_PATH="/usr/bin:/bin:', text, re.MULTILINE)
+
+
+def test_imported_shell_functions_are_dropped_before_anything_runs() -> None:
+    """An exported `timeout()` function shadowed the tool by name."""
+    for script in (_LAYER2, _LAYER2.with_name("upgrade.sh")):
+        text = script.read_text(encoding="utf-8")
+        prelude = text.index("set -euo pipefail")
+        drop = text.index('unset -f "$_imported_function"')
+        assert prelude < drop < text.index("\n}\n"), script.name
+
+
+def test_the_gate_runs_in_a_cleared_environment_and_a_zero_exit_needs_its_verdict() -> None:
     body = _function_body(_script(), _GATE)
-    assert 'timeout "$GATE_TIMEOUT_SECONDS"' in body
-    assert "gate-verdict=proceed" in body
+    assert '("$env_bin" -i "PATH=$GATE_SAFE_PATH"' in body
+    assert '"$timeout_bin" "$GATE_TIMEOUT_SECONDS"' in body
+    assert '--verdict-file "$verdict_file" --nonce "$nonce"' in body
+    assert "/dev/urandom" in body
+    assert '[ "$nonce_line" != "nonce=$nonce" ]' in body
+    assert '[ ! -L "$verdict_file" ] && [ -O "$verdict_file" ]' in body
 
 
 def test_the_used_approval_is_removed_only_on_success_on_both_paths() -> None:

@@ -9,6 +9,7 @@ report then says whether the task applies.
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -234,6 +235,24 @@ class TestDetect:
         hits, _total = detect(Detection(pattern="plan-qa", paths=("*.sh",)), root)
         assert [h.path for h in hits] == ["caller.sh"]
 
+    def test_a_git_planted_on_path_does_not_list_the_files(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Fresh review BLOCKER 1: `shutil.which` took the caller's PATH for git."""
+        root = tmp_path / "repo"
+        root.mkdir()
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        (root / "caller.sh").write_text("plan-qa --json\n")
+        (root / "decoy.txt").write_text("nothing\n")
+        fakebin = tmp_path / "fakebin"
+        fakebin.mkdir()
+        fake_git = fakebin / "git"
+        fake_git.write_text("#!/bin/sh\nprintf 'decoy.txt\\0'\n")
+        fake_git.chmod(0o755)
+        monkeypatch.setenv("PATH", f"{fakebin}:{os.environ['PATH']}")
+        hits, _total = detect(Detection(pattern="plan-qa", paths=("*.sh",)), root)
+        assert [h.path for h in hits] == ["caller.sh"]
+
 
 class TestShippedPlanQaTask:
     """The shipped 00375 task is critical, so a false positive costs an owner approval."""
@@ -265,6 +284,23 @@ class TestShippedPlanQaTask:
     )
     def test_it_ignores_a_file_name(self, line: str) -> None:
         assert re.search(self._pattern(), line) is None
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "hooks-daemon plan-qa --json | jq '.findings[].severity'",
+            'sev = [f["severity"] for f in json.loads(run(["hooks-daemon", "plan-qa", "--json"]))]',
+        ],
+    )
+    def test_it_ignores_a_call_site_already_reading_severity(self, line: str) -> None:
+        """Fresh review D6: a migrated site cost the owner an approval on every crossing."""
+        assert re.search(self._pattern(), line) is None
+
+    def test_it_never_tells_the_reader_a_critical_hit_can_be_acknowledged(self) -> None:
+        """Fresh review D6: any hit of a critical task needs the owner, even a false one."""
+        text = self._PATH.read_text(encoding="utf-8")
+        assert "and acknowledge" not in text
+        assert "even" in text.split("## How to detect if this applies to you")[1].split("##")[0]
 
 
 class TestRange:

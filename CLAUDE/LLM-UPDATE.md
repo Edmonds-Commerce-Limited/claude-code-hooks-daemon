@@ -87,7 +87,7 @@ If no suitable Python is found, install Python 3.11+ before proceeding.
 
 The upgrade system uses a **two-layer architecture**:
 
-- **Layer 1** (`scripts/upgrade.sh`): Minimal curl-fetched script (~130 lines). Requires `--project-root PATH` to specify the project directory. Fetches tags, checks out target version first (checkout-first strategy), then runs Layer 2 as a child process and exits with Layer 2's exit code.
+- **Layer 1** (`scripts/upgrade.sh`): The curl-fetched entry script. Requires `--project-root PATH` to specify the project directory. Fetches tags, checks out target version first (checkout-first strategy), then runs Layer 2 as a child process and exits with Layer 2's exit code.
 - **Layer 2** (`scripts/upgrade_version.sh`): Version-specific orchestrator implementing **"Upgrade = Clean Reinstall + Config Preservation"**. Sources a shared modular library (`scripts/install/*.sh`) for all operations.
 
 **Key principle**: Upgrade produces the same clean state as a fresh install, while preserving only user config customizations via a diff/merge/validate pipeline.
@@ -132,7 +132,15 @@ less untracked/scratch/upgrade.sh
 # Run it with --project-root pointing to your project directory (REQUIRED)
 bash untracked/scratch/upgrade.sh --project-root /path/to/your/project
 
-# Clean up
+# Exit 3 or 4 is the pre-deploy gate stopping before anything was deployed
+# (see "The pre-deploy gate" below). Do NOT delete the script yet: after
+# exit 3, read what it listed and carry out each listed task, then re-run it
+# with the digest the stop printed. After exit 4, report the reasons to the
+# user and stop; the re-run follows the owner's approval.
+#   bash untracked/scratch/upgrade.sh --project-root /path/to/your/project \
+#       --skip-reading-confirmation=<digest>
+
+# Clean up, once the upgrade has completed (exit 0)
 rm untracked/scratch/upgrade.sh
 ```
 
@@ -144,8 +152,10 @@ This works for **any version** (including pre-v2.5.0 installations) and is the s
 # Fetch and run with version argument (from your project root)
 mkdir -p untracked/scratch
 curl -fsSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/scripts/upgrade.sh -o untracked/scratch/upgrade.sh
-bash untracked/scratch/upgrade.sh --project-root /path/to/your/project v2.9.0
-rm untracked/scratch/upgrade.sh
+# The script is removed only when the upgrade completes: after an exit 3 or 4
+# stop it is needed for the re-run (see the block above).
+bash untracked/scratch/upgrade.sh --project-root /path/to/your/project v2.9.0 \
+    && rm untracked/scratch/upgrade.sh
 ```
 
 ### What the Script Does (Two-Layer Flow)
@@ -202,21 +212,79 @@ checkout and a re-run therefore all see the real range. With neither, the gate
 cannot rule anything out: it lists every pre-upgrade task up to the target
 that applies to the project and needs the owner.
 
-No interpreter or venv override steers the gate. The stamp is read only from one of
-this daemon's own `untracked/venv-*` directories, never from
-`HOOKS_DAEMON_VENV_PATH`. The gate runs on that venv's Python, else on a Python
-3.11+ found on `PATH`, never on `HOOKS_DAEMON_PYTHON`, and always with `-I` so
-no `PYTHON*` variable reaches it. A `**Detect**` scan covers tracked files and
-untracked ones the project's own `.gitignore` files do not exclude;
-`.git/info/exclude`, a global excludes file and `GIT_*` variables cannot hide a
-call site from it. An agent that sets one of these variables on an upgrade
-command is denied (`upgrade_approval_guard`); if the upgrade genuinely needs one,
+Nothing in the caller's environment steers the gate or speaks for it:
+
+- The stamp is read only from one of this daemon's own `untracked/venv-*`
+  directories, never from `HOOKS_DAEMON_VENV_PATH`.
+- The gate runs only on a Python 3.11+ installed in a fixed system location
+  (`/usr/bin`, `/bin`, `/usr/sbin`, `/sbin`, `/usr/local/bin`,
+  `/opt/homebrew/bin`). It never runs on `HOOKS_DAEMON_PYTHON`, on anything the
+  caller's `PATH` names, or on the installed venv's Python: that venv lives in
+  the project, and code planted in its site-packages would run inside the gate.
+- It runs under `env -i` with only that fixed `PATH`, and with Python's `-I -S`
+  (no site-packages, no `.pth` code), so no `PYTHON*`, `GIT_*`, `LD_*` variable
+  or exported shell function reaches it.
+  `timeout`, `git` and every other tool it or Layer 2 uses to decide come from
+  the same fixed locations.
+- Its verdict comes back in a file Layer 2 creates for that run, headed by a
+  one-time nonce. A zero exit without that file stops the upgrade, so a wrapper
+  that only prints a verdict cannot pass for the gate.
+- A `**Detect**` scan covers tracked files and untracked ones the project's own
+  `.gitignore` files do not exclude. `.git/info/exclude`, a global excludes
+  file and `GIT_*` variables cannot hide a call site from it.
+
+`upgrade_approval_guard` also denies an agent that steers the rest of the
+upgrade. It recognises an upgrade by what the command is, not by the file's
+name:
+
+- `upgrade.sh`, `upgrade_version.sh` or `upgrade_gate_standalone.py` by name;
+- Layer 1's `--skip-reading-confirmation`;
+- a script whose content carries `HOOKS_DAEMON_UPGRADE_HANDOFF`, which every
+  copy of Layer 1 and Layer 2 does;
+- a script it cannot read (`bash "$tmp"`, or a script on stdin) run with
+  `--project-root`, or with the `.claude/hooks-daemon` clone as an argument.
+
+On such a command, the guard denies setting any of these variables:
+
+- `PATH`, `HOME`, `TMPDIR` or `HOSTNAME`;
+- `HOOKS_DAEMON_PYTHON`, `HOOKS_DAEMON_VENV_PATH`, `UPGRADE_FLAGS` or the
+  `HOOKS_DAEMON_UPGRADE_*`/`HOOKS_DAEMON_CLONE_URL` variables;
+- `GIT_*`, `BASH_ENV`, `ENV`, `BASH_FUNC_*`, `SHELLOPTS` or `BASHOPTS`;
+- `LD_*`, `DYLD_*` or `PYTHON*`.
+
+It also denies exporting a shell function (`export -f`). If the upgrade
+genuinely needs one of these (a Python 3.11+ outside the system locations, say),
 ask the user to run it.
 
+Moving the clone by hand is the other way around the gate. `checkout`,
+`switch`, `pull`, `merge`, `rebase`, `reset`, `cherry-pick`, `am` or `revert`
+on `.claude/hooks-daemon` installs a version the gate never read, so the same
+guard denies it. `fetch`, `show`, `log` and `describe` are allowed.
+
+A venv stamp that already says the target is not taken on trust. `hooks-daemon repair` after a manual checkout writes the same stamp. The installed == target
+shortcut therefore counts only when the gate itself recorded letting that exact
+version through (`.claude/hooks-daemon/untracked/upgrade-approvals/gated-install.json`,
+written when it proceeds). Otherwise the version installed before it cannot be told, and the
+owner decides.
+
 With nothing to list, the upgrade continues without comment, as it does when
-the venv already carries the target's exact stamp. Otherwise it never infers
-consent from the absence of a terminal. It stops, puts the daemon checkout back
-on the installed version, deploys nothing, and exits:
+the gate itself installed the target already. Otherwise it never infers consent
+from the absence of a terminal. It stops, deploys nothing, and exits with the
+code in the table below.
+
+The stop also puts the daemon checkout back on the installed version, when that
+version can be told. The version comes from the venv stamp, else
+`.claude/HOOKS-DAEMON.md`, else the commit Layer 1 moved the clone from. There
+are two cases where the restore does not happen:
+
+- **Nothing names the installed version.** For example, a direct Layer 2 run
+  on a clone with no stamp and no marker. The clone stays on the target, and
+  the stop prints the `git -C .claude/hooks-daemon reset --hard <tag>` to run
+  first.
+- **The reset itself fails.** The upgrade exits `1` with the same command.
+
+Layer 2 never runs in self-install mode. It refuses before the gate, and the
+developer's own checkout is left where Layer 1 put it.
 
 | Exit | Meaning                 | What to do                                                                                                                                                                                                                                                                                        |
 | ---- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -224,25 +292,38 @@ on the installed version, deploys nothing, and exits:
 | `4`  | Owner's approval needed | Report the printed reasons and stop. The project owner approves ONE upgrade in their own terminal with the command the stop printed. An agent cannot record it (see below). Then re-run with the same `--skip-reading-confirmation=<digest>`; the approval is removed once that upgrade completes |
 
 The owner's approval needs a terminal and a typed phrase naming both versions
-(`approve upgrade from v<installed> to v<target>`), and the marker it writes
-is bound to those versions and this install's paths. So an agent's shell,
-which has no terminal, cannot run it, and a marker made any other way does not
-count. The stop prints two commands for it:
+(`approve upgrade from v<installed> to v<target>`, or
+`approve upgrade from an unknown version to v<target>` when the installed
+version cannot be told). The marker it writes is bound to those versions and
+this install's paths. So an agent's shell, which has no terminal, cannot run
+it, and a marker made any other way does not count. The stop prints two
+commands for it:
 
 - `.claude/hooks-daemon/bin/hooks-daemon approve-upgrade <target> --from <installed>`,
   for an installed daemon that has the command;
 - a command that runs the approval from the TARGET's own code in the clone
-  (`git archive` of the target's `src`, then `upgrade_gate_standalone.py approve`),
-  which works from any installed version. On the first gated upgrade the
-  installed daemon predates `approve-upgrade`, so this is the one to use.
+  (`git archive` of the target's `src`, then `upgrade_gate_standalone.py approve`
+  run by the gate's own Python 3.11+, named by absolute path), which works from
+  any installed version. On the first gated upgrade the installed daemon
+  predates `approve-upgrade`, so this is the one to use.
 
-A gate that cannot decide also stops the upgrade (exit `1`): it crashed, or it
-did not decide within 300 seconds. Report it as a daemon bug.
+Exit `1` also means the upgrade stopped with nothing deployed. The printed
+error says which cause it was, and who acts depends on the cause:
+
+| Cause                                                                                        | Who acts                                                                                   |
+| -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| No Python 3.11+ for the gate in a system location (a pyenv or uv Python does not count)      | The user: install or link a Python 3.11+ into a location the error lists, then re-run      |
+| The stop could not put the clone back (`reset --hard` failed)                                | The user: run the printed `git -C .claude/hooks-daemon reset --hard <ref>` before anything |
+| The gate crashed, exited 0 without writing its verdict, or did not decide within 300 seconds | Report it as a daemon bug                                                                  |
+
+The 300-second limit applies only when a `timeout` command exists in a system
+location. Without one, the upgrade warns and the gate runs with no time limit.
 
 A Layer 1 that predates the gate (an installed daemon's own `upgrade.sh`, or a
-pinned `HOOKS_DAEMON_UPGRADE_REF` older than the gate) cannot pass the flag and
-reports a stop as success. Layer 2 still restores the checkout, and prints
-`THE UPGRADE DID NOT COMPLETE` with the command that runs the target's own
+pinned `HOOKS_DAEMON_UPGRADE_REF` older than the gate) cannot pass the flag. It
+reports a stop as success. Layer 2 still restores the checkout when the
+installed version can be told, as above. It also prints
+`THE UPGRADE DID NOT COMPLETE`, with the command that runs the target's own
 Layer 1 instead.
 
 ### Why Fetch from GitHub?
@@ -280,8 +361,9 @@ cp .claude/hooks-daemon.yaml .claude/hooks-daemon.yaml.backup
 
 ```bash
 # Fetch all tags into the clone. Do NOT check anything out: the upgrade
-# does that itself, and its pre-deploy gate puts the clone back on the
-# installed version if it stops.
+# does that itself, and when its pre-deploy gate stops it puts the clone back
+# on the installed version (when that version can be told). Moving the clone
+# by hand is denied: it would install a version the gate never read.
 git -C .claude/hooks-daemon fetch --tags
 
 # List available versions

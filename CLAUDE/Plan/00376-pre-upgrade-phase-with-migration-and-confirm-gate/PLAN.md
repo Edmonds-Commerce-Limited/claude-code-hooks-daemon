@@ -36,15 +36,17 @@ but on the supported route it never runs (see Task 1.1).
 Three measured facts drive the remaining work:
 
 - **The one confirmation gate that exists is dead for agents.** Step 5a of
-  `scripts/upgrade_version.sh:733-861` prints "REQUIRED READING" and asks
-  yes/no — but `:808` tests `[ ! -t 0 ]` and, on any non-interactive stdin,
-  falls through at `:814` to "Review upgrade guides after upgrade". Every
+  `scripts/upgrade_version.sh` (as the plan found it) prints "REQUIRED
+  READING" and asks yes/no — but its prompt tests `[ ! -t 0 ]` and, on any
+  non-interactive stdin, falls through to "Review upgrade guides after
+  upgrade". Every
   agent-driven upgrade takes that branch. The gate protects humans at a
   terminal and nobody else. (Task 1.1 found it could not fire at all, and
   removed it; the reading list now runs in `run_pre_deploy_phase`.)
-- **It would not be pre-install even if it fired.** Layer 1 checks the new
-  version out at `scripts/upgrade.sh:550`, then delegates to Layer 2 at
-  `:608-629`. By the time Step 5a runs, the new code is already on disk.
+- **It would not be pre-install even if it fired.** Layer 1
+  (`scripts/upgrade.sh`) checks the new version out in its Step 6, then
+  delegates to Layer 2 in its Step 8. By the time Step 5a runs, the new code
+  is already on disk.
 - **`post-upgrade-tasks/` is a dead letter box.** Its own README states
   (`CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks/README.md:20`) "There is no
   runner. Nothing executes these tasks automatically." Nothing in the upgrade
@@ -90,8 +92,8 @@ rather than only matching syntax.
 ### Phase 1: Establish where the phase runs
 
 - [x] ✅ **Task 1.1**: Site the phase alongside the existing compat check in
-  Layer 2 (`scripts/upgrade_version.sh`, around the pre-install checks at
-  `:511` and compat at `:536-603`), which is already after checkout and before
+  Layer 2 (`scripts/upgrade_version.sh`, around `run_pre_install_checks` and
+  the config compatibility check), which is already after checkout and before
   any deploy. No new fetch mechanism is required — see the Overview.
   **Measured while fixing 4.2 and 4.3**: on the supported route that site
   never ran. Layer 1 checks the target out before it calls Layer 2, so the
@@ -112,7 +114,7 @@ rather than only matching syntax.
   runs the real Layer 1 route on release and branch fixtures, and cheaply by
   `test_upgrade_pre_deploy_phase_placement.py`.
 - [x] ✅ **Task 1.2**: Characterise what "abort" must undo at that point. The
-  daemon dir is ALREADY on the target checkout (`upgrade.sh:550`) while nothing
+  daemon dir is ALREADY on the target checkout (Layer 1's Step 6) while nothing
   has been deployed — so an abort is not free, and the plan must define whether
   it restores the previous ref or documents the daemon dir as intentionally
   moved. **Characterised**: on the Layer 1 route, by the time Layer 2 runs,
@@ -183,8 +185,8 @@ rather than only matching syntax.
 ### Phase 3: The gate that works for agents
 
 - [x] ✅ **Task 3.1**: Replace the TTY-only gate. A non-interactive caller must
-  get a real decision point, not a silent fall-through. `upgrade_version.sh:808`
-  is a COMPOUND condition —
+  get a real decision point, not a silent fall-through. The Step 5a prompt's
+  test in `upgrade_version.sh` is a COMPOUND condition —
   `[[ "$*" == *"--skip-reading-confirmation"* ]] || [ ! -t 0 ]` — so it has two
   skip paths and only ONE of them is the bug. The explicit flag is a deliberate
   opt-out a caller asked for and must survive; it is the `[ ! -t 0 ]` INFERENCE
@@ -216,6 +218,7 @@ rather than only matching syntax.
   was listed (MINOR 6); no environment variable skips the gate (MAJOR 4).
   Assumption: the owner's "no known defects" instruction; the owner can
   reverse this with one message.
+
 - [x] ✅ **Task 3.2**: Define escalation: which changes an agent may accept on
   its own, and which require the owner. Breaking/MAJOR is the obvious
   escalation trigger. Reuse the existing one-shot approval-marker mechanism
@@ -248,6 +251,7 @@ rather than only matching syntax.
   note 64 and RELEASING.md say who stops and how the owner approves.
   Assumption: the owner's "no known defects" instruction; the owner can
   reverse this with one message.
+
 - [x] ✅ **Task 3.3**: An abort must leave the install in a state the next run
   can proceed from, per Task 1.2 — the checkout has already happened, so
   "untouched" is not achievable without an explicit restore. **Done**:
@@ -287,6 +291,66 @@ rather than only matching syntax.
   `test_no_document_upgrades_forward_through_the_installed_layer1`.
   Assumption: the owner's "no known defects" instruction; the owner can
   reverse this with one message.
+  **Decided (unattended, 2026-09-25), fresh review BLOCKER 1 and MAJOR 1**
+  (the review is `subagent-reports/260925-00376-fresh-review-opus-5-5.md`;
+  this supersedes (a) and (d) above):
+
+  - (a) The gate takes its tools from fixed system locations
+    (`GATE_SAFE_PATH` in Layer 2, `TRUSTED_TOOL_PATH` in
+    `install/upgrade_tasks.py`: `/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin`).
+    It runs under `env -i` with only that `PATH`, `LANG` and `HOME`, through
+    the `timeout` and Python 3.11+ found there, with `-I -S`. It no longer
+    runs on the installed venv's Python: that venv is in the project, and a
+    `.pth` planted in its site-packages ran inside the gate even under `-I`
+    and could write the verdict itself (RED:
+    `test_code_planted_in_the_installed_venv_does_not_answer_for_the_gate`).
+    The cost: a host whose only Python 3.11+ is a pyenv or uv one stops with
+    exit 1 until the user installs or links one into a system location. Its
+    verdict comes back in a
+    file inside a directory Layer 2 creates, opened `O_EXCL` with mode 0600
+    and headed by a nonce Layer 2 draws from `/dev/urandom`. A zero exit
+    without that file stops the upgrade (exit 1). Reason: a planted
+    `timeout`, `git` or `python3.99` on the caller's `PATH` answered for the
+    gate, and a stdout verdict line is what any wrapper can print.
+  - (b) Every function that feeds or decides the gate (the installed
+    version, the target release, the restore target, the abort) declares
+    `local PATH="$GATE_SAFE_PATH"`, and Layer 1 and Layer 2 drop every
+    imported shell function before anything runs. Reason: an exported
+    `timeout()` or `git()` shadows the tool by name, whatever `PATH` says.
+  - (c) The installed == target shortcut counts only when the gate itself
+    recorded letting that exact stamp through
+    (`upgrade-approvals/gated-install.json` in the daemon's untracked dir, written on PROCEED,
+    in the directory the guard already keeps agents out of). A stamp with
+    no matching record is a range the gate cannot read, so it goes to the
+    owner. Reason: `git checkout` of the target plus `hooks-daemon repair`
+    writes the target's stamp legitimately, and the shortcut then waved a
+    MAJOR through.
+  - (d) `upgrade_approval_guard` recognises an upgrade by what the command
+    is, not the file's name. It matches an entry point by name, Layer 1's
+    `--skip-reading-confirmation`, or a readable script carrying
+    `HOOKS_DAEMON_UPGRADE_HANDOFF`. It also matches a script it cannot read
+    (`bash "$tmp"`, stdin, `bash -c` strings scanned recursively) that is run
+    with `--project-root` or the daemon clone as an argument. The steering
+    list adds `HOME`, `TMPDIR`, `BASH_ENV`, `ENV`, `BASH_FUNC_*`, `SHELLOPTS`,
+    `BASHOPTS`, `LD_*`, `DYLD_*` and `PYTHON*`, plus `export -f`. Moving
+    `.claude/hooks-daemon` to another ref by hand (`checkout`, `switch`,
+    `pull`, `merge`, `rebase`, `reset`, `cherry-pick`, `am`, `revert`) is
+    denied under the agent-action rule; fetch, show, log and describe are
+    not. Reason: the documented route runs Layer 1 from a temp file, which
+    the name-only check never saw.
+  - (e) Layer 1 is NOT re-executed through a canonical path or under
+    `env -i`. Reason: after (a) and (b) the gate no longer depends on the
+    caller's environment, and a whitelisting re-exec would also drop
+    settings the rest of the upgrade legitimately honours, such as
+    `HOOKS_DAEMON_PYTHON` for building the venv (a user's choice) or a proxy.
+    The guard keeps an agent from steering the rest.
+
+  Pinned by the planted-timeout, planted-git and planted-python cases in
+  `test_upgrade_pre_deploy_phase_runs_on_layer1.py`,
+  `TestUpgradeRecognisedByWhatItIs` and `TestManualCheckoutOfTheDaemonClone`,
+  and `TestAlreadyInstalled` in `tests/unit/install/test_upgrade_gate.py`.
+  Assumption: the owner's "no known defects" instruction; the owner can
+  reverse this with one message.
 
 ### Phase 4: Fix what the survey exposed
 
@@ -303,7 +367,8 @@ rather than only matching syntax.
   the task's own "ask the user" rules, not a script's (the plan's Non-Goal).
   Assumption: the owner's "no known defects" instruction; the owner can
   reverse this with one message.
-- [x] ✅ **Task 4.2**: `install/upgrade_compatibility.py:351-373` scans only
+- [x] ✅ **Task 4.2**: `install/upgrade_compatibility.py`'s
+  `suggest_upgrade_guides` (as the plan found it) scans only
   `CLAUDE/UPGRADES/v{major}/` and never `UNRELEASED/`, so unreleased breaking
   changes are invisible to compatibility checking. Fixed:
   `suggest_upgrade_guides` resolves guides through

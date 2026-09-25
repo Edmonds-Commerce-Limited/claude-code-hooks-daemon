@@ -45,7 +45,7 @@ from __future__ import annotations
 import os
 import re
 import shutil
-import subprocess  # nosec B404 - trusted system tools (git, bash) for fixtures
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -559,6 +559,95 @@ def test_no_interpreter_or_venv_override_answers_for_the_gate(
         python = _forged_venv(tmp_path, f"v{major}") / "bin" / "python"
     result = _upgrade(project, _env({"HOOKS_DAEMON_PYTHON": str(python)}), f"v{major}")
     _assert_stopped_and_restored(result, GateVerdict.NEEDS_ACKNOWLEDGEMENT, project, current)
+
+
+_REAL_TIMEOUT: Final[str] = shutil.which("timeout") or "/usr/bin/timeout"
+_REAL_GIT: Final[str] = shutil.which("git") or "/usr/bin/git"
+#: What a planted tool prints when it is handed the gate: the old stdout verdict.
+_FORGED_VERDICT: Final[str] = (
+    'case "$*" in *upgrade_gate_standalone.py*) echo gate-verdict=proceed; exit 0 ;; esac\n'
+)
+_PLANTED_TOOLS: Final[dict[str, tuple[str, str]]] = {
+    "timeout": ("timeout", f'#!/bin/bash\n{_FORGED_VERDICT}exec "{_REAL_TIMEOUT}" "$@"\n'),
+    "python": (
+        "python3.99",
+        '#!/bin/bash\nif [ "$1" = "--version" ]; then echo "Python 3.99.0"; exit 0; fi\n'
+        f'{_FORGED_VERDICT}exec "{sys.executable}" "$@"\n',
+    ),
+    # Lists nothing, so a Detect scan through it finds no call site.
+    "git": (
+        "git",
+        '#!/bin/bash\nif [ "$1" = "-C" ] && [ "$3" = "ls-files" ]; then exit 0; fi\n'
+        f'exec "{_REAL_GIT}" "$@"\n',
+    ),
+}
+
+
+@pytest.mark.parametrize("tool", sorted(_PLANTED_TOOLS))
+def test_a_tool_planted_on_path_does_not_answer_for_the_gate(
+    tmp_path: Path, project: Path, versions: tuple[str, str, str], tool: str
+) -> None:
+    """Fresh review BLOCKER 1: the gate took `timeout`, python and git from PATH.
+
+    Run the way the docs say, from the target's own Layer 1 fetched to a file,
+    with the planted tool first on PATH: the gate still stops, and still names
+    the call site.
+    """
+    current, target, major = versions
+    to = f"v{major}" if tool != "git" else f"v{target}"
+    fakebin = tmp_path / "fakebin"
+    fakebin.mkdir()
+    name, body = _PLANTED_TOOLS[tool]
+    planted = fakebin / name
+    planted.write_text(body)
+    planted.chmod(0o755)
+    layer1 = tmp_path / "fetched-upgrade.sh"
+    layer1.write_text(_git(_daemon_dir(project), "show", f"{to}:scripts/upgrade.sh"))
+    env = _env({"PATH": f"{fakebin}:{os.environ['PATH']}"})
+    result = _upgrade(project, env, to, layer1=layer1)
+    combined = _assert_stopped_and_restored(
+        result, GateVerdict.NEEDS_ACKNOWLEDGEMENT, project, current
+    )
+    assert f"{_CALL_SITE_FILE}:2" in _section(combined, _READING_MARKER)
+
+
+#: A `.pth` line that does what code inside the gate's process could: read the
+#: verdict file and nonce from argv and write the verdict itself.
+_FORGING_PTH: Final[str] = (
+    "import os, sys; a = sys.argv; "
+    "(open(a[a.index('--verdict-file') + 1], 'w').write("
+    "'nonce=' + a[a.index('--nonce') + 1] + '\\nverdict=proceed\\n'), os._exit(0)) "
+    "if '--verdict-file' in a else None\n"
+)
+
+
+def test_code_planted_in_the_installed_venv_does_not_answer_for_the_gate(
+    project: Path, versions: tuple[str, str, str]
+) -> None:
+    """Fresh review BLOCKER 1b: the gate ran on the installed venv's Python.
+
+    That venv sits in the project, where an agent can write, and a `.pth` in
+    its site-packages runs inside the gate's own process even under `-I`, so a
+    verdict file bound to a nonce proves nothing about it.
+    """
+    current, _target, major = versions
+    env = _env()
+    try:
+        installed = _upgrade(project, env, f"v{current}")
+        assert installed.returncode == 0, installed.stdout[-6000:]
+        site_packages = sorted(
+            (_daemon_dir(project) / "untracked").glob("venv-*/lib/python3*/site-packages")
+        )
+        assert site_packages, "the install built no venv"
+        for directory in site_packages:
+            (directory / "zz-forge-gate-verdict.pth").write_text(_FORGING_PTH)
+        result = _upgrade(project, env, f"v{major}")
+    finally:
+        _stop_daemon(project, env)
+    assert result.returncode == GateVerdict.NEEDS_ACKNOWLEDGEMENT.exit_code, result.stdout[-6000:]
+    assert _STOPPED_MARKER in result.stdout
+    daemon_dir = _daemon_dir(project)
+    assert _head(daemon_dir) == _commit_of(daemon_dir, f"v{current}")
 
 
 def test_a_direct_layer2_call_ignores_a_forged_venv_path(

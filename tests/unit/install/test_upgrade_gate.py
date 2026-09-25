@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import io
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -34,8 +35,10 @@ from claude_code_hooks_daemon.install.upgrade_gate import (
     check_approval,
     evaluate_gate,
     format_gate_report,
+    gated_install_stamp,
     installed_version,
     main,
+    record_gated_install,
     run_approval,
     write_approval,
 )
@@ -265,13 +268,19 @@ class TestReadingNeedsAcknowledgement:
 
 
 class TestAlreadyInstalled:
-    """The exact target already installed: a re-run, or a direct call's second pass."""
+    """The exact target already installed: a re-run, or a direct call's second pass.
+
+    Only an upgrade this gate let through counts as installed (fresh review
+    MAJOR 1): ``hooks-daemon repair`` after a manual checkout writes the same
+    venv stamp, and would otherwise have the gate wave a MAJOR through.
+    """
 
     def test_the_same_stamp_proceeds_even_on_a_branch_install(
         self, daemon_dir: Path, upgrades: Path, project: Path, untracked: Path
     ) -> None:
         _write(upgrades / "UNRELEASED" / "release-notes" / "01-note.md", "# note\n")
         stamp = "v3.66.0+main.abc1234"
+        record_gated_install(untracked, stamp=stamp, daemon_dir=daemon_dir, project_root=project)
         report = _gate(
             daemon_dir,
             project,
@@ -300,6 +309,83 @@ class TestAlreadyInstalled:
             target_stamp="v3.66.0+main.def5678",
         )
         assert report.verdict is GateVerdict.NEEDS_ACKNOWLEDGEMENT
+
+    @pytest.mark.parametrize("recorded", [None, "v3.66.0", "v4.0.0"])
+    def test_a_stamp_no_gated_upgrade_wrote_is_not_installed(
+        self, daemon_dir: Path, project: Path, untracked: Path, recorded: str | None
+    ) -> None:
+        """A checkout of v4 plus `repair` stamps the venv v4 with no gate involved."""
+        if recorded is not None:
+            other = daemon_dir if recorded != "v4.0.0" else daemon_dir / "elsewhere"
+            record_gated_install(untracked, stamp=recorded, daemon_dir=other, project_root=project)
+        report = _gate(
+            daemon_dir,
+            project,
+            untracked,
+            "4.0.0",
+            "4.0.0",
+            installed_stamp="v4.0.0",
+            target_stamp="v4.0.0",
+        )
+        assert not report.already_installed
+        assert report.verdict is GateVerdict.NEEDS_ACKNOWLEDGEMENT
+        assert "no upgrade through this gate installed it" in format_gate_report(report)
+        acknowledged = _gate(
+            daemon_dir,
+            project,
+            untracked,
+            "4.0.0",
+            "4.0.0",
+            acknowledgement=report.digest,
+            installed_stamp="v4.0.0",
+            target_stamp="v4.0.0",
+        )
+        assert acknowledged.verdict is GateVerdict.NEEDS_APPROVAL
+
+    def test_the_gate_records_what_it_let_through(
+        self, daemon_dir: Path, project: Path, untracked: Path
+    ) -> None:
+        argv = [
+            "--daemon-dir",
+            str(daemon_dir),
+            "--project-root",
+            str(project),
+            "--untracked-dir",
+            str(untracked),
+            "--installed-stamp",
+            "v3.64.0",
+            "--to",
+            "3.65.0",
+            "--target-stamp",
+            "v3.65.0",
+        ]
+        assert main(argv) == 0
+        assert gated_install_stamp(untracked, daemon_dir=daemon_dir, project_root=project) == (
+            "v3.65.0"
+        )
+        rerun = [*argv[:-6], "--installed-stamp", "v3.65.0", *argv[-4:]]
+        assert main(rerun) == 0
+
+    def test_a_stop_records_nothing(
+        self, daemon_dir: Path, upgrades: Path, project: Path, untracked: Path
+    ) -> None:
+        _guide(upgrades, "v3.64.0-to-v3.65.0")
+        argv = [
+            "--daemon-dir",
+            str(daemon_dir),
+            "--project-root",
+            str(project),
+            "--untracked-dir",
+            str(untracked),
+            "--installed-stamp",
+            "v3.64.0",
+            "--to",
+            "3.65.0",
+            "--target-stamp",
+            "v3.65.0",
+        ]
+        assert main(argv) == GateVerdict.NEEDS_ACKNOWLEDGEMENT.exit_code
+        assert gated_install_stamp(untracked, daemon_dir=daemon_dir, project_root=project) is None
 
 
 class TestUnknownRange:
@@ -389,6 +475,9 @@ class TestEscalation:
         assert f'git -C "{daemon_dir}" archive v4.0.0 src' in text
         assert 'upgrade_gate_standalone.py" approve' in text
         assert "terminal" in text
+        # Fresh review D7: a bare `python3` is 3.9 on the hosts that need an override.
+        assert f'"{sys.executable}" "$tmp/' in text
+        assert 'python3 "$tmp/' not in text
 
     def test_a_crossed_breaking_manifest_needs_the_owner(
         self, daemon_dir: Path, upgrades: Path, project: Path, untracked: Path
@@ -564,6 +653,25 @@ class TestRunApproval:
             is ApprovalState.VALID
         )
 
+    def test_an_unknown_installed_version_is_not_typed_as_vunknown(
+        self, daemon_dir: Path, project: Path, untracked: Path
+    ) -> None:
+        """Fresh review N4: the phrase asked a human to type `vunknown`."""
+        phrase = "approve upgrade from an unknown version to v4.0.0"
+        out = io.StringIO()
+        code = run_approval(
+            project_root=project,
+            daemon_dir=daemon_dir,
+            from_version=None,
+            to_version="4.0.0",
+            untracked_dir=untracked,
+            stdin=_FakeTty(f"{phrase}\n", tty=True),
+            stdout=out,
+        )
+        assert code == 0, out.getvalue()
+        assert phrase in out.getvalue()
+        assert "vunknown" not in out.getvalue()
+
     def test_approve_main_refuses_without_a_terminal(
         self,
         daemon_dir: Path,
@@ -680,28 +788,63 @@ class TestMain:
         argv = self._argv(daemon_dir, project, untracked, "--to", "3.65.0")
         assert main(argv) == GateVerdict.NEEDS_ACKNOWLEDGEMENT.exit_code
 
-    def test_an_approval_used_is_printed_on_stdout_for_the_caller_to_consume(
+    def test_an_approval_used_is_written_to_the_verdict_file_for_the_caller_to_consume(
         self,
+        tmp_path: Path,
         daemon_dir: Path,
         project: Path,
         untracked: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         marker = _approve(untracked, daemon_dir, project, "3.66.0", "4.0.0")
+        verdict_file = tmp_path / "verdict"
         argv = self._argv(
-            daemon_dir, project, untracked, "--installed-stamp", "v3.66.0", "--to", "4.0.0"
+            daemon_dir,
+            project,
+            untracked,
+            "--installed-stamp",
+            "v3.66.0",
+            "--to",
+            "4.0.0",
+            "--verdict-file",
+            str(verdict_file),
+            "--nonce",
+            "n0nce",
         )
         main(argv)
         digest = capsys.readouterr().err.split("--skip-reading-confirmation=", 1)[1].split()[0]
+        verdict_file.unlink()
         assert main([*argv, "--acknowledgement", digest]) == 0
-        assert f"approval-marker={marker}" in capsys.readouterr().out.splitlines()
+        assert f"approval-marker={marker}" in verdict_file.read_text().splitlines()
+
+    def test_a_verdict_file_already_there_is_never_reused(
+        self, tmp_path: Path, daemon_dir: Path, project: Path, untracked: Path
+    ) -> None:
+        planted = tmp_path / "verdict"
+        planted.write_text("nonce=n0nce\nverdict=proceed\n")
+        argv = self._argv(
+            daemon_dir,
+            project,
+            untracked,
+            "--installed-stamp",
+            "v3.66.0",
+            "--to",
+            "4.0.0",
+            "--verdict-file",
+            str(planted),
+            "--nonce",
+            "n0nce",
+        )
+        with pytest.raises(FileExistsError):
+            main(argv)
 
     @pytest.mark.parametrize(
         ("stamp", "expected"),
-        [("v3.66.0", "gate-verdict=proceed"), ("v3.64.0", "gate-verdict=needs-acknowledgement")],
+        [("v3.66.0", "verdict=proceed"), ("v3.64.0", "verdict=needs-acknowledgement")],
     )
-    def test_the_verdict_is_printed_on_stdout_for_the_caller_to_check(
+    def test_the_verdict_goes_to_the_callers_file_bound_to_its_nonce(
         self,
+        tmp_path: Path,
         daemon_dir: Path,
         upgrades: Path,
         project: Path,
@@ -710,11 +853,29 @@ class TestMain:
         stamp: str,
         expected: str,
     ) -> None:
+        """Fresh review BLOCKER 1: a stdout line is what any wrapper can print."""
         _guide(upgrades, "v3.64.0-to-v3.65.0")
+        verdict_file = tmp_path / "verdict"
         main(
-            self._argv(daemon_dir, project, untracked, "--installed-stamp", stamp, "--to", "3.66.0")
+            self._argv(
+                daemon_dir,
+                project,
+                untracked,
+                "--installed-stamp",
+                stamp,
+                "--to",
+                "3.66.0",
+                "--verdict-file",
+                str(verdict_file),
+                "--nonce",
+                "n0nce",
+            )
         )
-        assert expected in capsys.readouterr().out.splitlines()
+        lines = verdict_file.read_text().splitlines()
+        assert lines[0] == "nonce=n0nce"
+        assert expected in lines
+        assert "verdict=" not in capsys.readouterr().out
+        assert verdict_file.stat().st_mode & 0o077 == 0, "only the gate's user may read it"
 
     def test_include_unreleased_is_an_explicit_flag(
         self, daemon_dir: Path, upgrades: Path, project: Path, untracked: Path

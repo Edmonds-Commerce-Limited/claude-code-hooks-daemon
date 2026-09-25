@@ -21,6 +21,12 @@
 
 set -euo pipefail
 
+# Plan 00376 fresh review BLOCKER 1: a function exported into the environment
+# (BASH_FUNC_*) would shadow the tools the upgrade runs; none is wanted here.
+while read -r _ _ _imported_function; do
+    unset -f "$_imported_function"
+done < <(declare -F)
+
 # ============================================================
 # Argument parsing
 # ============================================================

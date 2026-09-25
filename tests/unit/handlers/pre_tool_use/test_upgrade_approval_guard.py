@@ -305,13 +305,113 @@ class TestUpgradeSteeringVariables:
         "command",
         [
             "bash scripts/upgrade.sh --project-root . v4.0.0",
-            "HOOKS_DAEMON_PYTHON=/usr/bin/python3.12 bash scripts/install.sh --project-root .",
             "PATH=/opt/bin:$PATH make test",
             "grep HOOKS_DAEMON_PYTHON scripts/upgrade.sh",
             "echo 'HOOKS_DAEMON_PYTHON=/x bash scripts/upgrade.sh'",
+            'bash "$tmp" --project-root "$PWD" "$TARGET"',
+            "PATH=/opt/bin:$PATH bin/hooks-daemon status",
         ],
     )
     def test_allows_other_uses(self, handler: UpgradeApprovalGuardHandler, command: str) -> None:
+        assert handler.matches(_bash(command)) is False, command
+
+    def test_allows_an_override_on_a_script_that_is_not_the_upgrade(
+        self, handler: UpgradeApprovalGuardHandler, tmp_path: Any
+    ) -> None:
+        (tmp_path / "install.sh").write_text("#!/bin/bash\necho installing\n")
+        command = "HOOKS_DAEMON_PYTHON=/usr/bin/python3.12 bash install.sh --project-root ."
+        assert handler.matches(_bash(command, cwd=str(tmp_path))) is False
+
+
+class TestUpgradeRecognisedByWhatItIs:
+    """Fresh review BLOCKER 1: the documented route runs Layer 1 from a temp file.
+
+    `bash "$tmp" --project-root ...` names no guarded script, so the guard
+    must recognise an upgrade by its arguments or its content, not its name.
+    """
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'PATH=/x/bin:$PATH bash "$tmp" --project-root "$PWD" v4.0.0',
+            'HOOKS_DAEMON_PYTHON=/x bash "$tmp" --project-root P v4.0.0',
+            'export PATH=/x/bin:$PATH && bash "$tmp" --project-root "$PWD" "$TARGET"',
+            'PATH=/x "$tmp" --skip-reading-confirmation=abc123 v4.0.0',
+            'PATH=/x bash /tmp/l2.sh "$PWD" "$PWD/.claude/hooks-daemon" v4.0.0',
+            'env PATH=/x timeout 900 bash "$tmp" --project-root .',
+            "bash -c 'PATH=/x bash \"$tmp\" --project-root .'",
+            'BASH_ENV=/tmp/evil.sh bash "$tmp" --project-root .',
+            'ENV=/tmp/evil.sh sh "$tmp" --project-root .',
+            'LD_PRELOAD=/tmp/evil.so bash "$tmp" --project-root .',
+            "PYTHONPATH=/tmp/evil bash scripts/upgrade.sh --project-root .",
+            'HOME=/tmp/fakehome bash "$tmp" --project-root .',
+            'TMPDIR=/tmp/mine bash "$tmp" --project-root .',
+            "env 'BASH_FUNC_timeout%%=() { echo x; }' bash \"$tmp\" --project-root .",
+            'timeout() { echo x; }; export -f timeout; bash "$tmp" --project-root .',
+            'cat "$tmp" | PATH=/x bash -s -- --project-root .',
+            "PATH=/x bash -ec 'bash \"$tmp\" --project-root .'",
+        ],
+    )
+    def test_denies_steering_an_upgrade_run_from_any_file(
+        self, handler: UpgradeApprovalGuardHandler, command: str
+    ) -> None:
+        hook_input = _bash(command)
+        assert handler.matches(hook_input) is True, command
+        result = handler.handle(hook_input)
+        assert result.reason is not None
+        assert result.reason.startswith(f"BLOCKED [{ENV_RULE_ID}]")
+
+    def test_denies_steering_a_renamed_copy_of_layer1(
+        self, handler: UpgradeApprovalGuardHandler, tmp_path: Any
+    ) -> None:
+        (tmp_path / "install.sh").write_text(
+            '#!/bin/bash\nexport HOOKS_DAEMON_UPGRADE_HANDOFF="$handoff"\n'
+        )
+        command = "PATH=/x/bin:$PATH bash install.sh v4.0.0"
+        assert handler.matches(_bash(command, cwd=str(tmp_path))) is True
+
+
+class TestManualCheckoutOfTheDaemonClone:
+    """Fresh review MAJOR 1: moving the daemon clone by hand IS an upgrade."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git -C .claude/hooks-daemon checkout v4.0.0",
+            "git -C /work/p/.claude/hooks-daemon switch --detach v4.0.0",
+            'git -C "$PWD/.claude/hooks-daemon/" checkout -q v4.0.0',
+            "git -C .claude/hooks-daemon pull",
+            "git -C .claude/hooks-daemon merge origin/main",
+            "git -C .claude/hooks-daemon reset v4.0.0",
+            "git --git-dir=.claude/hooks-daemon/.git --work-tree=.claude/hooks-daemon checkout v4",
+            "git -c advice.detachedHead=false -C .claude/hooks-daemon checkout v4.0.0",
+            "git -C .claude/hooks-daemon fetch --tags && git -C .claude/hooks-daemon checkout v4",
+        ],
+    )
+    def test_denies_moving_the_daemon_checkout(
+        self, handler: UpgradeApprovalGuardHandler, command: str
+    ) -> None:
+        hook_input = _bash(command)
+        assert handler.matches(hook_input) is True, command
+        result = handler.handle(hook_input)
+        assert result.reason is not None
+        assert result.reason.startswith(f"BLOCKED [{AGENT_RULE_ID}]")
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git -C .claude/hooks-daemon fetch --tags",
+            'git -C .claude/hooks-daemon show "v4.0.0:scripts/upgrade.sh" > f',
+            "git -C .claude/hooks-daemon describe --tags",
+            "git -C .claude/hooks-daemon log --oneline -3",
+            "git checkout main",
+            "git -C src checkout -b feature",
+            "grep 'git -C .claude/hooks-daemon checkout' docs/x.md",
+        ],
+    )
+    def test_allows_reading_the_daemon_clone_and_other_checkouts(
+        self, handler: UpgradeApprovalGuardHandler, command: str
+    ) -> None:
         assert handler.matches(_bash(command)) is False, command
 
 

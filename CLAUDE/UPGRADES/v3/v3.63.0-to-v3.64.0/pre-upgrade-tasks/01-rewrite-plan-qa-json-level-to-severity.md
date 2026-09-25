@@ -4,7 +4,7 @@
 **Severity**: critical
 **Applies to**: upgrades from v3.63.x or earlier, in any project whose tooling parses `hooks-daemon plan-qa --json`
 **Idempotent**: yes
-**Detect**: `plan[-_]qa\b[^\n]*--json`
+**Detect**: `^(?![^\n]*\bseverity\b)[^\n]*plan[-_]qa\b[^\n]*--json`
 **Detect in**: `*.py`, `*.sh`, `*.bash`, `*.js`, `*.mjs`, `*.ts`, `*.yml`, `*.yaml`, `*Makefile`, `*.mk`, `*.just`, `*justfile`
 
 ## Why
@@ -30,7 +30,9 @@ predates the pre-deploy gate and carries the same substance.
 
 The gate has already run the **Detect** pattern and listed every line that
 invokes `plan-qa` (or `plan_qa`) with `--json`, at `file:line`. A file name
-such as `plan_qa.json` is not an invocation and is not listed. For each
+such as `plan_qa.json` is not an invocation and is not listed, and neither is
+a line that already names `severity` (a one-line consumer that has been
+migrated, such as `plan-qa --json | jq '.findings[].severity'`). For each
 hit, find the code that reads the parsed findings, which may be on a later
 line or in another file the output is handed to, and check whether it reads a
 `level` key: `["level"]`, `.get("level")`, `.level`, `jq '.findings[].level'`,
@@ -39,7 +41,10 @@ or a destructuring form. Those are the call sites to change.
 The pattern cannot see a consumer that receives the JSON from somewhere else
 (a CI artefact, a file written earlier). If you know of one, include it.
 
-If no hit reads `level`, the task does not apply. Say so, and acknowledge.
+If no hit reads `level`, there is nothing to rewrite. Say so in your report.
+The upgrade still needs the owner: this task is `critical`, so any listed hit
+sends the upgrade to the project owner, even a hit that on inspection turns
+out not to read `level` (see below). The owner reads your finding and decides.
 
 ## How to handle
 
@@ -71,5 +76,6 @@ task exists to prevent.
 
 ## Rollback / if this goes wrong
 
-The rewrite touches only call sites you control; `git diff` shows it and
-`git checkout -- <file>` reverts it. No stored data is transformed.
+The rewrite touches only call sites you control; `git diff` shows it, and
+`git show HEAD:<file> > <file>` puts one file back as last committed. No
+stored data is transformed.
