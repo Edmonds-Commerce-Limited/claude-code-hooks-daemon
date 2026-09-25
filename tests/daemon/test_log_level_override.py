@@ -15,7 +15,7 @@ from unittest.mock import patch
 import pytest
 
 from claude_code_hooks_daemon.config.models import LogLevel
-from claude_code_hooks_daemon.constants import Priority
+from claude_code_hooks_daemon.constants import Priority, Timeout
 from claude_code_hooks_daemon.core.front_controller import FrontController
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
@@ -112,7 +112,7 @@ class TestLogLevelEnvironmentOverride:
 
             # Start daemon to trigger logging setup
             server_task = asyncio.create_task(daemon.start())
-            await asyncio.sleep(0.1)
+            await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
 
             # Check that root logger level is DEBUG (not INFO from config)
             root_logger = logging.getLogger()
@@ -138,7 +138,7 @@ class TestLogLevelEnvironmentOverride:
 
             # Start daemon to trigger logging setup
             server_task = asyncio.create_task(daemon.start())
-            await asyncio.sleep(0.1)
+            await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
 
             # Check that root logger level is INFO (from config)
             root_logger = logging.getLogger()
@@ -167,7 +167,7 @@ class TestLogLevelEnvironmentOverride:
             daemon = HooksDaemon(config=config, controller=front_controller)
 
             server_task = asyncio.create_task(daemon.start())
-            await asyncio.sleep(0.1)
+            await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
 
             # Env var should override config
             root_logger = logging.getLogger()
@@ -195,7 +195,7 @@ class TestLogLevelEnvironmentOverride:
             daemon = HooksDaemon(config=config, controller=front_controller)
 
             server_task = asyncio.create_task(daemon.start())
-            await asyncio.sleep(0.1)
+            await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
 
             # Env var should override config
             root_logger = logging.getLogger()
@@ -215,7 +215,7 @@ class TestLogLevelEnvironmentOverride:
             daemon = HooksDaemon(config=daemon_config, controller=front_controller)
 
             server_task = asyncio.create_task(daemon.start())
-            await asyncio.sleep(0.1)
+            await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
 
             root_logger = logging.getLogger()
             assert root_logger.level == logging.CRITICAL
@@ -234,7 +234,7 @@ class TestLogLevelEnvironmentOverride:
             daemon = HooksDaemon(config=daemon_config, controller=front_controller)
 
             server_task = asyncio.create_task(daemon.start())
-            await asyncio.sleep(0.1)
+            await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
 
             root_logger = logging.getLogger()
             # Should be converted to uppercase DEBUG
@@ -254,7 +254,7 @@ class TestLogLevelEnvironmentOverride:
             daemon = HooksDaemon(config=daemon_config, controller=front_controller)
 
             server_task = asyncio.create_task(daemon.start())
-            await asyncio.sleep(0.1)
+            await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
 
             root_logger = logging.getLogger()
             # Should be normalized to WARNING
@@ -274,7 +274,7 @@ class TestLogLevelEnvironmentOverride:
             daemon = HooksDaemon(config=daemon_config, controller=front_controller)
 
             server_task = asyncio.create_task(daemon.start())
-            await asyncio.sleep(0.1)
+            await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
 
             # Should fall back to config value (INFO)
             root_logger = logging.getLogger()
@@ -294,7 +294,7 @@ class TestLogLevelEnvironmentOverride:
             daemon = HooksDaemon(config=daemon_config, controller=front_controller)
 
             server_task = asyncio.create_task(daemon.start())
-            await asyncio.sleep(0.1)
+            await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
 
             # Should use config value (INFO)
             root_logger = logging.getLogger()
@@ -314,7 +314,7 @@ class TestLogLevelEnvironmentOverride:
             daemon = HooksDaemon(config=daemon_config, controller=front_controller)
 
             server_task = asyncio.create_task(daemon.start())
-            await asyncio.sleep(0.1)
+            await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
 
             # Should use config value (INFO)
             root_logger = logging.getLogger()
@@ -334,7 +334,7 @@ class TestLogLevelEnvironmentOverride:
             daemon = HooksDaemon(config=daemon_config, controller=front_controller)
 
             server_task = asyncio.create_task(daemon.start())
-            await asyncio.sleep(0.1)
+            await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
 
             # Should trim and use DEBUG
             root_logger = logging.getLogger()

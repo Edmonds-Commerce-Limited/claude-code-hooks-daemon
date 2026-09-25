@@ -20,6 +20,15 @@ source "${PROJECT_ROOT}/scripts/venv-include.bash"
 
 cd "${PROJECT_ROOT}"
 
+# llm_qa.py's `tests` tool is `live_daemon=True`: `ensure_live_daemon` starts
+# this checkout's daemon before this script runs, but a start failure there
+# does not abort -- it only prints a message, and this script still runs
+# with no daemon live. blocking_gate_guard.py (tests/acceptance/) only
+# escalates a skip of a declared release-gate file to a failure when this is
+# set (Plan 00466 N39 widened); without it, that daemon-start failure would
+# leave those tests skipping quietly instead of failing this gate.
+export HOOKS_DAEMON_RELEASE_GATE=1
+
 # Ensure venv and deps
 ensure_venv || exit 1
 if ! "${VENV_PYTHON}" -c "import pytest" 2>/dev/null; then

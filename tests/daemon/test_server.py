@@ -16,7 +16,7 @@ from typing import Any
 import pytest
 
 from claude_code_hooks_daemon.config.models import LogLevel
-from claude_code_hooks_daemon.constants import Priority
+from claude_code_hooks_daemon.constants import Priority, Timeout
 from claude_code_hooks_daemon.core.front_controller import FrontController
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
@@ -183,7 +183,7 @@ class TestHooksDaemon:
         server_task = asyncio.create_task(daemon.start())
 
         # Wait for server to be ready
-        await asyncio.sleep(0.1)
+        await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
 
         # Connect and send request
         reader, writer = await asyncio.open_unix_connection(str(daemon_config.socket_path))
@@ -220,7 +220,7 @@ class TestHooksDaemon:
         daemon = HooksDaemon(config=daemon_config, controller=front_controller)
 
         server_task = asyncio.create_task(daemon.start())
-        await asyncio.sleep(0.1)
+        await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
 
         # Check PID file exists and contains valid PID
         assert _require_path(daemon_config.pid_file_path_obj).exists()
@@ -240,7 +240,7 @@ class TestHooksDaemon:
         daemon = HooksDaemon(config=daemon_config, controller=front_controller)
 
         server_task = asyncio.create_task(daemon.start())
-        await asyncio.sleep(0.1)
+        await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
 
         assert _require_path(daemon_config.pid_file_path_obj).exists()
 
@@ -263,7 +263,7 @@ class TestHooksDaemon:
 
         # Should start successfully and overwrite stale PID
         server_task = asyncio.create_task(daemon.start())
-        await asyncio.sleep(0.1)
+        await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
 
         assert _require_path(daemon_config.pid_file_path_obj).exists()
         pid = int(_require_path(daemon_config.pid_file_path_obj).read_text().strip())
@@ -287,7 +287,7 @@ class TestHooksDaemon:
         )
 
         server_task = asyncio.create_task(daemon.start())
-        await asyncio.sleep(0.1)
+        await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
 
         # Wait for idle timeout to trigger (1s timeout + 1s check + buffer)
         await asyncio.sleep(2.5)
@@ -305,7 +305,7 @@ class TestHooksDaemon:
 
         daemon = HooksDaemon(config=daemon_config, controller=front_controller)
         server_task = asyncio.create_task(daemon.start())
-        await asyncio.sleep(0.1)
+        await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
 
         # Send request after 1 second (before timeout)
         await asyncio.sleep(1)
@@ -353,7 +353,7 @@ class TestHooksDaemon:
 
         daemon = HooksDaemon(config=daemon_config, controller=controller)
         server_task = asyncio.create_task(daemon.start())
-        await asyncio.sleep(0.1)
+        await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
 
         # Send 3 concurrent requests
         async def send_request(request_id: str) -> dict[str, Any]:
@@ -407,7 +407,7 @@ class TestHooksDaemon:
 
         daemon = HooksDaemon(config=daemon_config, controller=controller)
         server_task = asyncio.create_task(daemon.start())
-        await asyncio.sleep(0.1)
+        await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
 
         # Start a slow request
         async def send_slow_request() -> dict[str, Any]:
@@ -448,7 +448,7 @@ class TestHooksDaemon:
         """Test that daemon handles malformed JSON gracefully."""
         daemon = HooksDaemon(config=daemon_config, controller=front_controller)
         server_task = asyncio.create_task(daemon.start())
-        await asyncio.sleep(0.1)
+        await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
 
         reader, writer = await asyncio.open_unix_connection(str(daemon_config.socket_path))
 
@@ -479,7 +479,7 @@ class TestHooksDaemon:
         """
         daemon = HooksDaemon(config=daemon_config, controller=front_controller)
         server_task = asyncio.create_task(daemon.start())
-        await asyncio.sleep(0.1)
+        await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
 
         reader, writer = await asyncio.open_unix_connection(str(daemon_config.socket_path))
 
@@ -512,7 +512,7 @@ class TestHooksDaemon:
         """Test that daemon removes socket file on shutdown."""
         daemon = HooksDaemon(config=daemon_config, controller=front_controller)
         server_task = asyncio.create_task(daemon.start())
-        await asyncio.sleep(0.1)
+        await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
 
         assert _require_path(daemon_config.socket_path_obj).exists()
 
@@ -529,7 +529,7 @@ class TestHooksDaemon:
         """Test that daemon handles request missing event field."""
         daemon = HooksDaemon(config=daemon_config, controller=front_controller)
         server_task = asyncio.create_task(daemon.start())
-        await asyncio.sleep(0.1)
+        await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
 
         reader, writer = await asyncio.open_unix_connection(str(daemon_config.socket_path))
 
@@ -557,7 +557,7 @@ class TestHooksDaemon:
         """Test that daemon handles request missing hook_input field."""
         daemon = HooksDaemon(config=daemon_config, controller=front_controller)
         server_task = asyncio.create_task(daemon.start())
-        await asyncio.sleep(0.1)
+        await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
 
         reader, writer = await asyncio.open_unix_connection(str(daemon_config.socket_path))
 
@@ -585,7 +585,7 @@ class TestHooksDaemon:
         """Test that daemon handles empty JSON object gracefully."""
         daemon = HooksDaemon(config=daemon_config, controller=front_controller)
         server_task = asyncio.create_task(daemon.start())
-        await asyncio.sleep(0.1)
+        await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
 
         reader, writer = await asyncio.open_unix_connection(str(daemon_config.socket_path))
 
@@ -612,7 +612,7 @@ class TestHooksDaemon:
         """Test that daemon handles request without request_id field."""
         daemon = HooksDaemon(config=daemon_config, controller=front_controller)
         server_task = asyncio.create_task(daemon.start())
-        await asyncio.sleep(0.1)
+        await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
 
         reader, writer = await asyncio.open_unix_connection(str(daemon_config.socket_path))
 
@@ -648,7 +648,7 @@ class TestHooksDaemon:
 
         daemon = HooksDaemon(config=daemon_config, controller=front_controller)
         server_task = asyncio.create_task(daemon.start())
-        await asyncio.sleep(0.1)
+        await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
 
         # Socket should be recreated and functional
         assert _require_path(daemon_config.socket_path_obj).exists()
@@ -668,7 +668,7 @@ class TestHooksDaemon:
         """Test that daemon sets correct socket permissions (0o660)."""
         daemon = HooksDaemon(config=daemon_config, controller=front_controller)
         server_task = asyncio.create_task(daemon.start())
-        await asyncio.sleep(0.1)
+        await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
 
         # Check socket permissions
         stat_result = _require_path(daemon_config.socket_path_obj).stat()
@@ -685,7 +685,7 @@ class TestHooksDaemon:
         """Test that daemon handles multiple shutdown calls gracefully."""
         daemon = HooksDaemon(config=daemon_config, controller=front_controller)
         server_task = asyncio.create_task(daemon.start())
-        await asyncio.sleep(0.1)
+        await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
 
         # Call shutdown multiple times
         await daemon.shutdown()
@@ -705,7 +705,7 @@ class TestHooksDaemon:
         """Test that daemon correctly tracks active request count."""
         daemon = HooksDaemon(config=daemon_config, controller=front_controller)
         server_task = asyncio.create_task(daemon.start())
-        await asyncio.sleep(0.1)
+        await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
 
         # Initially no active requests
         assert daemon._active_requests == 0
@@ -744,7 +744,7 @@ class TestHooksDaemon:
         """Test that daemon updates last_activity timestamp on requests."""
         daemon = HooksDaemon(config=daemon_config, controller=front_controller)
         server_task = asyncio.create_task(daemon.start())
-        await asyncio.sleep(0.1)
+        await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
 
         initial_activity = daemon.last_activity
 
@@ -818,7 +818,7 @@ class TestHooksDaemon:
 
         daemon = HooksDaemon(config=daemon_config, controller=controller)
         server_task = asyncio.create_task(daemon.start())
-        await asyncio.sleep(0.1)
+        await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
 
         reader, writer = await asyncio.open_unix_connection(str(daemon_config.socket_path))
 
@@ -850,7 +850,7 @@ class TestHooksDaemon:
         """Test that daemon handles missing event field when request_id is also missing."""
         daemon = HooksDaemon(config=daemon_config, controller=front_controller)
         server_task = asyncio.create_task(daemon.start())
-        await asyncio.sleep(0.1)
+        await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
 
         reader, writer = await asyncio.open_unix_connection(str(daemon_config.socket_path))
 
@@ -879,7 +879,7 @@ class TestHooksDaemon:
         """Test that daemon handles missing hook_input when request_id is also missing."""
         daemon = HooksDaemon(config=daemon_config, controller=front_controller)
         server_task = asyncio.create_task(daemon.start())
-        await asyncio.sleep(0.1)
+        await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
 
         reader, writer = await asyncio.open_unix_connection(str(daemon_config.socket_path))
 
@@ -915,7 +915,7 @@ class TestHooksDaemon:
 
         daemon = HooksDaemon(config=config, controller=front_controller)
         server_task = asyncio.create_task(daemon.start())
-        await asyncio.sleep(0.1)
+        await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
 
         # Should work without PID file
         _reader, writer = await asyncio.open_unix_connection(str(config.socket_path))
@@ -937,7 +937,7 @@ class TestHooksDaemon:
 
         # Should start successfully despite invalid PID file
         server_task = asyncio.create_task(daemon.start())
-        await asyncio.sleep(0.1)
+        await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
 
         assert _require_path(daemon_config.pid_file_path_obj).exists()
         # Should have written valid PID
@@ -959,7 +959,7 @@ class TestHooksDaemon:
 
         # Should start and overwrite PID file with warning
         server_task = asyncio.create_task(daemon.start())
-        await asyncio.sleep(0.1)
+        await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
 
         assert _require_path(daemon_config.pid_file_path_obj).exists()
         pid = int(_require_path(daemon_config.pid_file_path_obj).read_text().strip())
@@ -987,7 +987,7 @@ class TestHooksDaemon:
         """
         daemon = HooksDaemon(config=daemon_config, controller=front_controller)
         server_task = asyncio.create_task(daemon.start())
-        await asyncio.sleep(0.1)
+        await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
 
         reader, writer = await asyncio.open_unix_connection(str(daemon_config.socket_path))
 
@@ -1071,7 +1071,7 @@ class TestHooksDaemonSystemRequests:
         """Test _system get_logs request returns logs."""
         daemon = HooksDaemon(config=daemon_config, controller=front_controller)
         server_task = asyncio.create_task(daemon.start())
-        await asyncio.sleep(0.1)
+        await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
 
         reader, writer = await asyncio.open_unix_connection(str(daemon_config.socket_path))
 
@@ -1107,7 +1107,7 @@ class TestHooksDaemonSystemRequests:
         """Test _system get_logs request with count parameter."""
         daemon = HooksDaemon(config=daemon_config, controller=front_controller)
         server_task = asyncio.create_task(daemon.start())
-        await asyncio.sleep(0.1)
+        await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
 
         reader, writer = await asyncio.open_unix_connection(str(daemon_config.socket_path))
 
@@ -1139,7 +1139,7 @@ class TestHooksDaemonSystemRequests:
         """Test _system get_logs request with level filter."""
         daemon = HooksDaemon(config=daemon_config, controller=front_controller)
         server_task = asyncio.create_task(daemon.start())
-        await asyncio.sleep(0.1)
+        await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
 
         reader, writer = await asyncio.open_unix_connection(str(daemon_config.socket_path))
 
@@ -1173,7 +1173,7 @@ class TestHooksDaemonSystemRequests:
         """Test _system log_marker request logs a marker message."""
         daemon = HooksDaemon(config=daemon_config, controller=front_controller)
         server_task = asyncio.create_task(daemon.start())
-        await asyncio.sleep(0.1)
+        await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
 
         reader, writer = await asyncio.open_unix_connection(str(daemon_config.socket_path))
 
@@ -1206,7 +1206,7 @@ class TestHooksDaemonSystemRequests:
         """Test _system log_marker with default message."""
         daemon = HooksDaemon(config=daemon_config, controller=front_controller)
         server_task = asyncio.create_task(daemon.start())
-        await asyncio.sleep(0.1)
+        await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
 
         reader, writer = await asyncio.open_unix_connection(str(daemon_config.socket_path))
 
@@ -1237,7 +1237,7 @@ class TestHooksDaemonSystemRequests:
         """Test _system request with unknown action returns error."""
         daemon = HooksDaemon(config=daemon_config, controller=front_controller)
         server_task = asyncio.create_task(daemon.start())
-        await asyncio.sleep(0.1)
+        await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
 
         reader, writer = await asyncio.open_unix_connection(str(daemon_config.socket_path))
 
@@ -1270,7 +1270,7 @@ class TestHooksDaemonSystemRequests:
         """Test _system request without request_id."""
         daemon = HooksDaemon(config=daemon_config, controller=front_controller)
         server_task = asyncio.create_task(daemon.start())
-        await asyncio.sleep(0.1)
+        await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
 
         reader, writer = await asyncio.open_unix_connection(str(daemon_config.socket_path))
 

@@ -21,6 +21,7 @@ from claude_code_hooks_daemon.core.response_schemas import (
     validate_response,
 )
 from claude_code_hooks_daemon.core.workspace import DeclaredProject, ProjectRegistry
+from claude_code_hooks_daemon.daemon.paths import get_pid_path
 
 # Re-exported so pytest collects it as a hook implementation from this
 # conftest. It sits at `tests/` root rather than in a subdirectory because the
@@ -495,6 +496,24 @@ _REJECTED_WRITE_DIR_PARTS = ("untracked", "rejected-writes")
 _REJECTED_WRITE_SUFFIX = ".rejected"
 
 
+def _daemon_pid_file_mtime(pid_path: Path) -> float | None:
+    """mtime of a daemon pid file, or None if it does not exist right now.
+
+    Plan 00466 N39 widened: a mid-run rewrite of a tracked generated doc was
+    traced to an EXTERNAL ``./bin/hooks-daemon restart`` during a live test
+    run, not to any test — ``DaemonController.initialise()`` re-runs
+    ``ClaudeMdInjector`` on every restart. A restart always touches this
+    project's own pid file (removed then recreated, or rewritten in place),
+    so comparing its mtime across the fixture's window is a one-stat way to
+    name that specific external cause instead of the generic "suspect an
+    external edit" text below.
+    """
+    try:
+        return pid_path.stat().st_mtime
+    except OSError:
+        return None
+
+
 def _tracked_file_fingerprints() -> dict[str, tuple[int, int]]:
     """Cheap (size, mtime_ns) per protected file. One stat each, per test."""
     fingerprints: dict[str, tuple[int, int]] = {}
@@ -592,11 +611,19 @@ def no_test_writes_tracked_generated_docs():
     inside the same test), so whatever is about to be overwritten is preserved
     first and named in the failure. A diagnostic must never be the only copy of
     the work it discards.
+
+    Do not restart this project's own daemon while a test run is in progress:
+    a restart re-runs the injector against the real repository exactly like a
+    misconfigured test would, and lands inside whichever test's window the
+    restart happened to overlap (Plan 00466 N39 widened).
     """
+    pid_path = get_pid_path(_REPO_ROOT)
+    pid_mtime_before = _daemon_pid_file_mtime(pid_path)
     baseline = _tracked_file_bytes()
     before = _tracked_file_fingerprints()
     yield
     after = _tracked_file_fingerprints()
+    pid_mtime_after = _daemon_pid_file_mtime(pid_path)
 
     mutated = [name for name, fingerprint in after.items() if before.get(name) != fingerprint]
     if not mutated:
@@ -617,9 +644,21 @@ def no_test_writes_tracked_generated_docs():
         (_REPO_ROOT / name).write_bytes(original)
         restored.append(name)
 
+    culprit_note = ""
+    if pid_mtime_before != pid_mtime_after:
+        culprit_note = (
+            f" This project's own daemon pid file ({pid_path}) changed mtime "
+            f"during this test's window ({pid_mtime_before!r} -> "
+            f"{pid_mtime_after!r}) — that means an external daemon "
+            "restart/start/stop happened WHILE THIS TEST RAN and is almost "
+            "certainly the real cause, not this test. Do not restart this "
+            "project's daemon during a test run."
+        )
+
     raise AssertionError(
         "This test rewrote tracked generated doc(s): "
         + ", ".join(mutated)
+        + culprit_note
         + ". Almost always this is DaemonController.initialise() being called "
         "with workspace_root pointing at the real repository — initialise() "
         "runs ClaudeMdInjector as a side effect and will rewrite CLAUDE.md "

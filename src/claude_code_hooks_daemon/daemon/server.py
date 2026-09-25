@@ -486,6 +486,7 @@ class HooksDaemon:
         "last_activity",
         "server",
         "shutdown_event",
+        "started_event",
     )
 
     def __init__(
@@ -507,6 +508,13 @@ class HooksDaemon:
         self._event_servers: dict[str, asyncio.Server] = {}
         self.last_activity: float = time.time()
         self.shutdown_event = asyncio.Event()
+        # Set once `start()` has finished both binding steps (legacy socket
+        # + per-event listeners, best-effort) -- the deterministic readiness
+        # signal a caller awaits instead of guessing a fixed sleep duration
+        # (Plan 00466 N39 widened: 13 call sites in
+        # test_event_socket_listeners.py raced a fixed 100 ms against these
+        # same two awaited steps under host load).
+        self.started_event = asyncio.Event()
         self._active_requests = 0
         self._shutdown_requested = False
         self._shutdown_task: asyncio.Task[None] | None = None
@@ -716,6 +724,12 @@ class HooksDaemon:
         # the legacy-socket reuse gate above — a start that loses the race
         # (DaemonAlreadyRunningError) never touches the events dir.
         await self._bind_event_sockets(socket_path)
+
+        # Both binding steps above are complete (best-effort for the
+        # per-event listeners -- a partial bind still reaches here). A
+        # caller waiting on `started_event` can now safely assume the
+        # legacy socket is live and `_event_servers` holds its final set.
+        self.started_event.set()
 
         # Setup signal handlers for graceful shutdown
         loop = asyncio.get_running_loop()
