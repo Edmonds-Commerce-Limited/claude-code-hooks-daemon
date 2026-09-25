@@ -17,6 +17,7 @@ from __future__ import annotations
 import errno
 import os
 import time
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -242,7 +243,7 @@ class TestBoundedRecursiveGlob:
         (tmp_path / "real.zzz-marker-9f2c").touch()
         real_scandir = os.scandir
 
-        def _fake_scandir(path: str | os.PathLike[str]) -> os.ScandirIterator[str]:
+        def _fake_scandir(path: str | os.PathLike[str]) -> Iterator[os.DirEntry[str]]:
             if Path(path) == tmp_path / "gone":
                 raise FileNotFoundError(errno.ENOENT, "No such file or directory")
             return real_scandir(path)
@@ -265,7 +266,7 @@ class TestBoundedRecursiveGlob:
         (tmp_path / "real.zzz-marker-9f2c").touch()
         real_scandir = os.scandir
 
-        def _fake_scandir(path: str | os.PathLike[str]) -> os.ScandirIterator[str]:
+        def _fake_scandir(path: str | os.PathLike[str]) -> Iterator[os.DirEntry[str]]:
             if Path(path) == tmp_path / "locked":
                 raise PermissionError(errno.EACCES, "Permission denied")
             return real_scandir(path)
@@ -584,7 +585,7 @@ class TestIterNormalisedShellWordsProcessSubstitutionGeneralised:
             "source <(kubectl completion bash)",
             "source <(gh completion -s bash)",
             "source <(helm completion bash)",
-            "eval \"$(pip completion --bash)\"",
+            'eval "$(pip completion --bash)"',
         ):
             list(iter_normalised_shell_words(command))  # must not raise
 
@@ -838,7 +839,7 @@ class TestIterNormalisedShellWordsCommandSubstitution:
         assert "world" in words
 
     def test_dollar_paren_inside_double_quotes_is_reparsed(self) -> None:
-        command = 'echo "$(sh -c \'cat wor\'\\\'\'ld\')"'
+        command = "echo \"$(sh -c 'cat wor'\\''ld')\""
         words = list(iter_normalised_shell_words(command))
         assert "world" in words
 
@@ -858,7 +859,7 @@ class TestIterNormalisedShellWordsCommandSubstitution:
         assert "world" in words
 
     def test_escaped_nested_backtick_inside_double_quotes_is_reparsed(self) -> None:
-        command = 'echo "`echo \\`bash -c \'cat wor\'\\\'\'ld\'\\``"'
+        command = "echo \"`echo \\`bash -c 'cat wor'\\''ld'\\``\""
         words = list(iter_normalised_shell_words(command))
         assert "world" in words
 
@@ -1147,7 +1148,7 @@ class TestIterNormalisedShellWordsGd6Shell2Residuals:
         argument, once quote-decoded, is `cat wor""ld` with the middle
         quotes literal at THIS level -- only a further re-parse (this
         fix) splices them, revealing `world`."""
-        command = "bash -c \"$(echo 'cat wor\"\"ld')\""
+        command = 'bash -c "$(echo \'cat wor""ld\')"'
         words = list(iter_normalised_shell_words(command))
         assert "world" in words
 

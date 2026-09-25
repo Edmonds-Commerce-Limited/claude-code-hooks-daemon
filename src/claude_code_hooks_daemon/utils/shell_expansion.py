@@ -435,7 +435,27 @@ _SSH_LOOPBACK_HOSTS: Final[frozenset[str]] = frozenset({"localhost", "127.0.0.1"
 #: loopback host, this recursion just does not fire -- fails toward NOT
 #: recursing, never toward a false deny).
 _SSH_SHORT_VALUE_FLAGS: Final[frozenset[str]] = frozenset(
-    {"-p", "-i", "-o", "-l", "-F", "-J", "-c", "-S", "-w", "-B", "-b", "-m", "-O", "-Q", "-e", "-R", "-L", "-D", "-W"}
+    {
+        "-p",
+        "-i",
+        "-o",
+        "-l",
+        "-F",
+        "-J",
+        "-c",
+        "-S",
+        "-w",
+        "-B",
+        "-b",
+        "-m",
+        "-O",
+        "-Q",
+        "-e",
+        "-R",
+        "-L",
+        "-D",
+        "-W",
+    }
 )
 
 
@@ -464,6 +484,7 @@ def _classify_wrapper_option_word(wrapper: str, word: str) -> str:
             return "skip"  # glued value, e.g. `-uroot`/`-n5`
         return "skip"  # an unrecognised flag -- best-effort: assume no value
     return "command"
+
 
 #: Nesting levels of `-c`/`eval` re-parsing followed (`bash -c 'bash -c
 #: "..."'` could recurse arbitrarily) -- independent of the per-level
@@ -623,6 +644,7 @@ def _classify_interpreter_option_word(word: str) -> str:
                 return "value_glued" if position + 1 < len(word) else "value_separate"
         return "plain"
     return "non_option"
+
 
 #: ANSI-C (`$'...'`) single-character escapes with no numeric argument.
 _ANSI_C_SIMPLE_ESCAPES: Final[dict[str, str]] = {
@@ -1067,7 +1089,11 @@ def _recurse_into_nested_command(
         raise TimeoutError("nested shell re-parsing exceeded its deadline")
     remaining_bytes[0] -= min(len(text), remaining_bytes[0])
     yield from _iter_normalised_shell_words(
-        text, max_words=max_words, depth=depth + 1, remaining_bytes=remaining_bytes, deadline=deadline
+        text,
+        max_words=max_words,
+        depth=depth + 1,
+        remaining_bytes=remaining_bytes,
+        deadline=deadline,
     )
 
 
@@ -1237,8 +1263,10 @@ def _iter_normalised_shell_words(
         #     genuine command terminator -- unlike a real interpreter's
         #     STRICT walk, it does not stop on the first ordinary word, so
         #     this is the only thing that ends it short of finding `-c`.
-        if scanning_interpreter_options and scanning_tolerant and any(
-            ch in _COMMAND_TERMINATOR_CHARS for ch in this_word_operators
+        if (
+            scanning_interpreter_options
+            and scanning_tolerant
+            and any(ch in _COMMAND_TERMINATOR_CHARS for ch in this_word_operators)
         ):
             scanning_interpreter_options = False
             scanning_tolerant = False
@@ -1399,7 +1427,11 @@ def _iter_normalised_shell_words(
                 scanning_tolerant = False
             else:
                 yield from _recurse_into_nested_command(
-                    decoded, max_words=max_words, depth=depth, remaining_bytes=remaining_bytes, deadline=deadline
+                    decoded,
+                    max_words=max_words,
+                    depth=depth,
+                    remaining_bytes=remaining_bytes,
+                    deadline=deadline,
                 )
             previous_word = decoded
             continue
@@ -1426,7 +1458,11 @@ def _iter_normalised_shell_words(
             scanning_interpreter_options = False
             scanning_tolerant = False
             yield from _recurse_into_nested_command(
-                decoded, max_words=max_words, depth=depth, remaining_bytes=remaining_bytes, deadline=deadline
+                decoded,
+                max_words=max_words,
+                depth=depth,
+                remaining_bytes=remaining_bytes,
+                deadline=deadline,
             )
             previous_word = decoded
             continue
@@ -1452,7 +1488,11 @@ def _iter_normalised_shell_words(
                 direct_wrapper_value_is_code = False
                 scanning_direct_wrapper = None
                 yield from _recurse_into_nested_command(
-                    decoded, max_words=max_words, depth=depth, remaining_bytes=remaining_bytes, deadline=deadline
+                    decoded,
+                    max_words=max_words,
+                    depth=depth,
+                    remaining_bytes=remaining_bytes,
+                    deadline=deadline,
                 )
             previous_word = decoded
             continue
@@ -1573,7 +1613,11 @@ def _iter_normalised_shell_words(
             scanning_interpreter_options = False
             if this_word_operators.endswith(_HERE_STRING_OPERATOR):
                 yield from _recurse_into_nested_command(
-                    decoded, max_words=max_words, depth=depth, remaining_bytes=remaining_bytes, deadline=deadline
+                    decoded,
+                    max_words=max_words,
+                    depth=depth,
+                    remaining_bytes=remaining_bytes,
+                    deadline=deadline,
                 )
                 previous_word = decoded
                 continue
@@ -1589,7 +1633,11 @@ def _iter_normalised_shell_words(
             if this_word_operators.endswith(_HERE_STRING_OPERATOR):
                 awaiting_bare_interpreter_herestring = False
                 yield from _recurse_into_nested_command(
-                    decoded, max_words=max_words, depth=depth, remaining_bytes=remaining_bytes, deadline=deadline
+                    decoded,
+                    max_words=max_words,
+                    depth=depth,
+                    remaining_bytes=remaining_bytes,
+                    deadline=deadline,
                 )
                 previous_word = decoded
                 continue
@@ -1668,7 +1716,11 @@ def _iter_normalised_shell_words(
                     fed_content = pending_output_procsub_content
                     pending_output_procsub_content = None
                     yield from _recurse_into_nested_command(
-                        joined, max_words=max_words, depth=depth, remaining_bytes=remaining_bytes, deadline=deadline
+                        joined,
+                        max_words=max_words,
+                        depth=depth,
+                        remaining_bytes=remaining_bytes,
+                        deadline=deadline,
                     )
                     if fed_content:
                         yield from _recurse_into_nested_command(
@@ -1711,7 +1763,11 @@ def _iter_normalised_shell_words(
                             "-- cannot rule out a protected path"
                         )
                     yield from _recurse_into_nested_command(
-                        joined, max_words=max_words, depth=depth, remaining_bytes=remaining_bytes, deadline=deadline
+                        joined,
+                        max_words=max_words,
+                        depth=depth,
+                        remaining_bytes=remaining_bytes,
+                        deadline=deadline,
                     )
             previous_word = decoded
             continue
@@ -1732,7 +1788,11 @@ def _iter_normalised_shell_words(
             awaiting_source_stdin_herestring = False
             if this_word_operators.endswith(_HERE_STRING_OPERATOR):
                 yield from _recurse_into_nested_command(
-                    decoded, max_words=max_words, depth=depth, remaining_bytes=remaining_bytes, deadline=deadline
+                    decoded,
+                    max_words=max_words,
+                    depth=depth,
+                    remaining_bytes=remaining_bytes,
+                    deadline=deadline,
                 )
                 previous_word = decoded
                 continue
@@ -1830,7 +1890,11 @@ def _iter_normalised_shell_words(
         joined = _resolve_collected_producer_text(collecting_head, collecting_words)
         if collecting_purpose == "output_procsub":
             yield from _recurse_into_nested_command(
-                joined, max_words=max_words, depth=depth, remaining_bytes=remaining_bytes, deadline=deadline
+                joined,
+                max_words=max_words,
+                depth=depth,
+                remaining_bytes=remaining_bytes,
+                deadline=deadline,
             )
             if pending_output_procsub_content:
                 yield from _recurse_into_nested_command(
@@ -1858,7 +1922,11 @@ def _iter_normalised_shell_words(
                     "-- cannot rule out a protected path"
                 )
             yield from _recurse_into_nested_command(
-                joined, max_words=max_words, depth=depth, remaining_bytes=remaining_bytes, deadline=deadline
+                joined,
+                max_words=max_words,
+                depth=depth,
+                remaining_bytes=remaining_bytes,
+                deadline=deadline,
             )
 
 

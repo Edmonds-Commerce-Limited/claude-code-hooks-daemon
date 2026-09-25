@@ -1964,9 +1964,7 @@ class TestContentContextSkipsAggressiveGlobIntersection:
         text = "cat prod.vault-passw*rd"
         assert sfm.find_protected_mention_detail(text, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
         assert (
-            sfm.find_protected_mention_detail(
-                text, sfm.DEFAULT_PROTECTED_PATTERNS, context="bash"
-            )
+            sfm.find_protected_mention_detail(text, sfm.DEFAULT_PROTECTED_PATTERNS, context="bash")
             is not None
         )
 
@@ -2675,23 +2673,31 @@ class TestNestedDashCAndEvalCommandsDeny:
 
     def test_the_reported_bash_dash_c_nested_splice_denies(self) -> None:
         command = "bash -c 'cat id_'\\''rs'\\''a'"
-        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
 
     def test_the_equivalent_eval_nested_splice_denies(self) -> None:
         command = "eval 'cat id_'\\''rs'\\''a'"
-        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
 
     def test_two_levels_of_bash_dash_c_nesting_denies(self) -> None:
         """RED test requested by team-lead: two levels of nesting."""
         inner = "bash -c 'cat id_'\\''rs'\\''a'"
         escaped_inner = inner.replace("'", "'\\''")
         command = f"bash -c '{escaped_inner}'"
-        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
 
     def test_mixed_double_and_single_quoting_denies(self) -> None:
         """RED test requested by team-lead: mixed quoting."""
         command = "bash -c \"cat id_'rs'a\""
-        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
 
     def test_an_unrelated_bash_dash_c_command_stays_allowed(self) -> None:
         command = "bash -c 'echo hello world'"
@@ -2706,36 +2712,52 @@ class TestReview6ClosedShellFeedShapes:
 
     def test_a_flag_between_interpreter_and_dash_c_denies(self) -> None:
         command = "bash -x -c 'cat id_'\\''rs'\\''a'"
-        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
 
     def test_bash_lc_clustered_denies(self) -> None:
         command = "bash -lc 'cat id_'\\''rs'\\''a'"
-        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
 
     def test_an_arg_taking_option_before_dash_c_denies(self) -> None:
         command = "bash -O extglob -c 'cat id_'\\''rs'\\''a'"
-        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
 
     def test_eval_with_several_words_denies(self) -> None:
         """Team-lead's own example: `eval cat id_\\'rs\\'a`."""
         command = "eval cat id_\\'rs\\'a"
-        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
 
     def test_eval_with_two_double_quoted_words_denies(self) -> None:
         command = 'eval "cat" "id_\'rs\'a"'
-        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
 
     def test_eval_after_builtin_prefix_denies(self) -> None:
         command = "builtin eval cat id_\\'rs\\'a"
-        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
 
     def test_eval_after_command_prefix_denies(self) -> None:
         command = "command eval cat id_\\'rs\\'a"
-        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
 
     def test_source_process_substitution_of_a_literal_echo_denies(self) -> None:
         command = "source <(echo cat id_'\\''rs'\\''a')"
-        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
 
     def test_source_process_substitution_of_a_non_literal_producer_with_no_mention_allows(
         self,
@@ -2757,7 +2779,9 @@ class TestReview6ClosedShellFeedShapes:
         """The other half of MAJOR-2: a non-literal producer's OWN command
         text is still scanned, so a protected path IN that text is caught."""
         command = "source <(cat id_'\\''rs'\\''a')"
-        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
 
     def test_source_process_substitution_of_a_completion_line_allows(self) -> None:
         """The false positive review 6 MAJOR-2 exists to fix: common
@@ -2766,7 +2790,7 @@ class TestReview6ClosedShellFeedShapes:
             "source <(kubectl completion bash)",
             "source <(gh completion -s bash)",
             "source <(helm completion bash)",
-            "eval \"$(pip completion --bash)\"",
+            'eval "$(pip completion --bash)"',
         ):
             assert (
                 sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is None
@@ -2774,11 +2798,15 @@ class TestReview6ClosedShellFeedShapes:
 
     def test_a_here_string_to_a_shell_denies(self) -> None:
         command = "bash <<<'cat id_'\\''rs'\\''a'"
-        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
 
     def test_a_literal_echo_piped_to_a_shell_denies(self) -> None:
         command = "echo cat id_'\\''rs'\\''a' | bash"
-        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
 
 
 class TestReview7CommandSubstitutionMentions:
@@ -2788,11 +2816,15 @@ class TestReview7CommandSubstitutionMentions:
 
     def test_dollar_paren_bash_dash_c_denies(self) -> None:
         command = "x=$(bash -c 'cat id_'\\''rs'\\''a')"
-        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
 
     def test_backtick_bash_dash_c_denies(self) -> None:
         command = "echo `bash -c 'cat id_'\\''rs'\\''a'`"
-        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
 
     def test_dollar_paren_with_no_mention_allows(self) -> None:
         assert (
@@ -2808,28 +2840,40 @@ class TestReview7PipeWrapperMentions:
 
     def test_sudo_dash_u_before_shell_denies(self) -> None:
         command = "echo cat id_'\\''rs'\\''a' | sudo -u root bash"
-        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
 
     def test_timeout_with_duration_before_shell_denies(self) -> None:
         command = "echo cat id_'\\''rs'\\''a' | timeout 5 bash"
-        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
 
     def test_cat_passthrough_with_no_argument_denies(self) -> None:
         command = "echo cat id_'\\''rs'\\''a' | cat | bash"
-        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
 
     def test_output_process_substitution_denies(self) -> None:
         command = "echo cat id_'\\''rs'\\''a' > >(bash)"
-        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
 
     def test_cat_here_string_piped_to_shell_denies(self) -> None:
         command = "cat <<< 'cat id_'\\''rs'\\''a' | bash"
-        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
 
     def test_ordinary_sudo_command_allows(self) -> None:
         """Control: an ordinary sudo-wrapped, non-shell command allows."""
         assert (
-            sfm.find_protected_mention_detail("sudo -u deploy ls -la", sfm.DEFAULT_PROTECTED_PATTERNS)
+            sfm.find_protected_mention_detail(
+                "sudo -u deploy ls -la", sfm.DEFAULT_PROTECTED_PATTERNS
+            )
             is None
         )
 
@@ -2843,27 +2887,39 @@ class TestFileSchemeUrlMentions:
 
     def test_curl_triple_slash_unencoded_denies(self) -> None:
         command = "curl -s file:///root/.ssh/id_rsa"
-        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
 
     def test_curl_percent_encoded_basename_denies(self) -> None:
         command = "curl -s file:///root/.ssh/id_r%73a"
-        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
 
     def test_wget_file_url_denies(self) -> None:
         command = "wget file:///root/.ssh/id_rsa"
-        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
 
     def test_file_url_with_localhost_host_denies(self) -> None:
         command = "curl file://localhost/root/.ssh/id_rsa"
-        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
 
     def test_git_clone_file_url_denies(self) -> None:
         command = "git clone file:///root/.ssh/id_rsa /tmp/x"
-        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
 
     def test_python_urllib_one_liner_denies(self) -> None:
         command = "python3 -c \"import urllib.request; urllib.request.urlopen('file:///root/.ssh/id_rsa')\""
-        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
 
     def test_file_url_to_a_non_protected_path_allows(self) -> None:
         """Control: the route works, but a `file:` URL naming an ordinary
@@ -2875,19 +2931,27 @@ class TestFileSchemeUrlMentions:
         """Review 7 MAJOR-4: URL schemes are case-insensitive (RFC 3986),
         and curl accepts `FILE://` exactly like `file://`."""
         command = "curl FILE:///root/.ssh/id_rsa"
-        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
 
     def test_mixed_case_scheme_denies(self) -> None:
         command = "curl File:///root/.ssh/id_rsa"
-        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
 
     def test_url_split_by_single_quote_denies(self) -> None:
         """Review 7 MAJOR-4: a URL split by shell quoting never appears as
         one contiguous `file:...` span in the RAW text -- only the
         quote-decoded word reassembles it."""
         command = "curl 'file:///root/.ssh/id_r'sa"
-        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )
 
     def test_url_split_by_double_quote_denies(self) -> None:
         command = 'curl file:///root/.ssh/id_r"sa"'
-        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        assert (
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+        )

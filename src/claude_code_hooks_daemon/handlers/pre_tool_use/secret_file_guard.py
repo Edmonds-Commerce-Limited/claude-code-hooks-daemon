@@ -299,9 +299,8 @@ def _first_literal_is_shell_interpreter(span_literals: list[str]) -> bool:
     basename = span_literals[0].rsplit("/", 1)[-1]
     return basename in _SHELL_INTERPRETER_NAMES
 
-_QUOTED_STRING_RE: Final[re.Pattern[str]] = re.compile(
-    r"""(['"])((?:\\.|(?!\1).)*)\1""", re.DOTALL
-)
+
+_QUOTED_STRING_RE: Final[re.Pattern[str]] = re.compile(r"""(['"])((?:\\.|(?!\1).)*)\1""", re.DOTALL)
 _BACKTICK_STRING_RE: Final[re.Pattern[str]] = re.compile(r"`((?:\\.|[^`\\])*)`", re.DOTALL)
 _PERCENT_LITERAL_DELIMITERS: Final[dict[str, str]] = {
     "{": "}",
@@ -325,9 +324,7 @@ _PY_MODULE_ALIAS_RE: Final[re.Pattern[str]] = re.compile(
 _PY_FROM_IMPORT_RE: Final[re.Pattern[str]] = re.compile(
     r"^\s*from\s+(os|subprocess)\s+import\s+(.+)$", re.MULTILINE
 )
-_PY_FROM_IMPORT_NAME_RE: Final[re.Pattern[str]] = re.compile(
-    r"(\w+)(?:\s+as\s+(\w+))?"
-)
+_PY_FROM_IMPORT_NAME_RE: Final[re.Pattern[str]] = re.compile(r"(\w+)(?:\s+as\s+(\w+))?")
 #: `shell=True`/`shell = True`/`shell\n=\nTrue` -- any whitespace around
 #: `=`, matching what `ast` already normalises away for the AST path.
 _PY_SHELL_TRUE_RE: Final[re.Pattern[str]] = re.compile(r"\bshell\s*=\s*True\b")
@@ -355,6 +352,8 @@ def _python_regex_fallback_module_aliases(content: str) -> dict[str, str]:
     """Best-effort ``local module alias -> real module name`` map for the
     regex fallback (``import subprocess as sp``)."""
     return {alias: module for module, alias in _PY_MODULE_ALIAS_RE.findall(content)}
+
+
 # Review 7 MINOR-2: the paren-free form (`system 'x'`, idiomatic Ruby) is
 # matched too, the same optional-paren shape Perl's `system` already uses
 # -- `_call_span` is a bounded text window, not a real paren matcher, so it
@@ -1432,9 +1431,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             layout=self.layout_for(path),
         ):
             return None
-        is_shell_extension = any(
-            path.endswith(extension) for extension in _SHELL_SCRIPT_EXTENSIONS
-        )
+        is_shell_extension = any(path.endswith(extension) for extension in _SHELL_SCRIPT_EXTENSIONS)
         context: sfm.MentionContext = (
             "bash"
             if (is_shell_extension or is_makefile or is_ci_yaml or is_shebang_shell)

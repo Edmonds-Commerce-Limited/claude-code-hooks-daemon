@@ -19,12 +19,13 @@ from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.chain import HandlerChain
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
-from claude_code_hooks_daemon.core.rule import Rule
+from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.handlers.pre_tool_use import secret_file_guard as guard_module
 from claude_code_hooks_daemon.handlers.pre_tool_use.secret_file_guard import (
     SecretFileGuardHandler,
 )
 from claude_code_hooks_daemon.utils import encrypted_at_rest
+from claude_code_hooks_daemon.utils import secret_file_matching as sfm
 
 
 @pytest.fixture(autouse=True)
@@ -188,7 +189,7 @@ class TestBashRouteInterpreterOneLiners:
 
     def test_perl_dash_e_system_denies(self) -> None:
         handler = _handler()
-        cmd = "perl -e '" + "system" + '(\'cat .vault-password\')\''
+        cmd = "perl -e '" + "system" + "('cat .vault-password')'"
         assert handler.matches(_hook_input("Bash", {"command": cmd}))
 
     def test_node_dash_e_exec_sync_denies(self) -> None:
@@ -209,7 +210,7 @@ class TestBashRouteInterpreterOneLiners:
         command text never carries the name contiguously, only the
         extracted call's AST-folded literal does."""
         handler = _handler()
-        cmd = "python3 -c \"import os; os." + "system('cat .vault-pas' 'sword')\""
+        cmd = 'python3 -c "import os; os.' + "system('cat .vault-pas' 'sword')\""
         assert handler.matches(_hook_input("Bash", {"command": cmd}))
 
 
@@ -266,9 +267,7 @@ class TestBashRouteInterpreterOneLinersReview7:
 
     def test_node_dash_dash_eval_exec_sync_denies(self) -> None:
         handler = _handler()
-        cmd = (
-            "node --eval \"require('child_process')." + "exec" + "Sync('cat .vault-password')\""
-        )
+        cmd = "node --eval \"require('child_process')." + "exec" + "Sync('cat .vault-password')\""
         assert handler.matches(_hook_input("Bash", {"command": cmd}))
 
     def test_unrelated_short_cluster_stays_allowed(self) -> None:
@@ -332,10 +331,7 @@ class TestOneLinerOptionWalkValueFlagsReview8:
         bash text never carries the protected name contiguously, so this
         can ONLY be caught by the option walk actually reaching `-c`."""
         handler = _handler()
-        cmd = (
-            'python3 -W ignore -c "import os; os.'
-            + "system('cat .vault-pas' 'sword')\""
-        )
+        cmd = 'python3 -W ignore -c "import os; os.' + "system('cat .vault-pas' 'sword')\""
         assert handler.matches(_hook_input("Bash", {"command": cmd}))
 
     def test_python_dash_capital_w_value_before_dash_c_without_a_code_flag_allows(self) -> None:
@@ -354,17 +350,13 @@ class TestPythonOneLinerMinorFixesReview7:
 
     def test_subprocess_getoutput_denies(self) -> None:
         handler = _handler()
-        cmd = (
-            'python3 -c "import subprocess; subprocess.getoutput'
-            "('cat .vault-password')\""
-        )
+        cmd = 'python3 -c "import subprocess; subprocess.getoutput' "('cat .vault-password')\""
         assert handler.matches(_hook_input("Bash", {"command": cmd}))
 
     def test_subprocess_getstatusoutput_denies(self) -> None:
         handler = _handler()
         cmd = (
-            'python3 -c "import subprocess; subprocess.getstatusoutput'
-            "('cat .vault-password')\""
+            'python3 -c "import subprocess; subprocess.getstatusoutput' "('cat .vault-password')\""
         )
         assert handler.matches(_hook_input("Bash", {"command": cmd}))
 
@@ -848,7 +840,7 @@ class TestFailsClosedOnEvaluationError:
         def _raise(*_args: object, **_kwargs: object) -> None:
             raise RuntimeError("synthetic failure injected by the test")
 
-        monkeypatch.setattr(guard_module.sfm, "find_protected_mention_detail", _raise)
+        monkeypatch.setattr(sfm, "find_protected_mention_detail", _raise)
         handler = _handler()
         hook_input = _hook_input("Bash", {"command": "echo hello"})
 
@@ -866,7 +858,7 @@ class TestFailsClosedOnEvaluationError:
         def _raise(*_args: object, **_kwargs: object) -> bool:
             raise ValueError("synthetic path_is_protected failure")
 
-        monkeypatch.setattr(guard_module.sfm, "path_is_protected", _raise)
+        monkeypatch.setattr(sfm, "path_is_protected", _raise)
         handler = _handler()
         hook_input = _hook_input("Read", {"file_path": "/proj/ordinary.py"})
 
@@ -887,7 +879,7 @@ class TestFailsClosedOnEvaluationError:
         def _raise(*_args: object, **_kwargs: object) -> None:
             raise TimeoutError("secret_file_guard mention scan exceeded its deadline")
 
-        monkeypatch.setattr(guard_module.sfm, "find_protected_mention_detail", _raise)
+        monkeypatch.setattr(sfm, "find_protected_mention_detail", _raise)
         handler = _handler()
         hook_input = _hook_input("Bash", {"command": "echo hello"})
 
@@ -900,12 +892,12 @@ class TestFailsClosedOnEvaluationError:
     def test_grep_directory_route_exception_still_denies(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(guard_module.sfm, "path_is_protected", lambda *_a, **_k: False)
+        monkeypatch.setattr(sfm, "path_is_protected", lambda *_a, **_k: False)
 
         def _raise(*_args: object, **_kwargs: object) -> None:
             raise OSError("synthetic directory-walk failure")
 
-        monkeypatch.setattr(guard_module.sfm, "directory_contains_protected", _raise)
+        monkeypatch.setattr(sfm, "directory_contains_protected", _raise)
         handler = _handler()
         hook_input = _hook_input("Grep", {"path": "/proj/some-dir", "pattern": "x"})
 
@@ -921,7 +913,7 @@ class TestFailsClosedOnEvaluationError:
         def _raise(*_args: object, **_kwargs: object) -> None:
             raise RuntimeError("synthetic script-content-scan failure")
 
-        monkeypatch.setattr(guard_module.sfm, "find_protected_mention_detail", _raise)
+        monkeypatch.setattr(sfm, "find_protected_mention_detail", _raise)
         handler = _handler()
         hook_input = _hook_input(
             "Write", {"file_path": "scripts/x.py", "content": "print('hello')"}
@@ -952,7 +944,7 @@ class TestFailsClosedOnEvaluationError:
         def _raise(*_args: object, **_kwargs: object) -> None:
             raise RuntimeError("synthetic")
 
-        monkeypatch.setattr(guard_module.sfm, "find_protected_mention_detail", _raise)
+        monkeypatch.setattr(sfm, "find_protected_mention_detail", _raise)
         handler = _handler()
         result = handler.handle(_hook_input("Bash", {"command": "echo hello"}))
 
@@ -1016,7 +1008,7 @@ class TestChainLevelFailClosedBehaviour:
         def _raise(self: object, *_args: object, **_kwargs: object) -> None:
             raise RuntimeError("synthetic chain-level failure")
 
-        monkeypatch.setattr(guard_module.RuleFormatter, "verbose", _raise)
+        monkeypatch.setattr(RuleFormatter, "verbose", _raise)
         chain = HandlerChain()
         chain.add(_handler())
         hook_input = _hook_input("Read", {"file_path": "/proj/.vault-pass"})
@@ -1030,7 +1022,7 @@ class TestChainLevelFailClosedBehaviour:
         def _raise(*_args: object, **_kwargs: object) -> None:
             raise RuntimeError("synthetic chain-level evaluation failure")
 
-        monkeypatch.setattr(guard_module.sfm, "find_protected_mention_detail", _raise)
+        monkeypatch.setattr(sfm, "find_protected_mention_detail", _raise)
         chain = HandlerChain()
         chain.add(_handler())
         hook_input = _hook_input("Bash", {"command": "echo hello"})
@@ -1054,7 +1046,7 @@ class TestErrorRouteEchoesOnlyTheExceptionType:
         def _raise(*_args: object, **_kwargs: object) -> None:
             raise RuntimeError("a message that must never reach the deny reason")
 
-        monkeypatch.setattr(guard_module.sfm, "find_protected_mention_detail", _raise)
+        monkeypatch.setattr(sfm, "find_protected_mention_detail", _raise)
         handler = _handler()
         result = handler.handle(_hook_input("Bash", {"command": "echo hello"}))
 
@@ -1068,7 +1060,7 @@ class TestErrorRouteEchoesOnlyTheExceptionType:
         def _raise(self: object, *_args: object, **_kwargs: object) -> None:
             raise RuntimeError("a different message that must never reach the deny reason")
 
-        monkeypatch.setattr(guard_module.RuleFormatter, "verbose", _raise)
+        monkeypatch.setattr(RuleFormatter, "verbose", _raise)
         handler = _handler()
         hook_input = _hook_input("Read", {"file_path": "/proj/.vault-pass"})
         result = handler.handle(hook_input)
@@ -1099,7 +1091,7 @@ class TestMatchesAndHandleShareOneEvaluation:
                 raise RuntimeError("transient failure, first call only")
             return None  # a clean re-evaluation finds nothing
 
-        monkeypatch.setattr(guard_module.sfm, "find_protected_mention_detail", _flaky)
+        monkeypatch.setattr(sfm, "find_protected_mention_detail", _flaky)
         handler = _handler()
         hook_input = _hook_input("Bash", {"command": "echo hello"})
 
@@ -1143,7 +1135,7 @@ class TestHandleTailFailsClosed:
         def _raise(self: object, *_args: object, **_kwargs: object) -> None:
             raise RuntimeError("synthetic RuleFormatter.verbose failure")
 
-        monkeypatch.setattr(guard_module.RuleFormatter, "verbose", _raise)
+        monkeypatch.setattr(RuleFormatter, "verbose", _raise)
         handler = _handler()
         hook_input = _hook_input("Read", {"file_path": "/proj/.vault-pass"})
 
@@ -1646,10 +1638,7 @@ class TestPythonAstShellExecLiterals:
 
     def test_module_import_alias_denies(self) -> None:
         handler = _handler()
-        call = (
-            "import subprocess as sp\nsp.run('cat .vault-password', shell"
-            + "=True)\n"
-        )
+        call = "import subprocess as sp\nsp.run('cat .vault-password', shell" + "=True)\n"
         hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
         assert handler.matches(hook_input)
 
@@ -1717,10 +1706,7 @@ class TestPythonAstShellExecLiterals:
         function body provides. Proven the same way, via the AST-only
         split-literal shape."""
         handler = _handler()
-        call = (
-            "    if True:\n"
-            "        os." + "system('cat .vault-pas' 'sword')\n"
-        )
+        call = "    if True:\n" "        os." + "system('cat .vault-pas' 'sword')\n"
         hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
         assert handler.matches(hook_input)
 
@@ -1777,10 +1763,7 @@ class TestPythonRegexFallbackEquivalence:
         assert handler.matches(hook_input)
 
     def test_getoutput_with_no_shell_true_is_recognised_by_the_regex_fallback(self) -> None:
-        call = (
-            "subprocess.getoutput('cat prod.vault-pass*')\n"
-            "broken = 'unterminated\n"
-        )
+        call = "subprocess.getoutput('cat prod.vault-pass*')\n" "broken = 'unterminated\n"
         handler = _handler()
         hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
         assert handler.matches(hook_input)
@@ -1788,10 +1771,7 @@ class TestPythonRegexFallbackEquivalence:
     def test_getstatusoutput_with_no_shell_true_is_recognised_by_the_regex_fallback(
         self,
     ) -> None:
-        call = (
-            "subprocess.getstatusoutput('cat prod.vault-pass*')\n"
-            "broken = 'unterminated\n"
-        )
+        call = "subprocess.getstatusoutput('cat prod.vault-pass*')\n" "broken = 'unterminated\n"
         handler = _handler()
         hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
         assert handler.matches(hook_input)
@@ -1802,10 +1782,7 @@ class TestPythonRegexFallbackEquivalence:
         """Control: an ordinary argv-list call naming no shell interpreter
         and with no shell=True must still be left to the (allowed)
         literal-only content scan, via the regex fallback too."""
-        call = (
-            'subprocess.run(["cat", "prod.vault-pass*"])\n'
-            "broken = 'unterminated\n"
-        )
+        call = 'subprocess.run(["cat", "prod.vault-pass*"])\n' "broken = 'unterminated\n"
         handler = _handler()
         hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
         assert not handler.matches(hook_input)

@@ -1575,9 +1575,9 @@ def _file_url_path_tokens(
     for match in _FILE_URL_RE.finditer(command):
         yield urllib.parse.unquote(match.group(1))
     word_stream = (
-        words if words is not None else shell_expansion.iter_normalised_shell_words(
-            command, deadline=deadline
-        )
+        words
+        if words is not None
+        else shell_expansion.iter_normalised_shell_words(command, deadline=deadline)
     )
     for word in word_stream:
         for match in _FILE_URL_RE.finditer(word):
