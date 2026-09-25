@@ -9,6 +9,21 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N49 — `daemon_location_guard` denies a `cd` into the daemon directory that is only text inside a quoted argument
+
+**Found by the coordinator.** A `printf '...'` whose single-quoted string
+mentioned the words cd, then the daemon directory path, was denied
+R-DAEMON-DIR-CD. The command appended a note to a queue file and changed no
+directory. So the guard matches the shape anywhere in the command text and
+does not look for a real `cd` command.
+
+**Candidate remedy:** judge real command heads through the shared shell
+segmentation, so only an actual `cd` (or `pushd`) whose target resolves into
+the daemon directory is denied. Text inside a quoted argument, a heredoc body
+or a commit message is not a directory change. RED tests: the printf case is
+allowed; a real `cd` and a `cd` after `&&` or `;` are still denied. This
+belongs to the shell-parser consolidation (N41).
+
 ### N48 — `sed_blocker`'s git-commit exemption reaches across a newline
 
 **Found by N38 review 2** (pre-existing, not caused by that branch). The
