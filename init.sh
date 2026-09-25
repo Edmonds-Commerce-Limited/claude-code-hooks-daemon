@@ -1665,6 +1665,28 @@ def emit_error_json(event_name, error_type, error_details):
             '(or .claude/hooks-daemon/bin/hooks-daemon restart), which stays',
             'allowed even while other calls are denied this way.',
         ]
+    elif error_type == 'connection_lost':
+        # connect() SUCCEEDED (a ConnectionRefusedError, the genuine
+        # daemon-down shape, is caught separately and never reaches here) --
+        # so the daemon WAS reached, then the connection dropped mid-send or
+        # mid-receive. Distinct from malformed_response (a response DID come
+        # back, just not a valid one) and from socket_timeout (no response
+        # within budget, connection still open): here the pipe itself broke.
+        context_lines = [
+            'HOOKS DAEMON: connection lost mid-exchange',
+            '',
+            f'Error: {error_type} - {error_details}',
+            '',
+            'The daemon was REACHED (the connection succeeded), then the pipe',
+            'broke before a response was received.',
+            '',
+            'TO FIX: run exactly bin/hooks-daemon restart (or',
+            '.claude/hooks-daemon/bin/hooks-daemon restart), which stays',
+            'allowed even while other calls are denied this way. Then use the',
+            'hooks-daemon skill to verify health (args=health).',
+            'If this recurs, use the hooks-daemon skill to check logs',
+            '(args=logs) and report it.',
+        ]
     elif error_type == 'malformed_response':
         # The socket round-trip SUCCEEDED (connect+send+recv all completed),
         # but what came back was not a valid decision -- the daemon-side
@@ -1734,7 +1756,8 @@ def emit_error_json(event_name, error_type, error_details):
                 'decision': 'block',
                 'reason': reason,
             }
-    elif event_name == 'PreToolUse' and error_type in ('socket_timeout', 'malformed_response') \
+    elif event_name == 'PreToolUse' \
+            and error_type in ('socket_timeout', 'malformed_response', 'connection_lost') \
             and not _is_daemon_recovery_command(hook_input):
         # Plan 00466 n24 security review: the daemon was REACHED (or, for
         # malformed_response, answered) but produced no usable verdict --
@@ -1751,7 +1774,7 @@ def emit_error_json(event_name, error_type, error_details):
         # unusable, a materially different cost than a rare timeout).
         # _is_daemon_recovery_command is checked so this can never itself
         # block the exact commands that would fix it.
-        verb = 'reached' if error_type == 'socket_timeout' else 'responded'
+        verb = 'responded' if error_type == 'malformed_response' else 'reached'
         reason = f'Hooks daemon {verb} but produced no verdict ({error_type}) - denied for safety'
         response = {
             'hookSpecificOutput': {
@@ -1922,6 +1945,19 @@ except ConnectionRefusedError:
     fail('connection_refused',
         f'Daemon refusing connections at {socket_path}. '
         'Daemon may be shutting down or in error state.')
+
+except (BrokenPipeError, ConnectionResetError) as e:
+    # Plan 00466 N40 review 2 mA1: connect() already SUCCEEDED by the time
+    # either of these can be raised here (sock.connect() itself raises
+    # ConnectionRefusedError, caught above, not these) -- so the daemon WAS
+    # reached, same as a socket_timeout, and the generic `except Exception`
+    # below used to classify this as an opaque error_type never in the
+    # PreToolUse fail-closed allowlist, silently ALLOWing. A legacy-socket
+    # peer past its drain cap (server.py's `_drain_oversized_request`) is
+    # exactly this shape on a large enough payload.
+    fail('connection_lost',
+        f'Daemon at {socket_path} was reached but the connection was lost '
+        f'mid-exchange ({type(e).__name__}: {e}).')
 
 except Exception as e:
     fail(type(e).__name__, f'{type(e).__name__}: {e}')

@@ -18,6 +18,7 @@ import json
 import os
 import shutil
 import socket
+import struct
 import subprocess
 import tempfile
 import threading
@@ -116,6 +117,44 @@ def malformed_socket() -> Iterator[Path]:
     """Accepts, reads, and responds with bytes that are not a valid
     PreToolUse decision."""
     yield from _fake_server(respond=b"not valid json at all\n")
+
+
+@pytest.fixture
+def connection_reset_socket() -> Iterator[Path]:
+    """Accepts the connection, then immediately RSTs it (SO_LINGER 0) without
+    reading anything -- forces the client's own ``sendall()`` to raise
+    ``BrokenPipeError``/``ConnectionResetError`` (Plan 00466 N40 review 2
+    mA1), the shape a legacy-socket peer past its drain cap produces on a
+    large enough payload. ``connect()`` still succeeds first, so this is
+    distinct from ``ConnectionRefusedError`` (never reached at all)."""
+    short_dir = Path(tempfile.mkdtemp(prefix="hd-", dir="/tmp"))  # nosec B108
+    sock_path = short_dir / "fake.sock"
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server.bind(str(sock_path))
+    server.listen(1)
+    stop = threading.Event()
+
+    def _serve() -> None:
+        server.settimeout(5.0)
+        while not stop.is_set():
+            try:
+                conn, _ = server.accept()
+            except OSError:
+                return
+            # SO_LINGER (1, 0): close() sends a TCP-style RST rather than a
+            # clean FIN, which is what actually produces BrokenPipeError/
+            # ConnectionResetError on the peer's next write, not just EOF.
+            conn.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+            conn.close()
+
+    thread = threading.Thread(target=_serve, daemon=True)
+    thread.start()
+    try:
+        yield sock_path
+    finally:
+        stop.set()
+        server.close()
+        shutil.rmtree(short_dir, ignore_errors=True)
 
 
 @pytest.fixture
@@ -240,6 +279,37 @@ class TestMalformedResponseFailsClosedForPreToolUse:
             "tool_input": {"command": ".claude/hooks-daemon/bin/hooks-daemon status"},
         }
         response = _send(project, malformed_socket, "PreToolUse", recovery_input)
+        hso = response["hookSpecificOutput"]
+        assert "permissionDecision" not in hso
+
+
+class TestConnectionLostFailsClosedForPreToolUse:
+    """connect() succeeded, then the pipe broke -- the daemon WAS reached.
+
+    Plan 00466 N40 review 2 mA1: a legacy-socket peer past the server's
+    drain cap (``_drain_oversized_request``) gets exactly this shape --
+    ``sendall()`` raises ``BrokenPipeError``/``ConnectionResetError``, which
+    the generic ``except Exception`` used to classify as an opaque
+    error_type never in the PreToolUse fail-closed allowlist, silently
+    ALLOWing a call the daemon never judged.
+    """
+
+    def test_a_pretooluse_call_is_denied(
+        self, project: Path, connection_reset_socket: Path
+    ) -> None:
+        response = _send(project, connection_reset_socket, "PreToolUse", _BASH_TOOL_INPUT)
+        hso = response["hookSpecificOutput"]
+        assert hso["permissionDecision"] == "deny"
+        assert "denied for safety" in hso["permissionDecisionReason"]
+
+    def test_the_recovery_command_is_not_denied(
+        self, project: Path, connection_reset_socket: Path
+    ) -> None:
+        recovery_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "bin/hooks-daemon restart"},
+        }
+        response = _send(project, connection_reset_socket, "PreToolUse", recovery_input)
         hso = response["hookSpecificOutput"]
         assert "permissionDecision" not in hso
 
