@@ -295,6 +295,10 @@ handlers:
       enabled: true        # Inert unless plan_workflow is on and mkplan.bash --journal is deployed
       priority: 31
 
+    plan_status_snapshot:  # Records a PLAN.md's pre-write status for post_tool_use.goal_injection to consume as ground truth
+      enabled: true         # On by default (opt-out) -- RV4-m4: goal_injection needs this to avoid its own inference fallback
+      priority: 30
+
     agent_isolation_advisor:  # Advises worktree isolation when agents share a checkout
       enabled: false          # Enable if you dispatch concurrent agents
       priority: 46
@@ -436,21 +440,17 @@ handlers:
       #   timeouts:              # Per-language extended-lint timeout override (seconds), default 15
       #     PHP: 30              # e.g. a slow/cold-cache extended linter wrapper
 
-    markdown_table_formatter:  # Auto-format markdown tables via mdformat + mdformat-gfm
-      enabled: false           # Enable for automatic markdown table alignment
-      priority: 26
-
     git_hooks_executable_fixer:  # Auto-chmod +x git hooks git skipped as non-executable
       enabled: true
-      priority: 27
+      priority: 26
 
     background_process_tracker:  # Tracks backgrounded processes; advises harvest-background + watchdog cron (never kills)
       enabled: true              # On by default (opt-out); advisory-only and rate-limited. Set false to disable.
-      priority: 28
+      priority: 27
 
     command_hints:  # Config-driven advisory reminder after a configured command (e.g. agent-browser -> close session)
       enabled: true  # On by default (opt-out); advisory-only, never blocks. Set false to disable.
-      priority: 29
+      priority: 28
       # options:
       #   mode: additive          # additive (default) | replace
       #   hints:
@@ -461,11 +461,11 @@ handlers:
 
     recovery_cron_advisor:  # Advises on failsafe recovery cron lifecycle (creation, progress, completion)
       enabled: true         # On by default (opt-out); advisory-only, fires only on CLAUDE/Plan/*/PLAN.md writes. Set false to disable.
-      priority: 30
+      priority: 29
 
     goal_injection:  # Writes <session>.goal-intent for the ccy PTY supervisor when a plan flips to In Progress (Plan 00269)
       enabled: false  # Opt-in: only useful when a supervisor is watching. Manual fallback: bin/hooks-daemon inject-goal NNNNN
-      priority: 31
+      priority: 30  # Ledger 00466 RV6-M1: MUST stay below markdown_table_formatter's priority
       # options:
       #   mode: additive                  # additive (default) | replace (fixed header line always kept)
       #   once_per_plan_per_session: true
@@ -474,6 +474,10 @@ handlers:
       #       enabled: true
       #     - id: project-motto
       #       text: "All findings are logged to {plan_path}/REPORTS/."
+
+    markdown_table_formatter:  # Auto-format markdown tables via mdformat + mdformat-gfm
+      enabled: false           # Enable for automatic markdown table alignment
+      priority: 31  # Ledger 00466 RV6-M1: MUST stay above goal_injection's priority
 
     budget_exhaustion_detector:  # Advisory when a tool response shows budget/quota-exhaustion messaging (Plan 00315)
       enabled: true   # On by default (opt-out); advisory-only, never blocks.

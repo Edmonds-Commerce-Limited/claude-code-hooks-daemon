@@ -242,6 +242,12 @@ _EARNS_GUIDANCE: dict[str, str] = {
         "T3 standing policy: an injected /goal is machine-marked and can never "
         "constitute human authorisation; also documents the inject-goal fallback"
     ),
+    "PlanStatusSnapshotHandler": (
+        "T3 standing background fact: this PreToolUse sensor feeds "
+        "goal_injection's ground-truth transition check for the SAME "
+        "Write/Edit, and documents the inference fallback that runs when no "
+        "fresh snapshot exists (RV4-m4: ships enabled, opt-out)"
+    ),
     "DismissiveLanguageNitpickHandler": (
         "T3 standing norm about deflecting; the fire-time line is one sentence "
         "and the remedy (acknowledge, then fix) is a habit, not a correction. "

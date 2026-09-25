@@ -339,7 +339,13 @@ class DaemonController:
         # DROPPED from CLAUDE.md on the next restart (and auto-committed),
         # because a live handler returning a section is not the same thing as
         # that section reaching the file.
-        all_handlers = [h for chain in self._router._chains.values() for h in chain._handlers]
+        # Ledger 00466 N7: read the chain's public `.handlers` property, not
+        # the private `._handlers` list -- the property sorts on access
+        # (priority, then name) and is the same pattern EventRouter.
+        # get_all_handlers() already uses. `_collect_tiers()` below sorts
+        # its own tiers independently, so this is a defence-in-depth fix
+        # at the source rather than a fix that only matters here.
+        all_handlers = [h for chain in self._router._chains.values() for h in chain.handlers]
         if self._pseudo_dispatcher is not None:
             all_handlers.extend(self._pseudo_dispatcher.all_handlers())
         promoted_handlers = claude_md.promotion.promoted_handlers if claude_md else None

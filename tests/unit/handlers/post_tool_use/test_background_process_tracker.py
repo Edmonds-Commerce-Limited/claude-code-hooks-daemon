@@ -11,6 +11,7 @@ import json
 
 import pytest
 
+from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.post_tool_use.background_process_tracker import (
     BackgroundProcessTrackerHandler,
@@ -43,7 +44,7 @@ class TestInit:
         assert handler.name == "background-process-tracker"
 
     def test_priority(self, handler):
-        assert handler.priority == 28
+        assert handler.priority == Priority.BACKGROUND_PROCESS_TRACKER
 
     def test_not_terminal(self, handler):
         assert handler.terminal is False

@@ -12,10 +12,12 @@ reason about from the outside.
 
 Writing this test found six such edges where the ledger entry described one.
 Clearing all six is a larger design question than the entry covers — two of
-them are deliberate reuse with a documented rationale — so the five that remain
-are named in :data:`_KNOWN_EDGES` with the reason each is still there. That
-makes this a ratchet rather than a wish: an edge that is removed must be struck
-from the list, and an edge nobody declared fails the test.
+them are deliberate reuse with a documented rationale — so the ones that
+remain are named in :data:`_KNOWN_EDGES` with the reason each is still there
+(Plan 00466 RV5-M3 cleared one: ``utils/plan_status_snapshot.py`` now stores
+a plain status string instead of importing ``plan_qa.model.PlanStatus``).
+That makes this a ratchet rather than a wish: an edge that is removed must be
+struck from the list, and an edge nobody declared fails the test.
 """
 
 from __future__ import annotations

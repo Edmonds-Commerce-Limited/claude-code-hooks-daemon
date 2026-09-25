@@ -7,7 +7,10 @@ direct tests at any point in that history — every caller exercised it
 incidentally — so they are written here as part of the move.
 """
 
-from claude_code_hooks_daemon.utils.markdown_fences import lines_outside_fences
+from claude_code_hooks_daemon.utils.markdown_fences import (
+    line_spans_outside_fences,
+    lines_outside_fences,
+)
 
 
 class TestLinesOutsideFences:
@@ -48,3 +51,37 @@ class TestLinesOutsideFences:
 
     def test_an_empty_document_yields_nothing(self) -> None:
         assert lines_outside_fences("") == []
+
+
+class TestLineSpansOutsideFences:
+    """RV3-m1 (Plan 00466): the replace_all ambiguity check needs to know
+    WHERE a surviving line sits in the original text, not just its
+    content, so it can tell whether a given match offset falls on the
+    real Status line."""
+
+    def test_spans_round_trip_to_the_original_text(self) -> None:
+        text = "one\ntwo\nthree\n"
+        for start, end, content in line_spans_outside_fences(text):
+            assert text[start:end] == content
+
+    def test_a_fenced_line_has_no_span(self) -> None:
+        text = "before\n```\ninside\n```\nafter\n"
+        contents = [content for _, _, content in line_spans_outside_fences(text)]
+        assert contents == ["before", "after"]
+
+    def test_offsets_are_correct_after_a_dropped_fence(self) -> None:
+        text = "before\n```\ninside\n```\nafter\n"
+        spans = line_spans_outside_fences(text)
+        assert [text[start:end] for start, end, _ in spans] == ["before", "after"]
+        # "after" starts right after "before\n```\ninside\n```\n".
+        after_start = len("before\n```\ninside\n```\n")
+        assert spans[1] == (after_start, after_start + len("after"), "after")
+
+    def test_matches_lines_outside_fences_content_for_content(self) -> None:
+        text = "a\n```\nx\n```\nb\n\nc\n"
+        assert [content for _, _, content in line_spans_outside_fences(text)] == (
+            lines_outside_fences(text)
+        )
+
+    def test_an_empty_document_yields_nothing(self) -> None:
+        assert line_spans_outside_fences("") == []

@@ -1682,3 +1682,114 @@ class TestADormantHandlerIsNotAnnouncedAsEnforced:
         )
         assert handler_names_in_guidance(block) == ["loud"]
         assert "This project requires a human to close a plan" not in block
+
+
+class TestGuidanceOrderIsIndependentOfDiscoveryOrder:
+    """Ledger 00466 N7: the generated block is a pure function of the
+    handler SET, never of caller iteration order.
+
+    ``HandlerRegistry.register_all()`` walked the filesystem via two
+    ``event_dir.glob("*.py")`` passes, unsorted before review m6/RV-n1 --
+    NOT ``pkgutil.walk_packages()``, which sits upstream of the registry and
+    already sorts its own directory scan internally; an earlier version of
+    this docstring named pkgutil, which review RV-n1 found still
+    misattributed the cause. Before the glob fix, directory-entry order was
+    not guaranteed identical across checkouts or even across runs on the
+    same tree, so two daemons over the SAME handler set (e.g. main and an
+    integration worktree) could emit a differently-ORDERED but otherwise
+    identical ``<hooksdaemon>`` block -- a spurious restart auto-commit, and
+    a merge conflict on pure reordering.
+    """
+
+    @staticmethod
+    def _rule(rule_id: str) -> Any:
+        from claude_code_hooks_daemon.core.rule import Rule
+
+        return Rule(
+            rule_id=rule_id,
+            blocked="`git reset --hard`",
+            why="destroys uncommitted changes permanently",
+            fix="ask the user / git stash first",
+            verbose="Full rationale for " + rule_id + ".",
+        )
+
+    @staticmethod
+    def _block(root: Path, handlers: "list[Any]", **kwargs: Any) -> str:
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        root.mkdir()
+        claude_md = root / "CLAUDE.md"
+        claude_md.write_text("# P\n")
+        ClaudeMdInjector(workspace_root=root, handlers=handlers, **kwargs).inject()
+        return claude_md.read_text(encoding="utf-8")
+
+    def test_promoted_tier_is_order_independent(self, tmp_path: Path) -> None:
+        zzz = _StubHandler("zzz_handler", "## zzz_handler\n\nPromoted prose Z.")
+        aaa = _StubHandler("aaa_handler", "## aaa_handler\n\nPromoted prose A.")
+        promoted_handlers = ["zzz_handler", "aaa_handler"]
+
+        forward = self._block(tmp_path / "fwd", [zzz, aaa], promoted_handlers=promoted_handlers)
+        reverse = self._block(tmp_path / "rev", [aaa, zzz], promoted_handlers=promoted_handlers)
+
+        assert forward == reverse
+
+    def test_promoted_tier_follows_the_authors_promoted_handlers_order(
+        self, tmp_path: Path
+    ) -> None:
+        """Review nit n6: alphabetical would lose the reason a handler is
+        promoted at all -- the config author's own ``promoted_handlers``
+        list order (e.g. most-triggered guidance first). That list is
+        itself a deterministic value, so honouring it does not reopen N7's
+        defect; it is a strictly better total order than alphabetising."""
+        zzz = _StubHandler("zzz_handler", "## zzz_handler\n\nPromoted prose Z.")
+        aaa = _StubHandler("aaa_handler", "## aaa_handler\n\nPromoted prose A.")
+        # Deliberately NOT alphabetical -- the author put zzz first.
+        promoted_handlers = ["zzz_handler", "aaa_handler"]
+
+        block = self._block(tmp_path / "root", [aaa, zzz], promoted_handlers=promoted_handlers)
+
+        assert block.index("zzz_handler") < block.index("aaa_handler")
+
+    def test_progressive_tier_is_order_independent(self, tmp_path: Path) -> None:
+        zzz = _StubHandler("zzz_progressive", None, rules=[self._rule("R-Z")])
+        aaa = _StubHandler("aaa_progressive", None, rules=[self._rule("R-A")])
+
+        forward = self._block(tmp_path / "fwd", [zzz, aaa])
+        reverse = self._block(tmp_path / "rev", [aaa, zzz])
+
+        assert forward == reverse
+
+    def test_fallback_tier_is_order_independent(self, tmp_path: Path) -> None:
+        zzz = _StubHandler("zzz_fallback", "## zzz_fallback\n\nAdvisory Z prose.")
+        aaa = _StubHandler("aaa_fallback", "## aaa_fallback\n\nAdvisory A prose.")
+
+        forward = self._block(tmp_path / "fwd", [zzz, aaa])
+        reverse = self._block(tmp_path / "rev", [aaa, zzz])
+
+        assert forward == reverse
+
+    def test_all_three_tiers_together_are_order_independent(self, tmp_path: Path) -> None:
+        """The realistic case: promoted + progressive + fallback handlers,
+        all discovered in one order vs. its exact reverse in a single run."""
+        promoted_zzz = _StubHandler("zzz_promoted", "## zzz_promoted\n\nPromoted Z.")
+        promoted_aaa = _StubHandler("aaa_promoted", "## aaa_promoted\n\nPromoted A.")
+        progressive_zzz = _StubHandler("zzz_progressive", None, rules=[self._rule("R-Z")])
+        progressive_aaa = _StubHandler("aaa_progressive", None, rules=[self._rule("R-A")])
+        fallback_zzz = _StubHandler("zzz_fallback", "## zzz_fallback\n\nFallback Z.")
+        fallback_aaa = _StubHandler("aaa_fallback", "## aaa_fallback\n\nFallback A.")
+        handlers = [
+            promoted_zzz,
+            promoted_aaa,
+            progressive_zzz,
+            progressive_aaa,
+            fallback_zzz,
+            fallback_aaa,
+        ]
+        promoted_handlers = ["zzz_promoted", "aaa_promoted"]
+
+        forward = self._block(tmp_path / "fwd", handlers, promoted_handlers=promoted_handlers)
+        reverse = self._block(
+            tmp_path / "rev", list(reversed(handlers)), promoted_handlers=promoted_handlers
+        )
+
+        assert forward == reverse

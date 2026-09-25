@@ -1349,7 +1349,56 @@ The class-wide guard lives at `tests/integration/test_allow_never_carries_deny_h
 
 **Candidate remedy:** emit in a total order that depends only on the handler set, for example tier, then priority, then handler name. Test that two injector runs over the same handlers in shuffled input order produce byte-identical blocks. Check whether `HOOKS-DAEMON.md` generation has the same tie problem, and give it the same fix.
 
-### N3 — `goal_injection` treats any edit of an In Progress plan as the plan starting
+**Remedy shipped in commit `0dba7bfb`.** `_collect_tiers()`
+(`core/claude_md_injector.py`) now sorts each of the three tier lists
+(`promoted`, `progressive`, `fallback`) by handler name before returning
+them — name alone is a complete total order because two active handlers
+never share a name, and priority is not consulted because handlers from
+different event chains are mixed into one flat CLAUDE.md tier where
+priority carries no meaningful cross-event-type ordering. `daemon/ controller.py`'s handler collection was reading the chain's private,
+unsorted `_handlers` list instead of its public `handlers` property (which
+already sorts by `(priority, name)` on access, the same pattern
+`EventRouter.get_all_handlers()` uses) — fixed to use `chain.handlers`.
+`TestGuidanceOrderIsIndependentOfDiscoveryOrder`
+(4 tests, RED against the pre-fix code) asserts forward- and
+reverse-ordered handler lists inject byte-identical `<hooksdaemon>`
+blocks. The sibling tie in `.claude/HOOKS-DAEMON.md` generation
+(`daemon/docs_generator.py`'s `_render_handler_table()`) sorted by
+priority only, so same-priority handlers kept registry order; fixed to
+sort by `(priority, config_key)`, pinned by
+`test_same_priority_handlers_are_order_independent` (1 test, RED against
+the pre-fix code). Verified idempotent: `regenerate-docs` run twice in a
+row produces the identical diff both times.
+
+**Correction (00466 review, minor m6):** the commit message and the
+paragraph above blamed `pkgutil.walk_packages()` for the unsorted input.
+That is wrong — `pkgutil` sorts `os.listdir` output internally
+(`_iter_file_finder_modules` calls `filenames.sort()`). The real unsorted
+source is `HandlerRegistry`'s two `event_dir.glob("*.py")` loops
+(`handlers/registry.py:467` and `:511`), which iterate in `os.scandir`
+order; a third loop in the same file (line 198) already wraps its glob in
+`sorted(...)`. The injector-level and docs_generator-level sorts above
+still make each rendered artefact a pure function of the handler set on
+their own — this correction is to the narrative, not to the fix's
+soundness. Both `registry.py` glob loops are now wrapped in `sorted(...)`
+too, so discovery order is deterministic at its source as well as at
+every rendering layer.
+
+**Also fixed (00466 review, nit n6):** the promoted tier's alphabetical
+sort lost the reason a handler is promoted at all — the config author's
+own `promoted_handlers` list order, chosen so the most-triggered guidance
+reads first. `_collect_tiers()` now sorts the promoted tier by each
+entry's INDEX in `self._promoted_handlers_order` (the author-authored
+config list, kept alongside the pre-existing `frozenset` used for the O(1)
+membership check) instead of alphabetically — still a complete,
+deterministic total order, because that config list is a fixed value, not
+a filesystem walk. The progressive and fallback tiers are unaffected;
+alphabetical is the right call there, since nothing about them carries
+author-chosen intent. Pinned by
+`test_promoted_tier_follows_the_authors_promoted_handlers_order` (RED
+against the pre-fix alphabetical code).
+
+### N3 — `goal_injection` treats any edit of an In Progress plan as the plan starting, and displaces the live goal
 
 **Found by the coordinator**, live. The supervisor had set the goal to Plan
 00461\. The coordinator then added a table row to this ledger's PLAN.md. That
@@ -1379,6 +1428,1122 @@ Progress status unchanged emits nothing and displaces nothing. RED tests:
 an Edit that adds a table row to an In Progress plan emits no signal and no
 advisory; an Edit flipping Not Started to In Progress still emits; a Write
 creating a new In Progress plan still emits.
+
+**Remedy shipped in commit `5676772d`.** `GoalInjectionHandler` gained
+`_is_real_flip_to_in_progress`: for `Edit` it parses `old_string` with
+`PlanDoc.parse` and answers directly from that fragment's own Status line
+(absent → this edit never touched it → not a flip; present and not In
+Progress → a flip). For `Write` there is no pre-write disk copy left by the
+time PostToolUse runs, so git HEAD stands in for "before" — deliberately
+not the Write/Edit `tool_response`, whose shape this codebase has never
+verified for either tool (see this same folder's
+`POSTTOOLUSE_FIXTURE_VERIFICATION.md`). A path absent at HEAD (new or never
+committed) reads as nothing to flip FROM, matching the pre-existing
+single-plan contract. The once-per-`(plan, session)` latch and the
+retirement-refresh path are unchanged. `TestStatusFlipDetection` (8 tests,
+3 RED against the old code) pins the contract; the module docstring, the
+class docstring and `get_claude_md()` now state it explicitly.
+
+**Follow-up in commits `6699fbbd` and `4813adc8`**, after review. The first
+`_head_plan_text` caught `RuntimeError`/`OSError`/`ValueError` and returned
+`None`, which `error_hiding`'s `return-none-on-error` check flagged; the
+initial fix added an exclusion, which the review correctly rejected —
+this project allows no new QA suppressions. Restructured instead: path
+membership is now a plain `Path.is_relative_to` comparison, never a caught
+`ValueError`, and `ProjectContext.project_root()` is called unguarded — by
+the time any handler dispatches the daemon has always initialised it, so a
+`RuntimeError` here means genuine misconfiguration and is left to propagate
+to the dispatcher (`core/chain.py`'s existing per-handler exception
+handling), rather than being swallowed into a false "nothing to compare
+against". The lookup moved out to
+`utils.git_facts.project_relative_head_text` so it has one home instead of
+a per-handler copy. `error_hiding` now passes with zero violations and no
+exclusion for this code.
+
+The review also asked for the sibling to be fixed, not just documented as
+accepted: `recovery_cron_advisor`'s Write-path completion check
+(`_STATUS_COMPLETE_RE.search(content)` against the whole new file) shared
+the exact same state-vs-transition defect shape for `**Status**: Complete`
+— "only an advisory" was not a reason to keep it. `_detect_lifecycle_phase`
+now calls `_write_is_real_completion`, which reuses
+`project_relative_head_text` rather than a second copy: a Write whose
+content reads Complete is COMPLETION only when the plan was not already
+Complete at HEAD; otherwise the event matches no phase at all (never falls
+through to PROGRESS/CREATION). `TestWriteCompletionIsTransitionBased` (4
+tests, 1 RED against the pre-fix code) pins the contract. Its Edit path
+(`_edit_results_in_status_complete`) already required the edit's own
+`old_string`/`new_string` to assert Complete and needed no change.
+`plan_close_approval._is_terminal_flip` was already transition-based
+(compares `PlanDoc.parse(current).status` against the proposed status).
+`plan_qa_edit.py`'s "In Progress" occurrences are guidance prose, not
+status-detection logic.
+
+**Second review pass (majors M2/M3, minors m4/m5, nits n3/n4/n7)**, fixed
+together on the same branch:
+
+- **M2 — a daemon restart silently disabled the retirement refresh.**
+  `_maybe_refresh_on_retirement` gated on the IN-MEMORY `self._fired`
+  latch, which a restart (`daemon_restart_verifier` requires one before
+  every commit) empties, and N3's flip-only rule meant a later non-flip
+  write no longer re-latched either — so a plan flipped in one daemon
+  lifetime and completed in the next never dropped out of the combined
+  `/goal` signal. Fixed by asking the PERSISTENT `GoalLedger` instead
+  (`GoalLedger.has_live_entry` at the time; superseded by
+  `owning_sessions` in the third review pass below), which survives the
+  restart the latch does not. Pinned by
+  `test_completing_a_plan_after_a_daemon_restart_still_refreshes_signal`
+  (a fresh `GoalInjectionHandler` instance simulates the restart; RED
+  against the pre-fix code).
+- **M3 — the "goal survives a session restart" contract was silently
+  dropped, not replaced.** Plan 00269 Task 2.1 deliberately chose "the
+  first edit to an already-In-Progress plan in a NEW session re-fires" so
+  a resumed session got its `/goal` back; N3's flip requirement removed
+  that with no replacement, and the original release note wrongly called
+  it "no action needed". Restored via `GoalLedger.reassert_session` (two
+  new ledger methods: `session_has_entries` decides whether THIS session
+  is new at all; `reassert_session` transfers ownership of the plan's
+  already-live entry with NONE of `record_emission`'s displacement
+  bookkeeping) and `_maybe_reassert_for_new_session`: a session with no
+  ledger entries whatsoever that touches an already-live plan without
+  itself producing a real flip gets its own signal written, no new ledger
+  record, no "GOAL DISPLACED" advisory, and no risk of wrongly displacing
+  some OTHER live plan. A session that already has its own live goal is
+  unaffected. Pinned by three new tests in
+  `TestNewSessionReassertion` (one RED against the pre-fix code) plus
+  three new `GoalLedger` test classes. Release note 13 and the module
+  docstring corrected to describe the restored contract instead of
+  claiming no behaviour changed.
+- **m4 — an Edit whose `old_string` carried only the bare status VALUE
+  (no `**Status**:` prefix) missed a genuine flip.** `PlanDoc.parse` on
+  `old_string` alone then found no Status line and read "never touched
+  it". Fixed by reconstructing the pre-edit text from what is already on
+  disk when this happens — reversing the SAME substitution the Edit tool
+  performed (`_reconstruct_pre_edit_text`, honouring `replace_all`) — and
+  parsing that instead of giving up. Pinned by
+  `test_edit_whose_old_string_is_only_the_status_value_still_emits` (RED
+  against the pre-fix code) plus a no-op control test.
+- **m5 — a Write in a nested repository (a linked worktree, any nested
+  clone) read HEAD from the PROJECT ROOT's repo, which never tracks the
+  nested path, so it always answered "absent" and misread every write
+  there as a genuine flip.** `project_relative_head_text` now resolves
+  the FILE's own enclosing repository via `GitRepo.resolve_for` (the same
+  `git -C <dir> rev-parse --show-toplevel` this project already
+  centralises) and reads HEAD relative to THAT root; a project root that
+  is itself a plain checkout is unaffected. Pinned by
+  `test_a_file_in_a_nested_repository_reads_from_its_OWN_head` (RED
+  against the pre-fix code) in `test_git_facts.py`, which also fixes
+  `recovery_cron_advisor`'s Write-path COMPLETION check for the same
+  reason (it shares the helper).
+- **n3 — `git_facts.py` imported `core.project_context`, breaking its own
+  documented "docs QA depends on this module alone" claim.**
+  `project_relative_head_text` now takes `project_root` as a plain
+  parameter instead — both callers already resolve
+  `ProjectContext.project_root()` for other purposes, so nothing is lost.
+- **n4 — acknowledged, not changed.** `_is_inside_project` fails open on
+  an uninitialised `ProjectContext`; `project_relative_head_text` lets it
+  propagate (by design, from the first review pass). Both new M2/M3
+  helpers (`_maybe_refresh_on_retirement`, `_maybe_reassert_for_new_session`)
+  now follow the SAME unguarded-propagation convention for consistency
+  (and because `error_hiding` flagged the None-returning one) — the
+  review itself called this "only reachable uninitialised", i.e. never on
+  the real dispatch path, so the two conventions differing is intentional
+  per the first review's explicit design, not an oversight.
+- **n7 — release note 13's title said "already-terminal-status"; In
+  Progress is not terminal.** Corrected to match the filename's wording.
+
+`TestStatusFlipDetection`, `TestCombinedGoalSignal`,
+`TestNewSessionReassertion`, `TestWriteCompletionIsTransitionBased`,
+`TestProjectRelativeHeadText` and the new `GoalLedger` test classes all
+pass; 518 tests across every touched handler/utils/core/daemon test file.
+
+**Third review pass (major RV-M1, minors RV-m1 through RV-m5, nits RV-n1
+through RV-n3)**: the second pass's M3 re-assert and M2 retraction worked
+AGAINST each other — fixed together with an ownership schema change:
+
+- **RV-M1 — `reassert_session`'s single-owner TRANSFER broke retraction the
+  moment a second session touched a plan.** Once TEAMMATE reasserted a plan
+  LEAD had flipped, `has_live_entry`'s exact `session_id` match stopped
+  matching LEAD, so LEAD's own signal could never be retracted again when
+  the plan completed — and a pre-existing gap on `main` meant a DIFFERENT
+  completing session never retracted the flipping session's stale signal
+  either. Fixed by making ownership ADDITIVE: `GoalLedgerEntry` gained a
+  `sessions: list[str]` field that `record_emission`/`reassert_session` both
+  APPEND to, never overwrite; `has_live_entry` checks membership in
+  `sessions`; a new `GoalLedger.owning_sessions(plan_number)` (accepting an
+  entry retired a moment ago for `RETIRED_TERMINAL_STATUS` too, subsuming
+  RV-m2 below) feeds `_maybe_refresh_on_retirement`, which now refreshes
+  EVERY owning session's own combined signal on a terminal write, not just
+  whichever session's write triggered the check. Pinned by
+  `TestOwnershipSurvivesASecondSession` (single plan, two plans, a second
+  session owning a plan it never flipped — all RED against the pre-fix
+  code) plus `TestReassertSession`/`TestOwningSessions` in
+  `test_goal_ledger.py`.
+- **RV-m2 — subsumed by RV-M1's fix.** `owning_sessions`' terminal-status
+  grace window (live OR just-retired-as-terminal) means a concurrent
+  reconciliation racing between a terminal write landing and this read
+  cannot suppress a real owner's retraction.
+- **RV-m3 — a SAME-session-id resume (`--resume`/`--continue`) never got
+  its `/goal` back**, because the M3 gate (`session_has_entries`) reads the
+  PERSISTED ledger, which still "knows" the session from its OWN earlier
+  real flip even after its signal FILE was lost across a restart. Fixed
+  with a second in-memory latch, `self._reasserted: dict[(session_id, plan_number), bool]`, reset every daemon lifetime and independent of
+  `self._fired` — "have I, this process, already confirmed a signal for
+  this pair" answers both a genuinely new session id and a same-id resume
+  identically. The busy-session contract (a session that already
+  real-flipped a DIFFERENT plan must not implicitly absorb an unrelated
+  one) still holds via `session_has_entries`, now checked only when the
+  session is NOT already a stakeholder of THIS specific plan
+  (`has_live_entry`). Pinned by
+  `test_same_session_id_after_a_restart_gets_its_signal_rewritten` (RED
+  against the pre-fix code).
+- **RV-m1 — the m4 reconstruction reversed the FIRST occurrence of
+  `new_string`, not necessarily the actual edit site.** A table cell or
+  title sharing the same text as the Status VALUE (e.g. "In Progress")
+  could reconstruct the wrong span and report a false flip. Fixed:
+  `_is_flip_via_reconstruction` now tries every occurrence of `new_string`
+  as a candidate, keeps only candidates whose reversal leaves `old_string`
+  unique (the Edit tool's own precondition for a non-`replace_all` edit),
+  and reports a flip only when every surviving candidate agrees; disagreement
+  or no viable candidate reads conservatively as "not a flip".
+  `replace_all` has no uniqueness precondition to exploit, so it instead
+  requires `old_string` to be ABSENT from the post-edit text (a clean
+  application leaves none behind) before reversing every occurrence at
+  once — otherwise conservatively "not a flip", the same trade-off as a
+  contrived title-collision missed-flip case this review accepted as
+  out of scope. **The `replace_all` half was not actually fixed by this**:
+  review 3 (RV3-m1, below) found the "absent `old_string`" guard never
+  fires on real `replace_all` output (a clean application always removes
+  every `old_string`), and both pinning tests used a post-edit fixture no
+  Edit tool call could produce. See RV3-m1 for the real fix.
+- **RV-n1 — the m6 fix narrative still blamed `pkgutil.walk_packages()`**,
+  which already sorts its own directory scan; the real (now fixed) source
+  was `HandlerRegistry.register_all`'s two previously-unsorted
+  `event_dir.glob("*.py")` passes. Corrected in `claude_md_injector.py`,
+  `docs_generator.py`, and both files' test docstrings.
+- **RV-n2 — the fail-open convention split flagged by the first review's n4
+  was read as unresolved, not intentional.** Unified behind one helper,
+  `_open_ledger()`, that every ledger-opening call site in the class now
+  goes through. The FIRST fix (this bullet, as originally written) caught
+  `RuntimeError` inside `_open_ledger()` itself and returned `None`. The
+  coordinator's own review of that fix (niggle N29) found it evaded
+  `error_hiding`'s `return-none-on-error` check by assigning the caught
+  error to a local read by a later, separate `return` — same behaviour,
+  different AST shape. Commit `c40d4ce6` undid that: `_open_ledger()` now
+  raises with no `try`/`except` at all, and each caller decides its own
+  fail-open action explicitly (see its docstring). `error_hiding`'s
+  `log-and-continue` check independently confirmed the two callers with
+  nothing substantive to fall back to (`_maybe_refresh_on_retirement`,
+  `_maybe_reassert_for_new_session`) cannot legitimately catch-and-log
+  either, so both now propagate to `core/chain.py`'s own documented
+  per-handler fail-open boundary instead.
+- **RV-n3 — no test covered the RV-M1 scenarios or RV-m1's collision case
+  (now fixed above); a registry test read the chain's PRIVATE
+  `._handlers` list, which only worked because the lazy `.handlers` sort
+  had not run yet.** Made the precondition explicit: the test now asserts
+  `chain._sorted is False` before reading `._handlers`, so an accidental
+  earlier `.handlers` access fails loudly instead of silently passing for
+  the wrong reason.
+
+Release note 13 and the module/class docstrings corrected again to
+describe the ADDITIVE ownership and per-daemon-lifetime reassert latch
+instead of the second pass's (now superseded) single-owner transfer.
+
+**Fourth review pass (major RV3-M1, minors RV3-m1 through RV3-m8, nits
+RV3-n1/n3/n4)**, fixed together:
+
+- **RV3-M1 — the retirement refresh was state-based, not transition-based,
+  and `owning_sessions` answered from the FIRST ledger entry for a plan
+  number, including long-retired ones.** A reopened-and-recompleted plan
+  retracted the WRONG (original) session, and any later edit to an
+  already-Complete, not-yet-archived plan re-signalled every past owner —
+  handing a session a goal for a plan it never touched, or clearing a
+  session's own unrelated manual `inject-goal` goal. Fixed on both halves:
+  `_maybe_refresh_on_retirement` now shares `_is_real_transition` with the
+  flip side (target: a terminal status), gated exactly like N3 already
+  gates the flip; `GoalLedger.owning_sessions` answers from the plan's LIVE
+  entry when one exists, or else its MOST RECENTLY retired terminal one,
+  never the first in the list. Pinned by RED tests for a reopened plan
+  completed by a different session, the same with a second unrelated live
+  plan, a note on an already-Complete plan, and the same note not clearing
+  a manual goal.
+- **RV3-m1 — the `replace_all` guard from the third pass never fires on
+  real Edit-tool output.** A clean `replace_all` application always removes
+  every `old_string`, so the "bail if `old_string` survives" guard was
+  vacuous, and the reconstruction blindly reversed EVERY occurrence of
+  `new_string` — including an untouched Status line that merely already
+  read the same text as a genuinely-replaced table cell. Fixed: when an
+  occurrence overlaps the real (non-fenced) Status line AND at least one
+  other occurrence exists, two verdicts are compared — reverse everything,
+  and reverse everything except the Status line's own occurrence;
+  disagreement reads conservatively as "not a flip" (the same accepted
+  trade-off the third pass already used elsewhere, now correctly extended
+  to also miss a genuine bulk Status-line-plus-cells flip, which cannot be
+  told apart from the collision from post-edit text alone). A single
+  occurrence with nothing to disambiguate against is answered directly, so
+  the ordinary single-site case is untouched. Both third-pass tests
+  rewritten to use a REAL post-edit fixture (the pre-edit text with the
+  transformation actually applied), plus a two-cell variant and a
+  single-occurrence regression control.
+- **RV3-m2 — the post-write "is it In Progress now?" check used a
+  literal-only regex, disagreeing with the fenced-block-aware, first-line-
+  wins `PlanDoc` the pre-write side already used.** A fenced example or a
+  per-phase second `**Status**:` line could make an unrelated edit look
+  like a flip, or (via the Edit fast path trusting `old_string`'s own
+  fragment in isolation) make a per-phase Status line edit look like a
+  top-level one. Fixed: `handle()`'s post-state check now uses
+  `PlanDoc.parse(plan_text).status`, and the Edit fast path is removed —
+  every Edit goes through the same reconstruct-and-compare `PlanDoc.parse`
+  machinery the Write side already used, so both sides of the transition
+  agree on what "the real Status line" is. A useful side effect: a Status
+  line carrying a trailing date qualifier (`In Progress (2026-09-24)`),
+  which the old literal regex could never match, is now correctly detected
+  too.
+- **RV3-m3 — a session whose own combined `/goal` text NAMES a plan it
+  does not own is never refreshed when that plan later completes.** The
+  combined text lists every live ledgered plan project-wide, but ownership
+  only grew through a flip or reassert of THAT specific plan, so a session
+  reading a plan's number in its own text could still be carrying a stale
+  copy of it forever. Fixed: `_write_combined_signal` now registers its
+  session as an owner of every plan its own rendered text just named
+  (`_extend_ownership`), not only the one that triggered the write.
+  Deliberately NOT applied to the retirement-refresh fan-out (RV3-m5 below
+  needs that path's cost bounded by EXISTING owners only).
+- **RV3-m4 — the flip path never set the reassert latch, and the latch map
+  was unbounded.** The session that just flipped a plan could write a
+  second, redundant signal on its own very next non-flip edit in the same
+  daemon lifetime (the reassert path's own latch had never been armed),
+  and 400 distinct reasserting sessions grew `self._reasserted` without
+  bound, unlike `self._fired`'s existing 256-entry FIFO cap. Fixed: the
+  flip path now sets both latches on a confirmed write, and `_record_latch`
+  is a single bounded-insert helper shared by both maps.
+- **RV3-m5 — plan ownership grew without bound, and refreshing many owners
+  re-derived the combined text once PER owner.** 150 teammate sessions
+  touching one live plan gave 151 owners with nothing pruning `sessions`,
+  and completing that plan took 0.25s (a full live-plan-directory read per
+  owner) against 0.003s on main. Fixed: `GoalLedgerEntry.sessions` is
+  capped (`_add_owner`, FIFO-drops the oldest owner past the cap), and
+  `_maybe_refresh_on_retirement` renders the combined payload ONCE
+  (`_render_combined`) and writes it to every owner, rather than
+  recomputing it per owner.
+- **RV3-m6 — the Write path still fired on an already-In-Progress plan
+  that was not yet committed as such.** git HEAD lagging an uncommitted
+  flip meant a teammate's plain Write to an already-live plan could be
+  misread as a fresh flip, wrongly re-emitting a ledger record and
+  displacing another live plan. Fixed: for a Write only (Edit reads its
+  own before/after span directly, immune to this race), a positive
+  transition verdict is narrowed further by `_ledger_plan_is_live` — the
+  ledger, not HEAD, is authoritative for whether a plan has already
+  started.
+- **RV3-m7 — documentation drift**, all corrected: the third pass's RV-n2
+  bullet still described the round-1 catch-and-log helper after `c40d4ce6`
+  reverted it to a propagating raise; two mentions of a
+  `_session_ledgered_plan` method that was never actually named that; the
+  RV-m1 bullet's "pinned by two RED tests" claim for `replace_all` (see
+  RV3-m1 above); release note 13's three over-claims (see the note itself).
+  This entry's status is held at 🔄 until this pass lands.
+- **RV3-m8 — a non-UTF-8 PLAN.md of any LIVE ledgered plan crashed the
+  handler, on more paths than the ledger-file case review RV-m5 already
+  fixed.** `goal_ledger.py`'s `_plan_state` and `_find_plan_md_text` (used
+  by reconciliation and by rendering the combined text respectively), and
+  `goal_injection.py`'s own `_read_plan`, each caught only `OSError`.
+  Under `strict_mode` (this repo), an unrelated plan's bad bytes turned a
+  routine reassert or refresh into a blocking "SYSTEM ERROR" for the
+  handler's whole PostToolUse chain. Fixed: all three now also catch
+  `ValueError` (covers `read_text`'s `UnicodeDecodeError`), treating the
+  plan as unreadable rather than crashing — matching RV-m5's existing
+  tolerance for the ledger file itself.
+- **RV3-n1 — held for a follow-up, not code changed.** `c40d4ce6`'s
+  propagating `_open_ledger()` is correct; the failure it exposes (a
+  `RuntimeError` reaching a real dispatch) cannot happen in a real daemon,
+  since the controller initialises `ProjectContext` before
+  `register_all`. The one true gap this nit found — the docstrings not
+  mentioning that `strict_mode` also STOPS the rest of the PostToolUse
+  chain, not just denies — is now documented in `_open_ledger`'s
+  docstring.
+- **RV3-n3 — review-round narration trimmed from code comments and
+  docstrings** (the module docstring, `_open_ledger`'s docstring, and the
+  `docs_generator.py`/`claude_md_injector.py` `pkgutil` asides) to describe
+  current state; the module docstring now points at this file for full
+  history instead of citing review labels inline. This pass was
+  incomplete — the method-level docstrings still narrated before/after
+  comparisons; see RV4-n1 below.
+- **RV4-n1 — the RV3-n3 trim was incomplete: method docstrings still
+  narrated before/after comparisons.** Fixed the three the report cited:
+  `goal_injection.py`'s `_maybe_refresh_on_retirement` docstring dropped
+  the "measured at 0.25s … against 0.003s on main" benchmark comparison
+  in favour of the current-state perf rationale it was making;
+  `goal_ledger.py`'s `GoalLedgerEntry`/`reassert_session` docstrings
+  reworded "the pre-fix shape … broke/let" into a present-tense "a
+  transfer would break …" hypothetical; `session_has_entries`'s docstring
+  dropped "the previous implementation read" in favour of stating
+  directly what the per-entry field does not mean. Rationale comments
+  that explain WHY an invariant exists by naming the review finding that
+  motivated it (e.g. `RV4-M1: protect names …`) are kept — that is the
+  sanctioned rationale pattern, not the narration this nit targets.
+- **RV3-n4 — the committed CLAUDE.md block was main's handler order, not
+  this branch's own code's order** (last written by a main merge, one
+  restart away from a spurious reorder commit). Regenerated by a daemon
+  restart before this pass's commit.
+- **RV3-n5 — fixed via a PreToolUse ground-truth snapshot, not another
+  inference patch.** A value-only real flip missed when "In Progress" also
+  appears as a table cell or a plan title (C3b, m4d's C3) was genuinely
+  indistinguishable from the Edit payload alone — no amount of layering on
+  `_is_transition_via_reconstruction` could resolve it, since the two
+  candidate pre-edit texts really do parse to different verdicts. Fixed by
+  removing the need to infer anything in the common case: a new PreToolUse
+  handler, `plan_status_snapshot`, runs immediately before the SAME
+  Write/Edit `goal_injection` sees after it lands, reads the plan's
+  CURRENT (pre-write) status straight off disk, and records it in a
+  bounded, TTL'd (`utils/plan_status_snapshot.py`) in-memory store keyed by
+  `tool_use_id` (carried by both the PreToolUse and PostToolUse payloads
+  for the same call). `goal_injection`'s new `_resolve_transition` consumes
+  it as ground truth — no reconstruction, no collision possible. The old
+  inference (`_is_real_transition` and everything it calls) is KEPT as the
+  fallback for the narrow window where no snapshot exists (a daemon
+  restart between the two dispatches, or a payload with no `tool_use_id`),
+  and that fallback path is logged when taken. RV3-m6's `_ledger_plan_is_live`
+  narrowing is scoped to apply ONLY on the fallback path now: a
+  snapshot-backed verdict already read the plan's true pre-write status off
+  disk, so the git-HEAD race it guards against cannot have occurred. Both
+  handlers share one trigger-matching implementation
+  (`utils/plan_trigger.py`) so they cannot silently disagree about what
+  counts as "the trigger" the snapshot was recorded for. New tests:
+  `TestGroundTruthSnapshotResolution` in `test_goal_injection.py` (C3b,
+  m4d's C3, a restart-fallback pair, and an empty-`tool_use_id` case),
+  `test_plan_status_snapshot.py`, `test_plan_trigger.py`, and
+  `tests/unit/handlers/pre_tool_use/test_plan_status_snapshot.py`. Both
+  `_read_plan` sites (`goal_injection.py`, `plan_status_snapshot.py`) raise
+  a shared `PlanUnreadable` (`utils/plan_trigger.py`) instead of returning
+  `None` on a read/decode failure — a missing file is checked BEFORE the
+  `try` (not an error; the ordinary brand-new-plan case), so nothing
+  inside either function's `except` block ever returns `None`. Each single
+  caller catches `PlanUnreadable` explicitly, logs a WARNING naming the
+  path and cause, and takes its own documented fail-open branch. This
+  replaces the error_hiding exclusion both functions carried; there is no
+  exclusion for either any more.
+- **RV3-n2 — `session_has_entries` now tracks what its name says, and the
+  B4 decision is pinned here.** `record_emission` overwrites an entry's
+  single `session_id` field with whoever re-emits for the SAME plan next,
+  and `_prune` can drop the entry out of the ledger entirely — either one
+  silently lost the "this session once recorded a real emission" fact the
+  method's own docstring claimed to answer. Fixed: a ledger-wide, bounded,
+  order-preserving `ever_recorded_sessions` list (`_EVER_RECORDED_KEY`),
+  populated ONLY by `record_emission` (both the new-entry and re-emission
+  branches) and read/persisted through the SAME locked read-modify-write
+  every other mutator already uses — it survives both the field overwrite
+  and pruning, because it is no longer derived from either. Deliberately
+  NOT populated by `reassert_session`: a session that has only ever been
+  ADDED to a plan's ownership (never performed a real emission itself)
+  must still read as having no entries of its own, so it correctly remains
+  free to become a stakeholder of a second, unrelated live plan it is
+  asked to track too (Plan 00269's own motivating case, still pinned by
+  `TestOwnershipSurvivesASecondSession` in `test_goal_injection.py`).
+  **B4 decision (accepted by team-lead, review-4-prep):** review 3's own
+  worked example for B4 ("T becomes an owner of 00298") is
+  `_extend_ownership`'s (RV3-m3) project-wide combined-signal side effect
+  — the combined `/goal` text is global, so absorption only decides WHO IS
+  REFRESHED when a plan retires, not who owns what in any sense that needs
+  gating. `session_has_entries` is a SEPARATE, narrower question ("has
+  this session ever performed a real emission"), and `_extend_ownership`
+  is left untouched — this pass did not restrict it further. **Updated by
+  RV4-M1:** that premise held only up to the RV3-m5 owner cap, which
+  absorption could push the FLIPPING session itself past — evicting the
+  one session that most needs its own signal refreshed when the plan it
+  started completes (main never had this bug; the cap introduced it once
+  combined with absorption). Fixed by pinning the flipper as the entry's
+  `primary_owner`, exempt from the cap; absorbed (non-flipping) owners are
+  still FIFO-capped exactly as B4 already decided. `session_has_entries`
+  and `_extend_ownership` are otherwise unchanged by this. Backing
+  `GoalLedger`-level tests: `TestSessionHasEntries` in `test_goal_ledger.py`
+  (`test_survives_session_id_overwrite_by_a_different_re_emitting_session`,
+  `test_survives_pruning_past_the_entry_cap`,
+  `test_false_for_a_reassert_only_session`). `_load_raw` raises a shared
+  `LedgerUnreadable` (`utils/goal_ledger.py`) instead of returning `None`
+  on a genuine read/parse failure — a missing file (nothing written yet)
+  is checked BEFORE the `try`, not an error. Every one of its five public
+  callers (`entries`, `record_emission`, `reassert_session`,
+  `live_plan_numbers`, `session_has_entries`) catches it explicitly, logs
+  its OWN WARNING naming the path, cause, and which fail-open branch it is
+  taking, rather than sharing one central catch-and-log. This replaces the
+  error_hiding exclusion `_load_raw` carried; there is no exclusion for it
+  any more. New tests: `TestUnreadableLedgerRaisesADomainException` in
+  `test_goal_ledger.py`.
+
+New tests: `TestOwnershipSurvivesASecondSession`-adjacent scenarios in
+`test_goal_injection.py` (`TestReview3Fixes`, inheriting the
+`TestNewSessionReassertion` fixture plumbing), new `replace_all`/fenced-
+Status/uncommitted-Write cases in `TestStatusFlipDetection`, and new
+`GoalLedger` test classes (`TestOwningSessionsAfterReopen`, `TestIsPlanLive`,
+`TestNonUtf8PlanMd`) plus a `line_spans_outside_fences` primitive and its
+tests in `utils/markdown_fences.py`.
+
+**Fifth review pass (major RV4-M1, minors RV4-m1 through RV4-m7, nits
+RV4-n1 through RV4-n7)**, fixed together (report:
+`subagent-reports/260924-n466-goalflip-review4-opus-5-5.md`):
+
+- **RV4-M1 — see the B4 decision update above:** the RV3-m5 owner cap
+  combined with RV3-m3's absorption could evict the flipping session from
+  its own plan's owner set once enough OTHER sessions touched any live
+  plan it also named, so completing the plan never refreshed the
+  flipper's own `/goal`. Fixed by pinning the flipper as the entry's
+  `primary_owner` (never reassigned, exempt from the cap via a `protect`
+  parameter threaded through `_add_bounded`), and by always including the
+  completing write's own `session_id` in the refresh set regardless of
+  what the ledger's owner set says. Pinned by
+  `test_flipper_survives_absorption_past_the_owner_cap` (50-teammate
+  absorption, `probe_gf4_evict2.py`'s E2) and
+  `test_completing_session_is_refreshed_even_if_the_ledger_names_no_owner`
+  in `TestReview4Fixes` (`test_goal_injection.py`).
+- **RV4-m1 — the snapshot store's dict was mutated and iterated across
+  threads with no lock.** The daemon dispatches every hook event through
+  a `ThreadPoolExecutor`, and `record`'s eviction racing `consume`'s
+  iteration raised `RuntimeError`/`KeyError` under real concurrency.
+  Fixed: `PlanStatusSnapshotStore` now holds a `threading.Lock` around
+  every mutation and iteration, matching `utils/config_cache.py`'s
+  existing pattern. Pinned by a 4-thread stress test in
+  `TestConcurrency` (`test_plan_status_snapshot.py`), confirmed RED
+  (raised on 3/3 runs) before the lock and GREEN (3/3) after.
+- **RV4-m2 — a snapshot could be stale by the time its own write landed.**
+  PreToolUse runs before the permission prompt, which can precede the
+  write by minutes; another session's write landing in that gap left the
+  snapshot describing a file that no longer existed in that form. Fixed:
+  `PlanStatusSnapshot` now carries a content hash (`hash_plan_text`) of
+  the text it read; for a non-`replace_all` Edit, `_snapshot_is_fresh`
+  reconstructs the candidate pre-edit text(s) and requires an exact hash
+  match; a `replace_all` Edit or a Write cannot be reconstructed
+  unambiguously (a collision can reverse an unrelated site too — the same
+  shape RV3-m1 already works around at the verdict level, which does not
+  extend to exact byte reconstruction), so those fall back to a
+  `_SNAPSHOT_RECENCY_BOUND_SECONDS` (5s) staleness bound instead. On a
+  stale snapshot, it is discarded and the existing inference fallback
+  runs, logged as a distinct WARNING from the "no snapshot" case. Pinned
+  by a race test modelling `probe_gf4_race.py`'s F3 (three plans; a
+  second session's later flip of one must not let a first session's
+  stale-snapshot-driven tick erase a THIRD plan's own displacement).
+- **RV4-m3 — an `EACCES` (or other `OSError`) from the existence
+  pre-check itself escaped as a raw, unwrapped exception**, in both
+  `goal_ledger.py`'s `_load_raw` and `plan_status_snapshot.py` (the
+  PreToolUse handler)'s `_read_plan`: the `is_file()` check ran BEFORE
+  the `try`, so an unreadable parent directory or `ENAMETOOLONG` bypassed
+  the domain-exception wrapping entirely. Fixed: the existence check now
+  runs INSIDE the `try` — `return None` there sits in the try body, not
+  an except handler, so it is not the shape `audit_error_hiding.py`
+  flags — and every other `OSError` (including from `is_file()` itself)
+  is caught and wrapped as the domain exception (`LedgerUnreadable`,
+  `PlanUnreadable`) with a WARNING at the caller. Pinned by a
+  permission-denied-file test in each affected test file, monkeypatching
+  `Path.is_file` to raise `PermissionError`.
+- **RV4-m4 — nothing told an operator that `goal_injection`'s
+  ground-truth snapshot path needs `plan_status_snapshot` enabled.** The
+  handler shipped opt-in (disabled by default), so a fresh install ran on
+  inference alone with no signal that the ground-truth path was even
+  available. `Handler.depends_on` looked like the natural coupling
+  mechanism but has zero consumers anywhere in `src/` — not a real
+  option. Fixed the simpler way team-lead offered: `get_default_enabled()`
+  flipped from `False` to `True` (opt-out), with the docstring, the
+  generated-config template (`daemon/init_config.py`), and the upgrade
+  reference config (`.claude/hooks-daemon.yaml.example`) all updated to
+  match — three independent sources of truth for one handler's default,
+  each with its own drift-guard test
+  (`test_default_enabled_template_consistency.py`,
+  `test_reference_config_completeness.py`), both of which were ALREADY
+  failing before this pass touched anything (the handler was never
+  registered in either).
+- **RV4-m5 — two gaps in what review 3's own fixes were pinned against.**
+  (1) `test_task_tick_on_a_not_started_plan_with_a_fenced_status_example_ stays_silent` (C7b) and the phase-2 collision test (C8) carried
+  PRE-edit fixture content, but PostToolUse dispatches AFTER the tool has
+  already landed the edit — the fixture defect masked the very collision
+  the tests exist to catch. Fixed the fixtures to hold POST-edit content.
+  (2) the RV3-m2 fix itself (`handle()`'s `PlanDoc.parse(plan_text).status`
+  gate, not a literal `'**Status**: In Progress' in plan_text` check) had
+  no direct mutation-testing pin — `probe_gf4_mutate.py` confirmed the
+  suite stayed GREEN under that exact literal-substring mutant. Fixed by
+  adding `test_terminal_transition_ignores_a_fenced_in_progress_example_ in_the_post_edit_text` to `TestReview4Fixes`, using a recorded
+  pre-write snapshot (ground truth, RV3-n5) to isolate the OUTER
+  post-write gate from the unrelated INNER reconstruction-uniqueness
+  filter a byte-identical fenced collision would otherwise also trip.
+  Confirmed RED against the literal mutant, GREEN against HEAD.
+- **RV4-m6 — the daemon needed an actual restart and doc regeneration in
+  THIS pass, not a stale claim that a previous pass already did it.** Ran
+  `bin/hooks-daemon restart` then `bin/hooks-daemon regenerate-docs`;
+  `CLAUDE.md` was already correct (no diff) at this point. **Correction
+  (this claim was wrong when first written):** `.claude/HOOKS-DAEMON.md`
+  was NOT already correct — the full-suite fallout later in this same
+  pass (`test_real_repository_handler_doc_is_fresh`, below) found it
+  still missing `plan_status_snapshot`'s row and handler count, because
+  `regenerate-docs` here talks to the already-running daemon's in-memory
+  handler registry rather than a fresh reimport. A plain
+  `bin/hooks-daemon generate-docs` afterwards is what actually fixed it.
+  The claim in RV3-n4 above is genuinely true only as of that later step,
+  not this one.
+- **RV4-m7 — documentation drift, corrected:** `HANDLER_REFERENCE.md`'s
+  `goal_injection` entry described the OLD state-based trigger
+  ("STATE-based … not transition-based") contradicting what N3 actually
+  does; reworded to TRANSITION-based with the new-session-reassert
+  exception named explicitly. `goal_injection.py`'s `_is_real_transition`
+  docstring still described a removed "`old_string` FIRST witness, used
+  DIRECTLY" fast path (RV3-m2 removed it); reworded to describe only the
+  current always-reconstruct behaviour. `get_claude_md()`'s "every
+  session ever handed a plan's goal keeps its own claim" was an overclaim
+  past the owner cap even before RV4-M1; reworded to describe the
+  pinned-primary-owner/FIFO-capped-absorbed-owners model precisely.
+  Release note 13 updated: the terminal-drop claim now names the
+  completing session's own guaranteed inclusion; the cap description now
+  names the primary-owner exemption; the "can no longer be misread either
+  way" claim is now scoped to "while that snapshot is trusted", with the
+  staleness fallback named; the closing line now conditions "no action
+  needed" on `plan_status_snapshot`'s default-enabled state rather than
+  asserting it unconditionally. `auto_continue_stop`'s existing
+  "Fail-open: a missing or unreadable ledger" claim (`HANDLER_REFERENCE.md`
+  line ~3662) was re-verified rather than reworded — `live_plan_numbers`
+  already catches `LedgerUnreadable` explicitly. **Correction (this claim
+  was wrong when first written): RV4-m3 did NOT make that catch complete.**
+  It fixed only `_load_raw`'s own existence check; `_plan_state` and
+  `_find_plan_md_text` — `live_plan_numbers`' own siblings, reached via
+  `_reconcile` on every call — kept a raw `PLAN.md.is_file()` outside
+  their try, so an `EACCES` on a search-denied plan folder still escaped
+  `live_plan_numbers` unwrapped. Not fixed until RV5-m6 below (see
+  review-5's entry). `PLAN.md`'s N3 row, shown as ✅ Remedied, corrected
+  back to 🔄 In progress per team-lead's standing instruction that it
+  stays there until merged.
+- **RV4-n1 — see above** (folded into the RV3-n3 entry it follows
+  directly, for locality with what it corrects).
+- **RV4-n2 — `GoalInjectionHandler.matches()`/`handle()` re-implemented
+  `matched_plan_write_or_edit` instead of calling it**, duplicating the
+  tool-name/path/`Completed`/project-membership checks `utils/plan_trigger.py`
+  already centralises for both handlers (its own module docstring claimed
+  they were shared, when only `plan_status_snapshot` actually called it).
+  Fixed: both methods now delegate to `matched_plan_write_or_edit`
+  directly, which made `_plan_path_pattern()`, `_is_inside_project()` and
+  `_COMPLETED_SEGMENT` genuinely dead code — removed along with their
+  now-unused imports.
+- **RV4-n3 — `record_emission`'s `LedgerUnreadable` warning did not say
+  the save about to happen OVERWRITES the unreadable file.** For a
+  transient `OSError` (as opposed to corrupt JSON), this silently
+  destroys every live entry and `ever_recorded_sessions`. Fixed: the log
+  message now says so explicitly.
+- **RV4-n4 — `test_goal_injection.py` and `test_recovery_cron_advisor.py`
+  each added their own copy of `test_git_facts.py`'s `_git` helper, each
+  with its own `# nosec B603 B607` suppression** — two new suppressions
+  reviewing the same trusted-subprocess-call shape a third file already
+  carried. Fixed: extracted the ONE helper (`run_git`) to
+  `tests/support/git_fixtures.py` (a new `tests/support/` package,
+  outside the daemon's own `src/`), with a single suppression; all three
+  test files now `from tests.support.git_fixtures import run_git as _git`
+  instead of defining their own copy.
+- **RV4-n5 — `TestOwnershipSurvivesASecondSession`, `TestResumedSameSessionReassertion`
+  and `TestReview3Fixes` each SUBCLASSED `TestNewSessionReassertion` to
+  reuse its fixtures, so pytest collected and RE-RAN its tests once per
+  subclass too** (108 `def test_` methods, 117 collected). Fixed:
+  extracted the shared fixture plumbing into `_ReassertionFixtures` (a
+  leading underscore keeps it out of pytest's `Test*` collection), and
+  every class above now inherits ONLY the fixtures, not each other's test
+  methods.
+- **RV4-n6 — docstrings asserted unconditionally that this repo's
+  `strict_mode` DENIES**, contradicting N24 (`strict_mode` never reaches
+  the live daemon, so it is inert in every install including this one).
+  Fixed in `goal_ledger.py`'s `_load_raw` and `goal_injection.py`'s
+  `_open_ledger` docstrings: both now state that the config DECLARES
+  `strict_mode: true` while noting, citing N24, that the setting does not
+  currently reach the live daemon, so the fail-open branch is what
+  actually runs.
+- **RV4-n7 — a symlink-loop `PLAN.md` raised `RuntimeError` from
+  `is_inside_project`'s `resolve()` call** (`utils/plan_trigger.py`,
+  copied from `goal_injection`'s pre-existing shape) instead of being
+  treated as "not inside the project". Fixed: `RuntimeError` added
+  alongside `ValueError`/`OSError` in the except tuple. Pinned by
+  `test_symlink_loop_never_raises` in `TestIsInsideProject`
+  (`test_plan_trigger.py`), confirmed RED (raw `RuntimeError` propagated)
+  before the fix.
+
+**Full-suite fallout from RV4-m3/m4, found by a whole-tree run after the
+fifth pass above and fixed together (none of these were in the review-4
+report itself):**
+
+- **`eacces_safe_predicates_static_check` flagged RV4-m3's own fix.**
+  `plan_status_snapshot.py`'s (PreToolUse handler) raw `is_file` predicate
+  is exactly the shape that checker exists to catch, regardless of the
+  `except OSError` one line below it -- it is a pure regex over the
+  source text, not a flow analysis, so it also matched the SAME method's
+  own docstring prose describing the predicate. Fixed: the existence
+  check now goes through `utils.path_predicates.path_is_file(path, unreadable_means=True)`; on a stat failure this assumes "yes, try to
+  read it" rather than silently answering `False`, so an EACCES does not
+  vanish -- it reaches the SAME read attempt immediately after, which
+  hits the identical permission error and is what the method's own
+  `except` still converts to `PlanUnreadable`. The docstring's prose
+  mention of the predicate reworded to not contain the literal
+  `.is_file()` substring the checker also matches. The RED/GREEN
+  permission-denied test updated to patch `Path.read_text` alongside
+  `Path.is_file` -- patching only the stat call no longer reproduces the
+  failure now that the stat alone does not stop the method.
+- **`test_no_handler_is_unclassified` had no `get_claude_md()` verdict
+  for `PlanStatusSnapshotHandler`.** It does return guidance text (not
+  `None`), so it needed a `_EARNS_GUIDANCE` entry, not an exempt one.
+  Added, alongside fixing that handler's own docstring/`get_claude_md()`
+  text still saying "ships disabled" after RV4-m4 flipped the default.
+- **`test_no_undeclared_module_imports_plan_qa` flagged
+  `utils/plan_status_snapshot.py -> plan_qa.model`.** The SAME import
+  `utils/goal_ledger.py` already carries, for the same reason (reading a
+  plan's status via `PlanDoc`/`PlanStatus`) and already declared in that
+  test's `_KNOWN_EDGES` allowlist. Declared alongside it with the same
+  rationale, rather than treated as a new design question.
+- **`test_real_repository_handler_doc_is_fresh` found `.claude/HOOKS- DAEMON.md` still missing `plan_status_snapshot`'s row and the handler
+  count.** The RV4-m6 `regenerate-docs` run earlier in this pass did not
+  pick this up (talks to the already-running daemon's in-memory handler
+  registry, not a fresh reimport); a plain `bin/hooks-daemon generate-docs`
+  run afterwards did. Regenerated again; committed alongside this pass.
+
+**Fifth review pass (review-5, `260925-goal-flip-review5-opus-5-5.md`) — 3
+majors, 6 minors, 5 nits, all fixed with a RED test first for each:**
+
+- **RV5-M1 — the RV4-M1 fix was itself a NEW regression against main.**
+  `_maybe_refresh_on_retirement`'s unconditional `if session_id and session_id not in owners: owners = [*owners, session_id]` handed a
+  `/goal` to a session that never owned the completing plan (K1: a
+  non-owner teammate ticking a Plan Completion Checklist box got a goal
+  for an unrelated live plan, PERMANENTLY — nothing later retracts it),
+  and could WIPE a session's own manually-injected goal (K2: `inject-goal 00400` cleared by an unrelated plan's completion). Fixed: removed the
+  unconditional add entirely — only an owner the ledger already names is
+  refreshed. `primary_owner` pinning (RV4-M1) alone still fixes the
+  original E2 scenario (the flipper survives absorption past the owner
+  cap); nothing else was needed for that case. Pinned by
+  `test_a_non_owner_completer_gets_no_goal` and
+  `test_a_manual_goal_survives_an_unrelated_plans_completion`
+  (`test_goal_injection.py`), both confirmed RED against the reverted
+  unconditional-add line before the fix.
+- **RV5-m4 (paired with RV5-M1) — the retirement-refresh fan-out never
+  registered a refreshed owner as an OWNER of the other plans its own
+  freshly rewritten text named.** So a session refreshed by one plan's
+  retirement, whose combined text now names a SECOND still-live plan,
+  never got retracted when THAT plan later completed (K4) — the fan-out
+  path never applied RV3-m3's `_extend_ownership` the flip path already
+  has. Fixed: `GoalLedger.add_owners(sessions, plan_numbers)`, a new
+  BATCHED method registering every refreshed owner as an owner of every
+  plan its combined text names, under ONE lock/save (not
+  `len(sessions)*len(plans)` individual `reassert_session` calls).
+  Pinned by
+  `test_a_retirement_refreshed_owner_becomes_an_owner_of_the_plans_its_text_names`,
+  confirmed RED with the `add_owners` call temporarily disabled.
+- **RV5-M2 — the RV4-m2 5 s recency bound was fundamentally broken, in
+  both directions.** PreToolUse runs BEFORE Claude Code's permission
+  prompt, so ANY prompt a person takes longer than 5 s to answer made a
+  genuinely-correct snapshot look "stale" and fall back to inference —
+  reproducing N3's original bug (T1: a real `replace_all` flip missed
+  after 6 s; T3/T4: a Write misread after 6 s). A BACKWARD clock step
+  (T5) had the opposite failure: it could make an arbitrarily stale
+  snapshot look fresh. Fixed by removing the time bound ENTIRELY —
+  team-lead's own instruction, over the review report's softer "use
+  `time.monotonic()`" suggestion: the store's orphan-eviction is now
+  bounded purely by entry count (`_MAX_ENTRIES=256`, FIFO on a full
+  store), never by a clock of either kind, which also resolves T5 as a
+  side effect (no clock logic left to exploit). Freshness itself is now a
+  pure hash comparison: the Pre handler PREDICTS the post-write text by
+  applying the same Write/Edit FORWARD to the pre-write text it just read
+  (reusing the existing shared `would_be_content` helper, already used by
+  three other handlers, rather than inventing a parallel
+  implementation), records the hash of that prediction; the Post handler
+  hashes the REAL post-edit text and compares directly — no
+  reconstruction, no clock, and it handles a deletion Edit (T7,
+  `new_string=""`) uniformly, which the OLD reverse-reconstruction design
+  could not (`_reconstruct_pre_edit_candidates` returned `[]` for it).
+  **Correction (RV6-m2): "uniformly" here is about needing no
+  reconstruction for any tool shape, not about detecting every race
+  uniformly.** For a Write the predicted image is the write's own
+  `content` field, independent of the pre-write text, so the freshness
+  check can only ever catch a LATER write landing on the file before this
+  one's own Post dispatch runs — it is blind to an EARLIER write that
+  changed the plan's status between the Pre snapshot and this Write
+  landing (probe W1). An Edit's prediction is built from its own
+  before/after span, so the same race IS caught for it (probe W1e). Stated
+  explicitly now in `_snapshot_is_fresh`'s own docstring and release note
+  13, per the review's Direction.
+  `PlanStatusSnapshot.text_hash`/`recorded_at` renamed/removed to
+  `predicted_post_hash`; `PlanStatusSnapshotStore`'s `ttl_seconds`
+  constructor param and `TestTtlExpiry` removed outright (the whole
+  premise is gone). New tests:
+  `test_snapshot_freshness_never_consults_the_clock` (the "bound never
+  expires" mutant's kill — confirmed RED by temporarily reinserting a
+  `time.time()` call into `_snapshot_is_fresh`, then reverted),
+  `test_t1_replace_all_bulk_flip_survives_an_arbitrary_pre_post_gap`,
+  `test_t3_write_with_unchanged_status_is_not_a_flip`,
+  `test_t4_write_reopening_a_complete_plan_is_a_genuine_flip`,
+  `test_t7_deletion_edit_is_resolved_by_the_snapshot` (all in
+  `test_goal_injection.py`). RV5-m5's test-gap items folded in here: the
+  RV3-m2 pin test's `old_string` was non-unique in its own pre-image (the
+  real Status line and a fenced example both read
+  `**Status**: In Progress`) — a real Edit tool call with that shape is
+  REJECTED before this handler ever sees it — rewritten to use a unique
+  `old_string` so it genuinely exercises the hash path instead of an
+  Edit call that could never happen.
+- **RV5-M3 — the `_KNOWN_EDGES` entry this pass's own prior session added
+  for `utils/plan_status_snapshot.py -> plan_qa.model` was itself a NEW
+  ratchet violation** (`test_qa_package_dependency_direction.py`'s
+  allowlist: "Shrink this list when one goes; never grow it to make a
+  new edge pass"). Unlike `goal_ledger.py`'s grandfathered entry (predates
+  the ratchet, does REAL `PlanDoc` parsing), `plan_status_snapshot.py`
+  only imported `PlanStatus` to annotate a dataclass field — no plan-text
+  parsing of its own. Fixed per team-lead's simplification of the
+  report's three options ("store `status.value` as a plain string, or
+  make the store generic; do not move the module"): `PlanStatusSnapshot. status` is now a plain `str | None` (the status VALUE, not the enum);
+  the Pre handler converts at its own boundary (`status.value`),
+  `goal_injection` rehydrates at its own boundary (`PlanStatus(value)`)
+  — both of those modules already import `plan_qa.model` for other
+  reasons and sit outside the ratcheted `utils`/`docs_qa` trees, so the
+  import moves to where it was always legitimate. The `_KNOWN_EDGES`
+  entry and its module docstring's "six ... five that remain" count
+  corrected to match.
+- **RV5-m1 — `plan_status_snapshot`'s "harmless when goal_injection is
+  off" claim was false.** `get_relevance()` is NOT a runtime gate — its
+  only caller is `daemon/cli.py`'s `optimise` command (the
+  config-optimisation REVIEW), never real dispatch, and `matches()`
+  doesn't consult it either. So the handler genuinely runs (a file read,
+  a `PlanDoc.parse`, a SHA-256 hash) on EVERY active plan's `PLAN.md`
+  write in EVERY client where it is enabled (the shipped default),
+  whether or not `goal_injection` is enabled and whether or not a ccy
+  supervisor is armed. No existing primitive in this codebase lets one
+  handler read another's resolved enabled-state at runtime (`Handler. depends_on` is stored but has zero consumers anywhere in `src/` — not a
+  real option, confirmed by grep), so building genuine cross-handler
+  gating would be a much larger architecture change than a minor finding
+  warrants. Took team-lead's explicit alternative instead: corrected the
+  module docstring and `get_claude_md()` to state the true, unconditional
+  cost plainly, and to drop the stale "TTL'd" description (RV5-M2 removed
+  the TTL — RV6-n1 found the phrase had survived in two OTHER spots this
+  pass missed, `plan_status_snapshot.py:13` and its acceptance-test
+  `safety_notes`; both fixed now).
+  **Correction (RV6-m1): the "no existing primitive" claim above was
+  wrong.** Five handlers already read a resolved config at runtime via
+  `utils.config_cache.load_config_cached` (`recovery_cron_advisor.py`,
+  `cron_stop_enforcer.py`, `cron_subagent_stop_enforcer.py`,
+  `failsafe_cron_session_advisor.py`, `remote_docs_routing.py`), and the
+  registry's own `handlers.registry.config_skip_reason` decides "enabled"
+  from exactly that with a one-line rule. `Handler.depends_on` genuinely
+  has zero consumers, as stated — that just was not the only route, and a
+  smaller one existed. Fixed properly instead of documented: `matches()`
+  is now gated on `goal_injection`'s resolved `enabled` state
+  (`PlanStatusSnapshotHandler._goal_injection_enabled`), with an ABSENT
+  block resolving to `goal_injection`'s OWN opt-in default (`False`), not
+  `config_skip_reason`'s generic "absent means enabled" convention (which
+  is tuned for the common opt-out handler shape). Pinned by
+  `TestGoalInjectionGate` in `test_plan_status_snapshot.py`.
+- **RV5-m2 — registration docs were missing.** Added
+  `handlers.pre_tool_use.plan_status_snapshot` to
+  `CLAUDE/UPGRADES/UNRELEASED/config-changes/v3.67.0.yaml` and a full
+  entry plus summary-table row to `docs/guides/HANDLER_REFERENCE.md`
+  (RV4-m4 already asked for the latter and it was never done).
+  `check_handler_reference.py`, `check_generated_doc_drift.py` and
+  `check_doc_truth.py` all still pass after adding these.
+- **RV5-m3/K3 — a resumed lead under a NEW session id is still
+  evictable, and the release note over-claimed otherwise.** The
+  `primary_owner` pin (RV4-M1) protects only the ORIGINAL flipping
+  session's id; a lead that resumes under a genuinely different id and
+  reasserts ownership is an absorbed owner like any other, subject to the
+  same FIFO cap as 50 teammates ticking a box. Team-lead's own fallback
+  instruction: "Fix it if the payload gives you a stable link... If there
+  is truly no signal, correct the release note... and record the
+  reasoning in NIGGLES." **Researched and confirmed no such signal
+  exists**: grepped this codebase for any existing session-lineage
+  concept (`parent_session_id`, `previous_session_id`, `lineage`,
+  `resumed_from`, `prior_session`, `session_lineage`) — none found.
+  Checked the vendored `hooks.md` docs for any hook-payload field linking
+  a resumed session's new id back to an old one — PostToolUse carries
+  only `session_id` and `transcript_path`; no parent/previous-session
+  field is documented anywhere. So there is genuinely nothing to key a
+  fix on without fabricating a link the daemon cannot verify — a fix here
+  would be a guess dressed as a fix. Corrected release note 13's "can
+  never evict the one session that most needs its own signal refreshed"
+  claim to name this limitation precisely (the pin is keyed on the
+  flipping session's OWN id, not a resumed one), rather than either
+  silently leaving the over-claim or inventing an unreliable fix.
+- **RV5-m5 — see RV5-M2 above** (the RV3-m2 pin rewrite folded in
+  there); the second half, "kill the `primary_owner` reassignment
+  mutant" (`goal_ledger.py`'s `record_emission` re-emission branch
+  handing `primary_owner` to the re-emitter), addressed separately — see
+  the dedicated entry below.
+- **RV5-m6 — doc over-claims, several distinct ones, each corrected
+  where found rather than in one place:** (1) release note 13's snapshot
+  match-check description updated for RV5-M2's forward-prediction design
+  (was: "a content hash of the text it read"; now: "a content hash of
+  the text it PREDICTS ... will produce", with the no-time-bound
+  behaviour stated explicitly). (2) release note 13's terminal-drop
+  bullet reworded to drop RV4-M1's now-REMOVED "including the completing
+  session itself, always, even ... the ledger's own owner set does not
+  (yet) name it" claim (RV5-M1 removed that behaviour) and to describe
+  RV5-m4's batched cross-plan ownership instead. (3) release note 13's
+  cap description corrected per RV5-m3/K3 above. (4) `NIGGLES.md`'s own
+  RV4-m3/RV4-m7 entries corrected in place, above — see the two
+  "Correction (this claim was wrong when first written)" notes. (5)
+  `plan_status_snapshot.py`'s "harmless" claim — see RV5-m1 above. Also
+  fixed as part of this item, the actual `EACCES` gap the RV4-m7 entry's
+  false claim had papered over: `goal_ledger.py`'s `_plan_state` and
+  `_find_plan_md_text` kept a raw `PLAN.md.is_file()` outside their own
+  try (RV4-m3 fixed only `_load_raw`'s equivalent) — a live ledgered
+  plan whose folder denies search escaped `live_plan_numbers` as a raw,
+  unwrapped `PermissionError`. Fixed with the same
+  `path_is_file(unreadable_means=True)` pattern RV4-m3 established;
+  pinned by
+  `test_live_plan_numbers_does_not_raise_on_eacces_from_plan_md_is_file`,
+  confirmed RED against a reverted raw `is_file()` call.
+- **RV5-n1 — the consolidated `# nosec` at `tests/support/git_fixtures. py:17` suppresses NOTHING** (bandit only scans `src/`, never `tests/`
+  — confirmed via `scripts/qa/run_security_check.sh`/`pyproject.toml`),
+  so it was inert in all three OLD per-file locations too, before RV4-n4
+  consolidated them. Net change vs main is 3→1 suppressions, not
+  "removed" as an earlier NIGGLES entry (RV4-n4, above) implied — noted
+  here rather than reworded there, since RV4-n4's own description of
+  what it DID (extracted one shared helper) is still accurate; only the
+  "3→0" framing this later review corrects was implicit, not stated.
+- **RV5-n2 — the legacy `primary_owner` back-fill
+  (`goal_ledger.py:423-427`) uses `session_id`, the field for the LAST
+  re-emitter, not the original creator.** A documented approximation
+  that applies only to pre-upgrade entries (every NEW entry sets
+  `primary_owner` at creation, correctly). Left as-is; the imprecision
+  was already named in the surrounding comment, so this is a
+  confirmation, not a fix.
+- **RV5-n3 — a directory literally named `PLAN.md` records `status=None`
+  ("no prior status") via `path_is_file` correctly answering `False` for
+  a directory.** Harmless: the real Write this models would itself fail
+  (a directory cannot be written as a file), so no Post ever fires to
+  consume the recorded `None`. No functional fix needed; noted as an
+  intentionally benign edge case.
+- **RV5-n4 — the RV5-M2-era docstrings (`utils/plan_status_snapshot.py`'s
+  module docstring, `_snapshot_is_fresh`) narrate the RV4-m2 → RV5-M2
+  design transition at some length.** Rationale keyed to a failure mode
+  (the old bound's exact break, T1/T5) is allowed per `comment_changelog`
+  — this is not a version changelog — but the reviewer's own softer
+  framing ("adds length") was taken as a signal to keep it as-is rather
+  than trim further: the transition explanation is load-bearing for
+  understanding why the design has NO time-based logic at all, which a
+  future reviewer would otherwise reasonably reintroduce.
+- **RV5-n5 — `probe_gf4_threads2.py` breaking (2-argument `record()`
+  calls, now 3-argument) is confirmed NOT a defect** — the reviewer's own
+  report already states this explicitly ("superseded by
+  `probe_gf5_threads.py`"); no action taken.
+
+**Review 6 (`260925-goal-flip-review6-opus-5-5.md`).**
+
+- **RV6-M1 — `markdown_table_formatter` rewrote `PLAN.md` before it was hashed.**
+  It runs at PostToolUse priority 26, ahead of `goal_injection` at 31, so
+  RV5-M2's forward-hash freshness check read STALE on any write whose
+  markdown was not already mdformat's canonical form -- worse than main on
+  exactly the Write/reopen/bulk-edit shapes RV5-M2 set out to rescue
+  (probe `probe_gf6_formatter.py`'s FE and FT4). This project enables all
+  three handlers. Fixed by reordering: `Priority.GOAL_INJECTION` is now
+  `30` and `Priority.MARKDOWN_TABLE_FORMATTER` is `31`
+  (`constants/priority.py`), with the same swap in
+  `.claude/hooks-daemon.yaml`, so `goal_injection` hashes exactly what the
+  tool wrote, before the formatter ever touches the file. A guard test
+  (`test_goal_injection_precedes_markdown_table_formatter`) pins
+  `Priority.GOAL_INJECTION < Priority.MARKDOWN_TABLE_FORMATTER` and the
+  real chain's resolved handler order, so a future priority shuffle fails
+  loudly instead of silently reintroducing this. Two chain-level tests in
+  `TestFormatterOrderingChain` (`test_goal_injection.py`) --
+  `test_fe_edit_flip_adding_an_unpadded_table_still_writes_a_signal` and
+  `test_ft4_write_reopening_a_complete_plan_with_an_unpadded_table_still_writes_a_signal`
+  -- build a REAL `HandlerChain` from `PlanStatusSnapshotHandler` +
+  `GoalInjectionHandler` + `MarkdownTableFormatterHandler` and confirm
+  both that the flip is still detected AND that the formatter still runs
+  (not passing merely because it never fired); the old (pre-fix) priority
+  order was confirmed to reproduce the miss via a throwaway script,
+  matching the reviewer's own repro. The report's Direction #3 ("check
+  every other non-terminal Post handler that can rewrite a `.md` file
+  before priority 31") was not separately audited this pass --
+  `markdown_table_formatter` is the only PostToolUse handler below the new
+  `goal_injection` priority that rewrites file CONTENT at all
+  (`git_hooks_executable_fixer` only chmods); left as a standing check for
+  a future PostToolUse handler that also rewrites `.md` content. The same
+  stale ordering was also baked into `.claude/hooks-daemon.yaml.example`
+  (the shipped template every fresh client install copies) and
+  `daemon/init_config.py`'s generated project config (the string
+  `hooks-daemon init` itself writes) -- both fixed the same way, with the
+  same `MUST stay below/above` comments, or a fresh install would have
+  reproduced this exact regression from day one. Also fixed a stale
+  cross-reference comment (`constants/priority.py`'s
+  `PLAN_STATUS_SNAPSHOT` docstring cited `GOAL_INJECTION = 31`, the OLD
+  value). `tests/integration/test_template_priorities_match_the_constants.py`
+  (pre-existing) confirms all three sources now agree with the code.
+- **RV6-m1 — the RV5-m1 NIGGLES claim that "no existing primitive...
+  lets one handler read another's resolved enabled-state at runtime" was
+  wrong**, corrected in place above. Fixed properly instead of merely
+  re-documented: `plan_status_snapshot.matches()` is now gated on
+  `goal_injection`'s resolved config state
+  (`PlanStatusSnapshotHandler._goal_injection_enabled`, via
+  `utils.config_cache.load_config_cached`), with an absent block
+  resolving to `goal_injection`'s OWN opt-in default (`False`) rather than
+  the generic opt-out-shaped "absent means enabled" convention. Pinned by
+  `TestGoalInjectionGate` (`test_plan_status_snapshot.py`, PreToolUse).
+- **RV6-m2 — a Write's RV5-M2 freshness check only ever catches a LATER
+  writer, and three docs claimed it "covers every shape uniformly."**
+  `would_be_content` returns a Write's `content` field verbatim,
+  independent of the pre-write text, so the comparison cannot see a race
+  that changed the plan's status BEFORE this Write landed (probe W1); an
+  Edit's prediction is built from its own before/after span and DOES
+  catch that race (probe W1e). "Uniformly" in the RV5-M2 design was about
+  needing no reconstruction for any tool shape, not about detecting every
+  race uniformly — the claim was imprecise, not the design. Corrected in
+  `_snapshot_is_fresh`'s own docstring
+  (`handlers/post_tool_use/goal_injection.py`), release note 13, and the
+  RV5-M2 NIGGLES entry above (this file).
+- **RV6-m3 — the "narrow window" framing for `goal_injection`'s inference
+  fallback undersold it in three places.** Besides a daemon restart
+  between the Pre/Post dispatch of the same call and a payload carrying
+  no `tool_use_id`, the fallback is also taken whenever nothing could be
+  predicted at Pre time (`would_be_content` returned `None`, or the plan
+  file could not be read), whenever the bounded store evicted the entry
+  under load, and whenever a recorded snapshot is rejected as STALE
+  (RV6-M1 is one concrete source of STALE, not the only one). Consolidated
+  into one authoritative list in `_resolve_transition`'s own docstring
+  (`goal_injection.py`), with `plan_status_snapshot.py`'s module docstring
+  and `get_claude_md()` now pointing at it instead of re-narrating a
+  shorter, stale version.
+- **RV6-n1 — "TTL'd" survived RV5-m1's claimed removal**, at
+  `plan_status_snapshot.py:13` and its acceptance-test `safety_notes`.
+  Both fixed (see the RV5-m1 correction above).
+- **RV6-n2 — `.claude/hooks-daemon.yaml`'s `plan_status_snapshot` comment
+  said "Opt-in (false) elsewhere" while shipping `enabled: true`
+  (`hooks-daemon.yaml.example`).** Fixed to state the true, unconditional
+  default plainly.
+- **RV6-n3 — a symlinked plan folder is ledgered under the link's number,
+  not the target's.** ~~Confirmed harmless~~ -- **wrong.** Review 7
+  (RV7-m3) reproduced it as a real defect: a plan COMPLETED through the
+  real (non-symlink) path leaves a live ledger entry keyed to the link's
+  number forever, because that entry was created through the link and
+  never retires. See the Review 7 section below for the fix.
+- **RV6-n4 — the snapshot store hand-rolled its own select-then-evict.**
+  Correct under its own lock (the `unlocked-eviction` semgrep rule exempts
+  a held lock) but a duplicate of exactly what `goal_injection`'s own
+  `_fired`/`_reasserted` latches already use. Fixed: `PlanStatusSnapshotStore`
+  is now backed by `handlers.utils.bounded_fifo_map.BoundedFifoMap` (Plan
+  00449 P2), removing the second implementation; pinned by
+  `TestUsesTheSharedBoundedMap` in `tests/unit/utils/test_plan_status_snapshot.py`.
+  All of `TestRecordAndConsume`, `TestConsumeSnapshot`, `TestBoundedGrowth`
+  and `TestConcurrency` (the existing black-box regression suite for this
+  store) still pass unchanged.
+
+**Review 7 (`260925-goal-flip-review7-opus-5-5.md`).**
+
+- **RV7-B1 — review 6's renumbering broke four PostToolUse unit tests it
+  never ran.** `constants/priority.py:205-218` shifted
+  `git_hooks_executable_fixer` (27→26), `background_process_tracker`
+  (28→27), `command_hints` (29→28) and `recovery_cron_advisor` (30→29) to
+  stay adjacent to the `goal_injection`/`markdown_table_formatter` swap,
+  but four `test_priority`-shaped assertions in those handlers' own test
+  files still asserted the OLD literal. Fixed by asserting against the
+  `Priority` constant instead of a literal in all four (renaming
+  `test_priority_is_30` to `test_priority_matches_constant` in
+  `test_recovery_cron_advisor.py`, since it is no longer 30) — the same
+  fix the report itself directed, so a future priority shuffle cannot
+  reintroduce this. The whole `tests/unit/handlers/post_tool_use/`
+  directory was run once before finishing, since B1 was itself a missed
+  sibling.
+- **RV7-M1 — the RV6-m1 gate ran BEFORE the cheap trigger match, so every
+  PreToolUse event paid a config read, and a broken config cost ~80ms per
+  event.** `plan_status_snapshot.matches()` now checks
+  `matched_plan_write_or_edit` (a tuple-membership test, no I/O) FIRST,
+  and only consults the config-backed gate for an actual plan Write/Edit —
+  the overwhelming majority of PreToolUse events never reach it at all.
+  Separately, `utils.config_cache.load_config_cached` now caches a
+  RAISED parse failure under the same `(st_mtime_ns, st_size)` signature
+  as a successful parse, so a config broken by an edit after startup is
+  re-parsed once per change rather than once per event — this benefits
+  all six callers of the cache, not just this gate. The misnamed
+  `test_gate_runs_before_the_trigger_match_so_a_non_plan_write_is_still_false`
+  test already exercised the right shape and needed no change; new tests
+  in `TestABrokenConfigIsCachedByFailure`
+  (`tests/unit/utils/test_config_cache.py`) pin the caching behaviour.
+- **RV7-m1 — the gate disagreed with what the daemon actually registers,
+  in two shapes RV7-m1 measured (an absent `goal_injection` block, and
+  `disable_tags` covering it), and its own docstring/test asserted the
+  disagreement was correct.** `_goal_injection_enabled` now decides from
+  `handlers.registry.handler_is_enabled` over the SAME per-event mapping
+  `daemon.cli._build_handler_config_mapping` builds for `register_all`
+  itself — the checklist's own "would `register_all` register this
+  handler" predicate — rather than a hand-rolled reading of the config
+  block that (wrongly) tried to honour `goal_injection`'s own opt-in
+  default, which `register_all` never actually consults. An absent block
+  now resolves to TRUE (matching the registry's own "absent means
+  enabled" convention), reversing the RV6-m1 test's assertion; the load-
+  failure test now writes genuinely unparseable YAML to a real config
+  path instead of monkeypatching `_load_config` past the `except` branch
+  it claimed to exercise. A new table-driven test
+  (`test_gate_agrees_with_register_all_for_every_shape`) builds a REAL
+  `HandlerRegistry`/`EventRouter` and asserts the gate's answer equals
+  what got registered, for all six shapes RV7-m1's own table names.
+- **RV7-m2 — the FT4 chain test passed against the PRE-fix priority
+  order, so review 6's commit message claim "every finding has a
+  RED-confirmed test" was false for it; FC3b (review 6's own Direction #2)
+  had no chain test at all.** Both `TestFormatterOrderingChain` tests now
+  assert the snapshot was consumed FRESH (no "is stale" WARNING in
+  `caplog`), not merely that a signal file exists — the file-exists
+  assertion alone cannot tell a fresh-snapshot pass from a lucky
+  fallback-inference pass. FT4 now runs inside a real git repo whose HEAD
+  already reads `**Status**: In Progress` (diverged from the actual,
+  uncommitted `Complete` pre-write disk state) — the Write-only fallback
+  reads that stale HEAD as "already there, no transition" and would write
+  NO signal, so the test genuinely fails without a fresh snapshot; before
+  this, `tmp_path` was not a git repo at all, so the fallback's
+  `before_text is None -> True` branch always reported a transition
+  regardless of ordering. Confirmed RED against the pre-fix priority
+  order via a throwaway in-process monkeypatch of `Priority.GOAL_INJECTION`/
+  `Priority.MARKDOWN_TABLE_FORMATTER` (matching the reviewer's own repro
+  method): all three of FE, FT4 and the new FC3b failed. A new
+  `test_fc3b_completion_write_with_reformatted_columns_still_retires_and_clears`
+  test mirrors FT4's shape for the terminal-transition detector (a
+  completing Write with an unpadded table, HEAD diverged the other way —
+  already `Complete` — so the fallback would wrongly conclude no
+  transition), first establishing ledger ownership via a real prior flip
+  (`clear_goal_signal` only fires for a plan the ledger already names an
+  owning session for). This NIGGLES entry — not the immutable `88991a06`
+  commit message — is the correction of record for the RED-confirmation
+  claim.
+- **RV7-m3 — RV6-n3 was wrongly closed as harmless: a plan flipped
+  through a symlinked folder is ledgered under the link's number and
+  never retires.** `matched_plan_write_or_edit` (`utils/plan_trigger.py`)
+  now re-applies the trigger pattern to the FULLY RESOLVED path (symlinks
+  followed), expressed relative to the resolved project root, once
+  `is_inside_project` has already confirmed containment (which resolves
+  the same path itself) — that resolved capture is what both
+  `goal_injection` and `plan_status_snapshot` key on, since both share
+  this one function. A path that resolves outside the pattern entirely
+  returns unmatched (logged), rather than trusting the unresolved
+  capture. Regression test
+  `test_a_symlinked_plan_folder_resolves_to_the_targets_number`
+  (`tests/unit/utils/test_plan_trigger.py`) asserts a plan reached via
+  `00301-l -> 00300-c` is captured as `00300-c`; confirmed RED against the
+  pre-fix logic via a throwaway in-process comparison against the OLD
+  (unresolved-capture) implementation. The RV6-n3 "confirmed harmless"
+  text above is struck through and superseded by this entry.
+- **RV7-m4 — release artefacts drifted from the RV6-m1/RV7-m1 fixes.**
+  `config-changes/v3.67.0.yaml` gained `changed` entries for all six
+  priorities RV6-M1 moved, with a `migration_note` on the two that matter
+  (an operator who set custom priorities for `goal_injection`/
+  `markdown_table_formatter` must keep the former below the latter).
+  Both `config-changes/v3.67.0.yaml` and `docs/guides/HANDLER_REFERENCE.md`
+  no longer claim `plan_status_snapshot` "runs unconditionally... whether
+  or not `goal_injection` itself is enabled" — false since RV6-m1 gated
+  it, and doubly false now that RV7-m1 fixed what the gate agrees with.
+  The optional `ConfigValidator` startup warning (RV7-m4 Direction #2) was
+  NOT added — genuinely optional per the report, and the guard test
+  (`test_goal_injection_precedes_markdown_table_formatter`) plus the new
+  `changed` migration_notes already cover the cases that matter.
+- **RV7-n1 — `.claude/hooks-daemon.yaml`'s commented `options:` block sat
+  under `markdown_table_formatter` instead of `goal_injection`,** so
+  uncommenting it configured the wrong handler (it names `mode`,
+  `once_per_plan_per_session` and `lines`, all `goal_injection` options).
+  Moved to sit under `goal_injection`, matching `.claude/hooks-daemon.yaml.example`'s
+  arrangement, which was already correct.
+- **RV7-n2 — the release note shared ordinal 13 with an unrelated one and
+  ran to ~1,300 words against a "one to three sentences" schema.**
+  Renumbered to `33` (the next free ordinal, matching main), and cut to
+  three sentences naming the operator-facing change, that the snapshot
+  sensor ships on by default, and what a project running the inference
+  fallback (an explicit opt-out) keeps instead. The mechanism narrative it
+  carried is not lost: it already lives in `goal_injection.py`'s and
+  `plan_status_snapshot.py`'s own module docstrings, which the shortened
+  note now points at instead of re-narrating.
+- **RV7-n3 — the "single authoritative list" of fallback triggers
+  (`goal_injection.py:909-943`) omitted a trigger this same branch
+  introduced:** the sensor not running at all, because
+  `plan_status_snapshot` is disabled or its (RV7-m1-corrected) gate reads
+  `goal_injection` as off. Added as its own bullet under "No snapshot
+  recorded at all".
 
 ### N2 — `setup_worktree.sh` tells every agent to run the full suite through `run_all.sh`
 

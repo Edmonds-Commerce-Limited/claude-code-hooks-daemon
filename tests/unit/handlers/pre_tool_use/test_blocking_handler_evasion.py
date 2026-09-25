@@ -459,6 +459,11 @@ _NOT_COMMAND_ANCHORED: dict[str, str] = {
         "matches the write TARGET path (tool file_path, or get_bash_write_targets), "
         "not a command name; advisory only"
     ),
+    "PlanStatusSnapshotHandler": (
+        "matches on a Write/Edit's file_path landing on an active plan's "
+        "PLAN.md (shared matcher, utils/plan_trigger.py), not a command name "
+        "- there is no command string to respell; always ALLOWs, never denies"
+    ),
     "DispatchDeclarationHandler": (
         "matches on the Task tool's prompt field, not a command string - there is "
         "no shell spelling to evade"

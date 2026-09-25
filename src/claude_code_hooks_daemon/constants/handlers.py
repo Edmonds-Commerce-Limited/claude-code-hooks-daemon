@@ -1030,6 +1030,15 @@ class HandlerID:
         config_key="hedging_language_nitpick",
         display_name="nitpick-hedging-language",
     )
+    # Plan 00466 RV3-n5: PreToolUse sensor half of goal_injection's
+    # ground-truth snapshot mechanism -- records a PLAN.md's pre-write
+    # status, keyed by tool_use_id, for goal_injection (PostToolUse) to
+    # consume in place of its old_string/new_string + git-HEAD inference.
+    PLAN_STATUS_SNAPSHOT = HandlerIDMeta(
+        class_name="PlanStatusSnapshotHandler",
+        config_key="plan_status_snapshot",
+        display_name="plan-status-snapshot",
+    )
 
 
 # Type-safe config key literal (for mypy/type checking)

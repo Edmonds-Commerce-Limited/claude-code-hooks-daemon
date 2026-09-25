@@ -2055,6 +2055,29 @@ handlers:
 
 ---
 
+#### plan_status_snapshot
+
+| Property       | Value                   |
+| -------------- | ----------------------- |
+| **Config key** | `plan_status_snapshot`  |
+| **Priority**   | 30                      |
+| **Type**       | Advisory (never blocks) |
+| **Event**      | PreToolUse              |
+
+**Description:** Sensor for `goal_injection` (PostToolUse): immediately before a `PLAN.md` Write/Edit under the active plan directory, records the plan's current status plus the SHA-256 hash of the PREDICTED post-write text (applying the same edit forward), keyed by `tool_use_id`. `goal_injection` consumes it as ground truth in place of inferring the pre-write status from `old_string`/`new_string` or git HEAD — removing collisions a bare status value could have with a table cell or a plan title, and HEAD's own lag behind an uncommitted flip. Never blocks, never surfaces advisory text. Gated on `goal_injection`'s own resolved config state, so a matching write's read/parse/hash only runs when `goal_injection` is actually enabled.
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    plan_status_snapshot:
+      enabled: true
+      priority: 30
+```
+
+---
+
 #### lsp_enforcement
 
 | Property       | Value             |
@@ -2993,7 +3016,7 @@ These handlers run **after** a tool call completes. They analyse output and prov
 | Property       | Value           |
 | -------------- | --------------- |
 | **Config key** | `command_hints` |
-| **Priority**   | 29              |
+| **Priority**   | 28              |
 | **Type**       | Advisory        |
 | **Event**      | PostToolUse     |
 
@@ -3014,7 +3037,7 @@ handlers:
   post_tool_use:
     command_hints:
       enabled: true
-      priority: 29
+      priority: 28
       options:
         mode: additive          # additive (default) | replace
         hints:
@@ -3032,13 +3055,13 @@ handlers:
 | Property       | Value            |
 | -------------- | ---------------- |
 | **Config key** | `goal_injection` |
-| **Priority**   | 31               |
+| **Priority**   | 30               |
 | **Type**       | Advisory         |
 | **Event**      | PostToolUse      |
 
-**Description:** Plan-execution-start sensor for the ccy PTY supervisor's `/goal` injection (Plan 00269). When a `PLAN.md` Write/Edit under the active plan directory (never `Completed/`) results in `**Status**: In Progress`, the handler renders the configured goal lines, joins them into ONE physical line, and atomically writes a `<session>.goal-intent` signal into the context-sidecar directory. The supervisor (actuator) consumes the signal and types `/goal 🤖 [ccy-supervisor] ...` into the foreground chat, subject to every existing injection rail (idle gate, empty-input-box gate, own-session/foreground scoping, structural validation gate). Ships disabled (opt-in); never blocks.
+**Description:** Plan-execution-start sensor for the ccy PTY supervisor's `/goal` injection (Plan 00269). When a `PLAN.md` Write/Edit under the active plan directory (never `Completed/`) results in `**Status**: In Progress`, the handler renders the configured goal lines, joins them into ONE physical line, and atomically writes a `<session>.goal-intent` signal into the context-sidecar directory. The supervisor (actuator) consumes the signal and types `/goal 🤖 [ccy-supervisor] ...` into the foreground chat, subject to every existing injection rail (idle gate, empty-input-box gate, own-session/foreground scoping, structural validation gate). Opt-in by its own `get_default_enabled() -> False`, but registration does not consult that default for an ABSENT `goal_injection` config block — a project with no `goal_injection` key at all, including a freshly `init minimal`'d one, still registers it (Ledger 00466 RV8-n3); set `enabled: false` explicitly to keep it off. Never blocks.
 
-The trigger is STATE-based (first qualifying write per plan per session), not transition-based: the first edit to an already-In-Progress plan in a NEW session re-fires deliberately, re-establishing the goal after a session restart. Manual fallback / debugging tool: `bin/hooks-daemon inject-goal NNNNN` (requires `CLAUDE_CODE_SESSION_ID` in the environment).
+The trigger is TRANSITION-based, not state-based (ledger 00466 N3): editing an already-In-Progress plan again in the SAME session does not re-fire, since nothing about the plan's status actually changed. The first edit to an already-In-Progress plan in a NEW session is the one deliberate exception -- it re-establishes the goal after a session restart, through a separate reassert path (no displacement bookkeeping) rather than the full flip path. Manual fallback / debugging tool: `bin/hooks-daemon inject-goal NNNNN` (requires `CLAUDE_CODE_SESSION_ID` in the environment).
 
 **Config paradigm** (mirrors `command_hints`): `options.mode` is `additive` (default) — project `lines` merge onto the built-in set, an entry whose `id` matches a built-in overrides it in place — or `replace`, which uses only the project's lines. The fixed `header` line (machine-origin marker + "NOT human authorisation" clause) is never overridable or removable, even in `replace` mode. Per-line `enabled` flags let a project turn a vetted built-in line on without restating its text.
 
@@ -3061,7 +3084,7 @@ handlers:
   post_tool_use:
     goal_injection:
       enabled: true
-      priority: 31
+      priority: 30
       options:
         mode: additive
         once_per_plan_per_session: true
@@ -4081,6 +4104,7 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | `merge_to_main_approval`       | PreToolUse        | 20       | git merge/pull/gh pr merge into main without a human's approval (opt-in) |
 | `qa_suppression`               | PreToolUse        | 30       | noqa, type: ignore, eslint-disable, nolint, ... (all langs)              |
 | `plan_number_helper`           | PreToolUse        | 30       | Broken plan number discovery commands                                    |
+| `plan_status_snapshot`         | PreToolUse        | 30       | Records a PLAN.md's pre-write status for `goal_injection` (never blocks) |
 | `plan_journal_guard`           | PreToolUse        | 31       | A plan journal entry written by hand (use `mkplan.bash --journal`)       |
 | `comment_changelog`            | PreToolUse        | 31       | Changelog narrative in a comment (`Prior <version>:`, dated entries)     |
 | `comment_size`                 | PreToolUse        | 33       | Over-long comments growing past the size limit                           |
@@ -4108,8 +4132,8 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | `web_search_year`          | PreToolUse       | 55       | Warns about outdated search years              |
 | `british_english`          | PreToolUse       | 60       | Warns about American spellings                 |
 | `validate_eslint_on_write` | PostToolUse      | 10       | Runs ESLint after .ts/.tsx writes              |
-| `command_hints`            | PostToolUse      | 29       | Config-driven reminder after a command         |
-| `goal_injection`           | PostToolUse      | 31       | Goal-intent signal on plan flip to In Progress |
+| `command_hints`            | PostToolUse      | 28       | Config-driven reminder after a command         |
+| `goal_injection`           | PostToolUse      | 30       | Goal-intent signal on plan flip to In Progress |
 | `optimal_config_checker`   | SessionStart     | 52       | Audits Claude Code settings                    |
 | `git_filemode_checker`     | SessionStart     | 53       | Warns when core.fileMode=false                 |
 | `suggest_status_line`      | SessionStart     | 55       | Suggests status line setup                     |
