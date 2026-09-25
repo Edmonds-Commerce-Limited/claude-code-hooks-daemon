@@ -46,7 +46,10 @@ if TYPE_CHECKING:
     from claude_code_hooks_daemon.core.handler import Handler
     from claude_code_hooks_daemon.core.project_layout import ProjectLayout
     from claude_code_hooks_daemon.core.workspace import ProjectRegistry
-    from claude_code_hooks_daemon.handlers.project_loader import ProjectHandlerDiscovery
+    from claude_code_hooks_daemon.handlers.project_loader import (
+        ProjectHandlerDiscovery,
+        ProjectHandlerLoadFailure,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +141,7 @@ class DaemonController:
         "_degraded",
         "_initialised",
         "_mode_manager",
+        "_project_handler_load_failures",
         "_pseudo_dispatcher",
         "_registry",
         "_router",
@@ -175,6 +179,8 @@ class DaemonController:
         # Why the chain deadline cannot beat the deployed client timeout
         # (Plan 00466 N40 review 2 mA4): reported in health, not rejected.
         self._chain_deadline_problems: list[str] = []
+        # Project handlers that failed to load this startup (reported in health).
+        self._project_handler_load_failures: list[ProjectHandlerLoadFailure] = []
         # Strict-mode flag (Plan 00466 N24): same narrow-slice DI idiom as
         # the two above. Previously read from `self._config.strict_mode`,
         # which is always None on the real startup path (see the comment
@@ -660,6 +666,10 @@ class DaemonController:
             write_load_failures,
         )
 
+        # Kept for get_health() too (Plan 00466 N40 review 2 nit 3): the
+        # state file serves the CLI and the SessionStart alert, but the
+        # daemon's own health answer said "healthy" while a handler was gone.
+        self._project_handler_load_failures = list(discovery.failures)
         try:
             write_load_failures(
                 discovery.failures,
@@ -1200,6 +1210,8 @@ class DaemonController:
             degraded_reasons.append("stragglers")
         if self._chain_deadline_problems:
             degraded_reasons.append("chain_deadline")
+        if self._project_handler_load_failures:
+            degraded_reasons.append("project_handlers")
 
         health: dict[str, Any] = {
             "status": "degraded" if degraded_reasons else "healthy",
@@ -1232,6 +1244,11 @@ class DaemonController:
             health["config_errors"] = self._config_errors
         if self._chain_deadline_problems:
             health["chain_deadline_problems"] = list(self._chain_deadline_problems)
+        if self._project_handler_load_failures:
+            health["project_handler_load_failures"] = [
+                {"filename": f.filename, "event_dir": f.event_dir, "reason": f.reason}
+                for f in self._project_handler_load_failures
+            ]
 
         return health
 
