@@ -5,7 +5,9 @@ candidate remedies.
 
 N34 is taken on the `worktree-n466-n24` branch (the chain deadline cannot
 interrupt a running handler) and lands with that branch. N40 is taken there too
-(the fail-open classes behind that branch's security-review blockers).
+(the fail-open classes behind that branch's security-review blockers). N41 is
+taken on the N38 fix branch (the chain's remaining linear per-token cost, which
+waits for the shell-parser consolidation).
 
 ### N39 — Nine unit tests fail in a whole-suite run and pass when their files run alone
 
