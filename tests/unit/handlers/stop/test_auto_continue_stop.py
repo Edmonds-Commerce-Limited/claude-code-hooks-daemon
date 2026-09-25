@@ -4,6 +4,7 @@ This handler auto-continues when Claude asks confirmation questions before stopp
 preventing the need for user input and enabling true YOLO mode automation.
 """
 
+import errno
 import json
 from pathlib import Path
 from typing import Any
@@ -1120,26 +1121,42 @@ class TestAutoContinueStopHandlerEdgeCases:
         assert handler.matches(hook_input) is True
 
     def test_matches_handles_oserror_reading_transcript(
-        self, handler: AutoContinueStopHandler, tmp_path: Path
+        self, handler: AutoContinueStopHandler, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Should handle OSError when reading transcript."""
+        """Should handle OSError when reading transcript.
+
+        Root reads a mode-000 file (root bypasses read permission bits), so
+        `chmod(0o000)` no longer forces the OSError branch this test targets
+        when the process is root -- this container runs as root (Plan 00466
+        N56 review 1, F5). Monkeypatch the actual read call (`Path.open`
+        inside `TranscriptReader._parse_tail`) to raise OSError for this
+        specific transcript path instead, which is what a genuinely-unreadable
+        file would report.
+        """
         transcript_path = tmp_path / "unreadable.jsonl"
-        transcript_path.touch()
-        # Make file unreadable
-        transcript_path.chmod(0o000)
+        transcript_path.write_text('{"type": "message"}\n', encoding="utf-8")
+
+        real_open = Path.open
+
+        # Any: passing through whichever overload of Path.open the caller used.
+        def _raise_oserror(self: Path, *args: Any, **kwargs: Any) -> Any:
+            if self == transcript_path:
+                raise OSError(errno.EACCES, "Permission denied")
+            return real_open(self, *args, **kwargs)
+
+        monkeypatch.setattr(
+            "claude_code_hooks_daemon.core.transcript_reader.Path.open", _raise_oserror
+        )
 
         hook_input = {
             "transcript_path": str(transcript_path),
             "stop_hook_active": False,
         }
 
-        try:
-            result = handler.matches(hook_input)
-            # Now returns True on read error — routing (fail open) happens in handle()
-            assert result is True
-        finally:
-            # Clean up - restore permissions so pytest can delete the file
-            transcript_path.chmod(0o644)
+        result = handler.matches(hook_input)
+        # Fail-open: an OSError reading the transcript tail must not crash
+        # matches() — routing (fail open) happens in handle().
+        assert result is True
 
     def test_matches_handles_unicode_decode_error(
         self, handler: AutoContinueStopHandler, mock_transcript_path: Path

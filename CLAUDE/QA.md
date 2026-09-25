@@ -64,9 +64,15 @@ while the runner ran considerably more.
   `PermissionError`, replace the file with a directory or a dangling
   symlink, or patch the exact predicate the code under test evaluates.
   `tests/integration/test_no_root_conditioned_skips.py` statically scans
-  every test module for `os.geteuid()`/`os.getuid()` gating a `skipif`,
-  `xfail`, or a hand-written `if <root check>: skip/xfail/return` and fails
-  on any match — it is not opt-out.
+  every `.py` file under `tests/` (not just `test_*.py`/`conftest.py`, and
+  excluding `tests/fixtures/`, which holds deliberately-invalid Python for
+  other handlers' own error-path tests). It fails on a
+  `skipif`/`xfail`/`unittest.skipIf` decorator or a hand-written
+  `if <root check>: skip/xfail/skipTest/return` whose condition resolves —
+  following a module constant or a zero-arg helper's `return` — to something
+  that tests root, **and independently** on any skip-like call whose stated
+  *reason* names root, whatever its condition actually tests (the shape Plan
+  00351 found). It is not opt-out.
 - **Security** (Bandit) — zero HIGH/MEDIUM/LOW issues; only B101 is filtered
 - **Dependencies** (Deptry) — missing (DEP001) and misplaced (DEP004)
 - **Plan QA** / **Docs QA** (`run_corpus_qa.py`) — the `plan-qa --sweep` and

@@ -823,7 +823,14 @@ class TestSocketPathLengthFallback(unittest.TestCase):
                 self.assertTrue(str(socket_path).endswith(".sock"))
 
     def test_socket_path_over_limit_uses_run_user(self):
-        """When path > 104 chars, no XDG_RUNTIME_DIR, use /run/user/{uid}."""
+        """When path > 104 chars, no XDG_RUNTIME_DIR, use /run/user/{uid}.
+
+        Whether this fires depends on `/run/user/{uid}` existing on the host
+        — not on root — so skipping when it is absent (as it is in this
+        container) never exercises the branch anywhere it is missing (Plan
+        00466 N56 review 1, F5). Monkeypatch `Path.is_dir` so the branch
+        runs deterministically regardless of what the host provides.
+        """
         deep_path = "/home/user/projects/client/" + "a" * 80 + "/deep-nested-project"
         uid = os.getuid()
         run_user_dir = Path(f"/run/user/{uid}")
@@ -832,17 +839,13 @@ class TestSocketPathLengthFallback(unittest.TestCase):
             os.environ.pop("CLAUDE_HOOKS_SOCKET_PATH", None)
             os.environ.pop("XDG_RUNTIME_DIR", None)
 
-            # Only test this fallback if /run/user/{uid} actually exists
-            if run_user_dir.is_dir():
+            with patch.object(Path, "is_dir", return_value=True):
                 socket_path = get_socket_path(deep_path)
                 project_hash = get_project_hash(deep_path)
 
                 self.assertTrue(str(socket_path).startswith(str(run_user_dir)))
                 self.assertIn(f"hooks-daemon-{project_hash}", str(socket_path))
                 self.assertTrue(str(socket_path).endswith(".sock"))
-            else:
-                # If /run/user/{uid} doesn't exist, skip gracefully
-                self.skipTest(f"/run/user/{uid} does not exist on this system")
 
     def test_socket_path_over_limit_uses_tmp_fallback(self):
         """When neither XDG nor /run/user available, use /tmp fallback."""

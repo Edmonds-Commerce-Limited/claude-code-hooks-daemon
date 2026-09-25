@@ -33,8 +33,9 @@ immutable file where one is available. Replace Plan 00351's check with a
 detector that fails on any root-conditioned skip. Record the rule in the
 testing standards doc.
 
-**Done, on `worktree-n466-n56`:** all four sites are rewritten to fault the
-operation a way root cannot bypass, keeping each test's original assertion:
+**Done, on `worktree-n466-n56`:** the three skip sites are rewritten to
+fault the operation a way root cannot bypass, keeping each test's original
+assertion:
 
 - `test_skills.py`'s `test_deploy_skills_raises_if_target_not_writable`
   monkeypatches `shutil.copytree` to raise `PermissionError` instead of
@@ -46,15 +47,30 @@ operation a way root cannot bypass, keeping each test's original assertion:
 - `test_bootstrap_decision.py`'s `test_untracked_not_writable` monkeypatches
   `os.access` itself, since `access(2)` grants `W_OK` to a privileged real
   UID regardless of the mode bits.
-- `test_skipif_reasons_match_their_conditions.py` is replaced by
-  `tests/integration/test_no_root_conditioned_skips.py`: a static AST scan
-  over every test module that fails on a `skipif`/`xfail` decorator or a
-  hand-written `if <root check>: skip/xfail/return` gated on
-  `os.geteuid()`/`os.getuid()`, wherever it appears under `tests/` — not
-  just the four sites found by hand. `tests/relay_gate_guard.py` and its
-  test are left alone (documented why): that guard's "Running as root" case
-  is a reason-string classifier for a different, CI-only concern, not a
-  root-conditioned skip itself.
+
+`test_skipif_reasons_match_their_conditions.py` is replaced by
+`tests/integration/test_no_root_conditioned_skips.py`: a static scan over
+every `.py` file under `tests/` (not just `test_*.py`/`conftest.py`) that
+fails on a `skipif`/`xfail`/`unittest.skipIf` decorator or a hand-written
+`if <root check>: skip/xfail/skipTest/return`, whether the condition
+directly calls `geteuid()`/`getuid()` or resolves to one through a module
+constant, a zero-arg helper, `not`/`in (0,)`, a `pwd`/`getpass` identity
+check, or a string condition — **and independently** on any skip-like call
+whose stated *reason* names root regardless of what its condition tests
+(review 1, F1: this is Plan 00351's own shape, which the first cut of the
+detector regressed). `tests/relay_gate_guard.py` and its test are left
+alone (documented why): that guard's "Running as root" case is a
+reason-string classifier for a different, CI-only concern, not a
+root-conditioned skip itself.
+
+Review 1 (F5) also found two chmod-based tests outside the four skip sites
+that were vacuous as root without skipping: `test_auto_continue_stop.py`'s
+`test_matches_handles_oserror_reading_transcript` (`chmod(0o000)`, root
+still reads the file) now monkeypatches `Path.open` inside
+`TranscriptReader._parse_tail`; `test_paths.py`'s
+`test_socket_path_over_limit_uses_run_user` (skipped when `/run/user/{uid}`
+is absent — a host-dependent skip, not a root one) now monkeypatches
+`Path.is_dir` so the branch runs deterministically.
 
 The rule is recorded in `CLAUDE/QA.md`, next to the other test requirements.
 
