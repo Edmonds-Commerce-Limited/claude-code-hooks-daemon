@@ -9,6 +9,30 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N85 — `_MESSAGE_BODY_PATTERN` reads `\'` as an escape inside single quotes, which hides a command from every guard
+
+**Found by N38 review 5 (ledger candidate 2).** In
+`git commit -m 'a\'; git reset --hard HEAD; echo 'x'`, bash ends the first
+string at `a\'`, since a single-quoted string has no escapes. So bash runs
+the reset. `strip_message_bodies` instead treats `\'` as an escaped quote,
+and blanks everything up to the last `'`. Every guard that uses
+`strip_inert_spans` then allows the command. Main and the N38 branch both
+allow it.
+
+**Remedy:** the single-quote alternative becomes `'[^']*'`. Sweep `src/` for
+the same mistake in any other single-quote matcher. Round 6 of the N38 fix
+branch carries it, with a RED test through the real chain.
+
+### N84 — The `daemon_process` test fixture never checks that `stop` succeeded, so daemons leak
+
+**Found by the N24 gate fixer.** When N24's root-attribution check refused
+to signal a test daemon, the fixture's teardown ignored `stop`'s exit code.
+Eight daemons had been left running in the container from earlier runs, and
+nothing reported them.
+
+**Remedy:** teardown asserts `stop` exits 0 and that the pid is gone, and
+a test pins that a failed stop fails the test.
+
 ### N83 — A parametrised live-daemon test skips its own `tests` case
 
 **Found by the coordinator in CI run 36171017537.**

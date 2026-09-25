@@ -101,6 +101,8 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N81 | `sed_blocker` denies a Bash heredoc that writes markdown, and a strict xfail pins the defect              | CI run             | ⬜ Open                                             |
 | N82 | A "design test" has been skipped as "implementation pending" since the registry-key work                  | CI run             | ⬜ Open                                             |
 | N83 | A parametrised live-daemon test skips its own `tests` case                                                | CI run             | ⬜ Open                                             |
+| N84 | The `daemon_process` test fixture never checks that `stop` succeeded, so daemons leak                     | N24 gate fixer     | ⬜ Open                                             |
+| N85 | `_MESSAGE_BODY_PATTERN` reads `\'` as an escape inside single quotes, hiding a command from every guard   | N38 review 5       | 🔄 In progress (N38 fix 6)                          |
 | N80 | A script overwritten earlier in the same command by an unlisted writer is judged by its old content       | 464 review 5 M4    | ⬜ Open (owner: pre-commit sink)                    |
 | N74 | A recursive grep over a protected directory is allowed                                                    | GD review 8        | ⬜ Open                                             |
 | N75 | The Write/Edit content route misses 26 script-launch shapes                                               | GD review 8        | ⬜ Open                                             |
