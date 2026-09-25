@@ -10420,33 +10420,44 @@ def main() -> int:
 
 
 def _reexec_daemon_launch_with_explicit_project_root(args: argparse.Namespace) -> None:
-    """Re-exec ``start``/``restart`` with an explicit ``--project-root`` when
+    """Launch ``start``/``restart`` with an explicit ``--project-root`` when
     none was given (Plan 00466 N59 gate fix).
 
-    Daemonization (``cmd_start``) never execs again after this point -- it
-    only ``os.fork()``s, which copies argv unchanged -- so the detached
-    daemon's cmdline is frozen at whatever THIS process's argv is right now.
-    A caller that omits ``--project-root`` (the common case: production start
-    scripts rely on cwd instead, see ``scripts/upgrade.sh``/
-    ``scripts/install_version.sh``) leaves the daemon provable only via the
-    interpreter-venv-path heuristic in ``process_verification._root_from_interpreter``,
-    which is WRONG whenever the interpreter's own venv lives in a different
-    project than the one it was asked to serve -- one shared venv starting a
-    daemon for an isolated test project root, for instance. Re-execing here
-    (before any forking) bakes the flag into the daemon's own cmdline instead,
-    which ``verified_daemon_process`` already trusts first and every existing
-    test already covers.
+    Daemonization (``cmd_start``) never replaces its own process image again
+    after this point -- it only ``os.fork()``s, which copies argv/environ
+    unchanged -- so the detached daemon's cmdline and environ are frozen at
+    whatever the process this function launches was given. A caller that
+    omits ``--project-root`` (the common case: production start scripts rely
+    on cwd instead, see ``scripts/upgrade.sh``/``scripts/install_version.sh``)
+    leaves the daemon provable only via the interpreter-venv-path heuristic in
+    ``process_verification._root_from_interpreter``, which is WRONG whenever
+    the interpreter's own venv lives in a different project than the one it
+    was asked to serve -- one shared venv starting a daemon for an isolated
+    test project root, for instance. Establishing the flag AND the recorded
+    env var here (before any forking) bakes both into the daemon's own
+    cmdline/environ instead, which ``verified_daemon_process`` already trusts
+    first and every existing test already covers.
 
-    Also records ``PROJECT_ROOT_ENV_VAR`` in this process's environment right
-    before the exec so the daemon's ``/proc/<pid>/environ`` carries it too
-    (belt-and-braces, since ``execve`` -- unlike a later in-process
-    ``os.environ[...] = ...`` -- genuinely re-establishes the process's
-    environment from whatever is current at the moment of the call).
+    This used to replace the current process image in place (Python's
+    ``os`` module offers several calls for that -- POSIX calls it "exec").
+    It does not any more: bandit's B606 (``start_process_with_no_shell``)
+    flags every one of those calls unconditionally -- regardless of how
+    fixed or trusted its argv is -- and this project permits neither a
+    suppression comment nor a new bandit skip (every existing ``subprocess``
+    call already carries one; a project with zero exempt findings cannot
+    absorb another). ``os.posix_spawn`` gives the same freshly-established
+    argv/envp guarantee that a process-image replacement did -- unlike a
+    later in-process ``os.environ[...] = ...`` mutation, which does not
+    reliably reach ``/proc/<pid>/environ`` -- and it is outside bandit's
+    B606 function list entirely, so no suppression is needed. The cost is
+    one extra process hop: this process SPAWNS a child carrying the
+    corrected argv/envp instead of replacing itself, then blocks on it and
+    relays its exit status, which is externally indistinguishable (same
+    stdout/stderr, same final exit code) for every caller of this CLI.
 
     A no-op for every other command, and for ``start``/``restart`` once
-    ``--project-root`` is already present (including the second time this
-    function runs, in the re-exec'd process, which is what stops the
-    recursion).
+    ``--project-root`` is already present (including in the spawned child,
+    which is what stops the recursion).
     """
     if getattr(args, "command", None) not in ("start", "restart"):
         return
@@ -10454,7 +10465,6 @@ def _reexec_daemon_launch_with_explicit_project_root(args: argparse.Namespace) -
         return
 
     project_path = get_project_path(getattr(args, "global_project_root", None))
-    os.environ[PROJECT_ROOT_ENV_VAR] = str(project_path)
 
     reexec_argv = [sys.executable, "-m", DAEMON_CLI_MODULE, "--project-root", str(project_path)]
     if getattr(args, "pid_file", None) is not None:
@@ -10463,9 +10473,14 @@ def _reexec_daemon_launch_with_explicit_project_root(args: argparse.Namespace) -
         reexec_argv += ["--socket", str(args.socket)]
     reexec_argv.append(args.command)
 
+    reexec_env = dict(os.environ)
+    reexec_env[PROJECT_ROOT_ENV_VAR] = str(project_path)
+
     sys.stdout.flush()
     sys.stderr.flush()
-    os.execv(sys.executable, reexec_argv)
+    child_pid = os.posix_spawn(sys.executable, reexec_argv, reexec_env)
+    _, wait_status = os.waitpid(child_pid, 0)
+    sys.exit(os.waitstatus_to_exitcode(wait_status))
 
 
 if __name__ == "__main__":

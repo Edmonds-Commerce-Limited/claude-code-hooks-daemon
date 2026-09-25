@@ -5,10 +5,13 @@ in container environments for single-process enforcement. Signalling a daemon
 it finds is ``utils.safe_signal``'s job, which re-proves the pid first.
 """
 
+import logging
 import os
 from pathlib import Path
 
 import psutil
+
+logger = logging.getLogger(__name__)
 
 # The CLI module that, given a launch subcommand, becomes the daemon server.
 # Matching requires this exact module token PLUS a launch subcommand (below) so
@@ -141,7 +144,8 @@ def _extract_project_root(proc: psutil.Process) -> str | None:
     """
     try:
         cmdline = proc.cmdline()
-    except (psutil.NoSuchProcess, psutil.AccessDenied):
+    except (psutil.NoSuchProcess, psutil.AccessDenied) as exc:
+        logger.debug("cmdline unavailable for pid %s (%s): %s", proc.pid, type(exc).__name__, exc)
         cmdline = None
 
     if cmdline:
@@ -167,9 +171,10 @@ def _root_from_environ(proc: psutil.Process) -> str | None:
     """
     try:
         env = proc.environ()
-    except (psutil.NoSuchProcess, psutil.AccessDenied, OSError):
-        return None
-    if not isinstance(env, dict):
+    except (psutil.NoSuchProcess, psutil.AccessDenied, OSError) as exc:
+        logger.debug("environ unavailable for pid %s (%s): %s", proc.pid, type(exc).__name__, exc)
+        env = None
+    if env is None or not isinstance(env, dict):
         return None
     value = env.get(PROJECT_ROOT_ENV_VAR)
     if not value:
