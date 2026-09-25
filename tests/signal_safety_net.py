@@ -29,7 +29,7 @@ import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, SupportsIndex
 
 #: The process name Claude Code runs under, as ``comm`` or as ``argv[0]``.
 CLAUDE_CODE_PROCESS_NAME: Final = "claude"
@@ -128,11 +128,13 @@ def _live_protected_targets() -> ProtectedTargets:
 
 
 def _as_int(value: object) -> int | None:
-    """The integer the kernel would receive, as ``os.kill`` coerces it; None if none."""
-    try:
-        return operator.index(value)  # a MagicMock and a bool both coerce to 1
-    except TypeError:
+    """The integer the kernel would receive, as ``os.kill`` coerces it; None if none.
+
+    A ``MagicMock`` and a ``bool`` both have ``__index__``, and both coerce to 1.
+    """
+    if not isinstance(value, SupportsIndex):
         return None
+    return operator.index(value)
 
 
 class SignalSafetyNet:

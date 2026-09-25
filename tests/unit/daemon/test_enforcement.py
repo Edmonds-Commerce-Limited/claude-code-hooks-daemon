@@ -221,7 +221,7 @@ class TestEnforceSingleDaemonProjectScoping:
 class TestEnforceSingleDaemonKillFailure:
     """A peer that is refused, unpermitted or survives is logged as an error."""
 
-    def _enforce_with(self, **stop_behaviour: object) -> MagicMock:
+    def _enforce_with(self, stop: MagicMock) -> MagicMock:
         mock_config = MagicMock()
         mock_config.daemon.enforce_single_daemon_process = True
         with (
@@ -233,7 +233,7 @@ class TestEnforceSingleDaemonKillFailure:
                 "claude_code_hooks_daemon.daemon.enforcement.find_all_daemon_processes",
                 return_value=[12345],
             ),
-            patch(_STOP, **stop_behaviour),
+            patch(_STOP, new=stop),
             patch("claude_code_hooks_daemon.daemon.enforcement.logger") as mock_logger,
         ):
             enforce_single_daemon(
@@ -242,19 +242,19 @@ class TestEnforceSingleDaemonKillFailure:
         return mock_logger
 
     def test_a_peer_that_survives_logs_error(self) -> None:
-        mock_logger = self._enforce_with(return_value=DaemonStop.SURVIVED)
+        mock_logger = self._enforce_with(MagicMock(return_value=DaemonStop.SURVIVED))
 
         mock_logger.error.assert_called_once()
         assert "12345" in str(mock_logger.error.call_args)
 
     def test_a_refused_peer_logs_error(self) -> None:
-        mock_logger = self._enforce_with(side_effect=RefusedSignalTarget("not a daemon"))
+        mock_logger = self._enforce_with(MagicMock(side_effect=RefusedSignalTarget("not a daemon")))
 
         mock_logger.error.assert_called_once()
         assert "12345" in str(mock_logger.error.call_args)
 
     def test_an_unpermitted_peer_logs_error(self) -> None:
-        mock_logger = self._enforce_with(side_effect=PermissionError("denied"))
+        mock_logger = self._enforce_with(MagicMock(side_effect=PermissionError("denied")))
 
         mock_logger.error.assert_called_once()
         assert "12345" in str(mock_logger.error.call_args)

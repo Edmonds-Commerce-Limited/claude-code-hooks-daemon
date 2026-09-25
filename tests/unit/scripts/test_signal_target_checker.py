@@ -86,6 +86,8 @@ class TestEverySpellingOfARawSignalIsFound:
             "from os import killpg as kpg\ndef f(g):\n    kpg(g, 9)\n",
             "import signal\ndef f(t):\n    signal.pthread_kill(t, signal.SIGUSR1)\n",
             "import os\nos.kill(123, 9)\n",
+            "import os\ndef f(target):\n    os.kill(*target)\n",
+            "import os\ndef f(pid, rest):\n    os.killpg(pid, *rest)\n",
         ],
     )
     def test_is_reported(self, checker: ModuleType, source: str) -> None:

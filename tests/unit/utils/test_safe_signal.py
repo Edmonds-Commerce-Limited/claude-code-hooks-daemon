@@ -97,6 +97,13 @@ class TestThisProcessAndItsCallersAreRefused:
         with pytest.raises(RefusedSignalTarget):
             signal_verified_daemon(os.getppid(), signal.SIGTERM, project_root=tmp_path)
 
+    def test_the_leader_of_our_own_group(self, tmp_path: Path) -> None:
+        own_group = os.getpgid(0)
+        if own_group <= 1:
+            pytest.fail("this test process leads no group of its own above init's")
+        with pytest.raises(RefusedSignalTarget):
+            signal_verified_daemon(own_group, signal.SIGTERM, project_root=tmp_path)
+
 
 class TestADaemonPidIsSignalledOnlyWhenItIsThisProjectsDaemon:
     def test_this_projects_daemon_is_signalled(

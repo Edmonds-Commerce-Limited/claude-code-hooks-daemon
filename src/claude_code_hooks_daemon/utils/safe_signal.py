@@ -68,9 +68,11 @@ def _plain_pid(pid: object) -> int:
 
 
 def _refuse_own_lineage(pid: int) -> None:
-    """Refuse this process and every ancestor up to init."""
+    """Refuse this process, the leader of its group, and every ancestor up to init."""
     if pid == os.getpid():
         raise RefusedSignalTarget(f"pid {pid} is this process")
+    if pid == os.getpgid(0):
+        raise RefusedSignalTarget(f"pid {pid} leads this process's own group")
     ancestors = {parent.pid for parent in psutil.Process().parents()}
     if pid in ancestors:
         raise RefusedSignalTarget(f"pid {pid} is an ancestor of this process")

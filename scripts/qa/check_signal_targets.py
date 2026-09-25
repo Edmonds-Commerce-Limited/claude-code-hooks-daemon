@@ -281,8 +281,11 @@ def _is_verified_handle_source(provenance: str) -> bool:
 
 
 def _check_raw_signal(call: ast.Call, name: str, bindings: dict[str, list[str]]) -> str | None:
-    if name not in _RAW_SIGNAL_CALLS or len(call.args) < 2:
+    if name not in _RAW_SIGNAL_CALLS:
         return None
+    # `os.kill(*target)` hides both the pid and the signal: unknown, so reported.
+    if len(call.args) < 2 or any(isinstance(arg, ast.Starred) for arg in call.args[:2]):
+        return RAW_SIGNAL
     if _is_literal_zero(call.args[1]):
         return None
     if name == "os.kill" and _all(bindings, call.args[0], _VERIFIED_PID):
