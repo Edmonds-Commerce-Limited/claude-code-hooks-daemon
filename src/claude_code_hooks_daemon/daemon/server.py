@@ -88,6 +88,24 @@ _OVERSIZED_REQUEST_DRAIN_CAP_BYTES: Final[int] = SocketLimit.REQUEST_BUFFER_BYTE
 # its error response.
 _OVERSIZED_REQUEST_DRAIN_PER_READ_TIMEOUT_SECONDS: Final[float] = 0.5
 
+# Overall limit on draining one oversized request (Plan 00466 N40 review 2
+# nit 1). The per-read timeout and the byte cap above still let a sender
+# trickling a little just inside each read's timeout hold the connection for
+# hours; a real client has sent everything long before this.
+_OVERSIZED_REQUEST_DRAIN_TOTAL_SECONDS: Final[float] = 2.0
+
+# The drain's clock, named so a test can drive it without touching the
+# monotonic clock asyncio itself runs on.
+_drain_clock = time.monotonic
+
+
+@runtime_checkable
+class _ChunkReader(Protocol):
+    """What the drain needs of a stream: ``asyncio.StreamReader.read``."""
+
+    async def read(self, n: int = -1) -> bytes: ...
+
+
 #: The wire event name PreToolUse requests carry (`EventID.PRE_TOOL_USE`'s
 #: `wire_key.value`, and what ``event_json_key`` is set to for the
 #: ``pre-tool-use.sock`` listener -- see the ``wired_event_metas()`` loop
@@ -1105,7 +1123,7 @@ class HooksDaemon:
         return b"".join(chunks)
 
     @staticmethod
-    async def _drain_oversized_request(reader: asyncio.StreamReader) -> None:
+    async def _drain_oversized_request(reader: _ChunkReader) -> None:
         """Discard the rest of an over-limit legacy-socket request.
 
         Plan 00466 N40 m5. Called after ``readline()`` raises on exceeding
@@ -1126,14 +1144,20 @@ class HooksDaemon:
         that long reads as "nothing more is coming", not as "still arriving".
         The running total is additionally capped by
         ``_OVERSIZED_REQUEST_DRAIN_CAP_BYTES`` so a sender that keeps
-        streaming cannot hang this connection indefinitely either.
+        streaming cannot hang this connection indefinitely either, and the
+        elapsed time by ``_OVERSIZED_REQUEST_DRAIN_TOTAL_SECONDS`` so neither
+        can one that trickles.
         """
+        deadline = _drain_clock() + _OVERSIZED_REQUEST_DRAIN_TOTAL_SECONDS
         drained = 0
         while drained < _OVERSIZED_REQUEST_DRAIN_CAP_BYTES:
+            remaining = deadline - _drain_clock()
+            if remaining <= 0:
+                return
             try:
                 chunk = await asyncio.wait_for(
                     reader.read(_EVENT_PAYLOAD_READ_CHUNK_BYTES),
-                    timeout=_OVERSIZED_REQUEST_DRAIN_PER_READ_TIMEOUT_SECONDS,
+                    timeout=min(_OVERSIZED_REQUEST_DRAIN_PER_READ_TIMEOUT_SECONDS, remaining),
                 )
             except (TimeoutError, ConnectionResetError, BrokenPipeError, OSError):
                 return
