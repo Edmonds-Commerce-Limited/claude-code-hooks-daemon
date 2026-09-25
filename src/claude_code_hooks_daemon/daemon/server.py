@@ -1325,13 +1325,21 @@ class HooksDaemon:
                     continue
 
                 restart_after = stragglers.get("restart_after_seconds")
+                if restart_after is None:
+                    continue  # self-restart disabled
                 oldest_age = stragglers.get("oldest_age_seconds", 0.0)
-                if restart_after is not None and oldest_age >= restart_after:
+                # At the cap every event holding a SAFETY+BLOCKING handler is
+                # refused, Stop included (which loops the agent), and nothing
+                # can be judged until a restart: waiting for age only prolongs
+                # it (Plan 00466 N40 review 2 mA3).
+                at_capacity = stragglers.get("at_capacity") is True
+                if at_capacity or oldest_age >= restart_after:
                     logger.critical(
-                        "Self-restarting: the oldest abandoned handler dispatch has "
-                        "run %.1fs, past the %.1fs restart threshold (%s straggler(s) "
-                        "total). The client's own lazy auto-start will bring up a "
-                        "fresh daemon on the next hook call.",
+                        "Self-restarting: %s (oldest abandoned handler dispatch has "
+                        "run %.1fs; restart threshold %.1fs; %s straggler(s) total). "
+                        "The client's own lazy auto-start will bring up a fresh "
+                        "daemon on the next hook call.",
+                        "the straggler cap is reached" if at_capacity else "a straggler is too old",
                         oldest_age,
                         restart_after,
                         stragglers.get("count", "?"),

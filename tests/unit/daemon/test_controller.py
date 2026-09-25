@@ -1137,6 +1137,7 @@ class TestControllerHealthStragglers:
             "count": 0,
             "oldest_age_seconds": 0.0,
             "restart_after_seconds": Timeout.STRAGGLER_RESTART_AFTER_SECONDS,
+            "at_capacity": False,
         }
 
     def test_stragglers_below_the_default_threshold_stay_healthy(self) -> None:
@@ -1182,6 +1183,59 @@ class TestControllerHealthStragglers:
 
         assert health["status"] == "healthy"
         assert health["stragglers"]["count"] == 10
+
+
+class TestControllerHealthChainDeadlineProblems:
+    """Plan 00466 N40 review 2 mA4: a chain deadline that cannot beat the
+    client's timeout is reported in health, not rejected at load -- the
+    daemon still starts, with every guard on, and says what to fix."""
+
+    _PROBLEM = "daemon.chain.deadline_seconds (20s) is not below transport.timeout_seconds"
+
+    def teardown_method(self) -> None:
+        ProjectContext.reset()
+
+    @pytest.fixture
+    def workspace_root(self, tmp_path: Path) -> Path:
+        claude_dir = tmp_path / "test-workspace" / ".claude"
+        claude_dir.mkdir(parents=True)
+        (claude_dir / "hooks-daemon.yaml").write_text(
+            "version: '1.0'\n"
+            "daemon:\n"
+            "  idle_timeout_seconds: 600\n"
+            "  log_level: INFO\n"
+            "handlers:\n"
+            "  pre_tool_use: {}\n"
+        )
+        return claude_dir.parent
+
+    def _initialised(self, workspace_root: Path, problems: list[str] | None) -> DaemonController:
+        controller = DaemonController()
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                Mock(returncode=0, stdout="/tmp/test\n"),
+                Mock(returncode=0, stdout="git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
+            ]
+            controller.initialise(
+                workspace_root=workspace_root,
+                verdict_log=VerdictLogConfig(enabled=False),
+                chain_deadline_problems=problems,
+            )
+        return controller
+
+    def test_a_reported_problem_degrades_health_and_is_named(self, workspace_root: Path) -> None:
+        health = self._initialised(workspace_root, [self._PROBLEM]).get_health()
+
+        assert health["status"] == "degraded"
+        assert "chain_deadline" in health["degraded_reasons"]
+        assert health["chain_deadline_problems"] == [self._PROBLEM]
+
+    def test_no_problem_leaves_health_untouched(self, workspace_root: Path) -> None:
+        health = self._initialised(workspace_root, None).get_health()
+
+        assert health["status"] == "healthy"
+        assert "chain_deadline_problems" not in health
 
 
 class TestProcessEventFailsClosedForPreToolUse:

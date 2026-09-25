@@ -94,10 +94,14 @@ class StragglerHealth:
             right now.
         oldest_age_seconds: How long the OLDEST of them has been running
             since it was dispatched. 0.0 when ``count`` is 0.
+        at_capacity: ``count`` has reached the straggler cap, so every new
+            dispatch is refused until one finishes (Plan 00466 N40 review 2
+            mA3).
     """
 
     count: int
     oldest_age_seconds: float
+    at_capacity: bool
 
 
 class _SinglePermit:
@@ -317,10 +321,13 @@ class BoundedDispatcher(Generic[T]):
         now = time.perf_counter()
         with self._threads_lock:
             infos = list(self._stragglers.values())
+        at_capacity = len(infos) >= self._max_stragglers
         if not infos:
-            return StragglerHealth(count=0, oldest_age_seconds=0.0)
+            return StragglerHealth(count=0, oldest_age_seconds=0.0, at_capacity=at_capacity)
         oldest_age = max(now - info.started_at for info in infos)
-        return StragglerHealth(count=len(infos), oldest_age_seconds=oldest_age)
+        return StragglerHealth(
+            count=len(infos), oldest_age_seconds=oldest_age, at_capacity=at_capacity
+        )
 
     @staticmethod
     def _log_late_completion(label: str, start: float) -> Callable[[Future[T]], None]:

@@ -525,6 +525,57 @@ class TestMonitorStragglerHealth:
         mock_shutdown.assert_not_called()
 
     @pytest.mark.anyio
+    async def test_restarts_at_once_when_the_straggler_cap_is_reached(self) -> None:
+        """Plan 00466 N40 review 2 mA3: at the straggler cap every event with a
+        SAFETY+BLOCKING handler -- Stop included, which then blocks and loops
+        the agent -- is refused until the restart. Nothing can be judged
+        before then, so waiting for the oldest straggler's age only prolongs it."""
+        controller = _HealthController(
+            {
+                "status": "degraded",
+                "stragglers": {
+                    "count": 16,
+                    "oldest_age_seconds": 1.0,
+                    "restart_after_seconds": 120.0,
+                    "at_capacity": True,
+                },
+            }
+        )
+        daemon = HooksDaemon(config=_make_config(), controller=controller)
+        mock_shutdown = AsyncMock()
+
+        with self._patched(mock_shutdown):
+            await asyncio.wait_for(
+                daemon._monitor_straggler_health(), timeout=Timeout.DISPATCH_TEST_NORMAL
+            )
+
+        mock_shutdown.assert_called_once()
+
+    @pytest.mark.anyio
+    async def test_the_cap_does_not_restart_when_self_restart_is_disabled(self) -> None:
+        controller = _HealthController(
+            {
+                "status": "degraded",
+                "stragglers": {
+                    "count": 16,
+                    "oldest_age_seconds": 1.0,
+                    "restart_after_seconds": None,
+                    "at_capacity": True,
+                },
+            }
+        )
+        daemon = HooksDaemon(config=_make_config(), controller=controller)
+        mock_shutdown = AsyncMock()
+
+        with self._patched(mock_shutdown):
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(
+                    daemon._monitor_straggler_health(), timeout=Timeout.DISPATCH_TEST_SHORT
+                )
+
+        mock_shutdown.assert_not_called()
+
+    @pytest.mark.anyio
     async def test_missing_stragglers_key_is_tolerated(self) -> None:
         """A controller not reporting `stragglers` at all (e.g. a future
         controller shape) must not crash the watchdog loop -- it simply has

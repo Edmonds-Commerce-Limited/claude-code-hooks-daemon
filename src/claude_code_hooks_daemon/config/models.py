@@ -1587,6 +1587,19 @@ class TransportConfig(BaseModel):
         """True when any rung requires the daemon's per-event listeners (§1.3)."""
         return self.relay_enabled or self.nc_enabled
 
+    @property
+    def client_budget_seconds(self) -> float:
+        """The tightest client socket timeout a request can meet under this config.
+
+        The python rung (``Timeout.SOCKET_DISPATCH_ROUNDTRIP``) is every
+        forwarder's fallback, so it always binds; an enabled per-event rung
+        adds ``timeout_seconds`` (relay ``--timeout-ms``, ``nc -w``).
+        """
+        budget = Timeout.SOCKET_DISPATCH_ROUNDTRIP
+        if self.per_event_sockets_needed:
+            return min(budget, float(self.timeout_seconds))
+        return budget
+
 
 class ChainConfig(BaseModel):
     """Handler-chain dispatch options — ``daemon.chain`` (Plan 00242).
@@ -1718,41 +1731,47 @@ class ChainConfig(BaseModel):
         ),
     )
 
-    @model_validator(mode="after")
-    def validate_deadline_below_client_socket_timeout(self) -> Self:
-        """Refuse a deadline flush against the client's own socket timeout.
+    def deadline_problem(self, client_budget_seconds: float, budget_name: str) -> str | None:
+        """Say why ``deadline_seconds`` cannot beat a client budget, if it cannot.
 
-        Plan 00466 N40 m6. ``deadline_seconds`` exists so the DAEMON's own
-        deadline-triggered deny reaches the client before the client's own
-        socket timeout gives up and fails the whole chain open — a merely
-        slow handler bypassing every guard behind it, not just itself
-        (see the attribute's docstring). A deadline set AT or too close to
-        that client timeout reproduces exactly the bypass it exists to
-        close: there is no time left to serialise and flush the response
-        once the deadline fires. ``None`` disables enforcement entirely and
-        is never checked here — there is no deadline to compare.
+        Plan 00466 N40 m6: the daemon's deadline-triggered deny names the
+        handler that was not judged in time, but only if it reaches the client
+        before the client's own timeout fires, with margin left to serialise
+        and flush it. Past that budget the client answers first -- a PreToolUse
+        call is still denied (``socket_timeout``), just without the name.
+
+        A problem, not a ``ValueError`` (Plan 00466 N40 review 2 mA4): a
+        rejected value stops the daemon starting, which leaves every guard off.
+        ``DaemonConfig.chain_deadline_problems`` collects this for health.
+
+        Args:
+            client_budget_seconds: The client timeout the deadline must beat.
+            budget_name: Names that timeout, so the operator can tell which
+                setting to change.
+
+        Returns:
+            The problem, or ``None`` when the deadline leaves the margin (or is
+            ``None``, which disables enforcement and has nothing to compare).
         """
         if self.deadline_seconds is None:
-            return self
-        client_timeout = Timeout.SOCKET_DISPATCH_ROUNDTRIP
+            return None
         margin = Timeout.CHAIN_DEADLINE_SOCKET_MARGIN_SECONDS
-        if self.deadline_seconds >= client_timeout:
-            raise ValueError(
-                f"daemon.chain.deadline_seconds ({self.deadline_seconds}s) must be "
-                f"below the client's own socket timeout ({client_timeout}s): at or "
-                "past it, the client gives up and fails the WHOLE chain open "
-                "before the daemon's deadline-triggered deny can ever be sent "
-                "back. Lower deadline_seconds."
+        if self.deadline_seconds >= client_budget_seconds:
+            return (
+                f"daemon.chain.deadline_seconds ({self.deadline_seconds}s) is not "
+                f"below {budget_name} ({client_budget_seconds}s): the client gives "
+                "up before the daemon's deadline-triggered deny can be sent back. "
+                "Lower deadline_seconds."
             )
-        if client_timeout - self.deadline_seconds < margin:
-            raise ValueError(
+        if client_budget_seconds - self.deadline_seconds < margin:
+            return (
                 f"daemon.chain.deadline_seconds ({self.deadline_seconds}s) leaves "
-                f"less than {margin}s of margin before the client's own socket "
-                f"timeout ({client_timeout}s) -- not enough time to serialise and "
+                f"less than {margin}s of margin before {budget_name} "
+                f"({client_budget_seconds}s) -- not enough time to serialise and "
                 "flush the deadline-triggered response. Lower deadline_seconds by "
-                f"at least {margin - (client_timeout - self.deadline_seconds)}s."
+                f"at least {margin - (client_budget_seconds - self.deadline_seconds)}s."
             )
-        return self
+        return None
 
 
 class DaemonConfig(BaseModel):
@@ -1849,6 +1868,26 @@ class DaemonConfig(BaseModel):
         if isinstance(v, Path):
             return str(v)
         return v
+
+    @property
+    def chain_deadline_problems(self) -> list[str]:
+        """Why ``chain.deadline_seconds`` cannot beat the client timeout this
+        config deploys (Plan 00466 N40 review 2 mA4); empty when it can.
+
+        Checked against ``transport.client_budget_seconds``, not only the python
+        rung's constant: an enabled relay or ``nc`` rung gives up after
+        ``transport.timeout_seconds``, which may be shorter. The problem names
+        whichever setting binds. The daemon reports these in ``health`` as a
+        degraded reason; see ``ChainConfig.deadline_problem`` for why they are
+        not validation errors.
+        """
+        budget = self.transport.client_budget_seconds
+        if budget < Timeout.SOCKET_DISPATCH_ROUNDTRIP:
+            budget_name = "transport.timeout_seconds (the relay/nc client timeout)"
+        else:
+            budget_name = "the client's own socket timeout"
+        problem = self.chain.deadline_problem(budget, budget_name)
+        return [problem] if problem is not None else []
 
     @property
     def socket_path_obj(self) -> Path | None:

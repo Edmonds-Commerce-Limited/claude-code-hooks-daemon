@@ -97,6 +97,67 @@ class TestCmdStatusDegradedVisibility:
         assert "DEGRADED" not in out
 
 
+class TestCmdStatusNonConfigDegradedReasons:
+    """Plan 00466 N40 review 2 mA4: health turns "degraded" for reasons other
+    than config (stragglers, a chain deadline the client timeout beats), and
+    none of them disables a handler -- so none may print the invalid-config
+    block that says enforcement is off."""
+
+    def _status_output(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str], result: dict[str, Any]
+    ) -> str:
+        socket_path, _ = _make_project(tmp_path)
+        with (
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=12345),
+            patch("claude_code_hooks_daemon.daemon.cli.get_socket_path", return_value=socket_path),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.send_daemon_request",
+                return_value={"result": result},
+            ),
+        ):
+            assert cmd_status(argparse.Namespace(project_root=tmp_path)) == 0
+        return capsys.readouterr().out
+
+    def test_stragglers_do_not_print_the_invalid_config_block(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        out = self._status_output(
+            tmp_path, capsys, {"status": "degraded", "degraded_reasons": ["stragglers"]}
+        )
+        assert "CONFIGURATION DEGRADED" not in out
+
+    def test_a_chain_deadline_problem_is_printed_on_its_own(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        problem = "daemon.chain.deadline_seconds (20s) is not below transport.timeout_seconds"
+        out = self._status_output(
+            tmp_path,
+            capsys,
+            {
+                "status": "degraded",
+                "degraded_reasons": ["chain_deadline"],
+                "chain_deadline_problems": [problem],
+            },
+        )
+        assert "CONFIGURATION DEGRADED" not in out
+        assert problem in out
+
+    def test_config_named_in_the_reasons_still_prints_the_block(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        out = self._status_output(
+            tmp_path,
+            capsys,
+            {
+                "status": "degraded",
+                "degraded_reasons": ["config", "stragglers"],
+                "config_errors": ["Unknown handler 'x'"],
+            },
+        )
+        assert "CONFIGURATION DEGRADED" in out
+        assert "Unknown handler 'x'" in out
+
+
 class TestCmdCheckDegradedVisibility:
     _OPT_MODULE = (
         "claude_code_hooks_daemon.handlers.session_start.optimal_config_checker."

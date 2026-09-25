@@ -132,6 +132,7 @@ class DaemonController:
 
     __slots__ = (
         "_chain_config",
+        "_chain_deadline_problems",
         "_config",
         "_config_errors",
         "_degraded",
@@ -171,6 +172,9 @@ class DaemonController:
         # Chain dispatch options (Plan 00242): same narrow-slice DI idiom.
         # Defaults keep the deny short-circuit (collect_all_violations=False).
         self._chain_config: ChainConfig = ChainConfig()
+        # Why the chain deadline cannot beat the deployed client timeout
+        # (Plan 00466 N40 review 2 mA4): reported in health, not rejected.
+        self._chain_deadline_problems: list[str] = []
         # Strict-mode flag (Plan 00466 N24): same narrow-slice DI idiom as
         # the two above. Previously read from `self._config.strict_mode`,
         # which is always None on the real startup path (see the comment
@@ -205,6 +209,7 @@ class DaemonController:
         write_claude_md_in_linked_worktree: bool = False,
         worktree: "WorktreeConfig | None" = None,
         reference_repos: "ReferenceReposConfig | None" = None,
+        chain_deadline_problems: list[str] | None = None,
     ) -> None:
         """Initialise the controller with handlers.
 
@@ -244,6 +249,9 @@ class DaemonController:
                 Daemon startup leaves it False, so a worktree's branch never
                 carries an auto-committed regeneration that conflicts with
                 main's on merge; ``regenerate-docs`` passes True.
+            chain_deadline_problems: ``DaemonConfig.chain_deadline_problems``
+                (Plan 00466 N40 review 2 mA4). Each is logged and reported in
+                ``get_health()`` as the ``chain_deadline`` degraded reason.
 
         Raises:
             ValueError: If workspace_root is None (FAIL FAST requirement)
@@ -268,6 +276,9 @@ class DaemonController:
         self._verdict_log_config = verdict_log or VerdictLogConfig()
         self._chain_config = chain or ChainConfig()
         self._strict_mode = strict_mode if strict_mode is not None else False
+        self._chain_deadline_problems = list(chain_deadline_problems or [])
+        for problem in self._chain_deadline_problems:
+            logger.warning("Chain deadline: %s", problem)
 
         # Initialize ProjectContext singleton (single source of truth for project-level constants)
         # May already be initialized from CLI config validation
@@ -1187,6 +1198,8 @@ class DaemonController:
         unhealthy_count = self._chain_config.straggler_unhealthy_count
         if unhealthy_count is not None and straggler_health.count >= unhealthy_count:
             degraded_reasons.append("stragglers")
+        if self._chain_deadline_problems:
+            degraded_reasons.append("chain_deadline")
 
         health: dict[str, Any] = {
             "status": "degraded" if degraded_reasons else "healthy",
@@ -1207,6 +1220,9 @@ class DaemonController:
                 # ChainConfig access -- get_health() stays the single
                 # source of truth for both count/age AND the threshold.
                 "restart_after_seconds": self._chain_config.straggler_restart_after_seconds,
+                # Plan 00466 N40 review 2 mA3: at the cap nothing can be
+                # judged, so the watchdog restarts without waiting for age.
+                "at_capacity": straggler_health.at_capacity,
             },
         }
 
@@ -1214,6 +1230,8 @@ class DaemonController:
             health["degraded_reasons"] = degraded_reasons
         if self._degraded:
             health["config_errors"] = self._config_errors
+        if self._chain_deadline_problems:
+            health["chain_deadline_problems"] = list(self._chain_deadline_problems)
 
         return health
 

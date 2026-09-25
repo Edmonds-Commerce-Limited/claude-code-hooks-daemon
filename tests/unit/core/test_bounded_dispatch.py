@@ -313,6 +313,29 @@ class TestBoundedDispatcherBoundsStragglers:
 
         assert isinstance(second_outcome, DispatchSaturated)
 
+    def test_health_says_when_the_cap_is_reached(self) -> None:
+        """Plan 00466 N40 review 2 mA3: at the cap every new dispatch is
+        refused, which the daemon's watchdog treats as grounds to restart now."""
+        dispatcher = BoundedDispatcher(max_inflight=4, max_stragglers=2)
+        release = threading.Event()
+
+        def _stuck() -> None:
+            release.wait(timeout=Timeout.DISPATCH_TEST_GENEROUS)
+
+        try:
+            assert dispatcher.straggler_health().at_capacity is False
+            # run() records a straggler before it returns DispatchTimeout, so
+            # the count is exact the moment each call comes back.
+            dispatcher.run(_stuck, timeout=Timeout.DISPATCH_TEST_VERY_SHORT, label="first")
+            health = dispatcher.straggler_health()
+            assert (health.count, health.at_capacity) == (1, False)
+            dispatcher.run(_stuck, timeout=Timeout.DISPATCH_TEST_VERY_SHORT, label="second")
+            health = dispatcher.straggler_health()
+            assert (health.count, health.at_capacity) == (2, True)
+        finally:
+            release.set()
+            dispatcher.shutdown(wait=True)
+
     def test_max_stragglers_defaults_to_max_inflight(self) -> None:
         """No explicit `max_stragglers` reuses `max_inflight` (Single Source
         of Truth: one dial governs both, unless a caller opts to split

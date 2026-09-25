@@ -892,10 +892,8 @@ def cmd_stop(args: argparse.Namespace) -> int:
         return 1
 
 
-def _query_daemon_config_degraded(
-    socket_path: Path, pid: int | None
-) -> tuple[bool, list[str]] | None:
-    """Query the live daemon's own config-validation degraded state.
+def _query_daemon_health(socket_path: Path, pid: int | None) -> dict[str, Any] | None:
+    """Query the live daemon's own ``health`` result.
 
     Plan 00304: a real-repo canary found `status` reporting RUNNING and
     `check` byte-identical between a degraded and a healthy daemon -- only a
@@ -909,9 +907,9 @@ def _query_daemon_config_degraded(
         pid: The daemon's PID, or None if not running.
 
     Returns:
-        ``(is_degraded, config_errors)`` if the daemon answered, else
-        ``None`` (daemon not running or unreachable -- callers stay silent
-        rather than report a false degraded/healthy verdict).
+        The health result if the daemon answered, else ``None`` (daemon not
+        running or unreachable -- callers stay silent rather than report a
+        false degraded/healthy verdict).
     """
     if pid is None:
         return None
@@ -920,26 +918,37 @@ def _query_daemon_config_degraded(
     if response is None or "error" in response:
         return None
     result = response.get("result", {})
-    return result.get("status") == "degraded", result.get("config_errors", [])
+    return result if isinstance(result, dict) else None
 
 
-def _print_degraded_config_block(degraded_state: tuple[bool, list[str]] | None) -> None:
-    """Print the degraded-mode block if the daemon reported one.
+def _print_degraded_config_block(health: dict[str, Any] | None) -> None:
+    """Print what the daemon reported as degrading its configuration.
+
+    Only the ``config`` reason disables handlers; the others (stragglers, a
+    chain deadline the client timeout beats -- Plan 00466 N40 review 2 mA4)
+    leave every guard on, so they must not print the block saying enforcement
+    is off. A daemon that names no reasons predates them, and its ``degraded``
+    status meant config.
 
     Args:
-        degraded_state: Result of `_query_daemon_config_degraded`.
+        health: Result of `_query_daemon_health`.
     """
-    if degraded_state is None:
+    if health is None:
         return
-    is_degraded, config_errors = degraded_state
-    if not is_degraded:
-        return
-    print("\n🚨 CONFIGURATION DEGRADED 🚨")
-    print("Daemon is running in DEGRADED MODE — invalid configuration disabled enforcement")
-    print("for handlers that need config (a config-independent safety net still runs).")
-    for error in config_errors:
-        print(f"  - {error}")
-    print("Fix: correct .claude/hooks-daemon.yaml, then restart the daemon.")
+    reasons = health.get("degraded_reasons")
+    config_degraded = health.get("status") == "degraded" if reasons is None else "config" in reasons
+    if config_degraded:
+        print("\n🚨 CONFIGURATION DEGRADED 🚨")
+        print("Daemon is running in DEGRADED MODE — invalid configuration disabled enforcement")
+        print("for handlers that need config (a config-independent safety net still runs).")
+        for error in health.get("config_errors", []):
+            print(f"  - {error}")
+        print("Fix: correct .claude/hooks-daemon.yaml, then restart the daemon.")
+    deadline_problems = health.get("chain_deadline_problems", [])
+    if deadline_problems:
+        print("\nChain deadline cannot beat the client timeout (every guard is still on):")
+        for problem in deadline_problems:
+            print(f"  - {problem}")
 
 
 def _print_install_stamp_line() -> None:
@@ -1033,7 +1042,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     # Config-validation degraded mode (Plan 00304). Surfaced for visibility;
     # the exit code stays liveness-based, same rationale as project-handler
     # health below — `health` is the command that returns non-zero on degrade.
-    _print_degraded_config_block(_query_daemon_config_degraded(socket_path, pid))
+    _print_degraded_config_block(_query_daemon_health(socket_path, pid))
 
     # Project-handler protection signal (Plan 00143). Surfaced for visibility;
     # the exit code stays liveness-based so existing "status == RUNNING" checks
@@ -1358,7 +1367,7 @@ def cmd_check(args: argparse.Namespace) -> int:
     # canary caught that. Query the live daemon the same way `health` does.
     socket_path, pid_path, _drift_warning = _resolve_effective_daemon(args, project_path)
     pid = read_pid_file(str(pid_path))
-    _print_degraded_config_block(_query_daemon_config_degraded(socket_path, pid))
+    _print_degraded_config_block(_query_daemon_health(socket_path, pid))
 
     # 1. Claude Code optimal configuration (the verbose report SessionStart hides)
     checks = OptimalConfigCheckerHandler()._run_checks()
@@ -3089,6 +3098,7 @@ def _build_initialised_controller(
         project_registry=ProjectRegistry.from_config(config, project_path),
         claude_md=config.claude_md,
         chain=config.daemon.chain,
+        chain_deadline_problems=config.daemon.chain_deadline_problems,
         strict_mode=config.daemon.strict_mode,
         write_claude_md_in_linked_worktree=write_claude_md_in_linked_worktree,
         worktree=config.worktree,

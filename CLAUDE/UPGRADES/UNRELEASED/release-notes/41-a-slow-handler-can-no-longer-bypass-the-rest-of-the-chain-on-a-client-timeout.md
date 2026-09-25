@@ -22,6 +22,13 @@ Four changes close this:
   under the fail-closed rule above, with a "not judged in time" reason naming
   the handler; every other not-yet-run handler is skipped instead, with an
   advisory note. Setting `deadline_seconds: null` disables enforcement.
+  The deadline must leave 5s before the client's own timeout, which is the
+  relay/`nc` budget (`daemon.transport.timeout_seconds`) when either of those
+  rungs is enabled and shorter than 30s. A deadline that does not is
+  **reported, not rejected**: `health` turns `degraded` with the
+  `chain_deadline` reason and the problem text, and `status`/`check` print
+  it. Rejecting it would stop the daemon starting, which leaves every guard
+  off; running it only means the client's timeout answers first.
 - **The client itself now also fails CLOSED on its own timeout, for
   PreToolUse specifically** (`.claude/init.sh`): a socket timeout, a crashed
   daemon, or a response that is not one of PreToolUse's two legitimate
