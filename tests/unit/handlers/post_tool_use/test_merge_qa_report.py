@@ -23,7 +23,9 @@ from claude_code_hooks_daemon.config.models import PlanWorkflowQaConfig
 from claude_code_hooks_daemon.constants import HandlerID, Priority
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.docs_qa.corpus import build_and_save_corpus
 from claude_code_hooks_daemon.docs_qa.policy import DocumentationPolicy
+from claude_code_hooks_daemon.handlers.post_tool_use import merge_qa_report
 from claude_code_hooks_daemon.handlers.post_tool_use.merge_qa_report import (
     MergeQaReportHandler,
 )
@@ -68,6 +70,12 @@ def _handler(
         docs_policy if docs_policy is not None else DocumentationPolicy(enabled=False)
     )
     return handler
+
+
+def _warm_docs_index(root: Path, untracked: Path) -> None:
+    """Build the docs index where the SessionStart sweep would have left it."""
+    index = untracked / merge_qa_report._INDEX_DIR_NAME / merge_qa_report._INDEX_FILE_NAME
+    build_and_save_corpus(root, DocumentationPolicy(enabled=True), index)
 
 
 def _init_git_identity(root: Path) -> None:
@@ -302,6 +310,7 @@ class TestDocsAttribution:
         _git(root, "merge", "--no-ff", "feature", "-m", "merge feature")
 
         untracked = tmp_path / "untracked"
+        _warm_docs_index(root, untracked)
         handler = _handler(
             plan_dir_rel=None,
             plan_policy=PlanWorkflowQaConfig(enabled=False),
@@ -316,6 +325,37 @@ class TestDocsAttribution:
         assert "pointer-resolves" in rendered
         assert "CLAUDE/Y.md" in rendered
         assert "docs-qa --sweep" in rendered
+
+    def test_a_cold_docs_index_is_not_built_inside_the_hook(self, tmp_path: Path) -> None:
+        """Plan 00408 Task 2.1: the cold-index rule `docs_qa_edit` states.
+
+        Building the corpus from nothing took 3.7s on this repository against a
+        5s handler budget; refreshing a warm index took 0.19s. The SessionStart
+        sweep builds the index, so with none on disk the docs half stands down.
+        """
+        root = _scaffold_docs_repo(tmp_path)
+        _git(root, "checkout", "-b", "feature")
+        (root / "CLAUDE" / "Y.md").write_text("See [missing](Nope.md).\n")
+        _git(root, "add", "-A")
+        _git(root, "commit", "-m", "feature: dead link")
+        _git(root, "checkout", "main")
+        _git(root, "merge", "--no-ff", "feature", "-m", "merge feature")
+
+        untracked = tmp_path / "untracked"
+        handler = _handler(
+            plan_dir_rel=None,
+            plan_policy=PlanWorkflowQaConfig(enabled=False),
+            docs_policy=DocumentationPolicy(enabled=True),
+        )
+        with (
+            _patched_root(root),
+            _patched_untracked(untracked),
+            patch(f"{_MODULE}.build_and_save_corpus") as build,
+        ):
+            result = handler.handle(_bash("git merge --no-ff feature"))
+
+        build.assert_not_called()
+        assert result.context == []
 
     def test_disabled_documentation_policy_produces_no_docs_section(self, tmp_path: Path) -> None:
         root = _scaffold_docs_repo(tmp_path)

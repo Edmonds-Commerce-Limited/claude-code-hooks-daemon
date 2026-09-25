@@ -100,12 +100,19 @@ class TestHandle:
         assert any("skill-scan" in line for line in result.context)
 
     def test_interval_option_respected(self, tmp_path: Path) -> None:
+        """Delivered the way the registry delivers it (Plan 00466 N17).
+
+        This test used ``configure({"options": ...})``, a path production
+        never takes, so it stayed green while the configured value was ignored.
+        """
         import time
+
+        from claude_code_hooks_daemon.handlers.registry import apply_handler_options
 
         two_days_ago = time.time() - 2 * 86_400
         record_success(tmp_path / STATE_FILE_NAME, report_path="/r.md", now=two_days_ago)
         handler = _handler()
-        handler.configure({"options": {"check_interval_days": 1}})
+        apply_handler_options(handler, {"check_interval_days": 1})
         with patch(_STATE_DIR_TARGET, return_value=tmp_path):
             result = handler.handle(_hook_input())
         assert any("skill-scan" in line for line in result.context)

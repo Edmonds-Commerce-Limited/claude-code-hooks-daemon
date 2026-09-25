@@ -329,6 +329,32 @@ class TestProjectRootRelative:
         assert is_path_excluded("/other/tests/fixtures/x.py", ["tests/fixtures/**"]) is True
 
 
+class TestEmptyFilePathNeverReachesRelpath:
+    """Ledger 00466 N44: ``os.path.relpath("", root)`` raises ``ValueError:
+    no path specified`` -- a live daemon crash surfaced when a caller (the
+    secret-mention scanner) handed this module an empty candidate derived
+    from tool-call CONTENT, not the tool's own ``file_path``. This module is
+    the shared chokepoint content-guard handlers funnel through, so it must
+    treat an empty candidate the same way it already treats one that
+    resolves outside ``project_root``: no match, never a crash.
+    """
+
+    def test_empty_file_path_with_project_root_does_not_raise(self) -> None:
+        assert path_matches_globs("", ["*.example-glob"], project_root="/proj") is False
+
+    def test_empty_file_path_without_project_root_does_not_raise(self) -> None:
+        assert path_matches_globs("", ["*.example-glob"]) is False
+
+    def test_is_path_excluded_with_empty_file_path_does_not_raise(self) -> None:
+        assert is_path_excluded("", ["*.example-glob"], project_root="/proj") is False
+
+    def test_handler_excludes_path_with_empty_file_path_does_not_raise(self) -> None:
+        assert (
+            handler_excludes_path("", handler_patterns=["**/fixtures/**"], project_patterns=None)
+            is False
+        )
+
+
 class TestMultiplePatterns:
     def test_any_pattern_matches(self) -> None:
         patterns = ["vendor/**", "**/fixtures/**", "samples/**/*.py"]

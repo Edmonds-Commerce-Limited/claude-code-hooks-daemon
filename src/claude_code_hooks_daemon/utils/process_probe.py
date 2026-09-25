@@ -244,13 +244,13 @@ class WrapperPidWait:
     """One wait on ``$!`` whose pid belongs to a wrapper, not to the job.
 
     ``$!`` holds the pid of the last command the shell BACKGROUNDED. When that
-    command is a wrapper — ``setsid``, ``nohup sh -c``, ``timeout``, ``env`` —
+    command is a wrapper — ``setsid``, ``nohup sh -c``, ``timeout``, ``env sh -c`` —
     the pid is the one the WRAPPER was given, and every question asked of it
     may be a question about the wrapper's lifetime rather than the job's.
 
     Attributes:
         wrapper: The wrapper that was handed the pid, as it is spoken about in
-            a message (``setsid``, ``nohup sh -c``, ``timeout``, ``env``).
+            a message (``setsid``, ``nohup sh -c``, ``timeout``, ``env sh -c``).
         detaching: Whether that wrapper's parent exits AT ONCE, leaving ``$!``
             naming a pid that is already gone. True for ``setsid``, which is
             the unambiguous case: the wait ends immediately and reports
@@ -1310,7 +1310,9 @@ _WRAPPER_PID_SPECS: Final[dict[str, _WrapperPidSpec]] = {
         value_flags=frozenset({"-s", "--signal", "-k", "--kill-after"}),
         positional_operands=1,
     ),
-    "env": _WrapperPidSpec(value_flags=frozenset({"-u", "--unset"})),
+    # GNU `env` execs in place exactly as `nohup` does, so `env VAR=1 ./job`
+    # leaves `$!` naming the job itself (Plan 00408 Task 3.1).
+    "env": _WrapperPidSpec(value_flags=frozenset({"-u", "--unset"}), needs_a_shell=True),
 }
 
 

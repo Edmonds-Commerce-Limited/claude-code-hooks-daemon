@@ -93,6 +93,7 @@ from claude_code_hooks_daemon.handlers.status_line.context_tiers import (
     classify_context,
 )
 from claude_code_hooks_daemon.handlers.status_line.settings_reader import (
+    get_settings_path,
     read_claude_settings,
 )
 
@@ -312,12 +313,12 @@ class ModelContextHandler(StatusLineHandlerBase):
         return False
 
     def _get_settings_path(self) -> Path:
-        """Get path to Claude settings file.
+        """Get path to Claude Code's user settings file.
 
         Returns:
-            Path to ~/.claude/settings.json
+            ``<config dir>/settings.json``, via the shared settings reader.
         """
-        return Path.home() / ".claude" / "settings.json"
+        return get_settings_path()
 
     def _get_context_icon_and_color(
         self, used_pct: float, *, window_size: int = 0
