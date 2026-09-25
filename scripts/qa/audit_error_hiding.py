@@ -125,26 +125,48 @@ _PYTHON_HEREDOC_START_RE = re.compile(
 _BASH_FUNCTION_START_RE = re.compile(r"^([A-Za-z_]\w*)\s*\(\)\s*\{?\s*$")
 
 
+#: Builtins whose result holds exactly the items of their first argument, or
+#: none without one: ``iter(())`` is as empty as ``()`` (review 8 n4).
+_ITEM_PRESERVING_BUILTINS: frozenset[str] = frozenset(
+    {"iter", "tuple", "list", "set", "frozenset", "dict", "reversed", "sorted"}
+)
+
+
+def _is_empty_iterable(source: ast.expr) -> bool:
+    """Whether ``yield from source`` provably yields nothing: an empty literal, or a builtin of one."""
+    if isinstance(source, (ast.Tuple, ast.List, ast.Set)):
+        return not source.elts
+    if isinstance(source, ast.Dict):
+        return not source.keys
+    if isinstance(source, ast.Constant):
+        return isinstance(source.value, (str, bytes)) and not source.value
+    if (
+        isinstance(source, ast.Call)
+        and isinstance(source.func, ast.Name)
+        and source.func.id in _ITEM_PRESERVING_BUILTINS
+    ):
+        return not source.args or _is_empty_iterable(source.args[0])
+    return False
+
+
 def _names_the_failure(value: ast.expr) -> bool:
     """Whether a ``yield``/``yield from`` expression actually reports something (review 7 n2).
 
-    A bare ``yield``, a constant (``yield 0``, ``yield None``) and
-    ``yield from`` an empty literal (``()``, ``[]``, ``{}``, ``set()``) name
-    nothing about the failure -- a caller sees no different a value than an
-    exception-free run would ever produce. Anything else (a name, a call, an
+    A bare ``yield``, a constant other than a non-empty string (``yield 0``,
+    ``yield None``) and ``yield from`` an empty iterable (``()``, ``set()``,
+    ``iter(())``) name nothing about the failure -- a caller sees no different
+    a value than an exception-free run would ever produce. A message
+    (``yield "read failed"``) names it. Anything else (a name, a call, an
     f-string) is presumed to carry the failure, as it did before this rule.
     """
     if isinstance(value, ast.Yield):
-        return value.value is not None and not isinstance(value.value, ast.Constant)
-    if isinstance(value, ast.YieldFrom):
-        source = value.value
-        if isinstance(source, (ast.Tuple, ast.List, ast.Set)):
-            return bool(source.elts)
-        if isinstance(source, ast.Call) and not source.args and not source.keywords:
-            empty_builders = {"tuple", "list", "set", "dict", "frozenset"}
-            if isinstance(source.func, ast.Name) and source.func.id in empty_builders:
-                return False
+        if value.value is None:
+            return False
+        if isinstance(value.value, ast.Constant):
+            return isinstance(value.value.value, str) and bool(value.value.value)
         return True
+    if isinstance(value, ast.YieldFrom):
+        return not _is_empty_iterable(value.value)
     return False
 
 

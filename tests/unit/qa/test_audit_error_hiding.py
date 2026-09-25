@@ -218,6 +218,30 @@ class TestAGeneratorThatYieldsTheFailure:
         rules = self._rules_of("        yield from ()\n        return\n")
         assert "return-none-on-error" in rules
 
+    @pytest.mark.parametrize(
+        "empty",
+        ["iter(())", "iter([])", "tuple(())", "list(iter(()))", "reversed([])", "sorted({})"],
+    )
+    def test_yielding_from_an_empty_iterable_built_by_a_builtin_is_still_flagged(
+        self, empty: str
+    ) -> None:
+        """Review 8 n4: wrapping the empty literal in one more call named nothing either."""
+        rules = self._rules_of(f"        yield from {empty}\n        return\n")
+        assert "return-none-on-error" in rules
+
+    def test_yielding_from_a_builtin_over_the_failure_is_not_flagged(self) -> None:
+        rules = self._rules_of("        yield from iter([UNPARSED])\n        return\n")
+        assert "return-none-on-error" not in rules
+
+    def test_yielding_a_message_naming_the_failure_is_not_flagged(self) -> None:
+        """Review 8 n4: a constant STRING names the failure, where ``0`` does not."""
+        rules = self._rules_of('        yield "read failed"\n        return\n')
+        assert "return-none-on-error" not in rules
+
+    def test_yielding_an_empty_string_is_still_flagged(self) -> None:
+        rules = self._rules_of('        yield ""\n        return\n')
+        assert "return-none-on-error" in rules
+
 
 class TestHeredocPythonExtraction:
     """Gap #2: Python embedded in a shell heredoc must be found and parsed."""
