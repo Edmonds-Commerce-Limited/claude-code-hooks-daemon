@@ -36,6 +36,7 @@ from typing import Any, Final
 import pytest
 
 from claude_code_hooks_daemon.utils.path_predicates import (
+    _reset_unreadable_warning_burst,
     path_exists,
     path_is_dir,
     path_is_file,
@@ -47,6 +48,12 @@ _PREDICATES: Final[dict[str, tuple[Callable[..., Any], str]]] = {
     "path_is_file": (path_is_file, "is_file"),
     "path_is_dir": (path_is_dir, "is_dir"),
 }
+
+
+@pytest.fixture(autouse=True)
+def _fresh_warning_burst() -> None:
+    """Each test gets its own burst window: the limiter is process-global state."""
+    _reset_unreadable_warning_burst()
 
 
 @pytest.fixture
@@ -187,7 +194,40 @@ class TestTheSubstitutionIsRecorded:
         with caplog.at_level(logging.WARNING):
             predicate(tmp_path, unreadable_means=False)
 
-        assert not caplog.records
+
+class TestABurstOfUnreadablePathsIsRateLimited:
+    """Review 7 n5: one 32 KiB command with 115 over-long operands logged 230
+    records (~200 KB). A burst now costs one record, not one per path."""
+
+    def test_a_small_burst_is_logged_in_full(
+        self, deny_every_stat: None, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.WARNING):
+            for index in range(3):
+                path_exists(f"/root/unreadable/{index}", unreadable_means=False)
+
+        assert len(caplog.records) == 3
+
+    def test_past_the_burst_limit_individual_records_stop(
+        self, deny_every_stat: None, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.WARNING):
+            for index in range(20):
+                path_exists(f"/root/unreadable/{index}", unreadable_means=False)
+
+        paths_logged = sum(1 for r in caplog.records if "/root/unreadable/" in r.getMessage())
+        assert paths_logged < 20
+        assert paths_logged >= 1
+
+    def test_the_aggregate_line_is_logged_exactly_once_per_burst(
+        self, deny_every_stat: None, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.WARNING):
+            for index in range(20):
+                path_exists(f"/root/unreadable/{index}", unreadable_means=False)
+
+        aggregate_lines = [r for r in caplog.records if "not logged individually" in r.getMessage()]
+        assert len(aggregate_lines) == 1
 
 
 class TestTheCallerCannotAvoidChoosing:

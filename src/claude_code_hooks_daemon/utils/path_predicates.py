@@ -39,6 +39,7 @@ the choice, and the reasoning behind it, is visible in review at every site.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeVar
@@ -46,6 +47,21 @@ from typing import TypeVar
 logger = logging.getLogger(__name__)
 
 _Fallback = TypeVar("_Fallback")
+
+#: One caller can hold hundreds of unreadable operands in a single burst
+#: (review 7 n5: 115 over-long operands in one command logged 230 records,
+#: ~200 KB). Full detail for the first few of a burst is enough to diagnose
+#: it; the rest are aggregated into one line so a burst costs one record,
+#: not one per path.
+_WARNING_BURST_LIMIT = 5
+_WARNING_WINDOW_SECONDS = 5.0
+_warning_burst = {"window_start": 0.0, "seen": 0}
+
+
+def _reset_unreadable_warning_burst() -> None:
+    """Start a fresh burst window. Test-only: production never needs this."""
+    _warning_burst["window_start"] = 0.0
+    _warning_burst["seen"] = 0
 
 
 @dataclass(frozen=True)
@@ -103,7 +119,28 @@ def _answer_or_fallback(
         # Logged, not swallowed. Without a record, "the guard decided no" and
         # "the guard could not look" are indistinguishable to whoever asks why
         # a policy did not fire -- which is the silent-fallback antipattern
-        # this repo's own error-hiding auditor exists to catch.
+        # this repo's own error-hiding auditor exists to catch. Rate-limited
+        # (review 7 n5): a caller can hold hundreds of these in one burst.
+        _log_unreadable(path, predicate_name, exc, fallback)
+        return fallback
+
+
+def _log_unreadable(
+    path: str | Path, predicate_name: str, exc: OSError, fallback: object
+) -> None:
+    """Log the substitution, in full for a burst's first few, then aggregated.
+
+    The window resets on the first call after it elapses, so a later,
+    unrelated burst is not silenced by an earlier one; within one window,
+    only the first ``_WARNING_BURST_LIMIT`` calls carry the path and reason.
+    """
+    now = time.monotonic()
+    if now - _warning_burst["window_start"] > _WARNING_WINDOW_SECONDS:
+        _warning_burst["window_start"] = now
+        _warning_burst["seen"] = 0
+    _warning_burst["seen"] += 1
+    seen = _warning_burst["seen"]
+    if seen <= _WARNING_BURST_LIMIT:
         logger.warning(
             "Could not stat %r for %s (%s) -- assuming %r. A guard keyed on "
             "this path is answering from an assumption, not an observation.",
@@ -112,7 +149,13 @@ def _answer_or_fallback(
             exc,
             fallback,
         )
-        return fallback
+    elif seen == _WARNING_BURST_LIMIT + 1:
+        logger.warning(
+            "Further unreadable-path substitutions in this burst (window %ss) are "
+            "not logged individually; the first %d above are representative.",
+            _WARNING_WINDOW_SECONDS,
+            _WARNING_BURST_LIMIT,
+        )
 
 
 def path_exists(path: str | Path, *, unreadable_means: _Fallback) -> bool | _Fallback:
