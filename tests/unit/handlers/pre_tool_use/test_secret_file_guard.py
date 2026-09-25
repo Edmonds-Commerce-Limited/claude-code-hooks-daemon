@@ -1611,3 +1611,28 @@ class TestGoRustJavaShellExecLiterals:
         call = 'new ProcessBuilder("cat", "prod.vault-pass*");\n'
         hook_input = _hook_input("Write", {"file_path": "/proj/helper.java", "content": call})
         assert not handler.matches(hook_input)
+
+
+class TestFileSchemeUrlOnBashRoute:
+    """review 7: a `file:` URL is a real, literal local-file read route --
+    curl, wget, and anything else accepting a URL argument."""
+
+    def test_curl_percent_encoded_denies(self) -> None:
+        handler = _handler()
+        cmd = "curl -s file:///root/.ssh/id_r%73a"
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_wget_denies(self) -> None:
+        handler = _handler()
+        cmd = "wget file:///root/.ssh/id_rsa"
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_file_url_localhost_denies(self) -> None:
+        handler = _handler()
+        cmd = "curl file://localhost/root/.ssh/id_rsa"
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_file_url_to_non_protected_path_stays_allowed(self) -> None:
+        handler = _handler()
+        cmd = "curl -s file:///etc/hostname"
+        assert not handler.matches(_hook_input("Bash", {"command": cmd}))

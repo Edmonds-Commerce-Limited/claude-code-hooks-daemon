@@ -30,6 +30,7 @@ import os
 import re
 import shlex
 import time
+import urllib.parse
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -1342,6 +1343,7 @@ def iter_protected_mentions(
         _tokenise(import_stripped),
         _brace_expansion_tokens(import_stripped),
         _normalised_word_tokens(import_stripped),
+        _file_url_path_tokens(import_stripped),
     )
     # Own live finding (team-lead's 1 MB timing follow-up to review 3): real
     # content is full of REPEATED short tokens (log lines, minified code,
@@ -1431,6 +1433,33 @@ def _normalised_word_tokens(command: str) -> Iterator[str]:
     possible.
     """
     yield from shell_expansion.iter_normalised_shell_words(command)
+
+
+#: `file:///path`, `file://localhost/path`, or the rarer single-slash
+#: `file:/path` -- the scheme and an optional empty/`localhost` host are
+#: consumed, leaving the absolute filesystem path as the capture group.
+#: `\b` anchors the scheme so an unrelated word ending in "...file:" (rare,
+#: but cheap to exclude) does not false-trigger.
+_FILE_URL_RE: Final[re.Pattern[str]] = re.compile(r"\bfile:(?:/{2})?(?:localhost)?(/[^\s'\"<>|;&)]*)")
+
+
+def _file_url_path_tokens(command: str) -> Iterator[str]:
+    """Lazily yield the percent-decoded filesystem PATH named by every
+    ``file:`` URL in ``command`` (review 7: guard-defects review 6's own
+    probe found `curl -s file:///root/.ssh/id_r%73a` invisible to every
+    other stream -- a real, literal local-file READ route, in a DIFFERENT
+    spelling than a plain bash token, reachable from `curl`, `wget`, a
+    Python ``urllib`` one-liner, ``git clone file://...``, or anything else
+    that accepts a URL argument).
+
+    Percent-decoding (``urllib.parse.unquote``) happens BEFORE the result is
+    handed to :func:`_token_mention`, so ``id_r%73a`` is judged as the
+    literal path ``id_rsa`` it names, exactly like any other path mention --
+    no separate matching logic, just a different way to PRODUCE a candidate
+    token.
+    """
+    for match in _FILE_URL_RE.finditer(command):
+        yield urllib.parse.unquote(match.group(1))
 
 
 def _token_mention(

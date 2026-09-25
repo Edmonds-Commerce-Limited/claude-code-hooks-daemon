@@ -2554,3 +2554,41 @@ class TestReview6ClosedShellFeedShapes:
     def test_a_literal_echo_piped_to_a_shell_denies(self) -> None:
         command = "echo cat id_'\\''rs'\\''a' | bash"
         assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+
+
+class TestFileSchemeUrlMentions:
+    """review 7: a `file:` URL is a real, literal local-file READ route
+    (curl, wget, a Python urllib one-liner, `git clone file://...`, ...) in
+    a DIFFERENT spelling than a plain bash token -- percent-decoded, with
+    the scheme and an optional `localhost` host stripped, then judged
+    exactly like any other path mention."""
+
+    def test_curl_triple_slash_unencoded_denies(self) -> None:
+        command = "curl -s file:///root/.ssh/id_rsa"
+        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+
+    def test_curl_percent_encoded_basename_denies(self) -> None:
+        command = "curl -s file:///root/.ssh/id_r%73a"
+        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+
+    def test_wget_file_url_denies(self) -> None:
+        command = "wget file:///root/.ssh/id_rsa"
+        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+
+    def test_file_url_with_localhost_host_denies(self) -> None:
+        command = "curl file://localhost/root/.ssh/id_rsa"
+        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+
+    def test_git_clone_file_url_denies(self) -> None:
+        command = "git clone file:///root/.ssh/id_rsa /tmp/x"
+        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+
+    def test_python_urllib_one_liner_denies(self) -> None:
+        command = "python3 -c \"import urllib.request; urllib.request.urlopen('file:///root/.ssh/id_rsa')\""
+        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+
+    def test_file_url_to_a_non_protected_path_allows(self) -> None:
+        """Control: the route works, but a `file:` URL naming an ordinary
+        path is not itself a protected-path mention."""
+        command = "curl -s file:///etc/hostname"
+        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is None

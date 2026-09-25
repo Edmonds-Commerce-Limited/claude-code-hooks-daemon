@@ -349,6 +349,97 @@ their OS-level / session-start-advisory mitigations named. No new leak was
 found in this round (the only class-(c) leak, G2, was already fixed under
 Decision 12).
 
+## Plan 00466 review 6/7 update — computed-string residuals and the file: URL route
+
+Guard-defects review 6/7's adversarial probes re-exercised this inventory
+against the shipped `secret_file_guard` + `shell_expansion` machinery and
+found one genuine gap (closed) plus a cluster of already-predicted class-(d)
+residuals, now pinned to concrete probe shapes rather than left abstract.
+
+### Accepted class-(d): computed strings the guard cannot evaluate
+
+Every row below is the SAME underlying limit this document already named as
+"String assembly ... undecidable; residual risk" (the path-obfuscation
+table above) and "Variable indirection" / "Persistent shell state" — a
+static text scanner cannot evaluate a shell's own runtime computation, only
+recognise a LITERAL mention. Review 6/7 confirmed each concretely:
+
+- **Variable indirection**, single OR cross-statement (`x='cat ~/.ssh/id_rsa'; bash -c "$x"`, `x=...; eval "$x"`): the ASSIGNMENT names
+  nothing suspicious on its own (the path sits inside the VALUE, not a
+  token the assignment step itself denies), and by the time `$x` is
+  expanded the guard is looking at a bare variable reference, not the
+  path.
+- **Aliases** (`alias k='cat ~/.ssh/id_rsa'; k`): the same shape as
+  variable indirection — the alias DEFINITION carries the path in a
+  position the deny-by-default scan does not single out from ordinary
+  quoted text once obfuscated, and the INVOCATION (`k`) carries nothing at
+  all.
+- **Write-then-run of a file named elsewhere** (`echo 'cat ~/.ssh/id_rsa' > /tmp/s; sh /tmp/s`): a Bash-authored file is invisible
+  to the content guards that run before a `Write`/`Edit` (documented at
+  the top of this project's own `CLAUDE.md`), and the RUN step (`sh /tmp/s`) names only a path the guard has no reason to protect.
+- **Opaque pipelines** (`echo Y2F0IH4vLnNzaC9pZF9yc2E= | base64 -d | bash`; `source <(base64 -d <<< Y2F0)`): decoding a base64 blob is
+  exactly the "would need to actually RUN a shell to resolve" case
+  `shell_expansion.iter_normalised_shell_words`'s own docstring draws the
+  line at — the SECOND case is also the direct, INTENDED consequence of
+  Plan 00466 review 6 MAJOR-2 (a non-literal process-substitution producer
+  is judged by its own command text, and `base64 -d <<< Y2F0` mentions no
+  protected path).
+- **Command substitution feeding `-c`** (`bash -c "$(echo 'cat ~/.ssh/id_rsa')"`, `bash -c "$(printf 'cat %s' '~/.ssh/id_rsa')"`): the
+  `-c` argument is not a literal string here — it is the OUTPUT of a
+  command `iter_normalised_shell_words` would have to actually EXECUTE to
+  know, which the module's own "never run a shell" design boundary
+  forbids.
+- **Remote execution** (`ssh localhost 'cat ~/.ssh/id_rsa'`, `docker exec c sh -c 'cat ~/.ssh/id_rsa'`): the command that reaches the REMOTE
+  host/container is not evaluated locally by design — what runs on the
+  other side is out of this guard's visibility by definition, not merely
+  unimplemented. (`docker exec` happens to still deny here, because its
+  trailing `sh -c` is recognised as a LOCAL shell trigger regardless of
+  what precedes it — a side effect of the interpreter scan being
+  position-independent, not deliberate remote-execution coverage.)
+- **Perl's own string-building** (`perl -e 'system("cat ~/.ssh/id_r""sa")'`): this is the SAME computed-string class as the
+  above, in a language-specific spelling. Python's `ast` module folds
+  adjacent string literals (`'a' 'b'` → one constant) at PARSE time, which
+  Plan 00466 review 6 minor-2 uses to close the equivalent Python case —
+  but Perl has no such implicit adjacent-literal concatenation (real Perl
+  string building uses the `.` operator, e.g. `"cat " . $x`, which is
+  itself a RUNTIME computation, not a parse-time fold), so the trick that
+  closes the Python row does not generalise to Perl.
+
+None of these are gaps to close with a bigger regex — closing any of them
+for real needs either running the shell/interpreter (which the module's own
+"deny by default, never resolve, never execute" design explicitly refuses to
+do — see `shell_expansion.py`'s module docstring) or an output-side backstop
+(the PostToolUse `updatedToolOutput` route this document already left
+**[DEFERRED-LIVE]** above).
+
+### Closed: the `file:` URL route
+
+**New route, now closed.** A `file:` URL (`file:///path`,
+`file://localhost/path`, the rarer single-slash `file:/path`) is a REAL,
+LITERAL local-file read — curl, wget, a Python `urllib` one-liner, `git clone file://...`, or anything else that accepts a URL argument can read a
+local file this way, in a spelling none of the other token streams
+recognised. Unlike the computed-string residuals above, the path is present
+in the command TEXT, just percent-encoded and URL-scheme-prefixed — exactly
+the kind of literal-but-differently-spelled mention this guard exists to
+catch (class (b)/(c), not (d)).
+
+Closed by `secret_file_matching._file_url_path_tokens` (Plan 00466 review
+7): a fourth lazy token stream alongside `_tokenise`/
+`_brace_expansion_tokens`/`_normalised_word_tokens`, chained into
+`iter_protected_mentions`. It finds every `file:` URL in the command text,
+percent-decodes it (`urllib.parse.unquote`), strips the scheme and an
+optional empty/`localhost` host, and hands the resulting filesystem path to
+the SAME `_token_mention` matching every other token stream already uses —
+no separate matching logic, just a different way to produce a candidate
+token. Verified against `curl`, `wget`, an unencoded path, a percent-encoded
+basename, `file://localhost/...`, `git clone file://...`, a Python `urllib`
+one-liner, and a control where the URL names a non-protected path (allowed).
+
+(Row cross-reference: this document's "Other surfaces" table already
+resolved `WebFetch file://` as out-of-scope — the TOOL rejects the scheme
+before any hook sees it. That finding is unaffected; this section is about
+`file:` URLs reaching a LOCAL PROGRAM via Bash, a different route entirely.)
+
 ### Task 1.2 result
 
 **Subagent PreToolUse coverage CONFIRMED.** The very first probe (creating the
