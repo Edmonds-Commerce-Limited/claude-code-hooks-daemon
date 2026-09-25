@@ -329,6 +329,78 @@ class TestFindAllDaemonProcessesProjectRootFilter:
             assert sorted(find_all_daemon_processes()) == [100, 200]
 
 
+class TestFilterMatchesViaTheDaemonsRecordedEnvironmentVariable:
+    """Plan 00466 N59 gate fix: a daemon started with NO ``--project-root``
+    flag (the shape ``cmd_start`` actually produces) whose interpreter lives
+    in a DIFFERENT project's venv is still correctly attributed, via the
+    ``CLAUDE_HOOKS_DAEMON_PROJECT_ROOT`` env var it records at startup --
+    exactly what a shared venv serving an isolated test project root needs."""
+
+    @staticmethod
+    def _proc(pid: int, cmdline: list[str], environ: dict[str, str]) -> MagicMock:
+        mock_proc = MagicMock(spec=psutil.Process)
+        mock_proc.pid = pid
+        mock_proc.name.return_value = "python"
+        mock_proc.cmdline.return_value = cmdline
+        mock_proc.environ.return_value = environ
+        return mock_proc
+
+    def test_env_var_overrides_the_interpreter_venv_heuristic(self) -> None:
+        """The interpreter's own venv path would misattribute this daemon to
+        `/workspace`; the recorded env var is what it actually serves."""
+        proc = self._proc(
+            pid=800,
+            cmdline=[
+                "/workspace/untracked/venv-py311-28fb230b/bin/python",
+                "-m",
+                "claude_code_hooks_daemon.daemon.cli",
+                "start",
+            ],
+            environ={"CLAUDE_HOOKS_DAEMON_PROJECT_ROOT": "/tmp/isolated-project"},
+        )
+
+        with patch("psutil.process_iter", return_value=[proc]):
+            assert find_all_daemon_processes(project_root="/tmp/isolated-project") == [800]
+            assert find_all_daemon_processes(project_root="/workspace") == []
+
+    def test_explicit_flag_still_wins_over_the_env_var(self) -> None:
+        """When the two disagree, the more explicit ``--project-root`` flag
+        is authoritative over the recorded env var."""
+        proc = self._proc(
+            pid=801,
+            cmdline=[
+                "python",
+                "-m",
+                "claude_code_hooks_daemon.daemon.cli",
+                "--project-root",
+                "/from-flag",
+                "start",
+            ],
+            environ={"CLAUDE_HOOKS_DAEMON_PROJECT_ROOT": "/from-env"},
+        )
+
+        with patch("psutil.process_iter", return_value=[proc]):
+            assert find_all_daemon_processes(project_root="/from-flag") == [801]
+            assert find_all_daemon_processes(project_root="/from-env") == []
+
+    def test_a_mock_without_a_modelled_environ_is_not_misread(self) -> None:
+        """``proc.environ()`` left unconfigured returns a bare ``MagicMock``,
+        not a ``dict`` -- must be read as 'no answer', never stringified into
+        a bogus path that happens to satisfy nothing (or, worse, something)."""
+        proc = MagicMock(spec=psutil.Process)
+        proc.pid = 802
+        proc.name.return_value = "python"
+        proc.cmdline.return_value = [
+            "python",
+            "-m",
+            "claude_code_hooks_daemon.daemon.cli",
+            "start",
+        ]
+
+        with patch("psutil.process_iter", return_value=[proc]):
+            assert find_all_daemon_processes(project_root="/anything") == []
+
+
 class TestDaemonServerMatching:
     """find_all_daemon_processes must match ONLY genuine daemon SERVER
     processes — those launched via ``cli start`` / ``cli restart`` — and never

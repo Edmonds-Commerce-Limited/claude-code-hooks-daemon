@@ -936,6 +936,32 @@ def _is_shell(path: Path) -> bool:
     return bool(_SHELL_SHEBANG.match(first_line))
 
 
+def _without_protected_paths(paths: list[Path]) -> list[Path]:
+    """Drop protected files from the scan set before anything reads them.
+
+    ``git ls-files`` enumerates every TRACKED path with no regard for which
+    ones are protected, and :func:`scan_shell_file` reads whatever this
+    returns (Plan 00412 class 9: a module that obtains content from a path
+    set git chose must consult the protected set itself). Mirrors
+    ``check_sensitive_content._without_protected_paths`` and
+    ``staged_lint_gate.py:249``.
+
+    The import is deliberately NOT guarded (same reasoning as
+    ``check_sensitive_content``): if the matcher cannot be loaded, this
+    module cannot know what it must not read, and stopping is the only safe
+    outcome.
+    """
+    from claude_code_hooks_daemon.utils.secret_file_matching import (
+        path_is_protected,
+        resolve_configured_patterns,
+    )
+
+    patterns = resolve_configured_patterns()
+    if not patterns:
+        return paths
+    return [p for p in paths if not path_is_protected(str(p), patterns)]
+
+
 def scanned_shell_files() -> list[Path]:
     """Every tracked shell script the Detector judges, including under ``tests/``."""
     # SECURITY: list-form subprocess, no shell=True, trusted system tool (git).
@@ -946,14 +972,15 @@ def scanned_shell_files() -> list[Path]:
         check=True,
     )
     paths = [_REPO_ROOT / name for name in result.stdout.split("\0") if name]
-    return sorted(
+    candidates = [
         path
         for path in paths
         if not _under_excluded_dir(path)
         and path.is_file()
         and not path.is_symlink()
         and _is_shell(path)
-    )
+    ]
+    return sorted(_without_protected_paths(candidates))
 
 
 def main() -> int:

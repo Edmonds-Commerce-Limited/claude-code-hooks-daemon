@@ -69,6 +69,24 @@ def _fake_daemon(
     return _spawn(children, _DAEMON_MODULE, "--project-root", str(project_root), "start")
 
 
+def _fake_daemon_via_env(
+    children: list[subprocess.Popen[bytes]], project_root: Path
+) -> subprocess.Popen[bytes]:
+    """A real daemon server started with NO ``--project-root`` flag at all --
+    the shape ``cmd_start`` actually produces (it derives the root from cwd),
+    proven instead via the env var it records in its own environment
+    (Plan 00466 N59 gate fix)."""
+    env = os.environ.copy()
+    env["CLAUDE_HOOKS_DAEMON_PROJECT_ROOT"] = str(project_root)
+    child = subprocess.Popen(
+        [sys.executable, "-c", _SLEEP, _DAEMON_MODULE, "start"],
+        start_new_session=True,
+        env=env,
+    )
+    children.append(child)
+    return child
+
+
 class TestAPidThatIsNotAPlainIntegerAboveOneIsRefused:
     @pytest.mark.parametrize("pid", [1, 0, -1, -4242])
     def test_init_and_group_aliases(self, pid: int, tmp_path: Path) -> None:
@@ -148,6 +166,31 @@ class TestADaemonPidIsSignalledOnlyWhenItIsThisProjectsDaemon:
         handle = verified_daemon_process(daemon.pid, project_root=tmp_path)
 
         assert handle.pid == daemon.pid
+
+
+class TestADaemonProvenOnlyByItsRecordedEnvironmentIsSignalled:
+    """Regression: a daemon ``cmd_start`` launches without an explicit
+    ``--project-root`` flag (the common case) must still be provably this
+    project's daemon, not misattributed via the interpreter's own venv path
+    (Plan 00466 N59 gate fix, worktree-n466-n59)."""
+
+    def test_the_daemon_is_signalled_via_its_recorded_env_var(
+        self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
+    ) -> None:
+        daemon = _fake_daemon_via_env(children, tmp_path)
+
+        signal_verified_daemon(daemon.pid, signal.SIGTERM, project_root=tmp_path)
+
+        assert daemon.wait(timeout=Timeout.PROCESS_SAMPLE) == -signal.SIGTERM
+
+    def test_a_daemon_recorded_for_another_project_root_is_refused(
+        self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
+    ) -> None:
+        daemon = _fake_daemon_via_env(children, tmp_path / "other-project")
+
+        with pytest.raises(RefusedSignalTarget, match="project root"):
+            signal_verified_daemon(daemon.pid, signal.SIGTERM, project_root=tmp_path)
+        assert daemon.poll() is None, "the other project's daemon must still be running"
 
 
 class TestStoppingADaemonTermsThenKillsOnlyThisProjectsDaemon:

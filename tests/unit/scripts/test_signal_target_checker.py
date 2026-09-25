@@ -467,6 +467,34 @@ class TestTheRepository:
         assert not any(root.startswith("tests/") for root in roots)
         assert "tests/fixtures/error_hiding/pre_fix_run_lint.sh" not in roots
 
+    def test_a_guarded_path_is_never_read(
+        self, checker: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """``git ls-files`` enumerates every tracked path with no regard for
+        which are guarded; ``scanned_shell_files`` must filter them out
+        itself before anything reads their content (Plan 00412 class 9,
+        Plan 00466 N59 gate fix: mirrors ``check_sensitive_content`` and
+        ``staged_lint_gate.py:249``)."""
+        from claude_code_hooks_daemon.utils import secret_file_matching as matcher_module
+
+        guarded = tmp_path / "guarded.sh"
+        guarded.write_text("#!/bin/bash\nkill -9 $pid\n")
+        allowed = tmp_path / "allowed.sh"
+        allowed.write_text("#!/bin/bash\necho hi\n")
+
+        def fake_patterns() -> list[str]:
+            return ["guarded.sh"]
+
+        def fake_is_protected(path: str, patterns: list[str]) -> bool:
+            return any(pattern in path for pattern in patterns)
+
+        monkeypatch.setattr(matcher_module, "resolve_configured_patterns", fake_patterns)
+        monkeypatch.setattr(matcher_module, "path_is_protected", fake_is_protected)
+
+        result = checker._without_protected_paths([guarded, allowed])
+
+        assert result == [allowed]
+
     def test_tests_tree_is_scanned_but_fixtures_under_it_are_not(self, checker: ModuleType) -> None:
         assert not checker._under_excluded_dir(_REPO_ROOT / "tests" / "foo.sh")
         assert checker._under_excluded_dir(_REPO_ROOT / "tests" / "fixtures" / "foo.sh")

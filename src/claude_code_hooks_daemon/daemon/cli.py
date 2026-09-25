@@ -81,6 +81,10 @@ from claude_code_hooks_daemon.daemon.permission_audit import (
     audit_untracked_permissions,
     tighten_permissions,
 )
+from claude_code_hooks_daemon.daemon.process_verification import (
+    DAEMON_CLI_MODULE,
+    PROJECT_ROOT_ENV_VAR,
+)
 from claude_code_hooks_daemon.daemon.server import (
     DaemonAlreadyRunningError,
     _socket_liveness_sync,
@@ -10410,7 +10414,58 @@ def main() -> int:
         parser.print_help()
         return 1
 
+    _reexec_daemon_launch_with_explicit_project_root(args)
+
     return cast("int", args.func(args))
+
+
+def _reexec_daemon_launch_with_explicit_project_root(args: argparse.Namespace) -> None:
+    """Re-exec ``start``/``restart`` with an explicit ``--project-root`` when
+    none was given (Plan 00466 N59 gate fix).
+
+    Daemonization (``cmd_start``) never execs again after this point -- it
+    only ``os.fork()``s, which copies argv unchanged -- so the detached
+    daemon's cmdline is frozen at whatever THIS process's argv is right now.
+    A caller that omits ``--project-root`` (the common case: production start
+    scripts rely on cwd instead, see ``scripts/upgrade.sh``/
+    ``scripts/install_version.sh``) leaves the daemon provable only via the
+    interpreter-venv-path heuristic in ``process_verification._root_from_interpreter``,
+    which is WRONG whenever the interpreter's own venv lives in a different
+    project than the one it was asked to serve -- one shared venv starting a
+    daemon for an isolated test project root, for instance. Re-execing here
+    (before any forking) bakes the flag into the daemon's own cmdline instead,
+    which ``verified_daemon_process`` already trusts first and every existing
+    test already covers.
+
+    Also records ``PROJECT_ROOT_ENV_VAR`` in this process's environment right
+    before the exec so the daemon's ``/proc/<pid>/environ`` carries it too
+    (belt-and-braces, since ``execve`` -- unlike a later in-process
+    ``os.environ[...] = ...`` -- genuinely re-establishes the process's
+    environment from whatever is current at the moment of the call).
+
+    A no-op for every other command, and for ``start``/``restart`` once
+    ``--project-root`` is already present (including the second time this
+    function runs, in the re-exec'd process, which is what stops the
+    recursion).
+    """
+    if getattr(args, "command", None) not in ("start", "restart"):
+        return
+    if getattr(args, "project_root", None) is not None:
+        return
+
+    project_path = get_project_path(getattr(args, "global_project_root", None))
+    os.environ[PROJECT_ROOT_ENV_VAR] = str(project_path)
+
+    reexec_argv = [sys.executable, "-m", DAEMON_CLI_MODULE, "--project-root", str(project_path)]
+    if getattr(args, "pid_file", None) is not None:
+        reexec_argv += ["--pid-file", str(args.pid_file)]
+    if getattr(args, "socket", None) is not None:
+        reexec_argv += ["--socket", str(args.socket)]
+    reexec_argv.append(args.command)
+
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os.execv(sys.executable, reexec_argv)
 
 
 if __name__ == "__main__":

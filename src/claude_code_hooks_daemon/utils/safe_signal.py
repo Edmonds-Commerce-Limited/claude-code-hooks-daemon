@@ -104,7 +104,7 @@ def verified_daemon_process(pid: object, *, project_root: Path | str) -> psutil.
     if not _is_daemon_server_process(cmdline):
         raise RefusedSignalTarget(f"pid {checked} is not a daemon server: {cmdline!r}")
     expected = _normalize_root(Path(project_root).absolute())
-    actual = _extract_project_root(cmdline)
+    actual = _extract_project_root(process)
     if actual != expected:
         raise RefusedSignalTarget(
             f"pid {checked} is a daemon for project root {actual!r}, not {expected!r}"
