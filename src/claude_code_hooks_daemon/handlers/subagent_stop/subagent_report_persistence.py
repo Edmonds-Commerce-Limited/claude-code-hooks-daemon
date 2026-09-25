@@ -58,6 +58,7 @@ from typing import Any
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import SubagentStopHandlerBase
+from claude_code_hooks_daemon.daemon.synthetic_traffic import is_synthetic_event
 from claude_code_hooks_daemon.utils.option_coercion import coerce_int_option
 from claude_code_hooks_daemon.utils.path_exclusion import resolve_lookup_root
 from claude_code_hooks_daemon.utils.retention import prune_directory
@@ -116,7 +117,7 @@ class SubagentReportPersistenceHandler(SubagentStopHandlerBase):
         self._project_root: Path | None = None
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        """True for every SubagentStop, including a re-entry.
+        """True for every real SubagentStop, including a re-entry.
 
         Review M2: the ``stop_hook_active`` skip other SubagentStop
         handlers use guards against a BLOCKING handler looping on its own
@@ -124,8 +125,12 @@ class SubagentReportPersistenceHandler(SubagentStopHandlerBase):
         against -- and dropping a re-entry stop would mean the agent's
         real, corrected final reply (the one that survived a block from
         another handler and kept working) is never the one persisted.
+
+        A synthetic stop is skipped (Plan 00466 N12): a probe standing for a
+        subagent is not a teammate, and persisting it would file a report
+        no agent wrote.
         """
-        return True
+        return not is_synthetic_event(hook_input)
 
     def _root(self) -> Path:
         """The checkout the report directory is resolved under.

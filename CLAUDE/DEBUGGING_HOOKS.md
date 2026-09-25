@@ -95,6 +95,122 @@ agent** is a full independent session (its own `session_id`, its own bar) while 
 triggered a bar and *whose* identity it carried — multiple sessions on one host/project
 share one daemon, so the daemon sees every session's Status renders.
 
+## Probing a Handler by Hand (`hooks-daemon probe`)
+
+To read one handler's verdict without driving Claude Code, send it a
+hand-built payload. **Mark the payload as a probe.** The daemon writes every
+decision to `verdicts.jsonl`, and a probe arriving through `.claude/hooks/` looks
+exactly like an agent's tool call. An unmarked probe is recorded as REAL
+traffic and skews every figure drawn from the log. That includes the
+orchestrator-simulate record that Plan 00418's enforcement decision is read
+from, so the damage is not cosmetic.
+
+The marker is the `synthetic_source` field on the payload. Its value names
+the producer. For a hand-sent probe that value is **`manual-probe`**. The
+classifier lives in `src/claude_code_hooks_daemon/daemon/synthetic_traffic.py`.
+
+**Use the helper.** It sets the marker for you:
+
+```bash
+bin/hooks-daemon probe PreToolUse --json '{"tool_name":"Bash","tool_input":{"command":"ls -la"}}'
+bin/hooks-daemon probe PreToolUse --file untracked/scratch/payload.json
+bin/hooks-daemon probe PreToolUse --as sub --json '{"tool_name":"CronDelete","tool_input":{"id":"x"}}'
+```
+
+It sends the payload through the project's own entry point
+(`.claude/hooks/<event>`) and prints the decision, the reason and the raw
+response. Before sending, it fills in anything the payload leaves out:
+
+- `synthetic_source: manual-probe`
+- `probe_as`, the thread the probe stands for (see below). It is set only on
+  an event that can carry `agent_id`, and is `main` unless you pass
+  `--as sub`.
+- `hook_event_name`
+- `cwd`, set to the project root
+- a fresh `session_id` (`manual-probe-<hex>`), so a handler with a
+  once-per-session or disclosure-ladder behaviour answers as it would on a
+  first fire. Set `session_id` yourself to probe a repeat.
+
+A payload that already carries its own `synthetic_source` keeps it. A
+`synthetic_source` that is empty or not a string is refused, because the log
+would ignore it. The event can be spelled `PreToolUse`, `pre-tool-use` or
+`pre_tool_use`. The exit code is 0 when the daemon answered, whatever it
+decided. It is 1 when there was no verdict: the daemon was not reached,
+rejected the event, or answered with something that is not JSON. It is 2 when
+the payload or event was wrong, and nothing was sent.
+
+**Probing a command a guard matches:** put the payload in a file and use
+`--file`. The guard judges your own Bash command's text. A `--json` or `echo`
+argument that spells out `git reset --hard` is therefore denied before the
+probe ever runs.
+
+**`probe_as`: the thread a probe stands for.** A fabricated event is neither
+a real main thread nor a subagent. So `core/handler_scope.py`'s
+`scope_admits` refuses a synthetic event for every handler scoped `MAIN` or
+`SUB` unless the event names its thread:
+
+- `"probe_as":"main"` stands for the main thread, and carries no `agent_id`.
+- `"probe_as":"sub"` stands for a subagent, and carries
+  `"agent_id":"manual-probe-agent"` (`PROBE_AGENT_ID`). That is the one fixed
+  identity for a probe, deliberately not the shape of a real agent id. A
+  probe carrying a real teammate's id is refused.
+
+The scoped handlers today are `auto_continue_stop`, `cron_stop_enforcer` and
+`teammate_reap_advisor` (`MAIN`), and `subagent_cron_delete_blocker` (`SUB`).
+The `orchestrator_simulate` project handler applies the same rule through
+`acts_as_main_thread`. Without `probe_as`, a probe of one of these is answered
+as if the handler were not there. Measured: a marked Stop probe with no
+`probe_as` answers `{}`, and with `"probe_as":"main"` it is blocked with
+`R-STOP-NO-REASON`.
+
+`probe_as` is honoured only when `synthetic_source` is a probe source
+(`PROBE_CLASS_SOURCES`):
+
+- `manual-probe`, a probe sent by hand;
+- `transport-verify`, the transport toggle's own verification probes;
+- `test-probe`, a test or QA script probing the live daemon;
+- `socket-stdin-test`, the forwarder socket-stdin integration test.
+
+A harness run, a cron tick or a supervisor-generated event cannot claim a
+thread. It keeps the refusal
+whatever it carries, and the helper warns when a caller-supplied source makes
+`probe_as` inert. Handlers that record state about real agents ignore
+synthetic events entirely: sub-agent report persistence, the status-line cache
+aggregator, the goal ledger and goal signal, and the human-blocked marker
+that silences a session's failsafe cron. `auto_continue_stop`'s own
+`stop-events.jsonl` tags a probe's line with `"synthetic"`.
+
+**Piping a raw payload instead:** set the fields yourself.
+
+```bash
+echo '{"tool_name":"Bash","tool_input":{"command":"ls -la"},"synthetic_source":"manual-probe","probe_as":"main"}' \
+  | bash .claude/hooks/pre-tool-use
+```
+
+`tests/integration/test_documented_hook_probes_are_marked.py` fails in three
+cases:
+
+- a document sends a payload to a hook entry point or to the daemon socket
+  without `synthetic_source`;
+- it teaches such a probe but never shows the helper;
+- an inline probe (an `echo` payload, or `probe --json`) is denied by this
+  project's own handlers before it is sent.
+
+There is no exemption. `tests/acceptance/test_documented_stop_probe.py`
+sends the Stop probe the debugging docs teach through the live entry point,
+and asserts that it is blocked.
+
+`tests/integration/test_live_probes_are_marked.py` holds code to the same
+rule. Any acceptance or integration test, or script under `scripts/`, with a
+route to the live daemon must mark each payload with a probe-class source.
+The routes are this repository's `.claude/hooks/` entry points, the acceptance
+`daemon_socket` fixture, and the live socket. A payload for an event that can
+carry `agent_id` also needs `probe_as`. A status-line payload has no
+`hook_event_name` (the transport injects it), so on the status-line route the
+guard knows it by its shape: fields only the daemon's status-line schema
+declares, such as `model` and `workspace`. A test that starts its own daemon
+in a temporary directory writes to a log deleted with it, and is not judged.
+
 ## Workflow: From Scenario to Handler
 
 ### Step 1: Identify Scenario

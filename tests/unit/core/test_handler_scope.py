@@ -34,7 +34,13 @@ from claude_code_hooks_daemon.core.handler_scope import (
     scope_admits,
 )
 from claude_code_hooks_daemon.daemon.synthetic_traffic import (
+    MANUAL_PROBE,
+    PROBE_AGENT_ID,
+    PROBE_AS_FIELD,
+    SOCKET_STDIN_TEST,
     SYNTHETIC_SOURCE_FIELD,
+    TEST_PROBE,
+    TRANSPORT_VERIFY,
 )
 
 _AGENT_ID = "agent_01H9XQK2M4N7P"
@@ -93,6 +99,68 @@ class TestScopeSub:
     def test_refuses_a_synthetic_event(self) -> None:
         """Symmetry: a fabricated event is neither, so neither scope claims it."""
         assert not scope_admits(HandlerScope.SUB, _synthetic())
+
+
+def _probe(**fields: Any) -> dict[str, Any]:
+    """A hand-sent probe: marked with the probe helper's own source."""
+    return {**_main_thread(), SYNTHETIC_SOURCE_FIELD: MANUAL_PROBE, **fields}
+
+
+class TestProbeAs:
+    """Plan 00466 N12: a probe is synthetic for the LOG and still names a thread.
+
+    Without this a marked probe could never exercise a MAIN- or SUB-scoped
+    handler: measured, a marked Stop probe answered `{}` where the same
+    payload unmarked was blocked by `auto_continue_stop`.
+    """
+
+    def test_a_probe_as_main_is_admitted_by_main(self) -> None:
+        assert scope_admits(HandlerScope.MAIN, _probe(**{PROBE_AS_FIELD: "main"}))
+
+    def test_a_probe_as_main_is_refused_by_sub(self) -> None:
+        assert not scope_admits(HandlerScope.SUB, _probe(**{PROBE_AS_FIELD: "main"}))
+
+    def test_a_probe_with_no_probe_as_is_still_refused_by_both(self) -> None:
+        assert not scope_admits(HandlerScope.MAIN, _probe())
+        assert not scope_admits(HandlerScope.SUB, _probe())
+
+    def test_a_probe_as_sub_with_the_probe_agent_is_admitted_by_sub(self) -> None:
+        event = _probe(**{PROBE_AS_FIELD: "sub", "agent_id": PROBE_AGENT_ID})
+        assert scope_admits(HandlerScope.SUB, event)
+        assert not scope_admits(HandlerScope.MAIN, event)
+
+    def test_a_probe_as_sub_needs_the_documented_probe_agent_id(self) -> None:
+        """Otherwise a probe could borrow a real teammate's identity."""
+        assert not scope_admits(HandlerScope.SUB, _probe(**{PROBE_AS_FIELD: "sub"}))
+        real = _probe(**{PROBE_AS_FIELD: "sub", "agent_id": _AGENT_ID})
+        assert not scope_admits(HandlerScope.SUB, real)
+
+    def test_a_probe_as_main_carrying_an_agent_id_contradicts_itself(self) -> None:
+        event = _probe(**{PROBE_AS_FIELD: "main", "agent_id": PROBE_AGENT_ID})
+        assert not scope_admits(HandlerScope.MAIN, event)
+
+    @pytest.mark.parametrize("source", ["playbook-probe", "cron-tick"])
+    def test_a_non_probe_synthetic_source_cannot_claim_a_thread(self, source: str) -> None:
+        """A harness, a cron tick or a supervisor event keeps today's refusal."""
+        event = {**_main_thread(), SYNTHETIC_SOURCE_FIELD: source, PROBE_AS_FIELD: "main"}
+        assert not scope_admits(HandlerScope.MAIN, event)
+        sub = {**event, PROBE_AS_FIELD: "sub", "agent_id": PROBE_AGENT_ID}
+        assert not scope_admits(HandlerScope.SUB, sub)
+
+    @pytest.mark.parametrize("source", [TRANSPORT_VERIFY, TEST_PROBE, SOCKET_STDIN_TEST])
+    def test_a_live_daemon_probe_source_is_declared_probe_class(self, source: str) -> None:
+        """Each sends a Stop probe that exists to see `auto_continue_stop` block."""
+        event = {**_main_thread(), SYNTHETIC_SOURCE_FIELD: source, PROBE_AS_FIELD: "main"}
+        assert scope_admits(HandlerScope.MAIN, event)
+
+    @pytest.mark.parametrize("value", ["MAIN", "orchestrator", "", 1, None])
+    def test_an_unknown_probe_as_value_is_refused(self, value: object) -> None:
+        assert not scope_admits(HandlerScope.MAIN, _probe(**{PROBE_AS_FIELD: value}))
+
+    def test_probe_as_on_real_traffic_changes_nothing(self) -> None:
+        """Only a synthetic event consults it; a real event is judged as today."""
+        assert not scope_admits(HandlerScope.MAIN, {**_subagent(), PROBE_AS_FIELD: "main"})
+        assert scope_admits(HandlerScope.MAIN, {**_main_thread(), PROBE_AS_FIELD: "sub"})
 
 
 class TestAgentTypeIsNeverConsulted:

@@ -50,6 +50,10 @@ from claude_code_hooks_daemon.core.transcript_reader import (
     TranscriptMessage,
     TranscriptReader,
 )
+from claude_code_hooks_daemon.daemon.synthetic_traffic import (
+    VERDICT_SYNTHETIC_FIELD,
+    event_synthetic_source,
+)
 from claude_code_hooks_daemon.utils.blockage_marker import MARKER_FILENAME, write_marker
 from claude_code_hooks_daemon.utils.goal_ledger import (
     LEDGER_FILENAME,
@@ -830,12 +834,17 @@ class AutoContinueStopHandler(StopHandlerBase):
             applicable -- Branch 2 ALLOWed for an unrelated reason). Otherwise
             True/False for whether the marker was actually written -- Plan
             00314 field observability: a matching text that ends up False
-            (missing session_id, no project context, or a swallowed OSError
-            inside ``write_marker``) is exactly the "matched but not armed"
+            (a synthetic event, missing session_id, no project context, or a
+            swallowed OSError inside ``write_marker``) is exactly the "matched but not armed"
             case that was previously invisible outside the volatile log ring.
         """
         if not _declares_human_blocked(text):
             return None
+        if event_synthetic_source(hook_input) is not None:
+            # Plan 00466 N12: the marker silences a session's failsafe cron,
+            # and a probe must never switch recovery off for any session.
+            logger.debug("human-blocked marker: synthetic event, skipping")
+            return False
         session_id = hook_input.get(HookInputField.SESSION_ID)
         if not isinstance(session_id, str) or not session_id:
             logger.debug("human-blocked marker: no session_id, skipping")
@@ -1139,6 +1148,12 @@ class AutoContinueStopHandler(StopHandlerBase):
             transcript_bytes = _transcript_size(hook_input)
             if transcript_bytes is not None:
                 entry["transcript_bytes"] = transcript_bytes
+            # Plan 00466 N12: a `probe_as: main` probe reaches this handler,
+            # so its line must be told apart from a real stop, as in
+            # verdicts.jsonl. Omitted for real traffic, like the fields above.
+            synthetic = event_synthetic_source(hook_input)
+            if synthetic is not None:
+                entry[VERDICT_SYNTHETIC_FIELD] = synthetic
             with open_private_append(log_path) as f:
                 f.write(json.dumps(entry) + "\n")
             # Plan 00181: bound the append-only log (keep newest half on breach).

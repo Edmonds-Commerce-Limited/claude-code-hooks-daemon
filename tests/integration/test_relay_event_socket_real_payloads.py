@@ -62,10 +62,22 @@ from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
 from claude_code_hooks_daemon.daemon.paths import get_event_socket_dir_from_untracked
 from claude_code_hooks_daemon.daemon.server import HooksDaemon
+from claude_code_hooks_daemon.daemon.synthetic_traffic import (
+    PROBE_AS_FIELD,
+    SYNTHETIC_SOURCE_FIELD,
+    TEST_PROBE,
+    ProbeThread,
+)
 from claude_code_hooks_daemon.install.forwarder_generator import generate_forwarder_content
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _HOOKS_DIR = _REPO_ROOT / ".claude" / "hooks"
+
+# Every payload a test sends is marked as a probe (Plan 00466 N12). The marker
+# is the daemon's own field, never one the transport injects, so a payload
+# carrying it is still "realistic" in the sense this module means.
+_MARKED: dict[str, Any] = {SYNTHETIC_SOURCE_FIELD: TEST_PROBE}
+_MAIN_PROBE: dict[str, Any] = {**_MARKED, PROBE_AS_FIELD: ProbeThread.MAIN.value}
 
 # ---------------------------------------------------------------------------
 # Realistic minimal payloads, keyed by json_key (the wire event name family;
@@ -77,36 +89,44 @@ _CORE_SCHEMA_PAYLOADS: dict[str, dict[str, Any]] = {
         "hook_event_name": "PreToolUse",
         "tool_name": "Bash",
         "tool_input": {"command": "echo hi"},
+        **_MAIN_PROBE,
     },
     "PostToolUse": {
         "hook_event_name": "PostToolUse",
         "tool_name": "Bash",
         "tool_input": {"command": "echo hi"},
         "tool_response": {"stdout": "hi\n", "stderr": ""},
+        **_MAIN_PROBE,
     },
     "PermissionRequest": {
         "hook_event_name": "PermissionRequest",
         "tool_name": "Bash",
         "permission_suggestions": [{"type": "once"}],
+        **_MARKED,
     },
     "Notification": {
         "hook_event_name": "Notification",
         "notification_type": "idle_prompt",
+        **_MARKED,
     },
     "SessionStart": {
         "hook_event_name": "SessionStart",
         "session_id": "sess-e2e-001",
+        **_MARKED,
     },
     "SessionEnd": {
         "hook_event_name": "SessionEnd",
         "session_id": "sess-e2e-001",
+        **_MARKED,
     },
     "PreCompact": {
         "hook_event_name": "PreCompact",
+        **_MARKED,
     },
     "UserPromptSubmit": {
         "hook_event_name": "UserPromptSubmit",
         "prompt": "hello",
+        **_MARKED,
     },
 }
 
@@ -125,6 +145,7 @@ def _payload_for(meta: EventIDMeta) -> dict[str, Any]:
             "model": {"display_name": "Claude Sonnet 4.5", "id": "claude-sonnet-4-5-20250929"},
             "context_window": {"used_percentage": 25.0},
             "workspace": {"current_dir": str(_REPO_ROOT), "project_dir": str(_REPO_ROOT)},
+            **_MARKED,
         }
     if meta.json_key in _CORE_SCHEMA_PAYLOADS:
         return dict(_CORE_SCHEMA_PAYLOADS[meta.json_key])
@@ -132,7 +153,7 @@ def _payload_for(meta: EventIDMeta) -> dict[str, Any]:
     # requires only a matching hook_event_name (core/input_schemas.py
     # _permissive_input_schema) — the minimal conformant payload IS the
     # real schema surface for these events today.
-    return {"hook_event_name": meta.json_key}
+    return {"hook_event_name": meta.json_key, **_MARKED}
 
 
 _RELAY_ELIGIBLE_METAS = tuple(m for m in wired_event_metas() if m.relay_eligible)

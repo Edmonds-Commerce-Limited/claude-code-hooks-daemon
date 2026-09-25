@@ -150,8 +150,17 @@ call starts it again.
 To see it running, check immediately after a hook fires:
 
 ```bash
-echo '{"tool_name":"Bash","tool_input":{"command":"echo test"}}' | bash .claude/hooks/pre-tool-use && \
+.claude/hooks-daemon/bin/hooks-daemon probe PreToolUse --json '{"tool_name":"Bash","tool_input":{"command":"echo test"}}' && \
 .claude/hooks-daemon/bin/hooks-daemon status
+```
+
+The `probe` command sends one test payload through your hook and prints the
+decision. It marks the payload `"synthetic_source": "manual-probe"`, so the
+daemon's verdict log does not count it as a real tool call. To pipe the
+payload yourself, set the field by hand:
+
+```bash
+echo '{"tool_name":"Bash","tool_input":{"command":"echo test"},"synthetic_source":"manual-probe"}' | bash .claude/hooks/pre-tool-use
 ```
 
 If the restart delay is what bothers you rather than the status line, raise

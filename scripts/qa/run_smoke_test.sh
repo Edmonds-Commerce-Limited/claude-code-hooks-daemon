@@ -108,9 +108,13 @@ SMOKE_TRANSCRIPT="$(mktemp -t smoke-stop-loop-XXXXXX.jsonl)"
 # (EXIT trap installed below — covers both transcript and stdout-capture tmpfile)
 printf '%s\n' '{"type":"user","message":{"role":"user","content":"Stop hook feedback:\nYou stopped without explaining why."}}' > "${SMOKE_TRANSCRIPT}"
 
-PROBE1='{"hook_event_name":"Stop","stop_hook_active":false,"session_id":"smoke-test-probe"}'
-PROBE2="$(printf '{"hook_event_name":"Stop","stop_hook_active":true,"transcript_path":"%s","session_id":"smoke-test-probe"}' "${SMOKE_TRANSCRIPT}")"
-PROBE3='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git reset --hard HEAD"},"session_id":"smoke-test-probe"}'
+# Every probe is marked (Plan 00466 N12): they go through the LIVE daemon,
+# whose verdicts.jsonl is the real record. probe_as main keeps the MAIN-scoped
+# auto_continue_stop judging the Stop probes, so PROBE2's "must not block" is
+# not a pass on a handler that never looked.
+PROBE1='{"hook_event_name":"Stop","stop_hook_active":false,"session_id":"smoke-test-probe","synthetic_source":"test-probe","probe_as":"main"}'
+PROBE2="$(printf '{"hook_event_name":"Stop","stop_hook_active":true,"transcript_path":"%s","session_id":"smoke-test-probe","synthetic_source":"test-probe","probe_as":"main"}' "${SMOKE_TRANSCRIPT}")"
+PROBE3='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git reset --hard HEAD"},"session_id":"smoke-test-probe","synthetic_source":"test-probe","probe_as":"main"}'
 
 # Plan 00101 Phase 9: stop wrapper now exits 2 on block (hard re-entry).
 # We need stdout (the daemon JSON) regardless of exit code, since exit 2 is

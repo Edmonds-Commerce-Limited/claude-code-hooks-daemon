@@ -300,9 +300,16 @@ Daemon is not running
 ### 3. Test Hook Execution
 
 ```bash
-echo '{"hook_event_name":"EventType","tool_name":"Bash","tool_input":{"command":"echo test"}}' | \
+# The helper marks the probe as synthetic traffic and prints the verdict:
+.claude/hooks-daemon/bin/hooks-daemon probe EventType --json '{"tool_name":"Bash","tool_input":{"command":"echo test"}}'
+
+# Or pipe the raw payload, with the marker set by hand:
+echo '{"hook_event_name":"EventType","tool_name":"Bash","tool_input":{"command":"echo test"},"synthetic_source":"manual-probe"}' | \
   .claude/hooks/event-type
 ```
+
+Every test payload carries `"synthetic_source":"manual-probe"`. Without it,
+the daemon's verdict log records the probe as a real agent's tool call.
 
 **Expected output**:
 
@@ -322,7 +329,7 @@ Example:
 
 ```bash
 # Test SessionStart hook with new handler
-echo '{"hook_event_name":"SessionStart","source":"new"}' | \
+echo '{"hook_event_name":"SessionStart","source":"new","synthetic_source":"manual-probe"}' | \
   .claude/hooks/session-start
 ```
 

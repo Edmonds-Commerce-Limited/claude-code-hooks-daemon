@@ -768,6 +768,49 @@ def write_input(file_path: str, content: str) -> dict:
     }
 ```
 
+### Probing the Live Handler
+
+Unit tests call the handler directly. To check the handler as the running
+daemon answers it, send a hand-built payload through the project's entry
+point, and **mark it as a probe**. The daemon records every decision in
+`verdicts.jsonl`. An unmarked probe is logged as a real agent's traffic.
+
+```bash
+# The helper sets synthetic_source=manual-probe and probe_as=main for you:
+./bin/hooks-daemon probe PreToolUse --json '{"tool_name":"Bash","tool_input":{"command":"ls -la"}}'
+
+# Piping a raw payload instead, with the fields set by hand:
+echo '{"tool_name":"Bash","tool_input":{"command":"ls -la"},"synthetic_source":"manual-probe","probe_as":"main"}' \
+  | bash .claude/hooks/pre-tool-use
+```
+
+**The design, in brief.** A probe answers two questions:
+
+- `synthetic_source` says whether it belongs in the real record. A probe does
+  not.
+- `probe_as` says which thread a scoped handler should judge it as.
+
+A synthetic event is otherwise neither a main thread nor a subagent, so a
+handler scoped `MAIN` or `SUB` never sees it. `probe_as: main|sub` (the
+helper's `--as`) lets it through. This is honoured only for a probe-class
+source, never for a harness, a cron tick or a supervisor event. The
+probe-class sources are declared by name in `PROBE_CLASS_SOURCES` (listed in
+DEBUGGING_HOOKS.md); a hand-sent probe uses `manual-probe`, and a test or QA
+script probing the live daemon uses `test-probe`.
+`tests/integration/test_live_probes_are_marked.py` fails on a test or script
+that sends the live daemon an unmarked payload. `probe_as: sub` carries the
+fixed `agent_id` `manual-probe-agent`, which no consumer mistakes for a real
+teammate.
+
+If your handler RECORDS something about real agents or sessions, it should
+decline a synthetic event, as report persistence and the goal ledger do.
+Otherwise a probe writes into state that real sessions then act on.
+
+The rest is described in
+[DEBUGGING_HOOKS.md](DEBUGGING_HOOKS.md#probing-a-handler-by-hand-hooks-daemon-probe):
+the fields the helper fills in, its exit codes, and why a guarded command
+belongs in a `--file` payload.
+
 ## Common Patterns
 
 ### Pattern 1: Regex Matching
@@ -1253,8 +1296,10 @@ plugins:
 3. **Test handler**:
 
 ```bash
-# Handler will now run on all PreToolUse events
-# Verify with: .claude/hooks/pre-tool-use < test-input.json
+# Handler will now run on all PreToolUse events. Verify it with a probe,
+# which is marked synthetic_source=manual-probe so the verdict log does not
+# count it as an agent's tool call:
+./bin/hooks-daemon probe PreToolUse --file test-input.json
 ```
 
 ### Multiple Handlers in One File
