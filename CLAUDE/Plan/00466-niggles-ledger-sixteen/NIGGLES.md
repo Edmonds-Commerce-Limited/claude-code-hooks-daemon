@@ -9,6 +9,28 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N63 — Supervisor unit tests read the ambient `CCY_*` environment, so a ccy session fails a test CI passes
+
+**Found by the N24 fixer.** On main,
+`test_effort_restore.py::test_opus_below_default_minimum_injects_high` fails
+in this container: it gets `/effort medium` where the test expects
+`/effort high`. It passes in CI. The cause is that the container exports
+`CCY_MIN_EFFORT_LEVELS=fable=low,opus=medium`, and the supervisor reads it at
+decision time.
+
+`tests/unit/supervise/conftest.py` already clears one such variable,
+`CCY_FLAG_COMPACT`, after the same failure shape bit before. That fix named one
+variable, not the class. The supervisor reads at least five more
+(`CCY_MIN_EFFORT_LEVELS`, `CCY_MODEL_RESTORE_SECONDS`,
+`CCY_MODEL_CONFIRM_ENTERS`, `CCY_EFFORT_CONFIRM_ENTERS`, and the Ctrl+C guard
+variables).
+
+**Remedy:**
+
+- the autouse fixture clears every `CCY_*` variable;
+- a guard test fails if the supervisor defines an environment-variable
+  constant outside `CCY_*` that the fixture does not also clear.
+
 ### N62 — Nothing bounds a subagent's context, so long-lived agents burn the usage budget
 
 **Found by the owner**, who hit the 5-hour limit during a coordinated run. The

@@ -20,6 +20,7 @@ their explicit setup still wins.
 from __future__ import annotations
 
 import json
+import os
 from typing import TYPE_CHECKING
 
 import pytest
@@ -69,10 +70,21 @@ def write_attributed_downgrade(
     return path
 
 
+AMBIENT_ENV_PREFIXES = ("CCY_", "CLAUDE_SUPERVISE_")
+
+
 @pytest.fixture(autouse=True)
-def _neutralise_ambient_flag_compact(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Clear ambient ``CCY_FLAG_COMPACT`` so tests default to the shipped-off state."""
-    monkeypatch.delenv(_mod._FLAG_COMPACT_ENV_VAR, raising=False)
+def _neutralise_ambient_ccy_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Clear every ambient supervisor variable so tests see the shipped defaults.
+
+    A ccy session exports its own tuning (``CCY_MIN_EFFORT_LEVELS``,
+    ``CCY_FLAG_COMPACT``, ...), which the supervisor reads at decision time.
+    Clearing the whole namespace, not one named variable, is what keeps a new
+    tunable from reintroducing the in-session-only failure (00466 N63).
+    """
+    for name in list(os.environ):
+        if name.startswith(AMBIENT_ENV_PREFIXES):
+            monkeypatch.delenv(name, raising=False)
 
 
 @pytest.fixture(autouse=True)
