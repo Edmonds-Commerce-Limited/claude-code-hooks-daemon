@@ -125,9 +125,7 @@ def _answer_or_fallback(
         return fallback
 
 
-def _log_unreadable(
-    path: str | Path, predicate_name: str, exc: OSError, fallback: object
-) -> None:
+def _log_unreadable(path: str | Path, predicate_name: str, exc: OSError, fallback: object) -> None:
     """Log the substitution, in full for a burst's first few, then aggregated.
 
     The window resets on the first call after it elapses, so a later,

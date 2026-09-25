@@ -1066,9 +1066,7 @@ class TestEnvironmentSetupProducersRunNoQa:
     ) -> None:
         assert find_full_qa_invocation(command, _patterns(), cwd=tmp_path) is None, command
 
-    def test_environment_setup_beside_a_targeted_run_is_still_allowed(
-        self, tmp_path: Path
-    ) -> None:
+    def test_environment_setup_beside_a_targeted_run_is_still_allowed(self, tmp_path: Path) -> None:
         (tmp_path / ".git").mkdir()
         (tmp_path / "tests" / "unit" / "qa").mkdir(parents=True)
         command = 'eval "$(pyenv init -)"; pytest tests/unit/qa'
@@ -1565,20 +1563,14 @@ class TestReadingAScriptDoesNotMisreadItsProse:
         )
         assert find_full_qa_invocation("python lint.py", _patterns(), cwd=tmp_path) is None
 
-    def test_a_large_script_whose_only_mention_of_pytest_is_a_comment(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_large_script_whose_only_mention_of_pytest_is_a_comment(self, tmp_path: Path) -> None:
         body = "# pytest is run by CI, not here\necho build\n" + ("# padding\n" * 3_400)
         (tmp_path / "build.sh").write_text(body, encoding="utf-8")
         assert find_full_qa_invocation("bash build.sh", _patterns(), cwd=tmp_path) is None
 
-    def test_a_docstring_that_genuinely_runs_the_suite_is_still_found(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_docstring_that_genuinely_runs_the_suite_is_still_found(self, tmp_path: Path) -> None:
         (tmp_path / "run.py").write_text(
-            '"""Run the whole suite."""\n'
-            "import os\n"
-            f'{self._SHELL_OUT}("pytest tests")\n',
+            '"""Run the whole suite."""\n' "import os\n" f'{self._SHELL_OUT}("pytest tests")\n',
             encoding="utf-8",
         )
         assert find_full_qa_invocation("python run.py", _patterns(), cwd=tmp_path) is not None
@@ -1696,9 +1688,7 @@ class TestFindExecIsFollowed:
             "find tests/unit -exec pytest -q {} +",
         ],
     )
-    def test_find_exec_naming_the_whole_tree_is_denied(
-        self, tmp_path: Path, command: str
-    ) -> None:
+    def test_find_exec_naming_the_whole_tree_is_denied(self, tmp_path: Path, command: str) -> None:
         assert find_full_qa_invocation(command, _patterns(), cwd=self._tree(tmp_path)), command
 
     def test_find_exec_on_a_narrow_start_path_is_not(self, tmp_path: Path) -> None:
@@ -1720,9 +1710,7 @@ class TestTheMergeBaseListingIsAccepted:
         return tmp_path
 
     def test_a_merge_base_substitution_is_a_targeted_listing(self, tmp_path: Path) -> None:
-        command = (
-            'git diff --name-only "$(git merge-base main HEAD)" -- tests | xargs -r pytest'
-        )
+        command = 'git diff --name-only "$(git merge-base main HEAD)" -- tests | xargs -r pytest'
         assert find_full_qa_invocation(command, _patterns(), cwd=self._tree(tmp_path)) is None
 
     def test_an_unrelated_substitution_still_refuses_the_listing(self, tmp_path: Path) -> None:

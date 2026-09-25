@@ -2605,11 +2605,7 @@ def _resolve_find(
     """
     start_paths: list[str] = []
     index = 0
-    while (
-        index < len(rest)
-        and not _is_flag(rest[index])
-        and rest[index] not in _FIND_PATH_STOP
-    ):
+    while index < len(rest) and not _is_flag(rest[index]) and rest[index] not in _FIND_PATH_STOP:
         start_paths.append(rest[index])
         index += 1
     narrowed = any(word in _FIND_NARROWING_TESTS for word in rest)
@@ -2785,9 +2781,7 @@ def _process_call_spans(code: str) -> list[str]:
         rf"\s*\.\s*\w+\s*\(",
     ]
     if bare:
-        call_patterns.append(
-            rf"(?<![\w.])(?:{'|'.join(re.escape(name) for name in bare)})\s*\("
-        )
+        call_patterns.append(rf"(?<![\w.])(?:{'|'.join(re.escape(name) for name in bare)})\s*\(")
     spans = []
     for call_pattern in call_patterns:
         for match in re.finditer(call_pattern, code):
@@ -3520,7 +3514,7 @@ class _Event:
     marked: dict[str, bool] = field(default_factory=dict)
     parse_budget: int = _MAX_PARSED_FILE_BYTES
     scan_budget: int = _MAX_SCANNED_FILE_BYTES
-    verdicts: dict[_VerdictKey, "FullQaMatch | None"] = field(default_factory=dict)
+    verdicts: dict[_VerdictKey, FullQaMatch | None] = field(default_factory=dict)
     verdicts_pending: set[_VerdictKey] = field(default_factory=set)
 
 
