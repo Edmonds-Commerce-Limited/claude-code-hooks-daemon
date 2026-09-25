@@ -9,6 +9,21 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N66 — Two singleton race tests depend on `time.sleep(0.02)`, so they can pass without the race happening
+
+**Found by N23 review 5 (its L6); carried open by the round 6 fixer.** The race
+tests in `test_data_layer.py` and `test_controller.py` sleep inside a slow
+initialiser to widen the window. On a loaded host the second thread may not
+arrive inside it, so the test passes whether or not the lock is correct.
+
+A naive N-party Barrier inside the initialiser deadlocks under the correct
+implementation, because only the winning thread reaches it.
+
+**Candidate remedy:** instrument the ENTRY of `get_data_layer()` (and the
+controller equivalent) with a test hook. Hold every thread at an entry barrier,
+release them together, and assert exactly one initialisation. Mutation proof:
+removing the lock must fail the test every time, not sometimes.
+
 ### N65 — `plan_number_helper` denies an `ls` of one named plan's folder as a next-number scan
 
 **Found by the coordinator.** In a worktree it ran
