@@ -351,9 +351,26 @@ class TestIterNormalisedShellWordsNestedCommands:
         assert "world" not in words
 
     def test_unrelated_dash_c_content_is_unaffected(self) -> None:
+        """`echo hello world` inside a `-c` argument (depth 1) is now ALSO
+        recursed into as its own nested command (review 7 follow-up's
+        depth>0 bare-`pipe_echo` fix, needed to reveal a mention hidden
+        behind a `bash -c "$(echo '...')"` shape) -- `hello`/`world` are
+        yielded twice (once from the depth-1 parse, once from the extra
+        depth-2 recursion this fix adds), harmlessly: neither is a
+        protected-path mention, and a repeated non-mention token changes
+        no verdict."""
         command = "bash -c 'echo hello world'"
         words = list(iter_normalised_shell_words(command))
-        assert words == ["bash", "-c", "echo hello world", "echo", "hello", "world"]
+        assert words == [
+            "bash",
+            "-c",
+            "echo hello world",
+            "echo",
+            "hello",
+            "world",
+            "hello",
+            "world",
+        ]
 
     def test_excessive_nesting_fails_closed_rather_than_hanging_or_allowing(
         self,
@@ -998,3 +1015,137 @@ class TestIterNormalisedShellWordsWrapperFalsePositives:
 
     def test_nice_running_an_ordinary_build_does_not_raise(self) -> None:
         list(iter_normalised_shell_words("nice -n 10 make -j4"))
+
+
+class TestIterNormalisedShellWordsGd6Shell2Residuals:
+    """Plan 00466 review 7 follow-up: five of the ten gd6_shell2 probe
+    residuals team-lead asked to be classified turned out to be genuine
+    fail-opens, fixed here (the other five are: one probe-authoring error
+    -- `perl -e 'system("cat "..."")'` is a real Perl syntax error, never
+    executes -- and four deferred, real fail-opens needing a materially
+    different mechanism, static same-command variable/alias/file-write
+    tracking, scoped to a dedicated follow-up rather than rushed here)."""
+
+    def test_ssh_to_loopback_recurses_into_the_remote_command(self) -> None:
+        """`ssh localhost CMD` executes CMD on THIS machine -- row 'ssh
+        remote cmd'."""
+        command = "ssh localhost 'cat wor'\\''ld'"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_ssh_to_a_loopback_ip_recurses_too(self) -> None:
+        command = "ssh user@127.0.0.1 'cat wor'\\''ld'"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_ssh_to_a_real_remote_host_does_not_recurse(self) -> None:
+        """Control: a genuine remote host's filesystem is out of scope --
+        recursing would fail closed on everyday `ssh deploy@server
+        'systemctl restart myapp'`."""
+        command = "ssh deploy@server 'cat wor'\\''ld'"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" not in words
+
+    def test_ssh_with_a_port_flag_before_the_loopback_target_still_recurses(
+        self,
+    ) -> None:
+        command = "ssh -p 2222 user@localhost 'cat wor'\\''ld'"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_pipe_content_through_an_unrecognised_transform_to_a_shell_fails_closed(
+        self,
+    ) -> None:
+        """`echo BASE64 | base64 -d | bash` -- row 'base64 | bash (opaque:
+        fail closed?)'. `base64 -d` is not a wrapper, shell or passthrough
+        (`tee`/`cat`), so the content it hands the shell cannot be
+        verified."""
+        command = "echo BASE64DATA | base64 -d | bash"
+        with pytest.raises(TooManyToEnumerateError):
+            list(iter_normalised_shell_words(command))
+
+    def test_opaque_transform_stage_with_multiple_words_still_fails_closed(
+        self,
+    ) -> None:
+        """The unrecognised stage's OWN flags (`-d`) must not end the
+        opaque tracking early -- `base64` alone already fails closed;
+        `base64 -d` (its ordinary spelling) must too."""
+        command = "echo BASE64DATA | base64 | bash"
+        with pytest.raises(TooManyToEnumerateError):
+            list(iter_normalised_shell_words(command))
+
+    def test_ordinary_pipelines_with_no_captured_content_are_unaffected(self) -> None:
+        """An unrecognised stage with NOTHING captured upstream (no
+        echo/printf/tee before it) must not raise -- only a genuinely
+        dropped, known producer payload does."""
+        list(iter_normalised_shell_words("curl -s https://example.com | jq '.data'"))
+        list(iter_normalised_shell_words("docker ps | awk '{print $1}'"))
+        list(iter_normalised_shell_words("ps aux | grep python"))
+
+    def test_echo_piped_through_an_unrecognised_stage_with_nothing_further_is_allowed(
+        self,
+    ) -> None:
+        """The pipeline ends at the unrecognised stage (no further `|`) --
+        nothing ever reaches a shell, so there is nothing to fail closed
+        about."""
+        list(iter_normalised_shell_words("echo hello | tr a-z A-Z"))
+
+    def test_source_procsub_fed_by_base64_decode_fails_closed(self) -> None:
+        """`source <(base64 -d <<< Y2F0)` -- row 'source nonliteral -> fail
+        closed'. `base64` can turn ANY payload into the sourced script;
+        scanning its own invocation text can never reveal what it decodes
+        to."""
+        command = "source <(base64 -d <<< Y2F0)"
+        with pytest.raises(TooManyToEnumerateError):
+            list(iter_normalised_shell_words(command))
+
+    def test_source_procsub_fed_by_openssl_fails_closed(self) -> None:
+        command = "source <(openssl enc -d -aes-256-cbc -in secret.enc)"
+        with pytest.raises(TooManyToEnumerateError):
+            list(iter_normalised_shell_words(command))
+
+    def test_source_procsub_fed_by_an_ordinary_tool_still_scans_its_own_text(
+        self,
+    ) -> None:
+        """Review 6 MAJOR-2's default is UNCHANGED for anything outside the
+        narrow opaque-transform set -- `source <(cat somefile)` stays
+        scanned by its own command text, not failed closed wholesale."""
+        words = list(iter_normalised_shell_words("source <(cat wor'ld)"))
+        assert "world" in words
+
+    def test_source_procsub_fed_by_a_completion_generator_stays_allowed(self) -> None:
+        """Control: the false-positive corpus's `source <(kubectl
+        completion bash)` family must not regress."""
+        words = list(iter_normalised_shell_words("source <(kubectl completion bash)"))
+        assert "kubectl" in words
+
+    def test_a_plain_procsub_argument_to_a_non_source_command_is_unaffected(
+        self,
+    ) -> None:
+        """`diff <(sort file1) <(sort file2)` -- NOT fed to `source`/`.`,
+        so the narrow opaque-transform fail-closed check must not apply
+        even when the substitution's head IS in that set."""
+        list(iter_normalised_shell_words("diff <(base64 file1) <(base64 file2)"))
+
+    def test_bash_c_fed_by_a_bare_echo_command_substitution_is_reparsed(self) -> None:
+        """`bash -c "$(echo '...')"` -- row 'bash -c cmd-subst'. `echo`'s
+        argument, once quote-decoded, is `cat wor""ld` with the middle
+        quotes literal at THIS level -- only a further re-parse (this
+        fix) splices them, revealing `world`."""
+        command = "bash -c \"$(echo 'cat wor\"\"ld')\""
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_bash_c_fed_by_a_split_printf_format_is_reparsed(self) -> None:
+        """`bash -c "$(printf 'cat %s' '...')"` -- row 'printf format
+        split'."""
+        command = "bash -c \"$(printf 'cat %s' 'wor\"\"ld')\""
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_a_top_level_bare_echo_is_not_recursed_into(self) -> None:
+        """Control: a plain TOP-LEVEL `echo` with nothing consuming its
+        output is a harmless PRINT -- must NOT be recursed into (that
+        would deny ordinary text that merely LOOKS like a shell command)."""
+        words = list(iter_normalised_shell_words("echo 'cat wor\"\"ld'"))
+        assert "world" not in words

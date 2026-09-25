@@ -420,6 +420,24 @@ _WRAPPER_POSITIONAL_COUNT: Final[dict[str, int]] = {"timeout": 1}
 #: command it runs (`env FOO=bar bash`).
 _ENV_ASSIGNMENT_RE: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
+#: `ssh` invoked with a LOOPBACK target (`ssh localhost CMD`, `ssh user@
+#: 127.0.0.1 CMD`) executes CMD on THIS machine, not a remote one -- review
+#: 7 follow-up (gd6_shell2 residual). Any OTHER target is a genuine remote
+#: host, whose filesystem this project's protected-path patterns say
+#: nothing about, so `ssh host CMD` for a non-loopback host is
+#: deliberately NOT recursed into (that would fail closed on every
+#: everyday `ssh deploy@server 'systemctl restart myapp'`).
+_SSH_BASENAMES: Final[frozenset[str]] = frozenset({"ssh"})
+_SSH_LOOPBACK_HOSTS: Final[frozenset[str]] = frozenset({"localhost", "127.0.0.1", "::1"})
+#: Common `ssh` short flags that take their value as the NEXT word -- a
+#: best-effort walk (an unrecognised flag simply is not skipped, so the
+#: NEXT word is misread as the target and, if it happens not to be a
+#: loopback host, this recursion just does not fire -- fails toward NOT
+#: recursing, never toward a false deny).
+_SSH_SHORT_VALUE_FLAGS: Final[frozenset[str]] = frozenset(
+    {"-p", "-i", "-o", "-l", "-F", "-J", "-c", "-S", "-w", "-B", "-b", "-m", "-O", "-Q", "-e", "-R", "-L", "-D", "-W"}
+)
+
 
 def _classify_wrapper_option_word(wrapper: str, word: str) -> str:
     """Classify one word while walking ``wrapper``'s OWN options/positionals
@@ -462,6 +480,41 @@ _MAX_NESTED_SHELL_BYTES: Final[int] = 32768
 def _interpreter_basename(word: str) -> str:
     """``word`` with any leading path stripped (e.g. `/bin/bash` -> `bash`)."""
     return word.rsplit("/", 1)[-1]
+
+
+#: `source <(PRODUCER)` -- review 7 follow-up (gd6_shell2 residual, row
+#: "source nonliteral -> fail closed"): review 6 MAJOR-2's own deliberate
+#: default is "scan the producer's own command text, deny only if THAT
+#: mentions a protected path" -- kept UNCHANGED for the general case
+#: (`source <(cat somefile)`, `source <(some-devops-tool print-env)`,
+#: every completion/init generator already pinned in the false-positive
+#: corpus), since that default is precisely what avoids failing closed on
+#: everyday `source <(kubectl completion bash)`-shaped commands.
+#:
+#: The gap review 7 found is narrower: a producer that OPAQUELY TRANSFORMS
+#: its input (base64/openssl/gzip-family decoding) can turn ANY payload
+#: into the sourced script, and scanning the DECODER's own invocation text
+#: (`base64 -d`) can never reveal what it decodes TO. These are the only
+#: basenames that override review 6's default and fail closed.
+_OPAQUE_SOURCE_TRANSFORM_BASENAMES: Final[frozenset[str]] = frozenset(
+    {
+        "base64",
+        "base32",
+        "openssl",
+        "xxd",
+        "gzip",
+        "gunzip",
+        "zcat",
+        "bzip2",
+        "bunzip2",
+        "bzcat",
+        "xz",
+        "unxz",
+        "xzcat",
+        "uudecode",
+        "iconv",
+    }
+)
 
 
 # n466-n24 review 6: three more nested-command shapes, closed rather than
@@ -1032,10 +1085,17 @@ def _iter_normalised_shell_words(
     direct_wrapper_value_is_code = False  # `env -S STRING` -- STRING is code
     direct_wrapper_positionals_remaining = 0
 
+    # `ssh [options] [user@]TARGET [COMMAND...]` -- looking for TARGET to
+    # decide whether COMMAND (an eval-style joined trailing argument list)
+    # is executed on THIS machine (review 7 follow-up).
+    scanning_ssh_target = False
+    ssh_awaiting_value = False
+
     # `eval`/a process substitution's content/`echo|printf ... | <shell>`
     # word-joining.
     collecting_words: list[str] | None = None
-    # "eval" | "procsub" | "pipe_echo" | "output_procsub" (review 7 MAJOR-3)
+    # "eval" | "procsub" | "source_procsub" | "pipe_echo" | "output_procsub"
+    # ("source_procsub" is review 7 follow-up; the rest are review 7 MAJOR-3)
     collecting_purpose: str | None = None
     collecting_head: str | None = None  # the trigger word, for echo/printf decode
 
@@ -1044,6 +1104,21 @@ def _iter_normalised_shell_words(
     pipe_content: str | None = None
     pipe_stage_awaiting_head = False
     pipe_stage_passthrough = False  # inside a `tee` stage; content survives it
+    # Review 7 follow-up (gd6_shell2 residual): `pipe_content` passed
+    # through an UNRECOGNISED stage (`base64 -d`, `openssl enc -d`, any
+    # command that is not a known wrapper/shell/passthrough) -- the
+    # content is no longer reliable (the unrecognised stage may have
+    # transformed it into anything), so it is kept PENDING rather than
+    # silently dropped: if a shell interpreter is later reached while this
+    # is set, that is "known producer content reached a shell through an
+    # opaque transform we cannot see through" and fails CLOSED, rather
+    # than the prior silent drop (a genuine fail-open this review found:
+    # `echo BASE64 | base64 -d | bash`).
+    pipe_content_opaque = False
+    # Walking an unrecognised stage's OWN trailing words (`base64 -d`) --
+    # mirrors `pipe_stage_passthrough`'s own multi-word tracking, since an
+    # unrecognised command's flags are not in any known option table.
+    scanning_opaque_stage = False
     # `echo '...' > >(shell)` (review 7 MAJOR-3) -- an OUTPUT process
     # substitution reads what was just redirected INTO it, the same
     # content a `|` would have piped to a plain shell.
@@ -1146,6 +1221,13 @@ def _iter_normalised_shell_words(
             pipe_stage_awaiting_head = stop_char == _PIPE_OPERATOR
             if not pipe_stage_awaiting_head:
                 pipe_content = None
+                pipe_content_opaque = False
+        if scanning_opaque_stage and is_terminator_next:
+            scanning_opaque_stage = False
+            pipe_stage_awaiting_head = stop_char == _PIPE_OPERATOR
+            if not pipe_stage_awaiting_head:
+                pipe_content = None
+                pipe_content_opaque = False
 
         # 0c. Resolve the head of a pipeline stage pending content is
         #     waiting on: a wrapper (keep looking, walking ITS OWN options
@@ -1189,6 +1271,19 @@ def _iter_normalised_shell_words(
             elif _is_shell_interpreter(basename):
                 content = pipe_content
                 pipe_content = None
+                opaque = pipe_content_opaque
+                pipe_content_opaque = False
+                if opaque:
+                    # Review 7 follow-up: known producer content reached
+                    # this shell through an unrecognised intermediate
+                    # transform (e.g. `base64 -d`) -- the actual bytes the
+                    # shell receives cannot be verified, so this fails
+                    # CLOSED (raises) rather than recursing into a
+                    # possibly-stale `content` and answering "no mention".
+                    raise TooManyToEnumerateError(
+                        "pipe content reached a shell through an unrecognised "
+                        "intermediate transform -- cannot rule out a protected path"
+                    )
                 yield from _recurse_into_nested_command(
                     content or "",
                     max_words=max_words,
@@ -1216,8 +1311,32 @@ def _iter_normalised_shell_words(
                     pipe_stage_awaiting_head = stop_char == _PIPE_OPERATOR
                     if not pipe_stage_awaiting_head:
                         pipe_content = None
-            else:
-                pipe_content = None
+                        pipe_content_opaque = False
+            elif pipe_content is not None:
+                # Review 7 follow-up: an UNRECOGNISED stage (not a
+                # wrapper, shell or passthrough) sits between known
+                # producer content and whatever comes next -- the content
+                # is kept PENDING (opaque) rather than dropped, so a
+                # LATER shell stage in the SAME pipeline still fails
+                # closed on it, instead of the prior silent drop.
+                # `scanning_opaque_stage` (mirrors `pipe_stage_
+                # passthrough`) tracks this stage's OWN trailing words
+                # (`base64 -d`'s `-d`) since an unrecognised command's
+                # flags are not in any known option table; the 0b check
+                # above resolves it exactly like a passthrough stage once
+                # its last word is reached.
+                pipe_content_opaque = True
+                scanning_opaque_stage = True
+                if is_terminator_next:
+                    scanning_opaque_stage = False
+                    pipe_stage_awaiting_head = stop_char == _PIPE_OPERATOR
+                    if not pipe_stage_awaiting_head:
+                        pipe_content = None
+                        pipe_content_opaque = False
+                # else: more words in this SAME unrecognised stage follow
+                # (`base64 -d`'s `-d`) -- state stays as set above,
+                # resolved by the `scanning_opaque_stage` check in 0b once
+                # this stage's LAST word is reached.
             previous_word = decoded
             continue
 
@@ -1344,6 +1463,35 @@ def _iter_normalised_shell_words(
             previous_word = decoded
             continue
 
+        # 2c. Walking `ssh`'s OWN options, looking for its TARGET argument
+        #     (review 7 follow-up) -- once found, a LOOPBACK target means
+        #     everything after it is an eval-style joined command executed
+        #     on THIS machine; any other target is a genuine remote host
+        #     and nothing further is done (the rest is scanned as
+        #     ordinary words, same as before this fix).
+        if scanning_ssh_target:
+            if ssh_awaiting_value:
+                ssh_awaiting_value = False
+                previous_word = decoded
+                continue
+            if decoded in _SSH_SHORT_VALUE_FLAGS:
+                ssh_awaiting_value = True
+                previous_word = decoded
+                continue
+            if decoded.startswith("-"):
+                # A plain flag (`-4`, `-A`, ...) or an unrecognised one
+                # (best-effort: fails toward NOT recursing, see above).
+                previous_word = decoded
+                continue
+            scanning_ssh_target = False
+            target = decoded.rsplit("@", 1)[-1]
+            if target in _SSH_LOOPBACK_HOSTS:
+                collecting_words = []
+                collecting_purpose = "eval"
+                collecting_head = None
+            previous_word = decoded
+            continue
+
         # 3. Currently walking an interpreter's (or code-flag wrapper's)
         #    option words.
         if scanning_interpreter_options:
@@ -1423,6 +1571,7 @@ def _iter_normalised_shell_words(
         if collecting_words is not None:
             collecting_words.append(decoded)
             if is_terminator_next:
+                head = collecting_head
                 joined = _resolve_collected_producer_text(collecting_head, collecting_words)
                 purpose = collecting_purpose
                 collecting_words = None
@@ -1438,9 +1587,43 @@ def _iter_normalised_shell_words(
                         # not dropped, until the next word resolves it.
                         pipe_content = joined
                         pipe_content_awaiting_output_procsub = True
-                    # else: not piped/redirected to anything relevant --
+                    elif depth > 0:
+                        # Review 7 follow-up (gd6_shell2 residual): a bare
+                        # `echo`/`printf` INSIDE a nested substitution
+                        # (`$(...)`, an `eval` argument, a process
+                        # substitution) is unconditionally EXECUTED by the
+                        # shell to produce its output -- that is what
+                        # command substitution means -- and the produced
+                        # text commonly becomes CODE for an outer `-c`/
+                        # `eval` context (a `bash -c` or `eval` argument
+                        # built entirely from one such substitution) that
+                        # this forward, single-pass parser cannot see from
+                        # inside the substitution body itself. Recursing
+                        # into the resolved text as its own command
+                        # reveals a mention hidden behind exactly this
+                        # "the shell re-parses the produced text as
+                        # source" shape -- the same second-parse-reveal
+                        # mechanism a nested `-c`/`eval` argument already
+                        # gets, and the same "fail toward denying more"
+                        # trade-off MAJOR-2 already makes for `$(...)`
+                        # bodies themselves.
+                        #
+                        # Scoped to `depth > 0` (inside a substitution)
+                        # specifically so a plain TOP-LEVEL echo of some
+                        # arbitrary text -- a harmless PRINT with nothing
+                        # consuming its output -- is not recursed into and
+                        # denied: that command never executes what it
+                        # prints.
+                        yield from _recurse_into_nested_command(
+                            joined,
+                            max_words=max_words,
+                            depth=depth,
+                            remaining_bytes=remaining_bytes,
+                            deadline=deadline,
+                        )
+                    # else: top-level (depth == 0), not piped/redirected --
                     # no recursion; the words were already scanned
-                    # individually above.
+                    # individually above, and nothing executes this text.
                 elif purpose == "output_procsub":
                     # The substitution's OWN command text (e.g. `bash`,
                     # `tee file`) is judged like any other nested command,
@@ -1462,6 +1645,37 @@ def _iter_normalised_shell_words(
                             deadline=deadline,
                         )
                 else:
+                    # `purpose` is "eval", "procsub" or "source_procsub"
+                    # here. For "eval", `joined` genuinely BECOMES the
+                    # executed command, so recursing into it is exact, not
+                    # a heuristic. For a plain "procsub" (`diff <(...)`,
+                    # `bash <(...)`, any consumer other than `source`/`.`),
+                    # the substitution is a DATA file-like argument, and
+                    # scanning its own command text (the existing,
+                    # unaffected behaviour) is the right level.
+                    #
+                    # For "source_procsub" (`source <(PRODUCER)`), the
+                    # producer is classified by `head` (its OWN command
+                    # name, never `joined` -- for a literal producer,
+                    # `joined` is already its RESOLVED OUTPUT, i.e. DATA,
+                    # not a command to classify). Review 6 MAJOR-2's
+                    # default (scan the producer's own text, deny only if
+                    # THAT mentions a protected path) is kept for every
+                    # producer except the narrow OPAQUE-TRANSFORM set
+                    # (base64/openssl/gzip-family decoders): those can
+                    # turn ANY payload into the sourced script, and
+                    # scanning the DECODER's own invocation can never
+                    # reveal what it decodes TO -- review 7 follow-up
+                    # (gd6_shell2 residual).
+                    head_basename = _interpreter_basename(head or "")
+                    if (
+                        purpose == "source_procsub"
+                        and head_basename in _OPAQUE_SOURCE_TRANSFORM_BASENAMES
+                    ):
+                        raise TooManyToEnumerateError(
+                            "source <(...) fed by an opaque encode/decode transform "
+                            "-- cannot rule out a protected path"
+                        )
                     yield from _recurse_into_nested_command(
                         joined, max_words=max_words, depth=depth, remaining_bytes=remaining_bytes, deadline=deadline
                     )
@@ -1518,7 +1732,15 @@ def _iter_normalised_shell_words(
         #    which a bare `==` comparison never equals `"<("`.
         if this_word_operators.endswith(_PROCESS_SUBSTITUTION_OPERATOR):
             collecting_words = []
-            collecting_purpose = "procsub"
+            # Review 7 follow-up: a process substitution fed to `source`/
+            # `.` becomes a SCRIPT that is executed -- its producer's
+            # OUTPUT matters, not just its own command text (see the
+            # "source_procsub" handling below). Any OTHER consumer
+            # (`diff <(...)`, `bash <(...)`, a plain argument) treats the
+            # substitution as a DATA file-like argument, unaffected.
+            collecting_purpose = (
+                "source_procsub" if previous_word in _SOURCE_COMMAND_NAMES else "procsub"
+            )
             collecting_head = decoded
             previous_word = decoded
             continue
@@ -1531,6 +1753,7 @@ def _iter_normalised_shell_words(
             )
             pipe_content_awaiting_output_procsub = False
             pipe_content = None
+            pipe_content_opaque = False
             previous_word = decoded
             continue
 
@@ -1558,6 +1781,8 @@ def _iter_normalised_shell_words(
             # `timeout 5 bash -c '…'`.
             scanning_direct_wrapper = basename
             direct_wrapper_positionals_remaining = _WRAPPER_POSITIONAL_COUNT.get(basename, 0)
+        elif basename in _SSH_BASENAMES:
+            scanning_ssh_target = True
 
         previous_word = decoded
 
@@ -1585,6 +1810,19 @@ def _iter_normalised_shell_words(
             # A `pipe_echo` collection ending at end-of-string was never
             # piped/redirected to anything -- its words were already
             # scanned individually, matching the mid-command behaviour.
+            # (This is the rare zero-word-collected edge case -- a real
+            # `source_procsub` producer text with actual words to judge
+            # is always resolved by the mid-loop branch above, since
+            # `is_terminator_next` already accounts for end-of-string.)
+            end_head_basename = _interpreter_basename(collecting_head or "")
+            if (
+                collecting_purpose == "source_procsub"
+                and end_head_basename in _OPAQUE_SOURCE_TRANSFORM_BASENAMES
+            ):
+                raise TooManyToEnumerateError(
+                    "source <(...) fed by an opaque encode/decode transform "
+                    "-- cannot rule out a protected path"
+                )
             yield from _recurse_into_nested_command(
                 joined, max_words=max_words, depth=depth, remaining_bytes=remaining_bytes, deadline=deadline
             )
