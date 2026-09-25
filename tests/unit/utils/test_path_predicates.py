@@ -50,9 +50,19 @@ _PREDICATES: Final[dict[str, tuple[Callable[..., Any], str]]] = {
 }
 
 
+def _a_noisy_guard(path: str) -> bool:
+    """One calling site, standing in for a handler that holds many unreadable paths."""
+    return path_exists(path, unreadable_means=False)
+
+
+def _a_quiet_guard(path: str) -> bool:
+    """Another calling site, standing in for an unrelated handler."""
+    return path_exists(path, unreadable_means=False)
+
+
 @pytest.fixture(autouse=True)
 def _fresh_warning_burst() -> None:
-    """Each test gets its own burst window: the limiter is process-global state."""
+    """Each test gets its own burst windows: the limiter is process-wide, one window per caller."""
     _reset_unreadable_warning_burst()
 
 
@@ -230,6 +240,22 @@ class TestABurstOfUnreadablePathsIsRateLimited:
 
         aggregate_lines = [r for r in caplog.records if "not logged individually" in r.getMessage()]
         assert len(aggregate_lines) == 1
+
+    def test_one_callers_burst_does_not_silence_another_caller(
+        self, deny_every_stat: None, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Review 8 minor m4: the limiter was process-global, so one handler's burst
+        silenced every other module's abstention warnings for the rest of the window."""
+        with caplog.at_level(logging.WARNING):
+            for index in range(20):
+                _a_noisy_guard(f"/root/noisy/{index}")
+            _a_quiet_guard("/root/quiet/0")
+
+        assert any("/root/quiet/0" in record.getMessage() for record in caplog.records)
+        aggregate = [r for r in caplog.records if "not logged individually" in r.getMessage()]
+        assert len(aggregate) == 1
+        # The burst is the calling site's, named as such -- not the predicate's own frame.
+        assert "_a_noisy_guard" in aggregate[0].getMessage()
 
 
 class TestTheCallerCannotAvoidChoosing:
