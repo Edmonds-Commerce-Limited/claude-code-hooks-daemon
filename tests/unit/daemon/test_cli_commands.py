@@ -61,6 +61,58 @@ def reset_project_context() -> None:
     ProjectContext._initialized = False
 
 
+# A pid above the kernel's pid_max ceiling: never a live process, so a signal
+# that escaped every patch below could not reach anything. Every TestCmdStop*
+# test uses this instead of a small hardcoded number (Plan 00466 N24 review 4
+# R4-B2: since the pidfd change, `cmd_stop` signals through `os.pidfd_open` +
+# `signal.pidfd_send_signal`, and a test that patches only `os.kill` no
+# longer intercepts that path -- a hardcoded pid that happened to be live on
+# the host got a REAL SIGTERM and SIGKILL, the N59 crash class).
+_UNREAL_PID = 2**22 + 7
+
+
+@pytest.fixture
+def _reject_unproven_real_signals() -> Iterator[None]:
+    """Fail the test outright if a signal reaches a pid this test did not prove fake.
+
+    Plan 00466 N24 review 4 R4-B2 guard. `TestCmdStop` and
+    `TestCmdStopGenericException` patch only `os.kill`; nothing intercepted
+    `os.pidfd_open`/`signal.pidfd_send_signal`, so `cmd_stop`'s pidfd path
+    reached the real kernel call whenever the test's pid happened to be live.
+    This fixture is the outermost patch of these four signalling primitives
+    for the duration of the test: `_UNREAL_PID` is accepted (and made to
+    behave like a pid that has already exited, exactly as `os.pidfd_open`
+    would report it in real life), and everything else fails the test rather
+    than reach a real signal. A test's own inner `with patch(...)` block
+    still shadows this for whichever primitive it explicitly controls.
+    """
+
+    def guard_pidfd_open(pid: int, flags: int = 0) -> int:
+        if pid != _UNREAL_PID:
+            pytest.fail(f"os.pidfd_open reached with unproven real pid {pid}")
+        raise ProcessLookupError("test guard: _UNREAL_PID never names a live process")
+
+    def guard_pidfd_send_signal(pidfd: int, sig: int) -> None:
+        pytest.fail(
+            f"signal.pidfd_send_signal reached (pidfd={pidfd}, sig={sig}) -- "
+            "unreachable once os.pidfd_open is guarded to always raise for _UNREAL_PID"
+        )
+
+    def guard_kill(pid: int, sig: int) -> None:
+        pytest.fail(f"os.kill reached the guard with unproven real pid {pid}")
+
+    def guard_killpg(pgid: int, sig: int) -> None:
+        pytest.fail(f"os.killpg reached the guard with unproven real pgid {pgid}")
+
+    with (
+        patch("os.pidfd_open", side_effect=guard_pidfd_open),
+        patch("signal.pidfd_send_signal", side_effect=guard_pidfd_send_signal),
+        patch("os.kill", side_effect=guard_kill),
+        patch("os.killpg", side_effect=guard_killpg),
+    ):
+        yield
+
+
 @pytest.fixture
 def pid_proven_ours(tmp_path: Path) -> Iterator[None]:
     """Attribute the stopped pid to ``tmp_path``'s daemon, as a real one would be."""
@@ -359,7 +411,7 @@ class TestCmdStatus:
             assert result == 1
 
 
-@pytest.mark.usefixtures("pid_proven_ours")
+@pytest.mark.usefixtures("pid_proven_ours", "_reject_unproven_real_signals")
 class TestCmdStop:
     """Tests for cmd_stop command."""
 
@@ -406,7 +458,7 @@ class TestCmdStop:
                 raise ProcessLookupError()
 
         with (
-            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=12345),
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=_UNREAL_PID),
             patch("os.kill", side_effect=mock_kill_func),
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_pid_file") as mock_cleanup_pid,
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket") as mock_cleanup_sock,
@@ -432,7 +484,7 @@ class TestCmdStop:
         args = argparse.Namespace(project_root=tmp_path)
 
         with (
-            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=12345),
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=_UNREAL_PID),
             patch("os.kill", side_effect=ProcessLookupError()),
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_pid_file") as mock_cleanup_pid,
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket") as mock_cleanup_sock,
@@ -456,7 +508,7 @@ class TestCmdStop:
         args = argparse.Namespace(project_root=tmp_path)
 
         with (
-            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=12345),
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=_UNREAL_PID),
             patch("os.kill", side_effect=PermissionError("Permission denied")),
         ):
             result = cmd_stop(args)
@@ -476,7 +528,7 @@ class TestCmdStop:
         args = argparse.Namespace(project_root=tmp_path)
 
         with (
-            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=12345),
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=_UNREAL_PID),
             patch("os.kill", return_value=None),  # Process stays alive
             patch("time.sleep"),
         ):
@@ -516,7 +568,7 @@ class TestCmdStop:
             return None
 
         with (
-            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=12345),
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=_UNREAL_PID),
             patch("os.kill", side_effect=mock_kill_func),
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_pid_file") as mock_cleanup_pid,
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket") as mock_cleanup_sock,
@@ -530,7 +582,7 @@ class TestCmdStop:
             mock_cleanup_sock.assert_called_once()
 
 
-@pytest.mark.usefixtures("pid_proven_ours")
+@pytest.mark.usefixtures("pid_proven_ours", "_reject_unproven_real_signals")
 class TestCmdStopGenericException:
     """Tests for cmd_stop generic exception path (line 373-375)."""
 
@@ -547,16 +599,13 @@ class TestCmdStopGenericException:
         args = argparse.Namespace(project_root=tmp_path)
 
         with (
-            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=12345),
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=_UNREAL_PID),
             patch("os.kill", side_effect=RuntimeError("unexpected")),
         ):
             result = cmd_stop(args)
             assert result == 1
 
 
-# A pid above the kernel's pid_max ceiling: never a live process, so a signal
-# that escaped every patch below could not reach anything.
-_UNREAL_PID = 2**22 + 7
 _OTHER_PROJECT_ROOT = "/srv/projects/someone-else"
 
 

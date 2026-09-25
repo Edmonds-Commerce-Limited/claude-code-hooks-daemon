@@ -423,6 +423,30 @@ $_hd_venv_missing_remedy")
             "Then inform the user if the issue persists.")
     fi
 
+    # Plan 00466 N24 review 4 R4-MA2: the DENY reason for PreToolUse (below,
+    # when $_pretooluse_deny is "true") must not reuse $context_msg's
+    # fail-open wording above -- it says safety handlers are "inactive" (they
+    # are actively denying) and routes the agent to the Skill tool, which is
+    # itself a PreToolUse call and so is denied the same way, wedging an
+    # unattended agent in a loop. Give the deny its own honest text instead,
+    # matching emit_error_json's socket_not_found wording: name the one
+    # command that is actually allowed, and name the human fallback.
+    local _pretooluse_deny_msg=""
+    if [[ "$_pretooluse_deny" == "true" ]]; then
+        _pretooluse_deny_msg=$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s' \
+            "HOOKS DAEMON: could not connect at all — denied for safety" \
+            "" \
+            "Error: $error_type - $error_details" \
+            "" \
+            "This call was denied because the daemon could not be reached at all," \
+            "not because a guard judged it. Hook safety handlers are ACTIVE and" \
+            "denying by default until the daemon answers again." \
+            "" \
+            "TO FIX: run exactly bin/hooks-daemon restart (or" \
+            ".claude/hooks-daemon/bin/hooks-daemon restart), which stays allowed" \
+            "even while other calls are denied this way. A human can also run it directly (! bin/hooks-daemon restart) since Edit is denied here too.")
+    fi
+
     # Event-specific JSON formatting. jq is used only on this pure-error path
     # (the hot-path transport is jq-free since Plan 00156); a jq-less fallback
     # follows below for hosts without it.
@@ -486,7 +510,7 @@ $_hd_venv_missing_remedy")
                 jq -n --arg reason "Hooks daemon not running - protection not active" \
                     '{"decision": "block", "reason": $reason}'
             elif [[ "$event_name" == "PreToolUse" && "$_pretooluse_deny" == "true" ]]; then
-                jq -n --arg event "$event_name" --arg reason "$context_msg" \
+                jq -n --arg event "$event_name" --arg reason "$_pretooluse_deny_msg" \
                     '{"hookSpecificOutput": {"hookEventName": $event, "permissionDecision": "deny", "permissionDecisionReason": $reason}}'
             else
                 jq -n --arg event "$event_name" --arg context "$context_msg" \
@@ -506,7 +530,7 @@ $_hd_venv_missing_remedy")
 import json
 import sys
 
-event_name, context_msg, ci_enforced, not_installed, checkout, venv_missing, venv_block_reason, pretooluse_deny = sys.argv[1:9]
+event_name, context_msg, ci_enforced, not_installed, checkout, venv_missing, venv_block_reason, pretooluse_deny, pretooluse_deny_msg = sys.argv[1:10]
 stop_events = ("Stop", "SubagentStop")
 
 if not event_name:
@@ -550,7 +574,7 @@ else:
             "hookSpecificOutput": {
                 "hookEventName": event_name,
                 "permissionDecision": "deny",
-                "permissionDecisionReason": context_msg,
+                "permissionDecisionReason": pretooluse_deny_msg,
             }
         }
     else:
@@ -559,7 +583,7 @@ else:
 print(json.dumps(resp))
 ' "$event_name" "$context_msg" "$_HOOKS_DAEMON_CI_ENFORCED" "$_HOOKS_DAEMON_NOT_INSTALLED" \
             "$_hooks_daemon_checkout" "$_HOOKS_DAEMON_VENV_MISSING" "$venv_block_reason" \
-            "$_pretooluse_deny"
+            "$_pretooluse_deny" "$_pretooluse_deny_msg"
     fi
 }
 
@@ -1917,27 +1941,41 @@ def emit_error_json(event_name, error_type, error_details):
                 'reason': reason,
             }
     elif event_name == 'PreToolUse' \
-            and error_type in ('socket_timeout', 'malformed_response', 'connection_lost',
-                                'connect_backlog_full', 'socket_not_found', 'connection_refused') \
+            and error_type != 'invalid_hook_input' \
             and not _is_daemon_recovery_command(hook_input):
-        # Plan 00466 n24/N24 security review: every one of these means the
-        # daemon produced no usable verdict for this call -- whether it was
-        # reached and then went silent or crashed (socket_timeout,
-        # malformed_response, connection_lost, connect_backlog_full), or
-        # never reachable at all (socket_not_found, connection_refused;
-        # review 3 MA4, owner decision). Fail CLOSED for all of them, unlike
-        # every other PreToolUse error_type below (invalid_hook_input: a
-        # payload that never reached the socket at all, so the daemon state
-        # is unrelated and unknown). This project's install/CI story keeps
+        # Plan 00466 N24 review 4 R4-MA1: deny for EVERY PreToolUse transport
+        # failure except invalid_hook_input (a payload that never reached the
+        # socket at all, so the daemon state is unrelated and unknown) and the
+        # exact daemon-recovery command (review 3 MA4's carve-out, checked via
+        # _is_daemon_recovery_command so this can never itself block the
+        # commands that would fix it). This used to be an ALLOWLIST of known
+        # error_types (socket_timeout, malformed_response, connection_lost,
+        # connect_backlog_full, socket_not_found, connection_refused) that
+        # denied, with everything else falling through to the fail-open
+        # branch below -- so a connect() failure the transport's except
+        # clauses do not name explicitly (PermissionError from a chmod'd
+        # socket, NotADirectoryError, an over-long socket path, ...) disabled
+        # every later PreToolUse guard. 'An exception never means allow' is
+        # binding here: deny by default, name the one exemption instead of a
+        # list of what to deny. This project's install/CI story keeps
         # ensure_daemon's auto-start ahead of every real call site here, so
         # 'the socket that auto-start just tried to reach is still missing'
         # is not the fresh-clone-before-first-install case -- that one is
         # handled entirely by emit_hook_error's own NOT_INSTALLED/
         # VENV_MISSING branches, upstream of ever reaching this transport at
-        # all. _is_daemon_recovery_command is checked so this can never
-        # itself block the exact commands that would fix it.
-        verb = 'responded' if error_type == 'malformed_response' else 'reached'
-        reason = f'Hooks daemon {verb} but produced no verdict ({error_type}) - denied for safety'
+        # all.
+        _POST_CONNECT_TYPES = ('socket_timeout', 'malformed_response', 'connection_lost',
+                                'connect_backlog_full')
+        if error_type == 'malformed_response':
+            verb = 'responded'
+        elif error_type in _POST_CONNECT_TYPES:
+            verb = 'reached'
+        else:
+            # socket_not_found, connection_refused, and every unclassified
+            # error_type alike: connect() itself never succeeded, so the
+            # daemon was never reached at all -- do not claim otherwise.
+            verb = 'unreachable'
+        reason = f'Hooks daemon {verb} - no verdict produced ({error_type}) - denied for safety'
         if timeout_note:
             reason = f'{reason}. {timeout_note}'
         response = {

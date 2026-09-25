@@ -160,6 +160,24 @@ def test_fallback_pretooluse_daemon_startup_failed_denies(tmp_path: Path) -> Non
     assert "boom" in hso["permissionDecisionReason"]
 
 
+def test_fallback_pretooluse_deny_text_is_honest_and_names_no_denied_tool(
+    tmp_path: Path,
+) -> None:
+    """Plan 00466 N24 review 4 R4-MA2: the deny reason must not reuse the
+    fail-open wording (it denies; it is not "inactive"), and must not route
+    the agent to the Skill tool -- Skill is itself a PreToolUse call and is
+    denied the same way, wedging an unattended agent in a loop."""
+    result = _emit(tmp_path, "PreToolUse", "daemon_startup_failed", "boom")
+
+    assert result.returncode == 0, result.stderr
+    parsed = json.loads(result.stdout)
+    reason = parsed["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "inactive" not in reason
+    assert "Skill tool" not in reason
+    assert "denied for safety" in reason
+    assert "bin/hooks-daemon restart" in reason
+
+
 def test_fallback_pretooluse_recovery_command_stays_fail_open(tmp_path: Path) -> None:
     """The exact recovery command must never be blocked by this deny."""
     recovery_hook_input = json.dumps(

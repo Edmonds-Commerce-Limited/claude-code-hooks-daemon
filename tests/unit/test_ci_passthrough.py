@@ -247,8 +247,9 @@ class TestNonCIDaemonFailure:
 
     def test_non_ci_installed_but_not_running_shows_restart_guidance(self, tmp_path: Path) -> None:
         """Non-CI, daemon installed but not starting: PreToolUse now DENIES
-        (Plan 00466 N24 review 3 MA4, owner decision) with a reason that
-        says 'Not currently running' and how to restart."""
+        (Plan 00466 N24 review 3 MA4, owner decision) with a reason that is
+        honest about being a deny (not the old fail-open 'inactive' wording,
+        review 4 R4-MA2) and says how to restart."""
         project = _create_project_structure(tmp_path, ci_enabled=None)
         _create_installed_stub(project)  # venv python exists → daemon appears installed
         result = _run_hook_via_forwarder("pre-tool-use", _PRE_TOOL_INPUT, project)
@@ -260,9 +261,13 @@ class TestNonCIDaemonFailure:
         hso = parsed["hookSpecificOutput"]
         assert hso["permissionDecision"] == "deny"
         reason = hso["permissionDecisionReason"]
+        assert "denied for safety" in reason, f"Expected an honest deny reason, got: {reason!r}"
         assert (
-            "Not currently running" in reason
-        ), f"Expected 'Not currently running' in reason, got: {reason!r}"
+            "inactive" not in reason
+        ), f"Deny reason must not reuse fail-open 'inactive' wording, got: {reason!r}"
+        assert (
+            "Skill tool" not in reason
+        ), f"Deny reason must not route to the denied Skill tool, got: {reason!r}"
         assert "restart" in reason, f"Expected restart instruction in reason, got: {reason!r}"
         assert (
             "LLM-INSTALL.md" not in reason

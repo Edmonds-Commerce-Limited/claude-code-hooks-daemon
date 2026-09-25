@@ -488,6 +488,62 @@ class TestDaemonNotReachableFailsClosedForPreToolUse:
         assert "permissionDecision" not in hso
 
 
+class TestUnclassifiedConnectErrorsFailClosedForPreToolUse:
+    """Plan 00466 N24 review 4 R4-MA1: a connect() failure the transport's
+    ``except`` clauses do not name explicitly must still DENY PreToolUse --
+    the generic ``except Exception`` used to classify these under an
+    ``error_type`` never in the old fail-closed allowlist, silently
+    ALLOWing every later call once one of these fired (e.g. an agent's own
+    ``chmod 000`` of the socket switching every subsequent PreToolUse to
+    ALLOW)."""
+
+    def test_not_a_directory_denies(self, project: Path, tmp_path: Path) -> None:
+        """A path component that is a regular file, not a directory, makes
+        ``connect()`` raise ``NotADirectoryError`` -- unclassified by any of
+        init.sh's named ``except`` clauses."""
+        blocker = tmp_path / "not-a-dir"
+        blocker.write_text("x")
+        response = _send(project, blocker / "fake.sock", "PreToolUse", _BASH_TOOL_INPUT)
+        hso = response["hookSpecificOutput"]
+        assert hso["permissionDecision"] == "deny"
+        assert "denied for safety" in hso["permissionDecisionReason"]
+
+    def test_not_a_directory_recovery_command_is_not_denied(
+        self, project: Path, tmp_path: Path
+    ) -> None:
+        blocker = tmp_path / "not-a-dir-2"
+        blocker.write_text("x")
+        recovery_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "bin/hooks-daemon restart"},
+        }
+        response = _send(project, blocker / "fake.sock", "PreToolUse", recovery_input)
+        hso = response["hookSpecificOutput"]
+        assert "permissionDecision" not in hso
+
+    def test_socket_path_over_the_sun_path_limit_denies(
+        self, project: Path, tmp_path: Path
+    ) -> None:
+        """A path past AF_UNIX's ~108-byte ``sun_path`` cap makes ``connect()``
+        raise a plain ``OSError`` (``ENAMETOOLONG``) -- also unclassified."""
+        overlong = tmp_path / ("x" * 200) / "fake.sock"
+        response = _send(project, overlong, "PreToolUse", _BASH_TOOL_INPUT)
+        hso = response["hookSpecificOutput"]
+        assert hso["permissionDecision"] == "deny"
+        assert "denied for safety" in hso["permissionDecisionReason"]
+
+    def test_not_a_directory_still_fails_open_for_a_non_pretooluse_event(
+        self, project: Path, tmp_path: Path
+    ) -> None:
+        """Only PreToolUse changed; every other event keeps the original
+        fail-open `additionalContext` contract."""
+        blocker = tmp_path / "not-a-dir-3"
+        blocker.write_text("x")
+        response = _send(project, blocker / "fake.sock", "PostToolUse", _BASH_TOOL_INPUT)
+        hso = response["hookSpecificOutput"]
+        assert "permissionDecision" not in hso
+
+
 class TestConnectionRefusedFailsClosedForPreToolUse:
     """Plan 00466 N24 review 3 MA4 follow-up: a socket FILE that exists but
     nothing is listening behind it is a distinct transport failure from

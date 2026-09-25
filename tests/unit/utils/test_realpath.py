@@ -1,9 +1,14 @@
-"""Tests for utils.realpath (Plan 00466 N40 review 2 nit 4).
+"""Tests for utils.realpath (Plan 00466 N24 review 4 R4-B1).
 
-``realpath`` must answer exactly what ``os.path.realpath`` answers, while doing
-O(log depth) filesystem calls rather than one per component: every guard that
-resolves a Write's ``file_path`` paid a full component walk, and a 90 KB-deep
-path cost seconds across the chain.
+``realpath`` must answer exactly what ``os.path.realpath`` answers, on every
+supported Python version -- not just the one the module happened to be
+written against. An earlier hand-written walk matched 3.11's algorithm but
+diverged from 3.13's rewritten symlink-loop handling (a loop followed by
+``..`` resolved differently), letting a Write through an in-project link
+bypass ``project_containment``. ``realpath`` now delegates straight to
+``os.path.realpath``, so every expectation below is "equals
+``os.path.realpath``" by construction; these tests exist to keep it that way
+as the wrapper evolves, not to re-derive the stdlib's own correctness.
 """
 
 from __future__ import annotations
@@ -12,7 +17,6 @@ import os
 import random
 from collections.abc import Callable
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -44,6 +48,8 @@ _RELATIVE_SHAPES = [
     "dangling",
     "dangling/child/../sibling",
     "loop_a/child",
+    "loop_a/../real/inner",
+    "loop_a/../../escape",
     "real/up/real/up/link",
     "real//inner/./file.txt",
     "real/inner/",
@@ -210,19 +216,6 @@ def test_a_nul_byte_after_a_missing_component_still_raises(tree: Path) -> None:
         os.path.realpath(path)
     with pytest.raises(ValueError):
         realpath(path)
-
-
-def test_a_deep_missing_path_costs_logarithmically_many_lstat_calls(tree: Path) -> None:
-    """The point of the helper: not one lstat per component. A deterministic
-    count: one per component that exists, and one for the first that does
-    not."""
-    depth = 4_096
-    deep = str(tree / "real" / ("pkg/" * depth) / "module.py")
-    expected = os.path.realpath(deep)
-    with patch("claude_code_hooks_daemon.utils.realpath.os.lstat", wraps=os.lstat) as lstat:
-        assert realpath(deep) == expected
-    existing_components = len((tree / "real").parts)
-    assert lstat.call_count <= existing_components + depth.bit_length() + 1
 
 
 def test_cost_grows_linearly_with_depth(tree: Path) -> None:

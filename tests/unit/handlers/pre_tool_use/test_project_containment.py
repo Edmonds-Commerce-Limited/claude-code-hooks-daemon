@@ -14,6 +14,7 @@ Two boundaries are load-bearing and are asserted here rather than assumed:
   durable.
 """
 
+import os
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -161,6 +162,46 @@ class TestAnInProjectLinkOutOfTheRoot:
         self, handler: ProjectContainmentHandler, linked_root: Path
     ) -> None:
         assert handler.matches(_write(f"{linked_root}{'/.' * 2_100}/inside.txt")) is False
+
+
+class TestASymlinkLoopFollowedByDotDotOutOfTheRoot:
+    """Plan 00466 N24 review 4 R4-B1: a symlink LOOP, then ``..``, then a link out.
+
+    ``utils.realpath`` used to reimplement ``os.path.realpath``'s walk by
+    hand. Its symlink-loop handling matched CPython 3.11 but diverged from
+    3.13's rewrite of the same algorithm: after hitting the loop, 3.11's own
+    ``os.path.realpath`` gives up and appends the rest of the path
+    unresolved (so ``..`` cancels lexically and the write never reaches
+    ``l_out`` at all), while 3.13 backs out of the loop and keeps resolving,
+    reaching ``l_out`` and following it outside the root. Because
+    ``utils.realpath`` now delegates straight to ``os.path.realpath``, this
+    handler's verdict must equal that per-interpreter answer exactly -- not
+    hardcode one of them -- which is what a bare ``os.path.realpath(path)``
+    call at test time also gives, so it is the test's own oracle.
+    """
+
+    @pytest.fixture()
+    def looped_root(self, tmp_path: Path, _project_root: Any) -> Path:
+        root = tmp_path / "proj"
+        root.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (root / "l_loop").symlink_to(root / "l_loop")  # self-referential loop
+        (root / "l_out").symlink_to(outside)
+        _project_root.return_value = root
+        return root
+
+    def test_it_agrees_with_os_path_realpath_end_to_end(
+        self, handler: ProjectContainmentHandler, looped_root: Path
+    ) -> None:
+        target = f"{looped_root}/l_loop/../l_out/escape.txt"
+        resolved = os.path.realpath(target)
+        actually_escapes = os.path.commonpath([resolved, str(looped_root)]) != str(looped_root)
+
+        result = handler.handle(_write(target))
+
+        assert handler.matches(_write(target)) is actually_escapes
+        assert result.decision == (Decision.DENY if actually_escapes else Decision.ALLOW)
 
 
 class TestTheBashSurface:
