@@ -1564,6 +1564,61 @@ def _resolve_socket_timeout():
 
 SOCKET_TIMEOUT_SECONDS = _resolve_socket_timeout()
 
+# Plan 00466 n24 security review: filled in once the raw hook_input is
+# parsed, below. Stays None for a failure that fires before parsing (e.g.
+# invalid_hook_input) -- every reader of this name tolerates that.
+hook_input = None
+
+# The exact daemon recovery commands a PreToolUse deny must never block, so
+# a wedged/slow daemon (the B2 GIL-hang shape: alive but not answering) can
+# still be recovered from inside the same session. EXACT match only, no
+# compound commands (no '&&', ';', extra args, ...) -- anything else is
+# judged like any other command.
+_RECOVERY_BINARIES = ('bin/hooks-daemon', '.claude/hooks-daemon/bin/hooks-daemon')
+_RECOVERY_SUBCOMMANDS = ('restart', 'status', 'logs', 'stop', 'start')
+
+def _is_daemon_recovery_command(hi):
+    '''True when hi is a Bash call whose WHOLE command is exactly one
+    binary + one subcommand from the allowlists above.'''
+    if not isinstance(hi, dict) or hi.get('tool_name') != 'Bash':
+        return False
+    tool_input = hi.get('tool_input')
+    if not isinstance(tool_input, dict):
+        return False
+    command = tool_input.get('command')
+    if not isinstance(command, str):
+        return False
+    stripped = command.strip()
+    return any(
+        stripped == f'{binary} {sub}'
+        for binary in _RECOVERY_BINARIES
+        for sub in _RECOVERY_SUBCOMMANDS
+    )
+
+def _pretooluse_response_looks_valid(text):
+    '''True when text parses as one of PreToolUse's two legitimate response
+    shapes: {} (a real ALLOW with nothing to say -- HookResult.to_json's
+    documented empty-response case) or a dict with a hookSpecificOutput key
+    whose permissionDecision, if present, is one of the four known values.
+    A response missing entirely, not valid JSON, or shaped as neither of
+    these is NOT a judged verdict -- the daemon-side handler chain may
+    have crashed or hung partway through serialising it.'''
+    if not text:
+        return False
+    try:
+        data = json.loads(text)
+    except Exception:
+        return False
+    if not isinstance(data, dict):
+        return False
+    if data == {}:
+        return True
+    hso = data.get('hookSpecificOutput')
+    if not isinstance(hso, dict):
+        return False
+    decision = hso.get('permissionDecision')
+    return decision is None or decision in ('allow', 'deny', 'ask', 'defer')
+
 def emit_error_json(event_name, error_type, error_details):
     '''Output valid hook error response to stdout.
 
@@ -1603,6 +1658,34 @@ def emit_error_json(event_name, error_type, error_details):
             '',
             'This usually means the session transcript has grown very large.',
             'Run /compact or start a new session to restore fast hooks.',
+            '',
+            'If this is a PreToolUse call being denied for safety because of',
+            'this timeout: a genuinely wedged daemon (not just a slow handler)',
+            'is fixed by restarting it -- run exactly bin/hooks-daemon restart',
+            '(or .claude/hooks-daemon/bin/hooks-daemon restart), which stays',
+            'allowed even while other calls are denied this way.',
+        ]
+    elif error_type == 'malformed_response':
+        # The socket round-trip SUCCEEDED (connect+send+recv all completed),
+        # but what came back was not a valid decision -- the daemon-side
+        # chain crashed partway through serialising its verdict, or the
+        # connection closed early. Distinct from socket_timeout (no response
+        # at all within budget) and from a genuinely dead daemon (which
+        # would have failed to connect in the first place).
+        context_lines = [
+            'HOOKS DAEMON: responded, but not with a valid decision',
+            '',
+            f'Error: {error_type} - {error_details}',
+            '',
+            'The daemon was REACHED and answered, but the response could not',
+            'be parsed as a judged verdict for this call.',
+            '',
+            'TO FIX: run exactly bin/hooks-daemon restart (or',
+            '.claude/hooks-daemon/bin/hooks-daemon restart), which stays',
+            'allowed even while other calls are denied this way. Then use the',
+            'hooks-daemon skill to verify health (args=health).',
+            'If this recurs, use the hooks-daemon skill to check logs',
+            '(args=logs) and report it.',
         ]
     else:
         context_lines = [
@@ -1651,8 +1734,38 @@ def emit_error_json(event_name, error_type, error_details):
                 'decision': 'block',
                 'reason': reason,
             }
+    elif event_name == 'PreToolUse' and error_type in ('socket_timeout', 'malformed_response') \
+            and not _is_daemon_recovery_command(hook_input):
+        # Plan 00466 n24 security review: the daemon was REACHED (or, for
+        # malformed_response, answered) but produced no usable verdict --
+        # exactly the shape B2's GIL-holding quadratic regex produced (a
+        # live daemon the client gave up on at 30s, silently ALLOWing
+        # whatever was requested). Fail CLOSED here, unlike every other
+        # PreToolUse error_type below. Deliberately narrower than any
+        # transport failure at all: socket_not_found, connection_refused
+        # and invalid_hook_input all mean the daemon was never reached,
+        # which keeps the existing, separately-documented fail-open path
+        # (ensure_daemon's auto-start already ran before this point; denying
+        # every tool call whenever the daemon is merely absent -- e.g. a
+        # fresh clone before first install -- would make Claude Code itself
+        # unusable, a materially different cost than a rare timeout).
+        # _is_daemon_recovery_command is checked so this can never itself
+        # block the exact commands that would fix it.
+        verb = 'reached' if error_type == 'socket_timeout' else 'responded'
+        reason = f'Hooks daemon {verb} but produced no verdict ({error_type}) - denied for safety'
+        response = {
+            'hookSpecificOutput': {
+                'hookEventName': event_name,
+                'permissionDecision': 'deny',
+                'permissionDecisionReason': reason,
+                'additionalContext': context,
+            }
+        }
     else:
-        # Other events: hookSpecificOutput with context (fail-open allow)
+        # Other events, and every other PreToolUse error_type (daemon not
+        # reachable at all, or a client-side parse failure, or an exact
+        # daemon-recovery command): hookSpecificOutput with context
+        # (fail-open allow) -- the existing, documented behaviour.
         response = {
             'hookSpecificOutput': {
                 'hookEventName': event_name,
@@ -1780,6 +1893,17 @@ try:
         print(render_status(output))
     elif response_mode == 'worktree':
         print_worktree(output)  # prints raw path + exits (0 on success, 1 if none)
+    elif event_name == 'PreToolUse' and not _pretooluse_response_looks_valid(output):
+        # Plan 00466 n24 security review: a response WAS received (the
+        # connect+send+recv all succeeded), but it is not one of
+        # PreToolUse's two legitimate shapes -- the connection closed
+        # early, or the daemon-side chain crashed partway through
+        # serialising its verdict. Treated exactly like a socket_timeout:
+        # fail CLOSED via emit_error_json's PreToolUse branch (still
+        # carving out an exact daemon-recovery command).
+        fail('malformed_response',
+            f'Daemon responded but the response was not a valid PreToolUse '
+            f'decision (received {output[:200]!r})')
     else:
         print(output)
     sys.exit(0)

@@ -148,15 +148,62 @@ non-glob-derived regex against structured input (header lines, shell
 tokens, bracket expressions) — a different audit (ReDoS review of
 hand-written regexes), out of B2's specific scope.
 
+**Client fail-closed for PreToolUse — ✅ Remedied.** `init.sh`'s
+`send_request_stdin` (the python3 transport embedded in every hook
+forwarder) previously fell open for every event except Stop/SubagentStop on
+ANY failure, including a socket timeout against a daemon B2 had already
+proven could be demonstrably alive and simply stuck — the client-side half
+of exactly the gap B2 exploited. Team-lead's explicit, unattended decision
+(2026-09-24) superseded an earlier "the client does not fail closed"
+constraint. Two new failure classes now deny for `PreToolUse` specifically,
+leaving every other event and every other `PreToolUse` error type
+unchanged:
+
+1. `socket_timeout` (connect+send succeeded, the daemon was reached and is
+   alive, but nothing came back within `CLAUDE_HOOKS_SOCKET_TIMEOUT`,
+   default 30s).
+2. A new `malformed_response` check on the SUCCESS path: the round-trip
+   completed, but the bytes received are not one of PreToolUse's two
+   legitimate shapes (`{}` — a real ALLOW with nothing to say, matching
+   `HookResult.to_json`'s documented empty-response case — or a dict with a
+   `hookSpecificOutput` key whose `permissionDecision`, if present, is one
+   of the four known values). Previously the response was echoed to stdout
+   completely unvalidated.
+
+Both are DELIBERATELY narrower than "any transport failure at all":
+`socket_not_found`, `connection_refused` and `invalid_hook_input` (the
+daemon was never reached, or the caller's own payload never parsed
+client-side) keep the existing, separately-documented fail-open path
+(`ensure_daemon`'s auto-start already ran before this point) — denying
+every tool call whenever the daemon is merely absent would make Claude Code
+itself unusable during any daemon downtime, a materially different cost
+from a rare timeout or garbled response. A new
+`_is_daemon_recovery_command` allowlist (exact match only, no compound
+commands) exempts `bin/hooks-daemon`/`.claude/hooks-daemon/bin/hooks-daemon`
+`restart`/`status`/`logs`/`stop`/`start` from BOTH new deny paths, so a
+wedged daemon can always still be restarted from inside the same session —
+`bin/hooks-daemon restart && rm -rf /` is deliberately NOT exempt (the
+allowlist check is a whole-string `==`, not a prefix match).
+
+Pinned end-to-end against the REAL script (sourced, not reimplemented) in
+`tests/integration/test_init_sh_pretooluse_fail_closed.py`: a real bound
+AF_UNIX socket that accepts, reads the request, then never responds (the
+socket_timeout/GIL-hang shape) denies for PreToolUse but leaves Stop's
+existing fail-open unaffected; a socket that responds with unparseable
+bytes or valid-JSON-wrong-shape both deny; the exact recovery command still
+gets through under either failure (a compound variant does not); a
+legitimate `{}` and a legitimate real deny both pass through byte-identical
+to before; a nonexistent socket (genuinely no daemon) keeps the existing
+fail-open path. Confirmed RED first: replayed the same hanging-socket
+fixture against the pre-fix `init.sh` (git blob `362e2516`) and got the old
+fail-open `additionalContext`-only response with no `permissionDecision`.
+`shellcheck init.sh` clean; the embedded python3 block (extracted by line
+range) independently `compile()`-checked and its two new helper functions
+unit-tested in isolation before the end-to-end run. `.claude/init.sh` is a
+symlink to `../init.sh`, so no separate deploy-sync step was needed.
+
 **Remaining review items, not yet started:**
 
-- **Client fail-closed for PreToolUse** (`init.sh`/hook shim): a socket
-  timeout or an invalid/malformed/empty response must become a DENY with
-  recovery instructions, with a narrow exact-match allowlist for
-  `bin/hooks-daemon`/`.claude/hooks-daemon/bin/hooks-daemon`
-  restart/status/logs/stop/start (no compound commands) so a wedged daemon
-  never bricks a session. "Daemon not running" keeps its existing
-  documented auto-start path.
 - **M1** — the deadline clock starts at `chain.execute`, not request
   arrival; executor queueing can push a judged-late request past the
   client's 30s timeout regardless of the per-handler bound N34 added.
