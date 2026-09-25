@@ -602,18 +602,34 @@ def _parse_python_fragment(content: str) -> ast.Module | None:
        block to sit inside.
 
     ``None`` when none of the three parses, so the caller falls back to
-    the (weaker) regex heuristic rather than under-detecting silently.
+    the (weaker) regex heuristic rather than under-detecting silently. Each
+    failed attempt is logged (error_hiding N-item: no bare
+    try/except/continue and no `return None` inside a handler), the last
+    at warning level since it is the point the caller actually loses
+    precision.
     """
     for attempt in (content, textwrap.dedent(content)):
         try:
             return ast.parse(attempt)
-        except (SyntaxError, ValueError):
+        except (SyntaxError, ValueError) as exc:
+            logger.debug(
+                "secret_file_guard: fragment parse attempt failed, trying next "
+                "recovery shape: %s",
+                exc,
+            )
             continue
     wrapped = "def _f():\n" + textwrap.indent(content, "    ")
+    tree: ast.Module | None = None
     try:
-        return ast.parse(wrapped)
-    except (SyntaxError, ValueError):
-        return None
+        tree = ast.parse(wrapped)
+    except (SyntaxError, ValueError) as exc:
+        logger.warning(
+            "secret_file_guard: fragment is not parseable Python after all "
+            "recovery attempts; falling back to the regex heuristic: %s",
+            exc,
+        )
+        tree = None
+    return tree
 
 
 def _python_shell_exec_literals_ast(content: str) -> list[str] | None:
