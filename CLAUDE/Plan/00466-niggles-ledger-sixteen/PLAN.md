@@ -104,6 +104,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N84 | The `daemon_process` test fixture never checks that `stop` succeeded, so daemons leak                     | N24 gate fixer     | ⬜ Open                                             |
 | N85 | `_MESSAGE_BODY_PATTERN` reads `\'` as an escape inside single quotes, hiding a command from every guard   | N38 review 5       | 🔄 In progress (N38 fix 6)                          |
 | N86 | A discovery-file miss leaves the forwarders unable to find or start the daemon                            | Upgrade e2e        | ⬜ Open (after N24)                                 |
+| N87 | ANSI-C quoting in text handed to a shell is never decoded, so the command it carries is unseen            | N38 fix 6          | ⬜ Open (after N38)                                 |
 | N80 | A script overwritten earlier in the same command by an unlisted writer is judged by its old content       | 464 review 5 M4    | ⬜ Open (owner: pre-commit sink)                    |
 | N74 | A recursive grep over a protected directory is allowed                                                    | GD review 8        | ⬜ Open                                             |
 | N75 | The Write/Edit content route misses 26 script-launch shapes                                               | GD review 8        | ⬜ Open                                             |

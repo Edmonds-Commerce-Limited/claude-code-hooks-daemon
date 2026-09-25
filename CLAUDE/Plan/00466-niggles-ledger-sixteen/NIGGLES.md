@@ -9,6 +9,19 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N87 — ANSI-C quoting in text handed to a shell is never decoded, so the command it carries is unseen
+
+**Found by N38 fix round 6.** In `bash -c $'echo a\ngit reset --hard HEAD'`,
+bash decodes `\n` to a newline and runs the reset as a second command. The
+guards see one `echo` with a literal `\n`, and allow it. Main allows it too.
+The same applies wherever an executed body arrives through `$'…'`: `sh -c`,
+`eval`, and a here-string fed to a shell.
+
+**Remedy:** decode `$'…'` (the full escape set: `\n`, `\t`, `\xHH`,
+`\nnn`, `\uHHHH`, `\cX`) before an executed body is lexed. If a string cannot
+be decoded, treat the command as unparseable and fail closed. It uses the
+N38 lexer, so it starts after N38 merges.
+
 ### N86 — A discovery-file miss leaves the forwarders unable to find or start the daemon
 
 **Found by the upgrade refused-cases investigation**
