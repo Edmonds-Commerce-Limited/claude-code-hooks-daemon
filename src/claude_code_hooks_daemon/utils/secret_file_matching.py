@@ -362,11 +362,23 @@ def _without_import_module_paths(command: str) -> str:
 
 
 def _normalised_token_forms(token: str) -> list[str]:
-    """Spellings of a token to match against protected globs."""
+    """Spellings of a token to match against protected globs.
+
+    A token that IS a home prefix and nothing else (``~/`` with no name
+    after it) strips to the empty string. That candidate is dropped rather
+    than appended (Ledger 00466 N44): every consumer of this list feeds each
+    form to :func:`~utils.path_exclusion.path_matches_globs`, which computes
+    ``os.path.relpath`` against a project root -- and ``os.path.relpath("",
+    root)`` raises ``ValueError: no path specified``, a live daemon crash on
+    a Bash command as ordinary as ``cp ~/ /tmp/x``. An empty string also
+    never usefully matches a protected glob, so dropping it costs nothing.
+    """
     forms = [token]
     for prefix in _HOME_PREFIXES:
         if token.startswith(prefix):
-            forms.append(token[len(prefix) :])
+            stripped_home = token[len(prefix) :]
+            if stripped_home:
+                forms.append(stripped_home)
     stripped = token.lstrip("./")
     if stripped and stripped != token and token.startswith("./"):
         forms.append(stripped)
