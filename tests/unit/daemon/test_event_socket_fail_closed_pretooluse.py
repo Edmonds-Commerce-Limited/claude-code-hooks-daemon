@@ -169,6 +169,139 @@ class TestMalformedPayloadFailsClosedOnPreToolUseSocket:
         await server_task
 
 
+class TestNonVerdictResponseFailsClosedOnPreToolUseSocket:
+    """Plan 00466 N24 review 3 MA2: ``_process_request`` can answer WITHOUT
+    raising -- an ``invalid_request``/``input_validation_failed`` error
+    envelope, or any other shape that is not one of PreToolUse's two
+    legitimate verdict shapes. The relay only pumps bytes and cannot tell
+    such a response apart from a real judged allow, so the daemon itself
+    must refuse to put it on the PreToolUse wire."""
+
+    @pytest.mark.anyio
+    async def test_error_envelope_denies_on_pre_tool_use_socket(
+        self,
+        isolated_untracked_dir: Path,
+        front_controller: FrontController,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        config = _make_config(isolated_untracked_dir)
+        daemon = HooksDaemon(config=config, controller=front_controller)
+
+        async def _non_verdict(*args: Any, **kwargs: Any) -> dict[str, Any]:
+            return {"error": "input_validation_failed"}
+
+        monkeypatch.setattr(HooksDaemon, "_process_request", _non_verdict)
+
+        server_task = asyncio.create_task(daemon.start())
+        await asyncio.sleep(0.1)
+
+        events_dir = get_event_socket_dir_from_untracked(isolated_untracked_dir)
+        socket_path = events_dir / "pre-tool-use.sock"
+
+        payload = (
+            b'{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"true"}}'
+        )
+        response = await _send_raw_and_read(socket_path, payload)
+
+        assert response != {"error": "input_validation_failed"}, response
+        assert _is_pre_tool_use_deny(response), response
+
+        await daemon.shutdown()
+        await server_task
+
+    @pytest.mark.anyio
+    async def test_malformed_result_envelope_denies_on_pre_tool_use_socket(
+        self,
+        isolated_untracked_dir: Path,
+        front_controller: FrontController,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        config = _make_config(isolated_untracked_dir)
+        daemon = HooksDaemon(config=config, controller=front_controller)
+
+        async def _non_verdict(*args: Any, **kwargs: Any) -> dict[str, Any]:
+            # controller.py's invalid_request path shape -- Claude Code never
+            # reads this key, so it is an ambiguous ALLOW on the old wire.
+            return {"result": {"decision": "deny", "reason": "invalid_request"}}
+
+        monkeypatch.setattr(HooksDaemon, "_process_request", _non_verdict)
+
+        server_task = asyncio.create_task(daemon.start())
+        await asyncio.sleep(0.1)
+
+        events_dir = get_event_socket_dir_from_untracked(isolated_untracked_dir)
+        socket_path = events_dir / "pre-tool-use.sock"
+
+        payload = (
+            b'{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"true"}}'
+        )
+        response = await _send_raw_and_read(socket_path, payload)
+
+        assert "result" not in response, response
+        assert _is_pre_tool_use_deny(response), response
+
+        await daemon.shutdown()
+        await server_task
+
+    @pytest.mark.anyio
+    async def test_non_verdict_response_on_non_pre_tool_use_socket_passes_through(
+        self,
+        isolated_untracked_dir: Path,
+        front_controller: FrontController,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Only the PreToolUse wire gets this new server-side validation --
+        every other event's response shape is untouched."""
+        config = _make_config(isolated_untracked_dir)
+        daemon = HooksDaemon(config=config, controller=front_controller)
+
+        async def _non_verdict(*args: Any, **kwargs: Any) -> dict[str, Any]:
+            return {"error": "input_validation_failed"}
+
+        monkeypatch.setattr(HooksDaemon, "_process_request", _non_verdict)
+
+        server_task = asyncio.create_task(daemon.start())
+        await asyncio.sleep(0.1)
+
+        events_dir = get_event_socket_dir_from_untracked(isolated_untracked_dir)
+        socket_path = events_dir / "status-line.sock"
+
+        response = await _send_raw_and_read(socket_path, b'{"hook_event_name":"Status"}')
+
+        assert response == {"error": "input_validation_failed"}, response
+
+        await daemon.shutdown()
+        await server_task
+
+    @pytest.mark.anyio
+    async def test_real_judged_deny_passes_through_unchanged(
+        self,
+        isolated_untracked_dir: Path,
+        front_controller: FrontController,
+    ) -> None:
+        """The new validation must never reject a REAL verdict."""
+        config = _make_config(isolated_untracked_dir)
+        daemon = HooksDaemon(config=config, controller=front_controller)
+        server_task = asyncio.create_task(daemon.start())
+        await asyncio.sleep(0.1)
+
+        events_dir = get_event_socket_dir_from_untracked(isolated_untracked_dir)
+        socket_path = events_dir / "pre-tool-use.sock"
+
+        payload = (
+            b'{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"true"}}'
+        )
+        response = await _send_raw_and_read(socket_path, payload)
+
+        # _AllowHandler always allows, so this is a genuine judged verdict --
+        # HookResult.to_json's documented empty-response shape for "allow,
+        # nothing to add".
+        assert response == {}, response
+
+        await daemon.shutdown()
+        await server_task
+
+
 class TestGenericExceptionFailsClosedOnPreToolUseSocket:
     @pytest.mark.anyio
     async def test_process_request_exception_denies_on_pre_tool_use_socket(

@@ -131,6 +131,34 @@ _TRANSPORT_FAIL_CLOSED_REASON: Final[str] = (
 )
 
 
+def _pre_tool_use_response_looks_valid(data: object) -> bool:
+    """True when ``data`` is one of PreToolUse's two legitimate response
+    shapes: ``{}`` (a real ALLOW with nothing to say -- ``HookResult.to_json``'s
+    documented empty-response case) or a dict with a ``hookSpecificOutput`` key
+    whose ``permissionDecision``, if present, is one of the four known values.
+
+    Server-side twin of ``init.sh``'s ``_pretooluse_response_looks_valid``
+    (Plan 00466 N24 review 3 MA2): a client on the relay rung never re-parses
+    the daemon's JSON, it only pumps bytes, so any non-empty response used to
+    pass straight through -- including ``{"error": "..."}`` from an
+    ``invalid_request``/``input_validation_failed`` path, and a malformed
+    ``{"result": ...}`` envelope, none of which is a judged PreToolUse
+    verdict. The python rung already refuses these; this makes the daemon
+    itself refuse to emit them on the PreToolUse wire in the first place, so
+    every consumer -- relay, nc, or a client dialling the socket directly --
+    gets the same guarantee.
+    """
+    if not isinstance(data, dict):
+        return False
+    if data == {}:
+        return True
+    hso = data.get("hookSpecificOutput")
+    if not isinstance(hso, dict):
+        return False
+    decision = hso.get("permissionDecision")
+    return decision is None or decision in ("allow", "deny", "ask", "defer")
+
+
 def _pre_tool_use_transport_deny_response() -> dict[str, Any]:
     """A genuine PreToolUse DENY, in the same shape
     ``HookResult._format_pre_tool_use_response`` emits for a real judged
@@ -1189,9 +1217,13 @@ class HooksDaemon:
         ``{"event": event_json_key, "hook_input": <parsed>}`` and dispatches
         through the SAME ``_process_request`` path the legacy socket uses
         (DESIGN-socket-relay.md §2). A malformed or oversized payload fails
-        open with an empty ``{}`` response — Claude Code must always receive
-        valid JSON, and ``{}`` carries no policy (the same passthrough
-        contract every unhandled event already gets).
+        open with an empty ``{}`` response for every event EXCEPT PreToolUse
+        — Claude Code must always receive valid JSON, and ``{}`` carries no
+        policy (the same passthrough contract every unhandled event already
+        gets). On the PreToolUse socket specifically, a malformed/oversized
+        payload, an uncaught exception, and (Plan 00466 N24 review 3 MA2) any
+        judged-but-non-verdict response all fail CLOSED instead, via
+        ``_pre_tool_use_transport_deny_response()``.
 
         **hook_event_name enrichment (Plan 00290 dogfood field report, commit
         9d353fd3 EMERGENCY suspension, defect 2)**: the legacy bash transport
@@ -1238,6 +1270,19 @@ class HooksDaemon:
 
             request_data = json.dumps({"event": event_json_key, "hook_input": hook_input})
             response = await self._process_request(request_data, arrival_time=arrival_time)
+            if event_json_key == _PRE_TOOL_USE_WIRE_KEY and not _pre_tool_use_response_looks_valid(
+                response
+            ):
+                # Plan 00466 N24 review 3 MA2: _process_request answered, but
+                # not with a judged PreToolUse verdict (an invalid_request or
+                # input_validation_failed error envelope, for example). A
+                # byte-pump relay client cannot apply this check itself, so
+                # refuse to put a non-verdict shape on this wire at all.
+                logger.warning(
+                    "Non-verdict response on PreToolUse event socket: %s",
+                    json.dumps(response)[:200],
+                )
+                response = _pre_tool_use_transport_deny_response()
             response_json = json.dumps(response)
 
             if is_blocking_response(response):
