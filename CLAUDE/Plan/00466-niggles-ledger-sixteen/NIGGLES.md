@@ -9,6 +9,24 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N43 — Log and payload redaction is inert while the daemon runs degraded on an unloadable config
+
+**Found by the Plan 00421 agent** while closing Task 4.9 on `worktree-d-00421`.
+`secret_redaction._resolve_active_path` resolves the secret word list through
+the configuration. When the config cannot load (the Plan 00421 degraded
+mode), that lookup raises ValueError, and redaction falls back to inert. So a
+degraded daemon writes its logs and payload captures UNREDACTED, which is
+exactly when a broken config makes a protective fallback matter most. The
+same root cause left degraded `sensitive_content` with no secret terms; that
+was fixed on the branch by pinning the default list explicitly.
+
+**Candidate remedy:** while degraded, redaction uses the default word list
+UNION the last-known-good snapshot's lists, the same set degraded
+`sensitive_content` uses. A redaction failure to resolve a list must never
+mean "redact nothing". Pin it with a degraded-start test that captures a
+payload containing a term and asserts the term is redacted. Being fixed on
+`worktree-d-00421`.
+
 ### N42 — Quoted-heredoc blanking hides text that bash executes from the Bash command guards
 
 **Found by the N38 review** (its M3), confirmed against real bash, and
