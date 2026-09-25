@@ -1707,6 +1707,8 @@ def _print_mode_advisory(pre_mode: dict[str, Any]) -> None:
 #: importable package, and the daemon must not grow a dependency on the QA
 #: harness to print an advisory.
 _QA_RUN_LOCK_RELPATH: Final[str] = "untracked/qa/.llm_qa.lock"
+#: Reported when a run holds the lock but its pid cannot be read.
+_UNNAMED_HOLDER: Final[str] = "unknown"
 
 _QA_LOCK_CANNOT_TELL: Final[str] = (
     "Could not tell whether a QA run is in progress: %s. Restarting without the warning."
@@ -1754,18 +1756,23 @@ def _qa_run_lock_holder(project_root: Path) -> str | None:
         logger.warning(_QA_LOCK_CANNOT_TELL, f"its lock could not be tested ({exc})")
         held = False
     finally:
+        # Closing the descriptor releases an flock we acquired, so there is no
+        # explicit LOCK_UN: one sat outside every handler here and could end
+        # `restart` with a traceback (Plan 00408 Task 3.10).
         os.close(fd)
     return _recorded_qa_lock_holder(lock_path) if held else None
 
 
 def _qa_lock_is_held(fd: int) -> bool:
-    """Probe with a NON-BLOCKING ``flock``; any other ``OSError`` propagates."""
+    """Probe with a NON-BLOCKING ``flock``; any other ``OSError`` propagates.
+
+    A lock this probe acquires is released when the caller closes ``fd``.
+    """
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
         # Contention is the ANSWER here, not an error: a run holds the lock.
         return True
-    fcntl.flock(fd, fcntl.LOCK_UN)
     return False
 
 
@@ -1781,7 +1788,7 @@ def _recorded_qa_lock_holder(lock_path: Path) -> str:
     except OSError as exc:
         logger.warning("QA run lock is held but its pid is unreadable (%s)", exc)
         recorded = ""
-    return recorded.removeprefix("pid=") or "unknown"
+    return recorded.removeprefix("pid=") or _UNNAMED_HOLDER
 
 
 def _warn_if_qa_run_in_progress(args: argparse.Namespace) -> None:

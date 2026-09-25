@@ -128,6 +128,7 @@ class TestRegistryCatalogue:
             "journal-entry-with-progress",
             "journal-completion-entry",
             "plan-shrink-without-journal",
+            "archival-links-resolve",
             # Sweep-only
             "staleness-nag",
             "dormant-honesty",
@@ -159,7 +160,8 @@ class TestRegistryCatalogue:
         #   settled document; without this registration the move would be a net
         #   loosening rather than the tightening it is.
         # + plan-stats-arithmetic (Plan 00466 N13)
-        assert len(by_stage[Stage.COMMIT]) == 19
+        # + archival-links-resolve (Plan 00408 Task 3.2b; COMMIT only by design)
+        assert len(by_stage[Stage.COMMIT]) == 20
         # 3 sweep-only + 5 dual tree checks + 2 journal SWEEP checks (Plan 00163)
         # + index-row-length (Plan 00218) + index-no-log + 5 document-rule sweep
         # twins and the journal-dayfile-naming sweep twin (Plan 00230)
@@ -211,6 +213,7 @@ class TestRegistryCatalogue:
             "index-row-length",
             "index-no-log",
             "index-retention-window",
+            "archival-links-resolve",
         }
         for spec in all_checks():
             if spec.check_id in post_audit_no_sins:

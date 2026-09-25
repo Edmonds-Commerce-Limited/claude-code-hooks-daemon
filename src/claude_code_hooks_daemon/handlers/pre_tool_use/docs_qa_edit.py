@@ -30,7 +30,9 @@ corpus and no git subprocess — single-file invariants only. Two checks,
 so this handler loads (never BUILDS) the cached corpus via
 :func:`docs_qa.corpus.load_edit_corpus` — one cheap JSON read plus a ``stat``
 per indexed document to revalidate it, not a filesystem scan (the cold-index
-rule: building is SessionStart/CLI-only). If no cache exists yet (a session
+rule: building from nothing is SessionStart/CLI-only; ``merge_qa_report``
+refreshes a WARM index after a merge and stands down on a cold one, Plan
+00408 Task 2.1). If no cache exists yet (a session
 before the sweep has run), the corpus is ``cold`` and both checks degrade to
 silence — never a false positive, never a crash. Not yet covering a Bash-authored ``.md`` write
 (the same detection ``lint_on_edit`` uses) — deferred; Write/Edit is the

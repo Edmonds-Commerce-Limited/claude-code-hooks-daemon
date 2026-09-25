@@ -146,7 +146,7 @@ def event_synthetic_source(hook_input: Mapping[str, Any]) -> str | None:
     """Classify a raw hook-event payload. See :func:`classify_synthetic`."""
     return classify_synthetic(
         marker=hook_input.get(SYNTHETIC_SOURCE_FIELD),
-        session_id=hook_input.get("session_id"),
+        session_id=hook_input.get(HookInputField.SESSION_ID),
     )
 
 

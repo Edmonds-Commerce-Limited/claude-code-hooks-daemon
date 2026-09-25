@@ -74,7 +74,6 @@ _MODE_BLOCK: Final[str] = "block"
 _DEFAULT_MAX_FILES: Final[int] = 20
 
 _FIELD_COMMAND: Final[str] = "command"
-_CWD_FIELD: Final[str] = "cwd"
 
 # A newline separates commands exactly as `;` does (Plan 00268's own lesson,
 # from `verification_result_gate`), and `&&`/`||`/`|` each start a new command
@@ -153,7 +152,7 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
         self._formatter = RuleFormatter()
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        if hook_input.get("tool_name") != ToolName.BASH:
+        if hook_input.get(HookInputField.TOOL_NAME) != ToolName.BASH:
             return False
         command = get_bash_command(hook_input)
         if not command:
@@ -359,7 +358,7 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
         Mirrors `PlanQaCommitGateHandler._is_foreign_repo`: nested/vendor
         repos and other worktrees own their own staged tree.
         """
-        cwd_raw = hook_input.get(_CWD_FIELD)
+        cwd_raw = hook_input.get(HookInputField.CWD)
         if not cwd_raw:
             return False
         repo = GitRepo.resolve_for(Path(cwd_raw))

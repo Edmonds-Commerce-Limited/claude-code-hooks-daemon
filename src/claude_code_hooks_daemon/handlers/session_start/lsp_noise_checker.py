@@ -102,11 +102,15 @@ def running_language_servers(known_names: frozenset[str]) -> list[RunningServer]
             continue
         cmdline = " ".join(str(part) for part in (info.get("cmdline") or []))
         matched = frozenset(name for name in known_names if name in cmdline)
-        if matched:
+        # `process_iter` sets an attribute it may not read to None rather than
+        # raising, so a server with no readable start time cannot be aged and
+        # is skipped (Plan 00408 Task 3.1).
+        started_at = info.get("create_time")
+        if matched and started_at is not None:
             found.append(
                 RunningServer(
                     pid=int(info["pid"]),
-                    started_at=float(info["create_time"]),
+                    started_at=float(started_at),
                     matched_names=matched,
                 )
             )

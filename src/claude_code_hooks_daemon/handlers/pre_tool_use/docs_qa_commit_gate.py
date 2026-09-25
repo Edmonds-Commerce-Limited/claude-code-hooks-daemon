@@ -66,7 +66,6 @@ _RULE_VERBOSE = (
 )
 
 _FIELD_COMMAND: Final[str] = "command"
-_CWD_FIELD: Final[str] = "cwd"
 
 
 class DocsQaCommitGateHandler(PreToolUseHandlerBase):
@@ -163,7 +162,7 @@ class DocsQaCommitGateHandler(PreToolUseHandlerBase):
     @staticmethod
     def _is_foreign_repo(hook_input: dict[str, Any], project_root: Path) -> bool:
         """True when the command runs inside a repo other than the project's."""
-        cwd_raw = hook_input.get(_CWD_FIELD)
+        cwd_raw = hook_input.get(HookInputField.CWD)
         if not cwd_raw:
             return False
         repo = GitRepo.resolve_for(Path(cwd_raw))

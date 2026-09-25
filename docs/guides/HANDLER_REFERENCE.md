@@ -421,7 +421,7 @@ handlers:
 | **Type**       | Blocking                |
 | **Event**      | PreToolUse              |
 
-**Description:** Blocks Bash commands that `cd` into `.claude/hooks-daemon/` (or into a daemon-internal subdirectory and then run something). The daemon is an upstream dependency: anything edited inside that directory is overwritten by the next upgrade, and a shell rooted there resolves project-relative paths against the wrong tree.
+**Description:** Blocks Bash commands that `cd` or `pushd` into `.claude/hooks-daemon/` (or into a daemon-internal subdirectory and then run something). The daemon is an upstream dependency: anything edited inside that directory is overwritten by the next upgrade, and a shell rooted there resolves project-relative paths against the wrong tree. Options before the path (`cd -- <path>`, `cd -P <path>`), quoting or an escape inside the path (`.claude/'hooks-daemon'`) and a doubled `//` do not change the directory, so none of them changes the verdict. `popd` and `cd -` are not matched: they name no path, and the directory they return to was entered by an earlier command this rule already judged.
 
 **Do this instead:** run the daemon CLI from the project root — it works regardless of the current directory.
 
@@ -611,9 +611,9 @@ Denied wherever it appears, not only inside a loop: an advisory in a background 
 **Also blocked** — `R-WAIT-ON-WRAPPER-PID`, a wait on a wrapper's `$!`:
 
 - `setsid ./job.bash & kill -0 $!` — `$!` is `setsid`'s pid, and setsid forks and exits at once, so the wait ends immediately and reports the job finished
-- Advisory (not denied) for `nohup sh -c`, `nohup bash -c`, `timeout` and `env`: whether those hand the pid on or keep it turns on what they were asked to run, which the command text does not say
+- Advisory (not denied) for `nohup sh -c`, `nohup bash -c`, `timeout` and `env sh -c`: whether those hand the pid on or keep it turns on what they were asked to run, which the command text does not say
 - Remedies: a pidfile the job writes itself (`nohup sh -c './job.bash > run.log 2>&1 & echo $! > job.pid' &`), `pgrep -P <wrapper-pid>` once to resolve the child, or waiting on a log marker
-- Never flagged: `./job.bash & pid=$!` (no wrapper), `nohup ./job.bash & pid=$!` (nohup execs in place), `setsid -w ./job.bash & wait $!` (`-w` makes the wrapper outlive the job)
+- Never flagged: `./job.bash & pid=$!` (no wrapper), `nohup ./job.bash & pid=$!` and `env VAR=1 ./job.bash & wait $!` (both exec in place), `setsid -w ./job.bash & wait $!` (`-w` makes the wrapper outlive the job)
 
 **Allowed** — these are the fixes:
 
@@ -1030,7 +1030,7 @@ handlers:
 
 **Description:** Makes a human's approval of the parent-to-main merge a REAL, configurable gate instead of a sentence in `Worktree.core.md` nobody enforces (Plan 00367). With `worktree.merge_to_main_requires_human_approval: true`, a `git merge <branch>` (or `gh pr merge`) run in the MAIN checkout while it is on the default branch is denied until a human has approved that branch. A merge run inside a linked worktree (child into parent) is never gated -- that is the automatic half of the worktree workflow.
 
-**Fires when:** the key is true, the command is a `git merge`/`gh pr merge` naming a real branch (not `--abort`/`--continue`/`--quit`, and not a bare mention inside a quoted string such as `echo 'git merge x'`), and the shell's cwd is a MAIN checkout currently on its default branch. With the key false (the shipped default) the handler never matches and the parent-to-main merge happens once verification passes.
+**Fires when:** the key is true, the command is a `git merge`/`gh pr merge` (not `--abort`/`--continue`/`--quit`) or a `git pull <remote> <branch>`, and the shell's cwd is a MAIN checkout currently on its default branch. A `git merge` whose branch is not in the command text (`... | xargs git merge`, or a bare `git merge` of the upstream) is gated under the key `unnamed-branch`. A pull naming no branch, or naming the default branch itself (`git pull origin main` on `main`), is an ordinary update and is not gated. A merge named inside a quoted string (`echo 'git merge x'`) IS matched, because the shell runs the same text in `bash -c "git merge x"`. With the key false (the shipped default) the handler never matches and the parent-to-main merge happens once verification passes.
 
 **The human's route:** run `hooks-daemon approve-merge <branch>`, which records a one-shot marker under the daemon's untracked directory (`untracked/merge-approvals/<branch>.approved`) that the very next merge of that branch consumes. Approving one branch does not approve another, and an approval left unconsumed because the key is off is noted by the command.
 
@@ -1656,6 +1656,8 @@ switched off:
 | `gh issue comment`, `list` and `view` | No generator produces a comment body; `sensitive_content` scans one for secret terms.              |
 | The daemon's own repository           | It stands down in self-install, so the project's own issue workflow is unaffected.                 |
 | `--web`                               | It files nothing — it opens GitHub's forms, which state the rule; the defect form needs two ticks. |
+
+With no `--repo` and no `GH_REPO`, the target is read from the working directory's git remotes, as `gh` itself does. ANY remote pointing at this repository counts, not only `origin`: `gh` chooses from the whole set and prefers one named `upstream`. A fork filing on its own tracker passes `--repo`, which always wins.
 
 `--web` is the deliberate hole, and it is what keeps the gate honest. Someone
 who genuinely cannot run the generator — a defect that stops the CLI, a machine
@@ -3488,6 +3490,8 @@ That second half exists because a rule enforced only at write time cannot see wh
 
 `plan-link-resolves` is sweep-only and advise-only. It reports a live `PLAN.md` linking to a plan that has since been archived — naming the repointed path — and a link whose target exists nowhere. A link is resolved by plan NUMBER across the active root and every archive directory, so an archived plan is found rather than reported dead. Archived plans and journals are exempt: a record is not rewritten to match today's tree, and a journal is append-only. It is not registered at edit or commit time because docs QA's `pointer-resolves` already blocks a link that is new in that edit or commit.
 
+`archival-links-resolve` is the one exception to that exemption, and it runs only in the commit gate. Archiving a plan moves it one directory deeper, so its relative links all shift by a level, and the archival commit is the one commit still writing the record. For each `.md` file the commit renames into an archive directory (journals excluded, because they are append-only), a link that resolved before the move and does not after BLOCKS with the repoint that restores it. A link already dead before the move is advised, not blocked.
+
 **Fires when:** a new (non-resumed) session starts with `plan_workflow.qa.enabled` true and `sweep_mode: advise`. A configured plan directory that does not exist is itself reported as a structural finding. Findings about a plan path matching the project-wide `daemon.exclude_paths` are dropped from the report (see [Path Exclusion](#path-exclusion-exclude_paths)).
 
 **Enforcement mode:** honours `plan_workflow.qa.sweep_mode` (`advise` | `off`, default `advise`). The sweep never blocks -- it only reports drift for you to fix as plan housekeeping.
@@ -4046,50 +4050,50 @@ handlers:
 
 Priorities below are the **shipped defaults** from `constants/priority.py`. Several handlers share a priority; ties run in registration order.
 
-| Config Key                     | Event             | Priority | What It Blocks                                                        |
-| ------------------------------ | ----------------- | -------- | --------------------------------------------------------------------- |
-| `destructive_git`              | PreToolUse        | 10       | git reset --hard, clean -f, push --force, branch -D, etc.             |
-| `sed_blocker`                  | PreToolUse        | 10       | the word sed in a Bash command, bar four narrow exemptions            |
-| `curl_pipe_shell`              | PreToolUse        | 10       | curl/wget piped to bash/sh                                            |
-| `lock_file_edit_blocker`       | PreToolUse        | 10       | Direct editing of lock files                                          |
-| `pip_break_system`             | PreToolUse        | 10       | pip --break-system-packages                                           |
-| `sudo_pip`                     | PreToolUse        | 10       | sudo pip install                                                      |
-| `ask_user_question_blocker`    | PreToolUse        | 10       | AskUserQuestion without an `ASKING BECAUSE:` prefix                   |
-| `daemon_location_guard`        | PreToolUse        | 11       | cd into .claude/hooks-daemon/                                         |
-| `absolute_path`                | PreToolUse        | 12       | Relative paths in Read/Write/Edit                                     |
-| `error_hiding_blocker`         | PreToolUse        | 13       | Code that silently swallows errors                                    |
-| `project_containment`          | PreToolUse        | 14       | Writes whose target is named outside the repository root              |
-| `security_antipattern`         | PreToolUse        | 14       | Dangerous constructs (eval, shell exec, deserialization, XSS, creds)  |
-| `artifact_publish_blocker`     | PreToolUse        | 14       | Publishing an artefact (a claude.ai URL outside the project)          |
-| `issue_filing_gate`            | PreToolUse        | 14       | gh issue create against the daemon's tracker with a hand-written body |
-| `subagent_cron_delete_blocker` | PreToolUse        | 14       | CronDelete inside a subagent (the coordinator's own is unaffected)    |
-| `write_clobber_guard`          | PreToolUse        | 16       | Write to an existing file not read this session                       |
-| `worktree_file_copy`           | PreToolUse        | 15       | cp/mv/rsync between worktrees                                         |
-| `pipe_blocker`                 | PreToolUse        | 15       | Expensive commands piped to tail/head                                 |
-| `dangerous_permissions`        | PreToolUse        | 15       | chmod 777, chmod a+rwx                                                |
-| `tdd_enforcement`              | PreToolUse        | 15       | Production code without tests (11 languages)                          |
-| `root_recursion_guard`         | PreToolUse        | 16       | Recursive scans rooted at /, /home, $HOME, ...                        |
-| `self_matching_process_probe`  | PreToolUse        | 17       | A pgrep/pkill/ps-grep probe that matches the calling shell's own argv |
-| `github_auto_close_keywords`   | PreToolUse        | 18       | GitHub auto-closing keyword refs (Fixes #N) in git/gh pr messages     |
-| `git_stash`                    | PreToolUse        | 20       | git stash creation (deny by default; configurable)                    |
-| `git_message_backtick`         | PreToolUse        | 20       | Backticks in a double-quoted git -m (bash executes them)              |
-| `ancestry_preserving_merge`    | PreToolUse        | 19       | git merge --squash, gh pr merge --squash/--rebase (severs ancestry)   |
-| `merge_to_main_approval`       | PreToolUse        | 20       | git merge/gh pr merge into main without a human's approval (opt-in)   |
-| `qa_suppression`               | PreToolUse        | 30       | noqa, type: ignore, eslint-disable, nolint, ... (all langs)           |
-| `plan_number_helper`           | PreToolUse        | 30       | Broken plan number discovery commands                                 |
-| `plan_journal_guard`           | PreToolUse        | 31       | A plan journal entry written by hand (use `mkplan.bash --journal`)    |
-| `comment_changelog`            | PreToolUse        | 31       | Changelog narrative in a comment (`Prior <version>:`, dated entries)  |
-| `comment_size`                 | PreToolUse        | 33       | Over-long comments growing past the size limit                        |
-| `markdown_organization`        | PreToolUse        | 35       | Disorganised markdown; untracked Claude memory writes                 |
-| `lsp_enforcement`              | PreToolUse        | 38       | Grep/rg used for symbol lookups (use LSP)                             |
-| `reference_repo_freshness`     | PreToolUse        | 39       | Reading a governed reference clone that is stale or unverified        |
-| `gh_issue_comments`            | PreToolUse        | 40       | gh issue view without --comments                                      |
-| `gh_pr_comments`               | PreToolUse        | 40       | gh pr view without --comments                                         |
-| `plan_time_estimates`          | PreToolUse        | 40       | Time estimates in plan docs                                           |
-| `npm_command`                  | PreToolUse        | 50       | Non-llm: npm commands                                                 |
-| `validate_instruction_content` | PreToolUse        | 50       | Ephemeral content in CLAUDE.md                                        |
-| `auto_continue_stop`           | Stop              | 15       | Stops after confirmation questions                                    |
-| `auto_approve_reads`           | PermissionRequest | 10       | (Approves) read-only tools in bypassPermissions mode                  |
+| Config Key                     | Event             | Priority | What It Blocks                                                           |
+| ------------------------------ | ----------------- | -------- | ------------------------------------------------------------------------ |
+| `destructive_git`              | PreToolUse        | 10       | git reset --hard, clean -f, push --force, branch -D, etc.                |
+| `sed_blocker`                  | PreToolUse        | 10       | the word sed in a Bash command, bar four narrow exemptions               |
+| `curl_pipe_shell`              | PreToolUse        | 10       | curl/wget piped to bash/sh                                               |
+| `lock_file_edit_blocker`       | PreToolUse        | 10       | Direct editing of lock files                                             |
+| `pip_break_system`             | PreToolUse        | 10       | pip --break-system-packages                                              |
+| `sudo_pip`                     | PreToolUse        | 10       | sudo pip install                                                         |
+| `ask_user_question_blocker`    | PreToolUse        | 10       | AskUserQuestion without an `ASKING BECAUSE:` prefix                      |
+| `daemon_location_guard`        | PreToolUse        | 11       | cd/pushd into .claude/hooks-daemon/                                      |
+| `absolute_path`                | PreToolUse        | 12       | Relative paths in Read/Write/Edit                                        |
+| `error_hiding_blocker`         | PreToolUse        | 13       | Code that silently swallows errors                                       |
+| `project_containment`          | PreToolUse        | 14       | Writes whose target is named outside the repository root                 |
+| `security_antipattern`         | PreToolUse        | 14       | Dangerous constructs (eval, shell exec, deserialization, XSS, creds)     |
+| `artifact_publish_blocker`     | PreToolUse        | 14       | Publishing an artefact (a claude.ai URL outside the project)             |
+| `issue_filing_gate`            | PreToolUse        | 14       | gh issue create against the daemon's tracker with a hand-written body    |
+| `subagent_cron_delete_blocker` | PreToolUse        | 14       | CronDelete inside a subagent (the coordinator's own is unaffected)       |
+| `write_clobber_guard`          | PreToolUse        | 16       | Write to an existing file not read this session                          |
+| `worktree_file_copy`           | PreToolUse        | 15       | cp/mv/rsync between worktrees                                            |
+| `pipe_blocker`                 | PreToolUse        | 15       | Expensive commands piped to tail/head                                    |
+| `dangerous_permissions`        | PreToolUse        | 15       | chmod 777, chmod a+rwx                                                   |
+| `tdd_enforcement`              | PreToolUse        | 15       | Production code without tests (11 languages)                             |
+| `root_recursion_guard`         | PreToolUse        | 16       | Recursive scans rooted at /, /home, $HOME, ...                           |
+| `self_matching_process_probe`  | PreToolUse        | 17       | A pgrep/pkill/ps-grep probe that matches the calling shell's own argv    |
+| `github_auto_close_keywords`   | PreToolUse        | 18       | GitHub auto-closing keyword refs (Fixes #N) in git/gh pr messages        |
+| `git_stash`                    | PreToolUse        | 20       | git stash creation (deny by default; configurable)                       |
+| `git_message_backtick`         | PreToolUse        | 20       | Backticks in a double-quoted git -m (bash executes them)                 |
+| `ancestry_preserving_merge`    | PreToolUse        | 19       | git merge --squash, gh pr merge --squash/--rebase (severs ancestry)      |
+| `merge_to_main_approval`       | PreToolUse        | 20       | git merge/pull/gh pr merge into main without a human's approval (opt-in) |
+| `qa_suppression`               | PreToolUse        | 30       | noqa, type: ignore, eslint-disable, nolint, ... (all langs)              |
+| `plan_number_helper`           | PreToolUse        | 30       | Broken plan number discovery commands                                    |
+| `plan_journal_guard`           | PreToolUse        | 31       | A plan journal entry written by hand (use `mkplan.bash --journal`)       |
+| `comment_changelog`            | PreToolUse        | 31       | Changelog narrative in a comment (`Prior <version>:`, dated entries)     |
+| `comment_size`                 | PreToolUse        | 33       | Over-long comments growing past the size limit                           |
+| `markdown_organization`        | PreToolUse        | 35       | Disorganised markdown; untracked Claude memory writes                    |
+| `lsp_enforcement`              | PreToolUse        | 38       | Grep/rg used for symbol lookups (use LSP)                                |
+| `reference_repo_freshness`     | PreToolUse        | 39       | Reading a governed reference clone that is stale or unverified           |
+| `gh_issue_comments`            | PreToolUse        | 40       | gh issue view without --comments                                         |
+| `gh_pr_comments`               | PreToolUse        | 40       | gh pr view without --comments                                            |
+| `plan_time_estimates`          | PreToolUse        | 40       | Time estimates in plan docs                                              |
+| `npm_command`                  | PreToolUse        | 50       | Non-llm: npm commands                                                    |
+| `validate_instruction_content` | PreToolUse        | 50       | Ephemeral content in CLAUDE.md                                           |
+| `auto_continue_stop`           | Stop              | 15       | Stops after confirmation questions                                       |
+| `auto_approve_reads`           | PermissionRequest | 10       | (Approves) read-only tools in bypassPermissions mode                     |
 
 ### All Advisory Handlers
 

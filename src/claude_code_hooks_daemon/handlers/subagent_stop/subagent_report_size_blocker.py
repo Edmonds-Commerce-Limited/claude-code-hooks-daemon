@@ -21,7 +21,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import SubagentStopHandlerBase
 from claude_code_hooks_daemon.utils.option_coercion import coerce_int_option
@@ -122,7 +122,7 @@ class SubagentReportSizeBlockerHandler(SubagentStopHandlerBase):
         not part of the SubagentStop contract at all.
         """
         yymmdd = datetime.now(tz=UTC).strftime("%y%m%d")
-        agent_type = hook_input.get("agent_type")
+        agent_type = hook_input.get(HookInputField.AGENT_TYPE)
         agent_name = (
             sanitise_component(agent_type)
             if isinstance(agent_type, str) and agent_type
@@ -137,7 +137,7 @@ class SubagentReportSizeBlockerHandler(SubagentStopHandlerBase):
         agent file, or an enabled plugin's agent), else None (unknown —
         callers must keep today's behaviour, never guess).
         """
-        agent_type = hook_input.get("agent_type")
+        agent_type = hook_input.get(HookInputField.AGENT_TYPE)
         root = resolve_lookup_root(self._project_root, getattr(self, "_workspace_root", None))
         return resolve_agent_can_write(
             agent_type if isinstance(agent_type, str) else None, root, config_dir=self._config_dir
@@ -162,10 +162,10 @@ class SubagentReportSizeBlockerHandler(SubagentStopHandlerBase):
         ``message`` is cited; anything else is treated the same as no
         match at all, falling through to the older messages.
         """
-        agent_id = hook_input.get("agent_id")
+        agent_id = hook_input.get(HookInputField.AGENT_ID)
         if not isinstance(agent_id, str) or not agent_id:
             return None
-        agent_type = hook_input.get("agent_type")
+        agent_type = hook_input.get(HookInputField.AGENT_TYPE)
         root = resolve_lookup_root(self._project_root, getattr(self, "_workspace_root", None))
         target_dir = root / self._persisted_report_dir
         found = find_persisted_report(
@@ -282,7 +282,7 @@ class SubagentReportSizeBlockerHandler(SubagentStopHandlerBase):
             )
 
         if can_write is False:
-            agent_type = hook_input.get("agent_type")
+            agent_type = hook_input.get(HookInputField.AGENT_TYPE)
             return self._deny_read_only(
                 agent_type if isinstance(agent_type, str) else _AGENT_NAME_PLACEHOLDER,
                 len(message),

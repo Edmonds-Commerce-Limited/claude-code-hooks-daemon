@@ -230,10 +230,10 @@ class ArtifactPublishBlockerHandler(PreToolUseHandlerBase):
         """
         self._ensure_source_disable()
 
-        if hook_input.get("tool_name") != ToolName.ARTIFACT:
+        if hook_input.get(HookInputField.TOOL_NAME) != ToolName.ARTIFACT:
             return False
 
-        tool_input = hook_input.get("tool_input")
+        tool_input = hook_input.get(HookInputField.TOOL_INPUT)
         if not isinstance(tool_input, dict):
             return False
 

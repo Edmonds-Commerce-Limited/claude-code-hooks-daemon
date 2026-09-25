@@ -201,6 +201,20 @@ GIT_GLOBAL_OPTIONS_TAKING_SEPARATE_VALUE: Final[frozenset[str]] = frozenset(
 )
 
 
+# Characters that can make up a word with no shell meaning at all: removing
+# quoting around a run of them changes nothing but the quoting. Deliberately
+# excludes whitespace, separators, `$`, globs, quotes and the backslash.
+_PLAIN_WORD_CHARS: Final[frozenset[str]] = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_./:@%+,=~-"
+)
+_PLAIN_WORD: Final[re.Pattern[str]] = re.compile(
+    "[" + re.escape("".join(sorted(_PLAIN_WORD_CHARS))) + "]*"
+)
+_SINGLE_QUOTE: Final[str] = "'"
+_DOUBLE_QUOTE: Final[str] = '"'
+_ESCAPE: Final[str] = "\\"
+
+
 def normalise_line_continuations(command: str) -> str:
     r"""Remove shell line continuations, joining the lines as the shell does.
 
@@ -243,6 +257,66 @@ def normalise_line_continuations(command: str) -> str:
     guard to look at more text, never less.
     """
     return _LINE_CONTINUATION_PATTERN.sub("", command)
+
+
+def _quoted_span_end(command: str, start: int) -> int:
+    """Index just past the quote closing the span opened at ``start``, or -1.
+
+    A backslash escapes the next character inside DOUBLE quotes only; inside
+    single quotes nothing is special except the closing quote.
+    """
+    quote = command[start]
+    index = start + 1
+    while index < len(command):
+        char = command[index]
+        if char == _ESCAPE and quote == _DOUBLE_QUOTE:
+            index += 2
+            continue
+        if char == quote:
+            return index + 1
+        index += 1
+    return -1
+
+
+def remove_word_quoting(command: str) -> str:
+    r"""Remove the quoting bash strips from inside a single plain word.
+
+    ``git checkout "--" f.txt`` hands git a bare ``--``, and
+    ``cd .claude/'hooks-daemon'`` and ``cd .cl\aude/hooks-daemon`` change into
+    the same directory as the unquoted spelling. A pattern written against the
+    plain word misses every one of them (Plan 00408 Tasks 3.0 and 3.9), so a
+    guard reads the command through this first.
+
+    Only quoting that cannot move a word boundary is removed: a quoted span
+    whose content is entirely :data:`_PLAIN_WORD_CHARS`, and a backslash before
+    one such character. Anything else -- a space, a separator, ``$``, a glob,
+    another quote -- keeps its quoting verbatim, so this can reveal a token but
+    never invent a separator or split a message into words. Unbalanced quoting
+    is copied through unchanged from the opening quote onwards.
+    """
+    parts: list[str] = []
+    index = 0
+    while index < len(command):
+        char = command[index]
+        if char in (_SINGLE_QUOTE, _DOUBLE_QUOTE):
+            end = _quoted_span_end(command, index)
+            if end < 0:
+                parts.append(command[index:])
+                break
+            inner = command[index + 1 : end - 1]
+            parts.append(inner if _PLAIN_WORD.fullmatch(inner) else command[index:end])
+            index = end
+            continue
+        if char == _ESCAPE and index + 1 < len(command):
+            following = command[index + 1]
+            parts.append(
+                following if following in _PLAIN_WORD_CHARS else command[index : index + 2]
+            )
+            index += 2
+            continue
+        parts.append(char)
+        index += 1
+    return "".join(parts)
 
 
 def compile_command_name_pattern(name: str) -> re.Pattern[str]:

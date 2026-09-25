@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.constants.handlers import HandlerID
+from claude_code_hooks_daemon.constants.protocol import HookInputField
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core import AdvisoryResult
 from claude_code_hooks_daemon.core.handler_bases import WorktreeRemoveHandlerBase
@@ -31,7 +32,6 @@ from claude_code_hooks_daemon.utils.path_predicates import path_exists
 
 _WORKTREE_REMOVE_PRIORITY = 50
 
-_KEY_CWD = "cwd"
 # Payload keys that may carry the worktree path (defensive — exact key unknown).
 _PATH_KEYS = ("worktree_path", "path")
 
@@ -52,7 +52,7 @@ class WorktreeRemoveHandler(WorktreeRemoveHandlerBase):
 
     def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         """Best-effort cleanup; always a clean allow (WorktreeRemove is safe)."""
-        cwd = hook_input.get(_KEY_CWD)
+        cwd = hook_input.get(HookInputField.CWD)
         if cwd:
             path = self._extract_path(hook_input)
             # The payload path arrives with no containment check at all, so it

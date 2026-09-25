@@ -1,6 +1,6 @@
 # Plan 00408: handler hygiene from the release review
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-14
 **Owner**: joseph
 **Priority**: Low
@@ -34,24 +34,36 @@ gate — were fixed in 00407 and shipped. This plan is the remainder.
 
 ### Phase 1: Single source of truth
 
-- [ ] ⬜ **Task 1.1**: Raw hook-field string literals where `HookInputField` is
+- [x] ✅ **Task 1.1**: Raw hook-field string literals where `HookInputField` is
   declared the single source of truth, plus two duplicate `_CWD_FIELD`
   constants. Mechanical, but worth doing as one pass so the declaration stops
   being aspirational. Check whether a test can hold the line afterwards —
   a rule nothing enforces drifts back.
+  - Fixed across 35 modules. There were six `_CWD_FIELD` copies by then,
+    not two. `tests/unit/constants/test_hook_input_field_single_source.py`
+    holds the line with an AST scan of every read of `hook_input`. The one
+    literal left is inside the project-handler scaffold that `cli.py`
+    writes out as a string, so it is client code rather than a read.
 
 ### Phase 2: Cost on the hook budget
 
-- [ ] ⬜ **Task 2.1**: `merge_qa_report` builds the full docs corpus inside a
+- [x] ✅ **Task 2.1**: `merge_qa_report` builds the full docs corpus inside a
   PostToolUse hook. The contradiction is what makes it worth a task rather than
   a shrug: a sibling handler argues against exactly that, in its own docstring,
   in the same release. Decide which position is right and make both agree —
   the answer may be that this one is fine and the sibling's caution is
   overstated, which is a legitimate outcome.
+  - **Decided (unattended, 2026-09-24)**: both are right about different
+    builds, so `merge_qa_report` now follows the cold-index rule. It still
+    refreshes a warm index, and it stands down when there is no index. Measured
+    on this repository: 0.19s warm and 3.7s cold, against a 5s handler budget;
+    the handler runs only after a git command that moves history. Assumption:
+    the owner's 'no known defects' instruction; the owner can reverse this with
+    one message. Test: `test_a_cold_docs_index_is_not_built_inside_the_hook`.
 
 ### Phase 3: A quoted destructive operand
 
-- [ ] ⬜ **Task 3.0**: `destructive_git` does not recognise a QUOTED operand:
+- [x] ✅ **Task 3.0**: `destructive_git` does not recognise a QUOTED operand:
   `git checkout "--" f.txt` is allowed where the unquoted spelling is denied,
   and bash removes the quotes before git ever sees them. Graduated from
   [Plan 00407](../Completed/00407-niggles-ledger-twelve/PLAN.md) N8.
@@ -68,9 +80,21 @@ gate — were fixed in 00407 and shipped. This plan is the remainder.
   pattern of "fixed in one, missed in the neighbour" recurred four times in the
   review that produced this plan.
 
+  - Fixed with a shared `utils.command_evasion.remove_word_quoting`, which
+    removes only quoting that cannot move a word boundary. The sibling sweep
+    found the gap in eleven spellings across `destructive_git`'s rules
+    (`test_destructive_git_quoted_operands.py`) and two in `git_stash`
+    (`TestGitStashQuotedWords`). `ancestry_preserving_merge` already matched
+    its quoted spellings. The xfail is now a plain pass.
+
 ### Phase 3b: A stats check no fast gate can see
 
-- [ ] ⬜ **Task 3.2**: Port `plan-stats-arithmetic` from
+- [x] ✅ **Task 3.2**: Delivered by Plan 00466 N13, on branch
+  `worktree-n466-n13n14`. That branch moves the check into
+  `plan_qa/checks/stats_arithmetic.py` as the one shared implementation,
+  called by `check_repo_hygiene.py` and run in the commit gate. A second
+  build here was withdrawn before commit, because two implementations of one
+  check is the shape this plan exists to remove. Port `plan-stats-arithmetic` from
   `scripts/qa/check_repo_hygiene.py` into the daemon's `plan-qa` checks, so the
   session sweep, the edit-time lint and the commit gate all see it. Graduated
   from [Plan 00407](../Completed/00407-niggles-ledger-twelve/PLAN.md) N11.
@@ -89,7 +113,7 @@ gate — were fixed in 00407 and shipped. This plan is the remainder.
   class outright. Either remedy closes this — prefer whichever leaves fewer
   hand-maintained numbers behind.
 
-- [ ] ⬜ **Task 3.2b**: `docs-qa`'s `pointer-resolves` check does not reach
+- [x] ✅ **Task 3.2b**: `docs-qa`'s `pointer-resolves` check does not reach
   plans under `Completed/`, so a link broken BY archival is invisible to it.
 
   Measured, not suspected: archiving Plans 00406 and 00407 turned four
@@ -108,9 +132,20 @@ gate — were fixed in 00407 and shipped. This plan is the remainder.
   (verify every link in the moved folder resolves after the `git mv`) rather
   than in the sweep. Either answer closes this; leaving it unexamined does not.
 
+  - **Decided (unattended, 2026-09-24)**: yes, `archive-immutability` is the
+    reason for the exclusion, so the check runs at archival time. The new
+    plan-QA COMMIT check `archival-links-resolve` looks at each `.md` file the
+    commit renames into an archive directory. It BLOCKS a link the move broke
+    and names the repoint that restores it, and it advises on a link that was
+    already dead. Journals are skipped because they are append-only. The
+    sweep exemption stays. Assumption: the owner's 'no known defects'
+    instruction; the owner can reverse this with one message. Tests:
+    `tests/unit/plan_qa/checks/test_archival_links_resolve.py`.
+
 ### Phase 3c: An allowlist of commands that do not run their argument
 
-- [ ] ⬜ **Task 3.3**: `echo 'git merge x'` and `echo 'cd .claude/hooks-daemon'`
+- [ ] ⬜ **Task 3.3**: (Open: it was not assigned in the 2026-09-24
+  unattended pass.) `echo 'git merge x'` and `echo 'cd .claude/hooks-daemon'`
   are matched as real commands by `merge_to_main_approval` and
   `daemon_location_guard`. Graduated from
   [Plan 00407](../Completed/00407-niggles-ledger-twelve/PLAN.md) N12.
@@ -128,7 +163,7 @@ gate — were fixed in 00407 and shipped. This plan is the remainder.
   growing a private copy — that divergence is what produced N2, N3 and N12 in
   the first place.
 
-- [ ] ⬜ **Task 3.4**: `plan_number_helper` uses literal-blanking as an
+- [x] ✅ **Task 3.4**: `plan_number_helper` uses literal-blanking as an
   existence filter, the same shape N12 corrected in its two siblings —
   `blank_shell_literal_spans(strip_quoted_heredoc_bodies(command))` decides
   whether a `mkdir` of a plan folder is present, so `bash -c "mkdir …"` is
@@ -140,7 +175,15 @@ gate — were fixed in 00407 and shipped. This plan is the remainder.
   precisely how the mistake propagated. Verify the behaviour before changing
   it; the fix is the same one-line removal if it reproduces.
 
-- [ ] ⬜ **Task 3.5**: `pushd` walks past `R-DAEMON-DIR-CD`. The pattern
+  - Reproduced and fixed. This is NOT ledger 00422 N28, which is about a
+    relative `mkdir` resolved against the workspace root and waits on Plan
+    00464's command-directory resolver. The mkdir rule now reads
+    `strip_inert_spans` plus in-word unquoting, so `bash -c "mkdir …"` and a
+    quoted plan-folder path both match
+    (`test_a_quoted_creation_is_still_a_creation`). The discovery rules keep
+    their literal blanking, where a literal is the signal.
+
+- [x] ✅ **Task 3.5**: `pushd` walks past `R-DAEMON-DIR-CD`. The pattern
   anchors on `\bcd`, and `pushd .claude/hooks-daemon` changes the working
   directory exactly as `cd` does.
 
@@ -163,9 +206,16 @@ gate — were fixed in 00407 and shipped. This plan is the remainder.
   `\b(?:cd|pushd)` — but check `popd` and the `-` form too, and check whether
   the deny message still reads correctly when the command was not `cd`.
 
+  - Fixed, and the xfail is now a plain pass. The rule text now reads
+    "`cd`/`pushd` into …". **Decided (unattended, 2026-09-24)**: `popd` and
+    `cd -` stay unmatched, because they name no path and the directory they
+    return to was entered by an earlier command this rule already judged.
+    Assumption: the owner's 'no known defects' instruction; the owner can
+    reverse this with one message.
+
 ### Phase 3d: Release-documentation leftovers from the v3.64.0 gates
 
-- [ ] ⬜ **Task 3.6**: Four documentation NITs the v3.64.0 Step 7 review raised
+- [x] ✅ **Task 3.6**: Four documentation NITs the v3.64.0 Step 7 review raised
   and the release did not take. Recorded here because the review report lives
   under `untracked/agent-reports/`, which is gitignored — a finding that exists
   only in an untracked file is a finding that is already lost.
@@ -188,6 +238,22 @@ gate — were fixed in 00407 and shipped. This plan is the remainder.
   into the next release's documentation pass rather than amending a published
   one.
 
+  - **Decided (unattended, 2026-09-24)**, following this task's own "do not
+    amend a published release" rule:
+
+    - Numbering and links: declined. Both live only in the published
+      v3.63.0→v3.64.0 directory, nothing is missing, and renumbering would
+      break any link to those files.
+    - #37/#38 credit: the convention is to credit, as
+      `(reported as issue #N)`. It is recorded in
+      `CLAUDE/UPGRADES/UNRELEASED/release-notes/README.md`, where callouts
+      are written.
+    - The two unmentioned skill changes: folded into the next release as
+      callout `44-`.
+
+    Assumption: the owner's 'no known defects' instruction; the owner can
+    reverse this with one message.
+
 ### Phase 3e: The `review-n12` findings, rehoused from Plan 00409
 
 These arrived with the finding that became
@@ -198,7 +264,7 @@ one shipped regression, this plan is the review's leftovers. Every reproduction
 below was re-verified against the report and, where cheap, re-run on current
 code.
 
-- [ ] ⬜ **Task 3.7**: `merge_to_main_approval` misses two real merges. Both
+- [x] ✅ **Task 3.7**: `merge_to_main_approval` misses two real merges. Both
   re-confirmed on current code after 00409 landed, so neither is a side effect
   of that fix:
 
@@ -214,7 +280,15 @@ code.
   `git merge $(cat branch.txt)`, `B=x; git merge $B` and `xargs -I{}` all DENY
   with a garbled name — fail-closed and cosmetic, explicitly NOT holes.
 
-- [ ] ⬜ **Task 3.8**: `issue_filing_gate._cwd_repo_slug` reads only
+  - Fixed (`TestTwoMergesThatWereMissed`). A positional-less `git merge` is
+    gated under `unnamed-branch`. **Decided (unattended, 2026-09-24)**:
+    `git pull <remote> <branch>` is gated as a merge of that branch, whatever
+    the remote is. A pull naming no branch, or naming the default branch
+    itself (`git pull origin main` on `main`), is an ordinary update and is
+    not gated. Assumption: the owner's 'no known defects' instruction; the
+    owner can reverse this with one message.
+
+- [x] ✅ **Task 3.8**: `issue_filing_gate._cwd_repo_slug` reads only
   `remote.origin.url` (`issue_filing_gate.py:258`), so a clone whose only
   remote is named `upstream` answers None and the gate stands down — while `gh`
   resolves its base repo from the remote SET and files against the PUBLIC
@@ -229,7 +303,13 @@ code.
   being revisited on new evidence — that the fail-open is reachable — not a
   defect the code failed to consider.
 
-- [ ] ⬜ **Task 3.9**: Six further `cd` spellings past `R-DAEMON-DIR-CD`, all
+  - Fixed. The new `GitRepo.remote_urls()` reads every remote, and a remote
+    anywhere in the set that points at us engages the gate. The docstring of
+    `_cwd_repo_slugs` records the correction.
+    Tests: `test_a_clone_whose_only_remote_is_named_upstream_is_gated` and
+    `test_any_remote_pointing_at_us_is_enough`.
+
+- [x] ✅ **Task 3.9**: Six further `cd` spellings past `R-DAEMON-DIR-CD`, all
   verified `matches=False` through the live handler, all of which really do
   change directory. `pushd` is the seventh and is already Task 3.5.
 
@@ -249,7 +329,18 @@ code.
   fail the lookahead, but a `cd` in a subshell that ends immediately changes
   nothing. Add a command after either and both match.
 
-- [ ] ⬜ **Task 3.10**: Two `daemon/cli.py` nits from the same review.
+  - Fixed as specified: an option run, plus `)` and a backtick in the
+    lookahead. The matched text is normalised first: every quote and
+    backslash is dropped, so a path nested inside `bash -c '…'` is covered
+    too, and `//` and `/./` are collapsed. The tests are in
+    `TestEverySpellingThatReallyChangesDirectory`. `(cd <dir>)` now matches.
+    That is fail-closed, as the lookahead change implies.
+
+- [x] ✅ **Task 3.10**: Two `daemon/cli.py` nits from the same review. Both
+  fixed: an unreadable held lock now reports `"unknown"`, and the explicit
+  `LOCK_UN` is gone because `os.close` releases the lock. Tests:
+  `test_an_unreadable_lock_body_still_warns_with_an_unnamed_holder` and
+  `test_a_failing_unlock_is_survived`.
 
   - `cli.py:1699-1708`: the comment says "an unnamed holder is better than no
     warning at all", and the adjacent `except OSError` sets `holder = None`,
@@ -266,7 +357,7 @@ code.
 
 ### Phase 4: The sub-bar items, carried so they are not lost
 
-- [ ] ⬜ **Task 3.1**: Four items the reviewer put below the filing bar, each
+- [x] ✅ **Task 3.1**: Four items the reviewer put below the filing bar, each
   to be fixed or explicitly declined:
   - `utils/process_probe.py` lists `env` in `_WRAPPER_PID_SPECS`; GNU `env`
     execs without forking, so `env VAR=1 ./job & wait $!` draws an advisory for
@@ -284,6 +375,21 @@ code.
     path rather than asking `ProjectContext.config_path()`. Pre-existing house
     style (three other handlers do the same), noted only because the argument
     against it is made in this same release by `daemon_sync_after_merge`.
+  - **Decided (unattended, 2026-09-24)**. Assumption: the owner's 'no known
+    defects' instruction; the owner can reverse this with one message.
+    - `env`: fixed. It is treated like `nohup`, so it is flagged only when
+      handed a shell (`env sh -c`).
+    - `create_time`: fixed. A server whose start time is unreadable is
+      skipped (`test_scan_survives_an_inaccessible_start_time`).
+    - `_append_unique`: declined. On a case-insensitive filesystem both
+      entries name the same absent path, and acting on either creates the
+      same file. Folding them needs a filesystem case probe on every deny,
+      which the Linux CI cannot exercise.
+    - Config path: declined. `ProjectContext.initialize` rejects any config
+      not at `<root>/.claude/hooks-daemon.yaml`, so the joined literal
+      cannot diverge from `config_path()`. The join also honours the
+      injected `_workspace_root` that the tests rely on, which
+      `config_path()` would bypass.
 
 ## Success Criteria
 

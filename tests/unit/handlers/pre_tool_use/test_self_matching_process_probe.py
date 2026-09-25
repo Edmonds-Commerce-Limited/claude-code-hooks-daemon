@@ -372,7 +372,7 @@ class TestWrapperPidWaits:
             "nohup sh -c './job.bash > j.log 2>&1' & wait $!",
             "nohup bash -c './job.bash' & wait $!",
             "timeout 600 ./job.bash & wait $!",
-            "env FOO=1 ./job.bash & wait $!",
+            "env FOO=1 sh -c './job.bash' & wait $!",
         ],
     )
     def test_a_non_detaching_wrapper_advises_rather_than_denies(

@@ -27,7 +27,7 @@ from typing import Any, Final, Protocol, runtime_checkable
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.constants.events import wired_event_metas
 from claude_code_hooks_daemon.constants.modes import DaemonMode, ModeConstant
-from claude_code_hooks_daemon.constants.protocol import SocketLimit
+from claude_code_hooks_daemon.constants.protocol import HookInputField, SocketLimit
 from claude_code_hooks_daemon.core.hook_result import HookResult
 from claude_code_hooks_daemon.core.input_schemas import get_input_schema
 from claude_code_hooks_daemon.core.project_context import ProjectContext
@@ -1045,8 +1045,8 @@ class HooksDaemon:
         self, event_json_key: str, hook_input: Any, writer: asyncio.StreamWriter
     ) -> None:
         """Dispatch one parsed event-socket payload and write its response."""
-        if isinstance(hook_input, dict) and not hook_input.get("hook_event_name"):
-            hook_input["hook_event_name"] = event_json_key
+        if isinstance(hook_input, dict) and not hook_input.get(HookInputField.HOOK_EVENT_NAME):
+            hook_input[HookInputField.HOOK_EVENT_NAME] = event_json_key
 
         request_data = json.dumps({"event": event_json_key, "hook_input": hook_input})
         response = await self._process_request(request_data)
@@ -1548,7 +1548,7 @@ class HooksDaemon:
 
         elif action == "log_marker":
             # Log a boundary marker message
-            message = hook_input.get("message", "MARKER")
+            message = hook_input.get(HookInputField.MESSAGE, "MARKER")
             logger.info(f"=== {message} ===")
             response = {"result": {"status": "logged", "message": message}}
 

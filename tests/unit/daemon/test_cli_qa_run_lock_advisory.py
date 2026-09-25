@@ -90,6 +90,22 @@ class TestTheAdvisoryNeverRaises:
             assert _qa_run_lock_holder(tmp_path) == "unknown"
         assert "pid is unreadable" in caplog.text
 
+    def test_a_lock_acquired_by_the_probe_is_never_explicitly_unlocked(
+        self, tmp_path: Path
+    ) -> None:
+        """Plan 00408 Task 3.10: an explicit unlock could end `restart` with a
+        traceback. Closing the descriptor releases an ``flock`` anyway, so the
+        probe's only flock call is the acquire, and the answer is "no holder".
+        """
+        _lock_file(tmp_path)
+
+        with patch(
+            "claude_code_hooks_daemon.daemon.cli.fcntl.flock",
+            side_effect=[None, OSError("unlock failed")],
+        ) as flock:
+            assert _qa_run_lock_holder(tmp_path) is None
+        assert flock.call_count == 1
+
 
 class TestCannotTellIsSaid:
     """00466 N29: "cannot tell" degrades to no restart warning, and says so."""

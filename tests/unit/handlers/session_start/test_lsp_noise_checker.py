@@ -359,3 +359,16 @@ class TestProcessScan:
 
         with patch(_PROCESS_ITER, return_value=[_Gone()]):
             assert running_language_servers(frozenset({"pyright-langserver"})) == []
+
+    def test_scan_survives_an_inaccessible_start_time(self) -> None:
+        """Plan 00408 Task 3.1: `process_iter` sets a denied attribute to None.
+
+        It does not raise, so `float(None)` sat outside the handler above.
+        """
+
+        class _Proc:
+            def __init__(self) -> None:
+                self.info = {"pid": 7, "cmdline": ["pyright-langserver"], "create_time": None}
+
+        with patch(_PROCESS_ITER, return_value=[_Proc()]):
+            assert running_language_servers(frozenset({"pyright-langserver"})) == []

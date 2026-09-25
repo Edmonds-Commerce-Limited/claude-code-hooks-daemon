@@ -33,7 +33,7 @@ import re
 from pathlib import Path
 from typing import Any, Final
 
-from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.core import BlockingResult, Decision, ProjectContext
 from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
 from claude_code_hooks_daemon.core.handler_bases import SubagentStopHandlerBase
@@ -137,7 +137,7 @@ class SubagentCacheAggregatorHandler(SubagentStopHandlerBase):
         """
         if is_synthetic_event(hook_input):
             return False
-        return bool(hook_input.get("agent_transcript_path"))
+        return bool(hook_input.get(HookInputField.AGENT_TRANSCRIPT_PATH))
 
     def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
         """Record this agent's totals, then always ALLOW.
@@ -145,10 +145,10 @@ class SubagentCacheAggregatorHandler(SubagentStopHandlerBase):
         A sensor on a blocking event: the ALLOW is unconditional by design, so
         a number that could not be collected never strands a stopping agent.
         """
-        transcript = Path(str(hook_input.get("agent_transcript_path") or ""))
+        transcript = Path(str(hook_input.get(HookInputField.AGENT_TRANSCRIPT_PATH) or ""))
         self.record(
-            session_id=str(hook_input.get("session_id") or ""),
-            agent_id=str(hook_input.get("agent_id") or ""),
+            session_id=str(hook_input.get(HookInputField.SESSION_ID) or ""),
+            agent_id=str(hook_input.get(HookInputField.AGENT_ID) or ""),
             transcript=transcript,
         )
         return BlockingResult(decision=Decision.ALLOW)
