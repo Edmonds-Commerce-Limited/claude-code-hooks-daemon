@@ -9,6 +9,143 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N89 — A data-sink receiver is trusted after the command redefines it
+
+**Found by N38 review 6 (ledger candidate 3).** `cat() { bash; }; cat <<'E'`
+and `alias cat=bash` both fail open on every tree. The heredoc blanking treats
+`cat` as a data sink, so the body is never judged, but bash runs it.
+
+**Remedy:** a receiver name is not trusted as a data sink once the same
+command defines a function or alias of that name, or runs `alias`, `eval` or
+`source` beforehand. In that case the body is judged. It builds on the N38
+lexer, so it goes on the executed-body branch with N87 and N88.
+
+### N88 — A data sink whose output feeds an executing process substitution hides the body
+
+**Found by N38 review 6 (ledger candidate 2).** In
+`tee >(bash) <<'E'` followed by `git reset --hard HEAD` and `E`, bash runs
+the reset. HEAD, base and main all allow it. `_downstream_is_all_data_sinks`
+looks at pipes only, not at `>(...)` redirect targets. This bypasses every
+guard that relies on heredoc blanking.
+
+**Remedy:** a `>(...)` or `<(...)` target that runs a shell (or anything
+off the data-sink list) makes the heredoc body executed. It goes on the
+executed-body branch with N87 and N89.
+
+### N87 — ANSI-C quoting in text handed to a shell is never decoded, so the command it carries is unseen
+
+**Found by N38 fix round 6.** In `bash -c $'echo a\ngit reset --hard HEAD'`,
+bash decodes `\n` to a newline and runs the reset as a second command. The
+guards see one `echo` with a literal `\n`, and allow it. Main allows it too.
+The same applies wherever an executed body arrives through `$'…'`: `sh -c`,
+`eval`, and a here-string fed to a shell.
+
+**Remedy:** decode `$'…'` (the full escape set: `\n`, `\t`, `\xHH`,
+`\nnn`, `\uHHHH`, `\cX`) before an executed body is lexed. If a string cannot
+be decoded, treat the command as unparseable and fail closed. It uses the
+N38 lexer, so it starts after N38 merges.
+
+### N86 — A discovery-file miss leaves the forwarders unable to find or start the daemon
+
+**Found by the upgrade refused-cases investigation**
+(`subagent-reports/260925-upgrade-refused-rootcause-opus-5-5.md` on
+`worktree-upgrade-scripts`, section 4.2). The daemon publishes its
+socket-path discovery file under the OS hostname. A forwarder running with a
+different `HOSTNAME` cannot find it. The upgrade apply's `env -i` dropped
+`HOSTNAME`, and that is fixed on that branch, but a deleted file or a crash
+lands in the same state. Then `cmd_start` sees a socket path over the
+AF_UNIX limit, reports "socket exists but its liveness is indeterminate",
+and refuses. The file does not exist, so the message is false, and the
+forwarder can never start a daemon from that state. Every PreToolUse call
+then fails open until N24 lands, and fails closed after it.
+
+**Remedy:** an absent socket path is NOT_LIVE, not indeterminate. The
+forwarder (`init.sh`) computes the same `/tmp` fallback name the Python CLI
+does, instead of depending only on the discovery file. It touches `init.sh`,
+so it starts after N24 merges.
+
+### N85 — `_MESSAGE_BODY_PATTERN` reads `\'` as an escape inside single quotes, which hides a command from every guard
+
+**Found by N38 review 5 (ledger candidate 2).** In
+`git commit -m 'a\'; git reset --hard HEAD; echo 'x'`, bash ends the first
+string at `a\'`, since a single-quoted string has no escapes. So bash runs
+the reset. `strip_message_bodies` instead treats `\'` as an escaped quote,
+and blanks everything up to the last `'`. Every guard that uses
+`strip_inert_spans` then allows the command. Main and the N38 branch both
+allow it.
+
+**Remedy:** the single-quote alternative becomes `'[^']*'`. Sweep `src/` for
+the same mistake in any other single-quote matcher. Round 6 of the N38 fix
+branch carries it, with a RED test through the real chain.
+
+### N84 — The `daemon_process` test fixture never checks that `stop` succeeded, so daemons leak
+
+**Found by the N24 gate fixer.** When N24's root-attribution check refused
+to signal a test daemon, the fixture's teardown ignored `stop`'s exit code.
+Eight daemons had been left running in the container from earlier runs, and
+nothing reported them.
+
+**Remedy:** teardown asserts `stop` exits 0 and that the pid is gone, and
+a test pins that a failed stop fails the test.
+
+### N83 — A parametrised live-daemon test skips its own `tests` case
+
+**Found by the coordinator in CI run 36171017537.**
+`tests/unit/qa/test_llm_qa_live_daemon.py:76` parametrises over the whole
+`TOOL_REGISTRY` and then calls `pytest.skip` for `tests`, so every run
+reports a skip. The owner's rule is that a skip in a release gate is a
+failure.
+
+**Remedy:** exclude `tests` from the parametrisation, and pin the reason in
+a separate test that asserts `tests` reaches the daemon through
+`tests/acceptance`.
+
+### N82 — A "design test" has been skipped as "implementation pending" since the registry-key work
+
+**Found by the coordinator in CI run 36171017537.**
+`tests/unit/handlers/test_config_key_consistency.py:76` calls `pytest.skip`
+unconditionally. It records the requirement that the registry derive a
+handler's config key from its `HandlerID` constant, not from
+`_to_snake_case(class_name)`. It has never run.
+
+**Remedy:** check whether the registry now uses the constant. If it does,
+turn the skip into a real assertion. If not, implement the lookup RED-first
+and delete the skip.
+
+### N81 — `sed_blocker` denies a Bash heredoc that writes markdown, and a strict xfail pins the defect
+
+**Found by the coordinator in CI run 36171017537.** The strict `xfail` at
+`tests/unit/handlers/test_sed_blocker.py:1391` records a behaviour defect that
+Plan 00260 Task 3.1 deferred. `cat > NOTES.md <<'EOF'` with a body that
+mentions sed is DENIED, while the Write tool allows the same `.md` content.
+Plan 00260 is archived Complete, so nothing now owns the defect. A deferral
+is the owner's call.
+
+**Remedy:** use the redirect-target parsing the other Bash guards now share
+to exempt a write whose only target is a `.md` file and whose sed text is
+never executed. Flip the xfail into a passing test and remove the marker,
+then update the guidance.
+
+### N80 — A script overwritten earlier in the same command by an unlisted writer is judged by its old content
+
+**Found by Plan 00464 review 5 (M4). Narrowed by fix round 11, then confirmed
+by the verify-and-merge pass at 5a14423fb.** The commit-gate script walk
+judges a script by its on-disk content. Round 11 made the known
+content-changing git writers deny: checkout, switch, reset, pull, merge,
+apply, am, stash pop, restore, cherry-pick, rebase, revert, worktree add and
+clone. Three writers that overwrite an EXISTING script earlier in the same
+command still leak, each reproduced with a real commit: `tar -x`, `curl -o`,
+and a `python3` `shutil.copy`. The staged term then reached the commit.
+
+The review's suggested inversion treats any command with an unknown writer
+before the script as unjudged. Measured at 53 false denies out of 191 on the
+B1 corpus, it was reverted. Text judging cannot enumerate every writer.
+
+**Remedy:** the git-level backstop that is already an owner referral in Plan
+00464 (a pre-commit sink that scans the staged content at commit time,
+whatever command produced it), which closes this whole class. Until the
+owner rules, these three shapes are the known open leaks.
+
 ### N79 — The guard-defects false-positive corpus is smaller than review 7 asked
 
 **Found by guard-defects review 8 (L8).** The in-repo corpus holds 171
