@@ -88,6 +88,8 @@ source "$_VB_SCRIPTS_DIR/install/python_fingerprint.sh"
 source "$_VB_SCRIPTS_DIR/lib/python_discovery.sh"
 # shellcheck source=lib/resolve_venv.sh
 source "$_VB_SCRIPTS_DIR/lib/resolve_venv.sh"
+# shellcheck source=lib/portable_time.sh
+source "$_VB_SCRIPTS_DIR/lib/portable_time.sh"
 
 _VB_EX_USAGE=2
 # The daemon's hard minimum; pyproject.toml's requires-python can only raise it.
@@ -183,8 +185,13 @@ _vb_marker_inputs() {
 _vb_write_marker() {
     local marker="$1" inputs="$2" exit_code="$3"
     local tmp="$marker.tmp.$$"
+    # Plan 00466 N30: a standalone assignment, so `set -euo pipefail` (top
+    # of file) aborts loudly if no timestamp source is available, rather
+    # than embedding an empty `date` substitution into the marker file.
+    local failed_at
+    failed_at="$(_hp_timestamp '%Y-%m-%dT%H:%M:%SZ' --utc)"
     printf 'inputs=%s\nfailed_at=%s\nexit=%s\n' \
-        "$inputs" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$exit_code" > "$tmp"
+        "$inputs" "$failed_at" "$exit_code" > "$tmp"
     mv -f "$tmp" "$marker"
 }
 
@@ -209,7 +216,7 @@ _vb_clone_version() {
 # printed for it.
 #
 _vb_print_running() {
-    local daemon_dir="$1" value started
+    local daemon_dir="$1" value started now
     echo "state=running"
     if value="$(venv_build_record_field "$daemon_dir" log)"; then
         echo "log=$value"
@@ -217,8 +224,14 @@ _vb_print_running() {
     if value="$(venv_build_record_field "$daemon_dir" pid)"; then
         echo "pid=$value"
     fi
-    if started="$(venv_build_record_field "$daemon_dir" started)" && [[ "$started" =~ ^[0-9]+$ ]]; then
-        echo "elapsed=$(($(date +%s) - started))"
+    # Plan 00466 N30: `elapsed=` is purely informational (init.sh's status
+    # protocol) -- when epoch time cannot be determined, OMIT the field
+    # rather than print a garbled/negative number computed from an empty
+    # `date` substitution.
+    if started="$(venv_build_record_field "$daemon_dir" started)" \
+        && [[ "$started" =~ ^[0-9]+$ ]] \
+        && now="$(_hp_epoch_seconds)"; then
+        echo "elapsed=$((now - started))"
     fi
 }
 
@@ -332,9 +345,22 @@ _vb_hook() {
     rm -f "$marker"
     local bound
     bound="$(venv_build_timeout)"
+    # Plan 00466 N30: `started=` seeds every later timeout judgement for
+    # this build (_vb_watchdog, _vb_judge_stop) -- unlike `elapsed=` above,
+    # this is not optional informational output, so a missing epoch source
+    # must refuse to start the build rather than record a bad seed.
+    local started_epoch
+    if ! started_epoch="$(_hp_epoch_seconds)"; then
+        release_venv_lock
+        echo "state=error"
+        echo "detail=cannot determine the current time to start the build (see the hook's stderr)"
+        return 0
+    fi
+    local started_iso
+    started_iso="$(_hp_timestamp '%Y-%m-%dT%H:%M:%SZ' --utc)"
     printf 'venv bootstrap started %s (python %s, daemon dir %s, bound %ss)\n' \
-        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$VB_PYTHON" "$daemon_dir" "$bound" > "$log"
-    printf 'log=%s\nstarted=%s\nbound=%s\n' "$log" "$(date +%s)" "$bound" \
+        "$started_iso" "$VB_PYTHON" "$daemon_dir" "$bound" > "$log"
+    printf 'log=%s\nstarted=%s\nbound=%s\n' "$log" "$started_epoch" "$bound" \
         > "$(_vb_record_path "$daemon_dir")"
 
     local spec
@@ -438,9 +464,17 @@ _vb_stop_job() {
 # Args: $1 the build process's pid, $2 the bound as an epoch deadline.
 #
 _vb_watchdog() {
-    local owner="$1" deadline="$2" probe out
+    local owner="$1" deadline="$2" probe out now
     while probe="$(kill -0 "$owner" 2>&1)"; do
-        if [ "$(date +%s)" -ge "$deadline" ]; then
+        # Plan 00466 N30: an unknown "now" must never be silently treated as
+        # "past the deadline" (N1's original hazard, for `sleep`, killed a
+        # healthy candidate the same way) -- stop the watchdog loudly
+        # instead, leaving the build unbounded rather than wrongly killed.
+        if ! now="$(_hp_epoch_seconds)"; then
+            print_error "venv bootstrap: watchdog cannot determine the current time; stopping without a kill (see stderr above for the cause)"
+            return 1
+        fi
+        if [ "$now" -ge "$deadline" ]; then
             print_warning "venv bootstrap: the build reached its ${_VB_CHILD_BOUND}s bound; stopping it"
             if ! out="$(kill -TERM "$owner" 2>&1)"; then
                 print_verbose "venv bootstrap: the build process $owner ended first ($out)"
@@ -465,13 +499,21 @@ _vb_watchdog() {
 # out, marker written) or 143 (stopped, nothing recorded).
 #
 _vb_judge_stop() {
-    local status="$1" resolved elapsed
+    local status="$1" resolved elapsed now
     if resolved="$(resolve_venv_python "$_VB_CHILD_DAEMON_DIR")"; then
         rm -f "$_VB_CHILD_MARKER"
         print_success "venv bootstrap: the build was stopped (status $status), but $resolved resolves for this path; nothing is recorded as failed."
         return 0
     fi
-    elapsed=$(($(date +%s) - _VB_CHILD_STARTED))
+    # Plan 00466 N30: an unknown elapsed time must never be judged a
+    # timeout -- that would wrongly record a healthy stop as a permanent
+    # failure. Fall through to the "just stopped" verdict below (143,
+    # nothing recorded) and say why on stderr.
+    if ! now="$(_hp_epoch_seconds)"; then
+        print_error "venv bootstrap: cannot determine elapsed time to judge the stop (status $status); treating it as NOT a timeout so the next hook retries."
+        return 143
+    fi
+    elapsed=$((now - _VB_CHILD_STARTED))
     if [ "$elapsed" -ge "$_VB_CHILD_BOUND" ]; then
         _vb_write_marker "$_VB_CHILD_MARKER" "$_VB_CHILD_INPUTS" "timeout"
         print_error "venv bootstrap FAILED: the build timed out after ${_VB_CHILD_BOUND}s (HOOKS_DAEMON_VENV_BUILD_TIMEOUT) and was stopped."
@@ -529,8 +571,11 @@ _vb_build() {
     trap _vb_build_stop TERM HUP INT
 
     # The bound runs from when the hook started the build (its record).
+    # Plan 00466 N30: a standalone assignment -- `set -euo pipefail` (top of
+    # file) aborts loudly on failure here, and the EXIT trap registered
+    # above still runs to release the lock cleanly.
     local now
-    now="$(date +%s)"
+    now="$(_hp_epoch_seconds)"
     if ! _VB_CHILD_STARTED="$(venv_build_record_field "$daemon_dir" started)" \
             || [[ ! "$_VB_CHILD_STARTED" =~ ^[0-9]+$ ]]; then
         _VB_CHILD_STARTED="$now"

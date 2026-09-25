@@ -623,3 +623,31 @@ class TestScope:
         assert len(violations) == 1
         assert violations[0].path == "install.sh"
         assert violations[0].line == 3
+
+
+class TestAScanOfNothingIsNotAPass:
+    """00466 N26: a missing or empty root checks 0 files, which verifies nothing.
+
+    The inventory is emptied so its gone-instance rows cannot fail the run
+    first; the only thing left to fail it is the empty scan itself.
+    """
+
+    @pytest.mark.parametrize("state", ["missing", "empty"])
+    def test_it_fails(
+        self,
+        checker: ModuleType,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        state: str,
+    ) -> None:
+        root = tmp_path / "scan-root"
+        if state == "empty":
+            root.mkdir()
+        monkeypatch.setattr(checker, "DEFAULT_INVENTORY", tmp_path / "no-inventory.yaml")
+        monkeypatch.setattr(sys, "argv", ["check", "--root", str(root)])
+
+        assert checker.main() == 1
+        out = capsys.readouterr().out
+        assert out.startswith("FAILED:")
+        assert str(root) in out

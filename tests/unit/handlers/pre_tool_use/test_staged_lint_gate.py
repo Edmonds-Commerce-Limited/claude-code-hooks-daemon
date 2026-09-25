@@ -16,10 +16,11 @@ stands the whole check down rather than linting an unbounded set.
 
 from __future__ import annotations
 
+import logging
 import subprocess
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -188,6 +189,26 @@ class TestSyntaxFailureIsSurfaced:
 
         assert result.decision == Decision.ALLOW
         assert not result.context
+
+    def test_a_check_that_timed_out_is_said_at_warning(
+        self, handler: StagedLintGateHandler, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """00466 N29: a timed-out check never looked at the file, so there is no
+        diagnosis to block on, and the log says the file went unchecked."""
+        strategy = MagicMock(default_lint_command="lint-tool {file}")
+        target = "claude_code_hooks_daemon.handlers.pre_tool_use.staged_lint_gate.subprocess.run"
+
+        with (
+            patch.object(handler, "_resolve_executable", return_value="/usr/bin/lint-tool"),
+            patch(
+                target,
+                side_effect=subprocess.TimeoutExpired(cmd="lint", timeout=Timeout.LINT_CHECK),
+            ),
+            caplog.at_level(logging.WARNING),
+        ):
+            assert handler._syntax_check("slow.py", strategy) is None
+
+        assert "slow.py was NOT checked" in caplog.text
 
 
 class TestProtectedPathExclusion:

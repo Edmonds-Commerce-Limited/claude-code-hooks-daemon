@@ -29,6 +29,14 @@ from claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization import
 
 
 @pytest.fixture(autouse=True)
+def _hermetic_claude_config_dir(tmp_path_factory: pytest.TempPathFactory, monkeypatch: Any) -> None:
+    """The handler exempts Claude Code's config dir (Plan 00468 P4); never the real one."""
+    monkeypatch.setenv(
+        "CLAUDE_CONFIG_DIR", str(tmp_path_factory.mktemp("claude-config") / ".claude")
+    )
+
+
+@pytest.fixture(autouse=True)
 def _reset_disclosure_tracker():
     """Reset the shared DaemonDataLayer singleton around every test in this module."""
     reset_data_layer()
@@ -1919,6 +1927,136 @@ class TestSkillsDirectoryMarkdown:
         assert handler.is_adhoc_instruction_file("docs/skills/reference.md") is False
 
 
+class TestClaudeConfigDirIsNotProjectLayout:
+    """Plan 00468 P4: the Claude config dir holds user agents, skills and
+    plugin data, not project docs. Under ccy it is a symlink into the project
+    (`~/.claude -> <project>/.claude/ccy`), so a write there resolved into the
+    project and was judged by the project's layout rules, and denied. The
+    memory policy is a separate rule and still applies."""
+
+    @pytest.fixture
+    def layout(self, tmp_path: Path, mock_project_context: MagicMock) -> dict[str, Path]:
+        project = tmp_path / "project"
+        in_tree_home = project / ".claude" / "ccy"
+        in_tree_home.mkdir(parents=True)
+        home_link = tmp_path / "home" / ".claude"
+        home_link.parent.mkdir()
+        home_link.symlink_to(in_tree_home)
+        mock_project_context.return_value = project
+        return {"project": project, "in_tree_home": in_tree_home, "home_link": home_link}
+
+    @pytest.fixture
+    def handler(self, layout: dict[str, Path]) -> MarkdownOrganizationHandler:
+        handler = MarkdownOrganizationHandler()
+        handler._workspace_root = layout["project"]
+        handler._config_dir = layout["home_link"]
+        return handler
+
+    @staticmethod
+    def _write(path: Path) -> dict[str, Any]:
+        return {"tool_name": "Write", "tool_input": {"file_path": str(path), "content": "x"}}
+
+    @pytest.mark.parametrize(
+        "relative",
+        [
+            "plugins/data/defence-before-fix-defence-before-fix/spec/NOTE.md",
+            "agents/my-agent.md",
+            "commands/my-command.md",
+            "rules/my-rule.md",
+            "output-styles/terse.md",
+            "skills/my-skill/SKILL.md",
+        ],
+    )
+    def test_a_write_through_the_home_symlink_is_allowed(
+        self, handler: MarkdownOrganizationHandler, layout: dict[str, Path], relative: str
+    ) -> None:
+        assert handler.matches(self._write(layout["home_link"] / relative)) is False
+
+    def test_the_resolved_in_tree_spelling_is_allowed_too(
+        self, handler: MarkdownOrganizationHandler, layout: dict[str, Path]
+    ) -> None:
+        target = layout["in_tree_home"] / "plugins" / "data" / "p" / "NOTE.md"
+        assert handler.matches(self._write(target)) is False
+
+    def test_the_memory_policy_still_applies_there(
+        self, handler: MarkdownOrganizationHandler, layout: dict[str, Path]
+    ) -> None:
+        handler._allow_untracked_claude_memory = False
+        target = layout["home_link"] / "projects" / "-workspace" / "memory" / "MEMORY.md"
+        assert handler.matches(self._write(target)) is True
+
+    def test_the_rest_of_the_project_is_still_judged(
+        self, handler: MarkdownOrganizationHandler, layout: dict[str, Path]
+    ) -> None:
+        target = layout["project"] / ".claude" / "elsewhere" / "NOTE.md"
+        assert handler.matches(self._write(target)) is True
+
+
+class TestClaudeCodePluginSourceLayout:
+    """Plan 00468 G8: a directory holding `.claude-plugin/plugin.json` or
+    `.claude-plugin/marketplace.json` is a Claude Code plugin root, and its
+    component markdown (`agents/`, `commands/`, `skills/`, `output-styles/`)
+    lives where Claude Code loads it from."""
+
+    @pytest.fixture
+    def project(self, tmp_path: Path, mock_project_context: MagicMock) -> Path:
+        mock_project_context.return_value = tmp_path
+        return tmp_path
+
+    @pytest.fixture
+    def handler(self, project: Path) -> MarkdownOrganizationHandler:
+        handler = MarkdownOrganizationHandler()
+        handler._workspace_root = project
+        handler._config_dir = project.parent / "unrelated-claude-home"
+        return handler
+
+    @staticmethod
+    def _plugin_root(project: Path, manifest: str = "plugin.json") -> Path:
+        root = project / "tools" / "my-plugin"
+        (root / ".claude-plugin").mkdir(parents=True)
+        (root / ".claude-plugin" / manifest).write_text("{}")
+        return root
+
+    @staticmethod
+    def _write(path: Path) -> dict[str, Any]:
+        return {"tool_name": "Write", "tool_input": {"file_path": str(path), "content": "x"}}
+
+    @pytest.mark.parametrize(
+        "relative",
+        [
+            "agents/reviewer.md",
+            "agents/review/security.md",
+            "commands/status.md",
+            "skills/pdf/SKILL.md",
+            "skills/pdf/references/format.md",
+            "output-styles/terse.md",
+        ],
+    )
+    def test_component_markdown_in_a_plugin_root_is_allowed(
+        self, handler: MarkdownOrganizationHandler, project: Path, relative: str
+    ) -> None:
+        root = self._plugin_root(project)
+        assert handler.matches(self._write(root / relative)) is False
+
+    def test_a_marketplace_root_counts_too(
+        self, handler: MarkdownOrganizationHandler, project: Path
+    ) -> None:
+        root = self._plugin_root(project, manifest="marketplace.json")
+        assert handler.matches(self._write(root / "skills" / "x" / "SKILL.md")) is False
+
+    def test_other_markdown_in_a_plugin_root_is_still_judged(
+        self, handler: MarkdownOrganizationHandler, project: Path
+    ) -> None:
+        root = self._plugin_root(project)
+        assert handler.matches(self._write(root / "notes" / "idea.md")) is True
+
+    def test_without_a_manifest_it_is_not_a_plugin_root(
+        self, handler: MarkdownOrganizationHandler, project: Path
+    ) -> None:
+        target = project / "tools" / "my-plugin" / "agents" / "reviewer.md"
+        assert handler.matches(self._write(target)) is True
+
+
 class TestClaudeCodeSyncEnforcement:
     """Tests for _check_claude_code_sync() — Phase 3 of Plan 86.
 
@@ -2042,6 +2180,59 @@ class TestClaudeCodeSyncEnforcement:
         settings_file.write_text('{"plansDirectory": "CLAUDE/Plan"}', encoding="utf-8")
         result = handler._check_claude_code_sync()
         assert result is None
+
+    # ── Local settings (Plan 00468 Task 1.2) ──
+    # Claude Code merges .claude/settings.local.json over .claude/settings.json,
+    # and a checkout-specific plansDirectory belongs there, because
+    # settings.json is what the installers ship to clients.
+
+    def test_passes_when_plans_directory_is_only_in_local_settings(
+        self, handler: MarkdownOrganizationHandler, settings_dir: Path
+    ) -> None:
+        (settings_dir / "settings.json").write_text('{"other_key": "value"}', encoding="utf-8")
+        (settings_dir / "settings.local.json").write_text(
+            '{"plansDirectory": "./CLAUDE/Plan"}', encoding="utf-8"
+        )
+        assert handler._check_claude_code_sync() is None
+
+    def test_passes_when_only_local_settings_exist(
+        self, handler: MarkdownOrganizationHandler, settings_dir: Path
+    ) -> None:
+        (settings_dir / "settings.local.json").write_text(
+            '{"plansDirectory": "CLAUDE/Plan"}', encoding="utf-8"
+        )
+        assert handler._check_claude_code_sync() is None
+
+    def test_local_value_overrides_the_project_value(
+        self, handler: MarkdownOrganizationHandler, settings_dir: Path
+    ) -> None:
+        """The local file wins in Claude Code, so a wrong local value is the
+        one that decides where plan mode writes, whatever settings.json says."""
+        (settings_dir / "settings.json").write_text(
+            '{"plansDirectory": "./CLAUDE/Plan"}', encoding="utf-8"
+        )
+        (settings_dir / "settings.local.json").write_text(
+            '{"plansDirectory": "./Other/Plans"}', encoding="utf-8"
+        )
+        result = handler._check_claude_code_sync()
+        assert result is not None
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "Other/Plans" in result.reason
+        assert "settings.local.json" in result.reason
+
+    def test_invalid_local_settings_deny(
+        self, handler: MarkdownOrganizationHandler, settings_dir: Path
+    ) -> None:
+        (settings_dir / "settings.json").write_text(
+            '{"plansDirectory": "./CLAUDE/Plan"}', encoding="utf-8"
+        )
+        (settings_dir / "settings.local.json").write_text("{invalid json", encoding="utf-8")
+        result = handler._check_claude_code_sync()
+        assert result is not None
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "Cannot read .claude/settings.local.json" in result.reason
 
     # ── Integration: sync check in handle_planning_mode_write ──
 

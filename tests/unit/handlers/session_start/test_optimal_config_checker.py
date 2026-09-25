@@ -20,6 +20,18 @@ from claude_code_hooks_daemon.core import Decision
 class TestOptimalConfigCheckerInit:
     """Test handler initialization."""
 
+    def test_the_settings_path_honours_claude_config_dir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Plan 00468 G13: user settings live under ``$CLAUDE_CONFIG_DIR``."""
+        from claude_code_hooks_daemon.handlers.session_start.optimal_config_checker import (
+            OptimalConfigCheckerHandler,
+        )
+
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
+        handler = OptimalConfigCheckerHandler()
+        assert handler._get_settings_path() == tmp_path / "cfg" / "settings.json"
+
     def test_handler_id(self) -> None:
         """Test handler has correct ID."""
         from claude_code_hooks_daemon.handlers.session_start.optimal_config_checker import (

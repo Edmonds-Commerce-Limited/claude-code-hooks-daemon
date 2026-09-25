@@ -74,7 +74,6 @@ _MODE_BLOCK: Final[str] = "block"
 _DEFAULT_MAX_FILES: Final[int] = 20
 
 _FIELD_COMMAND: Final[str] = "command"
-_CWD_FIELD: Final[str] = "cwd"
 
 # A newline separates commands exactly as `;` does (Plan 00268's own lesson,
 # from `verification_result_gate`), and `&&`/`||`/`|` each start a new command
@@ -161,7 +160,7 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
         self._formatter = RuleFormatter()
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        if hook_input.get("tool_name") != ToolName.BASH:
+        if hook_input.get(HookInputField.TOOL_NAME) != ToolName.BASH:
             return False
         command = get_bash_command(hook_input)
         if not command:
@@ -320,12 +319,17 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
                 )
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
-            # A missing binary or a timed-out subprocess is feature detection,
-            # not a failure to hide: the file's syntax was never actually
-            # checked, so there is nothing to report. Logged (not silent) so
-            # the daemon log records that the check did not run, matching
-            # `lint_on_edit`'s identical never-block-on-absence convention.
-            logger.debug("staged_lint_gate: %s unavailable for %s: %s", parts[0], file_path, exc)
+            # A tool that cannot run or times out never looked at the file, so
+            # there is no diagnosis to block on (`lint_on_edit`'s identical
+            # never-block-on-absence convention). It is logged at WARNING: the
+            # commit goes through with this file unchecked, which is not the
+            # same as the file passing.
+            logger.warning(
+                "staged_lint_gate: %s was NOT checked: %s could not run (%s)",
+                file_path,
+                parts[0],
+                exc,
+            )
             result = None
 
         if result is None:
@@ -362,7 +366,7 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
         Mirrors `PlanQaCommitGateHandler._is_foreign_repo`: nested/vendor
         repos and other worktrees own their own staged tree.
         """
-        cwd_raw = hook_input.get(_CWD_FIELD)
+        cwd_raw = hook_input.get(HookInputField.CWD)
         if not cwd_raw:
             return False
         repo = GitRepo.resolve_for(Path(cwd_raw))

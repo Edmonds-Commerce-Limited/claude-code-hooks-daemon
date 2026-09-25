@@ -1,6 +1,6 @@
 """Stage 1: deterministic extraction of genuine human prompts (Plan 00274).
 
-Reads Claude Code session transcripts (``~/.claude/projects/<slug>/*.jsonl``)
+Reads Claude Code session transcripts (``<config dir>/projects/<slug>/*.jsonl``)
 and applies the two-layer noise filter verified in BRAINSTORM.md section 2:
 field-level flags first, then content-level markers. Tolerant of unknown
 record shapes — skip and count, never crash (the jsonl format is Claude
@@ -15,7 +15,6 @@ import time
 from pathlib import Path
 
 from claude_code_hooks_daemon.skill_scan.constants import (
-    CLAUDE_PROJECTS_SUBDIR,
     EXCLUDE_CONTENT_MARKERS,
     EXCLUDE_FLAGS,
     SECONDS_PER_DAY,
@@ -23,6 +22,7 @@ from claude_code_hooks_daemon.skill_scan.constants import (
     USER_RECORD_TYPE,
 )
 from claude_code_hooks_daemon.skill_scan.models import Prompt, ScanStats
+from claude_code_hooks_daemon.utils.claude_config import claude_project_dir
 
 logger = logging.getLogger(__name__)
 
@@ -30,20 +30,16 @@ _MESSAGE_FIELD = "message"
 _CONTENT_FIELD = "content"
 _TYPE_FIELD = "type"
 _SESSION_ID_FIELD = "sessionId"
-_SLUG_SEPARATOR = "-"
-_PATH_SEPARATOR = "/"
 
 
-def derive_transcript_dir(project_root: Path, home: Path | None = None) -> Path:
+def derive_transcript_dir(project_root: Path, *, config_dir: Path | None = None) -> Path:
     """Claude Code's transcript directory for ``project_root``.
 
-    Claude Code slugs a project path by replacing every path separator with
-    ``-`` (so ``/workspace`` becomes ``-workspace``) under
-    ``~/.claude/projects/``.
+    Delegates to :func:`claude_project_dir`, the one derivation every
+    transcript reader shares (00466 N27); the config dir defaults to
+    :func:`claude_config_dir` (Plan 00468 G13).
     """
-    base = home if home is not None else Path.home()
-    slug = str(project_root).replace(_PATH_SEPARATOR, _SLUG_SEPARATOR)
-    return base.joinpath(*CLAUDE_PROJECTS_SUBDIR) / slug
+    return claude_project_dir(project_root, config_dir=config_dir)
 
 
 def _is_genuine_text(text: str, markers: tuple[str, ...]) -> bool:

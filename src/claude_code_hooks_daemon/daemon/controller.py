@@ -29,6 +29,10 @@ from claude_code_hooks_daemon.core.pseudo_event import (
     merge_pseudo_results,
 )
 from claude_code_hooks_daemon.core.router import EventRouter
+from claude_code_hooks_daemon.daemon.source_fingerprint import (
+    HEALTH_KEY_CONFIG_FINGERPRINT,
+    HEALTH_KEY_SOURCE_FINGERPRINT,
+)
 from claude_code_hooks_daemon.daemon.verdict_log import append_verdicts
 from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
 
@@ -138,6 +142,7 @@ class DaemonController:
         "_chain_deadline_problems",
         "_config",
         "_config_errors",
+        "_config_fingerprint",
         "_degraded",
         "_initialised",
         "_mode_manager",
@@ -194,6 +199,9 @@ class DaemonController:
         # after that -- staying stale IS the point, so a caller can detect
         # when the on-disk source has moved on without a restart.
         self._source_fingerprint: str | None = None
+        # Fingerprint of the config bound at startup (Plan 00415), supplied by
+        # the caller that loaded it; the same never-recomputed contract.
+        self._config_fingerprint: str | None = None
 
     def initialise(
         self,
@@ -216,6 +224,7 @@ class DaemonController:
         worktree: "WorktreeConfig | None" = None,
         reference_repos: "ReferenceReposConfig | None" = None,
         chain_deadline_problems: list[str] | None = None,
+        config_fingerprint: str | None = None,
     ) -> None:
         """Initialise the controller with handlers.
 
@@ -258,6 +267,11 @@ class DaemonController:
             chain_deadline_problems: ``DaemonConfig.chain_deadline_problems``
                 (Plan 00466 N40 review 2 mA4). Each is logged and reported in
                 ``get_health()`` as the ``chain_deadline`` degraded reason.
+            config_fingerprint: ``compute_config_fingerprint`` of the config
+                these slices came from (Plan 00415), reported by
+                ``get_health`` so a config edit without a restart reads as
+                stale. ``None`` reports no config fingerprint, which the
+                freshness verdict treats as unverifiable.
 
         Raises:
             ValueError: If workspace_root is None (FAIL FAST requirement)
@@ -348,6 +362,7 @@ class DaemonController:
         self._source_fingerprint = self._compute_startup_source_fingerprint(
             workspace_root, project_handlers_config
         )
+        self._config_fingerprint = config_fingerprint
 
         # Inject handler guidance into project CLAUDE.md (advisory, never raises).
         # Pseudo-event handlers must be included: they dispatch through the
@@ -357,7 +372,13 @@ class DaemonController:
         # DROPPED from CLAUDE.md on the next restart (and auto-committed),
         # because a live handler returning a section is not the same thing as
         # that section reaching the file.
-        all_handlers = [h for chain in self._router._chains.values() for h in chain._handlers]
+        # Ledger 00466 N7: read the chain's public `.handlers` property, not
+        # the private `._handlers` list -- the property sorts on access
+        # (priority, then name) and is the same pattern EventRouter.
+        # get_all_handlers() already uses. `_collect_tiers()` below sorts
+        # its own tiers independently, so this is a defence-in-depth fix
+        # at the source rather than a fix that only matters here.
+        all_handlers = [h for chain in self._router._chains.values() for h in chain.handlers]
         if self._pseudo_dispatcher is not None:
             all_handlers.extend(self._pseudo_dispatcher.all_handlers())
         promoted_handlers = claude_md.promotion.promoted_handlers if claude_md else None
@@ -1222,7 +1243,10 @@ class DaemonController:
             # Plan 00371: content fingerprint of the code loaded at startup,
             # so a caller can detect a daemon whose loaded code has fallen
             # behind the working tree. None until initialise() runs.
-            "source_fingerprint": self._source_fingerprint,
+            HEALTH_KEY_SOURCE_FINGERPRINT: self._source_fingerprint,
+            # Plan 00415: fingerprint of the config bound at startup, the
+            # other half of the freshness verdict. None until initialise().
+            HEALTH_KEY_CONFIG_FINGERPRINT: self._config_fingerprint,
             "stragglers": {
                 "count": straggler_health.count,
                 "oldest_age_seconds": straggler_health.oldest_age_seconds,
@@ -1249,6 +1273,12 @@ class DaemonController:
                 {"filename": f.filename, "event_dir": f.event_dir, "reason": f.reason}
                 for f in self._project_handler_load_failures
             ]
+
+        # Plan 00466 N19: a handler whose options could not be collected runs
+        # on its defaults, which is degraded protection the operator must see.
+        option_failures = self._registry.option_failures
+        if option_failures:
+            health["option_failures"] = option_failures
 
         return health
 

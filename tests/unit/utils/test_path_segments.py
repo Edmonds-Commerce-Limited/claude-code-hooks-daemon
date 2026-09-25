@@ -87,6 +87,14 @@ class TestProjectRelative:
         match, and must not raise."""
         assert matches_path_segment("/proj", ("venv/",), project_root="/proj") is False
 
+    def test_empty_file_path_is_not_skipped_and_does_not_raise(self) -> None:
+        """Ledger 00466 N44: ``os.path.relpath("", root)`` raises
+        ``ValueError: no path specified`` -- a caller handing this module an
+        empty candidate (rather than one this module derives itself) must
+        get the same safe "not skipped" answer as any other unresolvable
+        path, never a crash."""
+        assert matches_path_segment("", ("venv/",), project_root="/proj") is False
+
 
 class TestPathLibCompatible:
     """``project_root`` accepts anything ``str()`` renders as a path, matching

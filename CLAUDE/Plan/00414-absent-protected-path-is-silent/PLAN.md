@@ -1,6 +1,6 @@
 # Plan 00414: absent protected path is silent
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-15
 **Owner**: joseph
 **Priority**: Medium
@@ -68,34 +68,62 @@ These need settling before implementation, and they are genuinely open:
   real finding and the first is noise, and telling them apart may need an
   explicit declaration rather than inference.
 
+  **Decided (unattended, 2026-09-24)**: report "absent" only when the
+  project's config names the protected path explicitly: `sensitive_content`'s
+  `secret_word_list_path` option, or a path-shaped literal (no glob, contains
+  a `/`) in `secret_file_guard`'s `protected_paths`, with that handler enabled.
+  A default nobody configured is no gap. Assumption: the owner's 'no known
+  defects' instruction; the owner can reverse this with one message.
+
 - **Once per checkout, or every session?** A one-shot notice is easy to miss
   and easy to ignore; a per-session one is the noise failure above. The
   existing `deployed_artefact_drift` and `reference_repo_sweep` handlers have
   each already answered a version of this question — their answers should be
   read before a third one is invented.
 
+  **Decided (unattended, 2026-09-24)**: report it once per config or content
+  change, keyed by a content hash of the findings in the daemon's untracked
+  dir, reusing the caching pattern of `gitignore_safety_checker`. A new
+  declaration, a moved path or a file lost again after being restored is told
+  again. Assumption: the owner's 'no known defects' instruction; the owner can
+  reverse this with one message.
+
+- **Defect or feature?** **Decided (unattended, 2026-09-24)**: classed as a
+  defect, because a silently inert guard is reported the same as a healthy
+  one. Assumption: the owner's 'no known defects' instruction; the owner can
+  reverse this with one message.
+
 ## Tasks
 
-- [ ] ⬜ **Task 1.1**: Settle the two open questions above with the owner.
+- [x] ✅ **Task 1.1**: Settle the two open questions above with the owner.
+  Settled by the rulings above.
 
-- [ ] ⬜ **Task 1.2**: Read how `deployed_artefact_drift` and
+- [x] ✅ **Task 1.2**: Read how `deployed_artefact_drift` and
   `reference_repo_sweep` decide when to speak, and reuse rather than reinvent.
+  `deployed_artefact_drift` speaks every session while drift lasts, keyed on
+  presence; `gitignore_safety_checker` keeps a content-hash cache under the
+  daemon's untracked dir. The once-only key reuses the latter's shape.
 
-- [ ] ⬜ **Task 1.3**: Failing test first: a configured-but-absent protected
+- [x] ✅ **Task 1.3**: Failing test first: a configured-but-absent protected
   path produces a finding; a configured-and-healthy one still produces silence.
 
-- [ ] ⬜ **Task 1.4**: Implement, keeping the metadata-only contract — assert in
-  a test that no code path opens a protected file.
+- [x] ✅ **Task 1.4**: Implement, keeping the metadata-only contract — assert in
+  a test that no code path opens a protected file. Absence is judged by
+  `stat()` alone. Plan 00459 has since added one sanctioned in-daemon format
+  read (`classify_at_rest`); the test stubs it so any other open would show.
 
 ## Success Criteria
 
-- [ ] ⬜ A fresh clone whose config names a word list it does not have is told
+- [x] ✅ A fresh clone whose config names a word list it does not have is told
   so, once, in terms that say which guard is inert as a result.
 
-- [ ] ⬜ A checkout with nothing missing produces exactly the same output as
+- [x] ✅ A checkout with nothing missing produces exactly the same output as
   today.
 
-- [ ] ⬜ No protected file's contents are read on any path, proven by test.
+- [x] ✅ No protected file's contents are read on any path, proven by test.
+
+- [ ] ⬜ Full QA passes over the merged batch, the daemon is restarted, and CI
+  is green.
 
 ## Delivery & Milestones
 

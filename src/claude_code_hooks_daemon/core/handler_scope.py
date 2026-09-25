@@ -21,7 +21,10 @@ thread by that field alone. ``orchestrator_simulate`` learned this the
 expensive way and guards with :func:`is_synthetic_event`; its docstring records
 that without the guard the suite went red with hundreds of denied probes AND,
 under most-restrictive-wins, other handlers' expected ALLOWs turned into
-failures. So ``MAIN`` means "no ``agent_id`` AND not synthetic".
+failures. So ``MAIN`` means "no ``agent_id`` AND not synthetic", unless a
+hand-sent probe names its thread with ``probe_as`` (Plan 00466 N12), which is
+the only way a probe can exercise a scoped handler without being recorded as
+real traffic.
 
 **Scope only means anything on an event that can carry ``agent_id``.** Five
 contracts declare the field in their ``conditional_input_fields`` or
@@ -88,6 +91,36 @@ def _is_synthetic(hook_input: Mapping[str, Any]) -> bool:
     return is_synthetic_event(hook_input)
 
 
+def _probe_stands_for(hook_input: Mapping[str, Any], *, subagent: bool) -> bool:
+    """Whether a synthetic event is a probe standing for that thread.
+
+    Lazy for the same import-cycle reason as :func:`_is_synthetic`.
+    """
+    from claude_code_hooks_daemon.daemon.synthetic_traffic import ProbeThread, probe_thread
+
+    wanted = ProbeThread.SUB if subagent else ProbeThread.MAIN
+    return probe_thread(hook_input) is wanted
+
+
+def acts_as_main_thread(hook_input: Mapping[str, Any]) -> bool:
+    """Whether this event is judged as the main thread's.
+
+    A real event: no ``agent_id``. A synthetic one: only a probe that says it
+    stands for the main thread (Plan 00466 N12); any other fabricated event is
+    neither thread, as before.
+    """
+    if _is_synthetic(hook_input):
+        return _probe_stands_for(hook_input, subagent=False)
+    return not in_subagent(hook_input)
+
+
+def acts_as_subagent(hook_input: Mapping[str, Any]) -> bool:
+    """Whether this event is judged as a subagent's. Mirror of :func:`acts_as_main_thread`."""
+    if _is_synthetic(hook_input):
+        return _probe_stands_for(hook_input, subagent=True)
+    return in_subagent(hook_input)
+
+
 def in_subagent(hook_input: Mapping[str, Any]) -> bool:
     """Whether this event fired inside a subagent call.
 
@@ -102,17 +135,17 @@ def in_subagent(hook_input: Mapping[str, Any]) -> bool:
 def scope_admits(scope: HandlerScope, hook_input: Mapping[str, Any]) -> bool:
     """Whether a handler with ``scope`` may run for this event.
 
-    A synthetic event is admitted by ``ALL`` and by neither of the others: it
-    is not a real main thread, and it is not a subagent, so claiming it for
-    either would be a statement the payload does not support.
+    A synthetic event is admitted by ``ALL`` and, as a rule, by neither of the
+    others: it is not a real main thread, and it is not a subagent, so
+    claiming it for either would be a statement the payload does not support.
+    The one exception is a probe that makes that statement itself with
+    ``probe_as`` (see ``synthetic_traffic.probe_thread``).
     """
     if scope is HandlerScope.ALL:
         return True
-    if _is_synthetic(hook_input):
-        return False
     if scope is HandlerScope.MAIN:
-        return not in_subagent(hook_input)
-    return in_subagent(hook_input)
+        return acts_as_main_thread(hook_input)
+    return acts_as_subagent(hook_input)
 
 
 def event_supports_scope(event_name: str) -> bool:
