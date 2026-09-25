@@ -5,11 +5,9 @@ from unittest.mock import MagicMock, patch
 
 import psutil
 
-from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.daemon.process_verification import (
     find_all_daemon_processes,
     is_process_running,
-    kill_daemon_process,
 )
 
 
@@ -415,63 +413,6 @@ class TestDaemonServerMatching:
         )
 
         assert _DAEMON_LAUNCH_SUBCOMMANDS == ("start", "restart")
-
-
-class TestKillDaemonProcess:
-    """Tests for kill_daemon_process()."""
-
-    def test_kill_process_succeeds(self) -> None:
-        """Successfully terminates process with SIGTERM."""
-        mock_process = MagicMock(spec=psutil.Process)
-        mock_process.is_running.return_value = False  # Process terminated
-
-        with patch("psutil.Process", return_value=mock_process):
-            result = kill_daemon_process(pid=12345)
-
-        assert result is True
-        mock_process.terminate.assert_called_once()
-        mock_process.wait.assert_called_once_with(timeout=Timeout.PROCESS_KILL_WAIT)
-
-    def test_kill_process_uses_sigkill_if_sigterm_fails(self) -> None:
-        """Uses SIGKILL if process doesn't respond to SIGTERM."""
-        mock_process = MagicMock(spec=psutil.Process)
-        mock_process.wait.side_effect = psutil.TimeoutExpired(seconds=2)
-        mock_process.is_running.return_value = False  # Process eventually terminated
-
-        with patch("psutil.Process", return_value=mock_process):
-            result = kill_daemon_process(pid=12345)
-
-        assert result is True
-        mock_process.terminate.assert_called_once()
-        mock_process.wait.assert_called_once_with(timeout=Timeout.PROCESS_KILL_WAIT)
-        mock_process.kill.assert_called_once()
-
-    def test_kill_process_handles_non_existent_pid(self) -> None:
-        """Returns False when PID does not exist."""
-        with patch("psutil.Process", side_effect=psutil.NoSuchProcess(pid=99999)):
-            result = kill_daemon_process(pid=99999)
-
-        assert result is False
-
-    def test_kill_process_handles_permission_denied(self) -> None:
-        """Returns False when lacking permission to kill process."""
-        mock_process = MagicMock(spec=psutil.Process)
-        mock_process.terminate.side_effect = psutil.AccessDenied(pid=12345)
-
-        with patch("psutil.Process", return_value=mock_process):
-            result = kill_daemon_process(pid=12345)
-
-        assert result is False
-
-    def test_refuses_to_kill_current_process(self) -> None:
-        """Returns False and does not kill if PID is current process."""
-        current_pid = os.getpid()
-
-        with patch("psutil.Process") as mock_process_cls:
-            result = kill_daemon_process(pid=current_pid)
-
-        assert result is False
-        mock_process_cls.assert_not_called()  # Should never create Process object
 
 
 class TestIsProcessRunning:

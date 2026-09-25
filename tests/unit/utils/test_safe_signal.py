@@ -9,12 +9,13 @@ from __future__ import annotations
 
 import os
 import signal
-import subprocess  # nosec B404 - spawns trusted python children only
+import subprocess
 import sys
 from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import psutil
 import pytest
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
@@ -56,9 +57,7 @@ def children() -> Iterator[list[subprocess.Popen[bytes]]]:
 def _spawn(
     children: list[subprocess.Popen[bytes]], *argv: str, new_session: bool = True
 ) -> subprocess.Popen[bytes]:
-    child = subprocess.Popen(  # nosec B603 - fixed argv, trusted interpreter
-        [sys.executable, "-c", _SLEEP, *argv], start_new_session=new_session
-    )
+    child = subprocess.Popen([sys.executable, "-c", _SLEEP, *argv], start_new_session=new_session)
     children.append(child)
     return child
 
@@ -159,7 +158,7 @@ class TestStoppingADaemonTermsThenKillsOnlyThisProjectsDaemon:
     def test_a_daemon_that_ignores_term_is_killed(
         self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
     ) -> None:
-        daemon = subprocess.Popen(  # nosec B603 - fixed argv, trusted interpreter
+        daemon = subprocess.Popen(
             [
                 sys.executable,
                 "-c",
@@ -203,6 +202,25 @@ class TestStoppingADaemonTermsThenKillsOnlyThisProjectsDaemon:
             stop_verified_daemon(
                 MagicMock().pid, project_root=tmp_path, grace_seconds=_GRACE_SECONDS
             )
+
+    def test_no_permission_to_signal_is_a_permission_error(
+        self,
+        tmp_path: Path,
+        children: list[subprocess.Popen[bytes]],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Tests run as root, which may signal anything, so the refusal the
+        # kernel would give an unprivileged caller is raised here instead.
+        daemon = _fake_daemon(children, tmp_path)
+
+        def denied(process: psutil.Process) -> None:
+            raise psutil.AccessDenied(process.pid)
+
+        monkeypatch.setattr(psutil.Process, "terminate", denied)
+
+        with pytest.raises(PermissionError):
+            stop_verified_daemon(daemon.pid, project_root=tmp_path, grace_seconds=_GRACE_SECONDS)
+        assert daemon.poll() is None
 
 
 class TestAGroupIsSignalledOnlyWhenOurOwnChildLeadsIt:

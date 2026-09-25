@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import os
 import signal
-import subprocess  # nosec B404 - spawns a trusted `sleep` child only
+import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -272,7 +272,7 @@ class TestTheNetIsInstalledForTheWholeRun:
         assert len(net.drain_violations()) == 1
 
     def test_a_child_this_test_started_in_its_own_session_is_killed_normally(self) -> None:
-        child = subprocess.Popen(  # nosec B603 - fixed argv, trusted binary
+        child = subprocess.Popen(
             [sys.executable, "-c", "import time; time.sleep(600)"],
             start_new_session=True,
         )

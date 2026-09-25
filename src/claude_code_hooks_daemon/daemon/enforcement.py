@@ -9,16 +9,36 @@ import os
 from pathlib import Path
 
 from claude_code_hooks_daemon.config.models import Config
+from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.daemon.paths import cleanup_pid_file, read_pid_file
 from claude_code_hooks_daemon.daemon.process_verification import (
     find_all_daemon_processes,
     is_process_running,
-    kill_daemon_process,
 )
 from claude_code_hooks_daemon.daemon.server import _socket_is_live
 from claude_code_hooks_daemon.utils.container_detection import is_container_environment
+from claude_code_hooks_daemon.utils.safe_signal import (
+    DaemonStop,
+    RefusedSignalTarget,
+    stop_verified_daemon,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _stop_peer_daemon(pid: int, project_root: Path) -> str | None:
+    """SIGTERM, then SIGKILL, one peer daemon once it is proven to be ours.
+
+    Returns:
+        None when the peer is gone, otherwise why it could not be stopped.
+    """
+    try:
+        outcome = stop_verified_daemon(
+            pid, project_root=project_root, grace_seconds=Timeout.PROCESS_KILL_WAIT
+        )
+    except (RefusedSignalTarget, PermissionError) as failure:
+        return str(failure)
+    return "it survived SIGKILL" if outcome is DaemonStop.SURVIVED else None
 
 
 def enforce_single_daemon(
@@ -84,17 +104,25 @@ def enforce_single_daemon(
 
     logger.debug(f"Found {len(other_daemons)} other daemon process(es)")
 
-    # In container: Kill all other daemons (system-wide enforcement)
-    if in_container and other_daemons:
+    # In container: stop every other daemon of THIS project root. Each pid is
+    # re-proven by stop_verified_daemon, so without a project root nothing can
+    # be proven ours and nothing is signalled (Plan 00466 N59).
+    if in_container and other_daemons and project_root is None:
+        logger.error(
+            f"Container environment: {len(other_daemons)} other daemon process(es) found, "
+            "but no project root to prove they are this project's; signalling none"
+        )
+    elif in_container and other_daemons and project_root is not None:
         logger.warning(
             f"Container environment: Killing {len(other_daemons)} other daemon process(es)"
         )
         for pid in other_daemons:
             logger.info(f"Killing daemon process {pid}")
-            if kill_daemon_process(pid):
+            failure = _stop_peer_daemon(pid, project_root)
+            if failure is None:
                 logger.info(f"Successfully killed daemon process {pid}")
             else:
-                logger.error(f"Failed to kill daemon process {pid}")
+                logger.error(f"Failed to kill daemon process {pid}: {failure}")
 
     # Outside container: Only clean up stale PID file (conservative)
     elif not in_container:

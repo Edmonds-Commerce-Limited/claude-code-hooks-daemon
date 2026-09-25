@@ -555,12 +555,6 @@
       "reason": "_log_stop_event(): Non-critical JSONL append — logs at debug level and continues when ProjectContext is not initialised (unit tests) or the log file is unwritable. Stop event logging is purely diagnostic and must not affect the handler decision or raise to callers."
     },
     {
-      "file": "install/client_validator.py",
-      "function": "_check_running_daemon",
-      "rule": "silent-pass",
-      "reason": "Process management during installation: nested try/except/pass for OS signal operations (kill, SIGTERM, SIGKILL). Inner exceptions (ProcessLookupError) indicate the process already died — a success condition. Outer try handles unexpected signal failures gracefully."
-    },
-    {
       "file": "install/transport_probe.py",
       "function": "_verify_digest",
       "rule": "return-none-on-error",

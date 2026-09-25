@@ -1,18 +1,14 @@
 """Process verification utilities for daemon enforcement.
 
-This module provides system-wide daemon process detection and management,
-particularly useful in container environments for single-process enforcement.
+This module provides system-wide daemon process detection, particularly useful
+in container environments for single-process enforcement. Signalling a daemon
+it finds is ``utils.safe_signal``'s job, which re-proves the pid first.
 """
 
-import logging
 import os
 from pathlib import Path
 
 import psutil
-
-from claude_code_hooks_daemon.constants import Timeout
-
-logger = logging.getLogger(__name__)
 
 # The CLI module that, given a launch subcommand, becomes the daemon server.
 # Matching requires this exact module token PLUS a launch subcommand (below) so
@@ -153,59 +149,6 @@ def _root_from_interpreter(interpreter: str) -> str | None:
         if marker in interpreter:
             return _normalize_root(interpreter.split(marker, 1)[0])
     return None
-
-
-def kill_daemon_process(pid: int) -> bool:
-    """Safely terminate a daemon process.
-
-    Uses SIGTERM first, waits 2 seconds, then SIGKILL if needed.
-
-    Args:
-        pid: Process ID to terminate
-
-    Returns:
-        True if process was successfully terminated, False otherwise.
-
-    Note:
-        - Refuses to kill current process (safety check)
-        - Returns False for non-existent PIDs
-        - Returns False for permission denied errors
-    """
-    # Safety check: never kill current process
-    if pid == os.getpid():
-        logger.warning(f"Refusing to kill current process (PID {pid})")
-        return False
-
-    try:
-        process = psutil.Process(pid)
-
-        # Try graceful termination first (SIGTERM)
-        logger.info(f"Terminating daemon process (PID {pid})")
-        process.terminate()
-
-        # Wait up to 2 seconds for process to exit
-        try:
-            process.wait(timeout=Timeout.PROCESS_KILL_WAIT)
-        except psutil.TimeoutExpired:
-            # Process didn't exit, force kill (SIGKILL)
-            logger.warning(f"Process {pid} did not respond to SIGTERM, using SIGKILL")
-            process.kill()
-
-        # Verify termination
-        if not process.is_running():
-            logger.info(f"Successfully killed daemon process (PID {pid})")
-            return True
-
-        logger.error(f"Failed to kill daemon process (PID {pid})")
-        return False
-
-    except psutil.NoSuchProcess:
-        logger.debug(f"Process {pid} does not exist")
-        return False
-
-    except psutil.AccessDenied:
-        logger.error(f"Permission denied to kill process {pid}")
-        return False
 
 
 def is_process_running(pid: int) -> bool:
