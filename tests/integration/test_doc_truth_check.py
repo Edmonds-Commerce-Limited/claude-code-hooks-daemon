@@ -396,6 +396,8 @@ def test_does_not_scan_a_protected_pattern_file_outside_a_git_repo(tmp_path: Pat
     assert exit_code == 0, (
         "a violation inside a protected-pattern file was scanned: " f"{report['violations']}"
     )
+
+
 def test_a_root_below_an_unscanned_name_is_still_scanned(tmp_path: Path) -> None:
     """00466 N21: the unscanned names judge paths BELOW the root.
 

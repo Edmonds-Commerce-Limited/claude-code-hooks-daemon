@@ -60,6 +60,5 @@ async def wait_for_daemon_started(
             raise exc
 
     raise TimeoutError(
-        f"daemon did not start within {timeout}s "
-        "(started_event unset, server_task not done)"
+        f"daemon did not start within {timeout}s " "(started_event unset, server_task not done)"
     )

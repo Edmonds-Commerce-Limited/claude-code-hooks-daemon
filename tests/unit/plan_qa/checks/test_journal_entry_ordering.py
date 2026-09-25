@@ -328,6 +328,65 @@ def _sweep_check_ids(
     return [f["check_id"] for f in json.loads(capsys.readouterr().out)]
 
 
+def _sweep_check_ids_with_correction(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    earlier_date: date,
+    later_date: date,
+    ref: str,
+) -> list[str]:
+    """Like :func:`_sweep_check_ids`, but two day-files: an earlier one with
+    the out-of-order entries, and a later one holding only the correction."""
+    import argparse
+    import json
+    import subprocess
+
+    from claude_code_hooks_daemon.constants.timeout import Timeout
+    from claude_code_hooks_daemon.daemon.cli import cmd_plan_qa
+
+    root = tmp_path / "repo"
+    plan_dir = root / "CLAUDE" / "Plan"
+    (plan_dir / "Completed").mkdir(parents=True)
+    (plan_dir / "Cancelled").mkdir()
+    (root / ".claude").mkdir()
+    (root / ".claude" / "hooks-daemon.yaml").write_text("plan_workflow:\n  enabled: true\n")
+
+    folder = plan_dir / "00001-first"
+    folder.mkdir()
+    (folder / "PLAN.md").write_text(
+        "# Plan 00001: first\n\n**Status**: In Progress\n\n- [ ] ⬜ **Task 1.1**: x\n"
+    )
+    journal = folder / "JOURNAL"
+    journal.mkdir()
+    (journal / f"00001-Journal-{earlier_date:%y-%m-%d}.md").write_text(
+        _PREAMBLE + _entry("13:00") + _entry("12:50")
+    )
+    (journal / f"00001-Journal-{later_date:%y-%m-%d}.md").write_text(
+        _PREAMBLE + _correction("09:00", ref)
+    )
+    (plan_dir / "README.md").write_text(
+        "# Plans Index\n\n## Active Plans\n\n- [00001: first](00001-first/PLAN.md) - In Progress\n"
+    )
+    subprocess.run(
+        ["git", "init", str(root)],
+        capture_output=True,
+        check=True,
+        timeout=Timeout.GIT_CONTEXT,
+    )
+
+    cmd_plan_qa(
+        argparse.Namespace(
+            project_root=root,
+            sweep=True,
+            check_staged=False,
+            lint=None,
+            json_output=True,
+        )
+    )
+    return [f["check_id"] for f in json.loads(capsys.readouterr().out)]
+
+
 class TestTheSweepSeesItToo:
     """N1 was specifically a SWEEP gap — the edit-time half already worked."""
 
@@ -362,3 +421,38 @@ class TestTheSweepsDeliberateBlindSpots:
         """`archive-immutability` forbids the edit that would fix it."""
         ids = _sweep_check_ids(tmp_path, capsys, archived=True)
         assert "journal-entry-ordering" not in ids
+
+
+class TestACrossDayCorrectionVoidsTheEntryItNames:
+    """A correction can only ever be APPENDED to TODAY's day-file
+    (``mkplan.bash --journal`` has no way to append into an earlier one), so
+    voiding an earlier file's own out-of-order entry needs a REF that crosses
+    files: ``YY-MM-DD/HH:MM``. ``corrected_entry_labels`` deliberately reads
+    only same-file REFs (edit-time has no other file to check against); the
+    sweep is the only stage that sees the whole plan and can resolve one.
+    """
+
+    def test_a_correction_in_a_later_dayfile_voids_the_earlier_ones_finding(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        ids = _sweep_check_ids_with_correction(
+            tmp_path,
+            capsys,
+            earlier_date=date(2026, 9, 11),
+            later_date=date(2026, 9, 12),
+            ref="26-09-11/12:50",
+        )
+        assert "journal-entry-ordering" not in ids
+
+    def test_a_correction_naming_the_wrong_entry_voids_nothing(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Control: the cross-day mechanism only voids the NAMED entry."""
+        ids = _sweep_check_ids_with_correction(
+            tmp_path,
+            capsys,
+            earlier_date=date(2026, 9, 11),
+            later_date=date(2026, 9, 12),
+            ref="26-09-11/09:00",
+        )
+        assert "journal-entry-ordering" in ids

@@ -403,9 +403,7 @@ class TestGoalInjectionHandler:
         assert handler.priority == Priority.GOAL_INJECTION
         assert handler.terminal is False
 
-    def test_class_level_tags_match_the_instance_tags(
-        self, handler: GoalInjectionHandler
-    ) -> None:
+    def test_class_level_tags_match_the_instance_tags(self, handler: GoalInjectionHandler) -> None:
         """RV8-m2: ``plan_status_snapshot``'s gate reads ``GoalInjectionHandler
         .TAGS`` instead of constructing a throwaway instance -- this pins the
         class constant against drifting away from what ``__init__`` actually
@@ -2973,16 +2971,14 @@ class TestFormatterOrderingChain:
         self._init_repo()
         plan = self._plan_path()
         committed_text = (
-            "# Plan\n\n**Status**: In Progress\n\n"
-            "| Field | Key |\n| ----- | --- |\n| A | x |\n"
+            "# Plan\n\n**Status**: In Progress\n\n" "| Field | Key |\n| ----- | --- |\n| A | x |\n"
         )
         plan.write_text(committed_text, encoding="utf-8")
         _git(self._project, "add", "-A")
         _git(self._project, "commit", "-m", "in progress at HEAD")
 
         pre_write = (
-            "# Plan\n\n**Status**: Complete\n\n"
-            "| Field | Key |\n| ----- | --- |\n| A | x |\n"
+            "# Plan\n\n**Status**: Complete\n\n" "| Field | Key |\n| ----- | --- |\n| A | x |\n"
         )
         plan.write_text(pre_write, encoding="utf-8")
         landed_text = (

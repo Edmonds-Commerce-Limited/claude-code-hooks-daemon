@@ -21,7 +21,7 @@ really give — relay or bash transport, whichever the project runs.
 from __future__ import annotations
 
 import json
-import subprocess
+import subprocess  # nosec B404 — only ever runs the trusted system ``bash`` binary
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -222,7 +222,7 @@ def dispatch_probe(
     Raises:
         subprocess.TimeoutExpired: The entry point did not answer in time.
     """
-    result = subprocess.run(
+    result = subprocess.run(  # nosec B603 B607 — fixed argv, no shell, trusted binary
         ["bash", str(entry_point)],
         input=json.dumps(dict(hook_event)),
         capture_output=True,

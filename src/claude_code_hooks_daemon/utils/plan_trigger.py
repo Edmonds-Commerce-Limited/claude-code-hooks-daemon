@@ -147,9 +147,7 @@ def matched_plan_write_or_edit(
         return None
     if not is_inside_project(file_path):
         return None
-    resolved_folder = _resolved_folder_capture(
-        file_path, pattern, unresolved_folder=match.group(1)
-    )
+    resolved_folder = _resolved_folder_capture(file_path, pattern, unresolved_folder=match.group(1))
     if resolved_folder is None:
         _warn_unresolved_once(file_path, match.group(1))
         return None

@@ -31,6 +31,8 @@ from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.constants.timeout import Timeout
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 VENV_BOOTSTRAP_SH = REPO_ROOT / "scripts" / "venv_bootstrap.sh"
 BASH = shutil.which("bash") or "/bin/bash"
@@ -116,7 +118,7 @@ class TestWatchdogNeverKillsWronglyUnderHostilePath:
             assert result.returncode == 0, f"stdout={result.stdout!r} stderr={result.stderr!r}"
             assert elapsed < 10.0, f"watchdog must respect its bound; took {elapsed:.2f}s"
             # The watchdog only SIGNALS -- give the process a moment to die.
-            proc.wait(timeout=5)
+            proc.wait(timeout=Timeout.PROCESS_DEATH_WAIT)
             assert proc.returncode is not None and proc.returncode != 0
         finally:
             if proc.poll() is None:

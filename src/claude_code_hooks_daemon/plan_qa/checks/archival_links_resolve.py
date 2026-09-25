@@ -32,6 +32,7 @@ from claude_code_hooks_daemon.plan_qa.types import (
     Level,
     Stage,
 )
+from claude_code_hooks_daemon.utils.authored_paths import authored_path_exists
 from claude_code_hooks_daemon.utils.link_resolution import link_resolves_literally
 from claude_code_hooks_daemon.utils.markdown_links import extract_link_targets
 
@@ -88,7 +89,7 @@ def _link_finding(
     before = posixpath.normpath(posixpath.join(old_dir, file_part))
     depth_sensitive = not file_part.startswith(_ROOT_PREFIX) and not before.startswith(_PARENT)
     current = _after_this_commit(before, renames) if depth_sensitive else None
-    if current is None or not (context.project_root / current).exists():
+    if current is None or not authored_path_exists(context.project_root, current):
         return Finding(
             check_id=CHECK_ID,
             level=Level.ADVISE,

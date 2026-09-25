@@ -764,7 +764,7 @@ class GoalLedger:
             self._save(entries, self._parse_ever_recorded(raw))
         return True
 
-    def add_owners(self, sessions: list[str], plan_numbers: list[str]) -> None:
+    def add_owners(self, sessions: list[str], plan_numbers: list[str]) -> bool:
         """Batched :meth:`reassert_session` (RV5-m4): register EVERY session
         in ``sessions`` as an owner of EVERY still-live entry named in
         ``plan_numbers``, under ONE lock and ONE save.
@@ -783,16 +783,24 @@ class GoalLedger:
         A session already in an entry's ``sessions`` is left untouched (no
         redundant write); an entry with no live match for ``plan_numbers``,
         or a caller passing either list empty, is a no-op.
+
+        Returns ``True`` when the batched write happened, ``False`` for
+        every no-op path -- including an unreadable ledger, which is
+        deliberately fail-open (logged, not raised) like its siblings
+        :meth:`reassert_session` and :meth:`session_has_entries`. ``False``
+        is an explicit sentinel so this reads as "nothing changed", never
+        as "the exception was swallowed" -- a bare ``return`` here would be
+        indistinguishable from every other no-op path.
         """
         if not sessions or not plan_numbers:
-            return
+            return False
         wanted = set(plan_numbers)
         with self._locked():
             try:
                 raw = self._load_raw()
             except LedgerUnreadable as e:
                 logger.warning("goal_ledger: %s; add_owners finds nothing to add onto", e)
-                return
+                return False
             entries = self._parse_entries(raw)
             changed = False
             now = time.time()
@@ -812,6 +820,7 @@ class GoalLedger:
                     changed = True
             if changed:
                 self._save(entries, self._parse_ever_recorded(raw))
+            return changed
 
     def live_plan_numbers(self, plan_dir: Path) -> list[str]:
         """Return ledgered plans still ``In Progress``; persists retirements.
