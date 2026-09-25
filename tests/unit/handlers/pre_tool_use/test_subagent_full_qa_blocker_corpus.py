@@ -29,8 +29,10 @@ from typing import Any
 import pytest
 
 from claude_code_hooks_daemon.config.loader import ConfigLoader
+from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.pre_tool_use.subagent_full_qa_blocker import (
     FullQaPattern,
+    SubagentFullQaBlockerHandler,
     find_full_qa_invocation,
     parse_full_qa_patterns,
 )
@@ -191,21 +193,6 @@ def _corpus_rows() -> list[tuple[str, bool]]:
 
 #: The two ``scripts/qa`` entry points that ARE the full suite.
 _FULL_BY_DESIGN: frozenset[str] = frozenset({"run_all.sh", "run_tests.sh"})
-#: Review 9 B1's residual, narrowed in Plan 00463 round 9c (see PLAN.md's
-#: "B1 residual" note and ``_SCRIPTS_THAT_RUN_UNSEEN_CODE`` in
-#: test_subagent_full_qa_blocker.py): the self-location symlink loop and the
-#: ``${BASH_SOURCE[0]%/*}`` dirname trim these three all use, directly or via
-#: ``scripts/lib/resolve_venv.sh``, are now both resolved structurally -- but
-#: each still shells out to (or, for ``check_generated_doc_drift.py``,
-#: mentions in a docstring misread as an invocation of) ``bin/hooks-daemon``,
-#: which stays denied for a DIFFERENT reason: a later two-hop ``cd`` chain in
-#: that script reaches a variable this handler's nested-substitution walk
-#: cannot see (no branch/scope awareness across a script's own top-level
-#: assignments). ``run_semgrep_check.sh`` also builds its own program path by
-#: calling a bash FUNCTION, genuinely uncomputable without running it.
-_B1_RESIDUAL_UNSEEN: frozenset[str] = frozenset(
-    {"run_canonical_callers_check.sh", "run_semgrep_check.sh", "check_generated_doc_drift.py"}
-)
 _HANDLER_TESTS = "tests/unit/handlers/pre_tool_use/test_subagent_full_qa_blocker.py"
 _HANDLER = "src/claude_code_hooks_daemon/handlers/pre_tool_use/subagent_full_qa_blocker.py"
 _LLM_QA = "./scripts/qa/llm_qa.py"
@@ -286,13 +273,16 @@ def _everyday_commands() -> list[str]:
         "bash scripts/qa/run_security_check.sh",
         "./scripts/qa/run_autofix.sh",
         "./scripts/qa/check_canonical_callers.sh",
-        # `bin/hooks-daemon` itself is review 9 B1's residual, narrowed in
-        # round 9c (see `_B1_RESIDUAL_UNSEEN` above and PLAN.md's "B1
-        # residual" note): its self-location loop now resolves, but a LATER
-        # two-hop `cd` chain in the same script reaches a variable this
-        # handler's nested-substitution walk cannot see, so it is still
-        # denied rather than judged by its pattern. Pinned DENIED, not
-        # omitted, in `TestBinHooksDaemonIsTheB1Residual` below.
+        # `bin/hooks-daemon` itself: round 9 B1's UNSEEN residual (the CLI's
+        # own two-hop `cd` chain, unresolved by this handler's nested-
+        # substitution walk) is ALLOWED, not denied, per the round 9d
+        # coordinator ruling -- UNSEEN code is advisory-only now that the
+        # sink (the host-wide full-QA lock) is the guarantee. See PLAN.md's
+        # "Round 9" section.
+        "bin/hooks-daemon status",
+        "bin/hooks-daemon restart",
+        "./bin/hooks-daemon explain-rule R-SUBAGENT-FULL-QA",
+        "bin/hooks-daemon find-plan 463",
         'CLAUDE/Plan/mkplan.bash "a-new-plan"',
         f"CLAUDE/Plan/mkplan.bash --journal {_PLAN} Review untracked/scratch/journal.txt",
         # git and gh.
@@ -358,12 +348,14 @@ def _everyday_commands() -> list[str]:
     ]
     qa_scripts = _REPO_ROOT / "scripts" / "qa"
     for script in sorted(qa_scripts.glob("*.py")):
-        if script.name not in _B1_RESIDUAL_UNSEEN:
-            commands.append(f"python scripts/qa/{script.name} --help")
-            commands.append(f"python3 scripts/qa/{script.name}")
+        commands.append(f"python scripts/qa/{script.name} --help")
+        commands.append(f"python3 scripts/qa/{script.name}")
     for script in sorted(qa_scripts.glob("*.sh")):
-        if script.name not in _FULL_BY_DESIGN and script.name not in _B1_RESIDUAL_UNSEEN:
+        if script.name not in _FULL_BY_DESIGN:
             commands.append(f"./scripts/qa/{script.name}")
+    skills_dir = _REPO_ROOT / ".claude" / "skills"
+    for invoke in sorted(skills_dir.glob("*/invoke.sh")):
+        commands.append(f"bash {invoke.relative_to(_REPO_ROOT).as_posix()}")
     return commands
 
 
@@ -375,6 +367,35 @@ def _live_patterns() -> list[FullQaPattern]:
     patterns, problems = parse_full_qa_patterns(options["full_qa_patterns"])
     assert not problems, problems
     return patterns
+
+
+def _live_handler() -> SubagentFullQaBlockerHandler:
+    """The handler as this repository's own config configures it (Decision.handle level).
+
+    A DIFFERENT question from ``_live_patterns()``: that answers "does this
+    handler's parser SEE this as a full run"; this answers "does the sub-
+    agent's command actually get DENIED" -- and per the round 9d coordinator
+    ruling those two questions diverge for UNSEEN code (allowed, advisory
+    only) while agreeing for a positively SEEN one (denied).
+    """
+    config = ConfigLoader.load(_REPO_ROOT / ".claude" / "hooks-daemon.yaml")
+    options: dict[str, Any] = config["handlers"]["pre_tool_use"]["subagent_full_qa_blocker"][
+        "options"
+    ]
+    handler = SubagentFullQaBlockerHandler()
+    handler._full_qa_patterns = options["full_qa_patterns"]
+    handler._targeted_qa_commands = options.get("targeted_qa_commands", [])
+    return handler
+
+
+def _decision(command: str) -> Decision:
+    hook_input = {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": {"command": command},
+        "cwd": str(_REPO_ROOT),
+    }
+    return _live_handler().handle(hook_input).decision
 
 
 @pytest.fixture(scope="module")
@@ -403,29 +424,24 @@ def test_the_review_8_corpus_gets_its_verdict(
 
 
 @pytest.mark.parametrize("command", _everyday_commands())
-def test_an_everyday_sub_agent_command_is_allowed(
-    command: str, patterns: list[FullQaPattern]
-) -> None:
-    assert find_full_qa_invocation(command, patterns, cwd=_REPO_ROOT) is None, command
+def test_an_everyday_sub_agent_command_is_allowed(command: str) -> None:
+    """Never DENIED -- whether this handler's parser sees the command in full,
+    or judges it UNSEEN (round 9d: UNSEEN is advisory-only, never a deny)."""
+    assert _decision(command) is Decision.ALLOW, command
 
 
-class TestBinHooksDaemonIsTheB1Residual:
-    """``bin/hooks-daemon`` is denied, not allowed -- review 9 B1's residual, narrowed.
+class TestUnseenScriptsAreAllowedNotDenied:
+    """Round 9d coordinator ruling: UNSEEN code is ALLOWED, with an advisory.
 
-    Round 9c resolved its OWN self-location loop (``while [ -L "$_source" ];
-    do ... readlink ...; done``) structurally, so that is no longer why this
-    is denied. What remains: ``BIN_DIR="$(cd -P "$(dirname "$_source")" &&
-    pwd)"`` then ``DAEMON_DIR="$(cd -P "$BIN_DIR/.." && pwd)"`` -- the second
-    ``cd`` is reached through this handler's OWN recursion into a nested
-    ``$(...)`` substitution, which has no visibility into ``BIN_DIR``'s
-    top-level assignment earlier in the SAME script, so the "here" this
-    handler tracks goes opaque before ``source "$RESOLVE_LIB"`` (further
-    down the same script) is reached. A fix was attempted (threading the
-    enclosing script's variables into that nested recursion) and reverted:
-    it fixed this file's own denial but newly denied
-    ``scripts/qa/run_smoke_test.sh`` (see PLAN.md's "B1 residual" note), so
-    it is not landed. Pinned here so a future fix that resolves it is a
-    welcome diff, not a silent gap.
+    ``bin/hooks-daemon`` is review 9 B1's residual, narrowed in round 9c: its
+    own self-location loop resolves, but a later two-hop ``cd`` chain in the
+    same script reaches a variable this handler's nested-substitution walk
+    cannot see, so ``find_full_qa_invocation`` still judges it UNSEEN (see
+    ``fail_closed`` on its match). What changed this round is the
+    CONSEQUENCE: the sink (the host-wide full-QA lock) is the guarantee now,
+    so this handler no longer denies what it merely could not see -- only a
+    POSITIVELY SEEN full run still does (``TestTheDenial`` in
+    ``test_subagent_full_qa_blocker.py``).
     """
 
     @pytest.mark.parametrize(
@@ -437,7 +453,21 @@ class TestBinHooksDaemonIsTheB1Residual:
             "bin/hooks-daemon find-plan 463",
         ],
     )
-    def test_is_denied_unseen(self, command: str, patterns: list[FullQaPattern]) -> None:
+    def test_still_judged_unseen_by_the_parser(
+        self, command: str, patterns: list[FullQaPattern]
+    ) -> None:
         match = find_full_qa_invocation(command, patterns, cwd=_REPO_ROOT)
         assert match is not None, command
         assert match.fail_closed
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "bin/hooks-daemon status",
+            "bin/hooks-daemon restart",
+            "./bin/hooks-daemon explain-rule R-SUBAGENT-FULL-QA",
+            "bin/hooks-daemon find-plan 463",
+        ],
+    )
+    def test_allowed_at_the_handler_decision_level(self, command: str) -> None:
+        assert _decision(command) is Decision.ALLOW, command

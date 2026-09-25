@@ -4983,24 +4983,48 @@ class SubagentFullQaBlockerHandler(PreToolUseHandlerBase):
         return [_RULE]
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
-        """Refuse, naming what matched and the targeted forms that are allowed.
+        """Refuse a positively SEEN full run; advise, never refuse, an UNSEEN one.
 
-        Always verbose. A sub-agent meets this a handful of times in its life,
-        and the one thing it needs every time is the list of what to run
-        instead.
+        Always verbose on the deny path. A sub-agent meets this a handful of
+        times in its life, and the one thing it needs every time is the list
+        of what to run instead.
+
+        Coordinator ruling (Plan 00463 round 9d, recorded in PLAN.md's
+        "Round 9" section): the sink -- the host-wide full-QA lock enforced by
+        a pytest plugin (`tests/conftest.py`) -- is the GUARANTEE now, on every
+        route, however the command was spelled. This handler is the first
+        line, not the guarantee, so a command it merely COULD NOT SEE (a
+        script or substitution the parser cannot resolve) is ALLOWED, with an
+        advisory that the sink will serialise or refuse it if it turns out to
+        run the whole suite. Only a POSITIVELY SEEN full run still denies.
+        Chasing every unreadable script produced a denial of this
+        repository's own CLI (`bin/hooks-daemon`) and everything that shells
+        out to it -- a cost the sink's existence no longer justifies.
         """
         match = self._find(hook_input)
         if match is None:
             return GatingResult(decision=Decision.ALLOW)
 
+        if match.fail_closed:
+            return GatingResult(
+                decision=Decision.ALLOW,
+                context=[
+                    f"{RuleFormatter().advisory(_RULE)}\n\n"
+                    f"UNSEEN: `{match.pattern_id}` in `{match.segment}` "
+                    f"-- {match.fail_closed}\n\n"
+                    "This command could not be read in full, so it is not denied here. "
+                    "If it runs the whole suite, the host-wide full-QA lock sink "
+                    "(`tests/conftest.py`) will refuse or serialise it."
+                ],
+            )
+
         declared = self._targeted_forms()
         instead = (
             "\n".join(f"  - {form}" for form in declared) if declared else _GENERIC_TARGETED_FORM
         )
-        unseen = f"\n\nJUDGED UNSEEN: {match.fail_closed}" if match.fail_closed else ""
         return GatingResult.deny(
             f"{RuleFormatter().verbose(_RULE)}\n\n"
-            f"MATCHED: `{match.pattern_id}` in `{match.segment}`{unseen}\n\n"
+            f"MATCHED: `{match.pattern_id}` in `{match.segment}`\n\n"
             f"RUN INSTEAD:\n{instead}"
         )
 
@@ -5107,6 +5131,12 @@ class SubagentFullQaBlockerHandler(PreToolUseHandlerBase):
             "`echo` that mentions a full-QA command runs nothing and is never denied; a "
             "read-only form such as a `--read-only` summary is allowed if the project "
             "declares that flag.\n\n"
+            "**Only a POSITIVELY SEEN full run denies.** A script or substitution this "
+            "parser cannot resolve is ALLOWED, with an advisory: the host-wide full-QA "
+            "lock (a pytest plugin, `tests/conftest.py`) is the guarantee now, and it "
+            "refuses or serialises a whole-suite pytest run however it was launched, "
+            "seen or not. This handler is the fast, friendly first line, not the "
+            "guarantee.\n\n"
             "**Configure** under `handlers.pre_tool_use.subagent_full_qa_blocker.options`: "
             "`full_qa_patterns` entries are `{id, command, full_args?, full_words?, "
             "bare_is_full?, read_only_flags?, value_flags?, option_grammar?}`, where "

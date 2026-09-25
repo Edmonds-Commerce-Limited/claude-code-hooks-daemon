@@ -218,15 +218,37 @@ one place every route ends up, whatever launched it: pytest itself.
   FUNCTION, `resolve_venv_python`, which is genuinely uncomputable without
   running it; `check_generated_doc_drift.py` is denied only because its own
   docstring PROSE mentions `bin/hooks-daemon generate-docs`, misread as an
-  invocation) remain pinned DENIED in `_SCRIPTS_THAT_RUN_UNSEEN_CODE`
-  (`test_subagent_full_qa_blocker.py`), `_B1_RESIDUAL_UNSEEN` and
-  `TestBinHooksDaemonIsTheB1Residual` (`..._corpus.py`), with their
-  docstrings updated to the CURRENT cause. A real fix needs the nested-`cd`
-  "here" tracker to see the enclosing script's own variables WITHOUT
-  reintroducing the `run_smoke_test.sh` regression -- likely branch-aware
-  variable tracking for `if`, not just the loop idiom -- which is follow-up
-  work, not a "documented limit" to leave alone: it sits in code this round
-  touches.
+  invocation) stay UNSEEN at the PARSER level, named in
+  `_SCRIPTS_THAT_RUN_UNSEEN_CODE`'s docstring (`test_subagent_full_qa_blocker.py`,
+  kept as documentation of WHY, no longer as a branch any test takes) and
+  proven still-UNSEEN in `TestUnseenScriptsAreAllowedNotDenied`
+  (`..._corpus.py`). A real fix needs the nested-`cd` "here" tracker to see
+  the enclosing script's own variables WITHOUT reintroducing the
+  `run_smoke_test.sh` regression -- likely branch-aware variable tracking for
+  `if`, not just the loop idiom -- which is follow-up work, not a
+  "documented limit" to leave alone: it sits in code this round touches.
+- **Round 9d: the coordinator's ruling on UNSEEN code.** The sink is the
+  guarantee on every route now (the previous bullet), so this handler is the
+  FIRST line, not the guarantee -- and chasing every unreadable script had
+  produced a denial of this repository's own CLI (`bin/hooks-daemon`) and
+  everything that shells out to it. So: a POSITIVELY SEEN full run still
+  DENIES, unchanged; UNSEEN code (a script or substitution this parser
+  cannot resolve) now ALLOWS, carrying an ADVISORY (never "BLOCKED") that
+  names the construct and says the full-QA lock sink will refuse or
+  serialise the command if it turns out to run the whole suite
+  (`SubagentFullQaBlockerHandler.handle`, `TestTheUnseenAdvisory`). The old
+  `_B1_RESIDUAL_UNSEEN` set and `TestBinHooksDaemonIsTheB1Residual` class
+  (which pinned `bin/hooks-daemon` DENIED) are removed: every executable
+  script under `bin/`, `scripts/`, and `.claude/skills/*/invoke.sh`, invoked
+  as the docs invoke it, is proven ALLOWED at the decision level in
+  `test_an_everyday_sub_agent_command_is_allowed`
+  (`test_subagent_full_qa_blocker_corpus.py`) unless it positively runs the
+  whole suite (`run_all.sh`/`run_tests.sh`, `_FULL_BY_DESIGN`). The backstop
+  is proven with a real subprocess integration test
+  (`tests/unit/qa/test_full_qa_gate.py`/`test_full_qa_lock.py`, round 9b):
+  a script this handler cannot see, running a whole-suite pytest while
+  another holder has the lock, is refused or serialised by the sink, not by
+  this handler.
 - The plan merges AFTER Plan 00466's N24 ledger, whose deadline now fails
   CLOSED on a chain timeout (M7's own budget finding: a chain timeout must
   never read as an allow for a SUB-scoped guard).

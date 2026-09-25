@@ -34,7 +34,7 @@ import pytest
 
 from claude_code_hooks_daemon.config.loader import ConfigLoader
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
-from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_scope import HandlerScope, scope_admits
 from claude_code_hooks_daemon.daemon.synthetic_traffic import (
     PLAYBOOK_PROBE,
@@ -464,16 +464,20 @@ _NOT_FULL_RUNS: list[str] = [
 
 
 class TestWhatCannotBeParsed:
-    """The lead's rule for review 4: what cannot be parsed denies, and says so."""
+    """Review 4's original rule (what cannot be parsed fails closed) still holds
+    at the PARSER level; round 9d changes only the DECISION: unparseable is
+    UNSEEN, so it now allows with an advisory rather than denying (the sink
+    is the guarantee for what this handler cannot read)."""
 
     def test_an_unparseable_command_naming_a_full_run_program_is_denied(self) -> None:
         match = find_full_qa_invocation('pytest tests/unit/x.py "unterminated', _patterns())
         assert match is not None
         assert match.fail_closed
 
-    def test_the_deny_says_the_command_could_not_be_parsed(self) -> None:
+    def test_the_advisory_says_the_command_could_not_be_parsed(self) -> None:
         result = _handler().handle(_bash('pytest "unterminated'))
-        assert "could not be parsed" in (result.reason or "")
+        assert result.decision is Decision.ALLOW
+        assert "could not be parsed" in "\n".join(result.context)
 
 
 #: The quoting, nesting and grammar edges of each construct the parser follows.
@@ -1185,10 +1189,14 @@ class TestTheEnvironmentSetupAllowlistTrustsTheSubcommandToo:
 
 
 class TestWhatCannotBeSeenFailsClosed:
-    """Review 5: a construct whose run cannot be seen is denied when it may be the suite.
+    """Review 5: a construct whose run cannot be seen is judged as the suite it may be.
 
-    The deny says which construct it was, so a sub-agent can spell the run
-    out plainly instead.
+    That is still true at the PARSER level (``find_full_qa_invocation``,
+    ``match.fail_closed``). Round 9d changes the DECISION built on top of it:
+    this handler now ALLOWS with an advisory rather than denying, naming
+    which construct it could not see so a sub-agent can spell the run out
+    plainly if it wants the fast, friendly first line instead of relying on
+    the sink.
     """
 
     def test_a_dynamic_import_that_calls_main_is_denied_as_opaque(self) -> None:
@@ -1215,9 +1223,10 @@ class TestWhatCannotBeSeenFailsClosed:
         assert seen is not None
         assert not seen.fail_closed
 
-    def test_the_deny_carries_the_reason(self) -> None:
+    def test_the_advisory_carries_the_reason(self) -> None:
         result = _handler().handle(_bash("$(find-tool pytest) tests"))
-        assert "run time" in (result.reason or "")
+        assert result.decision is Decision.ALLOW
+        assert "run time" in "\n".join(result.context)
 
     def test_an_unparsed_command_says_it_could_not_be_parsed(self) -> None:
         match = find_full_qa_invocation('pytest "unterminated', _patterns())
@@ -1572,38 +1581,6 @@ class TestCodeTheHandlerCannotReadFailsClosed:
             assert match.fail_closed
 
 
-#: This repository's scripts whose code includes code that cannot be seen,
-#: so they fail closed: `prerequisites.sh` pipes a downloaded installer into
-#: sh. The rest are review 9 B1's residual, narrowed in Plan 00463 round 9c:
-#: the `while [ -L ... ]; do ... readlink ...; done` self-location loop and
-#: the `${BASH_SOURCE[0]%/*}` dirname trim are both resolved now (see
-#: `TestSelfLocationSymlinkLoopIsResolved`/`TestBashSourceDirnameTrimIsResolved`
-#: below), but `bin/hooks-daemon` itself still denies: a LATER two-hop `cd`
-#: chain in the SAME script (`BIN_DIR` then `DAEMON_DIR="$(cd -P
-#: "$BIN_DIR/.." && pwd)"`) is walked through a nested `$(...)` substitution
-#: that has no visibility into `BIN_DIR`'s own top-level assignment, so the
-#: "here" this handler tracks goes opaque before `source
-#: "$RESOLVE_LIB"` is reached -- a different, still-open gap (see PLAN.md's
-#: "B1 residual" note). Every script here that shells out to
-#: `bin/hooks-daemon` inherits that denial; `run_semgrep_check.sh` is
-#: additionally its own case (its program path comes from calling a bash
-#: FUNCTION, genuinely uncomputable without running it). None is reached
-#: directly by an everyday sub-agent command except `bin/hooks-daemon`
-#: itself (tracked separately, `TestBinHooksDaemonIsTheB1Residual`).
-_SCRIPTS_THAT_RUN_UNSEEN_CODE: frozenset[str] = frozenset(
-    {
-        "scripts/install/prerequisites.sh",
-        "scripts/bootstrap-self-install.sh",
-        "scripts/dummy-client-repo.sh",
-        "scripts/install/rollback.sh",
-        "scripts/install_version.sh",
-        "scripts/qa/run_canonical_callers_check.sh",
-        "scripts/qa/run_semgrep_check.sh",
-        "scripts/qa/check_generated_doc_drift.py",
-    }
-)
-
-
 class TestAScriptRunByItsNameIsRead:
     """Review 6: a script run by its own name was judged by that name alone.
 
@@ -1657,13 +1634,15 @@ class TestAScriptRunByItsNameIsRead:
         ),
     )
     def test_the_repositorys_own_scripts_are_not_full_runs(self, script: str) -> None:
-        """A false deny on a script agents run would teach them the guard is noise."""
-        match = find_full_qa_invocation(f"bash {script}", _patterns(), cwd=_REPO_ROOT)
-        if script in _SCRIPTS_THAT_RUN_UNSEEN_CODE:
-            assert match is not None
-            assert match.fail_closed
-        else:
-            assert match is None, match
+        """A false deny on a script agents run would teach them the guard is noise.
+
+        Judged at the DECISION level (``handle()``), not the raw parser
+        match: round 9d's coordinator ruling allows a script this handler's
+        parser cannot fully resolve (UNSEEN, advisory only) exactly like any
+        other script -- only a POSITIVELY SEEN full run still denies.
+        """
+        result = _handler().handle(_bash(f"bash {script}", cwd=str(_REPO_ROOT)))
+        assert result.decision is Decision.ALLOW, (script, result.reason)
 
     @pytest.mark.parametrize(
         "script",
@@ -1673,15 +1652,13 @@ class TestAScriptRunByItsNameIsRead:
         ),
     )
     def test_the_qa_scripts_run_as_documented_are_not_full_runs(self, script: str) -> None:
-        """Review 7 M2: a docstring's apostrophe or a comment denied 6 of these scripts."""
-        match = find_full_qa_invocation(f"python {script}", _patterns(), cwd=_REPO_ROOT)
-        if script in _SCRIPTS_THAT_RUN_UNSEEN_CODE:
-            # Review 9 B1's accepted residual, reached through a subprocess
-            # call: check_generated_doc_drift.py shells out to `bin/hooks-daemon`.
-            assert match is not None
-            assert match.fail_closed
-        else:
-            assert match is None, match
+        """Review 7 M2: a docstring's apostrophe or a comment denied 6 of these scripts.
+
+        Judged at the DECISION level -- see
+        ``test_the_repositorys_own_scripts_are_not_full_runs`` above for why.
+        """
+        result = _handler().handle(_bash(f"python {script}", cwd=str(_REPO_ROOT)))
+        assert result.decision is Decision.ALLOW, (script, result.reason)
 
 
 class TestReadingAScriptDoesNotMisreadItsProse:
@@ -2985,6 +2962,43 @@ class TestTheDenial:
 
     def test_get_rules_declares_the_rule(self) -> None:
         assert [rule.rule_id for rule in _handler().get_rules()] == [RuleID.SUBAGENT_FULL_QA]
+
+
+class TestTheUnseenAdvisory:
+    """Round 9d coordinator ruling: UNSEEN code is ALLOWED, with an advisory.
+
+    The Bash-text handler is the first line, not the guarantee (the sink --
+    the host-wide full-QA lock -- is). Chasing every unreadable script
+    produced a denial of this repository's own CLI (`bin/hooks-daemon`), so
+    a match this parser could not fully resolve now allows, carrying an
+    ADVISORY (never "BLOCKED") that says the sink will refuse or serialise
+    the command if it turns out to run the whole suite.
+    """
+
+    def _result(self, command: str) -> GatingResult:
+        return _handler().handle(_bash(command, cwd=str(_REPO_ROOT)))
+
+    def test_unseen_allows(self) -> None:
+        result = self._result("bin/hooks-daemon status")
+        assert result.decision is Decision.ALLOW
+
+    def test_unseen_carries_an_advisory_not_a_block(self) -> None:
+        result = self._result("bin/hooks-daemon status")
+        context = "\n".join(result.context)
+        assert RuleID.SUBAGENT_FULL_QA in context
+        assert "ADVISORY [" in context
+        assert "BLOCKED [" not in context
+
+    def test_unseen_advisory_names_the_sink(self) -> None:
+        result = self._result("bin/hooks-daemon status")
+        context = "\n".join(result.context)
+        assert "lock" in context.lower()
+
+    def test_positively_seen_still_denies_not_advises(self) -> None:
+        """The one case that must NOT change: a full run this parser can read."""
+        result = self._result("pytest tests/")
+        assert result.decision is Decision.DENY
+        assert "ADVISORY [" not in (result.reason or "")
 
 
 class TestDefaultsAndPosture:
