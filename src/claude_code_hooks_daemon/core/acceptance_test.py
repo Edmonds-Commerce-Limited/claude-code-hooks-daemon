@@ -221,6 +221,16 @@ class AcceptanceTest:
             ``harness_cannot_produce`` for the same reason those three are
             mutually exclusive with each other: exactly one declaration may
             say how to drive a given test.
+        extra_hook_input: Extra top-level hook-event keys merged ALONGSIDE a
+            ``tool_payload`` (both harnesses -- the live-daemon dispatch and
+            the in-process contract test -- merge these into the event/
+            hook_input dict they build from ``tool_payload``). This is how a
+            test states a PRECONDITION the payload itself cannot carry, e.g.
+            a ``transcript_path`` pointing at a fixture Claude config so
+            ``lsp_enforcement`` sees a deterministic, fixture-declared plugin
+            inventory rather than whatever the host happens to have enabled.
+            Mutually exclusive with ``hook_input``: that field already IS the
+            whole event, so there is no envelope left to merge into.
     """
 
     title: str
@@ -240,6 +250,7 @@ class AcceptanceTest:
     harness_cannot_produce: str | None = None
     tool_payload: ToolPayload | None = None
     hook_input: dict[str, Any] | None = None
+    extra_hook_input: dict[str, Any] | None = None
     #: An `InitVar`, not a field: it is consumed at construction to produce
     #: `tool_payload` and nothing reads it afterwards. A stored field would
     #: also have to be serialised -- `test_playbook_generator_json_field_
@@ -285,6 +296,11 @@ class AcceptanceTest:
                 raise ValueError(
                     "hook_input and harness_cannot_produce are mutually exclusive: "
                     "a test whose input cannot be produced has no input to drive it with"
+                )
+            if self.extra_hook_input is not None:
+                raise ValueError(
+                    "hook_input and extra_hook_input are mutually exclusive: "
+                    "hook_input is already the whole event, with no envelope left to merge into"
                 )
 
     def _derive_bash_payload(self) -> None:
