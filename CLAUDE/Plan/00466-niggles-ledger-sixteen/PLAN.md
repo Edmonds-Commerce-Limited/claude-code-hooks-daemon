@@ -90,6 +90,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N59 | A signal went to a PID nobody proved was the intended process, and killed the container twice             | Infra owner        | 🔄 In progress        |
 | N60 | `curl_pipe_shell` denies a double-quoted `echo` argument that only mentions the pattern                   | Coordinator        | ⬜ Open               |
 | N61 | The `sensitive_content` commit gate misses a file that a same-command `git add` stages                    | upgrade-scripts    | 🔄 In progress        |
+| N62 | Nothing bounds a subagent's context, so long-lived agents burn the usage budget                           | Owner              | ⬜ Open               |
 
 ## Tasks
 

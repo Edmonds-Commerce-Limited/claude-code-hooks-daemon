@@ -9,6 +9,36 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N62 — Nothing bounds a subagent's context, so long-lived agents burn the usage budget
+
+**Found by the owner**, who hit the 5-hour limit during a coordinated run. The
+measurements:
+
+- 584 subagent transcripts, about 1 GB;
+- the largest agents compacted only at about 567k to 581k tokens (Plan 464's
+  implementer compacted 9 times);
+- messaging a finished agent resumes its whole history (2,374 prior messages
+  in one case).
+
+Every tool call re-reads that context, so the cost is roughly (average
+context) × (tool calls) × (agents in parallel).
+
+**Candidate remedies** (daemon-enforceable; the hook input carries
+`transcript_path` and `agent_id`):
+
+- A subagent context budget. A PreToolUse handler reads the latest usage
+  from the agent's transcript. Past a soft budget it advises "write your
+  handoff to the report file". Past a hard budget it denies every tool except
+  writing that report and messaging the coordinator. The coordinator then
+  starts a fresh agent from the report. Both budgets are configurable.
+- A resume guard. Deny `SendMessage` to a stopped agent whose transcript is
+  over the budget, and name the fresh-agent-from-brief route instead.
+- A concurrency cap. Deny `Agent` when the running teammate count is at a
+  configured maximum.
+- Owner-side: `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` lowers the compaction
+  trigger for subagents too. At about 570k today, a 500k trigger saves only
+  about 12%. A trigger near 150k to 200k is where the cost falls materially.
+
 ### N61 — The `sensitive_content` commit gate misses a file that a same-command `git add` stages
 
 **Found by the upgrade-scripts agent**, on main at a93c4b0ad and on the Plan
