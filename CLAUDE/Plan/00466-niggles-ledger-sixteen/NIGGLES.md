@@ -9,6 +9,20 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N64 — `subagent_report_path_verifier` resolves a worktree-relative report path against the main checkout
+
+**Found by an N47 verify agent** working in
+`.claude/worktrees/agent-ad81…`. It named its report as
+`CLAUDE/Plan/…/subagent-reports/260925-n47-verify6-sonnet-5.md`, relative to
+its own worktree, where the file exists. The verifier checked that path
+against `/workspace` instead, reported it missing, and pushed the agent into
+an extra turn arguing with a false negative.
+
+**Candidate remedy:** resolve a relative claimed path against the agent's own
+cwd (the hook input's `cwd`), then against the project root. Report "missing"
+only when neither exists. RED test: an agent whose cwd is a worktree claims a
+relative path that exists only there.
+
 ### N63 — Supervisor unit tests read the ambient `CCY_*` environment, so a ccy session fails a test CI passes
 
 **Found by the N24 fixer.** On main,
