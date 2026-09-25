@@ -9,6 +9,31 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N44 — A PreToolUse handler raises `ValueError: no path specified` on an Edit, and the Edit goes through
+
+**Found by the Plan 00464 agent** while editing
+`src/claude_code_hooks_daemon/utils/git_command_target.py` in its worktree,
+with its hooks served by the main `/workspace` daemon. The hook context
+returned `Handler exception: ValueError: no path specified`, and the Edit was
+allowed. That message is what `os.path.relpath("")` raises. So some handler
+computes a relative path from an EMPTY candidate. The replaced text contained
+`Path(xdg).joinpath(*_XDG_CONFIG_PATH)`, a `*name` shape like the
+`secret_file_guard` false positive on `*words[`. So the secret-path candidate
+extraction is the first suspect, but this is unverified.
+
+Nothing identifies the handler yet: the in-memory log had already rolled
+over, and an in-process run without the main config did not reproduce it.
+Two defects are here:
+
+- a handler raises on ordinary content;
+- the raise fails open. That is ledger N24's class, being closed on the n24
+  branch.
+
+**Candidate remedy:** reproduce through the real chain with the project's
+real config and word list. Name the handler, guard the empty candidate at its
+source, and add a RED test. Also sweep for other `relpath` and `commonpath`
+calls that can receive an empty or foreign path.
+
 ### N43 — Log and payload redaction is inert while the daemon runs degraded on an unloadable config
 
 **Found by the Plan 00421 agent** while closing Task 4.9 on `worktree-d-00421`.
