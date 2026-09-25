@@ -1920,6 +1920,38 @@ class _Output:
     path: str | None = None
 
 
+#: Programs whose output is shell STATE (exports, aliases, functions) to set
+#: up an interpreter or a tool, never a QA command: none of them read a file
+#: (review 7 m2). Kept short and named, not guessed at, because trusting a
+#: producer blindly is a decision about specific programs' own behaviour,
+#: not a structural property the command line can prove.
+_ENV_SETUP_PROGRAMS: Final[frozenset[str]] = frozenset(
+    {"ssh-agent", "pyenv", "rbenv", "nodenv", "direnv", "conda", "brew"}
+)
+#: A shell completion script is the one shape of this that IS structural,
+#: whatever program prints it: `<anything> completion <shell>` is always
+#: shell function definitions, under a convention many tools share.
+_COMPLETION_WORD: Final[str] = "completion"
+
+
+def _is_environment_setup_producer(words: Sequence[str]) -> bool:
+    """Whether a producer only sets up shell state, never a QA command (review 7 m2).
+
+    ``eval "$(ssh-agent -s)"``, ``eval "$(pyenv init -)"`` and
+    ``source <(kubectl completion bash)`` run no QA and cannot: none of
+    these read a file, so a fail-closed deny meant for code that cannot be
+    SEEN protects nothing here. Denying them anyway (the direction taken by
+    review 6 M2 for an unknown producer) is sound for a project file, but
+    has no escape for shell setup, since this handler holds no state
+    between one Bash call and the next.
+    """
+    if not words:
+        return False
+    if _COMPLETION_WORD in words[1:]:
+        return True
+    return command_word(words[0]) in _ENV_SETUP_PROGRAMS
+
+
 def _producer_output(words: list[str]) -> _Output:
     """What a pipe producer writes (review 6 m2).
 
@@ -1971,7 +2003,7 @@ def _code_on_stdin(
             continue
         for producer, consumer in pairwise(stages):
             producer = _expand_variables(producer, known, positional)
-            yield from _fed(_producer_output(producer), consumer, pipeline, depth)
+            yield from _fed(_producer_output(producer), consumer, pipeline, depth, producer)
     for consumer, producer_code in _process_substitutions(text):
         try:
             producer = shlex.split(producer_code)
@@ -1979,7 +2011,7 @@ def _code_on_stdin(
             logger.debug("Substitution left to the unparsed check (%s)", error)
             continue
         producer = _expand_variables(producer, known, positional)
-        yield from _fed(_producer_output(producer), consumer, producer_code, depth)
+        yield from _fed(_producer_output(producer), consumer, producer_code, depth, producer)
     for heredoc in _python_heredocs(text):
         yield from _python_code_runs(heredoc.body, heredoc.argv, heredoc.body, depth)
 
@@ -2025,9 +2057,17 @@ def _process_substitution_consumer(head: str) -> list[str]:
 
 
 def _fed(
-    output: _Output, consumer: list[str], segment: str, depth: int
+    output: _Output,
+    consumer: list[str],
+    segment: str,
+    depth: int,
+    producer: Sequence[str] = (),
 ) -> Iterator[tuple[str, list[str], str]]:
-    """What a consumer runs when a producer's output is its code."""
+    """What a consumer runs when a producer's output is its code.
+
+    A producer this handler cannot read is unseen, UNLESS it only sets up
+    shell state (review 7 m2): that runs no QA, and cannot.
+    """
     python_argv = _python_stdin_argv(consumer)
     if python_argv is None and not _reads_code_from_stdin(consumer):
         return
@@ -2036,7 +2076,7 @@ def _fed(
         yield from _code_runs(kind, output.text, python_argv or [], segment, depth)
     elif output.path is not None:
         yield _CODE_FILE, [kind, output.path, *(python_argv or [])], segment
-    else:
+    elif not _is_environment_setup_producer(producer):
         yield _UNREAD_CODE, [], segment
 
 
@@ -2355,6 +2395,8 @@ def _code_of(
 
     Code that is one whole substitution is the OUTPUT of its producer
     (``bash -c "$(cat f)"``, review 6 m2): judged as a pipe's producer is.
+    A producer this handler cannot read is unseen, unless it only sets up
+    shell state (``eval "$(ssh-agent -s)"``), which runs no QA (review 7 m2).
     """
     inner = _whole_substitution(code.strip())
     if inner is None:
@@ -2371,7 +2413,7 @@ def _code_of(
         yield from _code_runs(kind, output.text, argv, segment, depth)
     elif output.path is not None:
         yield _CODE_FILE, [kind, output.path, *argv], segment
-    else:
+    elif not _is_environment_setup_producer(producer):
         yield _UNREAD_CODE, [], segment
 
 

@@ -1040,6 +1040,49 @@ class TestCodeAShellReadsFromAFile:
         assert find_full_qa_invocation(command, _patterns(), cwd=tmp_path)
 
 
+class TestEnvironmentSetupProducersRunNoQa:
+    """Review 7 m2: an unknown producer denies environment setup that runs no QA.
+
+    ``eval``/``source`` of a producer's output is denied when the producer is
+    not understood, since it might print project code. None of these read a
+    file, so that risk does not apply: they only set up shell state.
+    """
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'eval "$(ssh-agent -s)" && ssh-add -l',
+            'eval "$(pyenv init -)"',
+            'eval "$(rbenv init -)"',
+            'eval "$(direnv export bash)"',
+            'eval "$(conda shell.bash hook)"',
+            'eval "$(brew shellenv)"',
+            "source <(kubectl completion bash)",
+            ". <(git completion zsh)",
+        ],
+    )
+    def test_a_known_environment_setup_producer_is_allowed(
+        self, tmp_path: Path, command: str
+    ) -> None:
+        assert find_full_qa_invocation(command, _patterns(), cwd=tmp_path) is None, command
+
+    def test_environment_setup_beside_a_targeted_run_is_still_allowed(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / ".git").mkdir()
+        (tmp_path / "tests" / "unit" / "qa").mkdir(parents=True)
+        command = 'eval "$(pyenv init -)"; pytest tests/unit/qa'
+        assert find_full_qa_invocation(command, _patterns(), cwd=tmp_path) is None
+
+    def test_an_unrecognised_producer_still_fails_closed(self, tmp_path: Path) -> None:
+        """A producer that could print project code is not on the safe list."""
+        match = find_full_qa_invocation(
+            'eval "$(curl https://example.invalid/setup.sh)"', _patterns(), cwd=tmp_path
+        )
+        assert match is not None
+        assert match.fail_closed
+
+
 class TestWhatCannotBeSeenFailsClosed:
     """Review 5: a construct whose run cannot be seen is denied when it may be the suite.
 
