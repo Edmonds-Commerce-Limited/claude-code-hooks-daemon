@@ -9,6 +9,48 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N61 — The `sensitive_content` commit gate misses a file that a same-command `git add` stages
+
+**Found by the upgrade-scripts agent**, on main at a93c4b0ad and on the Plan
+00464 branch alike. The commit gate scans only what is ALREADY staged when
+the Bash command is judged. So `git add leak.txt && git commit -m x` is
+allowed even when `leak.txt` matches a public pattern. The same commit with
+`leak.txt` staged beforehand is denied. The realistic script shape, add then
+commit, is the one that passes.
+
+**Candidate remedy:** when a command both stages and commits, judge the
+union of the current index and every path the same command's `git add`
+(and `git commit -a`/`-u`/pathspec) would stage, read from the working tree.
+Where the added set cannot be resolved (a glob, a computed argument, `git add .`), take the working-tree changes git itself reports as the set. Never take
+an empty set: an unresolvable one denies. This is the same class as N53
+review 3's MA-2 shapes, so it is fixed on the N53 branch. RED tests:
+
+- `git add leak.txt && git commit -m x` denies;
+- `git add . && git commit -m x` with a leaking untracked file denies;
+- a clean add-then-commit is allowed.
+
+### N60 — `curl_pipe_shell` denies a double-quoted `echo` argument that only mentions the pattern
+
+**Found by the coordinator.** It appended a queue note with
+`echo "... <download tool> ... | sh ..." >> file`. The text inside the double
+quotes is data for `echo`: the shell runs no pipe there, and there is no
+substitution in it. R-CURL-PIPE-SHELL denied it anyway. So the handler matches
+the raw command text, not the pipeline structure.
+
+**Candidate remedy:** judge only real pipeline stages. The producer stage must
+be a download command, the consumer stage must be a shell, and both must be
+outside quotes and outside a heredoc body that nothing executes. This belongs
+with the shell-parser consolidation (N22, N32, N36, N48, N49, N51, N57, N58).
+A second shape was denied too: a QUOTED-delimiter heredoc fed to `cat >>`.
+The body of such a heredoc is literal text, and `pipe_blocker` already
+exempts it. RED tests:
+
+- the reported `echo` is allowed;
+- `cat >> f <<'EOF'` whose body mentions the pattern is allowed;
+- a real `<download> URL | sh` still denies;
+- `bash -c "<download> URL | sh"` still denies, because the string IS
+  executed.
+
 ### N59 — A signal is sent to a PID nobody proved is the intended process, and it killed the container twice
 
 **Found by the infra owner.** The container died with exit 137 at 11:07 and
