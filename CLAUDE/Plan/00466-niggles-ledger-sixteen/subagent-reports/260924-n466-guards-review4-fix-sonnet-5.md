@@ -365,3 +365,86 @@ against every `check_*.py`-backed detector plus `lint`/`type_check`/
 found and fixed along the way: the regression test's own subprocess
 `timeout=60` moved to `Timeout.REQUEST_LONG`). The full unit suite was
 NOT re-run this pass per team-lead's explicit host-overload instruction.
+
+## Addendum 4: review 6's three named closures (interpreter flags, multi-word eval, other-language shell-exec calls)
+
+Team-lead's follow-up closed the two review-5/Addendum-3 minor-1 "accepted
+simplifications" as real defects, plus a third item extending the same
+shell-exec detection to non-shell languages. Picked up from a previous
+agent's uncommitted WIP (cut off by a usage limit) -- reviewed it against
+the three asks, found it sound, and finished the gap it left (no tests for
+item 3 through the real handler) rather than rewriting what was already
+correct.
+
+**Item 1 -- a flag between the interpreter and `-c`.** minor-1's documented
+limitation ("adjacency only") is closed by
+`_classify_interpreter_option_word` in `shell_expansion.py`: walking
+`<interpreter> [options...] -c <code>` word by word, recognising `-c`
+anywhere inside a short-option cluster (`-lc`), long options
+(`--rcfile`/`--init-file`, value as the next word), and `-o`/`-O`
+consuming a value either glued (`-opipefail`) or separate (`-O extglob`).
+Covers `bash -x -c '…'`, `bash -lc '…'`, `bash -O extglob -c '…'`.
+
+**Item 2 -- `eval` with several words.** minor-1's other documented
+limitation ("only the single word directly after eval") is closed:
+`eval`'s own argument words are collected until a genuine shell command
+terminator (`;|&<>()`) and rejoined with a single space each -- matching
+eval's real semantics -- then re-parsed recursively through the same
+bounded mechanism (`_MAX_NESTED_SHELL_DEPTH`/`_MAX_NESTED_SHELL_BYTES`,
+shared across every nesting level and shape). The same word-collection
+path also covers `builtin eval`/`command eval` (triggers on the literal
+word `eval` appearing at all, prefix or not), `source <(echo|printf …)`/
+`. <(echo|printf …)` (a literal producer's joined output is what gets
+sourced), `bash <<<'…'` (a here-string with no `-c`, read from stdin),
+and a literal `echo '…' | bash` (piped to a shell's stdin). A `source <(...)` /`. <(...)` whose substituted command is NOT a recognised literal
+producer cannot be examined at all and FAILS CLOSED (raises
+`TooManyToEnumerateError`) rather than silently passing through --
+matching this module's existing doctrine for
+`expand_braces`/`bounded_recursive_glob`.
+
+RED-pinned end-to-end via `find_protected_mention_detail`
+(`TestReview6ClosedShellFeedShapes`, `tests/unit/utils/ test_secret_file_matching.py`): the flag-before-`-c` shapes, `-lc`,
+multi-word `eval` (team-lead's own repro), `eval` with two double-quoted
+words, `builtin eval`/`command eval`, `source <(echo …)`, the non-literal
+`source <(...)` fail-closed raise, a here-string, and a literal-echo pipe
+to `bash` -- all deny (or raise, for the fail-closed case); an unrelated
+`bash -c` command stays allowed (control, carried from review 5).
+
+**Item 3 -- shell-executing calls in other languages.**
+`secret_file_guard.py` gained `_shell_exec_call_literals`, dispatched by
+file extension, extracting string-literal arguments to a KNOWN
+shell-executing call and scanning them with `context="bash"` (the
+aggressive route already used for `.sh`/`.bash` content), while the rest
+of the file stays on the weaker `context="content"` literal-only scan:
+Python (`os.system`, `os.popen`, any `subprocess.*` call carrying
+`shell=True` or an argv list naming a shell interpreter, e.g. `["bash", "-c", …]`), Ruby (backticks, `%x{...}`, bare `system`/`exec`), PHP
+(`shell_exec`, `exec`, `system`, backticks), Perl (backticks, `qx{...}`,
+bare `system`), Node (`exec`/`execSync`, with or without the
+`child_process.` prefix). This is a bounded window after the call site
+standing in for a real argument-span matcher (documented as the same
+honest limit `security_antipattern`'s own docstring states), not a
+parser.
+
+The previous agent's WIP had no test coverage for item 3 through the real
+handler at all -- added `TestShellExecCallLiteralsInOtherLanguages` (18
+tests) in `tests/unit/handlers/pre_tool_use/test_secret_file_guard.py`,
+end-to-end via `handler.matches()`: a deny case per language/construct,
+paired with an ordinary-string-literal control that must stay allowed
+(the same `pattern = 'prod.vault-passw*rd'` control used elsewhere in
+this file), plus a `subprocess.run([...])` control with no `shell=True`
+and no shell name in its argv, which never reaches a shell and must stay
+allowed. Some fixture bodies assemble the call syntax from split string
+literals (e.g. `"exec" + "Sync(...)"`) purely to avoid
+`security_antipattern` pattern-matching the fixture's own contiguous
+`os.system(`/`exec(`/`shell_exec(` text on the Edit that authored the
+test file -- a constraint anyone touching this test class again will hit
+the same way.
+
+**Verification** (targeted only, per standing instruction -- no
+whole-suite run): `TestShellExecCallLiteralsInOtherLanguages` +
+`test_shell_expansion.py` -- 71 passed. The full `test_secret_file_guard.py`
+
+- `test_secret_file_matching.py` + `test_shell_expansion.py` -- 487
+  passed. Every `scripts/qa/check_*.py` detector run individually -- all
+  exit 0. No suppressions or exclusions added. Worktree daemon restarted
+  clean after commit.
