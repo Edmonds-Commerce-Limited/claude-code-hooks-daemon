@@ -9,6 +9,29 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N45 — A NUL byte in a configured word-list path makes the never-raising secret-term lookup raise
+
+**Found by the Plan 00421 agent** while fixing N43. A NUL byte in a HEALTHY
+config's `sensitive_content.secret_word_list_path` gets through
+`normalise_repo_relative_path`. It then reaches `get_cached_secret_terms`,
+where `path.stat()` raises ValueError, and the code there catches only
+OSError. So `get_active_secret_terms` raises, although it is documented as
+never raising. It does so on every leak-vector call site: the router's debug
+log, the front controller and payload capture. That is where redaction must
+never fail.
+
+**Candidate remedy:**
+
+- Validate every configured path option at config load, and reject NUL and
+  other non-path bytes with a clear config error.
+- Make the term lookup honour its never-raise contract: catch ValueError
+  beside OSError, and treat a list that cannot be resolved as a reported
+  problem that never means "redact nothing".
+- Sweep the other `Path.stat`, `open` and `resolve` calls on config-supplied
+  paths for the same gap.
+
+RED tests cover the config error and each leak-vector site.
+
 ### N44 — A PreToolUse handler raises `ValueError: no path specified` on an Edit, and the Edit goes through
 
 **Found by the Plan 00464 agent** while editing
