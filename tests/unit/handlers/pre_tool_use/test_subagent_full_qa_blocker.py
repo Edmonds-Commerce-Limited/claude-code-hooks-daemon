@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import os
 import time
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +38,9 @@ from claude_code_hooks_daemon.core.handler_scope import HandlerScope, scope_admi
 from claude_code_hooks_daemon.daemon.synthetic_traffic import (
     PLAYBOOK_PROBE,
     SYNTHETIC_SOURCE_FIELD,
+)
+from claude_code_hooks_daemon.handlers.pre_tool_use import (
+    subagent_full_qa_blocker as _blocker_module,
 )
 from claude_code_hooks_daemon.handlers.pre_tool_use.subagent_full_qa_blocker import (
     PYTEST_FLAG_OPTIONS,
@@ -1759,6 +1763,71 @@ class TestAFileUnderTheParseCapIsParsedOnce:
             "bash selfrun.sh\n" * 10 + "pytest tests\n", encoding="utf-8"
         )
         match = find_full_qa_invocation("bash selfrun.sh", _patterns(), cwd=tmp_path)
+        assert match is not None
+
+
+class TestTheParseBudgetIsPerEventNotPerMemoKey:
+    """Review 8 B1: a different argv or directory per reference defeated the review 7 memo.
+
+    The memo key (path, kind, argv, directory) let a distinct key re-parse a
+    file every time, since the parse budget was only ever charged once, at
+    the file's first READ. Charging it at every PARSE instead bounds the
+    total bytes parsed in one event, however many distinct keys reference
+    the same file.
+    """
+
+    _BUDGET_SECONDS = 1.0
+
+    def test_two_hundred_distinct_argv_references_are_judged_within_a_second(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "words32k.sh").write_text("x " * 16_000 + "\n", encoding="utf-8")
+        command = "".join(f'bash words32k.sh "a{n}"; ' for n in range(200))
+        began = time.perf_counter()
+        assert find_full_qa_invocation(command, _patterns(), cwd=tmp_path) is None
+        assert time.perf_counter() - began < self._BUDGET_SECONDS
+
+    def test_thirty_distinct_directory_references_are_judged_within_a_second(
+        self, tmp_path: Path
+    ) -> None:
+        script = tmp_path / "cd30.sh"
+        script.write_text("x " * 8_000 + "\n", encoding="utf-8")
+        for n in range(30):
+            (tmp_path / f"d{n}").mkdir()
+        command = "; ".join(f"cd d{n} && bash {script}" for n in range(30))
+        began = time.perf_counter()
+        assert find_full_qa_invocation(command, _patterns(), cwd=tmp_path) is None
+        assert time.perf_counter() - began < self._BUDGET_SECONDS
+
+    def test_bytes_parsed_in_one_event_stay_within_a_small_multiple_of_the_budget(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / "words32k.sh").write_text("x " * 16_000 + "\n", encoding="utf-8")
+        command = "".join(f'bash words32k.sh "a{n}"; ' for n in range(200))
+        parsed: list[int] = []
+        real_invocations = _blocker_module._invocations
+
+        def _counting_invocations(
+            text: str, depth: int = 0, positional: Sequence[str] | None = None
+        ) -> Iterator[tuple[str, list[str], str]]:
+            parsed.append(len(text.encode("utf-8")))
+            yield from real_invocations(text, depth, positional)
+
+        monkeypatch.setattr(_blocker_module, "_invocations", _counting_invocations)
+        find_full_qa_invocation(command, _patterns(), cwd=tmp_path)
+        # The command itself is one parse; past the budget every further
+        # distinct-argv reference to the file is only scanned, not re-parsed,
+        # so the total stays well under 200 x 16 KiB.
+        assert sum(parsed) < 100_000, sum(parsed)
+
+    def test_a_full_run_past_the_budget_is_still_reached_at_the_top_level(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "words32k.sh").write_text("x " * 16_000 + "\n", encoding="utf-8")
+        command = "".join(f'bash words32k.sh "a{n}"; ' for n in range(200)) + "pytest tests"
+        began = time.perf_counter()
+        match = find_full_qa_invocation(command, _patterns(), cwd=tmp_path)
+        assert time.perf_counter() - began < self._BUDGET_SECONDS
         assert match is not None
 
 

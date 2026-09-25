@@ -3651,10 +3651,15 @@ def _full_run_in_code_file(
     read and judged with its own argv; a cd inside it stays inside it. Code
     that cannot be seen fails closed: an unreadable file is denied, and one
     too large to parse, or past the nesting followed, is denied when it names
-    a declared program (review 6 M1, m2). A file is PARSED at most once per
-    distinct (path, kind, argv, directory): every other reference reuses the
-    memoised verdict, so a file referenced many times, or one that feeds
-    itself, costs one parse, not one per reference (review 7 M1).
+    a declared program (review 6 M1, m2). A file's BYTES are read at most
+    once per event; but the parse budget is charged at every actual PARSE,
+    not at the read (review 8 B1) -- a distinct (path, kind, argv, directory)
+    key still reuses its own memoised verdict, but a NEW key past the budget
+    falls back to the scan already used for an oversized file, rather than
+    parsing again. Otherwise a file referenced with a different argv or
+    directory each time (``bash f.sh a0``, ``a1``, ...) defeated the memo:
+    each key was new, so each was parsed in full, and the budget -- charged
+    only once, at the first read -- never bounded the total parse work.
     """
     kind, path, argv = arguments[0], arguments[1], arguments[2:]
     name = _PROGRAM_ALIASES.get(command_word(path), command_word(path))
@@ -3687,6 +3692,14 @@ def _full_run_in_code_file(
             if found is None
             else FullQaMatch(found.pattern_id, segment.strip(), found.fail_closed)
         )
+    size = len(content.text.encode("utf-8"))
+    if size > event.parse_budget:
+        # A NEW key, but the shared budget is spent: fall back to the same
+        # scan an oversized file gets, cached per PATH (not per key), so
+        # every further distinct-key reference to this file costs one cheap
+        # scan lookup rather than another full parse (review 8 B1).
+        return _scanned_verdict(content, code_kind, event, segment)
+    event.parse_budget -= size
     event.verdicts_pending.add(key)
     try:
         event.addopts.extend(_addopts(content.text))
@@ -3781,10 +3794,12 @@ def _read_new(target: str, event: _Event) -> _CodeContent:
 
     Missing, a directory, or a name the filesystem refuses: nothing runs. A
     FIFO or a device: unseen, and never opened, since a FIFO blocks. Within
-    the parse cap and the event's parse budget: parsed. Past them: scanned
-    while the scan budget lasts, and unseen after it. Any other ``OSError``
-    propagates, which the daemon turns into a deny: the code may be a run,
-    and it could not be seen.
+    the parse cap: readable in full, TEXT -- whether it is actually PARSED
+    or only scanned is decided per verdict key, against the parse budget
+    (review 8 B1), not here at read time: the bytes are read once regardless.
+    Past the parse cap: scanned while the scan budget lasts, and unseen after
+    it. Any other ``OSError`` propagates, which the daemon turns into a deny:
+    the code may be a run, and it could not be seen.
     """
     try:
         status = Path(target).stat()
@@ -3799,8 +3814,7 @@ def _read_new(target: str, event: _Event) -> _CodeContent:
     if not stat.S_ISREG(status.st_mode):
         return _UNSEEN_CODE
     size = status.st_size
-    if size <= _MAX_COMMAND_LENGTH and size <= event.parse_budget:
-        event.parse_budget -= size
+    if size <= _MAX_COMMAND_LENGTH:
         return _CodeContent(_Readable.TEXT, _decoded(target), target)
     if size > event.scan_budget:
         return _UNSEEN_CODE
