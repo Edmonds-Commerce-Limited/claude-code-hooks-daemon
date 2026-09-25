@@ -51,22 +51,28 @@ computed name is judged as pytest. Each such deny says why.
 **Code in files is read, within one budget per event (review 6).** A script
 run by its name or path, and a file fed to a shell or Python, is read and
 judged with its own arguments, unless it is a program the project declares,
-which its pattern judges. Each path is read once; past the parse budget a
-file is only scanned for a declared program's name, and code that cannot be
-read at all (a producer that is not understood, a FIFO, a file the same
-command writes) fails closed. The one run that is not seen is a program whose
-NAME is built at run time from pieces (``$(printf 'py%s' test)``, or
-``"py" + "test"`` in Python).
+which its pattern judges. Every byte handed to a parser in one event is
+charged to one meter, and a command whose code does not fit it is DENIED
+(review 8 B1); so is code nested deeper than is followed. A file too large to
+parse at all is scanned RAW for a declared program's name, and code that
+cannot be read (a producer that is not understood, a FIFO, a file the same
+command writes) fails closed. In Python, every string the code holds or
+builds, and every argv list, is judged (review 8 M1). The one run that is not
+seen is a program whose NAME is built at run time from pieces (``$(printf
+'py%s' test)``, ``"py" + "test"`` in Python, or a Python string whose first
+word the code computes).
 """
 
 from __future__ import annotations
 
+import ast
 import errno
 import logging
 import posixpath
 import re
 import shlex
 import stat
+import string
 import sys
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextvars import ContextVar
@@ -715,6 +721,13 @@ _TOO_DEEP: Final[str] = "<code nested deeper than is followed>"
 #: What it yields for the paths a command writes (``>``, ``>>``, ``tee``):
 #: code read from one of them is not what is on disk now.
 _WRITES: Final[str] = "<paths this command writes>"
+#: Programs that can give a file an execute bit, or put an executable file
+#: at its path: once one has run, a file without the bit may yet run.
+_MODE_CHANGERS: Final[frozenset[str]] = frozenset(
+    {"chmod", "install", "cp", "mv", "ln", "rsync", "setfacl", "tar", "unzip"}
+)
+#: Any execute bit: execve refuses a file with none, root included.
+_EXECUTE_BITS: Final[int] = stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
 #: ``env -C DIR cmd``: DIR is the directory for ``cmd`` alone.
 _CD_PUSH: Final[str] = "<enter a directory for one command>"
 _CD_POP: Final[str] = "<leave that directory>"
@@ -908,10 +921,38 @@ _DYNAMIC_EXECUTION: Final[tuple[re.Pattern[str], ...]] = (
     re.compile(r"(?<![\w.])(?:[e]xec|[e]val)\s*\((?!\s*(['\"])[^'\"]*\1\s*\))"),
 )
 #: The modules whose functions start a process, and ``os``'s such functions;
-#: every ``subprocess`` function does.
+#: every ``subprocess`` function does, and ``pty.spawn``.
 _OS_MODULE: Final[re.Pattern[str]] = re.compile("os")
 _SUBPROCESS_MODULE: Final[re.Pattern[str]] = re.compile("subprocess")
-_OS_PROCESS_FUNCTION: Final[re.Pattern[str]] = re.compile(r"(?:system|popen|exec\w*|spawn\w*)")
+_PTY_MODULE: Final[re.Pattern[str]] = re.compile("pty")
+_OS_PROCESS_FUNCTION: Final[re.Pattern[str]] = re.compile(
+    r"(?:system|popen|exec\w*|spawn\w*|posix_spawn\w*)"
+)
+#: ``asyncio.create_subprocess_shell``/``_exec``, however it is reached.
+_ASYNC_SUBPROCESS: Final[re.Pattern[str]] = re.compile(r"\bcreate_subprocess_(?:shell|exec)\b")
+#: A value only Python computes, as a word of a command the code builds:
+#: shaped as an unset shell variable, so it is judged as built at run time.
+_PYTHON_VALUE: Final[str] = "${__python_value__}"
+#: ``sys.executable`` heading an argv is Python itself.
+_SYS: Final[str] = "sys"
+_EXECUTABLE: Final[str] = "executable"
+_ARGV: Final[str] = "argv"
+#: ``sys.argv`` spread into an argv list (``*sys.argv[1:]``, ``+ sys.argv[1:]``).
+_ARGV_SPREAD: Final[re.Pattern[str]] = re.compile(r"[*+]\s*sys\s*\.\s*argv\s*\[")
+#: Shell code that reads its own arguments: ``$1``, ``$@``, ``$*``, ``$#``,
+#: ``shift``, ``getopts`` or ``BASH_ARGV``. Code with none of them runs the
+#: same whatever it is given.
+_SHELL_READS_ARGV: Final[re.Pattern[str]] = re.compile(
+    r"\$\{?[#!]?(?:[0-9@*#]|BASH_ARGV)|\b(?:shift|getopts)\b"
+)
+_PYTHON_PROGRAM: Final[str] = "python3"
+#: ``%``-formatting's conversions; ``%%`` is a literal ``%``.
+_PERCENT_CONVERSION: Final[re.Pattern[str]] = re.compile(
+    r"%(?:\([^)]*\))?[-+ #0]*(?:\d+|\*)?(?:\.(?:\d+|\*))?[a-zA-Z%]"
+)
+_PERCENT_LITERAL: Final[str] = "%%"
+_FORMAT_METHOD: Final[str] = "format"
+_JOIN_METHOD: Final[str] = "join"
 #: ``sys.argv`` in the code: the words after the code string reach it.
 _SYS_ARGV: Final[re.Pattern[str]] = re.compile(r"\bsys\s*\.\s*argv\b")
 #: A quoted string in Python code: its content is one word of the run.
@@ -2797,51 +2838,336 @@ def _calls_pytest(code: str) -> bool:
 
 
 def _starts_a_process(code: str) -> bool:
-    """Whether Python code calls ``os``/``subprocess`` to start a process, under any name."""
-    os_modules, os_members = _imported_names(code, _OS_MODULE)
+    """Whether Python code can start a process, under any name it reaches one by.
+
+    A REFERENCE is enough, not only a call (review 8 M1): ``run =
+    subprocess.run``, ``getattr(subprocess, "run")`` and
+    ``functools.partial(subprocess.run, ...)`` start one through a name this
+    cannot follow. So importing ``subprocess`` or ``pty`` counts, as does
+    naming ``asyncio``'s subprocess functions, or one of ``os``'s process
+    functions as an attribute, an import, or a ``getattr`` string.
+    """
     process_modules, process_members = _imported_names(code, _SUBPROCESS_MODULE)
-    os_functions = {
-        bound for bound, member in os_members.items() if _OS_PROCESS_FUNCTION.fullmatch(member)
-    }
-    return (
-        _calls_a_name(code, {_OS_MODULE.pattern, *os_modules}, _OS_PROCESS_FUNCTION.pattern)
-        or _calls_a_name(code, {_SUBPROCESS_MODULE.pattern, *process_modules}, r"\w+")
-        or _calls_a_name(code, os_functions | set(process_members))
+    pty_modules, pty_members = _imported_names(code, _PTY_MODULE)
+    if process_modules or process_members or pty_modules or pty_members:
+        return True
+    if _ASYNC_SUBPROCESS.search(code) is not None:
+        return True
+    os_modules, os_members = _imported_names(code, _OS_MODULE)
+    if any(_OS_PROCESS_FUNCTION.fullmatch(member) for member in os_members.values()):
+        return True
+    holders = "|".join(re.escape(name) for name in sorted({_OS_MODULE.pattern, *os_modules}))
+    if re.search(rf"(?<![\w.])(?:{holders})\s*\.\s*{_OS_PROCESS_FUNCTION.pattern}\b", code):
+        return True
+    return bool(os_modules) and any(
+        _OS_PROCESS_FUNCTION.fullmatch(literal) for literal in _string_literals(code)
     )
 
 
-def _process_call_spans(code: str) -> list[str]:
-    """The argument text of every call this code makes that starts a process.
+def _python_strings_of(code: str, argv: Sequence[str]) -> tuple[list[str], list[list[str]]]:
+    """The strings and argv lists of Python code (:func:`_python_strings`).
 
-    A string literal is only ever an ARGV the code runs when it sits between
-    a process-starting call's parentheses (review 7 M2): a docstring or a
-    log message elsewhere in the file is never inside one, so it is never a
-    candidate, however many words or apostrophes it has. Depth is tracked
-    per call with :func:`_closing_paren`, so a nested call's own parens do
-    not end the outer one early.
+    Code Python cannot parse, or whose expressions nest too deep to walk (a
+    method chain thousands of calls long), is judged by every quoted literal
+    it holds instead, with no argv list read from it.
     """
-    os_modules, os_members = _imported_names(code, _OS_MODULE)
-    process_modules, process_members = _imported_names(code, _SUBPROCESS_MODULE)
-    os_functions = {
-        bound for bound, member in os_members.items() if _OS_PROCESS_FUNCTION.fullmatch(member)
+    try:
+        return _python_strings(ast.parse(code), argv)
+    except (SyntaxError, ValueError, RecursionError) as error:
+        logger.debug("Python judged by its quoted literals, unparsable (%s)", error)
+        return _string_literals(code), []
+
+
+def _constant_names(tree: ast.Module) -> dict[str, list[str]]:
+    """Each name the code binds to a string constant, with every value it is given."""
+    names: dict[str, list[str]] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            targets, value = node.targets, node.value
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            targets, value = [node.target], node.value
+        else:
+            continue
+        if isinstance(value, ast.Constant) and isinstance(value.value, str):
+            for target in targets:
+                if isinstance(target, ast.Name):
+                    names.setdefault(target.id, []).append(value.value)
+    return names
+
+
+def _python_text(node: ast.expr, names: Mapping[str, list[str]]) -> str | None:
+    """The text a string expression makes, a value only Python computes as ``_PYTHON_VALUE``.
+
+    A constant, an f-string, a ``+`` or ``%`` whose left side is a string, a
+    ``.format`` of one, and ``sep.join([...])``. None for an expression that
+    builds no string here. A ``+`` chain is walked down its left spine
+    without recursion, so a long one costs its length once.
+    """
+    if isinstance(node, ast.Constant):
+        if isinstance(node.value, bytes):
+            return node.value.decode("utf-8", errors="replace")
+        return node.value if isinstance(node.value, str) else None
+    if isinstance(node, ast.JoinedStr):
+        return "".join(
+            (
+                _python_word(part.value, names) or ""
+                if isinstance(part, ast.FormattedValue)
+                else _python_text(part, names) or ""
+            )
+            for part in node.values
+        )
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        parts: list[ast.expr] = []
+        left: ast.expr = node
+        while isinstance(left, ast.BinOp) and isinstance(left.op, ast.Add):
+            parts.append(left.right)
+            left = left.left
+        parts.append(left)
+        texts = [_python_word(part, names, strings_only=True) for part in reversed(parts)]
+        if all(text in (None, _PYTHON_VALUE) for text in texts):
+            return None
+        return "".join(_PYTHON_VALUE if text is None else text for text in texts)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mod):
+        leftmost: ast.expr = node
+        while isinstance(leftmost, ast.BinOp) and isinstance(leftmost.op, ast.Mod):
+            leftmost = leftmost.left
+        template = _python_text(leftmost, names)
+        if template is None:
+            return None
+        return _PERCENT_CONVERSION.sub(
+            lambda found: "%" if found.group() == _PERCENT_LITERAL else _PYTHON_VALUE, template
+        )
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+        owner = _python_text(node.func.value, names)
+        if owner is None:
+            return None
+        if node.func.attr == _FORMAT_METHOD:
+            return _formatted(owner)
+        if node.func.attr == _JOIN_METHOD and node.args:
+            items = node.args[0]
+            if isinstance(items, (ast.List, ast.Tuple)):
+                return owner.join(_python_word(item, names) or "" for item in items.elts)
+            return _PYTHON_VALUE
+    return None
+
+
+def _formatted(template: str) -> str:
+    """A ``.format`` template with each replacement field a value Python computes."""
+    try:
+        fields = list(string.Formatter().parse(template))
+    except ValueError as error:
+        logger.debug("Format template read as written (%s)", error)
+        return template
+    return "".join(
+        literal + ("" if name is None else _PYTHON_VALUE) for literal, name, _, _ in fields
+    )
+
+
+def _python_word(
+    node: ast.expr, names: Mapping[str, list[str]], *, strings_only: bool = False
+) -> str | None:
+    """One word a Python value stands for: its text, a name's one value, or ``_PYTHON_VALUE``.
+
+    With ``strings_only``, an expression that is plainly no string (a
+    constant number) is None rather than a value, so ``1 + 2`` builds none.
+    """
+    text = _python_text(node, names)
+    if text is not None:
+        return text
+    if isinstance(node, ast.Name) and len(names.get(node.id, [])) == 1:
+        return names[node.id][0]
+    if strings_only and isinstance(node, ast.Constant):
+        return None
+    return _PYTHON_VALUE
+
+
+def _python_argv_heads(node: ast.expr, names: Mapping[str, list[str]]) -> list[str]:
+    """The programs an argv list can start with: a string, ``sys.executable``, a name's values."""
+    text = _python_text(node, names)
+    if text is not None:
+        return [text]
+    if (
+        isinstance(node, ast.Attribute)
+        and node.attr == _EXECUTABLE
+        and isinstance(node.value, ast.Name)
+        and node.value.id == _SYS
+    ):
+        return [_PYTHON_PROGRAM]
+    if isinstance(node, ast.Name):
+        return list(dict.fromkeys(names.get(node.id, [])))
+    return []
+
+
+def _python_judged_with_argv(code: str) -> bool:
+    """Whether judging this Python code reads the words after it, so they key its verdict.
+
+    Exactly where the judgement uses them: :func:`_pytest_in_code` adds them
+    to a pytest run the code makes when it reads ``sys.argv``, and an argv
+    list takes them where it spreads ``sys.argv[1:]`` (``*`` or ``+``). Code
+    that hands ``sys.argv`` to argparse, say, is judged the same whatever it
+    is given.
+    """
+    if _SYS_ARGV.search(code) is None:
+        return False
+    return (
+        _ARGV_SPREAD.search(code) is not None
+        or _PYTEST in _string_literals(code)
+        or _calls_pytest(code)
+    )
+
+
+def _is_sys_argv_tail(node: ast.expr) -> bool:
+    """Whether the expression is ``sys.argv[1:]``: the words after the code."""
+    return (
+        isinstance(node, ast.Subscript)
+        and isinstance(node.value, ast.Attribute)
+        and node.value.attr == _ARGV
+        and isinstance(node.value.value, ast.Name)
+        and node.value.value.id == _SYS
+        and isinstance(node.slice, ast.Slice)
+        and isinstance(node.slice.lower, ast.Constant)
+        and node.slice.lower.value == 1
+        and node.slice.upper is None
+        and node.slice.step is None
+    )
+
+
+def _python_spread(
+    node: ast.expr, names: Mapping[str, list[str]], argv: Sequence[str]
+) -> list[str]:
+    """The words a value spread into an argv makes: a list's items, ``sys.argv[1:]``, or one value."""
+    if _is_sys_argv_tail(node):
+        return list(argv)
+    if isinstance(node, (ast.List, ast.Tuple)):
+        return [word for item in node.elts for word in _python_argv_item(item, names, argv)]
+    return [_PYTHON_VALUE]
+
+
+def _python_argv_item(
+    node: ast.expr, names: Mapping[str, list[str]], argv: Sequence[str]
+) -> list[str]:
+    """The words one item of an argv list makes: a starred spread many, anything else one."""
+    if isinstance(node, ast.Starred):
+        return _python_spread(node.value, names, argv)
+    return [_python_word(node, names) or ""]
+
+
+def _python_argvs(
+    node: ast.expr, names: Mapping[str, list[str]], argv: Sequence[str]
+) -> list[list[str]]:
+    """The argvs a list, or a ``+`` of lists and values, can be; none when it heads no program.
+
+    A list or tuple whose first item names a program (a string,
+    ``sys.executable``, or a name bound to strings) is an argv, one per value
+    that head can take. What is added to it is more of its words:
+    ``["pytest"] + paths`` is pytest with a value Python computes, never a
+    bare pytest.
+    """
+    parts: list[ast.expr] = []
+    left = node
+    while isinstance(left, ast.BinOp) and isinstance(left.op, ast.Add):
+        parts.append(left.right)
+        left = left.left
+    parts.append(left)
+    parts.reverse()
+    first = parts[0]
+    if not isinstance(first, (ast.List, ast.Tuple)) or not first.elts:
+        return []
+    heads = _python_argv_heads(first.elts[0], names)
+    tail = [word for item in first.elts[1:] for word in _python_argv_item(item, names, argv)]
+    for part in parts[1:]:
+        tail.extend(_python_spread(part, names, argv))
+    return [[head, *tail] for head in heads]
+
+
+def _python_strings(tree: ast.Module, argv: Sequence[str]) -> tuple[list[str], list[list[str]]]:
+    """Every string the code holds or builds, and every argv list it holds (review 8 M1).
+
+    Every string literal counts, wherever it sits: a command held in a
+    variable, a constant, a dict or a function's return is as much a
+    command as one written in the call. A string, or an argv, BUILT by an
+    expression is judged whole, from the root of its expression only, never
+    once per link of a ``+`` chain (see :func:`_python_argvs`).
+    """
+    nodes = list(ast.walk(tree))
+    links = {
+        id(side)
+        for node in nodes
+        if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Mod))
+        for side in (node.left, node.right)
     }
-    os_holders = sorted({_OS_MODULE.pattern, *os_modules})
-    process_holders = sorted({_SUBPROCESS_MODULE.pattern, *process_modules})
-    bare = sorted(os_functions | set(process_members))
-    call_patterns = [
-        rf"(?<![\w.])(?:{'|'.join(re.escape(name) for name in os_holders)})"
-        rf"\s*\.\s*{_OS_PROCESS_FUNCTION.pattern}\s*\(",
-        rf"(?<![\w.])(?:{'|'.join(re.escape(name) for name in process_holders)})"
-        rf"\s*\.\s*\w+\s*\(",
-    ]
-    if bare:
-        call_patterns.append(rf"(?<![\w.])(?:{'|'.join(re.escape(name) for name in bare)})\s*\(")
-    spans = []
-    for call_pattern in call_patterns:
-        for match in re.finditer(call_pattern, code):
-            start = match.end()
-            spans.append(code[start : _closing_paren(code, start)])
-    return spans
+    names = _constant_names(tree)
+    texts: list[str] = []
+    argvs: list[list[str]] = []
+    for node in nodes:
+        if isinstance(node, ast.Constant) or (
+            isinstance(node, (ast.JoinedStr, ast.BinOp, ast.Call)) and id(node) not in links
+        ):
+            text = _python_text(node, names)
+            if text is not None:
+                texts.append(text)
+        if isinstance(node, (ast.List, ast.Tuple, ast.BinOp)) and id(node) not in links:
+            argvs.extend(_python_argvs(node, names, argv))
+    return texts, argvs
+
+
+def _open_quote(text: str) -> str:
+    """The quote character the text leaves open at its end, or ``""``."""
+    in_single = in_double = False
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if char == "\\" and not in_single:
+            index += 2
+            continue
+        if char == "'" and not in_double:
+            in_single = not in_single
+        elif char == '"' and not in_single:
+            in_double = not in_double
+        index += 1
+    return "'" if in_single else '"' if in_double else ""
+
+
+def _python_command(text: str, segment: str, depth: int) -> Iterator[tuple[str, list[str], str]]:
+    """What one string Python holds runs, if the code hands it to a shell.
+
+    A string of one word is a program's name alone: yielded as that program
+    with no argument, except pytest's, which :func:`_pytest_in_code` judges
+    with the code's other strings. Longer strings are shell code.
+
+    A string that leaves a quote open is read BOTH ways it can run. Handed
+    to a shell whole, the quote runs to its end and the shell refuses that
+    line, so nothing past the quote runs: it is read with the quote closed
+    at its end. Joined at run time after text that opened a quote, its own
+    quote CLOSES that one and what follows runs: it is read with the quote
+    opened before its start. Prose (``Don't run pytest here``) holds no
+    program either way; ``echo it's; pytest tests`` runs pytest the second.
+    """
+    words = text.split()
+    if not words:
+        return
+    if len(words) == 1:
+        name = _PROGRAM_ALIASES.get(command_word(words[0]), command_word(words[0]))
+        if name != _PYTEST:
+            yield name, [], segment
+        return
+    quote = _open_quote(text)
+    if quote:
+        yield from _nested(text + quote, segment, depth)
+        yield from _nested(quote + text, segment, depth)
+        return
+    yield from _nested(text, segment, depth)
+
+
+def _python_commands(
+    code: str, argv: Sequence[str], segment: str, depth: int
+) -> Iterator[tuple[str, list[str], str]]:
+    """What the strings and argv lists of process-starting Python code run."""
+    texts, argvs = _python_strings_of(code, argv)
+    for text in texts:
+        yield from _python_command(text, segment, depth)
+    for argv in argvs:
+        yield from _resolve(argv, segment, depth)
 
 
 def _pytest_in_code(code: str, argv: Sequence[str] = ()) -> list[str] | None:
@@ -2881,33 +3207,19 @@ def _python_code_runs(
 ) -> Iterator[tuple[str, list[str], str]]:
     """What Python code runs: pytest, a shell command it hands to a process, or neither.
 
-    A string literal is judged as shell code only when it sits inside a
-    process-starting call's own argument list (:func:`_process_call_spans`):
-    a docstring or a log message elsewhere in the file is never an argv, and
-    parsing one as shell risks an apostrophe reading as an unbalanced quote
-    and the prose then being scanned whole for a declared program's name
-    (review 7 M2). Code that imports or runs a module named only at run time
-    is yielded as ``_OPAQUE``, so the caller can fail closed. pytest is
-    yielded as ``_PYTEST_IN_CODE``: its operands are every string in the
-    code, so only a path-shaped one targets the run. Code past the parse
-    meter is ``_OVER_BUDGET`` and nothing else (review 8 B1).
+    When the code can start a process, every string it holds or builds, and
+    every argv list, is judged (:func:`_python_commands`, review 8 M1). Code
+    that imports or runs a module named only at run time is yielded as
+    ``_OPAQUE``, so the caller can fail closed. pytest is yielded as
+    ``_PYTEST_IN_CODE``: its operands are every string in the code, so only
+    a path-shaped one targets the run. Code past the parse meter is
+    ``_OVER_BUDGET`` and nothing else (review 8 B1).
     """
     if not _charge(code):
         yield _OVER_BUDGET, [], segment
         return
     if _starts_a_process(code):
-        for span in _process_call_spans(code):
-            for literal in _string_literals(span):
-                if not literal.split(maxsplit=1)[1:]:
-                    continue
-                try:
-                    shlex.split(literal)
-                except ValueError as error:
-                    # Unparsable as shell: prose (an apostrophe, say), not a
-                    # command whose absence should fail closed (review 7 M2).
-                    logger.debug("Literal left unparsed, not shell (%s): %r", error, literal)
-                    continue
-                yield from _nested(literal, segment, depth)
+        yield from _python_commands(code, argv, segment, depth)
     operands = _pytest_in_code(code, argv)
     if operands is not None:
         yield _PYTEST_IN_CODE, operands, segment
@@ -3548,6 +3860,7 @@ class _CodeContent:
     readable: _Readable
     text: str = ""
     path: str = ""
+    executable: bool = False
 
 
 _ABSENT_CODE: Final[_CodeContent] = _CodeContent(_Readable.ABSENT)
@@ -3615,6 +3928,7 @@ class _Event:
     marked: dict[str, bool] = field(default_factory=dict)
     code_texts: dict[str, str] = field(default_factory=dict)
     read_budget: int = _MAX_READ_BYTES
+    modes_may_change: bool = False
     verdicts: dict[_VerdictKey, FullQaMatch | None] = field(default_factory=dict)
     verdicts_pending: set[_ChainKey] = field(default_factory=set)
     addopts_read: set[str] = field(default_factory=set)
@@ -3681,6 +3995,7 @@ def _first_full_run(
             quoted = segment.strip()[:_QUOTED_SEGMENT_LENGTH]
             found = FullQaMatch(_TOO_DEEP_ID, quoted, _TOO_DEEP_REASON)
         else:
+            event.modes_may_change = event.modes_may_change or program in _MODE_CHANGERS
             found = _full_run_of(program, arguments, segment, event, here, source)
         if found is not None:
             return found
@@ -3703,6 +4018,12 @@ def _full_run_of(
         return FullQaMatch(named.pattern_id, segment.strip(), fail_closed=_UNPARSED_REASON)
     if program == _OPAQUE:
         word, rest = arguments[0], arguments[1:]
+        if word == _PYTHON_VALUE:
+            # A string whose FIRST word Python computes (``f"{n} files
+            # scanned"``): its program is a name built at run time, which is
+            # not seen (see the module's docstring). Reading it as every
+            # program the code names denies each such log message.
+            return None
         # A variable the code does not set may hold any program the code
         # names -- in code, never in a comment, which no value comes from;
         # a substitution names its program in its own text.
@@ -3790,15 +4111,27 @@ def _full_run_in_code_file(
         return None
     if content.readable is _Readable.UNSEEN:
         return FullQaMatch(_UNREAD_CODE_ID, segment.strip(), _UNREAD_CODE_REASON)
+    if kind == _EXECUTABLE_CODE and not content.executable and not event.modes_may_change:
+        # Run by its path with no execute bit: execve refuses it, root included,
+        # unless something earlier in the command may have given it one.
+        return None
     code_kind = _code_kind(content.text) if kind == _EXECUTABLE_CODE else kind
     if code_kind is None:
         return None
     if len(content.text) > _parse_cap(code_kind):
         return _scanned_verdict(content, event, segment)
+    # Code whose judgement never reads its arguments is judged the same
+    # whatever it is given, so its argv is no part of its verdict: a script
+    # whose usage text names it with other arguments is not parsed again.
+    reads_argv = (
+        _python_judged_with_argv(content.text)
+        if code_kind == _PYTHON_CODE
+        else _SHELL_READS_ARGV.search(content.text) is not None
+    )
     chain: _ChainKey = (
         content.path,
         code_kind,
-        tuple(argv),
+        tuple(argv) if reads_argv else (),
         str(here) if here is not None else "",
         tuple(event.addopts),
     )
@@ -3945,7 +4278,8 @@ def _read_new(target: str, event: _Event) -> _CodeContent:
         # More than its reported size, and more than is left: /proc, or growing.
         return _UNSEEN_CODE
     # Undecodable bytes are replaced, never an error.
-    return _CodeContent(_Readable.TEXT, data.decode("utf-8", errors="replace"), target)
+    text = data.decode("utf-8", errors="replace")
+    return _CodeContent(_Readable.TEXT, text, target, bool(status.st_mode & _EXECUTE_BITS))
 
 
 def _names_program(text: str, program: str) -> bool:

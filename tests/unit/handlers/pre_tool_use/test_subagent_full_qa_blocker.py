@@ -1678,6 +1678,222 @@ class TestReadingAScriptDoesNotMisreadItsProse:
         assert match is not None
 
 
+#: Built from parts, as ``_SHELL_OUT`` is: the literal keyword in a fixture
+#: would read as a use of it.
+_SHELL_TRUE = "shell=" + "True"
+
+#: Review 8 M1: Python that runs the whole suite through a string held
+#: anywhere -- a variable, a constant, a dict, a function's return -- or one
+#: built by concatenation, an f-string or ``.format``. Each was allowed.
+_PYTHON_FULL_RUNNERS: dict[str, str] = {
+    "var_str": f'import subprocess\ncmd = "pytest tests"\nsubprocess.run(cmd, {_SHELL_TRUE})\n',
+    "var_str_os": f'import os\nc = "pytest tests"\n{_SHELL_OUT}(c)\n',
+    "var_llm": (
+        "import subprocess\n"
+        'cmd = "./scripts/qa/llm_qa.py all"\n'
+        f"subprocess.run(cmd, {_SHELL_TRUE})\n"
+    ),
+    "var_llm_list": (
+        'import subprocess\ncmd = ["./scripts/qa/llm_qa.py", "all"]\nsubprocess.run(cmd)\n'
+    ),
+    "const_llm": (
+        "import subprocess\n"
+        'FULL = "scripts/qa/llm_qa.py all"\n\n\n'
+        "def main():\n    subprocess.run(FULL.split(), check=True)\n\n\nmain()\n"
+    ),
+    "shlex_var": (
+        'import shlex, subprocess\nCMD = "pytest tests"\nsubprocess.run(shlex.split(CMD))\n'
+    ),
+    "alias_assign": (
+        f'import subprocess\nrun = subprocess.run\nrun("pytest tests", {_SHELL_TRUE})\n'
+    ),
+    "alias_getattr": (
+        f'import subprocess\ngetattr(subprocess, "run")("pytest tests", {_SHELL_TRUE})\n'
+    ),
+    "partial": (
+        "import functools, subprocess\n"
+        f'functools.partial(subprocess.run, {_SHELL_TRUE})("pytest tests")\n'
+    ),
+    "comment_paren": (
+        f'import subprocess\nsubprocess.run(  # see (1))\n    "pytest tests", {_SHELL_TRUE})\n'
+    ),
+    "concat": f'import subprocess\nsubprocess.run("pytest " + "tests", {_SHELL_TRUE})\n',
+    "fstr": f'import subprocess\nd = "tests"\nsubprocess.run(f"pytest {{d}}", {_SHELL_TRUE})\n',
+    "format": (
+        f'import subprocess\nsubprocess.run("pytest {{}}".format("tests"), {_SHELL_TRUE})\n'
+    ),
+    "percent": f'import subprocess\nsubprocess.run("pytest %s" % "tests", {_SHELL_TRUE})\n',
+    "asyncio_sh": (
+        'import asyncio\nasyncio.run(asyncio.create_subprocess_shell("pytest tests"))\n'
+    ),
+    "pty_spawn": 'import pty\npty.spawn(["pytest", "tests"])\n',
+    "dict_cmd": (
+        "import subprocess\n"
+        'CMDS = {"full": "pytest tests"}\n'
+        f'subprocess.run(CMDS["full"], {_SHELL_TRUE})\n'
+    ),
+    "func_ret": (
+        "import subprocess\n\n\n"
+        'def cmd():\n    return "pytest tests"\n\n\n'
+        f"subprocess.run(cmd(), {_SHELL_TRUE})\n"
+    ),
+    "run_all_word": 'import subprocess\nsubprocess.run("./scripts/qa/run_all.sh")\n',
+    # A fragment joined after text that opened a quote: its apostrophe closes
+    # that quote, and pytest runs (review 8's `escaped_q`).
+    "escaped_q": f"import subprocess\nsubprocess.run('echo it\\'s; pytest tests', {_SHELL_TRUE})\n",
+    "line_before_prose": (
+        f'import subprocess\nsubprocess.run("pytest tests\\necho it\'s done", {_SHELL_TRUE})\n'
+    ),
+    "list_llm_43kb": (
+        "import subprocess\n"
+        + "# padding line for a large runner\n" * 1_300
+        + 'subprocess.run(["./scripts/qa/llm_qa.py", "all"])\n'
+    ),
+}
+
+#: Python that starts a process and runs nothing full: prose is not a command.
+_PYTHON_NOT_FULL: dict[str, str] = {
+    "ctl_tgt": f'import subprocess\ncmd = "pytest tests/unit/qa"\nsubprocess.run(cmd, {_SHELL_TRUE})\n',
+    "ctl_doc": (
+        '"""Run the linter. Don\'t run pytest here."""\n'
+        "import subprocess\n"
+        'subprocess.run(["ruff", "check"], check=True)\n'
+    ),
+    "ctl_log": (
+        "import logging, subprocess\n"
+        'logging.info("we don\'t run pytest tests here")\n'
+        'subprocess.run(["ruff", "check"], check=True)\n'
+    ),
+    "prose_after_apostrophe": (
+        '"""Don\'t run the suite here: the coordinator runs pytest tests."""\n'
+        "import subprocess\n"
+        'subprocess.run(["ruff", "check"], check=True)\n'
+    ),
+    "targeted_list": (
+        'import subprocess\nsubprocess.run(["pytest", "-q", "tests/unit/qa/test_x.py"])\n'
+    ),
+}
+
+
+class TestEveryPythonStringLiteralCounts:
+    """Review 8 M1: only literals inside a process call's parentheses were judged.
+
+    A command held in a variable, a constant, a dict or a function's return
+    is the ordinary way to write a Python runner, and it was allowed. Every
+    string literal is judged again, as at review 7, and so is every string an
+    expression BUILDS (``+``, ``%``, ``.format``, an f-string, ``" ".join``)
+    and every list that is an argv, with a value Python computes read as a
+    word built at run time. Prose is told from a command the way the shell
+    would: a quote left open runs to the end of the text, so an apostrophe
+    in a docstring makes the rest one word, not a program.
+    """
+
+    @pytest.mark.parametrize("name", sorted(_PYTHON_FULL_RUNNERS))
+    def test_a_runner_is_denied(self, tmp_path: Path, name: str) -> None:
+        (tmp_path / f"{name}.py").write_text(_PYTHON_FULL_RUNNERS[name], encoding="utf-8")
+        match = find_full_qa_invocation(f"python3 {name}.py", _patterns(), cwd=tmp_path)
+        assert match is not None, name
+
+    @pytest.mark.parametrize("name", sorted(_PYTHON_NOT_FULL))
+    def test_prose_and_a_targeted_run_are_allowed(self, tmp_path: Path, name: str) -> None:
+        (tmp_path / f"{name}.py").write_text(_PYTHON_NOT_FULL[name], encoding="utf-8")
+        assert find_full_qa_invocation(f"python3 {name}.py", _patterns(), cwd=tmp_path) is None
+
+    def test_code_python_cannot_parse_still_has_every_literal_judged(self, tmp_path: Path) -> None:
+        text = f'import subprocess\ncmd = "pytest tests"\nsubprocess.run(cmd, {_SHELL_TRUE}\n'
+        (tmp_path / "broken.py").write_text(text, encoding="utf-8")
+        assert find_full_qa_invocation("python3 broken.py", _patterns(), cwd=tmp_path)
+
+    def test_a_name_bound_to_a_program_is_read_inside_an_f_string(self, tmp_path: Path) -> None:
+        text = f'import subprocess\nPYTEST = "pytest"\nsubprocess.run(f"{{PYTEST}} tests", {_SHELL_TRUE})\n'
+        (tmp_path / "named.py").write_text(text, encoding="utf-8")
+        assert find_full_qa_invocation("python3 named.py", _patterns(), cwd=tmp_path)
+
+    def test_a_message_that_starts_with_a_computed_value_is_no_program(
+        self, tmp_path: Path
+    ) -> None:
+        """``f"{n} files scanned"`` names no program: a computed head is not every program."""
+        text = (
+            '"""Runs beside ./scripts/qa/llm_qa.py all."""\n'
+            "import subprocess\n"
+            "n = len([])\n"
+            'print(f"{n} files scanned, {n} tests collected")\n'
+            'subprocess.run(["ruff", "check"], check=True)\n'
+        )
+        (tmp_path / "counts.py").write_text(text, encoding="utf-8")
+        assert find_full_qa_invocation("python3 counts.py", _patterns(), cwd=tmp_path) is None
+
+    def test_a_string_led_by_a_non_executable_file_runs_nothing(self, tmp_path: Path) -> None:
+        """``"notes/README.md: sum is wrong"`` is prose: the shell cannot exec that file."""
+        (tmp_path / "notes").mkdir()
+        (tmp_path / "notes" / "README.md").write_text(
+            "./scripts/qa/llm_qa.py all\n" + "x\n" * 20_000, encoding="utf-8"
+        )
+        text = (
+            "import subprocess\n"
+            'print("notes/README.md: the folder sum does not add up")\n'
+            'subprocess.run(["ruff", "check"], check=True)\n'
+        )
+        (tmp_path / "report.py").write_text(text, encoding="utf-8")
+        assert find_full_qa_invocation("python3 report.py", _patterns(), cwd=tmp_path) is None
+
+    def test_a_long_concatenation_is_rendered_once(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A chain of ``+`` is one string, rendered from its root, never from each link.
+
+        2,000 links: Python's own parser gives up near 3,000, and the code is
+        then judged by its literals, which is the fallback, not this path.
+        """
+        chain = " + ".join('"x "' for _ in range(2_000))
+        (tmp_path / "chain.py").write_text(
+            f"import subprocess\nsubprocess.run({chain}, {_SHELL_TRUE})\n", encoding="utf-8"
+        )
+        ledger = _ParseLedger(monkeypatch)
+        assert find_full_qa_invocation("python3 chain.py", _patterns(), cwd=tmp_path) is None
+        ledger.assert_metered()
+        assert ledger.parses_of(len("x " * 2_000)) == 1
+
+
+class TestAFileRunByItsPathNeedsItsExecuteBit:
+    """A file the shell runs by its path must be executable, or execve refuses it.
+
+    Root included: execve needs at least one execute bit. So such a file runs
+    nothing, however it reads -- unless the same command can give it the bit.
+    """
+
+    @staticmethod
+    def _script(tmp_path: Path, mode: int) -> Path:
+        (tmp_path / "full.sh").write_text("pytest tests\n", encoding="utf-8")
+        (tmp_path / "full.sh").chmod(mode)
+        return tmp_path
+
+    def test_a_file_without_the_bit_runs_nothing(self, tmp_path: Path) -> None:
+        root = self._script(tmp_path, 0o644)
+        assert find_full_qa_invocation("./full.sh", _patterns(), cwd=root) is None
+
+    def test_a_file_with_the_bit_is_read(self, tmp_path: Path) -> None:
+        root = self._script(tmp_path, 0o755)
+        assert find_full_qa_invocation("./full.sh", _patterns(), cwd=root)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "chmod +x full.sh && ./full.sh",
+            "chmod 755 ./full.sh; ./full.sh",
+            f"chmod u+x {'{'}a,full.sh{'}'} && ./full.sh",
+        ],
+    )
+    def test_a_file_the_command_chmods_is_read(self, tmp_path: Path, command: str) -> None:
+        root = self._script(tmp_path, 0o644)
+        assert find_full_qa_invocation(command, _patterns(), cwd=root), command
+
+    def test_a_file_fed_to_a_shell_needs_no_bit(self, tmp_path: Path) -> None:
+        root = self._script(tmp_path, 0o644)
+        for command in ("bash full.sh", "source full.sh", "bash < full.sh"):
+            assert find_full_qa_invocation(command, _patterns(), cwd=root), command
+
+
 class TestAFileTooLargeToParseIsNeverBlanked:
     """Review 8 M2: the scan past the parse cap blanked every Python string.
 
@@ -2105,6 +2321,41 @@ class TestTheMemoKeyCarriesWhatAVerdictDependsOn:
         root = self._files(tmp_path, files)
         assert find_full_qa_invocation("bash f0.sh", _patterns(), cwd=root) is None
 
+    @pytest.mark.parametrize(
+        ("name", "text"),
+        [
+            (
+                "usage.py",
+                '"""Usage: python3 usage.py [--json] [--path P]"""\nimport subprocess\n'
+                + "# padding\n" * 4_000,
+            ),
+            ("usage.sh", "# Usage: bash usage.sh [--json]\necho hi\n" + "# padding\n" * 2_000),
+        ],
+    )
+    def test_code_that_never_reads_its_argv_is_parsed_once_whatever_the_argv(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, text: str
+    ) -> None:
+        """A script whose own usage text names it is not re-parsed for each argv it shows."""
+        (tmp_path / name).write_text(text, encoding="utf-8")
+        interpreter = "python3" if name.endswith(".py") else "bash"
+        command = "; ".join(f"{interpreter} {name} --a{n}" for n in range(20))
+        ledger = _ParseLedger(monkeypatch)
+        assert find_full_qa_invocation(command, _patterns(), cwd=tmp_path) is None
+        ledger.assert_metered()
+        assert ledger.parses_of(len(text)) == 1
+
+    def test_code_that_reads_its_argv_is_judged_per_argv(self, tmp_path: Path) -> None:
+        root = self._files(tmp_path, {"arg.sh": 'pytest "$1"\n', "arg.py": ""})
+        (root / "arg.py").write_text(
+            "import subprocess, sys\nsubprocess.run(['pytest', *sys.argv[1:]])\n",
+            encoding="utf-8",
+        )
+        for interpreter, name in (("bash", "arg.sh"), ("python3", "arg.py")):
+            narrow = f"{interpreter} {name} tests/unit/qa"
+            assert find_full_qa_invocation(narrow, _patterns(), cwd=root) is None, narrow
+            both = f"{narrow}; {interpreter} {name} tests"
+            assert find_full_qa_invocation(both, _patterns(), cwd=root), both
+
     def test_a_file_that_feeds_itself_is_not_denied_for_depth(self, tmp_path: Path) -> None:
         root = self._files(tmp_path, {"a.sh": "bash b.sh\n", "b.sh": "bash a.sh\nls\n"})
         assert find_full_qa_invocation("bash a.sh", _patterns(), cwd=root) is None
@@ -2133,7 +2384,8 @@ class TestTheParseBudgetIsPerEventNotPerMemoKey:
 
     @staticmethod
     def _words(tmp_path: Path) -> Path:
-        (tmp_path / "words32k.sh").write_text("x " * 16_000 + "\n", encoding="utf-8")
+        # It reads its argv ("$1"), so each distinct argv is a distinct verdict.
+        (tmp_path / "words32k.sh").write_text("x " * 16_000 + '\necho "$1"\n', encoding="utf-8")
         return tmp_path
 
     def test_two_hundred_distinct_argv_references_exhaust_the_meter_and_deny(
