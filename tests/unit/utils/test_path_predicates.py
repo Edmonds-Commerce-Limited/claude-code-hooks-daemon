@@ -194,6 +194,8 @@ class TestTheSubstitutionIsRecorded:
         with caplog.at_level(logging.WARNING):
             predicate(tmp_path, unreadable_means=False)
 
+        assert not caplog.records
+
 
 class TestABurstOfUnreadablePathsIsRateLimited:
     """Review 7 n5: one 32 KiB command with 115 over-long operands logged 230
