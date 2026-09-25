@@ -9,6 +9,39 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N73 — Two everyday idioms are still denied by the Plan 00464 script walker
+
+**Found by Plan 00464 review 5 (m3).** PLAN Task 1.12 lists them as not
+fixed. A `cd "${PROJECT_ROOT}"` is not followed by the walker's cd tracking,
+and a bare `~/...` word is not resolved. Both fail closed (they deny, and
+nothing leaks), but each is a false deny of an ordinary command.
+
+**Remedy:** resolve `${VAR}` in a `cd` from the same in-order value tracking
+the `"$X"` command-position fix uses, and expand a leading `~/` to `$HOME`.
+Add both shapes to the B1 corpus.
+
+### N72 — A Python script's computed subprocess argv is dropped, not judged unresolved
+
+**Found by Plan 00464 review 5 (m2).** `python3 s.py`, where `s.py` calls
+`subprocess.run(argv_var)` with a git argv built at run time, is allowed, and
+the staged term reached a real commit (`probe_464r5_allow_chain.out`).
+`Worktree.core.md` documents this as best-effort, but a security caller must
+fail closed, and a documented fail-open is still a fail-open.
+
+**Remedy:** when the Python reader meets a `subprocess`/`os` call whose argv
+it cannot resolve, mark the script unresolved (deny when it could commit)
+rather than dropping the call. Keep the B1 corpus at 0 false denies.
+
+### N71 — The check-to-run race of the commit-gate script walk is undocumented
+
+**Found by Plan 00464 review 5 (m1, carried from review 4 B3).** Another
+process, such as a background job or a second agent, can rewrite a script
+between the PreToolUse judgement and the run. The walk judges the file as it
+was. Neither `Worktree.core.md` nor `HANDLER_REFERENCE.md` says so.
+
+**Remedy:** document the boundary in both, and name the git-level sink
+(the Plan 00464 pre-commit owner referral) as what would close it.
+
 ### N70 — The pidfd stop path falls back and cleans up too eagerly
 
 **Found by N24 review 4 (two NITs).**

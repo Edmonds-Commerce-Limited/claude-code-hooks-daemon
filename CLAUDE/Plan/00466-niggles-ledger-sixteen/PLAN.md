@@ -98,6 +98,9 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N67 | The daemon-down repair carve-out trusts the command text, not the binary it runs                          | N24 review 4       | ⬜ Open                                             |
 | N68 | A moved-away daemon checkout reads as NOT_INSTALLED, which fails open                                     | N24 review 4       | ⬜ Open                                             |
 | N69 | Two fail-closed deny messages misname what happened                                                       | N24 reviews 3–4    | ⬜ Open                                             |
+| N71 | The commit-gate script walk's check-to-run race is undocumented                                           | 464 review 5       | ⬜ Open                                             |
+| N72 | A Python script's computed subprocess argv is dropped, not judged unresolved                              | 464 review 5       | ⬜ Open                                             |
+| N73 | Two everyday idioms are still denied by the Plan 00464 script walker                                      | 464 review 5       | ⬜ Open                                             |
 | N70 | The pidfd stop path falls back and cleans up too eagerly                                                  | N24 review 4       | ⬜ Open                                             |
 
 ## Tasks
