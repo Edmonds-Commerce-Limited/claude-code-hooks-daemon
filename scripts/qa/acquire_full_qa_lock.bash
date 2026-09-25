@@ -27,6 +27,7 @@
 # treatment of the same race), never treated as evidence either way.
 _full_qa_lock_holders() {
     local lock_file="$1" fd_link target pid
+    local -a pids=()
     for fd_link in /proc/[0-9]*/fd/*; do
         if [ ! -e "${fd_link}" ]; then
             continue
@@ -39,8 +40,12 @@ _full_qa_lock_holders() {
         fi
         pid="${fd_link#/proc/}"
         pid="${pid%%/*}"
-        echo "${pid}"
-    done | sort -un
+        pids+=("${pid}")
+    done
+    if [ "${#pids[@]}" -eq 0 ]; then
+        return 0
+    fi
+    printf '%s\n' "${pids[@]}" | sort -un
 }
 
 acquire_full_qa_lock_or_die() {
