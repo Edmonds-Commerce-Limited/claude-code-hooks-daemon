@@ -68,6 +68,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N35 | `daemon_sync_after_merge` judges a `cd <worktree> && git merge` against the session root's ORIG_HEAD      | Plan 00421 agent   | ⬜ Open               |
 | N36 | `destructive_git` denies a `grep` whose search pattern is the text of a force branch delete               | Plan 00463 agent   | ⬜ Open               |
 | N37 | `resolve_venv.sh` caches an override's interpreter for later callers that set no override                 | Plan 00376 agent   | 🔄 In progress        |
+| N38 | The PreToolUse chain takes quadratic time on a command of quoted heredoc openers                          | 463 review 6       | 🔄 In progress        |
 
 ## Tasks
 

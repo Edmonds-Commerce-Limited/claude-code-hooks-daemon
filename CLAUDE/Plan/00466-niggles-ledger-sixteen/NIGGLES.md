@@ -6,6 +6,26 @@ candidate remedies.
 N34 is taken on the `worktree-n466-n24` branch (the chain deadline cannot
 interrupt a running handler) and lands with that branch.
 
+### N38 — The PreToolUse chain takes quadratic time on a command of quoted heredoc openers
+
+**Found by the Plan 00463 sixth review** (its nit n6), measured on `main` and
+on the 463 branch alike (`untracked/scratch/probe_463v6_chain_main_heredoc.py`).
+A main-thread Bash command made of repeated `cat <<'E'` openers takes the
+whole in-process PreToolUse chain 1.9 s at 16 KiB, 6.8 s at 32 KiB and 51.7 s
+at 94 KiB. So the cost roughly quadruples when the size doubles. The verdict
+is allow, but at 94 KiB it runs past the client's 30 s budget. Until N25's
+fail-closed client lands, that timeout is itself an ALLOW for the whole chain.
+After it lands, it is a false deny of a harmless command, and the daemon
+keeps burning a worker thread on it either way.
+
+The handler, or handlers, carrying the quadratic heredoc scan has not yet
+been identified; profiling is the first step.
+
+**Candidate remedy:** profile the chain per handler on the 94 KiB fixture, and
+make each heredoc scan linear. The likely shape is one that re-scans the rest
+of the command for each opener. Pin it with a test: the 94 KiB fixture takes
+the whole chain under 2 s.
+
 ### N37 — `resolve_venv.sh` caches an override's interpreter for later callers that set no override
 
 **Found by the Plan 00376 agent** while closing the upgrade gate's
