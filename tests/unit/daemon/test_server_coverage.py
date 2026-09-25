@@ -40,7 +40,9 @@ def _make_config(
 class FakeController:
     """Controller implementing the new Controller protocol."""
 
-    def process_request(self, request_data: dict[str, Any]) -> dict[str, Any]:
+    def process_request(
+        self, request_data: dict[str, Any], *, arrival_time: float | None = None
+    ) -> dict[str, Any]:
         """Process request and return response."""
         return {"result": {"decision": "allow"}}
 
@@ -403,3 +405,157 @@ class TestWritePidFileNoPidPath:
 
         # Should not raise - just returns early
         await daemon._write_pid_file()
+
+
+class _HealthController(FakeController):
+    """A `FakeController` reporting a caller-chosen `get_health()` result,
+    so each test can shape the straggler state it wants without touching
+    `HooksDaemon` itself (which is `__slots__`-based and cannot take an
+    instance-level method override)."""
+
+    def __init__(self, health: dict[str, Any]) -> None:
+        self._health = health
+
+    def get_health(self) -> dict[str, Any]:
+        return self._health
+
+
+class _RaisingHealthController(FakeController):
+    """A `FakeController` whose `get_health()` always raises."""
+
+    def get_health(self) -> dict[str, Any]:
+        raise RuntimeError("boom")
+
+
+class TestMonitorStragglerHealth:
+    """Plan 00466 N40 M2: the daemon self-restarts once the oldest abandoned
+    handler dispatch has run past its configured age -- the client's own
+    lazy auto-start (`ensure_daemon` in init.sh) then brings up a fresh
+    process on the next hook call, so exiting here is recovery, not an
+    outage.
+
+    `HooksDaemon.shutdown` is patched at the CLASS level (`patch.object`
+    below), not the instance: `HooksDaemon` declares `__slots__`, so an
+    instance-level method override (`daemon.shutdown = AsyncMock()`) would
+    raise `AttributeError` rather than actually replacing it.
+    """
+
+    @staticmethod
+    def _patched(mock_shutdown: AsyncMock) -> Any:
+        """Both class-level patches every test needs: a fast poll interval
+        (``HooksDaemon`` is ``__slots__``-based, so only a CLASS-level patch
+        can override the constant -- an instance-level assignment raises
+        AttributeError) and a mocked ``shutdown`` so no test needs a real
+        socket/PID file torn down."""
+        return patch.multiple(
+            HooksDaemon,
+            _STRAGGLER_CHECK_INTERVAL_SECONDS=0.01,
+            shutdown=mock_shutdown,
+        )
+
+    @pytest.mark.anyio
+    async def test_self_restarts_once_oldest_straggler_exceeds_the_threshold(self) -> None:
+        controller = _HealthController(
+            {
+                "status": "degraded",
+                "stragglers": {
+                    "count": 5,
+                    "oldest_age_seconds": 200.0,
+                    "restart_after_seconds": 120.0,
+                },
+            }
+        )
+        daemon = HooksDaemon(config=_make_config(), controller=controller)
+        mock_shutdown = AsyncMock()
+
+        with self._patched(mock_shutdown):
+            await asyncio.wait_for(daemon._monitor_straggler_health(), timeout=1.0)
+
+        mock_shutdown.assert_called_once()
+
+    @pytest.mark.anyio
+    async def test_does_not_restart_while_healthy(self) -> None:
+        controller = _HealthController(
+            {
+                "status": "healthy",
+                "stragglers": {
+                    "count": 0,
+                    "oldest_age_seconds": 0.0,
+                    "restart_after_seconds": 120.0,
+                },
+            }
+        )
+        daemon = HooksDaemon(config=_make_config(), controller=controller)
+        mock_shutdown = AsyncMock()
+
+        with self._patched(mock_shutdown):
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(daemon._monitor_straggler_health(), timeout=0.05)
+
+        mock_shutdown.assert_not_called()
+
+    @pytest.mark.anyio
+    async def test_none_restart_threshold_disables_self_restart(self) -> None:
+        """``straggler_restart_after_seconds: None`` in config must never
+        restart, however old a straggler gets."""
+        controller = _HealthController(
+            {
+                "status": "degraded",
+                "stragglers": {
+                    "count": 9,
+                    "oldest_age_seconds": 99_999.0,
+                    "restart_after_seconds": None,
+                },
+            }
+        )
+        daemon = HooksDaemon(config=_make_config(), controller=controller)
+        mock_shutdown = AsyncMock()
+
+        with self._patched(mock_shutdown):
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(daemon._monitor_straggler_health(), timeout=0.05)
+
+        mock_shutdown.assert_not_called()
+
+    @pytest.mark.anyio
+    async def test_missing_stragglers_key_is_tolerated(self) -> None:
+        """A controller not reporting `stragglers` at all (e.g. a future
+        controller shape) must not crash the watchdog loop -- it simply has
+        nothing to act on this cycle."""
+        controller = _HealthController({"status": "healthy"})
+        daemon = HooksDaemon(config=_make_config(), controller=controller)
+        mock_shutdown = AsyncMock()
+
+        with self._patched(mock_shutdown):
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(daemon._monitor_straggler_health(), timeout=0.05)
+
+        mock_shutdown.assert_not_called()
+
+    @pytest.mark.anyio
+    async def test_get_health_raising_is_tolerated_not_fatal(self) -> None:
+        """A crash inside get_health() must not kill the watchdog loop
+        outright -- it is logged and the loop keeps ticking."""
+        daemon = HooksDaemon(config=_make_config(), controller=_RaisingHealthController())
+        mock_shutdown = AsyncMock()
+
+        with self._patched(mock_shutdown):
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(daemon._monitor_straggler_health(), timeout=0.05)
+
+        mock_shutdown.assert_not_called()
+
+    @pytest.mark.anyio
+    async def test_legacy_controller_is_never_polled(self) -> None:
+        """The legacy `dispatch()`-only protocol has no `get_health()` at
+        all -- the watchdog must gate on `_is_new_controller`, exactly like
+        every other `self.controller.get_health()` call site in this
+        module, rather than calling a method that does not exist."""
+        daemon = HooksDaemon(config=_make_config(), controller=FakeLegacyController())
+        mock_shutdown = AsyncMock()
+
+        with self._patched(mock_shutdown):
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(daemon._monitor_straggler_health(), timeout=0.05)
+
+        mock_shutdown.assert_not_called()

@@ -2,6 +2,18 @@
 
 Tests HandlerChain execution, priority ordering, terminal/non-terminal behavior,
 error handling, and ChainExecutionResult.
+
+Plan 00466 N40 m1: when ``deadline_seconds`` is set, ``HandlerChain.execute``
+dispatches the WHOLE handler loop as ONE call on the shared pool, not one
+dispatch per handler (measured at ~12ms overhead per event from creating up
+to 69 threads, even when every handler is fast). A handler that FINISHES
+(however late) is still attributed by name in the deny/skip reason -- the
+per-handler deadline check is a cheap comparison, not a thread, and still
+runs inline. Only when the WHOLE dispatched call itself times out or the
+pool is saturated (some handler never returns at all, or the pool has no
+free capacity even for the whole chain) does the reason name "chain"
+instead of a specific handler: nothing is left running on the CALLING
+thread at that point that could still say which one it was.
 """
 
 import time
@@ -895,16 +907,21 @@ class TestHandlerChain:
         assert result.result.reason is not None
         assert "SYSTEM ERROR" in result.result.reason
 
-    def test_deadline_exceeded_denies_a_safety_blocking_handler_not_yet_run(self) -> None:
-        """Plan 00466 N25: a chain deadline denies a SAFETY+BLOCKING handler
-        it ran out of time to judge, rather than letting a slow handler
-        exhaust the CLIENT's own timeout (which fails the whole chain open).
+    def test_deadline_exceeded_denies_when_a_slow_handler_exhausts_the_whole_chain(self) -> None:
+        """Plan 00466 N25: a chain deadline denies rather than letting a slow
+        handler exhaust the CLIENT's own timeout (which fails the whole
+        chain open).
 
-        Plan 00466 N34: ``slow`` itself is now ALSO bounded (it runs on the
-        shared dispatch pool, not the calling thread), so it is no longer
-        guaranteed to have finished by the time ``execute()`` returns --
-        only that it eventually does, in the background. Polling for that
-        rather than asserting it immediately keeps this deterministic.
+        Plan 00466 N40 m1: the WHOLE chain is now ONE dispatched call, not
+        one per handler -- so a handler slow enough to blow the budget makes
+        the OUTER dispatch itself time out, and the response can only say
+        "chain", not name `slow` or `guard` specifically: nothing is left
+        running on the CALLING thread that could still say which handler it
+        was. The straggler keeps evaluating in the background and reaches
+        the SAME correct "safety-guard: not judged in time" verdict
+        internally, but that verdict is discarded -- the caller already
+        gave up. Polling for `slow` to finish rather than asserting it
+        immediately keeps this deterministic.
         """
         chain = HandlerChain()
         slow = MockHandler("slow", priority=10, sleep_in_handle=0.05)
@@ -929,12 +946,59 @@ class TestHandlerChain:
         assert guard.handle_called == 0
         assert result.result.decision == Decision.DENY
         assert result.result.reason is not None
-        assert "safety-guard" in result.result.reason
+        assert "chain" in result.result.reason
         assert "not judged in time" in result.result.reason.lower()
+        assert result.terminated_by is None
+
+    def test_deadline_measured_from_arrival_time_not_from_execute_call(self) -> None:
+        """Plan 00466 N40 M1: the deadline clock starts at request ARRIVAL,
+        not at ``execute()``'s own call -- executor queueing between the two
+        must count against the budget too, or a request judged late by the
+        client's own 30s timeout still looks on-time to the chain.
+
+        A budget already exhausted before ``execute()`` was even called (a
+        stale ``arrival_time``) denies the first SAFETY+BLOCKING handler
+        immediately, though nothing here is actually slow.
+        """
+        chain = HandlerChain()
+        guard = MockHandler(
+            "safety-guard",
+            priority=10,
+            terminal=True,
+            tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING],
+        )
+        chain.add(guard)
+
+        stale_arrival = time.perf_counter() - 10.0
+        result = chain.execute(
+            {"tool_name": "Bash"},
+            deadline_seconds=0.01,
+            arrival_time=stale_arrival,
+        )
+
+        assert guard.matches_called == 0
+        assert guard.handle_called == 0
+        assert result.result.decision == Decision.DENY
         assert result.terminated_by == "safety-guard"
 
+    def test_deadline_defaults_to_execute_call_time_when_arrival_time_omitted(self) -> None:
+        """Backward compatible: every pre-existing caller that never passes
+        ``arrival_time`` keeps measuring from ``execute()``'s own call."""
+        chain = HandlerChain()
+        h1 = MockHandler("h1", priority=10, terminal=True)
+        chain.add(h1)
+
+        result = chain.execute({"tool_name": "Bash"}, deadline_seconds=5.0)
+
+        assert h1.handle_called == 1
+        assert result.result.decision == Decision.ALLOW
+
     def test_deadline_exceeded_skips_an_advisory_handler_with_a_note(self) -> None:
-        """A non-SAFETY+BLOCKING handler is skipped, not denied, on deadline."""
+        """A chain with no SAFETY+BLOCKING handler is skipped, not denied,
+        on deadline. Plan 00466 N40 m1: `slow` alone exceeds the whole
+        chain's dispatch budget, so the note names "chain", not `advisory`
+        specifically -- see the module-level note on the redesign.
+        """
         chain = HandlerChain()
         slow = MockHandler("slow", priority=10, sleep_in_handle=0.05)
         advisory = MockHandler("advisory", priority=20, tags=[HandlerTag.ADVISORY])
@@ -945,7 +1009,9 @@ class TestHandlerChain:
 
         assert advisory.matches_called == 0
         assert result.result.decision == Decision.ALLOW
-        assert any("advisory" in ctx and "deadline" in ctx.lower() for ctx in result.result.context)
+        assert any(
+            "chain" in ctx.lower() and "budget" in ctx.lower() for ctx in result.result.context
+        )
 
     def test_deadline_none_never_denies_on_its_own(self) -> None:
         """The default (no deadline passed) is unenforced -- backward compatible."""
@@ -986,6 +1052,11 @@ class TestHandlerChain:
         execution can catch it. Mirrors the real finding: secret_file_guard
         measured at 48.958s on 4 MB input, past the 20s chain deadline,
         entirely inside its own call.
+
+        Plan 00466 N40 m1: the WHOLE chain (here, just this one handler) is
+        the dispatched unit -- the deny names "chain", not "safety-guard",
+        since nothing is left on the calling thread to say which handler it
+        was. See the module-level note on the redesign.
         """
         chain = HandlerChain()
         guard = MockHandler(
@@ -1005,15 +1076,17 @@ class TestHandlerChain:
         assert elapsed < 2.0
         assert result.result.decision == Decision.DENY
         assert result.result.reason is not None
-        assert "safety-guard" in result.result.reason
+        assert "chain" in result.result.reason
         assert "not judged in time" in result.result.reason.lower()
-        assert result.terminated_by == "safety-guard"
+        assert result.terminated_by is None
 
     def test_a_slow_advisory_only_handler_that_oversleeps_itself_allows_with_an_advisory(
         self,
     ) -> None:
         """The non-SAFETY+BLOCKING mirror of the test above: bounded the same
-        way, but skipped with a context note rather than denied.
+        way, but skipped with a context note rather than denied. Plan 00466
+        N40 m1: the note names "chain", not `slow-advisory` specifically --
+        see the module-level note on the redesign.
         """
         chain = HandlerChain()
         advisory = MockHandler(
@@ -1031,7 +1104,7 @@ class TestHandlerChain:
         assert elapsed < 2.0
         assert result.result.decision == Decision.ALLOW
         assert any(
-            "slow-advisory" in ctx and "budget" in ctx.lower() for ctx in result.result.context
+            "chain" in ctx.lower() and "budget" in ctx.lower() for ctx in result.result.context
         )
 
     def test_deadline_none_leaves_an_oversleeping_safety_handler_unbounded(self) -> None:
@@ -1059,7 +1132,9 @@ class TestHandlerChain:
         """Plan 00466 N34 remedy 2's OTHER fail-closed case: a pool with no
         free capacity refuses the submission outright rather than queuing
         it -- an unbounded queue is exactly the "pile up threads" failure
-        this exists to prevent.
+        this exists to prevent. Plan 00466 N40 m1: the WHOLE chain is now
+        the thing submitted to the pool, so saturation denies "chain", not
+        `safety-guard` specifically -- see the module-level note.
         """
         import threading
 
@@ -1103,7 +1178,7 @@ class TestHandlerChain:
         assert elapsed < 1.0
         assert result.result.decision == Decision.DENY
         assert result.result.reason is not None
-        assert "safety-guard" in result.result.reason
+        assert "chain" in result.result.reason
         assert "not judged in time" in result.result.reason.lower()
 
     def test_oversized_bash_command_denies_a_safety_blocking_handler(self) -> None:

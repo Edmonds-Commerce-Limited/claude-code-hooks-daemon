@@ -89,27 +89,6 @@ def _safety_payload_size(hook_input: dict[str, Any]) -> int:
     return len(serialised.encode("utf-8", "surrogatepass"))
 
 
-def _dispatch_matches_and_handle(
-    handler: "Handler",
-    hook_input: dict[str, Any],
-    on_matched: Callable[[], None],
-) -> "HookResult | None":
-    """One handler's own decision, run on whichever thread calls this.
-
-    The single callable :meth:`BoundedDispatcher.run` dispatches (Plan 00466
-    N34): ``matches()`` and ``handle()`` combined, so the caller's ONE
-    ``Future.result(timeout=...)`` wait bounds both -- a handler slow inside
-    either call is bounded the same way. ``on_matched`` fires the instant
-    ``matches()`` returns True, before ``handle()`` runs, mirroring the
-    direct synchronous call's own ordering: a handler that matched is
-    recorded even when ``handle()`` itself goes on to raise.
-    """
-    if not handler.matches(hook_input):
-        return None
-    on_matched()
-    return handler.handle(hook_input)
-
-
 # Result fields that carry INFORMATION rather than a decision, and so travel
 # like ``context``: whichever result wins the decision, the first handler to
 # set one of these owns it. Without this merge a contentless early ALLOW —
@@ -433,6 +412,7 @@ class HandlerChain:
         deadline_seconds: float | None = None,
         max_safety_input_bytes: int | None = None,
         dispatcher: "BoundedDispatcher[object] | None" = None,
+        arrival_time: float | None = None,
     ) -> ChainExecutionResult:
         """Execute the handler chain for an event.
 
@@ -472,30 +452,215 @@ class HandlerChain:
             deadline_seconds: ``daemon.chain.deadline_seconds`` (Plan 00466
                 N25). None (the default for every existing caller that does
                 not pass it) leaves the chain unbounded, matching the
-                pre-existing behaviour. When set, EVERY handler's own
-                ``matches()``/``handle()`` call is also individually bounded
-                (Plan 00466 N34) -- see :mod:`core.bounded_dispatch` -- not
-                only the gap between handlers.
+                pre-existing behaviour. When set, the WHOLE handler loop
+                (Plan 00466 N40 m1) runs as ONE dispatched call on the
+                shared pool, not one dispatch per handler -- measured at
+                ~12ms overhead per event from creating up to 69 threads,
+                one per PreToolUse handler, even when every one of them is
+                fast. A handler that FINISHES (however late) is still
+                attributed by name, exactly as before: the per-handler
+                deadline check below is a cheap comparison, not a thread,
+                and runs regardless. Only a handler that never returns at
+                all is now bounded at the WHOLE-CHAIN level instead of
+                individually -- see :meth:`_execute_handlers` and the
+                "chain: not judged in time" path below.
             max_safety_input_bytes: ``daemon.chain.max_safety_input_bytes``
                 (Plan 00466 N34 remedy 3). A SAFETY handler whose bulk-text
                 input exceeds this is denied (SAFETY+BLOCKING) or skipped
                 (otherwise) BEFORE dispatch is even attempted. None (the
                 default) disables this check; ``deadline_seconds`` still
                 applies regardless.
-            dispatcher: The :class:`BoundedDispatcher` to run handlers on
-                when ``deadline_seconds`` is set. None (the default for
-                every real caller) uses the shared, process-lifetime pool.
-                Tests that need to control or observe pool capacity directly
-                (e.g. saturation) inject their own instance instead.
+            dispatcher: The :class:`BoundedDispatcher` to run the WHOLE
+                handler loop on when ``deadline_seconds`` is set. None (the
+                default for every real caller) uses the shared,
+                process-lifetime pool. Tests that need to control or
+                observe pool capacity directly (e.g. saturation) inject
+                their own instance instead.
+            arrival_time: ``time.perf_counter()`` reading taken when the
+                REQUEST arrived (Plan 00466 N40 M1) -- e.g. right after the
+                socket read, before executor queueing. ``deadline_seconds``
+                is measured from here, not from this call, so time spent
+                queued for a worker thread counts against the budget too.
+                None (the default, and every caller that predates M1) falls
+                back to this call's own start -- unchanged behaviour.
 
         Returns:
             ChainExecutionResult with final result and metadata
         """
-        # Resolved once per call, not per handler: the shared, process-lifetime
-        # pool by default (Plan 00466 N34), or an injected one for tests that
-        # need to control/observe its capacity directly (e.g. saturation).
+        # Resolved once per call (Plan 00466 N40 m1: once per EVENT, not once
+        # per handler): the shared, process-lifetime pool by default (Plan
+        # 00466 N34), or an injected one for tests that need to control/
+        # observe its capacity directly (e.g. saturation).
         active_dispatcher = dispatcher if dispatcher is not None else get_default_dispatcher()
         start_time = time.perf_counter()
+        # Deadline comparisons use THIS clock (Plan 00466 N40 M1); execution
+        # timing (execution_time_ms below) keeps measuring from `start_time`
+        # -- this call's own duration, not time spent queued before it.
+        deadline_clock_start = arrival_time if arrival_time is not None else start_time
+
+        # Computed once per call, not per handler (Plan 00466 N34 remedy 3).
+        # `_safety_payload_size` is documented never to raise, but this
+        # except is a SECOND layer (Plan 00466 n24 security review, B1):
+        # anything here this cannot foresee must still fail CLOSED for a
+        # chain holding a SAFETY+BLOCKING handler, rather than escape
+        # `execute()` entirely and reach the controller's fail-OPEN
+        # catch-all (`HookResult.error()`) -- exactly the regression this
+        # branch introduced by adding a size measurement OUTSIDE every
+        # handler's own try/except in the first place. With no SAFETY+
+        # BLOCKING handler registered, there is nothing this cap could have
+        # denied anyway, so it degrades to "cap not enforced" instead of
+        # failing the whole chain over an unrelated measurement bug.
+        payload_size = 0
+        size_measurement_error: Exception | None = None
+        if max_safety_input_bytes is not None:
+            try:
+                payload_size = _safety_payload_size(hook_input)
+            except Exception as exc:
+                size_measurement_error = exc
+                logger.exception(
+                    "SAFETY input-size measurement crashed; treating as a "
+                    "handler-crash-equivalent for any SAFETY+BLOCKING handler"
+                )
+
+        if size_measurement_error is not None and any(
+            HandlerTag.SAFETY in h.tags and HandlerTag.BLOCKING in h.tags for h in self.handlers
+        ):
+            crash_result = HookResult.deny(
+                reason=(
+                    "SYSTEM ERROR: could not measure the SAFETY input-size cap, "
+                    "denied for safety "
+                    f"({type(size_measurement_error).__name__}: {size_measurement_error})"
+                ),
+            )
+            crash_result.context = [
+                f"Size measurement exception: {type(size_measurement_error).__name__}: "
+                f"{size_measurement_error}"
+            ]
+            return ChainExecutionResult(
+                result=crash_result,
+                execution_time_ms=(time.perf_counter() - start_time) * 1000,
+            )
+
+        if deadline_seconds is None:
+            # No deadline configured: the original, fully synchronous call --
+            # unchanged, and zero bounded-dispatch overhead on what is still
+            # every unit test's and every un-configured install's own path.
+            return self._execute_handlers(
+                hook_input,
+                strict_mode,
+                collect_all=collect_all,
+                deadline_seconds=None,
+                deadline_clock_start=deadline_clock_start,
+                max_safety_input_bytes=max_safety_input_bytes,
+                payload_size=payload_size,
+                start_time=start_time,
+            )
+
+        # Plan 00466 N40 m1: the WHOLE handler loop is ONE dispatched call,
+        # not one per handler. The per-handler deadline check inside
+        # `_execute_handlers` still runs (it is a cheap comparison, not a
+        # thread) and still attributes "not judged in time" to a SPECIFIC
+        # handler whenever the loop is still making progress -- every
+        # handler that FINISHES, however late, is caught there exactly as
+        # before. Only a handler that never returns AT ALL exhausts this
+        # OUTER bound instead: at that point nothing is left running that
+        # could still say which handler it was, so the response below can
+        # only name "chain", not a handler.
+        remaining = max(0.0, deadline_seconds - (time.perf_counter() - deadline_clock_start))
+        if remaining <= 0.0:
+            # Already expired before dispatch was even considered (e.g. a
+            # stale `arrival_time`) -- every handler's own pre-loop deadline
+            # check inside `_execute_handlers` will see the SAME already-
+            # blown deadline from its very first iteration onward, so no
+            # handler's matches()/handle() ever actually runs: the whole
+            # loop is cheap time comparisons only. Calling it directly
+            # (skipping the dispatcher) is both free of thread-creation
+            # overhead AND avoids a real race a `timeout=0.0` dispatch would
+            # have: whether the freshly-started thread gets scheduled at all
+            # before `Future.result(timeout=0.0)` gives up on it.
+            return self._execute_handlers(
+                hook_input,
+                strict_mode,
+                collect_all=collect_all,
+                deadline_seconds=deadline_seconds,
+                deadline_clock_start=deadline_clock_start,
+                max_safety_input_bytes=max_safety_input_bytes,
+                payload_size=payload_size,
+                start_time=start_time,
+            )
+        outcome = active_dispatcher.run(
+            lambda: self._execute_handlers(
+                hook_input,
+                strict_mode,
+                collect_all=collect_all,
+                deadline_seconds=deadline_seconds,
+                deadline_clock_start=deadline_clock_start,
+                max_safety_input_bytes=max_safety_input_bytes,
+                payload_size=payload_size,
+                start_time=start_time,
+            ),
+            timeout=remaining,
+            label="chain",
+        )
+        if isinstance(outcome, ChainExecutionResult):
+            return outcome
+
+        # DispatchTimeout or DispatchSaturated: the whole chain did not come
+        # back in time. Fail closed (Plan 00466 N24/N25's own principle)
+        # whenever this chain holds ANY SAFETY+BLOCKING handler -- there is
+        # no way to know from out here whether it was the one still running.
+        if isinstance(outcome, DispatchTimeout):
+            detail = f"exceeded its {remaining:.2f}s dispatch budget"
+        else:
+            assert isinstance(outcome, DispatchSaturated)
+            detail = "dispatch pool saturated"
+        execution_time_ms = (time.perf_counter() - start_time) * 1000
+        if any(HandlerTag.SAFETY in h.tags and HandlerTag.BLOCKING in h.tags for h in self.handlers):
+            denied_result = HookResult.deny(reason=f"chain: not judged in time ({detail})")
+            denied_result.context = [f"Chain not judged in time: {detail}"]
+            return ChainExecutionResult(result=denied_result, execution_time_ms=execution_time_ms)
+        allowed_result = HookResult.allow()
+        allowed_result.context = [f"Chain skipped: {detail}"]
+        return ChainExecutionResult(result=allowed_result, execution_time_ms=execution_time_ms)
+
+    def _execute_handlers(
+        self,
+        hook_input: dict[str, Any],
+        strict_mode: bool,
+        *,
+        collect_all: bool,
+        deadline_seconds: float | None,
+        deadline_clock_start: float,
+        max_safety_input_bytes: int | None,
+        payload_size: int,
+        start_time: float,
+    ) -> ChainExecutionResult:
+        """Runs the WHOLE handler loop on whichever thread calls this (Plan
+        00466 N40 m1). ``execute()`` above either calls this directly
+        (``deadline_seconds is None``) or dispatches it as ONE bounded call
+        on the shared pool -- never one dispatch per handler, which is what
+        this method replaces from the pre-m1 design.
+
+        Args:
+            hook_input: Hook input dictionary to process.
+            strict_mode: See :meth:`execute`.
+            collect_all: See :meth:`execute`.
+            deadline_seconds: See :meth:`execute`. Still enforced HERE,
+                between handlers -- this is a cheap ``time.perf_counter()``
+                comparison, not a dispatch, so it costs nothing extra to
+                keep doing it inline even though the OUTER per-handler
+                dispatch is gone.
+            deadline_clock_start: See ``execute()``'s ``arrival_time``.
+            max_safety_input_bytes: See :meth:`execute`.
+            payload_size: Pre-measured by ``execute()`` (once per call, not
+                once per handler).
+            start_time: ``execute()``'s own ``time.perf_counter()`` reading,
+                threaded through so ``execution_time_ms`` keeps measuring
+                this call's own duration, not time spent queued before it.
+
+        Returns:
+            ChainExecutionResult with final result and metadata.
+        """
         accumulated_context: list[str] = []
         handlers_executed: list[str] = []
         handlers_matched: list[str] = []
@@ -641,72 +806,10 @@ class HandlerChain:
             ends_on_allow = self.allow_is_final and not restrictive
             return bool(handler.terminal and (ends_on_restrictive or ends_on_allow))
 
-        def _make_dispatch_call(handler: "Handler") -> Callable[[], "HookResult | None"]:
-            """A zero-argument closure over THIS ``handler`` for
-            :meth:`BoundedDispatcher.run` (Plan 00466 N34).
-
-            A named factory taking ``handler`` as a real parameter, not a
-            ``lambda h=handler: ...`` default-argument trick, is deliberate:
-            the latter both defeats type inference on the generic dispatcher
-            call and is easy to get subtly wrong for the classic
-            loop-variable-closure reason (a default argument binds it, but a
-            typo dropping the default silently reintroduces the bug).
-            """
-
-            def _call() -> "HookResult | None":
-                return _dispatch_matches_and_handle(
-                    handler, hook_input, lambda: handlers_matched.append(handler.name)
-                )
-
-            return _call
-
-        # Computed once per call, not per handler (Plan 00466 N34 remedy 3).
-        # `_safety_payload_size` is documented never to raise, but this
-        # except is a SECOND layer (Plan 00466 n24 security review, B1):
-        # anything here this cannot foresee must still fail CLOSED for a
-        # chain holding a SAFETY+BLOCKING handler, rather than escape
-        # `execute()` entirely and reach the controller's fail-OPEN
-        # catch-all (`HookResult.error()`) -- exactly the regression this
-        # branch introduced by adding a size measurement OUTSIDE every
-        # handler's own try/except in the first place. With no SAFETY+
-        # BLOCKING handler registered, there is nothing this cap could have
-        # denied anyway, so it degrades to "cap not enforced" instead of
-        # failing the whole chain over an unrelated measurement bug.
-        payload_size = 0
-        size_measurement_error: Exception | None = None
-        if max_safety_input_bytes is not None:
-            try:
-                payload_size = _safety_payload_size(hook_input)
-            except Exception as exc:
-                size_measurement_error = exc
-                logger.exception(
-                    "SAFETY input-size measurement crashed; treating as a "
-                    "handler-crash-equivalent for any SAFETY+BLOCKING handler"
-                )
-
-        if size_measurement_error is not None and any(
-            HandlerTag.SAFETY in h.tags and HandlerTag.BLOCKING in h.tags for h in self.handlers
-        ):
-            crash_result = HookResult.deny(
-                reason=(
-                    "SYSTEM ERROR: could not measure the SAFETY input-size cap, "
-                    "denied for safety "
-                    f"({type(size_measurement_error).__name__}: {size_measurement_error})"
-                ),
-            )
-            crash_result.context = [
-                f"Size measurement exception: {type(size_measurement_error).__name__}: "
-                f"{size_measurement_error}"
-            ]
-            return ChainExecutionResult(
-                result=crash_result,
-                execution_time_ms=(time.perf_counter() - start_time) * 1000,
-            )
-
         for handler in self.handlers:
             if (
                 deadline_seconds is not None
-                and (time.perf_counter() - start_time) >= deadline_seconds
+                and (time.perf_counter() - deadline_clock_start) >= deadline_seconds
             ):
                 # Out of budget before this handler even ran (Plan 00466 N25).
                 if _apply_deadline_exceeded(
@@ -748,57 +851,23 @@ class HandlerChain:
                     )
                     continue
 
-                if deadline_seconds is None:
-                    # No deadline configured: the original, fully synchronous
-                    # call -- unchanged, and zero bounded-dispatch overhead on
-                    # what is still every unit test's and every un-configured
-                    # install's own path.
-                    if handler.matches(hook_input):
-                        handlers_matched.append(handler.name)
-                        logger.debug("Handler %s matched event", handler.name)
-                        result = handler.handle(hook_input)
-                        if _record_matched_result(handler, result):
-                            terminated_by = handler.name
-                            break
-                    continue
-
-                # Plan 00466 N34: a chain deadline that only ever checks
-                # BETWEEN handlers cannot catch one slow WITHIN its own
-                # matches()/handle() -- exactly secret_file_guard's shape on
-                # multi-MB input (48.958s measured on 4 MB, past both this
-                # deadline and the client's own 30s socket timeout). Below,
-                # the handler's own call is bounded too: it runs on the
-                # shared pool and this thread waits on it for at most the
-                # REMAINING budget, not the handler's own sleep/scan time.
-                remaining = max(0.0, deadline_seconds - (time.perf_counter() - start_time))
-                outcome = active_dispatcher.run(
-                    _make_dispatch_call(handler),
-                    timeout=remaining,
-                    label=handler.name,
-                )
-                if isinstance(outcome, DispatchTimeout):
-                    if _apply_deadline_exceeded(
-                        handler, f"exceeded its {remaining:.2f}s dispatch budget"
-                    ):
+                # A handler's own matches()/handle() call runs DIRECTLY here,
+                # on whichever thread is executing this loop (Plan 00466 N40
+                # m1) -- never its own dispatched thread. When a deadline is
+                # configured, `execute()` above already bounds the WHOLE
+                # loop as one dispatched call; a handler slow enough within
+                # its own call (secret_file_guard measured at 48.958s on 4
+                # MB, Plan 00466 N34's original finding) still exhausts that
+                # OUTER bound, just without this loop being able to name
+                # which handler it was -- see `execute()`'s
+                # "chain: not judged in time" path.
+                if handler.matches(hook_input):
+                    handlers_matched.append(handler.name)
+                    logger.debug("Handler %s matched event", handler.name)
+                    result = handler.handle(hook_input)
+                    if _record_matched_result(handler, result):
+                        terminated_by = handler.name
                         break
-                    continue
-                if isinstance(outcome, DispatchSaturated):
-                    if _apply_deadline_exceeded(handler, "dispatch pool saturated"):
-                        break
-                    continue
-                if outcome is None:
-                    # matches() returned False -- nothing to record, exactly
-                    # like the direct-call path above.
-                    continue
-                # The only remaining possibility: `_make_dispatch_call`'s own
-                # closure returns `HookResult | None`, and None was just
-                # ruled out above -- this narrows `object` (BoundedDispatcher
-                # is generic over its DECLARED type, not this call's actual
-                # return type) back to what it always really was.
-                assert isinstance(outcome, HookResult)
-                if _record_matched_result(handler, outcome):
-                    terminated_by = handler.name
-                    break
 
             except Exception as e:
                 logger.exception("Handler %s raised exception", handler.name)

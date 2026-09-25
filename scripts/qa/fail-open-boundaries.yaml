@@ -61,9 +61,9 @@ boundaries:
       harmless because there is nothing that cap could have denied anyway.
 
   - surface: src/claude_code_hooks_daemon/core/chain.py
-    scope: execute
+    scope: _execute_handlers
     construct: "except Exception"
-    ordinal: 1
+    ordinal: 0
     verdict: fail-open
     induced_by: "any handler raising while judging the event"
     caller_controlled: true
@@ -77,18 +77,24 @@ boundaries:
       found inert in every real install). Only a non-SAFETY+BLOCKING
       handler still falls through this fail-open branch. Blast radius is one
       handler, not the chain -- F-BYPS verified this one as correctly built.
+      Plan 00466 N40 m1: this construct moved from `execute` into
+      `_execute_handlers` when the whole handler loop became a single
+      dispatched call rather than one dispatch per handler; the boundary
+      itself is unchanged.
 
   - surface: src/claude_code_hooks_daemon/core/chain.py
-    scope: execute
+    scope: _execute_handlers
     construct: "except Exception"
-    ordinal: 2
+    ordinal: 1
     verdict: fail-open
     induced_by: "a handler raising in commit_side_effects, after the decision"
     caller_controlled: true
     trace: >-
       logger.exception plus an entry appended to final_result.context. The
       decision is already final here, so what fails open is the post-decision
-      commit (a rate limiter's rollback), not the verdict.
+      commit (a rate limiter's rollback), not the verdict. Plan 00466 N40 m1:
+      this construct moved from `execute` into `_execute_handlers` alongside
+      the row above; the boundary itself is unchanged.
 
   # ------------------------------------------------------ front_controller.py
   - surface: src/claude_code_hooks_daemon/core/front_controller.py

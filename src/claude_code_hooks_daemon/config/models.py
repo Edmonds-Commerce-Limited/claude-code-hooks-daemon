@@ -1639,6 +1639,15 @@ class ChainConfig(BaseModel):
             +BLOCKING handler over the limit is denied, naming the size and
             the limit; any other SAFETY handler is skipped with a context
             note.
+        straggler_unhealthy_count: Plan 00466 N40 M2. ``get_health()``
+            reports "degraded" once this many BoundedDispatcher stragglers
+            (handlers still running past their own dispatch timeout) are
+            alive at once. None disables straggler-count-driven health
+            reporting.
+        straggler_restart_after_seconds: Plan 00466 N40 M2. The daemon
+            self-restarts once its OLDEST straggler has run this long,
+            rather than staying wedged behind an unbounded pileup. None
+            disables self-restart.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -1671,6 +1680,27 @@ class ChainConfig(BaseModel):
             "denied before dispatch is even attempted, rather than paying "
             "dispatch overhead only to be cut off by the deadline. None "
             "disables this check (deadline_seconds still applies)."
+        ),
+    )
+    straggler_unhealthy_count: Annotated[int, Field(ge=1)] | None = Field(
+        default=Timeout.STRAGGLER_UNHEALTHY_COUNT,
+        description=(
+            "Plan 00466 N40 M2: number of concurrently-abandoned handler "
+            "dispatches (BoundedDispatcher stragglers -- a handler still "
+            "running past its own deadline_seconds timeout) at or above "
+            "which get_health() reports 'degraded'. None disables straggler "
+            "health reporting entirely (status is never flipped by it)."
+        ),
+    )
+    straggler_restart_after_seconds: Annotated[float, Field(gt=0)] | None = Field(
+        default=Timeout.STRAGGLER_RESTART_AFTER_SECONDS,
+        description=(
+            "Plan 00466 N40 M2: once the OLDEST straggler has been running "
+            "this many seconds, the daemon self-restarts (exits; the "
+            "client's own lazy auto-start brings up a fresh process on the "
+            "next hook call) rather than staying wedged indefinitely with a "
+            "16-straggler pileup denying every PreToolUse call and no way "
+            "out short of a manual restart. None disables self-restart."
         ),
     )
 

@@ -62,6 +62,16 @@ class Timeout:
     # payload far outside normal use BEFORE dispatch overhead is spent on it.
     SAFETY_INPUT_SIZE_CAP_BYTES = 2 * 1024 * 1024  # 2 MiB
 
+    # Straggler health thresholds (Plan 00466 N40 M2): an abandoned handler
+    # dispatch ("straggler") is one whose own BoundedDispatcher.run() call
+    # already gave up waiting on it -- it is still running in the
+    # background, consuming a thread (and, if CPU-bound, real CPU) with no
+    # verdict ever coming. A handful is unremarkable; enough of them at once,
+    # or one stuck long enough, means the daemon can no longer promise a
+    # timely verdict at all.
+    STRAGGLER_UNHEALTHY_COUNT = 4  # concurrent stragglers before DEGRADED health
+    STRAGGLER_RESTART_AFTER_SECONDS = 120  # oldest straggler's age before self-restart
+
     # Network/IO timeouts (seconds)
     SOCKET_CONNECT = 5  # 5 seconds (Unix socket connection)
     FILE_LOCK = 10  # 10 seconds (file lock acquisition)

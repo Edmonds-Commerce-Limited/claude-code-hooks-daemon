@@ -1,5 +1,13 @@
 """Bounded, externally-enforced per-call dispatch (Plan 00466 N34).
 
+Plan 00466 N40 M2 adds straggler accounting: a timed-out call's semaphore
+permit is released the moment the CALLER gives up waiting (not when the
+straggler itself eventually finishes), so an abandoned call no longer denies
+every future dispatch forever. A separate ``max_stragglers`` cap then bounds
+how many abandoned calls may be alive at once, since the semaphore alone no
+longer does -- and :meth:`BoundedDispatcher.straggler_health` reports their
+count and oldest age so the daemon can surface DEGRADED health.
+
 ``HandlerChain.execute``'s own chain deadline (Plan 00466 N25) is checked
 ONCE per handler, BEFORE it runs -- it bounds the gap BETWEEN handlers, not
 a handler's own execution. A handler slow enough within its own
@@ -69,6 +77,59 @@ class DispatchSaturated:
     """Sentinel: the pool had no free capacity to even start the call."""
 
 
+@dataclass(frozen=True, slots=True)
+class _StragglerInfo:
+    """Bookkeeping for one abandoned call, kept until it actually finishes."""
+
+    label: str
+    started_at: float
+
+
+@dataclass(frozen=True, slots=True)
+class StragglerHealth:
+    """Snapshot of currently-abandoned dispatch calls (Plan 00466 N40 M2).
+
+    Attributes:
+        count: How many calls are still running past their own timeout,
+            right now.
+        oldest_age_seconds: How long the OLDEST of them has been running
+            since it was dispatched. 0.0 when ``count`` is 0.
+    """
+
+    count: int
+    oldest_age_seconds: float
+
+
+class _SinglePermit:
+    """Releases a dispatcher's semaphore permit exactly once, whichever of
+    two racing paths gets there first (Plan 00466 N40 M2).
+
+    ``BoundedDispatcher.run`` and the worker thread it starts both hold a
+    reference to the SAME instance: the waiting thread releases it early on
+    timeout (freeing capacity for a NEW dispatch immediately, rather than
+    holding the permit hostage until the abandoned call finishes on its
+    own), and the worker's own ``finally`` releases it again when the call
+    actually completes. Without this guard both paths would call
+    ``semaphore.release()``, over-releasing a ``BoundedSemaphore`` past its
+    initial value.
+    """
+
+    __slots__ = ("_lock", "_released", "_semaphore")
+
+    def __init__(self, semaphore: threading.BoundedSemaphore) -> None:
+        self._semaphore = semaphore
+        self._lock = threading.Lock()
+        self._released = False
+
+    def release(self) -> None:
+        """Release the underlying permit, unless already released."""
+        with self._lock:
+            if self._released:
+                return
+            self._released = True
+        self._semaphore.release()
+
+
 class BoundedDispatcher(Generic[T]):
     """Runs callables on a small, bounded, shared thread pool.
 
@@ -78,17 +139,38 @@ class BoundedDispatcher(Generic[T]):
     from here identically; only the timeout/saturation cases are new.
     """
 
-    __slots__ = ("_max_inflight", "_semaphore", "_threads", "_threads_lock")
+    __slots__ = (
+        "_max_inflight",
+        "_max_stragglers",
+        "_semaphore",
+        "_stragglers",
+        "_threads",
+        "_threads_lock",
+    )
 
-    def __init__(self, max_inflight: int = DISPATCH_MAX_INFLIGHT) -> None:
+    def __init__(
+        self,
+        max_inflight: int = DISPATCH_MAX_INFLIGHT,
+        *,
+        max_stragglers: int | None = None,
+    ) -> None:
         """Create a dispatcher.
 
         Args:
-            max_inflight: Upper bound on calls running at once, on this
-                dispatcher. A submission beyond it is refused outright
-                (:class:`DispatchSaturated`), never queued.
+            max_inflight: Upper bound on calls being ACTIVELY WAITED ON at
+                once, on this dispatcher. A submission beyond it is refused
+                outright (:class:`DispatchSaturated`), never queued.
+            max_stragglers: Upper bound on abandoned calls (Plan 00466 N40
+                M2) still running in the background at once. A timed-out
+                call's ``max_inflight`` permit is released immediately (see
+                :meth:`run`), so `max_inflight` alone no longer bounds how
+                many stragglers can pile up -- this does. None (the
+                default) reuses ``max_inflight`` itself: Single Source of
+                Truth, one dial governs both unless a caller deliberately
+                splits them.
         """
         self._max_inflight = max_inflight
+        self._max_stragglers = max_stragglers if max_stragglers is not None else max_inflight
         self._semaphore = threading.BoundedSemaphore(max_inflight)
         # Only the CURRENTLY in-flight threads -- a finishing thread removes
         # itself (see `_run_and_release`), so this never grows past
@@ -96,6 +178,13 @@ class BoundedDispatcher(Generic[T]):
         # lifetime. Needed only so `shutdown(wait=True)` has something to
         # join; the daemon's own process-lifetime dispatcher never calls it.
         self._threads: set[threading.Thread] = set()
+        # Calls that timed out and are still running (Plan 00466 N40 M2),
+        # keyed by their own worker thread -- distinct from `_threads` (every
+        # currently-running call, straggler or not). Removed by whichever of
+        # `run`'s timeout branch or `_run_and_release`'s `finally` runs
+        # second; the FIRST already recorded it, so `dict.pop` with a
+        # default handles either order without raising.
+        self._stragglers: dict[threading.Thread, _StragglerInfo] = {}
         self._threads_lock = threading.Lock()
 
     def run(
@@ -117,15 +206,30 @@ class BoundedDispatcher(Generic[T]):
 
         Returns:
             ``fn``'s own return value on success; :class:`DispatchSaturated`
-            when the pool had no free capacity to even start the call
-            (fails CLOSED, the same "no verdict" case a timeout is); or
-            :class:`DispatchTimeout` when ``fn`` did not finish in time.
+            when the pool had no free capacity to even start the call, OR
+            the straggler cap was already reached (both fail CLOSED, the
+            same "no verdict" case a timeout is); or :class:`DispatchTimeout`
+            when ``fn`` did not finish in time.
 
         Raises:
             Exception: Whatever ``fn`` itself raised, when it raised before
                 ``timeout`` elapsed -- propagated exactly as a direct,
                 synchronous call to ``fn()`` would have raised it.
         """
+        # Checked BEFORE the semaphore (Plan 00466 N40 M2): a timed-out
+        # call's permit is released immediately below, so the semaphore
+        # alone would let an unbounded number of abandoned calls accumulate.
+        with self._threads_lock:
+            straggler_count = len(self._stragglers)
+        if straggler_count >= self._max_stragglers:
+            logger.warning(
+                "Bounded dispatch stragglers at capacity (%d abandoned call(s)) -- "
+                "%s could not even be started; treating as not judged in time",
+                straggler_count,
+                label,
+            )
+            return DispatchSaturated()
+
         if not self._semaphore.acquire(blocking=False):
             logger.warning(
                 "Bounded dispatch pool saturated (max_inflight exhausted) -- "
@@ -136,32 +240,61 @@ class BoundedDispatcher(Generic[T]):
 
         start = time.perf_counter()
         future: Future[T] = Future()
+        permit = _SinglePermit(self._semaphore)
 
         def _run_and_release() -> None:
             try:
                 result = fn()
-            except Exception as exc:
-                # Captured on the FUTURE, not swallowed: re-raised from
-                # future.result() on the calling thread below, exactly as a
-                # direct, synchronous call to fn() would have raised it.
+            except BaseException as exc:
+                # BaseException, not Exception (Plan 00466 N40 M2, review
+                # m3): SystemExit/KeyboardInterrupt raised inside fn() used
+                # to fall through this handler uncaught, leaving the future
+                # NEVER resolved -- the caller then waited out its full
+                # dispatch timeout for a verdict that was never coming,
+                # instead of failing fast. Captured on the FUTURE, not
+                # swallowed: re-raised from future.result() on the calling
+                # thread below, exactly as a direct, synchronous call to
+                # fn() would have raised it.
                 future.set_exception(exc)
             else:
                 future.set_result(result)
             finally:
-                self._semaphore.release()
+                # `permit.release()` is a no-op if `run`'s own timeout branch
+                # already released it (Plan 00466 N40 M2) -- see
+                # `_SinglePermit`.
+                permit.release()
                 with self._threads_lock:
                     self._threads.discard(threading.current_thread())
+                    self._stragglers.pop(threading.current_thread(), None)
 
         thread = threading.Thread(
             target=_run_and_release, name=f"handler-dispatch:{label}", daemon=True
         )
-        with self._threads_lock:
-            self._threads.add(thread)
-        thread.start()
+        try:
+            with self._threads_lock:
+                self._threads.add(thread)
+            thread.start()
+        except Exception:
+            # `thread.start()` (e.g. "can't start new thread") failed before
+            # `_run_and_release` ever got to run -- nothing will release the
+            # permit or discard the thread on our behalf, so both leak
+            # unless done here (Plan 00466 N40 M2, review m3).
+            permit.release()
+            with self._threads_lock:
+                self._threads.discard(thread)
+            raise
 
         try:
             return future.result(timeout=timeout)
         except FutureTimeoutError:
+            # Release the permit NOW -- the caller has given up, so holding
+            # capacity hostage until the straggler eventually finishes (which
+            # for a genuine infinite loop is never) is exactly how enough
+            # abandoned calls used to deny every future dispatch permanently
+            # (Plan 00466 N40 M2).
+            permit.release()
+            with self._threads_lock:
+                self._stragglers[thread] = _StragglerInfo(label=label, started_at=start)
             logger.warning(
                 "%s exceeded its %.2fs dispatch budget -- treating as not "
                 "judged in time; it keeps running in the background",
@@ -170,6 +303,18 @@ class BoundedDispatcher(Generic[T]):
             )
             future.add_done_callback(self._log_late_completion(label, start))
             return DispatchTimeout(waited=time.perf_counter() - start)
+
+    def straggler_health(self) -> StragglerHealth:
+        """Count and oldest age of calls currently running past their own
+        timeout (Plan 00466 N40 M2), for the daemon's health reporting.
+        """
+        now = time.perf_counter()
+        with self._threads_lock:
+            infos = list(self._stragglers.values())
+        if not infos:
+            return StragglerHealth(count=0, oldest_age_seconds=0.0)
+        oldest_age = max(now - info.started_at for info in infos)
+        return StragglerHealth(count=len(infos), oldest_age_seconds=oldest_age)
 
     @staticmethod
     def _log_late_completion(label: str, start: float) -> Callable[[Future[T]], None]:

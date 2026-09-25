@@ -263,6 +263,12 @@ def test_client_receives_the_deny_near_the_deadline_not_after_the_probes_sleep(
     would bound its own execution -- the round trip would take roughly
     ``_PROBE_SLEEP_SECONDS`` (8s) instead of roughly
     ``_CONFIGURED_DEADLINE_SECONDS`` (1s), and this assertion would fail.
+
+    Plan 00466 N40 m1: the WHOLE chain (here, just this one probe handler)
+    is dispatched as ONE call, not one per handler -- the deny names
+    "chain", not ``n34-deadline-probe`` specifically, since nothing is left
+    on the calling thread that could still say which handler overran. See
+    ``tests/unit/core/test_chain.py``'s module-level note on the redesign.
     """
     project_root = deadline_probe_daemon_process["project_root"]
     socket_path = deadline_probe_daemon_process["socket_path"]
@@ -275,9 +281,9 @@ def test_client_receives_the_deny_near_the_deadline_not_after_the_probes_sleep(
         f"A handler that oversleeps its own dispatch budget must be denied "
         f"(not judged in time). Got: {response!r}"
     )
-    assert "n34-deadline-probe" in _reason(
+    assert "chain" in _reason(
         response
-    ), f"Deny reason must name the handler that overran. Got: {_reason(response)!r}"
+    ), f"Deny reason must say the CHAIN was not judged in time. Got: {_reason(response)!r}"
     assert "not judged in time" in _reason(response).lower()
     # Generous margin above the 1s configured deadline for process/socket
     # overhead, but nowhere near the probe's own 8s sleep or the client's

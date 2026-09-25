@@ -318,7 +318,12 @@ class TestEventRouter:
         )
 
     def test_route_passes_deadline_seconds_through_to_the_chain(self, router: EventRouter) -> None:
-        """daemon.chain.deadline_seconds reaches HandlerChain.execute (Plan 00466 N25)."""
+        """daemon.chain.deadline_seconds reaches HandlerChain.execute (Plan
+        00466 N25). Plan 00466 N40 m1: the WHOLE chain is dispatched as ONE
+        call, so a `slow` handler alone exhausting the budget denies naming
+        "chain", not `safety-guard` specifically -- see
+        tests/unit/core/test_chain.py's module-level note on the redesign.
+        """
         slow = MockHandler(name="slow", priority=10)
         slow.sleep_in_handle = 0.05
         guard = MockHandler(
@@ -332,10 +337,16 @@ class TestEventRouter:
 
         result = router.route(EventType.PRE_TOOL_USE, {"toolName": "Bash"}, deadline_seconds=0.01)
 
+        # `slow` keeps running as a straggler in the background past the
+        # chain's own dispatch timeout above -- poll rather than assert
+        # immediately, same as test_chain.py's analogous case.
+        deadline = time.perf_counter() + 2.0
+        while not slow.handle_called and time.perf_counter() < deadline:
+            time.sleep(0.01)
         assert slow.handle_called is True
         assert guard.handle_called is False
         assert result.result.decision == Decision.DENY
-        assert "safety-guard" in (result.result.reason or "")
+        assert "chain" in (result.result.reason or "")
         assert "not judged in time" in (result.result.reason or "").lower()
 
     def test_permission_request_chain_is_allow_final(self, router: EventRouter) -> None:

@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 from claude_code_hooks_daemon.config.models import ChainConfig, VerdictLogConfig
 from claude_code_hooks_daemon.config.validator import ConfigValidator
 from claude_code_hooks_daemon.constants.modes import DaemonMode, ModeConstant
+from claude_code_hooks_daemon.core.bounded_dispatch import get_default_dispatcher
 from claude_code_hooks_daemon.core.chain import ChainExecutionResult
 from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
 from claude_code_hooks_daemon.core.data_layer import get_data_layer
@@ -905,7 +906,9 @@ class DaemonController:
         """
         return self._mode_manager.set_mode(mode, custom_message)
 
-    def process_event(self, event: HookEvent) -> ChainExecutionResult:
+    def process_event(
+        self, event: HookEvent, *, arrival_time: float | None = None
+    ) -> ChainExecutionResult:
         """Process a hook event.
 
         Routes the event to the appropriate handler chain.
@@ -913,6 +916,11 @@ class DaemonController:
 
         Args:
             event: Hook event to process
+            arrival_time: ``time.perf_counter()`` reading taken at request
+                arrival (Plan 00466 N40 M1) -- e.g. right after the socket
+                read, before any executor queueing delay. None (the
+                default) leaves the chain deadline measured from
+                ``HandlerChain.execute``'s own call, as before M1.
 
         Returns:
             Chain execution result
@@ -984,6 +992,7 @@ class DaemonController:
                 collect_all=self._chain_config.collect_all_violations,
                 deadline_seconds=self._chain_config.deadline_seconds,
                 max_safety_input_bytes=self._chain_config.max_safety_input_bytes,
+                arrival_time=arrival_time,
             )
             processing_time = (time.perf_counter() - start_time) * 1000
             self._stats.record_request(event.event_type.value, processing_time)
@@ -1100,13 +1109,17 @@ class DaemonController:
         except OSError as e:
             logger.warning("Failed to write verdict log: %s", e)
 
-    def process_request(self, request_data: dict[str, Any]) -> dict[str, Any]:
+    def process_request(
+        self, request_data: dict[str, Any], *, arrival_time: float | None = None
+    ) -> dict[str, Any]:
         """Process a raw request from the socket server.
 
         Parses the request, routes to handler chain, and formats response.
 
         Args:
             request_data: Raw request dictionary
+            arrival_time: ``time.perf_counter()`` reading taken at request
+                arrival (Plan 00466 N40 M1). See ``process_event``.
 
         Returns:
             Response dictionary per PRD 3.2.2 format
@@ -1132,7 +1145,7 @@ class DaemonController:
             )
             return error_result.to_response_dict("Unknown", 0.0)
 
-        result = self.process_event(event)
+        result = self.process_event(event, arrival_time=arrival_time)
 
         # Use to_json() for Claude Code hook format, not to_response_dict()
         hook_input_dict = event.hook_input.model_dump(by_alias=False)
@@ -1161,8 +1174,22 @@ class DaemonController:
         Returns:
             Health status dictionary
         """
+        degraded_reasons: list[str] = []
+        if self._degraded:
+            degraded_reasons.append("config")
+
+        # Plan 00466 N40 M2: surface the shared dispatcher's straggler state
+        # (handler calls still running past their own deadline_seconds
+        # timeout) -- a pileup is exactly what denies every future
+        # PreToolUse call once it reaches the dispatcher's own straggler
+        # cap, and that should be visible in health well before it does.
+        straggler_health = get_default_dispatcher().straggler_health()
+        unhealthy_count = self._chain_config.straggler_unhealthy_count
+        if unhealthy_count is not None and straggler_health.count >= unhealthy_count:
+            degraded_reasons.append("stragglers")
+
         health: dict[str, Any] = {
-            "status": "degraded" if self._degraded else "healthy",
+            "status": "degraded" if degraded_reasons else "healthy",
             "initialised": self._initialised,
             "stats": self._stats.to_dict(),
             "handlers": self._router.get_handler_count(),
@@ -1171,8 +1198,20 @@ class DaemonController:
             # so a caller can detect a daemon whose loaded code has fallen
             # behind the working tree. None until initialise() runs.
             "source_fingerprint": self._source_fingerprint,
+            "stragglers": {
+                "count": straggler_health.count,
+                "oldest_age_seconds": straggler_health.oldest_age_seconds,
+                # Plan 00466 N40 M2: carried in get_health()'s own dict (not
+                # a separate accessor) so the daemon's self-restart watchdog
+                # (server.py's _monitor_straggler_health) needs no direct
+                # ChainConfig access -- get_health() stays the single
+                # source of truth for both count/age AND the threshold.
+                "restart_after_seconds": self._chain_config.straggler_restart_after_seconds,
+            },
         }
 
+        if degraded_reasons:
+            health["degraded_reasons"] = degraded_reasons
         if self._degraded:
             health["config_errors"] = self._config_errors
 

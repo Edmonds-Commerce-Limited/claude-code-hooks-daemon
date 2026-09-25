@@ -347,7 +347,9 @@ def _pid_file_points_at_live_process(pid_file_path: Path | None) -> bool:
 class Controller(Protocol):
     """Protocol for controllers that can handle hook events."""
 
-    def process_request(self, request_data: dict[str, Any]) -> dict[str, Any]:
+    def process_request(
+        self, request_data: dict[str, Any], *, arrival_time: float | None = None
+    ) -> dict[str, Any]:
         """Process a request and return response dict."""
         ...
 
@@ -729,16 +731,23 @@ class HooksDaemon:
         # can distinguish live containers from dead ones by mtime)
         touch_task = asyncio.create_task(self._touch_daemon_files_periodically())
 
+        # Start the straggler-health watchdog (Plan 00466 N40 M2): self-
+        # restarts once an abandoned handler dispatch has run too long.
+        straggler_monitor_task = asyncio.create_task(self._monitor_straggler_health())
+
         # Wait for shutdown event
         await self.shutdown_event.wait()
 
         # Cancel background tasks
         idle_monitor_task.cancel()
         touch_task.cancel()
+        straggler_monitor_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await idle_monitor_task
         with contextlib.suppress(asyncio.CancelledError):
             await touch_task
+        with contextlib.suppress(asyncio.CancelledError):
+            await straggler_monitor_task
 
         logger.info("Daemon shutdown complete")
 
@@ -1069,6 +1078,12 @@ class HooksDaemon:
         """
         self._active_requests += 1
         self.last_activity = time.time()
+        # Plan 00466 N40 M1: the chain deadline is measured from HERE, not
+        # from wherever `_process_request` eventually gets scheduled --
+        # `run_in_executor` queueing below must count against the budget
+        # too, or a request already judged late by the client's own socket
+        # timeout still looks on-time to the chain.
+        arrival_time = time.perf_counter()
         try:
             try:
                 raw = await self._read_event_payload(reader, SocketLimit.REQUEST_BUFFER_BYTES)
@@ -1087,7 +1102,7 @@ class HooksDaemon:
                 hook_input["hook_event_name"] = event_json_key
 
             request_data = json.dumps({"event": event_json_key, "hook_input": hook_input})
-            response = await self._process_request(request_data)
+            response = await self._process_request(request_data, arrival_time=arrival_time)
             response_json = json.dumps(response)
 
             if is_blocking_response(response):
@@ -1163,6 +1178,69 @@ class HooksDaemon:
                     break
         except asyncio.CancelledError:
             logger.debug("Idle timeout monitor cancelled")
+            raise
+
+    # How often the straggler watchdog polls health (Plan 00466 N40 M2).
+    # Cheap (one dict read from the shared dispatcher's own lock-protected
+    # state) -- no need for this to track `_idle_check_interval`.
+    _STRAGGLER_CHECK_INTERVAL_SECONDS = 10.0
+
+    async def _monitor_straggler_health(self) -> None:
+        """Self-restart once the oldest abandoned handler dispatch
+        ("straggler") has been running longer than
+        ``daemon.chain.straggler_restart_after_seconds`` (Plan 00466 N40
+        M2).
+
+        Enough stragglers pile up (each still consuming a thread, and for a
+        CPU-bound one, real CPU) that the shared dispatcher's straggler cap
+        (:mod:`core.bounded_dispatch`) denies every future PreToolUse call
+        outright -- and the command an agent would use to recover
+        (``bin/hooks-daemon restart``) is ITSELF a PreToolUse call, so
+        nothing short of a restart gets through. Exiting here is recovery,
+        not an outage: the client's own lazy auto-start (``ensure_daemon``
+        in ``init.sh``) brings up a fresh process on the very next hook
+        call, and that fresh process starts with zero stragglers.
+
+        A crash reading health (e.g. a legacy controller with no
+        ``get_health``, or one that raises) is logged and the loop keeps
+        ticking -- a watchdog that dies silently on its own defect is worse
+        than one that occasionally skips a cycle.
+        """
+        try:
+            while not self._shutdown_requested:
+                await asyncio.sleep(self._STRAGGLER_CHECK_INTERVAL_SECONDS)
+
+                if not (self._is_new_controller and isinstance(self.controller, Controller)):
+                    continue  # legacy controller: no get_health() to poll
+
+                try:
+                    health = self.controller.get_health()
+                except Exception:
+                    logger.exception(
+                        "Straggler health check failed; skipping this cycle"
+                    )
+                    continue
+
+                stragglers = health.get("stragglers")
+                if not isinstance(stragglers, dict):
+                    continue
+
+                restart_after = stragglers.get("restart_after_seconds")
+                oldest_age = stragglers.get("oldest_age_seconds", 0.0)
+                if restart_after is not None and oldest_age >= restart_after:
+                    logger.critical(
+                        "Self-restarting: the oldest abandoned handler dispatch has "
+                        "run %.1fs, past the %.1fs restart threshold (%s straggler(s) "
+                        "total). The client's own lazy auto-start will bring up a "
+                        "fresh daemon on the next hook call.",
+                        oldest_age,
+                        restart_after,
+                        stragglers.get("count", "?"),
+                    )
+                    await self.shutdown()
+                    break
+        except asyncio.CancelledError:
+            logger.debug("Straggler health monitor cancelled")
             raise
 
     async def shutdown(self) -> None:
@@ -1253,9 +1331,14 @@ class HooksDaemon:
                 logger.warning("Received empty request")
                 return
 
+            # Plan 00466 N40 M1: arrival is HERE, before `_process_request`'s
+            # own `run_in_executor` queueing delay -- see the matching note
+            # in `_handle_event_client`.
+            arrival_time = time.perf_counter()
+
             # Parse and process request
             start_time = time.time()
-            response = await self._process_request(request_data.decode())
+            response = await self._process_request(request_data.decode(), arrival_time=arrival_time)
             elapsed_ms = (time.time() - start_time) * 1000
 
             # Note: timing_ms removed - Claude Code schema doesn't accept it as top-level field
@@ -1361,11 +1444,18 @@ class HooksDaemon:
         except (OSError, RuntimeError) as exc:
             logger.warning("Payload capture failed for %s: %s", event, exc)
 
-    async def _process_request(self, request_data: str) -> dict[str, Any]:
+    async def _process_request(
+        self, request_data: str, *, arrival_time: float | None = None
+    ) -> dict[str, Any]:
         """Process incoming hook request.
 
         Args:
             request_data: JSON-encoded request string
+            arrival_time: ``time.perf_counter()`` reading taken at request
+                arrival (Plan 00466 N40 M1), from BEFORE this coroutine was
+                even scheduled -- see the callers' own notes. None (the
+                default) leaves the chain deadline measured from wherever
+                the request happens to actually start executing.
 
         Returns:
             Response dictionary with result or error
@@ -1431,9 +1521,12 @@ class HooksDaemon:
         loop = asyncio.get_running_loop()
 
         if self._is_new_controller and isinstance(self.controller, Controller):
-            # New DaemonController - use process_request directly
+            # New DaemonController - use process_request directly. `partial`
+            # carries `arrival_time` through run_in_executor, which only accepts
+            # positional args for the target callable (Plan 00466 N40 M1).
             result: dict[str, Any] = await loop.run_in_executor(
-                None, self.controller.process_request, request
+                None,
+                partial(self.controller.process_request, request, arrival_time=arrival_time),
             )
             if request_id:
                 result["request_id"] = request_id

@@ -3,7 +3,7 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
-### N40 — In Progress — adversarial security review of the N24/N25/N34 fix (2 blockers, 3 majors, 6 minors, 4 nits)
+### N40 — ✅ Blockers/Majors remedied, minors/nits partially addressed — adversarial security review of the N24/N25/N34 fix (2 blockers, 3 majors, 6 minors, 4 nits)
 
 **Found by an adversarial, read-only security review**
 (`subagent-reports/260924-n466-n24-review-opus-5-5.md`) of `d7f2c875` (N24 +
@@ -45,9 +45,15 @@ catch-alls deny for `PreToolUse` and still fail open for every other event
 (`tests/unit/daemon/test_controller.py`, 4 new cases plus one pre-existing
 case's assertion flipped from ALLOW to DENY — a deliberate behaviour change,
 not a mistake). These tests exercise `chain.execute`/
-`controller.process_event`/`process_request` directly rather than the
-report's own real-socket reproducer; a real-socket integration test for
-this specific surrogate shape is not yet added (tracked below).
+`controller.process_event`/`process_request` directly; the report's own
+real-socket reproducer is now ALSO automated, in
+`tests/integration/test_b1_surrogate_isolated_daemon.py`: an isolated daemon
+with the DEFAULT handler set (no probe handler needed — B1 lives in core
+dispatch) receives `git reset --hard HEAD~1 # \ud800` (B1's own manual
+reproducer) over a real socket and is still denied by
+`prevent-destructive-git`, plus a second case putting the same surrogate in
+`file_path` (B2's own vector) and asserting the daemon returns a
+well-formed verdict rather than crashing or hanging.
 
 **B2 (blocker) — ✅ Remedied.** `path_exclusion.py`'s `path_matches_globs`
 translated a client's exclude glob into a regex (`_glob_to_regex`) and
@@ -202,26 +208,84 @@ range) independently `compile()`-checked and its two new helper functions
 unit-tested in isolation before the end-to-end run. `.claude/init.sh` is a
 symlink to `../init.sh`, so no separate deploy-sync step was needed.
 
-**Remaining review items, not yet started:**
+**M1 — ✅ Remedied.** The chain deadline was measured from `HandlerChain. execute`'s own call, not request arrival — executor queueing between the
+socket read and the worker thread actually starting was invisible to the
+budget, so a request already judged late by the CLIENT's own 30s timeout
+could still look on-time to the chain. `HooksDaemon._handle_client`/
+`_handle_event_client` now stamp `arrival_time = time.perf_counter()`
+immediately after the socket read, threaded through `_process_request` →
+`DaemonController.process_request`/`process_event` → `EventRouter.route` →
+`HandlerChain.execute` as a new keyword-only parameter (`None` for every
+caller that predates M1, falling back to `execute()`'s own call time —
+unchanged behaviour). RED tests: a stale `arrival_time` (10s in the past)
+denies a SAFETY+BLOCKING handler immediately even though nothing is slow
+(`tests/unit/core/test_chain.py`); omitting `arrival_time` keeps the
+pre-existing behaviour. Pseudo-event dispatch and verdict logging in
+`process_event` still run AFTER the chain returns and are not themselves
+inside the arrival-anchored budget — a smaller, separately-tracked gap the
+review's own direction treated as optional ("or run them after the response
+is written"), left for a follow-up niggle rather than expanding this one's
+scope further.
 
-- **M1** — the deadline clock starts at `chain.execute`, not request
-  arrival; executor queueing can push a judged-late request past the
-  client's 30s timeout regardless of the per-handler bound N34 added.
-- **M2** — an abandoned straggler's dispatch-pool slot is released only
-  when the straggler FINISHES, not when the caller gives up; enough
-  concurrent stragglers deny every PreToolUse call with no way out short of
-  a manual restart (and the restart command is itself a PreToolUse call).
-  **M3 — ✅ Remedied (narrowed scope).** Fail-closed-on-raise was TAG-dependent
-  (`chain.py`'s `_record_unjudged` requires both `HandlerTag.SAFETY` and
-  `HandlerTag.BLOCKING`), and the review found 19 PreToolUse handlers that can
-  genuinely deny but carried neither. Of those, 14 were COMPLETELY untagged
-  (no fail-closed-relevant decision had ever been made about them at all);
-  the other 5 (`enforce-tdd`, `qa-suppression-blocker`, `plan-*`, and 19 more
-  across the whole tree) already carry `BLOCKING` alone, which reads as a
-  deliberate-if-incomplete choice rather than an oversight — auditing that
-  much larger 22-handler bucket one-by-one was judged out of scope for this
-  niggle (see the follow-up note below) rather than rushed alongside the
-  other review items still open.
+**M2 — ✅ Remedied.** `BoundedDispatcher`'s semaphore permit was released
+only when an abandoned ("straggler") call FINISHED, never when the caller
+gave up waiting on it — so enough concurrent stragglers (the review's own
+16-straggler reproducer) denied every future PreToolUse call permanently,
+with no way out short of a manual restart, and the restart command itself
+is a PreToolUse call. Three parts:
+
+1. *Release the slot.* `BoundedDispatcher.run` now releases its semaphore
+   permit the MOMENT `future.result(timeout=...)` gives up (not when the
+   straggler eventually finishes) via a new `_SinglePermit` wrapper shared
+   between the waiting thread and the worker thread, guaranteeing the
+   permit is released exactly once regardless of which side gets there
+   first. A new dispatch can proceed immediately even while the abandoned
+   call is still running.
+2. *Bound the stragglers.* Releasing the permit early reopens the gap it
+   used to close: nothing bounded how many abandoned calls could pile up.
+   A SEPARATE `max_stragglers` cap (defaults to `max_inflight`, Single
+   Source of Truth unless a caller splits them) refuses a NEW dispatch
+   outright once that many stragglers are already alive, independent of
+   ordinary inflight capacity. `BoundedDispatcher.straggler_health()`
+   reports the live count and the oldest one's age.
+3. *DEGRADED health + self-restart.* `DaemonController.get_health()` now
+   reports `status: "degraded"` (with `degraded_reasons: ["stragglers"]`)
+   once the straggler count reaches `daemon.chain.straggler_unhealthy_count`
+   (new `ChainConfig` field, default 4), and carries the count/oldest-age/
+   restart-threshold in a `stragglers` sub-dict. A new watchdog task,
+   `HooksDaemon._monitor_straggler_health`, polls this every 10s and
+   self-restarts (calls `shutdown()`, i.e. exits) once the OLDEST straggler
+   has run past `daemon.chain.straggler_restart_after_seconds` (default
+   120s) — recovery, not an outage: the client's own lazy `ensure_daemon`
+   auto-start in `init.sh` brings up a fresh, zero-straggler process on the
+   very next hook call.
+
+RED-first TDD throughout: `tests/unit/core/test_bounded_dispatch.py` (permit
+released immediately on timeout without double-releasing on the straggler's
+own later completion; straggler count/age tracked correctly; a new dispatch
+refused once the straggler cap is reached even with free inflight capacity);
+`tests/unit/daemon/test_controller.py` (`get_health()` reports zero/below-
+threshold/at-threshold/disabled straggler states); `tests/unit/daemon/ test_server_coverage.py` (the watchdog self-restarts past the threshold,
+stays quiet below it, tolerates a `None` threshold/missing `stragglers` key/
+a raising `get_health()`/a legacy controller with no `get_health()` at all,
+without crashing the loop). Also folded in review m3's two `BoundedDispatcher`
+edge cases while touching the same code: `thread.start()` raising no longer
+leaks the semaphore permit or the thread-tracking entry, and the worker now
+catches `BaseException` (not only `Exception`) so a `SystemExit`/
+`KeyboardInterrupt` inside a handler resolves the future instead of leaving
+it unresolved for the FULL remaining timeout.
+
+**M3 — ✅ Remedied (narrowed scope).** Fail-closed-on-raise was TAG-dependent
+(`chain.py`'s `_record_unjudged` requires both `HandlerTag.SAFETY` and
+`HandlerTag.BLOCKING`), and the review found 19 PreToolUse handlers that can
+genuinely deny but carried neither. Of those, 14 were COMPLETELY untagged
+(no fail-closed-relevant decision had ever been made about them at all);
+the other 5 (`enforce-tdd`, `qa-suppression-blocker`, `plan-*`, and 19 more
+across the whole tree) already carry `BLOCKING` alone, which reads as a
+deliberate-if-incomplete choice rather than an oversight — auditing that
+much larger 22-handler bucket one-by-one was judged out of scope for this
+niggle (see the follow-up note below) rather than rushed alongside the
+other review items still open.
 
 Of the 14 completely-untagged handlers: 6 are now `HandlerTag.SAFETY` +
 `HandlerTag.BLOCKING` — `artifact_publish_blocker` (irreversible external
@@ -269,15 +333,57 @@ per-handler whether each should become `SAFETY`+`BLOCKING` or explicitly
 should run the same registry-test technique with the "already has BLOCKING"
 early-return removed, and work through the resulting list.
 
-- **m1** (thread-per-handler overhead, ~12ms measured) — collapse to one
-  worker thread per EVENT running the whole chain inline.
-- **m2** (stragglers mutating shared state after the verdict already
-  returned), **m3** (`BoundedDispatcher.run` edge cases: `thread.start()`
-  raising leaks the semaphore permit; `except Exception` doesn't catch
-  `BaseException`, leaving the future unresolved), **m4** (`bounded_dispatch.py`'s
-  fail-open branches are invisible to `check_fail_open_inventory.py`),
-  **m6** (nothing validates `deadline_seconds` stays below the client's
-  socket timeout).
+**m1 — ✅ Remedied.** Thread-per-handler dispatch added ~12ms per event
+(69 thread creations for this repo's PreToolUse handler set, even when
+every one of them was fast). `HandlerChain.execute` now dispatches the
+WHOLE handler loop (a new private `_execute_handlers` method) as ONE call
+on the shared pool when `deadline_seconds` is set, not one dispatch per
+handler — `deadline_seconds=None` keeps the original zero-overhead
+synchronous path unchanged. The per-handler deadline CHECK stays inline
+(a cheap `time.perf_counter()` comparison, not a thread) and still
+attributes "not judged in time" to a SPECIFIC handler whenever the loop is
+still making progress — every handler that FINISHES, however late, is
+caught exactly as before. Only when the WHOLE dispatched call itself times
+out or the pool is saturated (some handler never returns at all, or the
+pool has no free capacity even for the whole chain) does the deny/skip
+reason name "chain" instead of a specific handler — nothing is left
+running on the calling thread that could still say which one it was. An
+edge case surfaced during implementation: an ALREADY-expired deadline
+(e.g. a stale `arrival_time`) is handled by calling `_execute_handlers`
+directly rather than dispatching it with `timeout=0.0` — every handler's
+own pre-loop check sees the same already-blown deadline from the first
+iteration, so nothing risks hanging, and this also avoids a genuine race
+`Future.result(timeout=0.0)` would have had (whether the freshly-started
+thread gets scheduled at all before the wait gives up).
+
+Five existing tests (`tests/unit/core/test_chain.py` ×4,
+`tests/unit/core/test_router.py` ×1) asserted the OLD per-handler
+attribution for a slow-but-finite handler exceeding the budget; updated to
+assert the new chain-level attribution instead — a deliberate behaviour
+change, not a regression, and the module docstring in `test_chain.py`
+records why. One real-socket E2E test
+(`tests/integration/test_n34_deadline_probe_isolated_daemon.py`) needed the
+same update. `_dispatch_matches_and_handle` and `_make_dispatch_call`
+(the per-handler dispatch closures) were dead code afterwards and deleted.
+Full targeted sweep green: `tests/unit/core/`, `tests/unit/daemon/`,
+`tests/unit/handlers/test_pretooluse_fail_closed_tagging.py`,
+`tests/unit/config/` (4729 passed, 1 skipped), plus the real-socket
+integration files touching chain dispatch (18 passed).
+`scripts/qa/check_fail_open_inventory.py`'s rows for the two `except Exception` boundaries that moved from `execute` into `_execute_handlers`
+were updated to match (boundaries unchanged, only their enclosing method).
+
+**m3 — ✅ Remedied** (folded into M2's work above, same files): the two
+`BoundedDispatcher.run` edge cases (`thread.start()` raising leaking the
+semaphore permit; `except Exception` not catching `BaseException`, leaving
+the future unresolved for the full timeout) are both fixed.
+
+**m2** (stragglers mutating shared state after the verdict already
+returned), **m4** (`bounded_dispatch.py`'s fail-open branches are invisible
+to `check_fail_open_inventory.py` — still true: the new chain-level
+DispatchTimeout/DispatchSaturated handling in `execute()` is `isinstance`
+checks, not `except` constructs, same as before), **m6** (nothing validates
+`deadline_seconds` stays below the client's socket timeout) remain open.
+
 - **n1** ("shared pool"/"thread pool" wording in `bounded_dispatch.py`/
   `chain.py` — there is no pool, just bounded per-call threads), **n2**
   (`assert isinstance(...)` on the production path — `-O` strips asserts),

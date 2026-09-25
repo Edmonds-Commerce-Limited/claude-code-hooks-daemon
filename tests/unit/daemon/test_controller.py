@@ -1,5 +1,7 @@
 """Tests for DaemonController."""
 
+import threading
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -8,6 +10,12 @@ from unittest.mock import Mock, patch
 import pytest
 
 from claude_code_hooks_daemon.config.models import ChainConfig, VerdictLogConfig
+from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.core.bounded_dispatch import (
+    DispatchTimeout,
+    get_default_dispatcher,
+    reset_default_dispatcher_for_tests,
+)
 from claude_code_hooks_daemon.core.chain import ChainExecutionResult
 from claude_code_hooks_daemon.core.data_layer import reset_data_layer
 from claude_code_hooks_daemon.core.event import EventType, HookEvent
@@ -989,6 +997,7 @@ class TestControllerChainConfig:
             collect_all: bool = False,
             deadline_seconds: float | None = None,
             max_safety_input_bytes: int | None = None,
+            arrival_time: float | None = None,
         ) -> ChainExecutionResult:
             captured["deadline_seconds"] = deadline_seconds
             return ChainExecutionResult(result=HookResult.allow())
@@ -1018,6 +1027,7 @@ class TestControllerChainConfig:
             collect_all: bool = False,
             deadline_seconds: float | None = None,
             max_safety_input_bytes: int | None = None,
+            arrival_time: float | None = None,
         ) -> ChainExecutionResult:
             captured["max_safety_input_bytes"] = max_safety_input_bytes
             return ChainExecutionResult(result=HookResult.allow())
@@ -1055,6 +1065,123 @@ class TestControllerChainConfig:
         session = "chain-config-session"
         assert history.count_blocks_by_handler("the-blocker", session_id=session) == 1
         assert history.count_blocks_by_handler("the-advisor", session_id=session) == 0
+
+
+class TestControllerHealthStragglers:
+    """Plan 00466 N40 M2: get_health() surfaces the shared dispatcher's
+    straggler state, so a stuck-handler pileup is visible in `status`
+    (and `bin/hooks-daemon status`) BEFORE it denies every PreToolUse call
+    outright, per ``daemon.chain.straggler_unhealthy_count``.
+    """
+
+    def teardown_method(self) -> None:
+        ProjectContext.reset()
+        reset_default_dispatcher_for_tests()
+
+    @pytest.fixture
+    def workspace_root(self, tmp_path: Path) -> Path:
+        workspace = tmp_path / "test-workspace"
+        claude_dir = workspace / ".claude"
+        claude_dir.mkdir(parents=True)
+        (claude_dir / "hooks-daemon.yaml").write_text(
+            "version: '1.0'\n"
+            "daemon:\n"
+            "  idle_timeout_seconds: 600\n"
+            "  log_level: INFO\n"
+            "handlers:\n"
+            "  pre_tool_use: {}\n"
+        )
+        return workspace
+
+    def _initialised_controller(
+        self, workspace_root: Path, chain: ChainConfig | None = None
+    ) -> DaemonController:
+        controller = DaemonController()
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                Mock(returncode=0, stdout="/tmp/test\n"),
+                Mock(returncode=0, stdout="git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
+            ]
+            controller.initialise(
+                workspace_root=workspace_root,
+                verdict_log=VerdictLogConfig(enabled=False),
+                chain=chain,
+            )
+        return controller
+
+    @staticmethod
+    def _make_stragglers(count: int) -> threading.Event:
+        """Dispatch ``count`` calls that time out immediately and are still
+        running when this returns. Caller must ``.set()`` the returned event
+        to let them finish (and MUST, or they leak into later tests)."""
+        release = threading.Event()
+        dispatcher = get_default_dispatcher()
+        for i in range(count):
+            outcome = dispatcher.run(
+                lambda: release.wait(timeout=5.0), timeout=0.01, label=f"stuck-{i}"
+            )
+            assert isinstance(outcome, DispatchTimeout)
+        time.sleep(0.03)  # let each straggler actually register itself
+        return release
+
+    def test_no_stragglers_reports_healthy_with_zero_counts(self) -> None:
+        controller = DaemonController()
+
+        health = controller.get_health()
+
+        assert health["status"] == "healthy"
+        assert health["stragglers"] == {
+            "count": 0,
+            "oldest_age_seconds": 0.0,
+            "restart_after_seconds": Timeout.STRAGGLER_RESTART_AFTER_SECONDS,
+        }
+
+    def test_stragglers_below_the_default_threshold_stay_healthy(self) -> None:
+        controller = DaemonController()
+        release = self._make_stragglers(1)  # default threshold is 4
+
+        try:
+            health = controller.get_health()
+        finally:
+            release.set()
+
+        assert health["status"] == "healthy"
+        assert health["stragglers"]["count"] == 1
+        assert health["stragglers"]["oldest_age_seconds"] > 0.0
+
+    def test_reaching_the_configured_threshold_reports_degraded(
+        self, workspace_root: Path
+    ) -> None:
+        controller = self._initialised_controller(
+            workspace_root, chain=ChainConfig(straggler_unhealthy_count=2)
+        )
+        release = self._make_stragglers(2)
+
+        try:
+            health = controller.get_health()
+        finally:
+            release.set()
+
+        assert health["status"] == "degraded"
+        assert health["stragglers"]["count"] == 2
+        assert "stragglers" in health.get("degraded_reasons", [])
+
+    def test_none_threshold_disables_straggler_driven_degraded_status(
+        self, workspace_root: Path
+    ) -> None:
+        controller = self._initialised_controller(
+            workspace_root, chain=ChainConfig(straggler_unhealthy_count=None)
+        )
+        release = self._make_stragglers(10)
+
+        try:
+            health = controller.get_health()
+        finally:
+            release.set()
+
+        assert health["status"] == "healthy"
+        assert health["stragglers"]["count"] == 10
 
 
 class TestProcessEventFailsClosedForPreToolUse:
