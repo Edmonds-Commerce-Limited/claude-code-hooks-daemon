@@ -116,6 +116,8 @@ class TestRegistryCatalogue:
             "index-no-log",
             # Plan-index retention window (COMMIT + SWEEP; no EDIT by design)
             "index-retention-window",
+            # Plan-index statistics self-check (EDIT advises; COMMIT + SWEEP block)
+            "plan-stats-arithmetic",
             # Commit-only
             "index-at-birth",
             "counter-sanity",
@@ -126,6 +128,7 @@ class TestRegistryCatalogue:
             "journal-entry-with-progress",
             "journal-completion-entry",
             "plan-shrink-without-journal",
+            "archival-links-resolve",
             # Sweep-only
             "staleness-nag",
             "dormant-honesty",
@@ -146,7 +149,8 @@ class TestRegistryCatalogue:
         # + journal-entry-ordering (Plan 00377 N1)
         # + journal-entry-future-dated (Plan 00377 N9; EDIT only by design)
         # + release-blocked-plan (Plan 00419 N3)
-        assert len(by_stage[Stage.EDIT]) == 17
+        # + plan-stats-arithmetic (Plan 00466 N13; advisory at edit)
+        assert len(by_stage[Stage.EDIT]) == 18
         # 5 commit-only + 5 dual tree checks + 2 journal COMMIT checks (Plan 00163)
         # + plan-shrink-without-journal (Plan 00190) + index-row-length (Plan 00218)
         # + index-no-log + archived-status-coherence (Plan 00286)
@@ -155,7 +159,9 @@ class TestRegistryCatalogue:
         #   OFF the edit gate, so the invariant needs a surface that sees a
         #   settled document; without this registration the move would be a net
         #   loosening rather than the tightening it is.
-        assert len(by_stage[Stage.COMMIT]) == 18
+        # + plan-stats-arithmetic (Plan 00466 N13)
+        # + archival-links-resolve (Plan 00408 Task 3.2b; COMMIT only by design)
+        assert len(by_stage[Stage.COMMIT]) == 20
         # 3 sweep-only + 5 dual tree checks + 2 journal SWEEP checks (Plan 00163)
         # + index-row-length (Plan 00218) + index-no-log + 5 document-rule sweep
         # twins and the journal-dayfile-naming sweep twin (Plan 00230)
@@ -163,7 +169,8 @@ class TestRegistryCatalogue:
         # + index-retention-window (Plan 00379 N1)
         # + release-blocked-plan (Plan 00419 N3)
         # + plan-link-resolves (Plan 00419 N2; SWEEP only by design)
-        assert len(by_stage[Stage.SWEEP]) == 22
+        # + plan-stats-arithmetic (Plan 00466 N13)
+        assert len(by_stage[Stage.SWEEP]) == 23
 
     def test_dual_stage_checks_share_run_function(self) -> None:
         from claude_code_hooks_daemon.plan_qa.checks import all_checks
@@ -206,6 +213,7 @@ class TestRegistryCatalogue:
             "index-row-length",
             "index-no-log",
             "index-retention-window",
+            "archival-links-resolve",
         }
         for spec in all_checks():
             if spec.check_id in post_audit_no_sins:

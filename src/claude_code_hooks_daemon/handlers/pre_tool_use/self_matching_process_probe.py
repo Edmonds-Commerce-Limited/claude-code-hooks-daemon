@@ -359,7 +359,7 @@ class SelfMatchingProcessProbeHandler(PreToolUseHandlerBase):
             blocked=(
                 "a wait on `$!` when the backgrounded command starts with a "
                 "wrapper that forks — denied for `setsid`, advisory for "
-                "`nohup sh -c`, `timeout` and `env`"
+                "`nohup sh -c`, `timeout` and `env sh -c`"
             ),
             why=(
                 "`$!` is the wrapper's pid, and setsid's parent exits at once, "
@@ -536,7 +536,7 @@ class SelfMatchingProcessProbeHandler(PreToolUseHandlerBase):
             "the pid of `setsid`, which forks and whose parent exits at once, "
             "so `kill -0 $!` says the job finished while it is still running — "
             "the same incident's FIRST waiter. Denied for `setsid`; advisory "
-            "for `nohup sh -c`, `timeout` and `env`, where whether the pid is "
+            "for `nohup sh -c`, `timeout` and `env sh -c`, where whether the pid is "
             "the job's turns on what the wrapper was asked to run. Fix: let "
             "the job record its own pid "
             "(`nohup sh -c './job.bash > run.log 2>&1 & echo $! > job.pid' &`), "

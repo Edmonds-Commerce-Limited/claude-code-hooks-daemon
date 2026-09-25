@@ -11,6 +11,7 @@ import pytest
 
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.daemon.cli import cmd_block_report
+from claude_code_hooks_daemon.utils.claude_config import claude_project_dir
 
 
 def _args(project_root: Path, transcripts_dir: Path, **overrides: Any) -> argparse.Namespace:
@@ -158,6 +159,23 @@ class TestCmdBlockReport:
         exit_code = cmd_block_report(_args(root, root / "nope", no_write=True))
         assert exit_code == 0
         assert "0 transcript" in capsys.readouterr().out
+
+    def test_a_missing_derived_directory_is_named_on_stderr(
+        self,
+        project: tuple[Path, Path],
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """00466 N27: an absent derived directory is named, not silently empty."""
+        root, _ = project
+        config = tmp_path / "hermetic-claude-config"
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config))
+        args = _args(root, root, no_write=True)
+        args.transcripts_dir = None
+        assert cmd_block_report(args) == 0
+        err = capsys.readouterr().err
+        assert str(claude_project_dir(root, config_dir=config)) in err
 
 
 class TestCmdBlockReportAttributesProjectContextReadingHandlers:

@@ -10,6 +10,7 @@ from typing import Any
 
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
+from claude_code_hooks_daemon.constants.protocol import HookInputField
 from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
@@ -90,7 +91,7 @@ class GlobalNpmAdvisorHandler(PreToolUseHandlerBase):
         if not self.matches(hook_input):
             return GatingResult(decision=Decision.ALLOW)
 
-        command = hook_input.get("tool_input", {}).get("command", "")
+        command = hook_input.get(HookInputField.TOOL_INPUT, {}).get("command", "")
 
         # Extract package name if possible
         package_match = re.search(

@@ -49,6 +49,13 @@ Evidence, with verified facts marked apart from inferences, is in
 - [ ] ⬜ **Task 2.1**: PostToolUse handler records CronCreate/CronDelete (`session_id`, id, schedule, prompt hash, created_at) in a daemon state file. Tests: record, delete, prune dead sessions.
 - [ ] ⬜ **Task 2.2**: `cron_stop_enforcer` (and its SubagentStop twin) block a stop when a live job's record is older than `refresh_after`, naming the CronDelete + CronCreate. Unrecorded jobs get stamped, not blocked. Tests: age boundary, unknown age, pause respected, priority/terminal invariants unchanged.
 - [ ] ⬜ **Task 2.3**: ccy supervisor watchdog: no hook traffic while every recorded job is past expiry triggers the reconcile prompt. Tests in the supervisor suite.
+- [ ] ⬜ **Task 2.4**: Make the background-process watchdog cron a standing job. The owner's decision: it is a sensible safety net for a long-running session, so every session gets it.
+  - Declare it under `persistent_crons` next to `issue-sdlc` and `failsafe-recovery`.
+  - Its prompt must be byte-identical to `background_process_tracker`'s canonical `[tick:watchdog]` text, pinned by a test the way the failsafe prompt is pinned.
+  - A declared job is required by `cron_stop_enforcer` for the whole session. So the canonical prompt must stop telling the agent to CronDelete it once no background work remains: an idle tick is a no-op, not a reason to delete.
+  - `background_process_tracker` must stop asking for a second watchdog when the declared one exists.
+  - Fix `harvest-background` listing the same process group twice. It was observed in this session, and the doubled group was a wanted QA gate.
+  - Tests: the declaration is re-asserted at SessionStart; the prompt pin; the stop enforcer requires the job; an idle tick is a no-op; each group is listed once.
 
 ### Phase 3: Limits, restarts, durable queue (owner: python-developer sub-agent, TDD)
 

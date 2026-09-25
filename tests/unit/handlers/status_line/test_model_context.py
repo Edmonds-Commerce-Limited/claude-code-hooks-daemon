@@ -732,3 +732,12 @@ class TestModelContextHandler:
 
         # 2M > 1M so uses 1000k tier -> 35% = orange (30-39% band)
         assert "◕" in result.context[0]
+
+
+def test_the_settings_path_honours_claude_config_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Plan 00468 G13: user settings live under ``$CLAUDE_CONFIG_DIR``."""
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
+    handler = ModelContextHandler()
+    assert handler._get_settings_path() == tmp_path / "cfg" / "settings.json"

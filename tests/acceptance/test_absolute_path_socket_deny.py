@@ -26,8 +26,18 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.constants import Timeout, ToolName
+from claude_code_hooks_daemon.daemon.synthetic_traffic import (
+    PROBE_AS_FIELD,
+    SYNTHETIC_SOURCE_FIELD,
+    TEST_PROBE,
+    ProbeThread,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+#: The probe goes through the LIVE daemon, whose verdicts.jsonl is the real
+#: record, so it is marked (Plan 00466 N12) and stands for the main thread.
+_MAIN_PROBE = {SYNTHETIC_SOURCE_FIELD: TEST_PROBE, PROBE_AS_FIELD: ProbeThread.MAIN.value}
 
 _FILE_TOOLS = [ToolName.READ, ToolName.WRITE, ToolName.EDIT]
 _DENY = "deny"
@@ -56,6 +66,7 @@ def _send_pre_tool_use(sock_path: Path, tool_name: str, file_path: str) -> dict:
             "tool_name": tool_name,
             "tool_input": tool_input,
             "cwd": str(REPO_ROOT),
+            **_MAIN_PROBE,
         },
     }
     request = json.dumps(payload).encode("utf-8") + b"\n"

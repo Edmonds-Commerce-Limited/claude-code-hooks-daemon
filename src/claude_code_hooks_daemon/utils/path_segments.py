@@ -35,13 +35,18 @@ import os
 def _project_relative_or_none(file_path: str, project_root: str | os.PathLike[str]) -> str | None:
     """``file_path`` relative to ``project_root``, or ``None`` if it escapes it.
 
-    ``None`` covers both "outside the project" (``..``-prefixed) and the
-    degenerate ``file_path == project_root`` case (``os.path.relpath``
-    returns ``"."``, which can never be a directory-segment match and would
-    otherwise need special-casing at every call site).
+    ``None`` covers "outside the project" (``..``-prefixed), the degenerate
+    ``file_path == project_root`` case (``os.path.relpath`` returns ``"."``,
+    which can never be a directory-segment match and would otherwise need
+    special-casing at every call site), and an EMPTY ``file_path`` (Ledger
+    00466 N44): ``os.path.relpath("", root)`` raises ``ValueError: no path
+    specified`` rather than answering a degenerate result, and an empty
+    candidate can never usefully match a directory segment either way.
     """
     root = str(project_root).replace("\\", "/")
     raw = file_path.replace("\\", "/")
+    if not raw:
+        return None
     rel = os.path.relpath(raw, root).replace("\\", "/")
     if rel == "." or rel == ".." or rel.startswith("../"):
         return None

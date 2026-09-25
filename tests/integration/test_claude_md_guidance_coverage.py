@@ -242,6 +242,12 @@ _EARNS_GUIDANCE: dict[str, str] = {
         "T3 standing policy: an injected /goal is machine-marked and can never "
         "constitute human authorisation; also documents the inject-goal fallback"
     ),
+    "PlanStatusSnapshotHandler": (
+        "T3 standing background fact: this PreToolUse sensor feeds "
+        "goal_injection's ground-truth transition check for the SAME "
+        "Write/Edit, and documents the inference fallback that runs when no "
+        "fresh snapshot exists (RV4-m4: ships enabled, opt-out)"
+    ),
     "DismissiveLanguageNitpickHandler": (
         "T3 standing norm about deflecting; the fire-time line is one sentence "
         "and the remedy (acknowledge, then fix) is a habit, not a correction. "
@@ -438,8 +444,16 @@ _EXEMPT_FROM_GUIDANCE: dict[str, str] = {
     "DaemonDocsGuardHandler": "T4 one sentence at fire time carries the whole advice",
     "GitContextInjectorHandler": "T4 the injected git status IS the content",
     "GlobalNpmAdvisorHandler": "T4 never denies; the fire-time note is the whole advice",
+    "InstalledPluginEditAdvisorHandler": (
+        "T4 never denies; the fire-time note names the file, the update that "
+        "discards it, and the fork/upstream remedy"
+    ),
     "WebSearchYearHandler": "T4 message already carries the year, query and alternatives",
     "GitFilemodeCheckerHandler": "T4 fires once at session start with the full remedy",
+    "PluginHooksAdvisorHandler": (
+        "T4 fires once at session start naming each plugin, its hook events and "
+        "how to acknowledge it; nothing to hold across later decisions"
+    ),
     "GuardConfigDriftHandler": (
         "T4 fires once at session start naming each weakened guard and both "
         "remedies. Deliberately NOT grouped with ProjectHandlerLoadCheckerHandler, "

@@ -9,7 +9,7 @@ order: Gate 1 (length), Gate 2 (cooldown), Gate 3 (random).
 import random
 from typing import Any, Final
 
-from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.core import BlockingResult, Decision, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import UserPromptSubmitHandlerBase
 
@@ -72,7 +72,7 @@ class CriticalThinkingAdvisoryHandler(UserPromptSubmitHandlerBase):
             True if prompt length >= _MIN_PROMPT_LENGTH, False otherwise.
             A missing, null, or non-string prompt never matches.
         """
-        prompt = hook_input.get("prompt")
+        prompt = hook_input.get(HookInputField.PROMPT)
         if not isinstance(prompt, str):
             return False
         return len(prompt) >= _MIN_PROMPT_LENGTH

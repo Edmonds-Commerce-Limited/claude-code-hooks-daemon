@@ -47,6 +47,10 @@ One to three sentences, in the voice of the release notes: what changed,
 what it means for the reader, and what (if anything) they can now stop doing.
 ```
 
+A change that answers an externally-reported GitHub issue credits it in the
+callout as `(reported as issue #N)`, so every such issue in a release is
+credited the same way.
+
 ## How the release handles this directory
 
 At release time the release agent reads every callout, folds each into the

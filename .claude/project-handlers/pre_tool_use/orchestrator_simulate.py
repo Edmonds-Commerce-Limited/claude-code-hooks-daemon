@@ -50,9 +50,9 @@ from typing import Any, Final
 
 from claude_code_hooks_daemon.core import AcceptanceTest, Decision, GatingResult, TestType
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
+from claude_code_hooks_daemon.core.handler_scope import acts_as_main_thread
 from claude_code_hooks_daemon.core.rule import Rule
 from claude_code_hooks_daemon.core.utils import get_bash_command, get_file_path
-from claude_code_hooks_daemon.daemon.synthetic_traffic import is_synthetic_event
 
 # Task/Agent (subagent dispatch), TodoWrite, Read and the search/web tools are
 # obviously coordination — the owner's own framing in PLAN.md. SendMessage is
@@ -305,23 +305,25 @@ class OrchestratorSimulateHandler(PreToolUseHandlerBase):
 
         - the switch is on at all;
         - the tool is one of the three that mutate a file;
-        - no ``agent_id``, so this is the main thread. ``matches()`` checks
-          this too; repeating it here is defence in depth on the single
-          misreading that killed the original handler;
-        - the event was not fabricated by a test harness. The acceptance
-          playbook builds events with no ``agent_id``, so without this the
-          suite would go red — with hundreds of denied probes AND, under
-          most-restrictive-wins, other handlers' expected ALLOWs turned into
-          failures — on the day blocking was first enabled;
+        - the event is the main thread's, by the scope gate's own rule
+          (``acts_as_main_thread``): no ``agent_id``, and not fabricated by a
+          test harness. ``matches()`` checks ``agent_id`` too; repeating it
+          here is defence in depth on the single misreading that killed the
+          original handler. The acceptance playbook builds events with no
+          ``agent_id``, so without the synthetic half the suite would go red
+          — with hundreds of denied probes AND, under most-restrictive-wins,
+          other handlers' expected ALLOWs turned into failures — on the day
+          blocking was first enabled. A hand-sent probe that says it stands
+          for the main thread (``probe_as: main``, Plan 00466 N12) is judged,
+          so this handler can be probed without the probe being logged as a
+          real main-thread write;
         - the target is not in the plan tree the coordinator owns.
         """
         if not self._blocking:
             return False
         if hook_input.get("tool_name") not in _BLOCKED_TOOLS:
             return False
-        if hook_input.get("agent_id"):
-            return False
-        if is_synthetic_event(hook_input):
+        if not acts_as_main_thread(hook_input):
             return False
         file_path = _target_path(hook_input)
         return not (file_path and is_plan_tree_path(file_path))

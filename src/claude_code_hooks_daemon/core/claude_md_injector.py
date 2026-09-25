@@ -305,6 +305,10 @@ class ClaudeMdInjector:
         self._workspace_root = workspace_root
         self._handlers = handlers
         self._promoted_handlers = frozenset(promoted_handlers or [])
+        # The AUTHOR's chosen order (review nit n6): kept separately from the
+        # frozenset above, which exists purely for the O(1) membership check
+        # in the per-handler loop below and necessarily discards order.
+        self._promoted_handlers_order: tuple[str, ...] = tuple(promoted_handlers or [])
         self._write_in_linked_worktree = write_in_linked_worktree
 
     def inject(self) -> None:
@@ -635,7 +639,10 @@ class ClaudeMdInjector:
 
         A handler with neither prose nor rules contributes to no tier.
         """
-        promoted: list[tuple[str, str]] = []
+        # (name, content, config_key) while collecting -- config_key is
+        # needed to look the entry up in self._promoted_handlers_order below,
+        # then dropped once promoted is finalised.
+        promoted: list[tuple[str, str, str]] = []
         progressive: list[tuple[str, list[Rule]]] = []
         fallback: list[tuple[str, str]] = []
 
@@ -658,7 +665,7 @@ class ClaudeMdInjector:
             config_key = type(handler).__module__.rsplit(".", maxsplit=1)[-1]
             if config_key in self._promoted_handlers or handler.name in self._promoted_handlers:
                 if content is not None:
-                    promoted.append((handler.name, content))
+                    promoted.append((handler.name, content, config_key))
                     continue
                 # Named in promoted_handlers but has no get_claude_md() prose
                 # (only rules, or nothing at all) — fall through to the
@@ -670,7 +677,52 @@ class ClaudeMdInjector:
             elif content is not None:
                 fallback.append((handler.name, content))
 
-        return _CollectedTiers(promoted=promoted, progressive=progressive, fallback=fallback)
+        # Deterministic total order depending ONLY on the handler set
+        # (ledger 00466 N7): self._handlers is whatever order the caller
+        # passed in, and that caller chain ultimately bottoms out at
+        # HandlerRegistry.register_all()'s two event_dir.glob("*.py")
+        # passes, wrapped in sorted() here (NOT pkgutil.walk_packages()
+        # upstream of it, which already sorts its own directory scan
+        # internally -- the glob passes are the actual source of the
+        # nondeterminism). Before the glob fix, directory-entry order was not
+        # guaranteed stable across processes or machines, so two daemons
+        # over the identical handler set could emit a differently-ordered
+        # <hooksdaemon> block, causing a spurious restart commit and
+        # cross-branch merge conflicts on pure reordering. Handler name
+        # alone is sufficient for the progressive/fallback tiers: within
+        # one tier, name IS a unique key (two active handlers never share a
+        # name), so it is already a complete total order — priority is not
+        # consulted because handlers from different event chains are mixed
+        # into one flat tier and priority carries no meaningful ordering
+        # across event types.
+        #
+        # PROMOTED is the one exception (review nit n6): alphabetical would
+        # lose the reason a handler is promoted at all -- the config
+        # author's own `promoted_handlers` list order, chosen so the
+        # most-triggered guidance reads first. That list is itself already
+        # a fixed, deterministic total order (an author-authored config
+        # value, not a filesystem walk), so using its index is no less
+        # deterministic than alphabetising and preserves author intent.
+        # Name is still the tiebreaker for an entry the order list somehow
+        # does not resolve (unreachable in practice: an entry only reaches
+        # `promoted` by matching something in that same list).
+        def _promoted_sort_key(entry: tuple[str, str, str]) -> tuple[int, str]:
+            name, _content, config_key = entry
+            order = self._promoted_handlers_order
+            for candidate in (config_key, name):
+                if candidate in order:
+                    return (order.index(candidate), name)
+            return (len(order), name)
+
+        promoted.sort(key=_promoted_sort_key)
+        progressive.sort(key=lambda item: item[0])
+        fallback.sort(key=lambda item: item[0])
+
+        return _CollectedTiers(
+            promoted=[(name, content) for name, content, _key in promoted],
+            progressive=progressive,
+            fallback=fallback,
+        )
 
     @staticmethod
     def _build_section(

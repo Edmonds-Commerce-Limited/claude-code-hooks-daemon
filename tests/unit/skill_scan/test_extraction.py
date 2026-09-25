@@ -38,12 +38,20 @@ def _write_jsonl(path: Path, lines: list[str]) -> None:
 
 class TestDeriveTranscriptDir:
     def test_slug_replaces_separators(self, tmp_path: Path) -> None:
-        result = derive_transcript_dir(Path("/workspace"), home=tmp_path)
-        assert result == tmp_path / ".claude" / "projects" / "-workspace"
+        result = derive_transcript_dir(Path("/workspace"), config_dir=tmp_path)
+        assert result == tmp_path / "projects" / "-workspace"
 
     def test_nested_path_slug(self, tmp_path: Path) -> None:
-        result = derive_transcript_dir(Path("/home/user/my-project"), home=tmp_path)
+        result = derive_transcript_dir(Path("/home/user/my-project"), config_dir=tmp_path)
         assert result.name == "-home-user-my-project"
+
+    def test_the_default_honours_claude_config_dir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Plan 00468 G13: transcripts live under ``$CLAUDE_CONFIG_DIR/projects``."""
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
+        result = derive_transcript_dir(Path("/workspace"))
+        assert result == tmp_path / "cfg" / "projects" / "-workspace"
 
 
 class TestExtractPrompts:

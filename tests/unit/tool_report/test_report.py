@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 
 from claude_code_hooks_daemon.tool_report.analyser import ToolUsage, UsageSummary
+from claude_code_hooks_daemon.tool_report.plugin_costs import PluginListingCost
 from claude_code_hooks_daemon.tool_report.report import (
     Tier,
     build_report,
@@ -124,3 +125,53 @@ class TestRendering:
         tools = {row["tool"] for row in parsed["rows"]}
         assert "Bash" in tools
         assert parsed["sessions_scanned"] == 4
+
+
+_DBF_COST = PluginListingCost(
+    plugin_id="defence-before-fix@defence-before-fix",
+    skills_listed=1,
+    skills_hidden=0,
+    agents_listed=2,
+    skill_chars=400,
+    agent_chars=700,
+)
+
+
+class TestPluginListingCosts:
+    """Plan 00468 G15: the report sums each enabled Claude Code plugin's
+    always-on listing cost, beside the per-tool schema costs."""
+
+    def test_the_report_carries_the_plugin_costs(self) -> None:
+        report = build_report(
+            _summary({}), never_want={}, low_use_max_calls=2, plugin_costs=(_DBF_COST,)
+        )
+        assert report.plugin_costs == (_DBF_COST,)
+
+    def test_markdown_has_a_row_per_plugin(self) -> None:
+        report = build_report(
+            _summary({}), never_want={}, low_use_max_calls=2, plugin_costs=(_DBF_COST,)
+        )
+        markdown = render_markdown(report)
+        assert "## Enabled Claude Code plugins" in markdown
+        assert "| defence-before-fix@defence-before-fix | 1 | 0 | 2 | 1100 | 275 |" in markdown
+        assert "MCP" in markdown
+
+    def test_markdown_says_so_when_no_plugin_is_enabled(self) -> None:
+        report = build_report(_summary({}), never_want={}, low_use_max_calls=2)
+        assert "No enabled Claude Code plugins" in render_markdown(report)
+
+    def test_json_carries_the_plugin_costs(self) -> None:
+        report = build_report(
+            _summary({}), never_want={}, low_use_max_calls=2, plugin_costs=(_DBF_COST,)
+        )
+        (row,) = report_to_json(report)["plugins"]
+        assert row == {
+            "plugin_id": "defence-before-fix@defence-before-fix",
+            "skills_listed": 1,
+            "skills_hidden": 0,
+            "agents_listed": 2,
+            "skill_chars": 400,
+            "agent_chars": 700,
+            "total_chars": 1100,
+            "estimated_tokens": 275,
+        }

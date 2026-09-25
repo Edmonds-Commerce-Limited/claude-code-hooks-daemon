@@ -168,3 +168,18 @@ rather than only matching syntax.
 
 - Motivated by Plan 00375 and the owner's ruling against deprecation windows:
   "i dont like delay - its over complex".
+- Reconciled with the upgrade-scripts redesign (Plan 00464 work), which
+  rewrites the same scripts; report:
+  `subagent-reports/260925-upgrade-reconcile-opus-5-5.md`. This plan's work
+  is PORTED onto main after upgrade-scripts lands, not rebased: the gate,
+  approval guard, CLI and UPGRADES docs are kept, and the gate runs in the
+  staged step 2 before the swap. Its Layer 1 launch, handoff, reset path and
+  second pass are dropped. Coordinator decisions, which the owner can
+  reverse (the report's Q1 to Q5, each at its recommended answer):
+  - Q1: a release follows the upgrade-scripts merge at once.
+  - Q2: the config merge is restored, from the backup's baseline.
+  - Q3: the printed step 2 is the sanitised `env -i` launch, and it is the
+    only shape the guard allows.
+  - Q4: a non-canonical origin is refused for agent-run upgrades, with a
+    human-run command printed.
+  - Q5: an unknown FROM version fails closed to owner approval.

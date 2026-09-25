@@ -111,7 +111,7 @@ class WriteClobberGuardHandler(PreToolUseHandlerBase):
 
     @staticmethod
     def _session_id(hook_input: dict[str, Any]) -> str:
-        session = hook_input.get("session_id")
+        session = hook_input.get(HookInputField.SESSION_ID)
         return session if isinstance(session, str) and session else _UNKNOWN_SESSION
 
     @staticmethod
@@ -125,7 +125,7 @@ class WriteClobberGuardHandler(PreToolUseHandlerBase):
         Normalised lexically so ``/a/b/../c`` and ``/a/c`` are one record: two
         spellings of one path name one file, and a mismatch costs a false deny.
         """
-        tool_input = hook_input.get("tool_input")
+        tool_input = hook_input.get(HookInputField.TOOL_INPUT)
         if not isinstance(tool_input, dict):
             return None
         path = tool_input.get("file_path")
@@ -155,7 +155,7 @@ class WriteClobberGuardHandler(PreToolUseHandlerBase):
             True for a Read, Edit or Write carrying a path.
         """
         return (
-            hook_input.get("tool_name") in _TRACKED_TOOLS
+            hook_input.get(HookInputField.TOOL_NAME) in _TRACKED_TOOLS
             and self._file_path(hook_input) is not None
         )
 
@@ -197,7 +197,7 @@ class WriteClobberGuardHandler(PreToolUseHandlerBase):
             rewrites a known file, DENY for a clobbering Write.
         """
         path = self._file_path(hook_input)
-        tool_name = hook_input.get("tool_name")
+        tool_name = hook_input.get(HookInputField.TOOL_NAME)
         if path is None or tool_name not in _TRACKED_TOOLS:
             return GatingResult(decision=Decision.ALLOW)
 

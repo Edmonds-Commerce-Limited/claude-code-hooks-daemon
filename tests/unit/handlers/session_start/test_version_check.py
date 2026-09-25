@@ -140,6 +140,25 @@ def test_cache_validity_expired_cache(handler: VersionCheckHandler, tmp_path: Pa
     assert handler._is_cache_valid(cache_file) is False
 
 
+def test_configured_cache_ttl_hours_is_honoured(
+    handler: VersionCheckHandler, tmp_path: Path
+) -> None:
+    """Plan 00466 N17: the option arrives as the registry delivers it.
+
+    It was read from a ``configure()`` dict production never fills, so a
+    configured TTL was ignored and the 24-hour default always applied.
+    """
+    from claude_code_hooks_daemon.handlers.registry import apply_handler_options
+
+    cache_file = tmp_path / "cache.json"
+    cache_file.write_text(json.dumps({"cached_at": time.time() - (2 * 3600)}))
+    assert handler._is_cache_valid(cache_file) is True
+
+    apply_handler_options(handler, {"cache_ttl_hours": 1})
+
+    assert handler._is_cache_valid(cache_file) is False
+
+
 def test_cache_validity_missing_cache(handler: VersionCheckHandler, tmp_path: Path) -> None:
     """Cache is invalid when file doesn't exist."""
     cache_file = tmp_path / "nonexistent.json"

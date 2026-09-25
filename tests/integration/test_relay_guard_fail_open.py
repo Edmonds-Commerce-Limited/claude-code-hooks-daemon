@@ -43,7 +43,16 @@ import pytest
 
 from claude_code_hooks_daemon.config.models import TransportConfig
 from claude_code_hooks_daemon.daemon.paths import _get_hostname_suffix
+from claude_code_hooks_daemon.daemon.synthetic_traffic import (
+    PROBE_AS_FIELD,
+    SYNTHETIC_SOURCE_FIELD,
+    TEST_PROBE,
+    ProbeThread,
+)
 from claude_code_hooks_daemon.install.forwarder_generator import generate_forwarder_content
+
+#: A probe sent through a hook forwarder is marked (Plan 00466 N12).
+_MAIN_PROBE = {SYNTHETIC_SOURCE_FIELD: TEST_PROBE, PROBE_AS_FIELD: ProbeThread.MAIN.value}
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _INIT_SH = _REPO_ROOT / ".claude" / "init.sh"
@@ -214,7 +223,9 @@ def test_daemon_down_relay_execs_fallback_and_reaches_daemon(
     canned = b'{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"ok"}}\n'
     server = _RecordingSocketServer(sock_path, canned)
     server.start()
-    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": "ls"}}).encode()
+    payload = json.dumps(
+        {"tool_name": "Bash", "tool_input": {"command": "ls"}, **_MAIN_PROBE}
+    ).encode()
 
     result = subprocess.run(
         ["bash", str(forwarder)],
@@ -273,7 +284,9 @@ def test_binary_missing_falls_through_to_legacy_path(
     canned = b'{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"ok"}}\n'
     server = _RecordingSocketServer(sock_path, canned)
     server.start()
-    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": "pwd"}}).encode()
+    payload = json.dumps(
+        {"tool_name": "Bash", "tool_input": {"command": "pwd"}, **_MAIN_PROBE}
+    ).encode()
 
     result = subprocess.run(
         ["bash", str(forwarder)],
@@ -325,7 +338,9 @@ def test_nc_missing_falls_back_to_python3_transport(
     canned = b'{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"ok"}}\n'
     server = _RecordingSocketServer(sock_path, canned)
     server.start()
-    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": "echo hi"}}).encode()
+    payload = json.dumps(
+        {"tool_name": "Bash", "tool_input": {"command": "echo hi"}, **_MAIN_PROBE}
+    ).encode()
 
     env = _base_env(sock_path, live_pid_file)
     shim_dir = _make_broken_nc_dir(tmp_path)
@@ -365,7 +380,9 @@ def test_nc_capability_flag_unset_skips_nc_rung(
     canned = b'{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"ok"}}\n'
     server = _RecordingSocketServer(sock_path, canned)
     server.start()
-    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": "true"}}).encode()
+    payload = json.dumps(
+        {"tool_name": "Bash", "tool_input": {"command": "true"}, **_MAIN_PROBE}
+    ).encode()
 
     env = _base_env(sock_path, live_pid_file)
     env.pop("HOOKS_DAEMON_NC_UNIX_CAPABLE", None)
@@ -439,7 +456,7 @@ def test_nc_rung_round_trip_completes_promptly(live_pid_file: Path) -> None:
         server.start()
 
         payload = json.dumps(
-            {"tool_name": "Bash", "tool_input": {"command": "nc-roundtrip"}}
+            {"tool_name": "Bash", "tool_input": {"command": "nc-roundtrip"}, **_MAIN_PROBE}
         ).encode()
         env = _base_env(short_root / "no-such-legacy-daemon.sock", live_pid_file)
         env["HOOKS_DAEMON_NC_UNIX_CAPABLE"] = "1"
@@ -501,7 +518,11 @@ def test_nc_rung_honours_events_dir_env_override(live_pid_file: Path) -> None:
         # find nothing there and fall through to the legacy socket instead
         # of silently "succeeding" via the wrong path.
         payload = json.dumps(
-            {"tool_name": "Bash", "tool_input": {"command": "env-override-roundtrip"}}
+            {
+                "tool_name": "Bash",
+                "tool_input": {"command": "env-override-roundtrip"},
+                **_MAIN_PROBE,
+            }
         ).encode()
         env = _base_env(short_root / "no-such-legacy-daemon.sock", live_pid_file)
         env["HOOKS_DAEMON_NC_UNIX_CAPABLE"] = "1"
@@ -559,7 +580,9 @@ def test_no_relay_reentry_skips_own_guard(
         canned = b'{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"ok"}}\n'
         server = _RecordingSocketServer(sock_path, canned)
         server.start()
-        payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": "reentry"}}).encode()
+        payload = json.dumps(
+            {"tool_name": "Bash", "tool_input": {"command": "reentry"}, **_MAIN_PROBE}
+        ).encode()
 
         env = _base_env(sock_path, live_pid_file)
         # Test-isolation fix (Plan 00290 Phase 6 dogfood finding): redirect
@@ -690,7 +713,9 @@ def test_env_override_redirects_relay_away_from_baked_default(
     server = _RecordingSocketServer(override_events_dir / "pre-tool-use.sock", canned)
     server.start()
 
-    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": "override-me"}}).encode()
+    payload = json.dumps(
+        {"tool_name": "Bash", "tool_input": {"command": "override-me"}, **_MAIN_PROBE}
+    ).encode()
     env = _base_env(sock_path, live_pid_file)  # legacy socket deliberately unreachable
     env["HOOKS_DAEMON_EVENTS_DIR"] = str(override_events_dir)
 
@@ -730,7 +755,7 @@ def test_env_override_absent_falls_through_to_legacy(
     server = _RecordingSocketServer(sock_path, canned)
     server.start()
     payload = json.dumps(
-        {"tool_name": "Bash", "tool_input": {"command": "no-override-sock"}}
+        {"tool_name": "Bash", "tool_input": {"command": "no-override-sock"}, **_MAIN_PROBE}
     ).encode()
 
     env = _base_env(sock_path, live_pid_file)
