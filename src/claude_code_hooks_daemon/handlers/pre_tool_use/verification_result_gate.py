@@ -234,7 +234,16 @@ class VerificationResultGateHandler(PreToolUseHandlerBase):
             handler_id=HandlerID.VERIFICATION_RESULT_GATE,
             priority=Priority.VERIFICATION_RESULT_GATE,
             terminal=False,
-            tags=[HandlerTag.VALIDATION, HandlerTag.QA_ENFORCEMENT, HandlerTag.NON_TERMINAL],
+            # Plan 00466 n24 security review, M3: a heuristic pattern
+            # detector that, by its own docstring, is expected to be
+            # imperfect -- an explicit, deliberate opt-out from structural
+            # fail-closed, not an oversight.
+            tags=[
+                HandlerTag.VALIDATION,
+                HandlerTag.QA_ENFORCEMENT,
+                HandlerTag.NON_TERMINAL,
+                HandlerTag.ADVISORY,
+            ],
         )
         # Config options: set via setattr AFTER __init__.
         self._mode: str = _MODE_WARN

@@ -123,7 +123,15 @@ class StagedLintGateHandler(PreToolUseHandlerBase):
             handler_id=HandlerID.STAGED_LINT_GATE,
             priority=Priority.STAGED_LINT_GATE,
             terminal=False,
-            tags=[HandlerTag.VALIDATION, HandlerTag.QA_ENFORCEMENT, HandlerTag.GIT],
+            # Plan 00466 n24 security review, M3: a lint QA gate, not a
+            # dangerous-action guard -- an explicit, deliberate opt-out from
+            # structural fail-closed, not an oversight.
+            tags=[
+                HandlerTag.VALIDATION,
+                HandlerTag.QA_ENFORCEMENT,
+                HandlerTag.GIT,
+                HandlerTag.ADVISORY,
+            ],
         )
         self._registry = LintStrategyRegistry.create_default()
         # Config options: set via setattr AFTER __init__.

@@ -108,7 +108,16 @@ class BashSafeModeHandler(PreToolUseHandlerBase):
             handler_id=HandlerID.BASH_SAFE_MODE,
             priority=Priority.BASH_SAFE_MODE,
             terminal=False,
-            tags=[HandlerTag.VALIDATION, HandlerTag.QA_ENFORCEMENT, HandlerTag.NON_TERMINAL],
+            # Plan 00466 n24 security review, M3: opt-in, ships disabled by
+            # default, carries its own escape hatch -- an explicit,
+            # deliberate opt-out from structural fail-closed, not an
+            # oversight.
+            tags=[
+                HandlerTag.VALIDATION,
+                HandlerTag.QA_ENFORCEMENT,
+                HandlerTag.NON_TERMINAL,
+                HandlerTag.ADVISORY,
+            ],
         )
         # Config options: applied by blind setattr AFTER __init__. `_mode` is
         # a property so an unsupported value is rejected AT LOAD, inside the

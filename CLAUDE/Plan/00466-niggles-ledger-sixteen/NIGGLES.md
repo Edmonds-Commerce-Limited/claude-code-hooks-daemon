@@ -211,10 +211,53 @@ symlink to `../init.sh`, so no separate deploy-sync step was needed.
   when the straggler FINISHES, not when the caller gives up; enough
   concurrent stragglers deny every PreToolUse call with no way out short of
   a manual restart (and the restart command is itself a PreToolUse call).
-- **M3** — fail-closed-on-raise is TAG-dependent (SAFETY+BLOCKING); several
-  handlers that can genuinely deny (`curl_pipe_shell`, `dangerous_permissions`,
-  `sudo_pip`, `pip_break_system`, `lock_file_edit`, +more) carry neither tag
-  and so fail OPEN on a raise/timeout/saturation.
+  **M3 — ✅ Remedied (narrowed scope).** Fail-closed-on-raise was TAG-dependent
+  (`chain.py`'s `_record_unjudged` requires both `HandlerTag.SAFETY` and
+  `HandlerTag.BLOCKING`), and the review found 19 PreToolUse handlers that can
+  genuinely deny but carried neither. Of those, 14 were COMPLETELY untagged
+  (no fail-closed-relevant decision had ever been made about them at all);
+  the other 5 (`enforce-tdd`, `qa-suppression-blocker`, `plan-*`, and 19 more
+  across the whole tree) already carry `BLOCKING` alone, which reads as a
+  deliberate-if-incomplete choice rather than an oversight — auditing that
+  much larger 22-handler bucket one-by-one was judged out of scope for this
+  niggle (see the follow-up note below) rather than rushed alongside the
+  other review items still open.
+
+Of the 14 completely-untagged handlers: 6 are now `HandlerTag.SAFETY` +
+`HandlerTag.BLOCKING` — `artifact_publish_blocker` (irreversible external
+disclosure), `curl_pipe_shell`/`dangerous_permissions`/`sudo_pip`/
+`pip_break_system`/`lock_file_edit_blocker` (team-lead's explicit list: RCE,
+privilege escalation, system Python corruption, dependency-hash tampering).
+The other 8 are workflow/QA gates, not dangerous-action guards, and are now
+explicitly `HandlerTag.ADVISORY` (a deliberate, commented opt-out rather
+than a silent gap): `ask_user_question_blocker`, `bash_safe_mode` (ships
+disabled by default, has its own escape hatch), `docs_qa_commit_gate`,
+`docs_qa_edit`, `plan_qa_commit_gate`, `staged_lint_gate`,
+`validate_instruction_content`, `verification_result_gate` (a heuristic
+detector, imperfect by its own docstring).
+
+New registry test, `tests/unit/handlers/test_pretooluse_fail_closed_tagging.py`:
+parametrised over every `pre_tool_use` handler, source-inspects each for a
+deny signal (`HookResult.deny`/`Decision.DENY`/`Decision.BLOCK` — the same
+heuristic the review's own enumeration probe used), and fails any COMPLETELY
+untagged denier that carries neither `SAFETY`+`BLOCKING` nor `ADVISORY` —
+opt-out-not-opt-in, so a NEW handler in this state fails the suite instead
+of the gap growing silently. Deliberately does not flag the pre-existing
+`BLOCKING`-only bucket (out of this niggle's narrowed scope, see above).
+RED confirmed first (exactly the 14 named above failed, nothing else).
+Full `pre_tool_use`/registry/chain regression stays green (4167 passed).
+
+**Follow-up recorded, not done here:** a full audit of the 22-handler
+`BLOCKING`-without-`SAFETY` bucket (`enforce-tdd`, `qa-suppression-blocker`,
+`plan-qa-edit`, `comment_size`, `comment_changelog`, `dispatch_declaration`,
+`merge_to_main_approval`, `plan_close_approval`, `plan_time_estimates`,
+`reference_repo_freshness`, `remote_docs_*`, `require_gh_*_comments`,
+`enforce_lsp_usage`, `enforce_markdown_organization`, and others) — deciding
+per-handler whether each should become `SAFETY`+`BLOCKING` or explicitly
+`ADVISORY` — is real work this niggle did not do. A follow-up plan/niggle
+should run the same registry-test technique with the "already has BLOCKING"
+early-return removed, and work through the resulting list.
+
 - **m1** (thread-per-handler overhead, ~12ms measured) — collapse to one
   worker thread per EVENT running the whole chain inline.
 - **m2** (stragglers mutating shared state after the verdict already

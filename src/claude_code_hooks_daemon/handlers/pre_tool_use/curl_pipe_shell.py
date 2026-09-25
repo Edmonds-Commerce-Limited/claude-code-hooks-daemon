@@ -8,7 +8,7 @@ a common vector for malware and system compromise.
 import re
 from typing import Any
 
-from claude_code_hooks_daemon.constants import HookInputField
+from claude_code_hooks_daemon.constants import HandlerTag, HookInputField
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
@@ -137,6 +137,10 @@ class CurlPipeShellHandler(PreToolUseHandlerBase):
             handler_id=HandlerID.CURL_PIPE_SHELL,
             priority=Priority.CURL_PIPE_SHELL,
             terminal=True,
+            # Plan 00466 n24 security review, M3: remote code execution with
+            # no inspection opportunity -- structurally fail-closed, not
+            # just BLOCKING.
+            tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING],
         )
         self._rule = Rule(
             rule_id=RuleID.CURL_PIPE_SHELL,

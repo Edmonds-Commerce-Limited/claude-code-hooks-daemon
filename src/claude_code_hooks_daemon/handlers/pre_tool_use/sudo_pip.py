@@ -8,7 +8,7 @@ and break system tools.
 import re
 from typing import Any
 
-from claude_code_hooks_daemon.constants import HookInputField
+from claude_code_hooks_daemon.constants import HandlerTag, HookInputField
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.paths import ProjectPath
 from claude_code_hooks_daemon.constants.priority import Priority
@@ -72,6 +72,10 @@ class SudoPipHandler(PreToolUseHandlerBase):
             handler_id=HandlerID.SUDO_PIP,
             priority=Priority.SUDO_PIP,
             terminal=True,
+            # Plan 00466 n24 security review, M3: can corrupt the system
+            # Python installation -- structurally fail-closed, not just
+            # BLOCKING.
+            tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING],
         )
         self._rule = Rule(
             rule_id=RuleID.SUDO_PIP_INSTALL,

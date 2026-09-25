@@ -77,10 +77,14 @@ class PlanQaCommitGateHandler(PreToolUseHandlerBase):
             handler_id=HandlerID.PLAN_QA_COMMIT_GATE,
             priority=Priority.PLAN_QA_COMMIT_GATE,
             terminal=False,
+            # Plan 00466 n24 security review, M3: a plan-QA gate, not a
+            # dangerous-action guard -- an explicit, deliberate opt-out from
+            # structural fail-closed, not an oversight.
             tags=[
                 HandlerTag.PLANNING,
                 HandlerTag.VALIDATION,
                 HandlerTag.GIT,
+                HandlerTag.ADVISORY,
             ],
         )
         # Injected by the registry for PLANNING-tagged handlers.

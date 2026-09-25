@@ -146,7 +146,11 @@ class AskUserQuestionBlockerHandler(PreToolUseHandlerBase):
         super().__init__(
             handler_id=HandlerID.ASK_USER_QUESTION_BLOCKER,
             priority=Priority.ASK_USER_QUESTION_BLOCKER,
-            tags=[HandlerTag.WORKFLOW, HandlerTag.TERMINAL],
+            # Plan 00466 n24 security review, M3: a workflow convention gate
+            # (declare-before-ask), not a dangerous-action guard -- an
+            # explicit, deliberate opt-out from structural fail-closed, not
+            # an oversight.
+            tags=[HandlerTag.WORKFLOW, HandlerTag.TERMINAL, HandlerTag.ADVISORY],
         )
         self._formatter = RuleFormatter()
 

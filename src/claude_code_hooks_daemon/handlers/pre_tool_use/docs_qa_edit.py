@@ -96,10 +96,14 @@ class DocsQaEditHandler(PreToolUseHandlerBase):
             handler_id=HandlerID.DOCS_QA_EDIT,
             priority=Priority.DOCS_QA_EDIT,
             terminal=False,
+            # Plan 00466 n24 security review, M3: a docs-QA gate, not a
+            # dangerous-action guard -- an explicit, deliberate opt-out from
+            # structural fail-closed, not an oversight.
             tags=[
                 HandlerTag.DOCUMENTATION,
                 HandlerTag.VALIDATION,
                 HandlerTag.CONTENT_QUALITY,
+                HandlerTag.ADVISORY,
             ],
         )
         # Injected by the registry for DOCUMENTATION-tagged handlers.
