@@ -981,7 +981,7 @@ tests were computed by running that JavaScript under node.
   skill_scan named the wrong directory), `TestProjectDirName`,
   `TestClaudeProjectDir`, and a
   `test_a_missing_derived_directory_is_named_on_stderr` test in both cli
-  report test files. Release note 36.
+  report test files. Release note 39.
 
 ### N26 — ✅ Remedied — `check_skill_references.py` scans zero files when run from a worktree
 
@@ -1046,7 +1046,7 @@ file whose path contains a noise-directory name such as `untracked` or
 
 - **Existing tests.** The exclusion tests that asserted `passed` over a tree
   holding only the excluded file (the vacuous shape itself) now scan a clean
-  companion file and assert the examined count. Release note 37.
+  companion file and assert the examined count. Release note 40.
 
 The other 10 walkers are worktree-safe, and are pinned by the integration
 test rather than given their own zero guard.
@@ -1100,7 +1100,7 @@ test rather than given their own zero guard.
     `audit_error_hiding`.
 
   Tests that asserted a pass over a tree with nothing to scan now add a clean
-  scanned file, or assert the failure. Release note 37.
+  scanned file, or assert the failure. Release note 40.
 
 - **`.git` and nested checkouts.** In `--path` mode, `check_sensitive_content`
   walked the tree with a raw `rglob("*")`. That read `.git` internals (commit
@@ -1510,7 +1510,7 @@ together on the same branch:
   some OTHER live plan. A session that already has its own live goal is
   unaffected. Pinned by three new tests in
   `TestNewSessionReassertion` (one RED against the pre-fix code) plus
-  three new `GoalLedger` test classes. Release note 13 and the module
+  three new `GoalLedger` test classes. Release note 65 and the module
   docstring corrected to describe the restored contract instead of
   claiming no behaviour changed.
 - **m4 — an Edit whose `old_string` carried only the bare status VALUE
@@ -1548,7 +1548,7 @@ together on the same branch:
   review itself called this "only reachable uninitialised", i.e. never on
   the real dispatch path, so the two conventions differing is intentional
   per the first review's explicit design, not an oversight.
-- **n7 — release note 13's title said "already-terminal-status"; In
+- **n7 — release note 65's title said "already-terminal-status"; In
   Progress is not terminal.** Corrected to match the filename's wording.
 
 `TestStatusFlipDetection`, `TestCombinedGoalSignal`,
@@ -1644,7 +1644,7 @@ AGAINST each other — fixed together with an ownership schema change:
   earlier `.handlers` access fails loudly instead of silently passing for
   the wrong reason.
 
-Release note 13 and the module/class docstrings corrected again to
+Release note 65 and the module/class docstrings corrected again to
 describe the ADDITIVE ownership and per-daemon-lifetime reassert latch
 instead of the second pass's (now superseded) single-owner transfer.
 
@@ -1739,7 +1739,7 @@ RV3-n1/n3/n4)**, fixed together:
   reverted it to a propagating raise; two mentions of a
   `_session_ledgered_plan` method that was never actually named that; the
   RV-m1 bullet's "pinned by two RED tests" claim for `replace_all` (see
-  RV3-m1 above); release note 13's three over-claims (see the note itself).
+  RV3-m1 above); release note 65's three over-claims (see the note itself).
   This entry's status is held at 🔄 until this pass lands.
 - **RV3-m8 — a non-UTF-8 PLAN.md of any LIVE ledgered plan crashed the
   handler, on more paths than the ledger-file case review RV-m5 already
@@ -1987,7 +1987,7 @@ RV4-n1 through RV4-n7)**, fixed together (report:
   session ever handed a plan's goal keeps its own claim" was an overclaim
   past the owner cap even before RV4-M1; reworded to describe the
   pinned-primary-owner/FIFO-capped-absorbed-owners model precisely.
-  Release note 13 updated: the terminal-drop claim now names the
+  Release note 65 updated: the terminal-drop claim now names the
   completing session's own guaranteed inclusion; the cap description now
   names the primary-owner exemption; the "can no longer be misread either
   way" claim is now scoped to "while that snapshot is trusted", with the
@@ -2248,7 +2248,7 @@ majors, 6 minors, 5 nits, all fixed with a RED test first for each:**
   only `session_id` and `transcript_path`; no parent/previous-session
   field is documented anywhere. So there is genuinely nothing to key a
   fix on without fabricating a link the daemon cannot verify — a fix here
-  would be a guess dressed as a fix. Corrected release note 13's "can
+  would be a guess dressed as a fix. Corrected release note 65's "can
   never evict the one session that most needs its own signal refreshed"
   claim to name this limitation precisely (the pin is keyed on the
   flipping session's OWN id, not a resumed one), rather than either
@@ -2259,15 +2259,15 @@ majors, 6 minors, 5 nits, all fixed with a RED test first for each:**
   handing `primary_owner` to the re-emitter), addressed separately — see
   the dedicated entry below.
 - **RV5-m6 — doc over-claims, several distinct ones, each corrected
-  where found rather than in one place:** (1) release note 13's snapshot
+  where found rather than in one place:** (1) release note 65's snapshot
   match-check description updated for RV5-M2's forward-prediction design
   (was: "a content hash of the text it read"; now: "a content hash of
   the text it PREDICTS ... will produce", with the no-time-bound
-  behaviour stated explicitly). (2) release note 13's terminal-drop
+  behaviour stated explicitly). (2) release note 65's terminal-drop
   bullet reworded to drop RV4-M1's now-REMOVED "including the completing
   session itself, always, even ... the ledger's own owner set does not
   (yet) name it" claim (RV5-M1 removed that behaviour) and to describe
-  RV5-m4's batched cross-plan ownership instead. (3) release note 13's
+  RV5-m4's batched cross-plan ownership instead. (3) release note 65's
   cap description corrected per RV5-m3/K3 above. (4) `NIGGLES.md`'s own
   RV4-m3/RV4-m7 entries corrected in place, above — see the two
   "Correction (this claim was wrong when first written)" notes. (5)
@@ -2379,7 +2379,7 @@ majors, 6 minors, 5 nits, all fixed with a RED test first for each:**
   needing no reconstruction for any tool shape, not about detecting every
   race uniformly — the claim was imprecise, not the design. Corrected in
   `_snapshot_is_fresh`'s own docstring
-  (`handlers/post_tool_use/goal_injection.py`), release note 13, and the
+  (`handlers/post_tool_use/goal_injection.py`), release note 65, and the
   RV5-M2 NIGGLES entry above (this file).
 - **RV6-m3 — the "narrow window" framing for `goal_injection`'s inference
   fallback undersold it in three places.** Besides a daemon restart
