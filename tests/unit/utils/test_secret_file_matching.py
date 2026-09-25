@@ -1696,6 +1696,101 @@ class TestBraceExpansionBeforeTokenising:
         assert result is not None
 
 
+class TestBraceSequenceExpansion:
+    """n466-n24 review 4, M-1: a brace SEQUENCE (`{start..end[..step]}`) is
+    a DIFFERENT syntax from the comma alternation above, and was not
+    covered by it at all -- `_raw_brace_expansions` read the whole `a..a`
+    body as one literal comma-free alternative, so `id_rs{a..a}` spelled
+    `id_rsa..a`, not `id_rsa`."""
+
+    def test_degenerate_alpha_sequence_still_denies(self) -> None:
+        result = sfm.find_protected_mention_detail(
+            "cat id_rs{a..a}", sfm.DEFAULT_PROTECTED_PATTERNS
+        )
+        assert result is not None
+
+    def test_a_real_alpha_range_reaching_the_name_still_denies(self) -> None:
+        result = sfm.find_protected_mention_detail(
+            "cat id_rs{y..a}", sfm.DEFAULT_PROTECTED_PATTERNS
+        )
+        assert result is not None
+
+    def test_degenerate_numeric_sequence_reaching_a_project_pattern(self) -> None:
+        result = sfm.find_protected_mention_detail(
+            "cat file{9..9}.mysecretfile", ("*.mysecretfile",)
+        )
+        assert result is not None
+
+    def test_an_unrelated_sequence_is_not_denied(self) -> None:
+        result = sfm.find_protected_mention_detail(
+            "cat file{1..5}.txt", sfm.DEFAULT_PROTECTED_PATTERNS
+        )
+        assert result is None
+
+    def test_a_huge_numeric_sequence_fails_closed(self) -> None:
+        with pytest.raises(TooManyToEnumerateError):
+            sfm.find_protected_mention_detail(
+                "cat id_rs{1..100000}", sfm.DEFAULT_PROTECTED_PATTERNS
+            )
+
+
+class TestShellWordNormalisation:
+    """n466-n24 review 4, M-1: the class behind `id_rs{a..a}` and
+    `id_rs{'a',x}` reaching a protected name -- quote removal, adjacency
+    concatenation, backslash escapes, ANSI-C `$'...'`, and an unresolvable
+    substitution ($VAR/${...}/$(...)/backtick/$((...))) collapsed to a
+    single `*` so the word is judged as a glob instead of silently losing
+    the substitution's contribution."""
+
+    def test_double_quote_adjacency_concatenation_still_denies(self) -> None:
+        result = sfm.find_protected_mention_detail('cat id_"rs"a', sfm.DEFAULT_PROTECTED_PATTERNS)
+        assert result is not None
+
+    def test_single_quote_adjacency_concatenation_still_denies(self) -> None:
+        result = sfm.find_protected_mention_detail("cat i'd'_rsa", sfm.DEFAULT_PROTECTED_PATTERNS)
+        assert result is not None
+
+    def test_brace_alternative_carrying_a_quote_still_denies(self) -> None:
+        result = sfm.find_protected_mention_detail(
+            "cat id_rs{'a',x}", sfm.DEFAULT_PROTECTED_PATTERNS
+        )
+        assert result is not None
+
+    def test_backslash_escape_still_denies(self) -> None:
+        result = sfm.find_protected_mention_detail("cat id_rs\\a", sfm.DEFAULT_PROTECTED_PATTERNS)
+        assert result is not None
+
+    def test_ansi_c_hex_escape_still_denies(self) -> None:
+        result = sfm.find_protected_mention_detail(
+            "cat id_rs$'\\x61'", sfm.DEFAULT_PROTECTED_PATTERNS
+        )
+        assert result is not None
+
+    def test_dollar_var_unknown_suffix_becomes_a_glob_and_still_denies(self) -> None:
+        result = sfm.find_protected_mention_detail("cat id_rs$x", sfm.DEFAULT_PROTECTED_PATTERNS)
+        assert result is not None
+
+    def test_command_substitution_naming_the_file_still_denies(self) -> None:
+        result = sfm.find_protected_mention_detail(
+            "cat ~/.ssh/$(echo id_rsa)", sfm.DEFAULT_PROTECTED_PATTERNS
+        )
+        assert result is not None
+
+    def test_double_quoted_var_plus_trailing_glob_still_denies(self) -> None:
+        result = sfm.find_protected_mention_detail(
+            'cat "$HOME"/.ssh/id_rs*', sfm.DEFAULT_PROTECTED_PATTERNS
+        )
+        assert result is not None
+
+    def test_an_ordinary_dollar_var_path_is_not_denied(self) -> None:
+        """The fail-closed direction only fires when a match is genuinely
+        POSSIBLE -- an ordinary $VAR-rooted path must stay allowed."""
+        result = sfm.find_protected_mention_detail(
+            "cat $SOME_CONFIG_DIR/readme.txt", sfm.DEFAULT_PROTECTED_PATTERNS
+        )
+        assert result is None
+
+
 class TestBothEdgesFilesystemTruthRoute:
     """M2c (Plan 00466 guard-defects review 2): a both-edges pattern
     (``*.secret*``, ``*vault_pass*``) asserts only "contains this text

@@ -75,6 +75,87 @@ DEFAULT_MAX_BRACE_DEPTH: Final[int] = 64
 #: job).
 DEFAULT_MAX_BRACE_WORDS: Final[int] = 500
 
+#: A brace SEQUENCE body (`{start..end[..step]}`, n466-n24 review 4 M-1): a
+#: degenerate single-letter sequence with start == end names a real
+#: protected filename this way (a real review-4 finding, not a synthetic
+#: example), and was reaching NOTHING before this -- the pre-existing
+#: comma-split treated the whole body as one literal alternative, so
+#: `{a..a}` spelled the literal text `a..a`, not the single letter `a`.
+#: Both endpoints must be the SAME kind (both digits, or both a single
+#: letter) -- bash does not mix them, and neither does this.
+_SEQUENCE_RE: Final[re.Pattern[str]] = re.compile(
+    r"^(?P<start>-?\d+|[A-Za-z])\.\.(?P<end>-?\d+|[A-Za-z])(?:\.\.(?P<step>-?\d+))?$"
+)
+
+
+def _sequence_alternatives(body: str) -> Iterator[str] | None:
+    """Lazy alternatives for a brace SEQUENCE body, or ``None`` when ``body``
+    is not sequence-shaped -- the caller falls back to a comma split.
+
+    Lazy (a generator, not a materialised list) is the point: a huge span
+    (``{1..100000}``) must fail closed via the SAME ``max_spellings`` cap
+    :func:`expand_braces` already enforces on its ``islice``, not by
+    building the full list first. A ``range``-driven generator costs O(1)
+    to construct regardless of how wide the sequence is, so the cap is
+    cheap even for a huge span.
+    """
+    match = _SEQUENCE_RE.match(body)
+    if match is None:
+        return None
+    start_s, end_s, step_s = match.group("start"), match.group("end"), match.group("step")
+    if start_s.lstrip("-").isdigit() and end_s.lstrip("-").isdigit():
+        return _numeric_sequence(start_s, end_s, step_s)
+    if len(start_s) == 1 and len(end_s) == 1 and start_s.isalpha() and end_s.isalpha():
+        return _alpha_sequence(start_s, end_s, step_s)
+    return None
+
+
+def _numeric_sequence(start_s: str, end_s: str, step_s: str | None) -> Iterator[str] | None:
+    start, end = int(start_s), int(end_s)
+    if step_s is not None:
+        if not re.fullmatch(r"-?\d+", step_s) or int(step_s) == 0:
+            return None
+        magnitude = abs(int(step_s))
+    else:
+        magnitude = 1
+    step = magnitude if end >= start else -magnitude
+    # bash zero-pads every element to the widest endpoint WHEN either
+    # endpoint literally carries a leading zero (`{01..10}` -> 01..10;
+    # `{1..10}` does not pad).
+    width = 0
+    for literal in (start_s, end_s):
+        digits = literal[1:] if literal.startswith("-") else literal
+        if len(digits) > 1 and digits.startswith("0"):
+            width = max(width, len(digits))
+
+    def _gen() -> Iterator[str]:
+        n = start
+        while (n <= end) if step > 0 else (n >= end):
+            digits = str(abs(n)).rjust(width, "0")
+            yield f"-{digits}" if n < 0 else digits
+            n += step
+
+    return _gen()
+
+
+def _alpha_sequence(start_s: str, end_s: str, step_s: str | None) -> Iterator[str] | None:
+    if step_s is not None:
+        if not re.fullmatch(r"-?\d+", step_s) or int(step_s) == 0:
+            return None
+        magnitude = abs(int(step_s))
+    else:
+        magnitude = 1
+    start_ord, end_ord = ord(start_s), ord(end_s)
+    step = magnitude if end_ord >= start_ord else -magnitude
+
+    def _gen() -> Iterator[str]:
+        n = start_ord
+        while (n <= end_ord) if step > 0 else (n >= end_ord):
+            yield chr(n)
+            n += step
+
+    return _gen()
+
 
 def _raw_brace_expansions(word: str, *, depth: int, max_depth: int) -> Iterator[str]:
     """Lazy, unbounded-in-principle brace expansion of ``word``'s OWN groups.
@@ -94,7 +175,11 @@ def _raw_brace_expansions(word: str, *, depth: int, max_depth: int) -> Iterator[
         yield word
         return
     prefix, suffix = word[: match.start()], word[match.end() :]
-    for alternative in match.group(1).split(","):
+    body = match.group(1)
+    alternatives = _sequence_alternatives(body)
+    if alternatives is None:
+        alternatives = iter(body.split(","))
+    for alternative in alternatives:
         yield from _raw_brace_expansions(
             prefix + alternative + suffix, depth=depth + 1, max_depth=max_depth
         )
@@ -172,6 +257,284 @@ def iter_brace_words(text: str, *, max_words: int = DEFAULT_MAX_BRACE_WORDS) -> 
             end += 1
         last_end = end
         yield text[start:end]
+
+
+# ── Word normalisation (quotes, escapes, unresolved substitutions) ──────────
+#
+# n466-n24 review 4, M-1: brace expansion alone is not the whole "what could
+# this WORD really spell" class. A shell strips quotes and backslash escapes
+# and concatenates the pieces into ONE word before anything else sees it, so
+# a mention scan that keys on the RAW text (quote characters as plain token
+# delimiters, as `secret_file_matching._tokenise` does) tears a legitimately
+# assembled word apart before any spelling can be recognised -- the same
+# defect class `TestBraceExpansionBeforeTokenising` fixed for `,`. And a part
+# of a word this cannot resolve without actually RUNNING a shell (`$VAR`,
+# `${...}`, `$(...)`, a backtick, `$((...))`) must not be silently dropped
+# either: turning it into a single `*` makes the WHOLE word a glob, so the
+# caller's existing glob-intersection machinery (`_globs_can_intersect`) can
+# still judge whether it could reach a protected path -- denying only when a
+# match is genuinely POSSIBLE, so an ordinary `$VAR`-rooted path stays
+# allowed.
+
+#: Words yielded per call to :func:`iter_normalised_shell_words` -- bounds
+#: the volume cost of a command built from many separate words, the same
+#: direction :data:`DEFAULT_MAX_BRACE_WORDS` bounds for brace groups.
+DEFAULT_MAX_NORMALISED_WORDS: Final[int] = 2000
+
+#: Characters that end a shell WORD when found UNQUOTED. Mirrors
+#: ``secret_file_matching._TOKEN_DELIMITERS``'s operator set, minus the
+#: quote/``$``/backtick characters this module decodes instead of discarding.
+_WORD_SEPARATOR_CHARS: Final[str] = " \t\n;|&<>()"
+
+#: ANSI-C (`$'...'`) single-character escapes with no numeric argument.
+_ANSI_C_SIMPLE_ESCAPES: Final[dict[str, str]] = {
+    "a": "\a",
+    "b": "\b",
+    "e": "\x1b",
+    "f": "\f",
+    "n": "\n",
+    "r": "\r",
+    "t": "\t",
+    "v": "\v",
+    "\\": "\\",
+    "'": "'",
+    '"': '"',
+    "?": "?",
+}
+
+
+def _decode_ansi_c_body(body: str) -> str:
+    """Decode a ``$'...'`` ANSI-C-quoted body's backslash escapes: the
+    simple single-character forms above, ``\\xHH`` (1-2 hex digits),
+    ``\\NNN`` (1-3 octal digits), ``\\uHHHH`` and ``\\UHHHHHHHH`` (1-4/1-8
+    hex digits). An escape this does not recognise keeps both the
+    backslash and the following character, bash's own behaviour for one it
+    does not know either.
+    """
+    out: list[str] = []
+    i = 0
+    n = len(body)
+    while i < n:
+        ch = body[i]
+        if ch != "\\" or i + 1 >= n:
+            out.append(ch)
+            i += 1
+            continue
+        nxt = body[i + 1]
+        if nxt in _ANSI_C_SIMPLE_ESCAPES:
+            out.append(_ANSI_C_SIMPLE_ESCAPES[nxt])
+            i += 2
+        elif nxt == "x":
+            match = re.match(r"[0-9A-Fa-f]{1,2}", body[i + 2 : i + 4])
+            if match:
+                out.append(chr(int(match.group(0), 16)))
+                i += 2 + len(match.group(0))
+            else:
+                out.append(ch)
+                i += 1
+        elif nxt in "01234567":
+            match = re.match(r"[0-7]{1,3}", body[i + 1 : i + 4])
+            assert match is not None  # nxt itself is already an octal digit
+            out.append(chr(int(match.group(0), 8) & 0xFF))
+            i += 1 + len(match.group(0))
+        elif nxt in "uU":
+            width = 4 if nxt == "u" else 8
+            match = re.match(rf"[0-9A-Fa-f]{{1,{width}}}", body[i + 2 : i + 2 + width])
+            if match:
+                out.append(chr(int(match.group(0), 16)))
+                i += 2 + len(match.group(0))
+            else:
+                out.append(ch)
+                i += 1
+        else:
+            out.append(ch)
+            out.append(nxt)
+            i += 2
+    return "".join(out)
+
+
+#: A `$name` bareword: an identifier, or one of the single-character
+#: special parameters (`$1`, `$@`, `$?`, `$$`, `$!`, `$#`, `$-`, `$*`, `$0`).
+_DOLLAR_VAR_NAME_RE: Final[re.Pattern[str]] = re.compile(r"[A-Za-z_][A-Za-z0-9_]*|[0-9@*?$!#-]")
+
+
+def _consume_balanced(text: str, start: int, open_ch: str, close_ch: str) -> int:
+    """``text[start] == open_ch``: the index just past the MATCHING
+    ``close_ch``, tracking nesting depth (handles `$((...))` as two nested
+    `(`/`)` pairs for free). Unterminated input returns ``len(text)`` --
+    consuming to the end rather than looping, so a malformed substitution
+    can never cause a caller to revisit already-scanned bytes.
+    """
+    depth = 0
+    i = start
+    n = len(text)
+    while i < n:
+        if text[i] == open_ch:
+            depth += 1
+        elif text[i] == close_ch:
+            depth -= 1
+            if depth == 0:
+                return i + 1
+        i += 1
+    return n
+
+
+def _consume_dollar(text: str, start: int) -> tuple[str, int]:
+    """At ``text[start] == '$'``: ``(piece, end)``.
+
+    ``piece`` is statically-decoded text for the one form this CAN resolve
+    without running a shell (``$'...'`` ANSI-C quoting), or the single
+    character ``'*'`` for every form it cannot (``$VAR``, ``${...}``,
+    ``$(...)``, ``$((...))``) -- turning the word carrying it into a GLOB
+    rather than silently dropping the substitution's contribution. ``end``
+    is always ``> start``, so a caller advancing by it can never loop even
+    on a malformed/unterminated form.
+    """
+    n = len(text)
+    if start + 1 >= n:
+        return "$", start + 1
+    nxt = text[start + 1]
+    if nxt == "'":
+        i = start + 2
+        while i < n:
+            if text[i] == "\\":
+                i += 2
+                continue
+            if text[i] == "'":
+                break
+            i += 1
+        body = text[start + 2 : min(i, n)]
+        end = min(i, n) + 1 if i < n else n
+        return _decode_ansi_c_body(body), end
+    if nxt == "(":
+        return "*", _consume_balanced(text, start + 1, "(", ")")
+    if nxt == "{":
+        return "*", _consume_balanced(text, start + 1, "{", "}")
+    match = _DOLLAR_VAR_NAME_RE.match(text, start + 1)
+    if match and match.end() > start + 1:
+        return "*", match.end()
+    return "$", start + 1
+
+
+def _decode_span(text: str, start: int, stop_chars: str) -> tuple[str, int]:
+    """Quote/escape/substitution-decode ``text`` from ``start``, stopping at
+    the first UNQUOTED character in ``stop_chars`` (or at the end of
+    ``text`` when ``stop_chars`` is empty) -- the one shared scanner behind
+    both :func:`normalise_word` (a single already-isolated word, never
+    stops early) and :func:`iter_normalised_shell_words` (a whole command,
+    splitting on unquoted whitespace/operators).
+    """
+    out: list[str] = []
+    i = start
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if stop_chars and ch in stop_chars:
+            break
+        if ch == "'":
+            j = text.find("'", i + 1)
+            if j == -1:
+                out.append(text[i + 1 :])
+                i = n
+            else:
+                out.append(text[i + 1 : j])
+                i = j + 1
+            continue
+        if ch == '"':
+            i += 1
+            while i < n and text[i] != '"':
+                if text[i] == "\\" and i + 1 < n and text[i + 1] in ("\\", '"', "$", "`", "\n"):
+                    if text[i + 1] != "\n":
+                        out.append(text[i + 1])
+                    i += 2
+                    continue
+                if text[i] == "$":
+                    piece, end = _consume_dollar(text, i)
+                    out.append(piece)
+                    i = end
+                    continue
+                if text[i] == "`":
+                    j = text.find("`", i + 1)
+                    out.append("*")
+                    i = (j + 1) if j != -1 else n
+                    continue
+                out.append(text[i])
+                i += 1
+            if i < n and text[i] == '"':
+                i += 1
+            continue
+        if ch == "\\":
+            if i + 1 < n:
+                if text[i + 1] == "\n":
+                    i += 2
+                else:
+                    out.append(text[i + 1])
+                    i += 2
+            else:
+                i += 1
+            continue
+        if ch == "$":
+            piece, end = _consume_dollar(text, i)
+            out.append(piece)
+            i = end
+            continue
+        if ch == "`":
+            j = text.find("`", i + 1)
+            out.append("*")
+            i = (j + 1) if j != -1 else n
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out), i
+
+
+def normalise_word(word: str) -> str:
+    """``word`` with quotes removed, backslash escapes and ``$'...'``
+    ANSI-C sequences decoded, and any unresolvable substitution collapsed
+    to a single ``*``.
+
+    For a single already-isolated word (e.g. one spelling
+    :func:`expand_braces` already produced -- a brace ALTERNATIVE can
+    itself carry a quote, ``{'a',x}``, which needs this pass too, run
+    AFTER brace expansion so the composition matches what a shell actually
+    does: strip quotes from the concrete spelling, not from the group
+    template).
+    """
+    decoded, _ = _decode_span(word, 0, "")
+    return decoded
+
+
+def iter_normalised_shell_words(
+    command: str, *, max_words: int = DEFAULT_MAX_NORMALISED_WORDS
+) -> Iterator[str]:
+    """Every shell WORD in ``command``, quote/escape-decoded, with any
+    statically-unresolvable substitution collapsed to a single ``*``.
+
+    Deliberately conservative, not a real shell: quote removal, backslash
+    escapes and ``$'...'`` ANSI-C decoding are resolved exactly (POSIX/bash
+    rules); anything that would need to actually RUN a shell to resolve
+    becomes a single ``*``, so the word this yields is then judged as a
+    GLOB by the caller's existing glob-intersection machinery, exactly like
+    a literal ``*``/``?``/bracket expression the caller already handles.
+    Fails toward denying more, never toward silently dropping a
+    substitution's contribution to a word.
+
+    Bounded to the first ``max_words`` words, the same direction
+    :func:`iter_brace_words` bounds its own volume.
+    """
+    count = 0
+    i = 0
+    n = len(command)
+    while i < n:
+        if command[i] in _WORD_SEPARATOR_CHARS:
+            i += 1
+            continue
+        if count >= max_words:
+            return
+        decoded, end = _decode_span(command, i, _WORD_SEPARATOR_CHARS)
+        count += 1
+        yield decoded
+        i = end
 
 
 # ── Bounded recursive glob walk ──────────────────────────────────────────

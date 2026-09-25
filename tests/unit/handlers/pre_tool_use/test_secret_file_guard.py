@@ -160,6 +160,90 @@ class TestBash:
         assert not handler.matches(_hook_input("Bash", {"command": cmd}))
 
 
+class TestShellWordNormalisationThroughTheHandler:
+    """n466-n24 review 4, M-1: every listed spelling, end-to-end through the
+    real handler, both against shipped defaults (id_rsa) and a
+    project-configured EXACT ``protected_paths`` entry (``.env``)."""
+
+    def test_degenerate_brace_sequence_is_denied(self) -> None:
+        handler = _handler()
+        cmd = "cat id_rs{a..a}"
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_double_quote_adjacency_concatenation_is_denied(self) -> None:
+        handler = _handler()
+        cmd = 'cat id_"rs"a'
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_single_quote_adjacency_concatenation_is_denied(self) -> None:
+        handler = _handler()
+        cmd = "cat i'd'_rsa"
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_brace_alternative_carrying_a_quote_is_denied(self) -> None:
+        handler = _handler()
+        cmd = "cat id_rs{'a',x}"
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_backslash_escape_is_denied(self) -> None:
+        handler = _handler()
+        cmd = "cat id_rs\\a"
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_ansi_c_hex_escape_is_denied(self) -> None:
+        handler = _handler()
+        cmd = "cat id_rs$'\\x61'"
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_dollar_var_unknown_suffix_becomes_a_glob_and_is_denied(self) -> None:
+        handler = _handler()
+        cmd = "cat id_rs$x"
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_command_substitution_naming_the_file_is_denied(self) -> None:
+        handler = _handler()
+        cmd = "cat ~/.ssh/$(echo id_rsa)"
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_double_quoted_var_plus_trailing_glob_is_denied(self) -> None:
+        handler = _handler()
+        cmd = 'cat "$HOME"/.ssh/id_rs*'
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_an_ordinary_dollar_var_path_is_allowed(self) -> None:
+        handler = _handler()
+        cmd = "cat $SOME_CONFIG_DIR/readme.txt"
+        assert not handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_project_configured_exact_pattern_degenerate_sequence_is_denied(self) -> None:
+        handler = _handler()
+        handler._mode = "replace"
+        handler._protected_paths = [".env"]
+        cmd = "cat .en{v..v}"
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_project_configured_exact_pattern_quote_removal_is_denied(self) -> None:
+        handler = _handler()
+        handler._mode = "replace"
+        handler._protected_paths = [".env"]
+        cmd = 'cat .e"n"v'
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_project_configured_exact_pattern_unresolved_substitution_is_denied(self) -> None:
+        handler = _handler()
+        handler._mode = "replace"
+        handler._protected_paths = [".env"]
+        cmd = "cat .en$x"
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_project_configured_exact_pattern_unrelated_command_is_allowed(self) -> None:
+        handler = _handler()
+        handler._mode = "replace"
+        handler._protected_paths = [".env"]
+        cmd = "cat readme.txt"
+        assert not handler.matches(_hook_input("Bash", {"command": cmd}))
+
+
 class TestContentScan:
     """Task 4.3: authored SCRIPTS referencing a protected path are denied."""
 

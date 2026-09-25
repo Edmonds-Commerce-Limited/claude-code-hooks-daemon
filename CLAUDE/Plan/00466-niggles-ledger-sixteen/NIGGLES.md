@@ -403,6 +403,33 @@ brace groups are expanded against the raw command text before tokenising,
 the same conflict `enforce_llm_qa`'s own M1 fix resolves. Pinned with 4 new
 test classes (16 tests) in `tests/unit/utils/test_secret_file_matching.py`.
 
+**Correction (M-1, guard-defects review 4)**: the brace-group expansion added
+by review 2's correction only ever split a group on `,` — a brace SEQUENCE
+(`{start..end[..step]}`, e.g. `id_rs{a..a}` reaching the exact protected name
+`id_rsa`) and quote-stripping inside a group or word (`id_"rs"a`, `i'd'_rsa`,
+`id_rs{'a',x}`) were both unhandled, and neither the module's crude
+delimiter-split tokeniser nor the brace stream ever saw a word carrying `$`,
+a backtick, or a quote as anything but a boundary — so a substitution-carrying
+word (`cat id_rs$x`) produced no token resembling the name at all. Fixed by
+scoping the remedy to the whole CLASS, not the two reported spellings: a lazy
+brace-sequence generator (numeric/alpha, either direction, optionally
+stepped, capped by the same `max_spellings` guard so `{1..100000}` still
+fails closed) plus a from-scratch bounded shell-word normaliser
+(`shell_expansion.normalise_word`/`iter_normalised_shell_words`) that strips
+quotes, decodes backslash/ANSI-C escapes, concatenates adjacent
+quoted/unquoted spans into one word the way a real shell does, and collapses
+any statically-unresolvable substitution (`$VAR`, `${...}`, `$(...)`, a
+backtick, `$((...))`) to a single `*` — turning the whole containing word
+into a glob judged by the pre-existing `_globs_can_intersect` DP infrastructure
+this same N10 remedy built, rather than needing new matching logic. Chained
+as a third additive stream in `iter_protected_mentions`. Own findings caught
+before commit (not in the review): the new stream initially bypassed the
+import-module-path exemption and double-reported ordinary mentions already
+found by the plain tokeniser — both fixed (see the review-4 fix report).
+Verified end-to-end through the real `SecretFileGuardHandler`, both shipped
+defaults and a project-configured exact pattern. Full detail:
+`subagent-reports/260924-n466-guards-review4-fix-sonnet-5.md`.
+
 ### N9 — ✅ Remedied — `docs_qa` judges gitignored markdown, so installing a Claude Code plugin fails local full QA
 
 **Found by the coordinator** right after installing the Defence Before Fix plugin at project scope (Plan 00467). In this container Claude Code's config directory is `.claude/ccy/`, so the plugin's cache (`.claude/ccy/plugins/cache/...`) and marketplace clone (`.claude/ccy/plugins/marketplaces/...`) land inside the repository. Both are gitignored (`.claude/ccy/.gitignore:3: *`). `llm_qa.py docs_qa` then reported 12 `source-tree-markdown` findings, one per vendored spec file, and the tool FAILED. It reported 0 findings at batch A's gate, before the install. CI does not see this, because a fresh checkout has no `.claude/ccy/`. Every local full QA run, including the coordinator's integration gate, now fails on files that are not part of the project.

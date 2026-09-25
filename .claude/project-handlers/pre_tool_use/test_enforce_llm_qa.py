@@ -437,6 +437,29 @@ class TestEnforceLlmQaHandler:
         command = "timeout 900 bash -c '../scripts/qa/run_all.sh > out.txt 2>&1'"
         assert handler.matches(bash_hook_input(command)) is True
 
+    def test_still_matches_timeout_with_a_signal_flag_value(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        """n466-n24 review 4, nit n-1: `-s SIGNAL` is a flag taking a
+        SEPARATE value token -- skipping it by its own leading `-` alone
+        mistakes the duration (`900`) for the wrapped command, so the real
+        `bash -c '...'` tail was never reached."""
+        for command in (
+            "timeout -s TERM 900 bash -c '../scripts/qa/run_all.sh > out.txt 2>&1'",
+            "timeout --signal TERM 900 bash -c '../scripts/qa/run_all.sh > out.txt 2>&1'",
+            "timeout -k 10 900 bash -c '../scripts/qa/run_all.sh > out.txt 2>&1'",
+            "timeout --kill-after 10 900 bash -c '../scripts/qa/run_all.sh > out.txt 2>&1'",
+        ):
+            assert handler.matches(bash_hook_input(command)) is True, command
+
+    def test_still_matches_timeout_with_an_equals_form_flag_value(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        """The `--flag=VALUE` spelling carries its value in the same token
+        and needs no extra skip."""
+        command = "timeout --signal=TERM 900 bash -c '../scripts/qa/run_all.sh > out.txt 2>&1'"
+        assert handler.matches(bash_hook_input(command)) is True
+
     def test_still_matches_eval_of_a_string_naming_the_script(
         self, handler: EnforceLlmQaHandler, bash_hook_input: Any
     ) -> None:

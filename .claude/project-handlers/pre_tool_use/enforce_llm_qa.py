@@ -313,21 +313,33 @@ def _python_dash_c_argument(head_name: str, tokens: list[str]) -> str | None:
     return None
 
 
+#: GNU coreutils `timeout` flags that consume a SEPARATE value token when
+#: not given as `--flag=VALUE` (n466-n24 review 4, nit n-1): `-s SIGNAL` /
+#: `--signal SIGNAL` and `-k DURATION` / `--kill-after DURATION`. Every
+#: other `timeout` flag (`-v`/`--verbose`, `--preserve-status`,
+#: `--foreground`) takes no value at all.
+_TIMEOUT_FLAGS_WITH_VALUE: Final[frozenset[str]] = frozenset(
+    {"-s", "--signal", "-k", "--kill-after"}
+)
+
+
 def _strip_timeout_prefix(tokens: list[str]) -> list[str]:
     """``tokens`` with a leading ``timeout [OPTIONS] DURATION`` stripped, or
     ``tokens`` unchanged when it does not start with ``timeout`` (review 2,
-    M1: ``timeout 900 bash -c '...'`` is an everyday agent shape). Flags are
-    skipped by their leading ``-``; genuine flag VALUES (e.g. ``-s SIGNAL``)
-    are not specially handled -- no test shape here needs it, and skipping
-    one token too few only means the duration is mistaken for the command,
-    which still tokenises safely and falls through to no match rather than
-    a wrong one.
+    M1: ``timeout 900 bash -c '...'`` is an everyday agent shape). A flag
+    that takes a separate value (``-s SIGNAL``, ``-k DURATION``) skips that
+    value token too, so the duration argument is not mistaken for one
+    (n466-n24 review 4, nit n-1); the ``--flag=VALUE`` spelling carries its
+    value in the same token and needs no extra skip.
     """
     if not tokens or tokens[0] != "timeout":
         return tokens
     index = 1
     while index < len(tokens) and tokens[index].startswith("-"):
+        flag = tokens[index]
         index += 1
+        if flag in _TIMEOUT_FLAGS_WITH_VALUE and index < len(tokens):
+            index += 1
     if index < len(tokens):
         index += 1  # the duration argument itself
     return tokens[index:]

@@ -1246,6 +1246,20 @@ def iter_protected_mentions(
     breach is) only happens after THIS token has already passed the check
     below, so construction is now bounded by the very same per-token gate
     that bounds consumption.
+
+    M-1 (n466-n24 review 4): a THIRD stream, :func:`_normalised_word_tokens`,
+    adds every shell WORD with quotes/escapes/ANSI-C decoded and any
+    statically-unresolvable substitution (``$VAR``, ``$(...)``, a backtick,
+    ``$((...))``) collapsed to a single ``*`` -- ``_tokenise``'s crude
+    delimiter split treats a quote character, `` ` ``, and ``$`` as plain
+    separators, so ``cat id_rs$x`` never produces a token resembling a
+    protected name at all, not even a mangled one, and ``cat id_"rs"a``
+    produces three USELESS fragments instead of the one real word a shell
+    would read. Lazily chained for the identical reason the brace stream is.
+    An ordinary word with nothing to decode normalises back to the exact
+    same text ``_tokenise`` already produced for it, so the per-token dedup
+    below (keyed on token TEXT, not stream) is what keeps that overlap from
+    doubling every ordinary mention.
     """
     if not command or not patterns:
         return
@@ -1257,9 +1271,18 @@ def iter_protected_mentions(
         if _has_leading_wildcard(pattern) and _has_trailing_wildcard(pattern)
     )
     both_edges_stems = tuple(stem for stem, _pattern in _pattern_literal_stems(both_edges_patterns))
+    # The import-module-path exemption is applied ONCE, up front, and every
+    # stream reads the same stripped text -- an import statement's dotted
+    # module path is not a filesystem path regardless of which stream would
+    # otherwise re-discover it (M-1, n466-n24 review 4: the brace and
+    # normalised-word streams read raw `command` before this fix, so an
+    # `import <name>` line naming a protected stem in its own module path
+    # was exempted for `_tokenise` only, and still flagged by the other two).
+    import_stripped = _without_import_module_paths(command)
     tokens = itertools.chain(
-        _tokenise(_without_import_module_paths(command)),
-        _brace_expansion_tokens(command),
+        _tokenise(import_stripped),
+        _brace_expansion_tokens(import_stripped),
+        _normalised_word_tokens(import_stripped),
     )
     # Own live finding (team-lead's 1 MB timing follow-up to review 3): real
     # content is full of REPEATED short tokens (log lines, minified code,
@@ -1269,7 +1292,17 @@ def iter_protected_mentions(
     # two occurrences of it in the same command. Caching by token text turns
     # a scan that redid the full DP/bracket/filesystem work for every
     # occurrence into one that pays for each DISTINCT token once.
+    #
+    # M-1 (n466-n24 review 4): the SAME cache doubles as the yield-dedup --
+    # an ordinary word with nothing for `_normalised_word_tokens` to decode
+    # is the identical string `_tokenise` already produced, so without this
+    # every plain mention would be reported twice, once per stream that
+    # happened to find it. `_mention_is_encrypted` (the one caller that
+    # consumes every yielded mention) is a pure function of token text, so
+    # collapsing repeats -- whether from stream overlap or the command
+    # genuinely repeating a word -- changes no verdict it computes.
     mention_cache: dict[str, str | None] = {}
+    yielded_tokens: set[str] = set()
     for token in tokens:
         if deadline is not None and time.monotonic() > deadline:
             raise TimeoutError("secret_file_guard mention scan exceeded its deadline")
@@ -1287,7 +1320,8 @@ def iter_protected_mentions(
                 both_edges_stems=both_edges_stems,
             )
             mention_cache[token] = pattern
-        if pattern is not None:
+        if pattern is not None and token not in yielded_tokens:
+            yielded_tokens.add(token)
             yield (pattern, token)
 
 
@@ -1306,9 +1340,37 @@ def _brace_expansion_tokens(command: str) -> Iterator[str]:
     ``_expand_braces``/``_brace_expanded_tokens`` -- see
     ``iter_protected_mentions``'s docstring for why this must also be LAZY,
     not just capped.
+
+    Each concrete spelling is then quote/escape-normalised (n466-n24 review
+    4, M-1): a brace ALTERNATIVE can itself carry a quote (``{'a',x}``), so
+    a shell reads ``id_rs{'a',x}`` as EITHER ``id_rsa`` or ``id_rsx`` -- the
+    quote strips only once the alternative is chosen, not from the group
+    template beforehand. Run over the EXPANDED spelling, matching that
+    order.
     """
     for word in shell_expansion.iter_brace_words(command):
-        yield from shell_expansion.expand_braces(word)
+        for spelling in shell_expansion.expand_braces(word):
+            yield shell_expansion.normalise_word(spelling)
+
+
+def _normalised_word_tokens(command: str) -> Iterator[str]:
+    """Lazily yield every shell WORD in ``command``, quote/escape/ANSI-C
+    decoded, with any statically-unresolvable substitution collapsed to a
+    single ``*`` (n466-n24 review 4, M-1).
+
+    A thin pass-through to :func:`shell_expansion.iter_normalised_shell_words`
+    -- the bounded, non-backtracking word scanner lives there so it stays
+    the one place shared with any other caller that needs the same class of
+    normalisation, the same reason brace expansion and the recursive glob
+    walk live there. A resulting word that now carries a ``*`` (from an
+    unresolved ``$VAR``/``$(...)``/backtick/``$((...))``) is not treated
+    specially here -- it reaches :func:`_token_mention` exactly like any
+    other glob-shaped token, where the EXISTING interior-wildcard DP
+    intersection (:func:`_globs_can_intersect`) decides whether it could
+    reach a protected path, denying only when a match is genuinely
+    possible.
+    """
+    yield from shell_expansion.iter_normalised_shell_words(command)
 
 
 def _token_mention(

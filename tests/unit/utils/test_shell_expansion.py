@@ -156,6 +156,32 @@ class TestBoundedRecursiveGlob:
             list(bounded_recursive_glob(Path("/"), "**/*.se?ret-zq9x", max_entries_visited=100))
         assert time.monotonic() - start < 1.0
 
+    def test_refuses_a_multi_wildcard_pattern_with_no_recursive_marker(self) -> None:
+        """n466-n24 review 4, m-1: two or more wildcarded segments trip the
+        root refusal even with no literal `**` anywhere in the pattern --
+        the own live finding from review 3's docstring, still without its
+        own RED pin until now."""
+        with pytest.raises(TooManyToEnumerateError):
+            list(
+                bounded_recursive_glob(
+                    Path("/"), "*/*/*/*/*/*/*.se?ret-zq9x", max_entries_visited=100
+                )
+            )
+
+    def test_root_refusal_with_recursive_marker_is_not_masked_by_a_huge_cap(self) -> None:
+        """The refusal must fire from the root check itself, not merely
+        because `max_entries_visited` happens to be small -- raise the cap
+        far past anything a real walk would hit and confirm it still
+        refuses immediately rather than attempting the walk."""
+        start = time.monotonic()
+        with pytest.raises(TooManyToEnumerateError):
+            list(
+                bounded_recursive_glob(
+                    Path("/"), "**/*.se?ret-zq9x", max_entries_visited=10_000_000
+                )
+            )
+        assert time.monotonic() - start < 1.0
+
     def test_finds_a_real_match_under_a_small_tree(self, tmp_path: Path) -> None:
         target = tmp_path / "nested" / "dir"
         target.mkdir(parents=True)
