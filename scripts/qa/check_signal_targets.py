@@ -124,8 +124,14 @@ _REMEDIATION: Final[str] = (
     "    signal_own_session_child(popen, sig)                  # a group kill\n"
     "\n"
     "or signal the Popen object itself (proc.terminate()), which only ever\n"
-    "reaches its own unreaped child. Signal 0, the existence probe, is exempt.\n"
-    "There is no exemption marker: fix the site, or fix this Detector."
+    "reaches its own unreaped child.\n"
+    "\n"
+    "Shell: run an identity check on the pid earlier in the same function\n"
+    "(_is_project_daemon_pid, a start-time or parent check), or signal $$/$!.\n"
+    "\n"
+    "Signal 0, the existence probe, is exempt. There is no exemption marker:\n"
+    "fix the site, or fix this Detector. Rules and proofs:\n"
+    "CLAUDE/Security/UnprovenSignalTarget.md"
 )
 
 

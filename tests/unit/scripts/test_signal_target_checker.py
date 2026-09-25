@@ -462,6 +462,20 @@ class TestTheRepository:
             assert expected in roots
         assert not any(root.startswith("tests/") for root in roots)
 
+    def test_the_message_points_at_documentation_naming_every_rule(
+        self, checker: ModuleType
+    ) -> None:
+        docs = "CLAUDE/Security/UnprovenSignalTarget.md"
+        assert docs in checker._REMEDIATION
+        text = (_REPO_ROOT / docs).read_text(encoding="utf-8")
+        for rule in (
+            checker.RAW_SIGNAL,
+            checker.UNPROVEN_HANDLE,
+            checker.KILL_COMMAND,
+            checker.SHELL_UNPROVEN_KILL,
+        ):
+            assert f"`{rule}`" in text
+
     def test_the_repository_is_clean(self, checker: ModuleType) -> None:
         violations = [v for path in checker.scanned_files() for v in checker.scan_file(path)]
         violations += [

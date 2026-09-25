@@ -22,8 +22,10 @@ coerces to `1` through `__index__`, and `os.getpgid(1)` is `1` here, because
 PID 1 is `tini`, the container's init. So a test that reached the timeout path
 ran `killpg(1, SIGKILL)` and ended the container. Both deaths came about 10 s
 after an N53 fixer ran those tests (11:07:16 and 11:35:54). The daemon restart
-at 11:35:59 is not the cause: `cmd_stop` signals only a pid that
-`read_pid_file(..., verify_daemon=True)` proved is a daemon.
+at 11:35:59 is not the cause: `cmd_stop` signalled only a pid that
+`read_pid_file(..., verify_daemon=True)` proved is a daemon. That proves "a
+daemon", not "this project's daemon", so `cmd_stop` is an instance of the class
+too; see the remedy below.
 
 **The class is wider than N53.** On main, `install/client_validator.py` reads a
 pid from a `daemon*.pid` file and sends SIGTERM, then SIGKILL, with no identity
@@ -41,22 +43,36 @@ small PIDs, so a stale file can name `claude` itself.
   (`signal_own_session_child`).
 
 - **The Detector.** `scripts/qa/check_signal_targets.py` is `llm_qa`
-  `signal_targets` and `run_all.sh` check 33. It was RED on main at
-  `client_validator.py:320,329` and `process_verification.py:184,192`, and on
-  the N53 `killpg(getpgid(process.pid))` shape. It now finds nothing in the
-  653 files it scans.
+  `signal_targets` and `run_all.sh` check 33. It reads Python (rules
+  `raw-signal`, `unproven-process-handle`, `kill-command`) and every tracked
+  shell script outside `tests/` (rule `shell-unproven-kill`).
+
+  - The Python rules were RED on main at `client_validator.py:320,329`,
+    `process_verification.py:184,192` and `cli.py:788`, and on the N53
+    `killpg(getpgid(process.pid))` shape.
+  - The shell rule was RED on main's five shell sites.
+  - It now finds nothing in the 795 files it scans. Every one of the 23 shell
+    `kill` sites it sees was judged by hand; none was a false positive.
 
 - **Python sites fixed.** The installer's `_check_running_daemon` and
   container enforcement now go through the helper. Enforcement signals
   nothing when it has no project root. `kill_daemon_process` is removed.
+  `cmd_stop` takes a `verified_daemon_process` handle, which checks the
+  project root, and waits on that handle.
 
 - **Shell sites fixed.** Each now proves identity before it signals:
 
   - `upgrade.sh` checks for a daemon server of this project root;
-  - `dummy-client-repo.sh` signals the proven pid, never its group;
-  - the venv bootstrap watchdog checks the build's start time;
+  - `dummy-client-repo.sh` signals the proven pid, never its group, and
+    re-reads its command line immediately before the signal;
+  - the venv bootstrap watchdog checks the build's start time, and the group
+    kill sits beside its job-table check;
   - the venv lock heartbeat and the resolver probe watchdog check that the
     pid still has the parent recorded when it was started.
+
+- **Named, not built:** a rule for a `$!` signalled after its job may have
+  ended. The resolver probe watchdog was that shape. It is referred to the
+  owner with the DBF report.
 
 - **The test-suite safety net.** `tests/signal_safety_net.py` is installed by
   a session-wide autouse fixture in `tests/conftest.py`. It refuses, without
