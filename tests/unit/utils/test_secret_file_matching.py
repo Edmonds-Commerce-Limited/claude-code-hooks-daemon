@@ -9,7 +9,7 @@ position).
 
 import errno
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
@@ -1427,19 +1427,33 @@ class TestOrdinaryVolumeContentCompletesFast:
     time) -- these tests pin the COMMON case, which is now fast on its own
     merits rather than merely bounded by hitting a timeout.
 
-    Review 7 follow-up (team-lead): ``_BUDGET_SECONDS`` was raised from 1.0
-    to 3.5 -- the WORD-CAP fix restored these tests to actually running the
-    stream to completion (they previously "passed" by raising early, past
-    the now-removed cap, before ever reaching this cost) and review 7's own
-    per-word wrapper/interpreter option-walk (MAJOR-3/MAJOR-5) added real
-    state-machine cost per decoded word that this class's original 1.0s pin
-    predates. 1 MB measures ~1.0-1.4s on a quiet machine; 3.5s keeps a real
-    margin against ordinary CI/container load noise while staying
-    comfortably inside the production whole-scan deadline
-    (``SCAN_DEADLINE_SECONDS`` = 5.0s).
+    Review 7 follow-up (team-lead, second round): a FIXED wall-clock budget
+    (``_BUDGET_SECONDS``, raised 1.0 -> 2.5 -> 3.5 across two earlier rounds
+    fighting flakiness) is inherently sensitive to host load -- this suite
+    runs on a shared, often-loaded machine, and a fixed absolute threshold
+    either flakes under load or is too loose to catch a real regression.
+    The actual property under test is LINEARITY -- that scan cost grows
+    proportionally with input size, not quadratically or worse -- and that
+    is a property of a RATIO, not an absolute number. Each test now scans
+    the SAME shape at two sizes (100 KB and 1 MB) back-to-back in one run
+    and asserts the cost RATIO stays close to the size ratio: both
+    measurements suffer the identical load-driven slowdown factor, so the
+    ratio stays stable even when the machine is busy, while a genuine
+    algorithmic regression (quadratic or worse) still blows the ratio out
+    regardless of load. See :meth:`_assert_scan_cost_scales_linearly`.
     """
 
-    _BUDGET_SECONDS = 3.5
+    #: Kept far below ``_LARGE_BYTES`` so the SMALL scan's own elapsed time
+    #: is never so close to zero that timer resolution/scheduling noise
+    #: dominates the ratio.
+    _SMALL_BYTES = 100 * 1024
+    _LARGE_BYTES = 1024 * 1024
+    #: A perfectly linear scan costs ~_LARGE_BYTES/_SMALL_BYTES times as
+    #: much (~10.24x here) when measured back-to-back; this sits well above
+    #: that (headroom for scheduling noise between the two measurements)
+    #: and well below what even a mild quadratic blow-up would produce at
+    #: this size ratio (~100x), so it still catches a real regression.
+    _MAX_COST_RATIO = 25.0
 
     @staticmethod
     def _vocabulary_command(target_bytes: int) -> str:
@@ -1463,6 +1477,34 @@ class TestOrdinaryVolumeContentCompletesFast:
             index += 1
         return " ".join(words)[:target_bytes]
 
+    @staticmethod
+    def _repeated_token_command(target_bytes: int) -> str:
+        """The review's own pre-existing ``a*b `` xN shape, parametrised on
+        size instead of a fixed repeat count."""
+        return ("a*b " * (target_bytes // 4 + 1))[:target_bytes]
+
+    @staticmethod
+    def _timed_scan(command: str) -> tuple[tuple[str, str] | None, float]:
+        start = time.perf_counter()
+        result = sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS)
+        return result, time.perf_counter() - start
+
+    def _assert_scan_cost_scales_linearly(
+        self, build: Callable[[int], str]
+    ) -> tuple[str, str] | None:
+        """Deterministic linearity check (see class docstring). Returns the
+        LARGE-size scan's result so callers can also assert correctness
+        (mention found / not found) without a third scan."""
+        _small_result, small_elapsed = self._timed_scan(build(self._SMALL_BYTES))
+        large_result, large_elapsed = self._timed_scan(build(self._LARGE_BYTES))
+        ratio = large_elapsed / max(small_elapsed, 1e-6)
+        assert ratio < self._MAX_COST_RATIO, (
+            f"cost scaled {ratio:.1f}x for a "
+            f"{self._LARGE_BYTES // self._SMALL_BYTES}x size increase "
+            f"({small_elapsed:.3f}s -> {large_elapsed:.3f}s) -- looks worse than linear"
+        )
+        return large_result
+
     def test_one_megabyte_bash_command_completes_well_under_a_second(self) -> None:
         """Restored to this class's original contract (review 7 follow-up,
         team-lead): large ORDINARY content -- no genuine mention, nothing
@@ -1473,12 +1515,8 @@ class TestOrdinaryVolumeContentCompletesFast:
         for flat, linear-cost decoding; see
         ``shell_expansion.TestIterNormalisedShellWordsDeadline`` for its
         replacement, a TIME-based deadline)."""
-        command = self._vocabulary_command(1024 * 1024)
-        start = time.perf_counter()
-        result = sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS)
-        elapsed = time.perf_counter() - start
+        result = self._assert_scan_cost_scales_linearly(self._vocabulary_command)
         assert result is None
-        assert elapsed < self._BUDGET_SECONDS, f"took {elapsed:.3f}s"
 
     def test_one_megabyte_write_content_completes_well_under_a_second(self) -> None:
         # The script-content route (Write/Edit to a .py/.sh/...) scans
@@ -1486,33 +1524,23 @@ class TestOrdinaryVolumeContentCompletesFast:
         # same `find_protected_mention_detail` call, same cost profile.
         # Restored to this class's original contract: fast AND correct,
         # not denied (see the sibling Bash test's docstring above).
-        content = self._vocabulary_command(1024 * 1024)
-        start = time.perf_counter()
-        result = sfm.find_protected_mention_detail(content, sfm.DEFAULT_PROTECTED_PATTERNS)
-        elapsed = time.perf_counter() - start
+        result = self._assert_scan_cost_scales_linearly(self._vocabulary_command)
         assert result is None
-        assert elapsed < self._BUDGET_SECONDS, f"took {elapsed:.3f}s"
 
     def test_repeated_identical_tokens_benefit_from_the_per_scan_cache(self) -> None:
-        """The review's own pre-existing 'a*b ' x 250000 shape -- still
-        fast (the per-scan cache this class pins), and restored to this
-        class's original contract: completes and answers correctly (no
-        mention), not denied outright."""
-        content = "a*b " * 250_000
-        start = time.perf_counter()
-        result = sfm.find_protected_mention_detail(content, sfm.DEFAULT_PROTECTED_PATTERNS)
-        elapsed = time.perf_counter() - start
+        """The review's own pre-existing 'a*b ' xN shape -- still fast (the
+        per-scan cache this class pins), and restored to this class's
+        original contract: completes and answers correctly (no mention),
+        not denied outright."""
+        result = self._assert_scan_cost_scales_linearly(self._repeated_token_command)
         assert result is None
-        assert elapsed < self._BUDGET_SECONDS, f"took {elapsed:.3f}s"
 
     def test_a_genuine_mention_is_still_found_in_realistic_volume_content(self) -> None:
         """The speed-up must not cost detection: a real mention placed at
         the END of a large ordinary-vocabulary command is still found, fast."""
-        command = self._vocabulary_command(1024 * 1024) + " cat .vault-password"
-        start = time.perf_counter()
-        result = sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS)
-        elapsed = time.perf_counter() - start
-        assert elapsed < self._BUDGET_SECONDS, f"took {elapsed:.3f}s"
+        result = self._assert_scan_cost_scales_linearly(
+            lambda target_bytes: self._vocabulary_command(target_bytes) + " cat .vault-password"
+        )
         assert result is not None
 
 

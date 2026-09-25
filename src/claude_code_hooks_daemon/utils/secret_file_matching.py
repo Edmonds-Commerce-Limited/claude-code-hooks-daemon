@@ -31,7 +31,7 @@ import re
 import shlex
 import time
 import urllib.parse
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final, Literal
@@ -1222,6 +1222,33 @@ def find_protected_mention(
 SCAN_DEADLINE_SECONDS: Final[float] = 5.0
 
 
+def bash_route_word_stream(command: str, *, deadline: float | None = None) -> list[str] | None:
+    """The single decoded word list safe to share between BOTH consumers on
+    the Bash route: the ordinary mention scan (:func:`iter_protected_
+    mentions`) and ``secret_file_guard``'s interpreter one-liner fallback
+    (review 7 follow-up, team-lead's double-scan finding).
+
+    The ordinary scan reads ``command`` with import-module-path stripping
+    applied (:func:`_without_import_module_paths`); the one-liner fallback
+    MUST read raw ``command`` (stripping a `-c "import ...` argument's own
+    module name corrupts that argument's syntax before the one-liner
+    scan's AST-based literal extraction ever runs -- proven RED by a real
+    inline-import one-liner that stopped matching once fed stripped words).
+    Decoding twice is only ACTUALLY necessary when stripping changes the
+    text at all -- true for the overwhelming majority of commands, which
+    contain no `import <module>` positioned where the stripper looks, so
+    the two decodes would be identical anyway.
+
+    Returns the ONE decode (safe for both consumers) when stripping made no
+    difference, or ``None`` when it did -- signalling that each consumer
+    must decode separately for correctness, exactly the pre-existing
+    two-pass behaviour, kept only for this rare case.
+    """
+    if _without_import_module_paths(command) != command:
+        return None
+    return list(shell_expansion.iter_normalised_shell_words(command, deadline=deadline))
+
+
 def find_protected_mention_detail(
     command: str,
     patterns: tuple[str, ...],
@@ -1229,6 +1256,7 @@ def find_protected_mention_detail(
     deadline: float | None = None,
     cwd: str | None = None,
     context: MentionContext = "bash",
+    normalised_words: list[str] | None = None,
 ) -> tuple[str, str] | None:
     """``(pattern, token)`` for the first protected mention, else ``None``.
 
@@ -1244,10 +1272,19 @@ def find_protected_mention_detail(
     00466 review 2) is the HOOK's working directory, forwarded to the
     both-edges filesystem-truth route -- a caller with no hook cwd to hand
     simply omits it. ``context`` -- see :data:`MentionContext` -- defaults to
-    ``"bash"``, unchanged from every pre-existing caller.
+    ``"bash"``, unchanged from every pre-existing caller. ``normalised_words``
+    (review 7 follow-up) is forwarded straight through -- see
+    :func:`bash_route_word_stream`.
     """
     return next(
-        iter_protected_mentions(command, patterns, deadline=deadline, cwd=cwd, context=context),
+        iter_protected_mentions(
+            command,
+            patterns,
+            deadline=deadline,
+            cwd=cwd,
+            context=context,
+            normalised_words=normalised_words,
+        ),
         None,
     )
 
@@ -1259,6 +1296,7 @@ def iter_protected_mentions(
     deadline: float | None = None,
     cwd: str | None = None,
     context: MentionContext = "bash",
+    normalised_words: list[str] | None = None,
 ) -> Iterator[tuple[str, str]]:
     """``(pattern, token)`` for EVERY protected mention in ``command``, in order.
 
@@ -1320,6 +1358,24 @@ def iter_protected_mentions(
     forwarded to :func:`_token_mention` -- see :data:`MentionContext` for
     why a ``"content"`` scan skips the aggressive glob-shaped heuristics
     that a ``"bash"`` scan still runs.
+
+    Review 7 follow-up (team-lead's double-scan finding): the normalised-
+    word and ``file:`` URL streams below BOTH need the decoded word list
+    (the second one scans each word's own text for a `file:` URL), and used
+    to call :func:`shell_expansion.iter_normalised_shell_words` separately
+    -- a full second decode pass over the same text. They now share ONE
+    underlying generator via :func:`itertools.tee` when ``normalised_words``
+    is not supplied: still lazy relative to ``_tokenise``/
+    ``_brace_expansion_tokens`` above (the shared generator is never even
+    created if one of those two already answers the call), but each word is
+    decoded once and read by both consumers, not decoded twice.
+
+    ``normalised_words`` (review 7 follow-up): the Bash route in
+    ``secret_file_guard`` can go further still, in the common case where a
+    single decode is provably safe to share with its OWN interpreter
+    one-liner fallback too -- see :func:`bash_route_word_stream` for the
+    safety condition. When given, both streams below read this list
+    directly instead of tee-ing a fresh decode.
     """
     if not command or not patterns:
         return
@@ -1339,11 +1395,22 @@ def iter_protected_mentions(
     # `import <name>` line naming a protected stem in its own module path
     # was exempted for `_tokenise` only, and still flagged by the other two).
     import_stripped = _without_import_module_paths(command)
+    words_for_normalised_stream: Iterable[str]
+    words_for_file_url_stream: Iterable[str]
+    if normalised_words is not None:
+        words_for_normalised_stream = normalised_words
+        words_for_file_url_stream = normalised_words
+    else:
+        words_for_normalised_stream, words_for_file_url_stream = itertools.tee(
+            shell_expansion.iter_normalised_shell_words(import_stripped, deadline=deadline)
+        )
     tokens = itertools.chain(
         _tokenise(import_stripped),
         _brace_expansion_tokens(import_stripped),
-        _normalised_word_tokens(import_stripped, deadline=deadline),
-        _file_url_path_tokens(import_stripped, deadline=deadline),
+        _normalised_word_tokens(
+            import_stripped, deadline=deadline, words=words_for_normalised_stream
+        ),
+        _file_url_path_tokens(import_stripped, deadline=deadline, words=words_for_file_url_stream),
     )
     # Own live finding (team-lead's 1 MB timing follow-up to review 3): real
     # content is full of REPEATED short tokens (log lines, minified code,
@@ -1415,7 +1482,9 @@ def _brace_expansion_tokens(command: str) -> Iterator[str]:
             yield shell_expansion.normalise_word(spelling)
 
 
-def _normalised_word_tokens(command: str, *, deadline: float | None = None) -> Iterator[str]:
+def _normalised_word_tokens(
+    command: str, *, deadline: float | None = None, words: Iterable[str] | None = None
+) -> Iterator[str]:
     """Lazily yield every shell WORD in ``command``, quote/escape/ANSI-C
     decoded, with any statically-unresolvable substitution collapsed to a
     single ``*`` (n466-n24 review 4, M-1).
@@ -1437,7 +1506,17 @@ def _normalised_word_tokens(command: str, *, deadline: float | None = None) -> I
     ordinary large content, not just adversarial input), so THIS deadline,
     the same one ``iter_protected_mentions`` already checks per token, is
     now the only volume backstop for this stream too.
+
+    ``words`` (review 7 follow-up, team-lead's double-scan finding): when
+    given, yields THIS pre-decoded stream instead of calling
+    :func:`shell_expansion.iter_normalised_shell_words` again --
+    ``iter_protected_mentions`` passes one branch of an
+    :func:`itertools.tee` split shared with :func:`_file_url_path_tokens`,
+    so the underlying decode runs once for both streams.
     """
+    if words is not None:
+        yield from words
+        return
     yield from shell_expansion.iter_normalised_shell_words(command, deadline=deadline)
 
 
@@ -1454,7 +1533,9 @@ _FILE_URL_RE: Final[re.Pattern[str]] = re.compile(
 )
 
 
-def _file_url_path_tokens(command: str, *, deadline: float | None = None) -> Iterator[str]:
+def _file_url_path_tokens(
+    command: str, *, deadline: float | None = None, words: Iterable[str] | None = None
+) -> Iterator[str]:
     """Lazily yield the percent-decoded filesystem PATH named by every
     ``file:`` URL in ``command`` (review 7: guard-defects review 6's own
     probe found `curl -s file:///root/.ssh/id_r%73a` invisible to every
@@ -1478,10 +1559,21 @@ def _file_url_path_tokens(command: str, *, deadline: float | None = None) -> Ite
     concatenated into one shell word) reassembles it. The raw-text pass
     stays first so an ordinary, unquoted URL costs nothing beyond the
     existing regex scan.
+
+    ``words`` (review 7 follow-up, team-lead's double-scan finding): when
+    given, the second pass reads THIS pre-decoded stream instead of calling
+    :func:`shell_expansion.iter_normalised_shell_words` again --
+    ``iter_protected_mentions`` passes the other branch of the same
+    :func:`itertools.tee` split fed to :func:`_normalised_word_tokens`.
     """
     for match in _FILE_URL_RE.finditer(command):
         yield urllib.parse.unquote(match.group(1))
-    for word in shell_expansion.iter_normalised_shell_words(command, deadline=deadline):
+    word_stream = (
+        words if words is not None else shell_expansion.iter_normalised_shell_words(
+            command, deadline=deadline
+        )
+    )
+    for word in word_stream:
         for match in _FILE_URL_RE.finditer(word):
             yield urllib.parse.unquote(match.group(1))
 

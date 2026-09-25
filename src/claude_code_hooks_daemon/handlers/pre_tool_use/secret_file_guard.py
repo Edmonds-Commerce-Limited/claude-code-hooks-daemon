@@ -957,6 +957,7 @@ def _bash_interpreter_one_liner_mention(
     *,
     deadline: float,
     cwd: str | None,
+    words: list[str] | None = None,
 ) -> tuple[str, str] | None:
     """A protected mention inside a KNOWN shell-exec call embedded in an
     interpreter one-liner on the Bash route (review 6 minor-2, review 7
@@ -966,17 +967,34 @@ def _bash_interpreter_one_liner_mention(
     does, so the interpreter/flag/code triple is found using the SAME
     quote/escape decoding (including the second-parse tricks a nested `-c`
     argument already gets) rather than a fresh, narrower regex.
+
+    This function needs RAW-decoded words -- import-stripping a
+    `-c "import os; ..."` argument's own module name would corrupt the
+    code's syntax before this function's AST-based literal extraction ever
+    runs (proven RED by a real inline-import one-liner that stopped
+    matching once fed stripped words). ``words`` (review 7 follow-up,
+    team-lead's double-scan finding) lets the caller (``_evaluate``'s Bash
+    route) pass in an ALREADY-decoded RAW list -- via
+    ``sfm.bash_route_word_stream``, which only ever returns one when
+    decoding raw ``command`` is provably identical to decoding the ordinary
+    scan's import-stripped text -- instead of this function decoding a
+    second time. ``None`` (the default) decodes for itself, exactly the
+    pre-existing behaviour.
     """
-    words = list(shell_expansion.iter_normalised_shell_words(command, deadline=deadline))
-    for index, word in enumerate(words):
+    resolved_words = (
+        words
+        if words is not None
+        else list(shell_expansion.iter_normalised_shell_words(command, deadline=deadline))
+    )
+    for index, word in enumerate(resolved_words):
         basename = word.rsplit("/", 1)[-1]
         family = _match_one_liner_family(basename)
         if family is None:
             continue
         code_index: int | None = None
         cursor = index + 1
-        while cursor < len(words):
-            kind = _classify_one_liner_option_word(family, words[cursor])
+        while cursor < len(resolved_words):
+            kind = _classify_one_liner_option_word(family, resolved_words[cursor])
             if kind == "code":
                 code_index = cursor + 1
                 break
@@ -984,9 +1002,9 @@ def _bash_interpreter_one_liner_mention(
                 cursor += 1
                 continue
             break  # "stop": not an option word -- no code flag here
-        if code_index is None or code_index >= len(words):
+        if code_index is None or code_index >= len(resolved_words):
             continue
-        code = words[code_index]
+        code = resolved_words[code_index]
         pseudo_path = "one_liner" + family.pseudo_ext
         for literal in _shell_exec_call_literals(pseudo_path, code):
             mention = sfm.find_protected_mention_detail(
@@ -1207,11 +1225,25 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         if tool_name == ToolName.BASH:
             command = str(tool_input.get(_FIELD_COMMAND, ""))
             deadline = time.monotonic() + sfm.SCAN_DEADLINE_SECONDS
+            # review 7 follow-up (team-lead's double-scan finding): decode
+            # ONCE, up front, when it is provably safe to share with BOTH
+            # the ordinary scan below and the one-liner fallback further
+            # down -- true whenever import-module-path stripping would not
+            # change `command` at all (the overwhelming majority of
+            # commands: anything with no `import <module>` positioned where
+            # the stripper looks). `None` means stripping WOULD change the
+            # text -- sharing would corrupt a `-c "import ...` argument's
+            # own syntax before the one-liner scan's AST-based literal
+            # extraction runs (proven RED by a real inline-import one-liner
+            # that stopped matching once fed stripped words) -- so each
+            # consumer decodes separately for correctness, same as before.
+            shared_words = sfm.bash_route_word_stream(command, deadline=deadline)
             mention = sfm.find_protected_mention_detail(
                 command,
                 patterns,
                 deadline=deadline,
                 cwd=cwd,
+                normalised_words=shared_words,
             )
             if mention is None:
                 # review 6 minor-2: an interpreter one-liner's own
@@ -1221,7 +1253,7 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
                 # scan found nothing, since a match there already answers
                 # the question more cheaply.
                 one_liner_mention = _bash_interpreter_one_liner_mention(
-                    command, patterns, deadline=deadline, cwd=cwd
+                    command, patterns, deadline=deadline, cwd=cwd, words=shared_words
                 )
                 if one_liner_mention is None:
                     return None
