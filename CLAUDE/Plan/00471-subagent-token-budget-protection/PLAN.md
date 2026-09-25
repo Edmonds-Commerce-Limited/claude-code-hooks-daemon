@@ -58,8 +58,15 @@ cannot guarantee.
 
 - [ ] 🔄 **Task 1.1**: Brainstorm the levers, from the evidence
   (subagent-reports/).
-- [ ] ⬜ **Task 1.2**: Owner picks the levers and thresholds from the ranked
+- [ ] 🔄 **Task 1.2**: Owner picks the levers and thresholds from the ranked
   design.
+  - Decided: lever L1 (lower `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, which is 600000
+    in the container env) is dropped. About 230k is too tight for the
+    orchestrator, and Claude Code has no subagent-only compaction setting:
+    `sub-agents.md` says subagents compact "using the same logic as the main
+    conversation". L2, the daemon's subagent context budget, is the
+    subagent-only substitute. It forces a handoff and never touches the
+    orchestrator.
 
 ### Phase 2: Build
 
