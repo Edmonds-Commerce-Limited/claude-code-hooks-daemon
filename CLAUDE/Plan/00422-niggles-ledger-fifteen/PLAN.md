@@ -181,7 +181,7 @@ changing.
   shipped agent that does not declare `Bash` now fails.
 
 - [x] ❌ **Task 4.3**: N16 — **CANCELLED, nothing to do here.** The work already
-  lives in [Plan 00388](../00388-failsafe-marker-wiped-by-other-crons-in-multi-cron-sessions/PLAN.md)
+  lives in [Plan 00388](../Completed/00388-failsafe-marker-wiped-by-other-crons-in-multi-cron-sessions/PLAN.md)
   Task 2.4, graduated there from Plan 00392 N1 before this entry was written.
   Leaving a duplicate task open would split one owner ruling across two plans,
   which is the failure the ledger's own dedupe convention exists to stop.

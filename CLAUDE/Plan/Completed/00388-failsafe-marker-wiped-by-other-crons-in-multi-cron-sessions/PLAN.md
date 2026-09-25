@@ -1,6 +1,6 @@
 # Plan 00388: failsafe marker wiped by other crons in multi cron sessions
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-12
 **Owner**: joseph
 **Priority**: High
@@ -213,8 +213,9 @@ of this resurfacing as a separate decision later.
   and missing project context all still ALLOW.
 - [x] Every release-bound consequence is in the pending-release holding area, or
   this plan records why it has none. Release note 29, a truth-change entry.
-- [ ] Full QA passes and CI is green. Targeted QA only on the branch; the
-  coordinator runs the full gate over the merged batch.
+- [x] Full QA passes and CI is green. CI green on main's HEAD `34c588dc`
+  (run 36066507383), which includes this plan's delivered code (landed with
+  integration batch B2).
 
 ## Delivery & Milestones
 
@@ -223,3 +224,10 @@ of this resurfacing as a separate decision later.
 - Sits at the intersection of Plan 00298 (the marker), Plan 00337 (the sentinel
   and cadence) and Plan 00384 (several crons per session). None of the three is
   wrong on its own.
+- **Two residuals, accepted rather than fixed, stated plainly in the delivery
+  report**: a cron that already existed before this landed keeps its
+  old (sentinel-free) prompt until the session that re-creates it; and the
+  canonical prompt still says to remove the failsafe cron once the session is
+  genuinely finished, which Plan 00394's non-goal forbids rewording. Neither
+  is closed by this plan or by anything else in integration batch B2. See the
+  [delivery report](subagent-reports/260924-d-cron-opus-5-5.md#residual-risks-stated-plainly).

@@ -1,6 +1,6 @@
 # Plan 00394: failsafe cron coverage starts at first plan write
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-13
 **Owner**: joseph
 **Priority**: High
@@ -161,8 +161,9 @@ option 3 would impose a default cron on every client. Assumption: the owner's
 - [x] Every release-bound consequence is in the pending-release holding area, or
   this plan records why it has none. Release note 30, a config-changes entry and
   a truth-change entry.
-- [ ] Full QA passes and CI is green. Targeted QA only on the branch; the
-  coordinator runs the full gate over the merged batch.
+- [x] Full QA passes and CI is green. CI green on main's HEAD `34c588dc`
+  (run 36066507383), which includes this plan's delivered code (landed with
+  integration batch B2).
 
 ## Delivery & Milestones
 
@@ -174,3 +175,10 @@ option 3 would impose a default cron on every client. Assumption: the owner's
   machinery. It had not — the session was RESUMED, so every cron came back with
   its original ID. Chasing why the limitation had not bitten is what exposed
   that the most safety-critical cron has no session-start coverage.
+- **Two residuals, accepted rather than fixed, stated plainly in the delivery
+  report**: a cron that already existed before this landed keeps its
+  old (sentinel-free) prompt until the session that re-creates it; and the
+  canonical prompt still says to remove the failsafe cron once the session is
+  genuinely finished, which this plan's non-goal forbids rewording. Neither
+  is closed by this plan or by anything else in integration batch B2. See
+  [00388's report](../00388-failsafe-marker-wiped-by-other-crons-in-multi-cron-sessions/subagent-reports/260924-d-cron-opus-5-5.md#residual-risks-stated-plainly).
