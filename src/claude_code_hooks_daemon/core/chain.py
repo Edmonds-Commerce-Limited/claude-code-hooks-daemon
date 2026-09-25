@@ -806,11 +806,18 @@ class HandlerChain:
             payload can exhaust a handler's OWN budget regardless of how fast
             its per-byte cost is, so this is checked BEFORE any dispatch is
             even attempted, not after a timeout.
+
+            The deny reason names "chain", not ``handler.name`` (Plan 00466
+            N40 m5): this check runs before scope/``matches()``, so it fires
+            for the FIRST SAFETY+BLOCKING handler in PRIORITY order whether
+            or not that handler has anything to do with the tool being
+            called -- naming it would misleadingly blame e.g.
+            ``prevent-destructive-git`` for an oversized Write.
             """
             detail = f"{payload_size} bytes exceeds the {limit}-byte SAFETY evaluation limit"
             return _record_unjudged(
                 handler,
-                reason=f"{handler.name}: input too large to evaluate safely ({detail})",
+                reason=f"chain: input too large to evaluate safely ({detail})",
                 note=(
                     f"Handler {handler.name} input too large to evaluate safely: {detail}"
                     if (HandlerTag.SAFETY in handler.tags and HandlerTag.BLOCKING in handler.tags)

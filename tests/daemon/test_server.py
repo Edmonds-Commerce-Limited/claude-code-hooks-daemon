@@ -1023,6 +1023,71 @@ class TestHooksDaemon:
         await daemon.shutdown()
         await server_task
 
+    @pytest.mark.anyio
+    async def test_a_payload_past_the_socket_buffer_limit_fails_closed_for_pretooluse(
+        self, daemon_config: DaemonConfig, front_controller: FrontController
+    ) -> None:
+        """Plan 00466 N40 m5: a request past ``SocketLimit.REQUEST_BUFFER_BYTES``
+        (16 MiB) overruns ``reader.readline()``'s own limit -- distinct from
+        the 200KiB case above, which is comfortably UNDER it. The review
+        (real socket, `probe_n24r_p7_size.py`) found the client saw a raw
+        ``BrokenPipeError``/connection reset with NO response at all: the
+        server closed the connection while the client's oversized send was
+        still (partially) unread from the OS socket buffer, which is enough
+        for a Unix domain socket to RST rather than cleanly FIN-close. A bare
+        connection reset is indistinguishable, from ``.claude/init.sh``'s
+        side, from the daemon having crashed outright -- and unlike a
+        delivered ``{"error": ...}`` response (which init.sh's own
+        ``malformed_response`` handling fails CLOSED for PreToolUse on), a
+        reset with nothing read at all takes a DIFFERENT, non-fail-closed
+        code path there. The server must always deliver a real JSON error
+        response over an oversized request, never just drop the connection.
+        """
+        from claude_code_hooks_daemon.constants.protocol import SocketLimit
+
+        daemon = HooksDaemon(config=daemon_config, controller=front_controller)
+        server_task = asyncio.create_task(daemon.start())
+        await asyncio.sleep(0.1)
+
+        reader, writer = await asyncio.open_unix_connection(str(daemon_config.socket_path))
+
+        # Comfortably past the 16 MiB limit -- large enough that the client's
+        # own sendall() has not finished (and the server has not finished
+        # reading) by the time the server's readline() overruns its limit.
+        oversized_command = "x" * (SocketLimit.REQUEST_BUFFER_BYTES + 1024 * 1024)
+        request = {
+            "event": "PreToolUse",
+            "hook_input": {
+                "tool_name": "Bash",
+                "tool_input": {"command": oversized_command},
+            },
+            "request_id": "oversized-001",
+        }
+        payload = (json.dumps(request) + "\n").encode()
+
+        try:
+            writer.write(payload)
+            await writer.drain()
+        except (BrokenPipeError, ConnectionResetError):
+            # The server may already have started rejecting mid-send on a
+            # slow test host -- either way, a response must still arrive
+            # below, so fall through to the read.
+            pass
+
+        response_data = await reader.readline()
+        assert response_data, (
+            "server dropped the connection with no response at all for an "
+            "oversized PreToolUse request -- this is the fail-open bypass "
+            "m5 exists to close"
+        )
+        response = json.loads(response_data.decode())
+        assert "error" in response
+
+        writer.close()
+        await writer.wait_closed()
+        await daemon.shutdown()
+        await server_task
+
 
 class TestHooksDaemonSystemRequests:
     """Test suite for _system event handling in HooksDaemon."""

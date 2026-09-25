@@ -72,6 +72,22 @@ _INTERRUPTING_DECISIONS: Final[frozenset[str]] = frozenset({"deny", "ask"})
 # checked against that limit.
 _EVENT_PAYLOAD_READ_CHUNK_BYTES: Final[int] = 65536
 
+# Cap on how much MORE an oversized legacy-socket request is drained past
+# `SocketLimit.REQUEST_BUFFER_BYTES` before giving up (Plan 00466 N40 m5).
+# Draining exists so the peer's still-unread send does not trigger a Unix
+# domain socket RST when the server responds and closes; it must itself stay
+# bounded, or a sender that never stops writing would hang this connection
+# forever instead of getting an error back.
+_OVERSIZED_REQUEST_DRAIN_CAP_BYTES: Final[int] = SocketLimit.REQUEST_BUFFER_BYTES
+
+# Per-read timeout while draining an oversized request (Plan 00466 N40 m5).
+# The protocol has no length header, so silence this long reads as "the
+# sender is done", not "still arriving" -- see `_drain_oversized_request`.
+# Generous enough that a slow-but-still-sending peer is not cut off
+# prematurely, short enough that the client is not left waiting long for
+# its error response.
+_OVERSIZED_REQUEST_DRAIN_PER_READ_TIMEOUT_SECONDS: Final[float] = 0.5
+
 
 def redacted_blocking_response(response_json: str) -> str:
     """Prepare a blocking response for the DEBUG log: redacted, then truncated.
@@ -1050,6 +1066,43 @@ class HooksDaemon:
             chunks.append(chunk)
         return b"".join(chunks)
 
+    @staticmethod
+    async def _drain_oversized_request(reader: asyncio.StreamReader) -> None:
+        """Discard the rest of an over-limit legacy-socket request.
+
+        Plan 00466 N40 m5. Called after ``readline()`` raises on exceeding
+        ``SocketLimit.REQUEST_BUFFER_BYTES``: the sender's write may still be
+        landing, and responding + closing while data is still unread can make
+        a Unix domain socket RST rather than cleanly FIN-close, losing the
+        error response the caller is about to send.
+
+        This protocol carries no length header, so there is no way to know
+        "every byte the sender meant to send has now been read" versus "the
+        sender has gone quiet but is not done" -- the real client
+        (``init.sh``) sends its whole request with one blocking call before
+        it ever tries to read a response, so by the time we get here it has
+        nothing left to send, and ``reader.read()`` would otherwise block
+        forever waiting for bytes that are never coming (the peer is idle,
+        not at EOF). Each read is therefore individually bounded by
+        ``_OVERSIZED_REQUEST_DRAIN_PER_READ_TIMEOUT_SECONDS``: silence for
+        that long reads as "nothing more is coming", not as "still arriving".
+        The running total is additionally capped by
+        ``_OVERSIZED_REQUEST_DRAIN_CAP_BYTES`` so a sender that keeps
+        streaming cannot hang this connection indefinitely either.
+        """
+        drained = 0
+        while drained < _OVERSIZED_REQUEST_DRAIN_CAP_BYTES:
+            try:
+                chunk = await asyncio.wait_for(
+                    reader.read(_EVENT_PAYLOAD_READ_CHUNK_BYTES),
+                    timeout=_OVERSIZED_REQUEST_DRAIN_PER_READ_TIMEOUT_SECONDS,
+                )
+            except (TimeoutError, ConnectionResetError, BrokenPipeError, OSError):
+                return
+            if not chunk:
+                return
+            drained += len(chunk)
+
     async def _handle_event_client(
         self, event_json_key: str, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
@@ -1325,7 +1378,31 @@ class HooksDaemon:
 
         try:
             # Read request (newline-delimited JSON)
-            request_data = await reader.readline()
+            try:
+                request_data = await reader.readline()
+            except ValueError as e:
+                # `readline()` re-raises asyncio's LimitOverrunError as a bare
+                # ValueError once the line exceeds `SocketLimit.REQUEST_
+                # BUFFER_BYTES` (Plan 00466 N40 m5). The sender's write may
+                # still be landing in the OS socket buffer at this point --
+                # writing a response and closing without draining it first
+                # can make a Unix domain socket RST instead of cleanly
+                # FIN-closing, and the client then sees a bare
+                # BrokenPipeError/ConnectionResetError with NO response at
+                # all, indistinguishable from the daemon having crashed. Drain
+                # first so the response actually arrives, and
+                # `.claude/init.sh`'s existing malformed_response handling
+                # (which fails CLOSED for PreToolUse) gets a real response to
+                # act on instead of nothing.
+                logger.warning("Oversized request on legacy socket: %s", e)
+                await self._drain_oversized_request(reader)
+                with contextlib.suppress(BrokenPipeError, ConnectionResetError, OSError):
+                    error_response = {
+                        "error": f"request exceeds {SocketLimit.REQUEST_BUFFER_BYTES} bytes"
+                    }
+                    writer.write((json.dumps(error_response) + "\n").encode())
+                    await writer.drain()
+                return
 
             if not request_data:
                 logger.warning("Received empty request")

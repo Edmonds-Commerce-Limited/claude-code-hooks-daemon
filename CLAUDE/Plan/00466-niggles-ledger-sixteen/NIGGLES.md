@@ -3,7 +3,7 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
-### N40 — ✅ Blockers/Majors/nits remedied, m5 still open — adversarial security review of the N24/N25/N34 fix (2 blockers, 3 majors, 6 minors, 4 nits)
+### N40 — ✅ Blockers/Majors/minors/nits all remedied — adversarial security review of the N24/N25/N34 fix (2 blockers, 3 majors, 6 minors, 4 nits)
 
 **Found by an adversarial, read-only security review**
 (`subagent-reports/260924-n466-n24-review-opus-5-5.md`) of `d7f2c875` (N24 +
@@ -435,6 +435,46 @@ by. `None` (disabled enforcement) is never checked. RED-first in
 `test_chain_config.py::TestDeadlineBelowClientSocketTimeout`; includes a
 test that the shipped default (`Timeout.CHAIN_DEADLINE_DEFAULT` = 20s, 10s
 of margin) satisfies its own rule.
+
+**m5 — ✅ Remedied.** Three sub-findings, all fixed:
+
+1. *Non-monotonic measurement* was already fixed before this session
+   (`362e2516`, prior to this niggle's own work): `_safety_payload_size`
+   serialises the WHOLE `tool_input` dict with `surrogatepass` rather than
+   summing a fixed field list, closing the MultiEdit `edits[]`/NotebookEdit
+   `new_source`/`file_path` gaps the review measured.
+2. *Misattributed deny reason*: the size check runs BEFORE scope/`matches()`,
+   so it fires for the FIRST SAFETY+BLOCKING handler in PRIORITY order,
+   whichever that is — an oversized Write got denied naming
+   `prevent-destructive-git` regardless of relevance. `_apply_oversized_input`
+   now builds `reason=f"chain: input too large..."` instead of
+   `f"{handler.name}: ..."`, matching the existing "chain: not judged in
+   time" convention. RED test
+   (`test_oversized_input_deny_reason_does_not_misattribute_to_an_unrelated_handler`)
+   uses two SAFETY+BLOCKING handlers and asserts NEITHER name appears.
+3. *Server-side transport fail-open*: a request past
+   `SocketLimit.REQUEST_BUFFER_BYTES` (16 MiB) overran
+   `reader.readline()`'s own limit; the bare `ValueError` fell into
+   `_handle_client`'s generic exception handler, which tried to write an
+   error response and close WITHOUT draining the still-unread remainder of
+   the oversized send first — on a Unix domain socket this can make the
+   close send an RST instead of a clean FIN, and the client saw a raw
+   `ConnectionResetError`/`BrokenPipeError` with NO response at all (real
+   socket, `probe_n24r_p7_size.py`), indistinguishable from the daemon
+   having crashed outright and NOT covered by `.claude/init.sh`'s
+   `malformed_response` fail-closed-for-PreToolUse handling (which needs an
+   actual response to act on). Added `_drain_oversized_request`: drains the
+   remainder before responding, each `read()` bounded by a 0.5s
+   per-read timeout (the protocol carries no length header, so silence that
+   long reads as "the sender is done", not "still arriving" — the real
+   client sends its whole request in one blocking call before it ever tries
+   to read a response) and a running total capped at
+   `SocketLimit.REQUEST_BUFFER_BYTES` so a sender that never stops writing
+   cannot hang the connection either. RED test (real isolated daemon,
+   `test_a_payload_past_the_socket_buffer_limit_fails_closed_for_pretooluse`,
+   a genuine >16 MiB payload) confirmed the connection-reset-with-nothing
+   failure first; GREEN confirms a real `{"error": ...}` response now always
+   arrives.
 
 - **n1 — ✅ Remedied.** "Shared pool"/"thread pool" wording in
   `bounded_dispatch.py` (class docstring, singleton comment),

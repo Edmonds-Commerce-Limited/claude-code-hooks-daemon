@@ -1220,9 +1220,46 @@ class TestHandlerChain:
         assert guard.handle_called == 0
         assert result.result.decision == Decision.DENY
         assert result.result.reason is not None
-        assert "safety-guard" in result.result.reason
+        assert "chain" in result.result.reason
         assert "too large" in result.result.reason.lower()
         assert "50" in result.result.reason
+
+    def test_oversized_input_deny_reason_does_not_misattribute_to_an_unrelated_handler(
+        self,
+    ) -> None:
+        """Plan 00466 N40 m5: the size check runs BEFORE scope/matches(), so
+        it fires for the FIRST SAFETY+BLOCKING handler in PRIORITY order --
+        whether or not that handler has anything to do with the tool being
+        called. Naming that handler in the deny reason (the pre-fix
+        behaviour) misleadingly blamed e.g. `prevent-destructive-git` for a
+        denied Write. The reason must say "chain", never a specific
+        handler's name, regardless of which handler happened to be first.
+        """
+        chain = HandlerChain()
+        unrelated_git_guard = MockHandler(
+            "prevent-destructive-git",
+            priority=10,
+            terminal=True,
+            tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING],
+        )
+        chain.add(unrelated_git_guard)
+        chain.add(
+            MockHandler(
+                "block-sensitive-content",
+                priority=20,
+                terminal=True,
+                tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING],
+            )
+        )
+
+        hook_input = {"tool_name": "Write", "tool_input": {"content": "x" * 100}}
+        result = chain.execute(hook_input, max_safety_input_bytes=50)
+
+        assert result.result.decision == Decision.DENY
+        assert result.result.reason is not None
+        assert "prevent-destructive-git" not in result.result.reason
+        assert "block-sensitive-content" not in result.result.reason
+        assert result.result.reason.startswith("chain:")
 
     def test_oversized_write_content_skips_a_non_safety_blocking_handler(self) -> None:
         """A SAFETY handler without BLOCKING is skipped with a note, not denied."""
