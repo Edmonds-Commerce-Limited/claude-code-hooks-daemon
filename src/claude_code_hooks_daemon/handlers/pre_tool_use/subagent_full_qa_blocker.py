@@ -68,6 +68,7 @@ from __future__ import annotations
 import ast
 import errno
 import logging
+import os
 import posixpath
 import re
 import shlex
@@ -4551,6 +4552,67 @@ _SCRIPT_DIRECTORY: Final[re.Pattern[str]] = re.compile(
 #: the script's own path so a further ``dirname``/``cd && pwd`` built from
 #: that variable is still one :func:`_evaluated_path` can compute.
 _BASH_SOURCE_BARE: Final[re.Pattern[str]] = re.compile(r"\$\{BASH_SOURCE(?:\[0\])?\}|\$BASH_SOURCE")
+#: ``${BASH_SOURCE[0]%/*}`` -- bash parameter-expansion trim of the shortest
+#: ``/*`` suffix, a coreutils-free spelling of ``dirname`` some scripts use
+#: deliberately (a hostile ``PATH`` without ``dirname`` on it still resolves).
+#: Same directory as :data:`_SCRIPT_DIRECTORY`, different shape entirely, so
+#: it needs its own pattern rather than folding into that one.
+_BASH_SOURCE_DIRNAME_TRIM: Final[re.Pattern[str]] = re.compile(r"\$\{BASH_SOURCE(?:\[0\])?%/\*\}")
+#: The self-location loop that resolves a script's OWN path past any
+#: symlinks it was invoked through: ``while [ -L "$VAR" ]; do ... VAR=$(readlink
+#: ... "$VAR" ...); ... done``. Recognised STRUCTURALLY, by its condition
+#: (``-L`` tested on a variable) and its body (that SAME variable reassigned
+#: from ``readlink`` of itself) -- never by name, and never by which script
+#: carries it. Bash's own loop always converges on one outcome regardless of
+#: how many hops it takes or which branch of an inner `case` a given hop
+#: takes, so this needs no modelling of iterations or branches: it is
+#: resolved directly with ``os.path.realpath`` of the script being read
+#: (review 9 B1's residual; Plan 00463 round 9c).
+_SYMLINK_SOURCE_LOOP: Final[re.Pattern[str]] = re.compile(
+    r"while\s*\[\s*-L\s*\"\$(?P<var>\w+)\"\s*\]\s*;?\s*do\b(?P<body>.*?)\bdone\b", re.DOTALL
+)
+
+
+def _is_self_readlink_reassignment(body: str, var: str) -> bool:
+    """Whether ``body`` reassigns ``var`` from ``readlink`` of itself.
+
+    This is the structural signature the loop is recognised by: not just
+    any reassignment inside the loop, one that resolves one symlink hop of
+    the SAME variable the loop's ``-L`` condition tests. A look-alike loop
+    that tests ``-L`` but reassigns its variable some other way does not
+    match, and is left for the general parser to judge (and fail closed
+    on) as before.
+    """
+    escaped = re.escape(var)
+    pattern = re.compile(
+        rf'\b{escaped}="?\$\(\s*readlink\s+(?:-\S+\s+)*"?\$\{{?{escaped}\}}?"?\s*\)"?'
+    )
+    return pattern.search(body) is not None
+
+
+def _with_resolved_symlink_source(text: str, script: str) -> str:
+    """A self-location symlink-following loop, resolved to the script's real path.
+
+    The loop (condition, body, and everything between ``do`` and ``done``)
+    is removed outright -- its ``readlink``/``cd``/``case`` text is not
+    something :func:`_evaluated_path` can compute a value for without
+    modelling branches, and it does not need to: the loop's one
+    deterministic outcome is substituted directly for every later reference
+    to its variable. A loop that does not match the structural signature in
+    :func:`_is_self_readlink_reassignment` is left untouched.
+    """
+    match = _SYMLINK_SOURCE_LOOP.search(text)
+    if match is None:
+        return text
+    var = match.group("var")
+    if not _is_self_readlink_reassignment(match.group("body"), var):
+        return text
+    real = os.path.realpath(script)
+    remainder = text[: match.start()] + text[match.end() :]
+    reference = re.compile(rf"\$\{{{re.escape(var)}\}}|\${re.escape(var)}\b")
+    return reference.sub(lambda _: real, remainder)
+
+
 #: A directory that stands in the code as it is, needing no quoting.
 _PLAIN_PATH: Final[re.Pattern[str]] = re.compile(r"[\w./+@%,:=-]+")
 _SUBSTITUTION_CLOSER: Final[str] = ")"
@@ -4575,15 +4637,21 @@ def _with_script_directory(text: str, script: str) -> str:
     """Shell code run as the script at ``script``, its directory idiom replaced by that directory.
 
     ``$(dirname "${BASH_SOURCE[0]}")`` is where the script is, so a path or a
-    ``cd`` built from it is followed like a literal one. A bare
-    ``${BASH_SOURCE[0]}`` left over -- typically assigned to a variable first
-    and dirname'd from there -- becomes the script's own path, for the same
-    reason. Either substitution is skipped when the path would need quoting,
-    which then stays unseen.
+    ``cd`` built from it is followed like a literal one, and so is
+    ``${BASH_SOURCE[0]%/*}``, a coreutils-free spelling of the same thing. A
+    bare ``${BASH_SOURCE[0]}`` left over -- typically assigned to a variable
+    first and dirname'd from there -- becomes the script's own path, for the
+    same reason. A self-location symlink-following loop
+    (:func:`_with_resolved_symlink_source`) is resolved before any of that,
+    since it can reassign the very variable those idioms are built from.
+    Either substitution is skipped when the path would need quoting, which
+    then stays unseen.
     """
     if not _PLAIN_PATH.fullmatch(script):
         return text
+    text = _with_resolved_symlink_source(text, script)
     text = _SCRIPT_DIRECTORY.sub(posixpath.dirname(script), text)
+    text = _BASH_SOURCE_DIRNAME_TRIM.sub(posixpath.dirname(script), text)
     return _BASH_SOURCE_BARE.sub(script, text)
 
 

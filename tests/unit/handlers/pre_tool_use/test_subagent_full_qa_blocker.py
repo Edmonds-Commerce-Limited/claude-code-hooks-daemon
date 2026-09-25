@@ -1574,14 +1574,22 @@ class TestCodeTheHandlerCannotReadFailsClosed:
 
 #: This repository's scripts whose code includes code that cannot be seen,
 #: so they fail closed: `prerequisites.sh` pipes a downloaded installer into
-#: sh. The rest are review 9 B1's accepted residual: each resolves its OWN
-#: location past the fixed idioms this round resolves -- a `readlink`
-#: (without `-f`, so its target is not computable) inside a `while [ -L ... ]`
-#: symlink-following loop, or a value reassigned inside that loop overwriting
-#: the resolvable one set before it. None is reached directly by an everyday
-#: sub-agent command except `bin/hooks-daemon` itself (tracked separately,
-#: `TestReview9B1AcceptedResidual`), which the review's own patch already
-#: could not resolve either -- see PLAN.md's "B1 residual" note.
+#: sh. The rest are review 9 B1's residual, narrowed in Plan 00463 round 9c:
+#: the `while [ -L ... ]; do ... readlink ...; done` self-location loop and
+#: the `${BASH_SOURCE[0]%/*}` dirname trim are both resolved now (see
+#: `TestSelfLocationSymlinkLoopIsResolved`/`TestBashSourceDirnameTrimIsResolved`
+#: below), but `bin/hooks-daemon` itself still denies: a LATER two-hop `cd`
+#: chain in the SAME script (`BIN_DIR` then `DAEMON_DIR="$(cd -P
+#: "$BIN_DIR/.." && pwd)"`) is walked through a nested `$(...)` substitution
+#: that has no visibility into `BIN_DIR`'s own top-level assignment, so the
+#: "here" this handler tracks goes opaque before `source
+#: "$RESOLVE_LIB"` is reached -- a different, still-open gap (see PLAN.md's
+#: "B1 residual" note). Every script here that shells out to
+#: `bin/hooks-daemon` inherits that denial; `run_semgrep_check.sh` is
+#: additionally its own case (its program path comes from calling a bash
+#: FUNCTION, genuinely uncomputable without running it). None is reached
+#: directly by an everyday sub-agent command except `bin/hooks-daemon`
+#: itself (tracked separately, `TestBinHooksDaemonIsTheB1Residual`).
 _SCRIPTS_THAT_RUN_UNSEEN_CODE: frozenset[str] = frozenset(
     {
         "scripts/install/prerequisites.sh",
@@ -3085,3 +3093,98 @@ class TestTheAcceptanceTestsRunInASubagentContext:
         for test in _handler().get_acceptance_tests():
             assert test.hook_input is not None, test.title
             assert test.hook_input.get("agent_id"), test.title
+
+
+#: The self-location symlink-following loop, verbatim from ``bin/hooks-daemon``
+#: (Plan 00463 round 9c), with a placeholder command in place of the daemon
+#: dispatch it really ends with.
+_SYMLINK_LOOP_WRAPPER: str = """#!/bin/bash
+set -euo pipefail
+_source="${BASH_SOURCE[0]}"
+while [ -L "$_source" ]; do
+    _dir="$(cd -P "$(dirname "$_source")" && pwd)"
+    _source="$(readlink "$_source")"
+    case "$_source" in
+        /*) ;;
+        *) _source="$_dir/$_source" ;;
+    esac
+done
+BIN_DIR="$(cd -P "$(dirname "$_source")" && pwd)"
+source "$BIN_DIR/helper.sh"
+"""
+#: The same loop, with a body that reassigns the tested variable some OTHER
+#: way -- not from ``readlink`` of itself. Structurally a near miss: the
+#: condition matches, but :func:`_is_self_readlink_reassignment` must not.
+_LOOKALIKE_LOOP_WRAPPER: str = """#!/bin/bash
+set -euo pipefail
+_source="${BASH_SOURCE[0]}"
+while [ -L "$_source" ]; do
+    _source="$(resolve_one_hop "$_source")"
+done
+BIN_DIR="$(cd -P "$(dirname "$_source")" && pwd)"
+source "$BIN_DIR/helper.sh"
+"""
+
+
+class TestSelfLocationSymlinkLoopIsResolved:
+    """Plan 00463 round 9c: the ``while [ -L ... ]; do ... readlink ...; done``
+    self-location idiom is recognised structurally and resolved to the
+    script's real path, rather than left an unseen residual.
+
+    Each fixture ends by SOURCING ``$BIN_DIR/helper.sh``: a read that only
+    happens if ``BIN_DIR`` resolved to a real path, so the assertion proves
+    the loop's outcome was actually used, not merely that the command parsed.
+    """
+
+    def test_a_benign_sourced_file_is_allowed(self, tmp_path: Path) -> None:
+        (tmp_path / "helper.sh").write_text("echo hi\n", encoding="utf-8")
+        wrapper = tmp_path / "wrapper.sh"
+        wrapper.write_text(_SYMLINK_LOOP_WRAPPER, encoding="utf-8")
+        wrapper.chmod(0o755)
+        match = find_full_qa_invocation(f"bash {wrapper}", _patterns(), cwd=tmp_path)
+        assert match is None, match
+
+    def test_a_full_suite_sourced_file_is_still_caught(self, tmp_path: Path) -> None:
+        (tmp_path / "helper.sh").write_text("pytest tests\n", encoding="utf-8")
+        wrapper = tmp_path / "wrapper.sh"
+        wrapper.write_text(_SYMLINK_LOOP_WRAPPER, encoding="utf-8")
+        wrapper.chmod(0o755)
+        match = find_full_qa_invocation(f"bash {wrapper}", _patterns(), cwd=tmp_path)
+        assert match is not None
+
+    def test_a_lookalike_loop_with_a_different_body_stays_unseen(self, tmp_path: Path) -> None:
+        (tmp_path / "helper.sh").write_text("echo hi\n", encoding="utf-8")
+        wrapper = tmp_path / "wrapper.sh"
+        wrapper.write_text(_LOOKALIKE_LOOP_WRAPPER, encoding="utf-8")
+        wrapper.chmod(0o755)
+        match = find_full_qa_invocation(f"bash {wrapper}", _patterns(), cwd=tmp_path)
+        assert match is not None
+        assert match.fail_closed
+
+
+class TestBashSourceDirnameTrimIsResolved:
+    """Plan 00463 round 9c: ``${BASH_SOURCE[0]%/*}`` -- the coreutils-free
+    spelling of ``dirname "${BASH_SOURCE[0]}"`` -- is resolved the same way
+    the ``$(dirname ...)`` spelling already was.
+    """
+
+    def test_a_sourced_file_relative_to_the_trimmed_directory_is_read(self, tmp_path: Path) -> None:
+        """Without the trim resolved, ``$SCRIPT_DIR`` stays an opaque variable:
+
+        ``helper.sh``'s ``pytest tests`` is never reached, and the command is
+        wrongly allowed. Proves the resolution actually located the file,
+        not merely that the command parsed.
+        """
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        (sub / "helper.sh").write_text("pytest tests\n", encoding="utf-8")
+        wrapper = sub / "wrapper.sh"
+        wrapper.write_text(
+            "#!/bin/bash\n"
+            'SCRIPT_DIR="${BASH_SOURCE[0]%/*}"\n'
+            'source "$SCRIPT_DIR/helper.sh"\n',
+            encoding="utf-8",
+        )
+        wrapper.chmod(0o755)
+        match = find_full_qa_invocation(f"bash {wrapper}", _patterns(), cwd=tmp_path)
+        assert match is not None

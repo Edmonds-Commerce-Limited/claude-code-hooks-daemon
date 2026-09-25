@@ -189,21 +189,44 @@ one place every route ends up, whatever launched it: pytest itself.
   (`$(dirname "${BASH_SOURCE[0]}")`, `$(cd "$(dirname ...)" && pwd)`,
   `realpath`/`readlink -f` of a literal) so the tightened B1 rule does not
   turn every script that finds its own directory into a false deny.
-- **B1 residual (accepted, named, not silent).** A handful of this
-  repository's own installer/wrapper scripts resolve their own location past
-  those fixed idioms -- a plain `readlink` (uncomputable without `-f`) inside
-  a `while [ -L ... ]` symlink-following loop, or a value reassigned inside
-  that loop overwriting the resolvable one set before it (this handler's
-  variable tracking has no branch awareness). `bin/hooks-daemon` itself is
-  the most consequential instance, and every script that shells out to it
-  inherits the same denial. Pinned as DENIED (not silently dropped from
-  coverage) in `_SCRIPTS_THAT_RUN_UNSEEN_CODE`
-  (`tests/unit/handlers/pre_tool_use/test_subagent_full_qa_blocker.py`),
-  `_B1_RESIDUAL_UNSEEN` and `TestBinHooksDaemonIsTheB1Residual`
-  (`..._corpus.py`). A real fix needs branch-aware variable tracking (which
-  loop-body reassignment wins depends on whether the loop's own condition
-  can be proven), which is follow-up work, not a "documented limit" to
-  leave alone: it sits in code this round touches.
+- **B1 residual, narrowed (round 9c).** The `while [ -L "$VAR" ]; do ... readlink ...; done` self-location loop (`bin/hooks-daemon`'s own shape) and
+  the coreutils-free `${BASH_SOURCE[0]%/*}` dirname spelling (used by
+  `scripts/lib/resolve_venv.sh` and others) are now both resolved
+  structurally -- the loop by its condition and body signature
+  (`_with_resolved_symlink_source`/`_is_self_readlink_reassignment`,
+  `subagent_full_qa_blocker.py`), the trim idiom the same way the
+  `$(dirname ...)` spelling already was (`_BASH_SOURCE_DIRNAME_TRIM`). A
+  look-alike loop whose body reassigns its variable some OTHER way is left
+  unseen, on purpose (`TestSelfLocationSymlinkLoopIsResolved` in
+  `test_subagent_full_qa_blocker.py`).
+  This does NOT clear `bin/hooks-daemon` and the scripts that shell out to
+  it end to end: the handler's per-file variable tracking has no visibility
+  into a variable set by an EARLIER top-level assignment in the same script
+  once that `cd` is reached only through a nested `$(...)` substitution
+  (`BIN_DIR="$(cd -P "$(dirname "$_source")" && pwd)"` then `DAEMON_DIR= "$(cd -P "$BIN_DIR/.." && pwd)"` -- the second `cd`'s `$BIN_DIR` is opaque
+  to that nested walk). A fix was attempted (threading the enclosing script's
+  variables into `_nested`'s recursive `_invocations` call) and reverted: it
+  fixed `run_canonical_callers_check.sh`'s own two-hop
+  `SCRIPT_DIR`/`PROJECT_ROOT` chain, but newly denied
+  `scripts/qa/run_smoke_test.sh` (previously ALLOWED because the whole
+  `${PROJECT_ROOT}/bin/hooks-daemon` word was leniently treated as ABSENT
+  while `PROJECT_ROOT` stayed opaque -- resolving it exposed a DEEPER,
+  separate gap instead of a genuine allow). `bin/hooks-daemon`,
+  `run_canonical_callers_check.sh`, `run_semgrep_check.sh` and
+  `check_generated_doc_drift.py` (the last two also blocked separately:
+  `run_semgrep_check.sh` builds its program path by calling a bash
+  FUNCTION, `resolve_venv_python`, which is genuinely uncomputable without
+  running it; `check_generated_doc_drift.py` is denied only because its own
+  docstring PROSE mentions `bin/hooks-daemon generate-docs`, misread as an
+  invocation) remain pinned DENIED in `_SCRIPTS_THAT_RUN_UNSEEN_CODE`
+  (`test_subagent_full_qa_blocker.py`), `_B1_RESIDUAL_UNSEEN` and
+  `TestBinHooksDaemonIsTheB1Residual` (`..._corpus.py`), with their
+  docstrings updated to the CURRENT cause. A real fix needs the nested-`cd`
+  "here" tracker to see the enclosing script's own variables WITHOUT
+  reintroducing the `run_smoke_test.sh` regression -- likely branch-aware
+  variable tracking for `if`, not just the loop idiom -- which is follow-up
+  work, not a "documented limit" to leave alone: it sits in code this round
+  touches.
 - The plan merges AFTER Plan 00466's N24 ledger, whose deadline now fails
   CLOSED on a chain timeout (M7's own budget finding: a chain timeout must
   never read as an allow for a SUB-scoped guard).

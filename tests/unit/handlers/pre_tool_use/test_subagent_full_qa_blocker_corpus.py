@@ -191,12 +191,18 @@ def _corpus_rows() -> list[tuple[str, bool]]:
 
 #: The two ``scripts/qa`` entry points that ARE the full suite.
 _FULL_BY_DESIGN: frozenset[str] = frozenset({"run_all.sh", "run_tests.sh"})
-#: Review 9 B1's accepted residual (see PLAN.md's "B1 residual" note and
-#: ``_SCRIPTS_THAT_RUN_UNSEEN_CODE`` in test_subagent_full_qa_blocker.py):
-#: each resolves its own location past the fixed idioms this round resolves
-#: -- a plain ``readlink`` (not computable without ``-f``) inside a
-#: ``while [ -L ... ]`` symlink-following loop, or a value reassigned inside
-#: that loop overwriting the resolvable one set before it.
+#: Review 9 B1's residual, narrowed in Plan 00463 round 9c (see PLAN.md's
+#: "B1 residual" note and ``_SCRIPTS_THAT_RUN_UNSEEN_CODE`` in
+#: test_subagent_full_qa_blocker.py): the self-location symlink loop and the
+#: ``${BASH_SOURCE[0]%/*}`` dirname trim these three all use, directly or via
+#: ``scripts/lib/resolve_venv.sh``, are now both resolved structurally -- but
+#: each still shells out to (or, for ``check_generated_doc_drift.py``,
+#: mentions in a docstring misread as an invocation of) ``bin/hooks-daemon``,
+#: which stays denied for a DIFFERENT reason: a later two-hop ``cd`` chain in
+#: that script reaches a variable this handler's nested-substitution walk
+#: cannot see (no branch/scope awareness across a script's own top-level
+#: assignments). ``run_semgrep_check.sh`` also builds its own program path by
+#: calling a bash FUNCTION, genuinely uncomputable without running it.
 _B1_RESIDUAL_UNSEEN: frozenset[str] = frozenset(
     {"run_canonical_callers_check.sh", "run_semgrep_check.sh", "check_generated_doc_drift.py"}
 )
@@ -280,12 +286,13 @@ def _everyday_commands() -> list[str]:
         "bash scripts/qa/run_security_check.sh",
         "./scripts/qa/run_autofix.sh",
         "./scripts/qa/check_canonical_callers.sh",
-        # `bin/hooks-daemon` itself is review 9 B1's accepted residual (see
-        # `_B1_RESIDUAL_UNSEEN` above and PLAN.md's "B1 residual" note): its
-        # own self-location resolution follows a symlink via a plain
-        # `readlink` (uncomputable without `-f`) inside a `while [ -L ... ]`
-        # loop, so it is denied rather than judged by its pattern. Pinned
-        # DENIED, not omitted, in `TestBinHooksDaemonIsTheB1Residual` below.
+        # `bin/hooks-daemon` itself is review 9 B1's residual, narrowed in
+        # round 9c (see `_B1_RESIDUAL_UNSEEN` above and PLAN.md's "B1
+        # residual" note): its self-location loop now resolves, but a LATER
+        # two-hop `cd` chain in the same script reaches a variable this
+        # handler's nested-substitution walk cannot see, so it is still
+        # denied rather than judged by its pattern. Pinned DENIED, not
+        # omitted, in `TestBinHooksDaemonIsTheB1Residual` below.
         'CLAUDE/Plan/mkplan.bash "a-new-plan"',
         f"CLAUDE/Plan/mkplan.bash --journal {_PLAN} Review untracked/scratch/journal.txt",
         # git and gh.
@@ -403,15 +410,22 @@ def test_an_everyday_sub_agent_command_is_allowed(
 
 
 class TestBinHooksDaemonIsTheB1Residual:
-    """``bin/hooks-daemon`` is denied, not allowed -- review 9 B1's accepted residual.
+    """``bin/hooks-daemon`` is denied, not allowed -- review 9 B1's residual, narrowed.
 
-    Its own self-location resolution follows a symlink via a plain
-    ``readlink`` (uncomputable without ``-f``: review 9's own direction pins
-    plain readlink as NOT one of the fixed idioms) inside a
-    ``while [ -L "$_source" ]`` loop, and the loop's reassignment of
-    ``_source`` overwrites the resolvable pre-loop value this handler's
-    variable tracking has no branch awareness to keep separate. Pinned here
-    so a future fix that resolves it is a welcome diff, not a silent gap.
+    Round 9c resolved its OWN self-location loop (``while [ -L "$_source" ];
+    do ... readlink ...; done``) structurally, so that is no longer why this
+    is denied. What remains: ``BIN_DIR="$(cd -P "$(dirname "$_source")" &&
+    pwd)"`` then ``DAEMON_DIR="$(cd -P "$BIN_DIR/.." && pwd)"`` -- the second
+    ``cd`` is reached through this handler's OWN recursion into a nested
+    ``$(...)`` substitution, which has no visibility into ``BIN_DIR``'s
+    top-level assignment earlier in the SAME script, so the "here" this
+    handler tracks goes opaque before ``source "$RESOLVE_LIB"`` (further
+    down the same script) is reached. A fix was attempted (threading the
+    enclosing script's variables into that nested recursion) and reverted:
+    it fixed this file's own denial but newly denied
+    ``scripts/qa/run_smoke_test.sh`` (see PLAN.md's "B1 residual" note), so
+    it is not landed. Pinned here so a future fix that resolves it is a
+    welcome diff, not a silent gap.
     """
 
     @pytest.mark.parametrize(
