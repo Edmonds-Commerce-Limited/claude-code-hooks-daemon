@@ -9,6 +9,57 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N70 — The pidfd stop path falls back and cleans up too eagerly
+
+**Found by N24 review 4 (two NITs).**
+
+- `_open_pidfd` falls back to by-number signalling on ESRCH and EMFILE, not
+  only where pidfd is unsupported. ESRCH means the process is not running and
+  needs no fallback.
+- When the pinned process dies during the proof, `cmd_stop` deletes the PID
+  file and socket even though the proof has just attributed a live process to
+  this project.
+
+**Remedy:** fall back only for EMFILE and an unsupported platform, and leave
+the files alone in the race. A RED test for each.
+
+### N69 — Two fail-closed deny messages misname what happened
+
+**Found by N24 reviews 3 and 4.**
+
+- `emit_error_json` says "reached" for `socket_not_found` and
+  `connection_refused`, which never connected.
+- The relay's timeout is labelled "os error 11" instead of a readable name.
+
+**Remedy:** use the version-aware verb already used by `emit_hook_error`, and
+map EAGAIN to "timed out".
+
+### N68 — A moved-away daemon checkout reads as NOT_INSTALLED, which fails open
+
+**Found by N24 review 4 (mi-C). Owner decision needed.** An agent's
+`mv .claude/hooks-daemon .claude/hd-old && kill <pid>` is allowed. The hook
+then reports `NOT_INSTALLED`, which allows every call. That cannot be told
+apart from a genuinely fresh clone that has the committed config but no
+install yet.
+
+**Candidate remedies:**
+
+- an untracked install stamp, so a stamp with no checkout means removed, and
+  removed denies;
+- or an install-command carve-out instead of the fail-open.
+
+### N67 — The daemon-down repair carve-out trusts the command text, not the binary it runs
+
+**Found by N24 review 4 (mi-A).** While the daemon is unreachable, PreToolUse
+allows a sole `bin/hooks-daemon <read-only|restart>` command. The check reads
+the TEXT, so a planted `bin/hooks-daemon` in the hook's cwd runs. The same
+indirection exists while the daemon is up, but the carve-out is the one path
+that fail-closed mode exists to guard.
+
+**Remedy:** require `realpath(cwd/bin/hooks-daemon)` to equal the project's
+own launcher, or the cwd to be the project root. RED test: a planted launcher
+in a subdirectory is denied while the daemon is down.
+
 ### N66 — Two singleton race tests depend on `time.sleep(0.02)`, so they can pass without the race happening
 
 **Found by N23 review 5 (its L6); carried open by the round 6 fixer.** The race

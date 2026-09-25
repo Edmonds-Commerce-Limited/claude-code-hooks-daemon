@@ -95,6 +95,10 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N64 | `subagent_report_path_verifier` resolves a worktree-relative report path against the main checkout        | N47 verify agent   | ⬜ Open               |
 | N65 | `plan_number_helper` denies an `ls` of one named plan's folder as a next-number scan                      | Coordinator        | ⬜ Open               |
 | N66 | Two singleton race tests depend on `time.sleep(0.02)`, so they can pass without the race happening        | N23 review 5       | ⬜ Open               |
+| N67 | The daemon-down repair carve-out trusts the command text, not the binary it runs                          | N24 review 4       | ⬜ Open               |
+| N68 | A moved-away daemon checkout reads as NOT_INSTALLED, which fails open                                     | N24 review 4       | ⬜ Open               |
+| N69 | Two fail-closed deny messages misname what happened                                                       | N24 reviews 3–4    | ⬜ Open               |
+| N70 | The pidfd stop path falls back and cleans up too eagerly                                                  | N24 review 4       | ⬜ Open               |
 
 ## Tasks
 
