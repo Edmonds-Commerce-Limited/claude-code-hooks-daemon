@@ -142,6 +142,26 @@ class TestCmdStatusNonConfigDegradedReasons:
         assert "CONFIGURATION DEGRADED" not in out
         assert problem in out
 
+    def test_skipped_per_event_sockets_are_named(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Plan 00466 N24 review 2 P1: status names each event whose socket was skipped."""
+        out = self._status_output(
+            tmp_path,
+            capsys,
+            {
+                "status": "degraded",
+                "degraded_reasons": ["event_sockets"],
+                "event_socket_skips": [
+                    {"event": "PreToolUse", "reason": "path exceeds the AF_UNIX length limit"},
+                    {"event": "Stop", "reason": "bind failed: address in use"},
+                ],
+            },
+        )
+        assert "CONFIGURATION DEGRADED" not in out
+        assert "PreToolUse: path exceeds the AF_UNIX length limit" in out
+        assert "Stop: bind failed: address in use" in out
+
     def test_config_named_in_the_reasons_still_prints_the_block(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:

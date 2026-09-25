@@ -550,6 +550,7 @@ class HooksDaemon:
     __slots__ = (
         "_active_requests",
         "_event_servers",
+        "_event_socket_skips",
         "_idle_check_interval",
         "_input_validators",
         "_is_new_controller",
@@ -579,6 +580,9 @@ class HooksDaemon:
         self.controller = controller
         self.server: asyncio.Server | None = None
         self._event_servers: dict[str, asyncio.Server] = {}
+        # Wire event name -> why its per-event socket was not bound; reported
+        # by the ``health`` action (Plan 00466 N24 review 2 P1).
+        self._event_socket_skips: dict[str, str] = {}
         self.last_activity: float = time.time()
         self.shutdown_event = asyncio.Event()
         self._active_requests = 0
@@ -1012,6 +1016,10 @@ class HooksDaemon:
                 "the legacy socket",
                 events_dir,
             )
+            self._event_socket_skips = {
+                meta.wire_key.value: f"events dir {events_dir} is a pre-existing symlink"
+                for meta in wired_event_metas()
+            }
             return
         if events_dir.exists():
             try:
@@ -1027,6 +1035,7 @@ class HooksDaemon:
         events_dir.mkdir(parents=True, mode=0o750, exist_ok=True)
 
         bound: dict[str, asyncio.Server] = {}
+        skipped: dict[str, str] = {}
         for meta in wired_event_metas():
             event_socket_path = get_event_socket_path_in_dir(events_dir, meta.bash_key)
             if event_socket_path is None:
@@ -1035,6 +1044,9 @@ class HooksDaemon:
                     "length limit even under the events dir; served only via "
                     "the legacy socket",
                     meta.json_key,
+                )
+                skipped[meta.wire_key.value] = (
+                    f"{events_dir / meta.bash_key}.sock exceeds the AF_UNIX path length limit"
                 )
                 continue
             try:
@@ -1053,6 +1065,7 @@ class HooksDaemon:
                     meta.wire_key.value,
                     e,
                 )
+                skipped[meta.wire_key.value] = f"bind failed: {e}"
                 continue
             # Securing the socket is the second half of binding it, so it
             # shares the first half's best-effort contract: one event drops to
@@ -1075,10 +1088,12 @@ class HooksDaemon:
                     e,
                 )
                 await _discard_unsecured_socket(event_server, event_socket_path)
+                skipped[meta.wire_key.value] = f"could not be secured: {e}"
                 continue
             bound[meta.wire_key.value] = event_server
 
         self._event_servers = bound
+        self._event_socket_skips = skipped
         total_wired = len(wired_event_metas())
         if len(bound) < total_wired:
             # Plan 00290 F3 fix (canary run 2): the canary saw most events
@@ -1705,6 +1720,27 @@ class HooksDaemon:
         else:
             return {"error": "Unknown controller type"}
 
+    def _with_event_socket_skips(self, health: dict[str, Any]) -> dict[str, Any]:
+        """Add the per-event sockets this daemon could not bind to ``health``.
+
+        The server owns the sockets, so it adds this reason itself; the
+        controller's reasons are kept as they are. A skipped event falls back
+        to the bash forwarder, so the relay does nothing for it
+        (Plan 00466 N24 review 2 P1).
+        """
+        if not self._event_socket_skips:
+            return health
+        reasons = [*health.get("degraded_reasons", []), "event_sockets"]
+        return {
+            **health,
+            "status": "degraded",
+            "degraded_reasons": reasons,
+            "event_socket_skips": [
+                {"event": event, "reason": reason}
+                for event, reason in self._event_socket_skips.items()
+            ],
+        }
+
     def _handle_system_request(
         self, hook_input: dict[str, Any], request_id: str | None
     ) -> dict[str, Any]:
@@ -1738,7 +1774,7 @@ class HooksDaemon:
                     "stats": {"uptime_seconds": 0, "requests_processed": 0},
                     "handlers": {},
                 }
-            response = {"result": health_result}
+            response = {"result": self._with_event_socket_skips(health_result)}
 
         elif action == "handlers":
             if self._is_new_controller and isinstance(self.controller, Controller):

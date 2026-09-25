@@ -189,13 +189,15 @@ class TestEofFraming:
     async def test_malformed_json_fails_open_with_empty_object(
         self, isolated_untracked_dir: Path, front_controller: FrontController
     ) -> None:
+        """A non-gating event answers ``{}``. PreToolUse denies instead, which
+        ``test_event_socket_fail_closed_pretooluse.py`` pins."""
         config = _make_config(isolated_untracked_dir, relay_enabled=True)
         daemon = HooksDaemon(config=config, controller=front_controller)
         server_task = asyncio.create_task(daemon.start())
         await asyncio.sleep(0.1)
 
         events_dir = get_event_socket_dir_from_untracked(isolated_untracked_dir)
-        socket_path = events_dir / "pre-tool-use.sock"
+        socket_path = events_dir / "post-tool-use.sock"
 
         reader, writer = await asyncio.open_unix_connection(str(socket_path))
         writer.write(b"{not valid json")
@@ -296,6 +298,99 @@ class TestBindShortfallIsSurfaced:
         bound_count = expected_total - 2
         logs = "\n".join(get_memory_logs())
         assert f"Only {bound_count}/{expected_total} per-event socket(s) bound" in logs
+
+
+class TestSkippedSocketsReachHealth:
+    """Plan 00466 N24 review 2 P1: a log line is not a signal anyone watches.
+
+    A skipped per-event socket sends that event back to the bash forwarder
+    with nothing in ``health`` or ``status`` to say so. Health must go
+    degraded with its own reason and name every skipped event.
+    """
+
+    @staticmethod
+    def _health(daemon: HooksDaemon) -> dict[str, Any]:
+        response = daemon._handle_system_request({"action": "health"}, None)
+        return dict(response["result"])
+
+    @pytest.mark.anyio
+    async def test_a_path_length_skip_degrades_health_and_names_the_event(
+        self, isolated_untracked_dir: Path, front_controller: FrontController
+    ) -> None:
+        from claude_code_hooks_daemon.daemon import paths as paths_module
+
+        real_resolver = paths_module.get_event_socket_path_in_dir
+
+        def _too_long_for_pre_tool_use(events_dir: Path, event_file_name: str) -> Path | None:
+            if event_file_name == "pre-tool-use":
+                return None
+            return real_resolver(events_dir, event_file_name)
+
+        daemon = HooksDaemon(
+            config=_make_config(isolated_untracked_dir, relay_enabled=True),
+            controller=front_controller,
+        )
+        with patch.object(
+            paths_module, "get_event_socket_path_in_dir", side_effect=_too_long_for_pre_tool_use
+        ):
+            server_task = asyncio.create_task(daemon.start())
+            await asyncio.sleep(0.1)
+
+        health = self._health(daemon)
+        assert health["status"] == "degraded"
+        assert "event_sockets" in health["degraded_reasons"]
+        skips = health["event_socket_skips"]
+        assert [skip["event"] for skip in skips] == ["PreToolUse"]
+        assert "AF_UNIX" in skips[0]["reason"]
+
+        await daemon.shutdown()
+        await server_task
+
+    @pytest.mark.anyio
+    async def test_a_chmod_skip_is_named_too(
+        self, isolated_untracked_dir: Path, front_controller: FrontController
+    ) -> None:
+        events_dir = get_event_socket_dir_from_untracked(isolated_untracked_dir)
+        real_chmod = Path.chmod
+
+        def _refuse_stop(self: Path, mode: int, **kwargs: Any) -> None:
+            if self == events_dir / "stop.sock":
+                raise PermissionError(13, "Permission denied", str(self))
+            real_chmod(self, mode, **kwargs)
+
+        daemon = HooksDaemon(
+            config=_make_config(isolated_untracked_dir, relay_enabled=True),
+            controller=front_controller,
+        )
+        with patch.object(Path, "chmod", _refuse_stop):
+            server_task = asyncio.create_task(daemon.start())
+            await asyncio.sleep(0.1)
+
+        skips = self._health(daemon)["event_socket_skips"]
+        assert [skip["event"] for skip in skips] == ["Stop"]
+        assert "Permission denied" in skips[0]["reason"]
+
+        await daemon.shutdown()
+        await server_task
+
+    @pytest.mark.anyio
+    async def test_every_socket_bound_leaves_health_alone(
+        self, isolated_untracked_dir: Path, front_controller: FrontController
+    ) -> None:
+        daemon = HooksDaemon(
+            config=_make_config(isolated_untracked_dir, relay_enabled=True),
+            controller=front_controller,
+        )
+        server_task = asyncio.create_task(daemon.start())
+        await asyncio.sleep(0.1)
+
+        health = self._health(daemon)
+        assert health["status"] == "healthy"
+        assert "event_socket_skips" not in health
+        assert "degraded_reasons" not in health
+
+        await daemon.shutdown()
+        await server_task
 
 
 class TestSocketHygiene:

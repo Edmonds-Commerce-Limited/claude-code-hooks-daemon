@@ -955,6 +955,11 @@ def _print_degraded_config_block(health: dict[str, Any] | None) -> None:
         print("\nChain deadline cannot beat the client timeout (every guard is still on):")
         for problem in deadline_problems:
             print(f"  - {problem}")
+    socket_skips = health.get("event_socket_skips", [])
+    if socket_skips:
+        print("\nPer-event sockets not bound (these events use the bash forwarder, not the relay):")
+        for skip in socket_skips:
+            print(f"  - {skip.get('event')}: {skip.get('reason')}")
 
 
 def _print_install_stamp_line() -> None:
