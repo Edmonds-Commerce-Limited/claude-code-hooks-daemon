@@ -9,6 +9,44 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N83 — A parametrised live-daemon test skips its own `tests` case
+
+**Found by the coordinator in CI run 36171017537.**
+`tests/unit/qa/test_llm_qa_live_daemon.py:76` parametrises over the whole
+`TOOL_REGISTRY` and then calls `pytest.skip` for `tests`, so every run
+reports a skip. The owner's rule is that a skip in a release gate is a
+failure.
+
+**Remedy:** exclude `tests` from the parametrisation, and pin the reason in
+a separate test that asserts `tests` reaches the daemon through
+`tests/acceptance`.
+
+### N82 — A "design test" has been skipped as "implementation pending" since the registry-key work
+
+**Found by the coordinator in CI run 36171017537.**
+`tests/unit/handlers/test_config_key_consistency.py:76` calls `pytest.skip`
+unconditionally. It records the requirement that the registry derive a
+handler's config key from its `HandlerID` constant, not from
+`_to_snake_case(class_name)`. It has never run.
+
+**Remedy:** check whether the registry now uses the constant. If it does,
+turn the skip into a real assertion. If not, implement the lookup RED-first
+and delete the skip.
+
+### N81 — `sed_blocker` denies a Bash heredoc that writes markdown, and a strict xfail pins the defect
+
+**Found by the coordinator in CI run 36171017537.** The strict `xfail` at
+`tests/unit/handlers/test_sed_blocker.py:1391` records a behaviour defect that
+Plan 00260 Task 3.1 deferred. `cat > NOTES.md <<'EOF'` with a body that
+mentions sed is DENIED, while the Write tool allows the same `.md` content.
+Plan 00260 is archived Complete, so nothing now owns the defect. A deferral
+is the owner's call.
+
+**Remedy:** use the redirect-target parsing the other Bash guards now share
+to exempt a write whose only target is a `.md` file and whose sed text is
+never executed. Flip the xfail into a passing test and remove the marker,
+then update the guidance.
+
 ### N80 — A script overwritten earlier in the same command by an unlisted writer is judged by its old content
 
 **Found by Plan 00464 review 5 (M4). Narrowed by fix round 11, then confirmed

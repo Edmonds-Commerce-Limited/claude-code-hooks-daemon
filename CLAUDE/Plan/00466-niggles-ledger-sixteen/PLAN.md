@@ -98,6 +98,9 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N67 | The daemon-down repair carve-out trusts the command text, not the binary it runs                          | N24 review 4       | ⬜ Open                                             |
 | N68 | A moved-away daemon checkout reads as NOT_INSTALLED, which fails open                                     | N24 review 4       | ⬜ Open                                             |
 | N69 | Two fail-closed deny messages misname what happened                                                       | N24 reviews 3–4    | ⬜ Open                                             |
+| N81 | `sed_blocker` denies a Bash heredoc that writes markdown, and a strict xfail pins the defect              | CI run             | ⬜ Open                                             |
+| N82 | A "design test" has been skipped as "implementation pending" since the registry-key work                  | CI run             | ⬜ Open                                             |
+| N83 | A parametrised live-daemon test skips its own `tests` case                                                | CI run             | ⬜ Open                                             |
 | N80 | A script overwritten earlier in the same command by an unlisted writer is judged by its old content       | 464 review 5 M4    | ⬜ Open (owner: pre-commit sink)                    |
 | N74 | A recursive grep over a protected directory is allowed                                                    | GD review 8        | ⬜ Open                                             |
 | N75 | The Write/Edit content route misses 26 script-launch shapes                                               | GD review 8        | ⬜ Open                                             |
