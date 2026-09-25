@@ -9,6 +9,26 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N80 — A script overwritten earlier in the same command by an unlisted writer is judged by its old content
+
+**Found by Plan 00464 review 5 (M4). Narrowed by fix round 11, then confirmed
+by the verify-and-merge pass at 5a14423fb.** The commit-gate script walk
+judges a script by its on-disk content. Round 11 made the known
+content-changing git writers deny: checkout, switch, reset, pull, merge,
+apply, am, stash pop, restore, cherry-pick, rebase, revert, worktree add and
+clone. Three writers that overwrite an EXISTING script earlier in the same
+command still leak, each reproduced with a real commit: `tar -x`, `curl -o`,
+and a `python3` `shutil.copy`. The staged term then reached the commit.
+
+The review's suggested inversion treats any command with an unknown writer
+before the script as unjudged. Measured at 53 false denies out of 191 on the
+B1 corpus, it was reverted. Text judging cannot enumerate every writer.
+
+**Remedy:** the git-level backstop that is already an owner referral in Plan
+00464 (a pre-commit sink that scans the staged content at commit time,
+whatever command produced it), which closes this whole class. Until the
+owner rules, these three shapes are the known open leaks.
+
 ### N79 — The guard-defects false-positive corpus is smaller than review 7 asked
 
 **Found by guard-defects review 8 (L8).** The in-repo corpus holds 171
