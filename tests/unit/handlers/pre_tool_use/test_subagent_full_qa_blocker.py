@@ -2188,9 +2188,9 @@ class TestASubstitutionOrAVariableIsReadInEveryPosition:
 class TestFindExecIsFollowed:
     """Review 7 m4: ``find ... -exec pytest {} +`` was not followed at all.
 
-    ``{}`` is the files find selects: its start paths when nothing narrows
-    them, and unseen (fail closed) once a ``-name``/``-path`` test could
-    have narrowed them to something this handler cannot read.
+    ``{}`` is find's start paths, wherever it sits in a word. A test such as
+    ``-name`` can only select a subset of them, so a targeted start path
+    stays targeted and a full one stays full (review 8 minor m3).
     """
 
     @staticmethod

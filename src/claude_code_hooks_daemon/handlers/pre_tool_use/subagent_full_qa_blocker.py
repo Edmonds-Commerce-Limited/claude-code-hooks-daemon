@@ -1248,7 +1248,7 @@ _CWD_VARIABLE_PREFIXES: Final[tuple[str, ...]] = ("$PWD/", "${PWD}/", "$(pwd)/",
 _CWD_VARIABLES: Final[frozenset[str]] = frozenset({"$PWD", "${PWD}", "$(pwd)", "`pwd`"})
 #: A path from the home directory is absolute: it does not depend on the cwd.
 _HOME_PREFIXES: Final[tuple[str, ...]] = ("~/", "$HOME/", "${HOME}/")
-#: What ``os.path.expanduser`` expands, and returns unchanged when it cannot.
+#: What ``Path.expanduser`` expands; it raises when no home can be found.
 _HOME: Final[str] = "~"
 #: ``cd`` moves the directory later words are looked up in; a target that
 #: starts with an expansion goes somewhere this cannot see.
