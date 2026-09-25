@@ -460,10 +460,13 @@ handlers:
       priority: 32
       options:
         full_qa_patterns:
+          # `all` and `tests` are subcommands, not paths: the script finds its
+          # project from its own location, so they are full from anywhere.
           - id: llm-qa-whole-suite
             command: llm_qa.py
-            full_args: [all, tests]
+            full_words: [all, tests]
             read_only_flags: [--read-only, --help, -h]
+            value_flags: [--range]
           - id: run-all
             command: run_all.sh
           - id: run-tests

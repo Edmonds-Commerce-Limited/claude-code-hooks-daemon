@@ -721,6 +721,45 @@ class TestPeelCommandWrappers:
         """Plan 00463 review 5 m3: ``--`` was returned as the wrapped command."""
         assert peel_command_wrappers(argv) == expected
 
+    @pytest.mark.parametrize(
+        ("argv", "expected"),
+        [
+            (["env", "-iu", "HOME", "pytest"], (("env",), 3)),
+            (["env", "-iC", "tests", "pytest"], (("env",), 3)),
+            (["env", "-iCtests", "pytest"], (("env",), 2)),
+            (["nice", "-n5", "pytest"], (("nice",), 2)),
+            (["stdbuf", "-oL", "-eL", "pytest"], (("stdbuf",), 3)),
+        ],
+    )
+    def test_a_short_cluster_ending_in_a_value_flag_takes_its_value(
+        self, argv: list[str], expected: tuple[tuple[str, ...], int]
+    ) -> None:
+        """Plan 00463 review 6 m3: ``-iu HOME`` left HOME to be read as the command."""
+        assert peel_command_wrappers(argv) == expected
+
+    @pytest.mark.parametrize(
+        ("argv", "expected"),
+        [(["env", "-", "pytest"], (("env",), 2)), (["env", "-i", "-", "pytest"], (("env",), 3))],
+    )
+    def test_env_reads_a_lone_dash_as_ignore_environment(
+        self, argv: list[str], expected: tuple[tuple[str, ...], int]
+    ) -> None:
+        """Plan 00463 review 6 m3: ``env -`` is ``env -i``, not a command named ``-``."""
+        assert peel_command_wrappers(argv) == expected
+
+    @pytest.mark.parametrize(
+        ("argv", "expected"),
+        [
+            (["timeout", "60", "--", "pgrep"], (("timeout",), 2)),
+            (["timeout", "60", "-v", "pgrep"], (("timeout",), 2)),
+        ],
+    )
+    def test_timeout_stops_reading_options_at_its_duration(
+        self, argv: list[str], expected: tuple[tuple[str, ...], int]
+    ) -> None:
+        """Plan 00463 review 6 n4: after the duration, the next word is the command."""
+        assert peel_command_wrappers(argv) == expected
+
     def test_the_table_holds_the_wrappers_process_probe_relies_on(self) -> None:
         """Guard the move: every name the wait classifier peeled is still here."""
         assert {"watch", "timeout", "nohup", "sudo", "env", "nice", "stdbuf", "command"} <= set(

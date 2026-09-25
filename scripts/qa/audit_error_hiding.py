@@ -198,8 +198,15 @@ class ErrorHidingVisitor(ast.NodeVisitor):
         for child in ast.walk(node):
             if isinstance(child, ast.Try):
                 for handler in child.handlers:
+                    # A generator that yields a result naming the failure and
+                    # then stops has reported it, not returned None.
+                    yielded = False
                     for stmt in handler.body:
-                        if isinstance(stmt, ast.Return):
+                        if isinstance(stmt, ast.Expr) and isinstance(
+                            stmt.value, (ast.Yield, ast.YieldFrom)
+                        ):
+                            yielded = True
+                        if isinstance(stmt, ast.Return) and not yielded:
                             # Check if returning None
                             if stmt.value is None or (
                                 isinstance(stmt.value, ast.Constant) and stmt.value.value is None

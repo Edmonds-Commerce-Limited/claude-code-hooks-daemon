@@ -467,6 +467,101 @@ tests in `test_llm_qa_main_moved.py` (`TestExactlyTheCertifiedHeadLands`,
 `TestTheGateIsNotRunTwiceOnOneHead`); the clone-based `probe_463v5_n2b.sh` was not
 re-run, as its clone holds the old code.
 
+## Review 6 fixes (`260924-plan463-review6-opus-5-5.md`)
+
+The review was committed first (`53f646f8`). Every finding except n6 (not this
+teammate's) is fixed, each with a RED test first. No exclusion, suppression or
+`nosec` was added.
+
+**Majors.**
+
+- **M1.** One `_Event` carries the per-event state: a memo of each path read (read at
+  most once), one 32 KiB parse budget over all file content, and a 16 MiB scan budget.
+  Past the parse budget a file is only scanned for a declared program's name, and a hit
+  fails closed with `JUDGED UNSEEN`. A substring pre-check and a per-path cache keep the
+  scan linear. `TestTheCodeFileReaderIsBounded` pins the fanout fixture and 80 feeds of
+  `cat plain64k | bash`, each under 1 s (both about 0.03 s in the reviewer's filebomb
+  probe now).
+- **M2.** A `| xargs pytest` consumer of a listing is targeted only with `-r` or
+  `--no-run-if-empty`, and a `$(listing)` only beside a literal target. A listing steered
+  to print other words (`--format`, `--pretty`, `--line-prefix`, `--output`,
+  `--no-index`, the empty tree, a word built at run time, `grep --label`) is none, and
+  `git log`/`git show` are no longer listings (they print commit messages). The handler
+  reference shows `xargs -r`.
+
+**Minors.**
+
+- **m1.** `full_words` (always literal, never a path) is new; `full_args` are paths and
+  keep the existence check. The live `llm-qa-whole-suite` pattern declares
+  `full_words: [all, tests]`.
+- **m2.** Code on stdin is read only from `echo`, `printf` (formatted) and a
+  single-operand `cat FILE`. Any other producer, another descriptor, a FIFO or device, a
+  path the same command writes, or a file past the scan budget is `JUDGED UNSEEN`.
+  `/dev/stdin`, `/dev/fd/0`, `-` and `<(...)` are stdin. `bash -c "$(cat f)"` and
+  `eval "$(cat f)"` READ `f` (a design choice: seen, not denied). A script run by name or
+  path is read too, judged with its own `"$@"`/`$1`/`${1:-x}`.
+- **m3.** Python's short flags and the shared peel's wrapper value flags are read letter
+  by letter (`-Ic`, `-Bm`, `env -iu HOME`, `nice -n5`). `import pytest as p`,
+  `from pytest import main as m` and `_pytest` are calls. `env -` is `env -i`. The
+  shared-peel change is `CommandWrapper.lone_dash_is_flag` plus `_takes_next_word`, with
+  tests in `test_shell_segmentation.py`.
+- **m4.** `PYTEST_ADDOPTS` words, inline and exported, are pytest's own; an `@file`
+  operand is full (unseen).
+- **m5.** The glob-reader guard resolves a receiver joined or held in a constant,
+  f-strings, concatenation, `Path.walk`, aliases, a git argv in a variable or split from
+  a string, and roots from `getcwd`, `rootpath` and `parents[N]`.
+- **m6.** `value_flags: [--range]`; an opaque word with `-c`/`-m` is an interpreter;
+  brackets after `::` are no glob; `pushd`/`popd` are followed as a stack.
+- **m7.** Brace sequences (`{t..t}ests`, `{1..3}`); `${NAME:-word}`/`${NAME:=word}` read
+  as `word` when NAME is unset.
+- **m8.** A clean head holding nothing past the certified head but `main` merged in
+  gets the main-moved verdict with its recheck, not `head-moved`, by the same rule
+  `--advance` applies (`_work_beside_main`, shared by both).
+
+**Nits.** n1: an `OSError` in `_repository_root` reads as no marker (it now goes through
+`utils.path_predicates.path_exists`, which also clears `check_eacces_safe_predicates`).
+n2: every fail-closed deny carries `JUDGED UNSEEN`; the brace cap (64 alternatives, 32
+groups; past it a group reads as `*`, and an alternative holding `/` fails closed) is in
+the handler reference. n3: `_merges_exactly` is TIGHTENED to match its text: exactly two
+parents, one the certified head, the other an ancestor of it, and the same tree
+(same-tree child, unrelated and octopus merges are refused, pinned in
+`TestExactlyTheCertifiedHeadLands`). n4: `timeout 60 -- x` runs `--`. n5: `coproc`,
+`alias` under `expand_aliases`, `hash -p` and nested `env -C` are followed. n7: the
+handler reference advises the narrower spelling (`tests/unit/qa/test_llm_qa*.py`).
+
+**Corpus.** `probe_463v6_blocker.py`, 279 rows: 0 false denies, 2 false allows, both the
+one accepted limit, a program NAME built at run time from pieces
+(`P=$(printf 'py%s' test); $P tests`, `s.call(["py" + "test"])`). 4 documented denies
+(`tests/unit/**/test_llm_qa*.py`, `$(ls ...)`, `find | xargs pytest`, `"$EXTRA"`).
+Slowest row 0.11 s. `probe_463v5_blocker.py` (266 rows): 0 false allows; its 2 "false
+denies" are its old expectations for a bare `| xargs pytest` and a lone `$(git diff)`,
+which M2 makes denies by design. Its 12 `cd` rows all match.
+
+**Design choices worth a second look.**
+
+- Under `option_grammar`, every positional word is a target (pytest stops on a missing
+  path), so `cd tests/unit && pytest tests` is targeted.
+- A `--pyargs` module not found under the cwd is unseen.
+- Any stdin producer not understood denies unconditionally, so a script running
+  `eval "$(ssh-agent -s)"` beside a declared program would be denied.
+  `scripts/install/prerequisites.sh` (it pipes a download into `sh`) fails closed for
+  this reason, pinned in the repo-scripts test.
+
+**Two gate false positives met on the way.**
+
+- `secret_file_guard` denied an `Edit` whose code held the token `*words[1:]]`; the
+  line was rewritten as `renames[words[0]] + words[1:]`. Not fixed here: reported to the
+  coordinator for the niggles ledger.
+- `audit_error_hiding` flagged a generator's bare `return` after it had YIELDED the
+  deny as `return-none-on-error`. Fixed in the detector with RED tests
+  (`TestAGeneratorThatYieldsTheFailure`): a handler that yields before its bare `return`
+  has reported the failure; one that stops without yielding is still flagged.
+
+**Verification.** Targeted only: `format lint type_check pyright magic_values error_hiding`, `docs_qa plan_qa british_english sensitive_content repo_hygiene doc_truth doc_snippets handler_reference shell_check`, every `scripts/qa/check_*.py` Detector, and
+pytest on the touched and related files (the blocker, shell segmentation, all of
+`tests/unit/qa/`, the pipe_blocker family, process probe, the deadlock integration test,
+documented commands, handler reference, invariant pairs), all green.
+
 ## Task 1.1 measurements
 
 - **In-process teammate: `agent_id` is present.** Measured live on this teammate's own

@@ -859,6 +859,45 @@ class TestExactlyTheCertifiedHeadLands:
         with pytest.raises(llm_qa.MainMovedError, match="not the certified head"):
             llm_qa.finish_batch(repo, "main")
 
+    def test_finish_refuses_a_same_tree_child_that_is_no_merge(self, repo: Path) -> None:
+        """Review 6 n3: only a real merge of the certified head is accepted."""
+        _start(repo)
+        certified = _git(repo, "rev-parse", "HEAD")
+        _git(repo, "checkout", "-q", "-B", "main", certified)
+        _commit(repo, {}, "same tree, one parent")
+        _git(repo, "checkout", "-q", _BRANCH)
+        with pytest.raises(llm_qa.MainMovedError, match="not the certified head"):
+            llm_qa.finish_batch(repo, "main")
+
+    @pytest.mark.parametrize("side_branches", [["unrelated"], ["one", "two"]])
+    def test_finish_refuses_a_same_tree_merge_with_another_line_of_work(
+        self, repo: Path, side_branches: list[str]
+    ) -> None:
+        """Review 6 n3: a merge with an unrelated branch, or an octopus, is no landing."""
+        _start(repo)
+        certified = _git(repo, "rev-parse", "HEAD")
+        for name in side_branches:
+            if name == "unrelated":
+                _git(repo, "checkout", "-q", "--orphan", name)
+                _git(repo, "rm", "-rfq", ".")
+            else:
+                _git(repo, "checkout", "-q", "-b", name, "main")
+            _commit(repo, {f"{name}.md": f"# {name}\n"}, name)
+        _git(repo, "checkout", "-q", "-B", "main", certified)
+        _git(
+            repo,
+            "merge",
+            "-q",
+            "-s",
+            "ours",
+            "--no-edit",
+            "--allow-unrelated-histories",
+            *side_branches,
+        )
+        _git(repo, "checkout", "-q", _BRANCH)
+        with pytest.raises(llm_qa.MainMovedError, match="not the certified head"):
+            llm_qa.finish_batch(repo, "main")
+
     def test_unmoved_needs_head_to_contain_main(
         self, repo: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
@@ -911,6 +950,64 @@ class TestTheGateIsNotRunTwiceOnOneHead:
         _gate(repo)
         _certify(repo, llm_qa.DOCS_ONLY_TOOL_NAMES)
         assert not llm_qa.main_moved(repo, "main").recheck_passed
+
+    def test_a_merge_of_main_after_the_gate_is_judged_as_the_movement_of_main(
+        self, repo: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Review 6 m8: main merged and its docs recheck passed, then a check said head-moved."""
+        _start(repo)
+        _on_main(repo, {_LONELY: "# 2\n"})
+        _merge_main(repo)
+        _certify(repo, llm_qa.DOCS_ONLY_TOOL_NAMES)
+        outcome = llm_qa.main_moved(repo, "main")
+        assert outcome.verdict == llm_qa.VERDICT_DOCS_ONLY
+        assert outcome.recheck_passed
+        capsys.readouterr()
+        assert llm_qa.main_moved_command([], root=repo) == llm_qa.EXIT_DOCS_ONLY
+        out = capsys.readouterr().out
+        assert "--advance" in out
+        assert "llm_qa.py all" not in out
+
+    def test_a_merge_of_main_whose_recheck_has_not_run_names_the_recheck(
+        self, repo: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _start(repo)
+        _on_main(repo, {_LONELY: "# 2\n"})
+        _merge_main(repo)
+        outcome = llm_qa.main_moved(repo, "main")
+        assert outcome.verdict == llm_qa.VERDICT_DOCS_ONLY
+        assert not outcome.recheck_passed
+        capsys.readouterr()
+        llm_qa.main_moved_command([], root=repo)
+        out = capsys.readouterr().out
+        assert "llm_qa.py all" not in out
+        assert " ".join(llm_qa.DOCS_ONLY_TOOL_NAMES) in out
+
+    @pytest.mark.parametrize("extra", ["a commit", "an edit inside the merge"])
+    def test_work_beside_the_merge_of_main_is_still_head_moved(
+        self, repo: Path, extra: str
+    ) -> None:
+        _start(repo)
+        _on_main(repo, {_LONELY: "# 2\n"})
+        if extra == "a commit":
+            _merge_main(repo)
+            _commit(repo, {"src/feature.py": "y = 5\n"}, "not from main")
+        else:
+            _git(repo, "merge", "-q", "--no-commit", "--no-ff", "main")
+            _write(repo, {"src/feature.py": "y = 6\n"})
+            _git(repo, "add", "-A")
+            _git(repo, "commit", "-q", "--no-edit")
+        _certify(repo, llm_qa.DOCS_ONLY_TOOL_NAMES)
+        assert llm_qa.main_moved(repo, "main").verdict == llm_qa.VERDICT_HEAD_MOVED
+
+    def test_a_dirty_tree_after_the_merge_of_main_is_still_head_moved(self, repo: Path) -> None:
+        _start(repo)
+        _on_main(repo, {_LONELY: "# 2\n"})
+        _merge_main(repo)
+        _write(repo, {"docs/untracked-copy.md": "# x\n"})
+        outcome = llm_qa.main_moved(repo, "main")
+        assert outcome.verdict == llm_qa.VERDICT_HEAD_MOVED
+        assert "uncommitted" in outcome.reason
 
 
 class TestTheCommand:

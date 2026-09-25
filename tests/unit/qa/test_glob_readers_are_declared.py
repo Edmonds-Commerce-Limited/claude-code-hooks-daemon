@@ -8,18 +8,24 @@ doc tools passed, and a head that failed
 remedy is a ``path_glob`` rule in ``changed_tests_map.yaml`` naming each such
 test, and this guard, so the next glob reader cannot reopen the hole silently.
 
-A glob reader is a ``.glob``/``.rglob`` call with a markdown pattern, or an
-``os.walk``, whose receiver is derived from the repository root (a name bound
-to an expression over ``__file__``, directly or through other such names), in
-any scope. A glob over ``tmp_path`` or a fixture is not one.
+A glob reader is a ``.glob``/``.rglob`` call with a markdown pattern, or a
+walk, whose receiver is derived from the repository root (an expression over
+``__file__``, ``os.getcwd()`` or pytest's ``rootpath``, or a name bound to
+one, directly or through other such names), in any scope. A glob over
+``tmp_path`` or a fixture is not one. Strings are folded as Python would
+build them (a concatenation, an f-string, a name bound to either), so a
+pattern or a directory is compared as the path it reads (review 6 m5).
 """
 
 from __future__ import annotations
 
 import ast
 import importlib.util
+import posixpath
+import shlex
 import sys
-from pathlib import Path
+from itertools import product
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import pytest
@@ -41,6 +47,23 @@ _PATH_LISTERS = frozenset(
     {("listdir", "os"), ("scandir", "os"), ("glob", _GLOB_MODULE), ("iglob", _GLOB_MODULE)}
 )
 _GIT_LISTING = frozenset({"git", "ls-files"})
+#: Where else a test finds the repository root (review 6 m5): ``os.getcwd()``,
+#: ``Path.cwd()`` and pytest's ``config.rootpath``.
+_CWD_CALLS = frozenset({"getcwd", "cwd"})
+_ROOT_ATTRIBUTES = frozenset({"rootpath", "rootdir"})
+_FILE = "__file__"
+#: ``Path.walk()`` (3.12) as well as ``os.walk``.
+_WALK = "walk"
+_SPLIT = "split"
+_SHLEX = "shlex"
+#: Calls that pass a path through unchanged, or join more parts onto it.
+_PATH_BUILDERS = frozenset({"Path", "PurePath", "PurePosixPath", "str", "join", "joinpath"})
+_PATH_PASS_THROUGH = frozenset({"resolve", "absolute", "expanduser"})
+_PARENT = "parent"
+_PARENTS = "parents"
+#: How far a string is followed through names and joins; past it, it is unknown.
+_MAX_FOLD_DEPTH = 8
+_MAX_FOLDED_VALUES = 64
 
 
 def _load(script: str, name: str) -> Any:
@@ -62,8 +85,20 @@ def _names(node: ast.AST) -> set[str]:
     return {child.id for child in ast.walk(node) if isinstance(child, ast.Name)}
 
 
-def _mentions_file(node: ast.AST) -> bool:
-    return "__file__" in _names(node)
+def _is_root_source(node: ast.AST) -> bool:
+    """Whether an expression takes a path from ``__file__``, the cwd or pytest's rootpath."""
+    for child in ast.walk(node):
+        if isinstance(child, ast.Name) and child.id == _FILE:
+            return True
+        if isinstance(child, ast.Attribute) and child.attr in _ROOT_ATTRIBUTES:
+            return True
+        if (
+            isinstance(child, ast.Call)
+            and isinstance(child.func, ast.Attribute)
+            and child.func.attr in _CWD_CALLS
+        ):
+            return True
+    return False
 
 
 def _targets(node: ast.AST) -> set[str]:
@@ -84,7 +119,7 @@ def _source_of(node: ast.AST) -> ast.AST | None:
 
 
 def _repo_names(tree: ast.Module) -> set[str]:
-    """Every name, in any scope, bound from ``__file__`` or from another such name."""
+    """Every name, in any scope, bound from a root source or from another such name."""
     repo: set[str] = set()
     changed = True
     while changed:
@@ -93,7 +128,7 @@ def _repo_names(tree: ast.Module) -> set[str]:
             source = _source_of(node)
             if source is None:
                 continue
-            if _mentions_file(source) or _names(source) & repo:
+            if _is_root_source(source) or _names(source) & repo:
                 new = _targets(node) - repo
                 if new:
                     repo |= new
@@ -101,46 +136,130 @@ def _repo_names(tree: ast.Module) -> set[str]:
     return repo
 
 
-def _markdown_constants(tree: ast.Module) -> bool:
-    return any(
-        isinstance(node, ast.Constant)
-        and isinstance(node.value, str)
-        and node.value.endswith(_MARKDOWN)
-        and _WILDCARD in node.value
-        for node in ast.walk(tree)
-    )
+Bindings = dict[str, list[ast.expr]]
 
 
-def _is_markdown_pattern(argument: ast.expr, module_has_md_globs: bool) -> bool:
-    if isinstance(argument, ast.Constant) and isinstance(argument.value, str):
-        return _MARKDOWN in argument.value
-    if isinstance(argument, ast.JoinedStr):
-        return _MARKDOWN in ast.unparse(argument)
-    return module_has_md_globs
+def _bindings(tree: ast.Module) -> Bindings:
+    """Each simple name, in any scope, and every expression bound to it.
+
+    A loop variable is bound to ``*iterable`` (an ``ast.Starred``): each
+    element of what it loops over.
+    """
+    bound: Bindings = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    bound.setdefault(target.id, []).append(node.value)
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            if node.value is not None:
+                bound.setdefault(node.target.id, []).append(node.value)
+        elif isinstance(node, (ast.For, ast.comprehension)) and isinstance(node.target, ast.Name):
+            bound.setdefault(node.target.id, []).append(ast.Starred(value=node.iter))
+    return bound
 
 
-def _reads_markdown(tree: ast.Module) -> bool:
-    """Whether the module filters by the markdown suffix or names a markdown glob."""
-    return _markdown_constants(tree) or any(
-        isinstance(node, ast.Constant) and node.value == _MARKDOWN for node in ast.walk(tree)
-    )
+def _elements(node: ast.expr, bound: Bindings, depth: int) -> list[ast.expr] | None:
+    """The elements of a literal list or tuple, directly or through a name bound to one."""
+    if isinstance(node, (ast.List, ast.Tuple)):
+        return list(node.elts)
+    if isinstance(node, ast.Name) and depth < _MAX_FOLD_DEPTH:
+        exprs = bound.get(node.id, [])
+        if len(exprs) == 1:
+            return _elements(exprs[0], bound, depth + 1)
+    return None
+
+
+def _strings(node: ast.expr, bound: Bindings, depth: int = 0) -> list[str] | None:
+    """Every string ``node`` can be, built as Python builds it; None when a part is unknown.
+
+    A concatenation and an f-string are folded, and a name is each value
+    bound to it. An f-string part that cannot be known is ``*``: it may be
+    anything, which is what a glob wildcard says.
+    """
+    if depth > _MAX_FOLD_DEPTH:
+        return None
+    if isinstance(node, ast.Constant):
+        return [node.value] if isinstance(node.value, str) else None
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left = _strings(node.left, bound, depth + 1)
+        right = _strings(node.right, bound, depth + 1)
+        if left is None or right is None:
+            return None
+        return [a + b for a, b in product(left, right)][:_MAX_FOLDED_VALUES]
+    if isinstance(node, ast.JoinedStr):
+        parts = [
+            (
+                _strings(value.value, bound, depth + 1) or [_WILDCARD]
+                if isinstance(value, ast.FormattedValue)
+                else _strings(value, bound, depth + 1) or [""]
+            )
+            for value in node.values
+        ]
+        return ["".join(choice) for choice in product(*parts)][:_MAX_FOLDED_VALUES]
+    if isinstance(node, ast.Starred):
+        elements = _elements(node.value, bound, depth + 1)
+        return None if elements is None else _all_strings(elements, bound, depth + 1)
+    if isinstance(node, ast.Name):
+        exprs = bound.get(node.id)
+        return None if not exprs else _all_strings(exprs, bound, depth + 1)
+    return None
+
+
+def _all_strings(nodes: list[ast.expr], bound: Bindings, depth: int) -> list[str] | None:
+    values: list[str] = []
+    for node in nodes:
+        found = _strings(node, bound, depth)
+        if found is None:
+            return None
+        values.extend(found)
+    return values[:_MAX_FOLDED_VALUES]
+
+
+def _string_list(node: ast.expr, bound: Bindings, depth: int = 0) -> list[str] | None:
+    """The words of an argv: a literal list, a name bound to one, or a string split.
+
+    ``'git ls-files *.md'.split()`` and ``shlex.split(...)`` are argvs too
+    (review 6 m5).
+    """
+    elements = _elements(node, bound, depth)
+    if elements is not None:
+        return [(_strings(element, bound, depth + 1) or [""])[0] for element in elements]
+    if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+        return None
+    if node.func.attr != _SPLIT:
+        return None
+    if ast.unparse(node.func.value) == _SHLEX and node.args:
+        text = _strings(node.args[0], bound, depth + 1)
+        return shlex.split(text[0]) if text else None
+    text = _strings(node.func.value, bound, depth + 1)
+    return text[0].split() if text else None
+
+
+def _folded_strings(tree: ast.Module, bound: Bindings) -> list[str]:
+    """Every string the module writes, folded: constants, concatenations and f-strings."""
+    found: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Constant, ast.BinOp, ast.JoinedStr)):
+            found.extend(_strings(node, bound) or [])
+    return found
+
+
+def _is_markdown_pattern(argument: ast.expr, bound: Bindings, module_has_md_globs: bool) -> bool:
+    values = _strings(argument, bound)
+    if values is None:
+        return module_has_md_globs
+    return any(_MARKDOWN in value for value in values)
 
 
 def _is_repo_path(node: ast.expr, repo: set[str]) -> bool:
-    return bool(_names(node) & repo) or _mentions_file(node)
+    return bool(_names(node) & repo) or _is_root_source(node)
 
 
-def _is_git_listing(node: ast.Call, repo: set[str]) -> bool:
+def _is_git_listing(node: ast.Call, repo: set[str], bound: Bindings) -> bool:
     """A process call running ``git ls-files`` in, or on, the repository."""
     listing = any(
-        isinstance(argument, (ast.List, ast.Tuple))
-        and _GIT_LISTING
-        <= {
-            element.value
-            for element in argument.elts
-            if isinstance(element, ast.Constant) and isinstance(element.value, str)
-        }
-        for argument in node.args
+        _GIT_LISTING <= set(_string_list(argument, bound) or []) for argument in node.args
     )
     return listing and (
         any(_is_repo_path(argument, repo) for argument in node.args)
@@ -148,38 +267,59 @@ def _is_git_listing(node: ast.Call, repo: set[str]) -> bool:
     )
 
 
+def _called_method(node: ast.Call, bound: Bindings) -> tuple[str, ast.expr] | None:
+    """The method a call makes and its receiver, through a name bound to a bound method.
+
+    ``g = ROOT.glob`` then ``g('*.md')`` is ``ROOT.glob('*.md')`` (review 6 m5).
+    """
+    function = node.func
+    if isinstance(function, ast.Name):
+        exprs = bound.get(function.id, [])
+        if len(exprs) != 1 or not isinstance(exprs[0], ast.Attribute):
+            return None
+        function = exprs[0]
+    if isinstance(function, ast.Attribute):
+        return function.attr, function.value
+    return None
+
+
 def glob_readers(source: str) -> list[int]:
     """Lines where ``source`` enumerates repository markdown.
 
-    ``.glob``/``.rglob`` with a markdown pattern, ``os.walk``, and (in a module
-    that reads markdown) ``.iterdir()``, ``os.listdir``, ``glob.glob`` and
-    ``git ls-files`` (review 5 m4), each over a path from the repository root.
+    ``.glob``/``.rglob`` with a markdown pattern, ``os.walk`` and ``Path.walk``,
+    and (in a module that reads markdown) ``.iterdir()``, ``os.listdir``,
+    ``glob.glob`` and ``git ls-files`` (review 5 m4), each over a path from the
+    repository root.
     """
     tree = ast.parse(source)
     repo = _repo_names(tree)
-    has_md_globs = _markdown_constants(tree)
-    reads_markdown = _reads_markdown(tree)
+    bound = _bindings(tree)
+    strings = _folded_strings(tree, bound)
+    has_md_globs = any(value.endswith(_MARKDOWN) and _WILDCARD in value for value in strings)
+    reads_markdown = has_md_globs or _MARKDOWN in strings
     lines = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
-        if reads_markdown and _is_git_listing(node, repo):
+        if reads_markdown and _is_git_listing(node, repo, bound):
             lines.append(node.lineno)
             continue
-        if not isinstance(node.func, ast.Attribute):
+        called = _called_method(node, bound)
+        if called is None:
             continue
-        method, receiver = node.func.attr, node.func.value
+        method, receiver = called
         module = ast.unparse(receiver)
         first = node.args[0] if node.args else None
         if method in _GLOB_METHODS and first is not None and module != _GLOB_MODULE:
-            if _names(receiver) & repo and _is_markdown_pattern(first, has_md_globs):
+            if _is_repo_path(receiver, repo) and _is_markdown_pattern(first, bound, has_md_globs):
                 lines.append(node.lineno)
-        elif method == "walk" and module == "os" and first is not None:
-            if _is_repo_path(first, repo):
+        elif method == _WALK:
+            walked = first if module == "os" else receiver
+            if walked is not None and _is_repo_path(walked, repo):
                 lines.append(node.lineno)
         elif not reads_markdown:
             continue
-        elif method == _ITERDIR and _names(receiver) & repo:
+        elif method == _ITERDIR and _is_repo_path(receiver, repo):
             lines.append(node.lineno)
         elif (method, module) in _PATH_LISTERS and first is not None:
             if _is_repo_path(first, repo):
@@ -232,12 +372,124 @@ def _samples(pattern: str) -> list[str]:
     return sorted({shallow, deep})
 
 
+def _single_string(node: ast.expr, bound: Bindings, depth: int) -> str | None:
+    values = _strings(node, bound, depth)
+    return values[0] if values is not None and len(values) == 1 else None
+
+
+def _joined(base: PurePosixPath | None, parts: list[str | None]) -> PurePosixPath | None:
+    """``base`` with ``parts`` joined on, normalised; None when a part is unknown or above the root."""
+    if base is None or any(part is None for part in parts):
+        return None
+    joined = posixpath.normpath(base.joinpath(*(part for part in parts if part)).as_posix())
+    return None if joined.startswith("..") else PurePosixPath(joined)
+
+
+def _directory(
+    node: ast.expr, bound: Bindings, reader: PurePosixPath, depth: int = 0
+) -> PurePosixPath | None:
+    """The repository-relative path an expression names, or None when it cannot be known.
+
+    ``__file__`` is ``reader`` itself; ``.parents[N]``, ``.parent``, ``/``,
+    ``joinpath``, ``Path(...)`` and ``os.path.join`` move from it; the cwd and
+    pytest's rootpath are the root (review 6 m5).
+    """
+    if depth > _MAX_FOLD_DEPTH:
+        return None
+    if isinstance(node, ast.Name):
+        if node.id == _FILE:
+            return reader
+        exprs = bound.get(node.id, [])
+        return _directory(exprs[0], bound, reader, depth + 1) if len(exprs) == 1 else None
+    if isinstance(node, ast.Attribute):
+        if node.attr in _ROOT_ATTRIBUTES:
+            return PurePosixPath()
+        inner = _directory(node.value, bound, reader, depth + 1)
+        if node.attr == _PARENT and inner is not None and inner != PurePosixPath():
+            return inner.parent
+        return None
+    if isinstance(node, ast.Subscript):
+        holder, index = node.value, node.slice
+        if not (isinstance(holder, ast.Attribute) and holder.attr == _PARENTS):
+            return None
+        inner = _directory(holder.value, bound, reader, depth + 1)
+        if inner is None or not isinstance(index, ast.Constant) or not isinstance(index.value, int):
+            return None
+        return inner.parents[index.value] if index.value < len(inner.parents) else None
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        base = _directory(node.left, bound, reader, depth + 1)
+        return _joined(base, [_single_string(node.right, bound, depth + 1)])
+    if isinstance(node, ast.Call):
+        return _called_directory(node, bound, reader, depth)
+    return None
+
+
+def _called_directory(
+    node: ast.Call, bound: Bindings, reader: PurePosixPath, depth: int
+) -> PurePosixPath | None:
+    """The path a call returns: the cwd, a path passed through, or a path with parts joined."""
+    function = node.func
+    name = function.attr if isinstance(function, ast.Attribute) else ast.unparse(function)
+    if name in _CWD_CALLS:
+        return PurePosixPath()
+    if isinstance(function, ast.Attribute) and name in _PATH_PASS_THROUGH:
+        return _directory(function.value, bound, reader, depth + 1)
+    if name not in _PATH_BUILDERS:
+        return None
+    if isinstance(function, ast.Attribute) and name == "joinpath":
+        base, parts = _directory(function.value, bound, reader, depth + 1), node.args
+    elif node.args:
+        base, parts = _directory(node.args[0], bound, reader, depth + 1), node.args[1:]
+    else:
+        return None
+    return _joined(base, [_single_string(part, bound, depth + 1) for part in parts])
+
+
+def _call_patterns(tree: ast.Module, reader: str) -> list[str]:
+    """Each markdown glob a ``.glob``/``.rglob`` call reads, as ``directory/pattern`` from the root.
+
+    Review 6 m5: a directory joined onto the root, or held in a constant, and
+    a pattern built by an f-string or a concatenation read the same pages as
+    the literal ``CLAUDE/Architecture/*.md``, and were not compared.
+    """
+    bound = _bindings(tree)
+    reader_path = PurePosixPath(reader)
+    found: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not node.args:
+            continue
+        called = _called_method(node, bound)
+        if called is None or called[0] not in _GLOB_METHODS:
+            continue
+        method, receiver = called
+        if ast.unparse(receiver) == _GLOB_MODULE:
+            continue
+        directory = _directory(receiver, bound, reader_path)
+        patterns = _strings(node.args[0], bound)
+        if directory is None or patterns is None:
+            continue
+        for pattern in patterns:
+            if _MARKDOWN not in pattern or _WILDCARD not in pattern:
+                continue
+            reach = f"{_ANY_DEPTH}{_SEPARATOR}{pattern}" if method == "rglob" else pattern
+            found.append(
+                reach if directory == PurePosixPath() else f"{directory.as_posix()}/{reach}"
+            )
+    return found
+
+
 def undeclared_patterns(source: str, reader: str, rules: list[Any]) -> list[str]:
-    """Each root-relative markdown glob in ``source`` no rule naming ``reader`` covers."""
+    """Each root-relative markdown glob in ``source`` no rule naming ``reader`` covers.
+
+    The literal globs the module writes, and each glob call's
+    ``directory/pattern`` as it resolves from the root.
+    """
     own = [rule for rule in rules if reader in rule.tests]
+    tree = ast.parse(source)
+    patterns = sorted(set(_root_patterns(tree)) | set(_call_patterns(tree, reader)))
     return [
         pattern
-        for pattern in _root_patterns(ast.parse(source))
+        for pattern in patterns
         if not all(any(rule.matches(path) for rule in own) for path in _samples(pattern))
     ]
 
@@ -331,6 +583,40 @@ class TestTheScanner:
         )
         assert glob_readers(source) == []
 
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "CMD = ['git', 'ls-files', '*.md']\n"
+            "def test_x():\n    subprocess.run(CMD, cwd=ROOT, check=True)\n",
+            "def test_x():\n    subprocess.run('git ls-files *.md'.split(), cwd=ROOT, check=True)\n",
+            "SUFFIX = '.m' + 'd'\ndef test_x():\n    return list(ROOT.glob('CLAUDE/*' + SUFFIX))\n",
+            "def test_x():\n    g = ROOT.glob\n    return list(g('CLAUDE/*.md'))\n",
+            "def test_x():\n"
+            "    return [f for d, _, fs in (ROOT / 'CLAUDE').walk() for f in fs"
+            " if f.endswith('.md')]\n",
+            "def test_x():\n    return list(Path(os.getcwd(), 'CLAUDE').glob('*.md'))\n",
+            "def test_x(pytestconfig):\n    return list(pytestconfig.rootpath.glob('CLAUDE/*.md'))\n",
+            "def test_x():\n    return sorted(Path(__file__).parents[2].rglob('*.md'))\n",
+        ],
+        ids=[
+            "git-argv-in-a-variable",
+            "git-argv-split-from-a-string",
+            "suffix-by-concatenation",
+            "glob-method-alias",
+            "path-walk",
+            "root-from-getcwd",
+            "root-from-rootpath",
+            "inline-parents-receiver",
+        ],
+    )
+    def test_the_spellings_review_6_found_missed_are_readers(self, body: str) -> None:
+        """Review 6 m5: each of these read repository markdown and was not seen."""
+        header = (
+            "import os\nimport subprocess\nfrom pathlib import Path\n"
+            "ROOT = Path(__file__).resolve().parents[2]\n"
+        )
+        assert glob_readers(header + body), body
+
     def test_a_git_listing_of_a_temporary_repository_is_not_a_reader(self) -> None:
         source = (
             "import subprocess\n"
@@ -362,6 +648,32 @@ class TestEveryPatternOfAReaderIsDeclared:
         rules = _declared_rules()
         missing = undeclared_patterns(_READER_WITH_A_NEW_PATTERN, _COMMAND_CHECKER, rules)
         assert missing == ["CLAUDE/Architecture/*.md"]
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "def test_probe():\n    list((REPO_ROOT / 'CLAUDE' / 'Architecture').glob('*.md'))\n",
+            "PROBE_DIR = 'CLAUDE/Architecture'\n"
+            "def test_probe():\n    list((REPO_ROOT / PROBE_DIR).glob('*.md'))\n",
+            "def test_probe():\n    d = 'CLAUDE/Architecture'\n    list(REPO_ROOT.glob(f'{d}/*.md'))\n",
+            "def test_probe():\n    list(REPO_ROOT.glob('CLAUDE/Architecture/' + '*.md'))\n",
+            "def test_probe():\n    list(Path(__file__).parents[2].joinpath('CLAUDE', 'Architecture')"
+            ".glob('*.md'))\n",
+        ],
+        ids=["joined", "directory-constant", "f-string", "concatenated", "joinpath"],
+    )
+    def test_the_same_new_directory_spelled_otherwise_is_found(self, body: str) -> None:
+        """Review 6 m5: the receiver's directory joined with the pattern is what is read."""
+        source = "from pathlib import Path\nREPO_ROOT = Path(__file__).resolve().parents[2]\n"
+        missing = undeclared_patterns(source + body, _COMMAND_CHECKER, _declared_rules())
+        assert missing == ["CLAUDE/Architecture/*.md"], body
+
+    def test_a_declared_directory_spelled_as_a_join_is_not_reported(self) -> None:
+        source = (
+            "from pathlib import Path\nREPO_ROOT = Path(__file__).resolve().parents[2]\n"
+            "def pages():\n    return list((REPO_ROOT / 'docs').rglob('*.md'))\n"
+        )
+        assert undeclared_patterns(source, _COMMAND_CHECKER, _declared_rules()) == []
 
     def test_every_pattern_of_every_reader_is_declared(self) -> None:
         rules = _declared_rules()

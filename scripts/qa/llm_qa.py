@@ -1717,18 +1717,18 @@ def _head_uncertified(root: Path, git: GitBytesRunner) -> str | None:
             "no full gate has passed on this branch since the batch base was recorded: "
             f"run `llm_qa.py {_SELECTION_ALL}` on a clean tree"
         )
+    dirty = uncommitted_paths(root, git)
+    if dirty:
+        return (
+            f"the tree has uncommitted changes ({', '.join(dirty[:3])}), which --ff-only "
+            f"would not land: commit or remove them, then run `llm_qa.py {_SELECTION_ALL}`"
+        )
     head = _commit_of("HEAD", root, git)
     if head != certified:
         return (
             f"HEAD {head[:_SHORT_SHA]} is not the head the gate passed "
             f"({certified[:_SHORT_SHA]}): something was committed or merged after it. "
             f"Run `llm_qa.py {_SELECTION_ALL}` on this head"
-        )
-    dirty = uncommitted_paths(root, git)
-    if dirty:
-        return (
-            f"the tree has uncommitted changes ({', '.join(dirty[:3])}), which --ff-only "
-            f"would not land: commit or remove them, then run `llm_qa.py {_SELECTION_ALL}`"
         )
     return None
 
@@ -1820,10 +1820,11 @@ def main_moved(
     """The verdict for what would land: this head, plus what ``main_ref`` changed.
 
     The integration head comes first: unless HEAD is the head a gate passed on
-    a clean tree, the verdict is ``head-moved`` whatever ``main`` did. It is
-    also ``head-moved`` when ``main`` is still the base but HEAD does not
-    contain it (review 5 n2): ``--ff-only`` would refuse, and running the
-    check again would only say the same thing.
+    a clean tree, the verdict is ``head-moved`` whatever ``main`` did, save
+    when all HEAD adds to that head is ``main`` merged in, which is judged as
+    that movement (review 6 m8). It is also ``head-moved`` when ``main`` is
+    still the base but HEAD does not contain it (review 5 n2): ``--ff-only``
+    would refuse, and running the check again would only say the same thing.
 
     Raises:
         MainMovedError: no base is recorded, a ref does not resolve, or git or
@@ -1833,7 +1834,8 @@ def main_moved(
     main = _commit_of(main_ref, root, git)
     head_reason = _head_uncertified(root, git)
     if head_reason is not None:
-        return MainMoved(VERDICT_HEAD_MOVED, base, main, [], head_reason)
+        merged_in = _main_merged_since_certified(root, main_ref, base, main, git, select, qa_dir)
+        return merged_in or MainMoved(VERDICT_HEAD_MOVED, base, main, [], head_reason)
     head = _commit_of("HEAD", root, git)
     contains_main = _is_ancestor(main, head, root, git)
     if main == base and not contains_main:
@@ -1939,16 +1941,16 @@ def _merge_edits(merge: str, root: Path, git: GitBytesRunner) -> list[str]:
     return [name for name in names.split("\0") if name]
 
 
-def _only_main_merged(
+def _work_beside_main(
     certified: str, merged: str, moved: Sequence[str], root: Path, git: GitBytesRunner
-) -> None:
-    """Refuse when HEAD holds anything since ``certified`` that is not ``main`` merged in.
+) -> str | None:
+    """Why HEAD holds something since ``certified`` that is not ``main`` merged in, or None.
 
     A commit that is not a merge is new work no recheck covers, and so is an
     edit inside a merge on a path ``main`` did not move: both need the gate.
     """
     if not _is_ancestor(certified, "HEAD", root, git):
-        raise MainMovedError(
+        return (
             f"the certified head {certified[:_SHORT_SHA]} is not in this branch's history: "
             f"run `llm_qa.py {_SELECTION_ALL}`"
         )
@@ -1962,16 +1964,66 @@ def _only_main_merged(
     for line in filter(None, listed.splitlines()):
         commit, *parents = line.split()
         if len(parents) < _MERGE_PARENTS:
-            raise MainMovedError(
+            return (
                 f"HEAD holds {commit[:_SHORT_SHA]}, a commit that is not a merge of main: "
                 f"the gate never judged it. Run `llm_qa.py {_SELECTION_ALL}`"
             )
-        outside = [path for path in _merge_edits(commit, root, git) if path not in moved_set]
+        try:
+            edits = _merge_edits(commit, root, git)
+        except MainMovedError as exc:
+            return str(exc)
+        outside = [path for path in edits if path not in moved_set]
         if outside:
-            raise MainMovedError(
+            return (
                 f"the merge {commit[:_SHORT_SHA]} changes {', '.join(outside[:3])}, which "
                 f"main did not move, so no recheck covers it. Run `llm_qa.py {_SELECTION_ALL}`"
             )
+    return None
+
+
+def _main_merged_since_certified(
+    root: Path,
+    main_ref: str,
+    base: str,
+    main: str,
+    git: GitBytesRunner,
+    select: Selector,
+    qa_dir: Path | None,
+) -> MainMoved | None:
+    """The movement of ``main`` when all HEAD holds past the certified head is ``main`` merged.
+
+    The coordinator merges ``main``, passes its recheck, and may check again
+    before ``--advance`` (review 6 m8). HEAD is then past the certified head,
+    but only by what the recheck covers, so the verdict is that movement and
+    its recheck, not ``head-moved`` and a second full gate. None when there
+    is no certified head, the tree is dirty, nothing of ``main`` is merged
+    since the base, or HEAD holds other work.
+    """
+    certified = _ref_commit(certified_ref(root, git), root, git)
+    if certified is None or uncommitted_paths(root, git):
+        return None
+    merged = _git_text(
+        ["merge-base", "HEAD", main], root, git, f"this branch shares no history with {main_ref}"
+    )
+    if merged == base:
+        return None
+    verdict, judged, reason = _judge_range(base, merged, root, git, select)
+    if _work_beside_main(certified, merged, [path.path for path in judged], root, git):
+        return None
+    qa = qa_dir if qa_dir is not None else root / QA_OUTPUT_DIR.relative_to(PROJECT_ROOT)
+    recheck_passed = not _uncertified(verdict, (base, merged), root, qa, git)
+    head = _commit_of("HEAD", root, git)
+    reason = f"HEAD holds {main_ref} merged in since the certified head, and nothing else: {reason}"
+    return MainMoved(verdict, base, merged, judged, reason, head, recheck_passed)
+
+
+def _only_main_merged(
+    certified: str, merged: str, moved: Sequence[str], root: Path, git: GitBytesRunner
+) -> None:
+    """Refuse when HEAD holds anything since ``certified`` that is not ``main`` merged in."""
+    reason = _work_beside_main(certified, merged, moved, root, git)
+    if reason is not None:
+        raise MainMovedError(reason)
 
 
 def advance_batch(
@@ -2037,10 +2089,10 @@ def finish_batch(
 ) -> None:
     """Delete the batch refs once ``main_ref`` is exactly the certified head.
 
-    ``main_ref`` must BE the certified head, or a merge of it whose tree is
-    the certified tree (review 5 m5). A descendant is not enough: a late
-    commit landed with it was never judged, and removing the refs would erase
-    the evidence of that.
+    ``main_ref`` must BE the certified head, or a two-parent merge of it into
+    a commit it already contains, whose tree is the certified tree (review 5
+    m5, review 6 n3). A descendant is not enough: a late commit landed with it
+    was never judged, and removing the refs would erase the evidence of that.
 
     Raises:
         MainMovedError: there is no certified head, or what landed is not it.
@@ -2053,20 +2105,29 @@ def finish_batch(
     if main != certified and not _merges_exactly(main, certified, root, git):
         raise MainMovedError(
             f"{main_ref} is at {main[:_SHORT_SHA]}, which is not the certified head "
-            f"{certified[:_SHORT_SHA]} nor a merge of it with its tree: what landed is not what "
-            f"the gate passed. Land exactly that head (git merge --ff-only {certified}) "
-            "before finishing"
+            f"{certified[:_SHORT_SHA]} nor a two-parent merge of it into what it contains, with "
+            "its tree: what landed is not what the gate passed. Land exactly that head "
+            f"(git merge --ff-only {certified}) before finishing"
         )
     _delete_ref(batch_base_ref(root, git), root, git)
     _delete_ref(certified_name, root, git)
 
 
 def _merges_exactly(merge: str, certified: str, root: Path, git: GitBytesRunner) -> bool:
-    """Whether ``merge`` has ``certified`` as a parent and the certified tree."""
+    """Whether ``merge`` is a merge of ``certified`` that lands exactly it.
+
+    Two parents: ``certified``, and a commit ``certified`` already contains
+    (``main`` as it was, merged with ``--no-ff``); and the certified tree. A
+    same-tree child with one parent, an octopus and a merge with another line
+    of work are not a landing of the certified head (review 6 n3).
+    """
     parents = _git_text(
         ["rev-list", "--parents", "-n", "1", merge], root, git, f"cannot read {merge}"
     ).split()[1:]
-    if certified not in parents:
+    if len(parents) != _MERGE_PARENTS or certified not in parents:
+        return False
+    other = next(parent for parent in parents if parent != certified)
+    if not _is_ancestor(other, certified, root, git):
         return False
     trees = [
         _git_text(["rev-parse", f"{commit}^{{tree}}"], root, git, f"cannot read {commit}")

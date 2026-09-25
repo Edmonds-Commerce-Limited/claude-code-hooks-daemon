@@ -163,6 +163,45 @@ class TestSilentFallbackRule:
         assert "silent-fallback" in _rules(visitor.violations)
 
 
+class TestAGeneratorThatYieldsTheFailure:
+    """A bare ``return`` ends a generator; it returns no None to a caller.
+
+    A handler that YIELDS a result naming the failure and then stops has
+    reported it, so it is not ``return-none-on-error``. One that stops without
+    yielding has swallowed it, and still is.
+    """
+
+    @staticmethod
+    def _rules_of(handler_body: str) -> list[str]:
+        source = (
+            "def f():\n"
+            "    try:\n"
+            "        words = split()\n"
+            "    except ValueError:\n"
+            f"{handler_body}"
+            "    yield from words\n"
+        )
+        visitor = ErrorHidingVisitor(REPO_ROOT / "scripts" / "qa" / "fake.py")
+        visitor.visit(ast.parse(source))
+        return _rules(visitor.violations)
+
+    def test_yielding_the_failure_then_stopping_is_not_flagged(self) -> None:
+        rules = self._rules_of("        yield UNPARSED\n        return\n")
+        assert "return-none-on-error" not in rules
+
+    def test_yielding_from_the_failure_then_stopping_is_not_flagged(self) -> None:
+        rules = self._rules_of("        yield from unparsed()\n        return\n")
+        assert "return-none-on-error" not in rules
+
+    def test_stopping_without_yielding_is_still_flagged(self) -> None:
+        rules = self._rules_of("        return\n")
+        assert "return-none-on-error" in rules
+
+    def test_a_return_before_the_yield_is_still_flagged(self) -> None:
+        rules = self._rules_of("        return\n        yield UNPARSED\n")
+        assert "return-none-on-error" in rules
+
+
 class TestHeredocPythonExtraction:
     """Gap #2: Python embedded in a shell heredoc must be found and parsed."""
 

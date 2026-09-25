@@ -1400,17 +1400,20 @@ handlers:
 
 **What it matches:** a Bash command that would RUN a declared `full_qa_patterns` entry. The command is split into commands, and each is resolved to the program it starts, through:
 
-- wrappers (`timeout`, `env`, `nohup`, `sudo`, `nice`), including after `--` (`env -- pytest`); `env -C DIR cmd` runs `cmd` in DIR, and only `cmd`;
+- wrappers (`timeout`, `env`, `nohup`, `sudo`, `nice`), including after `--` (`env -- pytest`) and with short flags clustered (`env -iu HOME`, `nice -n5`); `env -` is `env -i`; `timeout` stops reading options at its duration, so `timeout 60 -- x` runs `--`; `env -C DIR cmd` runs `cmd` in DIR, and only `cmd`, and a nested `env -C` moves on from the one before;
+- `pushd DIR` and `popd`, followed as a stack alongside `cd`;
+- `coproc`, an `alias` under `shopt -s expand_aliases`, and `hash -p PATH NAME`;
 - launchers, each with its own flags and operands (`setsid`, `ionice`, `chrt`, `taskset`, `flock`, `xvfb-run`, `time`, `exec -a`, `strace`, `ltrace`, `caffeinate`, `doas`), the command a `-c` hands to `flock` or `script` (also in a cluster, `script -qc`), and `parallel cmd ::: args`;
-- interpreters (`python3 x.py`, `python -m pytest`, `bash -c '...'`);
-- Python code that CALLS pytest: `pytest.main(...)`, `from pytest import main` then `main()`, a `"pytest"` process argv, or a command line handed to a process. It is judged as a pytest run whose words are the code's quoted literals, plus the words after the code when it reads `sys.argv`. Importing pytest, or printing its version, runs nothing. The code may come from `-c`, a heredoc, a here-string, a pipe or a file on stdin;
+- interpreters (`python -m pytest`, `bash -c '...'`), with Python's short flags read letter by letter (`python3 -Ic code`, `-Bm pytest`, `-Wignore`); an interpreter named by a variable is one when its flags say so (`"$PY" -c code`, `"$PY" -m pytest`);
+- Python code that CALLS pytest: `pytest.main(...)` under any name it was imported as (`import pytest as p`, `import _pytest.config as c`), `from pytest import main as m` then `m()`, a `"pytest"` process argv, or a command line handed to a process. It is judged as a pytest run whose words are the code's quoted literals, of which only a path-shaped one targets it, plus the words after the code when it reads `sys.argv`. Importing pytest, or printing its version, runs nothing. The code may come from `-c`, a heredoc, a here-string, a pipe or a file;
 - grouping, and a function defined with or without the `function` keyword;
 - `uv run`/`poetry run`/`pdm run`/`pipx run`/`hatch run env:cmd`, `hatch test` (hatch's pytest), and `coverage run [-m] cmd`;
 - `uvx`/`uv tool run`, with any version pin such as `pytest@8`;
-- code a shell runs from a string: `eval`, `bash <<< '...'`, `source`/`.` of a script, and `echo`/`printf` output piped into a shell (`echo 'pytest' | bash`, `bash < <(echo pytest)`);
-- code a shell reads from a FILE on stdin (`cat commands.txt | bash`, `bash < commands.txt`): the file is read when it is a regular file of at most 64 KiB, and judged by its name as `bash commands.txt` would be either way;
+- code a shell runs from a string: `eval`, `bash <<< '...'`, and `echo`/`printf` output (formatted as `printf` formats it) piped into a shell (`echo 'pytest' | bash`, `bash < <(echo pytest)`, `bash <(echo pytest)`); `/dev/stdin`, `/dev/fd/0` and `-` as a script are stdin; `bash -c "$(cat f)"` and `eval "$(cat f)"` run the file;
+- code in a FILE: a script run by its name or path (`bash run.sh`, `./run.sh`, `source run.sh`, `python3 run.py`, the kind taken from its `#!` line), and a file fed on stdin (`cat commands.txt | bash`, `bash < commands.txt`). It is read and judged with its own arguments (`"$@"`, `$1`, `${1:-default}`), unless it is a program the project declares, which its pattern judges. Each path is read once per event, and one event parses at most 32 KiB of file content in all; past that a file is only scanned for a declared program's name;
 - a `$(...)` or backtick substitution, including one inside double quotes (`x="$(pytest tests)"`);
-- a variable the command sets (`P=pytest; $P tests`, `export P=...`), and a `for` loop's variable, which takes each listed value;
+- a variable the command sets (`P=pytest; $P tests`, `export P=...`, `CMD="$CMD --flag"`), `${NAME:-word}` and `${NAME:=word}` as `word` when NAME is not set, and a `for` loop's variable, which takes each listed value;
+- `PYTEST_ADDOPTS=...`, set on the command or exported, whose words pytest reads as its own;
 - `xargs cmd` and `builtin`.
 
 `py.test` is read as `pytest`, its other name. ANSI-C quoting (`$'...'`) is decoded as bash decodes it, including `\xHH`, octal `\NNN`, `\uHHHH` and `\UHHHHHHHH`, so `llm_qa.py $'all'` is `llm_qa.py all` and `$'py\x74est'` is `pytest`.
@@ -1419,10 +1422,14 @@ handlers:
 
 - a command that cannot be parsed (an unbalanced quote), nests deeper than three levels of code, or chains more than 32 launchers, and names a declared program;
 - a command longer than 32 KiB that names a declared program;
-- a program named at run time: `$(which pytest)`, `"$(command -v pytest)" tests`, or a variable the command does not set, judged as each declared program the substitution names (for a variable, that the whole command names);
-- Python that imports or runs a module by a computed name (`importlib.import_module(name).main()`), or runs a computed string, judged as pytest.
+- a program named at run time: `$(which pytest)`, `"$(command -v pytest)" tests`, or a variable the code does not set, judged as each declared program the substitution names (for a variable, that the code holding it names);
+- Python that imports or runs a module by a computed name (`importlib.import_module(name).main()`), or runs a computed string, judged as pytest;
+- code a shell or Python reads that cannot be seen: from a producer that is not understood (anything but `echo`, `printf` and `cat FILE`: `cat f g`, `cat < f`, `awk`, `grep`, a `tee` in the chain, a program's output), from another descriptor (`/dev/fd/3`), from a FIFO or a device, from a file this command also writes (`>`, `>>`, `tee`), or from a file past the scan budget. A file past the parse budget, or fed more than three files deep, is denied when it names a declared program;
+- an OPERAND built at run time: `pytest tests/unit/x.py $(cat more.txt)`, `pytest tests/unit/x.py "$EXTRA"`, an `@file` pytest reads arguments from, and a `--pyargs` package not found in the directory the command runs in;
+- a brace expansion past its limits (64 alternatives, 32 groups), when an alternative holds a `/`. Without one, each group is read as `*`, a glob of the same reach, so `tests/unit/qa/test_{a,b}{c,d}...py` stays targeted however many groups it has;
+- a run that may be bare: a changed-files listing that may be empty, and the arguments `xargs` reads from stdin.
 
-An OPERAND built at run time may be the whole suite, so a run with one is full: `pytest tests/unit/x.py $(cat more.txt)` and `pytest tests/unit/x.py "$EXTRA"` are denied. The exception is a listing of changed files: `pytest $(git diff --name-only main -- tests)`, and `git diff --name-only main -- tests | xargs pytest`, optionally filtered through `grep`, `sort` or `uniq`, are targeted runs. Arguments `xargs` reads from any other producer cannot be seen, so `echo tests | xargs pytest` is judged as bare, which is full.
+A listing of changed files is a targeted run only when it cannot leave the run bare: `git diff --name-only main -- tests | xargs -r pytest` (`-r` is `--no-run-if-empty`; plain `xargs` runs the command once on empty input), or `pytest tests/unit/qa/test_x.py $(git diff --name-only main -- tests)`, beside a named path. A `for f in $(git diff --name-only); do pytest "$f"; done` loop is targeted too, as it runs nothing on an empty list. The listing is `git diff --name-only`, optionally filtered through `grep`, `sort` or `uniq`; one steered to print other words is none: `--format`, `--pretty`, `--line-prefix`, `--output`, `--no-index`, the empty tree, a word built at run time, `grep --label`, and `git log`/`git show`, which print commit messages.
 
 A runner flag no table lists may take a value (`uv run --color never pytest`), so the word after it is tried both as that value and as the command.
 
@@ -1430,20 +1437,21 @@ A runner flag no table lists may take a value (`uv run --color never pytest`), s
 
 **Options:**
 
-| Option                 | Default | Meaning                                                                                             |
-| ---------------------- | ------- | --------------------------------------------------------------------------------------------------- |
-| `full_qa_patterns`     | `[]`    | Entries `{id, command, full_args?, bare_is_full?, read_only_flags?, value_flags?, option_grammar?}` |
-| `targeted_qa_commands` | `[]`    | Commands the deny lists under "RUN INSTEAD"; empty names the generic form                           |
+| Option                 | Default | Meaning                                                                                                          |
+| ---------------------- | ------- | ---------------------------------------------------------------------------------------------------------------- |
+| `full_qa_patterns`     | `[]`    | Entries `{id, command, full_args?, full_words?, bare_is_full?, read_only_flags?, value_flags?, option_grammar?}` |
+| `targeted_qa_commands` | `[]`    | Commands the deny lists under "RUN INSTEAD"; empty names the generic form                                        |
 
 In a pattern:
 
 - `command` is the program's basename.
-- `full_args` lists the operands that make it the whole suite. Omit it and every run is full.
+- `full_args` lists the PATHS that make it the whole suite (`tests`, `.`), judged from the repository holding them.
+- `full_words` lists the WORDS that make it the whole suite wherever it runs (`llm_qa.py all`): matched literally, never as paths, so a directory named `all` where the command stands changes nothing. Omit both lists and every run is full.
 - `bare_is_full` makes a run that targets no path full. Such a run collects the directory it runs in, so it is judged as the operand `.` from there: `cd tests/unit/qa && pytest -q` is targeted.
-- `value_flags` lists flags whose value can look like a path (`--rootdir .`).
+- `value_flags` lists flags whose value can look like a path (`--rootdir .`, `--range A..B`).
 - `option_grammar: pytest` supplies pytest's complete option set, with and without values, for pytest and its common plugins.
 
-Only a PATH-LIKE word targets a run. That is a word that:
+Under `option_grammar`, every word no flag claims is an operand, and targets the run unless it names the suite: pytest stops on a path it cannot find, so `cd tests/unit && pytest tests` runs nothing. Without a grammar, only a PATH-LIKE word targets a run. That is a word that:
 
 - contains `/` or `::`;
 - ends in `.py`; or
@@ -1451,9 +1459,9 @@ Only a PATH-LIKE word targets a run. That is a word that:
 
 A path operand is normalised (`tests/unit/../unit`, `tests//unit` and `tests/unit/qa/..` are what they name) and resolved from the directory the command runs in (so `cd tests/unit/qa && pytest .` is the `tests/unit/qa` run). It is then judged against the repository that CONTAINS it, the nearest directory holding `.git` or `pyproject.toml`: its root, a `full_args` entry or an ancestor of one is full. So `pytest untracked/worktrees/wt/tests`, run from the main checkout, is that worktree's whole suite. Where no repository is found, the event's working directory stands in for the root, and an operand at or above that directory is always full.
 
-A glob or brace operand is judged by what the shell expands it to. `tests/*`, `tests/{unit,integration}` and `tests/unit/**/test_*.py` reach the whole of a full directory. `tests/unit/handlers/test_*.py` names files in one directory and is targeted.
+A glob or brace operand is judged by what the shell expands it to, sequences included (`{t..t}ests` is `tests`). `tests/*`, `tests/{unit,integration}` and `tests/unit/**/test_*.py` reach the whole of a full directory. `tests/unit/handlers/test_*.py` names files in one directory and is targeted, so name the directory that holds the files: `tests/unit/qa/test_llm_qa*.py`, not `tests/unit/**/test_llm_qa*.py`. Brackets after `::` select a parametrised test and are no glob.
 
-Any other word is ignored, so a bare flag value such as `--timeout 60` cannot make a full run look targeted. A path-shaped value can: without a grammar, the word after an unlisted flag is still read as a target. With `option_grammar`, a flag the grammar does not know (a plugin's) is read as taking a value, so `--json-report-file out/r.json` does not target the run. To avoid a false deny, name the test paths before such a flag, or write it as `--flag=value`.
+Without a grammar, any other word is ignored, so a bare flag value such as `--timeout 60` cannot make a full run look targeted. A path-shaped value can: without a grammar, the word after an unlisted flag is still read as a target. With `option_grammar`, a flag the grammar does not know (a plugin's) is read as taking a value, so `--json-report-file out/r.json` does not target the run. To avoid a false deny, name the test paths before such a flag, or write it as `--flag=value`.
 
 A malformed entry is skipped and logged. `hooks-daemon check` reports a handler enabled with no usable pattern.
 
@@ -1463,11 +1471,13 @@ A malformed entry is skipped and logged. `hooks-daemon check` reports a handler 
 
 **What "full" covers is what the project declares.** A resource guard for cooperating agents, not a security boundary:
 
-- a program the project has not declared is not a full run. A script RUN by its own name (`./my_checks.sh`, `bash my_checks.sh`) is judged by that name, and a project runner such as `tox` or `nox` runs whatever the project's config says. Declare each one that runs the whole suite in `full_qa_patterns` (for example `{id: tox, command: tox}`);
+- a program the project has not declared is not a full run, and a project runner such as `tox` or `nox` runs whatever the project's config says, which is not read. A script run by its name is read (see above), but judged by its name alone when it cannot be read: with no known directory, or as a binary. Declare each program that runs the whole suite in `full_qa_patterns` (for example `{id: tox, command: tox}`);
 - a wrapper or launcher not listed above has its own grammar, so an unknown one is judged as the program it names. Add it to the handler's tables when one is found;
-- a `cd` target the shell would expand (`cd $DIR`) leads somewhere unseen. After one, words are judged by shape alone. Every `cd` is followed in order, including one inside a subshell or after `||`.
+- a `cd` target the shell would expand (`cd $DIR`) leads somewhere unseen. After one, a path is judged by its shape and its words. Every `cd` is followed in order, including one inside a subshell or after `||`.
 
-The false denies the fail-closed rules accept: an operand built at run time other than a changed-files listing (`$(cat more.txt)`, `"$EXTRA"`), arguments `xargs` reads from a producer other than such a listing (`echo tests | xargs pytest`), and a command over 32 KiB that mentions a declared program. Spell the paths out literally instead.
+**The one run that is not seen** is a program whose NAME is built at run time from pieces: `P=$(printf 'py%s' test); $P tests`, or `subprocess.call(["py" + "test"])` in Python. No parser can know what such a name will be without running the code that builds it.
+
+The false denies the fail-closed rules accept: an operand built at run time (`$(cat more.txt)`, `"$EXTRA"`), arguments `xargs` reads from stdin (`echo tests | xargs pytest`, `find ... | xargs pytest`), code fed through a producer that is not understood (a script that pipes a downloaded installer into `sh`), and a command over 32 KiB that mentions a declared program. Spell the paths out literally instead.
 
 The coordinator's full gate still runs before the main branch moves.
 

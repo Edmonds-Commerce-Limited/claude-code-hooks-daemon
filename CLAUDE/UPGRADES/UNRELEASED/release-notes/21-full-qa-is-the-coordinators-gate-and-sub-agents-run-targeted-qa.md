@@ -16,13 +16,19 @@ calls `pytest.main`, launchers such as `setsid`, `flock` and `time`, globs and
 brace expansion. Only a path-like word targets a run, and it is normalised,
 resolved against any `cd`, and judged against the repository that contains it,
 so `pytest tests/./unit`, `cd tests && pytest unit` and a worktree's `tests/`
-named from the main checkout are full runs. What it cannot see FAILS CLOSED:
-a command it cannot parse, one too long to parse, a program named only at run
-time (`$(which pytest)`) and an operand built at run time are denied when they
-may be the suite, and the reason says which. A listing of changed files
-(`pytest $(git diff --name-only main -- tests)`) is a targeted run. The handler
-reference lists what "full" does not cover (a program you have not declared)
-and the false denies the fail-closed rules accept.
+named from the main checkout are full runs. A script run by its name or path,
+or fed to a shell on stdin, is read and judged with its own arguments, within
+one parse budget per command. What it cannot see FAILS CLOSED: a command it
+cannot parse, one too long to parse, a program named only at run time
+(`$(which pytest)`), an operand built at run time, and code from a producer it
+does not understand are denied when they may be the suite, and the reason says
+which. A listing of changed files is a targeted run only when it cannot leave
+the run bare: `git diff --name-only main -- tests | xargs -r pytest`, or a
+`$(git diff ...)` beside a named path. `full_words` declares words that mean
+the whole suite wherever the command runs (`llm_qa.py all`), apart from
+`full_args`, which are paths. The handler reference lists what "full" does not
+cover (a program you have not declared, and one whose name is built at run
+time from pieces) and the false denies the fail-closed rules accept.
 `option_grammar: pytest` supplies pytest's complete option set, so a flag's
 value is never mistaken for a path. A plugin flag the grammar does not know is
 read as taking a value. Nothing ships by default. `hooks-daemon check`
@@ -55,7 +61,8 @@ clean tree records the head it judged in
 `refs/integration/certified/<branch>`. `llm_qa.py main-moved` then answers
 what must re-run before the fast-forward, with an exit code to branch on:
 `head-moved` (7) when the head is not the certified one, the tree is dirty, or
-the head lacks `main`; `unmoved` (0) fast-forwards `main` to the certified
+the head lacks `main` (a head holding only `main` merged in since the certified
+head is judged by that movement instead); `unmoved` (0) fast-forwards `main` to the certified
 head's SHA, which it prints; `docs-only` (5) re-runs the doc checks;
 `targeted` (6) runs `llm_qa.py changed` over exactly the moved range, because
 a moved document that tests read is judged by the same test mapper `changed`

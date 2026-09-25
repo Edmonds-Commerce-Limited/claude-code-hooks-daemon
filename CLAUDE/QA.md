@@ -135,9 +135,13 @@ paths, so a file moved out of `src/` is judged by the path it left.
 The integration head is judged FIRST. Unless `HEAD` is the certified head and
 the tree is clean, the verdict is `head-moved`, whatever `main` did: a commit or
 merge after the gate, or an uncommitted change `--ff-only` would not land, has
-not been through the gate. It is also `head-moved` when `main` is still the
-base but `HEAD` does not contain it (the merge of `main` was backed out):
-`--ff-only` would refuse, so the printed steps merge `main` back in first.
+not been through the gate. The exception is a clean `HEAD` that holds nothing
+past the certified head but `main` merged in, by the rule `--advance` applies
+(step 3 below): that is judged as the movement merged, with its recheck, so
+checking again between the merge and `--advance` never asks for a second
+`llm_qa.py all`. It is also `head-moved` when `main` is still the base but
+`HEAD` does not contain it (the merge of `main` was backed out): `--ff-only`
+would refuse, so the printed steps merge `main` back in first.
 
 | Verdict      | Exit | When                                                                        | Recheck, run exactly as printed                                                                           |
 | ------------ | ---- | --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |

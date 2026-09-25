@@ -373,10 +373,14 @@ class CommandWrapper:
         value_flags: Flags whose following word is a value, not the command.
         positional_operands: Positional words consumed before the wrapped
             command starts. ``timeout``'s DURATION is the only one shipped.
+            Option parsing stops at the last of them, so the word after it is
+            the command whatever it looks like.
+        lone_dash_is_flag: ``env -`` is ``env -i``, so a lone ``-`` is a flag.
     """
 
     value_flags: frozenset[str]
     positional_operands: int = 0
+    lone_dash_is_flag: bool = False
 
 
 #: Wrappers whose job is to run the command after them. One table, because two
@@ -392,7 +396,9 @@ COMMAND_WRAPPERS: Final[dict[str, CommandWrapper]] = {
     ),
     "nohup": CommandWrapper(value_flags=frozenset()),
     "sudo": CommandWrapper(value_flags=frozenset({"-u", "-g", "-p"})),
-    "env": CommandWrapper(value_flags=frozenset({"-u", "--unset", "-C", "--chdir"})),
+    "env": CommandWrapper(
+        value_flags=frozenset({"-u", "--unset", "-C", "--chdir"}), lone_dash_is_flag=True
+    ),
     "nice": CommandWrapper(value_flags=frozenset({"-n", "--adjustment"})),
     "stdbuf": CommandWrapper(value_flags=frozenset({"-i", "-o", "-e"})),
     "command": CommandWrapper(value_flags=frozenset()),
@@ -442,20 +448,39 @@ def peel_command_wrappers(argv: Sequence[str]) -> tuple[tuple[str, ...], int]:
                 options_ended = True
                 index += 1
                 continue
-            is_flag = (
-                not options_ended and argument.startswith(FLAG_PREFIX) and argument != LONE_DASH
+            is_flag = not options_ended and (
+                (argument.startswith(FLAG_PREFIX) and argument != LONE_DASH)
+                or (argument == LONE_DASH and wrapper.lone_dash_is_flag)
             )
             if is_flag:
                 index += 1
-                if argument in wrapper.value_flags and index < len(argv):
+                if _takes_next_word(argument, wrapper.value_flags) and index < len(argv):
                     index += 1
                 continue
             if positionals > 0:
                 index += 1
                 positionals -= 1
+                if positionals == 0:
+                    break
                 continue
             break
     return tuple(names), index
+
+
+def _takes_next_word(flag: str, value_flags: frozenset[str]) -> bool:
+    """Whether a wrapper flag consumes the next word: a value flag, or a cluster ending in one.
+
+    ``env -iu HOME`` is ``-i -u HOME``. A value flag with its value attached
+    (``-n5``, ``-iCdir``) takes nothing more.
+    """
+    if flag in value_flags:
+        return True
+    if flag.startswith(END_OF_OPTIONS) or len(flag) <= len(FLAG_PREFIX) + 1:
+        return False
+    for position, letter in enumerate(flag[1:], start=1):
+        if FLAG_PREFIX + letter in value_flags:
+            return position == len(flag) - 1
+    return False
 
 
 def value_can_substitute(value: str) -> bool:
