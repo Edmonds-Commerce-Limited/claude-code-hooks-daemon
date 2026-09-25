@@ -88,9 +88,15 @@ def _sandbox_project(tmp_path: Path) -> Path:
 
 
 def _emit(
-    tmp_path: Path, event: str, error_type: str, details: str
+    tmp_path: Path, event: str, error_type: str, details: str, *, stdin: str = ""
 ) -> subprocess.CompletedProcess[str]:
-    """Source init.sh with jq absent, then call emit_hook_error; capture stdout."""
+    """Source init.sh with jq absent, then call emit_hook_error; capture stdout.
+
+    ``stdin`` feeds ``emit_hook_error``'s own stdin read (Plan 00466 N24
+    review 3 MA4: for PreToolUse it checks whether stdin is the exact
+    recovery command). Always passed explicitly via ``input=`` -- an
+    inherited stdin left open with no EOF would hang the subprocess.
+    """
     proj = _sandbox_project(tmp_path)
     bindir = _curated_bin_without_jq(tmp_path)
     init_sh = proj / ".claude" / "init.sh"
@@ -98,6 +104,7 @@ def _emit(
     env = {"PATH": str(bindir), "HOME": str(tmp_path)}
     return subprocess.run(
         ["bash", "-c", script, "bash", event, error_type, details],
+        input=stdin,
         capture_output=True,
         text=True,
         env=env,
@@ -123,16 +130,50 @@ def test_fallback_absent_jq_is_actually_taken(tmp_path: Path) -> None:
 
 
 def test_fallback_emits_valid_json_for_adversarial_details(tmp_path: Path) -> None:
-    """Details with quotes/backslashes/newlines must not break the JSON document."""
+    """Details with quotes/backslashes/newlines must not break the JSON document.
+
+    PreToolUse + daemon_startup_failed now denies (Plan 00466 N24 review 3
+    MA4) with empty/non-recovery stdin, so the adversarial text is checked
+    inside ``permissionDecisionReason`` instead of ``additionalContext``.
+    """
     nasty = 'boom "quoted" \\ backslash\nsecond line\ttab'
     result = _emit(tmp_path, "PreToolUse", "daemon_startup_failed", nasty)
 
     assert result.returncode == 0, result.stderr
     # Must parse — the pre-fix fallback produced invalid JSON here.
     parsed = json.loads(result.stdout)
-    context = parsed["hookSpecificOutput"]["additionalContext"]
-    assert nasty in context
-    assert parsed["hookSpecificOutput"]["hookEventName"] == "PreToolUse"
+    hso = parsed["hookSpecificOutput"]
+    assert hso["hookEventName"] == "PreToolUse"
+    assert hso["permissionDecision"] == "deny"
+    assert nasty in hso["permissionDecisionReason"]
+
+
+def test_fallback_pretooluse_daemon_startup_failed_denies(tmp_path: Path) -> None:
+    """Plan 00466 N24 review 3 MA4: the daemon-won't-start shape now denies
+    PreToolUse, not just the post-connect transport failures."""
+    result = _emit(tmp_path, "PreToolUse", "daemon_startup_failed", "boom")
+
+    assert result.returncode == 0, result.stderr
+    parsed = json.loads(result.stdout)
+    hso = parsed["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert "boom" in hso["permissionDecisionReason"]
+
+
+def test_fallback_pretooluse_recovery_command_stays_fail_open(tmp_path: Path) -> None:
+    """The exact recovery command must never be blocked by this deny."""
+    recovery_hook_input = json.dumps(
+        {"tool_name": "Bash", "tool_input": {"command": "bin/hooks-daemon restart"}}
+    )
+    result = _emit(
+        tmp_path, "PreToolUse", "daemon_startup_failed", "boom", stdin=recovery_hook_input
+    )
+
+    assert result.returncode == 0, result.stderr
+    parsed = json.loads(result.stdout)
+    hso = parsed["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hso["hookEventName"] == "PreToolUse"
 
 
 @pytest.mark.parametrize("event", ["Stop", "SubagentStop"])

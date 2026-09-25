@@ -246,7 +246,9 @@ class TestNonCIDaemonFailure:
         ), "Non-CI not-installed should not show CI advisory language"
 
     def test_non_ci_installed_but_not_running_shows_restart_guidance(self, tmp_path: Path) -> None:
-        """Non-CI, daemon installed but not starting: hookSpecificOutput says 'Not currently running'."""
+        """Non-CI, daemon installed but not starting: PreToolUse now DENIES
+        (Plan 00466 N24 review 3 MA4, owner decision) with a reason that
+        says 'Not currently running' and how to restart."""
         project = _create_project_structure(tmp_path, ci_enabled=None)
         _create_installed_stub(project)  # venv python exists → daemon appears installed
         result = _run_hook_via_forwarder("pre-tool-use", _PRE_TOOL_INPUT, project)
@@ -255,14 +257,34 @@ class TestNonCIDaemonFailure:
         stdout = result.stdout.strip()
         parsed = json.loads(stdout)
         assert "hookSpecificOutput" in parsed, f"Expected hookSpecificOutput, got: {parsed}"
-        context = parsed["hookSpecificOutput"]["additionalContext"]
+        hso = parsed["hookSpecificOutput"]
+        assert hso["permissionDecision"] == "deny"
+        reason = hso["permissionDecisionReason"]
         assert (
-            "Not currently running" in context
-        ), f"Expected 'Not currently running' in context, got: {context!r}"
-        assert "restart" in context, f"Expected restart instruction in context, got: {context!r}"
+            "Not currently running" in reason
+        ), f"Expected 'Not currently running' in reason, got: {reason!r}"
+        assert "restart" in reason, f"Expected restart instruction in reason, got: {reason!r}"
         assert (
-            "LLM-INSTALL.md" not in context
+            "LLM-INSTALL.md" not in reason
         ), "Installed-but-not-running should not show install guide"
+
+    def test_non_ci_installed_but_not_running_recovery_command_stays_fail_open(
+        self, tmp_path: Path
+    ) -> None:
+        """The exact recovery command must never be blocked by the deny above."""
+        project = _create_project_structure(tmp_path, ci_enabled=None)
+        _create_installed_stub(project)
+        recovery_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "bin/hooks-daemon restart"},
+        }
+        result = _run_hook_via_forwarder("pre-tool-use", recovery_input, project)
+
+        assert result.returncode == 0
+        parsed = json.loads(result.stdout.strip())
+        hso = parsed["hookSpecificOutput"]
+        assert "permissionDecision" not in hso
+        assert "Not currently running" in hso["additionalContext"]
 
     def test_non_ci_stop_event_blocked(self, tmp_path: Path) -> None:
         """Non-CI daemon failure returns decision: block for Stop events."""

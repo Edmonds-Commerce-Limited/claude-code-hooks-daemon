@@ -76,6 +76,49 @@ _HOOKS_DAEMON_BOOTSTRAP_PID=""
 _HOOKS_DAEMON_BOOTSTRAP_ELAPSED=""
 
 #
+# _hooks_daemon_stdin_is_recovery_command() - True when stdin is the EXACT
+# daemon recovery command (Plan 00466 N24 review 3 MA4).
+#
+# Reads stdin (a PreToolUse hook_input JSON document) to EOF and checks it
+# against the same allowlist send_request_stdin's own
+# _is_daemon_recovery_command applies once the daemon IS reachable: a Bash
+# tool call whose whole command is exactly one recovery binary + one
+# read-only-or-restart subcommand, no compound commands. Any parse failure,
+# wrong tool, or non-matching command returns false (deny-by-default) --
+# this function decides whether a call gets a CARVE-OUT, never whether it
+# gets blocked outright.
+_hooks_daemon_stdin_is_recovery_command() {
+    python3 -c '
+import json
+import sys
+
+_RECOVERY_BINARIES = ("bin/hooks-daemon", ".claude/hooks-daemon/bin/hooks-daemon")
+_RECOVERY_SUBCOMMANDS = ("restart", "status", "logs", "stop", "start")
+
+try:
+    hi = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+
+if not isinstance(hi, dict) or hi.get("tool_name") != "Bash":
+    sys.exit(1)
+tool_input = hi.get("tool_input")
+if not isinstance(tool_input, dict):
+    sys.exit(1)
+command = tool_input.get("command")
+if not isinstance(command, str):
+    sys.exit(1)
+stripped = command.strip()
+ok = any(
+    stripped == f"{binary} {sub}"
+    for binary in _RECOVERY_BINARIES
+    for sub in _RECOVERY_SUBCOMMANDS
+)
+sys.exit(0 if ok else 1)
+'
+}
+
+#
 # emit_hook_error() - Output a valid hook error response to stdout
 #
 # CRITICAL: This ensures the agent sees errors and can take action.
@@ -110,6 +153,33 @@ emit_hook_error() {
 
     # Log to stderr for debugging (agent won't see this)
     echo "HOOKS DAEMON ERROR [$error_type]: $error_details" >&2
+
+    # Plan 00466 N24 review 3 MA4: for PreToolUse, the STANDARD branch below
+    # (an installed project whose daemon could not be reached at all --
+    # ensure_daemon itself failed) now denies rather than fails open. The one
+    # carve-out is the exact command that would fix it, so it must be
+    # checked before that decision is made. Every real call site with
+    # event_name=PreToolUse reaches this function with stdin still fully
+    # unconsumed and exits right afterwards, so reading it here is safe.
+    #
+    # Gated to ONLY the standard case (every named state below stays
+    # unconditionally fail-open, untouched by MA4) -- every other branch
+    # must never touch stdin at all: several of this function's OTHER
+    # callers pass no stdin of their own, and an unguarded read here would
+    # hang them waiting for an EOF that never comes.
+    local _pretooluse_deny="false"
+    if [[ "$event_name" == "PreToolUse" \
+        && "$_HOOKS_DAEMON_CI_ENFORCED" != "true" \
+        && "$_HOOKS_DAEMON_REPO_UNCONFIGURED" != "true" \
+        && "$_HOOKS_DAEMON_VENV_MISSING" != "true" \
+        && "$_HOOKS_DAEMON_NOT_INSTALLED" != "true" \
+        && "$_HOOKS_DAEMON_VERSION_MISMATCH" != "true" ]]; then
+        if _hooks_daemon_stdin_is_recovery_command; then
+            _pretooluse_deny="false"
+        else
+            _pretooluse_deny="true"
+        fi
+    fi
 
     # Build error context message based on CI enforcement policy
     local context_msg
@@ -409,10 +479,15 @@ $_hd_venv_missing_remedy")
                     '{"hookSpecificOutput": {"hookEventName": $event, "additionalContext": $context}}'
             fi
         else
-            # Standard: Stop/SubagentStop block, others fail-open with context
+            # Standard: Stop/SubagentStop block; PreToolUse denies (Plan
+            # 00466 N24 review 3 MA4) unless stdin was the exact recovery
+            # command; every other event fails open with context.
             if [[ "$event_name" == "Stop" || "$event_name" == "SubagentStop" ]]; then
                 jq -n --arg reason "Hooks daemon not running - protection not active" \
                     '{"decision": "block", "reason": $reason}'
+            elif [[ "$event_name" == "PreToolUse" && "$_pretooluse_deny" == "true" ]]; then
+                jq -n --arg event "$event_name" --arg reason "$context_msg" \
+                    '{"hookSpecificOutput": {"hookEventName": $event, "permissionDecision": "deny", "permissionDecisionReason": $reason}}'
             else
                 jq -n --arg event "$event_name" --arg context "$context_msg" \
                     '{"hookSpecificOutput": {"hookEventName": $event, "additionalContext": $context}}'
@@ -431,7 +506,7 @@ $_hd_venv_missing_remedy")
 import json
 import sys
 
-event_name, context_msg, ci_enforced, not_installed, checkout, venv_missing, venv_block_reason = sys.argv[1:8]
+event_name, context_msg, ci_enforced, not_installed, checkout, venv_missing, venv_block_reason, pretooluse_deny = sys.argv[1:9]
 stop_events = ("Stop", "SubagentStop")
 
 if not event_name:
@@ -465,14 +540,26 @@ elif not_installed == "true":
     else:
         resp = {"hookSpecificOutput": {"hookEventName": event_name, "additionalContext": context_msg}}
 else:
+    # Standard: Stop/SubagentStop block; PreToolUse denies (Plan 00466 N24
+    # review 3 MA4) unless stdin was the exact recovery command; every
+    # other event fails open with context.
     if event_name in stop_events:
         resp = {"decision": "block", "reason": "Hooks daemon not running - protection not active"}
+    elif event_name == "PreToolUse" and pretooluse_deny == "true":
+        resp = {
+            "hookSpecificOutput": {
+                "hookEventName": event_name,
+                "permissionDecision": "deny",
+                "permissionDecisionReason": context_msg,
+            }
+        }
     else:
         resp = {"hookSpecificOutput": {"hookEventName": event_name, "additionalContext": context_msg}}
 
 print(json.dumps(resp))
 ' "$event_name" "$context_msg" "$_HOOKS_DAEMON_CI_ENFORCED" "$_HOOKS_DAEMON_NOT_INSTALLED" \
-            "$_hooks_daemon_checkout" "$_HOOKS_DAEMON_VENV_MISSING" "$venv_block_reason"
+            "$_hooks_daemon_checkout" "$_HOOKS_DAEMON_VENV_MISSING" "$venv_block_reason" \
+            "$_pretooluse_deny"
     fi
 }
 
@@ -1757,6 +1844,31 @@ def emit_error_json(event_name, error_type, error_details):
             'If this recurs, use the hooks-daemon skill to check logs',
             '(args=logs) and report it.',
         ]
+    elif error_type in ('socket_not_found', 'connection_refused'):
+        # Plan 00466 N24 review 3 MA4 (owner decision): connect() itself
+        # never reached a daemon at all -- the socket is missing, or nothing
+        # is listening on it. For an INSTALLED project this used to fail
+        # OPEN unconditionally on the reasoning that ensure_daemon's
+        # auto-start already ran before this point, so 'merely absent'
+        # covered both a genuinely wedged/crashed daemon and a fresh clone
+        # before first install alike. It no longer does for PreToolUse: the
+        # PreToolUse branch below now denies this the same as a reached-but-
+        # unresponsive daemon, with the one exact-recovery-command carve-out.
+        context_lines = [
+            'HOOKS DAEMON: could not connect at all',
+            '',
+            f'Error: {error_type} - {error_details}',
+            '',
+            'No daemon answered this socket -- either it is not running, or',
+            'the socket itself is gone.',
+            '',
+            'TO FIX: run exactly bin/hooks-daemon restart (or',
+            '.claude/hooks-daemon/bin/hooks-daemon restart), which stays',
+            'allowed even while other calls are denied this way. Then use the',
+            'hooks-daemon skill to verify health (args=health).',
+            'If this recurs, use the hooks-daemon skill to check logs',
+            '(args=logs) and report it.',
+        ]
     else:
         context_lines = [
             'HOOKS DAEMON: Not currently running',
@@ -1806,23 +1918,24 @@ def emit_error_json(event_name, error_type, error_details):
             }
     elif event_name == 'PreToolUse' \
             and error_type in ('socket_timeout', 'malformed_response', 'connection_lost',
-                                'connect_backlog_full') \
+                                'connect_backlog_full', 'socket_not_found', 'connection_refused') \
             and not _is_daemon_recovery_command(hook_input):
-        # Plan 00466 n24 security review: the daemon was REACHED (or, for
-        # malformed_response, answered) but produced no usable verdict --
-        # exactly the shape B2's GIL-holding quadratic regex produced (a
-        # live daemon the client gave up on at 30s, silently ALLOWing
-        # whatever was requested). Fail CLOSED here, unlike every other
-        # PreToolUse error_type below. Deliberately narrower than any
-        # transport failure at all: socket_not_found, connection_refused
-        # and invalid_hook_input all mean the daemon was never reached,
-        # which keeps the existing, separately-documented fail-open path
-        # (ensure_daemon's auto-start already ran before this point; denying
-        # every tool call whenever the daemon is merely absent -- e.g. a
-        # fresh clone before first install -- would make Claude Code itself
-        # unusable, a materially different cost than a rare timeout).
-        # _is_daemon_recovery_command is checked so this can never itself
-        # block the exact commands that would fix it.
+        # Plan 00466 n24/N24 security review: every one of these means the
+        # daemon produced no usable verdict for this call -- whether it was
+        # reached and then went silent or crashed (socket_timeout,
+        # malformed_response, connection_lost, connect_backlog_full), or
+        # never reachable at all (socket_not_found, connection_refused;
+        # review 3 MA4, owner decision). Fail CLOSED for all of them, unlike
+        # every other PreToolUse error_type below (invalid_hook_input: a
+        # payload that never reached the socket at all, so the daemon state
+        # is unrelated and unknown). This project's install/CI story keeps
+        # ensure_daemon's auto-start ahead of every real call site here, so
+        # 'the socket that auto-start just tried to reach is still missing'
+        # is not the fresh-clone-before-first-install case -- that one is
+        # handled entirely by emit_hook_error's own NOT_INSTALLED/
+        # VENV_MISSING branches, upstream of ever reaching this transport at
+        # all. _is_daemon_recovery_command is checked so this can never
+        # itself block the exact commands that would fix it.
         verb = 'responded' if error_type == 'malformed_response' else 'reached'
         reason = f'Hooks daemon {verb} but produced no verdict ({error_type}) - denied for safety'
         if timeout_note:
@@ -1836,10 +1949,13 @@ def emit_error_json(event_name, error_type, error_details):
             }
         }
     else:
-        # Other events, and every other PreToolUse error_type (daemon not
-        # reachable at all, or a client-side parse failure, or an exact
-        # daemon-recovery command): hookSpecificOutput with context
-        # (fail-open allow) -- the existing, documented behaviour.
+        # Other events, and the two PreToolUse cases that still fail open:
+        # invalid_hook_input (a client-side parse failure that never reached
+        # the socket, so the daemon state is unrelated and unknown) and an
+        # exact daemon-recovery command (Plan 00466 N24 review 3 MA4's
+        # carve-out) on any of the error_types denied above.
+        # hookSpecificOutput with context -- the existing, documented
+        # fail-open shape.
         response = {
             'hookSpecificOutput': {
                 'hookEventName': event_name,
@@ -2115,6 +2231,7 @@ sys.exit(0)
 
 # Export functions for use by forwarder scripts
 export -f emit_hook_error
+export -f _hooks_daemon_stdin_is_recovery_command
 export -f validate_venv
 export -f is_daemon_running
 export -f start_daemon

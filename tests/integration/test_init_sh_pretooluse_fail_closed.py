@@ -436,11 +436,52 @@ class TestLegitimateResponsesPassThroughUnchanged:
         assert hso["permissionDecisionReason"] == "a real guard denied this"
 
 
-class TestDaemonNotReachableKeepsExistingPath:
-    """'Daemon not running' is explicitly OUT of scope: existing fail-open."""
+class TestDaemonNotReachableFailsClosedForPreToolUse:
+    """Plan 00466 N24 review 3 MA4 (owner decision): 'the socket is missing'
+    no longer means fail-open for PreToolUse -- it means the daemon could
+    not be reached at all, and this project's install/CI story keeps
+    ensure_daemon's auto-start ahead of every real call site, so this is
+    the wedged/crashed/never-started shape, not the fresh-clone-before-
+    install one (that stays fail-open, upstream of this transport, via
+    emit_hook_error's own NOT_INSTALLED/VENV_MISSING branches)."""
 
-    def test_no_socket_at_all_still_fails_open_for_pretooluse(self, project: Path) -> None:
-        nonexistent = project / ".claude" / "hooks-daemon" / "untracked" / "does-not-exist.sock"
-        response = _send(project, nonexistent, "PreToolUse", _BASH_TOOL_INPUT)
+    @pytest.fixture
+    def nonexistent_socket(self) -> Iterator[Path]:
+        """A path with no socket at it, short enough that connect() raises a
+        genuine ``FileNotFoundError`` rather than AF_UNIX's ~108-byte
+        ``ENAMETOOLONG`` -- pytest's own ``tmp_path`` nests too deep for
+        that (see the ``_fake_server``/``connection_reset_socket`` fixtures
+        above for the same reasoning)."""
+        short_dir = Path(tempfile.mkdtemp(prefix="hd-"))
+        try:
+            yield short_dir / "does-not-exist.sock"
+        finally:
+            shutil.rmtree(short_dir, ignore_errors=True)
+
+    def test_no_socket_at_all_denies_for_pretooluse(
+        self, project: Path, nonexistent_socket: Path
+    ) -> None:
+        response = _send(project, nonexistent_socket, "PreToolUse", _BASH_TOOL_INPUT)
+        hso = response["hookSpecificOutput"]
+        assert hso["permissionDecision"] == "deny"
+        assert "denied for safety" in hso["permissionDecisionReason"]
+
+    def test_the_recovery_command_is_not_denied(
+        self, project: Path, nonexistent_socket: Path
+    ) -> None:
+        recovery_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "bin/hooks-daemon restart"},
+        }
+        response = _send(project, nonexistent_socket, "PreToolUse", recovery_input)
+        hso = response["hookSpecificOutput"]
+        assert "permissionDecision" not in hso
+
+    def test_no_socket_at_all_still_fails_open_for_a_non_pretooluse_event(
+        self, project: Path, nonexistent_socket: Path
+    ) -> None:
+        """Only PreToolUse changed; every other event keeps the original
+        fail-open `additionalContext` contract."""
+        response = _send(project, nonexistent_socket, "PostToolUse", _BASH_TOOL_INPUT)
         hso = response["hookSpecificOutput"]
         assert "permissionDecision" not in hso
