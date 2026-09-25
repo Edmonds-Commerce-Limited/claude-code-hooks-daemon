@@ -27,9 +27,45 @@ from claude_code_hooks_daemon.core.workspace import DeclaredProject, ProjectRegi
 # relay-dependent gates it covers straddle `acceptance/` and `integration/`.
 # Outside CI it does nothing at all — see the module docstring.
 from tests.relay_gate_guard import pytest_runtest_makereport
+from tests.signal_safety_net import install as install_signal_safety_net
+from tests.signal_safety_net import uninstall as uninstall_signal_safety_net
 from tests.source_tree_guard import assert_package_is_this_checkout
 
 __all__ = ["pytest_runtest_makereport"]
+
+
+@pytest.fixture(autouse=True, scope="session")
+def signal_safety_net() -> Generator[None, None, None]:
+    """Plan 00466 N59: no signal from the test run may reach init, us or our callers.
+
+    A ``MagicMock`` pid coerces to 1, and ``killpg(getpgid(1), SIGKILL)`` from a
+    unit test killed the container's init twice. For the whole session
+    ``os.kill`` and ``os.killpg`` refuse, without delivering, a nonzero signal
+    to pid 1, group 1, this process, its group, any ancestor or Claude Code.
+    See ``tests/signal_safety_net.py``.
+    """
+    net = install_signal_safety_net()
+    try:
+        yield
+    finally:
+        uninstall_signal_safety_net(net)
+
+
+@pytest.fixture(autouse=True)
+def no_refused_signal_left_behind(signal_safety_net: None) -> Generator[None, None, None]:
+    """Fail a test whose code swallowed a refused signal instead of surfacing it."""
+    from tests.signal_safety_net import installed_net
+
+    yield
+    net = installed_net()
+    if net is None:
+        raise AssertionError("signal safety net was uninstalled during the test")
+    violations = net.drain_violations()
+    if violations:
+        raise AssertionError(
+            "This test tried to signal a protected process and the refusal was "
+            "caught instead of failing the test:\n" + "\n".join(violations)
+        )
 
 
 def pytest_sessionstart(session: pytest.Session) -> None:

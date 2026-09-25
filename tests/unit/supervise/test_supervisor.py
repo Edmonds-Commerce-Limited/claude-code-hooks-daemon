@@ -267,8 +267,13 @@ class TestSuperviseWinchForwarding:
         monkeypatch.setattr(_mod, "_set_winsize", set_winsize_mock)
         set_winsize_mock.reset_mock()  # clear the pre-fork call made by supervise() itself
 
+        main_thread_id = threading.main_thread().ident
+        assert main_thread_id is not None
+
         def _send_sigwinch_soon() -> None:
-            os.kill(os.getpid(), signal.SIGWINCH)
+            # To this process's main thread only: the N59 safety net refuses
+            # os.kill to the test process itself.
+            signal.pthread_kill(main_thread_id, signal.SIGWINCH)
 
         timer = threading.Timer(0.05, _send_sigwinch_soon)
         timer.start()
