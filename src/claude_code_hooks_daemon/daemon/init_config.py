@@ -219,6 +219,8 @@ class ConfigTemplate:
             "    bash_safe_mode: {enabled: false, priority: 36}  # Opt-in: require a set safety prelude on sequenced Bash (warn-first)\n"
             "    plan_number_helper: {enabled: true, priority: 30}  # Provide correct next plan number\n"
             "    plan_journal_guard: {enabled: true, priority: 31}  # Journal entries only via mkplan.bash --journal\n"
+            "    plan_status_snapshot: {enabled: true, priority: 30}  "
+            "# Record a PLAN.md's pre-write status for goal_injection (post_tool_use) to consume as ground truth\n"
             "    markdown_organization:  # Plan tracking and markdown organization\n"
             "      enabled: true\n"
             "      priority: 35\n"

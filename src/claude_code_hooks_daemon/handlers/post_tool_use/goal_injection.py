@@ -101,22 +101,19 @@ from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
-from claude_code_hooks_daemon.core.utils import get_file_path
 from claude_code_hooks_daemon.plan_qa.model import TERMINAL_STATUSES, PlanDoc, PlanStatus
 from claude_code_hooks_daemon.utils.ccy_supervisor import supervisor_relevance
 from claude_code_hooks_daemon.utils.git_facts import project_relative_head_text
 from claude_code_hooks_daemon.utils.goal_ledger import LEDGER_FILENAME, GoalLedger, LivePlanRef
 from claude_code_hooks_daemon.utils.markdown_fences import line_spans_outside_fences
-from claude_code_hooks_daemon.utils.plan_status_snapshot import plan_status_snapshots
-from claude_code_hooks_daemon.utils.plan_trigger import PlanUnreadable
-from claude_code_hooks_daemon.utils.plan_trigger import (
-    is_inside_project as _plan_trigger_is_inside_project,
+from claude_code_hooks_daemon.utils.plan_status_snapshot import (
+    PlanStatusSnapshot,
+    hash_plan_text,
+    plan_status_snapshots,
 )
+from claude_code_hooks_daemon.utils.plan_trigger import PlanUnreadable, matched_plan_write_or_edit
 from claude_code_hooks_daemon.utils.plan_trigger import (
     plan_dir_for as _plan_trigger_plan_dir_for,
-)
-from claude_code_hooks_daemon.utils.plan_trigger import (
-    plan_path_pattern as _plan_trigger_plan_path_pattern,
 )
 from claude_code_hooks_daemon.utils.temp_names import unique_temp_path
 
@@ -229,9 +226,9 @@ _MULTI_WORK_LINE_TEXT: Final[str] = (
 # PLAN.md, NOT inside Completed/ — the same shape recovery_cron_advisor uses
 # for the same trigger surface) is built per-instance from the ProjectLayout
 # facade's plan_dir (Plan 00288 Task 4.2) via the shared
-# ``utils.plan_trigger`` module (Plan 00466 RV3-n5) — see
-# _plan_dir()/_plan_path_pattern() below, which delegate to it.
-_COMPLETED_SEGMENT: Final[str] = "/Completed/"
+# ``utils.plan_trigger`` module (Plan 00466 RV3-n5), which both
+# ``matches()`` and ``handle()`` call into directly (RV4-n2) -- see
+# :meth:`_plan_dir` below.
 # RV3-m2: locates a candidate Status line's position for the replace_all
 # ambiguity check below -- classification of ITS VALUE is always left to
 # PlanDoc (fenced-block-aware, tolerant of dates/icons), never this regex.
@@ -250,6 +247,13 @@ _FIELD_OLD_STRING: Final[str] = "old_string"
 _FIELD_NEW_STRING: Final[str] = "new_string"
 _FIELD_REPLACE_ALL: Final[str] = "replace_all"
 _SINGLE_REPLACEMENT: Final[int] = 1
+# RV4-m2: a Write, or a replace_all Edit with an ambiguous collision,
+# cannot be verified by exact reconstruction, so freshness instead falls
+# back to a bound much shorter than the snapshot store's general TTL --
+# long enough for the tool's own dispatch overhead, short enough that a
+# gap spanning a permission prompt (or another session's write landing in
+# the meantime) is treated as stale rather than trusted blind.
+_SNAPSHOT_RECENCY_BOUND_SECONDS: Final[float] = 5.0
 
 # Bound the (session_id, plan_number) latch map (FIFO eviction) so a
 # long-lived daemon cannot leak memory across many sessions.
@@ -596,6 +600,45 @@ def _reverse_all_except(text: str, new_string: str, old_string: str, skip_site: 
     return "".join(pieces)
 
 
+def _reconstruct_pre_edit_candidates(tool_input: dict[str, Any], post_edit_text: str) -> list[str]:
+    """Every plausible full pre-edit text this Edit could have started
+    from, undoing ``new_string`` back to ``old_string`` against the
+    CURRENT (post-edit) text on disk.
+
+    Shared by :meth:`_is_transition_via_reconstruction`'s non-``replace_all``
+    branch and RV4-m2's snapshot staleness check
+    (:meth:`GoalInjectionHandler._snapshot_is_fresh`) -- both need the same
+    candidate reconstructions, one to ask "did the Status line transition",
+    the other to ask "does any candidate match what the Pre snapshot read".
+
+    ``replace_all`` gets its own single candidate (a clean full reversal,
+    guarded the same way :meth:`_is_transition_via_reconstruction` already
+    does above); a non-``replace_all`` edit's ``old_string`` is unique in
+    whatever text the tool actually matched, so only a candidate whose
+    reversal leaves ``old_string`` unique survives -- anything else is a
+    coincidental collision with an unrelated occurrence of ``new_string``.
+    """
+    new_string = str(tool_input.get(_FIELD_NEW_STRING, ""))
+    old_string = str(tool_input.get(_FIELD_OLD_STRING, ""))
+    if not new_string or new_string not in post_edit_text:
+        return []
+    if bool(tool_input.get(_FIELD_REPLACE_ALL, False)):
+        if old_string and old_string in post_edit_text:
+            return []
+        return [post_edit_text.replace(new_string, old_string)]
+    candidates: list[str] = []
+    search_from = 0
+    while True:
+        site = post_edit_text.find(new_string, search_from)
+        if site == -1:
+            break
+        candidate = post_edit_text[:site] + old_string + post_edit_text[site + len(new_string) :]
+        if candidate.count(old_string) == _SINGLE_REPLACEMENT:
+            candidates.append(candidate)
+        search_from = site + 1
+    return candidates
+
+
 def extract_plan_title(plan_text: str) -> str:
     """First ``# `` heading of PLAN.md, minus any leading ``Plan NNNNN:``."""
     for raw_line in plan_text.splitlines():
@@ -670,30 +713,6 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         "the trigger" from silently drifting apart.
         """
         return _plan_trigger_plan_dir_for(self._project_layout)
-
-    def _plan_path_pattern(self) -> re.Pattern[str]:
-        """Compile the trigger pattern from the configured plan directory.
-
-        Matches ``<plan_dir>/<digits>-<name>/PLAN.md`` (the ``/Completed/``
-        exclusion is checked separately by callers via _COMPLETED_SEGMENT).
-        Delegates to :mod:`utils.plan_trigger`; see :meth:`_plan_dir`.
-        """
-        return _plan_trigger_plan_path_pattern(self._plan_dir())
-
-    @staticmethod
-    def _is_inside_project(file_path: str) -> bool:
-        """True when ``file_path`` lives under this project's root.
-
-        The trigger pattern is applied with ``search``, so any path merely
-        CONTAINING ``<plan_dir>/NNNNN-name/PLAN.md`` matches wherever it
-        lives — while the rendered goal re-points it at the PROJECT's plan
-        directory. A scratch plan under /tmp would therefore emit a live
-        goal naming a project path that does not exist, and an
-        unsatisfiable goal cannot be discharged by doing the work
-        (Plan 00320). Delegates to :mod:`utils.plan_trigger`; see
-        :meth:`_plan_dir`.
-        """
-        return _plan_trigger_is_inside_project(file_path)
 
     @staticmethod
     def _is_in_progress_status(status: PlanStatus | None) -> bool:
@@ -804,18 +823,8 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
                 return False
             return full_verdict
 
-        verdicts: list[bool] = []
-        search_from = 0
-        while True:
-            site = post_edit_text.find(new_string, search_from)
-            if site == -1:
-                break
-            candidate = (
-                post_edit_text[:site] + old_string + post_edit_text[site + len(new_string) :]
-            )
-            if candidate.count(old_string) == _SINGLE_REPLACEMENT:
-                verdicts.append(not is_target(PlanDoc.parse(candidate).status))
-            search_from = site + 1
+        candidates = _reconstruct_pre_edit_candidates(tool_input, post_edit_text)
+        verdicts = [not is_target(PlanDoc.parse(c).status) for c in candidates]
         return bool(verdicts) and all(verdicts)
 
     def _is_real_transition(
@@ -833,22 +842,21 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         terminal-transition detector (``is_target=_is_terminal_status``) so
         both read pre-edit state through the same tested machinery.
 
-        Edit: ``old_string`` is the FIRST witness of the pre-edit text
-        consulted, and used DIRECTLY only when its ``**Status**:`` line is
-        verified to be the document's REAL one (RV3-m2): a fragment carrying
-        a per-phase or fenced-example ``**Status**:`` line is not the plan's
-        actual status line, and trusting it in isolation misread a
-        completely unrelated edit under that OTHER line as a top-level
-        transition. The full pre-edit file is instead always reconstructed
-        by reversing this edit against the post-edit text already on disk
+        Edit: the full pre-edit file is always reconstructed by reversing
+        this edit against the post-edit text already on disk
         (:meth:`_is_transition_via_reconstruction`, which also resolves
-        review RV-m1/RV3-m1's ``new_string`` collision cases) and parsed
+        review RV-m1/RV3-m1's ``new_string`` collision cases), then parsed
         with the SAME fenced-block-aware, first-line-wins rule PlanDoc
         already applies to the post-edit side — so both sides of the
-        transition agree on what "the real Status line" is. An irreversible
-        reconstruction (``new_string`` not found) is read as "not a
-        transition", the conservative default this function already used
-        for an ``old_string`` with no Status line at all.
+        transition agree on what "the real Status line" is. There is no
+        ``old_string``-only fast path (RV3-m2 removed it): a fragment
+        carrying a per-phase or fenced-example ``**Status**:`` line is not
+        the plan's actual status line, and trusting it in isolation misread
+        a completely unrelated edit under that OTHER line as a top-level
+        transition. An irreversible reconstruction (``new_string`` not
+        found) is read as "not a transition", the conservative default this
+        function already used for an ``old_string`` with no Status line at
+        all.
 
         Write: the file has already landed on disk by the time PostToolUse
         runs, so there is no unmodified copy left to compare against. git
@@ -894,26 +902,77 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         reconstructing the pre-edit text from ``old_string``/``new_string``
         can (RV3-m1/m2), and is not subject to git HEAD lagging an
         uncommitted flip (RV3-m6) the way the Write-only fallback is. The
-        inference machinery is kept and used ONLY when no snapshot exists
-        for this ``tool_use_id`` -- a daemon restart between the Pre and
-        Post dispatch of this same call, or a payload carrying no
-        ``tool_use_id`` at all -- and that fallback use is logged, since it
-        is the narrower, sometimes-ambiguous signal being kept for exactly
-        that narrow window rather than the common path.
+        inference machinery is kept and used ONLY when no FRESH snapshot
+        exists for this ``tool_use_id`` -- a daemon restart between the Pre
+        and Post dispatch of this same call, a payload carrying no
+        ``tool_use_id`` at all, or RV4-m2's staleness check below rejecting
+        one that no longer describes the file this write actually
+        replaced -- and that fallback use is logged, since it is the
+        narrower, sometimes-ambiguous signal being kept for exactly that
+        narrow window rather than the common path.
         """
         tool_use_id = str(hook_input.get(HookInputField.TOOL_USE_ID, "") or "")
-        snapshot_status, found = plan_status_snapshots.consume(tool_use_id)
-        if found:
-            return not is_target(snapshot_status), False
-        logger.info(
-            "goal_injection: no pre-write status snapshot for tool_use_id=%r; "
-            "falling back to old_string/new_string and git-HEAD inference",
-            tool_use_id,
-        )
+        snapshot = plan_status_snapshots.consume_snapshot(tool_use_id)
+        if snapshot is not None and self._snapshot_is_fresh(hook_input, post_edit_text, snapshot):
+            return not is_target(snapshot.status), False
+        if snapshot is not None:
+            logger.warning(
+                "goal_injection: pre-write snapshot for tool_use_id=%r is stale (the "
+                "file changed underneath between Pre and this write); falling back to "
+                "old_string/new_string and git-HEAD inference",
+                tool_use_id,
+            )
+        else:
+            logger.info(
+                "goal_injection: no pre-write status snapshot for tool_use_id=%r; "
+                "falling back to old_string/new_string and git-HEAD inference",
+                tool_use_id,
+            )
         transition = self._is_real_transition(
             hook_input, file_path, post_edit_text, is_target=is_target
         )
         return transition, True
+
+    @staticmethod
+    def _snapshot_is_fresh(
+        hook_input: dict[str, Any], post_edit_text: str, snapshot: PlanStatusSnapshot
+    ) -> bool:
+        """RV4-m2: a snapshot is ground truth only when it still describes
+        the file THIS write actually replaced -- PreToolUse runs before
+        Claude Code's permission prompt, so the Pre -> Post gap can span
+        however long a person takes to answer one, and another session's
+        write can land in between.
+
+        A non-``replace_all`` Edit is the ONLY case where the pre-edit text
+        can be reconstructed EXACTLY: reverse this edit against the
+        post-edit text (:func:`_reconstruct_pre_edit_candidates`, the same
+        machinery :meth:`_is_transition_via_reconstruction` uses) and
+        accept the snapshot only when SOME candidate's content hash matches
+        what Pre recorded -- no matching candidate means the file Pre read
+        is not the file this Edit actually modified.
+
+        Every other shape falls back to a recency bound -- much shorter
+        than the store's general TTL, long enough for the tool's own
+        dispatch overhead -- rather than a byte-exact comparison:
+
+        - **Write**: no reconstruction is possible at all (a Write's
+          payload carries only the NEW content, never the old).
+        - **``replace_all`` Edit**: reconstruction is genuinely AMBIGUOUS
+          by construction whenever an unrelated occurrence of the SAME
+          text pre-existed (RV3-m1's table-cell/title collisions, C3b/m4d
+          below) -- neither the full nor the partial reversal
+          :meth:`_is_transition_via_reconstruction` computes for THAT
+          decision is guaranteed to reproduce the exact original bytes, so
+          gating snapshot trust on an exact match here would reject the
+          very case the snapshot mechanism exists to resolve.
+        """
+        tool_name = hook_input.get(HookInputField.TOOL_NAME)
+        tool_input = hook_input.get(HookInputField.TOOL_INPUT, {}) or {}
+        if tool_name == ToolName.EDIT and not bool(tool_input.get(_FIELD_REPLACE_ALL, False)):
+            candidates = _reconstruct_pre_edit_candidates(tool_input, post_edit_text)
+            if candidates:
+                return any(hash_plan_text(c) == snapshot.text_hash for c in candidates)
+        return (time.time() - snapshot.recorded_at) <= _SNAPSHOT_RECENCY_BOUND_SECONDS
 
     def _is_real_flip_to_in_progress(
         self, hook_input: dict[str, Any], file_path: Path, plan_number: str, post_edit_text: str
@@ -963,16 +1022,16 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         return ledger.is_plan_live(plan_number)
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        """True for a Write/Edit landing on an ACTIVE plan's PLAN.md."""
-        if hook_input.get(HookInputField.TOOL_NAME) not in (ToolName.WRITE, ToolName.EDIT):
-            return False
-        file_path = get_file_path(hook_input) or ""
-        normalized = file_path.replace("\\", "/")
-        if _COMPLETED_SEGMENT in normalized:
-            return False
-        if self._plan_path_pattern().search(normalized) is None:
-            return False
-        return self._is_inside_project(file_path)
+        """True for a Write/Edit landing on an ACTIVE plan's PLAN.md.
+
+        RV4-n2: delegates entirely to :func:`matched_plan_write_or_edit`
+        (:mod:`utils.plan_trigger`) instead of re-implementing the same
+        tool-name/path/``Completed``/project-membership checks a second
+        time -- the whole point of the shared module is that ONE
+        implementation decides "the trigger" for both this handler and
+        ``plan_status_snapshot``.
+        """
+        return matched_plan_write_or_edit(hook_input, self._project_layout) is not None
 
     def handle(self, hook_input: dict[str, Any]) -> BlockingResult:
         """Render and write the goal-intent signal; always ALLOW.
@@ -986,12 +1045,10 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         of the `/goal` text promptly rather than only on the next
         UNRELATED plan's write.
         """
-        file_path = get_file_path(hook_input) or ""
-        normalized = file_path.replace("\\", "/")
-        match = self._plan_path_pattern().search(normalized)
-        if match is None or not self._is_inside_project(file_path):
+        matched = matched_plan_write_or_edit(hook_input, self._project_layout)
+        if matched is None:
             return BlockingResult(decision=Decision.ALLOW)
-        folder = match.group(1)
+        file_path, folder = matched
         plan_number = folder.split("-", 1)[0].zfill(5)
 
         try:
@@ -1094,11 +1151,14 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
           (``fail-open-boundaries.yaml``, ``chain.py``/``execute``): an
           already-reviewed, already-documented fail-open boundary that logs,
           surfaces the failure in the result's context, and ALLOWs — except
-          under ``strict_mode`` (this repo's setting), where it both DENIES
-          the tool call and stops the rest of this PostToolUse chain (no
-          handler after this one's priority runs for that event; see
-          ``core/chain.py``'s ``execute``) — the same contract every other
-          handler in this codebase already relies on.
+          under ``strict_mode``, where it would both DENY the tool call and
+          stop the rest of this PostToolUse chain (no handler after this
+          one's priority runs for that event; see ``core/chain.py``'s
+          ``execute``) — the same contract every other handler in this
+          codebase already relies on. This repo's config declares
+          ``strict_mode: true``, but N24 established the setting never
+          reaches the live daemon, so this branch is currently the one
+          that always runs.
         """
         ledger_path = ProjectContext.daemon_untracked_dir() / LEDGER_FILENAME
         return GoalLedger(ledger_path)
@@ -1137,10 +1197,9 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         never a stale one from an earlier lifecycle.
 
         RV3-m5: the combined text is rendered ONCE (:meth:`_render_combined`)
-        and written to every owner, rather than re-derived per owner (which
-        was a full live-plan-directory read PER owner -- measured at 0.25s
-        for 150 owners, against 0.003s on main before this class of gap
-        existed at all).
+        and written to every owner, rather than re-derived per owner -- a
+        per-owner re-derivation is a full live-plan-directory read per
+        owner, which does not scale with the owner cap.
 
         Unlike ``_write_combined_signal``/``_ledger_record``, this method
         does NOT catch ``_open_ledger``'s ``RuntimeError`` itself. There is
@@ -1167,6 +1226,13 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
             return
         ledger = self._open_ledger()
         owners = ledger.owning_sessions(plan_number)
+        # RV4-M1: the session whose OWN write just completed this plan is
+        # refreshed unconditionally, even when the ledger's owner set does
+        # not (or no longer) names it -- an owner-cap eviction or a stale
+        # ledger read must never leave the one session that just did the
+        # work with a `/goal` still naming the plan it finished.
+        if session_id and session_id not in owners:
+            owners = [*owners, session_id]
         if not owners:
             return
         plan_dir = plan_md_path.parent.parent
@@ -1453,11 +1519,17 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
             "including a resume with the SAME session id, that N3's flip-only "
             "rule otherwise silently dropped; a session that already flipped a "
             "DIFFERENT plan of its own does not implicitly absorb an unrelated "
-            "plan it merely touches. Ownership is additive (review RV-M1): "
-            "every session ever handed a plan's goal keeps its own claim, so a "
-            "plan going terminal under ANY owning session's write refreshes "
-            "every owner's own signal, not just whichever session's write "
-            "triggered the check. A completing write is detected via the "
+            "plan it merely touches. Ownership is additive (review RV-M1), with "
+            "the flipping session pinned as the entry's permanent owner "
+            "(RV4-M1): a plan going terminal under ANY still-tracked owning "
+            "session's write refreshes every tracked owner's own signal, and "
+            "the session whose write completed the plan is always among them "
+            "even if the ledger's owner set does not name it — not just "
+            "whichever session's write triggered the check. Absorbed "
+            "(non-flipping) owners are FIFO-capped so a rolling ledger plan "
+            "absorbing many teammates' combined-signal touches does not grow "
+            "without bound; the flipper itself is exempt from that cap. A "
+            "completing write is detected via the "
             "persisted ledger, not the in-memory latch, so it also survives a "
             "daemon restart (review M2). Manual fallback / debug tool: "
             "`bin/hooks-daemon inject-goal NNNNN` (requires `CLAUDE_CODE_SESSION_ID` "

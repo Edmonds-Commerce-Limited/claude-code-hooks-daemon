@@ -13,26 +13,16 @@ untouched — if the public surface moved, it would say so.
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
 import pytest
 
-from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.utils.git_facts import (
     GitFactsBase,
     StagedChange,
     project_relative_head_text,
 )
-
-
-def _git(root: Path, *args: str) -> None:
-    subprocess.run(  # nosec B603 B607 - trusted system tool, list form
-        ["git", "-C", str(root), *args],
-        check=True,
-        capture_output=True,
-        timeout=Timeout.GIT_CONTEXT,
-    )
+from tests.support.git_fixtures import run_git as _git
 
 
 @pytest.fixture

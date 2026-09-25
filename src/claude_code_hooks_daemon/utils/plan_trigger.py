@@ -72,8 +72,12 @@ def is_inside_project(file_path: str) -> bool:
         logger.warning("plan_trigger: project-root check skipped: %s", e)
         return True
     try:
+        # RV4-n7: a symlink-loop PLAN.md makes resolve() raise RuntimeError
+        # (Python's own maximum-recursion / ELOOP detection), not OSError --
+        # caught here alongside (ValueError, OSError) so it reads as "not
+        # inside" rather than escaping raw.
         Path(file_path).resolve().relative_to(root)
-    except (ValueError, OSError):
+    except (ValueError, OSError, RuntimeError):
         return False
     return True
 

@@ -222,6 +222,24 @@ class TestUnreadableLedgerRaisesADomainException:
         ledger = GoalLedger(tmp_path / LEDGER_FILENAME)
         assert ledger._load_raw() is None
 
+    def test_load_raw_raises_on_eacces_from_the_existence_check_itself(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """RV4-m3: ``Path.is_file()`` itself can raise (``EACCES`` on an
+        unreadable parent directory) -- reverting the existence check to
+        run OUTSIDE this try (as a pre-check) lets that escape as a raw,
+        unwrapped ``PermissionError`` instead of ``LedgerUnreadable``."""
+        from claude_code_hooks_daemon.utils.goal_ledger import LedgerUnreadable
+
+        def _boom(self: Path) -> bool:
+            raise PermissionError(13, "Permission denied")
+
+        monkeypatch.setattr(Path, "is_file", _boom)
+        ledger = GoalLedger(tmp_path / LEDGER_FILENAME)
+
+        with pytest.raises(LedgerUnreadable):
+            ledger._load_raw()
+
     def test_entries_logs_a_warning_for_a_corrupt_ledger(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
@@ -339,6 +357,33 @@ class TestNonUtf8PlanMd:
 
         refs = ledger.live_plan_refs(plan_dir)
         assert [r.plan_number for r in refs] == [_PLAN_A]
+
+    def test_find_plan_md_text_skips_a_non_utf8_candidate_directly(self, tmp_path: Path) -> None:
+        """RV4-m5: ``_find_plan_md_text``'s OWN ``ValueError`` tolerance,
+        pinned directly. Routing through ``live_plan_refs`` (the two tests
+        above) never actually reaches this function's except clause --
+        ``_plan_state``'s OWN ``(OSError, ValueError)`` catch already marks
+        the same undecodable plan unreadable, so ``live_plan_numbers``
+        filters it out before ``live_plan_refs`` ever calls
+        ``_find_plan_md_text`` for it. Two candidate folders for the SAME
+        plan number, the alphabetically-first one undecodable, force this
+        function itself to skip a bad candidate and keep looking --
+        reverting its except clause to ``except OSError`` alone raises
+        ``UnicodeDecodeError`` here instead."""
+        from claude_code_hooks_daemon.utils.goal_ledger import _find_plan_md_text
+
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        bad = plan_dir / f"{_PLAN_A}-a-bad"
+        bad.mkdir(parents=True)
+        (bad / "PLAN.md").write_bytes(b"\xff\xfe\x00\x01not valid utf-8")
+        good = plan_dir / f"{_PLAN_A}-b-good"
+        good.mkdir(parents=True)
+        (good / "PLAN.md").write_text("**Status**: In Progress\n", encoding="utf-8")
+
+        found = _find_plan_md_text(plan_dir, _PLAN_A)
+
+        assert found is not None
+        assert found[0] == good.name
 
 
 class TestBoundedGrowth:

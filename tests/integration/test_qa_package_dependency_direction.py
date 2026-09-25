@@ -40,6 +40,12 @@ _KNOWN_EDGES: Final[dict[str, str]] = {
         "The ledger reads plan status through PlanDoc. Whether a plan-shaped "
         "utility belongs in utils at all is the open question, not the import."
     ),
+    "utils/plan_status_snapshot.py -> claude_code_hooks_daemon.plan_qa.model": (
+        "Same reason as goal_ledger.py above: the store's whole purpose "
+        "(Plan 00466 RV3-n5) is holding a plan's PlanStatus, read via the "
+        "same PlanDoc both goal_injection and this store's PreToolUse "
+        "writer already use for the post-edit side of the same comparison."
+    ),
     "docs_qa/checks/module_doc_budget.py -> claude_code_hooks_daemon.plan_qa.types": (
         "Deliberate reuse of plan_qa's own tier line-count constants, so the "
         "two budgets cannot drift apart. Moving them needs a shared home first."

@@ -5,13 +5,12 @@ cooldown suppression, completion bypassing cooldown, non-plan writes ignored,
 and Completed/ directory exclusion.
 """
 
-import subprocess
 from pathlib import Path
 from typing import Any
 
 import pytest
+from tests.support.git_fixtures import run_git as _git
 
-from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.post_tool_use.recovery_cron_advisor import (
     _CANONICAL_CRON_PROMPT,
@@ -26,16 +25,6 @@ from claude_code_hooks_daemon.handlers.post_tool_use.recovery_cron_advisor impor
 )
 
 _RETIRED_SECTION = "Notes & Updates"
-
-
-def _git(root: Path, *args: str) -> None:
-    """Run a real git command against ``root`` (mirrors test_git_facts.py)."""
-    subprocess.run(  # nosec B603 B607 - trusted system tool, list form
-        ["git", "-C", str(root), *args],
-        check=True,
-        capture_output=True,
-        timeout=Timeout.GIT_CONTEXT,
-    )
 
 
 @pytest.fixture(autouse=True)

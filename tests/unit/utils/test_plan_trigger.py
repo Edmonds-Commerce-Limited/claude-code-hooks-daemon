@@ -79,6 +79,19 @@ class TestIsInsideProject:
         outside.write_text("x", encoding="utf-8")
         assert is_inside_project(str(outside)) is False
 
+    def test_symlink_loop_never_raises(self) -> None:
+        """RV4-n7: a symlink-loop PLAN.md raises RuntimeError from
+        Path.resolve() (Python's own maximum-recursion detection) --
+        is_inside_project's except clause must catch it alongside
+        (ValueError, OSError), not let it escape raw. Pre-existing shape,
+        copied from goal_injection's own version."""
+        loop_dir = self._project / "CLAUDE" / "Plan" / _PLAN_FOLDER
+        loop_dir.mkdir(parents=True)
+        looped = loop_dir / "PLAN.md"
+        looped.symlink_to(looped)
+
+        assert is_inside_project(str(looped)) is False
+
 
 class TestMatchedPlanWriteOrEdit:
     @pytest.fixture(autouse=True)

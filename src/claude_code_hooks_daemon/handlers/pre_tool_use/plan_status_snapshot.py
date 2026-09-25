@@ -24,9 +24,16 @@ Shares its trigger definition with ``goal_injection`` via
 on exactly what counts as "the trigger", or a snapshot recorded under one
 definition could be consumed under a different one.
 
-Opt-in (``get_default_enabled() -> False``, same relevance gate as
-``goal_injection`` -- only useful when a ccy PTY supervisor is armed);
-never blocks, never denies.
+RV4-m4: opt-OUT (``get_default_enabled() -> True``), unlike ``goal_injection``
+itself. A static per-handler default cannot read another handler's resolved
+config, so genuine "on wherever goal_injection is on" coupling is not
+achievable through this mechanism -- the closest correct approximation is to
+make this handler's OWN default effectively unconditional, so an operator
+who enables ONLY `goal_injection` still gets ground-truth snapshots instead
+of silently falling back to inference on every write. Harmless when
+`goal_injection` is off: `get_relevance` still gates it to an armed ccy PTY
+supervisor, and an unconsumed snapshot just ages out of the bounded, TTL'd
+store. Never blocks, never denies.
 """
 
 import logging
@@ -39,7 +46,11 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
 from claude_code_hooks_daemon.plan_qa.model import PlanDoc
 from claude_code_hooks_daemon.utils.ccy_supervisor import supervisor_relevance
-from claude_code_hooks_daemon.utils.plan_status_snapshot import plan_status_snapshots
+from claude_code_hooks_daemon.utils.path_predicates import path_is_file
+from claude_code_hooks_daemon.utils.plan_status_snapshot import (
+    hash_plan_text,
+    plan_status_snapshots,
+)
 from claude_code_hooks_daemon.utils.plan_trigger import PlanUnreadable, matched_plan_write_or_edit
 
 logger = logging.getLogger(__name__)
@@ -62,8 +73,11 @@ class PlanStatusSnapshotHandler(PreToolUseHandlerBase):
         )
 
     def get_default_enabled(self) -> bool:
-        """Opt-in: only useful alongside `goal_injection`, itself opt-in."""
-        return False
+        """RV4-m4: opt-OUT -- see the module docstring. Always-on is the
+        closest this static default can get to "on wherever `goal_injection`
+        is on", since this method has no access to another handler's
+        resolved config."""
+        return True
 
     def get_relevance(self, context: RelevanceContext) -> Relevance:
         """Relevant only under an armed ccy supervisor (mirrors `goal_injection`)."""
@@ -105,23 +119,41 @@ class PlanStatusSnapshotHandler(PreToolUseHandlerBase):
             )
             return GatingResult(decision=Decision.ALLOW)
         status = PlanDoc.parse(plan_text).status if plan_text is not None else None
-        plan_status_snapshots.record(tool_use_id, status)
+        # RV4-m2: the hash lets goal_injection verify at Post time that
+        # this snapshot still describes the file the write actually
+        # replaced -- the Pre -> Post gap includes the permission prompt,
+        # so another session's write can land in between.
+        plan_status_snapshots.record(tool_use_id, status, hash_plan_text(plan_text))
         return GatingResult(decision=Decision.ALLOW)
 
     @staticmethod
     def _read_plan(path: Path) -> str | None:
         """Read the plan's CURRENT (pre-write) text; ``None`` when no file
-        exists yet (the common brand-new-plan case, not an error -- checked
-        BEFORE the try so this branch never touches an except handler).
+        exists yet (the common brand-new-plan case, not an error).
+
+        RV4-m3: the existence check runs INSIDE this try, not before it --
+        the raw ``is_file`` stat predicate itself can raise (``EACCES`` on
+        an unreadable parent directory, ``ENAMETOOLONG``), and a pre-check
+        placed outside the try let exactly that escape as a raw, unwrapped
+        ``OSError`` instead of the documented ``PlanUnreadable`` contract.
+        ``return None`` here sits in the TRY body, not an except handler,
+        so it is not the shape ``audit_error_hiding.py`` flags -- only a
+        ``return None`` inside an except clause is. The predicate itself
+        goes through :func:`path_is_file` with ``unreadable_means=True``
+        (eacces_safe_predicates): a stat failure there is not swallowed --
+        it falls through to the READ attempt below, which hits the SAME
+        underlying error and is what this method's own ``except`` converts
+        to ``PlanUnreadable``.
 
         Raises:
             PlanUnreadable: the file exists but could not be read
-                (``OSError``) or decoded (``ValueError``, e.g. a non-UTF-8
+                (``OSError``, including a stat failure on the existence
+                check itself) or decoded (``ValueError``, e.g. a non-UTF-8
                 ``UnicodeDecodeError``).
         """
-        if not path.is_file():
-            return None
         try:
+            if not path_is_file(path, unreadable_means=True):
+                return None
             return path.read_text(encoding="utf-8")
         except (OSError, ValueError) as e:
             raise PlanUnreadable(f"could not read {path}: {e}") from e
@@ -129,7 +161,7 @@ class PlanStatusSnapshotHandler(PreToolUseHandlerBase):
     def get_claude_md(self) -> str | None:
         return (
             "## plan_status_snapshot — pre-write PLAN.md status snapshot\n\n"
-            "PreToolUse sensor (never blocks; ships disabled). Runs immediately "
+            "PreToolUse sensor (never blocks; ships enabled, opt-out — RV4-m4). Runs immediately "
             "before a `PLAN.md` Write/Edit under the active plan directory (never "
             "`Completed/`) and records the plan's CURRENT status, keyed by "
             "`tool_use_id`, in a bounded, TTL'd in-memory store. `goal_injection` "

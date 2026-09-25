@@ -295,6 +295,10 @@ handlers:
       enabled: true        # Inert unless plan_workflow is on and mkplan.bash --journal is deployed
       priority: 31
 
+    plan_status_snapshot:  # Records a PLAN.md's pre-write status for post_tool_use.goal_injection to consume as ground truth
+      enabled: true         # On by default (opt-out) -- RV4-m4: goal_injection needs this to avoid its own inference fallback
+      priority: 30
+
     agent_isolation_advisor:  # Advises worktree isolation when agents share a checkout
       enabled: false          # Enable if you dispatch concurrent agents
       priority: 46

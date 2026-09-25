@@ -66,8 +66,9 @@ class TestPlanStatusSnapshotHandler:
         assert handler.priority == Priority.PLAN_STATUS_SNAPSHOT
         assert handler.terminal is False
 
-    def test_default_disabled(self, handler: PlanStatusSnapshotHandler) -> None:
-        assert handler.get_default_enabled() is False
+    def test_default_enabled(self, handler: PlanStatusSnapshotHandler) -> None:
+        """RV4-m4: opt-OUT -- see the module docstring."""
+        assert handler.get_default_enabled() is True
 
     # ---- matches ------------------------------------------------------------
 
@@ -173,6 +174,37 @@ class TestPlanStatusSnapshotHandler:
         assert found is False
         assert status is None
         assert "plan_status_snapshot" in caplog.text
+
+    def test_handle_raises_via_domain_exception_on_eacces_from_is_file(
+        self, handler: PlanStatusSnapshotHandler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """RV4-m3: ``Path.is_file()`` itself can raise (``EACCES`` on an
+        unreadable parent directory) -- reverting the existence check to
+        run OUTSIDE ``_read_plan``'s try (as a pre-check) let that escape
+        as a raw, unwrapped ``PermissionError`` instead of the documented
+        ``PlanUnreadable`` -> WARNING -> no-snapshot fail-open contract.
+
+        An unreadable parent directory blocks EVERY traversal through it,
+        so both ``is_file`` and ``read_text`` are patched here -- the same
+        real-world failure would raise from both, and ``path_is_file``'s
+        ``unreadable_means=True`` fallback (eacces_safe_predicates) means
+        the stat failure alone does not stop this method; it is the
+        SUBSEQUENT read hitting the identical permission error that this
+        test pins as still reaching ``PlanUnreadable``."""
+        plan = self._write_plan("Not Started")
+
+        def _boom(self: Path, *args: object, **kwargs: object) -> str:
+            raise PermissionError(13, "Permission denied")
+
+        monkeypatch.setattr(Path, "is_file", _boom)
+        monkeypatch.setattr(Path, "read_text", _boom)
+
+        result = handler.handle(self._hook_input(plan, tool_use_id="tu-eacces"))
+
+        assert result.decision == Decision.ALLOW
+        status, found = plan_status_snapshots.consume("tu-eacces")
+        assert found is False
+        assert status is None
 
     def test_get_claude_md_present(self, handler: PlanStatusSnapshotHandler) -> None:
         text = handler.get_claude_md()

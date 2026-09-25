@@ -20,7 +20,15 @@ status immediately BEFORE the same Write/Edit lands and hands it to
 `goal_injection` for the SAME tool call (matched by `tool_use_id`) — no
 reconstruction, so a bare status value that also happens to appear
 elsewhere in the document (a table cell, the plan's own title) can no
-longer be misread either way. When no snapshot exists for a given call (a
+longer be misread either way WHILE that snapshot is trusted. A snapshot
+carries a content hash of the text it read, and is discarded — falling
+back to reconstruction, same as when none was recorded at all — if the
+file it actually modified no longer matches: PreToolUse runs before the
+permission prompt, so another session's write can land in the gap between
+the snapshot and this one's own write landing. `plan_status_snapshot`
+ships enabled by default so this ground-truth path is the common case; an
+operator who has explicitly disabled it loses it and runs on inference
+alone. When no snapshot exists for a given call (a
 daemon restart between the two dispatches, or a payload with no
 `tool_use_id`) it falls back to reading its own Edit's replaced span
 (reconstructing the pre-edit text from disk when the span carried only the
@@ -40,7 +48,9 @@ needed":**
 
 - **A plan going terminal drops it from every CURRENT owning session's
   combined `/goal` text, when the triggering write is itself what moved
-  the plan into that terminal status.** The retirement refresh used to key
+  the plan into that terminal status — including the completing session
+  itself, always, even in the narrow case where the ledger's own owner
+  set does not (yet) name it.** The retirement refresh used to key
   on an in-memory latch that a daemon restart empties; it now asks the
   persistent goal ledger instead, so a plan flipped in one daemon process
   and completed in the next is still retracted promptly. Like the flip
@@ -54,8 +64,12 @@ needed":**
   every plan its OWN combined `/goal` text names — not only the plan that
   triggered its write — so a plan it never directly touched still
   refreshes correctly for it later. Ownership per plan is capped (the
-  oldest owner drops first past the cap) so a rolling ledger plan touched
-  by dozens of teammates cannot grow its refresh cost without bound.
+  oldest ABSORBED owner drops first past the cap) so a rolling ledger plan
+  touched by dozens of teammates cannot grow its refresh cost without
+  bound; the flipping session itself is pinned as the entry's permanent
+  owner and is exempt from that cap, so absorbing enough teammates can
+  never evict the one session that most needs its own signal refreshed
+  when the plan it started completes.
 - **A resumed session still gets its `/goal` back — including a resume
   with the SAME session id.** Plan 00269 relied on "the first edit to an
   already-In-Progress plan re-fires" to survive a session restart. A
@@ -78,4 +92,7 @@ needed":**
   Write to an already-ledgered-live plan is never misread as a fresh flip
   even before anyone commits.
 
-No other action is needed — everything above is automatic.
+No other action is needed for the default configuration — `plan_status_snapshot`
+ships enabled, and everything above is automatic from there. Only an
+operator who has explicitly disabled it needs to know they are running on
+the inference fallback described above instead of the ground-truth path.

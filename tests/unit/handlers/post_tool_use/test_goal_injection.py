@@ -13,14 +13,13 @@ once per ``(plan, session)`` per daemon process. Never blocks. Opt-in
 """
 
 import json
-import subprocess
 from pathlib import Path
 from typing import Any
 
 import pytest
+from tests.support.git_fixtures import run_git as _git
 
 from claude_code_hooks_daemon.constants import HandlerID, Priority
-from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.post_tool_use.goal_injection import (
     _CLEAR_SUFFIX,
@@ -49,16 +48,6 @@ def _plan_md(status: str = "In Progress") -> str:
     return (
         "# Plan 00269: supervisor goal message injection\n\n"
         f"**Status**: {status}\n**Created**: 2026-08-26\n\n## Overview\n\nBody.\n"
-    )
-
-
-def _git(root: Path, *args: str) -> None:
-    """Run a real git command against ``root`` (mirrors test_git_facts.py)."""
-    subprocess.run(  # nosec B603 B607 - trusted system tool, list form
-        ["git", "-C", str(root), *args],
-        check=True,
-        capture_output=True,
-        timeout=Timeout.GIT_CONTEXT,
     )
 
 
@@ -1294,13 +1283,21 @@ class TestStatusFlipDetection:
         self, handler: GoalInjectionHandler
     ) -> None:
         """C7b: a fenced example line reading '**Status**: In Progress'
-        must not make an unrelated task-tick edit look like a flip."""
+        must not make an unrelated task-tick edit look like a flip.
+
+        RV4-m5: the fixture holds the POST-edit content (``new_string``
+        already applied) -- PostToolUse dispatches AFTER the tool has
+        already landed the edit on disk, and a fixture still carrying
+        ``old_string`` makes ``_is_transition_via_reconstruction`` bail out
+        at "new_string not found" before the fenced-example defence this
+        test names is ever exercised (the same fixture defect RV3-m1
+        raised)."""
         plan = self._plan_path()
         plan.write_text(
             "# Plan 00269: supervisor goal message injection\n\n"
             "**Status**: Not Started\n\n"
             "Example:\n\n```markdown\n**Status**: In Progress\n```\n\n"
-            "- [ ] a\n",
+            "- [x] a\n",
             encoding="utf-8",
         )
 
@@ -1316,12 +1313,16 @@ class TestStatusFlipDetection:
     ) -> None:
         """C8: the REAL Status line already reads In Progress; a per-phase
         second '**Status**:' line moving to In Progress is not the flip
-        PlanDoc (and thus this handler) cares about."""
+        PlanDoc (and thus this handler) cares about.
+
+        RV4-m5: the fixture holds the POST-edit content, same reasoning as
+        C7b above -- otherwise reconstruction bails out on a missing
+        ``new_string`` before this test exercises anything."""
         plan = self._plan_path()
         plan.write_text(
             "# Plan 00269: supervisor goal message injection\n\n"
             "**Status**: In Progress\n\n"
-            "### Phase 2\n\n**Status**: Not Started\n",
+            "### Phase 2\n\n**Status**: In Progress\n",
             encoding="utf-8",
         )
 
@@ -1583,7 +1584,10 @@ class TestGroundTruthSnapshotResolution:
         (main's conservative answer), but a pre-write snapshot resolves it
         as the real flip it is."""
         from claude_code_hooks_daemon.plan_qa.model import PlanStatus
-        from claude_code_hooks_daemon.utils.plan_status_snapshot import plan_status_snapshots
+        from claude_code_hooks_daemon.utils.plan_status_snapshot import (
+            hash_plan_text,
+            plan_status_snapshots,
+        )
 
         plan = self._plan_path()
         pre_edit = (
@@ -1597,7 +1601,9 @@ class TestGroundTruthSnapshotResolution:
             plan, old_string="Not Started", new_string="In Progress", tool_use_id="tu-c3b"
         )
         edit["tool_input"]["replace_all"] = True
-        plan_status_snapshots.record("tu-c3b", PlanStatus.NOT_STARTED)
+        # RV4-m2: the recorded hash must match the REAL pre-edit text for
+        # the snapshot to be trusted as fresh.
+        plan_status_snapshots.record("tu-c3b", PlanStatus.NOT_STARTED, hash_plan_text(pre_edit))
 
         result = handler.handle(edit)
 
@@ -1613,7 +1619,10 @@ class TestGroundTruthSnapshotResolution:
         after the per-candidate uniqueness filter -- a real flip is missed.
         A pre-write snapshot needs no reconstruction at all."""
         from claude_code_hooks_daemon.plan_qa.model import PlanStatus
-        from claude_code_hooks_daemon.utils.plan_status_snapshot import plan_status_snapshots
+        from claude_code_hooks_daemon.utils.plan_status_snapshot import (
+            hash_plan_text,
+            plan_status_snapshots,
+        )
 
         plan = self._plan_path()
         pre_edit = "# Plan 00269: Track In Progress plans\n\n" "**Status**: Not Started\n\nBody.\n"
@@ -1622,7 +1631,9 @@ class TestGroundTruthSnapshotResolution:
         edit = self._edit_hook_input(
             plan, old_string="Not Started", new_string="In Progress", tool_use_id="tu-m4d"
         )
-        plan_status_snapshots.record("tu-m4d", PlanStatus.NOT_STARTED)
+        # RV4-m2: the recorded hash must match the REAL pre-edit text for
+        # the snapshot to be trusted as fresh.
+        plan_status_snapshots.record("tu-m4d", PlanStatus.NOT_STARTED, hash_plan_text(pre_edit))
 
         result = handler.handle(edit)
 
@@ -1698,17 +1709,105 @@ class TestGroundTruthSnapshotResolution:
         assert result.decision == Decision.ALLOW
         assert self._signal_path().exists()
 
+    def test_a_snapshot_stale_from_another_sessions_flip_is_discarded(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """RV4-m2 / probe_gf4_race.py's F3: S1's Pre for a plain checkbox
+        tick on P runs while P still reads Not Started. Before S1's own
+        edit lands, S2 REALLY flips P for real, then S3 REALLY flips R --
+        which displaces P (a new plan starting displaces the previously
+        live one). S1's tick then lands on the now-In-Progress (and now
+        DISPLACED) P, dispatched against S1's stale snapshot.
 
-class TestNewSessionReassertion:
-    """Review M3: Plan 00269 Task 2.1 deliberately chose "the first edit to
-    an already-In-Progress plan in a NEW session re-fires" -- that is what
-    made the goal survive a session restart. N3 requires a genuine
-    TRANSITION to fire the full flip path, which silently dropped this: a
-    resumed session got no `/goal` at all until a real flip or a manual
-    `inject-goal`. Restored through ``GoalLedger.reassert_session`` --
-    ownership transfer only, no displacement bookkeeping -- gated on this
-    session having NO ledger entries at all, so it never fires for a
-    session that already has its own live goal.
+        Trusting that snapshot blindly makes S1's non-flip tick look like
+        ITS OWN fresh flip of P -- ``record_emission`` re-arms an existing
+        live entry on every real emission (``displaced_by = None``), which
+        would ERASE P's own legitimate displacement by R. The snapshot
+        must instead be discarded as stale (P changed underneath), falling
+        back to inference, which correctly reads this as "not a
+        transition" and leaves P's displacement exactly as R set it."""
+        from claude_code_hooks_daemon.plan_qa.model import PlanStatus
+        from claude_code_hooks_daemon.utils.plan_status_snapshot import (
+            hash_plan_text,
+            plan_status_snapshots,
+        )
+
+        p = self._plan_path("00300-p")
+        p_pre_edit = "# Plan 00300: p\n\n**Status**: Not Started\n\n## Tasks\n\n- [ ] a\n"
+        p.write_text(p_pre_edit, encoding="utf-8")
+        # S1's Pre snapshot: P read Not Started at this moment.
+        plan_status_snapshots.record("tu-race", PlanStatus.NOT_STARTED, hash_plan_text(p_pre_edit))
+
+        # S2 really flips P for real (no snapshot -- inference fallback).
+        p.write_text(
+            p_pre_edit.replace("**Status**: Not Started", "**Status**: In Progress"),
+            encoding="utf-8",
+        )
+        handler.handle(
+            {
+                "tool_name": "Edit",
+                "tool_input": {
+                    "file_path": str(p),
+                    "old_string": "**Status**: Not Started",
+                    "new_string": "**Status**: In Progress",
+                },
+                "session_id": "S2",
+            }
+        )
+
+        # S3 really flips R -- this displaces P, the now-previous live plan.
+        r = self._plan_path("00304-r")
+        r.write_text(_plan_md("In Progress"), encoding="utf-8")
+        handler.handle(
+            {
+                "tool_name": "Edit",
+                "tool_input": {
+                    "file_path": str(r),
+                    "old_string": "**Status**: Not Started",
+                    "new_string": "**Status**: In Progress",
+                },
+                "session_id": "S3",
+            }
+        )
+        ledger = GoalLedger(self._untracked / LEDGER_FILENAME)
+        entry_p_before = next(e for e in ledger.entries() if e.plan_number == "00300")
+        assert entry_p_before.displaced_by == "00304", "precondition: R's flip displaces P"
+
+        # S1's tick lands on the now-In-Progress, now-DISPLACED P,
+        # dispatched against the stale "tu-race" snapshot recorded before
+        # S2's flip.
+        p.write_text(p.read_text(encoding="utf-8").replace("- [ ] a", "- [x] a"), encoding="utf-8")
+        handler.handle(
+            {
+                "tool_name": "Edit",
+                "tool_input": {
+                    "file_path": str(p),
+                    "old_string": "- [ ] a",
+                    "new_string": "- [x] a",
+                },
+                "session_id": "S1",
+                "tool_use_id": "tu-race",
+            }
+        )
+
+        entry_p_after = next(e for e in ledger.entries() if e.plan_number == "00300")
+        assert entry_p_after.displaced_by == "00304", (
+            "P's own displacement by R was erased by S1's non-flip tick -- "
+            "the stale snapshot from before S2's real flip was trusted "
+            "instead of discarded, and S1's dispatch re-armed P's ledger "
+            "entry as though it were a fresh flip"
+        )
+
+
+class _ReassertionFixtures:
+    """Shared fixture plumbing for the reassertion test classes below.
+
+    RV4-n5: this used to be ``TestNewSessionReassertion``'s own body, with
+    every sibling class SUBCLASSING it to reuse the fixtures -- pytest then
+    collected and RE-RAN ``TestNewSessionReassertion``'s own tests once per
+    subclass too (108 ``def test_`` methods, 117 collected). A leading
+    underscore keeps this out of pytest's ``Test*`` collection, so every
+    class below inherits ONLY the fixtures, not each other's test methods.
     """
 
     @pytest.fixture(autouse=True)
@@ -1747,6 +1846,25 @@ class TestNewSessionReassertion:
             "tool_input": {"file_path": str(file_path), "old_string": old, "new_string": new},
             "session_id": session,
         }
+
+    def _clear_path(self, session: str) -> Path:
+        return self._untracked / _SIGNAL_SUBDIR / f"{session}{_CLEAR_SUFFIX}"
+
+    def _intent_path(self, session: str) -> Path:
+        return self._untracked / _SIGNAL_SUBDIR / f"{session}{_SIGNAL_SUFFIX}"
+
+
+class TestNewSessionReassertion(_ReassertionFixtures):
+    """Review M3: Plan 00269 Task 2.1 deliberately chose "the first edit to
+    an already-In-Progress plan in a NEW session re-fires" -- that is what
+    made the goal survive a session restart. N3 requires a genuine
+    TRANSITION to fire the full flip path, which silently dropped this: a
+    resumed session got no `/goal` at all until a real flip or a manual
+    `inject-goal`. Restored through ``GoalLedger.reassert_session`` --
+    ownership transfer only, no displacement bookkeeping -- gated on this
+    session having NO ledger entries at all, so it never fires for a
+    session that already has its own live goal.
+    """
 
     def test_a_new_session_touching_an_already_live_plan_gets_its_own_signal(
         self, handler: GoalInjectionHandler
@@ -1833,12 +1951,11 @@ class TestNewSessionReassertion:
         assert entry_b.displaced_by is None
 
 
-class TestOwnershipSurvivesASecondSession(TestNewSessionReassertion):
+class TestOwnershipSurvivesASecondSession(_ReassertionFixtures):
     """Review RV-M1: the ORIGINAL flipping session's own retraction must
     keep working after a SECOND session reasserts the same (or another)
     live plan -- the pre-fix single-owner ``reassert_session`` transfer
-    broke this the moment a second session touched the plan. Inherits the
-    fixture plumbing from ``TestNewSessionReassertion``.
+    broke this the moment a second session touched the plan.
     """
 
     def test_original_session_still_retracts_after_a_second_session_reasserts(
@@ -1921,7 +2038,7 @@ class TestOwnershipSurvivesASecondSession(TestNewSessionReassertion):
         assert "00296" in joined
 
 
-class TestResumedSameSessionReassertion(TestNewSessionReassertion):
+class TestResumedSameSessionReassertion(_ReassertionFixtures):
     """Review RV-m3: a SAME-session-id resume (Claude Code's --resume /
     --continue) must also get its own signal restored, not just a
     genuinely new session id -- Plan 00269's own motivating case was a
@@ -1954,17 +2071,10 @@ class TestResumedSameSessionReassertion(TestNewSessionReassertion):
         assert "00296" in json.loads(signal_path.read_text(encoding="utf-8"))["rendered_lines"][0]
 
 
-class TestReview3Fixes(TestNewSessionReassertion):
+class TestReview3Fixes(_ReassertionFixtures):
     """Review 3 (Plan 00466, subagent-reports/260924-n466-goalflip-review3-
-    opus-5-5.md): RV3-M1 (major), RV3-m3, RV3-m4, RV3-m5. Inherits the
-    fixture plumbing from ``TestNewSessionReassertion``.
+    opus-5-5.md): RV3-M1 (major), RV3-m3, RV3-m4, RV3-m5.
     """
-
-    def _clear_path(self, session: str) -> Path:
-        return self._untracked / _SIGNAL_SUBDIR / f"{session}{_CLEAR_SUFFIX}"
-
-    def _intent_path(self, session: str) -> Path:
-        return self._untracked / _SIGNAL_SUBDIR / f"{session}{_SIGNAL_SUFFIX}"
 
     # ---- RV3-M1: transition-based retirement + owning_sessions picks the
     # right entry --------------------------------------------------------
@@ -2239,3 +2349,172 @@ class TestReview3Fixes(TestNewSessionReassertion):
         result = handler.handle(self._edit_input(first, "S9", "- [ ] a", "- [x] a"))
 
         assert result.decision == Decision.ALLOW
+
+
+class TestReview4Fixes(_ReassertionFixtures):
+    """Review 4 (Plan 00466, subagent-reports/260924-n466-goalflip-review4-
+    opus-5-5.md): RV4-M1 (major) -- the RV3-m5 owner cap (50) combined with
+    RV3-m3's combined-signal absorption could evict the FLIPPING session
+    from its own plan's owner set once enough OTHER sessions touched any
+    live plan, so completing the plan never refreshed the flipper's own
+    `/goal`. Fixed by pinning the flipper as the entry's ``primary_owner``,
+    exempt from the FIFO cap, and by always refreshing the completing
+    write's own session regardless of what the ledger's owner set says.
+    """
+
+    @staticmethod
+    def _tick(handler: GoalInjectionHandler, path: Path, session: str, old: str, new: str):
+        text = path.read_text(encoding="utf-8")
+        assert text.count(old) == 1, f"fixture drift: {old!r} x{text.count(old)}"
+        path.write_text(text.replace(old, new, 1), encoding="utf-8")
+        edit_input = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(path), "old_string": old, "new_string": new},
+            "session_id": session,
+        }
+        return handler.handle(edit_input)
+
+    def test_flipper_survives_absorption_past_the_owner_cap(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """probe_gf4_evict2.py's E2: L flips 00296, S flips 00298. 50
+        teammates tick 00298 -- each becomes an owner of BOTH live plans
+        via ``_extend_ownership``'s combined-signal absorption (RV3-m3).
+        Before the fix, the 50-owner FIFO cap evicted L (the original
+        flipper of 00296) once the 50th teammate was absorbed. L must
+        still be refreshed when L itself completes 00296."""
+        a = self._plan_path("00296-a")
+        a.write_text(_plan_md("In Progress"), encoding="utf-8")
+        b_path = self._plan_path("00298-b")
+        b_body = "# Plan 00298: b\n\n**Status**: Not Started\n\n## Tasks\n\ncounter: 0\n"
+        b_path.write_text(b_body, encoding="utf-8")
+
+        handler.handle(
+            self._edit_input(a, "L", "**Status**: Not Started", "**Status**: In Progress")
+        )
+        self._tick(handler, b_path, "S", "**Status**: Not Started", "**Status**: In Progress")
+
+        for i in range(50):
+            self._tick(handler, b_path, f"TM{i:03d}", f"counter: {i}", f"counter: {i + 1}")
+
+        ledger = GoalLedger(self._untracked / LEDGER_FILENAME)
+        entry_a = next(e for e in ledger.entries() if e.plan_number == "00296")
+        assert "L" in entry_a.sessions, (
+            "L (the flipper) was evicted from its own plan's owner set by "
+            "absorbing 50 unrelated teammates -- primary_owner must pin it"
+        )
+
+        a.write_text(_plan_md("Complete"), encoding="utf-8")
+        handler.handle(self._edit_input(a, "L", "**Status**: In Progress", "**Status**: Complete"))
+
+        # 00298 is still live, so L's OWN signal is refreshed to the new
+        # combined view (matching probe_gf4_evict2.py: "L gets names
+        # 00298, which is correct") -- not cleared outright, and crucially
+        # not left stale still naming the plan L itself just completed.
+        joined = self._signal("L")["rendered_lines"][0]
+        assert "00296" not in joined, (
+            "L's own signal still names the plan it just completed -- it "
+            "was silently skipped by the retirement refresh"
+        )
+        assert "00298" in joined
+
+    def test_completing_session_is_refreshed_even_if_the_ledger_names_no_owner(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """Direction point 1: the completing write's own session_id is
+        always included in the refresh set, even in the (should-not-
+        happen-after-the-fix-above, but defended anyway) case where the
+        ledger's owner set does not name it."""
+        plan = self._plan_path("00296-a")
+        plan.write_text(_plan_md("In Progress"), encoding="utf-8")
+        handler.handle(
+            self._edit_input(plan, "L", "**Status**: Not Started", "**Status**: In Progress")
+        )
+
+        # Deliberately corrupt the on-disk ledger's ownership for this one
+        # entry, through the public JSON surface rather than a private
+        # method, so the ledger's owner set no longer names "L" at all.
+        ledger_path = self._untracked / LEDGER_FILENAME
+        raw = json.loads(ledger_path.read_text(encoding="utf-8"))
+        raw["entries"][0]["sessions"] = []
+        raw["entries"][0]["primary_owner"] = None
+        # _parse_entry back-fills `sessions` from `session_id` for a
+        # pre-RV-M1 ledger shape when `sessions` is empty -- blank that
+        # too, or this corruption is silently undone on the next read.
+        raw["entries"][0]["session_id"] = ""
+        ledger_path.write_text(json.dumps(raw), encoding="utf-8")
+
+        plan.write_text(_plan_md("Complete"), encoding="utf-8")
+        handler.handle(
+            self._edit_input(plan, "L", "**Status**: In Progress", "**Status**: Complete")
+        )
+
+        assert self._clear_path("L").exists(), (
+            "the completing session's own signal must be refreshed even "
+            "when the ledger's owner set does not name it"
+        )
+
+    def test_terminal_transition_ignores_a_fenced_in_progress_example_in_the_post_edit_text(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """RV3-m2 pin: ``handle()``'s post-write gate (:meth:`GoalInjectionHandler.
+        handle`, the ``PlanDoc.parse(plan_text).status`` check right before
+        the retirement branch) must decide "still In Progress?" from the
+        REAL Status line, not a literal ``'**Status**: In Progress' in
+        plan_text`` substring check -- probe_gf4_mutate.py's "RV3-m2 post-
+        state by literal substring, not PlanDoc" mutant. C7b/C8 above pin
+        the pre-write side of this same distinction; this pins the
+        POST-write side the retirement path depends on.
+
+        The plan's real Status line reads Complete, but the body also
+        carries a fenced example reading '**Status**: In Progress' (the
+        same collision shape C7b uses). The literal-substring mutant would
+        see that fenced text and wrongly conclude the plan is still In
+        Progress, skipping the retirement refresh entirely -- L's own
+        signal would stay stale, still naming the plan it just completed,
+        instead of being retracted.
+
+        A pre-write snapshot is recorded for this same ``tool_use_id`` so
+        the INNER real-transition check (:meth:`_resolve_transition`) is
+        answered from ground truth rather than reconstruction -- the fenced
+        example's byte-identical Status line would otherwise also trip
+        RV3-m1's per-candidate uniqueness filter there, which is a
+        different, already-pinned defence (C7b/C8) and not what this test
+        targets."""
+        from claude_code_hooks_daemon.plan_qa.model import PlanStatus
+        from claude_code_hooks_daemon.utils.plan_status_snapshot import (
+            hash_plan_text,
+            plan_status_snapshots,
+        )
+
+        plan = self._plan_path("00296-a")
+        plan.write_text(_plan_md("In Progress"), encoding="utf-8")
+        handler.handle(
+            self._edit_input(plan, "L", "**Status**: Not Started", "**Status**: In Progress")
+        )
+        assert self._signal("L")  # sanity: the flip emitted
+
+        pre_edit = (
+            "# Plan 00296: a\n\n**Status**: In Progress\n\n"
+            "Example:\n\n```markdown\n**Status**: In Progress\n```\n\nBody.\n"
+        )
+        plan.write_text(
+            pre_edit.replace(
+                "**Status**: In Progress\n\nExample",
+                "**Status**: Complete\n\nExample",
+            ),
+            encoding="utf-8",
+        )
+        plan_status_snapshots.record(
+            "tu-rv3m2-pin", PlanStatus.IN_PROGRESS, hash_plan_text(pre_edit)
+        )
+        edit_input = self._edit_input(plan, "L", "**Status**: In Progress", "**Status**: Complete")
+        edit_input["tool_use_id"] = "tu-rv3m2-pin"
+        handler.handle(edit_input)
+
+        assert self._clear_path("L").exists(), (
+            "a fenced '**Status**: In Progress' example in the post-edit "
+            "text made the retirement refresh look skippable -- the real "
+            "(non-fenced) Status line reads Complete and must still "
+            "retract L's own signal"
+        )

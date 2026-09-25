@@ -62,7 +62,10 @@ _MAX_EVER_RECORDED_SESSIONS: Final[int] = 200
 # RV3-m5: bounds ONE entry's owner set, distinct from _MAX_ENTRIES above
 # (which bounds the number of ENTRIES). A rolling ledger plan touched by
 # dozens of teammates can otherwise accumulate owners without bound, each
-# one a combined-signal write on every later terminal transition.
+# one a combined-signal write on every later terminal transition. RV4-M1:
+# the entry's primary_owner (the flipper) is exempt from this cap's
+# eviction (see _add_bounded's protect param) -- only ABSORBED owners are
+# FIFO-capped against it.
 _MAX_OWNERS_PER_ENTRY: Final[int] = 50
 
 _PLAN_MD_FILENAME: Final[str] = "PLAN.md"
@@ -113,11 +116,22 @@ class GoalLedgerEntry:
     in this plan's goal" is ``sessions`` instead (review RV-M1): the set of
     every session ever handed this plan's goal, additive from both a real
     emission and a resumed-session reassertion. A single-valued transfer
-    (the pre-fix shape) let a later session's reassertion strip the
-    original flipping session of the only fact that let it retract its OWN
-    signal when the plan went terminal; additive membership means BOTH
-    sessions keep their claim, and a terminal write can refresh/clear every
-    one of them, not just whichever session's write happened to trigger it.
+    would let a later session's reassertion strip the original flipping
+    session of the only fact that lets it retract its OWN signal when the
+    plan goes terminal; additive membership means BOTH sessions keep their
+    claim, and a terminal write can refresh/clear every one of them, not
+    just whichever session's write happened to trigger it.
+
+    ``primary_owner`` (RV4-M1) is the session whose ``record_emission`` call
+    CREATED this entry -- the flipper -- set once and never reassigned.
+    ``sessions`` still holds every owner, primary included, but eviction at
+    :data:`_MAX_OWNERS_PER_ENTRY` (:func:`_add_bounded`) skips whichever
+    entry equals ``primary_owner``: a rolling ledger plan absorbing dozens
+    of teammates' combined-signal touches (RV3-m3's ``_extend_ownership``)
+    must not, as a side effect of that absorption, push the flipper itself
+    out of its own plan's owner set -- the exact regression that left the
+    flipper's own ``/goal`` unrefreshed on completion (main never had this
+    bug; RV3-m5's cap introduced it once combined with RV3-m3's absorption).
     """
 
     plan_number: str
@@ -129,6 +143,7 @@ class GoalLedgerEntry:
     retired_at: float | None = None
     retired_reason: str | None = None
     sessions: list[str] = field(default_factory=list)
+    primary_owner: str | None = None
 
 
 @dataclass(frozen=True)
@@ -145,27 +160,39 @@ class LivePlanRef:
     plan_text: str
 
 
-def _add_bounded(items: list[str], value: str, cap: int) -> None:
+def _add_bounded(items: list[str], value: str, cap: int, *, protect: str | None = None) -> None:
     """Append ``value`` to ``items`` if absent, evicting the OLDEST entry
-    (index 0) when doing so would exceed ``cap``. Shared by every bounded,
+    when doing so would exceed ``cap``. Shared by every bounded,
     order-preserving membership list this module grows: RV3-m5's per-entry
     ``sessions`` owner set, and RV3-n2's ledger-wide ``ever_recorded_sessions``.
+
+    ``protect`` (RV4-M1) names ONE value that must never be evicted --
+    :func:`_add_owner` passes the entry's ``primary_owner`` (the flipper).
+    Eviction picks the OLDEST item that is NOT ``protect`` instead of always
+    index 0, so the FIFO discipline still applies to every OTHER item; if
+    every current item happens to equal ``protect`` (only possible when
+    ``cap`` is 1), nothing is evicted and the list grows one over cap rather
+    than evicting the one thing the caller asked to keep.
     """
     if value in items:
         return
     if len(items) >= cap:
-        del items[0]
+        evict_at = next((i for i, v in enumerate(items) if v != protect), None)
+        if evict_at is not None:
+            del items[evict_at]
     items.append(value)
 
 
-def _add_owner(sessions: list[str], session_id: str) -> None:
+def _add_owner(sessions: list[str], session_id: str, *, primary_owner: str | None) -> None:
     """Append ``session_id`` to ``sessions`` if absent, with FIFO eviction
-    of the OLDEST owner at :data:`_MAX_OWNERS_PER_ENTRY` (RV3-m5). Shared by
-    :meth:`GoalLedger.record_emission` and :meth:`GoalLedger.reassert_session`
-    -- both grow the same additive ``sessions`` set and both need the same
-    bound.
+    of the OLDEST *non-primary* owner at :data:`_MAX_OWNERS_PER_ENTRY`
+    (RV3-m5, narrowed by RV4-M1). Shared by :meth:`GoalLedger.record_emission`
+    and :meth:`GoalLedger.reassert_session` -- both grow the same additive
+    ``sessions`` set and both need the same bound, and both must never evict
+    ``primary_owner`` (the entry's flipper) regardless of how many other
+    sessions later absorb ownership of the same plan.
     """
-    _add_bounded(sessions, session_id, _MAX_OWNERS_PER_ENTRY)
+    _add_bounded(sessions, session_id, _MAX_OWNERS_PER_ENTRY, protect=primary_owner)
 
 
 def _optional_str(value: Any) -> str | None:
@@ -295,8 +322,9 @@ class GoalLedger:
 
     def _load_raw(self) -> Any:
         """Parse the raw ledger JSON (any shape); ``None`` when no ledger
-        has been written yet (checked BEFORE the try, so this branch never
-        touches an except handler -- a missing file is not an error).
+        has been written yet (the existence check sits inside the try body
+        below, so this branch never touches an except handler -- a missing
+        file is not an error; see RV4-m3 below).
 
         Raises:
             LedgerUnreadable: the file exists but could not be read
@@ -304,17 +332,29 @@ class GoalLedger:
                 a non-UTF-8 ``UnicodeDecodeError``, itself a ``ValueError``
                 subclass). Every caller catches this explicitly, logs a
                 WARNING naming the path and cause, and takes its own
-                documented fail-open branch -- this repo runs the daemon in
-                ``strict_mode``, where an UNCAUGHT exception here would DENY
-                every PLAN.md edit with a system error.
+                documented fail-open branch -- this repo's config declares
+                ``daemon.strict_mode: true``, which, were it to reach the
+                live daemon, would make an UNCAUGHT exception here DENY
+                every PLAN.md edit with a system error instead (N24: the
+                setting is currently inert and never reaches the live
+                daemon, so every caller's fail-open branch is what actually
+                runs).
 
         Shared by :meth:`entries` and every other caller needing the raw
         ``ever_recorded_sessions`` list too (RV3-n2), so code needing BOTH
         reads the file once, not twice.
+
+        RV4-m3: the existence check runs INSIDE this try, not before it --
+        ``Path.is_file()`` itself can raise (``EACCES`` on an unreadable
+        parent directory, ``ENAMETOOLONG``), and a pre-check placed outside
+        the try let exactly that escape as a raw, unwrapped ``OSError``.
+        ``return None`` here sits in the TRY body, not an except handler,
+        so it is not the shape ``audit_error_hiding.py`` flags -- only a
+        ``return None`` inside an except clause is.
         """
-        if not self._path.is_file():
-            return None
         try:
+            if not self._path.is_file():
+                return None
             return json.loads(self._path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as e:
             raise LedgerUnreadable(f"cannot read ledger {self._path}: {e}") from e
@@ -375,6 +415,16 @@ class GoalLedger:
                 sessions = [session_id]
             else:
                 sessions = []
+            # RV4-M1: a ledger entry written before primary_owner existed
+            # carries no such field -- back-fill from session_id (the
+            # creator, for an entry that has never since been re-emitted)
+            # or else the earliest surviving owner, the closest available
+            # approximation of "who originally flipped this".
+            primary_owner = (
+                _optional_str(item.get("primary_owner"))
+                or session_id
+                or (sessions[0] if sessions else None)
+            )
             return GoalLedgerEntry(
                 plan_number=str(item["plan_number"]),
                 session_id=session_id,
@@ -385,6 +435,7 @@ class GoalLedger:
                 retired_at=_optional_float(item.get("retired_at")),
                 retired_reason=_optional_str(item.get("retired_reason")),
                 sessions=sessions,
+                primary_owner=primary_owner,
             )
         except (KeyError, TypeError, ValueError) as e:
             logger.warning("goal_ledger: skipping malformed entry: %s", e)
@@ -481,7 +532,17 @@ class GoalLedger:
             try:
                 raw = self._load_raw()
             except LedgerUnreadable as e:
-                logger.warning("goal_ledger: %s; record_emission proceeds from an empty ledger", e)
+                # RV4-n3: this WRITES an empty ledger back over whatever is
+                # on disk (self._save below), including for a transient
+                # OSError (as opposed to corrupt JSON) where the prior
+                # entries and ever_recorded_sessions were otherwise intact
+                # -- say so plainly, since this is the one fail-open branch
+                # in this module where "proceed" also means "overwrite".
+                logger.warning(
+                    "goal_ledger: %s; record_emission proceeds from an empty ledger "
+                    "and will OVERWRITE the unreadable file with just this one emission",
+                    e,
+                )
                 entries: list[GoalLedgerEntry] = []
                 ever_recorded: list[str] = []
             else:
@@ -512,7 +573,14 @@ class GoalLedger:
                 # A re-emission re-arms the /goal slot for this plan.
                 existing.displaced_by = None
                 existing.displaced_at = None
-                _add_owner(existing.sessions, session_id)
+                # RV4-M1: primary_owner is NOT reassigned to this
+                # re-emitter -- it stays whoever's record_emission call
+                # created the entry below, so a later re-flip of the SAME
+                # still-live entry does not silently hand pinned-owner
+                # protection to someone new.
+                if existing.primary_owner is None:
+                    existing.primary_owner = session_id
+                _add_owner(existing.sessions, session_id, primary_owner=existing.primary_owner)
             else:
                 entries.append(
                     GoalLedgerEntry(
@@ -521,6 +589,7 @@ class GoalLedger:
                         rendered_line=rendered_line,
                         emitted_at=now,
                         sessions=[session_id],
+                        primary_owner=session_id,
                     )
                 )
             if session_id:
@@ -606,14 +675,14 @@ class GoalLedger:
         need re-arming — it already has its own live signal).
 
         RV3-n2: answered from a ledger-wide, bounded ``ever_recorded_sessions``
-        set (:data:`_EVER_RECORDED_KEY`), not any per-entry field. The
-        previous implementation read the single ``session_id`` field on any
-        entry, which is not actually what it means: ``record_emission``
-        OVERWRITES that field with whoever re-emits for the SAME plan next
-        (so a session whose plan was later re-flipped by someone else wrongly
-        counted as new again), and ``_prune`` can drop the entry out of the
-        ledger entirely once it exceeds its cap (silently losing the record
-        along with it). The durable set survives both.
+        set (:data:`_EVER_RECORDED_KEY`), not any per-entry field: the
+        single ``session_id`` field on an entry does not mean "has ever
+        recorded a session" -- ``record_emission`` OVERWRITES that field
+        with whoever re-emits for the SAME plan next (so a session whose
+        plan was later re-flipped by someone else would wrongly count as
+        new again), and ``_prune`` can drop the entry out of the ledger
+        entirely once it exceeds its cap (silently losing the record along
+        with it). The durable set survives both.
 
         Deliberately NOT populated by :meth:`reassert_session` -- a session
         that has only ever been ADDED to another plan's ownership, without
@@ -644,11 +713,11 @@ class GoalLedger:
 
         Review RV-M1: this is ADDITIVE, not a transfer — ``session_id`` is
         added to ``sessions`` alongside whoever already owns the entry,
-        never replacing them. A transfer (the pre-fix shape) broke the
-        original flipping session's own retraction the moment a second
-        session touched the plan: ``has_live_entry``'s ownership check
-        stopped matching it, so its own goal signal could never be cleared
-        when the plan went terminal. The idempotent no-op here (calling this
+        never replacing them. A transfer would break the original flipping
+        session's own retraction the moment a second session touched the
+        plan: ``has_live_entry``'s ownership check would stop matching it,
+        so its own goal signal could never be cleared when the plan went
+        terminal. The idempotent no-op here (calling this
         again for a session already in ``sessions``) is deliberate: the
         caller latches in memory to avoid the redundant write, not this
         method, which stays simple and safe to call repeatedly.
@@ -668,7 +737,9 @@ class GoalLedger:
             )
             if existing is None:
                 return False
-            _add_owner(existing.sessions, session_id)
+            if existing.primary_owner is None:
+                existing.primary_owner = existing.session_id or session_id
+            _add_owner(existing.sessions, session_id, primary_owner=existing.primary_owner)
             existing.emitted_at = time.time()
             # RV3-n2: ever_recorded is preserved UNCHANGED here -- a
             # reassertion is deliberately not a "real emission" (see
