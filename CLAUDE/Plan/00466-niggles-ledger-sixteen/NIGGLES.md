@@ -9,6 +9,47 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N47 — The ccy supervisor and Claude Code's settings.json both own effort, and they fight
+
+**Found by the owner.** They asked for medium effort. Claude Code reads effort
+from `settings.json` (`effortLevel`, and `modelSettings.<model-id>.effortLevel`
+per model). The supervisor (`.claude/ccy/claude-supervise.py`) keeps its own
+answer and types `/effort` over it:
+
+- `_DEFAULT_MIN_EFFORT_LEVELS` (opus=high, sonnet=high) is a floor the
+  supervisor raises live effort to. It knows nothing of `settings.json`, and
+  has a second override channel of its own, the `CCY_MIN_EFFORT_LEVELS` env
+  var in `ccy.env`.
+- `_coupled_effort_target` sends `/effort xhigh` after EVERY `/model` switch to
+  a non-top family, including the restore back to the session's own Opus. And
+  the floor only ever raises. So one downgrade-and-restore cycle leaves the
+  session at xhigh for good, whatever `settings.json` says.
+
+Setting medium therefore needed two edits in two formats (`settings.json` and
+`ccy.env`, commits 909f9591 and e52bd9e5). Even then the restore path still
+lands on xhigh.
+
+**Candidate remedy:** make `settings.json` the single source of truth for the
+effort a model runs at.
+
+- The supervisor resolves a family's effort from the settings Claude Code
+  itself reads, in its precedence order: per-model `modelSettings` over
+  `effortLevel`, project over user.
+- The separate floor map and `CCY_MIN_EFFORT_LEVELS` are retired, and the
+  `ccy.env` lines go with them.
+- A switch back to a configured model sets that model's configured effort.
+  `xhigh` compensation applies only while a downgrade leaves the session on a
+  fallback model.
+- The fable anchor clamp (Plan 00297) stays as a ceiling.
+
+RED tests:
+
+- the restore lands on the configured effort, not xhigh;
+- no `/effort` is sent while live effort equals the configured effort;
+- a downgrade still gets xhigh;
+- a missing or unreadable settings file degrades to the current defaults with a
+  logged reason.
+
 ### N46 — `budget_exhaustion_detector` fires on a tool result that merely contains budget wording
 
 **Found by the guard-defects review-6 agent.** Reading a diff whose source
