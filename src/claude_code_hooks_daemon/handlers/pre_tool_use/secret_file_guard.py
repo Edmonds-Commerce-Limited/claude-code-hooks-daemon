@@ -243,6 +243,194 @@ def _has_shell_shebang(content: str) -> bool:
     first_line = content.splitlines()[0] if content else ""
     return bool(_SHEBANG_SHELL_RE.match(first_line.strip()))
 
+
+# review 6 item 3: a `.py`/`.rb`/`.php`/`.pl`/`.js`/`.mjs`/`.ts` file is not
+# itself shell text -- the whole-file scan above rightly keeps it
+# `context="content"` -- but a STRING it hands to a shell at runtime
+# (`os.system`, backticks, `child_process.exec`) is executed just as surely
+# as a `.sh` file's own body. Those call-site string arguments are extracted
+# and scanned separately with `context="bash"`; everything else in the file
+# (an ordinary string literal such as `pattern = 'prod.vault-passw*rd'`)
+# stays under the literal-only scan.
+#
+# This is regex pattern-matching on known call shapes, not a parser -- the
+# same honest limit `security_antipattern`'s docstring states for its own
+# construct list. A bounded window after the call site stands in for real
+# argument-span/paren matching.
+_SHELL_EXEC_CALL_SPAN: Final[int] = 500
+_MAX_SHELL_EXEC_LITERALS: Final[int] = 64
+_SHELL_INTERPRETER_NAMES: Final[frozenset[str]] = frozenset(
+    {"sh", "bash", "zsh", "dash", "ksh", "ash"}
+)
+
+_QUOTED_STRING_RE: Final[re.Pattern[str]] = re.compile(
+    r"""(['"])((?:\\.|(?!\1).)*)\1""", re.DOTALL
+)
+_BACKTICK_STRING_RE: Final[re.Pattern[str]] = re.compile(r"`((?:\\.|[^`\\])*)`", re.DOTALL)
+_PERCENT_LITERAL_DELIMITERS: Final[dict[str, str]] = {
+    "{": "}",
+    "(": ")",
+    "[": "]",
+    "/": "/",
+    "|": "|",
+    "!": "!",
+}
+
+_PYTHON_SHELL_CALL_RE: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:os\.system|os\.popen|subprocess\.\w+)\s*\("
+)
+_RUBY_SHELL_CALL_RE: Final[re.Pattern[str]] = re.compile(r"\b(?:system|exec)\s*\(")
+_PHP_SHELL_CALL_RE: Final[re.Pattern[str]] = re.compile(r"\b(?:shell_exec|exec|system)\s*\(")
+_PERL_SHELL_CALL_RE: Final[re.Pattern[str]] = re.compile(r"\bsystem\b\s*\(?")
+_NODE_SHELL_CALL_RE: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:child_process\.)?(?:exec|execSync)\s*\("
+)
+
+
+def _decode_simple_escapes(text: str) -> str:
+    """Undo the three backslash escapes that would otherwise leave a stray
+    backslash in a regex-extracted literal (a doubled backslash, an escaped
+    single quote, an escaped double quote).
+
+    This scan is a glob heuristic, not a language-accurate interpreter --
+    anything else is left exactly as written rather than risked on a wrong
+    per-language decode.
+    """
+    return text.replace("\\\\", "\\").replace("\\'", "'").replace('\\"', '"')
+
+
+def _call_span(content: str, call_open: int) -> str:
+    """A bounded window of text following a call site's opening delimiter,
+    standing in for its argument list without a real parenthesis matcher."""
+    return content[call_open : call_open + _SHELL_EXEC_CALL_SPAN]
+
+
+def _quoted_literals_in_span(span: str, *, limit: int) -> list[str]:
+    """Every quoted-string literal inside ``span``, decoded, capped at ``limit``."""
+    literals: list[str] = []
+    for match in _QUOTED_STRING_RE.finditer(span):
+        if len(literals) >= limit:
+            break
+        literals.append(_decode_simple_escapes(match.group(2)))
+    return literals
+
+
+def _backtick_bodies(content: str, *, limit: int) -> list[str]:
+    """Every backtick-delimited body in ``content`` (Ruby/PHP/Perl shell-out), capped."""
+    bodies: list[str] = []
+    for match in _BACKTICK_STRING_RE.finditer(content):
+        if len(bodies) >= limit:
+            break
+        bodies.append(_decode_simple_escapes(match.group(1)))
+    return bodies
+
+
+def _percent_literal_bodies(content: str, prefix: str, *, limit: int) -> list[str]:
+    """Every percent-literal body in ``content`` for the given prefix (Ruby's
+    ``%x`` / Perl's ``qx`` shell-out literals), across all four bracket
+    delimiter pairs those languages accept plus the bar/bang forms.
+    """
+    bodies: list[str] = []
+    pattern = re.compile(re.escape(prefix) + r"([{(\[/|!])")
+    for match in pattern.finditer(content):
+        if len(bodies) >= limit:
+            break
+        closer = _PERCENT_LITERAL_DELIMITERS[match.group(1)]
+        start = match.end()
+        end = content.find(closer, start)
+        if end == -1:
+            continue
+        bodies.append(content[start:end])
+    return bodies
+
+
+def _python_shell_exec_literals(content: str) -> list[str]:
+    """String-literal arguments to a Python shell-executing call.
+
+    ``os.system``/``os.popen`` always run a shell. ``subprocess.*`` only
+    does when ``shell=True`` is passed, or the argument list itself names a
+    shell interpreter (a ``bash``/``-c`` style list) -- an ordinary argument
+    list with no shell name and no ``shell=True`` never reaches a shell, so
+    it is left to the literal-only whole-file scan.
+    """
+    literals: list[str] = []
+    for match in _PYTHON_SHELL_CALL_RE.finditer(content):
+        span = _call_span(content, match.end())
+        span_literals = _quoted_literals_in_span(span, limit=_MAX_SHELL_EXEC_LITERALS)
+        if match.group(0).startswith("subprocess."):
+            names_a_shell = any(literal in _SHELL_INTERPRETER_NAMES for literal in span_literals)
+            if "shell=True" not in span and not names_a_shell:
+                continue
+        literals.extend(span_literals)
+        if len(literals) >= _MAX_SHELL_EXEC_LITERALS:
+            break
+    return literals[:_MAX_SHELL_EXEC_LITERALS]
+
+
+def _ruby_shell_exec_literals(content: str) -> list[str]:
+    """String-literal arguments to a Ruby shell-executing construct:
+    backticks, a percent-x literal, or a bare ``system``/``exec`` call."""
+    literals = _backtick_bodies(content, limit=_MAX_SHELL_EXEC_LITERALS)
+    literals.extend(_percent_literal_bodies(content, "%x", limit=_MAX_SHELL_EXEC_LITERALS))
+    for match in _RUBY_SHELL_CALL_RE.finditer(content):
+        span = _call_span(content, match.end())
+        literals.extend(_quoted_literals_in_span(span, limit=_MAX_SHELL_EXEC_LITERALS))
+    return literals[:_MAX_SHELL_EXEC_LITERALS]
+
+
+def _php_shell_exec_literals(content: str) -> list[str]:
+    """String-literal arguments to a PHP shell-executing construct:
+    backticks, or a bare ``shell_exec``/``exec``/``system`` call."""
+    literals = _backtick_bodies(content, limit=_MAX_SHELL_EXEC_LITERALS)
+    for match in _PHP_SHELL_CALL_RE.finditer(content):
+        span = _call_span(content, match.end())
+        literals.extend(_quoted_literals_in_span(span, limit=_MAX_SHELL_EXEC_LITERALS))
+    return literals[:_MAX_SHELL_EXEC_LITERALS]
+
+
+def _perl_shell_exec_literals(content: str) -> list[str]:
+    """String-literal arguments to a Perl shell-executing construct:
+    backticks, a ``qx`` percent literal, or a bare ``system`` call (with or
+    without parentheses)."""
+    literals = _backtick_bodies(content, limit=_MAX_SHELL_EXEC_LITERALS)
+    literals.extend(_percent_literal_bodies(content, "qx", limit=_MAX_SHELL_EXEC_LITERALS))
+    for match in _PERL_SHELL_CALL_RE.finditer(content):
+        span = _call_span(content, match.end())
+        literals.extend(_quoted_literals_in_span(span, limit=_MAX_SHELL_EXEC_LITERALS))
+    return literals[:_MAX_SHELL_EXEC_LITERALS]
+
+
+def _node_shell_exec_literals(content: str) -> list[str]:
+    """String-literal arguments to Node's ``exec``/``execSync``, with or
+    without the ``child_process.`` prefix (a destructured import)."""
+    literals: list[str] = []
+    for match in _NODE_SHELL_CALL_RE.finditer(content):
+        span = _call_span(content, match.end())
+        literals.extend(_quoted_literals_in_span(span, limit=_MAX_SHELL_EXEC_LITERALS))
+    return literals[:_MAX_SHELL_EXEC_LITERALS]
+
+
+def _shell_exec_call_literals(path: str, content: str) -> list[str]:
+    """String-literal arguments to a KNOWN shell-executing call in ``content``,
+    dispatched by ``path``'s extension (review 6 item 3).
+
+    Only languages whose source is not itself shell text, but which CAN hand
+    a string to a shell at runtime, are covered here -- `.sh`/`.bash` content
+    is already treated as shell text by the whole-file scan.
+    """
+    if path.endswith(".py"):
+        return _python_shell_exec_literals(content)
+    if path.endswith(".rb"):
+        return _ruby_shell_exec_literals(content)
+    if path.endswith(".php"):
+        return _php_shell_exec_literals(content)
+    if path.endswith(".pl"):
+        return _perl_shell_exec_literals(content)
+    if path.endswith((".js", ".mjs", ".ts")):
+        return _node_shell_exec_literals(content)
+    return []
+
+
 # Plan 00459 acceptance probes: an encrypted vars file and its decrypted twin,
 # at the vault-vars name the default `*vault_pass*` glob matches.
 _PROBE_DIR: Final[str] = "untracked/acceptance/acceptance-test-secret-guard"
@@ -555,6 +743,14 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         YAML routes scan the WHOLE file rather than isolating just the
         recipe/``run:`` lines -- see ``_MAKEFILE_BASENAMES`` above for why
         that simplification is the safe direction to err in.
+
+        Review 6 item 3: when ``context == "content"`` (a non-shell-script
+        language), string-literal arguments to a KNOWN shell-executing call
+        (``os.system``, backticks, ``child_process.exec``, ...) are ALSO
+        scanned, each with ``context="bash"`` -- see
+        ``_shell_exec_call_literals`` for the per-language extraction. The
+        whole-file literal-only scan above stays the first check and covers
+        everything else in the file unchanged.
         """
         content = str(tool_input.get(_FIELD_CONTENT, "") or tool_input.get(_FIELD_NEW_STRING, ""))
         is_extension_script = any(path.endswith(extension) for extension in _SCRIPT_EXTENSIONS)
@@ -578,13 +774,25 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
             if (is_shell_extension or is_makefile or is_ci_yaml or is_shebang_shell)
             else "content"
         )
-        return sfm.find_protected_mention_detail(
+        deadline = time.monotonic() + sfm.SCAN_DEADLINE_SECONDS
+        whole_file_mention = sfm.find_protected_mention_detail(
             content,
             patterns,
-            deadline=time.monotonic() + sfm.SCAN_DEADLINE_SECONDS,
+            deadline=deadline,
             cwd=cwd,
             context=context,
         )
+        if whole_file_mention is not None:
+            return whole_file_mention
+        if context != "content":
+            return None
+        for literal in _shell_exec_call_literals(path, content):
+            mention = sfm.find_protected_mention_detail(
+                literal, patterns, deadline=deadline, cwd=cwd, context="bash"
+            )
+            if mention is not None:
+                return mention
+        return None
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         return self._compute_and_cache_matched(hook_input) is not None

@@ -314,10 +314,36 @@ class TestIterNormalisedShellWordsNestedCommands:
         words = list(iter_normalised_shell_words(command))
         assert "world" in words
 
-    def test_a_flag_between_interpreter_and_dash_c_is_not_recognised(self) -> None:
-        """Documented simplification: adjacency only, matching the reported
-        shape -- a flag in between is a known, accepted residual."""
+    def test_a_long_flag_between_interpreter_and_dash_c_is_recognised(self) -> None:
+        """Review 6: closed, not a documented simplification -- a proper
+        option walk finds `-c` past a preceding long flag."""
         command = "bash --norc -c 'cat wor'\\''ld'"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_a_short_flag_between_interpreter_and_dash_c_is_recognised(self) -> None:
+        command = "bash -x -c 'cat wor'\\''ld'"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_dash_c_clustered_with_a_preceding_short_flag_is_recognised(self) -> None:
+        """`bash -lc '…'` -- `-c` recognised anywhere in a short cluster."""
+        command = "bash -lc 'cat wor'\\''ld'"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_an_arg_taking_short_option_before_dash_c_is_recognised(self) -> None:
+        """`bash -O extglob -c '…'` -- `-O`'s separate-word value is
+        consumed as a plain value, not mistaken for the code argument."""
+        command = "bash -O extglob -c 'cat wor'\\''ld'"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+        assert "extglob" in words
+
+    def test_a_flag_after_interpreter_with_no_dash_c_does_not_recurse(self) -> None:
+        """Control: `bash -x '…'` (no `-c` anywhere) must not treat the
+        positional argument as code."""
+        command = "bash -x 'cat wor'\\''ld'"
         words = list(iter_normalised_shell_words(command))
         assert "world" not in words
 
@@ -339,3 +365,93 @@ class TestIterNormalisedShellWordsNestedCommands:
             nested = f"bash -c '{escaped}'"
         with pytest.raises(TooManyToEnumerateError):
             list(iter_normalised_shell_words(nested))
+
+
+class TestIterNormalisedShellWordsEvalAndLiteralShellFeeds:
+    """n466-n24 review 6: `eval` reassembles ALL its argument words (not
+    just the first), and three more literal-content-to-a-shell shapes are
+    recognised -- `source <(echo …)`, a here-string, and `echo … | <shell>`.
+    A benign quote-split word pins the mechanism without naming a
+    protected pattern; the end-to-end deny lives in
+    test_secret_file_matching.py."""
+
+    def test_eval_reassembles_two_separate_argument_words(self) -> None:
+        """Team-lead's own example shape: `eval cat id_\\'rs\\'a` -- but
+        pinned here with a benign word (the protected-pattern end-to-end
+        case lives in test_secret_file_matching.py)."""
+        command = "eval cat 'wor'\\''l'\\''d'"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_eval_after_builtin_prefix_is_recognised(self) -> None:
+        command = "builtin eval cat 'wor'\\''l'\\''d'"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_eval_after_command_prefix_is_recognised(self) -> None:
+        command = "command eval cat 'wor'\\''l'\\''d'"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_eval_argument_collection_stops_at_a_command_terminator(self) -> None:
+        """`eval echo hi; echo done` -- the SECOND statement must not be
+        swallowed into eval's own argument list."""
+        command = "eval echo hi; echo done"
+        words = list(iter_normalised_shell_words(command))
+        assert "done" in words
+
+    def test_source_process_substitution_of_a_literal_echo_is_reparsed(self) -> None:
+        command = "source <(echo cat 'wor'\\''l'\\''d')"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_dot_process_substitution_of_a_literal_printf_is_reparsed(self) -> None:
+        command = ". <(printf 'cat wor'\\''ld')"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_source_process_substitution_of_a_non_literal_producer_fails_closed(
+        self,
+    ) -> None:
+        """`source <(cat somefile)` -- the substituted command is not a
+        recognised literal producer, so its content cannot be ruled out."""
+        with pytest.raises(TooManyToEnumerateError):
+            list(iter_normalised_shell_words("source <(cat somefile)"))
+
+    def test_an_ordinary_source_invocation_is_unaffected(self) -> None:
+        """Control: `source file.sh arg1` (no process substitution at all)
+        must not raise or trigger any special handling."""
+        words = list(iter_normalised_shell_words("source myfile.sh arg1"))
+        assert words == ["source", "myfile.sh", "arg1"]
+
+    def test_a_here_string_to_a_shell_is_reparsed(self) -> None:
+        command = "bash <<<'wor'\\''ld'"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_a_here_string_to_sh_dash_s_is_reparsed(self) -> None:
+        command = "sh -s <<<'wor'\\''ld'"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_a_here_string_is_not_specially_recursed_when_dash_c_is_present(
+        self,
+    ) -> None:
+        """`bash -c 'true' <<<'ignored'` -- `-c` takes precedence over
+        stdin, so the here-string content is ordinary data, not a second
+        script; only `-c`'s own argument gets the nested-command treatment."""
+        command = "bash -c 'true' <<<'ignored'"
+        words = list(iter_normalised_shell_words(command))
+        assert "ignored" in words
+
+    def test_a_literal_echo_piped_to_a_shell_is_reparsed(self) -> None:
+        command = "echo cat 'wor'\\''l'\\''d' | bash"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_a_literal_echo_piped_to_a_non_shell_is_unaffected(self) -> None:
+        """Control: piped to `grep`, not a shell -- no special recursion,
+        though the words are still scanned individually as ordinary text."""
+        command = "echo cat 'wor'\\''l'\\''d' | grep x"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" not in words

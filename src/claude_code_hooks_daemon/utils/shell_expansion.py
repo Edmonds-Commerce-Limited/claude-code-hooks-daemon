@@ -316,6 +316,78 @@ def _interpreter_basename(word: str) -> str:
     """``word`` with any leading path stripped (e.g. `/bin/bash` -> `bash`)."""
     return word.rsplit("/", 1)[-1]
 
+
+# n466-n24 review 6: three more nested-command shapes, closed rather than
+# left as documented residuals, per team-lead's "no known defects" bar.
+#
+# (1) A FLAG between the interpreter and `-c` (`bash -x -c '…'`,
+#     `bash --norc -c`, `bash -lc` with `-c` clustered, `bash -O extglob -c`)
+#     was not recognised -- only bare adjacency was. `_classify_interpreter_
+#     option_word` below walks long options, short-flag clusters (`-c`
+#     recognised ANYWHERE in a cluster) and known arg-taking options
+#     (`-o`/`-O`, `--rcfile`/`--init-file`, glued or as a separate word).
+#
+# (2) `eval` joins ALL its own argument words with a single space each and
+#     RE-PARSES the joined result -- only the single word immediately after
+#     `eval` was recursed into before. Collection runs until a genuine shell
+#     command terminator (`;|&<>()`), mirrored by `source`/`.` piping a
+#     literal `echo`/`printf` producer's output through the same join
+#     (`source <(echo '…')`), and by a literal `echo '…' | bash` feeding a
+#     shell's stdin the same way.
+#
+# (3) `source <(…)` / `. <(…)` whose substituted command is NOT a literal
+#     `echo`/`printf` cannot be examined at all -- this fails CLOSED
+#     (raises), rather than silently doing nothing, per team-lead's "Anything
+#     non-literal fails closed".
+_COMMAND_TERMINATOR_CHARS: Final[str] = ";|&<>()"
+_HERE_STRING_OPERATOR: Final[str] = "<<<"
+_PROCESS_SUBSTITUTION_OPERATOR: Final[str] = "<("
+_PIPE_OPERATOR: Final[str] = "|"
+_LITERAL_PRODUCER_COMMANDS: Final[frozenset[str]] = frozenset({"echo", "printf"})
+_SOURCE_COMMAND_NAMES: Final[frozenset[str]] = frozenset({"source", "."})
+
+#: Long options that take their value as the NEXT word (`--rcfile FILE`).
+#: Everything else starting with `--` is assumed to take no argument.
+_LONG_OPTIONS_WITH_ARG: Final[frozenset[str]] = frozenset({"--rcfile", "--init-file"})
+
+#: Short-option characters that take a value, either glued into the same
+#: token (`-opipefail`) or as the next word (`-o pipefail`) -- `-o
+#: option-name` and `-O shopt-name`.
+_SHORT_OPTIONS_WITH_ARG: Final[str] = "oO"
+
+
+def _classify_interpreter_option_word(word: str) -> str:
+    """Classify one word while walking `<interpreter> [options...]`.
+
+    Returns one of:
+
+    - ``"dash_c"`` -- a `c` appears anywhere in this word's short-option
+      cluster (or the word IS `-c`). The CODE argument is the NEXT word,
+      wherever `c` sat in the cluster -- once bash sees `-c` it takes the
+      following ARGV word wholesale as the command string, so anything
+      past `c` in the SAME token is not meaningfully distinguishable here.
+    - ``"value_glued"`` -- an arg-taking short option (`-o`/`-O`) whose
+      value is glued into this SAME token (`-opipefail`) -- nothing more
+      to consume.
+    - ``"value_separate"`` -- an arg-taking option (`-o`, `-O`, or a known
+      long option) whose value is the NEXT word.
+    - ``"plain"`` -- an ordinary flag with no argument (`-x`, `--norc`,
+      `-lc` is handled by "dash_c" above since it contains `c`).
+    - ``"non_option"`` -- not an option word -- this is a `<interpreter>`
+      invocation with no `-c` found; option-walking stops here.
+    """
+    if word.startswith("--"):
+        return "value_separate" if word in _LONG_OPTIONS_WITH_ARG else "plain"
+    if word.startswith("-") and len(word) > 1:
+        for position in range(1, len(word)):
+            char = word[position]
+            if char == "c":
+                return "dash_c"
+            if char in _SHORT_OPTIONS_WITH_ARG:
+                return "value_glued" if position + 1 < len(word) else "value_separate"
+        return "plain"
+    return "non_option"
+
 #: ANSI-C (`$'...'`) single-character escapes with no numeric argument.
 _ANSI_C_SIMPLE_ESCAPES: Final[dict[str, str]] = {
     "a": "\a",
@@ -552,23 +624,61 @@ def iter_normalised_shell_words(
     Bounded to the first ``max_words`` words, the same direction
     :func:`iter_brace_words` bounds its own volume.
 
-    n466-n24 review 5 minor-1: the ARGUMENT immediately after a recognised
-    interpreter's ``-c`` (``bash -c '…'``, ``sh -c '…'``, …) or immediately
-    after ``eval`` is re-parsed with this SAME function, recursively -- it
-    is itself a nested command, and its own quotes only resolve once this
-    outer decode has already spliced them together once. See
-    ``_MAX_NESTED_SHELL_DEPTH``/``_MAX_NESTED_SHELL_BYTES`` above for the two
-    independent bounds this recursion is held to. Only the single word
-    directly after ``-c``/``eval`` is treated as the nested command (bash's
-    own ``-c`` semantics: anything past it is positional arguments, not
-    command text; a multi-argument ``eval a b`` is not reassembled -- a
-    documented simplification, not a claim of full ``eval`` generality). A
-    flag between the interpreter and ``-c`` (`bash --norc -c '…'`) is not
-    recognised -- adjacency only, matching the reported shape.
+    n466-n24 review 5 minor-1 / review 6: several shapes feed a NESTED
+    command through as literal text, whose own quotes/escapes only resolve
+    on a SECOND parse -- each is recognised and re-parsed with this SAME
+    function, recursively, bounded by ``_MAX_NESTED_SHELL_DEPTH``/
+    ``_MAX_NESTED_SHELL_BYTES`` (shared across every shape and every
+    nesting level):
+
+    - ``<interpreter> [options...] -c <code>`` -- a proper option walk
+      (long options, short clusters with `-c` recognised anywhere in one,
+      `-o`/`-O`/`--rcfile`/`--init-file` consuming a value glued or
+      separate), not bare adjacency; see
+      :func:`_classify_interpreter_option_word`.
+    - ``eval <words...>`` -- every argument word is reassembled with a
+      SINGLE space each (matching eval's own semantics) and the join is
+      re-parsed, not just the first word. ``builtin eval ...``/
+      ``command eval ...`` are covered for free (this triggers on the
+      literal word ``eval`` appearing at all).
+    - ``source <(echo|printf ...)`` / ``. <(echo|printf ...)`` -- the
+      producer's joined, literal output is what gets sourced, so it is
+      re-parsed the same way. A NON-literal (or unrecognised) producer
+      inside ``<(...)`` cannot be examined at all, and FAILS CLOSED
+      (raises) rather than silently passing through.
+    - ``echo|printf '...' | <interpreter>`` (no ``-c``, i.e. reading
+      stdin) -- the producer's joined output is what the shell executes,
+      re-parsed the same way.
+    - ``<interpreter> [-s] <<<'...'`` (a here-string, with no ``-c``) --
+      bash reads its own stdin as the script.
     """
     remaining_bytes = [_MAX_NESTED_SHELL_BYTES]
     yield from _iter_normalised_shell_words(
         command, max_words=max_words, depth=0, remaining_bytes=remaining_bytes
+    )
+
+
+def _recurse_into_nested_command(
+    text: str,
+    *,
+    max_words: int,
+    depth: int,
+    remaining_bytes: list[int],
+) -> Iterator[str]:
+    """Shared recursion entry point for every nested-command trigger in
+    :func:`_iter_normalised_shell_words` -- one place enforcing both
+    bounds identically, and failing CLOSED (raising) past either: "cannot
+    rule out a protected path" must never be conflated with "no protected
+    path" (this module's existing doctrine for
+    :func:`expand_braces`/:func:`bounded_recursive_glob`).
+    """
+    if depth >= _MAX_NESTED_SHELL_DEPTH:
+        raise TooManyToEnumerateError("nested shell re-parsing exceeded its depth bound")
+    if remaining_bytes[0] <= 0:
+        raise TooManyToEnumerateError("nested shell re-parsing exceeded its byte budget")
+    remaining_bytes[0] -= min(len(text), remaining_bytes[0])
+    yield from _iter_normalised_shell_words(
+        text, max_words=max_words, depth=depth + 1, remaining_bytes=remaining_bytes
     )
 
 
@@ -582,51 +692,158 @@ def _iter_normalised_shell_words(
     count = 0
     i = 0
     n = len(command)
-    previous: str | None = None
-    before_previous: str | None = None
+
+    # `<interpreter> [options...] -c <code>` option walk.
+    scanning_interpreter_options = False
+    awaiting_dash_c_argument = False
+    awaiting_option_value = False
+
+    # `eval`/`source <(echo ...)`/`echo ... | <shell>` word-joining.
+    collecting_words: list[str] | None = None
+    collecting_purpose: str | None = None  # "eval" | "source_echo" | "pipe_echo"
+    pending_pipe_content: str | None = None
+
+    # Single-word lookback for `source`/`.` immediately followed by `<(`.
+    previous_word: str | None = None
+    # Non-whitespace operator characters skipped since the last WORD was
+    # yielded (e.g. "<<<", "<(", "|") -- whitespace itself is dropped, only
+    # genuine shell operators are tracked, so a plain space between words
+    # never masquerades as one of these triggers.
+    last_operators = ""
+
     while i < n:
-        if command[i] in _WORD_SEPARATOR_CHARS:
+        char = command[i]
+        if char in _WORD_SEPARATOR_CHARS:
+            if char not in " \t\n":
+                last_operators += char
             i += 1
             continue
         if count >= max_words:
             return
+
+        this_word_operators = last_operators
+        last_operators = ""
         decoded, end = _decode_span(command, i, _WORD_SEPARATOR_CHARS)
         count += 1
         yield decoded
+        # Peek PAST any pure whitespace (not other operators) to find the
+        # real next boundary -- a plain space right after this word does
+        # NOT mean "nothing follows"; `echo a | bash` must see the `|`, not
+        # stop at the space directly after `a`.
+        peek = end
+        while peek < n and command[peek] in " \t\n":
+            peek += 1
+        stop_char = command[peek] if peek < n else None
+        is_terminator_next = stop_char is None or stop_char in _COMMAND_TERMINATOR_CHARS
         i = end
 
-        is_dash_c_argument = (
-            previous == "-c"
-            and before_previous is not None
-            and _interpreter_basename(before_previous) in _SHELL_INTERPRETER_BASENAMES
-        )
-        is_eval_argument = previous == _EVAL_COMMAND_NAME
-        if is_dash_c_argument or is_eval_argument:
-            # Past either bound this is a nested command we could NOT
-            # examine -- raising (rather than silently declining to
-            # recurse) matches this module's existing fail-closed doctrine
-            # for :func:`expand_braces`/:func:`bounded_recursive_glob`:
-            # "cannot rule out a protected path" is not the same fact as
-            # "no protected path", and the caller must not conflate them.
-            if depth >= _MAX_NESTED_SHELL_DEPTH:
-                raise TooManyToEnumerateError(
-                    "nested -c/eval re-parsing exceeded its depth bound"
+        # 1. Resolve a pending pipe-echo decision: is THIS word the shell
+        #    on the right-hand side of `echo '...' | <shell>`?
+        if pending_pipe_content is not None:
+            content = pending_pipe_content
+            pending_pipe_content = None
+            if _interpreter_basename(decoded) in _SHELL_INTERPRETER_BASENAMES and is_terminator_next:
+                yield from _recurse_into_nested_command(
+                    content, max_words=max_words, depth=depth, remaining_bytes=remaining_bytes
                 )
-            if remaining_bytes[0] <= 0:
-                raise TooManyToEnumerateError(
-                    "nested -c/eval re-parsing exceeded its byte budget"
+                previous_word = decoded
+                continue
+            # Not a stdin-shell-feed after all -- fall through so `decoded`
+            # is still checked as an ordinary/fresh trigger below.
+
+        # 2. Resolve a pending `-c` code argument.
+        if awaiting_dash_c_argument:
+            awaiting_dash_c_argument = False
+            scanning_interpreter_options = False
+            yield from _recurse_into_nested_command(
+                decoded, max_words=max_words, depth=depth, remaining_bytes=remaining_bytes
+            )
+            previous_word = decoded
+            continue
+
+        # 3. Resolve a pending plain option VALUE (not code) -- resume
+        #    walking for `-c` afterward.
+        if awaiting_option_value:
+            awaiting_option_value = False
+            scanning_interpreter_options = True
+            previous_word = decoded
+            continue
+
+        # 4. Currently walking an interpreter's option words.
+        if scanning_interpreter_options:
+            kind = _classify_interpreter_option_word(decoded)
+            if kind == "dash_c":
+                awaiting_dash_c_argument = True
+                previous_word = decoded
+                continue
+            if kind == "value_glued":
+                previous_word = decoded
+                continue
+            if kind == "value_separate":
+                awaiting_option_value = True
+                scanning_interpreter_options = False
+                previous_word = decoded
+                continue
+            if kind == "plain":
+                previous_word = decoded
+                continue
+            # "non_option": the option walk concluded with no `-c` found;
+            # `decoded` is the first non-option word.
+            scanning_interpreter_options = False
+            if this_word_operators == _HERE_STRING_OPERATOR:
+                yield from _recurse_into_nested_command(
+                    decoded, max_words=max_words, depth=depth, remaining_bytes=remaining_bytes
                 )
-            spend = min(len(decoded), remaining_bytes[0])
-            remaining_bytes[0] -= spend
-            yield from _iter_normalised_shell_words(
-                decoded,
-                max_words=max_words,
-                depth=depth + 1,
-                remaining_bytes=remaining_bytes,
+                previous_word = decoded
+                continue
+            # Not a here-string -- fall through, `decoded` may still be a
+            # fresh trigger in its own right (checked below).
+
+        # 5. Currently collecting eval/source-echo/pipe-echo argument words.
+        if collecting_words is not None:
+            collecting_words.append(decoded)
+            if is_terminator_next:
+                joined = " ".join(collecting_words)
+                purpose = collecting_purpose
+                collecting_words = None
+                collecting_purpose = None
+                if purpose == "pipe_echo":
+                    if stop_char == _PIPE_OPERATOR:
+                        pending_pipe_content = joined
+                    # else: not piped to anything -- no recursion; the
+                    # words were already scanned individually above.
+                else:
+                    yield from _recurse_into_nested_command(
+                        joined, max_words=max_words, depth=depth, remaining_bytes=remaining_bytes
+                    )
+            previous_word = decoded
+            continue
+
+        # 6. `source <(...)` / `. <(...)` -- resolve what the substituted
+        #    command is. A literal `echo`/`printf` producer's output is
+        #    collected and recursed into like `eval`'s. Anything else
+        #    cannot be examined and FAILS CLOSED (raises).
+        if previous_word in _SOURCE_COMMAND_NAMES and this_word_operators == _PROCESS_SUBSTITUTION_OPERATOR:
+            if decoded in _LITERAL_PRODUCER_COMMANDS:
+                collecting_words = []
+                collecting_purpose = "source_echo"
+                previous_word = decoded
+                continue
+            raise TooManyToEnumerateError(
+                "source/. <(...) with unrecognised (non-literal) content cannot be ruled out"
             )
 
-        before_previous = previous
-        previous = decoded
+        # 7. Fresh triggers.
+        if _interpreter_basename(decoded) in _SHELL_INTERPRETER_BASENAMES:
+            scanning_interpreter_options = True
+        elif decoded == _EVAL_COMMAND_NAME:
+            collecting_words = []
+            collecting_purpose = "eval"
+        elif decoded in _LITERAL_PRODUCER_COMMANDS:
+            collecting_words = []
+            collecting_purpose = "pipe_echo"
+
+        previous_word = decoded
 
 
 # ── Bounded recursive glob walk ──────────────────────────────────────────

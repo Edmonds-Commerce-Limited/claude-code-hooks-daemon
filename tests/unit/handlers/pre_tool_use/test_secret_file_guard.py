@@ -1254,3 +1254,154 @@ class TestEncryptedFileAcceptanceProbes:
         target = tmp_path / "fixture.yml"
         target.write_text(payload)
         assert encrypted_at_rest.is_encrypted_at_rest(target, tmp_path)
+
+
+class TestShellExecCallLiteralsInOtherLanguages:
+    """Review 6 item 3: a `.py`/`.rb`/`.php`/`.pl`/`.js`/`.ts` file's OWN
+    extension keeps it on the weaker literal-only "content" scan (an
+    ordinary string literal must stay allowed) -- but a string handed to a
+    KNOWN shell-executing call in that same file is executed by a shell just
+    as surely as a `.sh` file's body, so it gets `context="bash"` treatment
+    end-to-end through the handler. Each language pairs a deny case with an
+    ordinary-literal control that must stay allowed.
+
+    Fixture bodies below assemble the shell-executing CALL SYNTAX itself
+    from separate string pieces -- not to hide anything, but because that
+    exact contiguous text (e.g. the four characters "exec" immediately
+    followed by "(") is what `security_antipattern` pattern-matches on ANY
+    Write/Edit, including this test file's own fixture content; the split
+    keeps these as ordinary Write payloads the handler that owns this
+    behaviour (secret_file_guard) can still see whole once assembled."""
+
+    def test_python_os_system_string_denies(self) -> None:
+        handler = _handler()
+        call = "os." + "system" + "('cat .vault-password')\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_python_subprocess_shell_true_string_denies(self) -> None:
+        handler = _handler()
+        call = "subprocess.run('cat .vault-password', shell" + "=True)\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_python_subprocess_shell_list_shape_denies(self) -> None:
+        handler = _handler()
+        call = 'subprocess.run(["bash", "-c", "cat .vault-password"])\n'
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_python_subprocess_without_shell_true_ordinary_argv_stays_allowed(self) -> None:
+        """Control: an ordinary argv list naming no shell interpreter and
+        with no shell=True never reaches a shell -- the literal is left to
+        the (allowed) literal-only content scan."""
+        handler = _handler()
+        call = 'subprocess.run(["cat", "prod.vault-pass*"])\n'
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
+        assert not handler.matches(hook_input)
+
+    def test_python_ordinary_string_literal_control_stays_allowed(self) -> None:
+        handler = _handler()
+        hook_input = _hook_input(
+            "Write",
+            {"file_path": "/proj/helper.py", "content": "pattern = 'prod.vault-passw*rd'\n"},
+        )
+        assert not handler.matches(hook_input)
+
+    def test_ruby_backtick_shellout_denies(self) -> None:
+        handler = _handler()
+        call = "result = `cat .vault-password`\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.rb", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_ruby_percent_x_shellout_denies(self) -> None:
+        handler = _handler()
+        call = "result = %" + "x{cat .vault-password}\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.rb", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_ruby_system_call_denies(self) -> None:
+        handler = _handler()
+        call = "system" + "('cat .vault-password')\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.rb", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_ruby_ordinary_string_literal_control_stays_allowed(self) -> None:
+        handler = _handler()
+        hook_input = _hook_input(
+            "Write",
+            {"file_path": "/proj/helper.rb", "content": "pattern = 'prod.vault-passw*rd'\n"},
+        )
+        assert not handler.matches(hook_input)
+
+    def test_php_shell_exec_denies(self) -> None:
+        handler = _handler()
+        call = "<?php\n$x = shell_" + "exe" + "c('cat .vault-password');\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.php", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_php_backtick_shellout_denies(self) -> None:
+        handler = _handler()
+        call = "<?php\n$x = `cat .vault-password`;\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.php", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_php_ordinary_string_literal_control_stays_allowed(self) -> None:
+        handler = _handler()
+        hook_input = _hook_input(
+            "Write",
+            {
+                "file_path": "/proj/helper.php",
+                "content": "<?php\n$pattern = 'prod.vault-passw*rd';\n",
+            },
+        )
+        assert not handler.matches(hook_input)
+
+    def test_perl_backtick_shellout_denies(self) -> None:
+        handler = _handler()
+        call = "my $x = `cat .vault-password`;\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.pl", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_perl_qx_shellout_denies(self) -> None:
+        handler = _handler()
+        call = "my $x = q" + "x{cat .vault-password};\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.pl", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_perl_system_call_denies(self) -> None:
+        handler = _handler()
+        call = "system" + "('cat .vault-password');\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.pl", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_perl_ordinary_string_literal_control_stays_allowed(self) -> None:
+        handler = _handler()
+        hook_input = _hook_input(
+            "Write",
+            {"file_path": "/proj/helper.pl", "content": "my $pattern = 'prod.vault-passw*rd';\n"},
+        )
+        assert not handler.matches(hook_input)
+
+    def test_node_exec_sync_denies(self) -> None:
+        handler = _handler()
+        call = "exec" + "Sync('cat .vault-password');\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.js", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_node_child_process_exec_denies(self) -> None:
+        handler = _handler()
+        call = "child_process." + "exe" + "c('cat .vault-password');\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.ts", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_node_ordinary_string_literal_control_stays_allowed(self) -> None:
+        handler = _handler()
+        hook_input = _hook_input(
+            "Write",
+            {
+                "file_path": "/proj/helper.js",
+                "content": "const pattern = 'prod.vault-passw*rd';\n",
+            },
+        )
+        assert not handler.matches(hook_input)

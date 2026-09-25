@@ -2471,3 +2471,64 @@ class TestNestedDashCAndEvalCommandsDeny:
     def test_an_unrelated_bash_dash_c_command_stays_allowed(self) -> None:
         command = "bash -c 'echo hello world'"
         assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is None
+
+
+class TestReview6ClosedShellFeedShapes:
+    """n466-n24 review 6: closes the two "accepted simplifications" from
+    minor-1 (a flag between the interpreter and `-c`; `eval` joining only
+    its first argument word) as real, verified defects, plus three more
+    literal-content-to-a-shell shapes team-lead named explicitly."""
+
+    def test_a_flag_between_interpreter_and_dash_c_denies(self) -> None:
+        command = "bash -x -c 'cat id_'\\''rs'\\''a'"
+        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+
+    def test_bash_lc_clustered_denies(self) -> None:
+        command = "bash -lc 'cat id_'\\''rs'\\''a'"
+        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+
+    def test_an_arg_taking_option_before_dash_c_denies(self) -> None:
+        command = "bash -O extglob -c 'cat id_'\\''rs'\\''a'"
+        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+
+    def test_eval_with_several_words_denies(self) -> None:
+        """Team-lead's own example: `eval cat id_\\'rs\\'a`."""
+        command = "eval cat id_\\'rs\\'a"
+        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+
+    def test_eval_with_two_double_quoted_words_denies(self) -> None:
+        command = 'eval "cat" "id_\'rs\'a"'
+        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+
+    def test_eval_after_builtin_prefix_denies(self) -> None:
+        command = "builtin eval cat id_\\'rs\\'a"
+        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+
+    def test_eval_after_command_prefix_denies(self) -> None:
+        command = "command eval cat id_\\'rs\\'a"
+        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+
+    def test_source_process_substitution_of_a_literal_echo_denies(self) -> None:
+        command = "source <(echo cat id_'\\''rs'\\''a')"
+        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+
+    def test_source_process_substitution_of_a_non_literal_producer_fails_closed(
+        self,
+    ) -> None:
+        """A non-literal producer cannot be ruled out and must fail
+        CLOSED -- verified as a raise, not a silent allow, since a
+        find_protected_mention_detail caller that does not catch it
+        propagates straight through (secret_file_guard's own N11 wrapper
+        turns this into a deny)."""
+        with pytest.raises(TooManyToEnumerateError):
+            sfm.find_protected_mention_detail(
+                "source <(cat somefile)", sfm.DEFAULT_PROTECTED_PATTERNS
+            )
+
+    def test_a_here_string_to_a_shell_denies(self) -> None:
+        command = "bash <<<'cat id_'\\''rs'\\''a'"
+        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+
+    def test_a_literal_echo_piped_to_a_shell_denies(self) -> None:
+        command = "echo cat id_'\\''rs'\\''a' | bash"
+        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
