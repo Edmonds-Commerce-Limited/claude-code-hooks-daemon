@@ -684,6 +684,68 @@ class TestIterNormalisedShellWordsCapsFailClosed:
         assert len(words) == 499
 
 
+class TestIterNormalisedShellWordsQuotedHeredocBodyIsSkipped:
+    """Team-lead's review 7 follow-up: a quoted-delimiter heredoc body is
+    inert DATA handed to a consumer (`cat`, `tee`, `git commit -F-`) --
+    real bash expands NOTHING in it, so it cannot itself be a nested
+    command, and it can legitimately be large (long prose). Excluded
+    entirely from word decoding/counting so an everyday long heredoc does
+    not exhaust the volume cap; the raw text is still available to OTHER
+    token streams (``_tokenise`` in secret_file_matching) for a literal
+    mention."""
+
+    def test_a_long_quoted_heredoc_body_does_not_exhaust_the_word_cap(self) -> None:
+        body = " ".join(["word"] * 3000)
+        command = f"cat > /tmp/out.txt <<'EOF'\n{body}\nEOF\n"
+        words = list(iter_normalised_shell_words(command, max_words=2000))
+        assert "word" not in words
+
+    def test_a_long_double_quoted_heredoc_body_does_not_exhaust_the_word_cap(self) -> None:
+        body = " ".join(["word"] * 3000)
+        command = f'cat > /tmp/out.txt <<"EOF"\n{body}\nEOF\n'
+        words = list(iter_normalised_shell_words(command, max_words=2000))
+        assert "word" not in words
+
+    def test_a_long_backslash_delimiter_heredoc_body_does_not_exhaust_the_word_cap(
+        self,
+    ) -> None:
+        body = " ".join(["word"] * 3000)
+        command = f"cat > /tmp/out.txt <<\\EOF\n{body}\nEOF\n"
+        words = list(iter_normalised_shell_words(command, max_words=2000))
+        assert "word" not in words
+
+    def test_the_dash_form_strips_tabs_from_the_closing_delimiter(self) -> None:
+        body = " ".join(["word"] * 3000)
+        command = f"cat > /tmp/out.txt <<-'EOF'\n{body}\n\tEOF\n"
+        words = list(iter_normalised_shell_words(command, max_words=2000))
+        assert "word" not in words
+
+    def test_a_command_substitution_inside_a_quoted_heredoc_body_is_not_recursed(
+        self,
+    ) -> None:
+        """Real bash expands NOTHING inside a quoted-delimiter heredoc --
+        a literal `$(...)` in the body stays literal text, never executed."""
+        command = "cat > /tmp/out.txt <<'EOF'\n$(cat wor'ld)\nEOF\n"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" not in words
+
+    def test_a_command_substitution_outside_the_heredoc_still_recurses(self) -> None:
+        """Control: the exclusion is scoped to the heredoc BODY only."""
+        command = "x=$(bash -c 'cat wor'\\''ld'); cat > /tmp/out.txt <<'EOF'\nplain\nEOF\n"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_an_unquoted_heredoc_delimiter_is_not_exempt(self) -> None:
+        """Control: an UNQUOTED delimiter (`<<EOF`) undergoes expansion in
+        real bash, so its body stays fully scanned -- a long one still
+        exhausts the cap and raises, the pre-existing (correct) MAJOR-1
+        behaviour."""
+        body = " ".join(["word"] * 3000)
+        command = f"cat > /tmp/out.txt <<EOF\n{body}\nEOF\n"
+        with pytest.raises(TooManyToEnumerateError):
+            list(iter_normalised_shell_words(command, max_words=2000))
+
+
 class TestIterNormalisedShellWordsCommandSubstitution:
     """Plan 00466 guard-defects review 7 MAJOR-2: `$(...)` and a backtick
     span are genuine nested COMMANDS -- their body is re-parsed the same

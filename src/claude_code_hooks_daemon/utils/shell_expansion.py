@@ -861,6 +861,65 @@ def _resolve_collected_producer_text(head: str | None, words: list[str]) -> str:
     return " ".join(content)
 
 
+#: A heredoc introducer whose delimiter is QUOTED or backslash-escaped
+#: (`<<'EOF'`, `<<"EOF"`, `<<\EOF`, `<<-'EOF'`) -- review 7 follow-up
+#: (team-lead): this spelling means bash treats the BODY as literal data,
+#: expanding nothing in it (no `$(...)`, no `$VAR`, no backtick) -- exactly
+#: the inverse of an UNQUOTED delimiter (`<<EOF`), which still undergoes
+#: expansion and so stays fully scanned by :func:`_iter_normalised_shell_
+#: words` the ordinary way.
+_HEREDOC_QUOTED_INTRODUCER_RE: Final[re.Pattern[str]] = re.compile(
+    r"<<(-)?[ \t]*(?:'([A-Za-z_][A-Za-z0-9_]*)'"
+    r"|\"([A-Za-z_][A-Za-z0-9_]*)\""
+    r"|\\([A-Za-z_][A-Za-z0-9_]*))"
+)
+
+
+def _heredoc_body_skip_ranges(command: str) -> list[tuple[int, int]]:
+    """``(start, end)`` byte ranges of every QUOTED-delimiter heredoc BODY
+    in ``command`` -- the body only, not its introducer or closing-
+    delimiter line.
+
+    A quoted-delimiter heredoc body is inert data handed to a CONSUMER
+    (``cat > f <<'EOF'``, ``tee``, ``git commit -F- <<'EOF'``) -- nothing
+    in it can be a shell trigger, since the surrounding shell expands
+    NOTHING in it either. It can legitimately be large (long prose, a
+    generated file), so counting its every word against the volume cap
+    :func:`_iter_normalised_shell_words` enforces would deny an everyday
+    command for no security benefit -- the OTHER token streams
+    (``_tokenise``/``_brace_expansion_tokens`` in ``secret_file_matching``)
+    still scan this same span for a literal mention, unaffected by this
+    exclusion, which is scoped to nested-COMMAND discovery only.
+
+    ``<<-`` (the tab-stripping form) is honoured: the closing line may be
+    indented with tabs, stripped before comparing to the delimiter.
+    """
+    ranges: list[tuple[int, int]] = []
+    n = len(command)
+    for match in _HEREDOC_QUOTED_INTRODUCER_RE.finditer(command):
+        strip_tabs = match.group(1) is not None
+        delimiter = match.group(2) or match.group(3) or match.group(4)
+        newline = command.find("\n", match.end())
+        if newline == -1:
+            continue  # no body at all (introducer is the last line)
+        body_start = newline + 1
+        cursor = body_start
+        closing_start = n
+        while cursor <= n:
+            line_end = command.find("\n", cursor)
+            line_stop = line_end if line_end != -1 else n
+            line = command[cursor:line_stop]
+            candidate = line.lstrip("\t") if strip_tabs else line
+            if candidate == delimiter:
+                closing_start = cursor
+                break
+            if line_end == -1:
+                break
+            cursor = line_end + 1
+        ranges.append((body_start, closing_start))
+    return ranges
+
+
 def iter_normalised_shell_words(
     command: str, *, max_words: int = DEFAULT_MAX_NORMALISED_WORDS
 ) -> Iterator[str]:
@@ -967,6 +1026,13 @@ def _iter_normalised_shell_words(
     count = 0
     i = 0
     n = len(command)
+    # Review 7 follow-up: quoted-delimiter heredoc bodies are inert data,
+    # not command text -- skipped entirely from word decoding/counting
+    # (see `_heredoc_body_skip_ranges`'s docstring). Sorted by
+    # construction (`finditer` runs left to right), so a single advancing
+    # pointer suffices.
+    heredoc_skip_ranges = _heredoc_body_skip_ranges(command)
+    heredoc_skip_index = 0
 
     # `<interpreter> [options...] -c <code>` option walk (also entered for
     # the `su`/`script`/`flock` wrapper shapes below).
@@ -1030,6 +1096,17 @@ def _iter_normalised_shell_words(
     last_operators = ""
 
     while i < n:
+        while (
+            heredoc_skip_index < len(heredoc_skip_ranges)
+            and i >= heredoc_skip_ranges[heredoc_skip_index][1]
+        ):
+            heredoc_skip_index += 1
+        if (
+            heredoc_skip_index < len(heredoc_skip_ranges)
+            and heredoc_skip_ranges[heredoc_skip_index][0] <= i
+        ):
+            i = heredoc_skip_ranges[heredoc_skip_index][1]
+            continue
         char = command[i]
         if char in _WORD_SEPARATOR_CHARS:
             if char not in " \t\n":
