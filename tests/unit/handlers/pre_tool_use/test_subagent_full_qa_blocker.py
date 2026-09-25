@@ -68,15 +68,20 @@ def _live_options() -> dict[str, Any]:
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _REPO_PATTERNS: list[dict[str, Any]] = _live_options()["full_qa_patterns"]
 _TARGETED: list[str] = _live_options()["targeted_qa_commands"]
+_SINK_DESCRIPTION: str = _live_options()["unseen_sink_description"]
 
 
 def _handler(
     patterns: list[dict[str, Any]] | None = None,
     targeted: list[str] | None = None,
+    unseen_policy: str | None = None,
+    unseen_sink_description: str | None = _SINK_DESCRIPTION,
 ) -> SubagentFullQaBlockerHandler:
     handler = SubagentFullQaBlockerHandler()
     handler._full_qa_patterns = _REPO_PATTERNS if patterns is None else patterns
     handler._targeted_qa_commands = _TARGETED if targeted is None else targeted
+    handler._unseen_policy = unseen_policy
+    handler._unseen_sink_description = unseen_sink_description
     return handler
 
 
@@ -3015,6 +3020,50 @@ class TestTheUnseenAdvisory:
         result = self._result("pytest tests/")
         assert result.decision is Decision.DENY
         assert "ADVISORY [" not in (result.reason or "")
+
+
+class TestUnseenPolicyIsConfigurable:
+    """Review 10 M1: the UNSEEN ruling is an OPTION, not a fact baked into
+    shipped code -- and the advisory never claims a backstop a project does
+    not have."""
+
+    def _result(self, command: str, **kwargs: Any) -> GatingResult:
+        return _handler(**kwargs).handle(_bash(command, cwd=str(_REPO_ROOT)))
+
+    def test_default_policy_is_advisory_not_deny(self) -> None:
+        result = self._result("bin/hooks-daemon status")
+        assert result.decision is Decision.ALLOW
+
+    def test_policy_deny_denies_an_unseen_match_instead(self) -> None:
+        result = self._result("bin/hooks-daemon status", unseen_policy="deny")
+        assert result.decision is Decision.DENY
+        assert "UNSEEN" in (result.reason or "")
+
+    def test_an_unrecognised_policy_value_falls_back_to_advisory(self) -> None:
+        result = self._result("bin/hooks-daemon status", unseen_policy="block-it-please")
+        assert result.decision is Decision.ALLOW
+
+    def test_no_sink_description_states_plainly_that_none_is_declared(self) -> None:
+        result = self._result("bin/hooks-daemon status", unseen_sink_description=None)
+        context = "\n".join(result.context)
+        assert "none is declared" in context.lower()
+        assert "tests/conftest.py" not in context
+
+    def test_a_custom_sink_description_is_used_verbatim(self) -> None:
+        result = self._result(
+            "bin/hooks-daemon status",
+            unseen_sink_description="a CI-only check, never a local one",
+        )
+        context = "\n".join(result.context)
+        assert "a CI-only check, never a local one" in context
+
+    def test_the_shared_rule_text_makes_no_sink_specific_claim(self) -> None:
+        """`_RULE` is shipped to every project; it must not hardcode THIS
+        project's sink, and must say "backstop", never "guarantee"."""
+        result = self._result("pytest tests/")
+        reason = result.reason or ""
+        assert "tests/conftest.py" not in reason
+        assert "GUARANTEE" not in reason
 
 
 class TestDefaultsAndPosture:

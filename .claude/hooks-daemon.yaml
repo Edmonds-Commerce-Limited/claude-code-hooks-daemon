@@ -496,6 +496,17 @@ handlers:
           - "./scripts/qa/llm_qa.py changed"
           - "./scripts/qa/llm_qa.py <tool> [<tool> ...]   (e.g. lint type_check pyright)"
           - "pytest <explicit test files or directories narrower than tests/unit>"
+        # Round 10 M1: an accurate, honest description of this project's OWN
+        # backstop -- best-effort, not a guarantee (review 10 B1/B2 found and
+        # fixed real gaps, and `--noconftest` remains an owner-referred
+        # residual; see PLAN.md's "Round 10" section).
+        unseen_sink_description: >-
+          tests/conftest.py loads a pytest plugin (claude_code_hooks_daemon.qa.full_qa_gate)
+          that refuses a whole-suite-sized pytest run collected without the host-wide
+          full-QA lock held (scripts/qa/full_qa_lock.py), whatever launched it -- a
+          best-effort backstop, not a guarantee: it only runs if pytest actually loads
+          this conftest.py (--noconftest and equivalents bypass it, and are the handler's
+          job to catch when SEEN), and it covers pytest only, not llm_qa.py's other steps.
 
     bash_safe_mode:  # Opt-in safe-prelude forcer (Plan 00270); dogfooded here in warn mode
       enabled: true

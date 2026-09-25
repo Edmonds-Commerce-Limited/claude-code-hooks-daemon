@@ -4890,12 +4890,12 @@ _RULE: Final[Rule] = Rule(
         "Only a command that RUNS the whole suite is denied. Mentioning one in a\n"
         "commit message, a grep or an echo never is, and the coordinator's own\n"
         "run is unaffected.\n\n"
-        "This handler is the fast, friendly FIRST LINE, not the guarantee: it\n"
-        "parses Bash text, and no finite pattern list enumerates every way to\n"
-        "start a whole-suite run. The GUARANTEE is a sink-side backstop --\n"
-        "`tests/conftest.py` refuses a whole-suite-sized pytest run outright\n"
-        "unless it holds the host-wide full-QA lock (Plan 00463 round 9), no\n"
-        "matter what launched it or whether this handler saw it."
+        "This handler is the fast, friendly FIRST LINE: it parses Bash text,\n"
+        "and no finite pattern list enumerates every way to start a\n"
+        "whole-suite run. A command it could not fully resolve is judged by\n"
+        "`unseen_policy` (default: allowed, with an advisory) -- see that\n"
+        "option's own docs for whether and how this project backstops what\n"
+        "this handler could not see."
     ),
 )
 
@@ -4906,6 +4906,20 @@ _GENERIC_TARGETED_FORM: Final[str] = (
     "  - the same tools scoped to what you changed: named checks rather than the\n"
     "    whole suite, and tests on explicit test files or directories"
 )
+
+#: Review 10 M1: whether a command this parser could not fully resolve
+#: (`match.fail_closed`) allows with an advisory, or denies like a positively
+#: seen one. The coordinator's round 9d/10 ruling keeps "advisory" as the
+#: default -- chasing every unreadable script denied this repository's own
+#: CLI -- but a client project's own sink (or lack of one) is theirs to
+#: judge, so it is an option, not a fact baked into shipped code.
+_UNSEEN_POLICY_ADVISORY: Final[str] = "advisory"
+_UNSEEN_POLICY_DENY: Final[str] = "deny"
+_KNOWN_UNSEEN_POLICIES: Final[frozenset[str]] = frozenset(
+    {_UNSEEN_POLICY_ADVISORY, _UNSEEN_POLICY_DENY}
+)
+_OPTION_UNSEEN_POLICY: Final[str] = "unseen_policy"
+_OPTION_UNSEEN_SINK_DESCRIPTION: Final[str] = "unseen_sink_description"
 
 
 class SubagentFullQaBlockerHandler(PreToolUseHandlerBase):
@@ -4921,6 +4935,18 @@ class SubagentFullQaBlockerHandler(PreToolUseHandlerBase):
             Default empty, which is inert.
         targeted_qa_commands: list of command strings the deny names as the
             allowed path. Default empty, which names the generic form.
+        unseen_policy: ``"advisory"`` (default) or ``"deny"`` -- how a command
+            this parser could NOT fully resolve (a script or substitution it
+            cannot read) is judged. ``"advisory"`` allows it, carrying an
+            advisory context entry; ``"deny"`` treats it like a positively
+            seen full run. An unrecognised value is reported (see
+            ``get_enforcement_status``) and treated as ``"advisory"``.
+        unseen_sink_description: free text naming what, if anything, this
+            project relies on to catch an UNSEEN command that turns out to
+            run the whole suite (a pytest-side lock, a CI-only check, or
+            nothing at all). Included verbatim in the advisory so it never
+            claims a backstop a client project does not have. Default
+            ``None``, which states plainly that none is declared.
     """
 
     def __init__(self) -> None:
@@ -4942,6 +4968,8 @@ class SubagentFullQaBlockerHandler(PreToolUseHandlerBase):
         # validated on every read rather than parsed once here.
         self._full_qa_patterns: object = None
         self._targeted_qa_commands: object = None
+        self._unseen_policy: object = None
+        self._unseen_sink_description: object = None
         self._reported_problems: frozenset[str] = frozenset()
 
     def get_default_enabled(self) -> bool:
@@ -4956,6 +4984,37 @@ class SubagentFullQaBlockerHandler(PreToolUseHandlerBase):
             logger.warning("subagent_full_qa_blocker: %s (entry skipped)", problem)
         self._reported_problems |= fresh
         return patterns
+
+    def _unseen_denies(self) -> bool:
+        """Whether an UNSEEN match is judged like a positively seen one.
+
+        An unrecognised `unseen_policy` value is treated as the default
+        (advisory) -- reported once, like a malformed `full_qa_patterns`
+        entry, via `_reported_problems`.
+        """
+        raw = self._unseen_policy
+        if raw is None:
+            return False
+        if not isinstance(raw, str):
+            return False
+        value = raw.strip().lower()
+        if value not in _KNOWN_UNSEEN_POLICIES:
+            problem = (
+                f"`{_OPTION_UNSEEN_POLICY}` must be one of "
+                f"{sorted(_KNOWN_UNSEEN_POLICIES)}, got {raw!r} (using 'advisory')"
+            )
+            if problem not in self._reported_problems:
+                logger.warning("subagent_full_qa_blocker: %s", problem)
+                self._reported_problems |= {problem}
+            return False
+        return value == _UNSEEN_POLICY_DENY
+
+    def _resolved_unseen_sink_description(self) -> str | None:
+        """What, if anything, this project says backstops an UNSEEN match."""
+        raw = self._unseen_sink_description
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip()
+        return None
 
     def _targeted_forms(self) -> list[str]:
         raw = self._targeted_qa_commands
@@ -4983,38 +5042,62 @@ class SubagentFullQaBlockerHandler(PreToolUseHandlerBase):
         return [_RULE]
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
-        """Refuse a positively SEEN full run; advise, never refuse, an UNSEEN one.
+        """Refuse a positively SEEN full run; judge an UNSEEN one by `unseen_policy`.
 
         Always verbose on the deny path. A sub-agent meets this a handful of
         times in its life, and the one thing it needs every time is the list
         of what to run instead.
 
-        Coordinator ruling (Plan 00463 round 9d, recorded in PLAN.md's
-        "Round 9" section): the sink -- the host-wide full-QA lock enforced by
-        a pytest plugin (`tests/conftest.py`) -- is the GUARANTEE now, on every
-        route, however the command was spelled. This handler is the first
-        line, not the guarantee, so a command it merely COULD NOT SEE (a
-        script or substitution the parser cannot resolve) is ALLOWED, with an
-        advisory that the sink will serialise or refuse it if it turns out to
-        run the whole suite. Only a POSITIVELY SEEN full run still denies.
-        Chasing every unreadable script produced a denial of this
-        repository's own CLI (`bin/hooks-daemon`) and everything that shells
-        out to it -- a cost the sink's existence no longer justifies.
+        Coordinator ruling (Plan 00463 round 9d/10, recorded in PLAN.md): a
+        command this parser merely COULD NOT SEE (a script or substitution it
+        cannot resolve) is judged by the `unseen_policy` option, which
+        defaults to ALLOW-with-advisory rather than DENY. This handler is the
+        fast, friendly first line, not a guarantee: no finite pattern list
+        enumerates every way to start a whole-suite run, and chasing every
+        unreadable script once denied this repository's own CLI
+        (`bin/hooks-daemon`) and everything that shells out to it. Whether and
+        how a project backstops what this handler could not see is
+        `unseen_sink_description` -- review 10 M1: the advisory must never
+        claim a specific sink a client project does not have, and every such
+        claim is a "backstop", never a "guarantee". Only a POSITIVELY SEEN
+        full run always denies.
         """
         match = self._find(hook_input)
         if match is None:
             return GatingResult(decision=Decision.ALLOW)
 
         if match.fail_closed:
+            if self._unseen_denies():
+                declared = self._targeted_forms()
+                instead = (
+                    "\n".join(f"  - {form}" for form in declared)
+                    if declared
+                    else _GENERIC_TARGETED_FORM
+                )
+                return GatingResult.deny(
+                    f"{RuleFormatter().verbose(_RULE)}\n\n"
+                    f"UNSEEN: `{match.pattern_id}` in `{match.segment}` "
+                    f"-- {match.fail_closed}\n\n"
+                    "This project's `unseen_policy` is `deny`: a command this parser "
+                    "cannot read in full is treated like a positively seen full run.\n\n"
+                    f"RUN INSTEAD:\n{instead}"
+                )
+            sink = self._resolved_unseen_sink_description()
+            backstop = (
+                f"BACKSTOP: {sink}"
+                if sink
+                else "BACKSTOP: none is declared for this project "
+                "(`unseen_sink_description` is unset) -- if this command runs the "
+                "whole suite, nothing else here is known to catch it."
+            )
             return GatingResult(
                 decision=Decision.ALLOW,
                 context=[
                     f"{RuleFormatter().advisory(_RULE)}\n\n"
                     f"UNSEEN: `{match.pattern_id}` in `{match.segment}` "
                     f"-- {match.fail_closed}\n\n"
-                    "This command could not be read in full, so it is not denied here. "
-                    "If it runs the whole suite, the host-wide full-QA lock sink "
-                    "(`tests/conftest.py`) will refuse or serialise it."
+                    "This command could not be read in full, so it is not denied here.\n\n"
+                    f"{backstop}"
                 ],
             )
 
@@ -5131,12 +5214,14 @@ class SubagentFullQaBlockerHandler(PreToolUseHandlerBase):
             "`echo` that mentions a full-QA command runs nothing and is never denied; a "
             "read-only form such as a `--read-only` summary is allowed if the project "
             "declares that flag.\n\n"
-            "**Only a POSITIVELY SEEN full run denies.** A script or substitution this "
-            "parser cannot resolve is ALLOWED, with an advisory: the host-wide full-QA "
-            "lock (a pytest plugin, `tests/conftest.py`) is the guarantee now, and it "
-            "refuses or serialises a whole-suite pytest run however it was launched, "
-            "seen or not. This handler is the fast, friendly first line, not the "
-            "guarantee.\n\n"
+            "**A POSITIVELY SEEN full run always denies.** A script or substitution this "
+            "parser cannot resolve is judged by `unseen_policy` (default `advisory`: "
+            "ALLOWED, carrying an advisory that names `unseen_sink_description` -- "
+            "whatever this project relies on to catch it, or plainly says none is "
+            "declared). Set `unseen_policy: deny` to treat an unseen match like a seen "
+            "one instead. This handler is the fast, friendly first line, not a "
+            "guarantee: no finite pattern list enumerates every way to start a "
+            "whole-suite run.\n\n"
             "**Configure** under `handlers.pre_tool_use.subagent_full_qa_blocker.options`: "
             "`full_qa_patterns` entries are `{id, command, full_args?, full_words?, "
             "bare_is_full?, read_only_flags?, value_flags?, option_grammar?}`, where "

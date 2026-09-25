@@ -359,6 +359,27 @@ one place every route ends up, whatever launched it: pytest itself.
   flag consumes its own value under `option_grammar: pytest`, leaving
   `tests/` (or nothing, under `bare_is_full`) matched exactly as it would be
   without the flag. Pinned in `_FULL_RUNS` so this cannot silently regress.
+- **M1 fixed.** The UNSEEN policy was hardcoded ALLOW-with-advisory, and the
+  advisory (in `handle()`, the shared `_RULE.verbose` text shipped to every
+  project, and `get_claude_md()`) hardcoded a claim specific to THIS
+  repository (`tests/conftest.py`) as "the GUARANTEE". Two new options:
+  `unseen_policy` (`"advisory"` default, or `"deny"` to treat an UNSEEN match
+  like a positively seen one -- an unrecognised value is reported once and
+  treated as `"advisory"`) and `unseen_sink_description` (free text this
+  project supplies; the advisory prints it verbatim under a `BACKSTOP:`
+  line, or states plainly that none is declared when unset, never inventing
+  a claim a client project does not have). Every "guarantee" claim in code
+  and shipped docs is now "backstop". This repository's own config sets
+  `unseen_sink_description` to an honest description of the real sink,
+  including its known limits (best-effort, `--noconftest` bypasses it, pytest
+  only). `perl`/`node` rows in `out_handle.txt` getting **no** advisory at
+  all (rather than the wrong wording) is a SEPARATE, deeper gap -- those
+  commands are not recognised as running arbitrary code at all, so
+  `find_full_qa_invocation` returns `None`, not a `fail_closed` match, and
+  never reaches the advisory path. Teaching the parser to recognise `perl`,
+  `node` and other unlisted interpreters as opaque code-running programs is
+  a parser-scope change, not a wording change, and is left as follow-up
+  (tracked alongside the owner referral below, not accepted as a residual).
 
 ### Owner referral (Round 10)
 
@@ -375,6 +396,14 @@ handles for every route it CAN see, after B1's anchor fix) versus
 deliberate evasion (which no sink inside the checked process can close) --
 and is NOT accepted as a residual; it is recorded here for a decision, not
 left silent.
+
+**Second referral (M1's follow-up):** `perl`/`node`/other interpreters not on
+the parser's known-interpreter list run arbitrary code the handler cannot
+see, and `find_full_qa_invocation` currently returns `None` for them --
+UNSEEN-with-advisory is never reached; it is a silent ALLOW with no context
+at all. Widening the known-interpreter list (or a generic "unrecognised
+program running with `-e`/`-c`-shaped code" rule) is parser-scope work, not
+covered by this round.
 
 ### Phase 2: Deliver
 
