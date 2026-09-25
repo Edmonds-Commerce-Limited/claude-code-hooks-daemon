@@ -55,6 +55,14 @@ _LABEL_END = ":"
 _COMMAND_SHAPED_PREFIXES: tuple[str, ...] = ("./", "/", "$", "~", "`")
 _LEADING_PUNCTUATION = "(`\"'"
 _TRAILING_PUNCTUATION = ".,;:)`\"'"
+#: A candidate command ends at a word that joins it back into prose ("Run
+#: pytest BEFORE committing"). Read as operands, those words target the run:
+#: under pytest's grammar every positional word is a path, so bare ``pytest``
+#: looked targeted and the instruction to run the whole suite was missed.
+_PROSE_STOPS: frozenset[str] = frozenset(
+    {"after", "again", "and", "before", "first", "if", "instead", "once", "or", "then", "to"}
+    | {"until", "when", "while"}
+)
 _ASSIGNMENT = re.compile(r"^[A-Za-z_]\w*=")
 #: ``cat <<'EOF'``, ``cat <<EOF`` and ``cat <<-EOF``: the body is printed.
 _CAT_HEREDOC = re.compile(r"^\s*cat\b[^<]*<<-?\s*(?P<quote>['\"]?)(?P<delim>\w+)(?P=quote)")
@@ -140,11 +148,14 @@ def _candidate_commands(text: str, programs: frozenset[str]) -> list[str]:
     That is after a start word, a label or a command-shaped word, and at any
     word naming a declared program, whatever verb comes before it (review 4
     N7): ``Execute pytest tests`` is an instruction however it is phrased.
+    Each candidate ends at the first prose connective after its start.
     """
     raw = _split(text)
     words = [word.lstrip(_LEADING_PUNCTUATION).rstrip(_TRAILING_PUNCTUATION) for word in raw]
+    stops = [index for index, word in enumerate(words) if word.lower() in _PROSE_STOPS]
     candidates = []
     for index, word in enumerate(words):
+        end = next((stop for stop in stops if stop > index), len(words))
         previous = raw[index - 1] if index else ""
         starts = (
             index == 0
@@ -154,7 +165,7 @@ def _candidate_commands(text: str, programs: frozenset[str]) -> list[str]:
             or word.rsplit("/", 1)[-1] in programs
         )
         if starts and word:
-            candidates.append(" ".join(words[index:]))
+            candidates.append(" ".join(words[index:end]))
     return candidates
 
 
