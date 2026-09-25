@@ -794,11 +794,22 @@ def _open_pidfd(pid: int) -> int | None:
         than refusing to stop the daemon at all.
     """
     try:
-        return os.pidfd_open(pid, 0)
+        pidfd: int | None = os.pidfd_open(pid, 0)
     except AttributeError:
-        return None
-    except OSError:
-        return None
+        logger.warning(
+            "os.pidfd_open unsupported on this platform (pid %d); falling back "
+            "to signalling by pid number",
+            pid,
+        )
+        pidfd = None
+    except OSError as e:
+        logger.warning(
+            "os.pidfd_open(%d) failed (%s); falling back to signalling by pid number",
+            pid,
+            e,
+        )
+        pidfd = None
+    return pidfd
 
 
 def _signal_proven_pid(pid: int, pidfd: int | None, sig: int) -> None:

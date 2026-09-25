@@ -1216,8 +1216,13 @@ class HooksDaemon:
                     reader.read(_EVENT_PAYLOAD_READ_CHUNK_BYTES),
                     timeout=min(_OVERSIZED_REQUEST_DRAIN_PER_READ_TIMEOUT_SECONDS, remaining),
                 )
-            except (TimeoutError, ConnectionResetError, BrokenPipeError, OSError):
-                return
+            except (TimeoutError, ConnectionResetError, BrokenPipeError, OSError) as e:
+                logger.warning(
+                    "Oversized-request drain stopped early after %d bytes (%s)",
+                    drained,
+                    e,
+                )
+                break
             if not chunk:
                 return
             drained += len(chunk)
@@ -1320,9 +1325,10 @@ class HooksDaemon:
                 )
                 writer.write(json.dumps(fail_response).encode())
                 await writer.drain()
-                return
-
-            await self._answer_event(event_json_key, hook_input, writer, arrival_time=arrival_time)
+            else:
+                await self._answer_event(
+                    event_json_key, hook_input, writer, arrival_time=arrival_time
+                )
 
         except (BrokenPipeError, ConnectionResetError):
             self._log_lost_peer(None)
@@ -1576,41 +1582,42 @@ class HooksDaemon:
                     }
                     writer.write((json.dumps(error_response) + "\n").encode())
                     await writer.drain()
-                return
+            else:
+                if not request_data:
+                    logger.warning("Received empty request")
+                else:
+                    # Plan 00466 N40 M1: arrival is HERE, before
+                    # `_process_request`'s own `run_in_executor` queueing
+                    # delay -- see the matching note in `_handle_event_client`.
+                    arrival_time = time.perf_counter()
 
-            if not request_data:
-                logger.warning("Received empty request")
-                return
+                    # Parse and process request
+                    start_time = time.time()
+                    response = await self._process_request(
+                        request_data.decode(), arrival_time=arrival_time
+                    )
+                    elapsed_ms = (time.time() - start_time) * 1000
 
-            # Plan 00466 N40 M1: arrival is HERE, before `_process_request`'s
-            # own `run_in_executor` queueing delay -- see the matching note
-            # in `_handle_event_client`.
-            arrival_time = time.perf_counter()
+                    # Note: timing_ms removed - Claude Code schema doesn't
+                    # accept it as top-level field. Timing is logged below for
+                    # internal metrics only.
 
-            # Parse and process request
-            start_time = time.time()
-            response = await self._process_request(request_data.decode(), arrival_time=arrival_time)
-            elapsed_ms = (time.time() - start_time) * 1000
+                    # Send response
+                    response_json = json.dumps(response) + "\n"
 
-            # Note: timing_ms removed - Claude Code schema doesn't accept it as top-level field
-            # Timing is logged below for internal metrics only
+                    # DEBUG: log responses that actually block or interrupt the
+                    # user. Read structurally from the decision fields — see
+                    # is_blocking_response for why a substring test over the
+                    # serialised response is not the same question.
+                    if is_blocking_response(response):
+                        log_blocking_response(
+                            response_json, debug_enabled=logger.isEnabledFor(logging.DEBUG)
+                        )
 
-            # Send response
-            response_json = json.dumps(response) + "\n"
+                    writer.write(response_json.encode())
+                    await writer.drain()
 
-            # DEBUG: log responses that actually block or interrupt the user.
-            # Read structurally from the decision fields — see
-            # is_blocking_response for why a substring test over the serialised
-            # response is not the same question.
-            if is_blocking_response(response):
-                log_blocking_response(
-                    response_json, debug_enabled=logger.isEnabledFor(logging.DEBUG)
-                )
-
-            writer.write(response_json.encode())
-            await writer.drain()
-
-            logger.debug("Request processed in %.2fms", elapsed_ms)
+                    logger.debug("Request processed in %.2fms", elapsed_ms)
 
         except (BrokenPipeError, ConnectionResetError):
             # A peer that hung up is not a daemon fault, and this is the common
