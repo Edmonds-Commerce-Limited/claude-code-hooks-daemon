@@ -19,6 +19,7 @@ The merge is most-restrictive-wins (Plan 00144); the FIRST restrictive handler
 owns both the reason shown and the ``To disable:`` attribution (Task 3.3).
 """
 
+import json
 import logging
 import time
 from collections.abc import Callable, Iterator, Sequence
@@ -53,28 +54,39 @@ def is_restrictive(decision: Decision | str | None) -> bool:
     return decision in _RESTRICTIVE_DECISIONS
 
 
-# The bulk-text ``tool_input`` fields a SAFETY handler actually scans (Plan
-# 00466 N34 remedy 3). Deliberately NOT the whole payload -- an unrelated
-# large field (e.g. a long transcript_path) must never count against the
-# size cap, only the text a handler's own matches()/handle() would work over.
-_SIZED_TOOL_INPUT_FIELDS: tuple[str, ...] = ("command", "content", "new_string", "old_string")
-
-
 def _safety_payload_size(hook_input: dict[str, Any]) -> int:
-    """Best-effort byte size of the text a SAFETY handler would scan.
+    """Best-effort byte size of the WHOLE ``tool_input``, whatever shape it takes.
 
-    0 for a ``tool_input`` carrying none of :data:`_SIZED_TOOL_INPUT_FIELDS`
-    -- there is no known bulk text for the size cap to bound.
+    Plan 00466 n24 security review (B1, m5): serialises the whole
+    ``tool_input`` dict rather than summing a fixed field list. A fixed list
+    (the original ``command``/``content``/``new_string``/``old_string``)
+    missed MultiEdit's ``edits[]``, NotebookEdit's ``new_source`` and, most
+    importantly, Write/Edit's own ``file_path`` -- B2's actual attack vector
+    is a ~90 KB path that never touches ``content`` at all. Deliberately NOT
+    the whole ``hook_input``: an unrelated large top-level field (e.g. a long
+    ``transcript_path``) must never count against a SAFETY handler's own
+    input-size cap, since ``transcript_path`` sits outside ``tool_input``.
+
+    ``surrogatepass`` and the broad ``except`` are both deliberate and load
+    -bearing, not merely defensive style: a lone UTF-16 surrogate in a JSON
+    string (``str.encode``'s strict default raises ``UnicodeEncodeError`` on
+    one; the daemon's own ``json.loads`` produces exactly this from a
+    ``"\\ud800"`` escape, which a model's tool arguments can carry) crashed
+    this function outside every handler's own try/except, on the PreToolUse
+    hot path, with `max_safety_input_bytes` on by default -- a real
+    regression this branch introduced (n24 review B1). This function must
+    NEVER raise; an unmeasurable ``tool_input`` reads as size 0.
+    ``HandlerChain.execute`` also wraps the call site as defence in depth for
+    whatever this still cannot foresee.
     """
     tool_input = hook_input.get(HookInputField.TOOL_INPUT)
     if not isinstance(tool_input, dict):
         return 0
-    total = 0
-    for field_name in _SIZED_TOOL_INPUT_FIELDS:
-        value = tool_input.get(field_name)
-        if isinstance(value, str):
-            total += len(value.encode("utf-8"))
-    return total
+    try:
+        serialised = json.dumps(tool_input, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return 0
+    return len(serialised.encode("utf-8", "surrogatepass"))
 
 
 def _dispatch_matches_and_handle(
@@ -648,9 +660,48 @@ class HandlerChain:
 
             return _call
 
-        # Computed once per call, not per handler (Plan 00466 N34 remedy 3):
-        # a cheap O(field count) measurement, not a scan of the whole payload.
-        payload_size = _safety_payload_size(hook_input) if max_safety_input_bytes is not None else 0
+        # Computed once per call, not per handler (Plan 00466 N34 remedy 3).
+        # `_safety_payload_size` is documented never to raise, but this
+        # except is a SECOND layer (Plan 00466 n24 security review, B1):
+        # anything here this cannot foresee must still fail CLOSED for a
+        # chain holding a SAFETY+BLOCKING handler, rather than escape
+        # `execute()` entirely and reach the controller's fail-OPEN
+        # catch-all (`HookResult.error()`) -- exactly the regression this
+        # branch introduced by adding a size measurement OUTSIDE every
+        # handler's own try/except in the first place. With no SAFETY+
+        # BLOCKING handler registered, there is nothing this cap could have
+        # denied anyway, so it degrades to "cap not enforced" instead of
+        # failing the whole chain over an unrelated measurement bug.
+        payload_size = 0
+        size_measurement_error: Exception | None = None
+        if max_safety_input_bytes is not None:
+            try:
+                payload_size = _safety_payload_size(hook_input)
+            except Exception as exc:
+                size_measurement_error = exc
+                logger.exception(
+                    "SAFETY input-size measurement crashed; treating as a "
+                    "handler-crash-equivalent for any SAFETY+BLOCKING handler"
+                )
+
+        if size_measurement_error is not None and any(
+            HandlerTag.SAFETY in h.tags and HandlerTag.BLOCKING in h.tags for h in self.handlers
+        ):
+            crash_result = HookResult.deny(
+                reason=(
+                    "SYSTEM ERROR: could not measure the SAFETY input-size cap, "
+                    "denied for safety "
+                    f"({type(size_measurement_error).__name__}: {size_measurement_error})"
+                ),
+            )
+            crash_result.context = [
+                f"Size measurement exception: {type(size_measurement_error).__name__}: "
+                f"{size_measurement_error}"
+            ]
+            return ChainExecutionResult(
+                result=crash_result,
+                execution_time_ms=(time.perf_counter() - start_time) * 1000,
+            )
 
         for handler in self.handlers:
             if (

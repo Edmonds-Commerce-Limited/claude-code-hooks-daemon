@@ -3,6 +3,192 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
+### N35 — In Progress — adversarial security review of the N24/N25/N34 fix (2 blockers, 3 majors, 6 minors, 4 nits)
+
+**Found by an adversarial, read-only security review**
+(`subagent-reports/260924-n466-n24-review-opus-5-5.md`) of `d7f2c875` (N24 +
+N25 + N34 combined). Verdict: NOT READY — inputs existed that turned a
+SAFETY+BLOCKING decision into ALLOW. Full report committed at `f8f2dfeb`.
+Findings and remediation status, in the report's own order:
+
+**B1 (blocker) — ✅ Remedied.** A lone UTF-16 surrogate anywhere in
+`tool_input` crashed `_safety_payload_size` (`chain.py`, strict
+`.encode("utf-8")`) OUTSIDE every handler's own try/except; the crash
+propagated to `controller.py`'s catch-all, which built an ALLOW (no
+decision) via the pre-existing, deliberately-fail-open `HookResult.error()`.
+Reproduced live: `git reset --hard HEAD # \ud800` allowed on this branch,
+denied on base `3104434b`; fail-open was new here, not pre-existing.
+
+Fixed in three layers: (1) `_safety_payload_size` rewritten to serialise the
+WHOLE `tool_input` via `json.dumps(..., ensure_ascii=False)` then
+`.encode("utf-8", "surrogatepass")`, wrapped in try/except returning 0 on
+`TypeError`/`ValueError` — this also happens to satisfy the report's m5
+finding (the old 4-field summation missed `file_path`/MultiEdit's `edits[]`/
+NotebookEdit's `new_source`) as a side effect, since the whole dict is now
+measured regardless of shape; (2) the measurement call site in
+`HandlerChain.execute` is now itself wrapped: any exception computing it
+denies immediately, chain-level, when the chain holds a SAFETY+BLOCKING
+handler (nothing to protect ⇒ degrades to an unmeasured/uncapped chain
+instead, never a regression); (3) new `HookResult.error_deny()` factory
+(fail-closed counterpart to the pre-existing `error()`, reason names the
+error, context gives `bin/hooks-daemon status`/`restart` recovery
+instructions) — `DaemonController.process_event`'s and `process_request`'s
+catch-all exception handlers now use it, but ONLY when the event is
+`PreToolUse`; every other event type keeps the pre-existing fail-open
+`error()` deliberately, per the review's own scoping. RED tests: a lone
+surrogate in each of `command`/`content`/`new_string`/`old_string` denies
+via the guard's own reason, not a crash
+(`tests/unit/core/test_chain.py`); a forced size-measurement crash denies
+chain-level when a SAFETY+BLOCKING handler exists and degrades gracefully
+when none does; `controller.py`'s router-exception and pre-validation
+catch-alls deny for `PreToolUse` and still fail open for every other event
+(`tests/unit/daemon/test_controller.py`, 4 new cases plus one pre-existing
+case's assertion flipped from ALLOW to DENY — a deliberate behaviour change,
+not a mistake). These tests exercise `chain.execute`/
+`controller.process_event`/`process_request` directly rather than the
+report's own real-socket reproducer; a real-socket integration test for
+this specific surrogate shape is not yet added (tracked below).
+
+**B2 (blocker) — ✅ Remedied.** `path_exclusion.py`'s `path_matches_globs`
+translated a client's exclude glob into a regex (`_glob_to_regex`) and
+matched it via `compiled.fullmatch(candidate)`. Against a `file_path` built
+from many short segments (`"a/" * n`) the backtracking regex engine went
+quadratic-or-worse AND held the GIL for the ENTIRE call: N34's
+`BoundedDispatcher` waits on `Future.result(timeout=remaining)` from a
+DIFFERENT thread, but nothing can run on that thread while the C-level `re`
+call holds the GIL, so the timed wait cannot even observe, let alone
+interrupt, the hang — N34's own core claim defeated by its own root cause.
+Reproduced live: `probe_n24r_p9_pathhang.py` measured 1.9s at 4000 segments
+(unbounded growth from there); `probe_n24r_p11_gil.py` over the real socket
+showed a single adversarial Write freezing concurrent PreToolUse calls until
+the CLIENT's 30s timeout (fail-open); `hooks-daemon stop` returned in ~6s
+but the daemon was still alive at 99% CPU (Python signal handlers only run
+between bytecodes) and needed SIGKILL.
+
+Replaced the regex translator with a hand-written linear matcher
+(`_tokenize_glob` + `_apply_prefix`/`_apply_literal`/`_apply_qmark`/
+`_apply_star`/`_apply_segstar`/`_glob_fullmatch`): each pattern tokenizes
+once (cached, as before) into `PREFIX`/`LITSTR`/`QMARK`/`STAR`/`SEGSTAR`/
+`ANYALL`, and matching is a left-to-right sweep over a boolean "reachable
+position" array per token — no backtracking is possible by construction.
+`SEGSTAR` (mid-pattern `**/`) needed care: an earlier, simpler design that
+treated it like a plain `.*` was caught by hand-tracing `**/secret` against
+`xsecret` — that shortcut would have matched (treating "x" as an admissible
+empty prefix) where the original regex correctly does not, since `**/`
+requires a COMPLETE, non-empty path segment. The shipped `SEGSTAR`
+implementation tracks two flags across one sweep (`armed`: a segment may
+start here but has consumed 0 chars; `open`: it has consumed ≥1) so a `/`
+only completes a landing when `open`, never on a zero-length attempt.
+Verified equivalent to the OLD regex translator (reconstructed standalone,
+not deleted from history) across 567 hand-picked edge cases (double
+slashes, embedded `\n`, empty patterns/text) plus 65,000 random-fuzzed
+`(pattern, text)` pairs spanning both alphabets — zero mismatches.
+
+Performance was iterated three times against the review's own ask ("a
+timing test on a 90 KB `file_path` under 50ms") plus a MORE realistic case
+(`error_hiding_blocker`'s actual 14 default excludes: 11 vendored-dir globs
+
+- 3 fixture globs, all sharing the `**/X/**` shape) — a naive per-token
+  sweep passed the first but not the second (81ms):
+
+1. `_apply_prefix` and `_apply_star` initially used a plain O(n) Python
+   loop; switched to `str.find`-driven scans, faster in isolation but WORSE
+   once combined with other patterns on this repo's own dense-slash
+   adversarial shape (many small `find` calls beat a tight loop only when
+   boundaries are sparse).
+2. The real win: a `**/<name>/**`-shaped exclude list shares its ENTIRE
+   `PREFIX`+`SEGSTAR` prefix across every pattern, diverging only at the
+   literal name — but each pattern recomputed that shared O(n) prefix from
+   scratch. Added a `step_cache` (keyed by `(token, id(input reachable), id(text))`, scoped to one `path_matches_globs` call, safe because the
+   cache and everything it references share that call's lifetime) so the
+   shared prefix work runs once per candidate, not once per pattern.
+3. With PREFIX/SEGSTAR now cached, `_apply_literal`'s per-position
+   `reachable[j] and text[j:j+ln]==literal` loop became the dominant cost,
+   because SEGSTAR's output on this dense text is itself dense (most
+   positions reachable). Rewrote it to drive from `text.find(literal, pos)`
+   instead: a literal like `node_modules` is typically ABSENT from the
+   candidate entirely, and `find` returning "not found" is one fast
+   C-level scan rather than up to `len(text)` Python-level slice
+   compares. Stress-tested this specifically against the classic
+   pathological shapes for naive substring search (dense overlapping
+   matches, periodic near-misses) up to 640 KB — stayed linear, no hidden
+   blowup reintroduced.
+
+Final measured timings (this repo's venv): the review's own 90 KB/4-pattern
+timing ask, ~25ms; the realistic 14-pattern `error_hiding_blocker` set on
+the same 90 KB adversarial path, ~30ms — both comfortably under the 50ms
+ask. The review's own `probe_n24r_p9_pathhang.py` reproducer, re-run
+unmodified against the fix: the final `n=45_000` case (the one that used to
+require `faulthandler`'s 8s watchdog + SIGKILL to recover from) now
+completes in 0.48s. RED tests in
+`tests/unit/utils/test_path_exclusion.py`: `TestGlobstarDoesNotCrossPartialSegments`
+(the `**/secret` vs `xsecret` regression, pinned permanently) and
+`TestLinearMatcherPerformance` (the review's own 90 KB/50ms ask, plus a
+45,000-segment/1s sanity bound matching the review's adversarial shape).
+Full `tests/unit/utils/test_path_exclusion.py` suite green (63 tests), plus
+423 passing across every handler test touching `path_exclusion`
+(`error_hiding_blocker`, `comment_size`, `comment_changelog`,
+`qa_suppression`, `security_antipattern`, vendor-exclusion tests) — no
+regressions.
+
+**B2 direction #4 sweep (fnmatch/regex-over-glob-translated-text
+elsewhere).** Grepped `src/` for other dynamic glob-to-regex translation
+(`fnmatch.translate`/hand-rolled `[^/]*`-style translators) matched via
+`.fullmatch()`/`.match()`. Four call sites use stdlib `fnmatch.fnmatch`
+(`core/project_layout.py`, `docs_qa/checks/generated_doc_hand_edit.py`,
+`utils/worktree_seed_suggestions.py`, `utils/secret_file_matching.py`):
+all match a BOUNDED string (a single path component/basename, or a small
+fixed-size joined window of path parts), never an attacker-supplied
+unbounded `file_path` reaching a SAFETY+BLOCKING guard in the hot PreToolUse
+path the way `path_exclusion.py` did — and `fnmatch.translate`'s output has
+no `**`-style nested-quantifier segment logic to begin with. Not fixed;
+noted here as the sweep's result rather than left silently undone. Every
+other `.fullmatch`/`.match` call in `utils/` is a static, hand-written,
+non-glob-derived regex against structured input (header lines, shell
+tokens, bracket expressions) — a different audit (ReDoS review of
+hand-written regexes), out of B2's specific scope.
+
+**Remaining review items, not yet started:**
+
+- **Client fail-closed for PreToolUse** (`init.sh`/hook shim): a socket
+  timeout or an invalid/malformed/empty response must become a DENY with
+  recovery instructions, with a narrow exact-match allowlist for
+  `bin/hooks-daemon`/`.claude/hooks-daemon/bin/hooks-daemon`
+  restart/status/logs/stop/start (no compound commands) so a wedged daemon
+  never bricks a session. "Daemon not running" keeps its existing
+  documented auto-start path.
+- **M1** — the deadline clock starts at `chain.execute`, not request
+  arrival; executor queueing can push a judged-late request past the
+  client's 30s timeout regardless of the per-handler bound N34 added.
+- **M2** — an abandoned straggler's dispatch-pool slot is released only
+  when the straggler FINISHES, not when the caller gives up; enough
+  concurrent stragglers deny every PreToolUse call with no way out short of
+  a manual restart (and the restart command is itself a PreToolUse call).
+- **M3** — fail-closed-on-raise is TAG-dependent (SAFETY+BLOCKING); several
+  handlers that can genuinely deny (`curl_pipe_shell`, `dangerous_permissions`,
+  `sudo_pip`, `pip_break_system`, `lock_file_edit`, +more) carry neither tag
+  and so fail OPEN on a raise/timeout/saturation.
+- **m1** (thread-per-handler overhead, ~12ms measured) — collapse to one
+  worker thread per EVENT running the whole chain inline.
+- **m2** (stragglers mutating shared state after the verdict already
+  returned), **m3** (`BoundedDispatcher.run` edge cases: `thread.start()`
+  raising leaks the semaphore permit; `except Exception` doesn't catch
+  `BaseException`, leaving the future unresolved), **m4** (`bounded_dispatch.py`'s
+  fail-open branches are invisible to `check_fail_open_inventory.py`),
+  **m6** (nothing validates `deadline_seconds` stays below the client's
+  socket timeout).
+- **n1** ("shared pool"/"thread pool" wording in `bounded_dispatch.py`/
+  `chain.py` — there is no pool, just bounded per-call threads), **n2**
+  (`assert isinstance(...)` on the production path — `-O` strips asserts),
+  **n4** (parametrise the chain test suite to also run under the shipped
+  default `deadline_seconds`, not just `None`).
+- **n3** informational only (two SAFETY+BLOCKING handlers exceed the
+  review's 1s advisory threshold under 100 KB, both already under the
+  harness's 5s bound; `secret_file_guard`'s is the guard-defects branch's
+  known constant-factor issue) — no action needed here.
+- **P1** (`github_auto_close_keywords` cache bypass) is explicitly OUT of
+  this niggle's scope — routed by the coordinator to a different agent.
+
 ### N34 — ✅ Remedied — `secret_file_guard`'s linear scan has enough constant factor to blow past the chain deadline on its own
 
 **Found while measuring N25's deadline margin, on request from the

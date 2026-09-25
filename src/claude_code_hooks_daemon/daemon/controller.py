@@ -1037,10 +1037,28 @@ class DaemonController:
             self._stats.record_error()
             logger.exception("Error processing event")
 
-            # Return error result
-            error_result = HookResult.error(
-                error_type="internal_error",
-                error_details=f"{type(e).__name__}: {e}",
+            # Plan 00466 n24 security review, B1: an exception anywhere in
+            # THIS method -- request conversion, the mode interceptor,
+            # router.route (the handler chain, which already fails closed on
+            # its own for a raise/timeout/oversize -- N24/N25/N34), pseudo-
+            # event dispatch -- used to reach here and get the FAIL-OPEN
+            # `HookResult.error()` (documented "Returns allow decision"),
+            # which is an ALLOW for PreToolUse. "No verdict" must never read
+            # as "allowed" here, same as inside the chain. Scoped to
+            # PreToolUse deliberately, per the review's own direction: other
+            # event types were not shown to have the same exploitability and
+            # a blanket fail-closed risks denying non-security flows (e.g.
+            # SessionStart) for no security benefit.
+            error_result = (
+                HookResult.error_deny(
+                    error_type="internal_error",
+                    error_details=f"{type(e).__name__}: {e}",
+                )
+                if event.event_type == EventType.PRE_TOOL_USE
+                else HookResult.error(
+                    error_type="internal_error",
+                    error_details=f"{type(e).__name__}: {e}",
+                )
             )
             return ChainExecutionResult(
                 result=error_result,
@@ -1097,9 +1115,20 @@ class DaemonController:
             event = HookEvent.model_validate(request_data)
         except Exception as e:
             logger.warning("Invalid request data: %s", e)
-            error_result = HookResult.error(
-                error_type="invalid_request",
-                error_details=str(e),
+            # Plan 00466 n24 security review, B1: no validated HookEvent
+            # exists yet at this point, so the event type is read directly
+            # off the raw request dict, best-effort -- same PreToolUse-only
+            # scoping as process_event's own catch-all above.
+            error_result = (
+                HookResult.error_deny(
+                    error_type="invalid_request",
+                    error_details=str(e),
+                )
+                if request_data.get("event") == EventType.PRE_TOOL_USE.value
+                else HookResult.error(
+                    error_type="invalid_request",
+                    error_details=str(e),
+                )
             )
             return error_result.to_response_dict("Unknown", 0.0)
 

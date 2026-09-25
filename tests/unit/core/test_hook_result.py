@@ -821,6 +821,40 @@ class TestHookResultErrorFactory:
         assert "RECOMMENDED ACTION" not in context_text
 
 
+class TestHookResultErrorDenyFactory:
+    """Test HookResult.error_deny() factory method (Plan 00466 n24 review B1).
+
+    ``error()`` is documented fail-open (ALLOW with a warning) -- correct
+    for event types that cannot meaningfully refuse. For PreToolUse, an
+    unexpected exception ANYWHERE outside a handler's own try/except must
+    not read as "nothing to worry about": ``error_deny`` is the fail-closed
+    counterpart the controller uses for that surface.
+    """
+
+    def test_denies(self) -> None:
+        result = HookResult.error_deny(
+            error_type="internal_error",
+            error_details="ValueError: boom",
+        )
+
+        assert result.decision == Decision.DENY
+
+    def test_reason_names_the_error_and_gives_recovery_instructions(self) -> None:
+        result = HookResult.error_deny(
+            error_type="internal_error",
+            error_details="ValueError: boom",
+        )
+
+        assert result.reason is not None
+        text = result.reason + "\n" + "\n".join(result.context)
+        assert "internal_error" in text
+        assert "ValueError: boom" in text
+        # A denied caller needs a way OUT, not just a diagnosis -- recovery
+        # commands (bin/hooks-daemon restart/status/...) stay allowed by a
+        # narrow client-side allowlist; the reason should point at it.
+        assert "hooks-daemon" in text.lower()
+
+
 class TestHookResultStatusFormat:
     """Test Status event response format (plain text)."""
 

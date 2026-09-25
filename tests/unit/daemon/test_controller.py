@@ -820,7 +820,10 @@ class TestControllerProcessEventErrors:
     def test_process_event_router_exception_returns_error_result(
         self, workspace_root: Path
     ) -> None:
-        """process_event returns error result when router.route raises unexpected Exception."""
+        """process_event returns a DENY error result for PreToolUse when
+        router.route raises an unexpected Exception (Plan 00466 n24 security
+        review, B1: the catch-all was fail-open -- an ALLOW -- which read
+        "no verdict" as "allowed"; PreToolUse now fails CLOSED instead)."""
         from claude_code_hooks_daemon.core.event import HookInput
         from claude_code_hooks_daemon.core.hook_result import Decision
         from claude_code_hooks_daemon.core.router import EventRouter
@@ -840,8 +843,7 @@ class TestControllerProcessEventErrors:
         with patch.object(EventRouter, "route", side_effect=RuntimeError("Router exploded")):
             result = controller.process_event(event)
 
-        # Should return error result (fail-open)
-        assert result.result.decision == Decision.ALLOW
+        assert result.result.decision == Decision.DENY
         context_text = " ".join(result.result.context)
         assert "error" in context_text.lower() or "ERROR" in context_text
         assert controller.get_stats().errors == 1
@@ -1053,6 +1055,128 @@ class TestControllerChainConfig:
         session = "chain-config-session"
         assert history.count_blocks_by_handler("the-blocker", session_id=session) == 1
         assert history.count_blocks_by_handler("the-advisor", session_id=session) == 0
+
+
+class TestProcessEventFailsClosedForPreToolUse:
+    """Plan 00466 n24 security review, B1: an unexpected exception ANYWHERE
+    in ``process_event`` (not only inside the handler chain, which already
+    fails closed on its own -- Plan 00466 N24/N34) must not reach the
+    controller's original catch-all, which was fail-OPEN
+    (``HookResult.error()``, documented "Returns allow decision"). For
+    PreToolUse this is now ``HookResult.error_deny()`` instead; every other
+    event type is unaffected (a review-scoped fix, not a blanket change).
+    """
+
+    def teardown_method(self) -> None:
+        ProjectContext.reset()
+        reset_data_layer()
+
+    @pytest.fixture
+    def workspace_root(self, tmp_path: Path) -> Path:
+        workspace = tmp_path / "test-workspace"
+        claude_dir = workspace / ".claude"
+        claude_dir.mkdir(parents=True)
+        (claude_dir / "hooks-daemon.yaml").write_text(
+            "version: '1.0'\n"
+            "daemon:\n"
+            "  idle_timeout_seconds: 600\n"
+            "  log_level: INFO\n"
+            "handlers:\n"
+            "  pre_tool_use: {}\n"
+        )
+        return workspace
+
+    def _initialised_controller(self, workspace_root: Path) -> DaemonController:
+        controller = DaemonController()
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                Mock(returncode=0, stdout="/tmp/test\n"),
+                Mock(returncode=0, stdout="git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout="/tmp/test\n"),
+            ]
+            controller.initialise(
+                workspace_root=workspace_root,
+                verdict_log=VerdictLogConfig(enabled=False),
+            )
+        return controller
+
+    @staticmethod
+    def _bash_event(command: str = "echo hi") -> HookEvent:
+        from claude_code_hooks_daemon.core.event import HookInput
+
+        return HookEvent(
+            event_type=EventType.PRE_TOOL_USE,
+            hook_input=HookInput(
+                tool_name="Bash",
+                tool_input={"command": command},
+                session_id="fail-closed-session",
+            ),
+        )
+
+    @staticmethod
+    def _session_start_event() -> HookEvent:
+        from claude_code_hooks_daemon.core.event import HookInput
+
+        return HookEvent(
+            event_type=EventType.SESSION_START,
+            hook_input=HookInput(
+                session_id="fail-closed-session",
+            ),
+        )
+
+    def test_an_exception_anywhere_in_process_event_denies_pretooluse(
+        self, workspace_root: Path
+    ) -> None:
+        from claude_code_hooks_daemon.core.router import EventRouter
+
+        controller = self._initialised_controller(workspace_root)
+
+        with patch.object(EventRouter, "route", side_effect=RuntimeError("boom")):
+            result = controller.process_event(self._bash_event())
+
+        assert result.result.decision.value == "deny"
+        assert result.result.reason is not None
+        assert "boom" in result.result.reason or "RuntimeError" in result.result.reason
+        full_text = result.result.reason + "\n" + "\n".join(result.result.context)
+        assert "hooks-daemon" in full_text.lower()
+
+    def test_a_non_pretooluse_event_type_still_fails_open(self, workspace_root: Path) -> None:
+        """Scope check: this fix is PreToolUse-specific, per the review's own
+        direction -- a blanket fail-closed on every event type was not asked
+        for and is not applied.
+        """
+        from claude_code_hooks_daemon.core.router import EventRouter
+
+        controller = self._initialised_controller(workspace_root)
+
+        with patch.object(EventRouter, "route", side_effect=RuntimeError("boom")):
+            result = controller.process_event(self._session_start_event())
+
+        assert result.result.decision.value == "allow"
+
+    def test_an_invalid_request_shaped_as_pretooluse_denies(self, workspace_root: Path) -> None:
+        """The EARLIER catch-all in ``process_request`` (a request that
+        fails ``HookEvent.model_validate`` entirely) is also PreToolUse-
+        scoped, best-effort from the raw request dict's own "event" field.
+        """
+        controller = self._initialised_controller(workspace_root)
+
+        response = controller.process_request({"event": "PreToolUse", "hook_input": "not-a-dict"})
+
+        # This early-exit path (request failed HookEvent.model_validate, so
+        # there is no validated event to call to_json() with) uses
+        # to_response_dict()'s PRD 3.2.2 shape, not to_json()'s
+        # hookSpecificOutput wrapper -- pre-existing, unrelated to this fix.
+        assert response["result"]["decision"] == "deny"
+
+    def test_an_invalid_request_shaped_as_something_else_still_fails_open(
+        self, workspace_root: Path
+    ) -> None:
+        controller = self._initialised_controller(workspace_root)
+
+        response = controller.process_request({"event": "SessionStart", "hook_input": "not-a-dict"})
+
+        assert response["result"]["decision"] != "deny"
 
 
 class TestGlobalController:

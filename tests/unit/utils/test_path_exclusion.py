@@ -444,3 +444,62 @@ class TestHandlerExcludesPath:
         assert not handler_excludes_path(
             "/proj/src/x.py", handler_patterns=[], project_patterns=[], defaults=[]
         )
+
+
+class TestGlobstarDoesNotCrossPartialSegments:
+    """`**/` requires a COMPLETE, non-empty path segment before each landing.
+
+    Plan 00466 n24 review B2 direction: an earlier draft of the linear
+    replacement matcher considered treating a mid-pattern `**/` the same as
+    a trailing `**` (unrestricted `.*`) for simplicity. That would wrongly
+    let `**/secret` match a file merely ENDING in "secret" with no preceding
+    slash, e.g. `xsecret` -- silently widening every `**/name/**` exclusion
+    to match unrelated files sharing a suffix. This pins the correct,
+    segment-respecting behaviour permanently.
+    """
+
+    def test_globstar_does_not_match_a_bare_suffix(self) -> None:
+        assert is_path_excluded("xsecret", ["**/secret"]) is False
+
+    def test_globstar_matches_a_real_segment(self) -> None:
+        assert is_path_excluded("a/secret", ["**/secret"]) is True
+
+    def test_globstar_does_not_match_double_slash_as_an_empty_segment(self) -> None:
+        # "a//secret": the second "/" cannot itself be a zero-length segment.
+        assert is_path_excluded("a//secret", ["**/secret"]) is True
+        assert is_path_excluded("a/", ["**/secret"]) is False
+
+
+class TestLinearMatcherPerformance:
+    """Plan 00466 n24 security review, B2: `path_matches_globs` used a
+    backtracking `re.fullmatch` over a glob-derived regex. Against a
+    `file_path` built from many short segments (``"a/" * n``) this went
+    quadratic and held the GIL for the whole call -- no other thread, not
+    even a `BoundedDispatcher` waiter, could run meanwhile (measured: 1.9s
+    at 4000 segments, unbounded growth from there). The replacement matcher
+    is a single-pass reachability sweep per pattern token, so cost is
+    linear in the candidate length regardless of segment count.
+    """
+
+    def test_many_short_segments_stay_fast(self) -> None:
+        import time
+
+        candidate = "a/" * 45_000 + "f.py"  # the review's own adversarial shape
+        start = time.perf_counter()
+        result = is_path_excluded(candidate, ["**/node_modules/**", "**/fixtures/**", "*.pyc"])
+        elapsed = time.perf_counter() - start
+        assert result is False
+        assert elapsed < 1.0, f"expected linear-time matching, took {elapsed:.3f}s"
+
+    def test_a_90kb_file_path_matches_under_50ms(self) -> None:
+        """The review's explicit ask: a 90 KB `file_path` under 50ms."""
+        import time
+
+        candidate = "src/" + "pkg/" * 22_500 + "module.py"  # ~90KB
+        assert len(candidate) > 90_000
+        patterns = ["**/node_modules/**", "**/vendor/**", "tests/fixtures/**", "*.pyc"]
+        start = time.perf_counter()
+        for _ in range(3):
+            is_path_excluded(candidate, patterns)
+        elapsed = (time.perf_counter() - start) / 3
+        assert elapsed < 0.05, f"expected under 50ms, averaged {elapsed:.3f}s"

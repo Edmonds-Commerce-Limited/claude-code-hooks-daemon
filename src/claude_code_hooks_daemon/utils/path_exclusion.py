@@ -24,10 +24,9 @@ may pass either an absolute or a relative ``file_path``.
 from __future__ import annotations
 
 import os
-import re
 from collections.abc import Iterable, Sequence
 from pathlib import Path
-from typing import Protocol
+from typing import NamedTuple, Protocol
 
 from claude_code_hooks_daemon.constants.layout import CORE_VENDORED_BUILD_DIR_NAMES
 from claude_code_hooks_daemon.utils.vendor_paths import VENDOR_DIRS_TOKEN, is_vendored_path
@@ -57,21 +56,62 @@ def _resolves_vendor_token(file_path: str, layout: VendoredPathJudge | None) -> 
     return is_vendored_path(file_path, CORE_VENDORED_BUILD_DIR_NAMES)
 
 
-# Compiled-pattern cache: the same handful of client globs are matched on every
-# Write/Edit, so translating + compiling once per pattern is worth it.
-_REGEX_CACHE: dict[str, re.Pattern[str]] = {}
+# Plan 00466 n24 security review, B2: this used to translate a glob into a
+# regex string and match it with `compiled.fullmatch(candidate)`. Against an
+# adversarial `file_path` built from many short segments (`"a/" * n`), the
+# backtracking regex engine went quadratic-or-worse AND held the GIL for the
+# whole call -- no other thread could run meanwhile, so nothing bounding the
+# call (not even a timed wait) could observe or interrupt it. Measured: 1.9s
+# at 4000 segments, unbounded growth from there; a single Write with a ~90KB
+# `file_path` froze the daemon outright. Replaced with a hand-written matcher
+# below: each pattern is tokenized once (cached), and matching is a single
+# left-to-right sweep per token over a "reachable position" boolean array --
+# provably O(len(text) * token_count), no backtracking possible.
 
 
-def _glob_to_regex(pattern: str) -> str:
-    """Translate a gitignore-style glob into a full-match regex string.
+class _Token(NamedTuple):
+    """One piece of a tokenized glob pattern.
+
+    ``kind`` is one of ``PREFIX`` (the unanchored ``(?:.*/)?`` prefix,
+    always first and only ever present once), ``LITSTR`` (a run of literal
+    characters, using ``literal``), ``QMARK`` (``?``), ``STAR`` (a
+    single-segment ``*``), ``SEGSTAR`` (a mid-pattern ``**/``), or
+    ``ANYALL`` (a trailing/bare ``**``).
+    """
+
+    kind: str
+    literal: str = ""
+
+
+# Tokenized-pattern cache: the same handful of client globs are matched on
+# every Write/Edit, so tokenizing once per pattern is worth it -- mirrors the
+# old `_REGEX_CACHE`'s intent, just caching tokens instead of a compiled regex.
+_TOKEN_CACHE: dict[str, list[_Token]] = {}
+
+
+def _tokenize_glob(pattern: str) -> list[_Token]:
+    """Tokenize a gitignore-style glob for the linear matcher below.
 
     A leading ``/`` anchors to the (relative) path start; otherwise a
-    ``(?:.*/)?`` prefix lets the pattern match at any directory depth.
+    ``PREFIX`` token (the ``(?:.*/)?`` prefix) lets the pattern match at any
+    directory depth. Consecutive literal characters (including ``/``) are
+    merged into one ``LITSTR`` token so a long literal run (e.g.
+    ``node_modules``) costs one sweep, not one per character.
     """
     anchored = pattern.startswith("/")
     body = pattern[1:] if anchored else pattern
 
-    out: list[str] = []
+    tokens: list[_Token] = []
+    if not anchored:
+        tokens.append(_Token("PREFIX"))
+
+    literal_buf: list[str] = []
+
+    def flush_literal() -> None:
+        if literal_buf:
+            tokens.append(_Token("LITSTR", "".join(literal_buf)))
+            literal_buf.clear()
+
     i = 0
     n = len(body)
     while i < n:
@@ -80,35 +120,225 @@ def _glob_to_regex(pattern: str) -> str:
             if i + 1 < n and body[i + 1] == "*":
                 # '**' — any number of path segments.
                 i += 2
+                flush_literal()
                 if i < n and body[i] == "/":
                     # '**/' consumes the slash so it can match zero segments.
                     i += 1
-                    out.append("(?:[^/]+/)*")
+                    tokens.append(_Token("SEGSTAR"))
                 else:
-                    out.append(".*")
+                    tokens.append(_Token("ANYALL"))
                 continue
-            out.append("[^/]*")
+            flush_literal()
+            tokens.append(_Token("STAR"))
         elif char == "?":
-            out.append("[^/]")
-        elif char == "/":
-            out.append("/")
+            flush_literal()
+            tokens.append(_Token("QMARK"))
         else:
-            out.append(re.escape(char))
+            literal_buf.append(char)
         i += 1
-
-    regex = "".join(out)
-    if not anchored:
-        regex = "(?:.*/)?" + regex
-    return regex
+    flush_literal()
+    return tokens
 
 
-def _compiled(pattern: str) -> re.Pattern[str]:
-    """Return the cached compiled full-match regex for ``pattern``."""
-    compiled = _REGEX_CACHE.get(pattern)
-    if compiled is None:
-        compiled = re.compile(_glob_to_regex(pattern))
-        _REGEX_CACHE[pattern] = compiled
-    return compiled
+def _tokens_for(pattern: str) -> list[_Token]:
+    """Return the cached token list for ``pattern``."""
+    tokens = _TOKEN_CACHE.get(pattern)
+    if tokens is None:
+        tokens = _tokenize_glob(pattern)
+        _TOKEN_CACHE[pattern] = tokens
+    return tokens
+
+
+def _apply_prefix(text: str) -> list[bool]:
+    """Reachability after the unanchored ``(?:.*/)?`` prefix.
+
+    Always the first token, applied to the fixed initial state
+    ``{0: True}`` (nothing else can be reachable before the first token
+    runs), so it is computed directly from ``text`` rather than taking a
+    ``reachable`` argument. ``.`` does not match ``\\n`` (regex default,
+    no ``DOTALL``), and since this is a single optional occurrence — not a
+    starred/repeated group — a ``\\n`` anywhere permanently ends the run: no
+    later ``/`` can complete it.
+
+    Every ``/`` up to that point (if any) lands a reachable position, so this
+    walks ``/`` occurrences with ``str.find`` (a C-level scan) rather than a
+    Python-level loop over every character — the same total work, done far
+    faster in practice.
+    """
+    n = len(text)
+    new_reachable = [False] * (n + 1)
+    new_reachable[0] = True
+    newline_at = text.find("\n")
+    limit = newline_at if newline_at != -1 else n
+    pos = text.find("/", 0, limit)
+    while pos != -1:
+        new_reachable[pos + 1] = True
+        pos = text.find("/", pos + 1, limit)
+    return new_reachable
+
+
+def _apply_literal(reachable: list[bool], text: str, literal: str) -> list[bool]:
+    """Reachability after consuming an exact literal run.
+
+    Exact string comparison, not regex — so no escaping is needed and no
+    character in ``literal`` gets special meaning.
+
+    Drives the scan from ``str.find`` (a C-level substring search) rather
+    than checking every position for ``reachable[j]`` first: a literal like
+    ``node_modules`` is typically ABSENT from the candidate text entirely,
+    and ``find`` returning "not found" costs one fast C-level scan rather
+    than up to ``len(text)`` Python-level slice comparisons.
+    """
+    n = len(text)
+    ln = len(literal)
+    new_reachable = [False] * (n + 1)
+    limit = n - ln
+    if limit < 0:
+        return new_reachable
+    pos = text.find(literal)
+    while pos != -1 and pos <= limit:
+        if reachable[pos]:
+            new_reachable[pos + ln] = True
+        pos = text.find(literal, pos + 1)
+    return new_reachable
+
+
+def _apply_qmark(reachable: list[bool], text: str) -> list[bool]:
+    """Reachability after consuming exactly one non-``/`` character (``?``)."""
+    n = len(text)
+    new_reachable = [False] * (n + 1)
+    for j in range(n):
+        if reachable[j] and text[j] != "/":
+            new_reachable[j + 1] = True
+    return new_reachable
+
+
+def _apply_star(reachable: list[bool], text: str, *, exclude_char: str) -> list[bool]:
+    """Reachability after a zero-or-more wildcard that cannot cross ``exclude_char``.
+
+    Shared by ``STAR`` (``[^/]*``, ``exclude_char="/"``) and ``ANYALL``
+    (``.*``, ``exclude_char="\\n"`` — regex ``.`` excludes only newline).
+
+    ``text`` splits into runs bounded by ``exclude_char`` occurrences; within
+    a run, reachability can only ever *start* at the first ``True`` input
+    position and then holds for the rest of the run (once reachable, a
+    zero-or-more wildcard can always choose to consume one more character
+    up to the boundary). So each run needs only: locate its first ``True``
+    input position and, if one exists, fill from there to the run's end in
+    one C-level slice-assignment — cheaper than a Python-level loop over
+    every character.
+    """
+    n = len(text)
+    new_reachable = [False] * (n + 1)
+    lo = 0
+    pos = text.find(exclude_char)
+    while True:
+        hi = pos if pos != -1 else n  # run is [lo, hi], inclusive of the boundary index itself
+        run = reachable[lo : hi + 1]
+        if True in run:
+            first_true = lo + run.index(True)
+            new_reachable[first_true : hi + 1] = [True] * (hi + 1 - first_true)
+        if pos == -1:
+            break
+        lo = pos + 1
+        pos = text.find(exclude_char, lo)
+    return new_reachable
+
+
+def _apply_segstar(reachable: list[bool], text: str) -> list[bool]:
+    """Reachability after ``(?:[^/]+/)*`` — zero or more COMPLETE segments.
+
+    Each repeat needs at least one non-``/`` character before its ``/``; a
+    naive ``.*``-style linearization would wrongly let ``**/secret`` match
+    a bare ``xsecret`` (treating "x" as an admissible empty-ish prefix), so
+    this tracks two flags across a single sweep instead:
+
+    - ``armed``: a segment MAY start at the current position, but has not
+      yet consumed a character (set by a reachable input position, or by
+      just landing right after a completed segment's ``/``).
+    - ``open``: a segment has consumed at least one non-``/`` character and
+      is eligible to complete the moment a ``/`` is seen.
+
+    A ``/`` only completes (and records a new reachable position) when
+    ``open`` is True; an ``armed``-but-not-``open`` position hitting a
+    ``/`` immediately is a zero-length segment attempt and is discarded
+    (``armed`` resets, nothing recorded) — this is what keeps ``**/`` from
+    matching across an empty segment.
+    """
+    n = len(text)
+    new_reachable = list(reachable)  # zero repeats: every input position stays reachable.
+    armed = False
+    open_ = False
+    for j in range(n):
+        if reachable[j]:
+            armed = True
+        if text[j] == "/":
+            if open_:
+                new_reachable[j + 1] = True
+                open_ = False
+                armed = True
+            else:
+                armed = False
+        else:
+            if armed or open_:
+                open_ = True
+                armed = False
+    return new_reachable
+
+
+def _glob_fullmatch(
+    pattern: str, text: str, *, step_cache: dict[tuple[object, ...], list[bool]] | None = None
+) -> bool:
+    """Whether ``text`` fully matches ``pattern``, in this module's glob dialect.
+
+    Linear in ``len(text)``: each token in the (cached) tokenized pattern is
+    applied in one left-to-right sweep over a "reachable position" array,
+    with no backtracking possible.
+
+    ``step_cache`` is an optional cross-pattern memo, scoped to one
+    :func:`path_matches_globs` call: every ``_apply_*`` step is a pure
+    function of ``(token, input reachable, text)``, and a realistic exclude
+    list is mostly ``**/<name>/**`` patterns that all share the identical
+    ``PREFIX``/``SEGSTAR`` prefix and diverge only at the literal name —
+    (error_hiding_blocker's own defaults are 14 such patterns). Without this,
+    every pattern repeats that shared prefix's O(len(text)) work from
+    scratch. Keyed by ``id()`` of the input reachable array rather than its
+    value: safe only because the cache and the arrays it references share
+    this call's lifetime, so no id can be reused by an unrelated object
+    while the cache is live.
+    """
+    tokens = _tokens_for(pattern)
+    n = len(text)
+    reachable = [False] * (n + 1)
+    reachable[0] = True
+    for token in tokens:
+        cached = None
+        cache_key: tuple[object, ...] | None = None
+        if step_cache is not None:
+            cache_key = (
+                ("PREFIX", id(text)) if token.kind == "PREFIX" else (token, id(reachable), id(text))
+            )
+            cached = step_cache.get(cache_key)
+        if cached is not None:
+            reachable = cached
+        else:
+            if token.kind == "PREFIX":
+                reachable = _apply_prefix(text)
+            elif token.kind == "LITSTR":
+                reachable = _apply_literal(reachable, text, token.literal)
+            elif token.kind == "QMARK":
+                reachable = _apply_qmark(reachable, text)
+            elif token.kind == "STAR":
+                reachable = _apply_star(reachable, text, exclude_char="/")
+            elif token.kind == "ANYALL":
+                reachable = _apply_star(reachable, text, exclude_char="\n")
+            else:  # SEGSTAR
+                reachable = _apply_segstar(reachable, text)
+            if step_cache is not None and cache_key is not None:
+                step_cache[cache_key] = reachable
+        if True not in reachable:
+            return False
+    return reachable[n]
 
 
 def _candidate_paths(file_path: str, project_root: str | os.PathLike[str] | None) -> list[str]:
@@ -254,6 +484,11 @@ def path_matches_globs(
     if not patterns:
         return False
     candidates = _candidate_paths(file_path, project_root)
+    # A realistic exclude list is mostly `**/<name>/**` patterns that share
+    # an identical prefix and diverge only at the literal name -- see
+    # `_glob_fullmatch`'s docstring. This cache lets that shared work be
+    # computed once per candidate instead of once per pattern.
+    step_cache: dict[tuple[object, ...], list[bool]] = {}
     for pattern in patterns:
         if not pattern:
             continue
@@ -270,8 +505,9 @@ def path_matches_globs(
             if _resolves_vendor_token(candidates[0], layout):
                 return True
             continue
-        compiled = _compiled(pattern)
-        if any(compiled.fullmatch(candidate) for candidate in candidates):
+        if any(
+            _glob_fullmatch(pattern, candidate, step_cache=step_cache) for candidate in candidates
+        ):
             return True
     return False
 

@@ -1120,6 +1120,10 @@ class TestHandlerChain:
         )
         chain.add(guard)
 
+        # The measured size is the whole SERIALISED tool_input (n24 review
+        # m5), not the raw command string alone -- so this asserts on the
+        # limit and the ballpark, not a literal byte count tied to JSON
+        # punctuation overhead.
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "x" * 100}}
         result = chain.execute(hook_input, max_safety_input_bytes=50)
 
@@ -1129,7 +1133,6 @@ class TestHandlerChain:
         assert result.result.reason is not None
         assert "safety-guard" in result.result.reason
         assert "too large" in result.result.reason.lower()
-        assert "100" in result.result.reason
         assert "50" in result.result.reason
 
     def test_oversized_write_content_skips_a_non_safety_blocking_handler(self) -> None:
@@ -1146,6 +1149,59 @@ class TestHandlerChain:
         assert any(
             "safety-advisory" in ctx and "too large" in ctx.lower() for ctx in result.result.context
         )
+
+    def test_oversized_file_path_denies_a_safety_blocking_handler(self) -> None:
+        """Plan 00466 n24 review B2/m5: the ORIGINAL fixed-field size cap
+        never measured ``file_path`` at all -- a long path was B2's actual
+        vector (a ~90 KB path froze the whole daemon via a quadratic glob
+        match, with nothing bounding it). Serialising the whole tool_input
+        covers this without a dedicated field name.
+        """
+        chain = HandlerChain()
+        guard = MockHandler(
+            "safety-guard",
+            priority=10,
+            terminal=True,
+            tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING],
+        )
+        chain.add(guard)
+
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/tmp/" + "p" * 100, "content": "ok"},
+        }
+        result = chain.execute(hook_input, max_safety_input_bytes=50)
+
+        assert guard.handle_called == 0
+        assert result.result.decision == Decision.DENY
+        assert result.result.reason is not None
+        assert "too large" in result.result.reason.lower()
+
+    def test_oversized_multiedit_edits_list_denies_a_safety_blocking_handler(self) -> None:
+        """Plan 00466 n24 review m5: MultiEdit's bulk text lives in
+        ``edits[]``, a list of dicts -- also unmeasured by the original
+        fixed-field cap.
+        """
+        chain = HandlerChain()
+        guard = MockHandler(
+            "safety-guard",
+            priority=10,
+            terminal=True,
+            tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING],
+        )
+        chain.add(guard)
+
+        hook_input = {
+            "tool_name": "MultiEdit",
+            "tool_input": {
+                "file_path": "/tmp/x.py",
+                "edits": [{"old_string": "a", "new_string": "b" * 200}],
+            },
+        }
+        result = chain.execute(hook_input, max_safety_input_bytes=50)
+
+        assert guard.handle_called == 0
+        assert result.result.decision == Decision.DENY
 
     def test_non_safety_handler_is_unaffected_by_the_size_cap(self) -> None:
         """The size cap is scoped to SAFETY handlers -- an ordinary advisory
@@ -1193,6 +1249,98 @@ class TestHandlerChain:
         result = chain.execute(hook_input, max_safety_input_bytes=50)
 
         assert guard.handle_called == 1
+        assert result.result.decision == Decision.ALLOW
+
+    def test_a_lone_surrogate_in_the_measured_fields_does_not_crash_the_size_check(
+        self,
+    ) -> None:
+        """Plan 00466 n24 review B1: ``str.encode("utf-8")`` (strict) raises
+        ``UnicodeEncodeError`` on a lone surrogate -- reachable whenever the
+        daemon's own ``json.loads`` turns a JSON ``"\\ud800"`` escape into a
+        Python string, which a model's tool arguments can carry. Before the
+        fix this exception escaped ``_safety_payload_size``, outside every
+        handler's own try/except, and reached the controller's fail-OPEN
+        catch-all -- a regression this branch introduced by adding the size
+        check at all. The chain must still judge normally.
+        """
+        chain = HandlerChain()
+        guard = MockHandler(
+            "safety-guard",
+            priority=10,
+            terminal=True,
+            tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING],
+            result=HookResult.deny(reason="denied for a real reason"),
+        )
+        chain.add(guard)
+
+        for field in ("command", "content", "new_string", "old_string"):
+            hook_input = {"tool_name": "Bash", "tool_input": {field: "AKIA\ud800"}}
+            result = chain.execute(hook_input, max_safety_input_bytes=1_000_000)
+            assert guard.handle_called >= 1, field
+            assert result.result.decision == Decision.DENY, field
+            assert result.result.reason == "denied for a real reason", field
+
+    def test_a_size_measurement_crash_denies_when_a_safety_blocking_handler_exists(
+        self,
+    ) -> None:
+        """Defence in depth alongside the surrogate fix above: ANY exception
+        computing the size (not only the specific surrogate case) must fail
+        CLOSED, not reach the controller's fail-open catch-all, whenever a
+        SAFETY+BLOCKING handler is registered for this chain.
+        """
+        import claude_code_hooks_daemon.core.chain as chain_module
+
+        chain = HandlerChain()
+        guard = MockHandler(
+            "safety-guard",
+            priority=10,
+            terminal=True,
+            tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING],
+        )
+        chain.add(guard)
+
+        def _boom(hook_input: dict[str, Any]) -> int:
+            raise RuntimeError("boom")
+
+        original = chain_module._safety_payload_size
+        chain_module._safety_payload_size = _boom
+        try:
+            hook_input = {"tool_name": "Bash", "tool_input": {"command": "x"}}
+            result = chain.execute(hook_input, max_safety_input_bytes=50)
+        finally:
+            chain_module._safety_payload_size = original
+
+        assert guard.handle_called == 0
+        assert result.result.decision == Decision.DENY
+        assert result.result.reason is not None
+        assert "boom" in result.result.reason or "RuntimeError" in result.result.reason
+
+    def test_a_size_measurement_crash_degrades_gracefully_with_no_safety_blocking_handler(
+        self,
+    ) -> None:
+        """The same crash, but nothing in the chain COULD have denied on the
+        size cap anyway -- failing the whole chain over an unrelated
+        measurement bug would be a pure availability regression with no
+        security benefit, so this degrades to "cap not enforced" instead.
+        """
+        import claude_code_hooks_daemon.core.chain as chain_module
+
+        chain = HandlerChain()
+        advisory = MockHandler("ordinary", priority=10, tags=[HandlerTag.ADVISORY])
+        chain.add(advisory)
+
+        def _boom(hook_input: dict[str, Any]) -> int:
+            raise RuntimeError("boom")
+
+        original = chain_module._safety_payload_size
+        chain_module._safety_payload_size = _boom
+        try:
+            hook_input = {"tool_name": "Bash", "tool_input": {"command": "x"}}
+            result = chain.execute(hook_input, max_safety_input_bytes=50)
+        finally:
+            chain_module._safety_payload_size = original
+
+        assert advisory.handle_called == 1
         assert result.result.decision == Decision.ALLOW
 
     def test_execute_preserves_handler_priority_order(self) -> None:
