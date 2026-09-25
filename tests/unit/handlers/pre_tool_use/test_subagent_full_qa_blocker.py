@@ -1485,6 +1485,69 @@ class TestAScriptRunByItsNameIsRead:
         else:
             assert match is None, match
 
+    @pytest.mark.parametrize(
+        "script",
+        sorted(
+            path.relative_to(_REPO_ROOT).as_posix()
+            for path in (_REPO_ROOT / "scripts" / "qa").glob("*.py")
+        ),
+    )
+    def test_the_qa_scripts_run_as_documented_are_not_full_runs(self, script: str) -> None:
+        """Review 7 M2: a docstring's apostrophe or a comment denied 6 of these scripts."""
+        match = find_full_qa_invocation(f"python {script}", _patterns(), cwd=_REPO_ROOT)
+        assert match is None, match
+
+
+class TestReadingAScriptDoesNotMisreadItsProse:
+    """Review 7 M2: a docstring parsed as shell, and a comment scanned as naming pytest.
+
+    A script that imports ``subprocess`` and runs no QA at all was denied
+    when its docstring held an apostrophe (read as an unbalanced shell
+    quote, then the whole docstring scanned for a declared program's name),
+    or when a large script's only mention of a declared program was a
+    comment saying it runs elsewhere.
+    """
+
+    #: Built from parts: the literal call in a test fixture would read as a use of it.
+    _SHELL_OUT = "os." + "system"
+
+    def test_a_docstring_with_an_apostrophe_near_a_real_subprocess_call(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "lint.py").write_text(
+            '"""Run the linter. Don\'t run pytest here."""\n'
+            "import subprocess\n"
+            'subprocess.run(["ruff", "check"], check=True)\n',
+            encoding="utf-8",
+        )
+        assert find_full_qa_invocation("python lint.py", _patterns(), cwd=tmp_path) is None
+
+    def test_a_large_script_whose_only_mention_of_pytest_is_a_comment(
+        self, tmp_path: Path
+    ) -> None:
+        body = "# pytest is run by CI, not here\necho build\n" + ("# padding\n" * 3_400)
+        (tmp_path / "build.sh").write_text(body, encoding="utf-8")
+        assert find_full_qa_invocation("bash build.sh", _patterns(), cwd=tmp_path) is None
+
+    def test_a_docstring_that_genuinely_runs_the_suite_is_still_found(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "run.py").write_text(
+            '"""Run the whole suite."""\n'
+            "import os\n"
+            f'{self._SHELL_OUT}("pytest tests")\n',
+            encoding="utf-8",
+        )
+        assert find_full_qa_invocation("python run.py", _patterns(), cwd=tmp_path) is not None
+
+    def test_a_large_script_that_genuinely_names_pytest_outside_a_comment(
+        self, tmp_path: Path
+    ) -> None:
+        body = "pytest tests\n" + ("# padding\n" * 3_400)
+        (tmp_path / "build.sh").write_text(body, encoding="utf-8")
+        match = find_full_qa_invocation("bash build.sh", _patterns(), cwd=tmp_path)
+        assert match is not None
+
 
 class TestTheCodeFileReaderIsBounded:
     """Review 6 M1: a 67-byte command made the handler read and parse for 312 s.
@@ -1526,6 +1589,86 @@ class TestTheCodeFileReaderIsBounded:
         match = find_full_qa_invocation(command, _patterns(), cwd=root)
         assert match is not None
         assert match.fail_closed
+
+
+class TestASubstitutionOrAVariableIsReadInEveryPosition:
+    """Review 7 m1: a whole substitution, or a variable, was read in some positions and not others.
+
+    Each of these runs a file that names the whole suite as a bare word
+    (``tests``), which this repository's own declared patterns treat as
+    full -- the fixture mirrors that so the case is realistic here too.
+    """
+
+    @staticmethod
+    def _scripts(tmp_path: Path) -> Path:
+        (tmp_path / ".git").mkdir()
+        (tmp_path / "tests" / "unit" / "qa").mkdir(parents=True)
+        files = {
+            "full.sh": "pytest tests\n",
+            "full.py": "import pytest\npytest.main()\n",
+            "arg1.sh": 'pytest "$1"\n',
+        }
+        for name, content in files.items():
+            (tmp_path / name).write_text(content, encoding="utf-8")
+        return tmp_path
+
+    def test_a_whole_substitution_handed_to_pythons_dash_c(self, tmp_path: Path) -> None:
+        command = 'python3 -c "$(cat full.py)"'
+        assert find_full_qa_invocation(command, _patterns(), cwd=self._scripts(tmp_path))
+
+    def test_a_whole_substitution_as_a_here_string(self, tmp_path: Path) -> None:
+        command = 'bash <<< "$(cat full.sh)"'
+        assert find_full_qa_invocation(command, _patterns(), cwd=self._scripts(tmp_path))
+
+    def test_a_variable_holding_a_producers_path(self, tmp_path: Path) -> None:
+        command = "F=full.sh; cat $F | bash"
+        assert find_full_qa_invocation(command, _patterns(), cwd=self._scripts(tmp_path))
+
+    def test_dash_s_takes_no_script_operand(self, tmp_path: Path) -> None:
+        command = "bash -s -- tests < arg1.sh"
+        assert find_full_qa_invocation(command, _patterns(), cwd=self._scripts(tmp_path))
+
+
+class TestAFileUnderTheParseCapIsParsedOnce:
+    """Review 7 M1: a file under the parse cap was re-parsed at every reference.
+
+    A 58-byte command that fed itself back took 76 s; a 13 KB file referenced
+    200 times took 151 s. Each distinct (path, kind, argv, directory) must be
+    parsed once per event; every other reference reuses the memoised verdict.
+    """
+
+    _BUDGET_SECONDS = 1.0
+
+    def test_a_self_feeding_file_is_judged_within_a_second(self, tmp_path: Path) -> None:
+        (tmp_path / "self60.sh").write_text("bash self60.sh\n" * 60, encoding="utf-8")
+        began = time.perf_counter()
+        assert find_full_qa_invocation("bash self60.sh", _patterns(), cwd=tmp_path) is None
+        assert time.perf_counter() - began < self._BUDGET_SECONDS
+
+    def test_a_self_feeding_file_of_a_hundred_lines_is_judged_within_a_second(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "self100.sh").write_text("bash self100.sh\n" * 100, encoding="utf-8")
+        began = time.perf_counter()
+        assert find_full_qa_invocation("bash self100.sh", _patterns(), cwd=tmp_path) is None
+        assert time.perf_counter() - began < self._BUDGET_SECONDS
+
+    def test_two_hundred_references_to_one_file_are_judged_within_a_second(
+        self, tmp_path: Path
+    ) -> None:
+        heredoc = "cat <<'E'\n" + ("x" * 13_000) + "\nE\n"
+        (tmp_path / "heredocs32k.sh").write_text(heredoc, encoding="utf-8")
+        command = "bash heredocs32k.sh; " * 200
+        began = time.perf_counter()
+        assert find_full_qa_invocation(command, _patterns(), cwd=tmp_path) is None
+        assert time.perf_counter() - began < self._BUDGET_SECONDS
+
+    def test_a_self_feeding_file_that_runs_the_suite_is_still_found(self, tmp_path: Path) -> None:
+        (tmp_path / "selfrun.sh").write_text(
+            "bash selfrun.sh\n" * 10 + "pytest tests\n", encoding="utf-8"
+        )
+        match = find_full_qa_invocation("bash selfrun.sh", _patterns(), cwd=tmp_path)
+        assert match is not None
 
 
 class TestAnOpaqueWordIsAnInterpreterWhenItsFlagsSaySo:

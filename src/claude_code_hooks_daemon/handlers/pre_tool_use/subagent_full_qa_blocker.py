@@ -62,12 +62,14 @@ NAME is built at run time from pieces (``$(printf 'py%s' test)``, or
 from __future__ import annotations
 
 import errno
+import io
 import logging
 import posixpath
 import re
 import shlex
 import stat
 import sys
+import tokenize
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
@@ -890,6 +892,8 @@ _HEREDOC_OPENER: Final[re.Pattern[str]] = re.compile(
 _TAB: Final[str] = "\t"
 _SHELL_VALUE_FLAGS: Final[frozenset[str]] = frozenset({"-o", "+o", "-O", "+O"})
 _SHELL_CODE_LETTER: Final[str] = "c"
+#: Reads the script from stdin; every later word is positional (review 7 m1).
+_SHELL_STDIN_LETTER: Final[str] = "s"
 
 
 @dataclass(frozen=True, slots=True)
@@ -1206,6 +1210,47 @@ def _without_comments(text: str) -> str:
     return "".join(out)
 
 
+#: PEP 701 (Python 3.12+) splits an f-string into STRING-like parts; older
+#: Pythons tokenize a whole f-string as one STRING, already covered below.
+_FSTRING_MIDDLE_TYPE: Final[tuple[int, ...]] = (
+    (tokenize.FSTRING_MIDDLE,) if hasattr(tokenize, "FSTRING_MIDDLE") else ()
+)
+
+
+def _without_python_prose(text: str) -> str:
+    """Python code judged only for a declared program's name: comments and string content dropped.
+
+    Python's own tokenizer finds every comment and string, so a triple-quoted
+    docstring, an f-string and an escaped quote are all read the way Python
+    reads them -- unlike a hand-rolled quote toggle, which a single stray
+    quote character (inside a docstring, say) can desynchronise for the rest
+    of the file. A program's name inside a string is data, not a line that
+    runs it, and a scan too coarse to parse the file in full must not read
+    it as one (review 7 M2). A file that fails to tokenize (a syntax error)
+    is scanned unchanged: the same behaviour as before this fix.
+    """
+    try:
+        tokens = list(tokenize.generate_tokens(io.StringIO(text).readline))
+    except (tokenize.TokenError, IndentationError, SyntaxError, ValueError):
+        return text
+    line_starts = [0]
+    for line in text.splitlines(keepends=True):
+        line_starts.append(line_starts[-1] + len(line))
+    chars = list(text)
+    blanked_types = {tokenize.STRING, tokenize.COMMENT, *_FSTRING_MIDDLE_TYPE}
+    for token in tokens:
+        if token.type not in blanked_types:
+            continue
+        start = line_starts[token.start[0] - 1] + token.start[1]
+        end = line_starts[token.end[0] - 1] + token.end[1]
+        # The string's own quotes stay, so later text is still read as code.
+        edge = 1 if token.type == tokenize.STRING else 0
+        for index in range(start + edge, end - edge):
+            if chars[index] != "\n":
+                chars[index] = " "
+    return "".join(chars)
+
+
 def _decode_ansi_c(text: str, index: int) -> tuple[str, int]:
     """Decode an ANSI-C body from ``index``; return it and the index after its quote."""
     decoded: list[str] = []
@@ -1341,15 +1386,13 @@ def _invocations(
     written = _written_paths(scan_target)
     if written:
         yield _WRITES, written, ""
-    if _INTERPRETER_WORD.search(scan_target) is not None:
-        yield from _code_on_stdin(scan_target, depth)
-        scan_target = _without_python_heredocs(scan_target)
-    protected, substitutions = _protect_substitutions(scan_target)
-    nested = _double_quoted_substitutions(scan_target) + [
-        _substitution_code(original) for original in substitutions
-    ]
-    for code in nested:
-        yield from _nested(code, code, depth)
+    has_interpreter = _INTERPRETER_WORD.search(scan_target) is not None
+    # A Python heredoc's body is code for `_code_on_stdin` to judge, not a
+    # shell segment of its own, so it is blanked before the command is split
+    # into segments below -- but `_code_on_stdin` itself needs the ORIGINAL
+    # text to find the heredoc in the first place.
+    parse_target = _without_python_heredocs(scan_target) if has_interpreter else scan_target
+    protected, substitutions = _protect_substitutions(parse_target)
     fed_a_listing = _consumers_of_a_listing(protected)
     parsed: list[tuple[str, list[str] | None]] = []
     for segment in split_unquoted(protected, _COMMAND_BOUNDARIES):
@@ -1365,7 +1408,17 @@ def _invocations(
         parsed.append((restored, words))
     word_lists = [split for _, split in parsed if split]
     variables = _variables(word_lists, positional)
-    renames = _renamed_commands(word_lists, scan_target)
+    renames = _renamed_commands(word_lists, parse_target)
+    if has_interpreter:
+        # A producer word built from a variable the command sets is expanded
+        # too, so `F=f; cat $F | bash` reads f, not an absent path
+        # (review 7 m1).
+        yield from _code_on_stdin(scan_target, depth, variables, positional)
+    nested = _double_quoted_substitutions(parse_target) + [
+        _substitution_code(original) for original in substitutions
+    ]
+    for code in nested:
+        yield from _nested(code, code, depth)
     for segment, split in parsed:
         if split is None:
             yield _UNPARSED, [], segment
@@ -1633,8 +1686,13 @@ def _reads_code_from_stdin(words: list[str]) -> bool:
             continue
         if not _is_flag(argument):
             return argument in _STDIN_PATHS
-        if not argument.startswith(_LONG_FLAG_PREFIX) and _SHELL_CODE_LETTER in argument[1:]:
-            return False
+        if not argument.startswith(_LONG_FLAG_PREFIX):
+            if _SHELL_CODE_LETTER in argument[1:]:
+                return False
+            # `-s`: the script comes from stdin, so a later word is
+            # positional, not a name to check (review 7 m1).
+            if _SHELL_STDIN_LETTER in argument[1:]:
+                return True
         index += 1
     return True
 
@@ -1841,7 +1899,12 @@ def _producer_output(words: list[str]) -> _Output:
     return _Output()
 
 
-def _code_on_stdin(text: str, depth: int) -> Iterator[tuple[str, list[str], str]]:
+def _code_on_stdin(
+    text: str,
+    depth: int,
+    variables: Mapping[str, list[str]] | None = None,
+    positional: Sequence[str] | None = None,
+) -> Iterator[tuple[str, list[str], str]]:
     """Code a shell or Python reads on stdin: piped, from ``<(...)``, or a Python heredoc.
 
     Literal code (from ``echo``/``printf``) is judged here; a file (``cat
@@ -1850,8 +1913,11 @@ def _code_on_stdin(text: str, depth: int) -> Iterator[tuple[str, list[str], str]
     ``_UNREAD_CODE``. A shell heredoc needs nothing here: its body is not
     blanked, so its lines are judged as commands already. Text that cannot
     be split into words is left to :func:`_invocations`, which judges the
-    same segment as unparsed.
+    same segment as unparsed. A producer's own words are expanded against
+    ``variables`` first, so ``F=f; cat $F | bash`` reads ``f`` rather than
+    treating the path as absent (review 7 m1).
     """
+    known = variables or {}
     for pipeline in split_unquoted(text, _PIPELINE_BOUNDARIES):
         try:
             stages = [shlex.split(stage) for stage in split_unquoted(pipeline, _PIPE)]
@@ -1859,6 +1925,7 @@ def _code_on_stdin(text: str, depth: int) -> Iterator[tuple[str, list[str], str]
             logger.debug("Pipeline left to the unparsed check (%s): %r", error, pipeline)
             continue
         for producer, consumer in pairwise(stages):
+            producer = _expand_variables(producer, known, positional)
             yield from _fed(_producer_output(producer), consumer, pipeline, depth)
     for consumer, producer_code in _process_substitutions(text):
         try:
@@ -1866,6 +1933,7 @@ def _code_on_stdin(text: str, depth: int) -> Iterator[tuple[str, list[str], str]
         except ValueError as error:
             logger.debug("Substitution left to the unparsed check (%s)", error)
             continue
+        producer = _expand_variables(producer, known, positional)
         yield from _fed(_producer_output(producer), consumer, producer_code, depth)
     for heredoc in _python_heredocs(text):
         yield from _python_code_runs(heredoc.body, heredoc.argv, heredoc.body, depth)
@@ -2274,7 +2342,9 @@ def _resolve_script(
             following = words[index + 1] if index + 1 < len(words) else ""
             if word.startswith(_HERE_STRING):
                 code = word[len(_HERE_STRING) :] or following
-                yield from _code_runs(kind, code, arguments, segment, depth)
+                # A whole substitution is its producer's output (review 7 m1):
+                # `bash /dev/stdin <<< "$(cat f)"` reads f.
+                yield from _code_of(kind, code, arguments, segment, depth)
                 return
             stdin = _STDIN_REDIRECT.match(word)
             if stdin is not None:
@@ -2559,6 +2629,42 @@ def _starts_a_process(code: str) -> bool:
     )
 
 
+def _process_call_spans(code: str) -> list[str]:
+    """The argument text of every call this code makes that starts a process.
+
+    A string literal is only ever an ARGV the code runs when it sits between
+    a process-starting call's parentheses (review 7 M2): a docstring or a
+    log message elsewhere in the file is never inside one, so it is never a
+    candidate, however many words or apostrophes it has. Depth is tracked
+    per call with :func:`_closing_paren`, so a nested call's own parens do
+    not end the outer one early.
+    """
+    os_modules, os_members = _imported_names(code, _OS_MODULE)
+    process_modules, process_members = _imported_names(code, _SUBPROCESS_MODULE)
+    os_functions = {
+        bound for bound, member in os_members.items() if _OS_PROCESS_FUNCTION.fullmatch(member)
+    }
+    os_holders = sorted({_OS_MODULE.pattern, *os_modules})
+    process_holders = sorted({_SUBPROCESS_MODULE.pattern, *process_modules})
+    bare = sorted(os_functions | set(process_members))
+    call_patterns = [
+        rf"(?<![\w.])(?:{'|'.join(re.escape(name) for name in os_holders)})"
+        rf"\s*\.\s*{_OS_PROCESS_FUNCTION.pattern}\s*\(",
+        rf"(?<![\w.])(?:{'|'.join(re.escape(name) for name in process_holders)})"
+        rf"\s*\.\s*\w+\s*\(",
+    ]
+    if bare:
+        call_patterns.append(
+            rf"(?<![\w.])(?:{'|'.join(re.escape(name) for name in bare)})\s*\("
+        )
+    spans = []
+    for call_pattern in call_patterns:
+        for match in re.finditer(call_pattern, code):
+            start = match.end()
+            spans.append(code[start : _closing_paren(code, start)])
+    return spans
+
+
 def _pytest_in_code(code: str, argv: Sequence[str] = ()) -> list[str] | None:
     """The operands of the pytest run Python code makes, or None when it makes none.
 
@@ -2596,15 +2702,27 @@ def _python_code_runs(
 ) -> Iterator[tuple[str, list[str], str]]:
     """What Python code runs: pytest, a shell command it hands to a process, or neither.
 
-    When the code starts a process, a string literal holding a command line
-    is judged as shell code. Code that imports or runs a module named only
-    at run time is yielded as ``_OPAQUE``, so the caller can fail closed.
-    pytest is yielded as ``_PYTEST_IN_CODE``: its operands are every string
-    in the code, so only a path-shaped one targets the run.
+    A string literal is judged as shell code only when it sits inside a
+    process-starting call's own argument list (:func:`_process_call_spans`):
+    a docstring or a log message elsewhere in the file is never an argv, and
+    parsing one as shell risks an apostrophe reading as an unbalanced quote
+    and the prose then being scanned whole for a declared program's name
+    (review 7 M2). Code that imports or runs a module named only at run time
+    is yielded as ``_OPAQUE``, so the caller can fail closed. pytest is
+    yielded as ``_PYTEST_IN_CODE``: its operands are every string in the
+    code, so only a path-shaped one targets the run.
     """
     if _starts_a_process(code):
-        for literal in _string_literals(code):
-            if literal.split(maxsplit=1)[1:]:
+        for span in _process_call_spans(code):
+            for literal in _string_literals(span):
+                if not literal.split(maxsplit=1)[1:]:
+                    continue
+                try:
+                    shlex.split(literal)
+                except ValueError:
+                    # Unparsable as shell: prose (an apostrophe, say), not a
+                    # command whose absence should fail closed (review 7 M2).
+                    continue
                 yield from _nested(literal, segment, depth)
     operands = _pytest_in_code(code, argv)
     if operands is not None:
@@ -2632,7 +2750,9 @@ def _resolve_python(
         following = rest[index + 1] if index + 1 < len(rest) else ""
         if argument.startswith(_HERE_STRING):
             code = argument[len(_HERE_STRING) :] or following
-            yield from _python_code_runs(code, [], segment, depth)
+            # A whole substitution is its producer's output (review 7 m1):
+            # `python3 <<< "$(cat f)"` reads f.
+            yield from _code_of(_PYTHON_CODE, code, [], segment, depth)
             return
         stdin = _STDIN_REDIRECT.match(argument)
         if stdin is not None:
@@ -2659,7 +2779,9 @@ def _resolve_python(
                 yield from _resolve([value, *after], segment, depth, hops + 1)
             return
         if letter == _PYTHON_CODE_LETTER:
-            yield from _python_code_runs(value, after, segment, depth)
+            # A whole substitution is its producer's output, as for `bash -c`
+            # (review 7 m1): `python3 -c "$(cat f)"` reads f.
+            yield from _code_of(_PYTHON_CODE, value, after, segment, depth)
             return
         index = value_at + 1
     if stdin_file:
@@ -2669,16 +2791,25 @@ def _resolve_python(
 def _resolve_shell(
     rest: list[str], segment: str, depth: int
 ) -> Iterator[tuple[str, list[str], str]]:
-    """``bash script args`` runs the script; ``-c 'code'``, ``<<< 'code'`` and ``< file`` run code."""
+    """``bash script args`` runs the script; ``-c 'code'``, ``<<< 'code'`` and ``< file`` run code.
+
+    ``-s`` reads the script from stdin and takes no script operand: every
+    word after it is a positional argument, not a name (review 7 m1), so
+    ``bash -s -- tests < f`` reads ``f``, not a directory named ``tests``.
+    """
     index = 0
     runs_code = False
+    reads_stdin_script = False
     stdin_file = ""
+    positional: list[str] = []
     while index < len(rest):
         argument = rest[index]
         following = rest[index + 1] if index + 1 < len(rest) else ""
         if argument.startswith(_HERE_STRING):
             code = argument[len(_HERE_STRING) :] or following
-            yield from _nested(code, segment, depth)
+            # A whole substitution is its producer's output (review 7 m1):
+            # `bash <<< "$(cat f)"` reads f.
+            yield from _code_of(_SHELL_CODE, code, [], segment, depth)
             return
         stdin = _STDIN_REDIRECT.match(argument)
         if stdin is not None:
@@ -2694,9 +2825,14 @@ def _resolve_shell(
             continue
         if argument.startswith(FLAG_PREFIX) and not argument.startswith(_LONG_FLAG_PREFIX):
             runs_code = runs_code or _SHELL_CODE_LETTER in argument[1:]
+            reads_stdin_script = reads_stdin_script or _SHELL_STDIN_LETTER in argument[1:]
             index += 1
             continue
         if argument.startswith(_LONG_FLAG_PREFIX):
+            index += 1
+            continue
+        if reads_stdin_script:
+            positional.append(argument)
             index += 1
             continue
         if runs_code:
@@ -2705,7 +2841,7 @@ def _resolve_shell(
         yield from _resolve_script(_SHELL_CODE, rest[index:], segment, depth)
         return
     if stdin_file and not runs_code:
-        yield _CODE_FILE, [_SHELL_CODE, stdin_file], segment
+        yield _CODE_FILE, [_SHELL_CODE, stdin_file, *positional], segment
 
 
 def _normalise_operand(value: str) -> str:
@@ -3225,12 +3361,20 @@ _ABSENT_CODE: Final[_CodeContent] = _CodeContent(_Readable.ABSENT)
 _UNSEEN_CODE: Final[_CodeContent] = _CodeContent(_Readable.UNSEEN)
 
 
+#: A parsed file's verdict, memoised by the resolved path, the kind it was
+#: read as, its argv, and the directory it ran from (review 7 M1): a file
+#: referenced many times, or one that feeds itself, is parsed once.
+_VerdictKey = tuple[str, str, tuple[str, ...], str]
+
+
 @dataclass
 class _Event:
     """What one event's judgement shares: the declaration, and the bounded file reads.
 
     Every file read in the event draws on one parse budget and one scan
-    budget, and each path is read at most once (review 6 M1).
+    budget, and each path is read at most once (review 6 M1). Each distinct
+    (path, kind, argv, directory) is PARSED at most once: repeat references
+    reuse the memoised verdict instead of re-parsing (review 7 M1).
     """
 
     patterns: Sequence[FullQaPattern]
@@ -3242,6 +3386,8 @@ class _Event:
     marked: dict[str, bool] = field(default_factory=dict)
     parse_budget: int = _MAX_PARSED_FILE_BYTES
     scan_budget: int = _MAX_SCANNED_FILE_BYTES
+    verdicts: dict[_VerdictKey, "FullQaMatch | None"] = field(default_factory=dict)
+    verdicts_pending: set[_VerdictKey] = field(default_factory=set)
 
 
 def _addopts(text: str) -> list[str]:
@@ -3377,7 +3523,10 @@ def _full_run_in_code_file(
     read and judged with its own argv; a cd inside it stays inside it. Code
     that cannot be seen fails closed: an unreadable file is denied, and one
     too large to parse, or past the nesting followed, is denied when it names
-    a declared program (review 6 M1, m2).
+    a declared program (review 6 M1, m2). A file is PARSED at most once per
+    distinct (path, kind, argv, directory): every other reference reuses the
+    memoised verdict, so a file referenced many times, or one that feeds
+    itself, costs one parse, not one per reference (review 7 M1).
     """
     kind, path, argv = arguments[0], arguments[1], arguments[2:]
     name = _PROGRAM_ALIASES.get(command_word(path), command_word(path))
@@ -3392,25 +3541,65 @@ def _full_run_in_code_file(
     if code_kind is None:
         return None
     if content.readable is _Readable.SCANNED or files_deep >= _MAX_NESTING:
-        if content.path not in event.named:
-            event.named[content.path] = _named_pattern(content.text, event.patterns)
-        named = event.named[content.path]
-        if named is None:
-            return None
-        return FullQaMatch(named.pattern_id, segment.strip(), _SCANNED_FILE_REASON)
-    event.addopts.extend(_addopts(content.text))
-    invocations = (
-        _invocations(content.text, 0, argv)
-        if code_kind == _SHELL_CODE
-        else _python_code_runs(content.text, argv, segment, 0)
+        return _scanned_verdict(content, code_kind, event, segment)
+    key: _VerdictKey = (
+        content.path,
+        code_kind,
+        tuple(argv),
+        str(here) if here is not None else "",
     )
-    found = _first_full_run(
-        invocations, _without_comments(content.text), event, here, files_deep + 1
-    )
+    if key in event.verdicts_pending:
+        # A file feeding itself back in: already being explored higher in
+        # this same chain, so this reference adds nothing new to find.
+        return None
+    if key in event.verdicts:
+        found = event.verdicts[key]
+        return (
+            None
+            if found is None
+            else FullQaMatch(found.pattern_id, segment.strip(), found.fail_closed)
+        )
+    event.verdicts_pending.add(key)
+    try:
+        event.addopts.extend(_addopts(content.text))
+        invocations = (
+            _invocations(content.text, 0, argv)
+            if code_kind == _SHELL_CODE
+            else _python_code_runs(content.text, argv, segment, 0)
+        )
+        found = _first_full_run(
+            invocations, _without_comments(content.text), event, here, files_deep + 1
+        )
+    finally:
+        event.verdicts_pending.discard(key)
+    event.verdicts[key] = found
     # The deny quotes the command that ran the file, never the file's own text.
     return (
         None if found is None else FullQaMatch(found.pattern_id, segment.strip(), found.fail_closed)
     )
+
+
+def _scanned_verdict(
+    content: _CodeContent, code_kind: str, event: _Event, segment: str
+) -> FullQaMatch | None:
+    """The verdict for a file too large to parse: a scan for a declared program's name.
+
+    Comments are dropped first (review 7 M2): a large script's only mention
+    of a declared program can be a comment saying it is run elsewhere, not a
+    line that runs it. A Python file also has every string's content blanked,
+    so a docstring or a message quoting a program's name is not read as one.
+    """
+    if content.path not in event.named:
+        scanned = (
+            _without_python_prose(content.text)
+            if code_kind == _PYTHON_CODE
+            else _without_comments(content.text)
+        )
+        event.named[content.path] = _named_pattern(scanned, event.patterns)
+    named = event.named[content.path]
+    if named is None:
+        return None
+    return FullQaMatch(named.pattern_id, segment.strip(), _SCANNED_FILE_REASON)
 
 
 def _code_kind(text: str) -> str | None:
