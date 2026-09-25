@@ -418,3 +418,58 @@ def test_a_fable_drop_all_the_way_to_sonnet_still_counts(tmp_path: Path) -> None
     _write_sidecar(sidecar_dir, model_id="claude-sonnet-5", effort="high", ts=_NOW - 0.5)
     _decide(sidecar_dir, machine)
     assert machine.export_state()["downgrade_episode"] is not None
+
+
+# ── Review 5 finding 1: a human pick, at ANY family, is sacred ───────────────
+
+
+def test_a_human_pick_of_a_lower_family_closes_the_open_episode(tmp_path: Path) -> None:
+    """An open episode (fable -> opus) must close the moment the human moves
+
+    to a family BELOW the fallback, not just when they rise back to fable. A
+    rank-only close condition let this survive: rank(sonnet) < rank(opus), so
+    the old "family recovered" check never fired and the episode stayed open
+    through the flip-flop backoff -- `/model fable` was later typed over the
+    human's own Sonnet pick.
+    """
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    write_attributed_downgrade(sidecar_dir, session_id=_SESSION)
+    _write_sidecar(sidecar_dir, model_id="claude-fable-5", ts=_NOW - 5.0)
+    _decide(sidecar_dir, machine)
+    _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="high", ts=_NOW - 0.5)
+    _decide(sidecar_dir, machine)
+    assert machine.export_state()["downgrade_episode"] is not None
+
+    _write_sidecar(sidecar_dir, model_id="claude-sonnet-5", effort="high", ts=_NOW + 1.0)
+    _decide(sidecar_dir, machine, facts=_facts(_NOW + 2.0))
+
+    assert machine.export_state()["downgrade_episode"] is None
+    assert machine.export_state()["spent_downgrade_record_id"] is not None
+
+
+def test_a_human_pick_of_a_lower_family_is_never_reverted_once_backoff_expires(
+    tmp_path: Path,
+) -> None:
+    """Field defect this replaces: the flip-flop backoff held the episode
+
+    open, and once it expired the supervisor typed `/model fable` at a human
+    who had picked Sonnet 45 minutes earlier.
+    """
+    sidecar_dir = tmp_path / "cs"
+    machine = _machine()
+    write_attributed_downgrade(sidecar_dir, session_id=_SESSION)
+    _write_sidecar(sidecar_dir, model_id="claude-fable-5", ts=_NOW - 5.0)
+    _decide(sidecar_dir, machine)
+    _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="high", ts=_NOW - 0.5)
+    restore = _decide(sidecar_dir, machine)
+    assert restore.payload == "/model fable"
+    machine.mark_model_restore(_NOW, family="fable", session=_SESSION)
+
+    _write_sidecar(sidecar_dir, model_id="claude-sonnet-5", effort="high", ts=_NOW + 900.0)
+    _decide(sidecar_dir, machine, facts=_facts(_NOW + 901.0))
+    assert machine.export_state()["downgrade_episode"] is None
+
+    later = _decide(sidecar_dir, machine, facts=_facts(_NOW + 4500.0))
+    assert later.payload != "/model fable"
+    assert later.decision_value != "would-model"

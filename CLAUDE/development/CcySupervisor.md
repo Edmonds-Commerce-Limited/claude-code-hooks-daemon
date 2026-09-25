@@ -173,13 +173,14 @@ already pinned it.
   that the SUPERVISOR never does this automatically or fights the choice
   afterward.
 
-**What the owner should add to `modelSettings`** (in whichever settings file
-they want it to apply — most commonly their user settings), naming exact
-model ids per `settings-reference.md:1197` ("Claude Code writes each entry
-under the model's canonical name... and matches that model's alias,
-date-suffixed, `[1m]`, and recognized provider-specific IDs to the same
-entry"). This is the canonical copy of these entries; post-upgrade task 02
-points here:
+### What the owner should add to `modelSettings`
+
+In whichever settings file they want it to apply — most commonly their user
+settings — naming exact model ids per `settings-reference.md:1197`
+("Claude Code writes each entry under the model's canonical name... and
+matches that model's alias, date-suffixed, `[1m]`, and recognized
+provider-specific IDs to the same entry"). This is the canonical copy of
+these entries; post-upgrade task 02 points here:
 
 ```json
 {
@@ -207,10 +208,15 @@ points here:
 - `claude-opus-5-5` gets NO entry: Opus 5.5 stays at its built-in `medium`
   default (`model-config.md:548`), and a top-level `effortLevel` in the user
   file does not apply to it either (`model-config.md:550`). A top-level
-  `effortLevel` in the project, local or managed settings file, or
-  `CLAUDE_CODE_EFFORT_LEVEL`, WOULD apply to every model, Opus 5.5 included,
-  and override all three entries above; `hooks-daemon check` reports either
-  as `[WARN] Effort Source`.
+  `effortLevel` in the project or local settings file, or
+  `CLAUDE_CODE_EFFORT_LEVEL` (the shell variable, or the same variable set
+  through the project, local or user file's own `env` object), WOULD apply to
+  every model, Opus 5.5 included, and override all three entries above;
+  `hooks-daemon check` reports any of those as `[WARN] Effort Source`. A
+  managed settings file or `--settings` can pin it too, but `check` does not
+  read either: this project vendors no confirmed on-disk path for managed
+  settings, and `--settings` cannot be seen from a running session. Rule
+  those out by hand if `check` passes and effort still looks pinned.
 
 Since none of this is code, **no worker reload applies to it at all** —
 editing `modelSettings` is an ordinary Claude Code settings edit, not a

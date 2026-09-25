@@ -253,6 +253,24 @@ class TestEffortSourceCheck:
         assert effort["warn"] is True
         assert ".claude/settings.json" in effort["current"]
 
+    def test_a_settings_file_raising_oserror_on_read_cannot_be_confirmed(
+        self, handler: Any, tmp_path: Path
+    ) -> None:
+        """Review 5 finding 4 (K1): only malformed JSON (`ValueError`) was ever
+
+        exercised here, leaving the `OSError` arm of the same `except` clause
+        untested. A directory where the settings file should be raises
+        `IsADirectoryError` (an `OSError`) on `read_text()` -- no chmod, so
+        this is not vacuous running as root.
+        """
+        (tmp_path / ".claude" / "settings.json").mkdir(parents=True)
+
+        effort = self._effort(handler, tmp_path)
+
+        assert effort["passed"] is False
+        assert effort["warn"] is True
+        assert ".claude/settings.json" in effort["current"]
+
     def test_every_pin_is_named_at_once(
         self, handler: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -286,6 +304,66 @@ class TestEffortSourceCheck:
             names = [c["name"] for c in handler._run_checks(tmp_path)]
 
         assert "Effort Level" not in names
+
+    @pytest.mark.parametrize("name", ["settings.json", "settings.local.json"])
+    def test_an_env_object_pin_in_project_or_local_settings_is_a_warning(
+        self, handler: Any, tmp_path: Path, name: str
+    ) -> None:
+        """Review 5 finding 3: Claude Code applies a settings `env` object like
+
+        the shell -- a pin there is the same every-model override as
+        `CLAUDE_CODE_EFFORT_LEVEL` itself, and the check's own `where` line
+        already claimed to look here.
+        """
+        self._write(tmp_path, name, json.dumps({"env": {"CLAUDE_CODE_EFFORT_LEVEL": "high"}}))
+
+        effort = self._effort(handler, tmp_path)
+
+        assert effort["passed"] is False
+        assert effort["warn"] is True
+        assert f".claude/{name}" in effort["current"]
+        assert "CLAUDE_CODE_EFFORT_LEVEL" in effort["current"]
+
+    def test_an_env_object_pin_in_user_settings_is_a_warning(
+        self, handler: Any, tmp_path: Path
+    ) -> None:
+        """Unlike a top-level `effortLevel`, a user-file `env` pin is NOT
+
+        outranked by a per-model `modelSettings` entry in the same file --
+        it is an unconditional environment override, applied before Claude
+        Code even looks at `modelSettings`.
+        """
+        user = {
+            "env": {"CLAUDE_CODE_EFFORT_LEVEL": "low"},
+            "modelSettings": {"claude-fable-5-1": {"effortLevel": "low"}},
+        }
+        with patch.object(handler, "_read_global_settings", return_value=user):
+            checks = handler._run_checks(tmp_path)
+
+        effort = next(c for c in checks if c["name"] == "Effort Source")
+        assert effort["passed"] is False
+        assert effort["warn"] is True
+        assert "~/.claude/settings.json" in effort["current"]
+        assert "CLAUDE_CODE_EFFORT_LEVEL" in effort["current"]
+
+    @pytest.mark.parametrize("value", ["auto", "unset", "AUTO", ""])
+    def test_a_non_pinning_env_object_value_is_not_a_pin(
+        self, handler: Any, tmp_path: Path, value: str
+    ) -> None:
+        self._write(
+            tmp_path, "settings.json", json.dumps({"env": {"CLAUDE_CODE_EFFORT_LEVEL": value}})
+        )
+
+        assert self._effort(handler, tmp_path)["passed"] is True
+
+    @pytest.mark.parametrize("level", [None, "auto", "AUTO", "unset", ""])
+    def test_a_non_pinning_top_level_effort_level_is_not_a_pin(
+        self, handler: Any, tmp_path: Path, level: str | None
+    ) -> None:
+        """`null`/`auto`/`unset` resolve to no explicit level, same as the env var."""
+        self._write(tmp_path, "settings.json", json.dumps({"effortLevel": level}))
+
+        assert self._effort(handler, tmp_path)["passed"] is True
 
 
 class TestExtendedThinkingCheck:

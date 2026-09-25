@@ -452,3 +452,50 @@ class TestRecordIdentity:
 
         assert facts is not None
         assert facts.record_id == "uuid-block-2"
+
+    def test_a_subtype_timestamped_before_its_block_is_not_its_pair(self, tmp_path: Path) -> None:
+        """Plan 00466 N47 review 5 finding 4 (D1): the pair window is one-sided.
+
+        A refusal a transcript rewrite or a clock skew dated BEFORE the block
+        it follows on disk is not that block's downgrade -- it keeps its own
+        identity and event time rather than borrowing the block's.
+        """
+        transcript = tmp_path / "session.jsonl"
+        transcript.write_text(
+            f"{_block_line(uuid='uuid-block', timestamp='2026-08-27T09:34:00.000Z')}\n"
+            f"{_subtype_line(uuid='uuid-sub', timestamp='2026-08-27T09:33:59.000Z')}\n",
+            encoding="utf-8",
+        )
+
+        facts = scan_transcript_tail(transcript)
+
+        assert facts is not None
+        assert facts.record_id == "uuid-sub"
+        assert facts.timestamp == "2026-08-27T09:33:59.000Z"
+
+    def test_a_subtype_exactly_at_the_pair_window_bound_still_pairs(self, tmp_path: Path) -> None:
+        """Review 5 finding 4 (D2): pins `PAIR_WINDOW_SECONDS` at 180, not 100."""
+        transcript = tmp_path / "session.jsonl"
+        transcript.write_text(
+            f"{_block_line(uuid='uuid-block', timestamp='2026-08-27T09:33:00.000Z')}\n"
+            f"{_subtype_line(uuid='uuid-sub', timestamp='2026-08-27T09:36:00.000Z')}\n",
+            encoding="utf-8",
+        )
+
+        facts = scan_transcript_tail(transcript)
+
+        assert facts is not None
+        assert facts.record_id == "uuid-block"
+
+    def test_a_subtype_one_second_past_the_pair_window_does_not_pair(self, tmp_path: Path) -> None:
+        transcript = tmp_path / "session.jsonl"
+        transcript.write_text(
+            f"{_block_line(uuid='uuid-block', timestamp='2026-08-27T09:33:00.000Z')}\n"
+            f"{_subtype_line(uuid='uuid-sub', timestamp='2026-08-27T09:36:01.000Z')}\n",
+            encoding="utf-8",
+        )
+
+        facts = scan_transcript_tail(transcript)
+
+        assert facts is not None
+        assert facts.record_id == "uuid-sub"

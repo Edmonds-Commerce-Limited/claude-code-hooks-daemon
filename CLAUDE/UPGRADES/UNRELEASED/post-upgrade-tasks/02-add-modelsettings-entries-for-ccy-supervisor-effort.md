@@ -11,9 +11,10 @@ relied on the supervisor's own `/effort` injections
 The ccy supervisor used to type `/effort low` whenever Fable ran above low
 (Plan 00297's DROP ANCHOR) and `/effort xhigh` on a downgrade's fallback model
 (downgrade compensation) itself. Claude Code saves every interactively-typed
-`/effort <level>` into `modelSettings` in your own `settings.json`, so those
-injections permanently overwrote your own saved level — the fight the redesign
-exists to end. The supervisor now injects no `/effort` command at all; the
+`/effort <level>` except `max` (session-only, unless pinned through
+`CLAUDE_CODE_EFFORT_LEVEL`) into `modelSettings` in your own `settings.json`,
+so those injections permanently overwrote your own saved level — the fight
+the redesign exists to end. The supervisor now injects no `/effort` command at all; the
 levels those injections aimed for are per-model `modelSettings` entries you
 add yourself.
 

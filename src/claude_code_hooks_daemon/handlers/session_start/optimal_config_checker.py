@@ -41,19 +41,44 @@ _EFFORT_CHECK_NAME = "Effort Source"
 _EFFORT_CHECK_WHY = (
     "Effort is set per model in settings.json under modelSettings, so each model "
     "(and each automatic fallback) runs at its own configured level. The "
-    "CLAUDE_CODE_EFFORT_LEVEL environment variable, or a top-level effortLevel "
-    "in the project or local settings file, pins ONE level on every model instead "
-    "and silently overrides those per-model entries."
+    "CLAUDE_CODE_EFFORT_LEVEL environment variable -- set in the shell, or in any "
+    "settings file's own env section, which Claude Code applies the same way -- or "
+    "a top-level effortLevel in the project or local settings file, pins ONE level "
+    "on every model instead and silently overrides those per-model entries."
 )
 _EFFORT_CHECK_FIX = (
     "Remove the pin and keep levels per model in modelSettings: "
-    "unset CLAUDE_CODE_EFFORT_LEVEL, and delete the top-level effortLevel key "
+    "unset CLAUDE_CODE_EFFORT_LEVEL everywhere it is set (shell or a settings "
+    "file's env section), and delete the top-level effortLevel key "
     "from the project/local settings file"
 )
 _EFFORT_CHECK_WHERE = (
-    "environment (~/.bashrc, ~/.zshrc, settings.json env section), "
-    ".claude/settings.json, .claude/settings.local.json"
+    "environment (~/.bashrc, ~/.zshrc), the env section of ~/.claude/settings.json, "
+    ".claude/settings.json or .claude/settings.local.json, and a top-level effortLevel "
+    "in .claude/settings.json or .claude/settings.local.json. Not checked: a managed "
+    "settings file, and --settings"
 )
+
+
+def _read_env_effort_pin(data: dict[str, Any], location: str) -> str | None:
+    """Return a pin description if ``data``'s ``env`` object pins effort, else None.
+
+    Claude Code applies a settings file's ``env`` object to the session
+    exactly as if it were set in the shell (Plan 00466 N47 review 5 finding
+    3) -- so a value here is the same unconditional, every-model pin as the
+    ``CLAUDE_CODE_EFFORT_LEVEL`` environment variable itself, checked with the
+    same non-pinning values.
+    """
+    env_obj = data.get("env")
+    if not isinstance(env_obj, dict):
+        return None
+    raw = env_obj.get(_EFFORT_ENV_VAR)
+    if raw is None:
+        return None
+    value = str(raw)
+    if value.strip().lower() in _EFFORT_ENV_NON_PINNING_VALUES:
+        return None
+    return f"{location} env.{_EFFORT_ENV_VAR}={value!r}"
 
 
 class OptimalConfigCheckerHandler(SessionStartHandlerBase):
@@ -150,19 +175,36 @@ class OptimalConfigCheckerHandler(SessionStartHandlerBase):
         ``modelSettings`` -- the daemon holds no opinion on the level itself
         and never recommends one. What it can see is anything that silently
         overrides those per-model levels for every model at once: the
-        ``CLAUDE_CODE_EFFORT_LEVEL`` environment variable, and a top-level
+        ``CLAUDE_CODE_EFFORT_LEVEL`` environment variable (in the shell, or
+        set through any settings file's own ``env`` object -- review 5
+        finding 3, Claude Code applies both identically), and a top-level
         ``effortLevel`` in the project's or the local settings file (both
         outrank the user file, and a top-level key there applies to every
         model). A top-level ``effortLevel`` in the USER file is not a pin: a
-        per-model entry in the same file outranks it.
+        per-model entry in the same file outranks it. ``null``/``"auto"``
+        (and the other values the env var itself treats as unset) are not a
+        pin either way -- the same non-pinning values, for the same reason.
 
         A project settings file that cannot be read is reported too: not
         knowing whether it pins effort is not the same as knowing it does not.
+
+        Managed settings and ``--settings`` are NOT read here: this project
+        vendors no confirmed on-disk path for the managed-settings file, and
+        guessing one would report a location that might not be where this
+        machine's Claude Code actually reads it. ``_EFFORT_CHECK_WHERE`` and
+        ``CcySupervisor.md`` name this gap rather than claim coverage the
+        code does not have.
         """
         pins: list[str] = []
         env_value = os.environ.get(_EFFORT_ENV_VAR, "")
         if env_value.strip().lower() not in _EFFORT_ENV_NON_PINNING_VALUES:
             pins.append(f"{_EFFORT_ENV_VAR}={env_value!r}")
+
+        user_data = self._read_global_settings()
+        user_env_pin = _read_env_effort_pin(user_data, "~/.claude/settings.json")
+        if user_env_pin is not None:
+            pins.append(user_env_pin)
+
         for name in _PROJECT_SETTINGS_FILES:
             relative = f".claude/{name}"
             path = project_root / ".claude" / name
@@ -178,8 +220,15 @@ class OptimalConfigCheckerHandler(SessionStartHandlerBase):
                 continue
             if not isinstance(data, dict):
                 pins.append(f"{relative} is not a JSON object, so it cannot be checked")
-            elif "effortLevel" in data:
-                pins.append(f"{relative} sets a top-level effortLevel={data['effortLevel']!r}")
+                continue
+            if "effortLevel" in data:
+                level = data["effortLevel"]
+                normalized = "" if level is None else str(level).strip().lower()
+                if normalized not in _EFFORT_ENV_NON_PINNING_VALUES:
+                    pins.append(f"{relative} sets a top-level effortLevel={level!r}")
+            env_pin = _read_env_effort_pin(data, relative)
+            if env_pin is not None:
+                pins.append(env_pin)
 
         if not pins:
             return {

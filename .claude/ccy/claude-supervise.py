@@ -2868,6 +2868,16 @@ _DOWNGRADE_FIELD_RECORD_ID = "record_id"
 # gap after which a human's own pick could be mistaken for the machine's.
 _DOWNGRADE_ATTRIBUTION_WINDOW_SECONDS = 300.0
 
+# Plan 00466 N47 review 5 finding 2: a record must also not have been
+# SUPERSEDED -- the supervisor already saw the session back on the top family
+# (fable) at some point after the record's own event time, which means that
+# downgrade was already over before the drop now being judged happened. The
+# skew is slack for status-line render lag between the sidecar showing fable
+# and the record's own transcript timestamp; it is much smaller than the
+# attribution window because it bounds a rendering delay, not a human's
+# reaction time.
+_DOWNGRADE_SUPERSEDE_SKEW_SECONDS = 30.0
+
 
 @dataclass(frozen=True)
 class DowngradeRecord:
@@ -3330,6 +3340,13 @@ class CompactStateMachine:
         # `_DOWNGRADE_ATTRIBUTION_WINDOW_SECONDS` of it is attributed.
         self._attributed_downgrade: str | None = None
         self._attributed_downgrade_event_ts: float | None = None
+        # Plan 00466 N47 review 5 finding 2: the session and wall time of the
+        # most recently observed TOP-family (fable) reading. Updated on every
+        # reading that shows fable, not just on the transition into it --
+        # `_downgrade_is_attributed` uses the latest one to refuse a record
+        # the supervisor has already watched the session recover past.
+        self._last_top_family_seen_session: str | None = None
+        self._last_top_family_seen_ts: float | None = None
         # Plan 00466 N47: the record key backing the CURRENTLY open episode
         # (None when none is open), and the key of the most recently CLOSED
         # episode -- once a record's episode has been opened and later closed
@@ -3532,7 +3549,7 @@ class CompactStateMachine:
     ) -> bool:
         """True when the platform recorded THIS session making THIS drop, freshly.
 
-        Three conditions, each closing a way the supervisor came to type
+        Four conditions, each closing a way the supervisor came to type
         `/model fable` at a human who had chosen otherwise:
 
         - the record names this session, from-family and to-family;
@@ -3545,10 +3562,18 @@ class CompactStateMachine:
           ``_DOWNGRADE_ATTRIBUTION_WINDOW_SECONDS`` of ``observed_wall``, when
           the drop was seen -- an old record says nothing about a drop now,
           including one whose episode never opened and so was never spent
-          (review 4 findings 3 and 4).
+          (review 4 findings 3 and 4);
+        - the session has not been seen back on the top family (fable) SINCE
+          the record's own event time (review 5 finding 2) -- a record's key
+          can be one an empty-key record never spends, or one a later
+          unrelated record from a byte-offset collision happens to match, so
+          a downgrade already superseded by an observed recovery must not be
+          replayed onto a fresh drop that merely shares the same
+          from/to/session shape.
 
         An empty key is never spent (spending it would refuse every later
-        keyless record); for such a record the window is the only bound.
+        keyless record); for such a record the window and the supersede check
+        are the only bounds.
         """
         recorded = self._attributed_downgrade
         event_ts = self._attributed_downgrade_event_ts
@@ -3562,7 +3587,15 @@ class CompactStateMachine:
             return False
         if rec_key and rec_key == self._spent_downgrade_record_id:
             return False
-        return abs(observed_wall - event_ts) <= _DOWNGRADE_ATTRIBUTION_WINDOW_SECONDS
+        if abs(observed_wall - event_ts) > _DOWNGRADE_ATTRIBUTION_WINDOW_SECONDS:
+            return False
+        if (
+            self._last_top_family_seen_session == session
+            and self._last_top_family_seen_ts is not None
+            and self._last_top_family_seen_ts > event_ts + _DOWNGRADE_SUPERSEDE_SKEW_SECONDS
+        ):
+            return False
+        return True
 
     def _open_downgrade_episode(
         self, *, session: str, from_family: str, to_family: str, now_wall: float
@@ -3679,6 +3712,19 @@ class CompactStateMachine:
         prev_family = self._last_model_family
         self._last_model_session = session
         self._last_model_family = family
+        if (
+            _family_rank(family) == _TOP_FAMILY_RANK
+            and prev_session == session
+            and prev_family is not None
+        ):
+            # Excludes the very first reading this process has ever seen for
+            # the session: that one IS the origin of whatever drop follows
+            # it, not a later confirmation that supersedes an older record
+            # (review 5 finding 2's own window test -- a record dated up to
+            # `_DOWNGRADE_ATTRIBUTION_WINDOW_SECONDS` before this exact
+            # origin sighting must still attribute).
+            self._last_top_family_seen_session = session
+            self._last_top_family_seen_ts = reading.ts
         self._settle_awaited_restore(family=family, session=session, reading_ts=reading.ts)
         if self._pending_unattributed_drop is not None:
             p_session, _, p_rest = self._pending_unattributed_drop.partition(":")
@@ -3693,9 +3739,22 @@ class CompactStateMachine:
                 self._pending_unattributed_drop_ts = None
         if self._downgrade_episode is not None:
             ep_session, _, ep_family = self._downgrade_episode.partition(":")
-            if session != ep_session or _family_rank(family) > _family_rank(ep_family):
-                # Plan 00466 N47 review 2 finding 4: the episode is closing
-                # because the family recovered (or the session changed) --
+            if session != ep_session or family != ep_family:
+                # Plan 00466 N47 review 5 finding 1: ANY foreground change away
+                # from the fallback family closes the episode, not only a
+                # rise. A rank check alone left an open episode surviving a
+                # human's move to a LOWER family still (opus fallback, human
+                # picks Sonnet) -- the episode held through the flip-flop
+                # backoff and `/model fable` was later typed over that pick.
+                # Every reading that reaches here already had its own chance
+                # to be the supervisor's own awaited restore landing
+                # (`_settle_awaited_restore`, above); anything else observed
+                # on the fallback session is the human's business, exactly
+                # the same ruling that scopes the episode to a drop FROM
+                # fable in the first place (see the comment above this
+                # method).
+                #
+                # Plan 00466 N47 review 2 finding 4: the episode is closing --
                 # spend this episode's record key so the SAME still-published
                 # attribution record can never reopen a fresh episode later
                 # on a manual switch back to the fallback family. An EMPTY
@@ -3751,20 +3810,20 @@ class CompactStateMachine:
             else:
                 self._pending_unattributed_drop = None
                 self._pending_unattributed_drop_ts = None
-                if self._downgrade_episode is None:
-                    # A fresh episode: remember where we fell FROM and when, for
-                    # the delayed /model flip-back (Task 2b.3), and which record
-                    # backs it so a later recovery can spend it.
-                    self._open_downgrade_episode(
-                        session=session,
-                        from_family=prev_family,
-                        to_family=family,
-                        now_wall=now_wall,
-                    )
-                else:
-                    # A further drop inside an open episode keeps the original
-                    # from/started/record and follows the session down.
-                    self._downgrade_episode = f"{session}:{family}"
+                # An episode is always None here (Plan 00466 N47 review 5
+                # finding 4): reaching this branch requires `prev_family` to
+                # be the top family (fable), and an open episode's fallback
+                # family can never BE fable -- any reading of fable would
+                # already have closed it, above, before this point. Remember
+                # where we fell FROM and when, for the delayed /model
+                # flip-back (Task 2b.3), and which record backs it so a later
+                # recovery can spend it.
+                self._open_downgrade_episode(
+                    session=session,
+                    from_family=prev_family,
+                    to_family=family,
+                    now_wall=now_wall,
+                )
 
     @property
     def goal_injections(self) -> int:
@@ -3930,6 +3989,8 @@ class CompactStateMachine:
             "pending_unattributed_drop": self._pending_unattributed_drop,
             "pending_unattributed_drop_ts": self._pending_unattributed_drop_ts,
             "retro_attribution_note": self._retro_attribution_note,
+            "last_top_family_seen_session": self._last_top_family_seen_session,
+            "last_top_family_seen_ts": self._last_top_family_seen_ts,
         }
 
     def import_state(self, state: dict[str, object]) -> None:
@@ -4059,6 +4120,12 @@ class CompactStateMachine:
         if "retro_attribution_note" in state:
             raw = state["retro_attribution_note"]
             self._retro_attribution_note = None if raw is None else str(raw)
+        if "last_top_family_seen_session" in state:
+            raw = state["last_top_family_seen_session"]
+            self._last_top_family_seen_session = None if raw is None else str(raw)
+        if "last_top_family_seen_ts" in state:
+            raw = state["last_top_family_seen_ts"]
+            self._last_top_family_seen_ts = None if raw is None else _coerce_float(raw)
         # Plan 00466 N47 review 3: an episode already open when this state was
         # exported by an OLDER worker (pre-dating the episode's record key, or
         # a legacy payload with the key stripped) imports with no key to spend

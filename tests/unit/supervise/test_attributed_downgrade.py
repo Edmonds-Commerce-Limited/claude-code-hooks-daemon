@@ -639,6 +639,16 @@ class TestAttributionWindow:
 
         assert machine.export_state()["downgrade_episode"] is not None
 
+    def test_a_drop_exactly_at_the_window_bound_is_attributed(self, tmp_path: Path) -> None:
+        """Review 5 finding 4 (W1): the bound is `<=`, not `<` -- pin the exact 300s edge."""
+        sidecar_dir = tmp_path / "cs"
+        machine = _machine()
+        _write_downgrade_signal(sidecar_dir, ts=_NOW - 7.0 - _WINDOW)
+
+        _drive_fable_to_opus(sidecar_dir, machine, now=_NOW)
+
+        assert machine.export_state()["downgrade_episode"] is not None
+
     def test_a_drop_just_outside_the_window_is_not_attributed(self, tmp_path: Path) -> None:
         sidecar_dir = tmp_path / "cs"
         machine = _machine()
@@ -904,6 +914,44 @@ class TestRetroAttribution:
 
         assert outcome.payload == "/model fable"
         assert "retroactively" in outcome.reason
+
+    def test_settle_never_overwrites_an_already_open_episode(self, tmp_path: Path) -> None:
+        """Review 5 finding 4 (S2): the guard is reachable only through a hot
+
+        reload that imports BOTH an open episode and a stale latch at once
+        (never produced by a live tick -- `note_model_reading` clears the
+        latch the moment an episode opens). Without the guard, the latch's
+        drop would overwrite the episode the running session already has
+        open. The latch's OWN to-family is set to match the open episode's
+        fallback family exactly, so the reading below neither clears the
+        latch (its own leaves-the-fallback cleanup) nor closes the episode
+        (review 5 finding 1) -- isolating the settle guard alone.
+        """
+        sidecar_dir = tmp_path / "cs"
+        machine = _machine()
+        machine.import_state(
+            {
+                "last_model_session": _SESSION,
+                "last_model_family": "opus",
+                "downgrade_episode": f"{_SESSION}:opus",
+                "downgrade_from_family": "fable",
+                "downgrade_started_ts": _NOW - 100.0,
+                "downgrade_episode_record_id": "uuid-existing-episode",
+                "attributed_downgrade": f"{_SESSION}:haiku:opus:uuid-pending",
+                "attributed_downgrade_event_ts": _NOW - 10.0,
+                "pending_unattributed_drop": f"{_SESSION}:haiku:opus",
+                "pending_unattributed_drop_ts": _NOW - 10.0,
+            }
+        )
+
+        _show(sidecar_dir, model_id="claude-opus-5", now=_NOW + 1.0)
+        _decide(sidecar_dir, machine, now=_NOW + 1.0)
+
+        state = machine.export_state()
+        assert state["downgrade_episode"] == f"{_SESSION}:opus"
+        assert state["downgrade_from_family"] == "fable"
+        assert state["downgrade_episode_record_id"] == "uuid-existing-episode"
+        assert state["pending_unattributed_drop"] is not None
 
 
 class TestHotReloadBackfill:
