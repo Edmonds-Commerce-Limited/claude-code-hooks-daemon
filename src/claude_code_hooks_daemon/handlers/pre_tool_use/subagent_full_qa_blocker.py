@@ -1233,9 +1233,15 @@ def _without_comments(text: str) -> str:
 
 
 #: PEP 701 (Python 3.12+) splits an f-string into STRING-like parts; older
-#: Pythons tokenize a whole f-string as one STRING, already covered below.
+#: Pythons (this project runs 3.11) tokenize a whole f-string as one STRING,
+#: already covered below. ``getattr`` rather than a direct attribute access
+#: (review 8 M4): pyright resolves ``tokenize`` against the project's own
+#: 3.11 stub, where ``FSTRING_MIDDLE`` does not exist, so a static
+#: ``tokenize.FSTRING_MIDDLE`` is a reported error however it is guarded at
+#: runtime.
+_FSTRING_MIDDLE: Final[int | None] = getattr(tokenize, "FSTRING_MIDDLE", None)
 _FSTRING_MIDDLE_TYPE: Final[tuple[int, ...]] = (
-    (tokenize.FSTRING_MIDDLE,) if hasattr(tokenize, "FSTRING_MIDDLE") else ()
+    (_FSTRING_MIDDLE,) if _FSTRING_MIDDLE is not None else ()
 )
 
 
