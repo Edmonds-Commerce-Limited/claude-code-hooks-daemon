@@ -81,6 +81,7 @@ from claude_code_hooks_daemon.daemon.permission_audit import (
     audit_untracked_permissions,
     tighten_permissions,
 )
+from claude_code_hooks_daemon.daemon.process_verification import daemon_process_project_root
 from claude_code_hooks_daemon.daemon.server import (
     DaemonAlreadyRunningError,
     _socket_liveness_sync,
@@ -783,6 +784,24 @@ def cmd_stop(args: argparse.Namespace) -> int:
         print("Daemon not running")
         return 0
 
+    # verify_daemon proves only that the pid is SOME daemon server. Signal it
+    # only once it is proven to serve THIS project: a stale pid file whose pid
+    # was reused by another project's daemon must not get that daemon killed.
+    own_root = os.path.realpath(project_path)
+    pid_root = daemon_process_project_root(pid)
+    if pid_root is None:
+        print(
+            f"ERROR: PID {pid} is a daemon server whose project cannot be determined; "
+            "refusing to signal it",
+            file=sys.stderr,
+        )
+        return 1
+    if pid_root != own_root:
+        print(f"PID {pid} is the daemon for {pid_root}, not this project (stale PID file)")
+        cleanup_pid_file(str(pid_path))
+        cleanup_socket(str(socket_path))
+        return 0
+
     # Send SIGTERM
     try:
         os.kill(pid, signal.SIGTERM)
@@ -818,6 +837,15 @@ def cmd_stop(args: argparse.Namespace) -> int:
         # GIL-holding handler cannot even reach Python's signal-handling
         # bytecode check to act on SIGTERM; SIGKILL is delivered by the
         # kernel and cannot be caught, blocked or ignored.
+        # Re-prove before SIGKILL: the grace period is long enough for the pid
+        # to have exited and been reused.
+        if daemon_process_project_root(pid) != own_root:
+            print(
+                f"ERROR: PID {pid} no longer proves to be this project's daemon; "
+                "refusing to escalate to SIGKILL",
+                file=sys.stderr,
+            )
+            return 1
         print(
             f"WARNING: Daemon still running after {timeout}s; escalating to SIGKILL",
             file=sys.stderr,

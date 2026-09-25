@@ -7,10 +7,24 @@ import psutil
 
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.daemon.process_verification import (
+    daemon_process_project_root,
     find_all_daemon_processes,
     is_process_running,
     kill_daemon_process,
 )
+
+# A pid no real process carries (above the kernel's pid_max ceiling), so no
+# test here can ever name a live process even if a mock is bypassed.
+_UNREAL_PID = 2**22 + 7
+_OWN_ROOT = "/srv/projects/ours"
+_DAEMON_CMDLINE = [
+    f"{_OWN_ROOT}/untracked/venv/bin/python",
+    "-m",
+    "claude_code_hooks_daemon.daemon.cli",
+    "--project-root",
+    _OWN_ROOT,
+    "start",
+]
 
 
 class TestFindAllDaemonProcesses:
@@ -510,3 +524,51 @@ class TestIsProcessRunning:
             result = is_process_running(pid=12345)
 
         assert result is False
+
+
+class TestDaemonProcessProjectRoot:
+    """Tests for daemon_process_project_root(): the proof ``stop`` needs before it signals."""
+
+    def _process(self, cmdline: list[str]) -> MagicMock:
+        process = MagicMock(spec=psutil.Process)
+        process.cmdline.return_value = cmdline
+        return process
+
+    def test_returns_the_root_a_daemon_server_names(self) -> None:
+        with patch("psutil.Process", return_value=self._process(_DAEMON_CMDLINE)):
+            assert daemon_process_project_root(_UNREAL_PID) == os.path.realpath(_OWN_ROOT)
+
+    def test_a_non_daemon_process_has_no_root(self) -> None:
+        with patch("psutil.Process", return_value=self._process(["/usr/bin/vim", _OWN_ROOT])):
+            assert daemon_process_project_root(_UNREAL_PID) is None
+
+    def test_a_daemon_whose_root_cannot_be_attributed_has_no_root(self) -> None:
+        unattributable = ["/usr/bin/python3", "-m", "claude_code_hooks_daemon.daemon.cli", "start"]
+        with patch("psutil.Process", return_value=self._process(unattributable)):
+            assert daemon_process_project_root(_UNREAL_PID) is None
+
+    def test_a_vanished_or_inaccessible_process_has_no_root(self) -> None:
+        for error in (
+            psutil.NoSuchProcess(pid=_UNREAL_PID),
+            psutil.AccessDenied(pid=_UNREAL_PID),
+            psutil.ZombieProcess(pid=_UNREAL_PID),
+        ):
+            with patch("psutil.Process", side_effect=error):
+                assert daemon_process_project_root(_UNREAL_PID) is None
+
+    def test_init_our_own_pid_and_non_positive_pids_are_never_attributed(self) -> None:
+        """Even a daemon-shaped cmdline cannot make pid 1, 0, a negative pid or
+        this process a signal target (Plan 00466 N59: a pid that coerced to 1
+        killed the container)."""
+        with patch("psutil.Process", return_value=self._process(_DAEMON_CMDLINE)) as proc_cls:
+            for pid in (1, 0, -1, os.getpid()):
+                assert daemon_process_project_root(pid) is None
+            proc_cls.assert_not_called()
+
+    def test_a_non_int_pid_is_never_attributed(self) -> None:
+        """A MagicMock pid coerces to 1 through ``__index__``; it must be refused
+        before anything reads it as a number."""
+        with patch("psutil.Process", return_value=self._process(_DAEMON_CMDLINE)) as proc_cls:
+            assert daemon_process_project_root(MagicMock()) is None
+            assert daemon_process_project_root(True) is None
+            proc_cls.assert_not_called()

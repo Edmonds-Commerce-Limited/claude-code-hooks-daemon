@@ -155,6 +155,37 @@ def _root_from_interpreter(interpreter: str) -> str | None:
     return None
 
 
+def daemon_process_project_root(pid: int) -> str | None:
+    """Return the real project root a live daemon SERVER pid serves, if provable.
+
+    This is the proof a caller needs before it signals ``pid`` on behalf of one
+    project: compare the result with that project's own ``os.path.realpath``.
+    ``realpath`` is safe here, unlike in :func:`_normalize_root`, because a pid
+    this process can signal lives in its own mount namespace.
+
+    Args:
+        pid: Candidate process id.
+
+    Returns:
+        The resolved project root, or ``None`` when ``pid`` is not a real
+        ``int`` above 1, is this process, is gone or inaccessible, is not a
+        daemon server, or serves a root its command line does not name.
+    """
+    # type() rather than isinstance(): a bool is an int, and a MagicMock pid
+    # coerces to 1 through __index__ (Plan 00466 N59), so neither is a pid.
+    if type(pid) is not int or pid <= 1 or pid == os.getpid():
+        return None
+    try:
+        cmdline = psutil.Process(pid).cmdline()
+    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess) as e:
+        logger.debug("Cannot inspect PID %d cmdline: %s", pid, e)
+        return None
+    if not _is_daemon_server_process(cmdline):
+        return None
+    root = _extract_project_root(cmdline)
+    return os.path.realpath(root) if root is not None else None
+
+
 def kill_daemon_process(pid: int) -> bool:
     """Safely terminate a daemon process.
 

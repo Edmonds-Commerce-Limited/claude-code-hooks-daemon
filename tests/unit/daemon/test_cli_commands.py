@@ -10,7 +10,10 @@ Focused tests covering critical CLI paths including:
 
 import argparse
 import json
+import os
+import signal
 import socket
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock, patch
@@ -53,6 +56,16 @@ def mock_git_checks(monkeypatch: Any) -> None:
 def reset_project_context() -> None:
     """Reset ProjectContext singleton between tests."""
     ProjectContext._initialized = False
+
+
+@pytest.fixture
+def pid_proven_ours(tmp_path: Path) -> Iterator[None]:
+    """Attribute the stopped pid to ``tmp_path``'s daemon, as a real one would be."""
+    with patch(
+        "claude_code_hooks_daemon.daemon.cli.daemon_process_project_root",
+        return_value=os.path.realpath(tmp_path),
+    ):
+        yield
 
 
 class TestGetProjectPath:
@@ -289,6 +302,7 @@ class TestCmdStatus:
             assert result == 1
 
 
+@pytest.mark.usefixtures("pid_proven_ours")
 class TestCmdStop:
     """Tests for cmd_stop command."""
 
@@ -421,8 +435,6 @@ class TestCmdStop:
         finding leaves the process in, and exactly the case ``init.sh``'s own
         advice ("this is fixed by restarting it") assumes works.
         """
-        import signal
-
         claude_dir = tmp_path / ".claude"
         claude_dir.mkdir()
         hooks_daemon_dir = claude_dir / "hooks-daemon"
@@ -461,6 +473,7 @@ class TestCmdStop:
             mock_cleanup_sock.assert_called_once()
 
 
+@pytest.mark.usefixtures("pid_proven_ours")
 class TestCmdStopGenericException:
     """Tests for cmd_stop generic exception path (line 373-375)."""
 
@@ -482,6 +495,99 @@ class TestCmdStopGenericException:
         ):
             result = cmd_stop(args)
             assert result == 1
+
+
+# A pid above the kernel's pid_max ceiling: never a live process, so a signal
+# that escaped every patch below could not reach anything.
+_UNREAL_PID = 2**22 + 7
+_OTHER_PROJECT_ROOT = "/srv/projects/someone-else"
+
+
+class TestCmdStopSignalsOnlyThisProjectsDaemon:
+    """``stop`` signals a pid only once it is proven to be THIS project's daemon.
+
+    ``read_pid_file(verify_daemon=True)`` proves only that the pid is SOME
+    daemon server. A stale pid file whose pid was reused by another project's
+    daemon passes that check, and the SIGKILL escalation would then kill a
+    daemon serving someone else (Plan 00466 N40 review 2 MA2, N59's rule).
+    """
+
+    def _args(self, tmp_path: Path) -> argparse.Namespace:
+        claude_dir = tmp_path / ".claude"
+        (claude_dir / "hooks-daemon").mkdir(parents=True)
+        (claude_dir / "hooks-daemon.yaml").write_text("version: '1.0'\n")
+        return argparse.Namespace(project_root=tmp_path)
+
+    def test_another_projects_daemon_is_never_signalled(self, tmp_path: Path) -> None:
+        sent: list[int] = []
+
+        def record(pid: int, sig: int) -> None:
+            sent.append(sig)
+
+        with (
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=_UNREAL_PID),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.daemon_process_project_root",
+                return_value=_OTHER_PROJECT_ROOT,
+            ),
+            patch("os.kill", side_effect=record),
+            patch("claude_code_hooks_daemon.daemon.cli.cleanup_pid_file") as cleanup_pid,
+            patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket"),
+        ):
+            result = cmd_stop(self._args(tmp_path))
+
+        assert [sig for sig in sent if sig != 0] == []
+        assert result == 0
+        cleanup_pid.assert_called_once()
+
+    def test_an_unattributable_daemon_is_never_signalled(self, tmp_path: Path) -> None:
+        """When the daemon's project cannot be determined, stop refuses and says so."""
+        sent: list[int] = []
+
+        def record(pid: int, sig: int) -> None:
+            sent.append(sig)
+
+        with (
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=_UNREAL_PID),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.daemon_process_project_root",
+                return_value=None,
+            ),
+            patch("os.kill", side_effect=record),
+            patch("claude_code_hooks_daemon.daemon.cli.cleanup_pid_file") as cleanup_pid,
+        ):
+            result = cmd_stop(self._args(tmp_path))
+
+        assert [sig for sig in sent if sig != 0] == []
+        assert result == 1
+        cleanup_pid.assert_not_called()
+
+    def test_sigkill_is_withheld_when_the_pid_stops_being_ours_during_the_grace(
+        self, tmp_path: Path
+    ) -> None:
+        """The proof is re-taken right before SIGKILL: after SIGTERM's grace the
+        pid may belong to something else, and only a fresh proof may be acted on."""
+        sent: list[int] = []
+        ours = os.path.realpath(tmp_path)
+        roots = iter([ours, _OTHER_PROJECT_ROOT])
+
+        def record(pid: int, sig: int) -> None:
+            sent.append(sig)
+
+        with (
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=_UNREAL_PID),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.daemon_process_project_root",
+                side_effect=lambda pid: next(roots),
+            ),
+            patch("os.kill", side_effect=record),
+            patch("time.sleep"),
+        ):
+            result = cmd_stop(self._args(tmp_path))
+
+        assert signal.SIGTERM in sent
+        assert signal.SIGKILL not in sent
+        assert result == 1
 
 
 class TestCmdConfig:
