@@ -279,6 +279,73 @@ class TestBashRouteInterpreterOneLinersReview7:
         assert not handler.matches(_hook_input("Bash", {"command": cmd}))
 
 
+class TestOneLinerOptionWalkValueFlagsReview8:
+    """Plan 00466 guard-defects review 8 MAJOR-C: the option walk must step
+    OVER a value-taking option's own separate-word value (`-W ignore`,
+    `-X dev`) rather than stopping there and missing the real code flag
+    right after it. White-box on ``_classify_one_liner_option_word``
+    itself -- the review's own probe rows all also carry the protected
+    name CONTIGUOUSLY in the raw command text, so a black-box
+    ``handler.matches()`` assertion would pass via the ordinary top-level
+    mention scan regardless of whether this option walk is fixed at all."""
+
+    def test_python_dash_capital_w_value_is_skipped_not_stopped(self) -> None:
+        family = guard_module._ONE_LINER_FAMILIES["python"]
+        assert guard_module._classify_one_liner_option_word(family, "-W") == "value"
+        assert guard_module._classify_one_liner_option_word(family, "ignore") == "stop"
+        assert guard_module._classify_one_liner_option_word(family, "-c") == "code"
+
+    def test_python_dash_capital_x_value_is_skipped_not_stopped(self) -> None:
+        family = guard_module._ONE_LINER_FAMILIES["python"]
+        assert guard_module._classify_one_liner_option_word(family, "-X") == "value"
+
+    def test_python_check_hash_based_pycs_value_is_skipped_not_stopped(self) -> None:
+        family = guard_module._ONE_LINER_FAMILIES["python"]
+        assert (
+            guard_module._classify_one_liner_option_word(family, "--check-hash-based-pycs")
+            == "value"
+        )
+
+    def test_ruby_value_flags_are_skipped_not_stopped(self) -> None:
+        family = guard_module._ONE_LINER_FAMILIES["ruby"]
+        assert guard_module._classify_one_liner_option_word(family, "-C") == "value"
+        assert guard_module._classify_one_liner_option_word(family, "-I") == "value"
+        assert guard_module._classify_one_liner_option_word(family, "-r") == "value"
+        assert guard_module._classify_one_liner_option_word(family, "-e") == "code"
+
+    def test_perl_dash_capital_i_value_is_skipped_not_stopped(self) -> None:
+        family = guard_module._ONE_LINER_FAMILIES["perl"]
+        assert guard_module._classify_one_liner_option_word(family, "-I") == "value"
+
+    def test_node_value_flags_are_skipped_not_stopped(self) -> None:
+        family = guard_module._ONE_LINER_FAMILIES["node"]
+        assert guard_module._classify_one_liner_option_word(family, "-r") == "value"
+        assert guard_module._classify_one_liner_option_word(family, "--require") == "value"
+
+    def test_php_dash_d_value_is_skipped_not_stopped(self) -> None:
+        family = guard_module._ONE_LINER_FAMILIES["php"]
+        assert guard_module._classify_one_liner_option_word(family, "-d") == "value"
+
+    def test_python_dash_capital_w_value_before_dash_c_reaches_the_split_literal(self) -> None:
+        """End to end, via the same split-adjacent-string-literal mechanism
+        `test_python_dash_c_split_string_literal_denies` uses -- the raw
+        bash text never carries the protected name contiguously, so this
+        can ONLY be caught by the option walk actually reaching `-c`."""
+        handler = _handler()
+        cmd = (
+            'python3 -W ignore -c "import os; os.'
+            + "system('cat .vault-pas' 'sword')\""
+        )
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_python_dash_capital_w_value_before_dash_c_without_a_code_flag_allows(self) -> None:
+        """Control for the SAME split-literal mechanism: no `-c` follows
+        `-W`'s value, so there is genuinely no code argument to scan."""
+        handler = _handler()
+        cmd = "python3 -W ignore script.py"
+        assert not handler.matches(_hook_input("Bash", {"command": cmd}))
+
+
 class TestPythonOneLinerMinorFixesReview7:
     """Plan 00466 guard-defects review 7 MINOR-1: `subprocess.getoutput`/
     `getstatusoutput` always run a shell (gated on `shell=True`, which they

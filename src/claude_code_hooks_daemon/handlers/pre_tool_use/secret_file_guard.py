@@ -905,21 +905,47 @@ class _OneLinerFamily:
     #: Long-flag spellings (`--eval`, `--print`) that ALSO introduce the
     #: code argument, compared for exact equality.
     long_flags: frozenset[str] = frozenset()
+    #: Exact short (`-W`) and long (`--require`) flag spellings this
+    #: interpreter takes a REQUIRED value for as its own SEPARATE next
+    #: word (confirmed against each interpreter's real getopt behaviour,
+    #: not just its `--help` text -- an optional-value flag like ruby's
+    #: `-W` never consumes a following word and is deliberately excluded).
+    #: Plan 00466 review 8 MAJOR-C.
+    value_flags: frozenset[str] = frozenset()
 
 
 _ONE_LINER_FAMILIES: Final[dict[str, _OneLinerFamily]] = {
     "python": _OneLinerFamily(
-        re.compile(r"^(?:python|pypy)\d?(?:\.\d+)*$"), ".py", frozenset({"c"})
+        re.compile(r"^(?:python|pypy)\d?(?:\.\d+)*$"),
+        ".py",
+        frozenset({"c"}),
+        value_flags=frozenset({"-W", "-X", "--check-hash-based-pycs"}),
     ),
-    "ruby": _OneLinerFamily(re.compile(r"^ruby(?:\d+(?:\.\d+)*)?$"), ".rb", frozenset({"e"})),
-    "perl": _OneLinerFamily(re.compile(r"^perl(?:\d+(?:\.\d+)*)?$"), ".pl", frozenset({"e", "E"})),
+    "ruby": _OneLinerFamily(
+        re.compile(r"^ruby(?:\d+(?:\.\d+)*)?$"),
+        ".rb",
+        frozenset({"e"}),
+        value_flags=frozenset({"-C", "-I", "-r"}),
+    ),
+    "perl": _OneLinerFamily(
+        re.compile(r"^perl(?:\d+(?:\.\d+)*)?$"),
+        ".pl",
+        frozenset({"e", "E"}),
+        value_flags=frozenset({"-I"}),
+    ),
     "node": _OneLinerFamily(
         re.compile(r"^node(?:\d+(?:\.\d+)*)?$"),
         ".js",
         frozenset({"e", "p"}),
         frozenset({"--eval", "--print"}),
+        value_flags=frozenset({"-r", "--require"}),
     ),
-    "php": _OneLinerFamily(re.compile(r"^php(?:\d+(?:\.\d+)*)?$"), ".php", frozenset({"r"})),
+    "php": _OneLinerFamily(
+        re.compile(r"^php(?:\d+(?:\.\d+)*)?$"),
+        ".php",
+        frozenset({"r"}),
+        value_flags=frozenset({"-d"}),
+    ),
 }
 
 
@@ -936,10 +962,22 @@ def _classify_one_liner_option_word(family: _OneLinerFamily, word: str) -> str:
     """Classify one word while walking an interpreter's OWN options,
     looking for its code flag.
 
-    Returns ``"code"`` (the NEXT word is the code argument), ``"skip"``
-    (an ordinary option, keep walking), or ``"stop"`` (not an option word
-    -- no code flag found for this invocation).
+    Returns ``"code"`` (the NEXT word is the code argument), ``"value"``
+    (the NEXT word is THIS flag's own required value, not an option --
+    skip over it without inspecting it as a flag), ``"skip"`` (an ordinary
+    option, keep walking), or ``"stop"`` (not an option word -- this
+    invocation's own option list is exhausted here).
+
+    Plan 00466 review 8 MAJOR-C: ``"value"`` must be checked BEFORE the
+    generic cluster/`--`-prefix cases below -- `-W`/`-X`/`--require` and
+    their family siblings are themselves also single-letter- or
+    `--`-prefixed words, so without the earlier check their OWN required
+    value word (`ignore`, `dev`, `./x.js`) would reach the caller
+    unclassified and be mistaken for "no code flag here", ending the walk
+    before an actual `-c`/`-e` that follows.
     """
+    if word in family.value_flags:
+        return "value"
     if word in family.long_flags:
         return "code"
     if word.startswith("--"):
@@ -998,10 +1036,21 @@ def _bash_interpreter_one_liner_mention(
             if kind == "code":
                 code_index = cursor + 1
                 break
+            if kind == "value":
+                # This flag's own required value -- consume it WITHOUT
+                # classifying it as a word in its own right (review 8
+                # MAJOR-C): `python3 -W ignore -c ...` must not stop at
+                # `ignore` and miss the real `-c` right after it.
+                cursor += 2
+                continue
             if kind == "skip":
                 cursor += 1
                 continue
-            break  # "stop": not an option word -- no code flag here
+            # "stop": not a recognised option word for this family. Never
+            # break here (review 8 MAJOR-C) -- an unrecognised word must
+            # not silently end the walk and let a LATER real code flag go
+            # undetected; keep walking past it instead.
+            cursor += 1
         if code_index is None or code_index >= len(resolved_words):
             continue
         code = resolved_words[code_index]
