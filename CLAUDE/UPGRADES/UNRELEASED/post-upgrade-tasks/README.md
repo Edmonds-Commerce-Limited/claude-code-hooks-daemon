@@ -85,9 +85,10 @@ This file's lower half should list the tasks currently in this directory, so an 
 
 <!-- BEGIN TASK INDEX — regenerate when adding/removing tasks -->
 
-| File                                                   | Type  | Severity    | Applies to                                                                              | One-line summary                                                                                                                |
-| ------------------------------------------------------ | ----- | ----------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `01-remove-vendor-from-a-php-intelephense-override.md` | audit | recommended | PHP projects whose intelephense override followed the old `R-LSP-CONFIG-EXCLUDE` advice | Remove a bare `**/vendor` exclude entry, which undefines every Composer-installed type; use the printed nested entries instead. |
+| File                                                                        | Type  | Severity    | Applies to                                                                              | One-line summary                                                                                                                |
+| --------------------------------------------------------------------------- | ----- | ----------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `01-remove-vendor-from-a-php-intelephense-override.md`                      | audit | recommended | PHP projects whose intelephense override followed the old `R-LSP-CONFIG-EXCLUDE` advice | Remove a bare `**/vendor` exclude entry, which undefines every Composer-installed type; use the printed nested entries instead. |
+| `02-audit-daemon-outputs-for-secret-terms-under-a-non-default-word-list.md` | audit | recommended | Projects whose `secret_word_list_path` is not the default                               | Find and delete payload-capture and log files written before redaction read the configured word list.                           |
 
 <!-- END TASK INDEX -->
 

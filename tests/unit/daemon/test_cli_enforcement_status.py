@@ -85,6 +85,38 @@ class TestCollectEnforcementStatusLines:
             statuses = _collect_enforcement_status_lines(tmp_path)
         assert statuses == []
 
+    @pytest.mark.parametrize(
+        "config_body",
+        [
+            "handlers:\n  post_tool_use:\n    lint_on_edit:\n      options:\n"
+            "        languages: [Python]\n",
+            "daemon:\n  languages: [Python]\n",
+        ],
+        ids=["handler-option", "daemon-languages"],
+    )
+    def test_lint_on_edit_is_probed_with_its_configured_languages(
+        self, tmp_path: Path, config_body: str
+    ) -> None:
+        """Plan 00466 N15 audit: the probe ran on a handler built without its config.
+
+        So a project that lints only Python was told its Shell, Go, ... extended
+        linters were missing.
+        """
+        from unittest.mock import patch
+
+        (tmp_path / ".claude").mkdir()
+        (tmp_path / ".claude" / "hooks-daemon.yaml").write_text(config_body, encoding="utf-8")
+        with patch(
+            "claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit."
+            "LintOnEditHandler._resolve_executable",
+            return_value=None,
+        ):
+            statuses = _collect_enforcement_status_lines(tmp_path)
+
+        lint_lines = [s for s in statuses if s.startswith("lint_on_edit:")]
+        assert lint_lines, "the Python extended linter should still be probed"
+        assert all(s.startswith("lint_on_edit: Python ") for s in lint_lines), lint_lines
+
     @pytest.mark.parametrize("expected_substring", ["npm_command", "validate_eslint_on_write"])
     def test_degraded_llm_wrapper_probes_name_the_handler(
         self, tmp_path: Path, expected_substring: str

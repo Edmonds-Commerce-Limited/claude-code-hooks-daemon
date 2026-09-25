@@ -222,13 +222,12 @@ def _resolve_active_path() -> Path | None:
         return None
 
     try:
-        from claude_code_hooks_daemon.config.models import Config
+        from claude_code_hooks_daemon.config.models import Config, handler_options
 
         project_root = ProjectContext.project_root()
         config = Config.load_or_default(ProjectContext.config_path())
-        handler_cfg = config.handlers.pre_tool_use.get("sensitive_content", {})
-        options = handler_cfg.get("options", {}) if isinstance(handler_cfg, dict) else {}
-        configured = options.get("secret_word_list_path") if isinstance(options, dict) else None
+        options = handler_options(config.handlers.pre_tool_use.get("sensitive_content"))
+        configured = options.get("secret_word_list_path")
         _ACTIVE_PATH = resolve_secret_word_list_path(configured, project_root)
     except (OSError, RuntimeError, ValueError) as exc:
         # A missing config loads the defaults without raising, so every one of

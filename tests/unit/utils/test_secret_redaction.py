@@ -8,6 +8,7 @@ never surface directly — only an index into it).
 
 import logging
 from collections.abc import Generator
+from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import patch
 
@@ -469,6 +470,91 @@ class TestActiveSecretTerms:
             record.levelno == logging.WARNING and "INERT" in record.getMessage()
             for record in caplog.records
         )
+
+
+class TestConfiguredWordListPathReachesEveryLeakVector:
+    """A non-default ``secret_word_list_path`` must be honoured by redaction.
+
+    Plan 00466 N14: the resolver read the handler block as a dict, but
+    ``Config`` hands every block over as a ``HandlerConfig``, so a configured
+    path was never seen and redaction always used the default list. This
+    repository was unaffected only because its configured path IS the
+    default -- so every test here uses a path that is not.
+    """
+
+    _TERM = "zzqx-custom-list-term"
+    _WORD_LIST = "config/private/terms.txt"
+
+    def _project(self, tmp_path: Path) -> Path:
+        (tmp_path / ".claude").mkdir()
+        (tmp_path / ".claude" / "hooks-daemon.yaml").write_text(
+            'version: "1.0"\n'
+            "handlers:\n"
+            "  pre_tool_use:\n"
+            "    sensitive_content:\n"
+            "      enabled: true\n"
+            "      options:\n"
+            f"        secret_word_list_path: {self._WORD_LIST}\n"
+        )
+        word_list = tmp_path / self._WORD_LIST
+        word_list.parent.mkdir(parents=True)
+        word_list.write_text(f"{self._TERM}\n")
+        return tmp_path
+
+    @staticmethod
+    def _context(project_root: Path) -> ExitStack:
+        stack = ExitStack()
+        target = "claude_code_hooks_daemon.core.project_context.ProjectContext"
+        stack.enter_context(patch(f"{target}._initialized", True))
+        stack.enter_context(patch(f"{target}.project_root", return_value=project_root))
+        stack.enter_context(
+            patch(
+                f"{target}.config_path",
+                return_value=project_root / ".claude" / "hooks-daemon.yaml",
+            )
+        )
+        return stack
+
+    def test_active_terms_come_from_the_configured_path(self, tmp_path: Path) -> None:
+        with self._context(self._project(tmp_path)):
+            assert sr.get_active_secret_terms() == (self._TERM,)
+
+    def test_term_is_redacted_from_a_captured_payload(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.daemon.payload_capture import capture_payload
+
+        project_root = self._project(tmp_path)
+        capture_dir = tmp_path / "captures"
+        hook_input = {"tool_name": "Write", "tool_input": {"content": f"has {self._TERM}"}}
+
+        with self._context(project_root):
+            written = capture_payload(
+                enabled=True,
+                events=[],
+                capture_dir=capture_dir,
+                event="PreToolUse",
+                hook_input=hook_input,
+                secret_terms=sr.get_active_secret_terms(),
+            )
+
+        assert written is not None
+        captured = written.read_text(encoding="utf-8")
+        assert self._TERM not in captured
+        assert sr.REDACTED_PLACEHOLDER in captured
+
+    def test_term_is_redacted_from_the_router_debug_log(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        from claude_code_hooks_daemon.core.event import EventType
+        from claude_code_hooks_daemon.core.router import EventRouter
+
+        hook_input = {"tool_name": "Write", "tool_input": {"content": f"has {self._TERM}"}}
+        with self._context(self._project(tmp_path)):
+            with caplog.at_level(logging.DEBUG, logger="claude_code_hooks_daemon.core.router"):
+                EventRouter().route(EventType.PRE_TOOL_USE, hook_input)
+
+        assert "PRE_TOOL_USE hook_input" in caplog.text
+        assert self._TERM not in caplog.text
+        assert sr.REDACTED_PLACEHOLDER in caplog.text
 
 
 @pytest.fixture(autouse=True)

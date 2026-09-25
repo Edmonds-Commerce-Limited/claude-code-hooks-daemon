@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeGuard
 
+from claude_code_hooks_daemon.config.models import handler_options
 from claude_code_hooks_daemon.constants.config import ConfigKey, resolve_priority
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.core.event import EventType
@@ -291,6 +292,18 @@ def handler_is_enabled(
     )
 
 
+def apply_handler_options(instance: object, options: Mapping[str, Any]) -> None:
+    """Give ``instance`` its options the way ``register_all`` does: ``self._<key>``.
+
+    Handlers are constructed with no arguments and read their options from
+    these attributes, so a handler built anywhere else without this call runs
+    on its defaults. That is how ``remote-docs add`` scanned captures with no
+    public patterns at all (Plan 00466 N15).
+    """
+    for option_key, option_value in options.items():
+        setattr(instance, f"_{option_key}", option_value)
+
+
 class HandlerRegistry:
     """Registry for discovering and managing handlers.
 
@@ -298,13 +311,23 @@ class HandlerRegistry:
     registers them with the event router.
     """
 
-    __slots__ = ("_disabled_handlers", "_handlers", "_workspace_root")
+    __slots__ = ("_disabled_handlers", "_handlers", "_option_failures", "_workspace_root")
 
     def __init__(self) -> None:
         """Initialise empty registry."""
         self._handlers: dict[str, type[Handler]] = {}
         self._disabled_handlers: set[str] = set()
         self._workspace_root: Path | None = None
+        self._option_failures: dict[str, str] = {}
+
+    @property
+    def option_failures(self) -> dict[str, str]:
+        """Handlers whose configured options could not be collected, and why.
+
+        Keyed ``<EventType>.<config_key>``. Each one was registered on its
+        defaults, so ``health`` reports it as degraded protection.
+        """
+        return dict(self._option_failures)
 
     def discover(self, package_path: str = "claude_code_hooks_daemon.handlers") -> int:
         """Discover all handler classes in the handlers package.
@@ -452,6 +475,7 @@ class HandlerRegistry:
 
         # PASS 1: Collect all handler options
         options_registry: dict[str, dict[str, Any]] = {}
+        self._option_failures = {}
         handlers_dir = Path(__file__).parent
 
         for dir_name, event_type in EVENT_TYPE_MAPPING.items():
@@ -480,20 +504,28 @@ class HandlerRegistry:
                         config_key = _get_config_key(attr.__name__)
                         handler_config = event_config.get(config_key, {})
                         if handler_config.get(ConfigKey.ENABLED, True):
-                            # Use config key from HandlerID constant
+                            registry_key = f"{event_type.value}.{config_key}"
+                            # handler_options reads every block shape without
+                            # raising, so any exception here is a daemon
+                            # defect. Plan 00466 N19: one such defect once
+                            # dropped EVERY handler's options behind a
+                            # debug-level log line. The handler still runs on
+                            # its defaults, and health reports it degraded.
                             try:
-                                registry_key = f"{event_type.value}.{config_key}"
-                                options = handler_config.get(ConfigKey.OPTIONS, {})
-                                # Include workspace_root in options if available
-                                if self._workspace_root:
-                                    options["workspace_root"] = self._workspace_root
-                                options_registry[registry_key] = options
-                            except Exception:
-                                logger.debug(
-                                    "Failed to collect options for handler '%s': %s",
-                                    config_key,
+                                options = handler_options(handler_config)
+                            except Exception as exc:
+                                logger.error(
+                                    "Options for handler '%s' could not be collected;"
+                                    " it runs on its defaults",
+                                    registry_key,
                                     exc_info=True,
                                 )
+                                self._option_failures[registry_key] = f"{type(exc).__name__}: {exc}"
+                                continue
+                            # Include workspace_root in options if available
+                            if self._workspace_root:
+                                options["workspace_root"] = self._workspace_root
+                            options_registry[registry_key] = options
 
         # PASS 2: Register handlers with inherited options
         count = 0
@@ -577,20 +609,18 @@ class HandlerRegistry:
 
                             # Apply options inheritance if handler shares options with parent
                             registry_key = f"{event_type.value}.{config_key}"
-                            handler_options = options_registry.get(registry_key, {})
+                            own_options = options_registry.get(registry_key, {})
 
                             if instance.shares_options_with:
                                 # Get parent options
                                 parent_key = f"{event_type.value}.{instance.shares_options_with}"
                                 parent_options = options_registry.get(parent_key, {})
                                 # Merge: parent options + child overrides
-                                merged_options = {**parent_options, **handler_options}
+                                merged_options = {**parent_options, **own_options}
                             else:
-                                merged_options = handler_options
+                                merged_options = own_options
 
-                            # Apply all options as private attributes (generic for all handlers)
-                            for option_key, option_value in merged_options.items():
-                                setattr(instance, f"_{option_key}", option_value)
+                            apply_handler_options(instance, merged_options)
 
                             # Inject project-level language filter (via setattr like other options)
                             instance._project_languages = project_languages
@@ -654,6 +684,13 @@ class HandlerRegistry:
                                 instance, reference_repos_attr_name
                             ):
                                 setattr(instance, reference_repos_attr_name, reference_repos)
+
+                            # Pass-1 option failures (Plan 00466 N19), for the
+                            # session-start alert. Same declared-attribute
+                            # selection as `_reference_repos` above.
+                            option_failures_attr_name = "_option_failures"
+                            if hasattr(instance, option_failures_attr_name):
+                                setattr(instance, option_failures_attr_name, self.option_failures)
 
                             # Inject the worktree merge-gate toggle for git-tagged
                             # handlers (Plan 00367 Phase 4) -- same DI idiom as

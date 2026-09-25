@@ -185,17 +185,10 @@ def resolve_configured_patterns() -> tuple[str, ...]:
         return _CONFIGURED_PATTERNS
 
     try:
-        from claude_code_hooks_daemon.config.models import Config, HandlerConfig
+        from claude_code_hooks_daemon.config.models import Config, handler_options
 
         config = Config.load_or_default(ProjectContext.config_path())
-        handler_cfg = config.handlers.pre_tool_use.get("secret_file_guard")
-        # ``Config``'s own ``coerce_handler_configs`` validator turns every
-        # entry into a ``HandlerConfig`` instance (not a plain dict) once the
-        # config has been loaded through the model -- ``.options`` is the
-        # correct access, and a stray ``isinstance(..., dict)`` guard here
-        # silently found nothing and fell through to the shipped defaults on
-        # every real config, never actually reading a project's settings.
-        options = handler_cfg.options if isinstance(handler_cfg, HandlerConfig) else {}
+        options = handler_options(config.handlers.pre_tool_use.get("secret_file_guard"))
         mode = options.get("mode")
         project_patterns = options.get("protected_paths")
         _CONFIGURED_PATTERNS = resolve_protected_patterns(mode, project_patterns)

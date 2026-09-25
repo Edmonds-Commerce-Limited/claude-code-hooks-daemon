@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
 from pydantic import ValidationError as PydanticValidationError
 
 from claude_code_hooks_daemon.config.loader import ConfigLoader
-from claude_code_hooks_daemon.config.models import Config
+from claude_code_hooks_daemon.config.models import Config, handler_options
 from claude_code_hooks_daemon.constants import HandlerID, Timeout
 from claude_code_hooks_daemon.constants.modes import DaemonMode
 from claude_code_hooks_daemon.constants.permissions import FileMode
@@ -1231,7 +1231,19 @@ def cmd_health(args: argparse.Namespace) -> int:
     for line in _format_project_handler_health_lines(health_state):
         print(line)
 
-    healthy = status == "healthy" and not health_state.is_degraded
+    # Built-in handlers whose configured options could not be collected (Plan
+    # 00466 N19). Each runs on its defaults, so this drives the exit code too.
+    option_failures: dict[str, str] = result.get("option_failures", {})
+    print("\nHandler options:")
+    if not option_failures:
+        print("  OK — every handler received its configured options")
+    else:
+        print(f"  🚨 DEGRADED — {len(option_failures)} handler(s) running on defaults:")
+        for handler_key, reason in option_failures.items():
+            print(f"  - {handler_key}: {reason}")
+        print("  The daemon log has the traceback. This is a daemon defect; please report it.")
+
+    healthy = status == "healthy" and not health_state.is_degraded and not option_failures
     return 0 if healthy else 1
 
 
@@ -2096,9 +2108,11 @@ def _collect_enforcement_status_lines(project_path: Path) -> list[str]:
         ValidateEslintOnWriteHandler,
     )
     from claude_code_hooks_daemon.handlers.pre_tool_use.npm_command import NpmCommandHandler
+    from claude_code_hooks_daemon.handlers.registry import apply_handler_options
 
     config_file = project_path / ".claude" / "hooks-daemon.yaml"
     registry: ProjectRegistry
+    config: Config | None = None
     try:
         config_dict = ConfigLoader.load(config_file) if config_file.exists() else {}
         config = Config.model_validate(config_dict)
@@ -2115,13 +2129,20 @@ def _collect_enforcement_status_lines(project_path: Path) -> list[str]:
     # ProjectContext (that singleton is initialised at daemon startup, and
     # this CLI command talks to config files directly), so both handlers are
     # given `project_path` explicitly instead of relying on that singleton.
-    handlers: list[Any] = [
-        NpmCommandHandler(project_root=project_path),
-        LintOnEditHandler(),
-        ValidateEslintOnWriteHandler(workspace_root=project_path),
+    probes: list[tuple[str, Any]] = [
+        ("pre_tool_use", NpmCommandHandler(project_root=project_path)),
+        ("post_tool_use", LintOnEditHandler()),
+        ("post_tool_use", ValidateEslintOnWriteHandler(workspace_root=project_path)),
     ]
-    for handler in handlers:
+    handlers = [handler for _, handler in probes]
+    for event_key, handler in probes:
         handler._project_registry = registry
+        # Probed with its configured options, as the registry would run it
+        # (Plan 00466 N15): built bare, lint_on_edit probed every language.
+        if config is not None:
+            event_block = getattr(config.handlers, event_key)
+            apply_handler_options(handler, handler_options(event_block.get(handler.config_key)))
+            handler._project_languages = config.daemon.languages
 
     statuses: list[str] = []
     seen: set[str] = set()
@@ -2189,9 +2210,8 @@ def _collect_secret_redaction_status_lines(project_path: Path) -> list[str]:
         except (PydanticValidationError, OSError, ValueError):
             continue
 
-        handler_cfg = root_config.handlers.pre_tool_use.get("sensitive_content")
-        options = getattr(handler_cfg, "options", None)
-        configured = options.get("secret_word_list_path") if isinstance(options, dict) else None
+        options = handler_options(root_config.handlers.pre_tool_use.get("sensitive_content"))
+        configured = options.get("secret_word_list_path")
         message = secret_redaction.describe_secret_word_list_degradation(configured)
         if message and message not in seen:
             seen.add(message)
@@ -4475,17 +4495,13 @@ def cmd_inject_goal(args: argparse.Namespace) -> int:
         except (OSError, yaml.YAMLError) as e:
             print(f"WARNING: could not read {config_file}: {e}", file=sys.stderr)
             config_data = {}
-        options = (
-            config_data.get("handlers", {})
-            .get("post_tool_use", {})
-            .get("goal_injection", {})
-            .get("options", {})
+        options = handler_options(
+            config_data.get("handlers", {}).get("post_tool_use", {}).get("goal_injection")
             if isinstance(config_data, dict)
-            else {}
+            else None
         )
-        if isinstance(options, dict):
-            mode = str(options.get("mode", mode))
-            raw_lines = options.get("lines")
+        mode = str(options.get("mode", mode))
+        raw_lines = options.get("lines")
 
     # Initialise the project context UNCONDITIONALLY (no private-state peeking):
     # a repeat initialise raises RuntimeError, which simply means an earlier
@@ -5712,13 +5728,12 @@ def cmd_secret_meta(args: argparse.Namespace) -> int:
     override = getattr(args, "project_root", None)
     project_root = Path(override) if override else Path(get_project_path(None))
     config = load_config_safe(project_root) or {}
-    handler_options = (
+    guard_options = handler_options(
         config.get("handlers", {})
         .get("pre_tool_use", {})
-        .get(HandlerID.SECRET_FILE_GUARD.config_key, {})
-        .get("options", {})
-    ) or {}
-    allow_plain_hash = bool(handler_options.get("allow_plain_hash", False))
+        .get(HandlerID.SECRET_FILE_GUARD.config_key)
+    )
+    allow_plain_hash = bool(guard_options.get("allow_plain_hash", False))
 
     key_path = _daemon_untracked_dir(project_root) / KEY_FILE_NAME
     meta = collect_secret_meta(
@@ -6441,6 +6456,26 @@ def cmd_find_plan(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_plan_qa_checks(json_output: bool) -> int:
+    """Print every registered plan QA check with the stages it runs on."""
+    from claude_code_hooks_daemon.plan_qa.checks import all_checks
+
+    stages_by_check: dict[str, list[str]] = {}
+    for spec in all_checks():
+        stages = stages_by_check.setdefault(spec.check_id, [])
+        stage = f"{spec.stage.value}:{spec.level.value}"
+        if stage not in stages:
+            stages.append(stage)
+
+    if json_output:
+        print(json.dumps(stages_by_check, indent=2))
+        return 0
+    width = max(len(check_id) for check_id in stages_by_check)
+    for check_id, stages in stages_by_check.items():
+        print(f"{check_id:<{width}}  {', '.join(stages)}")
+    return 0
+
+
 def cmd_plan_qa(args: argparse.Namespace) -> int:
     """Run plan QA checks (Plan 00144): sweep, staged gate, or single-file lint.
 
@@ -6452,10 +6487,14 @@ def cmd_plan_qa(args: argparse.Namespace) -> int:
       checks) without committing.
     - ``--lint PATH``: run the Stage 1 edit-time checks against one file's
       current on-disk content.
+    - ``--list-checks``: print the registered check catalogue and the stages
+      each check runs on. It describes the daemon, not the project, so it
+      needs no plan tree; documentation points here rather than counting
+      checks (Plan 00466 N18).
 
     Args:
         args: Parsed CLI arguments with ``sweep``, ``check_staged``, ``lint``,
-            ``json_output`` and optional ``project_root``.
+            ``list_checks``, ``json_output`` and optional ``project_root``.
 
     Returns:
         0 when clean (or plan workflow / plan QA disabled in config),
@@ -6474,6 +6513,9 @@ def cmd_plan_qa(args: argparse.Namespace) -> int:
     from claude_code_hooks_daemon.plan_qa.report import CLEAN_SCOPE_TREE, format_cli_report
     from claude_code_hooks_daemon.plan_qa.runner import run_stage
     from claude_code_hooks_daemon.plan_qa.types import Stage
+
+    if getattr(args, "list_checks", False):
+        return _print_plan_qa_checks(bool(getattr(args, "json_output", False)))
 
     # An explicit --project-root is trusted as-is (plan QA needs a plan tree,
     # not a validated daemon installation); otherwise auto-detect as usual.
@@ -6721,13 +6763,19 @@ def cmd_docs_qa(args: argparse.Namespace) -> int:
     return 1 if findings else 0
 
 
-def _sensitive_content_guard() -> Any:
+def _sensitive_content_guard(project_root: Path) -> Any:
     """The project's configured sensitive-content scanner, or None.
 
     A capture writes to disk from this CLI, so the ``Write``-tool hook that
     normally inspects content never fires. Reusing the handler's own matching
     keeps one definition of "sensitive" rather than a second, weaker copy
     (Plan 00326 Task 2.5).
+
+    The handler gets ``project_root``'s configured options exactly as the
+    registry would give them. Built bare it had no public patterns (Plan
+    00466 N15). The word list path is resolved to an absolute path here,
+    because this CLI need not have initialised the project context the
+    handler would otherwise resolve it against.
 
     Returns None when the handler cannot be built. Capture then proceeds
     UNSCANNED rather than failing, matching how the daemon degrades
@@ -6736,13 +6784,29 @@ def _sensitive_content_guard() -> Any:
     its secrets with nothing to show that the check was skipped, which is
     the one degradation in this subsystem worth interrupting someone over.
     """
+    import yaml
+
     try:
+        from claude_code_hooks_daemon.constants import HandlerID
         from claude_code_hooks_daemon.handlers.pre_tool_use.sensitive_content import (
             SensitiveContentHandler,
         )
+        from claude_code_hooks_daemon.handlers.registry import apply_handler_options
+        from claude_code_hooks_daemon.utils.secret_redaction import (
+            resolve_secret_word_list_path,
+        )
 
-        return SensitiveContentHandler().scan_text
-    except (ImportError, RuntimeError, OSError) as exc:
+        config = Config.load_or_default(project_root / ".claude" / "hooks-daemon.yaml")
+        options = handler_options(
+            config.handlers.pre_tool_use.get(HandlerID.SENSITIVE_CONTENT.config_key)
+        )
+        word_list = resolve_secret_word_list_path(
+            options.get("secret_word_list_path"), project_root
+        )
+        handler = SensitiveContentHandler()
+        apply_handler_options(handler, {**options, "secret_word_list_path": str(word_list)})
+        return handler.scan_text
+    except (ImportError, RuntimeError, OSError, ValueError, yaml.YAMLError) as exc:
         logger.warning("sensitive-content guard unavailable for capture: %s", exc)
         print(
             "remote-docs: WARNING — the sensitive-content scanner is "
@@ -6791,9 +6855,11 @@ def cmd_remote_docs(args: argparse.Namespace) -> int:
         print(fetcher.warning, file=sys.stderr)
 
     if action == "add":
-        code = _remote_docs_add(args, tree, fetcher, now, _remote_docs_policy(resolved_root))
+        code = _remote_docs_add(
+            args, resolved_root, tree, fetcher, now, _remote_docs_policy(resolved_root)
+        )
     else:
-        code = _remote_docs_refresh(args, tree, fetcher, now)
+        code = _remote_docs_refresh(args, resolved_root, tree, fetcher, now)
 
     # Regenerated on every capture and refresh, never on demand: an index
     # that silently goes stale answers "we don't have that" confidently and
@@ -6851,7 +6917,7 @@ def _resolve_remote_docs_fetcher(args: argparse.Namespace) -> Any:
 
 
 def _remote_docs_add(
-    args: argparse.Namespace, tree: Path, fetcher: Any, now: Any, policy: Any
+    args: argparse.Namespace, project_root: Path, tree: Path, fetcher: Any, now: Any, policy: Any
 ) -> int:
     from claude_code_hooks_daemon.remote_docs.capture import CaptureError, derive_relative_path
     from claude_code_hooks_daemon.remote_docs.provenance import UNREVIEWED
@@ -6889,7 +6955,8 @@ def _remote_docs_add(
             now=now,
             licence=licence,
             stale_after_days=stale_after_days,
-            content_guard=getattr(args, "content_guard", None) or _sensitive_content_guard(),
+            content_guard=getattr(args, "content_guard", None)
+            or _sensitive_content_guard(project_root),
             force=force,
         )
     except CaptureError as exc:
@@ -7025,7 +7092,9 @@ def _remote_docs_check(
     return 1
 
 
-def _remote_docs_refresh(args: argparse.Namespace, tree: Path, fetcher: Any, now: Any) -> int:
+def _remote_docs_refresh(
+    args: argparse.Namespace, project_root: Path, tree: Path, fetcher: Any, now: Any
+) -> int:
     from claude_code_hooks_daemon.remote_docs.store import (
         RefreshOutcome,
         list_documents,
@@ -7050,7 +7119,8 @@ def _remote_docs_refresh(args: argparse.Namespace, tree: Path, fetcher: Any, now
             now=now,
             # The same guard `remote-docs add` applies. A refresh writes from a
             # CLI just as a capture does, so it bypasses the same hook.
-            content_guard=getattr(args, "content_guard", None) or _sensitive_content_guard(),
+            content_guard=getattr(args, "content_guard", None)
+            or _sensitive_content_guard(project_root),
         )
         print(f"{target}: {outcome.value}")
         if outcome is RefreshOutcome.REFUSED:
@@ -7270,15 +7340,11 @@ def cmd_skill_scan(args: argparse.Namespace) -> int:
     project_root = resolved_root
 
     config = Config.load_or_default(project_root / ".claude" / "hooks-daemon.yaml")
-    handler_cfg = config.handlers.session_start.get(HandlerID.SKILL_OPPORTUNITY_DETECTOR.config_key)
-    # The config model parses handler entries into HandlerConfig objects, but a
-    # raw dict is tolerated too (defensive: this path also runs against
-    # hand-built configs in tests).
-    if isinstance(handler_cfg, dict):
-        raw_options = handler_cfg.get("options", {})
-    else:
-        raw_options = getattr(handler_cfg, "options", {})
-    options = SkillScanOptions.from_dict(raw_options if isinstance(raw_options, dict) else {})
+    options = SkillScanOptions.from_dict(
+        handler_options(
+            config.handlers.session_start.get(HandlerID.SKILL_OPPORTUNITY_DETECTOR.config_key)
+        )
+    )
 
     state_path = _daemon_untracked_dir(project_root) / STATE_FILE_NAME
     force = bool(getattr(args, "force", False))
@@ -7291,16 +7357,9 @@ def cmd_skill_scan(args: argparse.Namespace) -> int:
             )
             return 0
 
-    sensitive_cfg = config.handlers.pre_tool_use.get(HandlerID.SENSITIVE_CONTENT.config_key)
-    if isinstance(sensitive_cfg, dict):
-        sensitive_options = sensitive_cfg.get("options", {})
-    else:
-        sensitive_options = getattr(sensitive_cfg, "options", {})
-    configured_word_list = (
-        sensitive_options.get("secret_word_list_path")
-        if isinstance(sensitive_options, dict)
-        else None
-    )
+    configured_word_list = handler_options(
+        config.handlers.pre_tool_use.get(HandlerID.SENSITIVE_CONTENT.config_key)
+    ).get("secret_word_list_path")
     secret_terms = get_cached_secret_terms(
         resolve_secret_word_list_path(configured_word_list, project_root)
     )
@@ -9468,6 +9527,12 @@ def main() -> int:
         metavar="FILE",
         default=None,
         help="Run edit-time checks against one plan file's on-disk content",
+    )
+    parser_plan_qa.add_argument(
+        "--list-checks",
+        dest="list_checks",
+        action="store_true",
+        help="List every registered check and the stages it runs on",
     )
     parser_plan_qa.add_argument(
         "--json",

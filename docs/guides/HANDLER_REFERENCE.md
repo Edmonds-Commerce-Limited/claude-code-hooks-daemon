@@ -2286,7 +2286,7 @@ handlers:
 
 **Block-level checks (new material):** a parseable `**Status**:` line must exist (`status-line-present`); the token must be one of Not Started, In Progress, Complete, Blocked, Cancelled, Superseded, Dormant (`status-enum-and-date`); the header must not contradict an all-ticked body (`header-body-coherence`); tasks must use the template grammar `- [ ] ⬜ **Task N.N**:` rather than ad-hoc markers (`task-grammar`). Advisory-level checks cover missing Created/Owner/Priority headers, a terminal status set while the folder is still in the plan root, edits to archived plans, and backticked `src/...` paths that no longer exist.
 
-**The plan index (`README.md`) is linted against TWO rules:** `index-row-length` -- every line must stay under 500 characters, because an index row is a pointer (a link, a status and one clause), not a summary duplicated from the linked `PLAN.md`. Only an edit that makes the index worse blocks (a new over-long line, or a longer worst offender), so an index that already has one stays editable, including by the edit that fixes it. The limit is not configurable: it is shared with the batch guard `tests/integration/test_plan_index_navigability.py`, which asserts a fixed ceiling, and two guards over one rule must read one number. `index-no-log` (advisory, on all three plan QA surfaces) flags a bullet written in LOG grammar -- a bold "Before that"/"Prior to that"/"Previously" lead-in, or a bold ISO date -- because the index has twice re-grown a stacked reconciliation ledger of past recounts instead of stating current truth; history belongs in git or in the relevant plan's `JOURNAL/`. No plan-document rule applies to the index -- it has no `**Status**:` line and needs none.
+**The plan index (`README.md`) is linted against THREE rules:** `index-row-length` -- every line must stay under 500 characters, because an index row is a pointer (a link, a status and one clause), not a summary duplicated from the linked `PLAN.md`. Only an edit that makes the index worse blocks (a new over-long line, or a longer worst offender), so an index that already has one stays editable, including by the edit that fixes it. The limit is not configurable: it is shared with the batch guard `tests/integration/test_plan_index_navigability.py`, which asserts a fixed ceiling, and two guards over one rule must read one number. `index-no-log` (advisory, on all three plan QA surfaces) flags a bullet written in LOG grammar -- a bold "Before that"/"Prior to that"/"Previously" lead-in, or a bold ISO date -- because the index has twice re-grown a stacked reconciliation ledger of past recounts instead of stating current truth; history belongs in git or in the relevant plan's `JOURNAL/`. `plan-stats-arithmetic` (advisory at edit, blocking at commit) checks that the statistics' closing self-check agrees with the figures above it, naming the line; the edit only advises because updating those figures takes more than one edit. No plan-document rule applies to the index -- it has no `**Status**:` line and needs none.
 
 **Policy configuration:** all three plan QA surfaces (this handler, `plan_qa_commit_gate`, `plan_qa_sweep`) plus the `plan-qa` CLI share ONE policy block under the top-level `plan_workflow.qa` key -- not per-handler `options`:
 
@@ -2522,7 +2522,7 @@ handlers:
 
 **Enforcement mode:** honours `plan_workflow.qa.commit_gate_mode` (`block` | `warn` | `off`, default `warn`). In `warn` (the rollout default) findings render as advisory context -- read them and amend the commit content before it lands; `block` denies the commit with a diffable TODO list of what the commit must also contain; `off` disables the gate.
 
-**Invariants checked:** creating a plan folder ⇒ the same commit stages its README index row (`index-at-birth`) with a number from the git counter / `mkplan.bash` (`counter-sanity`, `no-new-collisions`); flipping a plan to Complete/Cancelled/Superseded ⇒ the same commit contains the `git mv` into the archive dir plus the README row and statistics update (`terminal-state-atomic`); a `PLAN.md` staged under an archive dir must carry a terminal status in its STAGED content, not merely in the worktree file — `git mv` stages a rename using the index's existing blob, so a status flip made in the worktree but never re-`git add`ed can land a non-terminal status inside `Completed/`/`Cancelled/` (`archived-status-coherence`); every folder has a README row in the section matching its location and every row link resolves (`row-folder-bijection`, `stats-recount`); every line of the README index stays under 500 characters (`index-row-length`); a commit claiming `Plan NNNNN` that stages src/test/config changes should also touch that plan's PLAN.md (`same-commit-plan-doc`), and plans are referenced as `Plan NNNNN:` (`plan-ref-format`).
+**Invariants checked:** creating a plan folder ⇒ the same commit stages its README index row (`index-at-birth`) with a number from the git counter / `mkplan.bash` (`counter-sanity`, `no-new-collisions`); flipping a plan to Complete/Cancelled/Superseded ⇒ the same commit contains the `git mv` into the archive dir plus the README row and statistics update (`terminal-state-atomic`); a `PLAN.md` staged under an archive dir must carry a terminal status in its STAGED content, not merely in the worktree file — `git mv` stages a rename using the index's existing blob, so a status flip made in the worktree but never re-`git add`ed can land a non-terminal status inside `Completed/`/`Cancelled/` (`archived-status-coherence`); every folder has a README row in the section matching its location and every row link resolves (`row-folder-bijection`, `stats-recount`); every line of the README index stays under 500 characters (`index-row-length`); a commit staging the README keeps its statistics' closing self-check in agreement with the figures above it (`plan-stats-arithmetic`); a commit claiming `Plan NNNNN` that stages src/test/config changes should also touch that plan's PLAN.md (`same-commit-plan-doc`), and plans are referenced as `Plan NNNNN:` (`plan-ref-format`).
 
 **Policy configuration:** shares the top-level `plan_workflow.qa` block documented under [`plan_qa_edit`](#plan_qa_edit).
 
@@ -3303,7 +3303,13 @@ handlers:
 | **Type**       | Advisory        |
 | **Event**      | SessionStart    |
 
-**Description:** Checks if the daemon is up-to-date with the latest GitHub release on new sessions. Uses a 24-hour cache to avoid excessive git operations. Only runs on new sessions (not resumes).
+**Description:** Checks if the daemon is up-to-date with the latest GitHub release on new sessions. Caches the result (24 hours by default) to avoid excessive git operations. Only runs on new sessions (not resumes).
+
+**Options:**
+
+| Option            | Default | Description                                         |
+| ----------------- | ------- | --------------------------------------------------- |
+| `cache_ttl_hours` | `24`    | How long a version-check result is reused, in hours |
 
 **Config example:**
 
@@ -3313,6 +3319,8 @@ handlers:
     version_check:
       enabled: true
       priority: 55
+      options:
+        cache_ttl_hours: 24
 ```
 
 ---

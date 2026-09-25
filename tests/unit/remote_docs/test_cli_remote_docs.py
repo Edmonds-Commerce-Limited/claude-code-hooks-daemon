@@ -365,7 +365,7 @@ class TestUnscannedCaptureIsAnnounced:
     the check was skipped.
     """
 
-    def test_an_unavailable_guard_is_reported_on_stderr(self, capsys) -> None:
+    def test_an_unavailable_guard_is_reported_on_stderr(self, tmp_path: Path, capsys) -> None:
         from claude_code_hooks_daemon.daemon.cli import _sensitive_content_guard
 
         with patch(
@@ -373,16 +373,85 @@ class TestUnscannedCaptureIsAnnounced:
             ".SensitiveContentHandler",
             side_effect=RuntimeError("no project context"),
         ):
-            assert _sensitive_content_guard() is None
+            assert _sensitive_content_guard(tmp_path) is None
 
         assert "NOT being scanned" in capsys.readouterr().err
 
-    def test_an_available_guard_says_nothing(self, capsys) -> None:
+    def test_an_available_guard_says_nothing(self, tmp_path: Path, capsys) -> None:
         from claude_code_hooks_daemon.daemon.cli import _sensitive_content_guard
 
-        _sensitive_content_guard()
+        _sensitive_content_guard(tmp_path)
 
         assert capsys.readouterr().err == ""
+
+
+class TestCaptureScanUsesTheConfiguredHandler:
+    """Plan 00466 N15: the capture-time scan runs with the project's options.
+
+    The guard built ``SensitiveContentHandler()`` bare, so its public patterns
+    were empty and its word list was whatever the default path held. 28
+    example identifiers were vendored with no warning that way.
+    """
+
+    _MARKER = "ZZQX-CAPTURE-MARKER-42"
+    _PATTERNS = (
+        "        public_patterns:\n"
+        "          - name: capture-marker\n"
+        "            pattern: 'ZZQX-CAPTURE-MARKER-[0-9]+'\n"
+    )
+    _TERM = "zzqx-capture-term"
+    _WORD_LIST = "config/private/terms.txt"
+
+    def _configure(self, root: Path, options: str) -> None:
+        (root / ".claude").mkdir(parents=True, exist_ok=True)
+        (root / ".claude" / "hooks-daemon.yaml").write_text(
+            'version: "1.0"\n'
+            "handlers:\n"
+            "  pre_tool_use:\n"
+            "    sensitive_content:\n"
+            "      enabled: true\n"
+            "      options:\n" + options,
+            encoding="utf-8",
+        )
+
+    def test_a_configured_public_pattern_refuses_the_capture(self, tmp_path: Path, capsys) -> None:
+        self._configure(tmp_path, self._PATTERNS)
+        body = f"# Upstream\n\nexample {self._MARKER}\n".encode()
+
+        code = cmd_remote_docs(
+            _args(tmp_path, "add", url="https://example.com/p", fetch_fn=_fetch(body))
+        )
+
+        assert code == 1
+        assert "capture-marker" in capsys.readouterr().err
+        assert not (_tree(tmp_path) / "example.com" / "p.md").exists()
+
+    def test_a_non_default_word_list_path_is_honoured(self, tmp_path: Path, capsys) -> None:
+        self._configure(tmp_path, f"        secret_word_list_path: {self._WORD_LIST}\n")
+        word_list = tmp_path / self._WORD_LIST
+        word_list.parent.mkdir(parents=True)
+        word_list.write_text(f"{self._TERM}\n", encoding="utf-8")
+        body = f"# Upstream\n\nmentions {self._TERM}\n".encode()
+
+        code = cmd_remote_docs(
+            _args(tmp_path, "add", url="https://example.com/p", fetch_fn=_fetch(body))
+        )
+
+        assert code == 1
+        err = capsys.readouterr().err
+        assert "entry 1 of 1 in the secret word list" in err
+        assert self._TERM not in err
+        assert not (_tree(tmp_path) / "example.com" / "p.md").exists()
+
+    def test_the_refresh_path_is_scanned_the_same_way(self, tmp_path: Path) -> None:
+        cmd_remote_docs(_args(tmp_path, "add", url="https://example.com/p"))
+        self._configure(tmp_path, self._PATTERNS)
+        target = _tree(tmp_path) / "example.com" / "p.md"
+        body = f"# Upstream\n\nexample {self._MARKER}\n".encode()
+
+        cmd_remote_docs(_args(tmp_path, "refresh", path=target, fetch_fn=_fetch(body)))
+
+        assert self._MARKER not in target.read_text(encoding="utf-8")
 
 
 class TestGeneratedIndex:
