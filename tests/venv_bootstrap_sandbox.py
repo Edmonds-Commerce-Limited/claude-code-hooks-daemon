@@ -49,6 +49,8 @@ CLONE_FILES: Final[tuple[str, ...]] = (
     "scripts/install/python_fingerprint.sh",
     "scripts/lib/resolve_venv.sh",
     "scripts/lib/python_discovery.sh",
+    # venv_bootstrap.sh sources this unconditionally (Plan 00466 N30).
+    "scripts/lib/portable_time.sh",
     "src/claude_code_hooks_daemon/daemon/paths.py",
     # The venv-free `signal` verb (Plan 00457, #55) and its own dependencies,
     # loaded by file path rather than package import -- see
