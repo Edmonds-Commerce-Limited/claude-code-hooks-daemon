@@ -9,6 +9,20 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N90 — `project_containment` denies every command, even one that writes nothing, when the project root is unresolved
+
+**Found by the guard-defects gate fixer.** `project_containment.matches()`
+resolves `ProjectContext.project_root()` before it checks whether the
+command names any write target. When the root cannot be resolved, it fails
+closed on EVERY command ahead of every lower-priority handler. Three test
+harnesses that build a router without initialising `ProjectContext` showed
+it. In a real daemon the context is always initialised, but any future
+caller that routes events without it is fully locked out.
+
+**Remedy:** return early when `_named_targets()` is empty, before resolving
+the root. A command that writes nothing cannot escape the project. Keep
+fail-closed for a command that does name a target, and pin both with tests.
+
 ### N89 — A data-sink receiver is trusted after the command redefines it
 
 **Found by N38 review 6 (ledger candidate 3).** `cat() { bash; }; cat <<'E'`
