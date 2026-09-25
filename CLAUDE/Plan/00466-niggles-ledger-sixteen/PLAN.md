@@ -89,6 +89,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N58 | R-CHMOD-WORLD-WRITABLE denies a safe chmod when a later argument contains digits                          | N53 review 2       | ⬜ Open               |
 | N59 | A signal went to a PID nobody proved was the intended process, and killed the container twice             | Infra owner        | 🔄 In progress        |
 | N60 | `curl_pipe_shell` denies a double-quoted `echo` argument that only mentions the pattern                   | Coordinator        | ⬜ Open               |
+| N61 | The `sensitive_content` commit gate misses a file that a same-command `git add` stages                    | upgrade-scripts    | 🔄 In progress        |
 
 ## Tasks
 

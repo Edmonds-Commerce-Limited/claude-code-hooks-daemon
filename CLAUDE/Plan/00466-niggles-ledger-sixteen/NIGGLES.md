@@ -9,6 +9,26 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N61 — The `sensitive_content` commit gate misses a file that a same-command `git add` stages
+
+**Found by the upgrade-scripts agent**, on main at a93c4b0ad and on the Plan
+00464 branch alike. The commit gate scans only what is ALREADY staged when
+the Bash command is judged. So `git add leak.txt && git commit -m x` is
+allowed even when `leak.txt` matches a public pattern. The same commit with
+`leak.txt` staged beforehand is denied. The realistic script shape, add then
+commit, is the one that passes.
+
+**Candidate remedy:** when a command both stages and commits, judge the
+union of the current index and every path the same command's `git add`
+(and `git commit -a`/`-u`/pathspec) would stage, read from the working tree.
+Where the added set cannot be resolved (a glob, a computed argument, `git add .`), take the working-tree changes git itself reports as the set. Never take
+an empty set: an unresolvable one denies. This is the same class as N53
+review 3's MA-2 shapes, so it is fixed on the N53 branch. RED tests:
+
+- `git add leak.txt && git commit -m x` denies;
+- `git add . && git commit -m x` with a leaking untracked file denies;
+- a clean add-then-commit is allowed.
+
 ### N60 — `curl_pipe_shell` denies a double-quoted `echo` argument that only mentions the pattern
 
 **Found by the coordinator.** It appended a queue note with
