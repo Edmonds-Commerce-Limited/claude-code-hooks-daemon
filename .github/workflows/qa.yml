@@ -279,15 +279,25 @@ jobs:
             echo "go not on this runner; probe #155 will skip via required_tools"
           fi
 
+      # Plan 00463 round 9: `tests/conftest.py` refuses a whole-suite-sized
+      # pytest run unless it holds the host-wide full-QA lock (the sink; see
+      # claude_code_hooks_daemon.qa.full_qa_gate). A CI runner is single-tenant
+      # so there is never real contention, but the sink does not know that —
+      # it enforces the same rule everywhere, which is the point. Acquire the
+      # SAME lock file (`<git-common-dir>/hooksdaemon-full-qa.lock`) the same
+      # way `scripts/qa/run_tests.sh` does, so this step is not a special case.
       - name: Tests + coverage
         if: ${{ !cancelled() }}
-        run: >
-          pytest tests/
-          -rs
-          --cov=src
-          --cov-report=term-missing
-          --cov-report=xml
-          --cov-fail-under=95
+        run: |
+          GIT_COMMON_DIR="$(git rev-parse --path-format=absolute --git-common-dir)"
+          exec {FULL_QA_LOCK_FD}>> "${GIT_COMMON_DIR}/hooksdaemon-full-qa.lock"
+          flock "${FULL_QA_LOCK_FD}"
+          pytest tests/ \
+            -rs \
+            --cov=src \
+            --cov-report=term-missing \
+            --cov-report=xml \
+            --cov-fail-under=95
 
       # The project handlers sit outside pyproject's `testpaths`, so `pytest
       # tests/` above cannot reach them and CI was as blind to them as the local

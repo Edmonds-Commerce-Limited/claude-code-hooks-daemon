@@ -103,6 +103,18 @@ The coordinator, never a sub-agent:
    the evidence.
 6. **Red:** see "A red batch" below.
 
+**The coordinator's `llm_qa.py all` (step 4) is the only run holding the
+host-wide full-QA lock.** A sub-agent's `subagent_full_qa_blocker` handler is
+the friendly first line, but a Bash-text denylist can never enumerate every
+way to start a whole-suite run. So `tests/conftest.py`
+(`claude_code_hooks_daemon.qa.full_qa_gate`) refuses a whole-suite-sized
+pytest COLLECTION outright unless it holds that lock, proven by an inherited
+file descriptor on the lock file -- the sink every route ends up at,
+regardless of what launched it. `scripts/qa/run_tests.sh` and CI both acquire
+it before their own whole-suite pytest run; see
+`src/claude_code_hooks_daemon/qa/full_qa_lock.py` and Plan
+00463's "Round 9" note for the design.
+
 **While a batch is in flight, `main` is frozen for code.** The coordinator's
 own doc commits (ledger rows, journal entries, archival) either wait for the
 batch to land, or are committed onto the integration branch BEFORE step 4. A

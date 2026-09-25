@@ -708,6 +708,9 @@ _OPAQUE: Final[str] = "<built at run time>"
 #: a script; the arguments are the code's kind, the path and its own argv.
 _CODE_FILE: Final[str] = "<code read from a file>"
 _SHELL_CODE: Final[str] = "shell"
+#: A shell file run as a script (``bash f``, ``source f``, ``./f``): unlike
+#: code fed on stdin, it knows its own path as ``BASH_SOURCE`` (review 9 B1).
+_SHELL_SCRIPT_CODE: Final[str] = "shell script"
 _PYTHON_CODE: Final[str] = "python"
 #: A file run by its own path: its first line says which kind of code it is.
 _EXECUTABLE_CODE: Final[str] = "executable"
@@ -986,6 +989,11 @@ _SHELL_VALUE_FLAGS: Final[frozenset[str]] = frozenset({"-o", "+o", "-O", "+O"})
 _SHELL_CODE_LETTER: Final[str] = "c"
 #: Reads the script from stdin; every later word is positional (review 7 m1).
 _SHELL_STDIN_LETTER: Final[str] = "s"
+#: Parses without running anything (review 9 m1): `bash -n`/`sh -n`, never
+#: confused with `-ni` (login) since only the LETTER is looked for, not a
+#: whole flag word.
+_SHELL_NOEXEC_LETTER: Final[str] = "n"
+_SHELL_NOEXEC_LONG_FLAG: Final[str] = "--noexec"
 
 
 @dataclass(frozen=True, slots=True)
@@ -1243,9 +1251,11 @@ _PATH_SEPARATOR: Final[str] = "/"
 _NODE_ID_SEPARATOR: Final[str] = "::"
 _PYTHON_SUFFIX: Final[str] = ".py"
 
-#: ``$PWD/tests``, ``${PWD}/tests`` and ``$(pwd)/tests`` are ``./tests``.
-_CWD_VARIABLE_PREFIXES: Final[tuple[str, ...]] = ("$PWD/", "${PWD}/", "$(pwd)/", "`pwd`/")
-_CWD_VARIABLES: Final[frozenset[str]] = frozenset({"$PWD", "${PWD}", "$(pwd)", "`pwd`"})
+#: ``$PWD/tests``, ``${PWD}/tests``, ``$(pwd)/tests`` and ``~+/tests`` (review
+#: 9 m3: bash's own spelling of ``$PWD``, never confused with ``~-``/``$OLDPWD``)
+#: are all ``./tests``.
+_CWD_VARIABLE_PREFIXES: Final[tuple[str, ...]] = ("$PWD/", "${PWD}/", "$(pwd)/", "`pwd`/", "~+/")
+_CWD_VARIABLES: Final[frozenset[str]] = frozenset({"$PWD", "${PWD}", "$(pwd)", "`pwd`", "~+"})
 #: A path from the home directory is absolute: it does not depend on the cwd.
 _HOME_PREFIXES: Final[tuple[str, ...]] = ("~/", "$HOME/", "${HOME}/")
 #: What ``Path.expanduser`` expands; it raises when no home can be found.
@@ -2528,7 +2538,11 @@ def _substituted_command(
         producer = shlex.split(inner)
     except ValueError as error:
         logger.debug("Substituted command judged unparsed (%s)", error)
-        yield _UNPARSED, [], segment
+        # `arguments` is unread for `_UNPARSED` (`_full_run_of` judges only
+        # `segment`), so `str(error)` here carries the caught exception into
+        # the yielded value itself (review 9 m2's allowlist) rather than
+        # letting `logger.debug` be the only place it is reported.
+        yield _UNPARSED, [str(error)], segment
         return
     if not producer:
         yield from _resolve(rest, segment, depth, hops + 1)
@@ -2639,7 +2653,9 @@ def _code_of(
         producer = shlex.split(inner)
     except ValueError as error:
         logger.debug("Code substitution judged unparsed (%s)", error)
-        yield _UNPARSED, [], segment
+        # See the twin site in `_substituted_command`: `str(error)` here
+        # carries the caught exception into the yielded value itself.
+        yield _UNPARSED, [str(error)], segment
         return
     output = _producer_output(producer)
     if output.text is not None:
@@ -2679,7 +2695,8 @@ def _resolve_script(
     if script.startswith(_DESCRIPTOR_PREFIX):
         yield _UNREAD_CODE, [], segment
         return
-    yield _CODE_FILE, [kind, script, *arguments], segment
+    run_as = _SHELL_SCRIPT_CODE if kind == _SHELL_CODE else kind
+    yield _CODE_FILE, [run_as, script, *arguments], segment
 
 
 def _is_flag(word: str) -> bool:
@@ -3465,10 +3482,15 @@ def _resolve_shell(
     ``-s`` reads the script from stdin and takes no script operand: every
     word after it is a positional argument, not a name (review 7 m1), so
     ``bash -s -- tests < f`` reads ``f``, not a directory named ``tests``.
+    ``-n``/``--noexec`` (review 9 m1) reads and PARSES a script without
+    running anything in it -- bash's own ``-n``/``--noexec`` differ from
+    ``-i``/``--login`` by more than a letter, and this handler judges them
+    the same way bash's own parser does: nothing runs, so nothing is yielded.
     """
     index = 0
     runs_code = False
     reads_stdin_script = False
+    runs_nothing = False
     stdin_file = ""
     positional: list[str] = []
     while index < len(rest):
@@ -3478,7 +3500,8 @@ def _resolve_shell(
             code = argument[len(_HERE_STRING) :] or following
             # A whole substitution is its producer's output (review 7 m1):
             # `bash <<< "$(cat f)"` reads f.
-            yield from _code_of(_SHELL_CODE, code, [], segment, depth)
+            if not runs_nothing:
+                yield from _code_of(_SHELL_CODE, code, [], segment, depth)
             return
         stdin = _STDIN_REDIRECT.match(argument)
         if stdin is not None:
@@ -3492,9 +3515,14 @@ def _resolve_shell(
         if argument in _SHELL_VALUE_FLAGS:
             index += 2
             continue
+        if argument == _SHELL_NOEXEC_LONG_FLAG:
+            runs_nothing = True
+            index += 1
+            continue
         if argument.startswith(FLAG_PREFIX) and not argument.startswith(_LONG_FLAG_PREFIX):
             runs_code = runs_code or _SHELL_CODE_LETTER in argument[1:]
             reads_stdin_script = reads_stdin_script or _SHELL_STDIN_LETTER in argument[1:]
+            runs_nothing = runs_nothing or _SHELL_NOEXEC_LETTER in argument[1:]
             index += 1
             continue
         if argument.startswith(_LONG_FLAG_PREFIX):
@@ -3504,12 +3532,14 @@ def _resolve_shell(
             positional.append(argument)
             index += 1
             continue
+        if runs_nothing:
+            return
         if runs_code:
             yield from _code_of(_SHELL_CODE, argument, [], segment, depth)
             return
         yield from _resolve_script(_SHELL_CODE, rest[index:], segment, depth)
         return
-    if stdin_file and not runs_code:
+    if stdin_file and not runs_code and not runs_nothing:
         yield _CODE_FILE, [_SHELL_CODE, stdin_file, *positional], segment
 
 
@@ -4258,6 +4288,67 @@ def _with_addopts(pattern: FullQaPattern, arguments: list[str], event: _Event) -
     return event.addopts + arguments if pattern.command == _PYTEST else arguments
 
 
+def _resolved_code_path(path: str, here: Path | None) -> str | None:
+    """The filesystem path ``path`` names, or None when it cannot be placed.
+
+    The same absolute/home/cwd/relative placement :func:`_read_code` uses,
+    without its variable or substitution branch (a symlink target check has
+    no ``source`` text to resolve one against, and needs none: an unresolved
+    path is simply not checked). Reads nothing; used only to find a
+    SYMLINK's target path (review 9 m5).
+    """
+    if path.startswith(_HOME_PREFIXES):
+        home: Path | None
+        try:
+            home = Path(_HOME).expanduser()
+        except RuntimeError as error:
+            logger.debug("No home directory to place %r in (%s)", path, error)
+            home = None
+        if home is None:
+            return None
+        return posixpath.normpath(posixpath.join(home, path.partition(_PATH_SEPARATOR)[2]))
+    if path.startswith(_CWD_VARIABLE_PREFIXES) and here is not None:
+        return posixpath.normpath(posixpath.join(here, path.partition(_PATH_SEPARATOR)[2]))
+    if path.startswith(_PATH_SEPARATOR):
+        return posixpath.normpath(path)
+    if path.startswith(_UNSEEN_CD_PREFIXES):
+        logger.debug("A variable or substitution-led path cannot be placed: %r", path)
+        return None
+    if here is not None:
+        return posixpath.normpath(posixpath.join(here, path))
+    logger.debug("A relative path with no known directory cannot be placed: %r", path)
+    return None
+
+
+def _symlink_declared_name(
+    path: str, here: Path | None, patterns: Sequence[FullQaPattern]
+) -> str | None:
+    """A declared program's name, when ``path`` is a SYMLINK to it.
+
+    ``command_word(path)`` judges the LINK's own name; a project script that
+    is only a symlink to a declared runner (``ln -s llm_qa.py q.py``) would
+    otherwise be raw-scanned past the runner's own parse cap, judged by
+    whatever text a scan happens to find rather than by the runner's pattern
+    (review 9 m5). Resolving the link's TARGET first lets it be judged the
+    same as running the runner directly -- by its declared pattern, never by
+    reading anything.
+    """
+    resolved = _resolved_code_path(path, here)
+    if resolved is None:
+        return None
+    target: Path | None
+    try:
+        link = Path(resolved)
+        target = link.resolve() if link.is_symlink() else None
+    except OSError as error:
+        logger.debug("Could not check %r for a symlink target (%s)", resolved, error)
+        target = None
+    if target is None:
+        return None
+    target_name = _PROGRAM_ALIASES.get(command_word(str(target)), command_word(str(target)))
+    return target_name if any(pattern.command == target_name for pattern in patterns) else None
+
+
 def _full_run_in_code_file(
     arguments: list[str],
     segment: str,
@@ -4284,6 +4375,9 @@ def _full_run_in_code_file(
     name = _PROGRAM_ALIASES.get(command_word(path), command_word(path))
     if any(pattern.command == name for pattern in event.patterns):
         return _full_run_of(name, argv, segment, event, here)
+    linked = _symlink_declared_name(path, here, event.patterns)
+    if linked is not None:
+        return _full_run_of(linked, argv, segment, event, here)
     content = _read_code(path, here, event, source)
     if content.readable is _Readable.ABSENT:
         return None
@@ -4296,8 +4390,19 @@ def _full_run_in_code_file(
     code_kind = _code_kind(content.text) if kind == _EXECUTABLE_CODE else kind
     if code_kind is None:
         return None
+    # A shell file run AS A SCRIPT (`bash f`, `source f`, `./f`) knows its own
+    # path as `BASH_SOURCE`; the script-directory idiom built from it
+    # (`$(dirname "${BASH_SOURCE[0]}")`) is resolved to that directory before
+    # the text is parsed (review 9 B1), so a further path or `cd` built from
+    # it is followed like a literal one instead of judged unseen.
+    as_script = code_kind == _SHELL_SCRIPT_CODE or (
+        kind == _EXECUTABLE_CODE and code_kind == _SHELL_CODE
+    )
+    if as_script:
+        code_kind = _SHELL_CODE
     if len(content.text) > _parse_cap(code_kind):
         return _scanned_verdict(content, event, segment)
+    text = _with_script_directory(content.text, content.path) if as_script else content.text
     # Code whose judgement never reads its arguments is judged the same
     # whatever it is given, so its argv is no part of its verdict: a script
     # whose usage text names it with other arguments is not parsed again.
@@ -4309,7 +4414,7 @@ def _full_run_in_code_file(
     )
     chain: _ChainKey = (
         content.path,
-        code_kind,
+        _SHELL_SCRIPT_CODE if as_script else code_kind,
         tuple(argv) if reads_argv else (),
         str(here) if here is not None else "",
         tuple(event.addopts),
@@ -4334,15 +4439,15 @@ def _full_run_in_code_file(
             event.addopts_read.add(content.path)
             event.addopts.extend(_addopts(content.text))
         invocations = (
-            _invocations(content.text, 0, argv)
+            _invocations(text, 0, argv)
             if code_kind == _SHELL_CODE
             else (
-                _word_runs(content.text, argv, segment)
+                _word_runs(text, argv, segment)
                 if code_kind == _WORDS_CODE
-                else _python_code_runs(content.text, argv, segment, 0)
+                else _python_code_runs(text, argv, segment, 0)
             )
         )
-        found = _first_full_run(invocations, content.text, event, here, files_deep + 1)
+        found = _first_full_run(invocations, text, event, here, files_deep + 1)
     finally:
         event.verdicts_pending.discard(chain)
     event.verdicts[key] = found
@@ -4432,22 +4537,150 @@ def _assigns(source: str, name: str) -> bool:
     )
 
 
+#: ``$(dirname "${BASH_SOURCE[0]}")`` and its spellings: the directory of the
+#: script holding it, when it runs as a script. ``$0`` is left alone: in a
+#: sourced file it is the CALLER's name, which cannot be known here.
+_SCRIPT_DIRECTORY: Final[re.Pattern[str]] = re.compile(
+    r"\$\(\s*dirname\s+(?:--\s+)?"
+    r"(?:\"\$\{BASH_SOURCE(?:\[0\])?\}\"|\$\{BASH_SOURCE(?:\[0\])?\}|\"\$BASH_SOURCE\"|\$BASH_SOURCE)"
+    r"\s*\)"
+)
+#: A bare ``${BASH_SOURCE[0]}``/``$BASH_SOURCE`` that survives the dirname
+#: substitution above -- e.g. assigned to a variable first
+#: (``_source="${BASH_SOURCE[0]}"``) and dirname'd from THERE. Replaced with
+#: the script's own path so a further ``dirname``/``cd && pwd`` built from
+#: that variable is still one :func:`_evaluated_path` can compute.
+_BASH_SOURCE_BARE: Final[re.Pattern[str]] = re.compile(r"\$\{BASH_SOURCE(?:\[0\])?\}|\$BASH_SOURCE")
+#: A directory that stands in the code as it is, needing no quoting.
+_PLAIN_PATH: Final[re.Pattern[str]] = re.compile(r"[\w./+@%,:=-]+")
+_SUBSTITUTION_CLOSER: Final[str] = ")"
+_PWD_WORD: Final[str] = "pwd"
+_DIRNAME_WORD: Final[str] = "dirname"
+#: Programs that print their path operand, made absolute: ``realpath X``,
+#: ``readlink -f X``. Each maps to the flags it may take, and the flags of
+#: which it needs one (none for realpath; plain ``readlink`` prints a link's
+#: target instead). Symlinks are not followed; the file read is the same.
+_PATH_RESOLVERS: Final[Mapping[str, tuple[frozenset[str], frozenset[str]]]] = {
+    "realpath": (frozenset({"-e", "-m", "-s", "-q", "-P", "-L", "--"}), frozenset()),
+    "readlink": (
+        frozenset({"-f", "-e", "-m", "-n", "-q", "-s", "--"}),
+        frozenset({"-f", "-e", "-m"}),
+    ),
+}
+_CD_FLAGS: Final[frozenset[str]] = frozenset({"-P", "-L", "-e", "-@", "--"})
+_PWD_FLAGS: Final[frozenset[str]] = frozenset({"-P", "-L"})
+
+
+def _with_script_directory(text: str, script: str) -> str:
+    """Shell code run as the script at ``script``, its directory idiom replaced by that directory.
+
+    ``$(dirname "${BASH_SOURCE[0]}")`` is where the script is, so a path or a
+    ``cd`` built from it is followed like a literal one. A bare
+    ``${BASH_SOURCE[0]}`` left over -- typically assigned to a variable first
+    and dirname'd from there -- becomes the script's own path, for the same
+    reason. Either substitution is skipped when the path would need quoting,
+    which then stays unseen.
+    """
+    if not _PLAIN_PATH.fullmatch(script):
+        return text
+    text = _SCRIPT_DIRECTORY.sub(posixpath.dirname(script), text)
+    return _BASH_SOURCE_BARE.sub(script, text)
+
+
+def _evaluated_path(word: str, depth: int = 0) -> str | None:
+    """The absolute path a word builds from literals and path substitutions, else None.
+
+    A substitution counts only when it prints a path this can compute
+    without running anything: ``cd DIR && pwd``, ``dirname PATH``,
+    ``realpath PATH`` or ``readlink -f PATH``, of a word that is itself
+    computable. Anything else -- a variable, another program -- is None
+    (review 9 B1's direction: resolve only the fixed idioms, fail closed on
+    the rest).
+    """
+    if depth > _MAX_NESTING:
+        return None
+    built: list[str] = []
+    index = 0
+    while index < len(word):
+        if word.startswith(_SUBSTITUTION_OPENER, index):
+            start = index + len(_SUBSTITUTION_OPENER)
+            end = _closing_paren(word, start)
+            if end == len(word):
+                return None
+            value = _path_substitution(word[start:end], depth + 1)
+            if value is None:
+                return None
+            built.append(value)
+            index = end + len(_SUBSTITUTION_CLOSER)
+            continue
+        char = word[index]
+        if char in _UNSEEN_CD_PREFIXES or char == "\\":
+            return None
+        if char not in _QUOTES:
+            built.append(char)
+        index += 1
+    path = "".join(built)
+    return posixpath.normpath(path) if path.startswith(_PATH_SEPARATOR) else None
+
+
+def _path_substitution(code: str, depth: int) -> str | None:
+    """What a substitution's code prints, when it is one of the path-printing forms."""
+    protected, originals = _protect_substitutions(code)
+    commands: list[list[str]] | None
+    try:
+        commands = [
+            _without_redirects([_restore(word, originals) for word in shlex.split(segment)])
+            for segment in split_unquoted(protected, _COMMAND_BOUNDARIES)
+            if segment.strip()
+        ]
+    except ValueError as error:
+        logger.debug("Substitution not computable, unsplittable (%s): %r", error, code)
+        commands = None
+    if commands is None:
+        return None
+    if len(commands) == 2 and commands[0][:1] == [_CD] and commands[1][:1] == [_PWD_WORD]:
+        operands = [word for word in commands[0][1:] if word not in _CD_FLAGS]
+        if len(operands) != 1 or not set(commands[1][1:]) <= _PWD_FLAGS:
+            return None
+        return _evaluated_path(operands[0], depth)
+    if len(commands) != 1 or not commands[0]:
+        return None
+    name, rest = commands[0][0], commands[0][1:]
+    if name == _DIRNAME_WORD:
+        operands = [word for word in rest if word != END_OF_OPTIONS]
+        target = _evaluated_path(operands[0], depth) if len(operands) == 1 else None
+        return None if target is None else posixpath.dirname(target)
+    resolver = _PATH_RESOLVERS.get(name)
+    if resolver is None:
+        return None
+    flags, needed = resolver
+    if needed and not needed.intersection(rest):
+        return None
+    operands = [word for word in rest if word not in flags]
+    return _evaluated_path(operands[0], depth) if len(operands) == 1 else None
+
+
 def _read_code(path: str, here: Path | None, event: _Event, source: str) -> _CodeContent:
     """A file of code, read at most once per event and within the event's budgets.
 
     ``/dev/null`` is empty. A path this command writes is unseen: what runs
     is not what is on disk now. ``~``, ``$HOME`` and ``$PWD`` are where they
-    point. A path led by a variable ``source`` (the code holding the path)
-    never assigns is unseen (review 8 m1): it names a file this cannot
-    know. One led by a variable the code does assign, or a substitution,
-    is built at run time by the code itself, and a relative path with no
-    known directory cannot be placed: both are absent.
+    point, and so is a path built only from literals and path-printing
+    substitutions (:func:`_evaluated_path`, review 9 B1). A path led by a
+    variable ``source`` (the code holding the path) never assigns is unseen
+    (review 8 m1): it names a file this cannot know. One led by another
+    substitution or a backtick, or by Python at run time, is UNSEEN too: a
+    path this handler could not even COMPUTE is not one it proved empty. A
+    relative path with no known directory cannot be placed, and is absent.
     """
     if path == _EMPTY_DEVICE:
         return _CodeContent(_Readable.TEXT)
     if posixpath.normpath(path) in event.written:
         return _UNSEEN_CODE
-    if path.startswith(_HOME_PREFIXES):
+    evaluated = _evaluated_path(path) if path.startswith(_UNSEEN_CD_PREFIXES) else None
+    if evaluated is not None:
+        target = evaluated
+    elif path.startswith(_HOME_PREFIXES):
         try:
             home = Path(_HOME).expanduser()
         except RuntimeError as error:
@@ -4462,9 +4695,27 @@ def _read_code(path: str, here: Path | None, event: _Event, source: str) -> _Cod
     elif path.startswith(_UNSEEN_CD_PREFIXES):
         leading = _LEADING_VARIABLE.match(path)
         # A path Python computes (`[sys.executable, script]`) names a script
-        # built at run time, as a computed program name does: not seen.
-        if leading is None or path.startswith(_PYTHON_VALUE):
+        # built at run time, as a computed program name does: not seen
+        # (unchanged; `_PYTHON_VALUE` is this handler's OWN placeholder for
+        # "Python could not determine this text", not a path any real
+        # process is handed, so there is nothing here to fail closed ON).
+        if path.startswith(_PYTHON_VALUE):
             return _ABSENT_CODE
+        # A path built by a shell substitution or a backtick is not one this
+        # handler computed -- it is UNSEEN, not absent (review 9 B1):
+        # "absent" means PROVABLY nothing, which a path it could not even
+        # resolve is not. Only a WELL-FORMED substitution counts: `$(` (an
+        # opener `_protect_substitutions` always pairs with a real close), or
+        # a backtick with a genuine, non-empty closing backtick later in the
+        # word. A markdown code span (` ``name`` `) leaking into a raw scan
+        # of Python prose starts with two ADJACENT backticks -- no shell
+        # substitution is ever empty between opener and closer by
+        # construction here -- and names nothing to fail closed on.
+        if leading is None:
+            is_real_substitution = path.startswith(_SUBSTITUTION_OPENER) or (
+                path[0] == _BACKTICK and path.find(_BACKTICK, 2) != -1
+            )
+            return _UNSEEN_CODE if is_real_substitution else _ABSENT_CODE
         return _ABSENT_CODE if _assigns(source, leading.group("name")) else _UNSEEN_CODE
     elif here is not None:
         target = posixpath.normpath(posixpath.join(here, path))
@@ -4540,8 +4791,11 @@ def _changed_directory(current: Path | None, arguments: Sequence[str]) -> Path |
     if len(operands) != 1:
         return None
     target = operands[0]
-    if target == LONE_DASH or target.startswith(_UNSEEN_CD_PREFIXES):
+    if target == LONE_DASH:
         return None
+    if target.startswith(_UNSEEN_CD_PREFIXES):
+        evaluated = _evaluated_path(target)
+        return None if evaluated is None else Path(evaluated)
     if target.startswith(_PATH_SEPARATOR):
         return Path(target)
     return None if current is None else current / target
@@ -4567,7 +4821,13 @@ _RULE: Final[Rule] = Rule(
         "  3. The coordinator runs the full gate and sends back anything it finds.\n\n"
         "Only a command that RUNS the whole suite is denied. Mentioning one in a\n"
         "commit message, a grep or an echo never is, and the coordinator's own\n"
-        "run is unaffected."
+        "run is unaffected.\n\n"
+        "This handler is the fast, friendly FIRST LINE, not the guarantee: it\n"
+        "parses Bash text, and no finite pattern list enumerates every way to\n"
+        "start a whole-suite run. The GUARANTEE is a sink-side backstop --\n"
+        "`tests/conftest.py` refuses a whole-suite-sized pytest run outright\n"
+        "unless it holds the host-wide full-QA lock (Plan 00463 round 9), no\n"
+        "matter what launched it or whether this handler saw it."
     ),
 )
 

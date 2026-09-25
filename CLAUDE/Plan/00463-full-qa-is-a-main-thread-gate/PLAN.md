@@ -155,6 +155,59 @@ commands that ARE allowed, and they must exist.
 - [x] ✅ **Task 1.5**: Targeted QA in the worktree, then hand over. Under
   this plan's own rule, the coordinator runs the full gate.
 
+### Round 9: the guarantee moves to the sink
+
+Nine reviews chased command-TEXT evasions in the Bash handler -- perl, node,
+`at`, `systemd-run`, `git rebase --exec`, substitution-built paths, oversized
+text, files rewritten in the same command -- and review 9 still found 81 of
+202 evasion rows allowed. **A Bash-text denylist can never close that set**:
+any program can start a whole-suite test run, so no finite pattern list
+enumerates every launcher. The guarantee therefore moves to the SINK -- the
+one place every route ends up, whatever launched it: pytest itself.
+
+- `claude_code_hooks_daemon.qa.full_qa_gate` (a pytest plugin, wired from
+  `tests/conftest.py`) refuses a whole-suite-sized collected selection
+  (over 25% of the suite's test files) unless the host-wide full-QA lock
+  (`claude_code_hooks_daemon.qa.full_qa_lock`) is held, proven by an
+  INHERITED file descriptor on the lock file (never an env var).
+  `scripts/qa/run_tests.sh` and CI (`.github/workflows/qa.yml`) acquire it
+  before their whole-suite pytest invocation; `llm_qa.py all` and
+  `run_all.sh` acquire it transitively (both run `run_tests.sh`).
+  `run_changed_tests.py` and `llm_qa.py changed --range/--base` need no lock
+  of their own: they invoke pytest directly, so the sink already refuses them
+  the moment their selection is whole-suite-sized (this resolves the
+  standing M1 finding: a 40-file-per-call cap never bounded the TOTAL).
+- The Bash handler (`subagent_full_qa_blocker`) STAYS: it is the fast,
+  friendly first line that denies the common shapes early with a helpful,
+  actionable message. It is no longer the guarantee -- the sink is. Its own
+  fixes this round are narrow and exact, not a widening of the evasion
+  parser: `bash|sh -n`/`--noexec` runs nothing (m1); `~+` is bash's own
+  `$PWD` (m3); a symlink to a declared runner is judged by its target's
+  pattern (m5); a script path built by a shell substitution or backtick is
+  UNSEEN, not absent, so it fails closed instead of being silently skipped
+  (B1) -- paired with resolving the FIXED script-directory idioms
+  (`$(dirname "${BASH_SOURCE[0]}")`, `$(cd "$(dirname ...)" && pwd)`,
+  `realpath`/`readlink -f` of a literal) so the tightened B1 rule does not
+  turn every script that finds its own directory into a false deny.
+- **B1 residual (accepted, named, not silent).** A handful of this
+  repository's own installer/wrapper scripts resolve their own location past
+  those fixed idioms -- a plain `readlink` (uncomputable without `-f`) inside
+  a `while [ -L ... ]` symlink-following loop, or a value reassigned inside
+  that loop overwriting the resolvable one set before it (this handler's
+  variable tracking has no branch awareness). `bin/hooks-daemon` itself is
+  the most consequential instance, and every script that shells out to it
+  inherits the same denial. Pinned as DENIED (not silently dropped from
+  coverage) in `_SCRIPTS_THAT_RUN_UNSEEN_CODE`
+  (`tests/unit/handlers/pre_tool_use/test_subagent_full_qa_blocker.py`),
+  `_B1_RESIDUAL_UNSEEN` and `TestBinHooksDaemonIsTheB1Residual`
+  (`..._corpus.py`). A real fix needs branch-aware variable tracking (which
+  loop-body reassignment wins depends on whether the loop's own condition
+  can be proven), which is follow-up work, not a "documented limit" to
+  leave alone: it sits in code this round touches.
+- The plan merges AFTER Plan 00466's N24 ledger, whose deadline now fails
+  CLOSED on a chain timeout (M7's own budget finding: a chain timeout must
+  never read as an allow for a SUB-scoped guard).
+
 ### Phase 2: Deliver
 
 - [ ] ⬜ **Task 2.1**: The batched integration gate: the coordinator merges

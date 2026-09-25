@@ -26,6 +26,19 @@ if ! "${VENV_PYTHON}" -c "import pytest" 2>/dev/null; then
     install_deps || exit 1
 fi
 
+# Plan 00463 round 9: this script drives a whole-suite pytest run, so it must
+# hold the host-wide full-QA lock BEFORE pytest collects — the sink in
+# tests/conftest.py (claude_code_hooks_daemon.qa.full_qa_gate) refuses a
+# whole-suite-sized selection with no lock held, no matter what launched it.
+# `exec {FD}>>` opens a plain (non-CLOEXEC) descriptor, so `venv_tool pytest`
+# below — an ordinary child of THIS shell — inherits it for free; nothing
+# downstream needs to know the fd number, only that the file it points at
+# resolves to the same lock (verified via /proc/self/fd, not this variable).
+GIT_COMMON_DIR="$(git -C "${PROJECT_ROOT}" rev-parse --path-format=absolute --git-common-dir)"
+FULL_QA_LOCK="${GIT_COMMON_DIR}/hooksdaemon-full-qa.lock"
+exec {FULL_QA_LOCK_FD}>> "${FULL_QA_LOCK}"
+flock "${FULL_QA_LOCK_FD}"
+
 # Ensure output directory exists
 mkdir -p "$(dirname "${OUTPUT_FILE}")"
 

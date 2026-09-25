@@ -22,6 +22,13 @@ from claude_code_hooks_daemon.core.response_schemas import (
 )
 from claude_code_hooks_daemon.core.workspace import DeclaredProject, ProjectRegistry
 
+# Plan 00463 round 9: the sink-side backstop. Every route to a whole-suite-sized
+# pytest run ends up HERE regardless of what launched it, so this is where the
+# host-wide full-QA lock (claude_code_hooks_daemon.qa.full_qa_lock) is
+# actually enforced — the Bash handler (subagent_full_qa_blocker) is the fast,
+# friendly first line, not the guarantee. See qa/full_qa_gate.py's docstring.
+from claude_code_hooks_daemon.qa.full_qa_gate import pytest_collection_modifyitems
+
 # Re-exported so pytest collects it as a hook implementation from this
 # conftest. It sits at `tests/` root rather than in a subdirectory because the
 # relay-dependent gates it covers straddle `acceptance/` and `integration/`.
@@ -29,7 +36,7 @@ from claude_code_hooks_daemon.core.workspace import DeclaredProject, ProjectRegi
 from tests.relay_gate_guard import pytest_runtest_makereport
 from tests.source_tree_guard import assert_package_is_this_checkout
 
-__all__ = ["pytest_runtest_makereport"]
+__all__ = ["pytest_collection_modifyitems", "pytest_runtest_makereport"]
 
 
 def pytest_sessionstart(session: pytest.Session) -> None:

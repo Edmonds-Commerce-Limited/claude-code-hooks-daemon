@@ -191,6 +191,15 @@ def _corpus_rows() -> list[tuple[str, bool]]:
 
 #: The two ``scripts/qa`` entry points that ARE the full suite.
 _FULL_BY_DESIGN: frozenset[str] = frozenset({"run_all.sh", "run_tests.sh"})
+#: Review 9 B1's accepted residual (see PLAN.md's "B1 residual" note and
+#: ``_SCRIPTS_THAT_RUN_UNSEEN_CODE`` in test_subagent_full_qa_blocker.py):
+#: each resolves its own location past the fixed idioms this round resolves
+#: -- a plain ``readlink`` (not computable without ``-f``) inside a
+#: ``while [ -L ... ]`` symlink-following loop, or a value reassigned inside
+#: that loop overwriting the resolvable one set before it.
+_B1_RESIDUAL_UNSEEN: frozenset[str] = frozenset(
+    {"run_canonical_callers_check.sh", "run_semgrep_check.sh", "check_generated_doc_drift.py"}
+)
 _HANDLER_TESTS = "tests/unit/handlers/pre_tool_use/test_subagent_full_qa_blocker.py"
 _HANDLER = "src/claude_code_hooks_daemon/handlers/pre_tool_use/subagent_full_qa_blocker.py"
 _LLM_QA = "./scripts/qa/llm_qa.py"
@@ -271,10 +280,12 @@ def _everyday_commands() -> list[str]:
         "bash scripts/qa/run_security_check.sh",
         "./scripts/qa/run_autofix.sh",
         "./scripts/qa/check_canonical_callers.sh",
-        "bin/hooks-daemon status",
-        "bin/hooks-daemon restart",
-        "./bin/hooks-daemon explain-rule R-SUBAGENT-FULL-QA",
-        "bin/hooks-daemon find-plan 463",
+        # `bin/hooks-daemon` itself is review 9 B1's accepted residual (see
+        # `_B1_RESIDUAL_UNSEEN` above and PLAN.md's "B1 residual" note): its
+        # own self-location resolution follows a symlink via a plain
+        # `readlink` (uncomputable without `-f`) inside a `while [ -L ... ]`
+        # loop, so it is denied rather than judged by its pattern. Pinned
+        # DENIED, not omitted, in `TestBinHooksDaemonIsTheB1Residual` below.
         'CLAUDE/Plan/mkplan.bash "a-new-plan"',
         f"CLAUDE/Plan/mkplan.bash --journal {_PLAN} Review untracked/scratch/journal.txt",
         # git and gh.
@@ -340,10 +351,11 @@ def _everyday_commands() -> list[str]:
     ]
     qa_scripts = _REPO_ROOT / "scripts" / "qa"
     for script in sorted(qa_scripts.glob("*.py")):
-        commands.append(f"python scripts/qa/{script.name} --help")
-        commands.append(f"python3 scripts/qa/{script.name}")
+        if script.name not in _B1_RESIDUAL_UNSEEN:
+            commands.append(f"python scripts/qa/{script.name} --help")
+            commands.append(f"python3 scripts/qa/{script.name}")
     for script in sorted(qa_scripts.glob("*.sh")):
-        if script.name not in _FULL_BY_DESIGN:
+        if script.name not in _FULL_BY_DESIGN and script.name not in _B1_RESIDUAL_UNSEEN:
             commands.append(f"./scripts/qa/{script.name}")
     return commands
 
@@ -388,3 +400,30 @@ def test_an_everyday_sub_agent_command_is_allowed(
     command: str, patterns: list[FullQaPattern]
 ) -> None:
     assert find_full_qa_invocation(command, patterns, cwd=_REPO_ROOT) is None, command
+
+
+class TestBinHooksDaemonIsTheB1Residual:
+    """``bin/hooks-daemon`` is denied, not allowed -- review 9 B1's accepted residual.
+
+    Its own self-location resolution follows a symlink via a plain
+    ``readlink`` (uncomputable without ``-f``: review 9's own direction pins
+    plain readlink as NOT one of the fixed idioms) inside a
+    ``while [ -L "$_source" ]`` loop, and the loop's reassignment of
+    ``_source`` overwrites the resolvable pre-loop value this handler's
+    variable tracking has no branch awareness to keep separate. Pinned here
+    so a future fix that resolves it is a welcome diff, not a silent gap.
+    """
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "bin/hooks-daemon status",
+            "bin/hooks-daemon restart",
+            "./bin/hooks-daemon explain-rule R-SUBAGENT-FULL-QA",
+            "bin/hooks-daemon find-plan 463",
+        ],
+    )
+    def test_is_denied_unseen(self, command: str, patterns: list[FullQaPattern]) -> None:
+        match = find_full_qa_invocation(command, patterns, cwd=_REPO_ROOT)
+        assert match is not None, command
+        assert match.fail_closed

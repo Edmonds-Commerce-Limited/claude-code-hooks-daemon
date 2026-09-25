@@ -1573,8 +1573,27 @@ class TestCodeTheHandlerCannotReadFailsClosed:
 
 
 #: This repository's scripts whose code includes code that cannot be seen,
-#: so they fail closed: `prerequisites.sh` pipes a downloaded installer into sh.
-_SCRIPTS_THAT_RUN_UNSEEN_CODE: frozenset[str] = frozenset({"scripts/install/prerequisites.sh"})
+#: so they fail closed: `prerequisites.sh` pipes a downloaded installer into
+#: sh. The rest are review 9 B1's accepted residual: each resolves its OWN
+#: location past the fixed idioms this round resolves -- a `readlink`
+#: (without `-f`, so its target is not computable) inside a `while [ -L ... ]`
+#: symlink-following loop, or a value reassigned inside that loop overwriting
+#: the resolvable one set before it. None is reached directly by an everyday
+#: sub-agent command except `bin/hooks-daemon` itself (tracked separately,
+#: `TestReview9B1AcceptedResidual`), which the review's own patch already
+#: could not resolve either -- see PLAN.md's "B1 residual" note.
+_SCRIPTS_THAT_RUN_UNSEEN_CODE: frozenset[str] = frozenset(
+    {
+        "scripts/install/prerequisites.sh",
+        "scripts/bootstrap-self-install.sh",
+        "scripts/dummy-client-repo.sh",
+        "scripts/install/rollback.sh",
+        "scripts/install_version.sh",
+        "scripts/qa/run_canonical_callers_check.sh",
+        "scripts/qa/run_semgrep_check.sh",
+        "scripts/qa/check_generated_doc_drift.py",
+    }
+)
 
 
 class TestAScriptRunByItsNameIsRead:
@@ -1648,7 +1667,13 @@ class TestAScriptRunByItsNameIsRead:
     def test_the_qa_scripts_run_as_documented_are_not_full_runs(self, script: str) -> None:
         """Review 7 M2: a docstring's apostrophe or a comment denied 6 of these scripts."""
         match = find_full_qa_invocation(f"python {script}", _patterns(), cwd=_REPO_ROOT)
-        assert match is None, match
+        if script in _SCRIPTS_THAT_RUN_UNSEEN_CODE:
+            # Review 9 B1's accepted residual, reached through a subprocess
+            # call: check_generated_doc_drift.py shells out to `bin/hooks-daemon`.
+            assert match is not None
+            assert match.fail_closed
+        else:
+            assert match is None, match
 
 
 class TestReadingAScriptDoesNotMisreadItsProse:
@@ -2979,6 +3004,70 @@ class TestDefaultsAndPosture:
         handler.scope = scope
         status = handler.get_enforcement_status(tmp_path)
         assert any("scope" in line and "SUB" in line for line in status), status
+
+
+class TestReview9B1SubstitutionBuiltPathIsUnseenNotAbsent:
+    """A script path built by a substitution or a backtick fails CLOSED (deny),
+    never treated as though it names nothing (review 9 B1). The assigned-
+    variable idiom (``D=/abs; bash "$D/f.sh"``) is unaffected: :func:`_expand_variables`
+    already resolves it to a literal path before this branch is ever reached.
+    """
+
+    @staticmethod
+    def _tree(tmp_path: Path) -> Path:
+        (tmp_path / ".git").mkdir()
+        (tmp_path / "tests" / "unit" / "qa").mkdir(parents=True)
+        fx = tmp_path / "fx"
+        fx.mkdir()
+        (fx / "full.sh").write_text("pytest tests\n", encoding="utf-8")
+        return tmp_path
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'bash "$(echo fx)/full.sh"',
+            "bash `echo fx`/full.sh",
+            'bash "$(realpath fx)/full.sh"',
+        ],
+    )
+    def test_a_substitution_built_script_path_denies(self, tmp_path: Path, command: str) -> None:
+        assert find_full_qa_invocation(command, _patterns(), cwd=self._tree(tmp_path)), command
+
+
+class TestReview9M1BashNoexecRunsNothing:
+    """``bash -n``/``sh --noexec`` parses a script without running it."""
+
+    @staticmethod
+    def _tree(tmp_path: Path) -> Path:
+        (tmp_path / "full.sh").write_text("pytest tests\n", encoding="utf-8")
+        return tmp_path
+
+    @pytest.mark.parametrize(
+        "command", ["bash -n full.sh", "sh -n full.sh", "bash --noexec full.sh"]
+    )
+    def test_noexec_is_not_a_run(self, tmp_path: Path, command: str) -> None:
+        assert find_full_qa_invocation(command, _patterns(), cwd=self._tree(tmp_path)) is None
+
+
+class TestReview9M3TildePlusIsThePwd:
+    """``~+`` is bash's own spelling of ``$PWD`` (review 9 m3)."""
+
+    def test_tilde_plus_names_the_suite(self) -> None:
+        assert find_full_qa_invocation("pytest ~+/tests", _patterns()) is not None
+
+
+class TestReview9M5SymlinkToADeclaredRunnerIsJudgedByItsTarget:
+    """A symlink to a declared runner is judged by the runner's PATTERN, not
+    by raw-scanning the target's whole text (review 9 m5)."""
+
+    def test_a_symlink_to_llm_qa_is_judged_as_llm_qa(self, tmp_path: Path) -> None:
+        (tmp_path / ".git").mkdir()
+        real = tmp_path / "llm_qa.py"
+        real.write_text("#!/usr/bin/env python3\n" + ("# pad\n" * 40_000), encoding="utf-8")
+        link = tmp_path / "q.py"
+        link.symlink_to(real)
+        match = find_full_qa_invocation("python3 q.py all", _patterns(), cwd=tmp_path)
+        assert match is not None
 
 
 class TestTheAcceptanceTestsRunInASubagentContext:
