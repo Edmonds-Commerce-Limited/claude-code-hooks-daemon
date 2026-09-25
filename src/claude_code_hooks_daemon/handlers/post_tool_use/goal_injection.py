@@ -59,6 +59,7 @@ from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
 from claude_code_hooks_daemon.core.utils import get_file_path
+from claude_code_hooks_daemon.handlers.utils.bounded_fifo_map import BoundedFifoMap
 from claude_code_hooks_daemon.plan_qa.model import TERMINAL_STATUSES, PlanDoc
 from claude_code_hooks_daemon.utils.ccy_supervisor import supervisor_relevance
 from claude_code_hooks_daemon.utils.goal_ledger import LEDGER_FILENAME, GoalLedger, LivePlanRef
@@ -524,8 +525,10 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         self._mode: str = _DEFAULT_MODE
         self._lines: list[dict[str, Any]] | None = None
         self._once_per_plan_per_session: bool = True
-        # (session_id, plan_number) latch — bounded, FIFO eviction.
-        self._fired: dict[tuple[str, str], bool] = {}
+        # (session_id, plan_number) latch — bounded, atomic FIFO eviction.
+        self._fired: BoundedFifoMap[tuple[str, str], bool] = BoundedFifoMap(
+            max_entries=_MAX_TRACKED_LATCHES
+        )
 
     def get_default_enabled(self) -> bool:
         """Opt-in: only useful when a PTY supervisor is watching."""
@@ -759,8 +762,6 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
             return None
 
     def _record_latch(self, key: tuple[str, str]) -> None:
-        if key not in self._fired and len(self._fired) >= _MAX_TRACKED_LATCHES:
-            del self._fired[next(iter(self._fired))]
         self._fired[key] = True
 
     def get_claude_md(self) -> str | None:

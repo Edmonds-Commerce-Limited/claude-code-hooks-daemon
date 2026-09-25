@@ -148,9 +148,10 @@ class TestTheExemptionsStillWork:
 
         assert handler.handle(_write(_UNREADABLE)).decision == Decision.ALLOW
 
-    def test_an_edit_is_still_ignored(self, stat_always_denied: None) -> None:
-        """Edit replaces known text, not the file, so it is out of scope
-        regardless of whether the path can be stat'ed."""
+    def test_an_edit_is_never_denied(self, stat_always_denied: None) -> None:
+        """Edit replaces known text, not the file, so it is never denied
+        regardless of whether the path can be stat'ed. It is matched only so
+        ``handle()`` can record the path (Plan 00422 N29)."""
         handler = WriteClobberGuardHandler()
         hook_input: dict[str, Any] = {
             "tool_name": "Edit",
@@ -158,7 +159,7 @@ class TestTheExemptionsStillWork:
             "tool_input": {"file_path": _UNREADABLE, "old_string": "a", "new_string": "b"},
         }
 
-        assert handler.matches(hook_input) is False
+        assert handler.handle(hook_input).decision == Decision.ALLOW
 
     def test_a_genuinely_missing_file_is_still_allowed(self, tmp_path: Path) -> None:
         """ENOENT is not EACCES. pathlib already answers ``False`` for a missing

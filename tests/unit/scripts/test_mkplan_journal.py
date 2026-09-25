@@ -383,6 +383,140 @@ class TestEntryShape:
         assert result.returncode == 0, result.stderr
 
 
+_JOURNAL_DIR_PARTS = ("CLAUDE", "Plan", "00042-sample-plan", "JOURNAL")
+
+
+def _only_dayfile(repo: Path) -> Path:
+    return next(repo.joinpath(*_JOURNAL_DIR_PARTS).glob("00042-Journal-*.md"))
+
+
+def _last_heading(content: str) -> re.Match[str]:
+    return list(_ENTRY_HEADING.finditer(content))[-1]
+
+
+class TestCorrectionEntries:
+    """Ledger 00422 N3, decision 5: a `correction` names the entry it corrects.
+
+    The REF of a correction is the corrected entry's `HH:MM` in today's
+    day-file, or `YY-MM-DD/HH:MM` for an entry in an earlier one. The script
+    refuses a correction that names nothing, because a dangling reference is
+    a correction nobody can follow — and the ordering check trusts the name.
+    """
+
+    def test_a_correction_naming_an_entry_in_todays_file_is_appended(self, plan_repo: Path) -> None:
+        _make_plan(plan_repo, "00042", "sample-plan")
+        first = _run(plan_repo, "--journal", "42", "finding", str(_write_body(plan_repo)))
+        assert first.returncode == 0, first.stderr
+        corrected = _last_heading(_only_dayfile(plan_repo).read_text())
+        label = f"{corrected.group(1)}:{corrected.group(2)}"
+
+        body = plan_repo / "correction.txt"
+        body.write_text("That stamp was wrong.\n")
+        result = _run(plan_repo, "--journal", "42", "correction", str(body), "--ref", label)
+
+        assert result.returncode == 0, result.stderr
+        heading = _last_heading(_only_dayfile(plan_repo).read_text())
+        assert heading.group(3) == "correction"
+        assert heading.group(4) == label
+
+    def test_a_correction_may_name_an_entry_in_an_earlier_dayfile(self, plan_repo: Path) -> None:
+        folder = _make_plan(plan_repo, "00042", "sample-plan")
+        (folder / "JOURNAL").mkdir()
+        (folder / "JOURNAL" / "00042-Journal-26-01-01.md").write_text(
+            "# Plan 00042 — Journal 26-01-01\n\n## 10:50 · finding · —   — wrong\n\nBody.\n"
+        )
+
+        result = _run(
+            plan_repo,
+            "--journal",
+            "42",
+            "correction",
+            str(_write_body(plan_repo)),
+            "--ref",
+            "26-01-01/10:50",
+        )
+
+        assert result.returncode == 0, result.stderr
+        todays = [
+            path
+            for path in (folder / "JOURNAL").glob("00042-Journal-*.md")
+            if path.name != "00042-Journal-26-01-01.md"
+        ]
+        assert "· correction · 26-01-01/10:50" in todays[0].read_text()
+
+    def test_a_correction_without_a_ref_is_refused(self, plan_repo: Path) -> None:
+        _make_plan(plan_repo, "00042", "sample-plan")
+
+        result = _run(plan_repo, "--journal", "42", "correction", str(_write_body(plan_repo)))
+
+        assert result.returncode != 0
+        assert "--ref" in result.stderr
+        assert not plan_repo.joinpath(*_JOURNAL_DIR_PARTS).exists(), "a refusal writes nothing"
+
+    @pytest.mark.parametrize("ref", ["T2.1", "9:50", "26-01-01 10:50", "—"])
+    def test_a_ref_that_is_not_an_entry_time_is_refused(self, plan_repo: Path, ref: str) -> None:
+        _make_plan(plan_repo, "00042", "sample-plan")
+
+        result = _run(
+            plan_repo, "--journal", "42", "correction", str(_write_body(plan_repo)), "--ref", ref
+        )
+
+        assert result.returncode != 0
+        assert not plan_repo.joinpath(*_JOURNAL_DIR_PARTS).exists(), "a refusal writes nothing"
+
+    def test_a_correction_naming_no_entry_in_todays_file_is_refused(self, plan_repo: Path) -> None:
+        _make_plan(plan_repo, "00042", "sample-plan")
+        first = _run(plan_repo, "--journal", "42", "finding", str(_write_body(plan_repo)))
+        assert first.returncode == 0, first.stderr
+        before = _only_dayfile(plan_repo).read_bytes()
+        existing = _last_heading(before.decode())
+        absent = "00:01" if f"{existing.group(1)}:{existing.group(2)}" == "00:00" else "00:00"
+
+        result = _run(
+            plan_repo, "--journal", "42", "correction", str(_write_body(plan_repo)), "--ref", absent
+        )
+
+        assert result.returncode != 0
+        assert absent in result.stderr
+        assert _only_dayfile(plan_repo).read_bytes() == before, "a refusal writes nothing"
+
+    def test_a_heading_quoted_inside_a_fence_is_not_an_entry(self, plan_repo: Path) -> None:
+        folder = _make_plan(plan_repo, "00042", "sample-plan")
+        (folder / "JOURNAL").mkdir()
+        (folder / "JOURNAL" / "00042-Journal-26-01-01.md").write_text(
+            "# Plan 00042 — Journal 26-01-01\n\n"
+            "## 09:00 · finding · —\n\n```\n## 10:50 · finding · — quoted\n```\n"
+        )
+
+        result = _run(
+            plan_repo,
+            "--journal",
+            "42",
+            "correction",
+            str(_write_body(plan_repo)),
+            "--ref",
+            "26-01-01/10:50",
+        )
+
+        assert result.returncode != 0
+
+    def test_a_correction_naming_a_missing_dayfile_is_refused(self, plan_repo: Path) -> None:
+        _make_plan(plan_repo, "00042", "sample-plan")
+
+        result = _run(
+            plan_repo,
+            "--journal",
+            "42",
+            "correction",
+            str(_write_body(plan_repo)),
+            "--ref",
+            "26-01-01/10:50",
+        )
+
+        assert result.returncode != 0
+        assert not plan_repo.joinpath(*_JOURNAL_DIR_PARTS).exists(), "a refusal writes nothing"
+
+
 class TestUtcCrossZoneRegression:
     """The regression case: two writers, two zones, one day-file.
 
@@ -493,5 +627,13 @@ class TestHelpDocumentsJournalMode:
         assert result.returncode == 0, result.stderr
         assert "--journal <plan-number> <category> <body-file>" in result.stderr
         assert "UTC" in result.stderr
-        for category in ("action", "finding", "decision", "thought", "blocker", "handoff"):
+        for category in (
+            "action",
+            "finding",
+            "decision",
+            "thought",
+            "blocker",
+            "handoff",
+            "correction",
+        ):
             assert category in result.stderr

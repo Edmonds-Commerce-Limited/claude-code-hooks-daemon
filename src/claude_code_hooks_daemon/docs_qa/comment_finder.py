@@ -13,12 +13,20 @@ check. The daemon's ``find-comment-blocks`` CLI subcommand and the
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
 from claude_code_hooks_daemon.strategies.comments.extractor import extract_comment_spans
 from claude_code_hooks_daemon.strategies.comments.registry import CommentStrategyRegistry
+from claude_code_hooks_daemon.utils.git_repo import (
+    GitRepo,
+    git_visible_paths,
+    project_path_is_protected,
+)
+
+logger = logging.getLogger(__name__)
 
 #: Lower than ``comment_size``'s own 40-line block-length limit (which gates a
 #: WRITE) — this finder feeds an AGENT's worklist rather than blocking
@@ -47,14 +55,67 @@ class CommentBlockFinding:
 
 
 def _iter_candidate_files(paths: list[Path]) -> list[Path]:
-    """Expand directories to files; pass files through unchanged."""
+    """Expand directories to files; pass files through unchanged.
+
+    A file the caller names directly is never filtered (naming it is
+    explicit consent, the same convention ``daemon.cli``'s
+    ``format-markdown`` walk follows) — only the recursive directory
+    expansion below is.
+    """
     files: list[Path] = []
     for path in paths:
         if path.is_dir():
-            files.extend(sorted(p for p in path.rglob("*") if p.is_file()))
+            files.extend(_iter_dir_files_git_filtered(path))
         elif path.is_file():
             files.append(path)
     return files
+
+
+def _iter_dir_files_git_filtered(directory: Path) -> list[Path]:
+    """Every file under ``directory``, minus what git does not consider part
+    of the project (Plan 00468 P3 / Plan 00466 N9's class), minus any path
+    matching a protected glob (Plan 00412) -- applied regardless of whether
+    git truth is available.
+
+    A gitignored Claude Code plugin install (e.g. ``.claude/ccy/plugins/``)
+    is not this project's documentation, so it must not surface in the
+    docs-qa agent's worklist as if it were. ``directory`` may sit below the
+    enclosing git repository's root (``GitRepo.resolve_for`` walks up to
+    find it, mirroring ``daemon.cli``'s ``_enclosing_project_root``); when
+    there is no enclosing repository, or git is unavailable,
+    :func:`utils.git_repo.git_visible_paths` returns ``None`` and every
+    candidate is kept git-wise, matching the pre-existing unfiltered
+    behaviour -- but :func:`utils.git_repo.project_path_is_protected` is
+    still consulted on that branch, since a protected file must never
+    surface here whether or not git can vouch for the rest of the tree.
+    """
+    candidates = sorted(p for p in directory.rglob("*") if p.is_file())
+    repo = GitRepo.resolve_for(directory)
+    root = repo.root if repo is not None else directory
+    git_visible = git_visible_paths(repo.root) if repo is not None else None
+    visible: list[Path] = []
+    for candidate in candidates:
+        try:
+            rel = candidate.relative_to(root).as_posix()
+        except ValueError:
+            # Should not happen: `candidate` was reached by rglob-ing
+            # `directory`, which `root` is either equal to or (via
+            # `GitRepo.resolve_for`) an ancestor of -- so `candidate` is
+            # always under it. Logged rather than silently dropped in case
+            # that invariant is ever violated (a symlink escaping the tree,
+            # say).
+            logger.info(
+                "comment_finder: %s is not under resolved root %s; skipping",
+                candidate,
+                root,
+            )
+            continue
+        if git_visible is not None and rel not in git_visible:
+            continue
+        if project_path_is_protected(rel):
+            continue
+        visible.append(candidate)
+    return visible
 
 
 def find_long_comment_blocks(

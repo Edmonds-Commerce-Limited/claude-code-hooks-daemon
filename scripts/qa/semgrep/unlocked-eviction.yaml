@@ -1,0 +1,68 @@
+# Semgrep expression of the unlocked select-then-evict defect class (Plan 00449).
+#
+# Handlers are daemon-lifetime singletons, and dispatch is threaded:
+# daemon/server.py runs controller.dispatch through
+# `loop.run_in_executor(None, ...)`, whose default executor is a
+# ThreadPoolExecutor. So a bounded map on a handler that evicts in two steps —
+# SELECT a victim key, then DELETE it — is a race. Two threads reaching a full
+# map select the same victim and the second delete raises KeyError (`dict.pop`
+# with no default raises exactly as `del` does); `next(iter(m))` and `min(m, ...)`
+# raise RuntimeError when another thread changes the map's size mid-iteration.
+# The exception escapes the handler: a fail-open chain loses the handler for
+# that request, and a strict chain DENIES a request that had nothing to do with
+# it. Plan 00437 fixed two copies; Plan 00449 found twelve more.
+#
+# The fix is never a per-site lock around a hand-rolled copy. Use
+# `handlers/utils/bounded_fifo_map.BoundedFifoMap` (every operation atomic,
+# FIFO eviction, journal-aware) or, for a per-session rate limit,
+# `handlers/utils/session_advice_counter.SessionAdviceCounter`.
+#
+# Precision: the rule matches only the eviction SHAPE, and stands down inside a
+# `with <lock>:` block — which is how both shared primitives implement the same
+# two steps safely. A map that is genuinely single-threaded (a function local)
+# is still reported: the fix costs one constructor call, and a rule that has to
+# guess which maps are shared is a rule that guesses wrong. The fixture pins
+# both directions — tests/fixtures/semgrep/unlocked_eviction.py, asserted by
+# tests/unit/qa/test_semgrep_unlocked_eviction.py.
+
+rules:
+  - id: unlocked-select-then-evict
+    languages: [python]
+    severity: WARNING
+    message: >-
+      Unlocked select-then-evict on a bounded map. Handlers are daemon-lifetime
+      singletons dispatched on a thread pool, so two threads can select the
+      same victim and the second delete raises KeyError (or RuntimeError from
+      iterating a map another thread resized). Replace the map with
+      claude_code_hooks_daemon.handlers.utils.bounded_fifo_map.BoundedFifoMap,
+      whose inserts evict FIFO atomically. See
+      scripts/qa/semgrep/unlocked-eviction.yaml.
+    patterns:
+      - pattern-either:
+          # One statement: select and delete inline. `list($M)[0]` is not
+          # listed: ruff's RUF015 already rewrites it to next(iter($M)).
+          - pattern: del $M[next(iter($M))]
+          - pattern: del $M[next(iter($M.keys()))]
+          - pattern: $M.pop(next(iter($M)), ...)
+          - pattern: $M.pop(next(iter($M.keys())), ...)
+          # Two statements: bind the victim, then act on it — possibly with
+          # other work (a journal snapshot) in between, which widens the window.
+          - pattern: |
+              $K = next(iter($M))
+              ...
+              del $M[$K]
+          - pattern: |
+              $K = next(iter($M))
+              ...
+              $M.pop($K, ...)
+          - pattern: |
+              $K = min($M, ...)
+              ...
+              del $M[$K]
+          - pattern: |
+              $K = max($M, ...)
+              ...
+              del $M[$K]
+      - pattern-not-inside: |
+          with $LOCK:
+            ...

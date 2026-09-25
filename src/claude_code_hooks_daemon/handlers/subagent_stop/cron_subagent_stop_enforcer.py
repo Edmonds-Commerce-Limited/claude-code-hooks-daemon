@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 from pydantic import ValidationError
 
@@ -32,14 +32,21 @@ from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.core import BlockingResult, Decision, ProjectContext
 from claude_code_hooks_daemon.core.handler_bases import SubagentStopHandlerBase
+from claude_code_hooks_daemon.handlers.utils.session_advice_counter import (
+    SessionAdviceCounter,
+)
 from claude_code_hooks_daemon.utils.config_cache import load_config_cached
 from claude_code_hooks_daemon.utils.cron_enforcement import (
     find_missing_crons,
     parse_session_crons,
-    render_missing_crons_reason,
+    verdict_for_missing_crons,
 )
+from claude_code_hooks_daemon.utils.cron_pause import PAUSE_ADVISE_INTERVAL, default_pauses_path
 
 logger = logging.getLogger(__name__)
+
+# Bound the per-session pause-advice map on the daemon-lifetime singleton.
+_MAX_TRACKED_PAUSE_KEYS: Final[int] = 256
 
 
 class CronSubagentStopEnforcerHandler(SubagentStopHandlerBase):
@@ -62,6 +69,9 @@ class CronSubagentStopEnforcerHandler(SubagentStopHandlerBase):
                 HandlerTag.BLOCKING,
                 HandlerTag.NON_TERMINAL,
             ],
+        )
+        self._pause_advice = SessionAdviceCounter(
+            interval=PAUSE_ADVISE_INTERVAL, max_sessions=_MAX_TRACKED_PAUSE_KEYS
         )
 
     def get_default_enabled(self) -> bool:
@@ -110,7 +120,16 @@ class CronSubagentStopEnforcerHandler(SubagentStopHandlerBase):
         if not missing:
             return BlockingResult(decision=Decision.ALLOW)
 
-        return BlockingResult.deny(render_missing_crons_reason(missing))
+        return verdict_for_missing_crons(
+            missing,
+            hook_input,
+            pauses_path=self._pauses_path(),
+            should_advise=self._pause_advice.should_advise,
+        )
+
+    def _pauses_path(self) -> Path | None:
+        """Where ``hooks-daemon cron-pause`` records this project's pauses."""
+        return default_pauses_path()
 
     def get_acceptance_tests(self) -> list[Any]:
         """Two cases, mirroring the Stop twin against this repo's real job."""
@@ -173,7 +192,8 @@ class CronSubagentStopEnforcerHandler(SubagentStopHandlerBase):
             "## cron_subagent_stop_enforcer — SubagentStop twin of "
             "`cron_stop_enforcer`\n\n"
             "Same verification, same matching rules, same absent-vs-empty "
-            "`session_crons` semantics, same priority-7/non-terminal "
+            "`session_crons` semantics, same `cron-pause` session pause, same "
+            "priority-7/non-terminal "
             "ordering reasoning as `cron_stop_enforcer` — see its guidance "
             "above. This twin exists because a subagent-only session can "
             "reach `SubagentStop` without the main-thread `Stop` event ever "

@@ -41,6 +41,7 @@ from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
+from claude_code_hooks_daemon.handlers.utils.bounded_fifo_map import BoundedFifoMap
 from claude_code_hooks_daemon.reference_repos.cache import cached_states
 from claude_code_hooks_daemon.reference_repos.discovery import GIT_ENTRY as _GIT_ENTRY
 from claude_code_hooks_daemon.reference_repos.model import RepoState
@@ -52,6 +53,7 @@ from claude_code_hooks_daemon.reference_repos.report import (
     unconfirmed_note,
 )
 from claude_code_hooks_daemon.reference_repos.sweep import governed_roots
+from claude_code_hooks_daemon.utils.command_evasion import strip_reserved_word_prefix
 from claude_code_hooks_daemon.utils.path_predicates import path_exists
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     command_word,
@@ -239,7 +241,11 @@ class ReferenceRepoFreshnessHandler(PreToolUseHandlerBase):
         self._formatter = RuleFormatter()
         self.project_root_reader = self._default_project_root
         # session_id -> the governed subjects already reported in that session.
-        self._reported: dict[str, set[str]] = {}
+        # Bounded with atomic FIFO eviction: this is a blocking handler, and a
+        # race on its bookkeeping must not raise out of handle().
+        self._reported: BoundedFifoMap[str, set[str]] = BoundedFifoMap(
+            max_entries=_MAX_TRACKED_SESSIONS
+        )
 
     @staticmethod
     def _default_project_root() -> Path:
@@ -313,7 +319,8 @@ class ReferenceRepoFreshnessHandler(PreToolUseHandlerBase):
         cwd: Path | None = None
         for chain in split_unquoted(command, _CHAIN_SEPARATORS):
             for stage_index, stage in enumerate(split_unquoted(chain, _PIPE_SEPARATORS)):
-                words = _tokenise(stage)
+                # `then rg x` runs rg: judge the command, not the reserved word.
+                words = _tokenise(strip_reserved_word_prefix(stage))
                 if not words:
                     continue
                 head = command_word(words[0])
@@ -458,9 +465,7 @@ class ReferenceRepoFreshnessHandler(PreToolUseHandlerBase):
         return key in self._reported.get(session_id, set())
 
     def _record(self, session_id: str, key: str) -> None:
-        if session_id not in self._reported and len(self._reported) >= _MAX_TRACKED_SESSIONS:
-            self._reported.pop(next(iter(self._reported)))
-        self._reported.setdefault(session_id, set()).add(key)
+        self._reported.get_or_insert(session_id, set()).add(key)
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Judge every governed checkout this call reaches into.

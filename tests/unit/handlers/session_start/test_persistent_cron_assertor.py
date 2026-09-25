@@ -10,6 +10,7 @@ the daemon knows what is running.
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,11 @@ from claude_code_hooks_daemon.constants import HandlerTag
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.session_start.persistent_cron_assertor import (
     PersistentCronAssertorHandler,
+)
+from claude_code_hooks_daemon.utils.cron_pause import (
+    CRON_PAUSES_FILENAME,
+    CronPause,
+    record_pause,
 )
 
 
@@ -146,6 +152,66 @@ class TestEveryDeclaredJobIsReported:
         assert "dormant-job" not in context
 
 
+class TestAJobPausedForThisSessionIsNotReAsked:
+    """Ledger 00422 N4: a SessionStart inside the SAME session (resume, clear,
+    compact) must not tell the agent to re-create a job it was told to pause.
+    A new session has a new id, so the pause cannot follow it there."""
+
+    _SESSION = "paused-session"
+
+    def _handler_with_pause(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *jobs: PersistentCronConfig
+    ) -> PersistentCronAssertorHandler:
+        handler = _handler(monkeypatch, _config(*jobs))
+        path = tmp_path / CRON_PAUSES_FILENAME
+        monkeypatch.setattr(handler, "_pauses_path", lambda: path)
+        record_pause(
+            path,
+            CronPause(
+                job_id=_JOB.id,
+                session_id=self._SESSION,
+                reason="owner stopped it",
+                recorded_at=time.time(),
+            ),
+            now=time.time(),
+        )
+        return handler
+
+    def test_the_paused_job_is_not_in_the_create_list(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        second = PersistentCronConfig(id="second-job", schedule="41 * * * *", prompt="q")
+        handler = self._handler_with_pause(monkeypatch, tmp_path, _JOB, second)
+
+        context = handler.handle({"session_id": self._SESSION}).context
+
+        declared = context[context.index("DECLARED JOB:") :]
+        assert not any(_JOB.schedule in line for line in declared)
+        assert any("second-job" in line for line in declared)
+
+    def test_the_pause_itself_is_stated_with_reason_and_expiry(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        handler = self._handler_with_pause(monkeypatch, tmp_path, _JOB)
+
+        context = "\n".join(handler.handle({"session_id": self._SESSION}).context)
+
+        assert _JOB.id in context
+        assert "owner stopped it" in context
+        assert "expires" in context
+        assert "Do NOT re-create" in context
+
+    def test_a_new_session_is_asked_to_create_it_again(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        handler = self._handler_with_pause(monkeypatch, tmp_path, _JOB)
+
+        context = "\n".join(handler.handle({"session_id": "a-brand-new-session"}).context)
+
+        assert _JOB.schedule in context
+        assert "owner stopped it" not in context
+
+
 class TestHandlerWiring:
     def test_it_is_enabled_by_default(self) -> None:
         """Inertness comes from the config section, not from a second switch —
@@ -191,3 +257,39 @@ class TestTheHandlerIsTagged:
         and it carries WORKFLOW, PLANNING, ADVISORY and NON_TERMINAL.
         """
         assert expected in PersistentCronAssertorHandler().tags
+
+
+class TestTheDeclaredPromptCarriesItsTickSentinel:
+    """Plan 00388 option 2': the prompt the agent pastes is the daemon's text,
+    so the daemon adds the line that lets a later tick be told from the owner.
+    Without it an `issue-sdlc` tick wiped the `[awaiting-human]` marker."""
+
+    def test_the_job_prompt_is_led_by_its_sentinel(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        context = _handler(monkeypatch, _config(_JOB)).handle({}).context
+        prompt_start = context.index("    prompt:") + 1
+        assert context[prompt_start].strip() == "[tick:job:gh-issue-sdlc]"
+        assert context[prompt_start + 1].strip() == _JOB.prompt
+
+    def test_a_pause_leaves_the_other_jobs_sentinel_in_place(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Ledger 00422 N4's pause filter and Plan 00388's sentinel both shape
+        this advisory, and they landed on separate branches: the job still
+        asked for keeps its sentinel, and the paused one gains no create
+        instruction."""
+        second = PersistentCronConfig(id="second-job", schedule="41 * * * *", prompt="q")
+        handler = _handler(monkeypatch, _config(_JOB, second))
+        path = tmp_path / CRON_PAUSES_FILENAME
+        monkeypatch.setattr(handler, "_pauses_path", lambda: path)
+        now = time.time()
+        record_pause(
+            path,
+            CronPause(job_id=_JOB.id, session_id="s", reason="owner stopped it", recorded_at=now),
+            now=now,
+        )
+
+        context = handler.handle({"session_id": "s"}).context
+
+        assert "[tick:job:second-job]" in [line.strip() for line in context]
+        assert "[tick:job:gh-issue-sdlc]" not in "\n".join(context)
+        assert "owner stopped it" in "\n".join(context)

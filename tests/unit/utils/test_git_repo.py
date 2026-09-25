@@ -20,7 +20,7 @@ from unittest import mock
 import pytest
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
-from claude_code_hooks_daemon.utils.git_repo import GitRepo, run_git
+from claude_code_hooks_daemon.utils.git_repo import GitRepo, git_visible_paths, run_git
 
 _KEY = "hooksdaemon.testValue"
 
@@ -410,6 +410,141 @@ class TestIsLinkedWorktree:
         from claude_code_hooks_daemon.utils.git_repo import is_linked_worktree
 
         assert is_linked_worktree(tmp_path) is False
+
+
+class TestGitVisiblePaths:
+    """``git_visible_paths`` (Plan 00466 N9): the single shared "what counts
+    as part of the project" answer every filesystem-walking QA corpus should
+    consult -- tracked files, plus untracked files no ``.gitignore`` rule
+    excludes."""
+
+    def test_tracked_file_is_visible(self, tmp_git_repo: Path) -> None:
+        visible = git_visible_paths(tmp_git_repo)
+        assert visible is not None
+        assert "tracked.txt" in visible
+
+    def test_untracked_not_ignored_file_is_visible(self, tmp_git_repo: Path) -> None:
+        (tmp_git_repo / "new.txt").write_text("new\n", encoding="utf-8")
+        visible = git_visible_paths(tmp_git_repo)
+        assert visible is not None
+        assert "new.txt" in visible
+
+    def test_gitignored_file_is_not_visible(self, tmp_git_repo: Path) -> None:
+        (tmp_git_repo / ".gitignore").write_text("ignored.txt\n", encoding="utf-8")
+        (tmp_git_repo / "ignored.txt").write_text("x\n", encoding="utf-8")
+        visible = git_visible_paths(tmp_git_repo)
+        assert visible is not None
+        assert "ignored.txt" not in visible
+
+    def test_gitignored_directory_contents_are_not_visible(self, tmp_git_repo: Path) -> None:
+        (tmp_git_repo / ".gitignore").write_text("vendored/\n", encoding="utf-8")
+        (tmp_git_repo / "vendored" / "sub").mkdir(parents=True)
+        (tmp_git_repo / "vendored" / "sub" / "SPEC.md").write_text("x\n", encoding="utf-8")
+        visible = git_visible_paths(tmp_git_repo)
+        assert visible is not None
+        assert "vendored/sub/SPEC.md" not in visible
+
+    def test_not_a_git_repo_returns_none(self, tmp_path: Path) -> None:
+        plain = tmp_path / "plain"
+        plain.mkdir()
+        assert git_visible_paths(plain) is None
+
+    def test_untracked_protected_pattern_file_is_excluded(self, tmp_git_repo: Path) -> None:
+        """Plan 00412: git counts an untracked, non-ignored protected-looking
+        file as visible content -- this is the filter every downstream
+        content-reading corpus (docs_qa, comment_finder, format-markdown,
+        doc_truth) relies on to never see it.
+
+        The filename is built from ``DEFAULT_PROTECTED_PATTERNS`` at
+        runtime, not spelled out here, so this module's own source never
+        carries a protected-looking token itself.
+        """
+        from claude_code_hooks_daemon.utils import secret_file_matching as sfm
+
+        both_edges_pattern = next(p for p in sfm.DEFAULT_PROTECTED_PATTERNS if p.count("*") == 2)
+        protected_name = both_edges_pattern.replace("*", "x")
+        (tmp_git_repo / protected_name).write_text("x\n", encoding="utf-8")
+
+        visible = git_visible_paths(tmp_git_repo)
+
+        assert visible is not None
+        assert protected_name not in visible
+        assert "tracked.txt" in visible
+
+    def test_tracked_protected_pattern_file_is_also_excluded(self, tmp_git_repo: Path) -> None:
+        """Not just untracked -- a COMMITTED protected-looking file is
+        excluded too; git tracking it is not the same as it being safe to
+        read. The exact-match (no-wildcard) pattern is used AS the filename,
+        again taken from ``DEFAULT_PROTECTED_PATTERNS`` at runtime rather
+        than spelled out here (see the sibling test above)."""
+        from claude_code_hooks_daemon.utils import secret_file_matching as sfm
+
+        exact_pattern = next(p for p in sfm.DEFAULT_PROTECTED_PATTERNS if "*" not in p)
+        target = tmp_git_repo / exact_pattern
+        target.write_text("not a real key\n", encoding="utf-8")
+        subprocess.run(
+            ["git", "add", exact_pattern], cwd=tmp_git_repo, capture_output=True, check=True
+        )
+        subprocess.run(
+            ["git", "commit", "-m", "add fixture"],
+            cwd=tmp_git_repo,
+            capture_output=True,
+            check=True,
+        )
+
+        visible = git_visible_paths(tmp_git_repo)
+
+        assert visible is not None
+        assert exact_pattern not in visible
+
+    def test_a_project_configured_protected_pattern_is_also_honoured(
+        self, tmp_git_repo: Path
+    ) -> None:
+        """The filter consults the LIVE ``secret_file_guard`` config, not
+        just the shipped defaults -- proven with a pattern the shipped
+        defaults do not themselves carry. Mirrors
+        ``TestResolveConfiguredPatterns.test_reads_a_real_config_with_mode_replace_and_custom_patterns``
+        in ``test_secret_file_matching.py``; the real gitignored secret word
+        list is never touched."""
+        from unittest.mock import patch
+
+        from claude_code_hooks_daemon.core.project_context import ProjectContext
+        from claude_code_hooks_daemon.utils import secret_file_matching as sfm
+
+        config_path = tmp_git_repo / "hooks-daemon.yaml"
+        config_path.write_text(
+            "version: '2.0'\n"
+            "handlers:\n"
+            "  pre_tool_use:\n"
+            "    secret_file_guard:\n"
+            "      options:\n"
+            "        mode: replace\n"
+            "        protected_paths:\n"
+            "          - '*.my-custom-fixture-shape'\n",
+            encoding="utf-8",
+        )
+        (tmp_git_repo / "app.my-custom-fixture-shape").write_text("x\n", encoding="utf-8")
+        sfm.reset_configured_patterns_cache()
+        try:
+            with (
+                patch.object(ProjectContext, "is_initialized", return_value=True),
+                patch.object(ProjectContext, "config_path", return_value=config_path),
+            ):
+                visible = git_visible_paths(tmp_git_repo)
+        finally:
+            sfm.reset_configured_patterns_cache()
+        assert visible is not None
+        assert "app.my-custom-fixture-shape" not in visible
+        assert "tracked.txt" in visible
+
+    def test_git_unavailable_returns_none(
+        self, tmp_git_repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _raise(*_a: object, **_k: object) -> None:
+            raise OSError("git missing")
+
+        monkeypatch.setattr(subprocess, "run", _raise)
+        assert git_visible_paths(tmp_git_repo) is None
 
     def test_a_submodule_style_gitdir_file_is_not(self, tmp_path: Path) -> None:
         """A submodule's ``.git`` is also a file, pointing at ``modules/`` not ``worktrees/``."""

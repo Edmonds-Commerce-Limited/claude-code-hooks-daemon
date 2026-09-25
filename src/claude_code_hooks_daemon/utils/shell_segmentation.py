@@ -31,7 +31,10 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 
-from claude_code_hooks_daemon.utils.command_evasion import git_subcommand_index
+from claude_code_hooks_daemon.utils.command_evasion import (
+    git_subcommand_index,
+    strip_reserved_word_prefix,
+)
 
 # Bash quoting characters. Inside single quotes NOTHING is special except the
 # closing quote -- in particular a backslash is a literal backslash, which is
@@ -306,13 +309,15 @@ def _segment_words(command: str, index: int) -> list[str]:
 
     Bounded by chain separators so a `git commit` earlier in the line cannot
     lend its message-taking status to a later `python -m` in the same command.
+    Leading reserved words are dropped, so the segment of
+    `if x; then git commit -m m; fi` starts at `git` (Plan 00422 N25).
     """
     start = _SEGMENT_START
     for separator in _CHAIN_SEPARATORS:
         found = command.rfind(separator, _SEGMENT_START, index)
         if found != -1:
             start = max(start, found + len(separator))
-    return command[start:index].split()
+    return strip_reserved_word_prefix(command[start:index]).split()
 
 
 def _segment_binary(command: str, index: int) -> str:
@@ -759,8 +764,12 @@ def _segment_command_word(segment: str) -> str | None:
 
     None means the segment names no command at all, which every caller here
     treats as unknown rather than safe.
+
+    Leading reserved words are skipped the same way (Plan 00422 N25): in
+    `do cat <<'EOF'` the receiver is `cat`, and reading `do` withheld the
+    exemption from every heredoc in a loop body.
     """
-    for word in segment.split():
+    for word in strip_reserved_word_prefix(segment).split():
         if not word or word.startswith("-"):
             continue
         resolved = command_word(word)

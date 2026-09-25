@@ -56,6 +56,7 @@ from claude_code_hooks_daemon.core.chain import is_restrictive
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.side_effect_journal import SideEffectJournal
 from claude_code_hooks_daemon.core.utils import get_bash_command
+from claude_code_hooks_daemon.handlers.utils.bounded_fifo_map import BoundedFifoMap
 from claude_code_hooks_daemon.utils.command_evasion import compile_command_name_pattern
 from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
 
@@ -79,8 +80,8 @@ _DEFAULT_MIN_CALLS_BETWEEN: Final[int] = 0  # 0 = no secondary count gate
 
 # Bound the (session_id, hint_id) TTL-bookkeeping map so a long-lived daemon
 # cannot leak memory across many sessions/hints. Same FIFO-eviction shape as
-# background_process_tracker._session_counts, sized larger because this map
-# is keyed on TWO axes (session x hint) rather than one.
+# SessionAdviceCounter's session map, sized larger because this map is keyed
+# on TWO axes (session x hint) rather than one.
 _MAX_TRACKED_FIRE_STATES: Final[int] = 512
 
 # Shell separators that start a NEW command position. A pattern only ever
@@ -298,8 +299,10 @@ class CommandHintsHandler(PostToolUseHandlerBase):
         self._resolved_hints: list[CommandHint] | None = None
         self._compiled_patterns: dict[str, re.Pattern[str]] = {}
 
-        # Per (session_id, hint_id) TTL bookkeeping — bounded, FIFO eviction.
-        self._fire_state: dict[tuple[str, str], _HintFireState] = {}
+        # Per (session_id, hint_id) TTL bookkeeping — bounded, atomic FIFO eviction.
+        self._fire_state: BoundedFifoMap[tuple[str, str], _HintFireState] = BoundedFifoMap(
+            max_entries=_MAX_TRACKED_FIRE_STATES
+        )
         # Undo journal for _fire_state (Plan 00242 Phase 2): handle() runs
         # before the chain has decided, so a firing recorded here is rolled
         # back in commit_side_effects() if the call ends up denied.
@@ -397,12 +400,12 @@ class CommandHintsHandler(PostToolUseHandlerBase):
         return False
 
     def _record_fire(self, key: tuple[str, str], now: float) -> None:
-        """Record a firing for ``key``, bounding the tracked-state map (FIFO eviction)."""
-        if key not in self._fire_state and len(self._fire_state) >= _MAX_TRACKED_FIRE_STATES:
-            oldest = next(iter(self._fire_state))
-            self._journal.snapshot(self._fire_state, oldest)
-            del self._fire_state[oldest]
-        self._fire_state[key] = _HintFireState(last_fired_monotonic=now, calls_since_fire=0)
+        """Record a firing for ``key``; a journalled eviction is undone on rollback."""
+        self._fire_state.put(
+            key,
+            _HintFireState(last_fired_monotonic=now, calls_since_fire=0),
+            journal=self._journal,
+        )
 
     def commit_side_effects(self, hook_input: dict[str, Any], chain_decision: Decision) -> None:
         """Keep this call's TTL bookkeeping only if the call went ahead."""

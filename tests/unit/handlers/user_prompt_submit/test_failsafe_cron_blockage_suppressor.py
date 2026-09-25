@@ -14,7 +14,7 @@ from unittest.mock import patch
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.post_tool_use.recovery_cron_advisor import (
-    _CANONICAL_CRON_PROMPT,
+    CANONICAL_CRON_PROMPT,
 )
 from claude_code_hooks_daemon.handlers.user_prompt_submit.failsafe_cron_blockage_suppressor import (
     FailsafeCronBlockageSuppressorHandler,
@@ -43,7 +43,7 @@ _DAEMON_UNTRACKED_DIR_PATCH_TARGET = (
 
 
 def _cron_hook_input(session_id: str = "sess-1") -> dict[str, Any]:
-    return {"prompt": _CANONICAL_CRON_PROMPT, "session_id": session_id}
+    return {"prompt": CANONICAL_CRON_PROMPT, "session_id": session_id}
 
 
 def _real_hook_input(
@@ -151,7 +151,7 @@ class TestHandle:
         handler = FailsafeCronBlockageSuppressorHandler()
         handler._clock = lambda: 1000.0
         with patch(_DAEMON_UNTRACKED_DIR_PATCH_TARGET, return_value=tmp_path):
-            result = handler.handle({"prompt": _CANONICAL_CRON_PROMPT})
+            result = handler.handle({"prompt": CANONICAL_CRON_PROMPT})
         assert result.decision == Decision.DENY
 
     def test_real_prompt_with_valid_marker_clears_it_and_allows(self, tmp_path: Path) -> None:

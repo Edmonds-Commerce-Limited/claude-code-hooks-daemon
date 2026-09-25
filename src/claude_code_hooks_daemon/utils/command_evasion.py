@@ -102,6 +102,85 @@ OPTIONAL_PATH = r"(?:\S*/)?"
 # `VAR=value cmd` (no `env`) is covered by the same run of assignments.
 ENV_PREFIX = r"(?:env\s+)?(?:\w+=\S*\s+)*"
 
+# Shell reserved words that can stand in front of a command without being it
+# (Plan 00422 N25). Splitting `for f in a; do git commit; done` on `;` yields
+# ` do git commit`, and a site reading its first word judged `do`. In
+# `pipe_blocker` that denied a whitelisted `grep` and suggested whitelisting
+# `^do\b`, which would have exempted every loop body; at a dozen other sites it
+# hid the command from a guard. `process_probe._COMMAND_POSITION_MARKERS` is the
+# reference reading. `(` is deliberately absent: it is an operator, and a
+# subshell does not carry `set -e` out to the statements after it.
+SHELL_RESERVED_COMMAND_PREFIXES: Final[tuple[str, ...]] = (
+    "do",
+    "then",
+    "else",
+    "elif",
+    "if",
+    "while",
+    "until",
+    "!",
+    "{",
+    "time",
+)
+
+# Any run of those words, each followed by whitespace, as bash requires. `time`
+# may carry its one option, `-p`. Put this at a segment-start anchor, before
+# `ENV_PREFIX`: `^\s*{RESERVED_WORD_PREFIX}{ENV_PREFIX}git\s+commit`.
+RESERVED_WORD_PREFIX = (
+    r"(?:(?:time\s+-p|"
+    + "|".join(re.escape(word) for word in SHELL_RESERVED_COMMAND_PREFIXES)
+    + r")\s+)*"
+)
+
+# The start of a segment up to its command word: leading whitespace, reserved
+# words, then `env` and assignments. Every pattern answering "is this segment an
+# invocation of X?" starts here.
+COMMAND_POSITION = rf"^\s*{RESERVED_WORD_PREFIX}{ENV_PREFIX}"
+
+# What `compile_command_name_pattern` puts in front of the name it is given.
+_NAMED_COMMAND_HEAD = rf"{COMMAND_POSITION}{OPTIONAL_PATH}"
+
+_RESERVED_WORD_HEAD: Final[re.Pattern[str]] = re.compile(rf"^\s*{RESERVED_WORD_PREFIX}")
+
+
+def strip_reserved_word_prefix(segment: str) -> str:
+    """``segment`` from its command word on, past leading whitespace and reserved words.
+
+    For a site that reads a segment's first word as the command it runs:
+    ``" do git commit -m x"`` -> ``"git commit -m x"``. A quoted ``"do"`` is not
+    a reserved word to bash and is not removed, and neither is a word that
+    merely starts with one (``dog``). A segment that is only a closing word
+    (``done``, ``fi``) is returned unchanged: it runs no command of its own.
+    """
+    return _RESERVED_WORD_HEAD.sub("", segment, count=1)
+
+
+# The reserved words that change neither WHICH command runs, WHETHER it runs,
+# nor WHAT it reads: `time` only reports timing and `!` only inverts the exit
+# status. An exemption granted to a single simple command can look past these
+# and nothing else. `then`, `do`, `else` and the other words in
+# `SHELL_RESERVED_COMMAND_PREFIXES` only ever appear inside a compound command,
+# so an exemption for ONE command must not strip them: that would judge a
+# fragment of the compound as if it were all of it.
+TRANSPARENT_RESERVED_WORDS: Final[tuple[str, ...]] = ("time", "!")
+
+_TRANSPARENT_WORD_HEAD: Final[re.Pattern[str]] = re.compile(
+    r"^\s*(?:(?:time\s+-p|"
+    + "|".join(re.escape(word) for word in TRANSPARENT_RESERVED_WORDS)
+    + r")\s+)*"
+)
+
+
+def strip_transparent_reserved_words(command: str) -> str:
+    """``command`` past any leading run of ``time``, ``time -p`` and ``!``.
+
+    ``"time ! cat f"`` -> ``"cat f"``. Every other reserved word is left in
+    place, so a caller that accepts only a single simple command still sees
+    ``then cat f`` for what it is and refuses it.
+    """
+    return _TRANSPARENT_WORD_HEAD.sub("", command, count=1)
+
+
 # Git global options that take their value as a SEPARATE token. Everything else
 # is either self-contained (`--git-dir=<path>`) or valueless (`--no-pager`), so
 # these are the only ones whose value could be mistaken for the subcommand —
@@ -175,8 +254,9 @@ def compile_command_name_pattern(name: str) -> re.Pattern[str]:
     it. The caller supplies one segment from
     :func:`~claude_code_hooks_daemon.utils.shell_segmentation.split_unquoted`.
 
-    Recognises the respellings this module exists for: an optional ``env``
-    prefix, any run of ``VAR=value`` assignments, and a path qualifier.
+    Recognises the respellings this module exists for: leading shell reserved
+    words (``do``, ``then``, ``!``, ``time`` ...), an optional ``env`` prefix,
+    any run of ``VAR=value`` assignments, and a path qualifier.
 
     ``name`` may be several words (``go vet``, ``npm test``); the gap between
     them matches any run of whitespace, since the shell does not care.
@@ -195,7 +275,7 @@ def compile_command_name_pattern(name: str) -> re.Pattern[str]:
         A compiled pattern to ``search`` against one stripped segment.
     """
     literal = r"\s+".join(re.escape(word) for word in name.split())
-    return re.compile(rf"^\s*{ENV_PREFIX}{OPTIONAL_PATH}{literal}(?=\s|$)")
+    return re.compile(rf"{_NAMED_COMMAND_HEAD}{literal}(?=\s|$)")
 
 
 def git_subcommand_index(tokens: Sequence[str], git_index: int) -> int | None:

@@ -20,8 +20,13 @@ _Scaffolded by `mkplan.bash`; timestamps in this file are UTC._
 > - `HH:MM` UTC 24h (the date is in the filename, also UTC); times increase
 >   down the file. A file with no sentinel line above predates this system —
 >   its times are local, zone unrecorded (legacy; never rewritten).
-> - `category` ∈ `action` | `finding` | `decision` | `thought` | `blocker` | `handoff`
+> - `category` ∈ `action` | `finding` | `decision` | `thought` | `blocker` | `handoff` | `correction`
 > - `REF` = optional task/phase ref (`T1.2`, `P1`) or `—`.
+> - A `correction` corrects an earlier entry without touching it. Its `REF`
+>   (`--ref`, required) names that entry: `HH:MM` in this file, or
+>   `YY-MM-DD/HH:MM` in an earlier one. An entry a correction names in this
+>   file no longer counts for time order, so a future-dated stamp can be
+>   corrected at the honest time.
 > - Bodies may embed fenced logs/diffs/snippets — no size limit — with a
 >   one-line takeaway above the fence.
 > - End a working session with a `handoff` entry so the next agent's entry

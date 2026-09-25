@@ -99,4 +99,5 @@ class TestTheTwoTruthsAgree:
             "thought",
             "blocker",
             "handoff",
+            "correction",
         ]

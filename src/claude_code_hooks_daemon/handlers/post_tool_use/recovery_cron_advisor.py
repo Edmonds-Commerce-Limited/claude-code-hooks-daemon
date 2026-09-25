@@ -34,10 +34,14 @@ Decision D4 (PLAN.md): this is a PostToolUse handler, not an extension of the
 PreToolUse plan_workflow handler.
 """
 
+import logging
 import re
 from enum import Enum
 from typing import Any, ClassVar, Final
 
+from pydantic import ValidationError
+
+from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.constants import (
     HandlerID,
     HandlerTag,
@@ -49,9 +53,15 @@ from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.chain import is_restrictive
 from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
+from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.side_effect_journal import SideEffectJournal
 from claude_code_hooks_daemon.core.utils import get_bash_command, get_file_path
+from claude_code_hooks_daemon.handlers.utils.bounded_fifo_map import BoundedFifoMap
+from claude_code_hooks_daemon.utils.config_cache import load_config_cached
+from claude_code_hooks_daemon.utils.cron_tick import TickKind, classify_tick, tick_sentinel
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
+
+logger = logging.getLogger(__name__)
 
 # ─── Lifecycle phase ──────────────────────────────────────────────────────────
 
@@ -131,7 +141,7 @@ _PROGRESS_COUNT_START: Final[int] = 1
 # Maximum number of plan folders tracked in each per-plan tracking map
 # (progress counts, creation-seen, completion-seen). Bounds memory on the
 # daemon-lifetime singleton: when exceeded, the oldest inserted entry is
-# evicted (insertion-ordered dict). A plan re-entering after eviction simply
+# evicted (BoundedFifoMap, atomically). A plan re-entering after eviction simply
 # restarts tracking for that phase — harmless for an advisory.
 _MAX_TRACKED_PLANS: Final[int] = 256
 
@@ -161,12 +171,17 @@ _MKPLAN_SENTINEL_KEY: Final[str] = "__mkplan__"
 # Stable substring identifying a delivered canonical-cron-prompt tick, shared
 # with any handler that needs to recognise one without matching the whole
 # verbatim text (Plan 00298: failsafe_cron_blockage_suppressor). This module
-# authors _CANONICAL_CRON_PROMPT, so it is the single source of truth for the
+# authors CANONICAL_CRON_PROMPT, so it is the single source of truth for the
 # marker too -- a test pins that the marker is genuinely a substring of it.
+# Crons created before the tick sentinel existed carry only this, so it stays
+# recognised alongside ``[tick:failsafe]`` (Plan 00388).
 CANONICAL_CRON_PROMPT_MARKER: Final[str] = "FAILSAFE RECOVERY CHECK"
 
-# Verbatim from PLAN.md "Canonical recovery-cron prompt" section.
-_CANONICAL_CRON_PROMPT: Final[str] = (
+# Verbatim from PLAN.md "Canonical recovery-cron prompt" section, led by the
+# daemon tick sentinel (Plan 00388). Shared with the SessionStart counterpart
+# (Plan 00394), so every surface hands the agent the same text.
+CANONICAL_CRON_PROMPT: Final[str] = (
+    f"{tick_sentinel(TickKind.FAILSAFE)}\n"
     "**FAILSAFE RECOVERY CHECK (automated hourly safety net — NOT a heartbeat).**\n"
     "If your most recent work on the active plan/task was interrupted by an\n"
     "*external* factor (Claude API error/overload, rate limit, 5-hour usage limit,\n"
@@ -206,7 +221,7 @@ _CREATION_GUIDANCE: Final[str] = (
     "pace itself to the cron. Work proceeds at full speed until an external\n"
     "factor (API error, rate limit, usage limit) actually stops it.\n\n"
     "Paste the following text verbatim as the cron prompt:\n\n"
-    f"{_CANONICAL_CRON_PROMPT}"
+    f"{CANONICAL_CRON_PROMPT}"
 )
 
 _PROGRESS_GUIDANCE: Final[str] = (
@@ -235,6 +250,38 @@ _COMPLETION_GUIDANCE: Final[str] = (
     "    unrecorded)."
 )
 
+# Replaces the delete branch above when the project declares the failsafe cron
+# (Plan 00394): a declared job is required by cron_stop_enforcer, so deleting
+# it only earns a blocked stop and a re-create.
+_DECLARED_COMPLETION_NOTE: Final[str] = (
+    "This plan is complete. Keep its failsafe recovery cron: this project\n"
+    "DECLARES it under persistent_crons, so do NOT CronDelete it, even at the end\n"
+    "of the session. cron_stop_enforcer blocks a stop while a declared cron is\n"
+    "missing, and the cron ends with the session anyway."
+)
+
+
+def is_failsafe_prompt(prompt: str) -> bool:
+    """Whether ``prompt`` is the failsafe recovery cron's.
+
+    By its ``[tick:failsafe]`` sentinel, or by the heading literal that a
+    prompt written before the sentinel existed carries alone (Plan 00388).
+    """
+    tick = classify_tick(prompt)
+    if tick is not None and tick.kind is TickKind.FAILSAFE:
+        return True
+    return CANONICAL_CRON_PROMPT_MARKER in prompt
+
+
+def declares_failsafe_cron(config: Config) -> bool:
+    """Whether ``config`` declares the failsafe cron as an active persistent job.
+
+    One predicate for every surface that has to know (Plan 00394): the
+    SessionStart advisor leaves a declared failsafe to ``persistent_cron_assertor``,
+    and the completion guidance stops advising its deletion.
+    """
+    return any(is_failsafe_prompt(job.prompt) for job in config.persistent_crons.active_jobs())
+
 
 # ─── Phase detection helper ───────────────────────────────────────────────────
 
@@ -253,29 +300,6 @@ def _is_plan_path(file_path: str, plan_dir: str = _FALLBACK_PLAN_DIR) -> tuple[b
     if not m:
         return False, ""
     return True, m.group(1)
-
-
-# ─── Bounded per-plan tracking helper ─────────────────────────────────────────
-
-
-def _evict_oldest_tracked_entry_if_full(
-    tracked: dict[str, Any], journal: SideEffectJournal | None = None
-) -> None:
-    """Evict the oldest inserted key from a bounded per-plan tracking map.
-
-    Shared by every per-plan tracking map on this handler (progress counts,
-    creation-seen markers, completion-seen markers) so the bound
-    (_MAX_TRACKED_PLANS) and eviction policy — oldest-first, relying on
-    insertion-ordered dict iteration — live in exactly one place rather than
-    being copy-pasted per map.  No-op while the map has room. The eviction
-    is journalled when a ``journal`` is given, so a rolled-back call restores
-    the entry it evicted.
-    """
-    if len(tracked) >= _MAX_TRACKED_PLANS:
-        oldest_key = next(iter(tracked))
-        if journal is not None:
-            journal.snapshot(tracked, oldest_key)
-        del tracked[oldest_key]
 
 
 # Matches a bare Complete/Completed VALUE occupying its own line (no
@@ -432,16 +456,19 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
             ],
         )
         # Per-plan PROGRESS edit count: {plan_folder: number_of_progress_edits}.
-        # Insertion-ordered so the oldest entry can be evicted once the map
-        # exceeds _MAX_TRACKED_PLANS.
-        self._progress_counts: dict[str, int] = {}
+        # All three maps evict their oldest entry atomically once full.
+        self._progress_counts: BoundedFifoMap[str, int] = BoundedFifoMap(
+            max_entries=_MAX_TRACKED_PLANS
+        )
         # Per-plan CREATION / COMPLETION "seen" markers: {plan_folder: True}.
         # Presence of a key means that phase has already advised once for that
-        # plan folder. Insertion-ordered so the oldest entry can be evicted
-        # once a map exceeds _MAX_TRACKED_PLANS — same policy as
-        # _progress_counts, via the shared _evict_oldest_tracked_entry helper.
-        self._creation_seen: dict[str, bool] = {}
-        self._completion_seen: dict[str, bool] = {}
+        # plan folder.
+        self._creation_seen: BoundedFifoMap[str, bool] = BoundedFifoMap(
+            max_entries=_MAX_TRACKED_PLANS
+        )
+        self._completion_seen: BoundedFifoMap[str, bool] = BoundedFifoMap(
+            max_entries=_MAX_TRACKED_PLANS
+        )
         # Undo journal for the three maps above (Plan 00242 Phase 2): the
         # advice state a call records is rolled back in commit_side_effects()
         # if the Write/Edit that triggered it ends up denied.
@@ -462,6 +489,19 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
         test_default_enabled_template_consistency).
         """
         return True
+
+    def _load_config(self) -> Config:
+        """The project's daemon config; defaults when it cannot be read.
+
+        Defaults mean "not declared", which keeps today's completion guidance --
+        the warn-first, delete-only-when-finished advice.
+        """
+        try:
+            config_path = ProjectContext.project_root() / ".claude" / "hooks-daemon.yaml"
+            return load_config_cached(config_path)
+        except (ValidationError, OSError, ValueError, RuntimeError) as exc:
+            logger.debug("recovery_cron_advisor: config unavailable: %s", exc)
+            return Config()
 
     def _plan_dir(self) -> str:
         """Configured plan directory (facade, or the matching default)."""
@@ -495,20 +535,15 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
         """Record a progress edit for plan_folder and return whether to advise.
 
         Advises on the 1st progress edit and every _PROGRESS_ADVISE_INTERVAL-th
-        edit thereafter.  Bounds the tracking map at _MAX_TRACKED_PLANS via the
-        shared eviction helper.
+        edit thereafter. The journalled put records both the new count and
+        any entry it evicts, so a denied call restores the map exactly.
         """
         count = self._progress_counts.get(plan_folder)
-        self._journal.snapshot(self._progress_counts, plan_folder)
-        if count is None:
-            _evict_oldest_tracked_entry_if_full(self._progress_counts, self._journal)
-            count = _PROGRESS_COUNT_START
-        else:
-            count += 1
-        self._progress_counts[plan_folder] = count
+        count = _PROGRESS_COUNT_START if count is None else count + 1
+        self._progress_counts.put(plan_folder, count, journal=self._journal)
         return (count - _PROGRESS_COUNT_START) % _PROGRESS_ADVISE_INTERVAL == 0
 
-    def _should_advise_once(self, tracked: dict[str, bool], plan_folder: str) -> bool:
+    def _should_advise_once(self, tracked: BoundedFifoMap[str, bool], plan_folder: str) -> bool:
         """Record plan_folder as seen and return True only the FIRST time.
 
         Shared by CREATION and COMPLETION, which are one-shot state
@@ -516,15 +551,10 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
         folder, so a repeat creation or a re-save of an already-complete plan
         carries no new information and stays silent. This is deliberately NOT
         the PROGRESS rule (every Nth edit), which tracks ongoing activity
-        rather than a transition. Bounded and evicted identically to
-        _progress_counts via the shared eviction helper.
+        rather than a transition. The check and the journalled insert are one
+        step, so two concurrent writes cannot both be the first.
         """
-        if plan_folder in tracked:
-            return False
-        self._journal.snapshot(tracked, plan_folder)
-        _evict_oldest_tracked_entry_if_full(tracked, self._journal)
-        tracked[plan_folder] = True
-        return True
+        return tracked.insert_if_absent(plan_folder, True, journal=self._journal)
 
     def commit_side_effects(self, hook_input: dict[str, Any], chain_decision: Decision) -> None:
         """Keep this call's advice bookkeeping only if the Write/Edit landed."""
@@ -575,6 +605,8 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
             plan_folder = self._resolve_plan_folder(hook_input)
             if not self._should_advise_once(self._completion_seen, plan_folder):
                 return BlockingResult(decision=Decision.ALLOW)
+            if declares_failsafe_cron(self._load_config()):
+                return BlockingResult(decision=Decision.ALLOW, context=[_DECLARED_COMPLETION_NOTE])
             return BlockingResult(decision=Decision.ALLOW, context=[_COMPLETION_GUIDANCE])
 
         # PROGRESS — advise on every Nth progress edit for this plan.
@@ -623,7 +655,7 @@ class RecoveryCronAdvisorHandler(PostToolUseHandlerBase):
             "  safety net into an artificial hourly throttle.\n\n"
             "### Canonical recovery-cron prompt\n\n"
             "Use this verbatim as the CronCreate prompt:\n\n"
-            f"```\n{_CANONICAL_CRON_PROMPT}\n```\n\n"
+            f"```\n{CANONICAL_CRON_PROMPT}\n```\n\n"
             "### Configuration\n\n"
             "This handler is **on by default** (opt-out).  Disable with:\n\n"
             "```yaml\n"

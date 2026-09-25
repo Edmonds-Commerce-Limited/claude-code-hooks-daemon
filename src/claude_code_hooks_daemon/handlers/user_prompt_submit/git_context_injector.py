@@ -13,6 +13,7 @@ from claude_code_hooks_daemon.constants import (
 from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import UserPromptSubmitHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.handlers.utils.bounded_fifo_map import BoundedFifoMap
 from claude_code_hooks_daemon.utils.git_repo import run_git
 
 # Ceiling on how long an unchanged status may stay un-injected (Plan 00238
@@ -49,8 +50,12 @@ class GitContextInjectorHandler(UserPromptSubmitHandlerBase):
         )
         # session id -> (payload last injected for it, monotonic stamp).
         # Per-instance: the daemon holds one handler, so this lives as long as
-        # the daemon and is not shared across projects.
-        self._last_injected: dict[str, tuple[str, float]] = {}
+        # the daemon and is not shared across projects. Ordered by LAST
+        # injection (see _should_inject), so FIFO eviction drops the session
+        # injected least recently.
+        self._last_injected: BoundedFifoMap[str, tuple[str, float]] = BoundedFifoMap(
+            max_entries=_MAX_TRACKED_SESSIONS
+        )
 
     def _now(self) -> float:
         """Return a monotonic timestamp (seam for deterministic tests)."""
@@ -70,11 +75,10 @@ class GitContextInjectorHandler(UserPromptSubmitHandlerBase):
         if unchanged and fresh:
             return False
 
-        if session_id not in self._last_injected and len(self._last_injected) >= (
-            _MAX_TRACKED_SESSIONS
-        ):
-            oldest = min(self._last_injected, key=lambda key: self._last_injected[key][1])
-            del self._last_injected[oldest]
+        # Remove, then re-insert at the new end: an overwrite in place would
+        # keep the session's FIRST-injection position, and FIFO eviction would
+        # then drop an active session ahead of one that went quiet.
+        self._last_injected.pop(session_id, None)
         self._last_injected[session_id] = (payload, now)
         return True
 

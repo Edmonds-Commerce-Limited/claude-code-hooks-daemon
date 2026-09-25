@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from claude_code_hooks_daemon.skill_scan import constants
+from claude_code_hooks_daemon.utils.cron_tick import TICK_SENTINEL_PREFIX
 
 
 class TestConstants:
@@ -17,6 +18,11 @@ class TestConstants:
         assert "<teammate-message" in markers
         assert "FAILSAFE RECOVERY CHECK" in markers
         assert "🤖 [ccy-supervisor" in markers
+
+    def test_every_daemon_cron_tick_is_machine_traffic(self) -> None:
+        """Plan 00388: the watchdog and declared-job ticks are as automated
+        as the failsafe one, and all three share one sentinel prefix."""
+        assert TICK_SENTINEL_PREFIX in constants.EXCLUDE_CONTENT_MARKERS
 
     def test_budgets_positive(self) -> None:
         assert constants.DEFAULT_MAX_CLUSTERS > 0

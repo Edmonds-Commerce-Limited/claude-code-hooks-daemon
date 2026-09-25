@@ -344,7 +344,9 @@ class JournalDayfileName:
 #: An entry heading at the START of a line: ``## HH:MM · category · REF``.
 #: Anchored with no leading whitespace on purpose — the day-file preamble quotes
 #: the grammar inside a blockquote (``> ## HH:MM …``), which must never count.
-_JOURNAL_ENTRY_HEADING_RE: Final[re.Pattern[str]] = re.compile(r"^## (\d{2}):(\d{2})\b")
+_JOURNAL_ENTRY_HEADING_RE: Final[re.Pattern[str]] = re.compile(
+    r"^## (\d{2}):(\d{2})\b(?: · (\S+) · (\S+))?"
+)
 
 _MINUTES_PER_HOUR: Final[int] = 60
 
@@ -358,7 +360,16 @@ JOURNAL_CATEGORIES: Final[tuple[str, ...]] = (
     "thought",
     "blocker",
     "handoff",
+    "correction",
 )
+
+#: Ledger 00422 N3: the category that corrects an earlier entry in place of
+#: rewriting it. Its REF names the corrected entry: ``HH:MM`` in the same
+#: day-file, or ``YY-MM-DD/HH:MM`` in an earlier one.
+JOURNAL_CORRECTION_CATEGORY: Final[str] = "correction"
+
+#: A correction REF naming an entry in the SAME day-file.
+_SAME_FILE_ENTRY_REF_RE: Final[re.Pattern[str]] = re.compile(r"^\d{2}:\d{2}$")
 
 #: The plan scaffolder, deployed into the plan directory.
 MKPLAN_SCRIPT_NAME: Final[str] = "mkplan.bash"
@@ -391,12 +402,28 @@ def journal_append_command(
     )
 
 
+def journal_correction_command(plan_dir: str, plan_number: int | None) -> str:
+    """The command that appends a ``correction`` naming the entry it corrects."""
+    number = _PLAN_NUMBER_PLACEHOLDER if plan_number is None else str(plan_number)
+    return (
+        f"{plan_dir}/{MKPLAN_SCRIPT_NAME} --journal {number} {JOURNAL_CORRECTION_CATEGORY} "
+        f"{_BODY_FILE_PLACEHOLDER} --ref <HH:MM of the entry it corrects> "
+        '--title "short title"'
+    )
+
+
 @dataclass(frozen=True)
 class JournalEntryHeading:
-    """The clock reading on one journal entry heading (Plan 00461)."""
+    """The clock reading on one journal entry heading (Plan 00461).
+
+    ``category`` and ``ref`` are ``None`` for a heading that does not carry
+    the full ``· category · REF`` grammar, such as a legacy entry.
+    """
 
     hour: int
     minute: int
+    category: str | None = None
+    ref: str | None = None
 
     @property
     def label(self) -> str:
@@ -423,9 +450,29 @@ def journal_entry_headings(content: str) -> list[JournalEntryHeading]:
         match = _JOURNAL_ENTRY_HEADING_RE.match(line)
         if match is not None:
             headings.append(
-                JournalEntryHeading(hour=int(match.group(1)), minute=int(match.group(2)))
+                JournalEntryHeading(
+                    hour=int(match.group(1)),
+                    minute=int(match.group(2)),
+                    category=match.group(3),
+                    ref=match.group(4),
+                )
             )
     return headings
+
+
+def corrected_entry_labels(headings: list[JournalEntryHeading]) -> frozenset[str]:
+    """The ``HH:MM`` labels that this day-file's own corrections declare wrong.
+
+    Only a ``correction`` entry whose REF names an entry in the SAME file
+    counts; a ``YY-MM-DD/HH:MM`` REF points at another day-file.
+    """
+    return frozenset(
+        heading.ref
+        for heading in headings
+        if heading.category == JOURNAL_CORRECTION_CATEGORY
+        and heading.ref is not None
+        and _SAME_FILE_ENTRY_REF_RE.match(heading.ref) is not None
+    )
 
 
 def parse_journal_dayfile_name(filename: str) -> JournalDayfileName | None:

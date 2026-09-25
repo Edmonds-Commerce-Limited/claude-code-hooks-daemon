@@ -45,6 +45,7 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputF
 from claude_code_hooks_daemon.core import AdvisoryResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import SessionStartHandlerBase
 from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
+from claude_code_hooks_daemon.handlers.utils.bounded_fifo_map import BoundedFifoMap
 from claude_code_hooks_daemon.utils import secret_redaction
 from claude_code_hooks_daemon.utils.ccy_supervisor import supervisor_relevance
 from claude_code_hooks_daemon.utils.model_fallback_records import (
@@ -171,13 +172,19 @@ class ModelFallbackDetectorHandler(SessionStartHandlerBase):
         self._snapshot_dir: str = _DEFAULT_SNAPSHOT_DIR
         self._snapshot_window_records: int = _DEFAULT_SNAPSHOT_WINDOW_RECORDS
 
-        # (session_id, record identity) keys already advised — bounded FIFO.
+        # All three are bounded with atomic FIFO eviction, and claim a key in
+        # one step, so concurrent SessionStarts cannot both see it as new.
+        # (session_id, record identity) keys already advised.
         # Persisted to disk; see _load_state/_save_state.
-        self._advised: dict[tuple[str, str], None] = {}
+        self._advised: BoundedFifoMap[tuple[str, str], None] = BoundedFifoMap(
+            max_entries=_MAX_ADVISED_KEYS
+        )
         # Bare record identities already noted as RECOVERED — once ever.
-        self._recovered_noted: dict[str, None] = {}
+        self._recovered_noted: BoundedFifoMap[str, None] = BoundedFifoMap(
+            max_entries=_MAX_ADVISED_KEYS
+        )
         # Bare record identities already snapshotted — once ever.
-        self._snapshotted: dict[str, None] = {}
+        self._snapshotted: BoundedFifoMap[str, None] = BoundedFifoMap(max_entries=_MAX_ADVISED_KEYS)
 
     def get_default_enabled(self) -> bool:
         """Opt-in: a SessionStart scan is a stale, noisy signal for most
@@ -365,13 +372,7 @@ class ModelFallbackDetectorHandler(SessionStartHandlerBase):
 
     def _mark_advised(self, session_id: str, identity: str) -> bool:
         """True (and record it) the FIRST time this key is seen; False after."""
-        key = (session_id, identity)
-        if key in self._advised:
-            return False
-        if len(self._advised) >= _MAX_ADVISED_KEYS:
-            del self._advised[next(iter(self._advised))]
-        self._advised[key] = None
-        return True
+        return self._advised.insert_if_absent((session_id, identity), None)
 
     def _mark_recovered_noted(self, identity: str) -> bool:
         """True (and record it) the first time a RECOVERED identity is seen.
@@ -379,23 +380,13 @@ class ModelFallbackDetectorHandler(SessionStartHandlerBase):
         Unlike ``_mark_advised``, this is keyed on the bare identity alone —
         a recovered record is noted at most once EVER, across every session.
         """
-        if identity in self._recovered_noted:
-            return False
-        if len(self._recovered_noted) >= _MAX_ADVISED_KEYS:
-            del self._recovered_noted[next(iter(self._recovered_noted))]
-        self._recovered_noted[identity] = None
-        return True
+        return self._recovered_noted.insert_if_absent(identity, None)
 
     def _mark_snapshotted(self, identity: str) -> bool:
         """True (and record it) the first time a snapshot is attempted for
         this identity. Each distinct record's diagnostic snapshot is written
         at most once EVER, even across daemon restarts and sessions."""
-        if identity in self._snapshotted:
-            return False
-        if len(self._snapshotted) >= _MAX_ADVISED_KEYS:
-            del self._snapshotted[next(iter(self._snapshotted))]
-        self._snapshotted[identity] = None
-        return True
+        return self._snapshotted.insert_if_absent(identity, None)
 
     # ── Persisted dedupe state (survives a daemon restart) ─────────────────
 
@@ -441,17 +432,17 @@ class ModelFallbackDetectorHandler(SessionStartHandlerBase):
         if isinstance(advised, list):
             for pair in advised:
                 if isinstance(pair, list) and len(pair) == 2:
-                    self._advised.setdefault((str(pair[0]), str(pair[1])), None)
+                    self._advised.insert_if_absent((str(pair[0]), str(pair[1])), None)
         recovered_noted = data.get(_STATE_KEY_RECOVERED_NOTED)
         if isinstance(recovered_noted, list):
             for identity in recovered_noted:
                 if isinstance(identity, str):
-                    self._recovered_noted.setdefault(identity, None)
+                    self._recovered_noted.insert_if_absent(identity, None)
         snapshotted = data.get(_STATE_KEY_SNAPSHOTTED)
         if isinstance(snapshotted, list):
             for identity in snapshotted:
                 if isinstance(identity, str):
-                    self._snapshotted.setdefault(identity, None)
+                    self._snapshotted.insert_if_absent(identity, None)
 
     def _save_state(self) -> None:
         """Atomically persist the in-memory dedupe dicts to disk.

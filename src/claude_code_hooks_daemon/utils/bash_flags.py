@@ -38,8 +38,18 @@ STATEMENT_SEPARATORS: Final[tuple[str, ...]] = (";", "\n")
 #: two ``|``.
 SPAN_SEPARATORS: Final[tuple[str, ...]] = ("||", "&&", "|")
 
+#: Reserved words in front of a ``set`` that still run it unconditionally in
+#: the current shell (Plan 00422 N25): ``{ set -e; ...; }`` sets errexit for
+#: everything after it. ``then``/``do``/``else`` are absent on purpose, because
+#: a ``set`` behind them runs only if a condition holds, and crediting it would
+#: stand the safety checks down for a command that may never have run it. ``(``
+#: is absent too: a subshell's ``set`` ends with the subshell.
+_UNCONDITIONAL_PREFIX: Final = r"(?:(?:time\s+-p|time|!|\{)\s+)*"
+
 #: A ``set`` builtin at the head of a statement, capturing its arguments.
-_SET_STATEMENT: Final[re.Pattern[str]] = re.compile(r"^\s*set\s+(?P<args>\S.*)$")
+_SET_STATEMENT: Final[re.Pattern[str]] = re.compile(
+    rf"^\s*{_UNCONDITIONAL_PREFIX}set\s+(?P<args>\S.*)$"
+)
 
 #: Single-letter cluster flags that map to a safety flag (``set -eu``).
 _SHORT_FLAGS: Final[dict[str, str]] = {"e": FLAG_ERREXIT, "u": FLAG_NOUNSET}

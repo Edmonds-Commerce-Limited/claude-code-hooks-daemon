@@ -26,8 +26,11 @@ from claude_code_hooks_daemon.plan_qa.checks.common import (
 )
 from claude_code_hooks_daemon.plan_qa.model import (
     JOURNAL_BODY_FILE_HINT,
+    JOURNAL_CORRECTION_CATEGORY,
     PlanLocation,
+    corrected_entry_labels,
     journal_append_command,
+    journal_correction_command,
     journal_entry_headings,
     parse_journal_dayfile_name,
 )
@@ -71,21 +74,29 @@ _NO_BACKFILL_BEFORE: Final[tuple[int, int, int]] = (2026, 9, 11)
 def _remediation(plan_dir: str, plan_number: int | None) -> str:
     return (
         "Journal entries run oldest-first. Correct the record with a NEW entry "
-        f"appended with `{journal_append_command(plan_dir, plan_number)}` "
-        f"({JOURNAL_BODY_FILE_HINT}) — journals are append-only, so a correction "
-        "is an addition, never a restatement. Only if the out-of-order entry is "
-        "NOT yet committed may you move it back to its chronological slot "
-        "instead, keeping its text unchanged. A correction stamped EARLIER than "
-        "a future-dated entry it corrects will itself read as out of order: "
-        "that is the append-only rule and this one meeting, and the correction "
-        "is still the right move."
+        "— journals are append-only, so a correction is an addition, never a "
+        "restatement. If an entry's time is wrong (stamped in the future), "
+        f"append `{journal_correction_command(plan_dir, plan_number)}` "
+        f"({JOURNAL_BODY_FILE_HINT}): a `{JOURNAL_CORRECTION_CATEGORY}` entry "
+        "whose `--ref` names the wrong entry's time voids that time for this "
+        "check, and the wrong entry stays where it is. Any other correction is "
+        f"a NEW entry appended with `{journal_append_command(plan_dir, plan_number)}`. "
+        "Only if the out-of-order entry is NOT yet committed may you move it "
+        "back to its chronological slot instead, keeping its text unchanged."
     )
 
 
 def _rule(context: CheckContext, target: JournalEditTarget, content: str) -> list[Finding]:
+    headings = journal_entry_headings(content)
+    # An entry a correction in this file names has a clock reading the file
+    # itself declares wrong, so it sets no high-water mark. It stays where it
+    # is and still counts as an entry (ledger 00422 N3).
+    voided = corrected_entry_labels(headings)
     regressions: list[str] = []
     highest, highest_label = -1, ""
-    for heading in journal_entry_headings(content):
+    for heading in headings:
+        if heading.label in voided:
+            continue
         if heading.minutes < highest:
             regressions.append(f"`{heading.label}` appears after `{highest_label}`")
         else:

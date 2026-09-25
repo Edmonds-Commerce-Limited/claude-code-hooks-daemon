@@ -126,6 +126,15 @@ If nothing matches, report "no eligible issue" and stop. That is a success.
 Say how many issues the whitelist skipped, so "nothing to do" and "nothing
 allowed through" are distinguishable in the tick's output.
 
+**When the only reason is that every eligible issue is `agent-needs-human`,
+say so with the `[awaiting-human]` token**: `STOPPING BECAUSE: [awaiting-human] every eligible issue is agent-needs-human (#14, #22, …)`. Use it only when
+nothing else in the session can move either — the token is session-wide. It
+arms the blockage marker, and the daemon then drops later `issue-sdlc` ticks
+before they reach the model, at zero token cost, until a real prompt arrives
+or the marker expires (Plan 00388). Without it a backlog parked on a human
+costs a full model turn every hour. This works only for a cron whose prompt
+still starts with the `[tick:job:issue-sdlc]` line the daemon supplies.
+
 ### Recovering a stalled issue — establish the state, do not infer it
 
 **The label is a claim by a process that died. Trust git instead.** This path has
@@ -379,3 +388,15 @@ Stop and report, rather than pressing on, when:
 A tick that stops with a recorded reason is a **successful** tick. A tick that
 guesses in order to look productive is the failure this runbook exists to
 prevent.
+
+## Pausing the hourly cron for one session
+
+When the owner says to stop the `issue-sdlc` cron for now, pause it rather
+than only deleting it. `cron_stop_enforcer` refuses a stop while a declared job
+is missing, so a bare `CronDelete` leaves the session unable to stop. Run
+`hooks-daemon cron-pause issue-sdlc --reason "<the owner's words>"`, then
+`CronDelete` the job from the main session. The pause belongs to this session
+only. It expires within 24 hours, `hooks-daemon cron-resume issue-sdlc` ends it
+early, and every stop that finds the job missing names the pause. To stop the
+job in every session, edit `persistent_crons` in `.claude/hooks-daemon.yaml`;
+that is the only permanent switch.

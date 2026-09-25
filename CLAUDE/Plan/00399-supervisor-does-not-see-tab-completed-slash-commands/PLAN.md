@@ -1,6 +1,6 @@
 # Plan 00399: supervisor does not see tab completed slash commands
 
-**Status**: In Progress
+**Status**: Blocked
 **Created**: 2026-09-13
 **Owner**: joseph
 **Priority**: Medium
@@ -130,6 +130,10 @@ write-up saying otherwise would be a tidy story pointing the wrong way.
   encodes the keys. Since the ruling this task gates nothing: the record does
   not come from the input path at all.
 
+  **Blocked on this task alone.** Everything an agent can do shipped with B1
+  (2e6483a3). The plan waits for the owner to make the capture above, then
+  closes.
+
 ## Success Criteria
 
 - [x] A Tab-completed `/compact` either defers the supervisor correctly, or the
@@ -142,7 +146,8 @@ write-up saying otherwise would be a tidy story pointing the wrong way.
 - [x] No fix widens the match in a way that can produce a FALSE recognition,
   which costs more than the bug it repairs. Guarded by
   `test_keystrokes_without_the_whole_word_are_not_a_compact`.
-- [ ] Full QA passes and CI is green.
+- [x] Full QA passes and CI is green. Landed with integration batch B1
+  (2e6483a3); CI green on d23b56f0.
 - [x] Release note: `CLAUDE/UPGRADES/UNRELEASED/release-notes/18-a-tab-completed-compact-is-recognised-from-the-daemon-record.md`.
 
 ## Delivery & Milestones

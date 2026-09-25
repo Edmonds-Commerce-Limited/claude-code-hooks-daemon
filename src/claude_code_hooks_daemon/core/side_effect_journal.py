@@ -17,24 +17,50 @@ mutable state would need a deeper copy, so keep journalled state flat.
 from __future__ import annotations
 
 import copy
+import threading
 from collections.abc import Callable, MutableMapping
+from enum import Enum
 from typing import TypeVar
 
 K = TypeVar("K")
 V = TypeVar("V")
 
 
-class SideEffectJournal:
-    """Records how to undo each mutation a handler is about to make."""
+class _Absent(Enum):
+    """Sentinel for "no such key", distinct from any value a map can hold."""
 
-    __slots__ = ("_undo",)
+    KEY = "absent"
+
+
+class SideEffectJournal:
+    """Records how to undo each mutation a handler is about to make.
+
+    The undo records are PER THREAD (Plan 00449). The journal lives on a
+    handler singleton, ``server.py`` dispatches on a thread pool, and one
+    dispatch runs ``handle()`` and ``commit_side_effects()`` on the same
+    thread — so a thread's records are exactly one call's records. One shared
+    list let a concurrent call's ``commit()`` discard this call's undo
+    records, its ``rollback()`` undo this call's mutations, and two rollbacks
+    race into ``IndexError`` on ``while undo: undo.pop()``.
+    """
+
+    __slots__ = ("_local",)
 
     def __init__(self) -> None:
-        self._undo: list[Callable[[], None]] = []
+        self._local = threading.local()
+
+    @property
+    def _undo(self) -> list[Callable[[], None]]:
+        """This thread's undo records, created on first use."""
+        undo: list[Callable[[], None]] | None = getattr(self._local, "undo", None)
+        if undo is None:
+            undo = []
+            self._local.undo = undo
+        return undo
 
     @property
     def pending(self) -> int:
-        """Number of snapshots taken since the last commit/rollback."""
+        """Number of snapshots this thread took since its last commit/rollback."""
         return len(self._undo)
 
     def snapshot(self, mapping: MutableMapping[K, V], key: K) -> None:
@@ -42,8 +68,12 @@ class SideEffectJournal:
 
         Call BEFORE mutating the entry (overwrite, in-place change, delete
         or insert). Restoring an absent key deletes whatever was inserted.
+
+        The key is read ONCE: ``key in mapping`` followed by ``mapping[key]``
+        would raise if another thread evicted the key in between.
         """
-        if key not in mapping:
+        current = mapping.get(key, _Absent.KEY)
+        if current is _Absent.KEY:
 
             def _remove() -> None:
                 mapping.pop(key, None)
@@ -51,7 +81,7 @@ class SideEffectJournal:
             self._undo.append(_remove)
             return
 
-        restored = copy.copy(mapping[key])
+        restored = copy.copy(current)
 
         def _restore() -> None:
             mapping[key] = restored

@@ -24,6 +24,7 @@ from claude_code_hooks_daemon.utils.cron_enforcement import (
     PROMPT_DELIVERY_CAP,
     SessionCron,
     cron_is_asserted,
+    declared_tick_prompt,
     find_missing_crons,
     parse_session_crons,
     render_missing_crons_reason,
@@ -224,3 +225,46 @@ class TestRenderMissingCronsReason:
         reason = render_missing_crons_reason([_SHORT_JOB, second])
         assert "short-job" in reason
         assert "second-job" in reason
+
+
+class TestDeclaredJobsCarryTheTickSentinel:
+    """Plan 00388 option 2'. A declared job's prompt is handed to the agent by
+    the daemon, so the daemon adds the sentinel that lets the blockage
+    suppressor tell the job's tick from the owner. Matching must accept the
+    job with or without it, so a cron created before the sentinel existed is
+    not reported missing -- which would block every stop in a live session."""
+
+    def test_the_rendered_prompt_leads_with_the_job_sentinel(self) -> None:
+        assert declared_tick_prompt(_SHORT_JOB) == "[tick:job:short-job]\ncheck the build"
+
+    def test_a_prompt_already_carrying_a_sentinel_is_rendered_unchanged(self) -> None:
+        """A declared failsafe job pastes the canonical prompt, which already
+        says [tick:failsafe]; it must not gain a second identity."""
+        job = PersistentCronConfig(
+            id="failsafe-recovery", schedule="47 * * * *", prompt="[tick:failsafe]\nrecover"
+        )
+        assert declared_tick_prompt(job) == "[tick:failsafe]\nrecover"
+
+    def test_a_cron_created_with_the_sentinel_is_asserted(self) -> None:
+        actual = [SessionCron("c1", "23 * * * *", declared_tick_prompt(_SHORT_JOB))]
+        assert cron_is_asserted(_SHORT_JOB, actual)
+
+    def test_a_cron_created_before_the_sentinel_is_still_asserted(self) -> None:
+        actual = [SessionCron("c1", "23 * * * *", "check the build")]
+        assert cron_is_asserted(_SHORT_JOB, actual)
+
+    def test_the_sentinel_alone_does_not_make_a_different_job_match(self) -> None:
+        actual = [SessionCron("c1", "23 * * * *", "[tick:job:short-job]\nsomething else")]
+        assert not cron_is_asserted(_SHORT_JOB, actual)
+
+    def test_a_truncated_delivery_with_the_sentinel_still_matches(self) -> None:
+        job = PersistentCronConfig(id="long", schedule="23 * * * *", prompt=_long_prompt(1200))
+        delivered = declared_tick_prompt(job)[:PROMPT_DELIVERY_CAP] + "… [+217 chars]"
+        assert cron_is_asserted(job, [SessionCron("c1", "23 * * * *", delivered)])
+
+    def test_the_stop_block_names_the_prompt_with_its_sentinel(self) -> None:
+        """The block message is the other place an agent copies the prompt
+        from, so it must hand over the same text the SessionStart advisory
+        does."""
+        reason = render_missing_crons_reason([_SHORT_JOB])
+        assert "[tick:job:short-job]" in reason

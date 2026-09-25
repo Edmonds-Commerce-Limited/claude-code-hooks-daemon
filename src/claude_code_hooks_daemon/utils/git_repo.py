@@ -13,6 +13,13 @@ SOLID:
 - **Dependency Inversion**: handlers and utilities depend on this typed
   surface, not on subprocess internals. Typed facades (e.g. a plan-number
   counter that returns ``int``) layer on top of ``read_config`` → ``str | None``.
+
+:func:`project_path_is_protected` (Plan 00412) is the one predicate every
+content-reading walker in this codebase applies to its candidate set, WHETHER
+that set came from git (:func:`git_visible_paths`, which filters through it
+already) or from a plain filesystem walk with no git truth to filter by (the
+not-a-git-repository fallback several callers fall back to). A single owner
+means the protected-path check cannot drift between the two routes.
 """
 
 from __future__ import annotations
@@ -26,6 +33,10 @@ from pathlib import Path
 from typing import Final
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.utils.secret_file_matching import (
+    path_is_protected,
+    resolve_configured_patterns,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +141,84 @@ def run_git(
         )
     except (OSError, subprocess.SubprocessError) as exc:
         return subprocess.CompletedProcess(argv, _GIT_UNAVAILABLE, "", str(exc))
+
+
+def project_path_is_protected(rel_path: str) -> bool:
+    """Whether ``rel_path`` matches a protected glob under the LIVE
+    ``secret_file_guard`` configuration (Plan 00412).
+
+    The one predicate every content-reading walker in this codebase applies
+    to its final candidate set — ``docs_qa/comment_finder.py``,
+    ``docs_qa/corpus.py`` (both of its walks), ``daemon/cli.py``'s
+    ``format-markdown``, and ``scripts/qa/check_doc_truth.py`` — regardless
+    of whether that candidate set came from :func:`git_visible_paths` (which
+    already filters through this, so re-applying it there is a cheap no-op)
+    or from each caller's own plain filesystem walk when ``project_root`` is
+    not a git repository. A single owner for the check means the two routes
+    cannot silently drift apart, and a caller cannot forget it on one branch
+    while remembering it on the other.
+
+    Accepts a project-relative OR an absolute path — :func:`path_is_protected`
+    resolves either form against the live project root.
+    """
+    return path_is_protected(rel_path, resolve_configured_patterns())
+
+
+def git_visible_paths(project_root: Path) -> frozenset[str] | None:
+    """Every project-relative path ``git`` would add right now: tracked
+    files, plus untracked files no ``.gitignore`` rule excludes (Plan 00466
+    N9), MINUS any path matching a protected glob
+    (:func:`project_path_is_protected`, Plan 00412).
+
+    The single shared "what counts as part of the project" answer for every
+    QA corpus that enumerates files from disk rather than reading the
+    index/working-tree diff directly — a gitignored vendored install (e.g. a
+    Claude Code plugin's cache under ``.claude/ccy/plugins/``) is not
+    project content, and a plain filesystem walk has no way to tell the two
+    apart. ONE combined ``git ls-files --cached --others --exclude-standard``
+    call, never one per file: cheap enough to run once per corpus build.
+
+    The protected-set filter closes a disclosure this enumeration otherwise
+    opens: every caller (``docs_qa``, ``comment_finder``, ``format-markdown``,
+    ``doc_truth``) goes on to READ the content of what comes back, and git
+    tracking a file — or merely not ignoring it — says nothing about whether
+    it is safe to read. A path is protected whether or not it is tracked, so
+    a committed protected-looking file is excluded exactly like an untracked
+    one.
+
+    Returns ``None`` when ``project_root`` is not a git repository (or git
+    is unavailable): callers fall back to their pre-existing unfiltered walk
+    rather than guessing either "nothing is ignored" or "everything is" —
+    the fixture trees this daemon's own test suite builds under ``tmp_path``
+    are not git repositories unless a test opts in, and must keep scanning
+    everything they write. Every one of those fallbacks routes its own
+    per-file check through :func:`project_path_is_protected` too, so a
+    protected file is excluded on that branch just as it is here.
+    """
+    result = run_git(project_root, "ls-files", "--cached", "--others", "--exclude-standard", "-z")
+    if result.returncode != 0:
+        return None
+    paths = frozenset(token for token in result.stdout.split("\0") if token)
+    return frozenset(path for path in paths if not project_path_is_protected(path))
+
+
+def git_visible_ancestor_dirs(rel_paths: frozenset[str]) -> frozenset[str]:
+    """Every directory (at every depth) that encloses one of ``rel_paths``.
+
+    A pruned tree walk must still DESCEND into a directory that merely
+    CONTAINS a git-visible file — pruning by the file-level answer alone
+    would never reach a git-visible file nested two levels under an
+    otherwise-ignored parent. Shared by every caller of
+    :func:`git_visible_paths` that prunes its OWN walk rather than reading a
+    pre-built candidate list (:mod:`docs_qa.corpus`, ``daemon.cli``'s
+    ``format-markdown`` walk).
+    """
+    dirs: set[str] = set()
+    for rel_path in rel_paths:
+        parts = rel_path.split("/")
+        for depth in range(1, len(parts)):
+            dirs.add("/".join(parts[:depth]))
+    return frozenset(dirs)
 
 
 _GIT_DIR_ENTRY: Final[str] = ".git"
