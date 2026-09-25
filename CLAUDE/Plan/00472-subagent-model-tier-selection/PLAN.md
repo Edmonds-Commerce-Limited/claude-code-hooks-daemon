@@ -77,13 +77,20 @@ message. The decisions are listed side by side in each plan's Task 1.2.
 
 ### Phase 2: Workflow fan-out
 
-- [ ] 🔄 **Task 2.1**: Research what PreToolUse(`Workflow`) exposes (the
+- [x] ✅ **Task 2.1** (report:
+  `subagent-reports/260925-p472-workflow-fanout-sonnet-5.md`; PreToolUse on
+  `Workflow` is the only catch point, since a script's `agent()` calls fire no
+  PreToolUse(`Agent`) and SubagentStart names no parent run): Research what PreToolUse(`Workflow`) exposes (the
   inline script, `scriptPath`, a named workflow), how an `agent()` call's
   model is chosen when it has no `model` option, and whether workflow agents
   fire SubagentStart. Then design levers: a static count of the script's
   fan-out, an explicit `model` required on fanned-out `agent()` calls when the
   session runs the top tier, and a fan-out ceiling per tier, advisory or
   deny. Report into `subagent-reports/`.
+- [ ] ⬜ **Task 2.2**: Capture one real PreToolUse(`Workflow`) payload before
+  any handler is built; the shape is undocumented and nothing captured it yet.
+  A workflow may only run when the owner opts in, so this waits on the owner
+  running one small workflow with payload capture on.
 
 ## Success Criteria
 
