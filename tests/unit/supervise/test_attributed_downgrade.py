@@ -23,12 +23,16 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
+
+import pytest
 
 from tests.unit.supervise._load import load_supervisor_module
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
 
     from tests.unit.supervise._load import SupervisorStateMachine, SupervisorTickOutcome
@@ -40,6 +44,16 @@ _SESSION = "attributed-sess-1"
 _OTHER_SESSION = "attributed-sess-2"
 _RECORD_ID = "uuid-record-1"
 _WINDOW = 300.0
+
+
+@pytest.fixture
+def _non_utc_local_time(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Run with a local zone far from UTC, restoring the process zone after."""
+    monkeypatch.setenv("TZ", "America/New_York")
+    time.tzset()
+    yield
+    monkeypatch.undo()
+    time.tzset()
 
 
 def _iso(epoch: float) -> str:
@@ -277,7 +291,11 @@ class TestTheSignalLoader:
         assert found is not None
         assert found.event_ts is None
 
+    @pytest.mark.usefixtures("_non_utc_local_time")
     def test_a_record_time_without_a_zone_is_read_as_utc(self, tmp_path: Path) -> None:
+        """Claude Code writes UTC; reading a zone-less time as LOCAL time would
+        shift every record by the host's offset. Run under a non-UTC zone, or
+        a UTC container could not tell the two readings apart."""
         sidecar_dir = tmp_path / "cs"
         _write_downgrade_signal(sidecar_dir, record_ts=_iso(_NOW).rstrip("Z"))
 
@@ -666,6 +684,22 @@ class TestAttributionWindow:
 
         assert _model_commands(typed) == []
 
+    def test_a_record_of_unknown_time_attributes_nothing(self, tmp_path: Path) -> None:
+        """An older worker's exported state names a record but not WHEN it
+        happened, and no signal file has been read since. Not knowing the time
+        is not the same as the record being fresh."""
+        sidecar_dir = tmp_path / "cs"
+        reloaded = _machine()
+        reloaded.import_state({"attributed_downgrade": f"{_SESSION}:fable:opus:{_RECORD_ID}"})
+
+        _drive_fable_to_opus(sidecar_dir, reloaded, now=_NOW)
+        typed = _typed_between(
+            sidecar_dir, reloaded, start=_NOW, end=_NOW + 200.0, model_id="claude-opus-5"
+        )
+
+        assert _model_commands(typed) == []
+        assert reloaded.export_state()["downgrade_episode"] is None
+
     def test_the_first_sighting_of_an_untimestamped_record_is_kept(self, tmp_path: Path) -> None:
         """Republishing the same record every tick must not keep it "fresh"."""
         sidecar_dir = tmp_path / "cs"
@@ -789,9 +823,7 @@ class TestRetroAttribution:
         assert _model_commands(typed) == []
         assert machine.export_state()["downgrade_episode"] is None
 
-    def test_the_latch_is_dropped_when_the_foreground_session_changes(
-        self, tmp_path: Path
-    ) -> None:
+    def test_the_latch_is_dropped_when_the_foreground_session_changes(self, tmp_path: Path) -> None:
         """A restore types into the FOREGROUND session. If that is now another
         session, a late record for the first must not arm a `/model` there."""
         sidecar_dir = tmp_path / "cs"
@@ -913,8 +945,12 @@ class TestHotReloadBackfill:
         assert reloaded.export_state()["downgrade_episode"] is None
 
     def test_a_legacy_record_ts_state_is_read_as_the_record_key(self) -> None:
-        """A worker from before record ids exported `*_record_ts` keys."""
-        legacy = self._legacy_episode_state(f"{_SESSION}:fable:opus:{_iso(_NOW)}")
+        """A worker from before record ids exported `*_record_ts` keys.
+
+        The published record here is a NEWER one, so a backfill from it would
+        give a different key: the episode's own exported key must win.
+        """
+        legacy = self._legacy_episode_state(f"{_SESSION}:fable:opus:uuid-newer-record")
         legacy["downgrade_episode_record_ts"] = _iso(_NOW)
         legacy["spent_downgrade_record_ts"] = "2026-08-27T09:00:00.000Z"
         reloaded = _machine()

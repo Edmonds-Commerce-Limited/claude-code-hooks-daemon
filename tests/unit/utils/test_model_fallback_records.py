@@ -10,6 +10,8 @@ is the single place that recognises either.
 from __future__ import annotations
 
 import json
+import time
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -17,6 +19,7 @@ import pytest
 from claude_code_hooks_daemon.utils.model_fallback_records import (
     UNKNOWN_MODEL,
     FallbackFacts,
+    event_epoch,
     parse_fallback_line,
     scan_transcript_tail,
 )
@@ -266,6 +269,33 @@ class TestScanTranscriptTail:
         directory.mkdir()
 
         assert scan_transcript_tail(directory) is None
+
+
+@pytest.fixture
+def _non_utc_local_time(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Run with a local zone far from UTC, restoring the process zone after."""
+    monkeypatch.setenv("TZ", "America/New_York")
+    time.tzset()
+    yield
+    monkeypatch.undo()
+    time.tzset()
+
+
+class TestEventEpoch:
+    """A record's timestamp as epoch seconds; pairing and the supervisor's
+    attribution window both compare these."""
+
+    def test_a_utc_timestamp_is_read_exactly(self) -> None:
+        assert event_epoch("1970-01-01T00:01:40.500Z") == 100.5
+
+    @pytest.mark.usefixtures("_non_utc_local_time")
+    def test_a_zone_less_timestamp_is_utc_not_local_time(self) -> None:
+        """Under a non-UTC zone, or a UTC host could not tell the readings apart."""
+        assert event_epoch("1970-01-01T00:01:40") == 100.0
+
+    @pytest.mark.parametrize("text", ["", "not a time"], ids=["empty", "garbage"])
+    def test_a_missing_or_unparseable_timestamp_is_none(self, text: str) -> None:
+        assert event_epoch(text) is None
 
 
 class TestRecordIdentity:
