@@ -53,9 +53,18 @@ Evidence, with verified facts marked apart from inferences, is in
 ### Phase 3: Limits, restarts, durable queue (owner: python-developer sub-agent, TDD)
 
 - [ ] ⬜ **Task 3.1**: StopFailure handler package: record `rate_limit`, `authentication_failed`, `cloud_credential_error` to a durable file and surface them in the status line.
+
 - [ ] ⬜ **Task 3.2**: Notification handler records `quota_auto_resume_*`; on resume, inject a re-brief pointing at the queue.
-- [ ] ⬜ **Task 3.3**: Durable work-queue file format + the `issue-sdlc` skill writes and reads it; SessionStart (`resume`/`compact`) re-briefs from it.
+
+- [ ] ⬜ **Task 3.3**: Durable work-queue file format + the `issue-sdlc` skill writes and reads it; SessionStart (`resume`/`compact`) re-briefs from it. Observed on 2026-09-25, in two separate ways:
+
+  - After a usage-limit restart, a new session had no teammates.
+  - A user interrupt of the lead's turn killed all 11 running in-process agents.
+
+  Both times, each agent had to be re-briefed by hand from its worktree state. The queue must hold enough per agent (worktree, task brief, last sha) that a respawn is mechanical.
+
 - [ ] ⬜ **Task 3.4**: Regression test that a teammate or sub-agent stop never writes the lead's `[awaiting-human]` marker.
+
 - [ ] ⬜ **Task 3.5**: Server runbook: systemd/ccy restart with `--continue`, `autoContinueAtUsageLimit` on.
 
 ### Phase 4: Housekeeping and cost (owner: orchestrator; code by sub-agents)
