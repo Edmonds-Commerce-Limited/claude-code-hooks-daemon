@@ -281,6 +281,16 @@ _FULL_RUNS: list[tuple[str, str]] = [
     ("caffeinate -i pytest", "pytest-whole-suite"),
     ("caffeinate -w 123 pytest tests", "pytest-whole-suite"),
     ("doas -u dev pytest tests", "pytest-whole-suite"),
+    # Review 8 corpus: launchers that run a command after their own words.
+    ("ssh-agent pytest tests", "pytest-whole-suite"),
+    ("ssh-agent -t 60 bash -c 'pytest tests'", "pytest-whole-suite"),
+    ("pyenv exec pytest tests", "pytest-whole-suite"),
+    ("rbenv exec ./scripts/qa/llm_qa.py all", "llm-qa-whole-suite"),
+    ("direnv exec . pytest", "pytest-whole-suite"),
+    ("echo 'pytest tests' | direnv exec . bash", "pytest-whole-suite"),
+    ("echo 'import pytest; pytest.main()' | setsid pyenv exec python3", "pytest-whole-suite"),
+    ("conda run -n ci pytest tests", "pytest-whole-suite"),
+    ("mamba run --no-capture-output -p /opt/env python -m pytest", "pytest-whole-suite"),
     # Review 5 n4: ANSI-C hex, octal and unicode escapes are decoded.
     ("$'py\\x74est' tests", "pytest-whole-suite"),
     ("$'py\\164est' tests", "pytest-whole-suite"),
@@ -402,6 +412,16 @@ _NOT_FULL_RUNS: list[str] = [
     "parallel ::: 'pytest tests/unit/x.py'",
     "pipx run pytest tests/unit/x.py",
     "chrt -p 0 1234",
+    "ssh-agent pytest tests/unit/x.py",
+    "ssh-agent -s",
+    "pyenv exec pytest tests/unit/x.py",
+    "pyenv which pytest",
+    "pyenv install 3.11",
+    "direnv exec . pytest tests/unit/x.py",
+    "direnv allow .",
+    "conda run -n ci pytest tests/unit/x.py",
+    "conda install pytest",
+    "echo 'pytest tests' | flock /tmp/x -c cat",
     # Review 4 N10: a quoted delimiter with a blank is still a quoted delimiter.
     "cat > n.txt <<' EOF'\npytest tests\n EOF",
     "cat > n.txt <<'EOF X'\npytest tests\nEOF X",
@@ -2231,8 +2251,20 @@ class TestTheMergeBaseListingIsAccepted:
         (tmp_path / "tests" / "unit" / "qa").mkdir(parents=True)
         return tmp_path
 
-    def test_a_merge_base_substitution_is_a_targeted_listing(self, tmp_path: Path) -> None:
-        command = 'git diff --name-only "$(git merge-base main HEAD)" -- tests | xargs -r pytest'
+    @pytest.mark.parametrize(
+        "revisions",
+        [
+            '"$(git merge-base main HEAD)"',
+            # Review 8 corpus: unquoted, a merge base is still one SHA-shaped word.
+            "$(git merge-base main HEAD)",
+            "$(git merge-base main HEAD) $(git merge-base HEAD main)",
+            "`git merge-base main HEAD` HEAD",
+        ],
+    )
+    def test_a_merge_base_substitution_is_a_targeted_listing(
+        self, tmp_path: Path, revisions: str
+    ) -> None:
+        command = f"git diff --name-only {revisions} -- tests | xargs -r pytest"
         assert find_full_qa_invocation(command, _patterns(), cwd=self._tree(tmp_path)) is None
 
     def test_an_unrelated_substitution_still_refuses_the_listing(self, tmp_path: Path) -> None:
@@ -2248,6 +2280,8 @@ class TestTheMergeBaseListingIsAccepted:
             '"$(git merge-base -a main HEAD)"',
             '"$(git merge-base --fork-point main HEAD)"',
             '"$(git merge-base main HEAD | git mktree)"',
+            "$(git merge-base -a main HEAD)",
+            "$(git merge-base main HEAD) $(cat rev.txt)",
         ],
     )
     def test_a_substitution_that_runs_more_than_plain_merge_base_still_refuses_the_listing(

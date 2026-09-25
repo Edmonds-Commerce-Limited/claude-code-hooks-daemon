@@ -1087,13 +1087,24 @@ class _Launcher:
     ``operands`` counts the positional words before the command, and a
     ``code_flags`` value is shell code the launcher runs (``flock f -c 'cmd'``).
     With ``runs_tail`` unset, only a code flag runs anything (``script out.log``
-    starts an interactive shell).
+    starts an interactive shell). With ``subcommand`` set, the command runs
+    only after that word (``pyenv exec pytest``; ``pyenv which pytest`` runs
+    nothing), and the flags and operands are read after it.
     """
 
     value_flags: frozenset[str] = frozenset()
     operands: int = 0
     code_flags: frozenset[str] = frozenset()
     runs_tail: bool = True
+    subcommand: str | None = None
+
+
+#: ``conda run`` and its drop-in replacements, which name an environment first.
+_CONDA_RUN: Final[_Launcher] = _Launcher(
+    value_flags=frozenset({"-n", "--name", "-p", "--prefix", "--cwd"}), subcommand="run"
+)
+#: ``pyenv exec`` and ``rbenv exec`` run the command in the selected version.
+_VERSION_EXEC: Final[_Launcher] = _Launcher(subcommand="exec")
 
 
 #: Launchers the shared wrapper table does not peel, each with its own grammar.
@@ -1156,6 +1167,14 @@ _LAUNCHERS: Final[Mapping[str, _Launcher]] = {
     ),
     "caffeinate": _Launcher(value_flags=frozenset({"-t", "-w"})),
     "doas": _Launcher(value_flags=frozenset({"-u", "-C"})),
+    "ssh-agent": _Launcher(value_flags=frozenset({"-a", "-E", "-O", "-P", "-t"})),
+    "pyenv": _VERSION_EXEC,
+    "rbenv": _VERSION_EXEC,
+    # `direnv exec DIR cmd` runs cmd in DIR's environment.
+    "direnv": _Launcher(operands=1, subcommand="exec"),
+    "conda": _CONDA_RUN,
+    "mamba": _CONDA_RUN,
+    "micromamba": _CONDA_RUN,
 }
 #: ``parallel [options] cmd ::: a b`` runs ``cmd a`` and ``cmd b``; the words
 #: after ``::::`` are files the arguments are read from, which cannot be seen.
@@ -1458,7 +1477,7 @@ def _invocations(
     # text to find the heredoc in the first place.
     parse_target = _without_python_heredocs(scan_target) if has_interpreter else scan_target
     protected, substitutions = _protect_substitutions(parse_target)
-    fed_a_listing = _consumers_of_a_listing(protected)
+    fed_a_listing = _consumers_of_a_listing(protected, substitutions)
     parsed: list[tuple[str, list[str] | None]] = []
     for segment in split_unquoted(protected, _COMMAND_BOUNDARIES):
         restored = _restore(segment, substitutions)
@@ -1733,7 +1752,7 @@ def _reads_code_from_stdin(words: list[str]) -> bool:
     ``bash``, ``bash -s``, ``bash /dev/stdin`` and ``source /dev/stdin`` all
     do (review 6 m2).
     """
-    argv = _strip_prefixes(words)
+    argv = _command_after_launchers(words)
     if not argv:
         return False
     name = command_word(argv[0])
@@ -1780,17 +1799,19 @@ def _without_redirects(words: Sequence[str]) -> list[str]:
     return kept
 
 
-def _is_a_listing(stages: Sequence[str]) -> bool:
+def _is_a_listing(stages: Sequence[str], substitutions: Sequence[str] = ()) -> bool:
     """Whether a pipeline writes only the paths a change touches (review 5 n3, review 6 M2).
 
     ``git diff --name-only``, optionally filtered by ``grep``, ``sort`` or
     ``uniq``: its output is a set of changed files, which is the targeted run
     the guidance asks for. A listing steered to print other words is none: a
     format, a line prefix, an output file, the empty tree (every tracked
-    file), a word built at run time, or ``grep --label``.
+    file), a word built at run time, or ``grep --label``. ``substitutions``
+    are the spans :func:`_protect_substitutions` replaced in ``stages``; each
+    word is judged with its own put back.
     """
     try:
-        words = [shlex.split(stage) for stage in stages]
+        words = [[_restore(word, substitutions) for word in shlex.split(stage)] for stage in stages]
     except ValueError as error:
         logger.debug("Listing not recognised, unsplittable (%s)", error)
         return False
@@ -1890,13 +1911,15 @@ def _xargs_skips_empty_input(words: Sequence[str]) -> bool:
     return False
 
 
-def _consumers_of_a_listing(text: str) -> frozenset[str]:
+def _consumers_of_a_listing(text: str, substitutions: Sequence[str]) -> frozenset[str]:
     """Each ``xargs -r`` stage whose stdin is a listing of changed files, as written.
 
     Without ``-r`` an empty listing runs the command bare, so such a stage is
     not a targeted run (review 6 M2). Text that never spells ``xargs`` has no
     such stage, and is not split at all: a stage found here only ever makes
     a run targeted, so a quoted spelling this misses is denied, never let by.
+    ``text`` carries placeholders for ``substitutions``, so an unquoted
+    ``$(git merge-base main HEAD)`` is judged as the one word it is.
     """
     if _XARGS not in text:
         return frozenset()
@@ -1913,7 +1936,7 @@ def _consumers_of_a_listing(text: str) -> frozenset[str]:
                 consumer
                 and consumer[0] == _XARGS
                 and _xargs_skips_empty_input(consumer)
-                and _is_a_listing(stages[:position])
+                and _is_a_listing(stages[:position], substitutions)
             ):
                 consumers.add(stages[position].strip())
     return frozenset(consumers)
@@ -1925,7 +1948,7 @@ def _python_stdin_argv(words: list[str]) -> list[str] | None:
     ``python3 - a b`` reads code from stdin with ``sys.argv[1:]`` of
     ``['a', 'b']``; ``python3 script.py`` reads DATA from stdin.
     """
-    argv = _strip_prefixes(words)
+    argv = _command_after_launchers(words)
     if not argv:
         return None
     if _PYTHON_INTERPRETER.match(command_word(argv[0])) is None:
@@ -2742,14 +2765,26 @@ def _resolve_launcher(
     launcher: _Launcher, words: list[str], segment: str, depth: int, hops: int
 ) -> Iterator[tuple[str, list[str], str]]:
     """``<launcher> [flags] [operands] <command>`` runs ``<command>``, or a code flag's value."""
+    tail, code = _launched(launcher, words)
+    if code:
+        yield from _nested(code, segment, depth)
+    elif tail is not None:
+        yield from _resolve(tail, segment, depth, hops + 1)
+
+
+def _launched(launcher: _Launcher, words: list[str]) -> tuple[list[str] | None, str | None]:
+    """What a launcher runs: ``(command words, None)``, ``(None, code)``, or ``(None, None)``."""
+    if launcher.subcommand is not None:
+        at = next((i for i, word in enumerate(words) if not _is_flag(word)), len(words))
+        if at == len(words) or words[at] != launcher.subcommand:
+            return None, None
+        words = words[at + 1 :]
     index, operands = 0, launcher.operands
     while index < len(words):
         word = words[index]
         code = _code_flag_value(launcher, words, index)
         if code is not None:
-            if code:
-                yield from _nested(code, segment, depth)
-            return
+            return None, code
         if word == END_OF_OPTIONS:
             index += 1 + operands
             break
@@ -2760,8 +2795,25 @@ def _resolve_launcher(
             break
         operands -= 1
         index += 1
-    if launcher.runs_tail:
-        yield from _resolve(words[index:], segment, depth, hops + 1)
+    return (words[index:] if launcher.runs_tail else None), None
+
+
+def _command_after_launchers(words: list[str]) -> list[str]:
+    """The command a stdin consumer starts once wrappers and launchers are peeled.
+
+    ``echo code | direnv exec . bash`` feeds ``bash``; a launcher that runs
+    a code flag or nothing is left as it is, so it reads no code on stdin.
+    """
+    argv = _strip_prefixes(words)
+    while argv:
+        launcher = _LAUNCHERS.get(command_word(argv[0]))
+        if launcher is None:
+            break
+        tail, _code = _launched(launcher, argv[1:])
+        if tail is None:
+            break
+        argv = _strip_prefixes(tail)
+    return argv
 
 
 def _parallel_inputs(words: Sequence[str]) -> list[str]:
