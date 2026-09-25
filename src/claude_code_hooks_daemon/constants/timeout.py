@@ -33,6 +33,11 @@ class Timeout:
     DAEMON_IDLE = 600  # 10 minutes (daemon idle before shutdown)
     DAEMON_STARTUP = 30  # 30 seconds (wait for daemon to start)
     DAEMON_SHUTDOWN = 10  # 10 seconds (wait for daemon to shutdown)
+    # A process that ignores SIGTERM for the whole `SOCKET_CONNECT` grace
+    # period (Plan 00466 N40 review 2 MA2) is escalated to SIGKILL, which a
+    # process cannot catch, block or ignore -- this second, shorter budget is
+    # only for the OS to actually reap it afterward.
+    DAEMON_SIGKILL_GRACE = 2  # 2 seconds (wait after SIGKILL for the OS to reap)
     # A restart is a shutdown FOLLOWED BY a startup, so its budget is the sum.
     # Giving it DAEMON_SHUTDOWN alone asserts that stop-and-start fits inside
     # the stop budget -- structurally impossible whenever startup is the slower

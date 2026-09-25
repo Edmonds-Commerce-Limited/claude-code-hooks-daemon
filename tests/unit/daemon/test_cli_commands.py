@@ -412,6 +412,54 @@ class TestCmdStop:
             result = cmd_stop(args)
             assert result == 1
 
+    def test_stop_escalates_to_sigkill_after_sigterm_grace_period(self, tmp_path: Path) -> None:
+        """A process that survives SIGTERM's grace period gets SIGKILL'd (Plan 00466 N40 review 2 MA2).
+
+        A wedged daemon that ignores SIGTERM (e.g. holding the GIL in a
+        long-running C call) previously left ``stop``/``restart`` unable to
+        recover it at all -- exactly the state MA2's GIL-holding-handler
+        finding leaves the process in, and exactly the case ``init.sh``'s own
+        advice ("this is fixed by restarting it") assumes works.
+        """
+        import signal
+
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        hooks_daemon_dir = claude_dir / "hooks-daemon"
+        hooks_daemon_dir.mkdir()
+
+        config_file = claude_dir / "hooks-daemon.yaml"
+        config_file.write_text("version: '1.0'\ndaemon:\n  log_level: INFO\n")
+
+        args = argparse.Namespace(project_root=tmp_path)
+
+        signals_sent: list[int] = []
+
+        def mock_kill_func(pid: int, sig: int) -> None:
+            if sig == signal.SIGKILL:
+                signals_sent.append(sig)
+                # The process dies as soon as SIGKILL lands.
+                raise ProcessLookupError()
+            if sig != 0:
+                signals_sent.append(sig)
+            # SIGTERM, and every liveness check (signal 0) before SIGKILL:
+            # the process stays alive.
+            return None
+
+        with (
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=12345),
+            patch("os.kill", side_effect=mock_kill_func),
+            patch("claude_code_hooks_daemon.daemon.cli.cleanup_pid_file") as mock_cleanup_pid,
+            patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket") as mock_cleanup_sock,
+            patch("time.sleep"),
+        ):
+            result = cmd_stop(args)
+            assert result == 0
+            assert signal.SIGTERM in signals_sent
+            assert signal.SIGKILL in signals_sent
+            mock_cleanup_pid.assert_called_once()
+            mock_cleanup_sock.assert_called_once()
+
 
 class TestCmdStopGenericException:
     """Tests for cmd_stop generic exception path (line 373-375)."""

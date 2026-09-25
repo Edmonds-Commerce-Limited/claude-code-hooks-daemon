@@ -1081,3 +1081,39 @@ class TestDisclosureLadder:
         assert "Fix:" in result.reason
         assert "mkplan.bash" in result.reason
         assert "another-feature" in result.reason
+
+
+class TestEchoGlobPatternStaysLinear:
+    """The ``echo``/``printf`` glob-discovery patterns must not be quadratic.
+
+    Plan 00466 N40 review 2 MA2: ``_ARGUMENT_GAP`` (``[ \\t]+``) sits directly
+    beside ``[^_COMMAND_SEPARATORS]*``, whose negated class also allows space
+    and tab -- the classic adjacent-overlapping-quantifier shape. Both
+    quantifiers can claim the SAME run of blanked-quote whitespace, so the
+    engine tries every split point between them before giving up, which is
+    quadratic in the length of that run. A 20,000-character single-quote run
+    (blanked to whitespace by ``blank_shell_literal_spans``) measured
+    seconds; a linear pattern stays well under a generous bound.
+    """
+
+    _MAX_SECONDS = 2.0
+
+    @pytest.fixture
+    def handler(self, tmp_path: Path) -> PlanNumberHelperHandler:
+        handler = PlanNumberHelperHandler()
+        handler._workspace_root = tmp_path
+        handler._track_plans_in_project = "CLAUDE/Plan"
+        return handler
+
+    def test_long_quote_run_does_not_blow_up(self, handler: PlanNumberHelperHandler) -> None:
+        import time
+
+        command = "echo " + "'" * 20_000
+        start = time.monotonic()
+        handler.matches(_bash(command))
+        elapsed = time.monotonic() - start
+        assert elapsed < self._MAX_SECONDS, (
+            f"matches() took {elapsed:.2f}s on a 20,000-char quote run "
+            f"(bound {self._MAX_SECONDS}s) -- the echo/printf glob pattern "
+            "is quadratic again"
+        )

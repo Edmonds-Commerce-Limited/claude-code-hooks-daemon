@@ -36,6 +36,7 @@ own project handlers are real, in-scope code, not a fixture.
 
 from __future__ import annotations
 
+import threading
 import time
 from pathlib import Path
 
@@ -360,6 +361,141 @@ def _all_swept_handlers() -> list[Handler]:
     instances: list[Handler] = [cls() for cls in _safety_pre_tool_use_handlers()]
     instances.extend(_project_pre_tool_use_handlers())
     return instances
+
+
+# ---------------------------------------------------------------------------
+# GIL-starvation sweep across EVERY PreToolUse handler (Plan 00466 N40
+# review 2 MA2). The SAFETY-only sweep above missed two shipped handlers
+# entirely -- `lsp_enforcement` and `plan_number_helper` are not
+# SAFETY-tagged -- whose hand-written regexes were quadratic on exactly the
+# whitespace-run and quote-run shapes below: 73.5s and 37.5s, holding the
+# GIL for the handler's ENTIRE run so nothing else in the daemon process
+# could run meanwhile (not the chain deadline's own timed wait, not the
+# asyncio loop, not the straggler watchdog). A wall-clock bound on the
+# calling thread cannot distinguish "this callable ran slow" from "this
+# callable blocked every other thread too"; a concurrent ticker's own wakeup
+# gap can, and is what review 2's own probe (`probe_n24r2_e_gilstarve.py`)
+# used to find both defects.
+# ---------------------------------------------------------------------------
+
+
+def _whitespace_run_command() -> str:
+    """A harmless command followed by a long run of newlines.
+
+    The exact shape that froze `enforce-lsp-usage` for 73.5s: `_BASH_GREP_PATTERN`
+    had a `\\s` alternative directly beside `\\s*`, both able to claim the same
+    whitespace run.
+    """
+    return "true" + "\n" * _HOSTILE_SIZE
+
+
+def _quote_run_command() -> str:
+    """An `echo` followed by a long run of single quotes.
+
+    The exact shape that froze `plan-number-helper` for 37.5s: the argument
+    gap `[ \\t]+` sat directly beside a negated class that also accepts
+    space/tab.
+    """
+    return "echo " + "'" * _HOSTILE_SIZE
+
+
+#: Shape name -> hostile Bash command. Kept separate from `_SHAPES` above:
+#: those shapes are wrapped inside a larger command (`git commit -m 'x' &&
+#: echo <body>`), which would place the run mid-command rather than at the
+#: exact position that triggered both real regressions.
+_GIL_STARVATION_SHAPES: dict[str, str] = {
+    "whitespace_run": _whitespace_run_command(),
+    "quote_run": _quote_run_command(),
+}
+
+_TICKER_INTERVAL_SECONDS = 0.01
+
+# Generous: a genuinely linear handler finishes this shape in milliseconds,
+# nowhere near this bound. Tight enough that neither fixed regression (73.5s,
+# 37.5s) would pass.
+_MAX_GIL_GAP_SECONDS = 5.0
+
+# Upper bound on how long one handler-shape combination may run before the
+# sweep gives up on it and moves on, so ONE still-broken handler cannot hang
+# the whole suite indefinitely. Below the 30s client socket timeout (Plan
+# 00466 N25) is deliberately not required here -- this is a test bound, not a
+# production one -- but stays in the same order of magnitude.
+_GIL_PROBE_TIMEOUT_SECONDS = 20.0
+
+# How long to wait for the daemon ticker thread to notice `done` and exit,
+# once the worker thread has already returned (or been given up on above).
+_TICKER_JOIN_TIMEOUT_SECONDS = 1.0
+
+
+def _all_pre_tool_use_handler_classes() -> list[type[Handler]]:
+    """Every registered ``pre_tool_use`` handler class, SAFETY-tagged or not.
+
+    Unlike ``_safety_pre_tool_use_handlers()``, this applies NO tag filter --
+    the GIL-starvation class of defect is not specific to SAFETY handlers,
+    and both regressions this sweep exists to catch (`lsp_enforcement`,
+    `plan_number_helper`) carry the ``workflow``/``blocking`` tags instead.
+    """
+    if not ProjectContext.is_initialized():
+        ProjectContext.initialize(_project_root() / ".claude" / "hooks-daemon.yaml")
+    return [
+        ref.handler_cls for ref in iter_builtin_handler_classes() if ref.event_dir == "pre_tool_use"
+    ]
+
+
+def _longest_gil_gap_seconds(handler: Handler, hook_input: dict) -> float:
+    """Run ``matches()``+``handle()`` on a worker thread; return the longest
+    gap a concurrent 10ms ticker thread saw between its own wakeups.
+
+    A gap close to the handler's own run time means the handler held the GIL
+    for that whole call: a single C-level ``re`` call holds the GIL for its
+    entire duration, during which nothing else on the process runs -- not a
+    ``Future.result(timeout=...)`` waiter, not the asyncio event loop, not the
+    straggler-health monitor. Mirrors review 2's own probe
+    (``probe_n24r2_e_gilstarve.py``).
+    """
+    done = threading.Event()
+    gaps: list[float] = []
+
+    def tick() -> None:
+        last = time.perf_counter()
+        while not done.is_set():
+            time.sleep(_TICKER_INTERVAL_SECONDS)
+            now = time.perf_counter()
+            gaps.append(now - last)
+            last = now
+
+    def work() -> None:
+        if handler.matches(hook_input):
+            handler.handle(hook_input)
+
+    ticker = threading.Thread(target=tick, daemon=True)
+    ticker.start()
+    worker = threading.Thread(target=work, daemon=True)
+    worker.start()
+    worker.join(timeout=_GIL_PROBE_TIMEOUT_SECONDS)
+    done.set()
+    ticker.join(timeout=_TICKER_JOIN_TIMEOUT_SECONDS)
+    return max(gaps) if gaps else 0.0
+
+
+class TestGilStarvationAcrossEveryPreToolUseHandler:
+    """Every PreToolUse handler must never hold the GIL long enough to starve
+    a concurrent thread, on whitespace-run and quote-run hostile shapes."""
+
+    @pytest.mark.parametrize("shape_name", sorted(_GIL_STARVATION_SHAPES))
+    def test_no_handler_starves_the_gil(self, shape_name: str) -> None:
+        command = _GIL_STARVATION_SHAPES[shape_name]
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": command}}
+        starved: list[str] = []
+        for handler_cls in _all_pre_tool_use_handler_classes():
+            handler = handler_cls()
+            gap = _longest_gil_gap_seconds(handler, hook_input)
+            if gap >= _MAX_GIL_GAP_SECONDS:
+                starved.append(
+                    f"{handler_cls.__name__} starved the GIL for {gap:.2f}s "
+                    f"on shape={shape_name!r}"
+                )
+        assert not starved, "GIL-starving PreToolUse handler(s) found:\n" + "\n".join(starved)
 
 
 class TestCombinatorialSmallInputShapesStayLinear:

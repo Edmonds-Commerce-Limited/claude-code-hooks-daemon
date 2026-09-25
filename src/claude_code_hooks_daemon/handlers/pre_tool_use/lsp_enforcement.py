@@ -125,7 +125,17 @@ _COMMENT_MARKERS = frozenset(
 _IMPORTED_SYMBOL = re.compile(r"^[A-Z][a-zA-Z0-9]+$")
 
 # Bash grep/rg command pattern
-_BASH_GREP_PATTERN = re.compile(r"(?:^|\s|&&|\|\||;)\s*(?:grep|rg)\s+")
+#
+# A single required separator CHARACTER, not a class-then-quantified-class
+# pair (Plan 00466 N40 review 2 MA2): the previous
+# `(?:^|\s|&&|\|\||;)\s*` had a lone `\s` alternative directly beside `\s*`,
+# and both can claim the same run of whitespace -- quadratic on a long run
+# with no eventual match (99 KB froze a live daemon for 73.5s). `re.search`
+# tries every starting position, so a run of N separator characters before
+# "grep"/"rg" still matches at the LAST one without needing the whole run
+# consumed by one alternative -- correctness is unchanged, only the
+# backtracking ambiguity is gone.
+_BASH_GREP_PATTERN = re.compile(r"(?:^|[\s;&|])(?:grep|rg)\s+")
 
 # Flag-skip group consumed before the search pattern in a grep/rg command.
 # Handles, in priority order:

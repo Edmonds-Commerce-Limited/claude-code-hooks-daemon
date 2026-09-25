@@ -59,7 +59,16 @@ _COMMAND_SEPARATORS: Final[str] = r";&|\n\r"
 # unrelated command and denied it as plan-number discovery. A line continuation
 # is not a counter-example: `\<newline>` is normalised away by
 # `get_bash_command` before any pattern here sees it.
-_ARGUMENT_GAP: Final[str] = r"[ \t]+"
+#
+# Wrapped in an ATOMIC group (Plan 00466 N40 review 2 MA2): the class it
+# precedes, `[^_COMMAND_SEPARATORS]*`, also allows space and tab, so the two
+# quantifiers can claim the SAME run of whitespace. Left ordinary, the engine
+# tries every way to split that run between them before giving up -- quadratic
+# in its length; a 20,000-character quote run (blanked to whitespace) took
+# over 2s. `(?>...)` commits the gap to everything it can take and never gives
+# characters back, which is semantically identical here: the class right
+# after it accepts space/tab too, so nothing that was reachable before is lost.
+_ARGUMENT_GAP: Final[str] = r"(?>[ \t]+)"
 
 # A `-name` pattern carrying this many consecutive literal digits is naming ONE
 # specific plan (e.g. `00036-*`), not sweeping for whichever plans happen to

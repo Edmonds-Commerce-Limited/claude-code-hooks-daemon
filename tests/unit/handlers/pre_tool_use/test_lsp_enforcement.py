@@ -1033,3 +1033,36 @@ class TestLspEnforcementGetRules:
         assert second.decision == "allow"
         assert second.context
         assert "LSP" in "\n".join(second.context)
+
+
+class TestBashGrepPatternStaysLinear:
+    """``_BASH_GREP_PATTERN`` must not be quadratic on a long whitespace run.
+
+    Plan 00466 N40 review 2 MA2: the original pattern,
+    ``(?:^|\\s|&&|\\|\\||;)\\s*(?:grep|rg)\\s+``, has a single ``\\s``
+    alternative immediately followed by ``\\s*`` -- both can claim the same
+    run of whitespace, so a command with no eventual ``grep``/``rg`` makes
+    the engine try every split point. Measured: 5k newlines 0.2s, 10k 0.78s,
+    20k 2.84s -- quadratic. A 99 KB run froze a live daemon for 73.5s.
+    """
+
+    _MAX_SECONDS = 2.0
+
+    def test_long_whitespace_run_does_not_blow_up(self) -> None:
+        import time
+
+        from claude_code_hooks_daemon.handlers.pre_tool_use.lsp_enforcement import (
+            LspEnforcementHandler,
+        )
+
+        handler = LspEnforcementHandler()
+        command = "true" + "\n" * 20_000
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": command}}
+        start = time.monotonic()
+        handler.matches(hook_input)
+        elapsed = time.monotonic() - start
+        assert elapsed < self._MAX_SECONDS, (
+            f"matches() took {elapsed:.2f}s on a 20,000-newline run "
+            f"(bound {self._MAX_SECONDS}s) -- _BASH_GREP_PATTERN is "
+            "quadratic again"
+        )

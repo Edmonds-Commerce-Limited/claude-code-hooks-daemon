@@ -800,11 +800,47 @@ def cmd_stop(args: argparse.Namespace) -> int:
         # Check if still running
         try:
             os.kill(pid, 0)
-            print(f"WARNING: Daemon still running after {timeout}s", file=sys.stderr)
+        except ProcessLookupError:
+            # Process exited successfully
+            print("Daemon stopped")
+            cleanup_pid_file(str(pid_path))
+            cleanup_socket(str(socket_path))
+            return 0
+
+        # SIGTERM's grace period elapsed and the process is still alive --
+        # escalate to SIGKILL rather than leaving the operator with an
+        # unrecoverable wedged daemon (Plan 00466 N40 review 2 MA2). A
+        # GIL-holding handler cannot even reach Python's signal-handling
+        # bytecode check to act on SIGTERM; SIGKILL is delivered by the
+        # kernel and cannot be caught, blocked or ignored.
+        print(
+            f"WARNING: Daemon still running after {timeout}s; escalating to SIGKILL",
+            file=sys.stderr,
+        )
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            print("Daemon stopped")
+            cleanup_pid_file(str(pid_path))
+            cleanup_socket(str(socket_path))
+            return 0
+
+        kill_timeout = Timeout.DAEMON_SIGKILL_GRACE
+        kill_elapsed = 0.0
+        while kill_elapsed < kill_timeout:
+            try:
+                os.kill(pid, 0)
+                time.sleep(interval)
+                kill_elapsed += interval
+            except ProcessLookupError:
+                break
+
+        try:
+            os.kill(pid, 0)
+            print(f"WARNING: Daemon still running after SIGKILL ({kill_timeout}s)", file=sys.stderr)
             print(f"Try: kill -9 {pid}", file=sys.stderr)
             return 1
         except ProcessLookupError:
-            # Process exited successfully
             print("Daemon stopped")
             cleanup_pid_file(str(pid_path))
             cleanup_socket(str(socket_path))
