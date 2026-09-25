@@ -4,13 +4,19 @@
 **Audience**: operators
 
 `subagent_full_qa_blocker` now follows `find [paths] [tests] -exec cmd {} ;`
-(also `+`, `-execdir`, `-ok`, `-okdir`): `{}` is judged as the files find
-selects, which is find's own start paths when nothing narrows them, and
-unseen (denied) once a `-name`/`-path`/`-regex` test is present, since the
-files actually selected then cannot be read from the command line. A changed
-listing narrowed to `git diff --name-only "$(git merge-base main HEAD)" -- tests | xargs -r pytest` is now accepted as targeted: `git merge-base` always
-prints a commit, never the empty tree, so it cannot make the listing bare the
-way an arbitrary run-time word can.
+(also `+`, `-execdir`, `-ok`, `-okdir`): `{}` is judged as find's start paths,
+wherever it appears in a word (`{}/`, `./{}`). A test such as `-name` only
+selects a subset of them, so `find tests/unit/qa -name 'test_*.py' -exec pytest {} +`
+is targeted and `find tests -name 'test_*.py' -exec pytest {} +` is full. A
+changed listing narrowed to `git diff --name-only "$(git merge-base main HEAD)" -- tests | xargs -r pytest`,
+quoted or not, is now accepted as targeted: a substitution that is exactly one
+`git merge-base <rev>...` with no flag always prints one commit, never the
+empty tree, so it cannot make the listing bare the way an arbitrary run-time
+word can.
+
+The launchers `ssh-agent cmd`, `pyenv exec`, `rbenv exec`, `direnv exec DIR`
+and `conda`/`mamba`/`micromamba run` are followed to the command they run, and
+a shell behind one still reads the code piped to it.
 
 `python3 -c "$(cat f)"`, `bash <<< "$(cat f)"` and `bash /dev/stdin <<< "$(cat f)"` now read the file `f` the same way `bash -c "$(cat f)"` already did. A
 pipe or process-substitution producer's word is expanded against variables

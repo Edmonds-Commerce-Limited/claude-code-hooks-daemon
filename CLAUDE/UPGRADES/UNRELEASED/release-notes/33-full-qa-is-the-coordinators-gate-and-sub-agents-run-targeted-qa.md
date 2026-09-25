@@ -18,7 +18,7 @@ resolved against any `cd`, and judged against the repository that contains it,
 so `pytest tests/./unit`, `cd tests && pytest unit` and a worktree's `tests/`
 named from the main checkout are full runs. A script run by its name or path,
 or fed to a shell on stdin, is read and judged with its own arguments, within
-one parse budget per command. What it cannot see FAILS CLOSED: a command it
+one parse budget per command; code past the budget is denied. What it cannot see FAILS CLOSED: a command it
 cannot parse, one too long to parse, a program named only at run time
 (`$(which pytest)`), an operand built at run time, and code from a producer it
 does not understand are denied when they may be the suite, and the reason says

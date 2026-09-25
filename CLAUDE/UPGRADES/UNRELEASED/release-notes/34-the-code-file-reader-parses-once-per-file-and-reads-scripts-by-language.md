@@ -6,18 +6,23 @@
 `subagent_full_qa_blocker` bounded the bytes it reads from a file of code, but
 kept re-parsing the same file's content at every reference to it: a file that
 fed itself back, or was referenced many times in one command, cost one parse
-per reference. A distinct `(path, kind, argv, directory)` is now parsed at
-most once per event; every other reference reuses the memoised verdict, and a
-file feeding itself back is recognised as a cycle rather than followed again.
+per reference. A distinct `(path, kind, argv, directory, PYTEST_ADDOPTS)` is
+now parsed at most once per event at each depth; every other reference reuses
+the memoised verdict, and a file feeding itself back is recognised as a cycle
+rather than followed again.
 
-Reading a script run by its path or by `python script.py` no longer misreads
-its own prose as the run it makes. A Python string literal is judged as shell
-code only when it sits inside a `subprocess`/`os` call's own argument list, not
-wherever a multi-word string appears in the file — a docstring or a log
-message elsewhere is never a candidate, however many words or apostrophes it
-has, and a literal that still fails to parse as shell is treated as no
-command, not as an unseen run. A file past the parse cap is scanned for a
-declared program's name with its comments dropped, and a Python file also has
-every string's content blanked (found with Python's own tokenizer, not a
-hand-rolled quote count) — a docstring or a message quoting a program's name
-is data, not a line that runs it.
+Every parse in one judgement — the command, each nested `bash -c`, each file
+and each Python literal — draws on ONE budget of 96 KiB, counted in bytes.
+Code the budget cannot cover is denied (`too-much-code-to-judge`), never
+skipped. A file too large to parse is scanned raw for a declared program's
+name, comments and strings included, and any hit denies; a script that runs a
+script more than eight files deep is denied (`code-nested-too-deep`).
+
+Python code that can start a process has EVERY string literal read as a
+command, wherever it sits (a variable, a dict, a return value, a
+concatenation, an f-string's constant parts); a literal whose first word
+Python computes (`f"{n} files"`) is a program named at run time and is not
+seen. A file run by its path with no execute bit runs nothing, unless the
+command may change modes first. A script path led by a variable the code never
+sets (`bash "$SCRIPT"`) is denied as unseen, and `$(cat f)` as the command
+word runs the file.
