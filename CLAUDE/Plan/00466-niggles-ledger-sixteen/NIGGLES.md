@@ -9,6 +9,19 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N91 — A project's extra `protected_paths` can be ignored for the life of the daemon by the payload-capture and lint seams
+
+**Found by N38 fix round 8's static shared-state detector.**
+`secret_file_matching.resolve_configured_patterns()` sets its "resolved" flag
+BEFORE it checks whether `ProjectContext` is initialised. A first call made
+before the context is ready therefore fixes the patterns at the shipped
+defaults for the rest of the process. The project's own `protected_paths`
+are then never applied by the seams that use this function: payload capture
+and lint diagnostics. The guard itself reads its options separately.
+
+**Remedy:** the N38 branch replaces the flag with a memo keyed by its inputs,
+and a test fails on the old code. It lands with N38.
+
 ### N90 — `project_containment` denies every command, even one that writes nothing, when the project root is unresolved
 
 **Found by the guard-defects gate fixer.** `project_containment.matches()`
