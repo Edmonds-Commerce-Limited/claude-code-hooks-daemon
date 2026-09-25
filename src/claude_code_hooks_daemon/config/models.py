@@ -2239,6 +2239,17 @@ class Config(BaseModel):
             # raising (Plan 00407 N9). `json.JSONDecodeError` already IS a
             # `ValueError`, so the two formats now agree.
             raise ValueError(f"Invalid YAML in {path}: {exc}") from exc
+        except RecursionError as exc:
+            # A pathologically nested config (e.g. thousands of nested flow
+            # sequences) drives PyYAML's recursive-descent parser past the
+            # interpreter's recursion limit (Ledger 00466 RV9-n1). The same
+            # bytes always fail the same way, so this is exactly the
+            # deterministic-failure shape `ValueError` already covers here —
+            # converting it makes the failure cacheable by
+            # `utils.config_cache.load_config_cached` instead of escaping as a
+            # bare `RuntimeError` past callers whose `except` clauses only
+            # list `ValueError`.
+            raise ValueError(f"Config nested too deeply to parse: {path}: {exc}") from exc
 
         return cls.model_validate(data)
 

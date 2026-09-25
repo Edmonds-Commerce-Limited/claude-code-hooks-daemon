@@ -15,6 +15,7 @@ measured on a different daemon-lifetime singleton.
 from __future__ import annotations
 
 import concurrent.futures
+import copy
 import os
 import sys
 import threading
@@ -25,7 +26,12 @@ from unittest.mock import patch
 import pytest
 
 from claude_code_hooks_daemon.config.models import Config
-from claude_code_hooks_daemon.utils.config_cache import load_config_cached, reset_config_cache
+from claude_code_hooks_daemon.utils.config_cache import (
+    CachedConfigLoadError,
+    load_config_cached,
+    reset_config_cache,
+)
+from tests.fixtures.pickle_roundtrip import pickle_round_trip
 
 _YAML: Final[str] = "daemon:\n  enabled: true\n"
 _OTHER_YAML: Final[str] = "daemon:\n  enabled: false\n"
@@ -215,28 +221,84 @@ class TestATransientOSErrorIsNeverCached:
     def test_a_chmod_only_fix_is_picked_up_without_an_mtime_change(self, tmp_path: Path) -> None:
         """A permission repair changes neither mtime nor size, so if the
         OSError were cached by signature (as a deterministic failure is),
-        this second call would still see the cached failure."""
+        this second call would still see the cached failure.
+
+        A REAL ``chmod 000``/``chmod 644``, not a mocked ``OSError`` (RV9-n3)
+        -- the mocked version proved only that this cache does not add its
+        own caching on top of a caller-supplied side effect, never that an
+        actual filesystem permission denial goes uncached. Root ignores file
+        permission bits entirely, so ``chmod 000`` would not deny the read
+        and this is skipped when running as root.
+        """
+        if os.geteuid() == 0:
+            pytest.skip("root ignores file permission bits; chmod 000 does not deny reads")
+
         config_file = tmp_path / "hooks-daemon.yaml"
         _write(config_file, _YAML)
         signature_before = (config_file.stat().st_mtime_ns, config_file.stat().st_size)
 
-        calls = {"n": 0}
-        real_load_or_default = Config.load_or_default
-
-        def deny_once(path: str | Path | None = None) -> Config:
-            calls["n"] += 1
-            if calls["n"] == 1:
-                raise OSError(13, "Permission denied")
-            return real_load_or_default(path)
-
-        with patch.object(Config, "load_or_default", side_effect=deny_once):
+        config_file.chmod(0o000)
+        try:
             with pytest.raises(OSError):
                 load_config_cached(config_file)
-            result = load_config_cached(config_file)
+        finally:
+            config_file.chmod(0o644)
 
         signature_after = (config_file.stat().st_mtime_ns, config_file.stat().st_size)
         assert signature_after == signature_before
+
+        result = load_config_cached(config_file)
         assert result.daemon.enabled is True
+
+
+class TestAPathologicallyNestedConfigIsCachedAsAFailure:
+    """RV9-n1: ``Config.load`` converts a nested-too-deep config's
+    ``RecursionError`` to ``ValueError`` (same door as a YAML syntax error),
+    so it is cacheable by content signature exactly like any other
+    deterministic parse failure -- not re-parsed (at ~1.6 s a call) on every
+    hit while the file stays broken."""
+
+    def test_a_5000_deep_config_yields_a_cached_load_failure(self, tmp_path: Path) -> None:
+        config_file = tmp_path / "hooks-daemon.yaml"
+        _write(config_file, "[" * 5000 + "]" * 5000)
+
+        with patch.object(Config, "load_or_default", wraps=Config.load_or_default) as spy:
+            with pytest.raises(ValueError):
+                load_config_cached(config_file)
+            with pytest.raises(ValueError):
+                load_config_cached(config_file)
+
+        # A second hit must be answered from the cache, not by re-parsing --
+        # counted, not timed, so the assertion cannot flake on machine speed.
+        assert spy.call_count == 1
+
+
+class TestCachedConfigLoadErrorIsCopyableAndPicklable:
+    """RV9-n2: nothing copies this exception today, but an object nothing
+    can copy or pickle is a latent trap for the next caller that does
+    (a retry wrapper, a multiprocessing boundary, a test helper)."""
+
+    def _make(self) -> CachedConfigLoadError:
+        return CachedConfigLoadError(ValueError, "Invalid YAML in x: boom")
+
+    def test_copy_copy_preserves_the_fields(self) -> None:
+        original = self._make()
+
+        copied = copy.copy(original)
+
+        assert copied is not original
+        assert copied.original_type is original.original_type
+        assert copied.message == original.message
+        assert str(copied) == str(original)
+
+    def test_a_pickle_round_trip_preserves_the_fields(self) -> None:
+        original = self._make()
+
+        restored = pickle_round_trip(original)
+
+        assert restored.original_type is original.original_type
+        assert restored.message == original.message
+        assert str(restored) == str(original)
 
 
 class TestConcurrentCallersShareOneEntry:

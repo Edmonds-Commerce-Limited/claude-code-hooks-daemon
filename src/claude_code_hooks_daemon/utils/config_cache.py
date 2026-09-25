@@ -57,11 +57,10 @@ _ABSENT: Final[tuple[int, int]] = (-1, -1)
 #: from ``ValueError`` (``ValidationError`` is a ``ValueError`` subclass;
 #: ``Config.load``'s own ``yaml.YAMLError`` path already converts to one), so
 #: a single entry covers both. Deliberately excludes ``OSError`` (RV8-M2: a
-#: property of the READ, not the content -- see the module docstring) and
-#: ``RuntimeError`` (nothing in ``Config.load``/``load_or_default`` documents
-#: raising one; the only ``RuntimeError`` in this codebase's config path is
-#: ``_check_wired_event_field_coverage``, which runs at IMPORT time, never
-#: from a per-call load). Every caller of :func:`load_config_cached`
+#: property of the READ, not the content -- see the module docstring).
+#: ``Config.load`` also converts a pathologically-nested config's
+#: ``RecursionError`` to ``ValueError`` before it reaches here (RV9-n1), so
+#: this set does not need to name it. Every caller of :func:`load_config_cached`
 #: (``recovery_cron_advisor``, ``plan_status_snapshot``, ``cron_stop_enforcer``,
 #: ``failsafe_cron_session_advisor``, ``cron_subagent_stop_enforcer``,
 #: ``remote_docs_routing``) already catches ``ValueError``, so narrowing the
@@ -87,6 +86,23 @@ class CachedConfigLoadError(ValueError):
         #: The exception type that failed the ORIGINAL parse, for a caller
         #: that wants to distinguish causes without depending on message text.
         self.original_type = original_type
+        #: The original failure's message, kept separately from ``args`` so
+        #: __reduce__ (below) can reconstruct the two real constructor
+        #: arguments rather than the single formatted string ``args`` holds.
+        self.message = message
+
+    def __reduce__(self) -> tuple[type[CachedConfigLoadError], tuple[type[Exception], str]]:
+        """Reconstruct via the real two-argument constructor (RV9-n2).
+
+        ``BaseException.__reduce__`` defaults to ``(type(self), self.args)``,
+        and ``copy.copy``/``pickle`` both consult it before falling back to
+        that default. But ``self.args`` holds the single formatted string
+        built inside ``__init__``, not the two positional arguments
+        ``__init__`` actually takes -- so the default reconstruction call
+        raises ``TypeError: missing 1 required positional argument:
+        'message'``. Overriding it here fixes both callers at once.
+        """
+        return (type(self), (self.original_type, self.message))
 
 
 class _CachedFailure:
