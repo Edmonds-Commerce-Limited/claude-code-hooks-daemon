@@ -6,6 +6,7 @@
 **Priority**: Low
 **Recommended Executor**: Sonnet
 **Execution Strategy**: Sub-Agent Orchestration
+**GitHub Issue**: #58
 
 ## Overview
 
