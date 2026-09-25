@@ -114,12 +114,20 @@ def event_epoch(timestamp: str) -> float | None:
     """The record's transcript timestamp as epoch seconds, or ``None``.
 
     A timestamp without a zone is UTC, which is how Claude Code writes them.
+    ``None`` also covers an unparseable value: the caller (:func:`_is_pair`)
+    treats a record with no readable time as not pairable, which is the
+    fail-closed reading, and the parse failure is logged here so it is never
+    silently indistinguishable from a genuinely empty timestamp.
     """
     if not timestamp:
         return None
+    parsed: datetime | None = None
     try:
         parsed = datetime.fromisoformat(timestamp)
-    except ValueError:
+    except ValueError as exc:
+        logger.debug("model_fallback_records: unparseable timestamp %r: %s", timestamp, exc)
+        parsed = None
+    if parsed is None:
         return None
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=UTC)
@@ -191,17 +199,20 @@ def parse_fallback_payload(payload: dict[str, Any]) -> FallbackFacts | None:
 def _parse_payload_line(line: str) -> dict[str, Any] | None:
     """Parse one raw JSONL line into an object, or ``None``.
 
-    Fail-silent per line: a malformed or non-object line is simply not a
-    record. A transcript is appended to live, so the last line can be a partial
-    write, and one such line must never cost the whole scan.
+    A malformed or non-object line is simply not a record and must never cost
+    the whole scan -- a transcript is appended to live, so the last line can
+    be a partial write. That skip is logged rather than silent, so a genuinely
+    corrupt transcript is still visible somewhere.
     """
     stripped = line.strip()
     if not stripped:
         return None
+    payload: Any = None
     try:
         payload = json.loads(stripped)
-    except ValueError:
-        return None
+    except ValueError as exc:
+        logger.debug("model_fallback_records: unparseable transcript line: %s", exc)
+        payload = None
     return payload if isinstance(payload, dict) else None
 
 

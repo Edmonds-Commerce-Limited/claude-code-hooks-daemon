@@ -10,6 +10,7 @@ is the single place that recognises either.
 from __future__ import annotations
 
 import json
+import logging
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -118,6 +119,30 @@ class TestParseFallbackLine:
     )
     def test_a_line_that_is_not_a_fallback_record_yields_none(self, line: str) -> None:
         assert parse_fallback_line(line) is None
+
+    def test_unparseable_json_is_logged_not_silently_dropped(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Plan 00466 N47: a torn/malformed line must still be visible somewhere,
+        even though the scan correctly treats it as 'not a record' rather than
+        aborting -- a transcript is appended to live, so the last line is
+        routinely a partial write mid-flush."""
+        logger_name = "claude_code_hooks_daemon.utils.model_fallback_records"
+        with caplog.at_level(logging.DEBUG, logger=logger_name):
+            assert parse_fallback_line("not json at all") is None
+
+        assert any(
+            record.name == logger_name and "unparseable transcript line" in record.message
+            for record in caplog.records
+        )
+
+    def test_blank_lines_log_nothing(self, caplog: pytest.LogCaptureFixture) -> None:
+        """A blank line is a documented no-op, not a parse failure."""
+        logger_name = "claude_code_hooks_daemon.utils.model_fallback_records"
+        with caplog.at_level(logging.DEBUG, logger=logger_name):
+            assert parse_fallback_line("   ") is None
+
+        assert caplog.records == []
 
     def test_an_assistant_message_with_no_fallback_block_yields_none(self) -> None:
         line = json.dumps(
@@ -296,6 +321,28 @@ class TestEventEpoch:
     @pytest.mark.parametrize("text", ["", "not a time"], ids=["empty", "garbage"])
     def test_a_missing_or_unparseable_timestamp_is_none(self, text: str) -> None:
         assert event_epoch(text) is None
+
+    def test_an_unparseable_timestamp_is_logged_not_silently_dropped(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Plan 00466 N47: the parse failure must be explicit, not indistinguishable
+        from a record that legitimately carries no timestamp at all."""
+        logger_name = "claude_code_hooks_daemon.utils.model_fallback_records"
+        with caplog.at_level(logging.DEBUG, logger=logger_name):
+            assert event_epoch("not a time") is None
+
+        assert any(
+            record.name == logger_name and "unparseable timestamp" in record.message
+            for record in caplog.records
+        )
+
+    def test_an_empty_timestamp_logs_nothing(self, caplog: pytest.LogCaptureFixture) -> None:
+        """An empty timestamp is a documented absence, not a parse failure."""
+        logger_name = "claude_code_hooks_daemon.utils.model_fallback_records"
+        with caplog.at_level(logging.DEBUG, logger=logger_name):
+            assert event_epoch("") is None
+
+        assert caplog.records == []
 
 
 class TestRecordIdentity:
