@@ -9,6 +9,30 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N56 — Tests skip when run as root, so this container never runs them
+
+**Found by the owner, who set the rule:** every test must run as root, and
+no test may skip because the process is root. This container, and the
+dogfood server, run as root. So a root-guarded skip is a test that never runs
+where the work happens. Tests that skip on `os.geteuid() == 0` today:
+
+- `tests/claude_code_hooks_daemon/install/test_skills.py:146`
+- `tests/integration/test_settings_deploy_lib.py:189`
+- `tests/unit/daemon/test_bootstrap_decision.py:206`
+- `tests/integration/test_skipif_reasons_match_their_conditions.py:88`
+
+Plan 00351's `test_skipif_reasons_match_their_conditions.py` also endorses
+the pattern: it checks that a root skip's condition is written correctly
+rather than forbidding it.
+
+**Candidate remedy:** rewrite each test so it proves its behaviour as root.
+Permission checks are ineffective for root, so use a fault that root cannot
+bypass: an injected opener or os call that raises `PermissionError`, a
+directory or dangling symlink in place of a file, or a read-only bind or
+immutable file where one is available. Replace Plan 00351's check with a
+detector that fails on any root-conditioned skip. Record the rule in the
+testing standards doc.
+
 ### N55 — `register_all` ignores a handler's `get_default_enabled()` when its config block is absent
 
 **Found by goal-flip review 8 (RV8-n3), filed at review 9's request.** When a
