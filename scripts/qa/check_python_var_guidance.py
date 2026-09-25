@@ -37,7 +37,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
-from claude_code_hooks_daemon.utils.scan_scope import vacuous_scan_failure
+from claude_code_hooks_daemon.utils.scan_scope import vacuous_scan_failure, walk_files
 
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 _QA_OUTPUT_DIR: Final[Path] = _REPO_ROOT / "untracked" / "qa"
@@ -295,7 +295,7 @@ def scan_tree(root: Path) -> tuple[list[Violation], int]:
     """
     violations: list[Violation] = []
     files_scanned = 0
-    for path in sorted(root.rglob("*")):
+    for path in walk_files(root):
         if not path.is_file() or path.suffix not in _SCANNED_SUFFIXES:
             continue
         violations.extend(scan_file(path))

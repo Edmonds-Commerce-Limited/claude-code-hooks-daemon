@@ -92,7 +92,11 @@ from pathlib import Path
 from typing import Final
 
 from claude_code_hooks_daemon.utils.git_repo import git_visible_paths, project_path_is_protected
-from claude_code_hooks_daemon.utils.scan_scope import relative_parts, vacuous_scan_failure
+from claude_code_hooks_daemon.utils.scan_scope import (
+    relative_parts,
+    vacuous_scan_failure,
+    walk_files,
+)
 
 _PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 _QA_OUTPUT_DIR_PARTS: Final[tuple[str, str]] = ("untracked", "qa")
@@ -513,7 +517,7 @@ def _iter_markdown(root: Path) -> list[Path]:
     git_visible = git_visible_paths(root)
     candidates = (
         path
-        for path in root.rglob(_MARKDOWN_GLOB)
+        for path in walk_files(root, _MARKDOWN_GLOB)
         if not _UNSCANNED_DIR_NAMES.intersection(relative_parts(path, root))
     )
     kept: list[Path] = []
@@ -641,7 +645,7 @@ def main(argv: list[str] | None = None) -> int:
     docs_scanned = len(_iter_markdown(root))
     vacuous = vacuous_scan_failure(
         examined=docs_scanned,
-        candidates=sum(1 for _ in root.rglob(_MARKDOWN_GLOB)),
+        candidates=len(walk_files(root, _MARKDOWN_GLOB)),
         noun="markdown files",
         root=root,
     )

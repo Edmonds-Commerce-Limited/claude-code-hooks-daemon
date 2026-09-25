@@ -9,9 +9,79 @@ open exactly where branches are verified.
 
 from __future__ import annotations
 
+import ast
+import sys
 from pathlib import Path
 
-from claude_code_hooks_daemon.utils.scan_scope import relative_parts, vacuous_scan_failure
+from claude_code_hooks_daemon.utils import scan_scope
+from claude_code_hooks_daemon.utils.scan_scope import (
+    relative_parts,
+    vacuous_scan_failure,
+    walk_files,
+)
+
+
+def _touch(path: Path, text: str = "x\n") -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    return path
+
+
+def test_the_module_imports_only_the_standard_library() -> None:
+    """audit_capture_corruption loads it by path under a bare python3, with no
+    third-party packages available, so one non-stdlib import breaks that audit."""
+    source = Path(scan_scope.__file__).read_text(encoding="utf-8")
+    imported = {
+        name.split(".")[0]
+        for node in ast.walk(ast.parse(source))
+        for name in (
+            [alias.name for alias in node.names]
+            if isinstance(node, ast.Import)
+            else [node.module or ""] if isinstance(node, ast.ImportFrom) else []
+        )
+    }
+    assert imported <= set(sys.stdlib_module_names) | {"__future__"}, imported
+
+
+class TestWalkFiles:
+    def test_yields_matching_files_in_sorted_order(self, tmp_path: Path) -> None:
+        _touch(tmp_path / "b.py")
+        _touch(tmp_path / "pkg" / "a.py")
+        _touch(tmp_path / "notes.md")
+        assert [p.relative_to(tmp_path).as_posix() for p in walk_files(tmp_path, "*.py")] == [
+            "b.py",
+            "pkg/a.py",
+        ]
+
+    def test_every_file_by_default(self, tmp_path: Path) -> None:
+        _touch(tmp_path / "a.txt")
+        _touch(tmp_path / "d" / "b.md")
+        assert len(walk_files(tmp_path)) == 2
+
+    def test_the_roots_own_git_directory_is_skipped(self, tmp_path: Path) -> None:
+        _touch(tmp_path / ".git" / "hooks" / "pre-commit.py")
+        _touch(tmp_path / "real.py")
+        assert walk_files(tmp_path, "*.py") == [tmp_path / "real.py"]
+
+    def test_a_nested_repository_is_skipped(self, tmp_path: Path) -> None:
+        _touch(tmp_path / "vendor" / "lib" / ".git" / "HEAD")
+        _touch(tmp_path / "vendor" / "lib" / "mod.py")
+        _touch(tmp_path / "vendor" / "own.py")
+        assert walk_files(tmp_path, "*.py") == [tmp_path / "vendor" / "own.py"]
+
+    def test_a_linked_worktree_marked_by_a_git_file_is_skipped(self, tmp_path: Path) -> None:
+        _touch(tmp_path / "wt" / ".git", "gitdir: /elsewhere\n")
+        _touch(tmp_path / "wt" / "mod.py")
+        _touch(tmp_path / "own.py")
+        assert walk_files(tmp_path, "*.py") == [tmp_path / "own.py"]
+
+    def test_a_root_that_is_itself_a_checkout_is_still_walked(self, tmp_path: Path) -> None:
+        _touch(tmp_path / ".git", "gitdir: /elsewhere\n")
+        _touch(tmp_path / "mod.py")
+        assert walk_files(tmp_path) == [tmp_path / "mod.py"]
+
+    def test_a_missing_root_yields_nothing(self, tmp_path: Path) -> None:
+        assert walk_files(tmp_path / "absent") == []
 
 
 class TestRelativeParts:

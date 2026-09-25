@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -306,6 +307,22 @@ def test_a_walker_pointed_at_a_missing_or_empty_root_fails(
         timeout=_RUN_TIMEOUT_SECONDS,
     )
     assert result.returncode != 0, f"{script} passed on a {state} root: {result.stdout}"
+
+
+#: Recursive enumerations that descend into ``.git`` and nested checkouts.
+_RAW_RECURSIVE_WALK = re.compile(r"\.rglob\(|\bos\.walk\(|[\"'][^\"'\n]*\*\*/")
+
+
+@pytest.mark.parametrize("script", sorted(set(WALKERS) | SELF_GUARDED_WALKERS))
+def test_a_walker_enumerates_through_the_shared_walk(script: str) -> None:
+    """``scan_scope.walk_files`` skips ``.git`` and nested repositories; a raw walk does not."""
+    source = (QA_DIR / script).read_text(encoding="utf-8")
+    offending = [
+        f"{number}: {line.strip()}"
+        for number, line in enumerate(source.splitlines(), start=1)
+        if _RAW_RECURSIVE_WALK.search(line)
+    ]
+    assert not offending, f"{script} walks recursively without scan_scope.walk_files: {offending}"
 
 
 def test_every_walker_names_its_root_option() -> None:

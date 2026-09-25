@@ -46,7 +46,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
-from claude_code_hooks_daemon.utils.scan_scope import vacuous_scan_failure
+from claude_code_hooks_daemon.utils.scan_scope import vacuous_scan_failure, walk_files
 
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 _QA_OUTPUT_DIR: Final[Path] = _REPO_ROOT / "untracked" / "qa"
@@ -181,7 +181,7 @@ def scan_file(path: Path, scan_root: Path) -> list[Violation]:
 
 def scan_tree(scan_root: Path) -> list[Violation]:
     violations: list[Violation] = []
-    for path in sorted(scan_root.rglob("*.py")):
+    for path in walk_files(scan_root, "*.py"):
         violations.extend(scan_file(path, scan_root))
     return violations
 
@@ -198,7 +198,7 @@ def main() -> int:
         print(__doc__)
         return 0
 
-    files_scanned = len(list(scan_root.rglob("*.py"))) if scan_root.is_dir() else 0
+    files_scanned = len(walk_files(scan_root, "*.py"))
     violations = scan_tree(scan_root) if scan_root.is_dir() else []
     vacuous = vacuous_scan_failure(examined=files_scanned, noun="Python files", root=scan_root)
 

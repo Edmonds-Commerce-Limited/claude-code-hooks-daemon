@@ -36,7 +36,11 @@ import sys
 from pathlib import Path
 from typing import Any, Final
 
-from claude_code_hooks_daemon.utils.scan_scope import relative_parts, vacuous_scan_failure
+from claude_code_hooks_daemon.utils.scan_scope import (
+    relative_parts,
+    vacuous_scan_failure,
+    walk_files,
+)
 
 _PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 _QA_OUTPUT_DIR: Final[Path] = _PROJECT_ROOT / "untracked" / "qa"
@@ -113,22 +117,22 @@ def _is_allowed(relative: str, owner: str) -> bool:
 
 
 def _walk(root: Path) -> tuple[list[Path], int]:
-    """Every file worth reading, and how many entries the walk saw in total.
+    """Every file worth reading, and how many files the walk saw in total.
 
-    Hidden directories are INCLUDED. Directory names are matched below
-    ``root`` only (00466 N26): matched on the absolute path, a checkout under
+    Hidden directories are INCLUDED; ``.git`` and nested checkouts are not
+    this project's files. Directory names are matched below ``root`` only
+    (00466 N26): matched on the absolute path, a checkout under
     ``untracked/worktrees/`` read nothing.
     """
     found: list[Path] = []
-    seen = 0
-    for path in sorted(root.rglob("*")):
-        seen += 1
+    walked = walk_files(root)
+    for path in walked:
         if any(part in _SKIP_DIRS for part in relative_parts(path, root)):
             continue
         if not path.is_file() or path.is_symlink():
             continue
         found.append(path)
-    return found, seen
+    return found, len(walked)
 
 
 def _candidate_files(root: Path) -> list[Path]:
@@ -193,10 +197,10 @@ def main() -> int:
     args = parser.parse_args()
 
     root = Path(args.path).resolve()
-    candidate_files, entries_seen = _walk(root)
+    candidate_files, files_seen = _walk(root)
     files_scanned = len(candidate_files)
     vacuous = vacuous_scan_failure(
-        examined=files_scanned, candidates=entries_seen, noun="entries", root=root
+        examined=files_scanned, candidates=files_seen, noun="files", root=root
     )
     unreadable: list[str] = []
     violations = find_violations(root, unreadable=unreadable)

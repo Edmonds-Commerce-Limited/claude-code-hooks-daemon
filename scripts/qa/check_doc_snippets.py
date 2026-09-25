@@ -94,17 +94,24 @@ _INIT_NAME: Final[str] = "__init__"
 _SELF_PARAM: Final[str] = "self"
 _HANDLER_IDENTIFIERS: Final[tuple[str, str]] = ("handler_id", "name")
 
-_SCANNED_GLOBS: Final[tuple[str, ...]] = (
-    "CLAUDE/**/*.md",
-    "docs/**/*.md",
-    ".claude/*.md",
-    ".claude/agents/*.md",
+#: Trees whose markdown is scanned at any depth, through `scan_scope.walk_files`
+#: so a nested checkout's docs are never read as this project's.
+_SCANNED_TREES: Final[tuple[str, ...]] = (
+    "CLAUDE",
+    "docs",
     # Docs under src/ are DEPLOYED into client projects (the hooks-daemon
     # skill, its references, the per-package CLAUDE.md files). A broken
     # example there reaches every install, so this is the highest-impact
     # surface of all — it was missed on the first pass.
-    "src/**/*.md",
-    "examples/**/*.md",
+    "src",
+    "examples",
+)
+_MARKDOWN_NAME: Final[str] = "*.md"
+
+#: Single-level globs: these never descend.
+_SCANNED_GLOBS: Final[tuple[str, ...]] = (
+    ".claude/*.md",
+    ".claude/agents/*.md",
     "README.md",
     "CONTRIBUTING.md",
 )
@@ -394,14 +401,18 @@ def check_snippet(rel_file: str, start_line: int, source: str) -> list[Violation
 
 
 def _documents(root: Path) -> list[Path]:
+    _ensure_src_on_path()
+    from claude_code_hooks_daemon.utils.scan_scope import walk_files
+
+    listed = [path for tree in _SCANNED_TREES for path in walk_files(root / tree, _MARKDOWN_NAME)]
+    listed.extend(path for pattern in _SCANNED_GLOBS for path in root.glob(pattern))
     seen: set[Path] = set()
-    for pattern in _SCANNED_GLOBS:
-        for path in root.glob(pattern):
-            if not path.is_file():
-                continue
-            if any(part in _EXCLUDED_PARTS for part in path.relative_to(root).parts):
-                continue
-            seen.add(path)
+    for path in listed:
+        if not path.is_file():
+            continue
+        if any(part in _EXCLUDED_PARTS for part in path.relative_to(root).parts):
+            continue
+        seen.add(path)
     return sorted(seen)
 
 

@@ -414,8 +414,14 @@ def main() -> int:
         if arg == "--config" and index + 1 < len(args):
             config_path = Path(args[index + 1]).resolve()
 
+    # Unguarded for the reason `_without_protected_paths` gives: a scan that
+    # cannot tell what it examined must not report clean.
+    from claude_code_hooks_daemon.utils.scan_scope import vacuous_scan_failure, walk_files
+
     if path_override is not None:
-        files = sorted(p for p in path_override.rglob("*") if p.is_file())
+        # The walk skips `.git` and nested checkouts, which `git ls-files`
+        # never lists either: neither is this tree's content.
+        files = [p for p in walk_files(path_override) if p.is_file()]
         scan_root_for_terms = path_override
     else:
         files = _tracked_files(repo_root)
@@ -459,10 +465,6 @@ def main() -> int:
                 exempt_public,
             )
         )
-
-    # Unguarded for the reason `_without_protected_paths` gives: a scan that
-    # cannot tell whether it examined anything must not report clean.
-    from claude_code_hooks_daemon.utils.scan_scope import vacuous_scan_failure
 
     vacuous = vacuous_scan_failure(
         examined=len(files), candidates=candidates, noun="files", root=scan_root_for_terms

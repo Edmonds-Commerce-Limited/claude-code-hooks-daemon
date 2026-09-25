@@ -58,7 +58,11 @@ import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from claude_code_hooks_daemon.utils.scan_scope import relative_parts, vacuous_scan_failure
+from claude_code_hooks_daemon.utils.scan_scope import (
+    relative_parts,
+    vacuous_scan_failure,
+    walk_files,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 DEFAULT_SCAN_DIR = REPO_ROOT / "scripts"
@@ -264,7 +268,9 @@ class DirectoryAudit:
 
 def audit_directory(root: Path) -> DirectoryAudit:
     """Audit every .sh / .bash file under root (recursively)."""
-    candidates = sorted(script for pattern in ("*.sh", "*.bash") for script in root.rglob(pattern))
+    candidates = sorted(
+        script for pattern in ("*.sh", "*.bash") for script in walk_files(root, pattern)
+    )
     kept = [script for script in candidates if not _is_excluded(script, root)]
     violations = [violation for script in kept for violation in audit_file(script)]
     return DirectoryAudit(violations, examined=len(kept), candidates=len(candidates))

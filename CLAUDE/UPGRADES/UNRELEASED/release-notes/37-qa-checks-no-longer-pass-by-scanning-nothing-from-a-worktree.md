@@ -23,6 +23,11 @@ fails on a `--repo` that is not a git repository instead of passing. A
 `--path`/`--root` scan of a directory with nothing to check is a failure, not
 a clean result.
 
+Tree-walking checks also no longer read inside `.git` or inside a nested
+repository, such as a worktree, submodule or clone below the scanned tree.
+Before, a `--path` scan by `check_sensitive_content` reported a term found in a
+commit message under `.git`.
+
 Integration tests pin the class. They run every tree-walking check from three
 places: a copy of the tree placed under a path made of the excluded names, a
 checkout holding only the QA scripts, and a missing or empty root. A check

@@ -60,7 +60,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
-from claude_code_hooks_daemon.utils.scan_scope import vacuous_scan_failure
+from claude_code_hooks_daemon.utils.scan_scope import vacuous_scan_failure, walk_files
 
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 _QA_OUTPUT_DIR: Final[Path] = _REPO_ROOT / "untracked" / "qa"
@@ -267,7 +267,7 @@ def scan_file(path: Path, scan_root: Path) -> list[Violation]:
 def scan_tree(scan_root: Path) -> list[Violation]:
     """Every violation under ``scan_root``."""
     violations: list[Violation] = []
-    for path in sorted(scan_root.rglob("*.py")):
+    for path in walk_files(scan_root, "*.py"):
         violations.extend(scan_file(path, scan_root))
     return violations
 
@@ -279,7 +279,7 @@ def count_py_files(scan_root: Path) -> int:
     (``_is_in_scope`` wrongly rejecting everything, say) still reports how much
     it looked at rather than reading identically to a clean pass.
     """
-    return sum(1 for _ in scan_root.rglob("*.py"))
+    return len(walk_files(scan_root, "*.py"))
 
 
 def main() -> int:

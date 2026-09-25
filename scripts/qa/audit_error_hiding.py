@@ -39,6 +39,7 @@ from claude_code_hooks_daemon.strategies.error_hiding.protocol import ErrorHidin
 from claude_code_hooks_daemon.strategies.error_hiding.shell_strategy import (
     ShellErrorHidingStrategy,
 )
+from claude_code_hooks_daemon.utils.scan_scope import walk_files
 
 # Violation types
 VIOLATION_TYPES = {
@@ -297,7 +298,7 @@ def collect_python_files(
     base = directory if root is None else root
     return sorted(
         py_file
-        for py_file in directory.rglob("*.py")
+        for py_file in walk_files(directory, "*.py")
         if not _is_excluded(py_file, base, exclude_patterns)
     )
 
@@ -453,7 +454,7 @@ def collect_shell_files(
         if not directory.is_dir():
             continue
         for pattern in ("*.sh", "*.bash"):
-            for shell_file in directory.rglob(pattern):
+            for shell_file in walk_files(directory, pattern):
                 if _is_excluded(shell_file, workspace, exclude_patterns):
                     continue
                 files.append(shell_file)

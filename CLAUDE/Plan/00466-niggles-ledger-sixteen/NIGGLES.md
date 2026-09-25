@@ -300,6 +300,24 @@ test rather than given their own zero guard.
   Tests that asserted a pass over a tree with nothing to scan now add a clean
   scanned file, or assert the failure. Release note 37.
 
+- **`.git` and nested checkouts.** In `--path` mode, `check_sensitive_content`
+  walked the tree with a raw `rglob("*")`. That read `.git` internals (commit
+  messages, hook samples) and nested repositories as the tree's own files.
+  `git ls-files` lists neither in the default mode. Sixteen walkers had the
+  same raw recursive walk (`rglob`, or a `**/` glob in `check_doc_snippets`).
+
+  - **Fix.** New `scan_scope.walk_files(root, pattern)` never enters `.git`, and
+    it skips any directory below the root that holds a `.git` entry (a
+    worktree, submodule or clone). Every walker now enumerates through it.
+    `audit_capture_corruption` runs under a bare `python3`, so it loads the
+    stdlib-only module by file path. A test pins that `scan_scope` imports only
+    the standard library.
+  - **RED.** A `--path` tree reported a planted term from `.git/COMMIT_EDITMSG`,
+    from a nested repository and from a linked worktree. Only `real.txt` is
+    reported now. The pin
+    `test_a_walker_enumerates_through_the_shared_walk` failed for all 16
+    walkers. Examined counts on this repository are unchanged.
+
 ### N25 — a slow handler runs out the client's 30 s budget, and a timeout is an ALLOW for the whole PreToolUse chain
 
 **Found by the guard-defects security review 2**

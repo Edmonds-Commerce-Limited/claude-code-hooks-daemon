@@ -99,7 +99,7 @@ from typing import Final
 # green while it saw nothing — the precise failure it exists to prevent.
 from claude_code_hooks_daemon.constants import HandlerID
 from claude_code_hooks_daemon.core.claude_md_injector import handler_names_in_guidance
-from claude_code_hooks_daemon.utils.scan_scope import vacuous_scan_failure
+from claude_code_hooks_daemon.utils.scan_scope import vacuous_scan_failure, walk_files
 
 _PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 _QA_OUTPUT_DIR_PARTS: Final[tuple[str, str]] = ("untracked", "qa")
@@ -835,7 +835,7 @@ def _known_handler_identities(root: Path) -> set[str]:
     # one CLAUDE.md guidance would otherwise be flagged for its own handler.
     for handlers_root in (root / _HANDLERS_DIR, root / _PROJECT_HANDLERS_DIR):
         if handlers_root.is_dir():
-            for path in handlers_root.rglob(f"*{_PYTHON_SUFFIX}"):
+            for path in walk_files(handlers_root, f"*{_PYTHON_SUFFIX}"):
                 identities.add(path.stem)
                 # A project handler's `handler_id` follows the built-in
                 # display-name convention (kebab-case, e.g.

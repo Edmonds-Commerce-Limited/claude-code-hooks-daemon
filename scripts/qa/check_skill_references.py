@@ -25,7 +25,11 @@ import sys
 from pathlib import Path
 
 from claude_code_hooks_daemon.utils.claude_config import claude_config_dir
-from claude_code_hooks_daemon.utils.scan_scope import relative_parts, vacuous_scan_failure
+from claude_code_hooks_daemon.utils.scan_scope import (
+    relative_parts,
+    vacuous_scan_failure,
+    walk_files,
+)
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -361,14 +365,14 @@ def _collect_files(directory: Path, include_filter: str | None = None) -> tuple[
                 files.append(target)
             elif target.is_dir():
                 for ext in _SCANNERS:
-                    files.extend(target.rglob(f"*{ext}"))
+                    files.extend(walk_files(target, f"*{ext}"))
         # Also scan root-level CLAUDE.md, README.md
         for root_file in directory.glob("*.md"):
             files.append(root_file)
     else:
         # Custom path: scan everything
         for ext in _SCANNERS:
-            files.extend(directory.rglob(f"*{ext}"))
+            files.extend(walk_files(directory, f"*{ext}"))
 
     candidates = [f for f in files if not f.is_symlink() and f.suffix in _SCANNERS]
     kept = [f for f in candidates if not _should_exclude(f, directory, include_filter)]

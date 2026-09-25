@@ -42,7 +42,11 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Protocol
 
-from claude_code_hooks_daemon.utils.scan_scope import relative_parts, vacuous_scan_failure
+from claude_code_hooks_daemon.utils.scan_scope import (
+    relative_parts,
+    vacuous_scan_failure,
+    walk_files,
+)
 
 
 class _PositionedNode(Protocol):
@@ -597,7 +601,7 @@ def main() -> int:
     files_scanned = 0
 
     # Check source files
-    for pyfile in sorted(src_dir.rglob("*.py")):
+    for pyfile in walk_files(src_dir, "*.py"):
         # Skip constants module itself (it defines the constants)
         if "constants" in relative_parts(pyfile, project_root):
             continue
@@ -606,7 +610,7 @@ def main() -> int:
 
     # Check test files (but skip test fixtures which are intentionally simplified)
     if tests_dir.exists():
-        for pyfile in sorted(tests_dir.rglob("*.py")):
+        for pyfile in walk_files(tests_dir, "*.py"):
             # Skip test fixtures - they're intentionally simplified for testing
             if "fixtures" in relative_parts(pyfile, project_root):
                 continue
@@ -629,7 +633,7 @@ def main() -> int:
     violations.sort(key=lambda v: (v.file, v.line, v.column))
     vacuous = vacuous_scan_failure(
         examined=files_scanned,
-        candidates=sum(1 for _ in src_dir.rglob("*.py")),
+        candidates=len(walk_files(src_dir, "*.py")),
         noun="source files",
         root=src_dir,
     )

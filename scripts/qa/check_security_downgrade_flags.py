@@ -74,7 +74,7 @@ from typing import Final
 
 import yaml
 
-from claude_code_hooks_daemon.utils.scan_scope import vacuous_scan_failure
+from claude_code_hooks_daemon.utils.scan_scope import vacuous_scan_failure, walk_files
 
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 _QA_OUTPUT_DIR: Final[Path] = _REPO_ROOT / "untracked" / "qa"
@@ -365,7 +365,7 @@ def _expansion_violations(relative: str, lines: list[str]) -> list[Violation]:
 def candidate_files(root: Path) -> list[Path]:
     """Every shipped file this Detector is able to judge."""
     found: list[Path] = []
-    for path in sorted(root.rglob("*")):
+    for path in walk_files(root):
         if not path.is_file():
             continue
         parts = path.relative_to(root).parts

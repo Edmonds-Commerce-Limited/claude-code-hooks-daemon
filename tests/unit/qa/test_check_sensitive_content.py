@@ -82,6 +82,37 @@ def _write_config(
     )
 
 
+class TestPathModeSkipsGitInternalsAndNestedRepositories:
+    """A ``--path`` tree's ``.git`` and nested checkouts are not its files.
+
+    ``.git`` holds commit messages, packed objects and hook samples; a nested
+    repository (a worktree, a submodule, a vendored clone) is another project.
+    The default mode never saw either, because ``git ls-files`` lists neither.
+    """
+
+    def test_a_term_in_git_internals_or_a_nested_repo_is_not_reported(self, tmp_path: Path) -> None:
+        config = tmp_path / "hooks-daemon.yaml"
+        _write_config(
+            config, public_patterns=[{"name": "alpha", "pattern": "alpha", "description": ""}]
+        )
+        tree = tmp_path / "tree"
+        (tree / ".git").mkdir(parents=True)
+        (tree / ".git" / "COMMIT_EDITMSG").write_text("alpha in a commit message\n")
+        nested = tree / "vendor" / "lib"
+        (nested / ".git").mkdir(parents=True)
+        (nested / "notes.txt").write_text("alpha in another project\n")
+        worktree = tree / "wt"
+        worktree.mkdir()
+        (worktree / ".git").write_text("gitdir: /elsewhere/.git/worktrees/wt\n")
+        (worktree / "file.txt").write_text("alpha in a linked worktree\n")
+        (tree / "real.txt").write_text("alpha in the project\n")
+
+        data = _run_checker(tree, config)
+
+        reported = {Path(v["file"]).relative_to(tree).as_posix() for v in data["violations"]}
+        assert reported == {"real.txt"}
+
+
 class TestPublicPatternScanning:
     def test_no_config_no_violations(self, tmp_path: Path) -> None:
         (tmp_path / "file.txt").write_text("nothing sensitive here\n")

@@ -13,7 +13,42 @@ Two rules every walker follows:
 
 from __future__ import annotations
 
+import fnmatch
+import os
 from pathlib import Path
+
+#: The entry git keeps a checkout's metadata in: a directory, or in a linked
+#: worktree or submodule a file pointing at it.
+_GIT_ENTRY = ".git"
+
+
+def walk_files(root: Path, pattern: str = "*") -> list[Path]:
+    """Every file below ``root`` whose name matches ``pattern``, sorted.
+
+    Unlike ``root.rglob(pattern)`` this never descends into ``.git``, and it
+    skips a nested checkout entirely: any directory below the root holding a
+    ``.git`` entry is a worktree, submodule or clone of some other project.
+    ``git ls-files`` lists neither, so a walker that meant "this project's
+    files" reads the same set whichever way it enumerates. Symlinked
+    directories are not followed, as with ``rglob``.
+
+    Args:
+        root: The directory to walk; a missing one yields nothing.
+        pattern: An ``fnmatch`` pattern for the file NAME, as ``rglob`` takes.
+    """
+    found: list[Path] = []
+    for directory, dirnames, filenames in os.walk(root):
+        here = Path(directory)
+        if here != root and (_GIT_ENTRY in dirnames or _GIT_ENTRY in filenames):
+            dirnames.clear()
+            continue
+        dirnames[:] = [name for name in dirnames if name != _GIT_ENTRY]
+        found.extend(
+            here / name
+            for name in filenames
+            if name != _GIT_ENTRY and fnmatch.fnmatchcase(name, pattern)
+        )
+    return sorted(found)
 
 
 def relative_parts(path: Path, root: Path) -> tuple[str, ...]:
