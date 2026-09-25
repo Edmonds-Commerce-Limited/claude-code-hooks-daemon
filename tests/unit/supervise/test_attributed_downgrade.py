@@ -789,6 +789,34 @@ class TestRetroAttribution:
         assert _model_commands(typed) == []
         assert machine.export_state()["downgrade_episode"] is None
 
+    def test_the_latch_is_dropped_when_the_foreground_session_changes(
+        self, tmp_path: Path
+    ) -> None:
+        """A restore types into the FOREGROUND session. If that is now another
+        session, a late record for the first must not arm a `/model` there."""
+        sidecar_dir = tmp_path / "cs"
+        machine = _machine()
+        _write_sidecar(sidecar_dir, model_id="claude-fable-5", effort="low", ts=_NOW - 5.0)
+        _decide(sidecar_dir, machine, now=_NOW - 4.0)
+        _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="high", ts=_NOW - 3.0)
+        _decide(sidecar_dir, machine, now=_NOW - 2.0)
+        (sidecar_dir / f"{_SESSION}.json").unlink()
+        _show(sidecar_dir, model_id="claude-opus-5", now=_NOW, session_id=_OTHER_SESSION)
+        _decide(sidecar_dir, machine, now=_NOW)
+        assert machine.export_state()["pending_unattributed_drop"] is None
+
+        _write_downgrade_signal(sidecar_dir, ts=_NOW - 3.0)
+        typed = _typed_between(
+            sidecar_dir,
+            machine,
+            start=_NOW + 2.0,
+            end=_NOW + 200.0,
+            model_id="claude-opus-5",
+            session_id=_OTHER_SESSION,
+        )
+
+        assert _model_commands(typed) == []
+
     def test_a_record_for_another_session_is_not_retro_attributed(self, tmp_path: Path) -> None:
         sidecar_dir = tmp_path / "cs"
         machine = _machine()

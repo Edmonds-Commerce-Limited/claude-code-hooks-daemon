@@ -389,6 +389,25 @@ class TestRecordIdentity:
         assert facts is not None
         assert facts.record_id == "uuid-sub"
 
+    def test_two_standalone_records_are_two_downgrades(self, tmp_path: Path) -> None:
+        """Only a BLOCK and the standalone record after it are one downgrade.
+
+        Two standalone records a minute apart are a restore and a second
+        refusal, and the second must keep its own identity so it is not
+        mistaken for the first, already-spent one.
+        """
+        transcript = tmp_path / "session.jsonl"
+        transcript.write_text(
+            f"{_subtype_line(uuid='uuid-sub-1', timestamp='2026-08-27T09:33:00.000Z')}\n"
+            f"{_subtype_line(uuid='uuid-sub-2', timestamp='2026-08-27T09:34:00.000Z')}\n",
+            encoding="utf-8",
+        )
+
+        facts = scan_transcript_tail(transcript)
+
+        assert facts is not None
+        assert facts.record_id == "uuid-sub-2"
+
     def test_a_subtype_pairs_only_with_the_record_right_before_it(self, tmp_path: Path) -> None:
         """An earlier block is a different downgrade, however close in time."""
         transcript = tmp_path / "session.jsonl"
