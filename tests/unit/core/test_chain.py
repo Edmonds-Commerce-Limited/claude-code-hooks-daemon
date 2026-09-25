@@ -1160,14 +1160,16 @@ class TestHandlerChain:
 
         def _occupy() -> None:
             occupied.set()
-            release.wait(timeout=5.0)
+            release.wait(timeout=Timeout.DISPATCH_TEST_GENEROUS)
 
         filler = threading.Thread(
-            target=lambda: small_pool.run(_occupy, timeout=5.0, label="filler")
+            target=lambda: small_pool.run(
+                _occupy, timeout=Timeout.DISPATCH_TEST_GENEROUS, label="filler"
+            )
         )
         try:
             filler.start()
-            assert occupied.wait(timeout=1.0)
+            assert occupied.wait(timeout=Timeout.DISPATCH_TEST_NORMAL)
 
             chain = HandlerChain()
             guard = MockHandler(
@@ -1185,7 +1187,7 @@ class TestHandlerChain:
             elapsed = time.perf_counter() - start
         finally:
             release.set()
-            filler.join(timeout=5.0)
+            filler.join(timeout=Timeout.DISPATCH_TEST_GENEROUS)
             small_pool.shutdown(wait=True)
 
         # Refused immediately -- never waited anywhere near the 5s deadline.

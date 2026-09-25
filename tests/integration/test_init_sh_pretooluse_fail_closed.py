@@ -71,7 +71,7 @@ def _fake_server(*, respond: bytes | None, delay: float = 0.0) -> Iterator[Path]
 
     def _handle(conn: socket.socket) -> None:
         with conn:
-            conn.settimeout(5.0)
+            conn.settimeout(Timeout.DISPATCH_TEST_GENEROUS)
             chunks: list[bytes] = []
             while True:
                 chunk = conn.recv(4096)

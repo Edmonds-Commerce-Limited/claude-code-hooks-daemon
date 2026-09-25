@@ -53,7 +53,9 @@ _REQUEST_LINE = b'{"event":"PreToolUse","hook_input":{}}\n'
 class _StubController:
     """Never consulted — ``_process_request`` is patched in every test here."""
 
-    def process_request(self, request_data: dict[str, Any]) -> dict[str, Any]:
+    def process_request(
+        self, request_data: dict[str, Any], *, arrival_time: float | None = None
+    ) -> dict[str, Any]:
         return _ALLOW_RESPONSE
 
     def get_health(self) -> dict[str, Any]:

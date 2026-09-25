@@ -51,6 +51,24 @@ from claude_code_hooks_daemon.handlers.registry import iter_builtin_handler_clas
 # this size, and well below the 30s client socket timeout (Plan 00466 N25).
 _MAX_SECONDS = 5.0
 
+# Handlers with a KNOWN, already-tracked linear-but-expensive constant factor
+# (Plan 00466 N40 review 2 MA1): `SecretFileGuardHandler` measured at 5.2s/
+# 10.9s/6.4s against the 5s bound above on a loaded CI host -- not
+# superlinear (the guard-defects branch's own N34 finding already tracks the
+# constant-factor cost), but close enough to `_MAX_SECONDS` that ordinary
+# host contention flakes this harness. Each override stays comfortably under
+# the 30s client socket timeout (Plan 00466 N25) -- generous enough to absorb
+# load, not so generous it would miss a genuine regression. A handler not
+# listed here uses `_MAX_SECONDS` unchanged.
+_KNOWN_CONSTANT_FACTOR_BOUNDS: dict[str, float] = {
+    "SecretFileGuardHandler": 20.0,
+}
+
+
+def _bound_for(handler_cls: type[Handler]) -> float:
+    return _KNOWN_CONSTANT_FACTOR_BOUNDS.get(handler_cls.__name__, _MAX_SECONDS)
+
+
 # Large enough to make an O(n^2) handler's blowup obvious (Task 2's repros
 # hit 99s/98s at 200 KB); not so large that a genuinely linear handler's
 # legitimate per-character work approaches the bound.
@@ -151,6 +169,23 @@ def _timed_dispatch(handler: Handler, hook_input: dict) -> float:
     return time.perf_counter() - start
 
 
+class TestKnownConstantFactorBound:
+    """The override mechanism itself (Plan 00466 N40 review 2 MA1)."""
+
+    def test_an_unlisted_handler_uses_the_default_bound(self) -> None:
+        class _Unlisted(Handler):
+            pass
+
+        assert _bound_for(_Unlisted) == _MAX_SECONDS
+
+    def test_a_listed_handler_uses_its_own_wider_bound(self) -> None:
+        class SecretFileGuardHandler(Handler):
+            pass
+
+        assert _bound_for(SecretFileGuardHandler) == 20.0
+        assert _bound_for(SecretFileGuardHandler) > _MAX_SECONDS
+
+
 class TestNoVacuousDiscovery:
     """A discovery that finds nothing would make every sweep below pass by omission."""
 
@@ -172,7 +207,7 @@ class TestBashCommandShapesStayLinear:
         for handler_cls in _safety_pre_tool_use_handlers():
             handler = handler_cls()
             elapsed = _timed_dispatch(handler, hook_input)
-            if elapsed >= _MAX_SECONDS:
+            if elapsed >= _bound_for(handler_cls):
                 slow.append(f"{handler_cls.__name__} took {elapsed:.2f}s on shape={shape!r}")
         assert not slow, "superlinear SAFETY handler(s) found:\n" + "\n".join(slow)
 
@@ -192,7 +227,7 @@ class TestWriteContentShapesStayLinear:
         for handler_cls in _safety_pre_tool_use_handlers():
             handler = handler_cls()
             elapsed = _timed_dispatch(handler, hook_input)
-            if elapsed >= _MAX_SECONDS:
+            if elapsed >= _bound_for(handler_cls):
                 slow.append(f"{handler_cls.__name__} took {elapsed:.2f}s on shape={shape!r}")
         assert not slow, "superlinear SAFETY handler(s) found:\n" + "\n".join(slow)
 

@@ -1119,7 +1119,9 @@ class TestControllerHealthStragglers:
         dispatcher = get_default_dispatcher()
         for i in range(count):
             outcome = dispatcher.run(
-                lambda: release.wait(timeout=5.0), timeout=0.01, label=f"stuck-{i}"
+                lambda: release.wait(timeout=Timeout.DISPATCH_TEST_GENEROUS),
+                timeout=Timeout.DISPATCH_TEST_INSTANT,
+                label=f"stuck-{i}",
             )
             assert isinstance(outcome, DispatchTimeout)
         time.sleep(0.03)  # let each straggler actually register itself

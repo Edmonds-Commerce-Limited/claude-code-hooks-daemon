@@ -176,7 +176,7 @@ def strict_probe_daemon_process(strict_probe_daemon_env: dict[str, Any]):
             env=test_env,
             stdout=devnull,
             stderr=devnull,
-            timeout=10,
+            timeout=Timeout.DISPATCH_TEST_OUTER_BOUND,
         )
     if result.returncode != 0:
         pytest.fail(f"Failed to start daemon (exit code {result.returncode})")
