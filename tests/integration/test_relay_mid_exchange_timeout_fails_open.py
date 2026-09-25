@@ -33,7 +33,6 @@ import json
 import socket
 import subprocess
 import threading
-import time
 from pathlib import Path
 
 import pytest
@@ -105,22 +104,19 @@ def test_a_mid_exchange_timeout_for_a_full_qa_command_still_fails_open(tmp_path:
             + b"\n"
         )
 
-        start = time.monotonic()
         result = subprocess.run(
             [str(_RELAY_BINARY), str(sock_path), "--timeout-ms", str(_TIMEOUT_MS)],
             input=payload,
             capture_output=True,
             timeout=_SUBPROCESS_TIMEOUT_SECONDS,
         )
-        elapsed = time.monotonic() - start
     finally:
         server.close()
 
-    # The relay's own budget fired (not some unrelated fast failure): elapsed
-    # is bounded by ratios against the configured budget, not an absolute
-    # wall-clock guess.
-    assert elapsed >= (_TIMEOUT_MS / 1000) * 0.9, (elapsed, result.stdout, result.stderr)
-    assert elapsed < (_TIMEOUT_MS / 1000) * 5, (elapsed, result.stdout, result.stderr)
+    # The relay's own budget fired (not some unrelated fast failure): its
+    # stderr names the timeout. Review 10 M2: no wall-clock elapsed-time
+    # assertion here -- the server hangs until the relay's own budget forces
+    # the timeout, so this message is the proof, not a duration guess.
     assert b"timeout" in result.stderr, result.stderr
 
     # The defect: exit 0 with an empty/`{}` body is indistinguishable from
