@@ -17,9 +17,9 @@ terminal is attached:
 
 from __future__ import annotations
 
+import errno
 import io
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -420,18 +420,33 @@ class TestGatedInstallStampFailsClosedOnAnUnreadableReceipt:
         assert gated_install_stamp(untracked, daemon_dir=daemon_dir, project_root=project) is None
 
     def test_a_permission_denied_receipt_fails_closed_instead_of_crashing(
-        self, daemon_dir: Path, project: Path, untracked: Path
+        self,
+        daemon_dir: Path,
+        project: Path,
+        untracked: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        if os.geteuid() == 0:
-            pytest.skip("running as root defeats permission-based checks")
+        """Plan 00466 N56: every test runs as root, so a `chmod 0o000` proves
+        nothing here -- root reads through any permission bits. Fault the
+        specific ``Path.read_text`` call `gated_install_stamp` makes instead,
+        which fails the same way for root and non-root alike.
+        """
         path = untracked / APPROVAL_SUBDIR / "gated-install.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text('{"stamp": "v3.65.0"}', encoding="utf-8")
-        path.chmod(0o000)
-        try:
-            assert gated_install_stamp(untracked, daemon_dir=daemon_dir, project_root=project) is None
-        finally:
-            path.chmod(0o644)
+
+        real_read_text = Path.read_text
+
+        def _faulty_read_text(
+            self: Path, encoding: str | None = None, errors: str | None = None
+        ) -> str:
+            if self == path:
+                raise PermissionError(errno.EACCES, "Permission denied", str(self))
+            return real_read_text(self, encoding=encoding, errors=errors)
+
+        monkeypatch.setattr(Path, "read_text", _faulty_read_text)
+
+        assert gated_install_stamp(untracked, daemon_dir=daemon_dir, project_root=project) is None
 
 
 class TestUnknownRange:
@@ -473,6 +488,21 @@ class TestUnknownRange:
     ) -> None:
         report = _acked(daemon_dir, project, untracked, "3.64.0", "0123abc")
         assert report.verdict is GateVerdict.NEEDS_APPROVAL
+
+    def test_an_unknown_previous_version_still_lists_every_guide_up_to_the_target(
+        self, daemon_dir: Path, upgrades: Path, project: Path, untracked: Path
+    ) -> None:
+        """review4 follow-up: `_unknown_range_report` scans PRE tasks from
+        earliest to target (proven above), but hardcoded ``guides=[]`` --
+        dropping every informational guide document (including a staged,
+        UNRELEASED one a guarded branch install exists to surface) whenever
+        the range is unknown, with no way for the owner to see what they are
+        approving. Symmetric with the findings scan: unknown FROM means show
+        everything up to TO, not nothing.
+        """
+        _guide(upgrades, "v3.10.0-to-v3.11.0")
+        report = _gate(daemon_dir, project, untracked, None, "3.65.0")
+        assert any("v3.10.0-to-v3.11.0.md" in str(guide) for guide in report.guides), report.guides
 
 
 class TestUntrustedFrom:

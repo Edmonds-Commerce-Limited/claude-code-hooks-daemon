@@ -764,7 +764,8 @@ if [ -f "$_ENV_SANITISE_SH" ]; then
         for _allow_name in HOME LANG LC_ALL LC_CTYPE TMPDIR USER LOGNAME \
                 HTTP_PROXY HTTPS_PROXY NO_PROXY http_proxy https_proxy no_proxy \
                 SSL_CERT_FILE REQUESTS_CA_BUNDLE CURL_CA_BUNDLE XDG_CACHE_HOME \
-                HOOKS_DAEMON_PYTHON; do
+                HOOKS_DAEMON_PYTHON HOOKS_DAEMON_UNSAFE_TRACK_REF \
+                HOOKS_DAEMON_UNSAFE_TRACK_REF_BECAUSE; do
             if [ -n "${!_allow_name+x}" ]; then
                 _LAYER2_ENV_ALLOWLIST+=("$_allow_name=${!_allow_name}")
             fi

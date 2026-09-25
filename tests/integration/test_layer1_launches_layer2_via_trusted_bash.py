@@ -44,6 +44,8 @@ set -euo pipefail
 echo "STUB_LAYER2_ARGS: $*"
 echo "STUB_LAYER2_INTERPRETER: $BASH"
 echo "STUB_LAYER2_BASH_ENV: ${BASH_ENV:-<unset>}"
+echo "STUB_LAYER2_TRACK_REF: ${HOOKS_DAEMON_UNSAFE_TRACK_REF:-<unset>}"
+echo "STUB_LAYER2_TRACK_REF_BECAUSE: ${HOOKS_DAEMON_UNSAFE_TRACK_REF_BECAUSE:-<unset>}"
 # grep -c exits 1 on zero matches, which is the expected, common case here
 # (no imported function survived) -- not an error to hide, so set -e is
 # toggled off around it rather than masking it with `|| true`.
@@ -242,6 +244,41 @@ class TestLayer2EnvIsIsolatedFromTheCaller:
 
         assert result.returncode == 0, result.stdout + result.stderr
         assert _stub_field(result.stdout, "STUB_LAYER2_IMPORTED_FUNC_COUNT") == "0"
+
+    def test_the_guarded_branch_install_vars_do_reach_layer2(
+        self, tmp_path: Path, client_project: Path, daemon_remote: Path
+    ) -> None:
+        """Not everything is stripped -- only the review3 MAJOR 2 attack
+        surface. HOOKS_DAEMON_UNSAFE_TRACK_REF/_BECAUSE are the guarded
+        branch-install feature's own first-party inputs (Plan 00291);
+        dropping them from the `env -i` allowlist would silently break that
+        feature rather than close a gap, and did until this test caught it.
+        """
+        work = tmp_path / "branch-work"
+        _require_ok(_git("clone", "-q", str(daemon_remote), str(work), cwd=tmp_path), "clone branch work")
+        _require_ok(_git("checkout", "-q", "-b", "e2e-track", "v1.0.0", cwd=work), "cut branch")
+        _require_ok(_git("commit", "-q", "--allow-empty", "-m", "branch tip", cwd=work), "branch tip")
+        _require_ok(_git("push", "-q", "origin", "e2e-track", cwd=work), "push branch")
+
+        # The tracked ref IS the target: no positional version argument (that
+        # would conflict with it), unlike every other case in this file.
+        env = {k: v for k, v in os.environ.items() if not k.startswith("HOOKS_DAEMON_UNSAFE")}
+        env["NO_COLOR"] = "1"
+        env.pop("HOOKS_DAEMON_UPGRADE_PREVIOUS_VERSION", None)
+        env["HOOKS_DAEMON_UNSAFE_TRACK_REF"] = "e2e-track"
+        env["HOOKS_DAEMON_UNSAFE_TRACK_REF_BECAUSE"] = "test"
+        result = subprocess.run(
+            [REAL_BASH, str(LAYER1_UPGRADE_SH), "--project-root", str(client_project)],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=_TIMEOUT_SECONDS,
+            check=False,
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert _stub_field(result.stdout, "STUB_LAYER2_TRACK_REF") == "e2e-track"
+        assert _stub_field(result.stdout, "STUB_LAYER2_TRACK_REF_BECAUSE") == "test"
 
 
 class TestLayer1FetchIgnoresAHostileGlobalGitConfig:

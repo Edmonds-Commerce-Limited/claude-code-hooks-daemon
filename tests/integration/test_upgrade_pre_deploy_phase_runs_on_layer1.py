@@ -418,10 +418,28 @@ def test_branch_route_includes_the_staged_unreleased_task(
             "HOOKS_DAEMON_UNSAFE_TRACK_REF_BECAUSE": "end-to-end fixture",
         }
     )
+    untracked = get_untracked_dir(project)
     try:
         stopped = _upgrade(project, env)
         _assert_stopped_and_restored(stopped, GateVerdict.NEEDS_ACKNOWLEDGEMENT, project, current)
-        result = _upgrade(project, env, _confirm(stopped.stdout))
+        confirm = _confirm(stopped.stdout)
+        # Plan 00376 review3 (review4 follow-up): the branch was cut off
+        # v{current} with no version bump, so its release is the SAME as the
+        # installed one -- an untrusted FROM (the doc marker) that has caught
+        # up to the target, review2 BLOCKER 1's unknown range. It needs the
+        # owner's approval too, not just the reading confirmed.
+        approval_needed = _upgrade(project, env, confirm)
+        _assert_stopped_and_restored(
+            approval_needed, GateVerdict.NEEDS_APPROVAL, project, current
+        )
+        write_approval(
+            untracked,
+            to_version=current,
+            from_version=current,
+            daemon_dir=_daemon_dir(project),
+            project_root=project,
+        )
+        result = _upgrade(project, env, confirm)
     finally:
         _stop_daemon(project, env)
     combined = result.stdout
@@ -632,8 +650,26 @@ def test_code_planted_in_the_installed_venv_does_not_answer_for_the_gate(
     """
     current, _target, major = versions
     env = _env()
+    untracked = get_untracked_dir(project)
     try:
-        installed = _upgrade(project, env, f"v{current}")
+        # Plan 00376 review3 (review4 follow-up): review2 BLOCKER 1 made an
+        # untrusted FROM (the doc marker, no venv stamp yet) that has caught
+        # up to or passed the target an unknown range -- which this bootstrap
+        # install (installing the currently-installed release, to build the
+        # first venv) now is. It needs the reading confirmed AND the owner's
+        # approval, exactly like `test_major_route_needs_the_owners_bound_approval`.
+        unread = _upgrade(project, env, f"v{current}")
+        confirm = _confirm(unread.stdout)
+        stopped = _upgrade(project, env, f"v{current}", confirm)
+        _assert_stopped_and_restored(stopped, GateVerdict.NEEDS_APPROVAL, project, current)
+        write_approval(
+            untracked,
+            to_version=current,
+            from_version=current,
+            daemon_dir=_daemon_dir(project),
+            project_root=project,
+        )
+        installed = _upgrade(project, env, f"v{current}", confirm)
         assert installed.returncode == 0, installed.stdout[-6000:]
         site_packages = sorted(
             (_daemon_dir(project) / "untracked").glob("venv-*/lib/python3*/site-packages")

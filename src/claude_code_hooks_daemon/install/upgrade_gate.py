@@ -513,19 +513,27 @@ def _unknown_range_report(
 ) -> GateReport:
     """A range the gate cannot read: detect everything, and send it to the owner."""
     findings: list[TaskFinding] = []
+    guides: list[Path] = []
     escalations: list[str] = []
     target_is_release = _is_release(to_version)
     if not target_is_release:
         escalations.append(f"the target {to_version!r} is not a release version")
     else:
+        upgrades_dir = daemon_dir / UPGRADES_SUBPATH
         tasks = tasks_for_range(
             TaskKind.PRE,
             _EARLIEST_RELEASE,
             to_version,
-            upgrades_dir=daemon_dir / UPGRADES_SUBPATH,
+            upgrades_dir=upgrades_dir,
             include_unreleased=include_unreleased,
         )
         findings = evaluate(tasks, project_root)
+        # review4 follow-up: symmetric with the findings scan above -- an
+        # unknown FROM means show every guide up to TO, not none. Dropping
+        # this list left a guarded branch install (Plan 00291) informing the
+        # owner of nothing, including a staged UNRELEASED document it exists
+        # to surface, whenever the range could not be verified.
+        guides = _reading_list(upgrades_dir, _EARLIEST_RELEASE, to_version, include_unreleased)
     if unknown_reason is not None:
         escalations.append(unknown_reason)
     elif not _is_release(from_version):
@@ -555,7 +563,7 @@ def _unknown_range_report(
         target_ref=target_ref,
         range_known=False,
         downgrade=False,
-        guides=[],
+        guides=guides,
         findings=findings,
         escalations=escalations,
         acknowledgement=acknowledgement,
