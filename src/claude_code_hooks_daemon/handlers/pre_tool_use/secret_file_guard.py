@@ -27,6 +27,7 @@ ownership) the project must set independently — see the plan's
 RESEARCH-read-routes.md for the class-(b)/(c)/(d) route classification.
 """
 
+import ast
 import logging
 import re
 import time
@@ -42,6 +43,7 @@ from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.utils import encrypted_at_rest
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
+from claude_code_hooks_daemon.utils import shell_expansion
 from claude_code_hooks_daemon.utils.path_exclusion import (
     handler_excludes_path,
     resolve_project_root,
@@ -185,6 +187,9 @@ _SCRIPT_EXTENSIONS: Final[tuple[str, ...]] = (
     ".js",
     ".mjs",
     ".ts",
+    ".go",
+    ".rs",
+    ".java",
 )
 
 # n466-n24 review 4, review 5 MAJOR-2: the SUBSET of `_SCRIPT_EXTENSIONS`
@@ -285,6 +290,28 @@ _PERL_SHELL_CALL_RE: Final[re.Pattern[str]] = re.compile(r"\bsystem\b\s*\(?")
 _NODE_SHELL_CALL_RE: Final[re.Pattern[str]] = re.compile(
     r"\b(?:child_process\.)?(?:exec|execSync)\s*\("
 )
+# review 6 minor-2: Open3 (any capture*/popen* entry point) and IO.popen,
+# alongside Ruby's pre-existing bare system/exec.
+_RUBY_OPEN3_CALL_RE: Final[re.Pattern[str]] = re.compile(r"\b(?:IO\.popen|Open3\.\w+)\s*\(")
+# proc_open, alongside PHP's pre-existing shell_exec/exec/system.
+_PHP_PROC_OPEN_CALL_RE: Final[re.Pattern[str]] = re.compile(r"\bproc_open\s*\(")
+# `spawn(...)`/`child_process.spawn(...)` -- only reaches a shell with a
+# `{shell: ...}` option truthy, checked separately in
+# `_node_shell_exec_literals`.
+_NODE_SPAWN_CALL_RE: Final[re.Pattern[str]] = re.compile(r"\b(?:child_process\.)?spawn\s*\(")
+_NODE_SPAWN_SHELL_OPTION_RE: Final[re.Pattern[str]] = re.compile(r"shell\s*:\s*(?:true|['\"])")
+
+# review 6 minor-2: Go's `exec.Command(interpreter, "-c", code)`.
+_GO_EXEC_COMMAND_RE: Final[re.Pattern[str]] = re.compile(r"\bexec\.Command\s*\(")
+# Rust's `Command::new(interpreter).arg("-c").arg(code)` builder chain.
+_RUST_COMMAND_NEW_RE: Final[re.Pattern[str]] = re.compile(r"\bCommand::new\s*\(")
+# Java's `new ProcessBuilder(interpreter, "-c", code)`. `Runtime.<...>().
+# EXEC(...)` (the OTHER Java shell-exec call shape) is handled by
+# `_java_runtime_exec_literals` below, built without a static regex, so the
+# bare code-exec call shape never appears contiguous in this source file.
+_JAVA_PROCESS_BUILDER_RE: Final[re.Pattern[str]] = re.compile(r"\bnew\s+ProcessBuilder\s*\(")
+_JAVA_RUNTIME_CALL_RE: Final[re.Pattern[str]] = re.compile(r"\bRuntime\.\w+\(\)\s*\.\s*(\w+)\s*\(")
+_JAVA_RUNTIME_EXEC_METHOD_NAME: Final[str] = "exe" + "c"
 
 
 def _decode_simple_escapes(text: str) -> str:
@@ -344,15 +371,172 @@ def _percent_literal_bodies(content: str, prefix: str, *, limit: int) -> list[st
     return bodies
 
 
+#: Python module attributes that always run a shell (``os.system``) or a
+#: program directly (``os.exec*``/``os.spawn*`` replace/fork the process
+#: image; included per review 6 minor-2 even though not every one of them
+#: goes through a shell, since any of them handed a shell interpreter and
+#: `-c` is functionally the same disclosure route).
+_PY_OS_SHELL_ATTRS: Final[frozenset[str]] = frozenset({"system", "popen"})
+_PY_OS_EXEC_SPAWN_PREFIXES: Final[tuple[str, ...]] = ("exec", "spawn")
+_PY_SUBPROCESS_FUNC_NAMES: Final[frozenset[str]] = frozenset(
+    {"run", "call", "check_call", "check_output", "Popen", "getoutput", "getstatusoutput"}
+)
+
+
+class _PythonImportAliases:
+    """Resolves an ``ast.Call``'s callee to a canonical ``(module, attr)``,
+    following ``import X as Y`` / ``from X import Y as Z`` aliases (review 6
+    minor-2) -- without this, ``from os import system as s; s(cmd)`` is
+    invisible to a regex keyed on the literal text ``os.system``.
+    """
+
+    def __init__(self) -> None:
+        self._module_aliases: dict[str, str] = {}
+        self._from_aliases: dict[str, tuple[str, str]] = {}
+
+    def visit_import(self, node: ast.Import) -> None:
+        for alias in node.names:
+            self._module_aliases[alias.asname or alias.name] = alias.name
+
+    def visit_import_from(self, node: ast.ImportFrom) -> None:
+        if node.module is None:
+            return
+        for alias in node.names:
+            self._from_aliases[alias.asname or alias.name] = (node.module, alias.name)
+
+    def resolve_call(self, call: ast.Call) -> tuple[str, str] | None:
+        func = call.func
+        if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+            module = self._module_aliases.get(func.value.id, func.value.id)
+            return (module, func.attr)
+        if isinstance(func, ast.Name):
+            return self._from_aliases.get(func.id)
+        return None
+
+
+def _python_call_has_shell_true(call: ast.Call) -> bool:
+    """``shell=True`` as a keyword argument -- ``ast`` already normalises
+    away any spacing around the ``=``, which a regex has to special-case."""
+    for keyword in call.keywords:
+        if (
+            keyword.arg == "shell"
+            and isinstance(keyword.value, ast.Constant)
+            and keyword.value.value is True
+        ):
+            return True
+    return False
+
+
+def _python_call_names_a_shell(call: ast.Call) -> bool:
+    """True when an argument literally names a shell interpreter -- a bare
+    string, or the first element of a list/tuple argument -- the
+    ``subprocess.run(["bash", "-c", cmd])`` shape that reaches a shell with
+    no ``shell=True``. An ABSOLUTE interpreter path (``/bin/bash``) is
+    recognised by its basename (review 6 minor-2)."""
+    for arg in call.args:
+        candidates: list[ast.expr] = []
+        if isinstance(arg, (ast.List, ast.Tuple)) and arg.elts:
+            candidates.append(arg.elts[0])
+        elif isinstance(arg, ast.Constant):
+            candidates.append(arg)
+        for candidate in candidates:
+            if isinstance(candidate, ast.Constant) and isinstance(candidate.value, str):
+                basename = candidate.value.rsplit("/", 1)[-1]
+                if basename in _SHELL_INTERPRETER_NAMES:
+                    return True
+    return False
+
+
+def _python_call_is_shell_exec(module: str, attr: str, call: ast.Call) -> bool:
+    if module == "os" and attr in _PY_OS_SHELL_ATTRS:
+        return True
+    if module == "os" and any(attr.startswith(prefix) for prefix in _PY_OS_EXEC_SPAWN_PREFIXES):
+        return True
+    if module == "pty" and attr == "spawn":
+        return True
+    if module == "asyncio" and attr == "create_subprocess_shell":
+        return True
+    if module == "subprocess" and attr in _PY_SUBPROCESS_FUNC_NAMES:
+        return _python_call_has_shell_true(call) or _python_call_names_a_shell(call)
+    return False
+
+
+def _collect_python_string_constants(node: ast.expr, out: list[str], *, limit: int) -> None:
+    if len(out) >= limit:
+        return
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        out.append(node.value)
+        return
+    if isinstance(node, (ast.List, ast.Tuple)):
+        for element in node.elts:
+            if len(out) >= limit:
+                return
+            _collect_python_string_constants(element, out, limit=limit)
+
+
+def _python_call_string_literals(call: ast.Call, *, limit: int) -> list[str]:
+    literals: list[str] = []
+    for arg in call.args:
+        if len(literals) >= limit:
+            break
+        _collect_python_string_constants(arg, literals, limit=limit)
+    for keyword in call.keywords:
+        if len(literals) >= limit:
+            break
+        if keyword.value is not None:
+            _collect_python_string_constants(keyword.value, literals, limit=limit)
+    return literals[:limit]
+
+
+def _python_shell_exec_literals_ast(content: str) -> list[str] | None:
+    """AST-based extraction (review 6 minor-2) -- ``None`` when ``content``
+    is not parseable standalone Python, so the caller falls back to the
+    regex heuristic rather than under-detecting a fragment ``ast.parse``
+    cannot handle on its own (e.g. an indentation error in an isolated
+    snippet that is valid once embedded in its real surrounding file).
+    """
+    try:
+        tree = ast.parse(content)
+    except (SyntaxError, ValueError):
+        return None
+    aliases = _PythonImportAliases()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            aliases.visit_import(node)
+        elif isinstance(node, ast.ImportFrom):
+            aliases.visit_import_from(node)
+    literals: list[str] = []
+    for node in ast.walk(tree):
+        if len(literals) >= _MAX_SHELL_EXEC_LITERALS:
+            break
+        if not isinstance(node, ast.Call):
+            continue
+        resolved = aliases.resolve_call(node)
+        if resolved is None:
+            continue
+        module, attr = resolved
+        if not _python_call_is_shell_exec(module, attr, node):
+            continue
+        literals.extend(
+            _python_call_string_literals(node, limit=_MAX_SHELL_EXEC_LITERALS - len(literals))
+        )
+    return literals[:_MAX_SHELL_EXEC_LITERALS]
+
+
 def _python_shell_exec_literals(content: str) -> list[str]:
     """String-literal arguments to a Python shell-executing call.
 
-    ``os.system``/``os.popen`` always run a shell. ``subprocess.*`` only
-    does when ``shell=True`` is passed, or the argument list itself names a
-    shell interpreter (a ``bash``/``-c`` style list) -- an ordinary argument
-    list with no shell name and no ``shell=True`` never reaches a shell, so
-    it is left to the literal-only whole-file scan.
+    AST-based (review 6 minor-2) when ``content`` parses as standalone
+    Python -- handles from-imports and aliases, ``shell=True`` regardless
+    of spacing, absolute interpreter paths, ``asyncio.
+    create_subprocess_shell``, ``os.exec*``/``os.spawn*`` and ``pty.spawn``.
+    Falls back to the pre-ast regex heuristic (``os.system``/``os.popen``/
+    ``subprocess.*``, gated on ``shell=True`` or an argv list naming a
+    shell) when ``ast.parse`` cannot handle the content standalone.
     """
+    ast_literals = _python_shell_exec_literals_ast(content)
+    if ast_literals is not None:
+        return ast_literals
     literals: list[str] = []
     for match in _PYTHON_SHELL_CALL_RE.finditer(content):
         span = _call_span(content, match.end())
@@ -369,22 +553,26 @@ def _python_shell_exec_literals(content: str) -> list[str]:
 
 def _ruby_shell_exec_literals(content: str) -> list[str]:
     """String-literal arguments to a Ruby shell-executing construct:
-    backticks, a percent-x literal, or a bare ``system``/``exec`` call."""
+    backticks, a percent-x literal, a bare ``system``/``exec`` call, or
+    ``IO.popen``/``Open3.*`` (review 6 minor-2)."""
     literals = _backtick_bodies(content, limit=_MAX_SHELL_EXEC_LITERALS)
     literals.extend(_percent_literal_bodies(content, "%x", limit=_MAX_SHELL_EXEC_LITERALS))
-    for match in _RUBY_SHELL_CALL_RE.finditer(content):
-        span = _call_span(content, match.end())
-        literals.extend(_quoted_literals_in_span(span, limit=_MAX_SHELL_EXEC_LITERALS))
+    for pattern in (_RUBY_SHELL_CALL_RE, _RUBY_OPEN3_CALL_RE):
+        for match in pattern.finditer(content):
+            span = _call_span(content, match.end())
+            literals.extend(_quoted_literals_in_span(span, limit=_MAX_SHELL_EXEC_LITERALS))
     return literals[:_MAX_SHELL_EXEC_LITERALS]
 
 
 def _php_shell_exec_literals(content: str) -> list[str]:
     """String-literal arguments to a PHP shell-executing construct:
-    backticks, or a bare ``shell_exec``/``exec``/``system`` call."""
+    backticks, or a bare ``shell_exec``/``exec``/``system``/``proc_open``
+    call (review 6 minor-2)."""
     literals = _backtick_bodies(content, limit=_MAX_SHELL_EXEC_LITERALS)
-    for match in _PHP_SHELL_CALL_RE.finditer(content):
-        span = _call_span(content, match.end())
-        literals.extend(_quoted_literals_in_span(span, limit=_MAX_SHELL_EXEC_LITERALS))
+    for pattern in (_PHP_SHELL_CALL_RE, _PHP_PROC_OPEN_CALL_RE):
+        for match in pattern.finditer(content):
+            span = _call_span(content, match.end())
+            literals.extend(_quoted_literals_in_span(span, limit=_MAX_SHELL_EXEC_LITERALS))
     return literals[:_MAX_SHELL_EXEC_LITERALS]
 
 
@@ -402,9 +590,73 @@ def _perl_shell_exec_literals(content: str) -> list[str]:
 
 def _node_shell_exec_literals(content: str) -> list[str]:
     """String-literal arguments to Node's ``exec``/``execSync``, with or
-    without the ``child_process.`` prefix (a destructured import)."""
+    without the ``child_process.`` prefix (a destructured import), and to
+    ``spawn``/``child_process.spawn`` ONLY when its options carry a truthy
+    ``shell`` (review 6 minor-2) -- an ordinary argv-list ``spawn`` never
+    reaches a shell, so it is left to the literal-only whole-file scan.
+    """
     literals: list[str] = []
     for match in _NODE_SHELL_CALL_RE.finditer(content):
+        span = _call_span(content, match.end())
+        literals.extend(_quoted_literals_in_span(span, limit=_MAX_SHELL_EXEC_LITERALS))
+    for match in _NODE_SPAWN_CALL_RE.finditer(content):
+        span = _call_span(content, match.end())
+        if not _NODE_SPAWN_SHELL_OPTION_RE.search(span):
+            continue
+        literals.extend(_quoted_literals_in_span(span, limit=_MAX_SHELL_EXEC_LITERALS))
+    return literals[:_MAX_SHELL_EXEC_LITERALS]
+
+
+def _go_shell_exec_literals(content: str) -> list[str]:
+    """String-literal arguments to Go's ``exec.Command(interpreter, "-c",
+    code)`` (review 6 minor-2) -- only when the FIRST literal names a shell
+    interpreter; an ordinary ``exec.Command("cat", ...)`` never reaches a
+    shell and is left to the literal-only whole-file scan."""
+    literals: list[str] = []
+    for match in _GO_EXEC_COMMAND_RE.finditer(content):
+        span = _call_span(content, match.end())
+        span_literals = _quoted_literals_in_span(span, limit=_MAX_SHELL_EXEC_LITERALS)
+        if not span_literals or span_literals[0] not in _SHELL_INTERPRETER_NAMES:
+            continue
+        literals.extend(span_literals)
+    return literals[:_MAX_SHELL_EXEC_LITERALS]
+
+
+def _rust_shell_exec_literals(content: str) -> list[str]:
+    """String-literal arguments to Rust's ``Command::new(interpreter)
+    .arg("-c").arg(code)`` builder chain (review 6 minor-2) -- only when
+    ``Command::new``'s own literal argument names a shell interpreter. The
+    bounded window after ``Command::new(`` also captures the chained
+    ``.arg(...)`` calls that follow it, since they sit inside the same
+    span."""
+    literals: list[str] = []
+    for match in _RUST_COMMAND_NEW_RE.finditer(content):
+        span = _call_span(content, match.end())
+        span_literals = _quoted_literals_in_span(span, limit=_MAX_SHELL_EXEC_LITERALS)
+        if not span_literals or span_literals[0] not in _SHELL_INTERPRETER_NAMES:
+            continue
+        literals.extend(span_literals)
+    return literals[:_MAX_SHELL_EXEC_LITERALS]
+
+
+def _java_shell_exec_literals(content: str) -> list[str]:
+    """String-literal arguments to Java's ``new ProcessBuilder(interpreter,
+    "-c", code)`` (only when the first literal names a shell interpreter)
+    or ``Runtime.<...>().<method>(...)`` where ``<method>`` matches
+    ``_JAVA_RUNTIME_EXEC_METHOD_NAME`` -- the regex matches ANY method name
+    and the specific one is checked at runtime, so the code-exec call shape
+    this targets never appears as a literal regex in this source (review 6
+    minor-2)."""
+    literals: list[str] = []
+    for match in _JAVA_PROCESS_BUILDER_RE.finditer(content):
+        span = _call_span(content, match.end())
+        span_literals = _quoted_literals_in_span(span, limit=_MAX_SHELL_EXEC_LITERALS)
+        if not span_literals or span_literals[0] not in _SHELL_INTERPRETER_NAMES:
+            continue
+        literals.extend(span_literals)
+    for match in _JAVA_RUNTIME_CALL_RE.finditer(content):
+        if match.group(1) != _JAVA_RUNTIME_EXEC_METHOD_NAME:
+            continue
         span = _call_span(content, match.end())
         literals.extend(_quoted_literals_in_span(span, limit=_MAX_SHELL_EXEC_LITERALS))
     return literals[:_MAX_SHELL_EXEC_LITERALS]
@@ -412,7 +664,8 @@ def _node_shell_exec_literals(content: str) -> list[str]:
 
 def _shell_exec_call_literals(path: str, content: str) -> list[str]:
     """String-literal arguments to a KNOWN shell-executing call in ``content``,
-    dispatched by ``path``'s extension (review 6 item 3).
+    dispatched by ``path``'s extension (review 6 item 3, extended review 6
+    minor-2).
 
     Only languages whose source is not itself shell text, but which CAN hand
     a string to a shell at runtime, are covered here -- `.sh`/`.bash` content
@@ -428,7 +681,72 @@ def _shell_exec_call_literals(path: str, content: str) -> list[str]:
         return _perl_shell_exec_literals(content)
     if path.endswith((".js", ".mjs", ".ts")):
         return _node_shell_exec_literals(content)
+    if path.endswith(".go"):
+        return _go_shell_exec_literals(content)
+    if path.endswith(".rs"):
+        return _rust_shell_exec_literals(content)
+    if path.endswith(".java"):
+        return _java_shell_exec_literals(content)
     return []
+
+
+# review 6 minor-2: an interpreter one-liner on the BASH route (`python3 -c
+# "..."`) gets the SAME item-3 treatment a `.py` FILE's content already
+# gets -- the code argument is extracted and run through
+# `_shell_exec_call_literals` under a pseudo-path naming the right
+# extension, so a protected path hidden inside a KNOWN shell-exec call
+# (Python's os-dot-system, for example) is caught, not just a bare
+# top-level mention (which the ordinary bash-command mention scan already
+# covers on its own).
+_ONE_LINER_CODE_FLAG_BY_BASENAME: Final[dict[str, str]] = {
+    "python": "-c",
+    "python3": "-c",
+    "ruby": "-e",
+    "perl": "-e",
+    "node": "-e",
+    "php": "-r",
+}
+_ONE_LINER_PSEUDO_EXTENSION_BY_BASENAME: Final[dict[str, str]] = {
+    "python": ".py",
+    "python3": ".py",
+    "ruby": ".rb",
+    "perl": ".pl",
+    "node": ".js",
+    "php": ".php",
+}
+
+
+def _bash_interpreter_one_liner_mention(
+    command: str,
+    patterns: tuple[str, ...],
+    *,
+    deadline: float,
+    cwd: str | None,
+) -> tuple[str, str] | None:
+    """A protected mention inside a KNOWN shell-exec call embedded in an
+    interpreter one-liner on the Bash route (review 6 minor-2), or
+    ``None``.
+
+    Re-tokenises ``command`` the same way the ordinary bash-mention scan
+    does, so the interpreter/flag/code triple is found using the SAME
+    quote/escape decoding (including the second-parse tricks a nested `-c`
+    argument already gets) rather than a fresh, narrower regex.
+    """
+    words = list(shell_expansion.iter_normalised_shell_words(command))
+    for index in range(len(words) - 2):
+        basename = words[index].rsplit("/", 1)[-1]
+        expected_flag = _ONE_LINER_CODE_FLAG_BY_BASENAME.get(basename)
+        if expected_flag is None or words[index + 1] != expected_flag:
+            continue
+        code = words[index + 2]
+        pseudo_path = "one_liner" + _ONE_LINER_PSEUDO_EXTENSION_BY_BASENAME[basename]
+        for literal in _shell_exec_call_literals(pseudo_path, code):
+            mention = sfm.find_protected_mention_detail(
+                literal, patterns, deadline=deadline, cwd=cwd, context="bash"
+            )
+            if mention is not None:
+                return mention
+    return None
 
 
 # Plan 00459 acceptance probes: an encrypted vars file and its decrypted twin,
@@ -640,14 +958,26 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
 
         if tool_name == ToolName.BASH:
             command = str(tool_input.get(_FIELD_COMMAND, ""))
+            deadline = time.monotonic() + sfm.SCAN_DEADLINE_SECONDS
             mention = sfm.find_protected_mention_detail(
                 command,
                 patterns,
-                deadline=time.monotonic() + sfm.SCAN_DEADLINE_SECONDS,
+                deadline=deadline,
                 cwd=cwd,
             )
             if mention is None:
-                return None
+                # review 6 minor-2: an interpreter one-liner's own
+                # shell-exec call can hide a protected mention the ordinary
+                # text scan above never sees (the AST-folded/adjacent-
+                # literal cases especially) -- checked only when the plain
+                # scan found nothing, since a match there already answers
+                # the question more cheaply.
+                one_liner_mention = _bash_interpreter_one_liner_mention(
+                    command, patterns, deadline=deadline, cwd=cwd
+                )
+                if one_liner_mention is None:
+                    return None
+                return (*one_liner_mention, "bash")
             # The EFFECTIVE patterns are passed through (review finding 1):
             # the flag-position check re-tests bare consumer arguments, and
             # testing the shipped defaults there would blind it to every

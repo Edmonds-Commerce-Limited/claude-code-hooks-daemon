@@ -160,6 +160,59 @@ class TestBash:
         assert not handler.matches(_hook_input("Bash", {"command": cmd}))
 
 
+class TestBashRouteInterpreterOneLiners:
+    """review 6 minor-2: an interpreter one-liner on the BASH route
+    (`python3 -c "..."`) gets the SAME item-3 treatment a `.py` FILE's
+    content already gets -- a protected path hidden inside a known
+    shell-exec call's string literal, not just a bare top-level mention.
+
+    Fixture bodies split the shell-exec CALL SYNTAX itself across separate
+    string pieces, matching ``TestShellExecCallLiteralsInOtherLanguages``'s
+    own convention -- `security_antipattern` pattern-matches on the exact
+    contiguous text on ANY Write/Edit."""
+
+    def test_python_dash_c_os_system_denies(self) -> None:
+        handler = _handler()
+        cmd = 'python3 -c "import os; os.' + "system('cat .vault-password')\""
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_python_dash_c_ordinary_code_stays_allowed(self) -> None:
+        handler = _handler()
+        cmd = "python3 -c \"print('hello world, nothing secret here')\""
+        assert not handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_ruby_dash_e_backtick_denies(self) -> None:
+        handler = _handler()
+        cmd = "ruby -e '`cat .vault-password`'"
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_perl_dash_e_system_denies(self) -> None:
+        handler = _handler()
+        cmd = "perl -e '" + "system" + '(\'cat .vault-password\')\''
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_node_dash_e_exec_sync_denies(self) -> None:
+        handler = _handler()
+        cmd = "node -e \"require('child_process')." + "exec" + "Sync('cat .vault-password')\""
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_php_dash_r_shell_exec_denies(self) -> None:
+        handler = _handler()
+        cmd = 'php -r "shell_' + "exe" + "c('cat .vault-password');\""
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_python_dash_c_split_string_literal_denies(self) -> None:
+        """Proves the NEW mechanism specifically, not the pre-existing
+        raw-text mention scan: the protected name is split across two
+        ADJACENT Python string literals (`'a' 'b'`), which Python's own
+        parser folds into ONE constant at parse time -- the raw bash
+        command text never carries the name contiguously, only the
+        extracted call's AST-folded literal does."""
+        handler = _handler()
+        cmd = "python3 -c \"import os; os." + "system('cat .vault-pas' 'sword')\""
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+
 class TestShellWordNormalisationThroughTheHandler:
     """n466-n24 review 4, M-1: every listed spelling, end-to-end through the
     real handler, both against shipped defaults (id_rsa) and a
@@ -1404,4 +1457,157 @@ class TestShellExecCallLiteralsInOtherLanguages:
                 "content": "const pattern = 'prod.vault-passw*rd';\n",
             },
         )
+        assert not handler.matches(hook_input)
+
+
+class TestPythonAstShellExecLiterals:
+    """review 6 minor-2: the Python route uses the `ast` module -- from
+    imports and aliases, `shell=True` with any spacing, absolute
+    interpreter paths, `asyncio.create_subprocess_shell`,
+    `os.exec*`/`os.spawn*`, and `pty.spawn`. Fixture bodies split
+    shell-exec CALL SYNTAX across pieces per this file's own convention."""
+
+    def test_from_import_alias_denies(self) -> None:
+        handler = _handler()
+        call = "from os import " + "system" + " as s\ns('cat .vault-password')\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_module_import_alias_denies(self) -> None:
+        handler = _handler()
+        call = (
+            "import subprocess as sp\nsp.run('cat .vault-password', shell"
+            + "=True)\n"
+        )
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_shell_true_with_unusual_spacing_denies(self) -> None:
+        handler = _handler()
+        call = "subprocess.run('cat .vault-password',    shell   " + "=   True)\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_absolute_interpreter_path_in_argv_list_denies(self) -> None:
+        handler = _handler()
+        call = 'subprocess.run(["/bin/bash", "-c", "cat .vault-password"])\n'
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_asyncio_create_subprocess_shell_denies(self) -> None:
+        handler = _handler()
+        call = "await asyncio.create_subprocess_shell('cat .vault-password')\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_os_execv_denies(self) -> None:
+        handler = _handler()
+        call = 'os.execv("/bin/sh", ["/bin/sh", "-c", "cat .vault-password"])\n'
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_os_spawnl_denies(self) -> None:
+        handler = _handler()
+        call = 'os.spawnl(os.P_WAIT, "/bin/sh", "sh", "-c", "cat .vault-password")\n'
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_pty_spawn_denies(self) -> None:
+        handler = _handler()
+        call = "import pty\npty.spawn(['sh', '-c', 'cat .vault-password'])\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_unparseable_fragment_falls_back_to_the_regex_heuristic(self) -> None:
+        """`ast.parse` cannot handle a bare fragment (mismatched
+        indentation alone) -- the pre-ast regex heuristic is the floor,
+        not a silent miss."""
+        handler = _handler()
+        call = "    os." + "system('cat .vault-password')\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
+        assert handler.matches(hook_input)
+
+
+class TestBroadenedRubyPhpNodeShellExecLiterals:
+    """review 6 minor-2: Open3 and IO.popen for Ruby, proc_open for PHP,
+    and Node's `spawn` with a shell option."""
+
+    def test_ruby_open3_capture2e_denies(self) -> None:
+        handler = _handler()
+        call = "require 'open3'\nOpen3.capture2e('cat .vault-password')\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.rb", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_ruby_io_popen_denies(self) -> None:
+        handler = _handler()
+        call = "IO." + "popen('cat .vault-password')\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.rb", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_php_proc_open_denies(self) -> None:
+        handler = _handler()
+        call = "<?php\nproc_" + "open('cat .vault-password', [], $p);\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.php", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_node_spawn_with_shell_option_denies(self) -> None:
+        handler = _handler()
+        call = "spawn('cat .vault-password', [], {shel" + "l: true});\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.js", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_node_spawn_without_shell_option_stays_allowed(self) -> None:
+        """Control: `spawn` with an ordinary argv list and no shell option
+        never reaches a shell -- left to the (allowed) literal-only scan."""
+        handler = _handler()
+        call = "spawn('cat', ['prod.vault-pass*']);\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.js", "content": call})
+        assert not handler.matches(hook_input)
+
+
+class TestGoRustJavaShellExecLiterals:
+    """review 6 minor-2: `exec.Command(sh, -c, ...)` (Go),
+    `Command::new("sh").arg("-c")` (Rust), and `Runtime.exec`/
+    `ProcessBuilder` with `sh -c` (Java)."""
+
+    def test_go_exec_command_sh_dash_c_denies(self) -> None:
+        handler = _handler()
+        call = "exe" + 'c.Command("sh", "-c", "cat .vault-password")\n'
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.go", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_go_exec_command_ordinary_argv_stays_allowed(self) -> None:
+        handler = _handler()
+        call = "exe" + 'c.Command("cat", "prod.vault-pass*")\n'
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.go", "content": call})
+        assert not handler.matches(hook_input)
+
+    def test_rust_command_new_sh_dash_c_denies(self) -> None:
+        handler = _handler()
+        call = 'Command::new("sh").arg("-c").arg("cat .vault-password");\n'
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.rs", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_rust_command_new_ordinary_argv_stays_allowed(self) -> None:
+        handler = _handler()
+        call = 'Command::new("cat").arg("prod.vault-pass*");\n'
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.rs", "content": call})
+        assert not handler.matches(hook_input)
+
+    def test_java_runtime_exec_denies(self) -> None:
+        handler = _handler()
+        call = "Runtime.getRuntime()." + "exe" + 'c("cat .vault-password");\n'
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.java", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_java_process_builder_sh_dash_c_denies(self) -> None:
+        handler = _handler()
+        call = 'new ProcessBuilder("sh", "-c", "cat .vault-password");\n'
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.java", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_java_process_builder_ordinary_argv_stays_allowed(self) -> None:
+        handler = _handler()
+        call = 'new ProcessBuilder("cat", "prod.vault-pass*");\n'
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.java", "content": call})
         assert not handler.matches(hook_input)
