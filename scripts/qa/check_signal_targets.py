@@ -29,7 +29,8 @@ Python rules:
   ``subprocess``, other than ``kill -0``.
 
 Shell rule, over every tracked ``*.sh``/``*.bash`` file and shell-shebang
-script outside ``tests/``:
+script outside a ``fixtures``/``assets`` directory (deliberately-broken
+fixtures, not first-party code):
 
 * ``shell-unproven-kill`` -- ``kill``, ``pkill`` or ``killall`` in command
   position (including inside ``$( )``, backticks, a ``trap`` action and a
@@ -73,12 +74,47 @@ _HELPER: Final[Path] = _REPO_ROOT / "src" / "claude_code_hooks_daemon" / "utils"
 _SCAN_TREES: Final[tuple[Path, ...]] = (
     _REPO_ROOT / "src" / "claude_code_hooks_daemon",
     _REPO_ROOT / "scripts",
+    _REPO_ROOT / "tests",
 )
 #: Directories scanned one level deep: the ccy supervisor and the CLI entry points.
 _SCAN_FLAT_DIRS: Final[tuple[Path, ...]] = (
     _REPO_ROOT / ".claude" / "ccy",
     _REPO_ROOT / "bin",
 )
+#: Directory names holding fixtures, not first-party code (some are
+#: deliberately invalid Python, e.g. a syntax-error plugin fixture, and would
+#: crash ``ast.parse``); never scanned, in either language.
+_EXCLUDED_DIR_NAMES: Final[frozenset[str]] = frozenset(
+    {"fixtures", "assets", "__fixtures__", "__pycache__"}
+)
+
+#: Test files that deliberately send a hazardous signal to prove the safety
+#: net refuses it, or that signal a pid only after checking (immediately
+#: before the call) that its own environment identifies it as the specific
+#: process the test started -- not project code the Rule should route
+#: through ``safe_signal``. One sentence of reason each; see Plan 00466 N59.
+_SIGNAL_HAZARD_TEST_EXCEPTIONS: Final[dict[str, str]] = {
+    "tests/unit/test_signal_safety_net.py": (
+        "the safety net's own tests: each call to os.kill(1, ...) / "
+        "os.killpg(own_group, ...) is preceded by an installed-net check "
+        "that it will refuse the target, and the net intercepts the call "
+        "before the OS ever sees it; the third call signals a child this "
+        "test itself started in its own session (pgid == pid, proven)"
+    ),
+    "tests/venv_bootstrap_sandbox.py": (
+        "sandbox teardown: terminates a pid only after re-checking, "
+        "immediately before the call, that its environ still carries this "
+        "sandbox's own CLAUDE_HOOKS_PID_PATH"
+    ),
+    "tests/integration/test_venv_bootstrap_driver.py": (
+        "test teardown: signals a pid only after re-checking, immediately "
+        "before the call, that its environ still carries this test's own HOME"
+    ),
+    "tests/unit/supervise/test_supervisor.py": (
+        "pthread_kill targets only this process's own main thread id "
+        "(threading.main_thread().ident), never another process"
+    ),
+}
 
 RAW_SIGNAL: Final[str] = "raw-signal"
 UNPROVEN_HANDLE: Final[str] = "unproven-process-handle"
@@ -364,10 +400,13 @@ def scan_source(source: str, reported: str) -> list[Violation]:
 
 
 def scan_file(path: Path) -> list[Violation]:
-    """Every unproven signal in one file; none in the verifying helper itself."""
+    """Every unproven signal in one file; none in the verifying helper itself
+    or in a file :data:`_SIGNAL_HAZARD_TEST_EXCEPTIONS` names."""
     if path.resolve() == _HELPER.resolve():
         return []
     reported = str(path.relative_to(_REPO_ROOT)) if path.is_relative_to(_REPO_ROOT) else str(path)
+    if reported in _SIGNAL_HAZARD_TEST_EXCEPTIONS:
+        return []
     return scan_source(path.read_text(encoding="utf-8"), reported)
 
 
@@ -379,11 +418,17 @@ def _is_python(path: Path) -> bool:
     return first_line.startswith(b"#!") and b"python" in first_line
 
 
+def _under_excluded_dir(path: Path) -> bool:
+    """Whether ``path`` sits inside a fixtures/assets directory (see :data:`_EXCLUDED_DIR_NAMES`)."""
+    relative = path.relative_to(_REPO_ROOT) if path.is_relative_to(_REPO_ROOT) else path
+    return bool(_EXCLUDED_DIR_NAMES & set(relative.parts[:-1]))
+
+
 def scanned_files() -> list[Path]:
     """Every Python file the Detector judges."""
     files: set[Path] = set()
     for tree in _SCAN_TREES:
-        files.update(path for path in tree.rglob("*.py") if "__pycache__" not in path.parts)
+        files.update(path for path in tree.rglob("*.py") if not _under_excluded_dir(path))
     for directory in _SCAN_FLAT_DIRS:
         files.update(path for path in directory.iterdir() if path.is_file() and _is_python(path))
     return sorted(files)
@@ -892,7 +937,7 @@ def _is_shell(path: Path) -> bool:
 
 
 def scanned_shell_files() -> list[Path]:
-    """Every tracked shell script the Detector judges; the test suite's own are not first-party code."""
+    """Every tracked shell script the Detector judges, including under ``tests/``."""
     # SECURITY: list-form subprocess, no shell=True, trusted system tool (git).
     result = subprocess.run(
         ["git", "-C", str(_REPO_ROOT), "ls-files", "-z"],
@@ -904,7 +949,7 @@ def scanned_shell_files() -> list[Path]:
     return sorted(
         path
         for path in paths
-        if path.relative_to(_REPO_ROOT).parts[0] != "tests"
+        if not _under_excluded_dir(path)
         and path.is_file()
         and not path.is_symlink()
         and _is_shell(path)

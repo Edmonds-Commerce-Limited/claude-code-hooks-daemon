@@ -191,16 +191,21 @@ The search won everywhere it disagreed, except where the lead ruled.
 **Scope.** First-party source in both languages the pattern occurs in:
 
 - Python in `src/claude_code_hooks_daemon`, `scripts`, `.claude/ccy` (the ccy
-  supervisor) and `bin`;
+  supervisor), `bin`, and `tests`;
 - every tracked shell script, including `CLAUDE/Plan`, `.claude/hooks`, `bin`,
-  the skill installer and the install templates.
+  the skill installer, the install templates, and `tests`.
 
-Together that is 795 files: 653 Python and 142 shell. No generated or
-vendored code is tracked in those trees. The project had no recorded sweep
-decision; this is it.
+Together that is 1978 files (795 non-`tests/` — 653 Python and 142 shell —
+plus the `tests/` tree). No generated or vendored code is tracked in those
+trees; a `fixtures`/`assets` directory is excluded (fixture content is not
+first-party code, and includes files that are deliberately invalid Python).
+The project had no recorded sweep decision; this is it.
 
-**Excluded: `tests/`.** Scanning it reports 6 sites, each examined
-individually:
+**`tests/` is in scope, not excluded (revised — conformance review finding
+1).** A prior draft of this report excluded `tests/` and framed that as a
+pending Owner decision; the merged code had in fact already narrowed the
+Rule permanently rather than left the question open (section 4 does not
+allow that). Scanning `tests/` reports 6 sites, each examined individually:
 
 - three in the safety net's own tests, which call `os.kill(1, …)`/`killpg` on
   purpose to prove the net refuses them;
@@ -208,8 +213,11 @@ individually:
   `test_venv_bootstrap_driver.py:626`;
 - `test_supervisor.py:276`, a `pthread_kill` to our own main thread.
 
-None carries the hazard. The exclusion is still not hazard-free as a rule for
-new test code, so it is referred.
+None carries the hazard, and each now has a narrow, sentence-backed Exception
+in `_SIGNAL_HAZARD_TEST_EXCEPTIONS` (see "Resolved" below) rather than a
+directory-wide carve-out. A new hazardous call anywhere else under `tests/`
+is still caught — pinned by
+`test_a_new_raw_kill_under_tests_is_reported`.
 
 **Total instances across all scans:** 11 on the branch, of which 10 are on
 main. The eleventh is the N53 branch shape, which never merged and is covered
@@ -263,7 +271,10 @@ Bash command at top level, for runtime guards. It does not recurse into
 Folding the two together belongs to the Plan 00464 shell-parser
 consolidation.
 
-## Decisions referred to the owner
+## Decisions referred to the owner: extend the rule
+
+These name a Rule that does not exist yet and could be built wider; current
+scanned coverage is not narrowed by leaving either unbuilt.
 
 1. **Leave the named wider rule unbuilt: a `$!` signalled after its job may
    have ended.**
@@ -290,18 +301,55 @@ consolidation.
    - To build it: the rule above, plus a proof shape for those five (a
      parent check, as `resolve_venv.sh` now uses).
 
-2. **Leave `tests/` outside the rule.**
+2. **`pthread_kill` stays inside `raw-signal` for thread targets.**
 
-   - Counts: 6 sites, all examined, 0 carrying the hazard, 0 remaining.
-   - What stopped it: the net's own tests must signal pid 1 and our own
-     group, to prove the net refuses them. Scanning `tests/` would need an
-     exception for them, and exceptions are the owner's.
-   - To build it:
-     - a test-side proof helper the detector recognises, for the two
-       identity-checked cleanups;
-     - an owner-agreed exception for `tests/unit/test_signal_safety_net.py`;
-     - `pthread_kill` taken out of `raw-signal` for thread targets. It
-       cannot reach another process, so it carries no hazard.
+   - Counts: 1 site (`tests/unit/supervise/test_supervisor.py`), handled by
+     the narrow per-file exception below rather than by a rule change.
+   - What stopped it: `pthread_kill` cannot reach another process, so a
+     thread-target call carries no hazard the way `os.kill`/`os.killpg` do;
+     narrowing the rule to recognise that needs its own proof shape
+     (a bound-to-`threading.main_thread().ident`/`get_ident()` check), which
+     was not built.
+   - To build it: a `raw-signal` carve-out for `signal.pthread_kill` whose
+     thread-id argument is proven to name a thread of the calling process,
+     not a signal to any other process.
+
+## Resolved: `tests/` is now inside the rule (conformance review finding 1)
+
+Superseded — a prior draft of this report left `tests/` outside the Rule's
+scan and framed that exclusion as still pending Owner sign-off. The
+independent conformance review (`260925-n59-conformance-review.md`, finding
+
+1. found the merged code had already narrowed the Rule (excluded the whole
+   tree, permanently, in code already blocking) rather than left it unbuilt or
+   flagged as an Instance awaiting the Owner, which section 4 does not permit.
+   Fixed by widening the scan to include `tests/` by default and carving a
+   narrow, sentence-backed Exception for the specific sites that deliberately
+   exercise the hazard, per `scan_file`'s `_SIGNAL_HAZARD_TEST_EXCEPTIONS`:
+
+- `tests/unit/test_signal_safety_net.py` — the safety net's own tests: each
+  `os.kill(1, ...)`/`os.killpg(own_group, ...)` is preceded by an
+  installed-net check that it will refuse the target, and the net
+  intercepts the call before the OS ever sees it.
+- `tests/venv_bootstrap_sandbox.py` and
+  `tests/integration/test_venv_bootstrap_driver.py` — identity-checked
+  cleanup: each re-checks, immediately before the call, that the pid's
+  environ still carries a marker only that test's own process could set.
+- `tests/unit/supervise/test_supervisor.py` — `pthread_kill` targets only
+  this process's own main thread id, never another process (see referral 2
+  above for why the rule itself was not widened to recognise this generally).
+
+A test (`test_signal_hazard_exceptions_name_only_files_that_exist`) pins
+that every exception names a file that exists, and
+`test_a_new_raw_kill_under_tests_is_reported` pins that a new hazard under
+`tests/` is still caught.
+
+## Decision referred to the owner: tighten a shipped but weaker-than-ideal check
+
+Unlike the two items above, this describes an existing weakness in the
+Rule's current, already-merged, already-blocking semantics — not a Rule
+that could additionally be built wider. Flagged distinctly per conformance
+review finding 2.
 
 3. **The shell proof is "a check ran earlier in the function", not "the check
    gates the kill".**
@@ -316,7 +364,8 @@ consolidation.
    - To build it: require the `kill` to sit in the success branch of an `if`
      or `&&` on the verifier, or after a `||` return on it.
 
-The rule is merged at full width. Nothing was weakened while these wait.
+The rule is merged at full width, including `tests/`. Nothing scanned is
+narrowed while these wait.
 
 ## Permanence
 
@@ -324,7 +373,8 @@ The rule is merged at full width. Nothing was weakened while these wait.
 - Blocking as `llm_qa` tool `signal_targets`, with a `ToolConfig` and a
   violation summariser.
 - `./scripts/qa/llm_qa.py signal_targets` exits 0 on the final commit, with
-  795 files scanned and no findings.
+  1978 files scanned (795 non-`tests/` plus the `tests/` tree, now in scope)
+  and no findings.
 - Also green through the entry point: `shell_check`, `error_hiding`,
   `shell_audit`, `lint`, `format`, `type_check`, `pyright`, `magic_values`,
   `canonical_callers`, `fail_open_inventory`, `semgrep`, `security` and

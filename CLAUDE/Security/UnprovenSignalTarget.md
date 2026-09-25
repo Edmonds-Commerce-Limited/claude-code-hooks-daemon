@@ -9,7 +9,7 @@ target pid was not proven to be the intended process. Its four rules:
 | `raw-signal`              | Python `os.kill`, `os.killpg`, `signal.pthread_kill`, however imported                                                                                      |
 | `unproven-process-handle` | Python `terminate`/`kill`/`send_signal` on a `psutil` handle built from a raw pid or `process_iter()`, and `send_signal` on anything not a Popen we spawned |
 | `kill-command`            | A `kill`/`pkill`/`killall` argv run through `subprocess`                                                                                                    |
-| `shell-unproven-kill`     | `kill`/`pkill`/`killall` in every tracked `*.sh`/`*.bash` and shell-shebang script outside `tests/`                                                         |
+| `shell-unproven-kill`     | `kill`/`pkill`/`killall` in every tracked `*.sh`/`*.bash` and shell-shebang script outside a `fixtures`/`assets` directory                                  |
 
 Index: [README.md](README.md). Found by the infra owner after the container
 died twice with exit 137 (Plan 00466 N59).
@@ -98,16 +98,32 @@ accepts; see below.
   catch it, "`$!` signalled from a scope that cannot see the job still
   running", is named and not built.
 
-- **Tests.** The Detector does not scan `tests/`. The session net refuses the
-  catastrophic targets. It does not protect an unrelated process that a test
-  signals by a pid its code under test reported:
+- **Tests, except a narrow named exception.** The Detector scans `tests/`
+  like any other first-party tree (only a `fixtures`/`assets` directory is
+  excluded, as fixture content, not code). A handful of sites deliberately
+  signal a hazardous target on purpose, and are listed by path with a
+  one-sentence reason in `check_signal_targets.py`'s
+  `_SIGNAL_HAZARD_TEST_EXCEPTIONS` — not a directory-wide carve-out, so a new
+  hazardous call anywhere else under `tests/` is still caught:
 
-  - `tests/venv_bootstrap_sandbox.py` cleanup now checks that the stand-in's
-    environment still names its own sandbox before it signals.
-  - `tests/integration/test_venv_bootstrap_driver.py` now checks that a
-    build pid the driver reported still carries the test's own `HOME` before
-    it signals.
-  - A new test site of either shape is found by review alone.
+  - `tests/unit/test_signal_safety_net.py` — the safety net's own tests:
+    each call is preceded by an installed-net check that it will refuse the
+    target, and the net intercepts the call before the OS ever sees it.
+  - `tests/venv_bootstrap_sandbox.py` cleanup checks that the stand-in's
+    environment still names its own sandbox immediately before it signals.
+  - `tests/integration/test_venv_bootstrap_driver.py` checks that a build
+    pid the driver reported still carries the test's own `HOME` immediately
+    before it signals.
+  - `tests/unit/supervise/test_supervisor.py` — `pthread_kill` targets only
+    this process's own main thread id, never another process. The Detector
+    does not (yet) recognise that shape generally: `signal.pthread_kill` is
+    still `raw-signal` for every other file, and a general carve-out for a
+    proven own-thread target is named but not built (see the DBF report's
+    "extend the rule" referrals).
+  - The session net (`tests/signal_safety_net.py`) still separately refuses
+    the catastrophic targets at runtime; it does not protect an unrelated
+    process that a test signals by a pid its code under test reported, which
+    is why the four sites above are proven at the call site, not only netted.
 
 - **Data flow beyond one scope.** A Python pid is proven only through the
   helper, and a shell pid only by a check in the same function. A pid proven

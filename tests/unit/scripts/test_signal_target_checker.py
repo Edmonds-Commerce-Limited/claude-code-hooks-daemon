@@ -460,7 +460,36 @@ class TestTheRepository:
             ".claude/hooks/pre-tool-use",
         ):
             assert expected in roots
+        # tests/ is in scope (Plan 00466 N59, conformance finding 1); only a
+        # fixtures/assets directory is excluded, not the whole tree. The only
+        # shell script currently under tests/ sits in a fixtures dir, so this
+        # asserts the exclusion rather than a positive tests/ hit.
         assert not any(root.startswith("tests/") for root in roots)
+        assert "tests/fixtures/error_hiding/pre_fix_run_lint.sh" not in roots
+
+    def test_tests_tree_is_scanned_but_fixtures_under_it_are_not(self, checker: ModuleType) -> None:
+        assert not checker._under_excluded_dir(_REPO_ROOT / "tests" / "foo.sh")
+        assert checker._under_excluded_dir(_REPO_ROOT / "tests" / "fixtures" / "foo.sh")
+        assert checker._under_excluded_dir(
+            _REPO_ROOT / "tests" / "integration" / "fixtures" / "foo.py"
+        )
+
+    def test_tests_tree_is_in_scope_for_python_too(self, checker: ModuleType) -> None:
+        roots = {path.relative_to(_REPO_ROOT).as_posix() for path in checker.scanned_files()}
+        assert "tests/unit/test_signal_safety_net.py" in roots
+        assert not any("/fixtures/" in root for root in roots)
+
+    def test_signal_hazard_exceptions_name_only_files_that_exist(self, checker: ModuleType) -> None:
+        for relative in checker._SIGNAL_HAZARD_TEST_EXCEPTIONS:
+            assert (_REPO_ROOT / relative).is_file(), f"{relative} does not exist"
+
+    def test_a_new_raw_kill_under_tests_is_reported(
+        self, checker: ModuleType, tmp_path: Path
+    ) -> None:
+        new_file = tmp_path / "test_a_new_hazard.py"
+        new_file.write_text("import os\nimport signal\n\nos.kill(pid, signal.SIGKILL)\n")
+        violations = checker.scan_file(new_file)
+        assert [v.rule for v in violations] == [checker.RAW_SIGNAL]
 
     def test_the_message_points_at_documentation_naming_every_rule(
         self, checker: ModuleType
