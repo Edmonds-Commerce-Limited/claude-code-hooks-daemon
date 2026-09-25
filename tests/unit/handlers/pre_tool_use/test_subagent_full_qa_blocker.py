@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import os
 import shlex
-import time
 from collections.abc import Iterator, Sequence
 from itertools import pairwise
 from pathlib import Path
@@ -932,17 +931,37 @@ class TestBraceExpansionIsBounded:
     A 139-character command with 23 groups took 18 s; past the client's 30 s
     budget the whole PreToolUse chain fails open. The work is now bounded by
     the cap, and a word with more alternatives than the cap is judged as the
-    whole suite: it cannot be judged, so it fails closed.
+    whole suite: it cannot be judged, so it fails closed. The work is
+    counted in expansion steps, never timed.
     """
 
-    _BUDGET_SECONDS = 1.0
+    #: At most this many expansion steps per word: each alternative the cap
+    #: allows, reached through at most every group the cap allows.
+    _STEP_BOUND = (_blocker_module._MAX_BRACE_ALTERNATIVES + 1) * (
+        _blocker_module._MAX_BRACE_GROUPS + 1
+    )
+
+    @staticmethod
+    def _count_steps(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+        """Record every call of the recursive expander, its recursion included."""
+        steps: list[str] = []
+        real = _blocker_module._brace_alternatives
+
+        def _counting(word: str) -> Iterator[str]:
+            steps.append(word)
+            yield from real(word)
+
+        monkeypatch.setattr(_blocker_module, "_brace_alternatives", _counting)
+        return steps
 
     @pytest.mark.parametrize("groups", [24, 40, 200])
-    def test_many_groups_are_judged_within_a_second(self, groups: int) -> None:
+    def test_many_groups_take_a_bounded_number_of_steps(
+        self, groups: int, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        steps = self._count_steps(monkeypatch)
         command = "pytest " + "{a,b}" * groups + " --co; git status"
-        began = time.perf_counter()
         find_full_qa_invocation(command, _patterns())
-        assert time.perf_counter() - began < self._BUDGET_SECONDS
+        assert len(steps) <= self._STEP_BOUND, len(steps)
 
     @pytest.mark.parametrize("groups", [7, 24])
     def test_more_alternatives_than_the_cap_are_read_as_a_glob(self, groups: int) -> None:
@@ -963,13 +982,16 @@ class TestBraceExpansionIsBounded:
         command = "pytest tests/unit/qa/test_" + "{a,b}" * 5 + ".py"
         assert find_full_qa_invocation(command, _patterns()) is None
 
-    def test_deeply_nested_braces_are_read_without_recursing(self) -> None:
-        began = time.perf_counter()
+    def test_deeply_nested_braces_are_read_without_recursing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        steps = self._count_steps(monkeypatch)
         narrow = "pytest tests/unit/qa/" + "{a," * 2000 + "b" + "}" * 2000
         assert find_full_qa_invocation(narrow, _patterns()) is None
         wide = "pytest " + "{a," * 2000 + "b" + "}" * 2000
         assert find_full_qa_invocation(wide, _patterns()) is not None
-        assert time.perf_counter() - began < self._BUDGET_SECONDS
+        # Past the group cap the word is read by one linear pass, never expanded.
+        assert steps == []
 
 
 class TestEnvChdirIsACdForOneCommand:
@@ -1176,17 +1198,18 @@ class TestWhatCannotBeSeenFailsClosed:
 
 
 class TestTheWorkIsBounded:
-    """Review 5 n5 and n6: a long command, or deep nesting, fails closed quickly."""
+    """Review 5 n5 and n6: a long command, or deep nesting, fails closed without parsing."""
 
-    _BUDGET_SECONDS = 1.0
-
-    def test_a_command_past_the_size_cap_naming_a_program_is_denied(self) -> None:
+    def test_a_command_past_the_size_cap_naming_a_program_is_denied(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         command = "echo " + "a" * 400_000 + "; pytest tests/unit/x.py"
-        began = time.perf_counter()
+        ledger = _ParseLedger(monkeypatch)
         match = find_full_qa_invocation(command, _patterns())
-        assert time.perf_counter() - began < self._BUDGET_SECONDS
         assert match is not None
         assert "too long" in match.fail_closed
+        # Judged by a linear scan for a program's name: nothing reaches a parser.
+        assert ledger.entries == []
 
     def test_a_command_past_the_size_cap_naming_no_program_is_allowed(self) -> None:
         assert find_full_qa_invocation("echo " + "a" * 400_000, _patterns()) is None
