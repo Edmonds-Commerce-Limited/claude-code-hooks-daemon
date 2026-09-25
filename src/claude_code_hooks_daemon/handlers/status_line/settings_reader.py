@@ -1,4 +1,4 @@
-"""Shared, mtime-cached reader for ``~/.claude/settings.json``.
+"""Shared, mtime-cached reader for Claude Code's user ``settings.json``.
 
 :class:`ModelContextHandler` needs values out of the user's Claude settings on
 every status-line render. The status line re-renders on every Claude Code
@@ -18,8 +18,8 @@ from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.handlers.status_line.mtime_cache import MtimeCachedFile
+from claude_code_hooks_daemon.utils.claude_config import claude_config_dir
 
-_CLAUDE_DIR = ".claude"
 _SETTINGS_FILENAME = "settings.json"
 
 
@@ -39,8 +39,12 @@ _settings_reader: MtimeCachedFile[dict[str, Any]] = MtimeCachedFile(
 
 
 def get_settings_path() -> Path:
-    """Return the canonical Claude settings path (``~/.claude/settings.json``)."""
-    return Path.home() / _CLAUDE_DIR / _SETTINGS_FILENAME
+    """Return Claude Code's user settings path, ``<config dir>/settings.json``.
+
+    The config dir is :func:`claude_config_dir`: ``$CLAUDE_CONFIG_DIR``, else
+    ``~/.claude`` (Plan 00468 G13).
+    """
+    return claude_config_dir() / _SETTINGS_FILENAME
 
 
 def clear_settings_cache() -> None:

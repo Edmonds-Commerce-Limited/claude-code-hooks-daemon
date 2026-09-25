@@ -27,6 +27,7 @@ def _args(
         check_staged=check_staged,
         lint=lint,
         json_output=json_output,
+        list_checks=False,
     )
 
 
@@ -56,6 +57,39 @@ def _scaffold(tmp_path: Path, config_body: str = _CONFIG_ENABLED) -> Path:
         timeout=Timeout.GIT_CONTEXT,
     )
     return root
+
+
+class TestListChecks:
+    """Plan 00466 N18: the check catalogue is listed from the registry itself.
+
+    Documentation used to state how many rules lint the plan index, and the
+    count went stale each time a rule was added. The docs now point here.
+    """
+
+    def test_lists_every_registered_check_with_its_stages(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        from claude_code_hooks_daemon.plan_qa.checks import all_checks
+
+        args = _args(tmp_path)
+        args.list_checks = True
+
+        assert cmd_plan_qa(args) == 0
+
+        out = capsys.readouterr().out
+        for spec in all_checks():
+            assert spec.check_id in out
+        assert "plan-stats-arithmetic" in out
+        stats_line = next(line for line in out.splitlines() if "plan-stats-arithmetic" in line)
+        for stage in ("edit", "commit", "sweep"):
+            assert stage in stats_line
+
+    def test_listing_needs_no_plan_tree(self, tmp_path: Path) -> None:
+        """It describes the daemon, not the project, so it works anywhere."""
+        args = _args(tmp_path / "does-not-exist")
+        args.list_checks = True
+
+        assert cmd_plan_qa(args) == 0
 
 
 class TestSweep:

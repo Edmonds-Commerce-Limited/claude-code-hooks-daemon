@@ -488,3 +488,17 @@ class TestGitStashAcceptanceTests:
         tests = handler.get_acceptance_tests()
         assert len(tests) >= 2
         assert all(t.expected_decision == Decision.DENY for t in tests)
+
+
+class TestGitStashQuotedWords:
+    """Plan 00408 Task 3.0 sibling sweep: bash removes in-word quoting first."""
+
+    @staticmethod
+    def _matches(command: str) -> bool:
+        return GitStashHandler().matches({"tool_name": "Bash", "tool_input": {"command": command}})
+
+    def test_a_quoted_subcommand_is_still_a_stash(self):
+        assert self._matches('git "stash"') is True
+
+    def test_a_quoted_recovery_verb_is_still_a_recovery(self):
+        assert self._matches("git stash 'pop'") is False

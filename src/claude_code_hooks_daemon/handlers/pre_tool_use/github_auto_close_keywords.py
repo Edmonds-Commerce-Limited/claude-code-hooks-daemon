@@ -58,10 +58,6 @@ _LOGGER = logging.getLogger(__name__)
 _MODE_BLOCK: Final[str] = "block"
 _MODE_WARN: Final[str] = "warn"
 
-# Hook input field carrying the tool call's working directory, used to
-# resolve a relative -F path the way git itself would.
-_CWD_FIELD: Final[str] = "cwd"
-
 # The nine closing keywords GitHub documents. Case-insensitivity and the
 # optional trailing colon ("Closes: #10") are applied in the pattern.
 _CLOSING_KEYWORDS: Final[tuple[str, ...]] = (
@@ -217,7 +213,7 @@ class GithubAutoCloseKeywordsHandler(PreToolUseHandlerBase):
         so a term in a git message file went unscanned there while the same
         term inline was denied (Plan 00412, D-PUB-2).
         """
-        cwd = hook_input.get(_CWD_FIELD)
+        cwd = hook_input.get(HookInputField.CWD)
         return [
             found.text
             for found in read_message_files(segment, cwd if isinstance(cwd, str) else None)

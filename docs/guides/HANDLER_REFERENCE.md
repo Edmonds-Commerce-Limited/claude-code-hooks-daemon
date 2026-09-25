@@ -421,7 +421,7 @@ handlers:
 | **Type**       | Blocking                |
 | **Event**      | PreToolUse              |
 
-**Description:** Blocks Bash commands that `cd` into `.claude/hooks-daemon/` (or into a daemon-internal subdirectory and then run something). The daemon is an upstream dependency: anything edited inside that directory is overwritten by the next upgrade, and a shell rooted there resolves project-relative paths against the wrong tree.
+**Description:** Blocks Bash commands that `cd` or `pushd` into `.claude/hooks-daemon/` (or into a daemon-internal subdirectory and then run something). The daemon is an upstream dependency: anything edited inside that directory is overwritten by the next upgrade, and a shell rooted there resolves project-relative paths against the wrong tree. Options before the path (`cd -- <path>`, `cd -P <path>`), quoting or an escape inside the path (`.claude/'hooks-daemon'`) and a doubled `//` do not change the directory, so none of them changes the verdict. `popd` and `cd -` are not matched: they name no path, and the directory they return to was entered by an earlier command this rule already judged.
 
 **Do this instead:** run the daemon CLI from the project root — it works regardless of the current directory.
 
@@ -611,9 +611,9 @@ Denied wherever it appears, not only inside a loop: an advisory in a background 
 **Also blocked** — `R-WAIT-ON-WRAPPER-PID`, a wait on a wrapper's `$!`:
 
 - `setsid ./job.bash & kill -0 $!` — `$!` is `setsid`'s pid, and setsid forks and exits at once, so the wait ends immediately and reports the job finished
-- Advisory (not denied) for `nohup sh -c`, `nohup bash -c`, `timeout` and `env`: whether those hand the pid on or keep it turns on what they were asked to run, which the command text does not say
+- Advisory (not denied) for `nohup sh -c`, `nohup bash -c`, `timeout` and `env sh -c`: whether those hand the pid on or keep it turns on what they were asked to run, which the command text does not say
 - Remedies: a pidfile the job writes itself (`nohup sh -c './job.bash > run.log 2>&1 & echo $! > job.pid' &`), `pgrep -P <wrapper-pid>` once to resolve the child, or waiting on a log marker
-- Never flagged: `./job.bash & pid=$!` (no wrapper), `nohup ./job.bash & pid=$!` (nohup execs in place), `setsid -w ./job.bash & wait $!` (`-w` makes the wrapper outlive the job)
+- Never flagged: `./job.bash & pid=$!` (no wrapper), `nohup ./job.bash & pid=$!` and `env VAR=1 ./job.bash & wait $!` (both exec in place), `setsid -w ./job.bash & wait $!` (`-w` makes the wrapper outlive the job)
 
 **Allowed** — these are the fixes:
 
@@ -1030,7 +1030,7 @@ handlers:
 
 **Description:** Makes a human's approval of the parent-to-main merge a REAL, configurable gate instead of a sentence in `Worktree.core.md` nobody enforces (Plan 00367). With `worktree.merge_to_main_requires_human_approval: true`, a `git merge <branch>` (or `gh pr merge`) run in the MAIN checkout while it is on the default branch is denied until a human has approved that branch. A merge run inside a linked worktree (child into parent) is never gated -- that is the automatic half of the worktree workflow.
 
-**Fires when:** the key is true, the command is a `git merge`/`gh pr merge` naming a real branch (not `--abort`/`--continue`/`--quit`, and not a bare mention inside a quoted string such as `echo 'git merge x'`), and the shell's cwd is a MAIN checkout currently on its default branch. With the key false (the shipped default) the handler never matches and the parent-to-main merge happens once verification passes.
+**Fires when:** the key is true, the command is a `git merge`/`gh pr merge` (not `--abort`/`--continue`/`--quit`) or a `git pull <remote> <branch>`, and the shell's cwd is a MAIN checkout currently on its default branch. A `git merge` whose branch is not in the command text (`... | xargs git merge`, or a bare `git merge` of the upstream) is gated under the key `unnamed-branch`. A pull naming no branch, or naming the default branch itself (`git pull origin main` on `main`), is an ordinary update and is not gated. A merge named inside a quoted string (`echo 'git merge x'`) IS matched, because the shell runs the same text in `bash -c "git merge x"`. With the key false (the shipped default) the handler never matches and the parent-to-main merge happens once verification passes.
 
 **The human's route:** run `hooks-daemon approve-merge <branch>`, which records a one-shot marker under the daemon's untracked directory (`untracked/merge-approvals/<branch>.approved`) that the very next merge of that branch consumes. Approving one branch does not approve another, and an approval left unconsumed because the key is off is noted by the command.
 
@@ -1570,8 +1570,10 @@ Two sources, with **deliberately different disclosure rules**:
   not open the file: it is itself read-protected by
   [`secret_file_guard`](#secret_file_guard) (Plan 00272).
 
-A missing, empty or comments-only secret file makes that source silently inert
-by design, so a checkout without the file still works.
+A missing, empty or comments-only secret file makes that source inert by
+design, so a checkout without the file still works. When the config names the
+list and it is missing, [`secret_file_hygiene_checker`](#secret_file_hygiene_checker)
+says so once at SessionStart.
 
 **Four surfaces, one guard.** The same two sources judge everything a tool call
 would introduce:
@@ -1654,6 +1656,8 @@ switched off:
 | `gh issue comment`, `list` and `view` | No generator produces a comment body; `sensitive_content` scans one for secret terms.              |
 | The daemon's own repository           | It stands down in self-install, so the project's own issue workflow is unaffected.                 |
 | `--web`                               | It files nothing — it opens GitHub's forms, which state the rule; the defect form needs two ticks. |
+
+With no `--repo` and no `GH_REPO`, the target is read from the working directory's git remotes, as `gh` itself does. ANY remote pointing at this repository counts, not only `origin`: `gh` chooses from the whole set and prefers one named `upstream`. A fork filing on its own tracker passes `--repo`, which always wins.
 
 `--web` is the deliberate hole, and it is what keeps the gate honest. Someone
 who genuinely cannot run the generator — a defect that stops the CLI, a machine
@@ -2051,6 +2055,29 @@ handlers:
 
 ---
 
+#### plan_status_snapshot
+
+| Property       | Value                   |
+| -------------- | ----------------------- |
+| **Config key** | `plan_status_snapshot`  |
+| **Priority**   | 30                      |
+| **Type**       | Advisory (never blocks) |
+| **Event**      | PreToolUse              |
+
+**Description:** Sensor for `goal_injection` (PostToolUse): immediately before a `PLAN.md` Write/Edit under the active plan directory, records the plan's current status plus the SHA-256 hash of the PREDICTED post-write text (applying the same edit forward), keyed by `tool_use_id`. `goal_injection` consumes it as ground truth in place of inferring the pre-write status from `old_string`/`new_string` or git HEAD — removing collisions a bare status value could have with a table cell or a plan title, and HEAD's own lag behind an uncommitted flip. Never blocks, never surfaces advisory text. Gated on `goal_injection`'s own resolved config state, so a matching write's read/parse/hash only runs when `goal_injection` is actually enabled.
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    plan_status_snapshot:
+      enabled: true
+      priority: 30
+```
+
+---
+
 #### lsp_enforcement
 
 | Property       | Value             |
@@ -2074,12 +2101,14 @@ handlers:
 
 **Grep is still correct for:** text patterns in content, log searching, and finding strings in config files. Those are never blocked.
 
+**When LSP counts as available:** only where an enabled Claude Code plugin provides a language server for the searched file type. Claude Code keeps the LSP tool inactive until you install a code intelligence plugin for the language. The file type comes from the Grep `glob`, `type` or `path`, or from a grep/rg command's `--include`, `-g`/`--glob`, `-t`/`--type` and file arguments. A search that names no file type counts as covered by any enabled language server. `ENABLE_LSP_TOOL` is not consulted.
+
 **Options:**
 
-| Option        | Values                             | Default      | Description                                                                                                                                        |
-| ------------- | ---------------------------------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `mode`        | `block_once`, `advisory`, `strict` | `block_once` | `block_once` denies the first symbol-lookup grep per session with guidance and allows retries; `strict` denies every one; `advisory` never denies. |
-| `no_lsp_mode` | `block`, `advisory`, `disable`     | `block`      | Behaviour when no LSP server is configured. `disable` switches the handler off entirely in that case.                                              |
+| Option        | Values                             | Default      | Description                                                                                                                                                               |
+| ------------- | ---------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mode`        | `block_once`, `advisory`, `strict` | `block_once` | `block_once` denies the first symbol-lookup grep per session with guidance and allows retries; `strict` denies every one; `advisory` never denies.                        |
+| `no_lsp_mode` | `advisory`, `block`, `disable`     | `advisory`   | Behaviour when no enabled plugin serves the searched file type. `advisory` allows and suggests a code intelligence plugin; `block` denies anyway; `disable` stays silent. |
 
 **Config example:**
 
@@ -2091,7 +2120,7 @@ handlers:
       priority: 38
       options:
         mode: block_once
-        no_lsp_mode: disable  # no LSP configured? stay out of the way
+        no_lsp_mode: disable  # no plugin serves this file type? stay out of the way
 ```
 
 ---
@@ -2282,7 +2311,7 @@ handlers:
 
 **Block-level checks (new material):** a parseable `**Status**:` line must exist (`status-line-present`); the token must be one of Not Started, In Progress, Complete, Blocked, Cancelled, Superseded, Dormant (`status-enum-and-date`); the header must not contradict an all-ticked body (`header-body-coherence`); tasks must use the template grammar `- [ ] ⬜ **Task N.N**:` rather than ad-hoc markers (`task-grammar`). Advisory-level checks cover missing Created/Owner/Priority headers, a terminal status set while the folder is still in the plan root, edits to archived plans, and backticked `src/...` paths that no longer exist.
 
-**The plan index (`README.md`) is linted against TWO rules:** `index-row-length` -- every line must stay under 500 characters, because an index row is a pointer (a link, a status and one clause), not a summary duplicated from the linked `PLAN.md`. Only an edit that makes the index worse blocks (a new over-long line, or a longer worst offender), so an index that already has one stays editable, including by the edit that fixes it. The limit is not configurable: it is shared with the batch guard `tests/integration/test_plan_index_navigability.py`, which asserts a fixed ceiling, and two guards over one rule must read one number. `index-no-log` (advisory, on all three plan QA surfaces) flags a bullet written in LOG grammar -- a bold "Before that"/"Prior to that"/"Previously" lead-in, or a bold ISO date -- because the index has twice re-grown a stacked reconciliation ledger of past recounts instead of stating current truth; history belongs in git or in the relevant plan's `JOURNAL/`. No plan-document rule applies to the index -- it has no `**Status**:` line and needs none.
+**The plan index (`README.md`) is linted against THREE rules:** `index-row-length` -- every line must stay under 500 characters, because an index row is a pointer (a link, a status and one clause), not a summary duplicated from the linked `PLAN.md`. Only an edit that makes the index worse blocks (a new over-long line, or a longer worst offender), so an index that already has one stays editable, including by the edit that fixes it. The limit is not configurable: it is shared with the batch guard `tests/integration/test_plan_index_navigability.py`, which asserts a fixed ceiling, and two guards over one rule must read one number. `index-no-log` (advisory, on all three plan QA surfaces) flags a bullet written in LOG grammar -- a bold "Before that"/"Prior to that"/"Previously" lead-in, or a bold ISO date -- because the index has twice re-grown a stacked reconciliation ledger of past recounts instead of stating current truth; history belongs in git or in the relevant plan's `JOURNAL/`. `plan-stats-arithmetic` (advisory at edit, blocking at commit) checks that the statistics' closing self-check agrees with the figures above it, naming the line; the edit only advises because updating those figures takes more than one edit. No plan-document rule applies to the index -- it has no `**Status**:` line and needs none.
 
 **Policy configuration:** all three plan QA surfaces (this handler, `plan_qa_commit_gate`, `plan_qa_sweep`) plus the `plan-qa` CLI share ONE policy block under the top-level `plan_workflow.qa` key -- not per-handler `options`:
 
@@ -2518,7 +2547,7 @@ handlers:
 
 **Enforcement mode:** honours `plan_workflow.qa.commit_gate_mode` (`block` | `warn` | `off`, default `warn`). In `warn` (the rollout default) findings render as advisory context -- read them and amend the commit content before it lands; `block` denies the commit with a diffable TODO list of what the commit must also contain; `off` disables the gate.
 
-**Invariants checked:** creating a plan folder ⇒ the same commit stages its README index row (`index-at-birth`) with a number from the git counter / `mkplan.bash` (`counter-sanity`, `no-new-collisions`); flipping a plan to Complete/Cancelled/Superseded ⇒ the same commit contains the `git mv` into the archive dir plus the README row and statistics update (`terminal-state-atomic`); a `PLAN.md` staged under an archive dir must carry a terminal status in its STAGED content, not merely in the worktree file — `git mv` stages a rename using the index's existing blob, so a status flip made in the worktree but never re-`git add`ed can land a non-terminal status inside `Completed/`/`Cancelled/` (`archived-status-coherence`); every folder has a README row in the section matching its location and every row link resolves (`row-folder-bijection`, `stats-recount`); every line of the README index stays under 500 characters (`index-row-length`); a commit claiming `Plan NNNNN` that stages src/test/config changes should also touch that plan's PLAN.md (`same-commit-plan-doc`), and plans are referenced as `Plan NNNNN:` (`plan-ref-format`).
+**Invariants checked:** creating a plan folder ⇒ the same commit stages its README index row (`index-at-birth`) with a number from the git counter / `mkplan.bash` (`counter-sanity`, `no-new-collisions`); flipping a plan to Complete/Cancelled/Superseded ⇒ the same commit contains the `git mv` into the archive dir plus the README row and statistics update (`terminal-state-atomic`); a `PLAN.md` staged under an archive dir must carry a terminal status in its STAGED content, not merely in the worktree file — `git mv` stages a rename using the index's existing blob, so a status flip made in the worktree but never re-`git add`ed can land a non-terminal status inside `Completed/`/`Cancelled/` (`archived-status-coherence`); every folder has a README row in the section matching its location and every row link resolves (`row-folder-bijection`, `stats-recount`); every line of the README index stays under 500 characters (`index-row-length`); a commit staging the README keeps its statistics' closing self-check in agreement with the figures above it (`plan-stats-arithmetic`); a commit claiming `Plan NNNNN` that stages src/test/config changes should also touch that plan's PLAN.md (`same-commit-plan-doc`), and plans are referenced as `Plan NNNNN:` (`plan-ref-format`).
 
 **Policy configuration:** shares the top-level `plan_workflow.qa` block documented under [`plan_qa_edit`](#plan_qa_edit).
 
@@ -2987,7 +3016,7 @@ These handlers run **after** a tool call completes. They analyse output and prov
 | Property       | Value           |
 | -------------- | --------------- |
 | **Config key** | `command_hints` |
-| **Priority**   | 29              |
+| **Priority**   | 28              |
 | **Type**       | Advisory        |
 | **Event**      | PostToolUse     |
 
@@ -3008,7 +3037,7 @@ handlers:
   post_tool_use:
     command_hints:
       enabled: true
-      priority: 29
+      priority: 28
       options:
         mode: additive          # additive (default) | replace
         hints:
@@ -3026,13 +3055,13 @@ handlers:
 | Property       | Value            |
 | -------------- | ---------------- |
 | **Config key** | `goal_injection` |
-| **Priority**   | 31               |
+| **Priority**   | 30               |
 | **Type**       | Advisory         |
 | **Event**      | PostToolUse      |
 
-**Description:** Plan-execution-start sensor for the ccy PTY supervisor's `/goal` injection (Plan 00269). When a `PLAN.md` Write/Edit under the active plan directory (never `Completed/`) results in `**Status**: In Progress`, the handler renders the configured goal lines, joins them into ONE physical line, and atomically writes a `<session>.goal-intent` signal into the context-sidecar directory. The supervisor (actuator) consumes the signal and types `/goal 🤖 [ccy-supervisor] ...` into the foreground chat, subject to every existing injection rail (idle gate, empty-input-box gate, own-session/foreground scoping, structural validation gate). Ships disabled (opt-in); never blocks.
+**Description:** Plan-execution-start sensor for the ccy PTY supervisor's `/goal` injection (Plan 00269). When a `PLAN.md` Write/Edit under the active plan directory (never `Completed/`) results in `**Status**: In Progress`, the handler renders the configured goal lines, joins them into ONE physical line, and atomically writes a `<session>.goal-intent` signal into the context-sidecar directory. The supervisor (actuator) consumes the signal and types `/goal 🤖 [ccy-supervisor] ...` into the foreground chat, subject to every existing injection rail (idle gate, empty-input-box gate, own-session/foreground scoping, structural validation gate). Opt-in by its own `get_default_enabled() -> False`, but registration does not consult that default for an ABSENT `goal_injection` config block — a project with no `goal_injection` key at all, including a freshly `init minimal`'d one, still registers it (Ledger 00466 RV8-n3); set `enabled: false` explicitly to keep it off. Never blocks.
 
-The trigger is STATE-based (first qualifying write per plan per session), not transition-based: the first edit to an already-In-Progress plan in a NEW session re-fires deliberately, re-establishing the goal after a session restart. Manual fallback / debugging tool: `bin/hooks-daemon inject-goal NNNNN` (requires `CLAUDE_CODE_SESSION_ID` in the environment).
+The trigger is TRANSITION-based, not state-based (ledger 00466 N3): editing an already-In-Progress plan again in the SAME session does not re-fire, since nothing about the plan's status actually changed. The first edit to an already-In-Progress plan in a NEW session is the one deliberate exception -- it re-establishes the goal after a session restart, through a separate reassert path (no displacement bookkeeping) rather than the full flip path. Manual fallback / debugging tool: `bin/hooks-daemon inject-goal NNNNN` (requires `CLAUDE_CODE_SESSION_ID` in the environment).
 
 **Config paradigm** (mirrors `command_hints`): `options.mode` is `additive` (default) — project `lines` merge onto the built-in set, an entry whose `id` matches a built-in overrides it in place — or `replace`, which uses only the project's lines. The fixed `header` line (machine-origin marker + "NOT human authorisation" clause) is never overridable or removable, even in `replace` mode. Per-line `enabled` flags let a project turn a vetted built-in line on without restating its text.
 
@@ -3055,7 +3084,7 @@ handlers:
   post_tool_use:
     goal_injection:
       enabled: true
-      priority: 31
+      priority: 30
       options:
         mode: additive
         once_per_plan_per_session: true
@@ -3299,7 +3328,13 @@ handlers:
 | **Type**       | Advisory        |
 | **Event**      | SessionStart    |
 
-**Description:** Checks if the daemon is up-to-date with the latest GitHub release on new sessions. Uses a 24-hour cache to avoid excessive git operations. Only runs on new sessions (not resumes).
+**Description:** Checks if the daemon is up-to-date with the latest GitHub release on new sessions. Caches the result (24 hours by default) to avoid excessive git operations. Only runs on new sessions (not resumes).
+
+**Options:**
+
+| Option            | Default | Description                                         |
+| ----------------- | ------- | --------------------------------------------------- |
+| `cache_ttl_hours` | `24`    | How long a version-check result is reused, in hours |
 
 **Config example:**
 
@@ -3309,6 +3344,8 @@ handlers:
     version_check:
       enabled: true
       priority: 55
+      options:
+        cache_ttl_hours: 24
 ```
 
 ---
@@ -3406,7 +3443,7 @@ handlers:
 | **Type**       | Advisory                      |
 | **Event**      | SessionStart                  |
 
-**Description:** Session-start half of the on-disk hygiene the `secret-meta` CLI already reports on demand for one path at a time (Plan 00272 Task 6.1). For every configured protected path (the effective `secret_file_guard` globs) that EXISTS on disk, advises — never blocks — when it is not gitignored, is git-tracked, or is group/world-readable. A file whose content is a whole-file Ansible Vault payload is ciphertext that is meant to be committed, so it gets none of that advice, and the advisory stays silent when nothing else is wrong (Plan 00459). Ciphertext that is untracked or gitignored, which is where the old advice left some projects, is told to come back: remove the ignore rule or add `!/<path>` after it, then `git add <path>`. `gitignore_safety_checker` applies the same rule to `.gitignore` lines: when it advises a protected glob, a `!/<path>` negation follows it for every existing encrypted file it would catch, and it reports encrypted files a present rule already ignores. A YAML file with inline `!vault` values gets a conditional statement in place of the untrack advice. Files are found with `git ls-files` and judged with `stat()` plus that one format check, which runs inside the daemon and returns only a format name, so content never reaches the advisory.
+**Description:** Session-start half of the on-disk hygiene the `secret-meta` CLI already reports on demand for one path at a time (Plan 00272 Task 6.1). For every configured protected path (the effective `secret_file_guard` globs) that EXISTS on disk, advises — never blocks — when it is not gitignored, is git-tracked, or is group/world-readable. A file whose content is a whole-file Ansible Vault payload is ciphertext that is meant to be committed, so it gets none of that advice, and the advisory stays silent when nothing else is wrong (Plan 00459). Ciphertext that is untracked or gitignored, which is where the old advice left some projects, is told to come back: remove the ignore rule or add `!/<path>` after it, then `git add <path>`. `gitignore_safety_checker` applies the same rule to `.gitignore` lines: when it advises a protected glob, a `!/<path>` negation follows it for every existing encrypted file it would catch, and it reports encrypted files a present rule already ignores. A YAML file with inline `!vault` values gets a conditional statement in place of the untrack advice. Files are found with `git ls-files` and judged with `stat()` plus that one format check, which runs inside the daemon and returns only a format name, so content never reaches the advisory. A path the config names that is ABSENT is reported too, once, naming the guard it leaves inert (Plan 00414): `sensitive_content`'s `secret_word_list_path` option, or a path-shaped literal in `secret_file_guard`'s `protected_paths`, with that handler enabled. A default nobody configured is not reported. It repeats only when the config or the file's presence changes.
 
 **Options:** none.
 
@@ -3475,6 +3512,8 @@ That second half exists because a rule enforced only at write time cannot see wh
 `path-existence` is scoped to plans whose work has begun: a `Not Started`, `Blocked` or `Dormant` plan names the files it *intends* to create, so a missing path there is the expected state rather than drift.
 
 `plan-link-resolves` is sweep-only and advise-only. It reports a live `PLAN.md` linking to a plan that has since been archived — naming the repointed path — and a link whose target exists nowhere. A link is resolved by plan NUMBER across the active root and every archive directory, so an archived plan is found rather than reported dead. Archived plans and journals are exempt: a record is not rewritten to match today's tree, and a journal is append-only. It is not registered at edit or commit time because docs QA's `pointer-resolves` already blocks a link that is new in that edit or commit.
+
+`archival-links-resolve` is the one exception to that exemption, and it runs only in the commit gate. Archiving a plan moves it one directory deeper, so its relative links all shift by a level, and the archival commit is the one commit still writing the record. For each `.md` file the commit renames into an archive directory (journals excluded, because they are append-only), a link that resolved before the move and does not after BLOCKS with the repoint that restores it. A link already dead before the move is advised, not blocked.
 
 **Fires when:** a new (non-resumed) session starts with `plan_workflow.qa.enabled` true and `sweep_mode: advise`. A configured plan directory that does not exist is itself reported as a structural finding. Findings about a plan path matching the project-wide `daemon.exclude_paths` are dropped from the report (see [Path Exclusion](#path-exclusion-exclude_paths)).
 
@@ -4034,50 +4073,51 @@ handlers:
 
 Priorities below are the **shipped defaults** from `constants/priority.py`. Several handlers share a priority; ties run in registration order.
 
-| Config Key                     | Event             | Priority | What It Blocks                                                        |
-| ------------------------------ | ----------------- | -------- | --------------------------------------------------------------------- |
-| `destructive_git`              | PreToolUse        | 10       | git reset --hard, clean -f, push --force, branch -D, etc.             |
-| `sed_blocker`                  | PreToolUse        | 10       | the word sed in a Bash command, bar four narrow exemptions            |
-| `curl_pipe_shell`              | PreToolUse        | 10       | curl/wget piped to bash/sh                                            |
-| `lock_file_edit_blocker`       | PreToolUse        | 10       | Direct editing of lock files                                          |
-| `pip_break_system`             | PreToolUse        | 10       | pip --break-system-packages                                           |
-| `sudo_pip`                     | PreToolUse        | 10       | sudo pip install                                                      |
-| `ask_user_question_blocker`    | PreToolUse        | 10       | AskUserQuestion without an `ASKING BECAUSE:` prefix                   |
-| `daemon_location_guard`        | PreToolUse        | 11       | cd into .claude/hooks-daemon/                                         |
-| `absolute_path`                | PreToolUse        | 12       | Relative paths in Read/Write/Edit                                     |
-| `error_hiding_blocker`         | PreToolUse        | 13       | Code that silently swallows errors                                    |
-| `project_containment`          | PreToolUse        | 14       | Writes whose target is named outside the repository root              |
-| `security_antipattern`         | PreToolUse        | 14       | Dangerous constructs (eval, shell exec, deserialization, XSS, creds)  |
-| `artifact_publish_blocker`     | PreToolUse        | 14       | Publishing an artefact (a claude.ai URL outside the project)          |
-| `issue_filing_gate`            | PreToolUse        | 14       | gh issue create against the daemon's tracker with a hand-written body |
-| `subagent_cron_delete_blocker` | PreToolUse        | 14       | CronDelete inside a subagent (the coordinator's own is unaffected)    |
-| `write_clobber_guard`          | PreToolUse        | 16       | Write to an existing file not read this session                       |
-| `worktree_file_copy`           | PreToolUse        | 15       | cp/mv/rsync between worktrees                                         |
-| `pipe_blocker`                 | PreToolUse        | 15       | Expensive commands piped to tail/head                                 |
-| `dangerous_permissions`        | PreToolUse        | 15       | chmod 777, chmod a+rwx                                                |
-| `tdd_enforcement`              | PreToolUse        | 15       | Production code without tests (11 languages)                          |
-| `root_recursion_guard`         | PreToolUse        | 16       | Recursive scans rooted at /, /home, $HOME, ...                        |
-| `self_matching_process_probe`  | PreToolUse        | 17       | A pgrep/pkill/ps-grep probe that matches the calling shell's own argv |
-| `github_auto_close_keywords`   | PreToolUse        | 18       | GitHub auto-closing keyword refs (Fixes #N) in git/gh pr messages     |
-| `git_stash`                    | PreToolUse        | 20       | git stash creation (deny by default; configurable)                    |
-| `git_message_backtick`         | PreToolUse        | 20       | Backticks in a double-quoted git -m (bash executes them)              |
-| `ancestry_preserving_merge`    | PreToolUse        | 19       | git merge --squash, gh pr merge --squash/--rebase (severs ancestry)   |
-| `merge_to_main_approval`       | PreToolUse        | 20       | git merge/gh pr merge into main without a human's approval (opt-in)   |
-| `qa_suppression`               | PreToolUse        | 30       | noqa, type: ignore, eslint-disable, nolint, ... (all langs)           |
-| `plan_number_helper`           | PreToolUse        | 30       | Broken plan number discovery commands                                 |
-| `plan_journal_guard`           | PreToolUse        | 31       | A plan journal entry written by hand (use `mkplan.bash --journal`)    |
-| `comment_changelog`            | PreToolUse        | 31       | Changelog narrative in a comment (`Prior <version>:`, dated entries)  |
-| `comment_size`                 | PreToolUse        | 33       | Over-long comments growing past the size limit                        |
-| `markdown_organization`        | PreToolUse        | 35       | Disorganised markdown; untracked Claude memory writes                 |
-| `lsp_enforcement`              | PreToolUse        | 38       | Grep/rg used for symbol lookups (use LSP)                             |
-| `reference_repo_freshness`     | PreToolUse        | 39       | Reading a governed reference clone that is stale or unverified        |
-| `gh_issue_comments`            | PreToolUse        | 40       | gh issue view without --comments                                      |
-| `gh_pr_comments`               | PreToolUse        | 40       | gh pr view without --comments                                         |
-| `plan_time_estimates`          | PreToolUse        | 40       | Time estimates in plan docs                                           |
-| `npm_command`                  | PreToolUse        | 50       | Non-llm: npm commands                                                 |
-| `validate_instruction_content` | PreToolUse        | 50       | Ephemeral content in CLAUDE.md                                        |
-| `auto_continue_stop`           | Stop              | 15       | Stops after confirmation questions                                    |
-| `auto_approve_reads`           | PermissionRequest | 10       | (Approves) read-only tools in bypassPermissions mode                  |
+| Config Key                     | Event             | Priority | What It Blocks                                                           |
+| ------------------------------ | ----------------- | -------- | ------------------------------------------------------------------------ |
+| `destructive_git`              | PreToolUse        | 10       | git reset --hard, clean -f, push --force, branch -D, etc.                |
+| `sed_blocker`                  | PreToolUse        | 10       | the word sed in a Bash command, bar four narrow exemptions               |
+| `curl_pipe_shell`              | PreToolUse        | 10       | curl/wget piped to bash/sh                                               |
+| `lock_file_edit_blocker`       | PreToolUse        | 10       | Direct editing of lock files                                             |
+| `pip_break_system`             | PreToolUse        | 10       | pip --break-system-packages                                              |
+| `sudo_pip`                     | PreToolUse        | 10       | sudo pip install                                                         |
+| `ask_user_question_blocker`    | PreToolUse        | 10       | AskUserQuestion without an `ASKING BECAUSE:` prefix                      |
+| `daemon_location_guard`        | PreToolUse        | 11       | cd/pushd into .claude/hooks-daemon/                                      |
+| `absolute_path`                | PreToolUse        | 12       | Relative paths in Read/Write/Edit                                        |
+| `error_hiding_blocker`         | PreToolUse        | 13       | Code that silently swallows errors                                       |
+| `project_containment`          | PreToolUse        | 14       | Writes whose target is named outside the repository root                 |
+| `security_antipattern`         | PreToolUse        | 14       | Dangerous constructs (eval, shell exec, deserialization, XSS, creds)     |
+| `artifact_publish_blocker`     | PreToolUse        | 14       | Publishing an artefact (a claude.ai URL outside the project)             |
+| `issue_filing_gate`            | PreToolUse        | 14       | gh issue create against the daemon's tracker with a hand-written body    |
+| `subagent_cron_delete_blocker` | PreToolUse        | 14       | CronDelete inside a subagent (the coordinator's own is unaffected)       |
+| `write_clobber_guard`          | PreToolUse        | 16       | Write to an existing file not read this session                          |
+| `worktree_file_copy`           | PreToolUse        | 15       | cp/mv/rsync between worktrees                                            |
+| `pipe_blocker`                 | PreToolUse        | 15       | Expensive commands piped to tail/head                                    |
+| `dangerous_permissions`        | PreToolUse        | 15       | chmod 777, chmod a+rwx                                                   |
+| `tdd_enforcement`              | PreToolUse        | 15       | Production code without tests (11 languages)                             |
+| `root_recursion_guard`         | PreToolUse        | 16       | Recursive scans rooted at /, /home, $HOME, ...                           |
+| `self_matching_process_probe`  | PreToolUse        | 17       | A pgrep/pkill/ps-grep probe that matches the calling shell's own argv    |
+| `github_auto_close_keywords`   | PreToolUse        | 18       | GitHub auto-closing keyword refs (Fixes #N) in git/gh pr messages        |
+| `git_stash`                    | PreToolUse        | 20       | git stash creation (deny by default; configurable)                       |
+| `git_message_backtick`         | PreToolUse        | 20       | Backticks in a double-quoted git -m (bash executes them)                 |
+| `ancestry_preserving_merge`    | PreToolUse        | 19       | git merge --squash, gh pr merge --squash/--rebase (severs ancestry)      |
+| `merge_to_main_approval`       | PreToolUse        | 20       | git merge/pull/gh pr merge into main without a human's approval (opt-in) |
+| `qa_suppression`               | PreToolUse        | 30       | noqa, type: ignore, eslint-disable, nolint, ... (all langs)              |
+| `plan_number_helper`           | PreToolUse        | 30       | Broken plan number discovery commands                                    |
+| `plan_status_snapshot`         | PreToolUse        | 30       | Records a PLAN.md's pre-write status for `goal_injection` (never blocks) |
+| `plan_journal_guard`           | PreToolUse        | 31       | A plan journal entry written by hand (use `mkplan.bash --journal`)       |
+| `comment_changelog`            | PreToolUse        | 31       | Changelog narrative in a comment (`Prior <version>:`, dated entries)     |
+| `comment_size`                 | PreToolUse        | 33       | Over-long comments growing past the size limit                           |
+| `markdown_organization`        | PreToolUse        | 35       | Disorganised markdown; untracked Claude memory writes                    |
+| `lsp_enforcement`              | PreToolUse        | 38       | Grep/rg used for symbol lookups (use LSP)                                |
+| `reference_repo_freshness`     | PreToolUse        | 39       | Reading a governed reference clone that is stale or unverified           |
+| `gh_issue_comments`            | PreToolUse        | 40       | gh issue view without --comments                                         |
+| `gh_pr_comments`               | PreToolUse        | 40       | gh pr view without --comments                                            |
+| `plan_time_estimates`          | PreToolUse        | 40       | Time estimates in plan docs                                              |
+| `npm_command`                  | PreToolUse        | 50       | Non-llm: npm commands                                                    |
+| `validate_instruction_content` | PreToolUse        | 50       | Ephemeral content in CLAUDE.md                                           |
+| `auto_continue_stop`           | Stop              | 15       | Stops after confirmation questions                                       |
+| `auto_approve_reads`           | PermissionRequest | 10       | (Approves) read-only tools in bypassPermissions mode                     |
 
 ### All Advisory Handlers
 
@@ -4092,8 +4132,8 @@ Priorities below are the **shipped defaults** from `constants/priority.py`. Seve
 | `web_search_year`          | PreToolUse       | 55       | Warns about outdated search years              |
 | `british_english`          | PreToolUse       | 60       | Warns about American spellings                 |
 | `validate_eslint_on_write` | PostToolUse      | 10       | Runs ESLint after .ts/.tsx writes              |
-| `command_hints`            | PostToolUse      | 29       | Config-driven reminder after a command         |
-| `goal_injection`           | PostToolUse      | 31       | Goal-intent signal on plan flip to In Progress |
+| `command_hints`            | PostToolUse      | 28       | Config-driven reminder after a command         |
+| `goal_injection`           | PostToolUse      | 30       | Goal-intent signal on plan flip to In Progress |
 | `optimal_config_checker`   | SessionStart     | 52       | Audits Claude Code settings                    |
 | `git_filemode_checker`     | SessionStart     | 53       | Warns when core.fileMode=false                 |
 | `suggest_status_line`      | SessionStart     | 55       | Suggests status line setup                     |

@@ -12,6 +12,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from claude_code_hooks_daemon.tool_report.analyser import (
     ToolUsage,
     analyse_transcripts,
@@ -51,6 +53,14 @@ class TestTranscriptsRootFor:
         scratchpad paths slug every separator to `-`)."""
         root = transcripts_root_for(Path("/srv/my_app.v2"), claude_home=tmp_path)
         assert root == tmp_path / "projects" / "-srv-my-app-v2"
+
+    def test_the_default_honours_claude_config_dir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Plan 00468 G13: not a hard-coded ``~/.claude``."""
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
+        root = transcripts_root_for(Path("/workspace"))
+        assert root == tmp_path / "cfg" / "projects" / "-workspace"
 
 
 class TestAnalyseTranscripts:

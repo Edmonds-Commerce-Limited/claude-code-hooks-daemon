@@ -139,3 +139,16 @@ truth_changes:
       recognised when they land and are never latched. This deliberately
       mirrors the model-downgrade rule, where an unattributed model change gets
       no restore.
+  - topic: blocking-handlers
+    was: >
+      A missing secret word list leaves `sensitive_content`'s word-list source
+      silently inert: nothing reports it, so a fresh clone (which never has
+      the gitignored list) runs without it and cannot tell.
+    now: >
+      The source is still inert without the file, and the daemon still keeps
+      working (Plan 00414). But when the config names the list explicitly
+      (`sensitive_content`'s `secret_word_list_path` option), or names a
+      path-shaped entry in `secret_file_guard`'s `protected_paths`, and that
+      path is missing, the SessionStart `secret_file_hygiene_checker`
+      advisory names it and the guard it leaves inert. It is told once, and
+      repeats only when the config or the file's presence changes.
