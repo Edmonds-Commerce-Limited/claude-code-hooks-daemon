@@ -26,13 +26,19 @@ changing either this priority or the terminal flag.
 Mirrors ``persistent_cron_assertor``'s config-loading shape (inert on an
 unloadable config, gated by the SAME ``persistent_crons.enabled`` switch) so
 the two handlers cannot disagree about which jobs are "declared".
+
+**A session-scoped pause is the one sanctioned gap** (ledger 00422 N4). A
+session told to cancel a declared job had no legal move: obeying failed this
+gate, satisfying it disobeyed the instruction. ``hooks-daemon cron-pause``
+records an expiring, session-keyed pause (``utils.cron_pause``); a paused job
+may be missing, and the output always names it with its reason and expiry.
 """
 
 from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 from pydantic import ValidationError
 
@@ -43,14 +49,21 @@ from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.core import BlockingResult, Decision, ProjectContext
 from claude_code_hooks_daemon.core.handler_bases import StopHandlerBase
 from claude_code_hooks_daemon.core.handler_scope import HandlerScope
+from claude_code_hooks_daemon.handlers.utils.session_advice_counter import (
+    SessionAdviceCounter,
+)
 from claude_code_hooks_daemon.utils.config_cache import load_config_cached
 from claude_code_hooks_daemon.utils.cron_enforcement import (
     find_missing_crons,
     parse_session_crons,
-    render_missing_crons_reason,
+    verdict_for_missing_crons,
 )
+from claude_code_hooks_daemon.utils.cron_pause import PAUSE_ADVISE_INTERVAL, default_pauses_path
 
 logger = logging.getLogger(__name__)
+
+# Bound the per-session pause-advice map on the daemon-lifetime singleton.
+_MAX_TRACKED_PAUSE_KEYS: Final[int] = 256
 
 
 class CronStopEnforcerHandler(StopHandlerBase):
@@ -83,6 +96,9 @@ class CronStopEnforcerHandler(StopHandlerBase):
                 HandlerTag.BLOCKING,
                 HandlerTag.NON_TERMINAL,
             ],
+        )
+        self._pause_advice = SessionAdviceCounter(
+            interval=PAUSE_ADVISE_INTERVAL, max_sessions=_MAX_TRACKED_PAUSE_KEYS
         )
 
     def get_default_enabled(self) -> bool:
@@ -125,7 +141,9 @@ class CronStopEnforcerHandler(StopHandlerBase):
         An ABSENT ``session_crons`` (``parse_session_crons`` returning
         ``None``) is "no information", not "no crons exist" -- ALLOW, never a
         block, is the only correct reading. A PRESENT list (even empty) is a
-        genuine report of session state and is compared for real.
+        genuine report of session state and is compared for real. A missing
+        job paused for this session (``hooks-daemon cron-pause``) is allowed
+        and named -- see ``verdict_for_missing_crons``.
         """
         jobs = self._active_jobs()
         if not jobs:
@@ -139,7 +157,16 @@ class CronStopEnforcerHandler(StopHandlerBase):
         if not missing:
             return BlockingResult(decision=Decision.ALLOW)
 
-        return BlockingResult.deny(render_missing_crons_reason(missing))
+        return verdict_for_missing_crons(
+            missing,
+            hook_input,
+            pauses_path=self._pauses_path(),
+            should_advise=self._pause_advice.should_advise,
+        )
+
+    def _pauses_path(self) -> Path | None:
+        """Where ``hooks-daemon cron-pause`` records this project's pauses."""
+        return default_pauses_path()
 
     def get_acceptance_tests(self) -> list[Any]:
         """Two cases, driven against this repo's own real declared job.
@@ -226,5 +253,12 @@ class CronStopEnforcerHandler(StopHandlerBase):
             "turn, and the DENY still wins the final response.\n\n"
             "**Fix**: run `CronCreate` (recurring: true) for every job named in "
             "the block message, using the schedule and prompt given verbatim, "
-            "then stop again."
+            "then stop again.\n\n"
+            "**Told to cancel a declared cron for now? Pause it, do not fight "
+            'the gate.** `hooks-daemon cron-pause <job> --reason "..."` '
+            "records a pause for THIS session only, which expires within 24 "
+            "hours on its own; `hooks-daemon cron-resume <job>` ends it early. "
+            "While it is live the job may be missing, and the stop output names "
+            "the job, the reason and the expiry. An unknown job id is refused. "
+            "Editing `persistent_crons` stays the only permanent switch."
         )

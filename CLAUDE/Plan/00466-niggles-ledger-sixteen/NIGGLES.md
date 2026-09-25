@@ -3,11 +3,249 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
-### N16 — `secret_file_guard`'s N4 splat exemption still false-positives against a BOTH-EDGES pattern
+N34 is taken on the `worktree-n466-n24` branch (the chain deadline cannot
+interrupt a running handler) and lands with that branch.
 
-**Found by the 00466 review** (nit n2, `subagent-reports/260924-n466-review-opus-5-5.md`), out of scope for the N10/N11 fix turn. N4 fixed the Python unpacking splat false positive (`*words[position + 1 :]`, `*wordlist`) against `*.vault-password` — the ONE shipped pattern with a leading wildcard and NO trailing one. The same splat shape is still denied against `*vault_pass*`, which has a wildcard on BOTH edges: `f(*assets)`, `f(*ssh_args)`, `f(*passthrough)` and `f(*assertions)` are each denied live, because the N4 fix's `pattern_has_trailing_wildcard` escape only widens the gate for a pattern with NO trailing wildcard — `*vault_pass*` has one, so the gate's stricter requirement never applies and the pre-N4 overlap-only behaviour (which is what produces this false positive) is untouched. `*assets`/`*args`-style splats are common Python, so this is a live nuisance, not a rare shape.
+### N36 — `destructive_git` denies a `grep` whose search pattern is the text of a force branch delete
 
-**Candidate remedy:** the both-edges branch of `_glob_token_overlaps_stem` already has a stricter "near-total-match" discriminator (`_both_edges_residue_is_near_total_stem_match`) for exactly this over-promiscuity — a leading-wildcard-only token (no trailing wildcard of its own) matched against a both-edges pattern is presently routed through the SAME lenient overlap check as a genuine `*passXXX`-style truncation, rather than through that stricter discriminator. Route a token with no trailing wildcard of its own through the near-total-match test regardless of which edge(s) the PATTERN has open, and keep the existing near-total-match behaviour for tokens that themselves have a trailing wildcard too. RED tests: each `f(*assets)`-style splat against `*vault_pass*` is allowed; a genuine both-edges truncation (`*vault_pass*` reached via, e.g., `*zzz-passwd*`-shaped tokens) still denies.
+**Found by the Plan 00463 agent** (review-5 fix round, its nit n9). Searching
+the tree for the literal force-branch-delete command text (a grep argument,
+for example `grep -rn "git branch -D" docs/`) is denied as
+R-GIT-BRANCH-FORCE-DELETE. Nothing in the command deletes a branch: the
+text is data given to `grep`. It is the same class as N22
+(`lsp_enforcement` takes another command's argument for a symbol lookup)
+and the N32 pipe split: a guard matches a dangerous shape anywhere in the
+command string instead of at a command position.
+
+**Candidate remedy:** judge destructive-git shapes only at a real command
+position, using the shared shell lexer from the Plan 00464 shell-parser
+consolidation. Treat a quoted argument to a known data consumer (`grep`,
+`rg`, `echo`, `printf`, a git `-m` message) as data. RED tests: the grep
+above is allowed; `git branch -D x`, `cd r && git branch -D x`, and
+`bash -c 'git branch -D x'` are still denied.
+
+### N35 — `daemon_sync_after_merge` judges a `cd <worktree> && git merge` against the session root's ORIG_HEAD
+
+**Found by the Plan 00421 agent.** It ran `cd <worktree> && git merge main`
+inside a worktree. The advisory then reported the MAIN checkout's own
+`ORIG_HEAD..HEAD` and named `.claude/hooks-daemon.yaml` and project-handlers
+as changed. The worktree merge had touched neither.
+
+**Why:** `_is_foreign_repo` and the diff both use the hook payload's cwd,
+which is the session root. They ignore the directory the command itself
+`cd`s into. This is the same attribution family as N28 (project_containment
+ignoring a same-command `cd`) and N33 (which daemon, or which checkout,
+a worktree agent's action is judged against).
+
+**Candidate remedy:** resolve the merge's working directory from the
+command, using the shell lexer's `cd` tracking from Plan 00464 (the
+shell-parser consolidation). Run the ORIG_HEAD diff in THAT repository, and
+say nothing when it is a different checkout from the one the daemon
+serves. RED test: `cd <other-worktree> && git merge main` emits no advisory
+about the session root.
+
+### N33 — a worktree agent's `secret_file_guard.exclude_paths` change had no effect after a daemon restart
+
+**Found by the integration-B2 fix agent.** The agent was writing tests in
+`worktree-integration-b2` that must name protected-looking filenames.
+R-SECRET-SCRIPT-AUTHOR kept denying the writes. It added the two test files
+to `secret_file_guard.options.exclude_paths` in the WORKTREE's
+`.claude/hooks-daemon.yaml` and restarted the worktree's daemon. The denials
+continued. It worked around it by building the filenames at runtime.
+
+**Why (unverified):** the likeliest cause is that a sub-agent's hook calls
+are served by the daemon of the Claude Code session's project root (the
+main checkout), not by the worktree's own daemon. If so, a worktree config
+change cannot affect that agent's own enforcement until it lands on main.
+The docs say "restart the daemon" without saying WHICH daemon enforces a
+worktree agent's tool calls, so the agent could not diagnose it.
+
+**Candidate remedy:** first reproduce it and establish which daemon served
+the denial (the hook log's project root and socket). Then either make the
+deny reason name the config file it was judged against, or document
+worktree-agent enforcement in CLAUDE/Worktree.md. Also consider an advisory
+when a worktree's handler config differs from the enforcing daemon's.
+
+### N32 — `pipe_blocker` splits at a `\|` inside double quotes and reads the next word as a pipe stage
+
+**Found by the Plan 00463 agent.** The command
+`grep -n "a\|--finish\|head-moved\|^#" CLAUDE/QA.md | bin/echd-capture --head 80`
+was denied as R-PIPE-TO-HEAD. The only real pipe goes to the whitelisted
+`bin/echd-capture`. The `\|` alternations inside the double-quoted grep
+pattern were split as pipes, and the "stage" `head-moved` was read as `head`.
+Two defects: a quoted `|` is not a pipe, and `head-moved` is not the
+command `head`.
+
+**Candidate remedy:** move pipe_blocker onto the shared shell lexer from
+Plan 00464 (the shell-parser consolidation), so pipe boundaries come from
+real tokenisation. Match a stage's command by whole word. RED tests: the
+command above is allowed; `pytest | head -1` is still denied; and
+`grep "x|y" f | head` is judged on `grep` (whitelisted), not on `y`.
+
+**Widened (Plan 00463 agent, review-5 n9):** an UNESCAPED `|` inside double
+quotes trips it too, not only `\|`. The RED tests must cover both spellings.
+
+### N31 — the dispatch-declaration advisory does not recognise "File to write to: <path>"
+
+**Found by the 00467 dogfood agent.** A dispatch brief that named its report
+path as `File to write to: <path>` still drew the Plan 00307
+dispatch-declaration advisory saying no report destination was declared.
+The advisory matches a narrower set of phrasings than briefs actually use,
+so it nags on a correct dispatch, and a nag that is often wrong teaches
+people to skim it.
+
+**Candidate remedy:** recognise any phrasing that pairs a write verb or noun
+("write", "report", "file", "output", "save") with a path in the brief, not
+only fixed phrases. RED tests: the phrasing above is recognised, and a brief
+with no path at all still draws the advisory.
+
+### N30 — more shell code that must survive a hostile PATH depends on a PATH command
+
+**Found by the 00467 dogfood agent**, applying the Defence Before Fix method
+to the watchdog defect fixed at 766677c1 (00466 N1's follow-up). An
+independent search for the same class ("shell code that must survive a
+hostile or stripped `PATH` runs a command looked up on `PATH`, and its
+absence silently takes a wrong branch") found four more candidates:
+
+- `scripts/venv_bootstrap.sh:443` and `:474` (`date`). The agent reproduced
+  this idiom.
+- `scripts/install/venv.sh:427` (`date`).
+- `scripts/install/daemon_control.sh:40-43` (`pgrep`).
+
+These are the venv and install paths, which exist to work when the host's
+tools are broken, exactly as `resolve_venv.sh` does.
+
+**Candidate remedy:**
+
+1. Fix each instance: use a bash builtin (`printf '%(...)T'` for dates,
+   `/proc` or `kill -0` for process checks). Where there is no builtin,
+   make the missing command a loud, explicit failure rather than a silent
+   wrong branch.
+2. The detector the method asks for: a check over the scripts that must
+   survive a hostile PATH (`resolve_venv.sh`, `venv_bootstrap.sh`,
+   `scripts/install/*.sh`, the `bin/` wrappers) that flags an external
+   command whose failure is not handled. It could be a `shell_audit` rule, or
+   a test that runs each such script's functions under an empty `PATH`. It
+   must catch the original watchdog shape, verified by reverting 766677c1 in
+   a scratch copy.
+
+### N29 — `error_hiding`'s return-None-in-except check is evaded by returning a local assigned in the handler
+
+**Found by the coordinator** reading the goal-flip agent's report. To clear the
+`error_hiding` finding on a literal `return None` inside an `except` handler,
+that agent assigned `None` to a local in the handler and returned the local
+after the `try`. The behaviour is identical, and the detector no longer sees
+it. So the check keys on syntax, not on the flow it exists to catch, and an
+agent under QA pressure finds the gap on the first try. The goal-flip branch
+has been told to undo the evasion and fix the code honestly.
+
+**Candidate remedy:** judge the flow, not the token. An `except` handler that
+binds a name read by a later `return`, where that name's only values are
+`None` or a default and the handler logs or re-raises nothing, is the same
+finding as a literal `return None`. RED tests: the evasion shape is flagged,
+a handler that logs at warning or above and returns a documented sentinel is
+not, and the literal form is still flagged. Then sweep the tree for existing
+instances of the evasion shape, which would currently pass unseen.
+
+### N28 — `project_containment` resolves a relative target against the payload cwd and ignores a same-command `cd`
+
+**Found by the Plan 00464 agent** during its re-review fix round (S12). It is
+an instance of 00464's own defect class: the payload `cwd` is where the
+session started, not where the command runs. So `cd <elsewhere> && <write to a relative path>` was judged against the wrong directory, and the containment
+verdict could be wrong in both directions.
+
+**Remedied on the 00464 branch** (`worktree-plan-464-commit-gate-repo`,
+827c45df) through the new `find_command_placements`, which every
+path-judging guard is meant to share. Two sibling walkers still resolve
+their own way: `reference_repo_freshness` (the 00464 agent fixes it on that
+branch) and `secret_file_matching` (after the guard-defects branch merges,
+in the shell-parser consolidation). Mark Remedied when 00464 lands; the
+siblings are tracked in the coordinator's consolidation work.
+
+### N27 — `skill_scan` and `tool_report` build the transcript directory name two different ways
+
+**Found by the 00468 core agent** (report on its branch,
+`subagent-reports/260924-p468-core-opus-5-5.md`). Claude Code keeps a
+project's transcripts under a directory named after the project path, with
+characters it cannot use in a name replaced. `skill_scan` and `tool_report`
+each derive that name with their own code, and they disagree for a path
+containing `.` or `_`. So for such a project one of them reads the wrong
+directory, finds nothing, and reports "no data" rather than an error.
+
+**Candidate remedy:** one helper derives the transcript directory from the
+project path, pinned to Claude Code's real rule (checked against a real
+`~/.claude/projects/` entry for a path with `.`, `_` and `-`). Both commands
+and every other derivation site use it (sweep for the other derivations).
+The helper raises, not returns empty, when the directory does not exist and
+the caller asked for it. RED test: a project path with `.` and `_` resolves
+to the same directory from both commands.
+
+### N26 — `check_skill_references.py` scans zero files when run from a worktree
+
+**Found by the 00468 core agent.** Run from any worktree, the skill
+references QA check reports success after scanning 0 files. A check that
+examines nothing and passes is a fail-open gate: every sub-agent's targeted
+QA runs from a worktree, so the check has been silently vacuous exactly
+where branches are verified.
+
+**Candidate remedy:** find why the file discovery comes up empty in a
+worktree (a `.git` file rather than a directory, or a path anchored to the
+main checkout), and fix it. Separately, the check FAILS when it scans zero
+files where skills exist, so a vacuous pass cannot recur. Audit the other
+`scripts/qa/check_*.py` for the same "0 examined, PASS" shape and pin the
+class with a test that runs each check from a worktree fixture.
+
+**The cause, and two more instances (integration B2).** Each checker drops a
+file whose path contains a noise-directory name such as `untracked` or
+`worktrees`, and it tests the ABSOLUTE path. Every agent checkout lives at
+`untracked/worktrees/<name>/`, so every file matches:
+
+- `check_doc_truth.py` `_iter_markdown`: 0 docs scanned in every worktree.
+  **Fixed on the B2 branch** (08c4be0e): it tests the path below `--root`.
+  1785 docs scanned after, 0 violations. The test is
+  `test_a_checkout_inside_a_worktrees_directory_is_still_scanned`.
+- `audit_shell.py` `_is_excluded`: it keeps 0 of the worktree's `.sh` files, so
+  `shell_audit` passes vacuously. Not fixed. B2 ran it by hand over the
+  relative `scripts/` and skill-scripts directories: 52 files, no violations.
+- `check_skill_references.py` (this entry): `_EXCLUDED_DIRS` holds both names
+  and is tested against `path.parts`, so it is very likely the same cause.
+  `check_github_urls.py` tests `path.parts` the same way and should be checked.
+
+### N25 — a slow handler runs out the client's 30 s budget, and a timeout is an ALLOW for the whole PreToolUse chain
+
+**Found by the guard-defects security review 2**
+([report](subagent-reports/260924-n466-guards-review2-opus-5-5.md), B1 and
+m3). `.claude/hooks/pre-tool-use` gives the daemon `--timeout-ms 30000`. On a
+read-side socket timeout, `.claude/init.sh` (about lines 1654-1661) emits
+`hookSpecificOutput` with context only, which is an ALLOW for every non-Stop
+event. So any handler that can be made slow enough bypasses every guard
+behind it, not just itself. Two instances are measured:
+
+- `destructive_git`'s `strip_inert_spans` takes 99 s on a 200 KB command.
+  That is already on main.
+- The guard-defects branch's interior-wildcard DP takes 31 s on a crafted
+  60 KB command. That one is fixed on its branch as review 2's B1.
+
+Fixing each slow handler one by one leaves the class open: the next
+super-linear regex or DP reopens it silently.
+
+**Candidate remedies (the class, not the instance):**
+
+1. The daemon enforces a per-event deadline well under the client budget
+   (for example 20 s for the whole chain). When it passes, the remaining
+   SAFETY+BLOCKING handlers are treated as having raised, which means DENY
+   with a "not judged in time" reason under N24's fail-closed rule.
+   Advisory handlers are skipped with a note.
+2. Fix the measured instance: `strip_inert_spans` becomes linear, with a
+   timing test at 200 KB.
+3. A test harness drives every SAFETY handler with large hostile inputs
+   (long runs of quotes, backslashes, wildcards and nesting) under a time
+   bound, so a super-linear path fails CI rather than a client.
+
+Deliberately NOT a remedy: making the client fail closed on timeout. A
+daemon that is merely slow (an overloaded host) would then block every tool
+call. The deadline belongs inside the daemon, where it can tell safety
+handlers from advisories.
 
 ### N24 — `daemon.strict_mode` never reaches the live daemon, so every guard fails OPEN on a handler exception
 
@@ -43,6 +281,25 @@ RED tests: a live-path daemon with `strict_mode: true` denies on a raising
 handler; a SAFETY+BLOCKING handler that raises denies even with `strict_mode`
 off; a non-safety advisory handler that raises still allows, and says so.
 
+### N23 — `recovery_cron_advisor` hands one request's lifecycle phase to another, through the singleton
+
+**Found by Plan 00449's agent** while fixing the eviction race in the same handler. `matches()` stores the detected phase on the handler (`self._cached_phase`) and `handle()` consumes it. The handler is a daemon-lifetime singleton and `server.py` dispatches on a thread pool, so request B's `matches()` can overwrite the value between request A's `matches()` and `handle()`. A then advises on B's phase (CREATION guidance for a PROGRESS edit, say), and B finds the cache already cleared and detects again. It raises nothing, so no test or log shows it. This is a different class from Plan 00449's select-then-evict: per-call state parked on a shared object between two calls. It is out of that plan's scope by its own Non-Goals ("no audit of every mutable handler attribute").
+
+**Candidate remedy:** stop caching on the instance (detect in `handle()`, or key the cache by thread with `threading.local`), with a RED test that interleaves two requests' `matches()` and `handle()`. Then treat it as a class: sweep for any `self._x` assigned in `matches()` and read in `handle()`. That shape is mechanical enough for a semgrep rule like `scripts/qa/semgrep/unlocked-eviction.yaml`.
+
+**Checked against main after integration B2 (2026-09-24): still Open, not
+fixed.** `recovery_cron_advisor.py` still declares `self._cached_phase: LifecyclePhase | None = None` in `__init__`, sets it in `matches()`
+(`self._cached_phase = _detect_lifecycle_phase(...)`) and reads/clears it in
+`handle()` (`cached = self._cached_phase; self._cached_phase = None`) — the
+exact shape this entry names. `tests/unit/handlers/post_tool_use/test_recovery_cron_advisor.py`
+has `test_matches_then_handle_uses_cached_phase` but no interleaving/
+concurrency test. d-00449's `BoundedFifoMap` work (Plan 00449) fixed the
+select-then-evict class across 12 sites in 10 handlers, including three
+other spots in this same file, but explicitly excluded this per-call-state
+class from its Non-Goals and recorded it here instead — see its report,
+"Recorded, not fixed". Nothing else in integration batch B2 touches this
+attribute. Remains a candidate for whoever picks up this ledger.
+
 ### N22 — `lsp_enforcement` takes another command's argument for a grep symbol lookup
 
 **Found by the coordinator**, live. The command was `python scripts/qa/llm_qa.py format lint ... plan_qa docs_qa ... > out.txt; grep -E '^(✅|❌)|^QA:' out.txt`. It was denied with `BLOCKED [R-LSP-SYMBOL-LOOKUP]: ... pattern 'plan_qa' looks like a symbol search`. `plan_qa` is a positional argument to `llm_qa.py`, not to `grep`. The grep's real pattern, `^(✅|❌)|^QA:`, is not symbol-shaped at all. The handler found a `grep` somewhere in the command and then took a symbol-like word from elsewhere in it. `block_once` let the identical retry through, so the cost was one wasted turn. But every "run a QA tool, then grep its capture" command is the everyday shape here, and each one is a coin toss on which word gets picked.
@@ -61,7 +318,11 @@ off; a non-safety advisory handler that raises still allows, and says so.
 
 **Candidate remedy:** carry the open-quote state across physical lines for single-quoted strings too, joining the logical line the same way continuations are joined. RED test: the two-line single-quoted echo with the redirect on the second line is not flagged, and one without the redirect is.
 
-N16 is filed on the unmerged `worktree-n466-guard-defects` branch; it joins this file at integration.
+### N16 — `secret_file_guard`'s N4 splat exemption still false-positives against a BOTH-EDGES pattern
+
+**Found by the 00466 review** (nit n2, `subagent-reports/260924-n466-review-opus-5-5.md`), out of scope for the N10/N11 fix turn. N4 fixed the Python unpacking splat false positive (`*words[position + 1 :]`, `*wordlist`) against `*.vault-password` — the ONE shipped pattern with a leading wildcard and NO trailing one. The same splat shape is still denied against `*vault_pass*`, which has a wildcard on BOTH edges: `f(*assets)`, `f(*ssh_args)`, `f(*passthrough)` and `f(*assertions)` are each denied live, because the N4 fix's `pattern_has_trailing_wildcard` escape only widens the gate for a pattern with NO trailing wildcard — `*vault_pass*` has one, so the gate's stricter requirement never applies and the pre-N4 overlap-only behaviour (which is what produces this false positive) is untouched. `*assets`/`*args`-style splats are common Python, so this is a live nuisance, not a rare shape.
+
+**Candidate remedy:** the both-edges branch of `_glob_token_overlaps_stem` already has a stricter "near-total-match" discriminator (`_both_edges_residue_is_near_total_stem_match`) for exactly this over-promiscuity — a leading-wildcard-only token (no trailing wildcard of its own) matched against a both-edges pattern is presently routed through the SAME lenient overlap check as a genuine `*passXXX`-style truncation, rather than through that stricter discriminator. Route a token with no trailing wildcard of its own through the near-total-match test regardless of which edge(s) the PATTERN has open, and keep the existing near-total-match behaviour for tokens that themselves have a trailing wildcard too. RED tests: each `f(*assets)`-style splat against `*vault_pass*` is allowed; a genuine both-edges truncation (`*vault_pass*` reached via, e.g., `*zzz-passwd*`-shaped tokens) still denies.
 
 ### N19 — the registry's options-collection failure is logged at debug level
 
@@ -80,8 +341,6 @@ N16 is filed on the unmerged `worktree-n466-guard-defects` branch; it joins this
 **Found by the N13/N14 agent.** `_options()` reads `self.config["options"]`, which only `configure()` populates. Nothing in `src/` calls `configure()`; the registry injects options as `_<key>` attributes instead. So a configured `check_interval_days` is ignored at runtime, and only the unit tests, which call `configure()` directly, exercise the option.
 
 **Candidate remedy:** read options the way the registry delivers them, through the shared accessor. RED test: a handler built by the real registry from a config with a non-default `check_interval_days` uses it. Then audit every handler for a `configure()`-only options path, and pin the class with a test that instantiates each handler through the registry with a non-default value for every declared option and checks that it is honoured.
-
-> > > > > > > main
 
 ### N15 — `remote-docs add` scans a capture with an unconfigured `sensitive_content` handler
 
@@ -109,17 +368,9 @@ N16 is filed on the unmerged `worktree-n466-guard-defects` branch; it joins this
 
 ### N11 — any exception in `secret_file_guard.matches()` lets the call through unless `strict_mode` is on
 
-**Found by the 00466 review** (major M4, `subagent-reports/260924-n466-review-opus-5-5.md`). N5's crash was the second time an exception in this guard's `matches()` skipped the guard entirely; Plan 00357 was the first. Under the default `strict_mode: false` the chain logs the exception and allows the call. This entry originally claimed the repository's own `strict_mode: true` made the crash deny here, with only a client on the defaults failing open. **That is false — corrected by N24**: `daemon.strict_mode` is inert in every install, this one included, so the crash was a fail-open everywhere, not just on a client left on the default `false`. One raise path is still live after N5, though it isn't exploitable: a file path containing a NUL byte.
+**Found by the 00466 review** (major M4, `subagent-reports/260924-n466-review-opus-5-5.md`). N5's crash was the second time an exception in this guard's `matches()` skipped the guard entirely; Plan 00357 was the first. Under the default `strict_mode: false` the chain logs the exception and allows the call. This repository runs `strict_mode: true`, so here the crash denied, but a client on the defaults fails open. One raise path is still live after N5, though it isn't exploitable: a file path containing a NUL byte.
 
 **Candidate remedy:** make the guard structurally fail closed. A raise anywhere in its match or route computation becomes a deny naming the internal error, whatever the global `strict_mode`, because a protected-read guard that fails open is worse than a false deny. Pin it with a test that injects an exception at each stage. Then audit the other security guards that should behave the same (`sensitive_content`, `project_containment`, the destructive-git rules) and decide each one explicitly.
-
-**Remedy (implemented) — `secret_file_guard`:** the pattern-matching body of `_matched_pattern_and_route` was renamed to `_evaluate`; the public method is now a thin try/except wrapper that NEVER raises — any exception, from any stage of route or pattern computation, resolves to a new internal `_ERROR_ROUTE` naming the raised exception's type and message. `handle()` checks for that route first and denies through a new `_deny_for_evaluation_error` method with a dedicated `RuleID.SECRET_EVALUATION_ERROR`, added to `get_rules()`. Because the guard itself never raises, the chain's `strict_mode` branch (`core/chain.py`) is never reached for this failure mode at all — the guard's behaviour is now independent of that global setting, closing the class of bug N5 was one instance of (a raise anywhere in `matches()`/`handle()` used to fall through to `strict_mode`'s allow-on-default). Pinned with `TestFailsClosedOnEvaluationError` (6 tests), including the live NUL-byte path with no monkeypatch — a genuine crash, now caught. 82 tests pass.
-
-**Audit — the three named sibling guards, each decided explicitly:**
-
-- **`project_containment`: genuine gap found and fixed.** `_resolved_root()` calls `ProjectContext.project_root()`, which raises `RuntimeError` when uninitialised — an unguarded raise inside `matches()`/`handle()`'s pre-existing `_offending_targets()` call, and a SECOND independent call site inside `handle()`'s own deny-message construction (fixed by threading the resolved `root` through as a parameter instead of re-resolving it, so closing the first call site could not silently leave the second exposed). Given the identical treatment: `_offending_targets` now takes `root: Path` as a parameter; a new `_offending_targets_or_error` wrapper never raises; a new `RuleID.PROJECT_CONTAINMENT_EVALUATION_ERROR` rule and `_deny_for_evaluation_error` method mirror the shape above. Pinned with `TestFailsClosedOnEvaluationError` (3 tests). 96 tests pass.
-- **`sensitive_content`: audited, no fix needed.** Already defensively coded throughout: `_relative_path_text` wraps `.resolve().relative_to()` in try/except `ValueError`, `_is_secret_list_itself` wraps its file check in try/except `OSError`/`ValueError`, `_compiled_public_pattern` wraps `re.compile` in try/except `re.error` (docstring: "never crashes"), and `get_active_secret_terms`/`find_first_match_index`/`term_matches` do plain literal substring matching via `re.escape`, never a raw regex over untrusted input. No raise path found.
-- **`destructive_git`: audited, negligible risk, no fix needed.** Pure regex matching over the Bash command string (`get_bash_command` plus a compiled pattern's `.search()`) — no file I/O, no path resolution, no `ProjectContext` call anywhere in the handler. The one route a regex engine could raise through (a pattern rejecting its own input) applies only to a pattern this project itself compiles at import time, not to attacker-controlled input, so this is a design defect it would have shipped broken from day one, not a live fail-open risk worth hardening defensively.
 
 ### N10 — a wildcard in the middle of a protected filename gets past `secret_file_guard`
 
@@ -152,13 +403,19 @@ brace groups are expanded against the raw command text before tokenising,
 the same conflict `enforce_llm_qa`'s own M1 fix resolves. Pinned with 4 new
 test classes (16 tests) in `tests/unit/utils/test_secret_file_matching.py`.
 
-### N9 — `docs_qa` judges gitignored markdown, so installing a Claude Code plugin fails local full QA
+### N9 — ✅ Remedied — `docs_qa` judges gitignored markdown, so installing a Claude Code plugin fails local full QA
 
 **Found by the coordinator** right after installing the Defence Before Fix plugin at project scope (Plan 00467). In this container Claude Code's config directory is `.claude/ccy/`, so the plugin's cache (`.claude/ccy/plugins/cache/...`) and marketplace clone (`.claude/ccy/plugins/marketplaces/...`) land inside the repository. Both are gitignored (`.claude/ccy/.gitignore:3: *`). `llm_qa.py docs_qa` then reported 12 `source-tree-markdown` findings, one per vendored spec file, and the tool FAILED. It reported 0 findings at batch A's gate, before the install. CI does not see this, because a fresh checkout has no `.claude/ccy/`. Every local full QA run, including the coordinator's integration gate, now fails on files that are not part of the project.
 
 The docs corpus walks the filesystem without honouring `.gitignore` (`docs_qa/corpus.py`; it already special-cases `.claude/ccy/CLAUDE.md`, lines 149 and 421).
 
 **Candidate remedy:** the corpus considers only tracked files plus untracked files that are NOT ignored, i.e. `git ls-files --cached --others --exclude-standard`, with a defined fallback outside a git repository. Keep any deliberate inclusion that is ignored but meant to be scanned explicit and named. RED test: a gitignored markdown file under a source-like directory produces no finding, and a tracked one still does. Audit the other QA corpora (plan_qa, doc_snippets, doc_truth, repo_hygiene, sensitive_content, british_english) for the same filesystem-walk assumption, and pin the class.
+
+**Remedied.** `utils/git_repo.py` gained `git_visible_paths(project_root)`: one combined `git ls-files --cached --others --exclude-standard -z` call returning every path git would add, or `None` outside a git repository (callers then fall back to their pre-existing unfiltered walk). `docs_qa/corpus.py`'s `iter_markdown_paths` and `iter_corpus_paths` both filter through it; `.claude/ccy/CLAUDE.md` — deliberately untracked and gitignored, yet named in scope by `is_module_doc_path`'s own docstring — is kept via a small named exception set (`_GITIGNORED_MARKDOWN_INCLUDES`) rather than left an accidental gap, with a directory-descent rule (`_git_visible_ancestor_dirs`) so the walk still reaches it.
+
+The class audit found a SECOND live instance of the same defect: `scripts/qa/check_doc_truth.py`'s `_iter_markdown` denylisted `.claude/ccy/plugins/marketplaces/` by name but not its sibling `cache/` directory, so a plugin's cached spec markdown could still reach `_check_shell_fences` as a false finding. Fixed the same way (filtered through `git_visible_paths`) and reproduced directly with a fixture that git-ignores `.claude/ccy/` and plants a violation inside it.
+
+The rest of the named corpora were audited and left unmigrated, each for a stated, mechanically-pinned reason: `repo_hygiene`, `sensitive_content` and `british_english` already scan `git ls-files` directly by design (tracked-only is deliberate for hygiene/secret-scanning); `magic_values` and `error_hiding` are scoped to `src/`/`tests/`/`scripts/` only, which carry no `.gitignore` gap; `doc_snippets`'s glob set never reaches a nested `.claude/ccy/` subtree; `handler_reference` never walks a directory at all (it introspects the live `HandlerRegistry`); `plan_qa`'s `PlanTree.scan` descends only the configured plan directory via `iterdir()`, never a project-root-wide walk. `tests/unit/qa/test_qa_corpus_git_visibility_audit.py` pins this table as a ratchet: every `MIGRATED` entry is verified by AST to actually import and call `git_visible_paths`, every declared source path is checked to still exist, and every `ALLOWLISTED` entry must carry a non-trivial reason — mirroring `test_qa_package_dependency_direction.py`'s shape.
 
 ### N8 — ✅ Remedied — `reference_repo_freshness` says BLOCKED on a call it allows
 
@@ -183,217 +440,6 @@ The class-wide guard lives at `tests/integration/test_allow_never_carries_deny_h
 - A worktree's regenerated block that never matches main's.
 
 **Candidate remedy:** emit in a total order that depends only on the handler set, for example tier, then priority, then handler name. Test that two injector runs over the same handlers in shuffled input order produce byte-identical blocks. Check whether `HOOKS-DAEMON.md` generation has the same tie problem, and give it the same fix.
-
-### N6 — `enforce_llm_qa` denies a PROSE mention of `run_all.sh` inside an unrelated command's own argument
-
-**Found by the coordinator**, live: a `CLAUDE/Plan/mkplan.bash --journal ... --title "..."` journal entry was denied by `enforce_llm_qa` (a project-handler; it has no rule ID), naming `run_all.sh`, even though the runner's name appeared only
-inside the quoted `--title` prose, not as anything the command would execute.
-
-**Cause** (`.claude/project-handlers/pre_tool_use/enforce_llm_qa.py`,
-`_is_inspection_only` and its call site in `matches()`, pre-fix): the handler
-split a command into top-level segments, then for any segment CONTAINING the
-substring `run_all.sh` ANYWHERE, checked only the segment's OWN leading word
-against an inspection/VCS allowlist (`cat`, `grep`, `git`, ...). A word
-appearing inside a quoted argument to an unrelated command was invisible to
-that check — the leading word of `CLAUDE/Plan/mkplan.bash --title "... run_all.sh ..."` is `mkplan.bash`, which is on no allowlist, so the whole segment was
-treated as a potential invocation and denied. The same shape denied a `gh issue comment --body "... run_all.sh ..."` (a plain prose mention) and a
-`bash scripts/qa/run_tests.sh; echo "see run_all.sh notes"` compound (a
-DIFFERENT script's wrapper plus unrelated prose in the next segment).
-
-**Remedy (implemented)**: replaced the substring-plus-allowlist check with a
-`shlex`-based real-invocation detector (`_has_real_invocation` /
-`_segment_executes_script`), reusing this project's already-established
-`shlex.split()` + `try/except ValueError` tokenisation pattern
-(`project_containment.py`'s `_tokenise`) rather than a third hand-rolled
-parser. A segment matches only when the script is named at the command's own
-HEAD, or as an argument to a wrapper — recursing into a wrapper's `-c`
-subshell argument and into any `$(...)`/backtick substitution's inner text,
-since bash runs both before the rest of the line. A prose word that merely
-CONTAINS the script's name inside a longer shlex token (a whole quoted
-`--title "..."` phrase is ONE token) is no longer conflated with a token that
-IS the script's path.
-
-**First cut (M1, found by the 00466 review) turned this ALLOW-by-default**:
-gating on a fixed list of "wrapper" heads meant every OTHER real invocation
-shape — `source`/`.`, `time`, a `VAR=1` prefix, `(subshell)`, `{ group; }`,
-`!`, `if`/`for`, `nohup`/`sudo`/`command`/`setsid`/`stdbuf`, `... | xargs bash` — passed through unexamined; 16 such shapes that main correctly denied
-were allowed on the branch. **Fixed by restoring deny-by-default**: a segment
-is now denied whenever ANY shlex word — at any position, not just the head —
-equals the script or ends in `/` + the script, UNLESS the segment's head is a
-recognised data consumer (an inspection command such as `cat`/`grep`/`head`,
-or `git`/`gh`) that could not execute it. Only the WORD SPLITTING changed
-from the naive substring check: `shlex.shlex(..., punctuation_chars="(){}!")`
-with `whitespace_split = True` so `(`, `)`, `{`, `!` split off a word with no
-surrounding whitespace, and a leading `VAR=value` assignment is skipped when
-finding the segment's head — so a quoted multi-word argument
-(`--title "... run_all.sh ..."`) stays ONE word and is never mistaken for the
-script's own path. The `_INSPECTION_COMMANDS`/`_VCS_COMMANDS` head allowlist
-from before M1 stays in place under the new name `_DATA_CONSUMERS`.
-
-One pre-existing acceptance-test fixture (`get_acceptance_tests()`, "Block
-run_all.sh") turned out to be the SAME false-positive class in miniature: it
-used `echo "./scripts/qa/run_all.sh"` as a "safe to execute" DENY case, which
-only denied because `echo` happened to be absent from the old allowlist — a
-prose mention, not an invocation. Replaced with `bash -n scripts/qa/run_all.sh`
-(a genuine wrapper-invocation shape; `-n` keeps it parse-only and harmless if
-the block ever regresses).
-
-RED tests (confirmed failing pre-fix, passing after), added to
-`.claude/project-handlers/pre_tool_use/test_enforce_llm_qa.py`:
-`test_does_not_match_a_prose_mention_in_a_quoted_title_flag` (the exact live
-shape) and `test_does_not_match_an_unrelated_wrapper_invocation`, plus (M1)
-`test_still_matches_shell_prefix_and_process_control_forms`,
-`test_still_matches_subshell_and_control_flow_forms`,
-`test_still_matches_a_bare_path_piped_into_xargs_bash` covering all 16 of the
-review's cases, and `test_does_not_match_further_prose_and_data_consumer_shapes`
-pinning the prose-mention fix stays intact. A companion "must still deny"
-regression guard was written alongside (already passing pre-fix, kept as a
-pin): `cd ... && ./run_all.sh`, `sh -c './scripts/qa/run_all.sh'`, and a bare
-`$(./run_all.sh)` substitution — `gh issue comment --body "... run_all.sh ..."` is NOT one of these: `gh` was already VCS-exempt on main (`_VCS_COMMANDS`,
-now `_DATA_CONSUMERS`), so a `gh --body` prose mention was ALLOW before this
-fix too, and `test_does_not_match_a_prose_mention_in_a_gh_body` was never RED.
-All 45 tests in that file pass, and all project-handler tests pass
-(`bin/hooks-daemon test-project-handlers --verbose`).
-
-**Correction (M1, guard-defects review 2)**: this entry's "restoring
-deny-by-default" and "Only the WORD SPLITTING changed" overstated the fix —
-19 further regressions were still ALLOW on this branch where main denied: a
-string-executor argument (`bash -c`/`eval`/`ssh`/`watch`/`su -c`/`timeout … sh -c`/`python -c`) where the script is not the LAST thing in the string, a
-glued redirection with no whitespace before `<`/`>`, and a glob/brace word
-that could expand to the script. Fixed on the guard-defects-review-2 branch:
-string-executor arguments are re-parsed recursively (extended `-c`/`-lc`,
-`eval`, `ssh <host>`, `watch`, `su -c`, `timeout … <shell> -c`, and a
-substring test for `python* -c`), `_PUNCTUATION_CHARS` gained `<`/`>` so a
-glued redirect splits into its own token, and a word that could glob- or
-brace-expand to the script is now checked the same as an exact spelling.
-Pinned with 8 new test methods covering all 19 regressions plus the M1
-brace/glob cases, in `.claude/project-handlers/pre_tool_use/test_enforce_llm_qa.py`.
-
-### N5 — SECURITY FAIL-OPEN: an empty path-mention token crashes `secret_file_guard.matches()`, skipping the whole guard for that write
-
-**Found by 00463's agent** live, reported to the coordinator; reproduced here
-via the daemon after the coordinator saved the exact triggering `tool_input`s
-and replayed them for a full traceback. Three Edits to
-`subagent_full_qa_blocker.py` (a WIP file inside a worktree) each drew
-`Handler exception: ValueError: no path specified` as PreToolUse:Edit
-context. The added content declared tuples of shell/Python path-expansion
-operands, e.g. `_HOME_PREFIXES: Final[tuple[str, ...]] = ("~/", "$HOME/", "${HOME}/", "$PWD/", "${PWD}/")` and `_UNSEEN_CD_PREFIXES: Final[tuple[str, ...]] = ("$", "~", "` `")`.
-
-**Cause**, traced through a live daemon log:
-`chain.py:431 handler.matches (block-secret-file-read)` →
-`secret_file_guard.py _matched_pattern_and_route` → `_script_content_mention`
-→ `secret_file_matching.py find_protected_mention_detail` →
-`iter_protected_mentions` → `_token_mention`: `path_matches_globs(form, ...)`
-with `form == ""` → `path_exclusion.py _candidate_paths`:
-`os.path.relpath(raw, root)` with `raw == ""` →
-`ValueError: no path specified` (`os.path.relpath` rejects an empty PATH
-argument outright, regardless of `start`).
-
-The empty `form` came from `_normalised_token_forms`: for a token EQUAL to
-one of `_HOME_PREFIXES` (e.g. the tokeniser isolates `"~/"` cleanly out of a
-quoted Python string literal, since neither `~` nor `/` is a token
-delimiter), `token[len(prefix):]` on a token exactly as long as the prefix is
-`""`. That empty spelling then reached the glob matcher, which had never been
-asked to answer for an empty path before.
-
-**Severity — this is a fail-OPEN under the default config, not noise.** The
-exception is raised inside `matches()`, not `handle()`. The daemon's
-per-handler catch (`core/chain.py`) branches on `daemon.strict_mode`: under
-the default `false` it logs the exception as context and moves on to the NEXT
-handler, treating this one as "did not match", so a Write/Edit whose content
-contains an empty-yielding token SKIPS `secret_file_guard` ENTIRELY for that
-call — including any genuine protected-path mention elsewhere in the same
-content. This entry originally claimed `.claude/hooks-daemon.yaml:8`'s
-`strict_mode: true` made the crash a fail-CLOSED SYSTEM ERROR deny in THIS
-repository, with the fail-open applying only to a client install left on the
-default `false`. **That is false — corrected by N24.** `daemon.strict_mode`
-never reaches the live daemon at all (`daemon/controller.py:959` reads a
-`config` parameter the real startup path never populates), so the crash was
-a fail-open here too, live-verified against this repository's own running
-daemon. The trigger was a bare `~/` only — `$` is a tokeniser
-delimiter (`_TOKEN_DELIMITERS`), so `"$PWD/"`/`"${PWD}/"` never reach the
-prefix-stripping branch at all (they tokenise to `PWD/`/`{PWD}/`, neither of
-which equals a configured prefix). Both surfaces were affected: the
-Write/Edit content scan above, and the Bash command scan (`ls ~/ && cat <protected>` crashed the same way pre-fix).
-
-**Remedy (implemented), both layers per the coordinator's instruction:**
-
-(a) `_normalised_token_forms`
-(`src/claude_code_hooks_daemon/utils/secret_file_matching.py`) never emits an
-empty form: the home/pwd-prefix-stripping branch now requires
-`len(token) > len(prefix)`, the same non-empty guard shape the adjacent
-`./`-stripping branch already used.
-
-(b) `_candidate_paths` (`src/claude_code_hooks_daemon/utils/path_exclusion.py`)
-is now TOTAL on an empty `file_path`: it returns early with a single empty
-candidate (matching nothing) rather than calling `os.path.relpath` at all —
-defence in depth, so no OTHER caller of `path_matches_globs`/`is_path_excluded`
-can hit the same crash by a different route.
-
-(c) Fail-safe pinned with a RED test: content carrying BOTH a home-prefix
-token and a genuine protected mention (`id_rsa`) elsewhere in the same blob
-must still deny — confirmed failing (crashing) before the fix, passing
-after. A corpus test iterates every operand shape from the live payloads
-(alone, inside a quoted string, inside a call) asserting the mention scan
-never raises.
-
-RED tests: `tests/unit/utils/test_path_exclusion.py ::TestEmptyAndNoMatch::test_empty_file_path_with_a_project_root_does_not_raise`
-and `tests/unit/utils/test_secret_file_matching.py ::TestBareHomePrefixTokenDoesNotCrash` (6 tests). Full
-`test_secret_file_matching.py` (196), `test_path_exclusion.py` (55) and
-`test_secret_file_guard.py` (76) pass — 327 total.
-
-**Nit fixed (n1, 00466 review):** `_candidate_paths`'s docstring said an empty
-`file_path` yields "an empty candidate list that matches nothing", but the
-code returned `[""]` — a list holding one empty string, which DOES match
-`*`/`**` (`fnmatch("", "*")` is True). Not a regression (main behaved the
-same with no `project_root`), but worth aligning: it now returns `[]`, so the
-code matches its own documented contract. RED test:
-`test_empty_file_path_does_not_match_a_bare_wildcard`.
-
-### N4 — `secret_file_guard`'s leading-wildcard overlap check denies an unrelated Python splat expression as `*.vault-password`
-
-**Found by a peer agent** working in a worktree, reported to the coordinator;
-reproduced independently here before fixing (per instruction, its account was
-treated as a hypothesis, not a fact). An Edit adding the Python expression
-`*words[position + 1 :]` (a plain unpacking of a slice, e.g. `rest = [words[0], *words[position + 1 :]]`) to a `.py` file was denied under
-`R-SECRET-SCRIPT-AUTHOR`, naming the protected glob `*.vault-password`. The
-same shape denies the equivalent Bash mention (`cat 'rest = [words[0], *words[position + 1 :]]'`) and, stripped of any bracket at all, a bare
-`def f(*wordlist): pass` or `call(*wordlist)`.
-
-**Cause** (`src/claude_code_hooks_daemon/utils/secret_file_matching.py`,
-`_glob_token_overlaps_stem` and its call site in `_token_mention`): the
-tokeniser splits `*words[position + 1 :]` on whitespace into `*words[position`,
-`+`, `1` and `:]` (`_tokenise`'s delimiter set includes space but not `[`/`]`/
-`:`/`+`). The first token starts with a literal `*` (Python's unpacking
-operator, not a shell glob), so `_has_leading_wildcard` reports it as a
-leading-wildcard token. Its literal residue, after stripping `*`/`[`, is
-`wordsposition`. The leading-wildcard branch of `_glob_token_overlaps_stem`
-then checks whether the STEM's suffix overlaps the residue's PREFIX
-(`_suffix_prefix_overlap_length`) — and `.vault-password`'s last 4 characters
-(`word`, from "pass-**word**") exactly equal `wordsposition`'s first 4
-characters, clearing the 2-char minimum. The same coincidence reproduces
-without any bracket: `*wordlist`'s residue `wordlist` shares the same 4-char
-`word` overlap.
-
-That overlap check was correct for the case it was built for — a token like
-`*passXXX` against a BOTH-EDGES pattern (`*vault_pass*`), where the pattern's
-own trailing wildcard can absorb whatever the token's residue doesn't cover
-after the overlap. It was applied uniformly to every leading-wildcard pattern
-though, including `*.vault-password` — the ONLY pattern in the shipped
-defaults with a leading wildcard and NO trailing one. For such a pattern a
-matching real filename must end EXACTLY at the stem (nothing can follow), so
-a token with no trailing wildcard of its own (as `*words[position`/`*wordlist`
-both are — the whole point of a leading-only token) can only be a genuine
-truncation if its ENTIRE residue is a literal suffix of the stem, not merely a
-short boundary coincidence. That stronger case was already covered by the
-pre-existing substring+fnmatch check earlier in the same function (confirmed:
-no test in the existing suite exercises a leading-only token against a
-leading-only pattern needing the overlap branch specifically) — so the overlap
-branch contributed nothing there but this false positive.
-
-**Remedy** (implemented): `_glob_token_overlaps_stem` takes a new `pattern_has_trailing_wildcard` parameter; its leading-wildcard branch now also requires `pattern_has_trailing_wildcard or stem_basename.endswith(residue)` before counting the overlap as a mention. The call site passes `_has_trailing_wildcard(pattern)` — a function already used elsewhere in the same module for the token's own edges, reused here for the pattern's. This is parametrised on the pattern's own shape, not special-cased to `.vault-password`, so any future or project-configured leading-wildcard-only glob is covered the same way. RED tests (confirmed failing pre-fix, passing after): `TestBashMentionsProtectedPath::test_leading_wildcard_python_splat_operator_is_not_matched` (the reported shape plus the bracket-free forms) and a paired `..._full_suffix_of_anchored_stem_still_matched` regression guard proving a genuine truncation of an anchored pattern (`*password`, `*ult-password` against `*.vault-password`) still denies. Full `test_secret_file_matching.py` (190 tests) and `test_secret_file_guard.py` (76 tests) pass.
-
-**Correction (m1, found by the 00466 review):** the `stem_basename.endswith(residue)` requirement above is only correct for the simple splat shape (`*identifier`, nothing else) — a token that carries ANOTHER wildcard besides its leading one (`*rd*rd`, project-configured `*on*.json`) is not that shape, since fnmatch expands the internal wildcard too and can still glob-match a protected name without its residue being a literal suffix of the stem at all (`*rd*rd` matches `rd.vault-password`). Applying the stricter requirement there silently dropped that detection. Fixed with a new `_has_wildcard_after_leading` predicate and a `token_has_wildcard_after_leading` parameter: the stricter requirement is now scoped to a token with NO wildcard after its leading one, restoring the pre-N4 overlap-only behaviour for genuinely multi-wildcard tokens. RED tests: `test_leading_wildcard_with_an_internal_wildcard_too_still_matched` (`*rd*rd`, `*word*word`) and `test_leading_wildcard_project_pattern_with_an_internal_wildcard_still_matched` (`*on*.json` against a project `*secret*.json` pattern). Full `test_secret_file_matching.py` (198 tests at the time) and `test_secret_file_guard.py` (82 tests) pass.
 
 ### N3 — `goal_injection` treats any edit of an In Progress plan as the plan starting
 

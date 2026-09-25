@@ -1,6 +1,6 @@
 # Plan 00388: failsafe marker wiped by other crons in multi cron sessions
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-09-12
 **Owner**: joseph
 **Priority**: High
@@ -109,6 +109,24 @@ Recorded as an option, not a ruling. It is offered because it removes a
 constraint the original framing treated as fixed, not to pre-empt the owner's
 choice.
 
+**Decided (unattended, 2026-09-24)**: approach 2′. Every daemon-authored tick
+prompt carries a sentinel and `background_process_tracker` supplies its watchdog
+prompt verbatim, so a tick can never be mistaken for the human; it is the only
+option that covers the cron that actually wiped the marker. Assumption: the
+owner's 'no known defects' instruction; the owner can reverse this with one
+message.
+
+**As built.** The sentinel is one bracketed token on the prompt's first line:
+`[tick:failsafe]`, `[tick:watchdog]`, or `[tick:job:<id>]` for a declared job
+(`utils/cron_tick.py`). The provenance table above now reads differently:
+the watchdog prompt is daemon-authored verbatim, and a declared job's prompt is
+rendered with its sentinel by `persistent_cron_assertor` and by the
+`cron_stop_enforcer` block message. The remaining gap is a cron the daemon
+never supplied the text for: an agent-composed prompt, a `/loop`, a
+`ScheduleWakeup`, or a cron created before this change. Those still read as the
+human, which is the over-clearing direction. `cron_enforcement` strips sentinels
+before matching, so a pre-sentinel cron still satisfies its declaration.
+
 ## A second consumer arrived — the ruling question is UNCHANGED
 
 Plan 00392 N1 graduated into this plan rather than becoming a third one. The
@@ -158,41 +176,45 @@ of this resurfacing as a separate decision later.
 
 ### Phase 1: Owner decision
 
-- [ ] ⬜ **Task 1.1**: Owner picks one of the three approaches, approach 2′, or
-  names another. Nothing below starts until then: the choice determines the test
-  matrix, not merely the implementation.
+- [x] ✅ **Task 1.1**: Owner picks one of the three approaches, approach 2′, or
+  names another. Decided: approach 2′ (see the ruling above).
 
 ### Phase 2: Fix, once decided
 
-- [ ] ⬜ **Task 2.1**: A failing test first, driven by the real watchdog and
+- [x] ✅ **Task 2.1**: A failing test first, driven by the real watchdog and
   `issue-sdlc` tick prompts. The existing suite only ever exercises the canonical
   prompt and an ordinary human sentence, which is exactly the gap that let this
-  through.
-- [ ] ⬜ **Task 2.2**: Implement the chosen rule, keeping every fail-open path.
-- [ ] ⬜ **Task 2.3**: Cover the cadence half explicitly — it rides the same
+  through. `test_failsafe_cron_multi_cron_ticks.py` holds prompts lifted from
+  this repository's session transcripts.
+- [x] ✅ **Task 2.2**: Implement the chosen rule, keeping every fail-open path.
+- [x] ✅ **Task 2.3**: Cover the cadence half explicitly — it rides the same
   branch and would otherwise be fixed by accident rather than on purpose.
-- [ ] ⬜ **Task 2.4**: Apply the chosen rule to EVERY declared cron, not just
+- [x] ✅ **Task 2.4**: Apply the chosen rule to EVERY declared cron, not just
   the failsafe one, so an `[awaiting-human]` marker stands the `issue-sdlc` tick
-  down too (Plan 00392 N1, graduated here). Suppression currently keys on the
-  literal `FAILSAFE RECOVERY CHECK` at `failsafe_cron_blockage_suppressor.py:269`,
-  which is why no other cron can ever be suppressed by it.
-- [ ] ⬜ **Task 2.5**: Pin that a suppressed `issue-sdlc` tick still resumes on
+  down too (Plan 00392 N1, graduated here). A declared job's tick is dropped
+  under a live marker (`R-DECLARED-CRON-SUPPRESSED`), and the issue-sdlc runbook
+  now tells a tick whose backlog is entirely `agent-needs-human` to stop with
+  `[awaiting-human]`, which is what arms the marker.
+- [x] ✅ **Task 2.5**: Pin that a suppressed `issue-sdlc` tick still resumes on
   a genuine human prompt. The failure to avoid is inverted here: a permanently
   stood-down issue loop is a backlog nobody is working, which is worse than an
   hourly no-op.
 
 ## Success Criteria
 
-- [ ] An armed marker survives a watchdog tick and an `issue-sdlc` tick, and is
-  still cleared by a genuine human prompt.
-- [ ] The cadence file behaves the same way under those same three prompts.
-- [ ] An armed marker stands the `issue-sdlc` tick down as well as the failsafe
+- [x] An armed marker survives a watchdog tick and an `issue-sdlc` tick, and is
+  still cleared by a genuine human prompt. Holds for ticks whose prompt the
+  daemon supplied; a pre-existing agent-composed watchdog prompt still clears,
+  pinned as the known residual.
+- [x] The cadence file behaves the same way under those same three prompts.
+- [x] An armed marker stands the `issue-sdlc` tick down as well as the failsafe
   one, and BOTH resume on a genuine human prompt.
-- [ ] Every fail-open path is unchanged: no marker, wrong session, expired marker
+- [x] Every fail-open path is unchanged: no marker, wrong session, expired marker
   and missing project context all still ALLOW.
-- [ ] Every release-bound consequence is in the pending-release holding area, or
-  this plan records why it has none.
-- [ ] Full QA passes and CI is green.
+- [x] Every release-bound consequence is in the pending-release holding area, or
+  this plan records why it has none. Release note 29, a truth-change entry.
+- [ ] Full QA passes and CI is green. Targeted QA only on the branch; the
+  coordinator runs the full gate over the merged batch.
 
 ## Delivery & Milestones
 

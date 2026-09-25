@@ -174,6 +174,124 @@ class TestAdvisoryMode:
         assert len(result.context) == 1
 
 
+_PLAN_WORK_TO_GITIGNORED_FALLBACK = (
+    "Review the v3.65.0 diff for Plan 00422: /workspace/CLAUDE/Plan/00422-niggles"
+    "-ledger-fifteen/. Write your report to untracked/agent-reports/"
+    "260924-review-opus.md and reply with a short summary."
+)
+
+
+class TestTheDefaultDestinationIsTracked:
+    """Ledger 00422 N5, decision 6: evidence must land where git can see it.
+
+    Twenty release-review non-defects were written to the gitignored
+    ``untracked/agent-reports/`` while a plan applied, and were one container
+    restart from gone. The plan's ``subagent-reports/`` is the default; the
+    gitignored directory is the fallback only when no plan applies.
+    """
+
+    def test_the_contract_names_the_plan_folder_as_the_tracked_default(
+        self, handler: DispatchDeclarationHandler
+    ) -> None:
+        text = handler.handle(_task_input("refactor the config loader")).context[0]
+
+        assert "tracked" in text.lower()
+        assert "default" in text.lower()
+        assert text.find("subagent-reports") < text.find("untracked/agent-reports/")
+
+    def test_the_contract_says_the_fallback_is_gitignored_and_only_for_plan_less_work(
+        self, handler: DispatchDeclarationHandler
+    ) -> None:
+        text = handler.handle(_task_input("refactor the config loader")).context[0].lower()
+
+        assert "gitignored" in text
+        assert "only when no plan applies" in text
+
+    def test_strict_mode_denies_with_the_same_default(
+        self, strict_handler: DispatchDeclarationHandler
+    ) -> None:
+        reason = strict_handler.handle(_task_input("refactor the config loader")).reason
+
+        assert reason is not None
+        assert "tracked" in reason.lower()
+        assert "only when no plan applies" in reason.lower()
+
+    def test_claude_md_guidance_states_the_tracked_default(
+        self, handler: DispatchDeclarationHandler
+    ) -> None:
+        guidance = handler.get_claude_md()
+
+        assert guidance is not None
+        assert "tracked" in guidance.lower()
+        assert "only when no plan applies" in guidance.lower()
+
+    def test_plan_work_sent_to_the_gitignored_fallback_is_advised(
+        self, handler: DispatchDeclarationHandler
+    ) -> None:
+        """The N5 shape: a plan applies, and the report still goes to the
+        directory git cannot see."""
+        result = handler.handle(_task_input(_PLAN_WORK_TO_GITIGNORED_FALLBACK))
+
+        assert result.decision == Decision.ALLOW
+        assert len(result.context) == 1
+        assert "gitignored" in result.context[0].lower()
+        assert "CLAUDE/Plan/00422-niggles-ledger-fifteen/subagent-reports/" in result.context[0]
+
+    def test_plan_work_sent_to_the_gitignored_fallback_is_never_denied(
+        self, strict_handler: DispatchDeclarationHandler
+    ) -> None:
+        """A declared destination is a declaration: strict mode denies only
+        an UNDECLARED dispatch, so this stays advisory there too."""
+        result = strict_handler.handle(_task_input(_PLAN_WORK_TO_GITIGNORED_FALLBACK))
+
+        assert result.decision == Decision.ALLOW
+        assert len(result.context) == 1
+
+    def test_plan_work_sent_to_its_own_subagent_reports_is_silent(
+        self, handler: DispatchDeclarationHandler
+    ) -> None:
+        """Control: the tracked destination draws nothing."""
+        hook_input = _task_input(_DECLARED_PROMPT_WITH_DESTINATION, subagent_type="general-purpose")
+
+        assert handler.handle(hook_input).context == []
+
+    def test_plan_less_work_sent_to_the_fallback_is_silent(
+        self, handler: DispatchDeclarationHandler
+    ) -> None:
+        """Control: with no plan, the fallback is the right destination."""
+        prompt = (
+            "This is not plan work. Write your report to untracked/agent-reports/"
+            "260901-probe-haiku.md and reply with a short summary."
+        )
+
+        assert handler.handle(_task_input(prompt)).context == []
+
+    def test_a_plan_prompt_that_only_mentions_the_fallback_is_silent(
+        self, handler: DispatchDeclarationHandler
+    ) -> None:
+        """Only a DESTINATION under the fallback counts, not any mention of it."""
+        prompt = (
+            "Plan 00422: /workspace/CLAUDE/Plan/00422-niggles-ledger-fifteen/. The "
+            "daemon also keeps a copy under untracked/agent-reports/auto/."
+        )
+
+        assert handler.handle(_task_input(prompt)).context == []
+
+    def test_a_configured_fallback_directory_is_the_one_judged(
+        self, handler: DispatchDeclarationHandler
+    ) -> None:
+        handler._fallback_report_dir = "scratch/reports/"
+        prompt = (
+            "Plan 00422: CLAUDE/Plan/00422-niggles-ledger-fifteen/. Save it to "
+            "scratch/reports/260924-x.md."
+        )
+
+        result = handler.handle(_task_input(prompt))
+
+        assert len(result.context) == 1
+        assert "scratch/reports/" in result.context[0]
+
+
 class TestStrictMode:
     def test_denies_undeclared_dispatch_in_strict_mode(
         self, strict_handler: DispatchDeclarationHandler

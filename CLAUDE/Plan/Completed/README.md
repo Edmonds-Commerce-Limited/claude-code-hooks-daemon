@@ -4,6 +4,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 
 ## Completed Plans (Archive)
 
+- [00425: remote docs index goes stale on delete](00425-remote-docs-index-goes-stale-on-delete/PLAN.md) - Complete at `edd91533`…`9282c9ea` + the archiving commit (from issue #43: `rm` is the one tree mutation that runs no daemon command, so `check` called the corpus fresh while the index named a deleted file. `check` now detects and reports; the network-free `remote-docs index` repairs)
+
 - [00424: remote docs add overwrites existing capture](00424-remote-docs-add-overwrites-existing-capture/PLAN.md) - Complete at `ad8e79b3`…`08f8b9c9` + the archiving commit (from issue #42: a second `add` of one URL silently replaced the first capture. The catch the report could not see is that `check` PRINTS plain `add` as the licence-drift remedy, so the refusal and that remedy moved together, welded by a test — nothing pinned that line before, in either direction)
 
 - [00423: per handler scope main sub](00423-per-handler-scope-main-sub/PLAN.md) - Complete at `93f2a1c0`…`48733f1b` + the archiving commit (from issues #40/#41: handlers declare `scope: ALL|MAIN|SUB`, keyed on `agent_id` presence because `agent_type` was measured empty in 4 of 5 subagent stops; #41's three destructive controls are scoped but deliberately not built)
@@ -33,6 +35,8 @@ Plans older than the 30 highest-numbered completed plans (see [../README.md](../
 - [00403: upstream issue reporting sop](00403-upstream-issue-reporting-sop/PLAN.md) - Complete at `6787874f`…`47f315cd` + the archiving commit (one procedure for reporting a daemon defect to this PUBLIC repo: a generator that never COLLECTS the hostname, remote, env file, config or logs, a gate refusing any body it did not build, issue forms mirroring its fields, and `--web` kept open as the hole that keeps the gate honest)
 
 - [00404: niggles ledger ten](00404-niggles-ledger-ten/PLAN.md) - Complete at `bd8fd27f` + the archiving commit (one entry, fixed: an unguarded `chmod` one line outside `_bind_event_sockets`' per-socket guard meant a single unsecurable socket aborted daemon startup and cost ALL 31 event sockets — found by reading a CI failure rather than hitting a symptom. The NEXT niggle opens ledger eleven)
+
+- [00402: restart path leaves generated handler doc stale](00402-restart-path-leaves-generated-handler-doc-stale/PLAN.md) - Complete at `40098113`…`d1f9e32a` + the archiving commit (a restart regenerated the `CLAUDE.md` block but never `.claude/HOOKS-DAEMON.md`, and nothing could see the drift. Ruled option 3: a `generated_doc_drift` QA check compares the body against fresh output and never rewrites the deployed-from marker `upgrade.sh` reads)
 
 - [00401: reference repo freshness before read](00401-reference-repo-freshness-before-read/PLAN.md) - Complete at `9e399219`…`7a43abf6` + the archiving commit (one checker over `git_sync` feeds a SessionStart sweep, a cache-only PreToolUse gate and a CLI report, with a third verdict for a clone that is un-fetchable by design; four defects were found by using the finished thing, not by adding tests)
 

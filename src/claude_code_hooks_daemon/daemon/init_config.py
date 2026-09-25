@@ -143,7 +143,7 @@ class ConfigTemplate:
             "# Block AskUserQuestion unless every question is `ASKING BECAUSE:`-prefixed\n"
             "    absolute_path: {enabled: true, priority: 12}     # Require absolute paths\n"
             "    error_hiding_blocker: {enabled: true, priority: 13}  # Block error-hiding patterns (|| true, except: pass, catch(e){})\n"
-            "    security_antipattern: {enabled: true, priority: 15}  # Block hardcoded secrets and injection patterns\n"
+            "    security_antipattern: {enabled: true, priority: 14}  # Block hardcoded secrets and injection patterns\n"
             # Inert until configured: public_patterns defaults to empty and the
             # secret word list defaults to a gitignored path that does not exist
             # in a fresh project. Registered enabled anyway so that adding terms
@@ -342,6 +342,7 @@ class ConfigTemplate:
             "    config_optimisation_reminder: {enabled: true, priority: 67}  # Remind to re-run the config-optimisation review after an upgrade; silent once a run is recorded against the current version\n"
             "    lsp_noise_checker: {enabled: true, priority: 69}  # Every supported language (Python, TypeScript/JavaScript, Go, Rust, PHP): advise when its server isn't told to exclude a tree that is not project code, or its process predates that check\n"
             "    persistent_cron_assertor: {enabled: true, priority: 70}  # Re-state crons declared under persistent_crons so a new session can re-create them (Claude Code crons are session-only: durable has no effect and recurring jobs expire after 7 days). Inert until persistent_crons.enabled is true AND a job is declared, so this ships silent\n"
+            "    failsafe_cron_session_advisor: {enabled: true, priority: 70}  # New sessions: reconcile the failsafe recovery cron from the start, not from the first plan write. Follows recovery_cron_advisor's switch; silent when the failsafe is declared under persistent_crons\n"
             "\n"
             "  # SessionEnd - no handlers ship today (cleanup removed in Plan 00237)\n"
             "  session_end: {}\n"
@@ -374,9 +375,9 @@ class ConfigTemplate:
             "\n"
             "  # Status - Status line generation\n"
             "  status_line:\n"
-            "    git_repo_name: {enabled: true, priority: 5}      # Git repository name\n"
-            "    account_display: {enabled: true, priority: 6}    # Account information\n"
-            "    host_hostname: {enabled: false, priority: 7}    # Which MACHINE this session is on (opt-in)\n"
+            "    git_repo_name: {enabled: true, priority: 3}      # Git repository name\n"
+            "    account_display: {enabled: true, priority: 5}    # Account information\n"
+            "    host_hostname: {enabled: false, priority: 6}    # Which MACHINE this session is on (opt-in)\n"
             "    model_context: {enabled: true, priority: 10}    # Model name and context %\n"
             "    downgrade_indicator: {enabled: true, priority: 11}  # Warn on a silent model-family downgrade\n"
             "    context_sidecar: {enabled: false, priority: 12}  # Observe-only context sidecar for PTY supervisor (opt-in)\n"

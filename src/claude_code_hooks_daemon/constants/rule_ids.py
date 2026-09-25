@@ -599,6 +599,12 @@ class RuleID:
     #: a real prompt; this one needs no declaration and never stops them.
     FAILSAFE_CRON_BACKED_OFF: str = "R-FAILSAFE-CRON-BACKED-OFF"
 
+    #: A delivered tick of a `persistent_crons` job, recognised by its
+    #: `[tick:job:<id>]` sentinel, dropped by the same still-valid marker
+    #: (Plan 00388 Task 2.4). No backoff: the goal ledger says nothing about
+    #: whether a declared job has work.
+    DECLARED_CRON_SUPPRESSED: str = "R-DECLARED-CRON-SUPPRESSED"
+
     # ------------------------------------------------------------------
     # lsp_noise_checker handler (Plan 00368) — both advisory
     # ------------------------------------------------------------------

@@ -409,6 +409,9 @@ class Priority:
     # again. Deliberately last: re-establishing crons is session housekeeping,
     # and it must not push a finding about the code ahead of it off the top.
     PERSISTENT_CRON_ASSERTOR = 70
+    # Plan 00394: same slot as its sibling above -- both re-establish a cron
+    # at session start, and at most one of them speaks about the failsafe.
+    FAILSAFE_CRON_SESSION_ADVISOR = 70
     # Plan 00401 Task 3.1: reference-repo freshness sweep -- next free
     # SessionStart priority after persistent_cron_assertor (70), so
     # ADVISORY_MAX widens by one again. Last deliberately: this is the only
@@ -455,8 +458,9 @@ class Priority:
     GIT_REPO_NAME = 3
     ENVIRONMENT_INDICATOR = 4  # After repo name, before account display
     ACCOUNT_DISPLAY = 5
-    # Plan 00411: beside the environment indicator, which says WHAT kind of
-    # environment this is — this says WHICH machine it is on (opt-in).
+    # Plan 00411: in the environment cluster after the environment indicator,
+    # which says WHAT kind of environment this is — this says WHICH machine it
+    # is on (opt-in).
     HOST_HOSTNAME = 6
     MODEL_CONTEXT = 10
     # Plan 00278: sits immediately after model_context so the downgrade marker

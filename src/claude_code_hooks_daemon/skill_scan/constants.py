@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from typing import Final
 
+from claude_code_hooks_daemon.utils.cron_tick import TICK_SENTINEL_PREFIX
+
 #: The jsonl record type carrying (possibly) human prompts.
 USER_RECORD_TYPE: Final[str] = "user"
 
@@ -30,6 +32,8 @@ EXCLUDE_CONTENT_MARKERS: Final[tuple[str, ...]] = (
     "<task-notification",
     "[Request interrupted by user",
     "FAILSAFE RECOVERY CHECK",
+    # Every daemon cron tick (failsafe, watchdog, declared job), Plan 00388.
+    TICK_SENTINEL_PREFIX,
     "🤖 [ccy-supervisor",
     "<command-name>",
     "<local-command-stdout>",
