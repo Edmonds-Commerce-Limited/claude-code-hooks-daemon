@@ -62,6 +62,8 @@ source "$INSTALL_LIB_DIR/config_preserve.sh"
 source "$INSTALL_LIB_DIR/upgrade_transition.sh"
 # shellcheck source=install/branch_install.sh
 source "$INSTALL_LIB_DIR/branch_install.sh"
+# shellcheck source=lib/python_discovery.sh
+source "$SCRIPT_DIR/lib/python_discovery.sh"
 
 # ============================================================
 # Argument parsing
@@ -322,6 +324,30 @@ _target_release() {
     echo "${release:-unknown}"
 }
 
+# The oldest Python the standalone gate runs on (datetime.UTC).
+GATE_PYTHON_FLOOR="3.11"
+GATE_PYTHON=""
+
+# _pick_gate_python() - Set GATE_PYTHON to an interpreter no environment
+# override chose; returns 1 when there is none.
+#
+# The venv the installed version was read from (resolved with the overrides
+# unset), else PATH discovery with HOOKS_DAEMON_PYTHON unset. Never
+# HOOKS_DAEMON_PYTHON itself: an interpreter that prints the gate's verdict
+# line without running the gate would answer for it. The override still
+# chooses the interpreter the target's venv is built with.
+_pick_gate_python() {
+    local version=""
+    GATE_PYTHON=""
+    if [ -n "$INSTALLED_VENV_PYTHON" ] && version="$(_pd_probe_version "$INSTALLED_VENV_PYTHON")" \
+        && _pd_version_ge "${version%.*}" "$GATE_PYTHON_FLOOR"; then
+        GATE_PYTHON="$INSTALLED_VENV_PYTHON"
+        return 0
+    fi
+    GATE_PYTHON="$(unset HOOKS_DAEMON_PYTHON HOOKS_DAEMON_VENV_PATH; find_latest_python "$GATE_PYTHON_FLOOR" "$DAEMON_DIR/pyproject.toml")" || GATE_PYTHON=""
+    [ -n "$GATE_PYTHON" ]
+}
+
 # run_pre_deploy_phase() - The pre-deploy gate (Plan 00376 Tasks 1.1, 3.1-3.3).
 #
 # Runs once the daemon dir sits on the target and BEFORE ensure_venv rebuilds
@@ -350,7 +376,10 @@ run_pre_deploy_phase() {
     local target_semver
     target_semver="$(_target_release)"
     local gate_script="$DAEMON_DIR/src/claude_code_hooks_daemon/install/upgrade_gate_standalone.py"
-    local gate_python="${HOOKS_DAEMON_PYTHON:-python3}"
+    if ! _pick_gate_python; then
+        print_error "No Python $GATE_PYTHON_FLOOR+ interpreter for the pre-deploy gate: the installed venv has none and PATH has none. The gate never runs on an interpreter an environment variable names; put a Python $GATE_PYTHON_FLOOR+ on PATH."
+        abort_before_deploy 1 "stopped: the pre-deploy gate could not run, and an undecided gate does not let an upgrade through"
+    fi
     local -a gate_args=(
         --daemon-dir "$DAEMON_DIR"
         --project-root "$PROJECT_ROOT"
@@ -366,19 +395,20 @@ run_pre_deploy_phase() {
         gate_args+=(--acknowledgement "$READING_ACKNOWLEDGEMENT")
     fi
 
-    print_info "Pre-deploy gate: what upgrading to $target_semver changes..."
+    print_info "Pre-deploy gate: what upgrading to $target_semver changes (run by $GATE_PYTHON)..."
     local gate_exit=0
     local gate_stdout=""
+    # -I (isolated): no PYTHON* variable and no user site-packages reach it.
     if command -v timeout > /dev/null; then
-        gate_stdout="$(timeout "$GATE_TIMEOUT_SECONDS" "$gate_python" "$gate_script" "${gate_args[@]}")" || gate_exit=$?
+        gate_stdout="$(timeout "$GATE_TIMEOUT_SECONDS" "$GATE_PYTHON" -I "$gate_script" "${gate_args[@]}")" || gate_exit=$?
     else
         print_warning "No timeout command on PATH, so the gate runs without a time limit."
-        gate_stdout="$("$gate_python" "$gate_script" "${gate_args[@]}")" || gate_exit=$?
+        gate_stdout="$("$GATE_PYTHON" -I "$gate_script" "${gate_args[@]}")" || gate_exit=$?
     fi
-    # A zero exit counts only with the gate's own verdict line: a stand-in
-    # interpreter that exits 0 having decided nothing does not wave it through.
+    # A zero exit counts only with the gate's own verdict line: anything that
+    # exits 0 having decided nothing does not wave the upgrade through.
     if [ "$gate_exit" -eq 0 ] && [[ $'\n'"$gate_stdout"$'\n' != *$'\n'"gate-verdict=proceed"$'\n'* ]]; then
-        print_error "The pre-deploy gate exited 0 without its verdict line; $gate_python did not run the gate."
+        print_error "The pre-deploy gate exited 0 without its verdict line; $GATE_PYTHON did not run the gate."
         gate_exit=1
     fi
     case "$gate_exit" in
@@ -500,9 +530,32 @@ fi
 # venv stamped v3.38.0" case). Empty when there is no existing stamped venv
 # (fresh install / pre-stamp build) — the transition helpers treat empty as
 # "installing".
+#
+# Plan 00376: that venv is resolved with HOOKS_DAEMON_PYTHON and
+# HOOKS_DAEMON_VENV_PATH unset. Both are operator overrides for which
+# interpreter runs the daemon, but either could name a "venv" whose stamp
+# already says the target, and the pre-deploy gate takes that stamp as the
+# installed version. VENV_PYTHON above keeps honouring them for daemon control.
+# The resolver also serves a path it cached from an earlier run, overrides
+# included, so the answer counts only when it is one of THIS daemon dir's own
+# fingerprint venvs (untracked/venv-*), compared as physical paths.
+INSTALLED_VENV_PYTHON="$VENV_PYTHON"
+if [ -n "${HOOKS_DAEMON_PYTHON:-}${HOOKS_DAEMON_VENV_PATH:-}" ]; then
+    INSTALLED_VENV_PYTHON="$(unset HOOKS_DAEMON_PYTHON HOOKS_DAEMON_VENV_PATH; resolve_existing_venv_python "$DAEMON_DIR")" || INSTALLED_VENV_PYTHON=""
+fi
+if [ -n "$INSTALLED_VENV_PYTHON" ]; then
+    _INSTALLED_VENV_REAL="$(cd "$(dirname "$(dirname "$INSTALLED_VENV_PYTHON")")" && pwd -P)" || _INSTALLED_VENV_REAL=""
+    case "$_INSTALLED_VENV_REAL" in
+        "$(cd "$DAEMON_DIR" && pwd -P)"/untracked/venv-*) ;;
+        *)
+            print_warning "Not reading the installed version from $INSTALLED_VENV_PYTHON: it is not one of $DAEMON_DIR's own venvs."
+            INSTALLED_VENV_PYTHON=""
+            ;;
+    esac
+fi
 INSTALLED_VERSION=""
-if [ -n "$VENV_PYTHON" ]; then
-    INSTALLED_VERSION="$(get_venv_version "$(dirname "$(dirname "$VENV_PYTHON")")")"
+if [ -n "$INSTALLED_VENV_PYTHON" ]; then
+    INSTALLED_VERSION="$(get_venv_version "$(dirname "$(dirname "$INSTALLED_VENV_PYTHON")")")"
 fi
 EXAMPLE_CONFIG="$DAEMON_DIR/.claude/hooks-daemon.yaml.example"
 SETTINGS_JSON_SOURCE="$DAEMON_DIR/.claude/settings.json"

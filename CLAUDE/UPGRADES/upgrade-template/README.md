@@ -123,8 +123,15 @@ cd hooks-daemon
 
 ### 2. Update Dependencies
 
+Run the TARGET's own Layer 1: the one installed before the upgrade may predate
+the pre-deploy gate, and then reports a stopped upgrade as success. After
+Option B there is no clone to read it from; the unpacked tree's own
+`scripts/upgrade.sh` is the target's.
+
 ```bash
-bash .claude/hooks-daemon/scripts/upgrade.sh --project-root "$PWD" v{NEW_VERSION}
+tmp="$(mktemp)"
+git -C .claude/hooks-daemon show "v{NEW_VERSION}:scripts/upgrade.sh" > "$tmp"
+bash "$tmp" --project-root "$PWD" v{NEW_VERSION}
 ```
 
 **Expected output**:

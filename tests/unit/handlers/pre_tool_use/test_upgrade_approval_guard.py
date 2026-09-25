@@ -261,6 +261,60 @@ class TestEnvVarBypass:
         assert handler.matches(_bash(command)) is False
 
 
+class TestUpgradeSteeringVariables:
+    """An upgrade run with a variable that picks its interpreter, venv or code.
+
+    Review of e27bd73f: `HOOKS_DAEMON_PYTHON` pointed the gate at a crafted
+    interpreter that printed `gate-verdict=proceed`. Layer 2 no longer takes
+    the gate's interpreter or the installed version from these, and the guard
+    denies an agent setting them on an upgrade invocation.
+    """
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "HOOKS_DAEMON_PYTHON=/tmp/fake bash scripts/upgrade.sh --project-root .",
+            "HOOKS_DAEMON_VENV_PATH=/tmp/forged bash .claude/hooks-daemon/scripts/upgrade.sh"
+            " --project-root .",
+            "PATH=/tmp/fake:$PATH bash .claude/skills/hooks-daemon/scripts/upgrade.sh v4.0.0",
+            "HOSTNAME=other bash scripts/upgrade_version.sh /p /p/.claude/hooks-daemon v4.0.0",
+            "env HOOKS_DAEMON_CLONE_URL=/tmp/evil bash /tmp/upgrade.sh --project-root .",
+            "HOOKS_DAEMON_UPGRADE_BASE_URL=file:///tmp/evil bash .claude/skills/hooks-daemon/"
+            "scripts/upgrade.sh",
+            "export HOOKS_DAEMON_PYTHON=/tmp/fake && bash scripts/upgrade.sh --project-root .",
+            "UPGRADE_FLAGS=--skip-reading-confirmation=abc bash scripts/upgrade_version.sh a b c",
+            "HOOKS_DAEMON_PYTHON=/tmp/fake python3 src/claude_code_hooks_daemon/install/"
+            "upgrade_gate_standalone.py --to 4.0.0",
+            "HOOKS_DAEMON_UPGRADE_SECOND_PASS=1 bash scripts/upgrade_version.sh a b c",
+            "HOOKS_DAEMON_UPGRADE_PREVIOUS_VERSION=v4.0.0 bash scripts/upgrade_version.sh a b c",
+            "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.excludesFile bash scripts/upgrade.sh",
+            "GIT_DIR=/tmp/other bash scripts/upgrade.sh --project-root .",
+        ],
+    )
+    def test_denies_steering_an_upgrade(
+        self, handler: UpgradeApprovalGuardHandler, command: str
+    ) -> None:
+        hook_input = _bash(command)
+        assert handler.matches(hook_input) is True, command
+        result = handler.handle(hook_input)
+        assert result.decision == "deny"
+        assert result.reason is not None
+        assert result.reason.startswith(f"BLOCKED [{ENV_RULE_ID}]")
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "bash scripts/upgrade.sh --project-root . v4.0.0",
+            "HOOKS_DAEMON_PYTHON=/usr/bin/python3.12 bash scripts/install.sh --project-root .",
+            "PATH=/opt/bin:$PATH make test",
+            "grep HOOKS_DAEMON_PYTHON scripts/upgrade.sh",
+            "echo 'HOOKS_DAEMON_PYTHON=/x bash scripts/upgrade.sh'",
+        ],
+    )
+    def test_allows_other_uses(self, handler: UpgradeApprovalGuardHandler, command: str) -> None:
+        assert handler.matches(_bash(command)) is False, command
+
+
 class TestVenvVersionStampForgery:
     """Item 5: forging a venv's .daemon-version stamp."""
 

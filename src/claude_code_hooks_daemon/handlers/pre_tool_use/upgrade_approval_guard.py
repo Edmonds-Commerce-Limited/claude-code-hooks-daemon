@@ -18,11 +18,14 @@ answering it:
 2. **Writing the marker directly** — ``touch``/redirect/``tee``/``cp``/``mv``/
    ``mkdir`` reaching a path under an ``upgrade-approvals/`` directory by any
    Bash route, or authoring it with ``Write``/``Edit``/``NotebookEdit``.
-3. **Impersonating Layer 1** — assigning, exporting or ``env``-setting
-   ``HOOKS_DAEMON_UPGRADE_HANDOFF``, the path of the one-shot handoff file
-   ``scripts/upgrade.sh`` writes for ``scripts/upgrade_version.sh``. Layer 2
-   believes that file only when its parent wrote it; a command that sets the
-   variable and runs Layer 2 IS that parent.
+3. **Impersonating Layer 1 or steering the upgrade** — assigning, exporting
+   or ``env``-setting ``HOOKS_DAEMON_UPGRADE_HANDOFF``, the path of the
+   one-shot handoff file ``scripts/upgrade.sh`` writes for
+   ``scripts/upgrade_version.sh`` (Layer 2 believes that file only when its
+   parent wrote it; a command that sets the variable and runs Layer 2 IS that
+   parent); or, on a command that runs an upgrade entry point, setting a
+   variable that picks its interpreter, venv, forwarded flags or code
+   (``_UPGRADE_STEERING_VARS``).
 4. **Forging the installer's own version stamp** — writing a venv's
    ``.daemon-version`` file (under ``untracked/venv*/``) by any of the same
    routes as (2), which would make the gate believe the target is already
@@ -124,6 +127,36 @@ _ENV_VAR_ASSIGN_RE: Final[re.Pattern[str]] = re.compile(
     rf"\b(?:{_ENV_VAR_GROUP})=" rf"|\b(?:export|declare\s+-x|typeset\s+-x)\s+(?:{_ENV_VAR_GROUP})\b"
 )
 
+#: Variables the upgrade path reads to choose the interpreter, the venv whose
+#: stamp is the installed version, the forwarded flags and pass state, the
+#: files git lists for detection, or the code it runs. Denied only on a
+#: command that also runs an upgrade entry point: each has ordinary uses
+#: elsewhere.
+_UPGRADE_STEERING_VARS: Final[tuple[str, ...]] = (
+    "HOOKS_DAEMON_PYTHON",
+    "HOOKS_DAEMON_VENV_PATH",
+    "PATH",
+    "HOSTNAME",
+    "HOOKS_DAEMON_CLONE_URL",
+    "HOOKS_DAEMON_UPGRADE_BASE_URL",
+    "HOOKS_DAEMON_UPGRADE_PREVIOUS_VERSION",
+    "HOOKS_DAEMON_UPGRADE_SECOND_PASS",
+    "UPGRADE_FLAGS",
+    "GIT_*",
+)
+_STEERING_GROUP: Final[str] = "|".join(
+    re.escape(name).replace(r"\*", r"[A-Z0-9_]+") for name in _UPGRADE_STEERING_VARS
+)
+_STEERING_ASSIGN_RE: Final[re.Pattern[str]] = re.compile(
+    rf"\b(?:{_STEERING_GROUP})="
+    rf"|\b(?:export|declare\s+-x|typeset\s+-x)\s+(?:{_STEERING_GROUP})\b"
+)
+#: The upgrade's entry points: Layer 1 (and the skill shim of the same name),
+#: Layer 2, and the gate itself.
+_UPGRADE_ENTRY_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?:^|[\s/])(?:upgrade\.sh|upgrade_version\.sh|upgrade_gate_standalone\.py)\b"
+)
+
 # --- segmentation and the inert-text exemption ------------------------------
 
 #: Splits a Bash command into top-level stages: `;`, `&&`, `||`, a pipe stage,
@@ -203,13 +236,16 @@ def _bash_runs_guarded_action(command: str) -> bool:
 
 
 def _bash_sets_bypass_env_var(command: str) -> bool:
-    """Whether ``command`` assigns/exports the Layer 1 handoff variable."""
-    for segment in _executable_segments(command):
-        if _is_inert_mention_segment(segment):
-            continue
-        if _ENV_VAR_ASSIGN_RE.search(segment):
-            return True
-    return False
+    """Whether ``command`` sets the handoff variable, or steers an upgrade it runs."""
+    segments = [
+        segment
+        for segment in _executable_segments(command)
+        if not _is_inert_mention_segment(segment)
+    ]
+    if any(_ENV_VAR_ASSIGN_RE.search(segment) for segment in segments):
+        return True
+    runs_upgrade = any(_UPGRADE_ENTRY_RE.search(segment) for segment in segments)
+    return runs_upgrade and any(_STEERING_ASSIGN_RE.search(segment) for segment in segments)
 
 
 def _extra_write_targets(command: str) -> list[str]:
@@ -317,22 +353,28 @@ class UpgradeApprovalGuardHandler(PreToolUseHandlerBase):
         self._rule_env_bypass = Rule(
             rule_id=RuleID.UPGRADE_APPROVAL_ENV_BYPASS,
             blocked=(
-                f"a Bash command that sets `{ENV_VAR_UPGRADE_HANDOFF}`, impersonating "
-                "the upgrade's Layer 1"
+                f"a Bash command that sets `{ENV_VAR_UPGRADE_HANDOFF}`, or runs an upgrade "
+                "with a variable that picks its interpreter, venv, flags or code"
             ),
-            why="Only scripts/upgrade.sh hands the upgrade over to Layer 2",
-            fix="Re-run the upgrade through scripts/upgrade.sh; do not set the variable yourself",
+            why="The upgrade and its pre-deploy gate run as shipped, not as an agent steers them",
+            fix="Run the upgrade with no such variable set; if it cannot run, tell the user",
             verbose=(
                 f"`{ENV_VAR_UPGRADE_HANDOFF}` names the one-shot handoff file "
                 "`scripts/upgrade.sh` (Layer 1) writes for `scripts/upgrade_version.sh` "
-                "(Layer 2): the flags it forwards and the commit to restore if the "
-                "pre-deploy gate stops. Layer 2 believes it only when its parent process "
-                "wrote it, and a command that sets the variable and runs Layer 2 is that "
-                "parent. Setting it by hand — an assignment, `export`, `env VAR=... cmd`, "
-                "`declare -x` — impersonates Layer 1 instead of running it.\n\n"
-                "Re-run the upgrade through `scripts/upgrade.sh` and let the gate run; if "
-                "it stops the upgrade, report its reasons to the user rather than working "
-                "around it."
+                "(Layer 2). Layer 2 believes it only when its parent process wrote it, and "
+                "a command that sets the variable and runs Layer 2 is that parent, so "
+                "setting it anywhere impersonates Layer 1.\n\n"
+                "On a command that runs an upgrade entry point (`upgrade.sh`, "
+                "`upgrade_version.sh`, `upgrade_gate_standalone.py`), these are denied "
+                f"too: {', '.join(f'`{name}`' for name in _UPGRADE_STEERING_VARS)}. They "
+                "choose the interpreter, the venv whose stamp is the installed version, the "
+                "forwarded flags or the code that runs, which is how a crafted interpreter "
+                "or a forged venv could answer for the pre-deploy gate. Layer 2 takes "
+                "neither the gate's interpreter nor the installed version from them, and "
+                "this rule keeps an agent from steering the rest.\n\n"
+                "Run the upgrade with none of them set. If it genuinely needs one (an "
+                "interpreter that is not on PATH, say), tell the user, who can run it "
+                "themselves."
             ),
         )
         self._formatter = RuleFormatter()
@@ -443,7 +485,12 @@ class UpgradeApprovalGuardHandler(PreToolUseHandlerBase):
             "any Bash route (`touch`, a redirect, `tee`, `cp`/`mv`, `mkdir` of the "
             "directory) or with Write/Edit/NotebookEdit.\n"
             "3. Assigning, exporting or `env`-setting `HOOKS_DAEMON_UPGRADE_HANDOFF`, "
-            "which impersonates the upgrade's Layer 1 (`scripts/upgrade.sh`).\n"
+            "which impersonates the upgrade's Layer 1 (`scripts/upgrade.sh`); or, on a "
+            "command that runs `upgrade.sh`, `upgrade_version.sh` or "
+            "`upgrade_gate_standalone.py`, setting a variable that picks its "
+            "interpreter, venv, flags, pass state, git view or code: "
+            f"{', '.join(f'`{name}`' for name in _UPGRADE_STEERING_VARS)}. Run the "
+            "upgrade with none of them set.\n"
             "4. Forging a venv's `.daemon-version` stamp under `untracked/venv*/`, by "
             "any of the routes in (2).\n\n"
             "**If you hit this**: report the gate's reasons to the user and STOP. Do "

@@ -53,7 +53,12 @@ config_changes:
         `<version>.approved` marker under an `upgrade-approvals/` directory by
         any Bash route or with Write/Edit/NotebookEdit; assigning, exporting
         or env-setting HOOKS_DAEMON_UPGRADE_HANDOFF, which impersonates the
-        upgrade's Layer 1; forging a venv's `.daemon-version`
+        upgrade's Layer 1; on a command that runs an upgrade entry point,
+        setting a variable that picks its interpreter, venv, flags, pass
+        state, git view or code (HOOKS_DAEMON_PYTHON, HOOKS_DAEMON_VENV_PATH,
+        PATH, HOSTNAME, HOOKS_DAEMON_CLONE_URL, HOOKS_DAEMON_UPGRADE_BASE_URL,
+        HOOKS_DAEMON_UPGRADE_PREVIOUS_VERSION, HOOKS_DAEMON_UPGRADE_SECOND_PASS,
+        UPGRADE_FLAGS, GIT_*); forging a venv's `.daemon-version`
         stamp. Never denied: reading (ls/cat/stat/grep/find -print/test -f),
         merely reading the env var, a git commit message, non-executing
         echo/printf prose, a grep search, or a quoted-delimiter heredoc body

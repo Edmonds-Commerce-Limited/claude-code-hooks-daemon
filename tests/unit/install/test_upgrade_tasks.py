@@ -216,6 +216,24 @@ class TestDetect:
         hits, _total = detect(Detection(pattern="plan-qa", paths=("*.sh",)), root)
         assert {h.path for h in hits} == {"new.sh"}
 
+    def test_only_the_projects_own_gitignore_can_exclude_a_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An environment variable or local git state must not hide a call site."""
+        root = tmp_path / "repo"
+        root.mkdir()
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        (root / "caller.sh").write_text("plan-qa --json\n")
+        (root / ".git" / "info" / "exclude").write_text("*\n")
+        everything = tmp_path / "exclude-everything"
+        everything.write_text("*\n")
+        monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+        monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.excludesFile")
+        monkeypatch.setenv("GIT_CONFIG_VALUE_0", str(everything))
+        monkeypatch.setenv("GIT_INDEX_FILE", str(tmp_path / "other-index"))
+        hits, _total = detect(Detection(pattern="plan-qa", paths=("*.sh",)), root)
+        assert [h.path for h in hits] == ["caller.sh"]
+
 
 class TestShippedPlanQaTask:
     """The shipped 00375 task is critical, so a false positive costs an owner approval."""

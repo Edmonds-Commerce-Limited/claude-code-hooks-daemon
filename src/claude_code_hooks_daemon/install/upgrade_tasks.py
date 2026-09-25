@@ -112,13 +112,19 @@ _MAX_SCANNED_BYTES: Final[int] = 1_048_576
 #: input (a minified file is one very long line).
 MAX_SCANNED_LINE_CHARS: Final[int] = 4096
 _GIT_LIST_TIMEOUT_SECONDS: Final[int] = 60
+#: Tracked files, plus untracked files the project's own `.gitignore` files do
+#: not exclude. Not `--exclude-standard`: `.git/info/exclude` and
+#: `core.excludesFile` are local state that could hide a call site.
 _GIT_LIST_ARGS: Final[tuple[str, ...]] = (
     "ls-files",
     "-z",
     "--cached",
     "--others",
-    "--exclude-standard",
+    "--exclude-per-directory=.gitignore",
 )
+#: Git reads these to pick its repository, index and config; none may steer
+#: which files the scan sees.
+_GIT_ENV_PREFIX: Final[str] = "GIT_"
 #: A NUL byte marks a binary file, which has no lines to report.
 _NUL_BYTE: Final[bytes] = b"\x00"
 _HIT_TEXT_WIDTH: Final[int] = 160
@@ -285,11 +291,15 @@ def _git_listed_files(project_root: Path) -> list[str] | None:
     git = shutil.which("git")
     if git is None:
         return None
+    env = {
+        name: value for name, value in os.environ.items() if not name.startswith(_GIT_ENV_PREFIX)
+    }
     result = subprocess.run(
         [git, "-C", str(project_root), *_GIT_LIST_ARGS],
         capture_output=True,
         check=False,
         timeout=_GIT_LIST_TIMEOUT_SECONDS,
+        env=env,
     )
     if result.returncode != 0:
         return None

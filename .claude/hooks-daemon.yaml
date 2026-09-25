@@ -390,7 +390,8 @@ handlers:
     upgrade_approval_guard: # An agent cannot grant its own upgrade approval (Plan 00376)
       enabled: true          # Denies running `approve-upgrade` itself, forging the marker
       priority: 20            # under upgrade-approvals/ or a venv .daemon-version stamp, and
-                               # setting HOOKS_DAEMON_UPGRADE_HANDOFF (impersonating Layer 1)
+                               # setting HOOKS_DAEMON_UPGRADE_HANDOFF, or steering an upgrade
+                               # with an interpreter/venv/code variable
 
     lock_file_edit_blocker: # Prevents editing package lock files
       enabled: true

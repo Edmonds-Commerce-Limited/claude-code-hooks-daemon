@@ -9,8 +9,8 @@ F4 makes the remaining hard-failure paths self-documenting:
 
   1. Layer 1 ``scripts/upgrade.sh`` python-discovery ``_fail`` (when even the
      F2 self-fetch cannot obtain ``python_discovery.sh``) must name actionable
-     recovery: run from the installed daemon dir, set ``HOOKS_DAEMON_PYTHON``,
-     and the ``HOOKS_DAEMON_SKIP_BOOTSTRAP=1`` escape hatch.
+     recovery: run the target's own Layer 1 out of the installed clone, and
+     the ``HOOKS_DAEMON_SKIP_BOOTSTRAP=1`` escape hatch.
   2. The skill thin-shim ``upgrade.sh`` fetch-failure path must mention the
      ``HOOKS_DAEMON_UPGRADE_REF`` pin and running the installed daemon's
      ``upgrade.sh`` directly.
@@ -74,9 +74,15 @@ def test_layer1_discovery_fail_names_recovery_hints(tmp_path: Path) -> None:
     combined = result.stdout + result.stderr
 
     assert result.returncode != 0, "Expected Layer 1 to fail with no helper available"
-    assert "HOOKS_DAEMON_PYTHON" in combined, (
-        "F4: the discovery-helper failure must mention HOOKS_DAEMON_PYTHON as a "
-        f"recovery.\n--- output ---\n{combined}"
+    # Plan 00376: the recovery is the TARGET's own Layer 1 with its lib/ beside
+    # it. HOOKS_DAEMON_PYTHON is not one: the missing helper is what reads it.
+    assert "archive VERSION scripts" in combined, (
+        "the discovery-helper failure must name the target's own Layer 1, "
+        f"extracted with its lib/.\n--- output ---\n{combined}"
+    )
+    assert "HOOKS_DAEMON_PYTHON" not in combined, (
+        "HOOKS_DAEMON_PYTHON cannot recover a missing discovery helper, which "
+        f"is the code that reads it.\n--- output ---\n{combined}"
     )
     assert "HOOKS_DAEMON_SKIP_BOOTSTRAP=1" in combined, (
         "F4: the discovery-helper failure must surface the "
@@ -84,8 +90,8 @@ def test_layer1_discovery_fail_names_recovery_hints(tmp_path: Path) -> None:
         f"--- output ---\n{combined}"
     )
     assert ".claude/hooks-daemon" in combined, (
-        "F4: the failure should point the user at running from the installed "
-        f"daemon dir.\n--- output ---\n{combined}"
+        "F4: the failure should point the user at the installed clone."
+        f"\n--- output ---\n{combined}"
     )
 
 

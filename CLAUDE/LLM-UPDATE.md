@@ -202,6 +202,17 @@ checkout and a re-run therefore all see the real range. With neither, the gate
 cannot rule anything out: it lists every pre-upgrade task up to the target
 that applies to the project and needs the owner.
 
+No interpreter or venv override steers the gate. The stamp is read only from one of
+this daemon's own `untracked/venv-*` directories, never from
+`HOOKS_DAEMON_VENV_PATH`. The gate runs on that venv's Python, else on a Python
+3.11+ found on `PATH`, never on `HOOKS_DAEMON_PYTHON`, and always with `-I` so
+no `PYTHON*` variable reaches it. A `**Detect**` scan covers tracked files and
+untracked ones the project's own `.gitignore` files do not exclude;
+`.git/info/exclude`, a global excludes file and `GIT_*` variables cannot hide a
+call site from it. An agent that sets one of these variables on an upgrade
+command is denied (`upgrade_approval_guard`); if the upgrade genuinely needs one,
+ask the user to run it.
+
 With nothing to list, the upgrade continues without comment, as it does when
 the venv already carries the target's exact stamp. Otherwise it never infers
 consent from the absence of a terminal. It stops, puts the daemon checkout back
@@ -747,7 +758,10 @@ tasks staged under `UNRELEASED/` that a branch install is already running.
 
 ```bash
 git -C .claude/hooks-daemon fetch --tags
-bash .claude/hooks-daemon/scripts/upgrade.sh --project-root "$PWD" v2.2.1
+# The target's own Layer 1, as in step 3 above: never the installed one.
+tmp="$(mktemp)"
+git -C .claude/hooks-daemon show "v2.2.1:scripts/upgrade.sh" > "$tmp"
+bash "$tmp" --project-root "$PWD" v2.2.1
 .claude/hooks-daemon/bin/hooks-daemon restart
 ```
 
@@ -1058,11 +1072,17 @@ mkdir -p untracked/scratch
 curl -fsSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/scripts/upgrade.sh -o untracked/scratch/upgrade.sh
 bash untracked/scratch/upgrade.sh --project-root /path/to/your/project
 
-# 2. If Python discovery still fails, point it at a known-good interpreter (3.11+):
+# 2. If Python discovery still fails, the USER points it at a known-good interpreter
+#    (3.11+). An agent does not set this: upgrade_approval_guard denies it on an
+#    upgrade command, so ask the user to run this line. It picks the interpreter
+#    the venv is built with; the pre-deploy gate never runs on it.
 HOOKS_DAEMON_PYTHON=/usr/bin/python3 bash untracked/scratch/upgrade.sh --project-root /path/to/your/project
 
-# 3. To pull the canonical script from a specific ref instead of main:
-HOOKS_DAEMON_UPGRADE_REF=v3.16.0 bash untracked/scratch/upgrade.sh --project-root /path/to/your/project
+# 3. To pull the canonical script, and the helper it fetches, from the TARGET tag
+#    instead of main (never a ref older than the target: an older Layer 1 may
+#    predate the pre-deploy gate):
+curl -fsSL "https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/$TARGET_VERSION/scripts/upgrade.sh" -o untracked/scratch/upgrade.sh
+HOOKS_DAEMON_UPGRADE_REF="$TARGET_VERSION" bash untracked/scratch/upgrade.sh --project-root /path/to/your/project "$TARGET_VERSION"
 
 # 4. Last resort — skip the self-bootstrap verification of the local skill shim (only if
 #    1-3 are unavailable and you trust the on-disk script):

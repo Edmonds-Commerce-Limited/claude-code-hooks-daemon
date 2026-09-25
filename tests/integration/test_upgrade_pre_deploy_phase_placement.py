@@ -120,6 +120,29 @@ def test_no_environment_variable_switches_the_gate_off() -> None:
     assert not re.search(r"^\s*if \[ -n \"\$\{HOOKS_DAEMON_\w+", body, re.MULTILINE), body
 
 
+def test_no_environment_override_picks_the_gate_interpreter() -> None:
+    """Review of e27bd73f: HOOKS_DAEMON_PYTHON ran a crafted interpreter as the gate."""
+    text = _script()
+    body = _function_body(text, _GATE)
+    assert "HOOKS_DAEMON_PYTHON" not in body
+    assert '"$GATE_PYTHON" -I ' in body, "isolated mode: no PYTHON* variable reaches the gate"
+    picker = _function_body(text, "_pick_gate_python")
+    assert "unset HOOKS_DAEMON_PYTHON HOOKS_DAEMON_VENV_PATH" in picker
+
+
+def test_the_installed_version_ignores_the_venv_overrides() -> None:
+    """HOOKS_DAEMON_VENV_PATH to a forged venv made the gate see the target installed."""
+    text = _script()
+    assert re.search(
+        r'^\s*INSTALLED_VENV_PYTHON="\$\(unset HOOKS_DAEMON_PYTHON HOOKS_DAEMON_VENV_PATH;',
+        text,
+        re.MULTILINE,
+    )
+    assert re.search(
+        r'^\s*INSTALLED_VERSION="\$\(get_venv_version .*INSTALLED_VENV_PYTHON', text, re.M
+    )
+
+
 def test_the_gate_runs_under_a_timeout_and_a_zero_exit_needs_its_verdict() -> None:
     body = _function_body(_script(), _GATE)
     assert 'timeout "$GATE_TIMEOUT_SECONDS"' in body

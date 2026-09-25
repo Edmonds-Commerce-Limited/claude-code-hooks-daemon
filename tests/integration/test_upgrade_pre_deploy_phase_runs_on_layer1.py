@@ -524,6 +524,60 @@ def test_no_environment_variable_switches_the_gate_off(
     _assert_stopped_and_restored(result, GateVerdict.NEEDS_ACKNOWLEDGEMENT, project, current)
 
 
+def _fake_gate_interpreter(tmp_path: Path) -> Path:
+    """An interpreter that answers for the gate and is Python for everything else."""
+    fake = tmp_path / "fake-python"
+    fake.write_text(
+        "#!/bin/bash\n"
+        'for arg in "$@"; do\n'
+        '    case "$arg" in *upgrade_gate_standalone.py) echo "gate-verdict=proceed"; exit 0 ;; esac\n'
+        "done\n"
+        f'exec "{sys.executable}" "$@"\n'
+    )
+    fake.chmod(0o755)
+    return fake
+
+
+def _forged_venv(tmp_path: Path, stamp: str) -> Path:
+    """A 'venv' whose stamp claims the target is already installed."""
+    venv = tmp_path / "forged-venv"
+    (venv / "bin").mkdir(parents=True)
+    (venv / "bin" / "python").symlink_to(sys.executable)
+    (venv / ".daemon-version").write_text(f"{stamp}\n")
+    return venv
+
+
+@pytest.mark.parametrize("route", ["fake-interpreter", "forged-venv-python"])
+def test_no_interpreter_or_venv_override_answers_for_the_gate(
+    tmp_path: Path, project: Path, versions: tuple[str, str, str], route: str
+) -> None:
+    """Review of e27bd73f: HOOKS_DAEMON_PYTHON picked the gate's interpreter and venv."""
+    current, _target, major = versions
+    if route == "fake-interpreter":
+        python = _fake_gate_interpreter(tmp_path)
+    else:
+        python = _forged_venv(tmp_path, f"v{major}") / "bin" / "python"
+    result = _upgrade(project, _env({"HOOKS_DAEMON_PYTHON": str(python)}), f"v{major}")
+    _assert_stopped_and_restored(result, GateVerdict.NEEDS_ACKNOWLEDGEMENT, project, current)
+
+
+def test_a_direct_layer2_call_ignores_a_forged_venv_path(
+    tmp_path: Path, project: Path, versions: tuple[str, str, str]
+) -> None:
+    """HOOKS_DAEMON_VENV_PATH to a venv stamped with the target is not 'installed'."""
+    current, _target, major = versions
+    daemon_dir = _daemon_dir(project)
+    _git(daemon_dir, "checkout", "-q", f"v{major}")
+    env = _env({"HOOKS_DAEMON_VENV_PATH": str(_forged_venv(tmp_path, f"v{major}"))})
+    env.pop("HOOKS_DAEMON_PYTHON")
+    result = _run(
+        [_BASH, str(daemon_dir / _LAYER2_REL), str(project), str(daemon_dir), f"v{major}"],
+        project,
+        env,
+    )
+    _assert_stopped_and_restored(result, GateVerdict.NEEDS_ACKNOWLEDGEMENT, project, current)
+
+
 def test_a_direct_layer2_call_ignores_an_inherited_handoff_and_its_flags(
     tmp_path: Path, project: Path, versions: tuple[str, str, str]
 ) -> None:

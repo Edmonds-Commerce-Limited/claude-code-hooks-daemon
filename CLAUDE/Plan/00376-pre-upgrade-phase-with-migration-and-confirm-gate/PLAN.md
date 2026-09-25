@@ -261,6 +261,30 @@ rather than only matching syntax.
   `tests/integration/test_upgrade_pre_deploy_phase_runs_on_layer1.py` on the
   release, branch, MAJOR, fresh-clone, manual, environment-bypass, direct and
   pre-gate-Layer-1 routes (all eight RED against 713a68c0).
+  **Decided (unattended, 2026-09-25), environment-steered gate**: (a) the gate
+  runs on the installed venv's Python, else on a Python 3.11+ found on `PATH`,
+  resolved with `HOOKS_DAEMON_PYTHON` and `HOOKS_DAEMON_VENV_PATH` unset, and
+  always with `-I`. Layer 1 still honours `HOOKS_DAEMON_PYTHON` to build the
+  venv, a legitimate non-gate use. (b) The installed version is read only from
+  one of the daemon's own `untracked/venv-*` directories, checked on the
+  physical path, because the resolver's cache serves an override's result to a
+  later call that sets none. (c) The `**Detect**` scan honours only the
+  project's own `.gitignore` files and drops every `GIT_*` variable, so
+  `.git/info/exclude`, `core.excludesFile` and `GIT_INDEX_FILE` cannot hide a
+  call site. (d) `upgrade_approval_guard` denies, on a command that runs an
+  upgrade entry point, setting the interpreter, venv, `PATH`, `HOSTNAME`,
+  clone/base URL, pass-state, `UPGRADE_FLAGS` or `GIT_*` variables. It does
+  not cover `HOOKS_DAEMON_UPGRADE_REF`, which picks only which published
+  Layer 1 runs while the gate stays in the target's Layer 2, nor
+  `HOOKS_DAEMON_UNSAFE_TRACK_REF`, which has its own owner guard and only
+  makes the gate stricter. (e) No live doc, template or recovery text
+  upgrades forward through the installed Layer 1; a rollback or a reinstall
+  still may, since it is never older than what it installs. Pinned by
+  `test_upgrade_pre_deploy_phase_runs_on_layer1.py`,
+  `TestUpgradeSteeringVariables` and
+  `test_no_document_upgrades_forward_through_the_installed_layer1`.
+  Assumption: the owner's "no known defects" instruction; the owner can
+  reverse this with one message.
 
 ### Phase 4: Fix what the survey exposed
 

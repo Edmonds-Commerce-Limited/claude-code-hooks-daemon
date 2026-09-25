@@ -145,7 +145,8 @@ _version_lt() {
 # ``requires-python`` lower bound, the helper raises the floor accordingly
 # (the host-a-style cross-check from Plan 00104 Phase 7 Task 7.2).
 #
-# Sets and exports HOOKS_DAEMON_PYTHON so Layer 2 scripts can use it.
+# Sets and exports HOOKS_DAEMON_PYTHON so Layer 2 scripts can build the venv
+# with it. Layer 2's pre-deploy gate never runs on it (Plan 00376).
 #
 # Returns:
 #   0 - compatible Python found (HOOKS_DAEMON_PYTHON exported)
@@ -253,11 +254,9 @@ find_compatible_python() {
         # the user hard-stuck guessing the internal escape hatch.
         _fail "Canonical python discovery helper missing: searched ${daemon_dir:+$daemon_dir/scripts/lib/python_discovery.sh and }$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/python_discovery.sh, and the network self-fetch also failed.
 Recovery options:
-  1. Run upgrade.sh from the INSTALLED daemon dir (it ships the helper):
-       bash \"\$PROJECT_ROOT/.claude/hooks-daemon/scripts/upgrade.sh\" --project-root \"\$PROJECT_ROOT\"
-  2. Set HOOKS_DAEMON_PYTHON to an absolute Python 3.11+ path to skip discovery:
-       HOOKS_DAEMON_PYTHON=/path/to/python3 bash $0 --project-root \"\$PROJECT_ROOT\"
-  3. If a stale skill shim re-execs with a legacy flag, bypass its bootstrap:
+  1. Run the target release's own upgrade.sh, with its lib/ beside it, out of the installed clone (VERSION = the tag to install):
+       d=\"\$(mktemp -d)\" && git -C \"\$PROJECT_ROOT/.claude/hooks-daemon\" fetch --tags && git -C \"\$PROJECT_ROOT/.claude/hooks-daemon\" archive VERSION scripts | tar -x -C \"\$d\" && bash \"\$d/scripts/upgrade.sh\" --project-root \"\$PROJECT_ROOT\" VERSION
+  2. If a stale skill shim re-execs with a legacy flag, bypass its bootstrap:
        HOOKS_DAEMON_SKIP_BOOTSTRAP=1 bash \"\$PROJECT_ROOT/.claude/skills/hooks-daemon/scripts/upgrade.sh\""
     fi
     # shellcheck source=lib/python_discovery.sh
