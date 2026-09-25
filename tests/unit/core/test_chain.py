@@ -27,6 +27,8 @@ the loop (thread creation, the semaphore, cancellation binding) -- the shape
 of gap this suite would otherwise never notice.
 """
 
+import json
+import threading
 import time
 from typing import Any
 
@@ -37,6 +39,11 @@ from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.chain import ChainExecutionResult, HandlerChain
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
+from tests.dispatch_timeouts import DispatchTestTimeout
+
+# The deny reason only the whole-chain dispatch timeout produces: the caller
+# gave up waiting, so it names "chain", not a handler (Plan 00466 N40 m1).
+_CHAIN_TIMED_OUT = "chain: not judged in time (exceeded its"
 
 
 class MockHandler(Handler):
@@ -987,9 +994,10 @@ class TestHandlerChain:
 
         result = chain.execute({"tool_name": "Bash"}, deadline_seconds=0.01)
 
-        deadline = time.perf_counter() + 2.0
+        # An upper bound on waiting for the straggler, not a speed assertion.
+        deadline = time.perf_counter() + DispatchTestTimeout.GENEROUS
         while slow.handle_called == 0 and time.perf_counter() < deadline:
-            time.sleep(0.01)
+            time.sleep(DispatchTestTimeout.INSTANT)
         assert slow.handle_called == 1
         # The deadline is hit before the guard is even asked whether it
         # matches -- there is no time budget left to run it at all.
@@ -997,8 +1005,7 @@ class TestHandlerChain:
         assert guard.handle_called == 0
         assert result.result.decision == Decision.DENY
         assert result.result.reason is not None
-        assert "chain" in result.result.reason
-        assert "not judged in time" in result.result.reason.lower()
+        assert result.result.reason.startswith(_CHAIN_TIMED_OUT)
         assert result.terminated_by is None
 
     def test_deadline_measured_from_arrival_time_not_from_execute_call(self) -> None:
@@ -1119,16 +1126,13 @@ class TestHandlerChain:
         )
         chain.add(guard)
 
-        start = time.perf_counter()
         result = chain.execute({"tool_name": "Bash"}, deadline_seconds=0.1)
-        elapsed = time.perf_counter() - start
 
-        # Bounded by the DEADLINE, not by the guard's own 5s sleep.
-        assert elapsed < 2.0
+        # Bounded by the DEADLINE, not by the guard's own 5s sleep: this
+        # reason comes only from the dispatcher giving up on the call.
         assert result.result.decision == Decision.DENY
         assert result.result.reason is not None
-        assert "chain" in result.result.reason
-        assert "not judged in time" in result.result.reason.lower()
+        assert result.result.reason.startswith(_CHAIN_TIMED_OUT)
         assert result.terminated_by is None
 
     def test_a_slow_advisory_only_handler_that_oversleeps_itself_allows_with_an_advisory(
@@ -1148,15 +1152,10 @@ class TestHandlerChain:
         )
         chain.add(advisory)
 
-        start = time.perf_counter()
         result = chain.execute({"tool_name": "Bash"}, deadline_seconds=0.1)
-        elapsed = time.perf_counter() - start
 
-        assert elapsed < 2.0
         assert result.result.decision == Decision.ALLOW
-        assert any(
-            "chain" in ctx.lower() and "budget" in ctx.lower() for ctx in result.result.context
-        )
+        assert any(ctx.startswith("Chain skipped: exceeded its") for ctx in result.result.context)
 
     def test_deadline_none_leaves_an_oversleeping_safety_handler_unbounded(self) -> None:
         """Plan 00466 N34: ``deadline_seconds=None`` disables the NEW
@@ -1187,8 +1186,6 @@ class TestHandlerChain:
         the thing submitted to the pool, so saturation denies "chain", not
         `safety-guard` specifically -- see the module-level note.
         """
-        import threading
-
         from claude_code_hooks_daemon.core.bounded_dispatch import BoundedDispatcher
 
         small_pool = BoundedDispatcher(max_inflight=1)
@@ -1197,16 +1194,16 @@ class TestHandlerChain:
 
         def _occupy() -> None:
             occupied.set()
-            release.wait(timeout=Timeout.DISPATCH_TEST_GENEROUS)
+            release.wait(timeout=DispatchTestTimeout.GENEROUS)
 
         filler = threading.Thread(
             target=lambda: small_pool.run(
-                _occupy, timeout=Timeout.DISPATCH_TEST_GENEROUS, label="filler"
+                _occupy, timeout=DispatchTestTimeout.GENEROUS, label="filler"
             )
         )
         try:
             filler.start()
-            assert occupied.wait(timeout=Timeout.DISPATCH_TEST_NORMAL)
+            assert occupied.wait(timeout=DispatchTestTimeout.NORMAL)
 
             chain = HandlerChain()
             guard = MockHandler(
@@ -1217,22 +1214,18 @@ class TestHandlerChain:
             )
             chain.add(guard)
 
-            start = time.perf_counter()
             result = chain.execute(
                 {"tool_name": "Bash"}, deadline_seconds=5.0, dispatcher=small_pool
             )
-            elapsed = time.perf_counter() - start
         finally:
             release.set()
-            filler.join(timeout=Timeout.DISPATCH_TEST_GENEROUS)
+            filler.join(timeout=DispatchTestTimeout.GENEROUS)
             small_pool.shutdown(wait=True)
 
-        # Refused immediately -- never waited anywhere near the 5s deadline.
-        assert elapsed < 1.0
+        # Refused, not queued: the guard never ran at all.
+        assert guard.matches_called == 0
         assert result.result.decision == Decision.DENY
-        assert result.result.reason is not None
-        assert "chain" in result.result.reason
-        assert "not judged in time" in result.result.reason.lower()
+        assert result.result.reason == "chain: not judged in time (dispatch pool saturated)"
 
     def test_oversized_bash_command_denies_a_safety_blocking_handler(self) -> None:
         """Plan 00466 N34 remedy 3: an oversized payload is denied BEFORE
@@ -1249,19 +1242,20 @@ class TestHandlerChain:
         chain.add(guard)
 
         # The measured size is the whole SERIALISED tool_input (n24 review
-        # m5), not the raw command string alone -- so this asserts on the
-        # limit and the ballpark, not a literal byte count tied to JSON
-        # punctuation overhead.
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "x" * 100}}
+        # m5), not the raw command string alone; the expected size is
+        # computed the same way, so the reason is asserted exactly.
+        tool_input = {"command": "x" * 100}
+        measured = len(json.dumps(tool_input, ensure_ascii=False).encode("utf-8"))
+        hook_input = {"tool_name": "Bash", "tool_input": tool_input}
         result = chain.execute(hook_input, max_safety_input_bytes=50)
 
         assert guard.matches_called == 0
         assert guard.handle_called == 0
         assert result.result.decision == Decision.DENY
-        assert result.result.reason is not None
-        assert "chain" in result.result.reason
-        assert "too large" in result.result.reason.lower()
-        assert "50" in result.result.reason
+        assert result.result.reason == (
+            "chain: input too large to evaluate safely "
+            f"({measured} bytes exceeds the 50-byte SAFETY evaluation limit)"
+        )
 
     def test_oversized_input_deny_reason_does_not_misattribute_to_an_unrelated_handler(
         self,
@@ -1709,17 +1703,21 @@ class _LateStateWriter(Handler):
     (Plan 00466 N40 m2)."""
 
     def __init__(
-        self, name: str, priority: int, sleep_before_check: float, outcome: dict[str, str]
+        self, name: str, priority: int, release: threading.Event, outcome: dict[str, str]
     ) -> None:
         super().__init__(name=name, priority=priority, terminal=True)
-        self._sleep_before_check = sleep_before_check
+        self._release = release
         self._outcome = outcome
+        self.checked = threading.Event()
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        time.sleep(self._sleep_before_check)
+        # Blocks until the test releases it, so "late" is an ordering the
+        # test controls rather than a sleep racing the deadline.
+        self._release.wait(timeout=DispatchTestTimeout.GENEROUS)
         from claude_code_hooks_daemon.core.dispatch_cancellation import is_dispatch_cancelled
 
         self._outcome["result"] = "skipped-cancelled" if is_dispatch_cancelled() else "written"
+        self.checked.set()
         return True
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
@@ -1743,20 +1741,19 @@ class TestDispatchCancellationReachesStragglingHandlerCode:
     def test_a_late_writes_after_the_deadline_is_skipped_not_written(self) -> None:
         chain = HandlerChain()
         outcome: dict[str, str] = {}
-        writer = _LateStateWriter(
-            "late-writer", priority=10, sleep_before_check=0.2, outcome=outcome
-        )
+        release = threading.Event()
+        writer = _LateStateWriter("late-writer", priority=10, release=release, outcome=outcome)
         chain.add(writer)
 
-        result = chain.execute({"tool_name": "Bash"}, deadline_seconds=0.02)
+        try:
+            result = chain.execute({"tool_name": "Bash"}, deadline_seconds=0.02)
+            # The caller has its answer while the straggler is still blocked.
+            assert "result" not in outcome
+        finally:
+            release.set()
 
-        # The caller gets its answer promptly -- well before the straggler's
-        # own 0.2s sleep finishes.
         assert result.result.decision == Decision.ALLOW
-
-        deadline = time.perf_counter() + 2.0
-        while "result" not in outcome and time.perf_counter() < deadline:
-            time.sleep(0.01)
+        assert writer.checked.wait(timeout=DispatchTestTimeout.GENEROUS)
         assert outcome.get("result") == "skipped-cancelled"
 
     def test_a_write_within_the_deadline_still_lands(self) -> None:
@@ -1764,9 +1761,9 @@ class TestDispatchCancellationReachesStragglingHandlerCode:
         call that finishes comfortably inside its own budget."""
         chain = HandlerChain()
         outcome: dict[str, str] = {}
-        writer = _LateStateWriter(
-            "on-time-writer", priority=10, sleep_before_check=0.0, outcome=outcome
-        )
+        release = threading.Event()
+        release.set()
+        writer = _LateStateWriter("on-time-writer", priority=10, release=release, outcome=outcome)
         chain.add(writer)
 
         result = chain.execute({"tool_name": "Bash"}, deadline_seconds=5.0)
@@ -1781,16 +1778,15 @@ class _CommitRecordingHandler(Handler):
     review 2 mA5)."""
 
     def __init__(
-        self, name: str, priority: int, sleep_before_matches: float, outcome: dict[str, bool]
+        self, name: str, priority: int, release: threading.Event, outcome: dict[str, bool]
     ) -> None:
         super().__init__(name=name, priority=priority, terminal=True)
-        self._sleep_before_matches = sleep_before_matches
+        self._release = release
         self._outcome = outcome
         self._outcome["committed"] = False
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        time.sleep(self._sleep_before_matches)
-        self._outcome["matches_finished"] = True
+        self._release.wait(timeout=DispatchTestTimeout.GENEROUS)
         return True
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
@@ -1817,34 +1813,41 @@ class TestStragglerCommitHonoursCancellation:
     """
 
     def test_commit_is_skipped_once_the_caller_has_abandoned_the_dispatch(self) -> None:
+        from claude_code_hooks_daemon.core.bounded_dispatch import BoundedDispatcher
+
         chain = HandlerChain()
         outcome: dict[str, bool] = {}
+        release = threading.Event()
         handler = _CommitRecordingHandler(
-            "late-committer", priority=10, sleep_before_matches=0.2, outcome=outcome
+            "late-committer", priority=10, release=release, outcome=outcome
         )
         chain.add(handler)
+        dispatcher = BoundedDispatcher(max_inflight=1)
 
-        result = chain.execute({"tool_name": "Bash"}, deadline_seconds=0.02)
+        try:
+            result = chain.execute(
+                {"tool_name": "Bash"}, deadline_seconds=0.02, dispatcher=dispatcher
+            )
+        finally:
+            release.set()
+        # The straggler leaves the dispatcher's straggler set only once its
+        # whole call -- the commit loop included -- has returned, so this
+        # waits for the commit decision itself, not for a guessed interval.
+        while dispatcher.straggler_health().count:
+            time.sleep(DispatchTestTimeout.INSTANT)
+        dispatcher.shutdown(wait=True)
 
-        # The caller gets its answer promptly -- well before the straggler's
-        # own 0.2s sleep, and its own commit_side_effects call, finish.
         assert result.result.decision == Decision.ALLOW
-
-        deadline = time.perf_counter() + 2.0
-        while not outcome.get("matches_finished") and time.perf_counter() < deadline:
-            time.sleep(0.01)
-        # commit_side_effects runs synchronously right after handle()
-        # returns, at the very end of the straggler's own dispatch -- give
-        # it a moment to actually run before asserting it did not commit.
-        time.sleep(0.05)
         assert outcome.get("committed") is False
 
     def test_commit_still_lands_for_a_call_that_finishes_on_time(self) -> None:
         """Negative control: cancellation must not suppress an on-time commit."""
         chain = HandlerChain()
         outcome: dict[str, bool] = {}
+        release = threading.Event()
+        release.set()
         handler = _CommitRecordingHandler(
-            "on-time-committer", priority=10, sleep_before_matches=0.0, outcome=outcome
+            "on-time-committer", priority=10, release=release, outcome=outcome
         )
         chain.add(handler)
 

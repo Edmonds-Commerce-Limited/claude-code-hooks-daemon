@@ -164,17 +164,3 @@ class Timeout:
     # without stalling start. A live-but-slower-than-this daemon is treated as
     # unhealthy and replaced (Decision 1 fail-fast trade-off).
     SOCKET_LIVENESS_PROBE_SEC = 0.5
-
-    # Test-only wait budgets for BoundedDispatcher/chain dispatch tests (Plan
-    # 00466 N40 review 2 MA1): an unnamed timeout literal is exactly as opaque
-    # in test code as in production, and check_magic_values.py's
-    # magic-timeout rule applies to both. Named by MAGNITUDE/role, not by
-    # individual call site, since many call sites share the same budget for
-    # the same reason (force a DispatchTimeout, or wait for a background
-    # straggler thread to settle before the next test starts).
-    DISPATCH_TEST_INSTANT = 0.01  # sub-tick: forces an already-expired wait
-    DISPATCH_TEST_VERY_SHORT = 0.02  # forces DispatchTimeout against a slow callable
-    DISPATCH_TEST_SHORT = 0.05  # forces DispatchTimeout with a slightly larger margin
-    DISPATCH_TEST_NORMAL = 1.0  # generous wait for a background thread to settle
-    DISPATCH_TEST_GENEROUS = 5.0  # generous wait under CI/host load
-    DISPATCH_TEST_OUTER_BOUND = 10  # outer ceiling for a probe socket's own settimeout()

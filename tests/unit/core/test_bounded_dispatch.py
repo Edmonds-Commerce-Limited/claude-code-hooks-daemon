@@ -17,12 +17,12 @@ import contextlib
 import threading
 import time
 
-from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.bounded_dispatch import (
     BoundedDispatcher,
     DispatchSaturated,
     DispatchTimeout,
 )
+from tests.dispatch_timeouts import DispatchTestTimeout
 
 
 class TestBoundedDispatcherCompletesWithinBudget:
@@ -31,7 +31,7 @@ class TestBoundedDispatcherCompletesWithinBudget:
     def test_returns_the_callables_own_result(self) -> None:
         dispatcher = BoundedDispatcher(max_inflight=4)
         try:
-            outcome = dispatcher.run(lambda: 42, timeout=Timeout.DISPATCH_TEST_NORMAL, label="fast")
+            outcome = dispatcher.run(lambda: 42, timeout=DispatchTestTimeout.NORMAL, label="fast")
         finally:
             dispatcher.shutdown()
         assert outcome == 42
@@ -45,7 +45,7 @@ class TestBoundedDispatcherCompletesWithinBudget:
         try:
             raised = None
             try:
-                dispatcher.run(_boom, timeout=Timeout.DISPATCH_TEST_NORMAL, label="raiser")
+                dispatcher.run(_boom, timeout=DispatchTestTimeout.NORMAL, label="raiser")
             except ValueError as exc:
                 raised = exc
         finally:
@@ -58,46 +58,44 @@ class TestBoundedDispatcherTimesOut:
     """A callable that outruns its budget is abandoned, not waited on."""
 
     def test_returns_dispatch_timeout_without_waiting_for_completion(self) -> None:
+        """Proved by order, not by a stopwatch: the callable cannot finish
+        until the test releases it, and run() has already returned by then."""
         dispatcher = BoundedDispatcher(max_inflight=4)
-        started = threading.Event()
+        release = threading.Event()
+        finished = threading.Event()
 
-        def _slow() -> str:
-            started.set()
-            time.sleep(0.3)
+        def _blocked() -> str:
+            release.wait(timeout=DispatchTestTimeout.GENEROUS)
+            finished.set()
             return "late"
 
         try:
-            start = time.perf_counter()
-            outcome = dispatcher.run(_slow, timeout=Timeout.DISPATCH_TEST_SHORT, label="slow")
-            elapsed = time.perf_counter() - start
+            outcome = dispatcher.run(_blocked, timeout=DispatchTestTimeout.SHORT, label="slow")
+            returned_before_completion = not finished.is_set()
         finally:
-            # The straggler is still sleeping; give it time to finish before
-            # the pool is torn down, so this test does not leak a thread
-            # into the next one.
-            started.wait(timeout=Timeout.DISPATCH_TEST_NORMAL)
-            time.sleep(0.3)
+            release.set()
             dispatcher.shutdown(wait=True)
 
         assert isinstance(outcome, DispatchTimeout)
-        # Bounded by the TIMEOUT, not by `_slow`'s own 0.3s sleep.
-        assert elapsed < 0.2
+        assert returned_before_completion
 
     def test_the_stray_worker_still_runs_to_completion_in_the_background(self) -> None:
         dispatcher = BoundedDispatcher(max_inflight=4)
+        release = threading.Event()
         completed = threading.Event()
 
-        def _slow() -> None:
-            time.sleep(0.1)
+        def _blocked() -> None:
+            release.wait(timeout=DispatchTestTimeout.GENEROUS)
             completed.set()
 
         try:
-            outcome = dispatcher.run(_slow, timeout=Timeout.DISPATCH_TEST_VERY_SHORT, label="slow")
+            outcome = dispatcher.run(_blocked, timeout=DispatchTestTimeout.VERY_SHORT, label="slow")
             assert isinstance(outcome, DispatchTimeout)
-            assert not completed.is_set()  # not yet -- still bounded above
-            assert completed.wait(
-                timeout=Timeout.DISPATCH_TEST_NORMAL
-            )  # but it DOES finish eventually
+            assert not completed.is_set()  # abandoned while still blocked
+            release.set()
+            assert completed.wait(timeout=DispatchTestTimeout.NORMAL)  # and it DOES finish
         finally:
+            release.set()
             dispatcher.shutdown(wait=True)
 
 
@@ -111,7 +109,7 @@ class TestBoundedDispatcherSaturation:
 
         def _occupy() -> None:
             occupied.set()
-            release.wait(timeout=Timeout.DISPATCH_TEST_GENEROUS)
+            release.wait(timeout=DispatchTestTimeout.GENEROUS)
 
         filler_thread: threading.Thread | None = None
         try:
@@ -119,26 +117,28 @@ class TestBoundedDispatcherSaturation:
             # release it.
             filler_thread = threading.Thread(
                 target=lambda: dispatcher.run(
-                    _occupy, timeout=Timeout.DISPATCH_TEST_GENEROUS, label="filler"
+                    _occupy, timeout=DispatchTestTimeout.GENEROUS, label="filler"
                 )
             )
             filler_thread.start()
-            assert occupied.wait(timeout=Timeout.DISPATCH_TEST_NORMAL)
+            assert occupied.wait(timeout=DispatchTestTimeout.NORMAL)
 
-            start = time.perf_counter()
-            outcome = dispatcher.run(
-                lambda: "unreachable", timeout=Timeout.DISPATCH_TEST_GENEROUS, label="second"
-            )
-            elapsed = time.perf_counter() - start
+            ran = threading.Event()
+
+            def _second() -> str:
+                ran.set()
+                return "unreachable"
+
+            outcome = dispatcher.run(_second, timeout=DispatchTestTimeout.GENEROUS, label="second")
         finally:
             release.set()
             if filler_thread is not None:
-                filler_thread.join(timeout=Timeout.DISPATCH_TEST_GENEROUS)
+                filler_thread.join(timeout=DispatchTestTimeout.GENEROUS)
             dispatcher.shutdown(wait=True)
 
         assert isinstance(outcome, DispatchSaturated)
-        # Refused immediately -- it never waited anywhere near the 5s timeout.
-        assert elapsed < 0.5
+        # Refused, not queued: it never ran, even once the slot was freed.
+        assert not ran.is_set()
 
 
 class TestBoundedDispatcherReleasesAbandonedSlot:
@@ -159,52 +159,50 @@ class TestBoundedDispatcherReleasesAbandonedSlot:
 
         def _stuck() -> None:
             started.set()
-            release.wait(timeout=Timeout.DISPATCH_TEST_GENEROUS)
+            release.wait(timeout=DispatchTestTimeout.GENEROUS)
 
         try:
-            outcome = dispatcher.run(_stuck, timeout=Timeout.DISPATCH_TEST_SHORT, label="stuck")
+            outcome = dispatcher.run(_stuck, timeout=DispatchTestTimeout.SHORT, label="stuck")
             assert isinstance(outcome, DispatchTimeout)
-            assert started.wait(timeout=Timeout.DISPATCH_TEST_NORMAL)
+            assert started.wait(timeout=DispatchTestTimeout.NORMAL)
 
             # The one and only inflight slot is "occupied" by `_stuck`, which
             # is STILL RUNNING -- but the permit was released at the timeout,
             # so a fresh call is not saturated.
-            start = time.perf_counter()
             second_outcome = dispatcher.run(
-                lambda: "ok", timeout=Timeout.DISPATCH_TEST_NORMAL, label="second"
+                lambda: "ok", timeout=DispatchTestTimeout.NORMAL, label="second"
             )
-            elapsed = time.perf_counter() - start
         finally:
             release.set()
             dispatcher.shutdown(wait=True)
 
         assert second_outcome == "ok"
-        assert elapsed < 0.5
 
     def test_straggler_does_not_release_the_slot_twice(self) -> None:
         """The straggler's own eventual completion must not over-release the
         semaphore a second time (that would let capacity silently grow past
         `max_inflight`, or raise on a `BoundedSemaphore`)."""
         dispatcher = BoundedDispatcher(max_inflight=1)
-        completed = threading.Event()
+        release = threading.Event()
 
-        def _slow() -> None:
-            time.sleep(0.1)
-            completed.set()
+        def _blocked() -> None:
+            release.wait(timeout=DispatchTestTimeout.GENEROUS)
 
         try:
-            outcome = dispatcher.run(_slow, timeout=Timeout.DISPATCH_TEST_VERY_SHORT, label="slow")
+            outcome = dispatcher.run(_blocked, timeout=DispatchTestTimeout.VERY_SHORT, label="slow")
             assert isinstance(outcome, DispatchTimeout)
-            assert completed.wait(timeout=Timeout.DISPATCH_TEST_NORMAL)
-            # Give the worker's `finally` a moment to run past `completed.set()`.
-            time.sleep(0.05)
+            release.set()
+            # The worker's `finally` (the second release attempt) has run once
+            # it leaves the straggler set.
+            while dispatcher.straggler_health().count:
+                time.sleep(DispatchTestTimeout.INSTANT)
 
             # Two more dispatches must both succeed -- if the straggler's own
             # completion had released a SECOND permit, `max_inflight=1` would
             # let two concurrent calls both acquire, silently doubling
             # capacity instead of raising.
-            first = dispatcher.run(lambda: "a", timeout=Timeout.DISPATCH_TEST_NORMAL, label="a")
-            second = dispatcher.run(lambda: "b", timeout=Timeout.DISPATCH_TEST_NORMAL, label="b")
+            first = dispatcher.run(lambda: "a", timeout=DispatchTestTimeout.NORMAL, label="a")
+            second = dispatcher.run(lambda: "b", timeout=DispatchTestTimeout.NORMAL, label="b")
         finally:
             dispatcher.shutdown(wait=True)
 
@@ -230,24 +228,21 @@ class TestBoundedDispatcherStragglerHealth:
         release = threading.Event()
 
         def _stuck() -> None:
-            release.wait(timeout=Timeout.DISPATCH_TEST_GENEROUS)
+            release.wait(timeout=DispatchTestTimeout.GENEROUS)
 
         try:
-            outcome = dispatcher.run(
-                _stuck, timeout=Timeout.DISPATCH_TEST_VERY_SHORT, label="stuck"
-            )
+            outcome = dispatcher.run(_stuck, timeout=DispatchTestTimeout.VERY_SHORT, label="stuck")
             assert isinstance(outcome, DispatchTimeout)
 
-            time.sleep(0.05)
             health = dispatcher.straggler_health()
             assert health.count == 1
             assert health.oldest_age_seconds > 0.0
 
             release.set()
-            # Poll briefly for the worker's `finally` to remove itself.
-            deadline = time.perf_counter() + 1.0
-            while dispatcher.straggler_health().count and time.perf_counter() < deadline:
-                time.sleep(0.01)
+            # The worker's `finally` removes it; no wall-clock bound on when,
+            # since release.wait() returning guarantees it gets there.
+            while dispatcher.straggler_health().count:
+                time.sleep(DispatchTestTimeout.INSTANT)
             assert dispatcher.straggler_health().count == 0
         finally:
             release.set()
@@ -258,12 +253,12 @@ class TestBoundedDispatcherStragglerHealth:
         release = threading.Event()
 
         def _stuck() -> None:
-            release.wait(timeout=Timeout.DISPATCH_TEST_GENEROUS)
+            release.wait(timeout=DispatchTestTimeout.GENEROUS)
 
         try:
-            dispatcher.run(_stuck, timeout=Timeout.DISPATCH_TEST_VERY_SHORT, label="first")
+            dispatcher.run(_stuck, timeout=DispatchTestTimeout.VERY_SHORT, label="first")
             time.sleep(0.1)
-            dispatcher.run(_stuck, timeout=Timeout.DISPATCH_TEST_VERY_SHORT, label="second")
+            dispatcher.run(_stuck, timeout=DispatchTestTimeout.VERY_SHORT, label="second")
             time.sleep(0.02)
 
             health = dispatcher.straggler_health()
@@ -292,12 +287,10 @@ class TestBoundedDispatcherBoundsStragglers:
         release = threading.Event()
 
         def _stuck() -> None:
-            release.wait(timeout=Timeout.DISPATCH_TEST_GENEROUS)
+            release.wait(timeout=DispatchTestTimeout.GENEROUS)
 
         try:
-            outcome = dispatcher.run(
-                _stuck, timeout=Timeout.DISPATCH_TEST_VERY_SHORT, label="stuck"
-            )
+            outcome = dispatcher.run(_stuck, timeout=DispatchTestTimeout.VERY_SHORT, label="stuck")
             assert isinstance(outcome, DispatchTimeout)
             time.sleep(0.05)
             assert dispatcher.straggler_health().count == 1
@@ -305,7 +298,7 @@ class TestBoundedDispatcherBoundsStragglers:
             # `max_inflight=4` has plenty of free capacity -- the straggler
             # cap must refuse this on its own.
             second_outcome = dispatcher.run(
-                lambda: "unreachable", timeout=Timeout.DISPATCH_TEST_NORMAL, label="second"
+                lambda: "unreachable", timeout=DispatchTestTimeout.NORMAL, label="second"
             )
         finally:
             release.set()
@@ -320,16 +313,16 @@ class TestBoundedDispatcherBoundsStragglers:
         release = threading.Event()
 
         def _stuck() -> None:
-            release.wait(timeout=Timeout.DISPATCH_TEST_GENEROUS)
+            release.wait(timeout=DispatchTestTimeout.GENEROUS)
 
         try:
             assert dispatcher.straggler_health().at_capacity is False
             # run() records a straggler before it returns DispatchTimeout, so
             # the count is exact the moment each call comes back.
-            dispatcher.run(_stuck, timeout=Timeout.DISPATCH_TEST_VERY_SHORT, label="first")
+            dispatcher.run(_stuck, timeout=DispatchTestTimeout.VERY_SHORT, label="first")
             health = dispatcher.straggler_health()
             assert (health.count, health.at_capacity) == (1, False)
-            dispatcher.run(_stuck, timeout=Timeout.DISPATCH_TEST_VERY_SHORT, label="second")
+            dispatcher.run(_stuck, timeout=DispatchTestTimeout.VERY_SHORT, label="second")
             health = dispatcher.straggler_health()
             assert (health.count, health.at_capacity) == (2, True)
         finally:
@@ -344,21 +337,19 @@ class TestBoundedDispatcherBoundsStragglers:
         release = threading.Event()
 
         def _stuck() -> None:
-            release.wait(timeout=Timeout.DISPATCH_TEST_GENEROUS)
+            release.wait(timeout=DispatchTestTimeout.GENEROUS)
 
         try:
-            dispatcher.run(_stuck, timeout=Timeout.DISPATCH_TEST_VERY_SHORT, label="first")
+            dispatcher.run(_stuck, timeout=DispatchTestTimeout.VERY_SHORT, label="first")
             time.sleep(0.02)
-            outcome = dispatcher.run(
-                _stuck, timeout=Timeout.DISPATCH_TEST_VERY_SHORT, label="second"
-            )
+            outcome = dispatcher.run(_stuck, timeout=DispatchTestTimeout.VERY_SHORT, label="second")
             assert isinstance(outcome, DispatchTimeout)
             time.sleep(0.02)
             assert dispatcher.straggler_health().count == 2
 
             # A third dispatch is refused: 2 stragglers already == max_inflight (2).
             third = dispatcher.run(
-                lambda: "unreachable", timeout=Timeout.DISPATCH_TEST_NORMAL, label="third"
+                lambda: "unreachable", timeout=DispatchTestTimeout.NORMAL, label="third"
             )
         finally:
             release.set()
@@ -381,22 +372,21 @@ class TestBoundedDispatcherHandlesBaseException:
             raise SystemExit(1)
 
         try:
-            start = time.perf_counter()
             raised = None
+            outcome: object = None
             try:
-                dispatcher.run(
-                    _raises_system_exit, timeout=Timeout.DISPATCH_TEST_GENEROUS, label="quitter"
+                outcome = dispatcher.run(
+                    _raises_system_exit, timeout=DispatchTestTimeout.GENEROUS, label="quitter"
                 )
             except SystemExit as exc:
                 raised = exc
-            elapsed = time.perf_counter() - start
         finally:
             dispatcher.shutdown(wait=True)
 
+        # An unresolved future would have waited out the timeout and come back
+        # as DispatchTimeout; the exception itself proves it was resolved.
         assert raised is not None
-        # Resolved almost immediately -- NOT after waiting out the full 5s
-        # timeout, which is what an unresolved future would have cost.
-        assert elapsed < 1.0
+        assert outcome is None
 
     def test_the_permit_is_still_released_after_a_base_exception(self) -> None:
         dispatcher = BoundedDispatcher(max_inflight=1)
@@ -408,13 +398,13 @@ class TestBoundedDispatcherHandlesBaseException:
             with contextlib.suppress(KeyboardInterrupt):
                 dispatcher.run(
                     _raises_keyboard_interrupt,
-                    timeout=Timeout.DISPATCH_TEST_GENEROUS,
+                    timeout=DispatchTestTimeout.GENEROUS,
                     label="ctrl-c",
                 )
 
             # If the permit leaked, this second call would saturate instead.
             outcome = dispatcher.run(
-                lambda: "ok", timeout=Timeout.DISPATCH_TEST_NORMAL, label="second"
+                lambda: "ok", timeout=DispatchTestTimeout.NORMAL, label="second"
             )
         finally:
             dispatcher.shutdown(wait=True)

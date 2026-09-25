@@ -29,6 +29,7 @@ from typing import Any
 import pytest
 
 from claude_code_hooks_daemon.constants import Timeout
+from tests.dispatch_timeouts import DispatchTestTimeout
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INIT_SH = REPO_ROOT / "init.sh"
@@ -72,7 +73,7 @@ def _fake_server(*, respond: bytes | None, delay: float = 0.0) -> Iterator[Path]
 
     def _handle(conn: socket.socket) -> None:
         with conn:
-            conn.settimeout(Timeout.DISPATCH_TEST_GENEROUS)
+            conn.settimeout(DispatchTestTimeout.GENEROUS)
             chunks: list[bytes] = []
             while True:
                 chunk = conn.recv(4096)

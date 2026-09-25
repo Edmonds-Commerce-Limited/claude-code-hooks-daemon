@@ -8,6 +8,7 @@ from typing import Any
 from unittest.mock import Mock, patch
 
 import pytest
+from tests.dispatch_timeouts import DispatchTestTimeout
 
 from claude_code_hooks_daemon.config.models import ChainConfig, VerdictLogConfig
 from claude_code_hooks_daemon.constants.timeout import Timeout
@@ -1119,8 +1120,8 @@ class TestControllerHealthStragglers:
         dispatcher = get_default_dispatcher()
         for i in range(count):
             outcome = dispatcher.run(
-                lambda: release.wait(timeout=Timeout.DISPATCH_TEST_GENEROUS),
-                timeout=Timeout.DISPATCH_TEST_INSTANT,
+                lambda: release.wait(timeout=DispatchTestTimeout.GENEROUS),
+                timeout=DispatchTestTimeout.INSTANT,
                 label=f"stuck-{i}",
             )
             assert isinstance(outcome, DispatchTimeout)

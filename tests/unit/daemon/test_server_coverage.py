@@ -14,9 +14,9 @@ from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from tests.dispatch_timeouts import DispatchTestTimeout
 
 from claude_code_hooks_daemon.config.models import DaemonConfig, LogLevel
-from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
 from claude_code_hooks_daemon.daemon.server import (
     HooksDaemon,
@@ -471,7 +471,7 @@ class TestMonitorStragglerHealth:
 
         with self._patched(mock_shutdown):
             await asyncio.wait_for(
-                daemon._monitor_straggler_health(), timeout=Timeout.DISPATCH_TEST_NORMAL
+                daemon._monitor_straggler_health(), timeout=DispatchTestTimeout.NORMAL
             )
 
         mock_shutdown.assert_called_once()
@@ -494,7 +494,7 @@ class TestMonitorStragglerHealth:
         with self._patched(mock_shutdown):
             with pytest.raises(asyncio.TimeoutError):
                 await asyncio.wait_for(
-                    daemon._monitor_straggler_health(), timeout=Timeout.DISPATCH_TEST_SHORT
+                    daemon._monitor_straggler_health(), timeout=DispatchTestTimeout.SHORT
                 )
 
         mock_shutdown.assert_not_called()
@@ -519,7 +519,7 @@ class TestMonitorStragglerHealth:
         with self._patched(mock_shutdown):
             with pytest.raises(asyncio.TimeoutError):
                 await asyncio.wait_for(
-                    daemon._monitor_straggler_health(), timeout=Timeout.DISPATCH_TEST_SHORT
+                    daemon._monitor_straggler_health(), timeout=DispatchTestTimeout.SHORT
                 )
 
         mock_shutdown.assert_not_called()
@@ -546,7 +546,7 @@ class TestMonitorStragglerHealth:
 
         with self._patched(mock_shutdown):
             await asyncio.wait_for(
-                daemon._monitor_straggler_health(), timeout=Timeout.DISPATCH_TEST_NORMAL
+                daemon._monitor_straggler_health(), timeout=DispatchTestTimeout.NORMAL
             )
 
         mock_shutdown.assert_called_once()
@@ -570,7 +570,7 @@ class TestMonitorStragglerHealth:
         with self._patched(mock_shutdown):
             with pytest.raises(asyncio.TimeoutError):
                 await asyncio.wait_for(
-                    daemon._monitor_straggler_health(), timeout=Timeout.DISPATCH_TEST_SHORT
+                    daemon._monitor_straggler_health(), timeout=DispatchTestTimeout.SHORT
                 )
 
         mock_shutdown.assert_not_called()
@@ -587,7 +587,7 @@ class TestMonitorStragglerHealth:
         with self._patched(mock_shutdown):
             with pytest.raises(asyncio.TimeoutError):
                 await asyncio.wait_for(
-                    daemon._monitor_straggler_health(), timeout=Timeout.DISPATCH_TEST_SHORT
+                    daemon._monitor_straggler_health(), timeout=DispatchTestTimeout.SHORT
                 )
 
         mock_shutdown.assert_not_called()
@@ -602,7 +602,7 @@ class TestMonitorStragglerHealth:
         with self._patched(mock_shutdown):
             with pytest.raises(asyncio.TimeoutError):
                 await asyncio.wait_for(
-                    daemon._monitor_straggler_health(), timeout=Timeout.DISPATCH_TEST_SHORT
+                    daemon._monitor_straggler_health(), timeout=DispatchTestTimeout.SHORT
                 )
 
         mock_shutdown.assert_not_called()
@@ -619,7 +619,7 @@ class TestMonitorStragglerHealth:
         with self._patched(mock_shutdown):
             with pytest.raises(asyncio.TimeoutError):
                 await asyncio.wait_for(
-                    daemon._monitor_straggler_health(), timeout=Timeout.DISPATCH_TEST_SHORT
+                    daemon._monitor_straggler_health(), timeout=DispatchTestTimeout.SHORT
                 )
 
         mock_shutdown.assert_not_called()

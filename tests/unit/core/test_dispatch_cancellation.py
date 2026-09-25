@@ -15,13 +15,13 @@ from __future__ import annotations
 
 import contextvars
 
-from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.dispatch_cancellation import (
     DispatchCancellation,
     bind_dispatch_cancellation,
     is_dispatch_cancelled,
     reset_dispatch_cancellation,
 )
+from tests.dispatch_timeouts import DispatchTestTimeout
 
 
 class TestDispatchCancellation:
@@ -117,7 +117,7 @@ class TestIsDispatchCancelled:
         try:
             thread = threading.Thread(target=_worker)
             thread.start()
-            thread.join(timeout=Timeout.DISPATCH_TEST_GENEROUS)
+            thread.join(timeout=DispatchTestTimeout.GENEROUS)
         finally:
             reset_dispatch_cancellation(ctx)
 
