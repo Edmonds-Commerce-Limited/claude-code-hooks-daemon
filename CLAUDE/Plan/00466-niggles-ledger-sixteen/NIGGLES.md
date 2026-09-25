@@ -3,7 +3,7 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
-### N35 — In Progress — adversarial security review of the N24/N25/N34 fix (2 blockers, 3 majors, 6 minors, 4 nits)
+### N40 — In Progress — adversarial security review of the N24/N25/N34 fix (2 blockers, 3 majors, 6 minors, 4 nits)
 
 **Found by an adversarial, read-only security review**
 (`subagent-reports/260924-n466-n24-review-opus-5-5.md`) of `d7f2c875` (N24 +
@@ -228,13 +228,24 @@ Of the 14 completely-untagged handlers: 6 are now `HandlerTag.SAFETY` +
 disclosure), `curl_pipe_shell`/`dangerous_permissions`/`sudo_pip`/
 `pip_break_system`/`lock_file_edit_blocker` (team-lead's explicit list: RCE,
 privilege escalation, system Python corruption, dependency-hash tampering).
-The other 8 are workflow/QA gates, not dangerous-action guards, and are now
-explicitly `HandlerTag.ADVISORY` (a deliberate, commented opt-out rather
-than a silent gap): `ask_user_question_blocker`, `bash_safe_mode` (ships
+The other 8 are workflow/QA gates, not dangerous-action guards, and none
+gets `SAFETY`. Six are now explicitly `HandlerTag.ADVISORY` (a deliberate,
+commented opt-out rather than a silent gap): `bash_safe_mode` (ships
 disabled by default, has its own escape hatch), `docs_qa_commit_gate`,
 `docs_qa_edit`, `plan_qa_commit_gate`, `staged_lint_gate`,
-`validate_instruction_content`, `verification_result_gate` (a heuristic
-detector, imperfect by its own docstring).
+`verification_result_gate` (a heuristic detector, imperfect by its own
+docstring) — each denies only under a non-default config value. The other
+two, `ask_user_question_blocker` (strict mode, the shipped default, denies
+unconditionally) and `validate_instruction_content` (denies unconditionally
+on a pattern match, no config gate at all), deny under a DEFAULT install, so
+`HandlerTag.ADVISORY` would have understated them: a full-suite run (below)
+surfaced the pre-existing sibling guard
+`test_declared_behaviour_matches_source.py`, which independently requires
+`HandlerTag.BLOCKING` for any handler whose default behaviour denies (it
+feeds `scripts/qa/check_doc_truth.py`'s ground truth for the generated
+`.claude/HOOKS-DAEMON.md`). Tagged `HandlerTag.BLOCKING` instead —
+satisfies both registry tests, since this test's own early-return treats
+`BLOCKING` alone as an already-made fail-closed decision.
 
 New registry test, `tests/unit/handlers/test_pretooluse_fail_closed_tagging.py`:
 parametrised over every `pre_tool_use` handler, source-inspects each for a
@@ -278,6 +289,43 @@ early-return removed, and work through the resulting list.
   known constant-factor issue) — no action needed here.
 - **P1** (`github_auto_close_keywords` cache bypass) is explicitly OUT of
   this niggle's scope — routed by the coordinator to a different agent.
+
+**Full-suite sweep, incidental to M3 — 5 pre-existing failures found and fixed.**
+Running the WHOLE test suite (not just targeted files) after M3 surfaced 5
+failures predating this niggle's own changes, all from earlier N24/N25/N34
+work in this same plan:
+
+1. `test_handler_config_blocking.py`'s `test_sed_blocker_prevents_inline_edits_e2e`
+   and `test_disabled_handler_does_not_block_e2e` called `router.route(...)`
+   directly without initialising `ProjectContext`. `enforce-project-containment`
+   (`SAFETY`+`BLOCKING`) now correctly denies the WHOLE chain when it raises
+   for want of it (N24's fail-closed-on-raise, working as designed) — so
+   both tests were denied on `enforce-project-containment` before the
+   handler under test ever ran, rather than seeing that handler's own
+   verdict. Fixed by requesting the file's own pre-existing (opt-in, not
+   autouse) `project_context` fixture from `conftest.py` on those two tests
+   — the fixture already existed and other classes in the same file already
+   used it correctly.
+2. Three pending release-note callouts (`40`/`41`/`42`, written earlier in
+   this plan for N24/N25) failed `test_pending_release_notes_holding_area.py`'s
+   own shape check: `40`'s filename had an underscore
+   (`strict_mode`), which the `NN-kebab-slug.md` naming rule rejects —
+   `git mv`d to `strict-mode`. `41` and `42` both wrote `**Audience**: operators, security reviewers` — the schema requires exactly ONE of a
+   fixed enum (`operators`/`handler authors`/`client projects`/`everyone`),
+   not a comma list; "security reviewers" was not a recognised value at
+   all. Both narrowed to `**Audience**: operators`, matching this
+   directory's other daemon-behaviour notes.
+3. `CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks/02-review-new-denials-from-strict-mode-and-safety-guards.md`
+   (also written for N24) existed on disk with no row in its directory's
+   `README.md` task index, failing `test_repo_hygiene_check.py`'s
+   post-upgrade-index-drift rule. Added the missing row.
+
+None of these three defects were introduced by THIS niggle's B1/B2/M3/init.sh
+work; they were latent since the commits that added each file, only
+surfaced now because a full (not targeted) suite run happened to be part of
+verifying M3. Fixed as small, self-contained corrections rather than left
+broken. Full `tests/integration/` suite green after (previously 7 failed /
+4187 passed / 8 skipped).
 
 ### N34 — ✅ Remedied — `secret_file_guard`'s linear scan has enough constant factor to blow past the chain deadline on its own
 

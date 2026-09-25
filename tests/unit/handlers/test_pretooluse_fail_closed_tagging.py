@@ -20,11 +20,19 @@ This is the OPT-OUT-NOT-OPT-IN registry test the review's M3 direction asks
 for: a completely untagged PreToolUse handler whose source can produce a
 deny/block decision must be SAFETY+BLOCKING, unless it explicitly declares
 `HandlerTag.ADVISORY` -- a deliberate statement that failing open here is an
-accepted trade-off (the workflow/QA gates among the 14 this niggle found:
-`ask-user-question-blocker`, `bash-safe-mode`, `docs-qa-commit-gate`,
+accepted trade-off (six of the 14 this niggle found, each conditional on a
+non-default config value: `bash-safe-mode`, `docs-qa-commit-gate`,
 `docs-qa-edit`, `plan-qa-commit-gate`, `staged-lint-gate`,
-`validate-instruction-content`, `verification-result-gate`), not an
-oversight. A new handler that denies and carries neither marker fails this
+`verification-result-gate`), not an oversight. The other two of the 14 --
+`ask-user-question-blocker` (strict mode, the default, denies
+unconditionally) and `validate-instruction-content` (denies unconditionally
+whenever a blocked pattern matches, no config gate at all) -- turned out to
+deny under a DEFAULT install rather than an opt-in mode, so they were tagged
+`HandlerTag.BLOCKING` instead: `test_declared_behaviour_matches_source.py`
+(same test tree) independently requires this for any handler whose default
+behaviour denies, and ADVISORY there would have understated them in the
+generated doc. Both stay out of SAFETY, since neither is a dangerous-action
+guard. A new handler that denies and carries neither marker fails this
 test, which is the whole point: the reviewer for THAT handler is forced to
 make the same call this niggle made for the existing 14, rather than the
 gap growing silently.

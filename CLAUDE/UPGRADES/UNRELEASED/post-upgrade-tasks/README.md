@@ -85,9 +85,10 @@ This file's lower half should list the tasks currently in this directory, so an 
 
 <!-- BEGIN TASK INDEX — regenerate when adding/removing tasks -->
 
-| File                                                   | Type  | Severity    | Applies to                                                                              | One-line summary                                                                                                                |
-| ------------------------------------------------------ | ----- | ----------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `01-remove-vendor-from-a-php-intelephense-override.md` | audit | recommended | PHP projects whose intelephense override followed the old `R-LSP-CONFIG-EXCLUDE` advice | Remove a bare `**/vendor` exclude entry, which undefines every Composer-installed type; use the printed nested entries instead. |
+| File                                                          | Type            | Severity     | Applies to                                                                              | One-line summary                                                                                                                |
+| ------------------------------------------------------------- | --------------- | ------------ | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `01-remove-vendor-from-a-php-intelephense-override.md`        | audit           | recommended  | PHP projects whose intelephense override followed the old `R-LSP-CONFIG-EXCLUDE` advice | Remove a bare `**/vendor` exclude entry, which undefines every Composer-installed type; use the printed nested entries instead. |
+| `02-review-new-denials-from-strict-mode-and-safety-guards.md` | workflow-change | notification | Any project with `daemon.strict_mode: true`, or any `SAFETY`+`BLOCKING` handler         | `strict_mode` and a raising `SAFETY`+`BLOCKING` handler now actually deny; review any newly-surfaced denials.                   |
 
 <!-- END TASK INDEX -->
 

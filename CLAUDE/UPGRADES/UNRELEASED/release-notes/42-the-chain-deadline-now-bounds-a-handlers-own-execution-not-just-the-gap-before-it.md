@@ -1,7 +1,7 @@
 # Callout: the chain deadline now bounds a handler's own execution, not just the gap before it
 
 **Plan**: 00466
-**Audience**: operators, security reviewers
+**Audience**: operators
 
 `daemon.chain.deadline_seconds` (Plan 00466 N25) was checked once per
 handler, BEFORE it ran — it bounded the gap between handlers, never a

@@ -1,7 +1,7 @@
 # Callout: `daemon.strict_mode` now actually reaches the daemon
 
 **Plan**: 00466
-**Audience**: operators, security reviewers
+**Audience**: operators
 
 `DaemonController.process_event` read `self._config.strict_mode`, and
 `self._config` is never populated by the real daemon startup path — every

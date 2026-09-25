@@ -27,9 +27,43 @@
 boundaries:
   # ---------------------------------------------------------------- chain.py
   - surface: src/claude_code_hooks_daemon/core/chain.py
+    scope: _safety_payload_size
+    construct: "except (TypeError, ValueError)"
+    ordinal: 0
+    verdict: fail-open
+    induced_by: >-
+      a tool_input dict containing a value json.dumps(..., ensure_ascii=False)
+      cannot serialise (e.g. a non-JSON-native type, or a float policy that
+      rejects NaN/Infinity)
+    caller_controlled: true
+    trace: >-
+      NONE from this function itself -- returns 0 silently (Plan 00466 n24
+      security review B1: this function must never raise). The SAFETY
+      input-size cap (max_safety_input_bytes) is then simply not enforced
+      for this request, since a 0-byte measurement never exceeds the limit.
+      HandlerChain.execute's own except Exception (ordinal 0 below) only
+      catches what escapes THIS try/except, so a TypeError/ValueError caught
+      here never reaches it and leaves no other trace.
+
+  - surface: src/claude_code_hooks_daemon/core/chain.py
     scope: execute
     construct: "except Exception"
     ordinal: 0
+    verdict: not-fail-open
+    reason: >-
+      Defence-in-depth wrapper (Plan 00466 n24 security review B1) around the
+      _safety_payload_size call site, for whatever that function's own
+      except (TypeError, ValueError) above does not foresee. When the chain
+      holds a SAFETY+BLOCKING handler this branch denies immediately
+      (crash_result = HookResult.deny(...), returned before the handler loop
+      even starts) -- fail-closed, not open. Only when NO SAFETY+BLOCKING
+      handler is registered does it degrade to "cap not enforced", which is
+      harmless because there is nothing that cap could have denied anyway.
+
+  - surface: src/claude_code_hooks_daemon/core/chain.py
+    scope: execute
+    construct: "except Exception"
+    ordinal: 1
     verdict: fail-open
     induced_by: "any handler raising while judging the event"
     caller_controlled: true
@@ -47,7 +81,7 @@ boundaries:
   - surface: src/claude_code_hooks_daemon/core/chain.py
     scope: execute
     construct: "except Exception"
-    ordinal: 1
+    ordinal: 2
     verdict: fail-open
     induced_by: "a handler raising in commit_side_effects, after the decision"
     caller_controlled: true

@@ -1,7 +1,7 @@
 # Callout: a slow handler can no longer bypass the rest of the chain on a client timeout
 
 **Plan**: 00466
-**Audience**: operators, security reviewers
+**Audience**: operators
 
 The hooks client gives the daemon a 30s socket timeout
 (`--timeout-ms 30000`). On a read-side timeout, the client's own fallback
