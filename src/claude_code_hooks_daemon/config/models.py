@@ -1607,21 +1607,24 @@ class ChainConfig(BaseModel):
             Costs the extra handlers' execution time on the blocked path;
             ``CLAUDE/Plan/00242-terminal-handlers-are-a-flawed-primitive/
             MEASUREMENTS.md`` records the numbers.
-        deadline_seconds: Per-event chain deadline (Plan 00466 N25/N34), well
-            under the client's own socket timeout (30s): that client-side
-            timeout fails the WHOLE chain open on expiry, so a merely slow
-            handler bypassed every guard behind it, not just itself. Checked
-            BETWEEN handlers, and (N34) each handler's own ``matches()``/
-            ``handle()`` call is ALSO individually bounded on a shared pool —
-            a handler slow enough within its own call (``secret_file_guard``
-            measured at 48.958s on 4 MB input) reproduces the exact bypass
-            this exists to close otherwise. Either way, a handler tagged both
-            ``SAFETY`` and ``BLOCKING`` not judged in time is denied, naming
-            the handler, "not judged in time"; any other not-yet-run handler
-            is skipped with a context note. ``None`` disables enforcement
-            entirely (NOT recommended: a slow handler can then exhaust the
-            client's own timeout, which fails the whole chain open with no
-            guard getting a say).
+        deadline_seconds: Per-event chain deadline (Plan 00466 N25/N34/N40),
+            well under the client's own socket timeout (30s): that
+            client-side timeout fails the WHOLE chain open on expiry, so a
+            merely slow handler bypassed every guard behind it, not just
+            itself. Checked BETWEEN handlers, and (Plan 00466 N40 m1) the
+            WHOLE per-handler loop is dispatched as ONE bounded call, on its
+            own fresh daemon thread (Plan 00466 N40 n1: not a thread pool —
+            see ``BoundedDispatcher``) — a handler slow enough within its own
+            ``matches()``/``handle()`` call (``secret_file_guard`` measured
+            at 48.958s on 4 MB input) reproduces the exact bypass this exists
+            to close otherwise, and the whole-chain dispatch bounds that case
+            too. Either way, a handler tagged both ``SAFETY`` and
+            ``BLOCKING`` not judged in time is denied, naming the handler,
+            "not judged in time"; any other not-yet-run handler is skipped
+            with a context note. ``None`` disables enforcement entirely (NOT
+            recommended: a slow handler can then exhaust the client's own
+            timeout, which fails the whole chain open with no guard getting
+            a say).
         max_safety_input_bytes: Defence in depth alongside
             ``deadline_seconds`` (Plan 00466 N34 remedy 3): the combined size
             of a SAFETY handler's bulk-text input fields (Bash's ``command``,
@@ -1703,6 +1706,42 @@ class ChainConfig(BaseModel):
             "out short of a manual restart. None disables self-restart."
         ),
     )
+
+    @model_validator(mode="after")
+    def validate_deadline_below_client_socket_timeout(self) -> Self:
+        """Refuse a deadline flush against the client's own socket timeout.
+
+        Plan 00466 N40 m6. ``deadline_seconds`` exists so the DAEMON's own
+        deadline-triggered deny reaches the client before the client's own
+        socket timeout gives up and fails the whole chain open — a merely
+        slow handler bypassing every guard behind it, not just itself
+        (see the attribute's docstring). A deadline set AT or too close to
+        that client timeout reproduces exactly the bypass it exists to
+        close: there is no time left to serialise and flush the response
+        once the deadline fires. ``None`` disables enforcement entirely and
+        is never checked here — there is no deadline to compare.
+        """
+        if self.deadline_seconds is None:
+            return self
+        client_timeout = Timeout.SOCKET_DISPATCH_ROUNDTRIP
+        margin = Timeout.CHAIN_DEADLINE_SOCKET_MARGIN_SECONDS
+        if self.deadline_seconds >= client_timeout:
+            raise ValueError(
+                f"daemon.chain.deadline_seconds ({self.deadline_seconds}s) must be "
+                f"below the client's own socket timeout ({client_timeout}s): at or "
+                "past it, the client gives up and fails the WHOLE chain open "
+                "before the daemon's deadline-triggered deny can ever be sent "
+                "back. Lower deadline_seconds."
+            )
+        if client_timeout - self.deadline_seconds < margin:
+            raise ValueError(
+                f"daemon.chain.deadline_seconds ({self.deadline_seconds}s) leaves "
+                f"less than {margin}s of margin before the client's own socket "
+                f"timeout ({client_timeout}s) -- not enough time to serialise and "
+                "flush the deadline-triggered response. Lower deadline_seconds by "
+                f"at least {margin - (client_timeout - self.deadline_seconds)}s."
+            )
+        return self
 
 
 class DaemonConfig(BaseModel):

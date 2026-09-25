@@ -52,3 +52,47 @@ class TestParsing:
     def test_rejects_a_non_positive_deadline(self) -> None:
         with pytest.raises(ValidationError):
             ChainConfig.model_validate({"deadline_seconds": 0})
+
+
+class TestDeadlineBelowClientSocketTimeout:
+    """Plan 00466 N40 m6: ``deadline_seconds`` must stay well under the
+    client's own socket timeout (``Timeout.SOCKET_DISPATCH_ROUNDTRIP``), with
+    enough margin left over to actually deliver the response. A deadline that
+    reaches (or merely grazes) the client timeout reproduces the exact
+    fail-open bypass ``deadline_seconds`` exists to close: the client gives up
+    and fails the WHOLE chain open before the daemon's own deadline-triggered
+    deny can ever be serialised and sent back.
+    """
+
+    def test_a_deadline_flush_against_the_socket_timeout_is_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="socket timeout"):
+            ChainConfig.model_validate({"deadline_seconds": Timeout.SOCKET_DISPATCH_ROUNDTRIP})
+
+    def test_a_deadline_past_the_socket_timeout_is_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="socket timeout"):
+            ChainConfig.model_validate(
+                {"deadline_seconds": Timeout.SOCKET_DISPATCH_ROUNDTRIP + 1}
+            )
+
+    def test_a_deadline_inside_the_timeout_but_without_margin_is_rejected(self) -> None:
+        """Even strictly under the socket timeout, too little margin to
+        actually send the response back is refused, not just a tie or an
+        overshoot."""
+        too_close = Timeout.SOCKET_DISPATCH_ROUNDTRIP - (
+            Timeout.CHAIN_DEADLINE_SOCKET_MARGIN_SECONDS - 1
+        )
+        with pytest.raises(ValidationError, match="margin"):
+            ChainConfig.model_validate({"deadline_seconds": too_close})
+
+    def test_a_deadline_with_adequate_margin_is_accepted(self) -> None:
+        safe = Timeout.SOCKET_DISPATCH_ROUNDTRIP - Timeout.CHAIN_DEADLINE_SOCKET_MARGIN_SECONDS
+        config = ChainConfig.model_validate({"deadline_seconds": safe})
+        assert config.deadline_seconds == safe
+
+    def test_the_shipped_default_satisfies_its_own_rule(self) -> None:
+        """The default must never trip the rule it enforces on everyone else."""
+        ChainConfig()  # must not raise
+
+    def test_none_still_disables_enforcement_and_is_never_checked(self) -> None:
+        config = ChainConfig.model_validate({"deadline_seconds": None})
+        assert config.deadline_seconds is None

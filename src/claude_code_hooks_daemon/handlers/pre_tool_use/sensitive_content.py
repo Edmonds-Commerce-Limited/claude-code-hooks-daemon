@@ -44,6 +44,7 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputF
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
+from claude_code_hooks_daemon.core.dispatch_cancellation import is_dispatch_cancelled
 from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
@@ -725,9 +726,19 @@ class SensitiveContentHandler(PreToolUseHandlerBase):
         across a single dispatch, not a memo across calls: the index can be
         restaged between two textually identical commit commands, so a second
         dispatch pays for its own diff rather than inheriting a stale one.
+
+        Plan 00466 N40 m2: skips the WRITE (still returns the haystacks to
+        this call's own ``matches()``, whose boolean result is harmless) when
+        ``is_dispatch_cancelled()`` -- a straggling ``matches()`` call whose
+        own chain dispatch the caller already gave up waiting on. Caching
+        secret-bearing haystack text on an instance that lives for the whole
+        daemon process, for a verdict nobody will ever see, is exactly the
+        retained-text leak ``commit_side_effects`` exists to prevent, just
+        reached by an abandoned dispatch instead of a delivered one.
         """
         haystacks = self._compute_haystacks(hook_input)
-        self._cached_dispatch = (self._dispatch_key(hook_input), haystacks)
+        if not is_dispatch_cancelled():
+            self._cached_dispatch = (self._dispatch_key(hook_input), haystacks)
         return haystacks
 
     def _take_cached_haystacks(self, hook_input: dict[str, Any]) -> list[_Haystack]:

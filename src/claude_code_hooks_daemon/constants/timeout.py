@@ -55,6 +55,16 @@ class Timeout:
     # rather than silently skipped.
     CHAIN_DEADLINE_DEFAULT = 20
 
+    # Minimum gap required (Plan 00466 N40 m6) between ChainConfig's
+    # deadline_seconds and the client's own socket timeout
+    # (SOCKET_DISPATCH_ROUNDTRIP, defined below). A deadline flush against —
+    # or merely close to — the client timeout reproduces the exact fail-open
+    # bypass deadline_seconds exists to close: the client gives up and fails
+    # the whole chain open before the daemon's deadline-triggered deny can be
+    # built and sent back over the socket. 5s covers the time to serialise
+    # and flush a response after the deadline fires.
+    CHAIN_DEADLINE_SOCKET_MARGIN_SECONDS = 5
+
     # SAFETY handler input-size cap in bytes (Plan 00466 N34 remedy 3),
     # defence in depth alongside CHAIN_DEADLINE_DEFAULT. Ordinary source
     # files are typically well under a few hundred KB; 2 MiB stays

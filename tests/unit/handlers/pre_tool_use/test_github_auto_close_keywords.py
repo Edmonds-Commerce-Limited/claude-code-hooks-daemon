@@ -379,6 +379,40 @@ class TestDisclosureLadder:
         )
         assert result.decision == Decision.ALLOW
 
+    def test_a_cancelled_dispatch_does_not_mark_disclosed(self) -> None:
+        """Plan 00466 N40 m2: a straggling ``handle()`` call -- one whose own
+        chain dispatch the caller already gave up waiting on -- must not
+        spend the disclosure ladder for a verdict nobody will ever see. The
+        DisclosureTracker is a shared, session-scoped, process-lifetime
+        store, so marking it here would silence a LATER, genuinely-delivered
+        first fire.
+        """
+        from claude_code_hooks_daemon.core.dispatch_cancellation import (
+            DispatchCancellation,
+            bind_dispatch_cancellation,
+            reset_dispatch_cancellation,
+        )
+
+        handler = GithubAutoCloseKeywordsHandler()
+        transcript_path = "/tmp/agent-a/transcript.jsonl"
+        hook_input = self._hook_input("git commit -m 'Fixes #123'", transcript_path)
+
+        token = DispatchCancellation()
+        token.cancel()
+        ctx_token = bind_dispatch_cancellation(token)
+        try:
+            cancelled_result = handler.handle(hook_input)
+        finally:
+            reset_dispatch_cancellation(ctx_token)
+        assert cancelled_result.reason is not None
+        assert "NO ESCAPE HATCH" in cancelled_result.reason  # still a real deny -- only the SIDE EFFECT is skipped
+
+        # A later, un-cancelled call on the SAME transcript must still be
+        # the VERBOSE first fire -- the cancelled call above never marked it.
+        delivered_result = handler.handle(hook_input)
+        assert delivered_result.reason is not None
+        assert "NO ESCAPE HATCH" in delivered_result.reason
+
 
 class TestGuidanceAndAcceptance:
     def test_get_claude_md_states_no_hatch_and_names_rewrites(self) -> None:

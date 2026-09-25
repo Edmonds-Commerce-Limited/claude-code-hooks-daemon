@@ -61,7 +61,7 @@ boundaries:
       harmless because there is nothing that cap could have denied anyway.
 
   - surface: src/claude_code_hooks_daemon/core/chain.py
-    scope: _execute_handlers
+    scope: _execute_handlers_body
     construct: "except Exception"
     ordinal: 0
     verdict: fail-open
@@ -80,10 +80,13 @@ boundaries:
       Plan 00466 N40 m1: this construct moved from `execute` into
       `_execute_handlers` when the whole handler loop became a single
       dispatched call rather than one dispatch per handler; the boundary
-      itself is unchanged.
+      itself is unchanged. Plan 00466 N40 m2: `_execute_handlers` is now a
+      thin wrapper that binds/resets the per-dispatch cancellation token
+      around the actual loop, renamed `_execute_handlers_body` -- again the
+      boundary itself is unchanged, only its enclosing function's name.
 
   - surface: src/claude_code_hooks_daemon/core/chain.py
-    scope: _execute_handlers
+    scope: _execute_handlers_body
     construct: "except Exception"
     ordinal: 1
     verdict: fail-open
@@ -94,7 +97,86 @@ boundaries:
       decision is already final here, so what fails open is the post-decision
       commit (a rate limiter's rollback), not the verdict. Plan 00466 N40 m1:
       this construct moved from `execute` into `_execute_handlers` alongside
-      the row above; the boundary itself is unchanged.
+      the row above; the boundary itself is unchanged. Plan 00466 N40 m2:
+      renamed to `_execute_handlers_body` alongside the row above, same
+      reason.
+
+  - surface: src/claude_code_hooks_daemon/core/chain.py
+    scope: execute
+    construct: "isinstance-dispatch DispatchTimeout"
+    ordinal: 0
+    verdict: fail-open
+    induced_by: >-
+      a handler slow enough within its own matches()/handle() call (or the
+      combined per-handler loop) to exceed the chain's own deadline_seconds
+      budget (Plan 00466 N34/N40) -- BoundedDispatcher.run() returns
+      DispatchTimeout instead of raising, so this isinstance check (not an
+      except block) is the fail-open DECISION POINT (Plan 00466 N40 m4:
+      previously invisible to this scanner, which only walked except
+      blocks).
+    caller_controlled: true
+    trace: >-
+      logger.warning inside BoundedDispatcher.run() itself, PLUS a
+      chain-level context line ("Chain not judged in time"/"Chain skipped").
+      When the chain holds a SAFETY+BLOCKING handler this branch denies
+      (HookResult.deny, "chain: not judged in time") -- fail-closed, not
+      open. Only when NO SAFETY+BLOCKING handler is registered does it
+      degrade to HookResult.allow() with a context note, which is the actual
+      fail-open half of this branch.
+
+  - surface: src/claude_code_hooks_daemon/core/chain.py
+    scope: execute
+    construct: "isinstance-dispatch DispatchSaturated"
+    ordinal: 0
+    verdict: fail-open
+    induced_by: >-
+      the bounded-dispatch pool or straggler cap already being saturated
+      when the whole-chain dispatch was attempted (Plan 00466 N34/N40) --
+      BoundedDispatcher.run() returns DispatchSaturated instead of raising.
+      Plan 00466 N40 n2: this is now its OWN isinstance check (an `elif`,
+      sibling to the DispatchTimeout row above) rather than an `assert`
+      inside the DispatchTimeout branch's `else` -- the `assert` was itself
+      the n2 finding (stripped under `-O`), and fixing it split what was
+      one row into two, which is the correct shape: two DIFFERENT
+      conditions inducing the same shared ALLOW/DENY decision below.
+    caller_controlled: true
+    trace: >-
+      Same shared trace as the DispatchTimeout row above: logger.warning
+      inside BoundedDispatcher.run(), plus a chain-level context line, and
+      the same SAFETY+BLOCKING-gated deny-vs-allow decision.
+
+  # ------------------------------------------------------ bounded_dispatch.py
+  - surface: src/claude_code_hooks_daemon/core/bounded_dispatch.py
+    scope: run
+    construct: "except FutureTimeoutError"
+    ordinal: 0
+    verdict: not-fail-open
+    reason: >-
+      This is where BoundedDispatcher.run() DECIDES to give up waiting and
+      return DispatchTimeout -- it is the SOURCE of the fail-open decision
+      point, not itself an instance of one: nothing here judges a tool call
+      or lets one proceed. The actual fail-open branch is in the CALLER
+      (chain.py::execute's isinstance-dispatch row above), which is where a
+      SAFETY+BLOCKING handler still denies and only an unguarded chain
+      allows. This function's own job -- releasing the semaphore permit
+      immediately and recording the straggler (Plan 00466 N40 M2) -- is
+      bookkeeping, not a verdict.
+
+  - surface: src/claude_code_hooks_daemon/core/bounded_dispatch.py
+    scope: _run_and_release
+    construct: "except BaseException"
+    ordinal: 0
+    verdict: not-fail-open
+    reason: >-
+      Captures fn()'s own exception ONTO THE FUTURE (future.set_exception)
+      rather than swallowing it -- Future.result() on the calling thread
+      re-raises it exactly as a direct, synchronous call to fn() would have,
+      so the caller (chain.py) still sees the failure and its own except
+      Exception boundaries (declared above) still apply. BaseException
+      (Plan 00466 N40 m3) only widens WHICH exceptions get this treatment
+      (SystemExit/KeyboardInterrupt now included, so the future is always
+      resolved instead of left pending forever) -- it does not change
+      whether the guarded action proceeds without a verdict.
 
   # ------------------------------------------------------ front_controller.py
   - surface: src/claude_code_hooks_daemon/core/front_controller.py

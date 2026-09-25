@@ -67,7 +67,21 @@ _PYTHON_SURFACES: Final[tuple[str, ...]] = (
     "src/claude_code_hooks_daemon/core/chain.py",
     "src/claude_code_hooks_daemon/core/front_controller.py",
     "src/claude_code_hooks_daemon/daemon/controller.py",
+    # Plan 00466 N40 m4: BoundedDispatcher.run() lives here and RETURNS a
+    # sentinel instead of raising when it cannot get a verdict in time -- the
+    # caller's fail-open decision is an isinstance check (see
+    # _DISPATCH_SENTINEL_NAMES below), not an except block, and this file was
+    # previously absent from scope entirely, so nothing in it was ever a
+    # candidate.
+    "src/claude_code_hooks_daemon/core/bounded_dispatch.py",
 )
+
+#: Sentinel class names BoundedDispatcher.run() (bounded_dispatch.py) returns
+#: instead of raising when it cannot get a verdict in time (Plan 00466 N34/
+#: N40). A caller's `if isinstance(x, DispatchTimeout)` is therefore a
+#: fail-open DECISION POINT wearing no `except` -- the "isinstance-dispatch
+#: shape" the except-only scanner above cannot see (Plan 00466 N40 m4).
+_DISPATCH_SENTINEL_NAMES: Final[frozenset[str]] = frozenset({"DispatchTimeout", "DispatchSaturated"})
 _RUST_SURFACES: Final[tuple[str, ...]] = ("relay/hooks_relay.rs",)
 #: `.claude/init.sh` is a symlink to this; the real file is the surface.
 _SHELL_SURFACES: Final[tuple[str, ...]] = ("init.sh",)
@@ -188,6 +202,58 @@ def _python_boundaries(surface: str, source: str) -> list[Boundary]:
         caught = ast.unparse(node.type) if node.type else "bare"
         scope = owner.get(node.lineno, _TOPLEVEL)
         construct = f"except {caught}"
+        ordinal = seen.get((scope, construct), 0)
+        seen[(scope, construct)] = ordinal + 1
+        found.append(Boundary(surface, scope, construct, ordinal))
+    found.extend(_isinstance_dispatch_boundaries(surface, tree, owner))
+    return found
+
+
+def _isinstance_dispatch_sentinel(test: ast.expr) -> str | None:
+    """The dispatch-sentinel class name an `isinstance(...)` test names, if any.
+
+    Only the FIRST-positional-argument-is-a-Name-or-Tuple shape is read --
+    the exact shape both call sites in this codebase use
+    (`isinstance(outcome, DispatchTimeout)`); anything more exotic (a
+    computed type, a walrus) is out of scope, matching this scanner's
+    existing preference for a narrow, honestly-filled-in inventory over a
+    noisy one.
+    """
+    if not (
+        isinstance(test, ast.Call) and isinstance(test.func, ast.Name) and test.func.id == "isinstance"
+    ):
+        return None
+    if len(test.args) != 2:
+        return None
+    types_arg = test.args[1]
+    candidates = types_arg.elts if isinstance(types_arg, (ast.Tuple, ast.List)) else [types_arg]
+    for candidate in candidates:
+        if isinstance(candidate, ast.Name) and candidate.id in _DISPATCH_SENTINEL_NAMES:
+            return candidate.id
+    return None
+
+
+def _isinstance_dispatch_boundaries(surface: str, tree: ast.Module, owner: dict[int, str]) -> list[Boundary]:
+    """`if isinstance(x, DispatchTimeout | DispatchSaturated)` branches.
+
+    BoundedDispatcher.run() (Plan 00466 N34/N40) returns a sentinel instead of
+    raising when it cannot get a verdict in time, so the caller's fail-open
+    decision is an isinstance check, not an except block -- invisible to
+    `_python_boundaries` above (Plan 00466 N40 m4). One row per `if` node
+    that tests for a given sentinel, regardless of what an `elif`/`else`
+    alongside it does -- an `else` that implicitly covers the other sentinel
+    (e.g. via an `assert`) is still its OWN decision point, not a shared one.
+    """
+    seen: dict[tuple[str, str], int] = {}
+    found: list[Boundary] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.If):
+            continue
+        sentinel = _isinstance_dispatch_sentinel(node.test)
+        if sentinel is None:
+            continue
+        scope = owner.get(node.lineno, _TOPLEVEL)
+        construct = f"isinstance-dispatch {sentinel}"
         ordinal = seen.get((scope, construct), 0)
         seen[(scope, construct)] = ordinal + 1
         found.append(Boundary(surface, scope, construct, ordinal))

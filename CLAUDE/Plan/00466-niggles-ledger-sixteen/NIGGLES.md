@@ -3,7 +3,7 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
-### N40 — ✅ Blockers/Majors remedied, minors/nits partially addressed — adversarial security review of the N24/N25/N34 fix (2 blockers, 3 majors, 6 minors, 4 nits)
+### N40 — ✅ Blockers/Majors/nits remedied, m5 still open — adversarial security review of the N24/N25/N34 fix (2 blockers, 3 majors, 6 minors, 4 nits)
 
 **Found by an adversarial, read-only security review**
 (`subagent-reports/260924-n466-n24-review-opus-5-5.md`) of `d7f2c875` (N24 +
@@ -322,16 +322,16 @@ of the gap growing silently. Deliberately does not flag the pre-existing
 RED confirmed first (exactly the 14 named above failed, nothing else).
 Full `pre_tool_use`/registry/chain regression stays green (4167 passed).
 
-**Follow-up recorded, not done here:** a full audit of the 22-handler
+**Follow-up recorded here, done below:** a full audit of the 22-handler
 `BLOCKING`-without-`SAFETY` bucket (`enforce-tdd`, `qa-suppression-blocker`,
 `plan-qa-edit`, `comment_size`, `comment_changelog`, `dispatch_declaration`,
 `merge_to_main_approval`, `plan_close_approval`, `plan_time_estimates`,
 `reference_repo_freshness`, `remote_docs_*`, `require_gh_*_comments`,
 `enforce_lsp_usage`, `enforce_markdown_organization`, and others) — deciding
 per-handler whether each should become `SAFETY`+`BLOCKING` or explicitly
-`ADVISORY` — is real work this niggle did not do. A follow-up plan/niggle
-should run the same registry-test technique with the "already has BLOCKING"
-early-return removed, and work through the resulting list.
+document why not — was deferred as real work this niggle did not do at the
+time. See "22-handler BLOCKING-without-SAFETY audit" below for the
+completed pass.
 
 **m1 — ✅ Remedied.** Thread-per-handler dispatch added ~12ms per event
 (69 thread creations for this repo's PreToolUse handler set, even when
@@ -377,24 +377,116 @@ were updated to match (boundaries unchanged, only their enclosing method).
 semaphore permit; `except Exception` not catching `BaseException`, leaving
 the future unresolved for the full timeout) are both fixed.
 
-**m2** (stragglers mutating shared state after the verdict already
-returned), **m4** (`bounded_dispatch.py`'s fail-open branches are invisible
-to `check_fail_open_inventory.py` — still true: the new chain-level
-DispatchTimeout/DispatchSaturated handling in `execute()` is `isinstance`
-checks, not `except` constructs, same as before), **m6** (nothing validates
-`deadline_seconds` stays below the client's socket timeout) remain open.
+**m2 — ✅ Remedied.** A straggler (a handler dispatch the caller already gave
+up waiting on, per M2 above) could still mutate PROCESS-LIFETIME state after
+its own verdict was discarded, for a decision nobody would ever see. Added
+`core/dispatch_cancellation.py`: a `DispatchCancellation` (wraps a
+`threading.Event`) created once per `HandlerChain.execute()` call, bound via
+a `contextvars.ContextVar` around the dispatched handler loop so nested
+handler code (in a different file, on the dispatched thread) can call
+`is_dispatch_cancelled()` without a parameter threaded through every
+signature. `execute()` calls `cancellation.cancel()` at the exact point it
+gives up on a `DispatchTimeout`/`DispatchSaturated` outcome, BEFORE building
+the fallback deny/allow. Two handlers had their own state write gated on it:
+`sensitive_content._compute_and_cache` (skips writing `_cached_dispatch`)
+and `github_auto_close_keywords.handle` (skips `tracker.mark_disclosed`).
+`lsp_enforcement` needed no change: its "spend" flows through
+`DaemonController.process_event`'s iteration over `result.decisions`, which
+is empty for an abandoned dispatch — the m1 one-thread-per-request redesign
+already structurally closed that one. RED test:
+`test_chain.py::TestDispatchCancellationReachesStragglingHandlerCode` (a
+handler that sleeps past its own deadline, then checks
+`is_dispatch_cancelled()` before recording a "written" vs "skipped-cancelled"
+outcome), plus one regression test per fixed handler
+(`test_sensitive_content.py`, `test_github_auto_close_keywords.py`).
 
-- **n1** ("shared pool"/"thread pool" wording in `bounded_dispatch.py`/
-  `chain.py` — there is no pool, just bounded per-call threads), **n2**
-  (`assert isinstance(...)` on the production path — `-O` strips asserts),
-  **n4** (parametrise the chain test suite to also run under the shipped
-  default `deadline_seconds`, not just `None`).
+**m4 — ✅ Remedied.** `check_fail_open_inventory.py` only ever walked
+`ast.ExceptHandler` nodes, so `bounded_dispatch.py` — not even in its surface
+list — and the chain-level `isinstance(outcome, DispatchTimeout)`/
+`DispatchSaturated` branches in `chain.py::execute` (the fail-open decision
+BoundedDispatcher.run()'s sentinel-return shape produces) were both
+invisible to it. Added `bounded_dispatch.py` to `_PYTHON_SURFACES`; added
+`_isinstance_dispatch_boundaries`, walking `ast.If` nodes whose test is
+`isinstance(x, DispatchTimeout | DispatchSaturated)` (a new "isinstance-
+dispatch" construct shape alongside the existing "except X" one). RED test
+(`test_fail_open_inventory_checker.py::TestIsinstanceDispatchBoundaries`,
+with a narrowing-control test proving an ordinary unrelated `isinstance`
+check is NOT flagged) confirmed against the unmodified detector first. Six
+new inventory rows added: `chain.py::execute::isinstance-dispatch DispatchTimeout`/`DispatchSaturated` (both `fail-open` — ALLOW when no
+SAFETY+BLOCKING handler is registered) and four `bounded_dispatch.py` rows
+(`run::except FutureTimeoutError`, `_run_and_release::except BaseException`,
+both `not-fail-open` — they are the SOURCE of the decision, made by the
+caller, not a verdict made here). Fixing n2 below (replacing the `assert`
+with an explicit `elif`) split the single `isinstance-dispatch DispatchTimeout`
+row that had covered both sentinels via an `else`-branch `assert` into two
+independent rows, which is the more accurate shape. `check_fail_open_ inventory.py` passes clean (39/39).
+
+**m6 — ✅ Remedied.** `ChainConfig.deadline_seconds` only enforced `gt=0`; a
+configured value at or past the client's own socket timeout
+(`Timeout.SOCKET_DISPATCH_ROUNDTRIP`, 30s) would reproduce the exact bypass
+`deadline_seconds` exists to close — the client gives up and fails the WHOLE
+chain open before the daemon's own deadline-triggered deny can be built and
+sent back. Added a `model_validator(mode="after")` on `ChainConfig` that
+raises `ValueError` (surfaces as `pydantic.ValidationError`) when
+`deadline_seconds` is at/past `SOCKET_DISPATCH_ROUNDTRIP`, or leaves less
+than a new `Timeout.CHAIN_DEADLINE_SOCKET_MARGIN_SECONDS` (5s) margin —
+naming the configured value, the client timeout, and how much to lower it
+by. `None` (disabled enforcement) is never checked. RED-first in
+`test_chain_config.py::TestDeadlineBelowClientSocketTimeout`; includes a
+test that the shipped default (`Timeout.CHAIN_DEADLINE_DEFAULT` = 20s, 10s
+of margin) satisfies its own rule.
+
+- **n1 — ✅ Remedied.** "Shared pool"/"thread pool" wording in
+  `bounded_dispatch.py` (class docstring, singleton comment),
+  `chain.py` (two docstrings), `config/models.py`'s `deadline_seconds`
+  field docstring, and `test_chain.py`'s module docstring all corrected:
+  `BoundedDispatcher` gives every call a FRESH daemon thread, bounded by a
+  shared semaphore — there is no fixed worker set and nothing is queued.
+- **n2 — ✅ Remedied.** `chain.py::execute`'s
+  `assert isinstance(outcome, DispatchSaturated)` (narrowing the `else` of
+  the DispatchTimeout check) replaced with an explicit `elif isinstance(...)`
+  and a `raise TypeError(...)` `else` — `-O` strips asserts, which would
+  have left `detail` silently unbound instead of failing loudly. Test:
+  `test_chain.py::TestUnexpectedDispatchOutcomeFailsLoud`, driving a fake
+  `BoundedDispatcher` subclass whose `run()` returns neither sentinel.
+- **n4 — ✅ Remedied.** Added `test_chain.py::TestUnderShippedDefaultDeadline`,
+  parametrised over `deadline_seconds` `[None, Timeout.CHAIN_DEADLINE_DEFAULT]`
+  — five representative core `execute()` behaviours (empty-chain allow,
+  matches-called-on-every-handler, terminal-deny-stops-the-chain,
+  raise-denies-only-in-strict-mode, first-restrictive-wins) now run under
+  BOTH the synchronous path and the real production-shipped threaded
+  dispatch path (a genuine thread, semaphore, and cancellation-token
+  bind/reset), not just `None`.
 - **n3** informational only (two SAFETY+BLOCKING handlers exceed the
   review's 1s advisory threshold under 100 KB, both already under the
   harness's 5s bound; `secret_file_guard`'s is the guard-defects branch's
   known constant-factor issue) — no action needed here.
 - **P1** (`github_auto_close_keywords` cache bypass) is explicitly OUT of
   this niggle's scope — routed by the coordinator to a different agent.
+
+**22-handler BLOCKING-without-SAFETY audit — ✅ Done.** The follow-up
+deferred below (originally "22 handlers") was live-rescanned across the
+FULL registry (every event, not only `pre_tool_use` — `HandlerChain.execute`'s
+fail-closed logic is generic across events) and found 24 at audit time: the
+21 `pre_tool_use` handlers the review named or implied, plus 3 more from
+other events (`lint_on_edit` (PostToolUse), `subagent_report_path_verifier`
+(SubagentStop), `failsafe_cron_blockage_suppressor` (UserPromptSubmit)) that
+carry the same tag shape. Audited each individually: all 24 are workflow/QA/
+governance gates (plan approval, doc placement, QA-suppression, TDD
+ordering, provenance, cadence optimisation, ...) whose fail-open consequence
+is "a process step did not happen", not a dangerous/irreversible ACTION —
+the bar the existing SAFETY roster (destructive git, secret disclosure,
+RCE-shaped constructs, write-clobbering, ...) is drawn at. None promoted;
+each recorded with its own specific reason (not a copy-pasted one) in a new
+`_AUDITED_BLOCKING_ONLY_REASONS` table in
+`test_pretooluse_fail_closed_tagging.py`, alongside a new
+`test_every_blocking_without_safety_handler_is_audited` (parametrised over
+the WHOLE registry, opt-out-not-opt-in: a future handler landing here with
+neither `SAFETY` nor a table row fails the suite) and a rot-guard
+(`test_the_audit_table_names_only_handlers_that_still_exist_and_still_need_it`)
+so a stale row — one for a handler later promoted, renamed, or removed —
+fails loudly instead of reading as coverage. RED confirmed by temporarily
+removing one row and observing the expected failure, then restoring it.
 
 **Full-suite sweep, incidental to M3 — 5 pre-existing failures found and fixed.**
 Running the WHOLE test suite (not just targeted files) after M3 surfaced 5

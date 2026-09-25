@@ -4,22 +4,36 @@ Tests HandlerChain execution, priority ordering, terminal/non-terminal behavior,
 error handling, and ChainExecutionResult.
 
 Plan 00466 N40 m1: when ``deadline_seconds`` is set, ``HandlerChain.execute``
-dispatches the WHOLE handler loop as ONE call on the shared pool, not one
-dispatch per handler (measured at ~12ms overhead per event from creating up
-to 69 threads, even when every handler is fast). A handler that FINISHES
-(however late) is still attributed by name in the deny/skip reason -- the
-per-handler deadline check is a cheap comparison, not a thread, and still
-runs inline. Only when the WHOLE dispatched call itself times out or the
-pool is saturated (some handler never returns at all, or the pool has no
-free capacity even for the whole chain) does the reason name "chain"
-instead of a specific handler: nothing is left running on the CALLING
-thread at that point that could still say which one it was.
+dispatches the WHOLE handler loop as ONE call, on its own fresh daemon
+thread bounded by the shared dispatcher's semaphore (Plan 00466 N40 n1: not
+a thread pool), not one dispatch per handler (measured at ~12ms overhead per
+event from creating up to 69 threads, even when every handler is fast). A
+handler that FINISHES (however late) is still attributed by name in the
+deny/skip reason -- the per-handler deadline check is a cheap comparison,
+not a thread, and still runs inline. Only when the WHOLE dispatched call
+itself times out or the dispatcher is saturated (some handler never returns
+at all, or there is no free capacity even for the whole chain) does the
+reason name "chain" instead of a specific handler: nothing is left running
+on the CALLING thread at that point that could still say which one it was.
+
+Plan 00466 N40 n4: most of this suite calls ``chain.execute()`` with its
+default ``deadline_seconds=None``, which is the SYNCHRONOUS path -- no
+dispatch, no thread, no ``BoundedDispatcher`` involved at all. Only the
+dispatch-specific tests above exercise the production-shipped threaded path.
+``TestUnderShippedDefaultDeadline`` below re-runs a representative slice of
+the synchronous-path behavioural tests under ``Timeout.CHAIN_DEADLINE_DEFAULT``
+instead, to catch a divergence that only shows up once a real dispatch is in
+the loop (thread creation, the semaphore, cancellation binding) -- the shape
+of gap this suite would otherwise never notice.
 """
 
 import time
 from typing import Any
 
+import pytest
+
 from claude_code_hooks_daemon.constants.tags import HandlerTag
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.chain import ChainExecutionResult, HandlerChain
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
@@ -1611,6 +1625,76 @@ class TestHandlerChain:
         assert h4.handle_called == 0
 
 
+class _LateStateWriter(Handler):
+    """Sleeps inside ``matches()`` past the chain's deadline, then checks
+    ``is_dispatch_cancelled()`` right before "writing" shared state --
+    exactly the shape ``sensitive_content.py``'s ``_cached_dispatch`` write
+    and ``github_auto_close_keywords.py``'s ``mark_disclosed`` call take
+    (Plan 00466 N40 m2)."""
+
+    def __init__(
+        self, name: str, priority: int, sleep_before_check: float, outcome: dict[str, str]
+    ) -> None:
+        super().__init__(name=name, priority=priority, terminal=True)
+        self._sleep_before_check = sleep_before_check
+        self._outcome = outcome
+
+    def matches(self, hook_input: dict[str, Any]) -> bool:
+        time.sleep(self._sleep_before_check)
+        from claude_code_hooks_daemon.core.dispatch_cancellation import is_dispatch_cancelled
+
+        self._outcome["result"] = "skipped-cancelled" if is_dispatch_cancelled() else "written"
+        return True
+
+    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+        return HookResult.allow()
+
+    def get_claude_md(self) -> str | None:
+        return None
+
+    def get_acceptance_tests(self) -> list[Any]:
+        return []
+
+
+class TestDispatchCancellationReachesStragglingHandlerCode:
+    """Plan 00466 N40 m2: a straggler's own state-mutating write, deep
+    inside ``matches()``/``handle()``, must see cancellation once the
+    caller has abandoned the whole chain -- the between-handler deadline
+    check alone cannot help here, since it never interrupts a handler
+    call ALREADY in progress.
+    """
+
+    def test_a_late_writes_after_the_deadline_is_skipped_not_written(self) -> None:
+        chain = HandlerChain()
+        outcome: dict[str, str] = {}
+        writer = _LateStateWriter("late-writer", priority=10, sleep_before_check=0.2, outcome=outcome)
+        chain.add(writer)
+
+        result = chain.execute({"tool_name": "Bash"}, deadline_seconds=0.02)
+
+        # The caller gets its answer promptly -- well before the straggler's
+        # own 0.2s sleep finishes.
+        assert result.result.decision == Decision.ALLOW
+
+        deadline = time.perf_counter() + 2.0
+        while "result" not in outcome and time.perf_counter() < deadline:
+            time.sleep(0.01)
+        assert outcome.get("result") == "skipped-cancelled"
+
+    def test_a_write_within_the_deadline_still_lands(self) -> None:
+        """Negative control: cancellation must not fire SPURIOUSLY for a
+        call that finishes comfortably inside its own budget."""
+        chain = HandlerChain()
+        outcome: dict[str, str] = {}
+        writer = _LateStateWriter("on-time-writer", priority=10, sleep_before_check=0.0, outcome=outcome)
+        chain.add(writer)
+
+        result = chain.execute({"tool_name": "Bash"}, deadline_seconds=5.0)
+
+        assert result.result.decision == Decision.ALLOW
+        assert outcome.get("result") == "written"
+
+
 class TestChainDecisions:
     """Tests for ChainExecutionResult.decisions (Plan 00209 verdict log).
 
@@ -2470,3 +2554,144 @@ class TestAllowOnlyFieldsAreAccumulated:
         result = chain.execute({"tool_name": "Bash"})
 
         assert result.result.guidance is None
+
+
+class TestUnexpectedDispatchOutcomeFailsLoud:
+    """Plan 00466 N40 n2: the production path used ``assert isinstance(outcome,
+    DispatchSaturated)`` to narrow the else-branch of the dispatch-outcome
+    check -- an assert that ``-O`` strips, silently leaving ``detail``
+    unbound instead of failing. Replaced with an explicit ``elif``/``else``
+    that raises. This test drives a dispatcher whose ``run()`` returns
+    neither a real result nor either known sentinel, to exercise that
+    explicit failure directly (an assert-based narrowing would never be
+    reached by a real ``BoundedDispatcher.run()``, so this can only be
+    proven with a fake).
+    """
+
+    def test_an_unrecognised_dispatch_outcome_raises_instead_of_silently_falling_through(
+        self,
+    ) -> None:
+        from claude_code_hooks_daemon.core.bounded_dispatch import BoundedDispatcher
+
+        class _BogusOutcomeDispatcher(BoundedDispatcher[object]):
+            """Returns neither a real result nor a known sentinel."""
+
+            def run(self, fn: Any, *, timeout: float, label: str) -> Any:
+                return object()
+
+        chain = HandlerChain()
+        chain.add(
+            MockHandler(
+                "safety-guard",
+                priority=10,
+                terminal=True,
+                tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING],
+            )
+        )
+
+        with pytest.raises(TypeError, match="unexpected type"):
+            chain.execute(
+                {"tool_name": "Bash"},
+                deadline_seconds=5.0,
+                dispatcher=_BogusOutcomeDispatcher(),
+            )
+
+
+@pytest.mark.parametrize(
+    "deadline_seconds",
+    [None, Timeout.CHAIN_DEADLINE_DEFAULT],
+    ids=["synchronous-path", "shipped-default-threaded-path"],
+)
+class TestUnderShippedDefaultDeadline:
+    """Plan 00466 N40 n4: a representative slice of core execute() behaviour,
+    re-run under the shipped default ``deadline_seconds`` (the production
+    THREADED path, via a real ``BoundedDispatcher`` dispatch) as well as the
+    ``None`` synchronous path the rest of this suite almost exclusively
+    exercises. Both parametrisations use fast MockHandlers, so a real dispatch
+    against ``Timeout.CHAIN_DEADLINE_DEFAULT`` (20s) never approaches its own
+    budget -- what this class actually verifies is that going through a real
+    thread, semaphore and cancellation-token bind/reset produces the SAME
+    observable decision as the synchronous path, not a timing property.
+    """
+
+    def test_empty_chain_returns_allow(self, deadline_seconds: float | None) -> None:
+        chain = HandlerChain()
+
+        result = chain.execute({"tool_name": "Bash"}, deadline_seconds=deadline_seconds)
+
+        assert result.result.decision == Decision.ALLOW
+        assert result.handlers_executed == []
+        assert result.terminated_by is None
+
+    def test_matches_is_called_on_every_handler(self, deadline_seconds: float | None) -> None:
+        chain = HandlerChain()
+        h1 = MockHandler("h1", should_match=False)
+        h2 = MockHandler("h2", should_match=True)
+        chain.add(h1)
+        chain.add(h2)
+
+        chain.execute({"tool_name": "Bash"}, deadline_seconds=deadline_seconds)
+
+        assert h1.matches_called == 1
+        assert h2.matches_called == 1
+        assert h2.handle_called == 1
+        assert h1.handle_called == 0
+
+    def test_a_terminal_deny_stops_the_chain(self, deadline_seconds: float | None) -> None:
+        chain = HandlerChain()
+        h1 = MockHandler("h1", priority=10, terminal=False)
+        h2 = MockHandler(
+            "h2",
+            priority=20,
+            terminal=True,
+            result=HookResult(decision=Decision.DENY, reason="stop here"),
+        )
+        h3 = MockHandler("h3", priority=30, terminal=False)
+        chain.add(h1)
+        chain.add(h2)
+        chain.add(h3)
+
+        result = chain.execute({"tool_name": "Bash"}, deadline_seconds=deadline_seconds)
+
+        assert h1.handle_called == 1
+        assert h2.handle_called == 1
+        assert h3.handle_called == 0
+        assert result.terminated_by == "h2"
+        assert result.result.decision == Decision.DENY
+
+    def test_a_raising_handler_denies_only_in_strict_mode(
+        self, deadline_seconds: float | None
+    ) -> None:
+        chain = HandlerChain()
+        chain.add(MockHandler("boom", priority=10, raise_exception=ValueError("boom")))
+
+        allowed = chain.execute(
+            {"tool_name": "Bash"}, strict_mode=False, deadline_seconds=deadline_seconds
+        )
+        denied = chain.execute(
+            {"tool_name": "Bash"}, strict_mode=True, deadline_seconds=deadline_seconds
+        )
+
+        assert allowed.result.decision == Decision.ALLOW
+        assert denied.result.decision == Decision.DENY
+
+    def test_the_first_restrictive_handler_wins_over_a_later_allow(
+        self, deadline_seconds: float | None
+    ) -> None:
+        chain = HandlerChain()
+        chain.add(_deny("blocker", 10, "denied", terminal=False))
+        chain.add(
+            MockHandler(
+                "advisor",
+                priority=20,
+                result=HookResult(decision=Decision.ALLOW, context=["hint"]),
+            )
+        )
+
+        result = chain.execute(
+            {"tool_name": "Bash"}, collect_all=True, deadline_seconds=deadline_seconds
+        )
+
+        assert result.result.decision == Decision.DENY
+        assert result.result.reason is not None
+        assert result.result.reason.startswith("denied")

@@ -1709,6 +1709,38 @@ class TestPerDispatchHaystackCache:
 
         assert handler._cached_dispatch is None
 
+    def test_matches_does_not_cache_haystacks_once_its_dispatch_is_cancelled(
+        self, repo: Path, tmp_path: Path
+    ) -> None:
+        """Plan 00466 N40 m2: a straggling ``matches()`` call -- one whose
+        own chain dispatch the caller already gave up waiting on -- must not
+        populate ``_cached_dispatch`` with secret-bearing haystack text for a
+        verdict nobody will ever see. ``_cached_dispatch`` lives on an
+        instance that persists for the whole daemon process, so a stale
+        write here is exactly the retained-text leak
+        ``commit_side_effects`` above exists to prevent -- just reached by
+        an abandoned dispatch instead of a delivered one.
+        """
+        from claude_code_hooks_daemon.core.dispatch_cancellation import (
+            DispatchCancellation,
+            bind_dispatch_cancellation,
+            reset_dispatch_cancellation,
+        )
+
+        handler = _wordlist(tmp_path, "alpha-term")
+        _stage(repo, "notes/report.md", "alpha-term\n")
+        hook_input = _commit_input(repo)
+
+        token = DispatchCancellation()
+        token.cancel()
+        ctx_token = bind_dispatch_cancellation(token)
+        try:
+            assert handler.matches(hook_input) is True
+        finally:
+            reset_dispatch_cancellation(ctx_token)
+
+        assert handler._cached_dispatch is None
+
 
 class TestGetClaudeMd:
     def test_guidance_names_the_staged_content_and_gh_body_surfaces(self) -> None:

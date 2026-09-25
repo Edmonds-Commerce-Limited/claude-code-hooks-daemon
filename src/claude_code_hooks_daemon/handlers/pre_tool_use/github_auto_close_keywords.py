@@ -46,6 +46,7 @@ from typing import Any, Final
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
+from claude_code_hooks_daemon.core.dispatch_cancellation import is_dispatch_cancelled
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.core.utils import get_bash_command
@@ -278,7 +279,12 @@ class GithubAutoCloseKeywordsHandler(PreToolUseHandlerBase):
         if transcript_path and tracker.was_disclosed(transcript_path, rule_id):
             message = self._formatter.terse(self._rule)
         else:
-            if transcript_path:
+            # Plan 00466 N40 m2: a straggler -- a handle() call whose own
+            # chain dispatch the caller already gave up waiting on -- must
+            # not spend the disclosure ladder for a verdict nobody sees.
+            # The tracker is process-lifetime shared state, so marking it
+            # here would wrongly silence a later, genuinely-delivered fire.
+            if transcript_path and not is_dispatch_cancelled():
                 tracker.mark_disclosed(transcript_path, rule_id)
             message = self._formatter.verbose(self._rule)
 

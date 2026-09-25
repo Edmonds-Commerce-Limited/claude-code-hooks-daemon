@@ -131,7 +131,13 @@ class _SinglePermit:
 
 
 class BoundedDispatcher(Generic[T]):
-    """Runs callables on a small, bounded, shared thread pool.
+    """Runs callables on fresh, per-call daemon threads, bounded by a shared
+    semaphore -- NOT a thread pool (Plan 00466 N40 n1): there is no fixed
+    set of worker threads reused across calls, and nothing is queued. Each
+    :meth:`run` call gets its own brand-new ``threading.Thread``; the
+    semaphore only caps how many may be alive and actively waited on at
+    once, refusing a call outright (:class:`DispatchSaturated`) rather than
+    queuing it past that cap.
 
     A callable that raises propagates the SAME exception back to
     :meth:`run`'s caller (``Future.result`` re-raises it) -- callers that
@@ -372,9 +378,11 @@ class BoundedDispatcher(Generic[T]):
 
 # Process-lifetime singleton (Plan 00466 N34), mirroring the process-lifetime
 # caches elsewhere in this codebase (e.g.
-# ``secret_file_matching.resolve_configured_patterns``): a thread pool is
-# exactly the kind of resource that must not be rebuilt per call, and
-# ``HandlerChain`` has no natural single owner to hold one instead.
+# ``secret_file_matching.resolve_configured_patterns``): the semaphore that
+# bounds concurrent in-flight calls (Plan 00466 N40 n1: NOT a thread pool --
+# see the class docstring) is exactly the kind of resource that must not be
+# rebuilt per call, and ``HandlerChain`` has no natural single owner to hold
+# one instead.
 _default_dispatcher: BoundedDispatcher[object] | None = None
 _default_dispatcher_lock = threading.Lock()
 

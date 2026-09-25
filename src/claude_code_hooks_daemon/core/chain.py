@@ -33,6 +33,11 @@ from claude_code_hooks_daemon.core.bounded_dispatch import (
     DispatchTimeout,
     get_default_dispatcher,
 )
+from claude_code_hooks_daemon.core.dispatch_cancellation import (
+    DispatchCancellation,
+    bind_dispatch_cancellation,
+    reset_dispatch_cancellation,
+)
 from claude_code_hooks_daemon.core.handler_scope import scope_admits
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
 
@@ -453,8 +458,10 @@ class HandlerChain:
                 N25). None (the default for every existing caller that does
                 not pass it) leaves the chain unbounded, matching the
                 pre-existing behaviour. When set, the WHOLE handler loop
-                (Plan 00466 N40 m1) runs as ONE dispatched call on the
-                shared pool, not one dispatch per handler -- measured at
+                (Plan 00466 N40 m1) runs as ONE dispatched call, on its own
+                fresh daemon thread bounded by the shared dispatcher's
+                semaphore (Plan 00466 N40 n1: not a thread pool -- see
+                ``BoundedDispatcher``), not one dispatch per handler -- measured at
                 ~12ms overhead per event from creating up to 69 threads,
                 one per PreToolUse handler, even when every one of them is
                 fast. A handler that FINISHES (however late) is still
@@ -541,6 +548,15 @@ class HandlerChain:
                 execution_time_ms=(time.perf_counter() - start_time) * 1000,
             )
 
+        # One cancellation token per event dispatch (Plan 00466 N40 m2): a
+        # straggler that outlives this call's patience can still observe,
+        # via `is_dispatch_cancelled()`, that its own verdict is already
+        # moot -- see `_execute_handlers` and `dispatch_cancellation`'s own
+        # module docstring. Created unconditionally (even on the
+        # never-cancelled direct-call paths below) so `_execute_handlers`
+        # has one uniform binding story regardless of which path called it.
+        cancellation = DispatchCancellation()
+
         if deadline_seconds is None:
             # No deadline configured: the original, fully synchronous call --
             # unchanged, and zero bounded-dispatch overhead on what is still
@@ -554,6 +570,7 @@ class HandlerChain:
                 max_safety_input_bytes=max_safety_input_bytes,
                 payload_size=payload_size,
                 start_time=start_time,
+                cancellation=cancellation,
             )
 
         # Plan 00466 N40 m1: the WHOLE handler loop is ONE dispatched call,
@@ -587,6 +604,7 @@ class HandlerChain:
                 max_safety_input_bytes=max_safety_input_bytes,
                 payload_size=payload_size,
                 start_time=start_time,
+                cancellation=cancellation,
             )
         outcome = active_dispatcher.run(
             lambda: self._execute_handlers(
@@ -598,6 +616,7 @@ class HandlerChain:
                 max_safety_input_bytes=max_safety_input_bytes,
                 payload_size=payload_size,
                 start_time=start_time,
+                cancellation=cancellation,
             ),
             timeout=remaining,
             label="chain",
@@ -609,11 +628,23 @@ class HandlerChain:
         # back in time. Fail closed (Plan 00466 N24/N25's own principle)
         # whenever this chain holds ANY SAFETY+BLOCKING handler -- there is
         # no way to know from out here whether it was the one still running.
+        # Cancel the token FIRST (Plan 00466 N40 m2): the straggler is still
+        # running and may still be about to write process-lifetime state
+        # (a cached haystack, a disclosure-tracker entry) for a verdict this
+        # call is about to discard -- from here on, that write should see
+        # itself as already moot.
+        cancellation.cancel()
         if isinstance(outcome, DispatchTimeout):
             detail = f"exceeded its {remaining:.2f}s dispatch budget"
-        else:
-            assert isinstance(outcome, DispatchSaturated)
+        elif isinstance(outcome, DispatchSaturated):
             detail = "dispatch pool saturated"
+        else:
+            # Plan 00466 N40 n2: an explicit check, not `assert` -- `-O`
+            # strips asserts from the production path, which would silently
+            # fall through with `detail` unbound instead of failing loudly.
+            raise TypeError(
+                f"BoundedDispatcher.run() returned an unexpected type: {type(outcome).__name__}"
+            )
         execution_time_ms = (time.perf_counter() - start_time) * 1000
         if any(HandlerTag.SAFETY in h.tags and HandlerTag.BLOCKING in h.tags for h in self.handlers):
             denied_result = HookResult.deny(reason=f"chain: not judged in time ({detail})")
@@ -634,12 +665,51 @@ class HandlerChain:
         max_safety_input_bytes: int | None,
         payload_size: int,
         start_time: float,
+        cancellation: DispatchCancellation,
+    ) -> ChainExecutionResult:
+        """Binds ``cancellation`` (Plan 00466 N40 m2) for the duration of
+        :meth:`_execute_handlers_body`'s call, on whichever thread calls
+        this, so deeply-nested handler code can consult
+        ``dispatch_cancellation.is_dispatch_cancelled()`` before a
+        state-mutating write with no signature change of its own. Reset in
+        a ``finally``: the ``deadline_seconds is None`` direct-call path
+        never spawns a new thread, so leaving a stale binding in place
+        would leak one dispatch's token into the next request handled by
+        the SAME (reused, e.g. asyncio executor) thread.
+        """
+        ctx_token = bind_dispatch_cancellation(cancellation)
+        try:
+            return self._execute_handlers_body(
+                hook_input,
+                strict_mode,
+                collect_all=collect_all,
+                deadline_seconds=deadline_seconds,
+                deadline_clock_start=deadline_clock_start,
+                max_safety_input_bytes=max_safety_input_bytes,
+                payload_size=payload_size,
+                start_time=start_time,
+            )
+        finally:
+            reset_dispatch_cancellation(ctx_token)
+
+    def _execute_handlers_body(
+        self,
+        hook_input: dict[str, Any],
+        strict_mode: bool,
+        *,
+        collect_all: bool,
+        deadline_seconds: float | None,
+        deadline_clock_start: float,
+        max_safety_input_bytes: int | None,
+        payload_size: int,
+        start_time: float,
     ) -> ChainExecutionResult:
         """Runs the WHOLE handler loop on whichever thread calls this (Plan
-        00466 N40 m1). ``execute()`` above either calls this directly
-        (``deadline_seconds is None``) or dispatches it as ONE bounded call
-        on the shared pool -- never one dispatch per handler, which is what
-        this method replaces from the pre-m1 design.
+        00466 N40 m1). ``execute()`` above either calls :meth:`_execute_handlers`
+        directly (``deadline_seconds is None``) or dispatches it as ONE
+        bounded call on its own fresh daemon thread (Plan 00466 N40 n1: not
+        a thread pool) -- never one dispatch per handler, which is what this
+        method replaces from the pre-m1 design.
 
         Args:
             hook_input: Hook input dictionary to process.
