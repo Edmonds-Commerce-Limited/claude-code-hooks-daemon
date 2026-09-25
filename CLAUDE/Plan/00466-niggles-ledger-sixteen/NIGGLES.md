@@ -50,27 +50,43 @@ assertion:
 
 `test_skipif_reasons_match_their_conditions.py` is replaced by
 `tests/integration/test_no_root_conditioned_skips.py`: a static scan over
-every `.py` file under `tests/` (not just `test_*.py`/`conftest.py`) that
-fails on a `skipif`/`xfail`/`unittest.skipIf` decorator or a hand-written
-`if <root check>: skip/xfail/skipTest/return`, whether the condition
-directly calls `geteuid()`/`getuid()` or resolves to one through a module
-constant, a zero-arg helper, `not`/`in (0,)`, a `pwd`/`getpass` identity
-check, or a string condition — **and independently** on any skip-like call
-whose stated *reason* names root regardless of what its condition tests
-(review 1, F1: this is Plan 00351's own shape, which the first cut of the
-detector regressed). `tests/relay_gate_guard.py` and its test are left
-alone (documented why): that guard's "Running as root" case is a
-reason-string classifier for a different, CI-only concern, not a
-root-conditioned skip itself.
+EVERY `.py` file under `tests/` — not just `test_*.py`/`conftest.py`, and
+with no exclusion list (review 2, B2: an earlier cut excluded a
+`fixtures`/`assets`/`__fixtures__` directory name and its own file, which
+pytest actually collects through). It classifies by data flow rather than by
+name (review 2, B1), so an alias, a local variable, a module constant, or
+one level of same-module helper (including a parameterised one called with
+literal arguments) is resolved the same as the direct call — covering
+`geteuid`/`getuid`/`getegid`/`getgid`/`getresuid`/`getresgid`,
+`getpass.getuser`, a `pwd`/`grp` lookup, an env check of
+`USER`/`LOGNAME`/`HOME`/`SUDO_*`, `Path.home()`/`os.path.expanduser("~")`,
+`os.access(...)`, and `<expr>.stat().st_uid`. It fails on a
+`skipif`/`xfail`/`unittest.skipIf`/`skipUnless` decorator, an `IfExp`
+marker, a hand-written `if <root check>: skip/xfail/skipTest/return`, or a
+conftest `pytest_ignore_collect`/`pytest_collection_modifyitems`/
+`pytest_runtest_setup` whose control flow depends on one — **and
+independently** on any skip-like call whose stated *reason* names root
+regardless of what its condition tests (review 1, F1: this is Plan 00351's
+own shape, which the first cut of the detector regressed). A reference it
+cannot resolve (a cross-module import, a class attribute) whose own name
+suggests process identity is reported as unproven rather than silently
+passed. `tests/relay_gate_guard.py` and its test are left alone (documented
+why): that guard's "Running as root" case is a reason-string classifier for
+a different, CI-only concern, not a root-conditioned skip itself.
 
-Review 1 (F5) also found two chmod-based tests outside the four skip sites
-that were vacuous as root without skipping: `test_auto_continue_stop.py`'s
+Review 1 (F5) also found two tests outside the three skip sites that were
+vacuous as root without skipping: `test_auto_continue_stop.py`'s
 `test_matches_handles_oserror_reading_transcript` (`chmod(0o000)`, root
 still reads the file) now monkeypatches `Path.open` inside
 `TranscriptReader._parse_tail`; `test_paths.py`'s
 `test_socket_path_over_limit_uses_run_user` (skipped when `/run/user/{uid}`
 is absent — a host-dependent skip, not a root one) now monkeypatches
-`Path.is_dir` so the branch runs deterministically.
+`Path.is_dir` so the branch runs deterministically. Review 2 (M1) found a
+third: `test_hooks_deploy_permissions.py`'s chmod-failure contract had been
+replaced by a lexical check on the installer's source because root's own
+chmod never fails; it now stubs `chmod` as a shell function that fails for
+one hook file, the same technique `test_settings_deploy_lib.py` uses for
+`cp`.
 
 The rule is recorded in `CLAUDE/QA.md`, next to the other test requirements.
 

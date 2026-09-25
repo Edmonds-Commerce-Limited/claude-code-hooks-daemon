@@ -64,15 +64,25 @@ while the runner ran considerably more.
   `PermissionError`, replace the file with a directory or a dangling
   symlink, or patch the exact predicate the code under test evaluates.
   `tests/integration/test_no_root_conditioned_skips.py` statically scans
-  every `.py` file under `tests/` (not just `test_*.py`/`conftest.py`, and
-  excluding `tests/fixtures/`, which holds deliberately-invalid Python for
-  other handlers' own error-path tests). It fails on a
-  `skipif`/`xfail`/`unittest.skipIf` decorator or a hand-written
-  `if <root check>: skip/xfail/skipTest/return` whose condition resolves —
-  following a module constant or a zero-arg helper's `return` — to something
-  that tests root, **and independently** on any skip-like call whose stated
-  *reason* names root, whatever its condition actually tests (the shape Plan
-  00351 found). It is not opt-out.
+  EVERY `.py` file under `tests/` — not just `test_*.py`/`conftest.py`, and
+  with no exclusion for `tests/fixtures/` or any other directory; it is not
+  opt-out. It classifies by data flow, not by name: a condition tainted by
+  `geteuid`/`getuid`/`getegid`/`getgid`/`getresuid`/`getresgid`,
+  `getpass.getuser`, a `pwd`/`grp` lookup, an env check of
+  `USER`/`LOGNAME`/`HOME`/`SUDO_*`, `Path.home()`/`os.path.expanduser("~")`,
+  `os.access(...)`, or `<expr>.stat().st_uid` is flagged however it reaches
+  the condition — through an alias, a local variable, a module constant, or
+  one level of same-module helper (a `def` or a zero-arg lambda, including a
+  parameterised helper called with literal arguments). It fails on a
+  `skipif`/`xfail`/`unittest.skipIf`/`skipUnless` decorator, an `IfExp`
+  marker, a hand-written `if <root check>: skip/xfail/skipTest/return`, or a
+  conftest `pytest_ignore_collect`/`pytest_collection_modifyitems`/
+  `pytest_runtest_setup` whose control flow depends on one — **and
+  independently** on any skip-like call whose stated *reason* names root,
+  whatever its condition actually tests (the shape Plan 00351 found). A
+  reference it cannot resolve (a cross-module import, a class attribute)
+  whose own name suggests process identity is reported as unproven rather
+  than silently passed.
 - **Security** (Bandit) — zero HIGH/MEDIUM/LOW issues; only B101 is filtered
 - **Dependencies** (Deptry) — missing (DEP001) and misplaced (DEP004)
 - **Plan QA** / **Docs QA** (`run_corpus_qa.py`) — the `plan-qa --sweep` and

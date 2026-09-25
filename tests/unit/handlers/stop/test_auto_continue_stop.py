@@ -1137,10 +1137,13 @@ class TestAutoContinueStopHandlerEdgeCases:
         transcript_path.write_text('{"type": "message"}\n', encoding="utf-8")
 
         real_open = Path.open
+        fault_calls = 0
 
         # Any: passing through whichever overload of Path.open the caller used.
         def _raise_oserror(self: Path, *args: Any, **kwargs: Any) -> Any:
+            nonlocal fault_calls
             if self == transcript_path:
+                fault_calls += 1
                 raise OSError(errno.EACCES, "Permission denied")
             return real_open(self, *args, **kwargs)
 
@@ -1154,6 +1157,11 @@ class TestAutoContinueStopHandlerEdgeCases:
         }
 
         result = handler.matches(hook_input)
+        # The fault must actually have fired -- otherwise `result is True`
+        # cannot tell an exercised OSError path from an unread fixture line
+        # that also parses to a truthy `{"type": "message"}` match (both give
+        # the same result, so a normal read would pass here just as easily).
+        assert fault_calls >= 1, "Path.open on the transcript path was never called"
         # Fail-open: an OSError reading the transcript tail must not crash
         # matches() — routing (fail open) happens in handle().
         assert result is True
