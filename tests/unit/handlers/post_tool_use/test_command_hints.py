@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 import pytest
 
+from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.post_tool_use.command_hints import (
     _AGENT_BROWSER_HINT_ID,
@@ -43,7 +44,7 @@ class TestInit:
         assert handler.name == "command-hints"
 
     def test_priority(self, handler: CommandHintsHandler) -> None:
-        assert handler.priority == 29
+        assert handler.priority == Priority.COMMAND_HINTS
 
     def test_not_terminal(self, handler: CommandHintsHandler) -> None:
         assert handler.terminal is False

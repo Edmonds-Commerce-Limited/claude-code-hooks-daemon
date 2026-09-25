@@ -20,13 +20,16 @@ import sys
 import threading
 from pathlib import Path
 from typing import Final
+from unittest.mock import patch
 
 import pytest
 
+from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.utils.config_cache import load_config_cached, reset_config_cache
 
 _YAML: Final[str] = "daemon:\n  enabled: true\n"
 _OTHER_YAML: Final[str] = "daemon:\n  enabled: false\n"
+_BROKEN_YAML: Final[str] = "daemon: [unterminated\n"
 
 
 @pytest.fixture(autouse=True)
@@ -104,6 +107,39 @@ class TestAnEditedFileIsReparsed:
         _write(config_file, _YAML)
 
         assert load_config_cached(config_file) is not first
+
+
+class TestABrokenConfigIsCachedByFailure:
+    """RV7-M1 item 3: a config that fails to parse must not be re-parsed on
+    every call while it stays broken -- only on the next edit."""
+
+    def test_a_second_call_on_the_same_broken_file_re_raises_without_reparsing(
+        self, tmp_path: Path
+    ) -> None:
+        config_file = tmp_path / "hooks-daemon.yaml"
+        _write(config_file, _BROKEN_YAML)
+
+        with patch.object(
+            Config, "load_or_default", wraps=Config.load_or_default
+        ) as spy:
+            with pytest.raises(ValueError):
+                load_config_cached(config_file)
+            with pytest.raises(ValueError):
+                load_config_cached(config_file)
+
+        assert spy.call_count == 1
+
+    def test_fixing_the_file_is_picked_up_on_the_next_call(self, tmp_path: Path) -> None:
+        config_file = tmp_path / "hooks-daemon.yaml"
+        _write(config_file, _BROKEN_YAML)
+        with pytest.raises(ValueError):
+            load_config_cached(config_file)
+
+        _write(config_file, _YAML)
+        stat = config_file.stat()
+        os.utime(config_file, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+
+        assert load_config_cached(config_file).daemon.enabled is True
 
 
 class TestConcurrentCallersShareOneEntry:

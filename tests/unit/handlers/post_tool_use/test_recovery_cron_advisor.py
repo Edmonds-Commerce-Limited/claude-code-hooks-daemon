@@ -16,6 +16,7 @@ from claude_code_hooks_daemon.config.models import (
     PersistentCronConfig,
     PersistentCronsConfig,
 )
+from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.post_tool_use.recovery_cron_advisor import (
     _CREATION_GUIDANCE,
@@ -170,9 +171,9 @@ class TestInit:
         """Handler name should be 'recovery-cron-advisor'."""
         assert handler.name == "recovery-cron-advisor"
 
-    def test_priority_is_30(self, handler: RecoveryCronAdvisorHandler) -> None:
-        """Handler priority should be 30 (free PostToolUse slot)."""
-        assert handler.priority == 30
+    def test_priority_matches_constant(self, handler: RecoveryCronAdvisorHandler) -> None:
+        """Handler priority should match the Priority constant, not a literal."""
+        assert handler.priority == Priority.RECOVERY_CRON_ADVISOR
 
     def test_is_non_terminal(self, handler: RecoveryCronAdvisorHandler) -> None:
         """Handler should be non-terminal (advisory)."""

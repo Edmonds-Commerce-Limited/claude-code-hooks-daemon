@@ -744,10 +744,6 @@ handlers:
     goal_injection:  # Dogfood: write <session>.goal-intent when a plan flips to In Progress (Plan 00269)
       enabled: true  # Opt-in (false) elsewhere; harmless without an armed supervisor
       priority: 30  # Ledger 00466 RV6-M1: MUST stay below markdown_table_formatter's priority
-
-    markdown_table_formatter:  # Auto-format markdown tables via mdformat + mdformat-gfm
-      enabled: true
-      priority: 31  # Ledger 00466 RV6-M1: MUST stay above goal_injection's priority
       # options:
       #   mode: additive                  # additive (default) | replace (fixed header line always kept)
       #   once_per_plan_per_session: true
@@ -756,6 +752,10 @@ handlers:
       #       enabled: true
       #     - id: project-motto
       #       text: "All findings are logged to {plan_path}/REPORTS/."
+
+    markdown_table_formatter:  # Auto-format markdown tables via mdformat + mdformat-gfm
+      enabled: true
+      priority: 31  # Ledger 00466 RV6-M1: MUST stay above goal_injection's priority
 
     budget_exhaustion_detector:  # Dogfood: advisory on budget/quota-exhaustion tool-response messaging (Plan 00315)
       enabled: true  # On by default (opt-out) everywhere; advisory-only, never blocks.

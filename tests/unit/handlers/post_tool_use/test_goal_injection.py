@@ -2863,7 +2863,22 @@ class TestFormatterOrderingChain:
             HandlerID.MARKDOWN_TABLE_FORMATTER.display_name
         )
 
-    def test_fe_edit_flip_adding_an_unpadded_table_still_writes_a_signal(self) -> None:
+    def _assert_snapshot_consumed_fresh(self, caplog: pytest.LogCaptureFixture) -> None:
+        """RV7-m2 Direction #1: a chain test that merely checks the signal
+        FILE exists cannot tell "consumed the fresh snapshot" apart from
+        "fell back to git-HEAD/old_string inference and got lucky" -- both
+        can write the same signal for some inputs. Assert the fallback path
+        was never taken at all."""
+        assert not any("is stale" in record.message for record in caplog.records), (
+            "the snapshot recorded at Pre time must still be FRESH at Post "
+            "time -- a 'is stale' WARNING means goal_injection fell back to "
+            "inference instead of consuming it, which is exactly the STALE "
+            "regression this chain proves fixed"
+        )
+
+    def test_fe_edit_flip_adding_an_unpadded_table_still_writes_a_signal(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """RV6-M1's FE: a plain flip Edit whose ``new_string`` adds an
         unpadded table. Reversed, this went STALE (the formatter had
         already re-padded the table by the time goal_injection hashed the
@@ -2898,7 +2913,8 @@ class TestFormatterOrderingChain:
         landed_text = pre_edit.replace(old_string, new_string, 1)
         plan.write_text(landed_text, encoding="utf-8")
 
-        result = self._post_chain().execute(hook_input)
+        with caplog.at_level("WARNING"):
+            result = self._post_chain().execute(hook_input)
 
         assert result.result.decision == Decision.ALLOW
         assert self._signal_path().exists(), (
@@ -2908,13 +2924,37 @@ class TestFormatterOrderingChain:
         # The formatter DID still run and reformat the unpadded table --
         # this is not passing merely because the formatter never fired.
         assert plan.read_text(encoding="utf-8") != landed_text
+        self._assert_snapshot_consumed_fresh(caplog)
 
     def test_ft4_write_reopening_a_complete_plan_with_an_unpadded_table_still_writes_a_signal(
-        self,
+        self, caplog: pytest.LogCaptureFixture
     ) -> None:
         """RV6-M1's FT4: a Write reopening Complete -> In Progress whose
-        content includes an unpadded table."""
+        content includes an unpadded table.
+
+        RV7-m2: a real git repo whose HEAD already reads ``In Progress`` --
+        diverged from the ``Complete`` text on disk right before this Write,
+        as an earlier flip committed then manually reverted (uncommitted)
+        would leave it -- makes this genuinely RED without a fresh snapshot.
+        The Write-only fallback (``_is_real_transition``) reads git HEAD as
+        "before": HEAD already says In Progress, so the fallback concludes
+        "not a transition" and writes NO signal. Only the PreToolUse
+        snapshot -- which read the ACTUAL pre-write disk text, ``Complete``
+        -- gets this right. Before RV7-m2, ``tmp_path`` was not a git repo
+        at all, so ``before_text`` was ``None`` and the fallback ALWAYS
+        read "transition=True" regardless of ordering, passing on the
+        fallback path even with the formatter mis-ordered ahead of
+        goal_injection."""
+        self._init_repo()
         plan = self._plan_path()
+        committed_text = (
+            "# Plan\n\n**Status**: In Progress\n\n"
+            "| Field | Key |\n| ----- | --- |\n| A | x |\n"
+        )
+        plan.write_text(committed_text, encoding="utf-8")
+        _git(self._project, "add", "-A")
+        _git(self._project, "commit", "-m", "in progress at HEAD")
+
         pre_write = (
             "# Plan\n\n**Status**: Complete\n\n"
             "| Field | Key |\n| ----- | --- |\n| A | x |\n"
@@ -2936,7 +2976,8 @@ class TestFormatterOrderingChain:
 
         plan.write_text(landed_text, encoding="utf-8")
 
-        result = self._post_chain().execute(hook_input)
+        with caplog.at_level("WARNING"):
+            result = self._post_chain().execute(hook_input)
 
         assert result.result.decision == Decision.ALLOW
         assert self._signal_path().exists(), (
@@ -2944,3 +2985,81 @@ class TestFormatterOrderingChain:
             "still be detected as a genuine flip with the formatter enabled"
         )
         assert plan.read_text(encoding="utf-8") != landed_text
+        self._assert_snapshot_consumed_fresh(caplog)
+
+    def test_fc3b_completion_write_with_reformatted_columns_still_retires_and_clears(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """RV7-m2 Direction #3: review 6's Direction #2 named FC3b -- a
+        Write that COMPLETES a plan (In Progress -> Complete/Cancelled/
+        Superseded) whose landed table has unpadded column widths the
+        formatter reformats -- and no chain test ever covered it. Mirrors
+        FT4's shape but for the terminal-transition detector
+        (``is_target=_is_terminal_status``), which drives the
+        ``+clear`` signal instead of the goal-intent one."""
+        self._init_repo()
+        plan = self._plan_path()
+        old_table = "| Field | Key |\n| ----- | --- |\n| A | x |\n"
+
+        # Establish ownership first: `clear_goal_signal` only fires for a
+        # plan the ledger already names an owning session for (RV5-M1) --
+        # without a real prior flip, `owners` is empty and no chain
+        # ordering, correct or broken, could ever make this assertion pass.
+        not_started = f"# Plan\n\n**Status**: Not Started\n\n{old_table}"
+        in_progress = f"# Plan\n\n**Status**: In Progress\n\n{old_table}"
+        plan.write_text(not_started, encoding="utf-8")
+        plan.write_text(in_progress, encoding="utf-8")
+        GoalInjectionHandler().handle(
+            {
+                "tool_name": "Edit",
+                "tool_input": {
+                    "file_path": str(plan),
+                    "old_string": "**Status**: Not Started",
+                    "new_string": "**Status**: In Progress",
+                },
+                "session_id": _SESSION,
+                "tool_use_id": "tu-fc3b-flip",
+            }
+        )
+
+        # The stale git HEAD: committed as ALREADY Complete, diverged from
+        # the real (uncommitted) In Progress state on disk that the
+        # completing Write below actually starts from.
+        committed_text = f"# Plan\n\n**Status**: Complete\n\n{old_table}"
+        plan.write_text(committed_text, encoding="utf-8")
+        _git(self._project, "add", "-A")
+        _git(self._project, "commit", "-m", "complete at HEAD")
+
+        plan.write_text(in_progress, encoding="utf-8")
+        landed_text = (
+            "# Plan\n\n**Status**: Complete\n\n"
+            "| Field | Key |\n|---|---|\n| A | x |\n| B | y |\n"
+        )
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(plan), "content": landed_text},
+            "session_id": _SESSION,
+            "tool_use_id": "tu-fc3b",
+        }
+
+        pre_result = PlanStatusSnapshotHandler().handle(hook_input)
+        assert pre_result.decision == Decision.ALLOW
+
+        plan.write_text(landed_text, encoding="utf-8")
+
+        with caplog.at_level("WARNING"):
+            result = self._post_chain().execute(hook_input)
+
+        assert result.result.decision == Decision.ALLOW
+        assert self._clear_path().exists(), (
+            "a genuine completion through an unpadded-table Write must "
+            "still retire the plan and write +clear with the formatter "
+            "enabled"
+        )
+        assert plan.read_text(encoding="utf-8") != landed_text
+        self._assert_snapshot_consumed_fresh(caplog)
+
+    def _init_repo(self) -> None:
+        _git(self._project, "init")
+        _git(self._project, "config", "user.email", "t@example.com")
+        _git(self._project, "config", "user.name", "T")

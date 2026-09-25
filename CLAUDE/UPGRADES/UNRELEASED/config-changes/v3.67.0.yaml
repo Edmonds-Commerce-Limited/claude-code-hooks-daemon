@@ -51,8 +51,11 @@ config_changes:
         collisions a bare status value could have with a table cell or a
         plan title, and git HEAD's own lag behind an uncommitted flip.
         Sensor only: never blocks, never denies, never surfaces advisory
-        text. Runs unconditionally on every matching write, whether or not
-        goal_injection is enabled.
+        text. `matches()` is gated on goal_injection's own resolved config
+        state (RV6-m1/RV7-m1: the same predicate `register_all` itself
+        uses to decide whether goal_injection is registered), so it only
+        pays the read/parse/hash cost on a matching write when
+        goal_injection is actually enabled.
       example_yaml: |
         handlers:
           pre_tool_use:
@@ -121,3 +124,46 @@ config_changes:
         tdd_enforcement and pipe_blocker (15), so when one tool call trips
         both and the chain stops at the first deny, the security deny is the
         one reported.
+    # Ledger 00466 RV6-M1/RV7-m4: goal_injection must run BEFORE
+    # markdown_table_formatter in the real PostToolUse chain -- its RV5-M2
+    # freshness check hashes the file it reads at Post time against a
+    # PREDICTED post-image computed from the tool's OWN write, never against
+    # anything a LATER handler rewrites the file into. Reversed, every write
+    # whose markdown was not already mdformat's canonical form went STALE and
+    # fell back to conservative inference. The other four moved only to stay
+    # adjacent in the PostToolUse band; their relative order is unchanged.
+    - key: handlers.post_tool_use.goal_injection.priority
+      description: >-
+        The init template now ships 30 (was 31), matching
+        Priority.GOAL_INJECTION. Now runs BEFORE markdown_table_formatter.
+      migration_note: >-
+        If you set your own priorities for goal_injection and
+        markdown_table_formatter, keep goal_injection's BELOW
+        markdown_table_formatter's -- reversed, the formatter's rewrite of
+        PLAN.md before goal_injection reads it makes every non-canonical
+        write go STALE and fall back to inference.
+    - key: handlers.post_tool_use.markdown_table_formatter.priority
+      description: >-
+        The init template now ships 31 (was 26), matching
+        Priority.MARKDOWN_TABLE_FORMATTER. Now runs AFTER goal_injection.
+      migration_note: >-
+        If you set your own priorities for goal_injection and
+        markdown_table_formatter, keep markdown_table_formatter's ABOVE
+        goal_injection's -- see that key's own migration_note for why.
+    - key: handlers.post_tool_use.git_hooks_executable_fixer.priority
+      description: >-
+        The init template now ships 26 (was 27), matching
+        Priority.GIT_HOOKS_EXECUTABLE_FIXER. Relative order among the four
+        PostToolUse advisories below goal_injection is unchanged.
+    - key: handlers.post_tool_use.background_process_tracker.priority
+      description: >-
+        The init template now ships 27 (was 28), matching
+        Priority.BACKGROUND_PROCESS_TRACKER. Relative order unchanged.
+    - key: handlers.post_tool_use.command_hints.priority
+      description: >-
+        The init template now ships 28 (was 29), matching
+        Priority.COMMAND_HINTS. Relative order unchanged.
+    - key: handlers.post_tool_use.recovery_cron_advisor.priority
+      description: >-
+        The init template now ships 29 (was 30), matching
+        Priority.RECOVERY_CRON_ADVISOR. Relative order unchanged.

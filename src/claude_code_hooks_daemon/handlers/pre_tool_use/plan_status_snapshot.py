@@ -61,15 +61,13 @@ never by time. Never blocks, never denies.
 """
 
 import logging
-from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 from pydantic import ValidationError
 
-from claude_code_hooks_daemon.config.models import Config, HandlerConfig
+from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
-from claude_code_hooks_daemon.constants.config import ConfigKey
 from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
@@ -132,50 +130,61 @@ class PlanStatusSnapshotHandler(PreToolUseHandlerBase):
             return Config()
 
     def _goal_injection_enabled(self) -> bool:
-        """RV6-m1: whether `goal_injection` (PostToolUse) is enabled in this
-        project's resolved config.
+        """RV6-m1/RV7-m1: whether `goal_injection` (PostToolUse) is enabled
+        in this project's resolved config -- decided by the SAME predicate
+        `register_all` itself uses, so this gate can never disagree with
+        what the daemon actually runs (RV7-m1 measured two shapes where the
+        earlier hand-rolled reading did: an ABSENT `goal_injection` block,
+        and `disable_tags` covering it).
 
         Gates :meth:`matches` so a project running this sensor with
         `goal_injection` off -- the common case, since this sensor ships
         opt-out and `goal_injection` ships opt-in -- does not pay the
         read/`PlanDoc.parse`/SHA-256 cost on every active plan's `PLAN.md`
         write for a store nothing then consumes (measured ~290 microsec per
-        write, `probe_gf6_gate_cost_out.txt`; the NIGGLES claim that no
-        primitive supports this was wrong -- five other handlers already
-        read a resolved config this way via
-        `utils.config_cache.load_config_cached`, and the registry's own
-        `handlers.registry.config_skip_reason` decides "enabled" with the
-        same one-line rule this mirrors).
+        write, `probe_gf6_gate_cost_out.txt`).
 
-        An ABSENT `goal_injection` block resolves to THAT handler's own
-        opt-in default (`GoalInjectionHandler.get_default_enabled() ->
-        False`) -- not `config_skip_reason`'s "absent means enabled"
-        convention, which is tuned for the common opt-out handler shape and
-        would misread a project that never mentions `goal_injection` as
-        having it on.
-
-        `HandlersConfig.post_tool_use` is typed `dict[str, Any]`, but a
-        `mode="before"` validator (`coerce_handler_configs`) already turns
-        every declared block into a real `HandlerConfig` before this ever
-        runs -- the `Mapping` branch below is a defensive fallback for a
-        `Config` assembled another way (e.g. `model_construct`), never the
-        normal load path.
+        `handlers.registry.handler_is_enabled` is the checklist's own
+        predicate for "would `register_all` register this handler" -- it
+        reads `config_skip_reason` (absent block means ENABLED, the
+        registration default) and `tag_skip_reason` (`enable_tags`/
+        `disable_tags`) together, over the same per-event mapping
+        `daemon.cli._build_handler_config_mapping` builds for
+        `register_all` itself. `GoalInjectionHandler`'s own
+        `get_default_enabled() -> False` (opt-in) is NOT consulted here,
+        deliberately: `register_all` never consults it either (RV7-m1) --
+        an absent block is registered exactly like an explicit
+        `enabled: true` -- so a gate that honoured the opt-in default would
+        disagree with the daemon it is meant to mirror.
         """
-        block = self._load_config().handlers.post_tool_use.get(
-            HandlerID.GOAL_INJECTION.config_key
+        from claude_code_hooks_daemon.daemon.cli import _build_handler_config_mapping
+        from claude_code_hooks_daemon.handlers.post_tool_use.goal_injection import (
+            GoalInjectionHandler,
         )
-        if isinstance(block, HandlerConfig):
-            return block.enabled
-        if isinstance(block, Mapping):
-            return bool(block.get(ConfigKey.ENABLED, True))
-        return False
+        from claude_code_hooks_daemon.handlers.registry import handler_is_enabled
+
+        mapping = _build_handler_config_mapping(self._load_config())
+        event_config = mapping.get("post_tool_use", {})
+        return handler_is_enabled(
+            event_config, HandlerID.GOAL_INJECTION.config_key, GoalInjectionHandler().tags
+        )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """True for a Write/Edit landing on an ACTIVE plan's PLAN.md, when
-        `goal_injection` is enabled in this project's config (RV6-m1)."""
-        if not self._goal_injection_enabled():
+        `goal_injection` is enabled in this project's config (RV6-m1).
+
+        RV7-M1: the cheap trigger match runs FIRST -- `matched_plan_write_or_edit`
+        is a tuple membership test plus a path check, no file I/O -- so a
+        non-plan event (the overwhelming majority: every Bash, Read, Grep,
+        and every Write/Edit outside the active plan directory) never reaches
+        the config-backed gate at all. Before this ordering, EVERY PreToolUse
+        event paid the gate's `Path.resolve()`/`stat()`/lock, and a broken
+        config cost a full re-parse (~80 ms) per event rather than per plan
+        write.
+        """
+        if matched_plan_write_or_edit(hook_input, self._project_layout) is None:
             return False
-        return matched_plan_write_or_edit(hook_input, self._project_layout) is not None
+        return self._goal_injection_enabled()
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
         """Record the plan's pre-write status and PREDICTED post-image

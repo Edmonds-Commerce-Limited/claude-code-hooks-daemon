@@ -289,21 +289,22 @@ class TestGoalInjectionGate:
             "tool_use_id": tool_use_id,
         }
 
-    def test_matches_false_when_goal_injection_has_no_config_block(
+    def test_matches_true_when_goal_injection_has_no_config_block(
         self, handler: PlanStatusSnapshotHandler, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """An ABSENT `goal_injection` block resolves to THAT handler's own
-        opt-in default (False) -- not `config_skip_reason`'s generic
-        "absent means enabled" convention, which is tuned for the common
-        opt-out handler shape and would misread a project that never
-        mentions `goal_injection` as having it on."""
+        """RV7-m1: an ABSENT `goal_injection` block resolves to TRUE --
+        matching `register_all`'s own `config_skip_reason` convention
+        ("absent means enabled"), which is what the daemon actually
+        registers. `GoalInjectionHandler.get_default_enabled() -> False`
+        (its own opt-in default) is NOT consulted at registration, so a
+        gate that read it instead would disagree with the running daemon."""
         monkeypatch.setattr(
             PlanStatusSnapshotHandler,
             "_load_config",
             lambda self: _config_declaring_goal_injection(enabled=None),
         )
         plan = self._write_plan("Not Started")
-        assert handler.matches(self._hook_input(plan)) is False
+        assert handler.matches(self._hook_input(plan)) is True
 
     def test_matches_false_when_goal_injection_explicitly_disabled(
         self, handler: PlanStatusSnapshotHandler, monkeypatch: pytest.MonkeyPatch
@@ -330,14 +331,15 @@ class TestGoalInjectionGate:
     def test_a_config_load_failure_resolves_like_an_absent_block(
         self, handler: PlanStatusSnapshotHandler, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """`_load_config` already degrades an unreadable/invalid config to
-        bare defaults (mirrors `recovery_cron_advisor._load_config`) -- so a
-        read failure resolves exactly like a config that never mentions
-        `goal_injection`, matching what the real registry would do with the
-        same broken config (fall back to defaults, under which
-        `goal_injection` is not registered)."""
+        """RV7-m1 item 4: a genuinely unparseable config on disk -- not a
+        monkeypatched `_load_config` that never exercises the `except`
+        branch -- degrades to bare defaults, which resolve like an absent
+        `goal_injection` block (TRUE, per the registry's own convention)."""
+        config_path = self._project / ".claude" / "hooks-daemon.yaml"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text("handlers: [unterminated\n", encoding="utf-8")
         plan = self._write_plan("Not Started")
-        assert handler.matches(self._hook_input(plan)) is False
+        assert handler.matches(self._hook_input(plan)) is True
 
     def test_gate_runs_before_the_trigger_match_so_a_non_plan_write_is_still_false(
         self, handler: PlanStatusSnapshotHandler, monkeypatch: pytest.MonkeyPatch
@@ -358,3 +360,43 @@ class TestGoalInjectionGate:
             "tool_use_id": "tu-other",
         }
         assert handler.matches(hook_input) is False
+
+    @pytest.mark.parametrize(
+        "post_tool_use_block",
+        [
+            pytest.param({}, id="no-goal-injection-block"),
+            pytest.param({"goal_injection": {"enabled": True}}, id="explicit-enabled"),
+            pytest.param({"goal_injection": {"enabled": False}}, id="explicit-disabled"),
+            pytest.param({"goal_injection": {"priority": 30}}, id="priority-only"),
+            pytest.param({"goal_injection": None}, id="bare-block"),
+            pytest.param(
+                {"goal_injection": {}, "disable_tags": ["workflow"]},
+                id="disable-tags-covering-it",
+            ),
+        ],
+    )
+    def test_gate_agrees_with_register_all_for_every_shape(
+        self,
+        handler: PlanStatusSnapshotHandler,
+        monkeypatch: pytest.MonkeyPatch,
+        post_tool_use_block: dict[str, Any],
+    ) -> None:
+        """RV7-m1 item 3: table-driven proof that the gate's answer equals
+        what `register_all` -- the daemon's OWN registration decision --
+        would do with the same config, for every disagreeing shape RV7-m1
+        found plus the agreeing ones."""
+        from claude_code_hooks_daemon.core.router import EventRouter
+        from claude_code_hooks_daemon.daemon.cli import _build_handler_config_mapping
+        from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
+
+        cfg = Config(handlers=HandlersConfig(post_tool_use=post_tool_use_block))
+        router = EventRouter()
+        registry = HandlerRegistry()
+        registry.discover()
+        registry.register_all(router, config=_build_handler_config_mapping(cfg))
+        registered_names = {h.name for h in router.get_all_handlers().get("PostToolUse", [])}
+        daemon_runs_goal_injection = "goal-injection" in registered_names
+
+        monkeypatch.setattr(PlanStatusSnapshotHandler, "_load_config", lambda self: cfg)
+        plan = self._write_plan("Not Started")
+        assert handler.matches(self._hook_input(plan)) is daemon_runs_goal_injection

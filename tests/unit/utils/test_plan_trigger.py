@@ -142,6 +142,21 @@ class TestMatchedPlanWriteOrEdit:
         result = matched_plan_write_or_edit(_hook_input(other), None)
         assert result is None
 
+    def test_a_symlinked_plan_folder_resolves_to_the_targets_number(self) -> None:
+        """RV7-m3: a plan reached through a symlinked alias
+        (``00301-l -> 00300-c``) must be captured under the TARGET's
+        folder, ``00300-c`` -- not the link's own name, ``00301-l``, which
+        goal_injection would then ledger under a number that never retires
+        (no plan directory ``00301-l`` genuinely exists to complete)."""
+        target = self._write_plan("00300-c")
+        link_dir = self._project / "CLAUDE" / "Plan" / "00301-l"
+        link_dir.symlink_to(target.parent, target_is_directory=True)
+        linked_plan = link_dir / "PLAN.md"
+
+        result = matched_plan_write_or_edit(_hook_input(linked_plan), None)
+
+        assert result == (str(linked_plan), "00300-c")
+
     def test_honours_a_non_default_plan_dir_from_the_layout(self) -> None:
         layout = ProjectLayout(
             source_dirs=(),

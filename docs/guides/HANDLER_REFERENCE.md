@@ -2060,7 +2060,7 @@ handlers:
 | **Type**       | Advisory (never blocks) |
 | **Event**      | PreToolUse              |
 
-**Description:** Sensor for `goal_injection` (PostToolUse): immediately before a `PLAN.md` Write/Edit under the active plan directory, records the plan's current status plus the SHA-256 hash of the PREDICTED post-write text (applying the same edit forward), keyed by `tool_use_id`. `goal_injection` consumes it as ground truth in place of inferring the pre-write status from `old_string`/`new_string` or git HEAD — removing collisions a bare status value could have with a table cell or a plan title, and HEAD's own lag behind an uncommitted flip. Never blocks, never surfaces advisory text. Runs unconditionally on every matching write whenever enabled, whether or not `goal_injection` itself is enabled.
+**Description:** Sensor for `goal_injection` (PostToolUse): immediately before a `PLAN.md` Write/Edit under the active plan directory, records the plan's current status plus the SHA-256 hash of the PREDICTED post-write text (applying the same edit forward), keyed by `tool_use_id`. `goal_injection` consumes it as ground truth in place of inferring the pre-write status from `old_string`/`new_string` or git HEAD — removing collisions a bare status value could have with a table cell or a plan title, and HEAD's own lag behind an uncommitted flip. Never blocks, never surfaces advisory text. Gated on `goal_injection`'s own resolved config state, so a matching write's read/parse/hash only runs when `goal_injection` is actually enabled.
 
 **Config example:**
 

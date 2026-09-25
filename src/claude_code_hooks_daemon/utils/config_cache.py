@@ -26,14 +26,34 @@ import threading
 from pathlib import Path
 from typing import Final
 
+from pydantic import ValidationError
+
 from claude_code_hooks_daemon.config.models import Config
 
 #: Stat signature of a path that does not exist. Distinct from any real
 #: ``(st_mtime_ns, st_size)``, so a file appearing later misses the cache.
 _ABSENT: Final[tuple[int, int]] = (-1, -1)
 
+#: Exceptions ``Config.load_or_default`` can raise on a file that exists but
+#: fails to parse or validate -- the same set every caller of
+#: :func:`load_config_cached` already catches (``recovery_cron_advisor``,
+#: ``plan_status_snapshot``, ``cron_stop_enforcer``,
+#: ``failsafe_cron_session_advisor``, ``cron_subagent_stop_enforcer``,
+#: ``remote_docs_routing``). Caching a MEMBER of this set, keyed by the same
+#: ``(st_mtime_ns, st_size)`` signature as a successful parse, is what makes a
+#: config broken by an edit after startup cost one re-parse per change rather
+#: than one per event (Ledger 00466 RV7-M1 item 3) -- a caller's own ``except``
+#: still decides how to degrade; this module only avoids re-parsing the same
+#: broken bytes on every call in between.
+_CACHEABLE_LOAD_FAILURES: Final[tuple[type[Exception], ...]] = (
+    ValidationError,
+    OSError,
+    ValueError,
+    RuntimeError,
+)
+
 _LOCK: Final[threading.Lock] = threading.Lock()
-_CACHE: dict[Path, tuple[tuple[int, int], Config]] = {}
+_CACHE: dict[Path, tuple[tuple[int, int], Config | Exception]] = {}
 
 
 def _signature(path: Path) -> tuple[int, int]:
@@ -55,6 +75,11 @@ def load_config_cached(path: str | Path) -> Config:
     Raises whatever ``Config.load_or_default`` raises — callers that need to
     degrade on an invalid config keep their own ``except``, because "this
     config is broken" is a decision about the handler, not about the cache.
+    A raised failure is cached under the SAME signature as a successful parse
+    would be (RV7-M1 item 3): while the file's ``(st_mtime_ns, st_size)``
+    stays unchanged, a second call re-raises the cached exception instead of
+    re-parsing the same broken bytes, so a syntactically broken config costs
+    one parse per edit rather than one per hook event.
     """
     resolved = Path(path).resolve()
     signature = _signature(resolved)
@@ -72,9 +97,16 @@ def load_config_cached(path: str | Path) -> Config:
     with _LOCK:
         cached = _CACHE.get(resolved)
         if cached is not None and cached[0] == signature:
-            return cached[1]
+            result = cached[1]
+            if isinstance(result, Exception):
+                raise result
+            return result
 
-        config = Config.load_or_default(resolved)
+        try:
+            config = Config.load_or_default(resolved)
+        except _CACHEABLE_LOAD_FAILURES as exc:
+            _CACHE[resolved] = (signature, exc)
+            raise
         _CACHE[resolved] = (signature, config)
         return config
 

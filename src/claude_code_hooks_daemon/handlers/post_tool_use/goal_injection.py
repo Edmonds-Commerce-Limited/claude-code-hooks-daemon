@@ -929,7 +929,13 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
           Pre time (``PlanUnreadable``);
         - the store evicted this ``tool_use_id`` before Post ran (a flood
           of other snapshots pushed it out of the bounded FIFO store,
-          RV5-M2 -- bounded by entry count, never by time).
+          RV5-M2 -- bounded by entry count, never by time);
+        - RV7-n3: the sensor never ran at all for this call --
+          ``plan_status_snapshot`` itself disabled, or its RV7-m1 gate
+          correctly read ``goal_injection`` as off in this project's
+          resolved config (see
+          ``handlers.pre_tool_use.plan_status_snapshot.PlanStatusSnapshotHandler._goal_injection_enabled``)
+          -- so there was never a Pre-time dispatch to record one.
 
         A snapshot recorded but rejected as STALE (WARNING log, "is
         stale"): its PREDICTED post-image no longer matches the file this

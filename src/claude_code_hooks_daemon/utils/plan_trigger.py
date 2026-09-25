@@ -88,6 +88,15 @@ def matched_plan_write_or_edit(
     """``(file_path, folder)`` when ``hook_input`` is a Write/Edit landing on
     an active plan's PLAN.md; ``None`` otherwise. ``folder`` is the
     ``<digits>-<name>`` capture group.
+
+    RV7-m3: ``folder`` is the capture from the RESOLVED path, not the raw
+    ``file_path`` text -- a plan folder reached through a symlinked alias
+    (``CLAUDE/Plan/00301-l -> 00300-c``) must ledger under the TARGET's
+    number, the one that actually retires when the plan completes, never
+    the link's. Once ``is_inside_project`` confirms containment (which
+    already resolves the same path to check it), the pattern is re-applied
+    to that SAME resolved path, expressed relative to the resolved project
+    root, and that capture wins over the unresolved one.
     """
     if hook_input.get(HookInputField.TOOL_NAME) not in (ToolName.WRITE, ToolName.EDIT):
         return None
@@ -95,9 +104,49 @@ def matched_plan_write_or_edit(
     normalized = file_path.replace("\\", "/")
     if COMPLETED_SEGMENT in normalized:
         return None
-    match = plan_path_pattern(plan_dir_for(project_layout)).search(normalized)
+    pattern = plan_path_pattern(plan_dir_for(project_layout))
+    match = pattern.search(normalized)
     if match is None:
         return None
     if not is_inside_project(file_path):
         return None
-    return file_path, match.group(1)
+    resolved_folder = _resolved_folder_capture(
+        file_path, pattern, unresolved_folder=match.group(1)
+    )
+    if resolved_folder is None:
+        logger.warning(
+            "plan_trigger: %r resolves to a path outside the plan pattern "
+            "(unresolved capture was %r) -- treating as unmatched rather "
+            "than ledgering it under an alias that cannot retire",
+            file_path,
+            match.group(1),
+        )
+        return None
+    return file_path, resolved_folder
+
+
+def _resolved_folder_capture(
+    file_path: str, pattern: re.Pattern[str], *, unresolved_folder: str
+) -> str | None:
+    """Re-apply ``pattern`` to ``file_path`` fully resolved (symlinks
+    followed) and expressed relative to the resolved project root.
+
+    Returns ``unresolved_folder`` -- the caller's own already-matched
+    capture -- when the root or the path itself cannot be resolved: an
+    unresolvable ROOT is a project-setup problem the caller already fails
+    open for via ``is_inside_project``, so this must not manufacture a
+    false negative on top of that. Returns ``None`` only when the resolved
+    path no longer matches ``pattern`` at all -- a real containment edge
+    case, not a resolution failure -- which the caller logs and treats as
+    unmatched.
+    """
+    try:
+        root = ProjectContext.project_root().resolve()
+    except (RuntimeError, OSError):
+        return unresolved_folder
+    try:
+        relative = Path(file_path).resolve().relative_to(root).as_posix()
+    except (ValueError, OSError, RuntimeError):
+        return unresolved_folder
+    resolved_match = pattern.search(relative)
+    return resolved_match.group(1) if resolved_match is not None else None

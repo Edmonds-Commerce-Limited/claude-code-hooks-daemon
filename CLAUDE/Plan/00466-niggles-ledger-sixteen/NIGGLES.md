@@ -1599,10 +1599,11 @@ majors, 6 minors, 5 nits, all fixed with a RED test first for each:**
   (`hooks-daemon.yaml.example`).** Fixed to state the true, unconditional
   default plainly.
 - **RV6-n3 — a symlinked plan folder is ledgered under the link's number,
-  not the target's.** Confirmed harmless (the snapshot path itself
-  behaves correctly, no log noise) and an unusual layout the reviewer
-  explicitly did not compare against main; no direction was given, so no
-  code change made.
+  not the target's.** ~~Confirmed harmless~~ -- **wrong.** Review 7
+  (RV7-m3) reproduced it as a real defect: a plan COMPLETED through the
+  real (non-symlink) path leaves a live ledger entry keyed to the link's
+  number forever, because that entry was created through the link and
+  never retires. See the Review 7 section below for the fix.
 - **RV6-n4 — the snapshot store hand-rolled its own select-then-evict.**
   Correct under its own lock (the `unlocked-eviction` semgrep rule exempts
   a held lock) but a duplicate of exactly what `goal_injection`'s own
@@ -1613,6 +1614,134 @@ majors, 6 minors, 5 nits, all fixed with a RED test first for each:**
   All of `TestRecordAndConsume`, `TestConsumeSnapshot`, `TestBoundedGrowth`
   and `TestConcurrency` (the existing black-box regression suite for this
   store) still pass unchanged.
+
+**Review 7 (`260925-goal-flip-review7-opus-5-5.md`).**
+
+- **RV7-B1 — review 6's renumbering broke four PostToolUse unit tests it
+  never ran.** `constants/priority.py:205-218` shifted
+  `git_hooks_executable_fixer` (27→26), `background_process_tracker`
+  (28→27), `command_hints` (29→28) and `recovery_cron_advisor` (30→29) to
+  stay adjacent to the `goal_injection`/`markdown_table_formatter` swap,
+  but four `test_priority`-shaped assertions in those handlers' own test
+  files still asserted the OLD literal. Fixed by asserting against the
+  `Priority` constant instead of a literal in all four (renaming
+  `test_priority_is_30` to `test_priority_matches_constant` in
+  `test_recovery_cron_advisor.py`, since it is no longer 30) — the same
+  fix the report itself directed, so a future priority shuffle cannot
+  reintroduce this. The whole `tests/unit/handlers/post_tool_use/`
+  directory was run once before finishing, since B1 was itself a missed
+  sibling.
+- **RV7-M1 — the RV6-m1 gate ran BEFORE the cheap trigger match, so every
+  PreToolUse event paid a config read, and a broken config cost ~80ms per
+  event.** `plan_status_snapshot.matches()` now checks
+  `matched_plan_write_or_edit` (a tuple-membership test, no I/O) FIRST,
+  and only consults the config-backed gate for an actual plan Write/Edit —
+  the overwhelming majority of PreToolUse events never reach it at all.
+  Separately, `utils.config_cache.load_config_cached` now caches a
+  RAISED parse failure under the same `(st_mtime_ns, st_size)` signature
+  as a successful parse, so a config broken by an edit after startup is
+  re-parsed once per change rather than once per event — this benefits
+  all six callers of the cache, not just this gate. The misnamed
+  `test_gate_runs_before_the_trigger_match_so_a_non_plan_write_is_still_false`
+  test already exercised the right shape and needed no change; new tests
+  in `TestABrokenConfigIsCachedByFailure`
+  (`tests/unit/utils/test_config_cache.py`) pin the caching behaviour.
+- **RV7-m1 — the gate disagreed with what the daemon actually registers,
+  in two shapes RV7-m1 measured (an absent `goal_injection` block, and
+  `disable_tags` covering it), and its own docstring/test asserted the
+  disagreement was correct.** `_goal_injection_enabled` now decides from
+  `handlers.registry.handler_is_enabled` over the SAME per-event mapping
+  `daemon.cli._build_handler_config_mapping` builds for `register_all`
+  itself — the checklist's own "would `register_all` register this
+  handler" predicate — rather than a hand-rolled reading of the config
+  block that (wrongly) tried to honour `goal_injection`'s own opt-in
+  default, which `register_all` never actually consults. An absent block
+  now resolves to TRUE (matching the registry's own "absent means
+  enabled" convention), reversing the RV6-m1 test's assertion; the load-
+  failure test now writes genuinely unparseable YAML to a real config
+  path instead of monkeypatching `_load_config` past the `except` branch
+  it claimed to exercise. A new table-driven test
+  (`test_gate_agrees_with_register_all_for_every_shape`) builds a REAL
+  `HandlerRegistry`/`EventRouter` and asserts the gate's answer equals
+  what got registered, for all six shapes RV7-m1's own table names.
+- **RV7-m2 — the FT4 chain test passed against the PRE-fix priority
+  order, so review 6's commit message claim "every finding has a
+  RED-confirmed test" was false for it; FC3b (review 6's own Direction #2)
+  had no chain test at all.** Both `TestFormatterOrderingChain` tests now
+  assert the snapshot was consumed FRESH (no "is stale" WARNING in
+  `caplog`), not merely that a signal file exists — the file-exists
+  assertion alone cannot tell a fresh-snapshot pass from a lucky
+  fallback-inference pass. FT4 now runs inside a real git repo whose HEAD
+  already reads `**Status**: In Progress` (diverged from the actual,
+  uncommitted `Complete` pre-write disk state) — the Write-only fallback
+  reads that stale HEAD as "already there, no transition" and would write
+  NO signal, so the test genuinely fails without a fresh snapshot; before
+  this, `tmp_path` was not a git repo at all, so the fallback's
+  `before_text is None -> True` branch always reported a transition
+  regardless of ordering. Confirmed RED against the pre-fix priority
+  order via a throwaway in-process monkeypatch of `Priority.GOAL_INJECTION`/
+  `Priority.MARKDOWN_TABLE_FORMATTER` (matching the reviewer's own repro
+  method): all three of FE, FT4 and the new FC3b failed. A new
+  `test_fc3b_completion_write_with_reformatted_columns_still_retires_and_clears`
+  test mirrors FT4's shape for the terminal-transition detector (a
+  completing Write with an unpadded table, HEAD diverged the other way —
+  already `Complete` — so the fallback would wrongly conclude no
+  transition), first establishing ledger ownership via a real prior flip
+  (`clear_goal_signal` only fires for a plan the ledger already names an
+  owning session for). This NIGGLES entry — not the immutable `88991a06`
+  commit message — is the correction of record for the RED-confirmation
+  claim.
+- **RV7-m3 — RV6-n3 was wrongly closed as harmless: a plan flipped
+  through a symlinked folder is ledgered under the link's number and
+  never retires.** `matched_plan_write_or_edit` (`utils/plan_trigger.py`)
+  now re-applies the trigger pattern to the FULLY RESOLVED path (symlinks
+  followed), expressed relative to the resolved project root, once
+  `is_inside_project` has already confirmed containment (which resolves
+  the same path itself) — that resolved capture is what both
+  `goal_injection` and `plan_status_snapshot` key on, since both share
+  this one function. A path that resolves outside the pattern entirely
+  returns unmatched (logged), rather than trusting the unresolved
+  capture. Regression test
+  `test_a_symlinked_plan_folder_resolves_to_the_targets_number`
+  (`tests/unit/utils/test_plan_trigger.py`) asserts a plan reached via
+  `00301-l -> 00300-c` is captured as `00300-c`; confirmed RED against the
+  pre-fix logic via a throwaway in-process comparison against the OLD
+  (unresolved-capture) implementation. The RV6-n3 "confirmed harmless"
+  text above is struck through and superseded by this entry.
+- **RV7-m4 — release artefacts drifted from the RV6-m1/RV7-m1 fixes.**
+  `config-changes/v3.67.0.yaml` gained `changed` entries for all six
+  priorities RV6-M1 moved, with a `migration_note` on the two that matter
+  (an operator who set custom priorities for `goal_injection`/
+  `markdown_table_formatter` must keep the former below the latter).
+  Both `config-changes/v3.67.0.yaml` and `docs/guides/HANDLER_REFERENCE.md`
+  no longer claim `plan_status_snapshot` "runs unconditionally... whether
+  or not `goal_injection` itself is enabled" — false since RV6-m1 gated
+  it, and doubly false now that RV7-m1 fixed what the gate agrees with.
+  The optional `ConfigValidator` startup warning (RV7-m4 Direction #2) was
+  NOT added — genuinely optional per the report, and the guard test
+  (`test_goal_injection_precedes_markdown_table_formatter`) plus the new
+  `changed` migration_notes already cover the cases that matter.
+- **RV7-n1 — `.claude/hooks-daemon.yaml`'s commented `options:` block sat
+  under `markdown_table_formatter` instead of `goal_injection`,** so
+  uncommenting it configured the wrong handler (it names `mode`,
+  `once_per_plan_per_session` and `lines`, all `goal_injection` options).
+  Moved to sit under `goal_injection`, matching `.claude/hooks-daemon.yaml.example`'s
+  arrangement, which was already correct.
+- **RV7-n2 — the release note shared ordinal 13 with an unrelated one and
+  ran to ~1,300 words against a "one to three sentences" schema.**
+  Renumbered to `33` (the next free ordinal, matching main), and cut to
+  three sentences naming the operator-facing change, that the snapshot
+  sensor ships on by default, and what a project running the inference
+  fallback (an explicit opt-out) keeps instead. The mechanism narrative it
+  carried is not lost: it already lives in `goal_injection.py`'s and
+  `plan_status_snapshot.py`'s own module docstrings, which the shortened
+  note now points at instead of re-narrating.
+- **RV7-n3 — the "single authoritative list" of fallback triggers
+  (`goal_injection.py:909-943`) omitted a trigger this same branch
+  introduced:** the sensor not running at all, because
+  `plan_status_snapshot` is disabled or its (RV7-m1-corrected) gate reads
+  `goal_injection` as off. Added as its own bullet under "No snapshot
+  recorded at all".
 
 ### N2 — `setup_worktree.sh` tells every agent to run the full suite through `run_all.sh`
 
