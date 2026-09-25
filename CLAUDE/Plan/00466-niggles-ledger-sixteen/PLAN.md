@@ -93,6 +93,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N62 | Nothing bounds a subagent's context, so long-lived agents burn the usage budget                           | Owner              | ⬜ Open               |
 | N63 | Supervisor unit tests read the ambient `CCY_*` environment, so a ccy session fails a test CI passes       | N24 fixer          | ✅ Remedied           |
 | N64 | `subagent_report_path_verifier` resolves a worktree-relative report path against the main checkout        | N47 verify agent   | ⬜ Open               |
+| N65 | `plan_number_helper` denies an `ls` of one named plan's folder as a next-number scan                      | Coordinator        | ⬜ Open               |
 
 ## Tasks
 

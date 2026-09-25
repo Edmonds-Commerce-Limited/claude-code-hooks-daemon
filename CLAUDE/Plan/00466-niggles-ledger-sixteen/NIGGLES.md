@@ -9,6 +9,21 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N65 — `plan_number_helper` denies an `ls` of one named plan's folder as a next-number scan
+
+**Found by the coordinator.** In a worktree it ran
+`ls CLAUDE/Plan/*464*/subagent-reports/; ls -d CLAUDE/Plan/*464*`, to list the
+reports of a plan it already knew by number. R-PLAN-NUMBER-DISCOVERY denied
+the command as a next-plan-number discovery scan. Nothing in the command
+sorts, tails, or reads the numbering. A glob that contains a specific plan
+number is a lookup, not a discovery.
+
+**Candidate remedy:** treat a glob or path that names a concrete plan number
+(`*464*`, `00464-*`) as a lookup and allow it. Keep denying the shapes that
+derive a number: a bare `ls CLAUDE/Plan` piped to `sort`, `tail` or `awk`, or
+a `find` over the plan root. RED tests: the command above is allowed;
+`ls CLAUDE/Plan | sort | tail -1` still denies.
+
 ### N64 — `subagent_report_path_verifier` resolves a worktree-relative report path against the main checkout
 
 **Found by an N47 verify agent** working in
