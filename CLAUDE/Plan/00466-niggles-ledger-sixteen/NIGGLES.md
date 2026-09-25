@@ -6,6 +6,23 @@ candidate remedies.
 N34 is taken on the `worktree-n466-n24` branch (the chain deadline cannot
 interrupt a running handler) and lands with that branch.
 
+### N37 — `resolve_venv.sh` caches an override's interpreter for later callers that set no override
+
+**Found by the Plan 00376 agent** while closing the upgrade gate's
+interpreter bypass. `scripts/lib/resolve_venv.sh` writes
+`untracked/.python-cmd-cache` even when the answer came from
+`HOOKS_DAEMON_PYTHON` or `HOOKS_DAEMON_VENV_PATH`. A later call that sets
+neither override is then served the overridden interpreter from the cache.
+So a one-off override sticks, and a caller that deliberately runs without
+overrides still inherits one. Layer 2 of the upgrade now works around this
+with its own containment check. Every other caller still inherits it.
+
+**Candidate remedy:** never write the cache from an override-derived answer.
+Also key the cache on the absence of overrides, or skip it whenever an
+override is set. RED test: resolve with `HOOKS_DAEMON_PYTHON=/x`, then with
+no override, and the second call must not return `/x`. Being fixed on
+`worktree-d-00376`.
+
 ### N36 — `destructive_git` denies a `grep` whose search pattern is the text of a force branch delete
 
 **Found by the Plan 00463 agent** (review-5 fix round, its nit n9). Searching
