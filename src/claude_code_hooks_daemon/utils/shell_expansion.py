@@ -771,6 +771,40 @@ def _consume_dollar(
     return "$", start + 1
 
 
+def _close_backtick(text: str, start: int) -> tuple[int, str]:
+    """Find the backtick that closes a backtick command substitution whose
+    body begins at ``start`` (just past the opening backtick), and return
+    its index together with the body UN-ESCAPED per bash's backtick rules.
+
+    Plan 00466 review 8 MAJOR-B: a plain ``text.find("`", start)`` finds an
+    ESCAPED inner backtick (``\\```) first, cutting the outer body short --
+    ``` `echo \\`bash -c '...'\\`` ``` closed after the first ``\\```
+    instead of the real outer close, so the inner ``bash -c`` was never
+    re-parsed as its own nested command. Inside a backtick span, bash gives
+    backslash its literal meaning EXCEPT before another backtick, a dollar
+    sign, or itself (bash manual, "Command Substitution") -- so those three
+    escapes are undone here and every other backslash is kept literal,
+    matching what the shell itself hands the nested command.
+
+    Returns ``(-1, body)`` with ``body`` running to the end of ``text`` when
+    no closing backtick is found (an unterminated span).
+    """
+    out: list[str] = []
+    i = start
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if ch == "\\" and i + 1 < n and text[i + 1] in ("`", "$", "\\"):
+            out.append(text[i + 1])
+            i += 2
+            continue
+        if ch == "`":
+            return i, "".join(out)
+        out.append(ch)
+        i += 1
+    return -1, "".join(out)
+
+
 def _decode_span(
     text: str, start: int, stop_chars: str, *, substitutions: list[str] | None = None
 ) -> tuple[str, int]:
@@ -818,9 +852,9 @@ def _decode_span(
                     i = end
                     continue
                 if text[i] == "`":
-                    j = text.find("`", i + 1)
+                    j, body = _close_backtick(text, i + 1)
                     if substitutions is not None and j != -1:
-                        substitutions.append(text[i + 1 : j])
+                        substitutions.append(body)
                     out.append("*")
                     i = (j + 1) if j != -1 else n
                     continue
@@ -845,9 +879,9 @@ def _decode_span(
             i = end
             continue
         if ch == "`":
-            j = text.find("`", i + 1)
+            j, body = _close_backtick(text, i + 1)
             if substitutions is not None and j != -1:
-                substitutions.append(text[i + 1 : j])
+                substitutions.append(body)
             out.append("*")
             i = (j + 1) if j != -1 else n
             continue

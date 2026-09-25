@@ -847,6 +847,21 @@ class TestIterNormalisedShellWordsCommandSubstitution:
         words = list(iter_normalised_shell_words(command))
         assert "world" in words
 
+    def test_escaped_nested_backtick_body_is_reparsed(self) -> None:
+        """Plan 00466 review 8 MAJOR-B: a plain ``text.find("`", ...)`` finds
+        the ESCAPED inner backtick first and cuts the outer body short, so
+        the inner ``bash -c`` was never re-parsed as its own nested command.
+        The closer must skip backslash-escaped characters, and the body
+        must be un-escaped (``\\``` -> `` ` ``) before the re-parse."""
+        command = "echo `echo \\`bash -c 'cat wor'\\''ld'\\``"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_escaped_nested_backtick_inside_double_quotes_is_reparsed(self) -> None:
+        command = 'echo "`echo \\`bash -c \'cat wor\'\\\'\'ld\'\\``"'
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
     def test_eval_inside_dollar_paren_is_reparsed(self) -> None:
         command = "x=$(eval 'cat wor'\\''ld')"
         words = list(iter_normalised_shell_words(command))
