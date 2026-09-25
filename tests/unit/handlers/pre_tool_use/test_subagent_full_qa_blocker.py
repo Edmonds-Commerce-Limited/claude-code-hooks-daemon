@@ -1750,6 +1750,27 @@ class TestFindExecIsFollowed:
         command = "find tests/unit/qa -exec pytest {} +"
         assert find_full_qa_invocation(command, _patterns(), cwd=self._tree(tmp_path)) is None
 
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "find tests -maxdepth 0 -exec pytest {}/ \\;",
+            "find tests -maxdepth 0 -exec pytest ./{} \\;",
+            "find tests -maxdepth 0 -exec pytest {}/unit/.. \\;",
+        ],
+    )
+    def test_the_placeholder_inside_a_word_is_still_replaced(
+        self, tmp_path: Path, command: str
+    ) -> None:
+        """Review 8 minor m3: GNU find replaces `{}` wherever it appears in a word."""
+        assert find_full_qa_invocation(command, _patterns(), cwd=self._tree(tmp_path)), command
+
+    def test_a_narrowing_test_under_an_already_targeted_start_path_is_still_targeted(
+        self, tmp_path: Path
+    ) -> None:
+        """Review 8 minor m3: a narrowing test can only select a SUBSET of the start paths."""
+        command = "find tests/unit/qa -name 'test_llm_qa*.py' -exec pytest -q {} +"
+        assert find_full_qa_invocation(command, _patterns(), cwd=self._tree(tmp_path)) is None
+
 
 class TestTheMergeBaseListingIsAccepted:
     """Review 7 m3: a listing narrowed to the merge base was refused.

@@ -610,18 +610,17 @@ _EVAL: Final[str] = "eval"
 #: ``source x`` and ``. x`` run the script ``x`` in this shell.
 _SOURCE_COMMANDS: Final[frozenset[str]] = frozenset({"source", "."})
 #: ``find [paths] [tests] -exec cmd {} ;`` runs ``cmd`` on what find selects
-#: (review 7 m4): its start paths, when nothing narrows them below that, and
-#: unseen otherwise -- which files matched cannot be read from the command.
+#: (review 7 m4): its start paths, whatever a ``-name``/``-path`` test
+#: narrows them by (review 8 minor m3) -- a test can only select a SUBSET of
+#: the start paths, so a targeted start path stays targeted under any
+#: narrowing, and this is left for the same downstream check that judges a
+#: bare ``pytest tests``. Only a BARE find (no path operand at all, which
+#: searches ``.``) has no path text to read at all, and is unseen.
 _FIND: Final[str] = "find"
 _FIND_PLACEHOLDER: Final[str] = "{}"
 _FIND_EXEC_ACTIONS: Final[frozenset[str]] = frozenset({"-exec", "-execdir", "-ok", "-okdir"})
 _FIND_ACTION_TERMINATORS: Final[frozenset[str]] = frozenset({";", "+"})
 _FIND_PATH_STOP: Final[frozenset[str]] = frozenset({"!", "("})
-#: A test that can select fewer files than the start paths hold: with one of
-#: these present, ``{}`` is not the start paths, and cannot be seen.
-_FIND_NARROWING_TESTS: Final[frozenset[str]] = frozenset(
-    {"-name", "-iname", "-path", "-ipath", "-regex", "-iregex", "-wholename", "-iwholename"}
-)
 _FIND_SELECTED_FILES: Final[str] = "the files find selects"
 #: ``xargs [options] cmd args`` runs ``cmd`` with ``args`` plus words from
 #: stdin, which cannot be seen: the explicit arguments are judged alone.
@@ -2653,10 +2652,14 @@ def _resolve_find(
 ) -> Iterator[tuple[str, list[str], str]]:
     """``find [paths] [tests] -exec cmd {} ;`` (or ``+``) runs ``cmd`` on what find selects.
 
-    ``{}`` is find's start paths when no test narrows them below that (no
-    ``-name``, ``-path`` or similar); a ``-name``/``-path`` test present
-    anywhere means the files actually selected cannot be read from the
-    command line, so ``{}`` is judged unseen instead (review 7 m4).
+    ``{}`` is find's start paths, wherever it sits inside a word (GNU find
+    replaces it in place: ``{}/``, ``./{}``, review 8 minor m3) -- and
+    whatever test narrows them (a ``-name``/``-path`` test can only select a
+    SUBSET of the start paths, so a targeted start path stays targeted under
+    any narrowing, and this is left for the same downstream check that
+    judges a bare ``pytest tests`` as full). A BARE find (no path operand,
+    which searches ``.``) has no path text to read at all, so ``{}`` is a
+    sentinel this handler cannot place, judged unseen instead.
     ``-execdir``/``-ok``/``-okdir`` are followed the same way as ``-exec``.
     """
     start_paths: list[str] = []
@@ -2664,8 +2667,7 @@ def _resolve_find(
     while index < len(rest) and not _is_flag(rest[index]) and rest[index] not in _FIND_PATH_STOP:
         start_paths.append(rest[index])
         index += 1
-    narrowed = any(word in _FIND_NARROWING_TESTS for word in rest)
-    selected = start_paths if start_paths and not narrowed else [_FIND_SELECTED_FILES]
+    selected = start_paths if start_paths else [_FIND_SELECTED_FILES]
     while index < len(rest):
         word = rest[index]
         index += 1
@@ -2680,7 +2682,10 @@ def _resolve_find(
             continue
         argv: list[str] = []
         for action_word in action:
-            argv.extend(selected if action_word == _FIND_PLACEHOLDER else [action_word])
+            if _FIND_PLACEHOLDER in action_word:
+                argv.extend(action_word.replace(_FIND_PLACEHOLDER, path) for path in selected)
+            else:
+                argv.append(action_word)
         yield from _resolve(argv, segment, depth, hops + 1)
 
 
