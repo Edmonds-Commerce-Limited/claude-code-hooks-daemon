@@ -118,10 +118,15 @@ _surviving_dummy_daemons() {
 # verify_dummy_daemon_stopped — post-condition for teardown.
 #
 # A stop that TARGETS the wrong project exits 0 while the real daemon lives on,
-# so "stop succeeded" is not evidence the daemon is gone. Reap any survivor by
-# process group rather than deleting its directory out from under it.
+# so "stop succeeded" is not evidence the daemon is gone. Reap any survivor
+# rather than deleting its directory out from under it.
+#
+# Each survivor's pid is proven by its command line, which names the dummy's
+# own venv. Its process GROUP is not: a daemon does not lead its group (the
+# double fork leaves the session leader's id on it), so the group could be
+# init's or ours, and only the proven pid is signalled (Plan 00466 N59).
 verify_dummy_daemon_stopped() {
-    local survivors pid pgid
+    local survivors pid
     survivors="$(_surviving_dummy_daemons)"
     if [ -z "$survivors" ]; then
         return 0
@@ -129,12 +134,10 @@ verify_dummy_daemon_stopped() {
 
     info "WARNING: daemon still alive after stop (pids: $(echo "$survivors" | tr '\n' ' '))"
     for pid in $survivors; do
-        if pgid="$(ps -o pgid= -p "$pid" | tr -d ' ')" && [ -n "$pgid" ]; then
-            if ! kill -- -"$pgid"; then
-                info "WARNING: could not signal process group $pgid"
-            fi
-        else
-            info "WARNING: could not determine process group for pid $pid"
+        if [ "$pid" -le 1 ] || [ "$pid" -eq "$$" ]; then
+            info "WARNING: refusing to signal pid $pid"
+        elif ! kill -TERM "$pid"; then
+            info "WARNING: could not signal pid $pid"
         fi
     done
     sleep 1

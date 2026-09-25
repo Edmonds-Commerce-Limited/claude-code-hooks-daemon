@@ -13,11 +13,18 @@ still-live daemon, leaving an orphan whose cwd pointed at a deleted directory
 while reporting a clean teardown.
 """
 
+import os
 import re
+import signal
+import subprocess
+import sys
 from pathlib import Path
 from typing import Final
 
+from claude_code_hooks_daemon.utils.safe_signal import signal_own_session_child
+
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[3]
+_REAP_SECONDS: Final[int] = 10
 _FIXTURE_SCRIPT: Final[Path] = _REPO_ROOT / "scripts" / "dummy-client-repo.sh"
 
 #: A daemon-CLI invocation in the fixture script.
@@ -126,3 +133,82 @@ class TestTeardownVerifiesTheDaemonActuallyStopped:
             "deleting its directory — otherwise a failed stop silently orphans "
             "the process and teardown still reports success."
         )
+
+
+#: Runs the two teardown functions, extracted from the script, with stub
+#: `info`/`fail` and no `main`.
+_TEARDOWN_HARNESS: Final[str] = r"""
+set -euo pipefail
+info() { printf '%s\n' "$*" >&2; }
+fail() { printf 'FAIL %s\n' "$*" >&2; return 1; }
+source <(awk '/^_surviving_dummy_daemons\(\) \{/,/^\}$/' "$SCRIPT")
+source <(awk '/^verify_dummy_daemon_stopped\(\) \{/,/^\}$/' "$SCRIPT")
+verify_dummy_daemon_stopped
+"""
+
+#: A group leader that starts a stand-in dummy daemon and an unrelated
+#: sibling in ITS group, prints both pids, and waits.
+_GROUP_OF_TWO: Final[str] = """
+import os, subprocess, sys, time
+daemon = subprocess.Popen([os.environ["STAND_IN"], "-c", "import time; time.sleep(60)"])
+sibling = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+print(daemon.pid, sibling.pid, flush=True)
+time.sleep(60)
+"""
+
+
+class TestTeardownSignalsOnlyTheProvenPid:
+    """Plan 00466 N59: a survivor's pid is proven by its command line; its group is not.
+
+    The daemon does not lead its process group, so ``kill -- -<pgid>`` could
+    reach init's group or teardown's own. Here the stand-in shares a group
+    with an unrelated sibling: only the stand-in may be signalled.
+    """
+
+    def test_the_survivor_is_stopped_and_its_group_mate_is_not(self, tmp_path: Path) -> None:
+        daemon_dir = tmp_path / ".claude" / "hooks-daemon"
+        interpreter = daemon_dir / "untracked" / "venv-dummy" / "bin" / "python"
+        interpreter.parent.mkdir(parents=True)
+        interpreter.symlink_to(sys.executable)
+
+        # The stand-in's path goes in the environment, not argv, so the only
+        # command line naming the dummy venv is the stand-in's own.
+        leader = subprocess.Popen(
+            [sys.executable, "-c", _GROUP_OF_TWO],
+            stdout=subprocess.PIPE,
+            env={**os.environ, "STAND_IN": str(interpreter)},
+            start_new_session=True,
+        )
+        try:
+            assert leader.stdout is not None
+            daemon_pid, sibling_pid = (int(p) for p in leader.stdout.readline().split())
+
+            result = subprocess.run(
+                ["bash", "-c", _TEARDOWN_HARNESS],
+                capture_output=True,
+                text=True,
+                env={
+                    **os.environ,
+                    "SCRIPT": str(_FIXTURE_SCRIPT),
+                    "DUMMY_DAEMON_DIR": str(daemon_dir),
+                },
+                check=False,
+            )
+
+            assert result.returncode == 0, result.stderr
+            assert "surviving daemon reaped" in result.stderr
+            assert _is_running(sibling_pid), "teardown signalled the survivor's whole group"
+            assert not _is_running(daemon_pid)
+        finally:
+            signal_own_session_child(leader, signal.SIGKILL)
+            leader.wait(timeout=_REAP_SECONDS)
+
+
+def _is_running(pid: int) -> bool:
+    """Alive and not a zombie (an unreaped child of the group leader)."""
+    try:
+        status = Path(f"/proc/{pid}/status").read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return False
+    state = next(line for line in status.splitlines() if line.startswith("State:"))
+    return "Z" not in state

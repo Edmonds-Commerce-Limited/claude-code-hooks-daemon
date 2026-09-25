@@ -29,6 +29,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 RESOLVE_VENV_SH = REPO_ROOT / "scripts" / "lib" / "resolve_venv.sh"
 BASH = shutil.which("bash") or "/bin/bash"
 _TIMEOUT_SECONDS = 30
+#: Above Linux's default pid_max, so no process can have it.
+_NONEXISTENT_PID = 2**22 + 7
 
 
 def _make_good_candidate(venv_dir: Path) -> Path:
@@ -145,6 +147,80 @@ def test_hanging_candidate_is_bounded_by_the_probe_timeout(tmp_path: Path) -> No
         f"stdout={result.stdout!r} stderr={result.stderr!r}"
     )
     assert elapsed < 10.0, f"probe must respect its bound; took {elapsed:.2f}s"
+
+
+def _run_in_library(script: str, *, path: str | None = None) -> subprocess.CompletedProcess[str]:
+    """Source the library, then run ``script`` in the same shell."""
+    prelude = f'export PATH="{path}"\n' if path is not None else ""
+    return subprocess.run(
+        [BASH, "-c", f'{prelude}. "{RESOLVE_VENV_SH}"\n{script}'],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=_TIMEOUT_SECONDS,
+    )
+
+
+class TestTheProbeWatchdogKillsOnlyTheCandidateItStarted:
+    """Plan 00466 N59: at the bound the watchdog must still be aiming at the candidate.
+
+    Once ``wait`` reaps a candidate its pid is free. The watchdog records the
+    candidate's parent while it is alive and kills only a pid that still has
+    it; a process that reused the pid has another parent.
+    """
+
+    def test_the_parent_of_a_child_is_this_shell(self) -> None:
+        result = _run_in_library(
+            'sleep 30 & child=$!\necho "$(_rv_parent_of "$child") $$"\nkill "$child"'
+        )
+
+        parent, shell = result.stdout.split()
+        assert parent == shell, result.stderr
+
+    def test_the_parent_is_read_without_any_tool_on_path(self, tmp_path: Path) -> None:
+        sleep_bin = shutil.which("sleep")
+        assert sleep_bin is not None
+        result = _run_in_library(
+            f'"{sleep_bin}" 30 & child=$!\necho "$(_rv_parent_of "$child") $$"\nkill "$child"',
+            path=str(tmp_path / "empty"),
+        )
+
+        parent, shell = result.stdout.split()
+        assert parent == shell, result.stderr
+
+    def test_a_pid_with_no_process_has_no_parent(self) -> None:
+        result = _run_in_library(f"_rv_parent_of {_NONEXISTENT_PID}")
+
+        assert result.returncode != 0
+        assert result.stdout == ""
+
+    def test_a_pid_whose_parent_changed_is_not_killed(self, tmp_path: Path) -> None:
+        daemon_dir = tmp_path / "daemon"
+        bin_dir = daemon_dir / "untracked" / "venv-py999-slow" / "bin"
+        bin_dir.mkdir(parents=True)
+        slow = bin_dir / "python"
+        slow.write_text("#!/bin/bash\nsleep 3\nexit 0\n")
+        slow.chmod(0o755)
+        state = tmp_path / "seen"
+        # The first read records one parent; every later read sees another,
+        # which is what a pid reused by an unrelated process looks like.
+        reused = (
+            "_rv_parent_of() {\n"
+            f'    if [ -e "{state}" ]; then echo 2; else : > "{state}"; echo 1; fi\n'
+            "}\n"
+        )
+
+        result = _run_in_library(
+            "export HOOKS_DAEMON_VENV_PROBE_TIMEOUT=1\n"
+            "unset HOOKS_DAEMON_PYTHON HOOKS_DAEMON_VENV_PATH\n"
+            f'{reused}_rv_pick_python "{daemon_dir}"'
+        )
+
+        assert result.returncode == 0, (
+            "the watchdog killed a pid whose parent had changed.\n"
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+        assert result.stdout.strip() == str(slow)
 
 
 def test_falls_through_to_good_second_candidate(tmp_path: Path) -> None:

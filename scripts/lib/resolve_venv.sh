@@ -166,6 +166,27 @@ _rv_wait_secs() {
     [ "$?" -gt 128 ]
 }
 
+# Echoes $1's parent pid; fails when $1 is gone. Read with builtins from /proc
+# where it exists, because the stripped PATH this resolver survives may lack
+# `ps`; elsewhere (macOS) from `ps`.
+_rv_parent_of() {
+    local stat rest parent
+    local -a fields
+    if [ -d /proc/self ]; then
+        [ -r "/proc/$1/stat" ] || return 1
+        read -r stat < "/proc/$1/stat" || return 1
+        # comm sits in parentheses and may hold spaces; ppid follows state.
+        rest="${stat##*) }"
+        read -r -a fields <<< "$rest"
+        parent="${fields[1]:-}"
+    else
+        parent="$(ps -o ppid= -p "$1")" || return 1
+        parent="${parent// /}"
+    fi
+    [ -n "$parent" ] || return 1
+    printf '%s\n' "$parent"
+}
+
 _rv_candidate_runs() {
     local candidate="$1" pid watchdog rc logfile
     logfile="$(mktemp "${TMPDIR:-/tmp}/rv-probe.XXXXXX" 2>/dev/null)" || logfile=""
@@ -178,7 +199,22 @@ _rv_candidate_runs() {
         "$candidate" -c 'import sys' > /dev/null 2>/dev/null &
     fi
     pid=$!
-    ( _rv_wait_secs "$_RV_PROBE_TIMEOUT_SECS" && kill -KILL "$pid" 2>/dev/null ) &
+    # The candidate's parent, recorded the instant it starts, is this probing
+    # shell; a candidate already gone by then needs no watchdog. At the bound
+    # the KILL goes only to a pid that still has that parent: once the
+    # candidate is reaped its pid is free, and a process that reuses it cannot
+    # be a child of a shell that is still probing (Plan 00466 N59). A kill that
+    # loses the race with the candidate's own exit has nothing to report, so
+    # its complaint is captured and dropped.
+    (
+        if ! _rv_parent="$(_rv_parent_of "$pid")"; then
+            exit 0
+        fi
+        if _rv_wait_secs "$_RV_PROBE_TIMEOUT_SECS" \
+            && [ "$(_rv_parent_of "$pid")" = "$_rv_parent" ]; then
+            _rv_kill_out="$(kill -KILL "$pid" 2>&1)"
+        fi
+    ) &
     watchdog=$!
     wait "$pid"
     rc=$?

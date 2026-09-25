@@ -468,32 +468,44 @@ fi
 # precedence logic the Phase 2 SSOT consolidated. Bootstrap now reads PID
 # files directly so zero venv / Python resolution is needed here.
 #
+#
+# Plan 00466 N59: a PID file survives a container restart, and a restarted
+# container reuses small pids, so the pid in it can name any process -- Claude
+# Code included. Only a pid whose command line is a daemon server for THIS
+# project root is signalled.
+#
 # Contract (pinned by tests/integration/test_upgrade_sh_stop_bootstrap.py):
-#   - SIGTERM every PID listed in $DAEMON_DIR/untracked/daemon-*.pid
-#   - Skip missing/empty/non-numeric/stale PID files silently
+#   - SIGTERM every PID in $DAEMON_DIR/untracked/daemon-*.pid that is a daemon
+#     server for $2, the project root; name and leave alone any other pid
+#   - Skip missing/empty/non-numeric/stale PID files
 #   - Skip missing untracked/ directory silently
 #   - Never invoke python, python3, or daemon.cli
 _stop_running_daemons() {
-    local daemon_dir="$1"
+    local daemon_dir="$1" project_root="$2"
     local untracked="$daemon_dir/untracked"
     [ -d "$untracked" ] || return 0
 
-    local pid_file pid_raw pid
+    local pid_file pid out
     local any_killed=0
     for pid_file in "$untracked"/daemon-*.pid; do
         [ -f "$pid_file" ] || continue
-        if ! pid_raw=$(tr -d '[:space:]' < "$pid_file" 2> /dev/null); then
+        if ! pid=$(tr -d '[:space:]' < "$pid_file"); then
+            printf 'upgrade: could not read %s; skipped\n' "$pid_file" >&2
             continue
         fi
-        pid="$pid_raw"
-        # Require a pure positive integer; skip empty / garbage / stale.
+        # Require a pure positive integer; skip empty / garbage.
         case "$pid" in
             '' | *[!0-9]*) continue ;;
         esac
-        if kill -0 "$pid" 2> /dev/null; then
-            if kill -TERM "$pid" 2> /dev/null; then
-                any_killed=1
-            fi
+        if ! _is_project_daemon_pid "$pid" "$project_root"; then
+            printf 'upgrade: %s names pid %s, which is not this project'"'"'s daemon; not signalling it\n' \
+                "$pid_file" "$pid" >&2
+            continue
+        fi
+        if out="$(kill -TERM "$pid" 2>&1)"; then
+            any_killed=1
+        else
+            printf 'upgrade: daemon pid %s ended before SIGTERM (%s)\n' "$pid" "$out" >&2
         fi
     done
     # Give terminated daemons a moment to shut sockets before checkout runs.
@@ -501,8 +513,49 @@ _stop_running_daemons() {
     return 0
 }
 
+# _is_project_daemon_pid PID PROJECT_ROOT - is PID a live daemon server for PROJECT_ROOT?
+#
+# The shell twin of process_verification's _is_daemon_server_process and
+# _extract_project_root (upgrade.sh must run with no venv): the daemon cli
+# module followed by a start/restart subcommand, and a project root taken from
+# --project-root, else from the interpreter's venv path. Fails closed: a pid
+# that is gone, <= 1, this shell, or unattributable is not a daemon of ours.
+_is_project_daemon_pid() {
+    local pid="$1" root="${2%/}" args word prev="" module_seen=0 launch_seen=0
+    local flag_root="" derived=""
+    local -a words
+    [ "$pid" -gt 1 ] && [ "$pid" -ne "$$" ] || return 1
+    if ! args="$(ps -o args= -p "$pid")"; then
+        return 1
+    fi
+    read -r -a words <<< "$args"
+    [ "${#words[@]}" -gt 0 ] || return 1
+    for word in "${words[@]}"; do
+        if [ "$module_seen" -eq 1 ] && { [ "$word" = start ] || [ "$word" = restart ]; }; then
+            launch_seen=1
+        fi
+        case "$word" in
+            *claude_code_hooks_daemon.daemon.cli*) module_seen=1 ;;
+            --project-root=*) flag_root="${word#--project-root=}" ;;
+        esac
+        [ "$prev" = "--project-root" ] && flag_root="$word"
+        prev="$word"
+    done
+    [ "$launch_seen" -eq 1 ] || return 1
+    if [ -n "$flag_root" ]; then
+        derived="$flag_root"
+    else
+        case "${words[0]}" in
+            */.claude/hooks-daemon/untracked/venv*) derived="${words[0]%%/.claude/hooks-daemon/untracked/venv*}" ;;
+            */untracked/venv*) derived="${words[0]%%/untracked/venv*}" ;;
+            *) return 1 ;;
+        esac
+    fi
+    [ "${derived%/}" = "$root" ]
+}
+
 _info "Stopping daemon (best-effort, PID-only)..."
-_stop_running_daemons "$DAEMON_DIR"
+_stop_running_daemons "$DAEMON_DIR" "$PROJECT_ROOT"
 
 # Step 5: Fetch tags and determine target version
 #

@@ -20,7 +20,6 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
-import signal
 import subprocess
 import sys
 import tempfile
@@ -28,6 +27,8 @@ import textwrap
 import time
 from pathlib import Path
 from typing import Final
+
+import psutil
 
 REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[1]
 BASH: Final[str] = shutil.which("bash") or "/bin/bash"
@@ -282,13 +283,23 @@ class Sandbox:
         raise AssertionError("the background build never released the venv lock")
 
     def cleanup(self) -> None:
-        """Stop the stand-in daemon process, if a test started one."""
+        """Stop the stand-in daemon process, if a test started one.
+
+        Its 60 s sleep may have run out long before teardown, freeing the pid
+        in the PID file for any process to reuse (Plan 00466 N59). So the pid
+        is signalled only while its environment still names THIS sandbox's
+        PID file, which the stand-in inherited and nothing else carries, and
+        through a psutil handle that re-checks the start time before signalling.
+        """
         if self.pid.exists():
             pid = int(self.pid.read_text().strip())
             try:
-                os.kill(pid, signal.SIGTERM)
-            except ProcessLookupError:
-                # Already gone: its 60s sleep ran out before teardown.
+                stand_in = psutil.Process(pid)
+                if stand_in.environ().get("CLAUDE_HOOKS_PID_PATH") == str(self.pid):
+                    stand_in.terminate()
+                else:
+                    print(f"pid {pid} is no longer the stand-in daemon", file=sys.stderr)
+            except psutil.NoSuchProcess:
                 print(f"stand-in daemon pid {pid} had already exited", file=sys.stderr)
         shutil.rmtree(self.runtime)
 

@@ -35,6 +35,7 @@ import time
 from pathlib import Path
 from typing import Final
 
+import psutil
 import pytest
 
 from tests.venv_bootstrap_sandbox import fake_clock_ahead
@@ -610,6 +611,21 @@ class TestADetachedBuildIsBoundedAndNamed:
         _wait_for_lock_release(daemon_dir)
 
 
+def _signal_build(pid: int, sig: int, tmp_path: Path) -> None:
+    """Signal the build process the driver reported, once it is proven to be this test's.
+
+    The pid came from the driver's output. It is signalled only while its
+    environment still carries this test's own ``HOME``, which nothing outside
+    the test has (Plan 00466 N59), and through a psutil handle that re-checks
+    the start time before it signals.
+    """
+    build = psutil.Process(pid)
+    assert build.environ().get("HOME") == str(
+        tmp_path / "home"
+    ), f"pid {pid} is not this test's build process; refusing to signal it"
+    build.send_signal(sig)
+
+
 def _strays(pattern: str) -> list[str]:
     """Processes whose whole command line is ``pattern`` (pgrep excludes itself)."""
     probe = subprocess.run(  # nosec B603 B607 - fixed argv, no shell
@@ -631,7 +647,7 @@ class TestOnlyATimeoutIsATimeout:
         time.sleep(1)
         pid = int(_fields(_run("hook", daemon_dir, env).stdout)["pid"][0])
 
-        os.kill(pid, signal.SIGTERM)
+        _signal_build(pid, signal.SIGTERM, tmp_path)
         _wait_for_lock_release(daemon_dir)
 
         log = Path(first["log"][0]).read_text()
@@ -777,7 +793,7 @@ class TestTheWatchdogNeverOutlivesItsBuild:
         time.sleep(0.7)
         build_pid = int(_fields(_run("hook", daemon_dir, env).stdout)["pid"][0])
 
-        os.kill(build_pid, signal.SIGKILL)
+        _signal_build(build_pid, signal.SIGKILL, tmp_path)
 
         # The orphaned job finishes its 2s uv run; the watchdog must be gone
         # one poll after the KILL, well inside the 6s bound.
@@ -819,6 +835,92 @@ class TestTheWatchdogNeverOutlivesItsBuild:
         assert fields["status"] == ["137"], stopped.stderr
         with pytest.raises(ProcessLookupError):
             os.killpg(int(fields["job"][0]), 0)
+
+
+#: How long the watchdog's target sleeps when nothing signals it.
+_WATCHED_TARGET_SECONDS: Final[int] = 3
+
+
+def _watch(tmp_path: Path, prelude: str) -> dict[str, list[str]]:
+    """Run ``_vb_watchdog`` past its deadline on a sleeping child of the harness shell.
+
+    The target is the harness's own ``$!``, so whatever the watchdog does, it
+    can only ever signal a process this test started. The target's exit status
+    says what happened to it: 143 if the watchdog's TERM reached it, 0 if it
+    was left to finish its short sleep.
+    """
+    ran = subprocess.run(
+        [
+            BASH,
+            "-c",
+            f'source "{DRIVER}"\n'
+            f"{prelude}\n"
+            f"sleep {_WATCHED_TARGET_SECONDS} < /dev/null &\n"
+            'target="$!"\n'
+            '_vb_watchdog "$target" 0\n'
+            'status=0; wait "$target" || status=$?\n'
+            'echo "status=$status"',
+        ],
+        capture_output=True,
+        text=True,
+        env=_env(tmp_path, with_uv=None, extra={"STATE": str(tmp_path / "seen")}),
+        timeout=_TIMEOUT_SECONDS,
+        check=False,
+    )
+    return _fields(ran.stdout)
+
+
+class TestTheWatchdogSignalsOnlyTheProcessItWasGiven:
+    """Plan 00466 N59: a live pid at the bound is not proof it is still the build.
+
+    A build KILLed just after one poll frees its pid before the next. The
+    watchdog records the build's start time at launch and TERMs only a pid
+    that still carries it.
+    """
+
+    def test_the_same_process_is_terminated_at_the_bound(self, tmp_path: Path) -> None:
+        fields = _watch(tmp_path, prelude="")
+
+        assert fields["status"] == [str(128 + signal.SIGTERM)]
+
+    def test_a_pid_now_carrying_another_identity_is_not_signalled(self, tmp_path: Path) -> None:
+        # The first identity read records one process; every later read sees
+        # another, which is what a reused pid looks like.
+        reused = (
+            "_vb_process_identity() {\n"
+            '    if [ -e "$STATE" ]; then echo "second process"; '
+            'else : > "$STATE"; echo "first process"; fi\n'
+            "}"
+        )
+
+        fields = _watch(tmp_path, prelude=reused)
+
+        assert fields["status"] == ["0"], "the watchdog signalled a pid with another identity"
+
+    def test_the_identity_survives_an_exec_of_the_same_process(self, tmp_path: Path) -> None:
+        # A process that execs keeps its pid and start time; an identity that
+        # changed there would stop the watchdog enforcing the bound at all.
+        inner = f'source "{DRIVER}"; echo "$BEFORE $(_vb_process_identity "$$")"'
+        ran = subprocess.run(
+            [
+                BASH,
+                "-c",
+                f'source "{DRIVER}"\n'
+                'BEFORE="$(_vb_process_identity "$$")"\n'
+                "export BEFORE\n"
+                f"exec {BASH} -c '{inner}'",
+            ],
+            capture_output=True,
+            text=True,
+            env=_env(tmp_path, with_uv=None),
+            timeout=_TIMEOUT_SECONDS,
+            check=False,
+        )
+
+        assert ran.returncode == 0, ran.stderr
+        before, after = ran.stdout.split()
+        assert before == after
+        assert before.isdigit()
 
 
 class TestStalenessIsJudgedByTheFilesystemClock:
