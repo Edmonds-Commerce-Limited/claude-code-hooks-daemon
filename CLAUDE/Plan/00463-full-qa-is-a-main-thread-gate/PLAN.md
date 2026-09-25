@@ -230,6 +230,20 @@ one place every route ends up, whatever launched it: pytest itself.
 - The plan merges AFTER Plan 00466's N24 ledger, whose deadline now fails
   CLOSED on a chain timeout (M7's own budget finding: a chain timeout must
   never read as an allow for a SUB-scoped guard).
+- **M7 verified on THIS branch (round 9d), deterministically.** A mid-exchange
+  relay timeout for a POSITIVELY SEEN full run (bare `pytest`) still fails
+  OPEN here: `relay/hooks_relay.rs`'s `mid_exchange_fail` writes `{}` and
+  exits 0 by design once its own `--timeout-ms` budget is spent post-connect.
+  Proven with a real relay binary against a fake Unix-socket server that
+  accepts the connection, reads the request to EOF, and never replies --
+  the elapsed time tracks the configured budget by a ratio, not an absolute
+  wall-clock guess, so the result does not depend on host load. Pinned as
+  `tests/integration/test_relay_mid_exchange_timeout_fails_open.py`, which
+  will FAIL once N24's fail-closed fix lands on this branch -- deliberately,
+  so the merge cannot silently drop the finding. Not independently re-fixed
+  here: N24 is the active, much larger effort closing this exact gap (the
+  relay binary, its build/deploy pipeline and CI asset baking), already 8+
+  review rounds deep; a parallel fix here would fork it.
 
 ### Phase 2: Deliver
 
