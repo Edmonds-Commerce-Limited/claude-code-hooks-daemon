@@ -9,6 +9,39 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N59 — A signal is sent to a PID nobody proved is the intended process, and it killed the container twice
+
+**Found by the infra owner.** The container died with exit 137 at 11:07 and
+11:36 UTC on 2026-09-25, taking every agent, gate and session with it. The
+dev VM showed no OOM kill and no external kill, so the kill came from inside.
+
+**Why the first two deaths happened (proven).** N53's uncommitted B2 work had
+`run_git` call `os.killpg(os.getpgid(process.pid), SIGKILL)` on timeout.
+Its tests patch `subprocess.Popen` with a plain `MagicMock`. A `MagicMock` pid
+coerces to `1` through `__index__`, and `os.getpgid(1)` is `1` here, because
+PID 1 is `tini`, the container's init. So a test that reached the timeout path
+ran `killpg(1, SIGKILL)` and ended the container. Both deaths came about 10 s
+after an N53 fixer ran those tests (11:07:16 and 11:35:54). The daemon restart
+at 11:35:59 is not the cause: `cmd_stop` signals only a pid that
+`read_pid_file(..., verify_daemon=True)` proved is a daemon.
+
+**The class is wider than N53.** On main, `install/client_validator.py` reads a
+pid from a `daemon*.pid` file and sends SIGTERM, then SIGKILL, with no identity
+check. PID files survive a container restart, and a restarted container reuses
+small PIDs, so a stale file can name `claude` itself.
+
+**Remedy (in progress):**
+
+- a signal with a nonzero number goes only to a pid proven to be the intended
+  process: a verified daemon, or a child this code started in its own session
+  that still leads its group;
+- a detector that fails QA on any `os.kill` or `os.killpg` whose pid is not
+  proven that way;
+- a test-suite safety net that refuses any signal to pid 1, to init's group,
+  or to the test runner's own group or ancestors;
+- a guard on N53's branch in `_kill_process_group`: only a real int pid above
+  1 that leads its own group, and never this process's own group.
+
 ### N58 — R-CHMOD-WORLD-WRITABLE denies a safe chmod when a later argument contains digits
 
 **Found by N53 review 2.** `chmod 755 f && echo <path>` was denied as
