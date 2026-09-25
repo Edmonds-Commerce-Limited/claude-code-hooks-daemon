@@ -1085,6 +1085,57 @@ class TestEnvironmentSetupProducersRunNoQa:
         assert match.fail_closed
 
 
+class TestTheEnvironmentSetupAllowlistTrustsTheSubcommandToo:
+    """Review 8 M3: the review 7 allowlist trusted a program name whatever it was asked to do.
+
+    ``pyenv exec cat f`` and ``eval "$(ssh-agent bash -c 'pytest tests')"``
+    both run something OTHER than the producer's own documented shape, so
+    neither is a shell-setup producer -- only the exact (program, subcommand)
+    pair the reference names is.
+    """
+
+    @staticmethod
+    def _tree(tmp_path: Path) -> Path:
+        (tmp_path / ".git").mkdir()
+        (tmp_path / "tests" / "unit" / "qa").mkdir(parents=True)
+        (tmp_path / "full.sh").write_text("pytest tests\n", encoding="utf-8")
+        return tmp_path
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "pyenv exec cat full.sh | bash",
+            "rbenv exec cat full.sh | bash",
+            "conda run cat full.sh | bash",
+            "direnv exec . cat full.sh | bash",
+            "bash <(direnv exec . cat full.sh)",
+            "source <(brew cat full.sh)",
+            "source <(pyenv exec python -c 'print(\"pytest tests\")')",
+            "source <(conda run python -c 'print(\"pytest tests\")')",
+            'eval "$(pyenv exec cat full.sh)"',
+            'eval "$(cat full.sh completion)"',
+            "source <(cat full.sh completion bash)",
+            'eval "$(awk 1 full.sh completion)"',
+            'eval "$(./ssh-agent -s)"',
+            "eval \"$(ssh-agent bash -c 'pytest tests')\"",
+        ],
+    )
+    def test_a_producer_naming_something_other_than_its_setup_shape_is_denied(
+        self, tmp_path: Path, command: str
+    ) -> None:
+        assert find_full_qa_invocation(command, _patterns(), cwd=self._tree(tmp_path)), command
+
+    def test_a_local_script_named_ssh_agent_is_not_trusted_by_name_alone(
+        self, tmp_path: Path
+    ) -> None:
+        root = self._tree(tmp_path)
+        fixture = root / "fx"
+        fixture.mkdir()
+        (fixture / "ssh-agent").write_text("pytest tests\n", encoding="utf-8")
+        command = 'eval "$(fx/ssh-agent)"'
+        assert find_full_qa_invocation(command, _patterns(), cwd=root)
+
+
 class TestWhatCannotBeSeenFailsClosed:
     """Review 5: a construct whose run cannot be seen is denied when it may be the suite.
 

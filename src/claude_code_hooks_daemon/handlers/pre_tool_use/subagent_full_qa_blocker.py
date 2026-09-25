@@ -1922,20 +1922,41 @@ class _Output:
 
 #: Programs whose output is shell STATE (exports, aliases, functions) to set
 #: up an interpreter or a tool, never a QA command: none of them read a file
-#: (review 7 m2). Kept short and named, not guessed at, because trusting a
-#: producer blindly is a decision about specific programs' own behaviour,
-#: not a structural property the command line can prove.
-_ENV_SETUP_PROGRAMS: Final[frozenset[str]] = frozenset(
-    {"ssh-agent", "pyenv", "rbenv", "nodenv", "direnv", "conda", "brew"}
-)
+#: (review 7 m2). Matched on the exact SUBCOMMAND the reference documents,
+#: never on the program's name alone (review 8 M3): trusting a producer
+#: blindly is a decision about a specific program's own behaviour, not a
+#: structural property the command line can prove, and a program's OTHER
+#: subcommands (``pyenv exec``, ``direnv exec``, ``conda run``) run an
+#: arbitrary command, not shell state.
+_ENV_SETUP_SUBCOMMANDS: Final[Mapping[str, frozenset[str]]] = {
+    "pyenv": frozenset({"init"}),
+    "rbenv": frozenset({"init"}),
+    "nodenv": frozenset({"init"}),
+    "direnv": frozenset({"export"}),
+    "brew": frozenset({"shellenv"}),
+}
+#: ``conda shell.bash hook``, ``conda shell.zsh hook``, ...: the shell name
+#: varies, the ``shell.`` prefix and the trailing ``hook`` do not.
+_CONDA: Final[str] = "conda"
+_CONDA_SHELL_PREFIX: Final[str] = "shell."
+_CONDA_HOOK_WORD: Final[str] = "hook"
+#: ``ssh-agent`` with only its own flags (``-s``, ``-c``: which shell syntax
+#: to print) and no command of its own -- ``ssh-agent <command>`` runs
+#: ``<command>``, which is not shell setup.
+_SSH_AGENT: Final[str] = "ssh-agent"
+_SSH_AGENT_FLAGS: Final[frozenset[str]] = frozenset({"-s", "-c"})
 #: A shell completion script is the one shape of this that IS structural,
 #: whatever program prints it: `<anything> completion <shell>` is always
-#: shell function definitions, under a convention many tools share.
+#: shell function definitions, under a convention many tools share -- but
+#: only in exactly this position, with the shell name the only operand after
+#: it (review 8 M3): `cat f completion` is not a completion producer just
+#: because the word `completion` appears somewhere in its arguments.
 _COMPLETION_WORD: Final[str] = "completion"
+_COMPLETION_WORDS: Final[int] = 2
 
 
 def _is_environment_setup_producer(words: Sequence[str]) -> bool:
-    """Whether a producer only sets up shell state, never a QA command (review 7 m2).
+    """Whether a producer only sets up shell state, never a QA command (review 7 m2, review 8 M3).
 
     ``eval "$(ssh-agent -s)"``, ``eval "$(pyenv init -)"`` and
     ``source <(kubectl completion bash)`` run no QA and cannot: none of
@@ -1943,13 +1964,30 @@ def _is_environment_setup_producer(words: Sequence[str]) -> bool:
     SEEN protects nothing here. Denying them anyway (the direction taken by
     review 6 M2 for an unknown producer) is sound for a project file, but
     has no escape for shell setup, since this handler holds no state
-    between one Bash call and the next.
+    between one Bash call and the next. A producer word that is a PATH
+    (``./ssh-agent``, ``fx/ssh-agent``) is never trusted: ``command_word``
+    strips the directory, so a same-named project file would otherwise pass
+    as the real tool.
     """
     if not words:
         return False
-    if _COMPLETION_WORD in words[1:]:
-        return True
-    return command_word(words[0]) in _ENV_SETUP_PROGRAMS
+    head = words[0]
+    if _PATH_SEPARATOR in head:
+        return False
+    name = command_word(head)
+    rest = words[1:]
+    if name == _SSH_AGENT:
+        return all(word in _SSH_AGENT_FLAGS for word in rest)
+    if name == _CONDA:
+        return (
+            len(rest) == 2
+            and rest[0].startswith(_CONDA_SHELL_PREFIX)
+            and rest[1] == _CONDA_HOOK_WORD
+        )
+    subcommands = _ENV_SETUP_SUBCOMMANDS.get(name)
+    if subcommands is not None:
+        return bool(rest) and rest[0] in subcommands
+    return len(rest) == _COMPLETION_WORDS and rest[0] == _COMPLETION_WORD
 
 
 def _producer_output(words: list[str]) -> _Output:
