@@ -88,6 +88,21 @@ chmod never fails; it now stubs `chmod` as a shell function that fails for
 one hook file, the same technique `test_settings_deploy_lib.py` uses for
 `cp`.
 
+Review 3 found two more evasions of the hand-written `if <root check>: ...`
+shape, both closed: a `pass`-only branch opposite a substantive one (`if root: pass else: assert ...`), and an `assert` gated by identity with no
+`else` at all. Both needed a new `_root_polarity` helper to tell which
+branch actually runs AS ROOT — only a no-op on that branch is a problem in a
+container that is always root; the reverse (no-op on the non-root branch) is
+fine and must not be flagged, or `getuid_used_non_skip` (already in the
+`_SHOULD_NOT_FIND` corpus) would false-positive. One evasion is left as a
+documented, owner-referred residual: `try: <op that only raises PermissionError as non-root> except PermissionError: return` followed by an
+unconditional skip has no syntactic root check anywhere — the
+root-dependence is a runtime property (what `open()` does), not something a
+static AST scan can read. It is tracked as
+`_KNOWN_RESIDUALS["try_except_permission_pass"]` in the detector's own test
+file, asserted to stay uncaught so a future fix flips that assertion red
+rather than the note going stale.
+
 The rule is recorded in `CLAUDE/QA.md`, next to the other test requirements.
 
 ### N55 — `register_all` ignores a handler's `get_default_enabled()` when its config block is absent

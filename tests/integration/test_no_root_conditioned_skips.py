@@ -48,6 +48,24 @@ and a conftest collection hook all evaded it, because each is a different
   own spelling (case-insensitively) names root/uid/gid/privilege/sudo; it is
   reported as `kind="unproven"` instead, since the alternative is treating
   "cannot analyse" as "cannot be a violation".
+- **Vacuous-branch analysis** (review 3, B1): a hand-written `if <root
+  check>: ...` can make the real check vacuous without ever calling anything
+  this file already recognises as skip-like — a `pass`-only branch opposite
+  a substantive one (`_is_vacuous_pass_guard`, kind `"vacuous-guard"`), or an
+  `assert` gated by identity with no `else` at all (kind `"vacuous-assert"`).
+  Both need `_root_polarity` to tell which branch runs AS ROOT, since only
+  that branch being a no-op is a problem in a container that is always root
+  — the reverse (a no-op on the non-root branch) is fine and must not be
+  flagged.
+
+**Known residual** (review 3, also B1): `try_except_permission_pass` —
+`try: <op raising PermissionError only as non-root> except PermissionError:
+return` followed by an unconditional `pytest.skip(...)` — has no syntactic
+root check anywhere; the root-dependence is a property of what the operation
+DOES at runtime, not of any expression this static scan can read. This is an
+OWNER REFERRAL, not a silently-accepted gap: `_KNOWN_RESIDUALS` below asserts
+it stays uncaught, so a future fix that closes it flips that assertion red
+instead of drifting unnoticed. See `CLAUDE/QA.md`.
 
 Plan 00466 N56: the owner set the rule directly. This container, and the
 dogfood server, run as root — so a root-guarded skip is a test that never
@@ -294,6 +312,15 @@ def _resolve_context(tree: ast.Module) -> _ResolutionContext:
         elif isinstance(node, ast.Assign) and len(node.targets) == 1:
             if isinstance(node.targets[0], ast.Name) and isinstance(node.value, ast.Lambda):
                 ctx.lambdas[node.targets[0].id] = node.value
+            # `_checks = {'root': lambda: ...}` then `_checks['root']()` — one
+            # level of dict-subscript indirection on a lambda, keyed the same
+            # way `_resolved_bare_call_name` renders the call site so the
+            # fixed-point loop below resolves it exactly like a bare lambda.
+            elif isinstance(node.targets[0], ast.Name) and isinstance(node.value, ast.Dict):
+                dict_name = node.targets[0].id
+                for key, value in zip(node.value.keys, node.value.values, strict=True):
+                    if isinstance(key, ast.Constant) and isinstance(value, ast.Lambda):
+                        ctx.lambdas[_dict_subscript_lambda_name(dict_name, key.value)] = value
 
     for assign in assigns:
         for name, _value in _assign_targets(assign):
@@ -412,7 +439,22 @@ def _call_with_substituted_params(call: ast.Call, ctx: _ResolutionContext) -> as
 # --------------------------------------------------------------------------
 
 
+def _dict_subscript_lambda_name(dict_name: str, key: object) -> str:
+    """A synthetic name for a lambda stored in a dict literal under `key`,
+    shared by the collection pass (`_resolve_context`) and the lookup
+    (`_resolved_bare_call_name`) so `_checks['root']()` resolves through
+    `ctx.lambdas`/`ctx.root_funcs` exactly like a bare zero-arg lambda call.
+    """
+    return f"{dict_name}[{key!r}]"
+
+
 def _resolved_bare_call_name(func: ast.expr, ctx: _ResolutionContext) -> str:
+    if (
+        isinstance(func, ast.Subscript)
+        and isinstance(func.value, ast.Name)
+        and isinstance(func.slice, ast.Constant)
+    ):
+        return _dict_subscript_lambda_name(func.value.id, func.slice.value)
     if isinstance(func, ast.Name) and func.id in ctx.call_aliases:
         return ctx.call_aliases[func.id]
     return _bare_name(_dotted_name(func))
@@ -612,6 +654,49 @@ def _is_root_expr(node: ast.expr, ctx: _ResolutionContext) -> bool:
     return kind is not None
 
 
+def _root_polarity(node: ast.expr, ctx: _ResolutionContext) -> bool | None:
+    """Whether `node` (already known to be `_is_root_expr`) evaluates `True`
+    when the process IS root, `False` when it evaluates `True` only when the
+    process is NOT root, or `None` when this scan can't tell.
+
+    Needed to tell which branch of an `if` is "the root branch" — unlike
+    `_is_root_expr`, which only proves the condition is IDENTITY-related at
+    all, this decides the DIRECTION. An unclear polarity must resolve to
+    `None`, never a guess: guessing wrong would flag code that is actually
+    fine (an assertion that only needs to run as root, which it does, every
+    time, in a container that is always root).
+    """
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+        inner = _root_polarity(node.operand, ctx)
+        return None if inner is None else not inner
+
+    if isinstance(node, ast.Compare) and len(node.ops) == 1:
+        left, op, right = node.left, node.ops[0], node.comparators[0]
+        left_kind = _identity_kind(left, ctx)
+        right_kind = _identity_kind(right, ctx)
+        if left_kind is not None or right_kind is not None:
+            names_root = (
+                _contains_zero(left)
+                or _contains_zero(right)
+                or _is_root_string_constant(left)
+                or _is_root_string_constant(right)
+                or (left_kind is not None and right_kind is not None)
+            )
+            if names_root:
+                if isinstance(op, ast.Eq):
+                    return True
+                if isinstance(op, ast.NotEq):
+                    return False
+        return None
+
+    # A bare identity value/record used truthily: a nonzero uid is truthy
+    # and means NON-root, so a bare `if os.geteuid():` is True when NOT root.
+    if _identity_kind(node, ctx) is not None:
+        return False
+
+    return None
+
+
 # --------------------------------------------------------------------------
 # Reason-text analysis — independent of the condition (Plan 00351's shape)
 # --------------------------------------------------------------------------
@@ -750,23 +835,80 @@ def _guarded_action(stmts: list[ast.stmt]) -> tuple[str, ast.stmt] | None:
     return None
 
 
+def _is_pass_only(stmts: list[ast.stmt]) -> bool:
+    """Whether `stmts` is non-empty and does nothing but `pass`."""
+    return bool(stmts) and all(isinstance(stmt, ast.Pass) for stmt in stmts)
+
+
+def _is_noop_or_empty(stmts: list[ast.stmt]) -> bool:
+    return not stmts or _is_pass_only(stmts)
+
+
+def _is_vacuous_pass_guard(
+    test: ast.expr, body: list[ast.stmt], orelse: list[ast.stmt], ctx: _ResolutionContext
+) -> bool:
+    """`if <root check>: pass else: <real check>` — review 3's
+    `match_guard_pass`. Neither branch calls anything this scan already
+    recognises as skip-like, so `_guarded_action` sees nothing to report,
+    but the branch that runs AS ROOT does nothing while the other branch —
+    which never runs in a container that is always root — does the real
+    work. A `pass` is functionally the same early-exit-for-root shape as a
+    `return`/`skip`, just spelled as "do nothing" instead of "leave now".
+
+    Polarity matters here, unlike `_guarded_action`: the reverse shape
+    (`pass` on the NON-root branch, real work on the root branch) is fine —
+    the real work still runs, every time, since this container is always
+    root — so an unclear polarity must not be flagged.
+    """
+    polarity = _root_polarity(test, ctx)
+    if polarity is None:
+        return False
+    root_branch, other_branch = (body, orelse) if polarity else (orelse, body)
+    return _is_pass_only(root_branch) and bool(other_branch) and not _is_noop_or_empty(other_branch)
+
+
+def _contains_assert(stmts: list[ast.stmt]) -> bool:
+    return any(isinstance(stmt, ast.Assert) for stmt in _non_nested_statements(stmts))
+
+
 def _if_guarded_findings(
     source: str, tree: ast.Module, ctx: _ResolutionContext
 ) -> list[RootConditionedSkip]:
     """`if <root check>: pytest.skip(...)` / `self.skipTest(...)` / `return` —
-    hand-written, in either the `if` or the `else` branch.
+    hand-written, in either the `if` or the `else` branch. Two further shapes
+    make the real check vacuous without ever calling anything skip-like:
+    a `pass`-only branch opposite a substantive one (`_is_vacuous_pass_guard`),
+    and an `assert` gated by identity with no `else` at all — one identity
+    outcome runs the assertion, the other silently runs nothing.
     """
     found: list[RootConditionedSkip] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.If) or not _is_root_expr(node.test, ctx):
             continue
         guarded = _guarded_action(node.body) or _guarded_action(node.orelse)
-        if guarded is None:
+        if guarded is not None:
+            kind, _stmt = guarded
+            found.append(
+                RootConditionedSkip(line=node.lineno, kind=kind, snippet=_snippet(source, node))
+            )
             continue
-        kind, _stmt = guarded
-        found.append(
-            RootConditionedSkip(line=node.lineno, kind=kind, snippet=_snippet(source, node))
-        )
+        if _is_vacuous_pass_guard(node.test, node.body, node.orelse, ctx):
+            found.append(
+                RootConditionedSkip(
+                    line=node.lineno, kind="vacuous-guard", snippet=_snippet(source, node)
+                )
+            )
+            continue
+        if (
+            not node.orelse
+            and _contains_assert(node.body)
+            and _root_polarity(node.test, ctx) is False
+        ):
+            found.append(
+                RootConditionedSkip(
+                    line=node.lineno, kind="vacuous-assert", snippet=_snippet(source, node)
+                )
+            )
     return found
 
 
@@ -1182,6 +1324,29 @@ class C:
 @pytest.mark.skipif(C.ROOT, reason='x')
 def test_a(): ...
 """,
+    # -- review 3 (B1, still open after fix round 2) ------------------------
+    "match_guard_pass": """
+import os, pytest
+def test_a():
+    if os.geteuid() == 0:
+        pass
+    else:
+        assert 1 == 2
+""",
+    "assert_only_when_nonroot": """
+import os, pytest
+def test_a(tmp_path):
+    p = tmp_path / 'f'
+    p.touch(); p.chmod(0)
+    if os.geteuid() != 0:
+        assert not os.access(p, os.R_OK)
+""",
+    "lambda_in_dict": """
+import os, pytest
+_checks = {'root': lambda: os.geteuid() == 0}
+@pytest.mark.skipif(_checks['root'](), reason='x')
+def test_a(): ...
+""",
 }
 
 _SHOULD_NOT_FIND: dict[str, str] = {
@@ -1241,6 +1406,33 @@ def test_a(tmp_path):
 """,
 }
 
+#: Evasion shapes review 3 found are genuine gaps but NOT fixable by static
+#: AST analysis — an OWNER REFERRAL, not a "documented limit" left silently
+#: (the standing rule: that phrase is not itself a terminal state). Each
+#: entry's comment says why, and this dict is asserted NOT caught below, so
+#: the day a future change closes one, that assertion flips red and forces
+#: this comment (and CLAUDE/QA.md's matching note) to be updated rather than
+#: silently going stale.
+_KNOWN_RESIDUALS: dict[str, str] = {
+    # `except PermissionError: return` only ever fires as non-root (root
+    # bypasses the mode bits that would raise it), so `pytest.skip(...)`
+    # right after it always runs as root — but nothing in the source is a
+    # syntactic root check at all; the root-dependence is a property of what
+    # `open()` DOES at runtime, not of any expression this scan can read.
+    # Review 2's own proposed fix is a runtime probe (patch the identity
+    # calls, diff the collected/skipped set under both identities), which is
+    # a different kind of test than this static scanner.
+    "try_except_permission_pass": """
+import os, pytest
+def test_a(tmp_path):
+    try:
+        open('/etc/shadow').read()
+    except PermissionError:
+        return
+    pytest.skip('cannot provoke denial')
+""",
+}
+
 
 class TestEveryEvasionShapeIsCaught:
     """One assertion per shape review 1 (F1, F2) and review 2 (B1) named."""
@@ -1249,6 +1441,23 @@ class TestEveryEvasionShapeIsCaught:
     def test_shape_is_found(self, name: str) -> None:
         found = root_conditioned_skips(_SHOULD_FIND[name])
         assert found, f"{name}: expected a root-conditioned skip to be found"
+
+
+class TestKnownResidualsRemainUncaught:
+    """`_KNOWN_RESIDUALS` — see its module comment. Asserting these stay
+    MISSED (not caught) is deliberate: it turns the day one gets fixed into
+    a failing test here, rather than a silent, unnoticed improvement that
+    leaves the residual note in this file and CLAUDE/QA.md stale.
+    """
+
+    @pytest.mark.parametrize("name", sorted(_KNOWN_RESIDUALS), ids=lambda n: n)
+    def test_shape_is_not_yet_caught(self, name: str) -> None:
+        found = root_conditioned_skips(_KNOWN_RESIDUALS[name])
+        assert found == [], (
+            f"{name}: this is recorded as an uncaught residual (see CLAUDE/QA.md), "
+            f"but the detector now finds {found!r} — update the residual note "
+            "(this file's _KNOWN_RESIDUALS comment and CLAUDE/QA.md) to reflect the fix."
+        )
 
 
 class TestNoFalsePositives:

@@ -82,7 +82,20 @@ while the runner ran considerably more.
   whatever its condition actually tests (the shape Plan 00351 found). A
   reference it cannot resolve (a cross-module import, a class attribute)
   whose own name suggests process identity is reported as unproven rather
-  than silently passed.
+  than silently passed. It also fails on a `pass`-only branch opposite a
+  substantive one, and on an `assert` gated by identity with no `else` at
+  all — both make the real check vacuous without ever calling anything
+  skip-like, and both need to know which branch runs AS ROOT (only a no-op
+  there is a problem, since this container is always root).
+  **Known residual** (owner referral, not silently accepted): `try: <permission-bypassing op> except PermissionError: return` followed by an
+  unconditional `pytest.skip(...)` has no syntactic root check at all — the
+  root-dependence is only observable at runtime (root never raises
+  `PermissionError`), which a static AST scan cannot see. A runtime probe
+  (patch the identity calls, diff the collected/skipped set under both
+  identities) would close it; nothing has attempted that yet. Tracked as
+  `_KNOWN_RESIDUALS["try_except_permission_pass"]` in the detector's own
+  test file, asserted to stay uncaught so a future fix flips that assertion
+  red instead of drifting unnoticed.
 - **Security** (Bandit) — zero HIGH/MEDIUM/LOW issues; only B101 is filtered
 - **Dependencies** (Deptry) — missing (DEP001) and misplaced (DEP004)
 - **Plan QA** / **Docs QA** (`run_corpus_qa.py`) — the `plan-qa --sweep` and
