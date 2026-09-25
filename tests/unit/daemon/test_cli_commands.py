@@ -164,6 +164,60 @@ class TestGetProjectPath:
         # Should find the valid parent installation, not the invalid child
         assert result == tmp_path
 
+    @staticmethod
+    def _enclosing_install_with_nested_config(tmp_path: Path, child_config: str) -> Path:
+        """A valid enclosing install, and a nested project carrying its own config."""
+        parent_claude = tmp_path / ".claude"
+        (parent_claude / "hooks-daemon").mkdir(parents=True)
+        (parent_claude / "hooks-daemon.yaml").write_text(
+            "version: '1.0'\ndaemon:\n  log_level: INFO\n"
+        )
+        child = tmp_path / "nested"
+        (child / ".claude" / "hooks-daemon").mkdir(parents=True)
+        (child / ".claude" / "hooks-daemon.yaml").write_text(child_config)
+        return child
+
+    def test_invalid_config_is_reported_not_replaced_by_the_enclosing_project(
+        self, tmp_path: Path, monkeypatch: Any, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A project's own broken config never falls through to an enclosing one.
+
+        Plan 00466 N24 review 2 P2: the nested project's config failed the
+        schema, so the search walked on upward and the daemon ran on the
+        ENCLOSING repository's config, reporting that file's unrelated error.
+        """
+        child = self._enclosing_install_with_nested_config(
+            tmp_path, "version: '1.0'\ndaemon:\n  log_level: NOT_A_LEVEL\n"
+        )
+        monkeypatch.chdir(child)
+
+        with pytest.raises(SystemExit) as exc_info:
+            get_project_path()
+
+        assert exc_info.value.code == 1
+        assert str(child / ".claude" / "hooks-daemon.yaml") in capsys.readouterr().err
+
+    def test_unparseable_config_is_reported_not_replaced_by_the_enclosing_project(
+        self, tmp_path: Path, monkeypatch: Any
+    ) -> None:
+        """A config that does not parse stops the search at its own project too."""
+        child = self._enclosing_install_with_nested_config(tmp_path, "daemon: [unclosed\n")
+        monkeypatch.chdir(child / ".claude")
+
+        with pytest.raises(SystemExit) as exc_info:
+            get_project_path()
+
+        assert exc_info.value.code == 1
+
+    def test_valid_nested_config_is_its_own_project(self, tmp_path: Path, monkeypatch: Any) -> None:
+        """The nearest config wins when it is valid, as before."""
+        child = self._enclosing_install_with_nested_config(
+            tmp_path, "version: '1.0'\ndaemon:\n  log_level: INFO\n"
+        )
+        monkeypatch.chdir(child)
+
+        assert get_project_path() == child
+
 
 class TestSendDaemonRequest:
     """Tests for send_daemon_request function."""

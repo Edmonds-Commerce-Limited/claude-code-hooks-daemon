@@ -775,6 +775,24 @@ def test_load_transport_config_falls_back_to_defaults_on_malformed_yaml(
     assert any("hooks-daemon.yaml" in record.message for record in caplog.records)
 
 
+def test_load_transport_config_never_reads_an_enclosing_projects_config(
+    tmp_path: Path,
+) -> None:
+    """A project without its own config gets the defaults, not its parent's.
+
+    Plan 00466 N24 review 2 P2: config discovery walked upward past the
+    project root, so a nested project took the ENCLOSING repository's config.
+    """
+    (tmp_path / ".claude").mkdir()
+    (tmp_path / ".claude" / "hooks-daemon.yaml").write_text(
+        "daemon:\n  transport:\n    relay_enabled: true\n"
+    )
+    nested = tmp_path / "nested"
+    (nested / ".claude").mkdir(parents=True)
+
+    assert load_transport_config(nested) == TransportConfig()
+
+
 # ---------------------------------------------------------------------------
 # The guard belongs to ONE checkout (Plan 00364 Task 5.1)
 # ---------------------------------------------------------------------------

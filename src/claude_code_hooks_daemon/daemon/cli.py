@@ -49,7 +49,7 @@ from pydantic import ValidationError as PydanticValidationError
 
 from claude_code_hooks_daemon.config.loader import ConfigLoader
 from claude_code_hooks_daemon.config.models import Config
-from claude_code_hooks_daemon.constants import Timeout
+from claude_code_hooks_daemon.constants import DaemonPath, Timeout
 from claude_code_hooks_daemon.constants.modes import DaemonMode
 from claude_code_hooks_daemon.constants.permissions import FileMode
 from claude_code_hooks_daemon.core.event import EventType
@@ -194,6 +194,12 @@ def get_project_path(override_path: Path | None = None) -> Path:
             if is_inside_daemon_directory(current):
                 current = current.parent
                 continue
+            # A directory carrying its own config IS the project, so the search
+            # stops here whether or not that config is valid. Walking on past a
+            # broken one ran the daemon on an ENCLOSING repository's config and
+            # reported that file's unrelated errors (Plan 00466 N24 review 2 P2).
+            if (claude_dir / DaemonPath.CONFIG_FILE).is_file():
+                return _validate_installation(current)
             # Validate installation based on config
             try:
                 return _validate_installation(current)
