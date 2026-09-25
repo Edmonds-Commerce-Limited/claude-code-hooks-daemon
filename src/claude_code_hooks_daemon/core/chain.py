@@ -1056,7 +1056,10 @@ class HandlerChain:
             for handler in executed_handlers:
                 try:
                     handler.commit_side_effects(hook_input, final_result.decision)
-                except Exception as e:
+                except BaseException as e:
+                    # BaseException for the same reason as the handler loop's
+                    # catch above: a SystemExit here would otherwise escape
+                    # through the dispatcher and end the daemon process.
                     logger.exception("Handler %s crashed in commit_side_effects", handler.name)
                     final_result.context.append(
                         f"Handler side-effect commit exception in {handler.name}: "

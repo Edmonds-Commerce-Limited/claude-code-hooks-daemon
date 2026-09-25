@@ -2429,6 +2429,27 @@ class TestSideEffectCommit:
         assert result.result.decision == Decision.ALLOW
         assert any("commit exploded" in line for line in result.result.context)
 
+    @pytest.mark.parametrize("exc", [SystemExit("commit exit"), KeyboardInterrupt("commit int")])
+    def test_a_base_exception_from_commit_does_not_escape_the_chain(
+        self, exc: BaseException
+    ) -> None:
+        """mA2's shape at the commit site: ``SystemExit``/``KeyboardInterrupt``
+        from ``commit_side_effects`` must not escape and kill the daemon."""
+        chain = HandlerChain()
+
+        class _BaseExceptionCommit(CommittingHandler):
+            def commit_side_effects(
+                self, hook_input: dict[str, Any], chain_decision: Decision
+            ) -> None:
+                raise exc
+
+        chain.add(_BaseExceptionCommit("boom", priority=10, terminal=False))
+
+        result = chain.execute({"tool_name": "Bash"})
+
+        assert result.result.decision == Decision.ALLOW
+        assert any(type(exc).__name__ in line for line in result.result.context)
+
     def test_a_crashed_handler_is_not_committed(self) -> None:
         chain = HandlerChain()
         crasher = CommittingHandler("crasher", priority=10, raise_exception=ValueError("x"))

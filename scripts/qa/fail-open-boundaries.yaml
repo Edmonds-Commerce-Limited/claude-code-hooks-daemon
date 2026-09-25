@@ -62,7 +62,7 @@ boundaries:
 
   - surface: src/claude_code_hooks_daemon/core/chain.py
     scope: _execute_handlers_body
-    construct: "except Exception"
+    construct: "except BaseException"
     ordinal: 0
     verdict: fail-open
     induced_by: "any handler raising while judging the event"
@@ -84,10 +84,17 @@ boundaries:
       thin wrapper that binds/resets the per-dispatch cancellation token
       around the actual loop, renamed `_execute_handlers_body` -- again the
       boundary itself is unchanged, only its enclosing function's name.
+      Plan 00466 N40 review 2 mA2: widened from `except Exception` to
+      `except BaseException`, because SystemExit/KeyboardInterrupt both
+      inherit from BaseException, not Exception, and used to sail straight
+      through this catch (and through BoundedDispatcher's own
+      future.result() re-raise) and kill the daemon process instead of
+      denying the one call. The construct name changed; the boundary and
+      its fail-open/fail-closed split are otherwise unchanged.
 
   - surface: src/claude_code_hooks_daemon/core/chain.py
     scope: _execute_handlers_body
-    construct: "except Exception"
+    construct: "except BaseException"
     ordinal: 1
     verdict: fail-open
     induced_by: "a handler raising in commit_side_effects, after the decision"
@@ -99,7 +106,9 @@ boundaries:
       this construct moved from `execute` into `_execute_handlers` alongside
       the row above; the boundary itself is unchanged. Plan 00466 N40 m2:
       renamed to `_execute_handlers_body` alongside the row above, same
-      reason.
+      reason. Catches BaseException for the same reason as the row above
+      (Plan 00466 N40 review 2 mA2): a SystemExit from a commit would
+      otherwise end the daemon process.
 
   - surface: src/claude_code_hooks_daemon/core/chain.py
     scope: execute
