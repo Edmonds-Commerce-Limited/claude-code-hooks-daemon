@@ -55,7 +55,18 @@ while the runner ran considerably more.
   the check with the install line, it never skips. Never reach zero with a
   suppression comment or a rule downgrade — see
   [development/LSP.md](development/LSP.md)
-- **Tests** (Pytest) — **95% coverage minimum**
+- **Tests** (Pytest) — **95% coverage minimum**. **No test may skip, xfail or
+  early-return because the process is root.** This container, and the
+  dogfood server, run as root, so a root-conditioned skip is a test that
+  never runs where the work happens (Plan 00466 N56). Root bypasses file
+  mode bits, so a permission check needs a different fault instead of a
+  skip: monkeypatch the specific `os`/`open`/`Path` call to raise
+  `PermissionError`, replace the file with a directory or a dangling
+  symlink, or patch the exact predicate the code under test evaluates.
+  `tests/integration/test_no_root_conditioned_skips.py` statically scans
+  every test module for `os.geteuid()`/`os.getuid()` gating a `skipif`,
+  `xfail`, or a hand-written `if <root check>: skip/xfail/return` and fails
+  on any match — it is not opt-out.
 - **Security** (Bandit) — zero HIGH/MEDIUM/LOW issues; only B101 is filtered
 - **Dependencies** (Deptry) — missing (DEP001) and misplaced (DEP004)
 - **Plan QA** / **Docs QA** (`run_corpus_qa.py`) — the `plan-qa --sweep` and

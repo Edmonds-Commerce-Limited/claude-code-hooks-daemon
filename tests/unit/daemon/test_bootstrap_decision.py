@@ -197,19 +197,29 @@ class TestMissingPreconditions:
     def test_untracked_not_writable(
         self, daemon_dir: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """The untracked-writable precondition fails when the check reports unwritable.
+
+        Linux `access(2)` grants W_OK to a privileged real UID regardless of
+        the mode bits, so `os.access(untracked, os.W_OK)` reports True even
+        after `chmod(0o500)` when the process is root — this container runs
+        as root (Plan 00466 N56). Monkeypatch `os.access` itself instead,
+        which is exactly the call the precondition makes and is what a
+        genuinely-unwritable directory would report.
+        """
         self._patch_all_good(monkeypatch)
         untracked = daemon_dir / "untracked"
-        untracked.chmod(0o500)  # read+execute, no write
-        try:
-            # Running as root (inside YOLO container) ignores chmod. Skip in that case —
-            # the precondition's writability guard is exercised by the non-root CI job.
-            if os.geteuid() == 0:
-                pytest.skip("chmod write-guard ineffective as root; covered by non-root CI")
-            decision = can_inline_bootstrap(daemon_dir)
-            assert decision.allowed is False
-            assert "untracked-writable" in decision.missing
-        finally:
-            untracked.chmod(0o700)
+        real_access = os.access
+
+        def _fake_access(path: Path, mode: int) -> bool:
+            if path == untracked and mode == os.W_OK:
+                return False
+            return real_access(path, mode)
+
+        monkeypatch.setattr("claude_code_hooks_daemon.daemon.paths.os.access", _fake_access)
+
+        decision = can_inline_bootstrap(daemon_dir)
+        assert decision.allowed is False
+        assert "untracked-writable" in decision.missing
 
     def test_untracked_parent_absent_is_createable(
         self, daemon_dir: Path, monkeypatch: pytest.MonkeyPatch
