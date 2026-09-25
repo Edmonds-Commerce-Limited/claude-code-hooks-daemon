@@ -76,6 +76,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N42 | Quoted-heredoc blanking hides text that bash executes from the Bash command guards                        | N38 review         | 🔄 In progress        |
 | N39 | Nine unit tests fail in a whole-suite run and pass when their files run alone                             | guard-defects fix  | 🔄 In progress        |
 | N47 | The ccy supervisor and Claude Code's settings.json both own effort, and they fight                        | Owner              | 🔄 In progress        |
+| N48 | `sed_blocker`'s git-commit exemption reaches across a newline                                             | N38 review 2       | ⬜ Open               |
 
 ## Tasks
 

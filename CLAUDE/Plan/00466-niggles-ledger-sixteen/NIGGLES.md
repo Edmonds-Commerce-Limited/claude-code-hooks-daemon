@@ -9,6 +9,20 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N48 — `sed_blocker`'s git-commit exemption reaches across a newline
+
+**Found by N38 review 2** (pre-existing, not caused by that branch). The
+exemption lets `sed` through when it follows `git commit` with no command
+separator in between. A newline is a command separator, but the exemption
+does not treat it as one. So `git commit -m x` on one line, followed by a
+line that runs `sed -i`, is allowed. The command runs sed.
+
+**Candidate remedy:** use the shared shell segmentation, so that a newline
+ends the `git commit` segment. The exemption then covers only a `sed` inside
+that segment's message argument. RED tests: sed on the next line is denied;
+sed after a newline inside a quoted message is still exempt. This belongs to
+the shell-parser consolidation (N41).
+
 ### N47 — The ccy supervisor and Claude Code's settings.json both own effort, and they fight
 
 **Found by the owner.** They asked for medium effort. Claude Code reads effort
