@@ -213,6 +213,21 @@ _HEAD_MOVING_GIT_SUBCOMMANDS: Final[frozenset[str]] = frozenset(
 _GIT_PATH_OPTIONS: Final[frozenset[str]] = frozenset({"-C", "--git-dir", "--work-tree"})
 #: git global options that take a separate value to skip.
 _GIT_VALUE_OPTIONS: Final[frozenset[str]] = frozenset({"-c", "--namespace", "--exec-path"})
+#: `git remote` subcommands that change what a remote points to or exists at
+#: all (review2 MINOR 2). `-v`/`show`/a bare `remote` only list/read.
+_REMOTE_MUTATING_SUBCOMMANDS: Final[frozenset[str]] = frozenset(
+    {"add", "remove", "rm", "rename", "set-url", "set-branches", "set-head", "prune"}
+)
+#: `git config` flags that write rather than read a value.
+_CONFIG_MUTATING_FLAGS: Final[frozenset[str]] = frozenset(
+    {"--add", "--unset", "--unset-all", "--replace-all", "--rename-section", "--remove-section",
+     "-e", "--edit"}
+)
+#: `git config` flags that read a value, so a `key value` positional PAIR is
+#: not what decides (a value can itself look like a second positional word).
+_CONFIG_READ_ONLY_FLAGS: Final[frozenset[str]] = frozenset(
+    {"--get", "--get-all", "--get-regexp", "--get-urlmatch", "-l", "--list", "--get-color"}
+)
 
 # --- segmentation and the inert-text exemption ------------------------------
 
@@ -408,8 +423,44 @@ def _bash_sets_bypass_env_var(command: str, cwd: str | None) -> bool:
     return steers and _command_runs_upgrade(command, cwd)
 
 
+def _remote_mutates(words: list[str], index: int) -> bool:
+    """Whether `git remote ...` (subcommand word at ``index``) changes a remote.
+
+    A bare `git remote`, or one followed only by `-v`/`show`/`get-url`, lists
+    or reads; `add`/`remove`/`rename`/`set-url` (etc.) change what `origin`
+    points to or whether it exists (review2 MINOR 2: a `fetch --tags --force`
+    that follows trusts whatever `origin` NAMES).
+    """
+    for word in words[index + 1 :]:
+        if word.startswith("-"):
+            continue
+        return word in _REMOTE_MUTATING_SUBCOMMANDS
+    return False
+
+
+def _config_mutates(words: list[str], index: int) -> bool:
+    """Whether `git config ...` (subcommand word at ``index``) writes a value.
+
+    A read (`--get`, `-l`, or a bare `key` with no value) is not this; a
+    write is a mutating flag, or two positional words (`key value`).
+    """
+    positional = 0
+    for word in words[index + 1 :]:
+        if word in _CONFIG_MUTATING_FLAGS:
+            return True
+        if word in _CONFIG_READ_ONLY_FLAGS:
+            return False
+        if word.startswith("-"):
+            continue
+        positional += 1
+    return positional >= 2
+
+
 def _git_moves_daemon_clone(words: list[str], clone_cwd: bool) -> bool:
-    """Whether a `git ...` word list moves the daemon clone to another commit.
+    """Whether a `git ...` word list moves the daemon clone to another commit,
+    or redirects where it next fetches FROM (review2 MINOR 2: `remote`/`config`
+    writes to `origin` are the same class of route -- neither moves HEAD by
+    itself, but both decide what the next `checkout`/`fetch` lands on).
 
     ``clone_cwd`` says an earlier stage changed into the clone, so a git with
     no `-C` acts on it.
@@ -435,7 +486,15 @@ def _git_moves_daemon_clone(words: list[str], clone_cwd: bool) -> bool:
         if word.startswith("-"):
             index += 1
             continue
-        return names_clone and word in _HEAD_MOVING_GIT_SUBCOMMANDS
+        if not names_clone:
+            return False
+        if word in _HEAD_MOVING_GIT_SUBCOMMANDS:
+            return True
+        if word == "remote":
+            return _remote_mutates(words, index)
+        if word == "config":
+            return _config_mutates(words, index)
+        return False
     return False
 
 
@@ -482,12 +541,19 @@ def _has_upgrade_approvals_segment(path: str) -> bool:
 
 
 def _is_venv_version_stamp(path: str) -> bool:
-    """Whether ``path`` is a `.daemon-version` stamp under `untracked/venv*/`."""
+    """Whether ``path`` is a `.daemon-version` stamp under `untracked/venv*/`.
+
+    review2 N2: the LAST `untracked` segment, not the first. A project that
+    itself sits under an `untracked/` ancestor -- this repo's own worktrees,
+    `untracked/worktrees/<name>/` -- has an outer `untracked` earlier in the
+    path than the venv's own `untracked/venv*/`; matching the first one
+    checked `worktrees` against `venv*` and missed the real stamp.
+    """
     parts = Path(path).parts
     if not parts or parts[-1] != STAMP_FILENAME:
         return False
     try:
-        index = parts.index("untracked")
+        index = len(parts) - 1 - parts[::-1].index("untracked")
     except ValueError:
         return False
     return index + 1 < len(parts) and parts[index + 1].startswith("venv")

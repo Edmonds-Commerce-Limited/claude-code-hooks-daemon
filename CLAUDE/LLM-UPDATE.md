@@ -208,11 +208,18 @@ It prints `REQUIRED READING`, which lists:
 The gate's FROM side is the version this project has INSTALLED, never the
 daemon checkout: the venv's `.daemon-version` stamp, else the version in the
 project's committed `.claude/HOOKS-DAEMON.md`. A fresh clone, a manual
-checkout and a re-run therefore all see the real range. With neither, the gate
-cannot rule anything out: it lists every pre-upgrade task up to the target
-that applies to the project and needs the owner.
+checkout and a re-run therefore all see the real range -- but only the venv
+stamp counts as verified. `.claude/HOOKS-DAEMON.md` is an ordinary tracked
+file an agent edits routinely, so a FROM read from it that has caught up to
+or passed the target is never taken as "nothing to install": the gate treats
+that range as unknown and needs the owner, the same answer it gives a venv
+stamp equal to the target with no matching gated-install receipt. With
+neither a stamp nor a usable marker, the gate cannot rule anything out
+either: it lists every pre-upgrade task up to the target that applies to the
+project and needs the owner.
 
-Nothing in the caller's environment steers the gate or speaks for it:
+Nothing in the caller's environment steers the GATE PROCESS ITSELF, or speaks
+for it:
 
 - The stamp is read only from one of this daemon's own `untracked/venv-*`
   directories, never from `HOOKS_DAEMON_VENV_PATH`.
@@ -224,14 +231,30 @@ Nothing in the caller's environment steers the gate or speaks for it:
 - It runs under `env -i` with only that fixed `PATH`, and with Python's `-I -S`
   (no site-packages, no `.pth` code), so no `PYTHON*`, `GIT_*`, `LD_*` variable
   or exported shell function reaches it.
-  `timeout`, `git` and every other tool it or Layer 2 uses to decide come from
-  the same fixed locations.
+  `timeout`, `git` and every other tool it or the detection scan uses to decide
+  come from the same fixed locations.
 - Its verdict comes back in a file Layer 2 creates for that run, headed by a
-  one-time nonce. A zero exit without that file stops the upgrade, so a wrapper
-  that only prints a verdict cannot pass for the gate.
+  one-time nonce. A zero exit without that file stops the upgrade, so a
+  stdout-printing wrapper cannot pass for the gate. The nonce travels on the
+  gate's own argv, though, which any process running as the same user can
+  read (`/proc` or equivalent); the file's `O_EXCL`/`0600` creation defeats a
+  STALE or REPLAYED verdict, not a CONCURRENT same-user process racing to
+  read the nonce and write its own verdict first.
 - A `**Detect**` scan covers tracked files and untracked ones the project's own
   `.gitignore` files do not exclude. `.git/info/exclude`, a global excludes
   file and `GIT_*` variables cannot hide a call site from it.
+
+**What this does and does not defend against.** The hardening above is scoped
+to the gate subprocess and its detection scan; it is what stands between the
+CALLER'S environment and the DECISION. Layer 1 still starts Layer 2 as an
+ordinary `bash` resolved from the caller's `PATH`, with the caller's
+environment inherited (Layer 2 needs that: building a venv, running `uv` and
+deploying files are not sandboxed operations). So the approval gate is a
+procedural control against an agent following the documented upgrade route,
+backed by a best-effort guard (`upgrade_approval_guard`) that recognises that
+route's shape. It is not a boundary against a same-user process determined to
+install by hand instead -- no in-process check can be that, because the same
+user can always run the daemon's own code directly.
 
 `upgrade_approval_guard` also denies an agent that steers the rest of the
 upgrade. It recognises an upgrade by what the command is, not by the file's
@@ -259,13 +282,19 @@ ask the user to run it.
 Moving the clone by hand is the other way around the gate. `checkout`,
 `switch`, `pull`, `merge`, `rebase`, `reset`, `cherry-pick`, `am` or `revert`
 on `.claude/hooks-daemon` installs a version the gate never read, so the same
-guard denies it. `fetch`, `show`, `log` and `describe` are allowed.
+guard denies it. `fetch`, `show`, `log` and `describe` are allowed. So is
+reading the clone's remote and config; writing them is not -- `git remote set-url`/`add`/`rename`/`remove` and a `git config` write on that clone are
+denied too, because Layer 1's `fetch --tags --force` trusts whatever `origin`
+names next.
 
 A venv stamp that already says the target is not taken on trust. `hooks-daemon repair` after a manual checkout writes the same stamp. The installed == target
 shortcut therefore counts only when the gate itself recorded letting that exact
 version through (`.claude/hooks-daemon/untracked/upgrade-approvals/gated-install.json`,
 written when it proceeds). Otherwise the version installed before it cannot be told, and the
-owner decides.
+owner decides. That record is unsigned JSON, protected only by the same
+write-guard as every other marker under `upgrade-approvals/` -- it is a
+procedural record, not a cryptographic one, and no stronger a defence than
+the approval marker it sits beside.
 
 With nothing to list, the upgrade continues without comment, as it does when
 the gate itself installed the target already. Otherwise it never infers consent

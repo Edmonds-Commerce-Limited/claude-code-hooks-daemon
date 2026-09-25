@@ -26,13 +26,11 @@ Before starting the upgrade:
   ```
 - [ ] Verify daemon is stopped
   ```bash
-  cd .claude/hooks-daemon
-  .claude/hooks-daemon/bin/hooks-daemon stop
+  bin/hooks-daemon stop
   ```
 - [ ] Check for uncommitted changes
   ```bash
-  cd .claude/hooks-daemon
-  git status
+  git -C .claude/hooks-daemon status
   ```
 - [ ] Read "Breaking Changes" section below (if any)
 
@@ -222,8 +220,7 @@ handlers:
 ### 7. Restart Daemon
 
 ```bash
-cd .claude/hooks-daemon
-.claude/hooks-daemon/bin/hooks-daemon restart
+bin/hooks-daemon restart
 ```
 
 **Expected output**:
@@ -278,8 +275,7 @@ new_config:
 ### 1. Verify Version Updated
 
 ```bash
-cd .claude/hooks-daemon
-cat src/claude_code_hooks_daemon/version.py
+cat .claude/hooks-daemon/src/claude_code_hooks_daemon/version.py
 ```
 
 **Expected output**:
@@ -291,8 +287,7 @@ __version__ = "X.Z.0"
 ### 2. Verify Daemon Starts
 
 ```bash
-cd .claude/hooks-daemon
-.claude/hooks-daemon/bin/hooks-daemon status
+bin/hooks-daemon status
 ```
 
 **Expected output** (daemon running):
@@ -352,8 +347,7 @@ echo '{"hook_event_name":"SessionStart","source":"new"}' | \
 If you're developing handlers:
 
 ```bash
-cd .claude/hooks-daemon
-./scripts/qa/run_all.sh
+.claude/hooks-daemon/scripts/qa/run_all.sh
 ```
 
 **Expected output**:
@@ -368,8 +362,7 @@ Coverage: 95%+
 This directory includes an automated verification script:
 
 ```bash
-cd .claude/hooks-daemon
-bash CLAUDE/UPGRADES/vX/vX.Y-to-vX.Z/verification.sh
+bash .claude/hooks-daemon/CLAUDE/UPGRADES/vX/vX.Y-to-vX.Z/verification.sh
 ```
 
 **Expected output**:
@@ -389,8 +382,7 @@ If upgrade fails or causes issues:
 ### 1. Stop Daemon
 
 ```bash
-cd .claude/hooks-daemon
-.claude/hooks-daemon/bin/hooks-daemon stop
+bin/hooks-daemon stop
 ```
 
 ### 2. Restore Configuration Backup
@@ -401,23 +393,36 @@ cp .claude/hooks-daemon.yaml.backup .claude/hooks-daemon.yaml
 
 ### 3. Revert Daemon Code
 
-**Option A - Git** (if you used git for upgrade):
+**Option A - Re-run the upgrade script** (recommended; an agent can run this
+too). The script handles a downgrade the same way it handles an upgrade --
+through the pre-deploy gate, which may stop and ask the project owner to
+approve it. This folds into Step 4 below; skip Options B and C if you use it:
 
 ```bash
-cd .claude/hooks-daemon
-git checkout vX.Y  # Previous working version
-git checkout main  # If using main branch, revert commit
+bash .claude/hooks-daemon/scripts/upgrade.sh --project-root "$PWD" v{PREV_VERSION}
 ```
 
-**Option B - Manual** (if you backed up directory):
+**Option B - Manual git checkout, OWNER ONLY.** `cd`-ing into
+`.claude/hooks-daemon/`, and any `git checkout`/`switch`/`reset` (etc.) of
+that clone, is denied for an agent -- it is exactly the route the pre-deploy
+gate exists to require approval for. The project owner runs this in their own
+terminal instead, never an agent:
 
 ```bash
-cd .claude
-rm -rf hooks-daemon
-mv hooks-daemon.backup hooks-daemon
+git -C .claude/hooks-daemon checkout vX.Y  # Previous working version
+git -C .claude/hooks-daemon checkout main  # If using main branch, revert commit
+```
+
+**Option C - Manual directory swap** (if you backed up the directory):
+
+```bash
+rm -rf .claude/hooks-daemon
+mv .claude/hooks-daemon.backup .claude/hooks-daemon
 ```
 
 ### 4. Reinstall Previous Dependencies
+
+Skip this step if Step 3 already used Option A.
 
 ```bash
 bash .claude/hooks-daemon/scripts/upgrade.sh --project-root "$PWD" v{PREV_VERSION}

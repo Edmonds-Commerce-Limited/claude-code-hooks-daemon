@@ -261,8 +261,17 @@ class TestReadingNeedsAcknowledgement:
     def test_a_downgrade_crosses_no_guide(
         self, daemon_dir: Path, upgrades: Path, project: Path, untracked: Path
     ) -> None:
+        """A downgrade FROM a real venv stamp is trusted and proceeds silently.
+
+        ``installed_stamp`` stands in for the venv's own ``.daemon-version``
+        (review2 BLOCKER 1: an unstamped FROM at or past the target is never
+        trusted, so this scenario must be backed by a stamp to mean what it
+        says).
+        """
         _guide(upgrades, "v3.64.0-to-v3.65.0")
-        report = _gate(daemon_dir, project, untracked, "3.65.0", "3.64.0")
+        report = _gate(
+            daemon_dir, project, untracked, "3.65.0", "3.64.0", installed_stamp="v3.65.0"
+        )
         assert report.verdict is GateVerdict.PROCEED
         assert "downgrade" in format_gate_report(report)
 
@@ -427,6 +436,62 @@ class TestUnknownRange:
     ) -> None:
         report = _acked(daemon_dir, project, untracked, "3.64.0", "0123abc")
         assert report.verdict is GateVerdict.NEEDS_APPROVAL
+
+
+class TestUntrustedFrom:
+    """Review2 BLOCKER 1: an untrusted FROM at or past the target is unknown.
+
+    ``from_untrusted`` is what :func:`main` sets whenever ``from_version``
+    did not come from a venv stamp naming a release -- in production, the
+    ``HOOKS-DAEMON.md`` fallback. It must never by itself certify "nothing to
+    install": that marker is an ordinary tracked file an agent edits
+    routinely, unlike a venv stamp bound to a ``gated-install.json`` receipt.
+    """
+
+    def _untrusted(
+        self, daemon_dir: Path, project: Path, untracked: Path, frm: str, to: str
+    ) -> GateReport:
+        return evaluate_gate(
+            daemon_dir=daemon_dir,
+            project_root=project,
+            from_version=frm,
+            to_version=to,
+            include_unreleased=False,
+            acknowledgement=None,
+            untracked_dir=untracked,
+            from_untrusted=True,
+        )
+
+    def test_equal_to_the_target_needs_the_owner(
+        self, daemon_dir: Path, project: Path, untracked: Path
+    ) -> None:
+        report = self._untrusted(daemon_dir, project, untracked, "4.0.0", "4.0.0")
+        assert report.verdict is GateVerdict.NEEDS_ACKNOWLEDGEMENT
+        assert not report.already_installed
+        assert report.escalations, "an unknown range must not sail through silently"
+
+    def test_ahead_of_the_target_needs_the_owner_not_a_downgrade(
+        self, daemon_dir: Path, project: Path, untracked: Path
+    ) -> None:
+        report = self._untrusted(daemon_dir, project, untracked, "5.0.0", "4.0.0")
+        assert report.verdict is GateVerdict.NEEDS_ACKNOWLEDGEMENT
+        assert not report.downgrade
+        assert "downgrade" not in format_gate_report(report)
+
+    def test_behind_the_target_is_unaffected(
+        self, daemon_dir: Path, project: Path, untracked: Path
+    ) -> None:
+        report = self._untrusted(daemon_dir, project, untracked, "3.64.0", "3.65.0")
+        assert report.verdict is GateVerdict.PROCEED
+
+    def test_trusted_from_at_the_target_is_not_escalated_by_this_rule(
+        self, daemon_dir: Path, project: Path, untracked: Path
+    ) -> None:
+        """``from_untrusted`` defaults to False: a caller vouching for its own
+        FROM (a real stamp, or a fixed test scenario) keeps deciding on the
+        normal range logic, same as before this fix."""
+        report = _gate(daemon_dir, project, untracked, "4.0.0", "4.0.0")
+        assert report.verdict is GateVerdict.PROCEED
 
 
 class TestInstalledVersion:
@@ -780,6 +845,33 @@ class TestMain:
         digest = err.split("--skip-reading-confirmation=", 1)[1].split()[0]
         assert main([*argv, "--acknowledgement", digest]) == 0
 
+    def test_a_repair_route_stamp_claiming_the_target_is_not_stated_as_settled(
+        self,
+        daemon_dir: Path,
+        project: Path,
+        untracked: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """review2 N1: the stamp line must not read as fact when it is about
+        to be checked against (and can be rejected by) the gated-install
+        record -- the repair-route case printed 'Installed version: 4.0.0
+        (from the venv stamp)' immediately followed by 'an unknown version'.
+        """
+        argv = self._argv(
+            daemon_dir,
+            project,
+            untracked,
+            "--installed-stamp",
+            "v4.0.0",
+            "--to",
+            "4.0.0",
+            "--target-stamp",
+            "v4.0.0",
+        )
+        main(argv)
+        err = capsys.readouterr().err
+        assert "checked against the gated-install record next" in err
+
     def test_from_comes_from_the_install_not_the_checkout(
         self, daemon_dir: Path, upgrades: Path, project: Path, untracked: Path
     ) -> None:
@@ -787,6 +879,54 @@ class TestMain:
         _write(project / ".claude" / "HOOKS-DAEMON.md", "> Generated on 2026-09-01 (v3.64.0)\n")
         argv = self._argv(daemon_dir, project, untracked, "--to", "3.65.0")
         assert main(argv) == GateVerdict.NEEDS_ACKNOWLEDGEMENT.exit_code
+
+    def test_a_doc_marker_equal_to_the_target_does_not_manufacture_already_installed(
+        self,
+        daemon_dir: Path,
+        project: Path,
+        untracked: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """review2 BLOCKER 1: no venv stamp, doc marker says the target itself.
+
+        A missing stamp plus an edited ``HOOKS-DAEMON.md`` must not read as
+        "already installed": that marker is an ordinary tracked file an agent
+        edits routinely, and it names no receipt a real gated install would
+        have left. The range must be treated as unknown and sent to the
+        owner, never PROCEED.
+        """
+        _write(project / ".claude" / "HOOKS-DAEMON.md", "> Generated on 2026-09-01 (v4.0.0)\n")
+        argv = self._argv(
+            daemon_dir, project, untracked, "--to", "4.0.0", "--target-stamp", "v4.0.0"
+        )
+        first = main(argv)
+        assert first == GateVerdict.NEEDS_ACKNOWLEDGEMENT.exit_code
+        err = capsys.readouterr().err
+        assert "already installed" not in err
+        digest = err.split("--skip-reading-confirmation=", 1)[1].split()[0]
+        assert main([*argv, "--acknowledgement", digest]) == GateVerdict.NEEDS_APPROVAL.exit_code
+        assert (
+            gated_install_stamp(untracked, daemon_dir=daemon_dir, project_root=project) is None
+        ), "a range the gate refused to read must record no install"
+
+    def test_a_doc_marker_ahead_of_the_target_is_not_a_silent_downgrade(
+        self,
+        daemon_dir: Path,
+        project: Path,
+        untracked: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """A tampered marker naming a version PAST the target must also escalate."""
+        _write(project / ".claude" / "HOOKS-DAEMON.md", "> Generated on 2026-09-01 (v5.0.0)\n")
+        argv = self._argv(
+            daemon_dir, project, untracked, "--to", "4.0.0", "--target-stamp", "v4.0.0"
+        )
+        first = main(argv)
+        assert first == GateVerdict.NEEDS_ACKNOWLEDGEMENT.exit_code
+        err = capsys.readouterr().err
+        assert "downgrade" not in err
+        digest = err.split("--skip-reading-confirmation=", 1)[1].split()[0]
+        assert main([*argv, "--acknowledgement", digest]) == GateVerdict.NEEDS_APPROVAL.exit_code
 
     def test_an_approval_used_is_written_to_the_verdict_file_for_the_caller_to_consume(
         self,

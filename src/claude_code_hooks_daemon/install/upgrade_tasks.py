@@ -27,6 +27,7 @@ import fnmatch
 import os
 import re
 import shutil
+import stat
 import subprocess
 from dataclasses import dataclass
 from enum import Enum
@@ -293,13 +294,50 @@ def _is_skipped(rel: str) -> bool:
     )
 
 
+def _dir_trust_from_stat(info: os.stat_result) -> bool:
+    """Whether a ``stat`` result names a directory safe to trust for a tool
+    (review2 MAJOR 2): root-owned, and neither group- nor world-writable. A
+    directory this same process could itself write to -- Homebrew's
+    ``/opt/homebrew/bin`` and ``/usr/local/bin`` are user-owned by default on
+    macOS -- is not trusted merely for being listed. An agent running AS root
+    defeats this by construction (root owns every directory here regardless
+    of its permission bits); no in-process check can defend against that, and
+    LLM-UPDATE says so. Split from :func:`_trusted_dirs` so the policy is
+    testable on a plain ``os.stat_result`` -- constructing one costs no real
+    directory of a uid this process does not have.
+    """
+    return info.st_uid == 0 and not (info.st_mode & (stat.S_IWGRP | stat.S_IWOTH))
+
+
+def _trusted_dirs(candidates: list[str] | None = None) -> list[str]:
+    """Of ``candidates`` (default: every ``TRUSTED_TOOL_PATH`` entry), the ones
+    :func:`_dir_trust_from_stat` accepts; the caller skips the rest and keeps
+    looking rather than treating a rejection as fatal.
+    """
+    trusted: list[str] = []
+    for candidate in TRUSTED_TOOL_PATH.split(os.pathsep) if candidates is None else candidates:
+        try:
+            info = Path(candidate).stat()
+        except OSError:
+            continue
+        if _dir_trust_from_stat(info):
+            trusted.append(candidate)
+    return trusted
+
+
+def _trusted_tool_path() -> str:
+    """``TRUSTED_TOOL_PATH``, with every untrusted directory removed."""
+    return os.pathsep.join(_trusted_dirs())
+
+
 def _git_listed_files(project_root: Path) -> list[str] | None:
     """The files git would track or offer to track, or None outside a work tree."""
-    git = shutil.which("git", path=TRUSTED_TOOL_PATH)
+    trusted_path = _trusted_tool_path()
+    git = shutil.which("git", path=trusted_path)
     if git is None:
         return None
     env = {name: os.environ[name] for name in _GIT_ENV_PASSED if name in os.environ}
-    env["PATH"] = TRUSTED_TOOL_PATH
+    env["PATH"] = trusted_path
     result = subprocess.run(
         [git, "-C", str(project_root), *_GIT_LIST_ARGS],
         capture_output=True,

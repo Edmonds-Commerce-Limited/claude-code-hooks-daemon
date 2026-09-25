@@ -22,7 +22,13 @@ returns one verdict:
 The FROM side is what is INSTALLED (:func:`installed_version`): the venv's
 stamp, else the project's committed ``HOOKS-DAEMON.md`` marker. The checkout is
 never asked, because on a fresh clone, a manual checkout or a re-run it already
-sits on the target and would make every range empty.
+sits on the target and would make every range empty. Only the stamp is
+verified, though: the marker is an ordinary tracked file an agent edits
+routinely, so a marker-derived FROM that has caught up to or passed the target
+(``evaluate_gate``'s ``from_untrusted``) is never read as "nothing to
+install" -- it gets ``NEEDS_APPROVAL`` like any other range the gate cannot
+vouch for, the same answer a venv stamp already at the target gets with no
+matching :func:`gated_install_stamp` receipt.
 
 The caller (bash) turns a stop into an abort that puts the daemon checkout
 back on the installed version (Task 1.2), so a stopped upgrade deploys
@@ -392,6 +398,13 @@ def record_gated_install(
     Only an upgrade recorded here counts as installed when the venv stamp
     already equals the target (fresh review MAJOR 1): ``hooks-daemon repair``
     after a manual checkout writes the same stamp with no gate involved.
+
+    review2 MINOR 3, stated plainly: this record is unsigned JSON, protected
+    only by ``upgrade_approval_guard`` denying a write under
+    ``upgrade-approvals/`` by any agent route. It carries no FROM version and
+    nothing binds it to a git commit. A forged marker already grants an
+    upgrade's approval (the same guard, the same predicate); this is not a
+    stronger class of defence than that one, and should not be cited as one.
     """
     payload = _install_binding(daemon_dir, project_root)
     payload[_FIELD_STAMP] = stamp
@@ -551,10 +564,18 @@ def evaluate_gate(
     installed_stamp: str | None = None,
     target_stamp: str | None = None,
     target_ref: str | None = None,
+    from_untrusted: bool = False,
 ) -> GateReport:
     """Read what the upgrade changes and decide whether it may go on.
 
     ``from_version`` is the INSTALLED release (None when unknown).
+    ``from_untrusted`` is True when ``from_version`` did NOT come from a venv
+    stamp that names a release (review2 BLOCKER 1): the committed
+    ``HOOKS-DAEMON.md`` marker it falls back to is an ordinary tracked file an
+    agent edits routinely, so it must never by itself certify that nothing new
+    needs installing. Callers that already know their ``from_version`` is
+    trustworthy (a real stamp, or a test fixing the installed release) leave
+    this False.
     ``acknowledgement`` is the value the caller passed with
     ``--skip-reading-confirmation`` (None when it passed no flag); it counts
     only when it equals this listing's digest. A valid approval is reported in
@@ -599,6 +620,37 @@ def evaluate_gate(
             approval_marker=store.path(untracked_dir, strip_tag_prefix(to_version)),
             approval_state=ApprovalState.ABSENT,
             notes=[f"{target_stamp} is already installed: nothing new to read or approve."],
+        )
+    # review2 BLOCKER 1: an untrusted FROM (the doc marker, not a venv stamp)
+    # that has caught up to or passed the target is exactly as suspect as a
+    # stamp with no matching receipt (checked above), and gets the same
+    # answer: an unknown range, sent to the owner. A trusted FROM (a real
+    # stamp, or a caller that already knows its own installed release) is
+    # unaffected and keeps deciding on the normal range logic below --
+    # including a deliberate downgrade, which this is not: it has no receipt
+    # to lose, only a claim this project never verified.
+    if (
+        from_untrusted
+        and from_version is not None
+        and _is_release(from_version)
+        and _is_release(to_version)
+        and release_tuple(from_version) >= release_tuple(to_version)
+    ):
+        return _unknown_range_report(
+            daemon_dir=daemon_dir,
+            project_root=project_root,
+            from_version=from_version,
+            to_version=to_version,
+            target_ref=ref,
+            include_unreleased=include_unreleased,
+            acknowledgement=acknowledgement,
+            untracked_dir=untracked_dir,
+            unknown_reason=(
+                f"the installed version ({_from_label(from_version)}) is read only from "
+                f"{HOOKS_DAEMON_DOC.as_posix()} (no venv stamp names it), an ordinary tracked "
+                "file an agent edits routinely, and it is not behind the target, so it cannot "
+                "be trusted to show there is nothing new to install"
+            ),
         )
     if from_version is None or not (_is_release(from_version) and _is_release(to_version)):
         return _unknown_range_report(
@@ -843,10 +895,22 @@ def main(argv: list[str] | None = None) -> int:
     )
     if args.from_version is not None:
         from_version: str | None = str(args.from_version)
+        from_untrusted = False
     else:
         from_version, source = installed_version(args.installed_stamp or None, project_root)
+        from_untrusted = source != SOURCE_VENV_STAMP
+        # review2 N1: when the stamp claims the target itself, evaluate_gate
+        # checks it against this install's own gated-install record next and
+        # may reject it (no upgrade through this gate installed it) -- so
+        # this line must not read as the settled answer in that one case.
+        claims_target = (
+            bool(args.installed_stamp)
+            and bool(args.target_stamp)
+            and args.installed_stamp == args.target_stamp
+        )
+        qualifier = ", checked against the gated-install record next" if claims_target else ""
         print(
-            f"Installed version: {from_version or UNKNOWN_VERSION} (from the {source})",
+            f"Installed version: {from_version or UNKNOWN_VERSION} (from the {source}{qualifier})",
             file=sys.stderr,
         )
     report = evaluate_gate(
@@ -860,6 +924,7 @@ def main(argv: list[str] | None = None) -> int:
         installed_stamp=args.installed_stamp or None,
         target_stamp=args.target_stamp or None,
         target_ref=args.target_ref,
+        from_untrusted=from_untrusted,
     )
     print(format_gate_report(report), file=sys.stderr)
     if report.verdict is GateVerdict.PROCEED and args.target_stamp and not report.already_installed:

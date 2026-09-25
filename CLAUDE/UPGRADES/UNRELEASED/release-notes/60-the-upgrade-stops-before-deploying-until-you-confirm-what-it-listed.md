@@ -17,12 +17,16 @@ list continues without comment.
 The gate compares the target with the version you have INSTALLED, not with
 whatever the daemon checkout holds: the venv's version stamp, else the version
 in your committed `.claude/HOOKS-DAEMON.md`. So a fresh clone of your project,
-a checkout moved by hand and a re-run all see the real range. On a stop it
-puts the checkout back on that installed version when it can tell which that
-is; when nothing names it, or the reset fails, the stop says so and prints the
-command that does it. If neither source names a version, the gate cannot rule
-anything out and asks for the owner (see "a breaking upgrade needs the owner's
-one-shot approval").
+a checkout moved by hand and a re-run all see the real range -- but only the
+venv stamp is verified. `.claude/HOOKS-DAEMON.md` is an ordinary tracked file,
+so a version read from it that has caught up to or passed the target is never
+taken on its own as "nothing to install"; the gate asks for the owner instead,
+the same answer a venv stamp already at the target gets with no matching
+gated-install receipt. On a stop it puts the checkout back on that installed
+version when it can tell which that is; when nothing names it, or the reset
+fails, the stop says so and prints the command that does it. If neither source
+names a version, the gate cannot rule anything out and asks for the owner (see
+"a breaking upgrade needs the owner's one-shot approval").
 
 An upgrade script older than the gate (an installed daemon's own
 `scripts/upgrade.sh`, or a pinned `HOOKS_DAEMON_UPGRADE_REF` older than this

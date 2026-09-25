@@ -339,11 +339,21 @@ rather than only matching syntax.
     not. Reason: the documented route runs Layer 1 from a temp file, which
     the name-only check never saw.
   - (e) Layer 1 is NOT re-executed through a canonical path or under
-    `env -i`. Reason: after (a) and (b) the gate no longer depends on the
-    caller's environment, and a whitelisting re-exec would also drop
-    settings the rest of the upgrade legitimately honours, such as
-    `HOOKS_DAEMON_PYTHON` for building the venv (a user's choice) or a proxy.
-    The guard keeps an agent from steering the rest.
+    `env -i`, and Layer 1's own launch of Layer 2 (`bash "$LAYER2_SCRIPT"`,
+    `upgrade.sh:721`) stays an ordinary child process with the caller's `PATH`
+    and full environment inherited. Reason: after (a) and (b) only the GATE
+    SUBPROCESS itself (the standalone script Layer 2 runs under `env -i`
+    with a fixed `PATH`) no longer depends on the caller's environment --
+    Layer 1 and Layer 2 still do, because a whitelisting re-exec of either
+    would drop settings the rest of the upgrade legitimately honours, such as
+    `HOOKS_DAEMON_PYTHON` for building the venv (a user's choice) or a proxy,
+    and Layer 2 does real work (building a venv, running `uv`, deploying
+    files) that is not something a fixed-tool sandbox can do. review2 MAJOR 1:
+    the approval gate is therefore a procedural control against an agent
+    following the documented route, backed by `upgrade_approval_guard`'s
+    best-effort recognition of that route's shape -- not a boundary against a
+    same-user process determined to install by hand instead, which no
+    in-process check can be. The guard keeps an agent from steering the rest.
 
   Pinned by the planted-timeout, planted-git and planted-python cases in
   `test_upgrade_pre_deploy_phase_runs_on_layer1.py`,

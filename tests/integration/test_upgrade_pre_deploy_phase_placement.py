@@ -18,7 +18,9 @@ gate returns; and no environment variable switches it off.
 
 from __future__ import annotations
 
+import os
 import re
+import subprocess
 from pathlib import Path
 from typing import Final
 
@@ -142,7 +144,13 @@ def test_the_installed_version_ignores_the_venv_overrides() -> None:
 
 
 def test_everything_that_feeds_the_gate_runs_on_the_fixed_system_path() -> None:
-    """Fresh review BLOCKER 1b: a tool planted on PATH answered for the gate."""
+    """Fresh review BLOCKER 1b: a tool planted on PATH answered for the gate.
+
+    review2 MAJOR 2: a GATE_SAFE_PATH LOCATION is not necessarily trusted
+    CONTENT (Homebrew's default layout is user-owned), so every function that
+    feeds the gate resolves its tools from the ownership-and-permission
+    filtered `_gate_trusted_path`, never the raw `$GATE_SAFE_PATH` list.
+    """
     text = _script()
     for name in (
         _GATE,
@@ -153,8 +161,70 @@ def test_everything_that_feeds_the_gate_runs_on_the_fixed_system_path() -> None:
         "_restore_target",
         "abort_before_deploy",
     ):
-        assert 'local PATH="$GATE_SAFE_PATH"' in _function_body(text, name), name
+        assert 'PATH="$(_gate_trusted_path)"' in _function_body(text, name), name
     assert re.search(r'^GATE_SAFE_PATH="/usr/bin:/bin:', text, re.MULTILINE)
+
+
+def test_gate_tool_resolves_only_trusted_locations() -> None:
+    body = _function_body(_script(), "_gate_tool")
+    assert '"$(_gate_trusted_path)"' in body
+    assert "GATE_SAFE_PATH" not in body, "must go through the trust filter, not the raw list"
+
+
+def test_only_a_root_owned_unwritable_directory_is_trusted() -> None:
+    """review2 MAJOR 2: an ownership/permission check, not just a fixed list."""
+    body = _function_body(_script(), "_gate_dir_is_trusted")
+    assert "stat -c '%u'" in body or "stat -f '%u'" in body, "owner uid is read"
+    assert '[ "$owner" = "0" ]' in body, "only root-owned directories are trusted"
+    assert "8#022" in body, "group- and world-write bits (022) are rejected"
+
+
+def test_gate_dir_is_trusted_rejects_a_group_or_world_writable_directory(
+    tmp_path: Path,
+) -> None:
+    """Real execution of the pure ownership/permission check, isolated from
+    the rest of Layer 2 (no real upgrade, no network, no venv build)."""
+    # _function_body() stops just before the closing brace (it is meant for
+    # substring assertions, not re-execution), so it is added back here.
+    functions = "\n\n".join(
+        f"{_function_body(_script(), name)}\n}}" for name in ("_gate_dir_is_trusted",)
+    )
+    harness = tmp_path / "harness.sh"
+    harness.write_text(
+        f'#!/bin/bash\nset -uo pipefail\nGATE_SAFE_PATH="/usr/bin:/bin:/usr/sbin:/sbin"\n'
+        f'{functions}\n"$@"\n'
+    )
+    harness.chmod(0o755)
+
+    root_owned_unwritable = tmp_path / "root-like"
+    root_owned_unwritable.mkdir()
+    root_owned_unwritable.chmod(0o755)
+    world_writable = tmp_path / "world-writable"
+    world_writable.mkdir()
+    world_writable.chmod(0o777)
+    group_writable = tmp_path / "group-writable"
+    group_writable.mkdir()
+    group_writable.chmod(0o775)
+
+    # This harness runs as whatever uid the test process has; on the CI/agent
+    # container that is root (uid 0), so `root_owned_unwritable` genuinely
+    # passes the ownership half and the permission bits alone decide.
+    if os.geteuid() != 0:
+        return
+    assert (
+        subprocess.run(
+            ["bash", str(harness), "_gate_dir_is_trusted", str(root_owned_unwritable)],
+            check=False,
+        ).returncode
+        == 0
+    )
+    for unsafe in (world_writable, group_writable):
+        assert (
+            subprocess.run(
+                ["bash", str(harness), "_gate_dir_is_trusted", str(unsafe)], check=False
+            ).returncode
+            != 0
+        ), unsafe
 
 
 def test_imported_shell_functions_are_dropped_before_anything_runs() -> None:
@@ -174,6 +244,13 @@ def test_the_gate_runs_in_a_cleared_environment_and_a_zero_exit_needs_its_verdic
     assert "/dev/urandom" in body
     assert '[ "$nonce_line" != "nonce=$nonce" ]' in body
     assert '[ ! -L "$verdict_file" ] && [ -O "$verdict_file" ]' in body
+
+
+def test_the_verdict_dir_ignores_an_inherited_tmpdir() -> None:
+    """review2 MINOR 1: a bare `mktemp -d` honours inherited TMPDIR, and the
+    upgrade guard denies TMPDIR only on the SAME command as the upgrade."""
+    body = _function_body(_script(), _GATE)
+    assert 'mktemp -d -p /tmp' in body
 
 
 def test_the_used_approval_is_removed_only_on_success_on_both_paths() -> None:

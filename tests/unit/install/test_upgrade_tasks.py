@@ -253,6 +253,80 @@ class TestDetect:
         hits, _total = detect(Detection(pattern="plan-qa", paths=("*.sh",)), root)
         assert [h.path for h in hits] == ["caller.sh"]
 
+    def test_a_git_planted_in_a_writable_trusted_tool_path_entry_does_not_answer(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """review2 MAJOR 2: a fixed system location is not trusted unless it is
+        root-owned and neither group- nor world-writable -- a directory this
+        same process could itself write to (Homebrew's default layout on
+        macOS) must not answer for the scan just for being listed."""
+        root = tmp_path / "repo"
+        root.mkdir()
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        (root / "caller.sh").write_text("plan-qa --json\n")
+        (root / "decoy.txt").write_text("nothing\n")
+        writable_bin = tmp_path / "writable-bin"
+        writable_bin.mkdir()
+        writable_bin.chmod(0o777)
+        fake_git = writable_bin / "git"
+        fake_git.write_text("#!/bin/sh\nprintf 'decoy.txt\\0'\n")
+        fake_git.chmod(0o755)
+        monkeypatch.setattr(
+            upgrade_tasks,
+            "TRUSTED_TOOL_PATH",
+            f"{writable_bin}{os.pathsep}{upgrade_tasks.TRUSTED_TOOL_PATH}",
+        )
+        hits, _total = detect(Detection(pattern="plan-qa", paths=("*.sh",)), root)
+        assert [h.path for h in hits] == ["caller.sh"]
+
+
+class TestTrustedDirs:
+    """review2 MAJOR 2: only a root-owned, non-group/world-writable directory
+    from a fixed tool-path list is trusted to answer for a planted tool."""
+
+    def test_a_root_owned_unwritable_directory_is_trusted(self, tmp_path: Path) -> None:
+        safe = tmp_path / "safe"
+        safe.mkdir()
+        safe.chmod(0o755)
+        assert upgrade_tasks._trusted_dirs([str(safe)]) == [str(safe)]
+
+    def test_a_world_writable_directory_is_not_trusted(self, tmp_path: Path) -> None:
+        unsafe = tmp_path / "world-writable"
+        unsafe.mkdir()
+        unsafe.chmod(0o777)
+        assert upgrade_tasks._trusted_dirs([str(unsafe)]) == []
+
+    def test_a_group_writable_directory_is_not_trusted(self, tmp_path: Path) -> None:
+        unsafe = tmp_path / "group-writable"
+        unsafe.mkdir()
+        unsafe.chmod(0o775)
+        assert upgrade_tasks._trusted_dirs([str(unsafe)]) == []
+
+    def test_a_directory_not_owned_by_root_is_not_trusted(self) -> None:
+        """Homebrew's /opt/homebrew/bin and /usr/local/bin are user-owned by
+        default on macOS: listed in GATE_SAFE_PATH/TRUSTED_TOOL_PATH, but not
+        trusted merely for being named there. The policy is pure over a
+        ``stat`` result (:func:`_dir_trust_from_stat`), so this is checked
+        without needing a directory of a uid this process does not have."""
+        user_owned = os.stat_result((0o40755, 1, 1, 1, 501, 501, 0, 0, 0, 0))
+        assert upgrade_tasks._dir_trust_from_stat(user_owned) is False
+
+    def test_a_root_owned_writable_directory_is_not_trusted(self) -> None:
+        world_writable = os.stat_result((0o40777, 1, 1, 1, 0, 0, 0, 0, 0, 0))
+        assert upgrade_tasks._dir_trust_from_stat(world_writable) is False
+
+    def test_a_root_owned_unwritable_stat_result_is_trusted(self) -> None:
+        safe = os.stat_result((0o40755, 1, 1, 1, 0, 0, 0, 0, 0, 0))
+        assert upgrade_tasks._dir_trust_from_stat(safe) is True
+
+    def test_a_missing_directory_is_skipped(self, tmp_path: Path) -> None:
+        assert upgrade_tasks._trusted_dirs([str(tmp_path / "absent")]) == []
+
+    def test_the_default_candidates_are_trusted_tool_path(self) -> None:
+        assert upgrade_tasks._trusted_tool_path() != ""
+        for directory in upgrade_tasks._trusted_tool_path().split(os.pathsep):
+            assert directory in upgrade_tasks.TRUSTED_TOOL_PATH.split(os.pathsep)
+
 
 class TestShippedPlanQaTask:
     """The shipped 00375 task is critical, so a false positive costs an owner approval."""
