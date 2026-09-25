@@ -201,6 +201,23 @@ class TestAGeneratorThatYieldsTheFailure:
         rules = self._rules_of("        return\n        yield UNPARSED\n")
         assert "return-none-on-error" in rules
 
+    def test_yielding_a_bare_constant_then_stopping_is_still_flagged(self) -> None:
+        """Review 7 n2: ``yield 0`` names nothing about the failure."""
+        rules = self._rules_of("        yield 0\n        return\n")
+        assert "return-none-on-error" in rules
+
+    def test_yielding_none_then_stopping_is_still_flagged(self) -> None:
+        rules = self._rules_of("        yield None\n        return\n")
+        assert "return-none-on-error" in rules
+
+    def test_a_bare_yield_then_stopping_is_still_flagged(self) -> None:
+        rules = self._rules_of("        yield\n        return\n")
+        assert "return-none-on-error" in rules
+
+    def test_yielding_from_an_empty_literal_then_stopping_is_still_flagged(self) -> None:
+        rules = self._rules_of("        yield from ()\n        return\n")
+        assert "return-none-on-error" in rules
+
 
 class TestHeredocPythonExtraction:
     """Gap #2: Python embedded in a shell heredoc must be found and parsed."""

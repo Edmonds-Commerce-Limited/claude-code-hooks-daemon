@@ -2850,9 +2850,10 @@ def _python_code_runs(
                     continue
                 try:
                     shlex.split(literal)
-                except ValueError:
+                except ValueError as error:
                     # Unparsable as shell: prose (an apostrophe, say), not a
                     # command whose absence should fail closed (review 7 M2).
+                    logger.debug("Literal left unparsed, not shell (%s): %r", error, literal)
                     continue
                 yield from _nested(literal, segment, depth)
     operands = _pytest_in_code(code, argv)

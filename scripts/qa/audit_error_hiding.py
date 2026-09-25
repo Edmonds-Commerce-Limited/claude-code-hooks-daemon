@@ -125,6 +125,29 @@ _PYTHON_HEREDOC_START_RE = re.compile(
 _BASH_FUNCTION_START_RE = re.compile(r"^([A-Za-z_]\w*)\s*\(\)\s*\{?\s*$")
 
 
+def _names_the_failure(value: ast.expr) -> bool:
+    """Whether a ``yield``/``yield from`` expression actually reports something (review 7 n2).
+
+    A bare ``yield``, a constant (``yield 0``, ``yield None``) and
+    ``yield from`` an empty literal (``()``, ``[]``, ``{}``, ``set()``) name
+    nothing about the failure -- a caller sees no different a value than an
+    exception-free run would ever produce. Anything else (a name, a call, an
+    f-string) is presumed to carry the failure, as it did before this rule.
+    """
+    if isinstance(value, ast.Yield):
+        return value.value is not None and not isinstance(value.value, ast.Constant)
+    if isinstance(value, ast.YieldFrom):
+        source = value.value
+        if isinstance(source, (ast.Tuple, ast.List, ast.Set)):
+            return bool(source.elts)
+        if isinstance(source, ast.Call) and not source.args and not source.keywords:
+            empty_builders = {"tuple", "list", "set", "dict", "frozenset"}
+            if isinstance(source.func, ast.Name) and source.func.id in empty_builders:
+                return False
+        return True
+    return False
+
+
 class ErrorHidingVisitor(ast.NodeVisitor):
     """AST visitor to detect error hiding patterns."""
 
@@ -199,12 +222,13 @@ class ErrorHidingVisitor(ast.NodeVisitor):
             if isinstance(child, ast.Try):
                 for handler in child.handlers:
                     # A generator that yields a result naming the failure and
-                    # then stops has reported it, not returned None.
+                    # then stops has reported it, not returned None. A
+                    # constant yield (`yield 0`, `yield None`, a bare
+                    # `yield`) or an empty `yield from ()` names nothing
+                    # about the failure, so it does not count (review 7 n2).
                     yielded = False
                     for stmt in handler.body:
-                        if isinstance(stmt, ast.Expr) and isinstance(
-                            stmt.value, (ast.Yield, ast.YieldFrom)
-                        ):
+                        if isinstance(stmt, ast.Expr) and _names_the_failure(stmt.value):
                             yielded = True
                         if isinstance(stmt, ast.Return) and not yielded:
                             # Check if returning None
