@@ -13,6 +13,8 @@ import json
 import os
 import signal
 import socket
+import subprocess
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -662,6 +664,137 @@ class TestCmdStopSignalsOnlyThisProjectsDaemon:
         assert signal.SIGTERM in sent
         assert signal.SIGKILL not in sent
         assert result == 1
+
+
+class TestCmdStopSignalsThroughPidfdWhenAvailable:
+    """Plan 00466 N24 review 3 mi5: closing the TOCTOU between the root proof
+    and the signal that acts on it.
+
+    ``pid`` is a number the kernel is free to recycle the instant the proven
+    process exits; a signal sent by that number after the proof can land on
+    an unrelated process that has since reused it. A pidfd pinned to the
+    exact process instance BEFORE the proof removes that window: every
+    signal below must go out through it, never bare ``os.kill``, whenever
+    one was obtainable.
+    """
+
+    def _args(self, tmp_path: Path) -> argparse.Namespace:
+        claude_dir = tmp_path / ".claude"
+        (claude_dir / "hooks-daemon").mkdir(parents=True)
+        (claude_dir / "hooks-daemon.yaml").write_text("version: '1.0'\n")
+        return argparse.Namespace(project_root=tmp_path)
+
+    def test_sigterm_and_liveness_checks_go_through_the_pidfd_not_os_kill(
+        self, tmp_path: Path
+    ) -> None:
+        """When a pidfd is obtainable, no signal is ever sent by bare pid number."""
+        _SENTINEL_FD = 4321
+        pidfd_signals: list[int] = []
+        bare_kill_calls: list[tuple[int, int]] = []
+
+        def record_pidfd_signal(pidfd: int, sig: int) -> None:
+            assert pidfd == _SENTINEL_FD, "signalled a pidfd other than the one pinned up front"
+            pidfd_signals.append(sig)
+            if sig != 0:
+                return
+            # Liveness check (signal 0): process has already exited by the
+            # first poll, so the loop above can break immediately.
+            raise ProcessLookupError()
+
+        def record_bare_kill(pid: int, sig: int) -> None:
+            bare_kill_calls.append((pid, sig))
+
+        with (
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=_UNREAL_PID),
+            patch("os.pidfd_open", return_value=_SENTINEL_FD) as mock_pidfd_open,
+            patch("os.close") as mock_close,
+            patch("signal.pidfd_send_signal", side_effect=record_pidfd_signal),
+            patch("os.kill", side_effect=record_bare_kill),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.daemon_process_project_root",
+                return_value=RootProof(root=os.path.realpath(tmp_path), refusal=None),
+            ),
+            patch("claude_code_hooks_daemon.daemon.cli.cleanup_pid_file") as mock_cleanup_pid,
+            patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket") as mock_cleanup_sock,
+        ):
+            result = cmd_stop(self._args(tmp_path))
+
+        assert result == 0
+        mock_pidfd_open.assert_called_once_with(_UNREAL_PID, 0)
+        assert signal.SIGTERM in pidfd_signals
+        assert bare_kill_calls == [], f"signalled by bare pid number: {bare_kill_calls}"
+        mock_cleanup_pid.assert_called_once()
+        mock_cleanup_sock.assert_called_once()
+        mock_close.assert_called_once_with(_SENTINEL_FD)
+
+    def test_sigkill_escalation_also_goes_through_the_same_pidfd(self, tmp_path: Path) -> None:
+        """The SIGKILL escalation path reuses the SAME pidfd opened up front --
+        it is not re-opened (and so not re-exposed to the race) at escalation time."""
+        _SENTINEL_FD = 8765
+        pidfd_signals: list[int] = []
+
+        def record_pidfd_signal(pidfd: int, sig: int) -> None:
+            assert pidfd == _SENTINEL_FD
+            if sig == signal.SIGKILL:
+                pidfd_signals.append(sig)
+                raise ProcessLookupError()  # dies as soon as SIGKILL lands
+            if sig != 0:
+                pidfd_signals.append(sig)
+            return None  # SIGTERM, and every liveness poll before SIGKILL: stays alive
+
+        with (
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=_UNREAL_PID),
+            patch("os.pidfd_open", return_value=_SENTINEL_FD),
+            patch("os.close") as mock_close,
+            patch("signal.pidfd_send_signal", side_effect=record_pidfd_signal),
+            patch("os.kill", side_effect=AssertionError("must not signal by bare pid number")),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.daemon_process_project_root",
+                return_value=RootProof(root=os.path.realpath(tmp_path), refusal=None),
+            ),
+            patch("claude_code_hooks_daemon.daemon.cli.cleanup_pid_file"),
+            patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket"),
+            patch("time.sleep"),
+        ):
+            result = cmd_stop(self._args(tmp_path))
+
+        assert result == 0
+        assert signal.SIGTERM in pidfd_signals
+        assert signal.SIGKILL in pidfd_signals
+        mock_close.assert_called_once_with(_SENTINEL_FD)
+
+    def test_open_pidfd_falls_back_to_none_when_the_pid_is_already_gone(self) -> None:
+        """`_open_pidfd` degrades to the bare-pid-number fallback rather than
+        raising, when the pid no longer names a live process."""
+        from claude_code_hooks_daemon.daemon.cli import _open_pidfd
+
+        with patch("os.pidfd_open", side_effect=ProcessLookupError("no such process")):
+            assert _open_pidfd(_UNREAL_PID) is None
+
+    def test_open_pidfd_falls_back_to_none_when_unsupported_by_the_platform(self) -> None:
+        """`_open_pidfd` degrades gracefully on a platform without pidfd_open
+        (pre-3.9 Python, or non-Linux) instead of crashing `cmd_stop`."""
+        from claude_code_hooks_daemon.daemon.cli import _open_pidfd
+
+        with patch("os.pidfd_open", side_effect=AttributeError("no pidfd_open")):
+            assert _open_pidfd(_UNREAL_PID) is None
+
+    def test_pidfd_send_signal_reports_a_dead_target_as_process_lookup_error(self) -> None:
+        """End-to-end with a REAL process: once the pidfd's target has exited,
+        signalling it raises exactly the exception `os.kill` would -- proving
+        the two are interchangeable from every `except ProcessLookupError`
+        in `cmd_stop`, and that the pidfd never silently redirects to
+        whatever process has since reused the pid number."""
+        from claude_code_hooks_daemon.daemon.cli import _signal_proven_pid
+
+        proc = subprocess.Popen([sys.executable, "-c", "pass"])
+        pidfd = os.pidfd_open(proc.pid, 0)  # opened while still live, like `cmd_stop` does
+        try:
+            proc.wait()
+            with pytest.raises(ProcessLookupError):
+                _signal_proven_pid(proc.pid, pidfd, 0)
+        finally:
+            os.close(pidfd)
 
 
 class TestCmdConfig:

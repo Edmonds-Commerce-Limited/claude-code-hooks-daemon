@@ -769,6 +769,48 @@ def cmd_start(args: argparse.Namespace) -> int:
     sys.exit(0)
 
 
+def _open_pidfd(pid: int) -> int | None:
+    """Pin a pidfd to this exact ``pid`` instance, before it is proven.
+
+    Plan 00466 N24 review 3 mi5: opening this BEFORE
+    ``daemon_process_project_root`` closes the microsecond-scale TOCTOU
+    between that proof and the signal ``cmd_stop`` sends on its strength --
+    ``pid`` is just a number the kernel is free to hand to an unrelated new
+    process the instant the proven process exits, so a signal sent by
+    number after the proof can land on that impostor instead. A pidfd
+    names the exact process instance the kernel opened it against:
+    :func:`signal.pidfd_send_signal` through it either reaches that same
+    instance or raises ``ProcessLookupError`` (it has already exited) --
+    never a different process that has since reused the pid number.
+
+    Returns:
+        The pidfd, or ``None`` when ``os.pidfd_open`` is unsupported on this
+        platform (pre-3.9 Python, or non-Linux) or ``pid`` is already gone --
+        callers fall back to signalling by pid number in that case, which
+        only keeps the smaller race this function exists to close, rather
+        than refusing to stop the daemon at all.
+    """
+    try:
+        return os.pidfd_open(pid, 0)
+    except AttributeError:
+        return None
+    except OSError:
+        return None
+
+
+def _signal_proven_pid(pid: int, pidfd: int | None, sig: int) -> None:
+    """Signal the process ``pidfd`` was opened against, when available.
+
+    Raises the same exceptions ``os.kill`` would (``ProcessLookupError``,
+    ``PermissionError``, ...), so every caller built around ``os.kill``'s
+    contract -- the whole of ``cmd_stop`` below -- needs no other change.
+    """
+    if pidfd is not None:
+        signal.pidfd_send_signal(pidfd, sig)
+        return
+    os.kill(pid, sig)
+
+
 def cmd_stop(args: argparse.Namespace) -> int:
     """Stop running daemon.
 
@@ -790,115 +832,128 @@ def cmd_stop(args: argparse.Namespace) -> int:
         print("Daemon not running")
         return 0
 
-    # verify_daemon proves only that the pid is SOME daemon server. Signal it
-    # only once it is proven to serve THIS project: a stale pid file whose pid
-    # was reused by another project's daemon must not get that daemon killed.
-    own_root = os.path.realpath(project_path)
-    proof = daemon_process_project_root(pid)
-    if proof.root is None:
-        print(f"ERROR: {proof.refusal}; refusing to signal it", file=sys.stderr)
-        return 1
-    if proof.root != own_root:
-        # Refuse, and delete nothing (Plan 00466 N24 review 3 mi1): the PID
-        # file may be stale while this project's own daemon still serves the
-        # socket, or the attribution itself may be wrong, and deleting either
-        # file orphans a live daemon.
-        print(
-            f"ERROR: PID {pid} is attributed by {proof.source} to {proof.root}, not to "
-            f"{own_root}; refusing to signal it or delete its PID file and socket. "
-            f"If that is wrong, stop it by hand.",
-            file=sys.stderr,
-        )
-        return 1
-
-    # Send SIGTERM
+    # Pin the pidfd to THIS pid instance before proving anything about it
+    # (mi5, see `_open_pidfd`) -- every signal below goes through it.
+    pidfd = _open_pidfd(pid)
     try:
-        os.kill(pid, signal.SIGTERM)
-        print(f"Sent SIGTERM to daemon (PID: {pid})")
-
-        # Wait for process to exit (up to 5 seconds)
-        timeout = Timeout.SOCKET_CONNECT
-        interval = 0.1
-        elapsed = 0.0
-
-        while elapsed < timeout:
-            try:
-                os.kill(pid, 0)  # Check if still alive
-                time.sleep(interval)
-                elapsed += interval
-            except ProcessLookupError:
-                # Process exited
-                break
-
-        # Check if still running
-        try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
-            # Process exited successfully
-            print("Daemon stopped")
-            cleanup_pid_file(str(pid_path))
-            cleanup_socket(str(socket_path))
-            return 0
-
-        # SIGTERM's grace period elapsed and the process is still alive --
-        # escalate to SIGKILL rather than leaving the operator with an
-        # unrecoverable wedged daemon (Plan 00466 N40 review 2 MA2). A
-        # GIL-holding handler cannot even reach Python's signal-handling
-        # bytecode check to act on SIGTERM; SIGKILL is delivered by the
-        # kernel and cannot be caught, blocked or ignored.
-        # Re-prove before SIGKILL: the grace period is long enough for the pid
-        # to have exited and been reused.
-        if daemon_process_project_root(pid).root != own_root:
+        # verify_daemon proves only that the pid is SOME daemon server. Signal
+        # it only once it is proven to serve THIS project: a stale pid file
+        # whose pid was reused by another project's daemon must not get that
+        # daemon killed.
+        own_root = os.path.realpath(project_path)
+        proof = daemon_process_project_root(pid)
+        if proof.root is None:
+            print(f"ERROR: {proof.refusal}; refusing to signal it", file=sys.stderr)
+            return 1
+        if proof.root != own_root:
+            # Refuse, and delete nothing (Plan 00466 N24 review 3 mi1): the PID
+            # file may be stale while this project's own daemon still serves the
+            # socket, or the attribution itself may be wrong, and deleting either
+            # file orphans a live daemon.
             print(
-                f"ERROR: PID {pid} no longer proves to be this project's daemon; "
-                "refusing to escalate to SIGKILL",
+                f"ERROR: PID {pid} is attributed by {proof.source} to {proof.root}, not to "
+                f"{own_root}; refusing to signal it or delete its PID file and socket. "
+                f"If that is wrong, stop it by hand.",
                 file=sys.stderr,
             )
             return 1
-        print(
-            f"WARNING: Daemon still running after {timeout}s; escalating to SIGKILL",
-            file=sys.stderr,
-        )
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except ProcessLookupError:
-            print("Daemon stopped")
-            cleanup_pid_file(str(pid_path))
-            cleanup_socket(str(socket_path))
-            return 0
 
-        kill_timeout = Timeout.DAEMON_SIGKILL_GRACE
-        kill_elapsed = 0.0
-        while kill_elapsed < kill_timeout:
+        # Send SIGTERM
+        try:
+            _signal_proven_pid(pid, pidfd, signal.SIGTERM)
+            print(f"Sent SIGTERM to daemon (PID: {pid})")
+
+            # Wait for process to exit (up to 5 seconds)
+            timeout = Timeout.SOCKET_CONNECT
+            interval = 0.1
+            elapsed = 0.0
+
+            while elapsed < timeout:
+                try:
+                    _signal_proven_pid(pid, pidfd, 0)  # Check if still alive
+                    time.sleep(interval)
+                    elapsed += interval
+                except ProcessLookupError:
+                    # Process exited
+                    break
+
+            # Check if still running
             try:
-                os.kill(pid, 0)
-                time.sleep(interval)
-                kill_elapsed += interval
+                _signal_proven_pid(pid, pidfd, 0)
             except ProcessLookupError:
-                break
+                # Process exited successfully
+                print("Daemon stopped")
+                cleanup_pid_file(str(pid_path))
+                cleanup_socket(str(socket_path))
+                return 0
 
-        try:
-            os.kill(pid, 0)
-            print(f"WARNING: Daemon still running after SIGKILL ({kill_timeout}s)", file=sys.stderr)
-            print(f"Try: kill -9 {pid}", file=sys.stderr)
-            return 1
+            # SIGTERM's grace period elapsed and the process is still alive --
+            # escalate to SIGKILL rather than leaving the operator with an
+            # unrecoverable wedged daemon (Plan 00466 N40 review 2 MA2). A
+            # GIL-holding handler cannot even reach Python's signal-handling
+            # bytecode check to act on SIGTERM; SIGKILL is delivered by the
+            # kernel and cannot be caught, blocked or ignored.
+            # Re-prove before SIGKILL: the grace period is long enough for the
+            # pid to have exited and been reused -- and the SIGKILL itself
+            # still goes out through the SAME pidfd pinned above, so even a
+            # reused pid number cannot make it land on the wrong process.
+            if daemon_process_project_root(pid).root != own_root:
+                print(
+                    f"ERROR: PID {pid} no longer proves to be this project's daemon; "
+                    "refusing to escalate to SIGKILL",
+                    file=sys.stderr,
+                )
+                return 1
+            print(
+                f"WARNING: Daemon still running after {timeout}s; escalating to SIGKILL",
+                file=sys.stderr,
+            )
+            try:
+                _signal_proven_pid(pid, pidfd, signal.SIGKILL)
+            except ProcessLookupError:
+                print("Daemon stopped")
+                cleanup_pid_file(str(pid_path))
+                cleanup_socket(str(socket_path))
+                return 0
+
+            kill_timeout = Timeout.DAEMON_SIGKILL_GRACE
+            kill_elapsed = 0.0
+            while kill_elapsed < kill_timeout:
+                try:
+                    _signal_proven_pid(pid, pidfd, 0)
+                    time.sleep(interval)
+                    kill_elapsed += interval
+                except ProcessLookupError:
+                    break
+
+            try:
+                _signal_proven_pid(pid, pidfd, 0)
+                print(
+                    f"WARNING: Daemon still running after SIGKILL ({kill_timeout}s)",
+                    file=sys.stderr,
+                )
+                print(f"Try: kill -9 {pid}", file=sys.stderr)
+                return 1
+            except ProcessLookupError:
+                print("Daemon stopped")
+                cleanup_pid_file(str(pid_path))
+                cleanup_socket(str(socket_path))
+                return 0
+
         except ProcessLookupError:
-            print("Daemon stopped")
+            print(f"Process {pid} not found (stale PID file)")
             cleanup_pid_file(str(pid_path))
             cleanup_socket(str(socket_path))
             return 0
-
-    except ProcessLookupError:
-        print(f"Process {pid} not found (stale PID file)")
-        cleanup_pid_file(str(pid_path))
-        cleanup_socket(str(socket_path))
-        return 0
-    except PermissionError:
-        print(f"ERROR: Permission denied to signal PID {pid}", file=sys.stderr)
-        return 1
-    except Exception as e:
-        print(f"ERROR: {e}", file=sys.stderr)
-        return 1
+        except PermissionError:
+            print(f"ERROR: Permission denied to signal PID {pid}", file=sys.stderr)
+            return 1
+        except Exception as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            return 1
+    finally:
+        if pidfd is not None:
+            os.close(pidfd)
 
 
 def _query_daemon_health(socket_path: Path, pid: int | None) -> dict[str, Any] | None:
