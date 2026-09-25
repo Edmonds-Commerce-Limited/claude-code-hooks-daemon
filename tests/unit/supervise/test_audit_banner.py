@@ -13,7 +13,7 @@ glance-able surface, not the archive.
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from tests.unit.supervise._load import load_supervisor_module
 
@@ -70,18 +70,21 @@ def _flush(
     machine = _mod.CompactStateMachine(_mod.CompactPolicy())
     for item in items:
         machine.arm_audit(item)
-    return _mod.decide_once(
-        machine,
-        sidecar_dir=sidecar_dir,
-        facts=_facts(input_line_empty=input_line_empty),
-        dry_run=False,
-        freshness_seconds=_mod.CompactPolicy().freshness_seconds,
+    return cast(
+        "SupervisorTickOutcome",
+        _mod.decide_once(
+            machine,
+            sidecar_dir=sidecar_dir,
+            facts=_facts(input_line_empty=input_line_empty),
+            dry_run=False,
+            freshness_seconds=_mod.CompactPolicy().freshness_seconds,
+        ),
     )
 
 
 def _banner_payload(tmp_path: Path) -> dict[str, object]:
     path = tmp_path / _mod._LOG_SUBDIRECTORY / _mod._STATUS_MESSAGE_FILENAME
-    return json.loads(path.read_text(encoding="utf-8"))
+    return cast("dict[str, object]", json.loads(path.read_text(encoding="utf-8")))
 
 
 class TestAuditBannerText:
@@ -332,18 +335,21 @@ def _tick(
     now: float,
     dry_run: bool = False,
 ) -> SupervisorTickOutcome:
-    return _mod.decide_once(
-        machine,
-        sidecar_dir=sidecar_dir,
-        facts=_mod.TickFacts(
-            now_wall=now,
-            idle=True,
-            input_line_empty=True,
-            human_compact_submitted=False,
-            work_idle=True,
+    return cast(
+        "SupervisorTickOutcome",
+        _mod.decide_once(
+            machine,
+            sidecar_dir=sidecar_dir,
+            facts=_mod.TickFacts(
+                now_wall=now,
+                idle=True,
+                input_line_empty=True,
+                human_compact_submitted=False,
+                work_idle=True,
+            ),
+            dry_run=dry_run,
+            freshness_seconds=_mod.CompactPolicy().freshness_seconds,
         ),
-        dry_run=dry_run,
-        freshness_seconds=_mod.CompactPolicy().freshness_seconds,
     )
 
 

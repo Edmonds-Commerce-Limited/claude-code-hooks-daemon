@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from tests.unit.supervise._load import load_supervisor_module
 
@@ -104,19 +104,22 @@ def _write_downgrade_signal(
 
 
 def _machine() -> SupervisorStateMachine:
-    return _mod.CompactStateMachine(_mod.CompactPolicy())
+    return cast("SupervisorStateMachine", _mod.CompactStateMachine(_mod.CompactPolicy()))
 
 
 def _decide(
     sidecar_dir: Path, machine: SupervisorStateMachine, *, now: float = _NOW
 ) -> SupervisorTickOutcome:
     policy = _mod.CompactPolicy()
-    return _mod.decide_once(
-        machine,
-        sidecar_dir=sidecar_dir,
-        facts=_facts(now),
-        dry_run=False,
-        freshness_seconds=policy.freshness_seconds,
+    return cast(
+        "SupervisorTickOutcome",
+        _mod.decide_once(
+            machine,
+            sidecar_dir=sidecar_dir,
+            facts=_facts(now),
+            dry_run=False,
+            freshness_seconds=policy.freshness_seconds,
+        ),
     )
 
 

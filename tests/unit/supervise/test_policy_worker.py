@@ -13,7 +13,7 @@ import base64
 import io
 import json
 import os
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -806,30 +806,36 @@ def test_fresh_fallback_without_shared_state_would_double_compact(tmp_path: Path
 
 
 def _compact_outcome_json(tick_id: int) -> str:
-    return _mod._outcome_to_json(
-        _mod.TickOutcome(
-            decision_value=_mod.Decision.WOULD_COMPACT.value,
-            reason="red",
-            payload="/compact 🤖 [ccy-supervisor] ...",
-            submit=True,
-            consume_signal_path=None,
-            deferred_log=None,
-            tick_id=tick_id,
-        )
+    return cast(
+        "str",
+        _mod._outcome_to_json(
+            _mod.TickOutcome(
+                decision_value=_mod.Decision.WOULD_COMPACT.value,
+                reason="red",
+                payload="/compact 🤖 [ccy-supervisor] ...",
+                submit=True,
+                consume_signal_path=None,
+                deferred_log=None,
+                tick_id=tick_id,
+            )
+        ),
     )
 
 
 def _noop_outcome_json(tick_id: int) -> str:
-    return _mod._outcome_to_json(
-        _mod.TickOutcome(
-            decision_value=_mod.Decision.NOOP.value,
-            reason="awaiting compaction start",
-            payload=None,
-            submit=True,
-            consume_signal_path=None,
-            deferred_log=None,
-            tick_id=tick_id,
-        )
+    return cast(
+        "str",
+        _mod._outcome_to_json(
+            _mod.TickOutcome(
+                decision_value=_mod.Decision.NOOP.value,
+                reason="awaiting compaction start",
+                payload=None,
+                submit=True,
+                consume_signal_path=None,
+                deferred_log=None,
+                tick_id=tick_id,
+            )
+        ),
     )
 
 

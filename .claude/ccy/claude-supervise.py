@@ -3438,7 +3438,6 @@ class CompactStateMachine:
         """The most recently observed foreground session id, or None (Plan 00278)."""
         return self._last_model_session
 
-
     def note_machine_downgrade(
         self, *, session: str, from_family: str, to_family: str, record_ts: str, now_wall: float
     ) -> None:
