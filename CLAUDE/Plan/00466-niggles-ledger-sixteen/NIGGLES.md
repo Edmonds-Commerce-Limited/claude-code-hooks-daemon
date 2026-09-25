@@ -964,6 +964,11 @@ mean "redact nothing". Pin it with a degraded-start test that captures a
 payload containing a term and asserts the term is redacted. Being fixed on
 `worktree-d-00421`.
 
+**Same root cause as N24 review 2's P2** (degraded mode turns guards off): a
+degraded daemon resolves nothing through the config it could not load. Both
+are fixed by that branch's `daemon/degraded_mode.py` and
+`secret_redaction.use_degraded_word_lists`, and not on the N24 branch.
+
 ### N42 — Quoted-heredoc blanking hides text that bash executes from the Bash command guards
 
 **Found by the N38 review** (its M3), confirmed against real bash, and
@@ -1484,6 +1489,41 @@ after all four fixes: none raise.
 The N5 and N11 entries' "this repository runs `strict_mode: true`, so here
 the crash denied" claim is corrected below, in place, rather than restated
 here.
+
+**Review 2's pre-existing observations** (the N24/N40 review 2 report, P1 and
+P2), taken into scope by the coordinator:
+
+- **P2, degraded mode switches guards off.** An invalid config sends the
+  daemon DEGRADED, and that mode then ALLOWS `curl | bash` and skips project
+  SAFETY handlers. This is the same root cause as N43: a degraded daemon
+  resolves nothing through the config it could not load. It is NOT fixed on
+  this branch, because Plan 00421's branch `worktree-d-00421` already fixes
+  both. It adds `daemon/degraded_mode.py`, which runs every SAFETY or
+  BLOCKING built-in and project handler at its defaults, widened by the
+  last-known-good snapshot and HEAD's config. A `FailClosedGuard` stands in
+  for any guard that cannot be built. It also tags `curl_pipe_shell` SAFETY,
+  and redacts with `use_degraded_word_lists` (N43). A second mechanism here
+  would duplicate that one and conflict with it in `controller.py`.
+- **P2, nested layout.** The fix is on this branch. `get_project_path`
+  walked past a project whose own config failed to load, so the daemon ran
+  on the ENCLOSING repository's config and reported that file's unrelated
+  error. A directory whose `.claude/` holds `hooks-daemon.yaml` is now the
+  project root, valid or not, and a broken config there exits with its own
+  error. `load_transport_config` also stopped searching upward. Tests:
+  `TestGetProjectPath` in `tests/unit/daemon/test_cli_commands.py`, and
+  `test_load_transport_config_never_reads_an_enclosing_projects_config`.
+- **P1, silently skipped per-event socket.** The server records each skipped
+  event (path length, bind, chmod, a symlinked events dir) with its reason.
+  `health` goes degraded with the `event_sockets` reason and lists
+  `event_socket_skips`, and `status` and `check` name each event. The events
+  dir already falls back to a short directory. Test:
+  `TestSkippedSocketsReachHealth` in `test_event_socket_listeners.py`.
+- **`CLAUDE_HOOKS_SOCKET_TIMEOUT` below the deadline.** A PreToolUse socket
+  timeout still denies. The deny reason, its context and the stderr line now
+  name the variable and its value, and say it is shorter than the chain
+  deadline. `init.sh` carries a pinned copy of `Timeout.CHAIN_DEADLINE_DEFAULT`,
+  so the comparison is against the default. A project that configures a
+  different deadline is not seen by the client.
 
 ### N23 — `recovery_cron_advisor` hands one request's lifecycle phase to another, through the singleton
 
