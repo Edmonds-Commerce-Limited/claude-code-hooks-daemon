@@ -88,6 +88,13 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N57 | `secret_file_guard` misses a protected path reached through an earlier assignment, alias or written file  | Guard-defects fix  | ⬜ Open               |
 | N58 | R-CHMOD-WORLD-WRITABLE denies a safe chmod when a later argument contains digits                          | N53 review 2       | ⬜ Open               |
 | N59 | A signal went to a PID nobody proved was the intended process, and killed the container twice             | Infra owner        | ✅ Remedied           |
+| N60 | `curl_pipe_shell` denies a double-quoted `echo` argument that only mentions the pattern                   | Coordinator        | ⬜ Open               |
+| N61 | The `sensitive_content` commit gate misses a file that a same-command `git add` stages                    | upgrade-scripts    | 🔄 In progress        |
+| N62 | Nothing bounds a subagent's context, so long-lived agents burn the usage budget                           | Owner              | ⬜ Open               |
+| N63 | Supervisor unit tests read the ambient `CCY_*` environment, so a ccy session fails a test CI passes       | N24 fixer          | ✅ Remedied           |
+| N64 | `subagent_report_path_verifier` resolves a worktree-relative report path against the main checkout        | N47 verify agent   | ⬜ Open               |
+| N65 | `plan_number_helper` denies an `ls` of one named plan's folder as a next-number scan                      | Coordinator        | ⬜ Open               |
+| N66 | Two singleton race tests depend on `time.sleep(0.02)`, so they can pass without the race happening        | N23 review 5       | ⬜ Open               |
 
 ## Tasks
 

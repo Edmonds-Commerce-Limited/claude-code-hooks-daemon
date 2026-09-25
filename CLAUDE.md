@@ -559,26 +559,6 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - flaggable_work_advisor — delegate flaggable work BEFORE reading it
 
-<!-- handler: daemon-sync-after-merge -->
-
-- daemon_sync_after_merge — a pull can leave the daemon stale
-
-<!-- handler: git-hooks-executable-fixer -->
-
-- git_hooks_executable_fixer — auto-fixes non-executable git hooks
-
-<!-- handler: merge-qa-report -->
-
-- merge_qa_report — post-hoc plan/docs QA report after a merge
-
-<!-- handler: model-downgrade-recorder -->
-
-- model_downgrade_recorder — the automatic model downgrade is written down
-
-<!-- handler: markdown-table-formatter -->
-
-- markdown_table_formatter — markdown tables are auto-aligned
-
 <!-- handler: background-process-tracker -->
 
 - background_process_tracker — backgrounded processes are tracked
@@ -591,9 +571,29 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - command_hints — advisory reminders after specific commands
 
+<!-- handler: daemon-sync-after-merge -->
+
+- daemon_sync_after_merge — a pull can leave the daemon stale
+
+<!-- handler: git-hooks-executable-fixer -->
+
+- git_hooks_executable_fixer — auto-fixes non-executable git hooks
+
 <!-- handler: goal-injection -->
 
 - goal_injection — plan-start goal signal for the ccy supervisor
+
+<!-- handler: markdown-table-formatter -->
+
+- markdown_table_formatter — markdown tables are auto-aligned
+
+<!-- handler: merge-qa-report -->
+
+- merge_qa_report — post-hoc plan/docs QA report after a merge
+
+<!-- handler: model-downgrade-recorder -->
+
+- model_downgrade_recorder — the automatic model downgrade is written down
 
 <!-- handler: recovery-cron-advisor -->
 
@@ -611,9 +611,25 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - docs_qa_sweep — documentation drift report at session start
 
+<!-- handler: failsafe-cron-session-advisor -->
+
+- failsafe_cron_session_advisor — the failsafe cron from session start
+
 <!-- handler: git-upstream-checker -->
 
 - git_upstream_checker — additive fetch + pull/cleanup advice on session start
+
+<!-- handler: hook-registration-checker -->
+
+- hook_registration_checker — hooks configuration policy
+
+<!-- handler: model-fallback-detector -->
+
+- model_fallback_detector — silent model substitution is surfaced
+
+<!-- handler: persistent-cron-assertor -->
+
+- persistent_cron_assertor — declared crons are re-established each session
 
 <!-- handler: plan-qa-sweep -->
 
@@ -623,25 +639,13 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - plan_workflow_asset_checker — plan tooling provisioning alert
 
-<!-- handler: reference-repo-sweep -->
-
-- reference_repo_sweep — reference clones are made fresh before you read them
-
-<!-- handler: tool-disable-advisor -->
-
-- tool_disable_advisor — declared never-want tools are checked at session start
-
 <!-- handler: project-handler-load-checker -->
 
 - project_handler_load_checker — project protection degraded alert
 
-<!-- handler: hook-registration-checker -->
+<!-- handler: reference-repo-sweep -->
 
-- hook_registration_checker — hooks configuration policy
-
-<!-- handler: session-actions-directive -->
-
-- session_actions_directive — the must-do list is delivered as a turn
+- reference_repo_sweep — reference clones are made fresh before you read them
 
 <!-- handler: routine-qa-sweep -->
 
@@ -651,17 +655,13 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - secret_file_hygiene_checker -- on-disk hygiene for protected paths
 
-<!-- handler: failsafe-cron-session-advisor -->
+<!-- handler: session-actions-directive -->
 
-- failsafe_cron_session_advisor — the failsafe cron from session start
+- session_actions_directive — the must-do list is delivered as a turn
 
-<!-- handler: model-fallback-detector -->
+<!-- handler: tool-disable-advisor -->
 
-- model_fallback_detector — silent model substitution is surfaced
-
-<!-- handler: persistent-cron-assertor -->
-
-- persistent_cron_assertor — declared crons are re-established each session
+- tool_disable_advisor — declared never-want tools are checked at session start
 
 <!-- handler: idle-housekeeping-advisory -->
 
@@ -679,6 +679,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 
 - cron_stop_enforcer — declared crons are verified, not just asked for
 
+<!-- handler: cron-subagent-stop-enforcer -->
+
+- cron_subagent_stop_enforcer — SubagentStop twin of `cron_stop_enforcer`
+
 <!-- handler: subagent-report-path-verifier -->
 
 - subagent_report_path_verifier — a claimed report path must exist
@@ -690,10 +694,6 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 <!-- handler: subagent-report-size-blocker -->
 
 - subagent_report_size_blocker — write large reports to a file
-
-<!-- handler: cron-subagent-stop-enforcer -->
-
-- cron_subagent_stop_enforcer — SubagentStop twin of `cron_stop_enforcer`
 
 <!-- handler: worktree-create -->
 

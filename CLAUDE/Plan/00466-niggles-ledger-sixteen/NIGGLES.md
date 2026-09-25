@@ -9,6 +9,144 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N66 — Two singleton race tests depend on `time.sleep(0.02)`, so they can pass without the race happening
+
+**Found by N23 review 5 (its L6); carried open by the round 6 fixer.** The race
+tests in `test_data_layer.py` and `test_controller.py` sleep inside a slow
+initialiser to widen the window. On a loaded host the second thread may not
+arrive inside it, so the test passes whether or not the lock is correct.
+
+A naive N-party Barrier inside the initialiser deadlocks under the correct
+implementation, because only the winning thread reaches it.
+
+**Candidate remedy:** instrument the ENTRY of `get_data_layer()` (and the
+controller equivalent) with a test hook. Hold every thread at an entry barrier,
+release them together, and assert exactly one initialisation. Mutation proof:
+removing the lock must fail the test every time, not sometimes.
+
+### N65 — `plan_number_helper` denies an `ls` of one named plan's folder as a next-number scan
+
+**Found by the coordinator.** In a worktree it ran
+`ls CLAUDE/Plan/*464*/subagent-reports/; ls -d CLAUDE/Plan/*464*`, to list the
+reports of a plan it already knew by number. R-PLAN-NUMBER-DISCOVERY denied
+the command as a next-plan-number discovery scan. Nothing in the command
+sorts, tails, or reads the numbering. A glob that contains a specific plan
+number is a lookup, not a discovery.
+
+**Candidate remedy:** treat a glob or path that names a concrete plan number
+(`*464*`, `00464-*`) as a lookup and allow it. Keep denying the shapes that
+derive a number: a bare `ls CLAUDE/Plan` piped to `sort`, `tail` or `awk`, or
+a `find` over the plan root. RED tests: the command above is allowed;
+`ls CLAUDE/Plan | sort | tail -1` still denies.
+
+### N64 — `subagent_report_path_verifier` resolves a worktree-relative report path against the main checkout
+
+**Found by an N47 verify agent** working in
+`.claude/worktrees/agent-ad81…`. It named its report as
+`CLAUDE/Plan/…/subagent-reports/260925-n47-verify6-sonnet-5.md`, relative to
+its own worktree, where the file exists. The verifier checked that path
+against `/workspace` instead, reported it missing, and pushed the agent into
+an extra turn arguing with a false negative.
+
+**Candidate remedy:** resolve a relative claimed path against the agent's own
+cwd (the hook input's `cwd`), then against the project root. Report "missing"
+only when neither exists. RED test: an agent whose cwd is a worktree claims a
+relative path that exists only there.
+
+### N63 — Supervisor unit tests read the ambient `CCY_*` environment, so a ccy session fails a test CI passes
+
+**Found by the N24 fixer.** On main,
+`test_effort_restore.py::test_opus_below_default_minimum_injects_high` fails
+in this container: it gets `/effort medium` where the test expects
+`/effort high`. It passes in CI. The cause is that the container exports
+`CCY_MIN_EFFORT_LEVELS=fable=low,opus=medium`, and the supervisor reads it at
+decision time.
+
+`tests/unit/supervise/conftest.py` already clears one such variable,
+`CCY_FLAG_COMPACT`, after the same failure shape bit before. That fix named one
+variable, not the class. The supervisor reads at least five more
+(`CCY_MIN_EFFORT_LEVELS`, `CCY_MODEL_RESTORE_SECONDS`,
+`CCY_MODEL_CONFIRM_ENTERS`, `CCY_EFFORT_CONFIRM_ENTERS`, and the Ctrl+C guard
+variables).
+
+**Remedy:**
+
+- the autouse fixture clears every `CCY_*` variable;
+- a guard test fails if the supervisor defines an environment-variable
+  constant outside `CCY_*` that the fixture does not also clear.
+
+### N62 — Nothing bounds a subagent's context, so long-lived agents burn the usage budget
+
+**Found by the owner**, who hit the 5-hour limit during a coordinated run. The
+measurements:
+
+- 584 subagent transcripts, about 1 GB;
+- the largest agents compacted only at about 567k to 581k tokens (Plan 464's
+  implementer compacted 9 times);
+- messaging a finished agent resumes its whole history (2,374 prior messages
+  in one case).
+
+Every tool call re-reads that context, so the cost is roughly (average
+context) × (tool calls) × (agents in parallel).
+
+**Candidate remedies** (daemon-enforceable; the hook input carries
+`transcript_path` and `agent_id`):
+
+- A subagent context budget. A PreToolUse handler reads the latest usage
+  from the agent's transcript. Past a soft budget it advises "write your
+  handoff to the report file". Past a hard budget it denies every tool except
+  writing that report and messaging the coordinator. The coordinator then
+  starts a fresh agent from the report. Both budgets are configurable.
+- A resume guard. Deny `SendMessage` to a stopped agent whose transcript is
+  over the budget, and name the fresh-agent-from-brief route instead.
+- A concurrency cap. Deny `Agent` when the running teammate count is at a
+  configured maximum.
+- Owner-side: `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` lowers the compaction
+  trigger for subagents too. At about 570k today, a 500k trigger saves only
+  about 12%. A trigger near 150k to 200k is where the cost falls materially.
+
+### N61 — The `sensitive_content` commit gate misses a file that a same-command `git add` stages
+
+**Found by the upgrade-scripts agent**, on main at a93c4b0ad and on the Plan
+00464 branch alike. The commit gate scans only what is ALREADY staged when
+the Bash command is judged. So `git add leak.txt && git commit -m x` is
+allowed even when `leak.txt` matches a public pattern. The same commit with
+`leak.txt` staged beforehand is denied. The realistic script shape, add then
+commit, is the one that passes.
+
+**Candidate remedy:** when a command both stages and commits, judge the
+union of the current index and every path the same command's `git add`
+(and `git commit -a`/`-u`/pathspec) would stage, read from the working tree.
+Where the added set cannot be resolved (a glob, a computed argument, `git add .`), take the working-tree changes git itself reports as the set. Never take
+an empty set: an unresolvable one denies. This is the same class as N53
+review 3's MA-2 shapes, so it is fixed on the N53 branch. RED tests:
+
+- `git add leak.txt && git commit -m x` denies;
+- `git add . && git commit -m x` with a leaking untracked file denies;
+- a clean add-then-commit is allowed.
+
+### N60 — `curl_pipe_shell` denies a double-quoted `echo` argument that only mentions the pattern
+
+**Found by the coordinator.** It appended a queue note with
+`echo "... <download tool> ... | sh ..." >> file`. The text inside the double
+quotes is data for `echo`: the shell runs no pipe there, and there is no
+substitution in it. R-CURL-PIPE-SHELL denied it anyway. So the handler matches
+the raw command text, not the pipeline structure.
+
+**Candidate remedy:** judge only real pipeline stages. The producer stage must
+be a download command, the consumer stage must be a shell, and both must be
+outside quotes and outside a heredoc body that nothing executes. This belongs
+with the shell-parser consolidation (N22, N32, N36, N48, N49, N51, N57, N58).
+A second shape was denied too: a QUOTED-delimiter heredoc fed to `cat >>`.
+The body of such a heredoc is literal text, and `pipe_blocker` already
+exempts it. RED tests:
+
+- the reported `echo` is allowed;
+- `cat >> f <<'EOF'` whose body mentions the pattern is allowed;
+- a real `<download> URL | sh` still denies;
+- `bash -c "<download> URL | sh"` still denies, because the string IS
+  executed.
+
 ### N59 — A signal is sent to a PID nobody proved is the intended process, and it killed the container twice
 
 **Found by the infra owner.** The container died with exit 137 at 11:07 and
