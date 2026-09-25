@@ -9,6 +9,87 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N65 — `plan_number_helper` denies an `ls` of one named plan's folder as a next-number scan
+
+**Found by the coordinator.** In a worktree it ran
+`ls CLAUDE/Plan/*464*/subagent-reports/; ls -d CLAUDE/Plan/*464*`, to list the
+reports of a plan it already knew by number. R-PLAN-NUMBER-DISCOVERY denied
+the command as a next-plan-number discovery scan. Nothing in the command
+sorts, tails, or reads the numbering. A glob that contains a specific plan
+number is a lookup, not a discovery.
+
+**Candidate remedy:** treat a glob or path that names a concrete plan number
+(`*464*`, `00464-*`) as a lookup and allow it. Keep denying the shapes that
+derive a number: a bare `ls CLAUDE/Plan` piped to `sort`, `tail` or `awk`, or
+a `find` over the plan root. RED tests: the command above is allowed;
+`ls CLAUDE/Plan | sort | tail -1` still denies.
+
+### N64 — `subagent_report_path_verifier` resolves a worktree-relative report path against the main checkout
+
+**Found by an N47 verify agent** working in
+`.claude/worktrees/agent-ad81…`. It named its report as
+`CLAUDE/Plan/…/subagent-reports/260925-n47-verify6-sonnet-5.md`, relative to
+its own worktree, where the file exists. The verifier checked that path
+against `/workspace` instead, reported it missing, and pushed the agent into
+an extra turn arguing with a false negative.
+
+**Candidate remedy:** resolve a relative claimed path against the agent's own
+cwd (the hook input's `cwd`), then against the project root. Report "missing"
+only when neither exists. RED test: an agent whose cwd is a worktree claims a
+relative path that exists only there.
+
+### N63 — Supervisor unit tests read the ambient `CCY_*` environment, so a ccy session fails a test CI passes
+
+**Found by the N24 fixer.** On main,
+`test_effort_restore.py::test_opus_below_default_minimum_injects_high` fails
+in this container: it gets `/effort medium` where the test expects
+`/effort high`. It passes in CI. The cause is that the container exports
+`CCY_MIN_EFFORT_LEVELS=fable=low,opus=medium`, and the supervisor reads it at
+decision time.
+
+`tests/unit/supervise/conftest.py` already clears one such variable,
+`CCY_FLAG_COMPACT`, after the same failure shape bit before. That fix named one
+variable, not the class. The supervisor reads at least five more
+(`CCY_MIN_EFFORT_LEVELS`, `CCY_MODEL_RESTORE_SECONDS`,
+`CCY_MODEL_CONFIRM_ENTERS`, `CCY_EFFORT_CONFIRM_ENTERS`, and the Ctrl+C guard
+variables).
+
+**Remedy:**
+
+- the autouse fixture clears every `CCY_*` variable;
+- a guard test fails if the supervisor defines an environment-variable
+  constant outside `CCY_*` that the fixture does not also clear.
+
+### N62 — Nothing bounds a subagent's context, so long-lived agents burn the usage budget
+
+**Found by the owner**, who hit the 5-hour limit during a coordinated run. The
+measurements:
+
+- 584 subagent transcripts, about 1 GB;
+- the largest agents compacted only at about 567k to 581k tokens (Plan 464's
+  implementer compacted 9 times);
+- messaging a finished agent resumes its whole history (2,374 prior messages
+  in one case).
+
+Every tool call re-reads that context, so the cost is roughly (average
+context) × (tool calls) × (agents in parallel).
+
+**Candidate remedies** (daemon-enforceable; the hook input carries
+`transcript_path` and `agent_id`):
+
+- A subagent context budget. A PreToolUse handler reads the latest usage
+  from the agent's transcript. Past a soft budget it advises "write your
+  handoff to the report file". Past a hard budget it denies every tool except
+  writing that report and messaging the coordinator. The coordinator then
+  starts a fresh agent from the report. Both budgets are configurable.
+- A resume guard. Deny `SendMessage` to a stopped agent whose transcript is
+  over the budget, and name the fresh-agent-from-brief route instead.
+- A concurrency cap. Deny `Agent` when the running teammate count is at a
+  configured maximum.
+- Owner-side: `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` lowers the compaction
+  trigger for subagents too. At about 570k today, a 500k trigger saves only
+  about 12%. A trigger near 150k to 200k is where the cost falls materially.
+
 ### N61 — The `sensitive_content` commit gate misses a file that a same-command `git add` stages
 
 **Found by the upgrade-scripts agent**, on main at a93c4b0ad and on the Plan

@@ -4,6 +4,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00471: subagent token budget protection](00471-subagent-token-budget-protection/PLAN.md) - In Progress (owner request after a usage-limit burn: subagents compacted only at about 570k tokens, finished agents were resumed with thousands of prior messages, and about nine Opus agents ran at once; the daemon sees every Agent, SendMessage and tool call plus the transcript's usage, so it can measure and bound the spend)
+
 - [00470: persistent session optimisation](00470-persistent-session-optimisation/PLAN.md) - Not Started (owner request: the always-on issue-monitoring server session is the dogfood; cron refresh before expiry, usage-limit and restart recovery from a durable queue, and a measured orchestrator-model choice)
 
 - [00468: claude code plugins are supported properly](00468-claude-code-plugins-are-supported-properly/PLAN.md) - In Progress (from the 00467 plugin audit: 8 defects, 3 release-blocking, and 16 gaps, most resting on one missing resolver for the Claude config dir and its enabled plugins)
@@ -284,7 +286,7 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Completed**: 407 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 40 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 41 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
