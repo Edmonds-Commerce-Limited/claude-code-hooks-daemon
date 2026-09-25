@@ -283,10 +283,12 @@ class TestUnreadableLedgerRaisesADomainException:
                 raise PermissionError(13, "Permission denied")
             return real_is_file(self)
 
-        def _read_text_boom(self: Path, *args: object, **kwargs: object) -> str:
+        def _read_text_boom(
+            self: Path, encoding: str | None = None, errors: str | None = None
+        ) -> str:
             if self.name == "PLAN.md":
                 raise PermissionError(13, "Permission denied")
-            return real_read_text(self, *args, **kwargs)
+            return real_read_text(self, encoding, errors)
 
         monkeypatch.setattr(Path, "is_file", _is_file_boom)
         monkeypatch.setattr(Path, "read_text", _read_text_boom)

@@ -33,8 +33,8 @@ from claude_code_hooks_daemon.utils.config_cache import (
     reset_config_cache,
 )
 
-_YAML: Final[str] = "daemon:\n  enabled: true\n"
-_OTHER_YAML: Final[str] = "daemon:\n  enabled: false\n"
+_YAML: Final[str] = "daemon:\n  strict_mode: true\n"
+_OTHER_YAML: Final[str] = "daemon:\n  strict_mode: false\n"
 _BROKEN_YAML: Final[str] = "daemon: [unterminated\n"
 
 
@@ -143,7 +143,7 @@ class TestABrokenConfigIsCachedByFailure:
         stat = config_file.stat()
         os.utime(config_file, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
 
-        assert load_config_cached(config_file).daemon.enabled is True
+        assert load_config_cached(config_file).daemon.strict_mode is True
 
 
 class TestABrokenConfigNeverGrowsATraceback:
@@ -214,7 +214,7 @@ class TestATransientOSErrorIsNeverCached:
         with patch.object(Config, "load_or_default", side_effect=flaky):
             with pytest.raises(OSError):
                 load_config_cached(config_file)
-            assert load_config_cached(config_file).daemon.enabled is True
+            assert load_config_cached(config_file).daemon.strict_mode is True
 
     def test_a_repair_is_picked_up_without_an_mtime_change(self, tmp_path: Path) -> None:
         """A repair that changes neither mtime nor size must still be picked
@@ -252,7 +252,7 @@ class TestATransientOSErrorIsNeverCached:
         assert signature_after == signature_before
 
         result = load_config_cached(config_file)
-        assert result.daemon.enabled is True
+        assert result.daemon.strict_mode is True
 
 
 class TestAPathologicallyNestedConfigIsCachedAsAFailure:
