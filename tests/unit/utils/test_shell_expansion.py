@@ -122,9 +122,12 @@ class TestIterBraceWords:
         assert list(iter_brace_words("echo x{a,b}y;next")) == ["x{a,b}y;next"]
 
     def test_caps_the_number_of_groups_examined(self) -> None:
+        """Review 7 MAJOR-1: past the cap this RAISES (fail closed), not a
+        silent truncation to the first N words -- superseded by
+        ``TestIterNormalisedShellWordsCapsFailClosed``."""
         command = " ".join(f"{{a{i},b{i}}}" for i in range(50))
-        words = list(iter_brace_words(command, max_words=10))
-        assert len(words) == 10
+        with pytest.raises(TooManyToEnumerateError):
+            list(iter_brace_words(command, max_words=10))
 
     def test_adversarial_no_brace_input_is_fast(self) -> None:
         """B1-R3 / M-3 (Plan 00466 review): the 94 KB / 200 KB reproducer --
@@ -652,3 +655,221 @@ class TestIterNormalisedShellWordsProducerEscapes:
         command = "echo 'a\\nb' | bash"
         words = list(iter_normalised_shell_words(command))
         assert "a\\nb" in words or any("a\\nb" in word for word in words)
+
+
+class TestIterNormalisedShellWordsCapsFailClosed:
+    """Plan 00466 guard-defects review 7 MAJOR-1: past EITHER volume cap,
+    the generator must RAISE rather than silently stop -- a caller that
+    saw quiet exhaustion and treated it as "no more words" would allow a
+    mention placed only past the cap."""
+
+    def test_the_normalised_word_cap_raises_rather_than_stopping(self) -> None:
+        command = " ".join(["w"] * 2001)
+        with pytest.raises(TooManyToEnumerateError):
+            list(iter_normalised_shell_words(command, max_words=2000))
+
+    def test_under_the_normalised_word_cap_does_not_raise(self) -> None:
+        command = " ".join(["w"] * 1999)
+        words = list(iter_normalised_shell_words(command, max_words=2000))
+        assert len(words) == 1999
+
+    def test_the_brace_word_cap_raises_rather_than_stopping(self) -> None:
+        text = " ".join(["{a,b}"] * 501)
+        with pytest.raises(TooManyToEnumerateError):
+            list(iter_brace_words(text, max_words=500))
+
+    def test_under_the_brace_word_cap_does_not_raise(self) -> None:
+        text = " ".join(["{a,b}"] * 499)
+        words = list(iter_brace_words(text, max_words=500))
+        assert len(words) == 499
+
+
+class TestIterNormalisedShellWordsCommandSubstitution:
+    """Plan 00466 guard-defects review 7 MAJOR-2: `$(...)` and a backtick
+    span are genuine nested COMMANDS -- their body is re-parsed the same
+    way `eval`'s argument and a process substitution's body already are,
+    not left unexamined behind the `*` their word collapses to."""
+
+    def test_dollar_paren_body_is_reparsed(self) -> None:
+        command = "x=$(bash -c 'cat wor'\\''ld')"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_dollar_paren_inside_double_quotes_is_reparsed(self) -> None:
+        command = 'echo "$(sh -c \'cat wor\'\\\'\'ld\')"'
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_backtick_body_is_reparsed(self) -> None:
+        command = "echo `bash -c 'cat wor'\\''ld'`"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_eval_inside_dollar_paren_is_reparsed(self) -> None:
+        command = "x=$(eval 'cat wor'\\''ld')"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_pipe_echo_inside_dollar_paren_is_reparsed(self) -> None:
+        command = "x=$(echo cat 'wor'\\''l'\\''d' | bash)"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_a_dollar_var_reference_does_not_raise_or_falsely_match(self) -> None:
+        """Control: an ordinary `$VAR` (no parens) is unaffected."""
+        words = list(iter_normalised_shell_words("echo $HOME/project"))
+        assert any("*" in word for word in words)
+
+
+class TestIterNormalisedShellWordsWrapperOptionWalk:
+    """Plan 00466 guard-defects review 7 MAJOR-3: a pipe-to-shell wrapper's
+    OWN options/positionals are walked (not just its bare name), a bare
+    interpreter's here-string may sit past an intervening redirect, `-c`
+    survives a following `--`/another flag, and more shell/wrapper name
+    spellings are recognised."""
+
+    def test_sudo_with_a_user_flag_before_the_shell_is_recognised(self) -> None:
+        command = "echo cat 'wor'\\''l'\\''d' | sudo -u root bash"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_env_with_dash_i_before_the_shell_is_recognised(self) -> None:
+        command = "echo cat 'wor'\\''l'\\''d' | env -i bash"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_timeout_with_a_duration_before_the_shell_is_recognised(self) -> None:
+        command = "echo cat 'wor'\\''l'\\''d' | timeout 5 bash"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_nice_with_an_adjustment_before_the_shell_is_recognised(self) -> None:
+        command = "echo cat 'wor'\\''l'\\''d' | nice -n 5 bash"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_cat_passthrough_with_no_trailing_argument_is_recognised(self) -> None:
+        command = "echo cat 'wor'\\''l'\\''d' | cat | bash"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_output_process_substitution_is_recognised(self) -> None:
+        command = "echo cat 'wor'\\''l'\\''d' > >(bash)"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_cat_here_string_piped_to_a_shell_is_recognised(self) -> None:
+        command = "cat <<< 'cat wor'\\''ld' | bash"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_here_string_past_an_intervening_redirect_is_recognised(self) -> None:
+        command = "bash 2>/dev/null <<<'cat wor'\\''ld'"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_bash_lt_process_substitution_is_recognised(self) -> None:
+        command = "bash < <(echo cat 'wor'\\''l'\\''d')"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_dash_c_survives_a_following_double_dash(self) -> None:
+        command = "bash -c -- 'cat wor'\\''ld'"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_dash_c_survives_a_following_flag(self) -> None:
+        command = "bash -c -x 'cat wor'\\''ld'"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_su_long_command_flag_is_recognised(self) -> None:
+        command = "su --command 'cat wor'\\''ld' root"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_su_glued_long_command_flag_is_recognised(self) -> None:
+        command = "su --command='cat wor'\\''ld' root"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_su_positional_user_before_dash_c_is_recognised(self) -> None:
+        command = "su root -c 'cat wor'\\''ld'"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_su_dash_positional_user_before_dash_c_is_recognised(self) -> None:
+        command = "su - root -c 'cat wor'\\''ld'"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_script_long_command_flag_is_recognised(self) -> None:
+        command = "script --command 'cat wor'\\''ld' /dev/null"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_script_positional_file_before_dash_c_is_recognised(self) -> None:
+        command = "script /dev/null -c 'cat wor'\\''ld'"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_flock_long_command_flag_is_recognised(self) -> None:
+        command = "flock --command 'cat wor'\\''ld' /tmp/l"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_watch_dash_x_before_bash_dash_c_is_recognised(self) -> None:
+        command = "watch -x bash -c 'cat wor'\\''ld'"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_env_dash_capital_s_split_string_is_recognised(self) -> None:
+        """`env -S`'s value is itself a nested command, re-parsed the same
+        way `eval`'s argument is -- a quote split across the word (the
+        standard `'...'"'"'...'` idiom) only resolves on that second pass."""
+        command = "env -S 'cat wor'\"'\"'ld'"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_rbash_is_recognised(self) -> None:
+        words = list(iter_normalised_shell_words("rbash -c 'cat wor'\\''ld'"))
+        assert "world" in words
+
+    def test_yash_is_recognised(self) -> None:
+        words = list(iter_normalised_shell_words("yash -c 'cat wor'\\''ld'"))
+        assert "world" in words
+
+    def test_posh_is_recognised(self) -> None:
+        words = list(iter_normalised_shell_words("posh -c 'cat wor'\\''ld'"))
+        assert "world" in words
+
+    def test_pdksh_is_recognised(self) -> None:
+        words = list(iter_normalised_shell_words("pdksh -c 'cat wor'\\''ld'"))
+        assert "world" in words
+
+    def test_dev_fd_0_here_string_is_recognised(self) -> None:
+        command = "bash /dev/fd/0 <<< 'cat wor'\\''ld'"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+    def test_source_proc_self_fd_0_here_string_is_recognised(self) -> None:
+        command = "source /proc/self/fd/0 <<< 'cat wor'\\''ld'"
+        words = list(iter_normalised_shell_words(command))
+        assert "world" in words
+
+
+class TestIterNormalisedShellWordsWrapperFalsePositives:
+    """Everyday wrapper usage that must NOT recurse into anything false or
+    raise -- a wrapper running an ordinary (non-shell) command."""
+
+    def test_sudo_running_an_ordinary_command_does_not_raise(self) -> None:
+        list(iter_normalised_shell_words("sudo -u deploy ls -la /srv"))
+
+    def test_env_setting_a_variable_for_an_ordinary_command_does_not_raise(self) -> None:
+        list(iter_normalised_shell_words("env FOO=bar node server.js"))
+
+    def test_timeout_running_an_ordinary_command_does_not_raise(self) -> None:
+        list(iter_normalised_shell_words("timeout 30 npm test"))
+
+    def test_nice_running_an_ordinary_build_does_not_raise(self) -> None:
+        list(iter_normalised_shell_words("nice -n 10 make -j4"))

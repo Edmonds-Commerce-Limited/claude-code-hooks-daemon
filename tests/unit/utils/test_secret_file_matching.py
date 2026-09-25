@@ -1359,9 +1359,11 @@ class TestInteriorWildcardDpIsBounded:
         no single token here is pathological, the cost is volume across
         250k short tokens. This is exactly what the whole-scan deadline
         exists for: with one supplied (as ``secret_file_guard`` supplies),
-        the call returns -- either with a real answer or a
-        ``TimeoutError`` -- well inside the deadline instead of running
-        past it, whichever outcome it is."""
+        the call returns -- either with a real answer, a ``TimeoutError``,
+        or a ``TooManyToEnumerateError`` (review 7 MAJOR-1: 250k words is
+        also past the normalised-word-stream cap, which now fails CLOSED
+        rather than silently truncating) -- well inside the deadline
+        instead of running past it, whichever outcome it is."""
         content = "a*b " * 250_000
         start = time.perf_counter()
         outcome = "completed"
@@ -1371,6 +1373,8 @@ class TestInteriorWildcardDpIsBounded:
             )
         except TimeoutError:
             outcome = "timed out"
+        except TooManyToEnumerateError:
+            outcome = "too many to enumerate"
         elapsed = time.perf_counter() - start
         assert elapsed < 3.0, f"{outcome} in {elapsed:.3f}s, past a 2s deadline"
 
@@ -1448,9 +1452,15 @@ class TestOrdinaryVolumeContentCompletesFast:
         return " ".join(words)[:target_bytes]
 
     def test_one_megabyte_bash_command_completes_well_under_a_second(self) -> None:
+        """Review 7 MAJOR-1: a command this size is also past the
+        normalised-word-stream cap, which now fails CLOSED (raises)
+        instead of silently truncating -- the timing guarantee this class
+        exists to pin (fast, not merely bounded by a deadline) still
+        holds: it fails fast, not slow."""
         command = self._vocabulary_command(1024 * 1024)
         start = time.perf_counter()
-        sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS)
+        with pytest.raises(TooManyToEnumerateError):
+            sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS)
         elapsed = time.perf_counter() - start
         assert elapsed < self._BUDGET_SECONDS, f"took {elapsed:.3f}s"
 
@@ -1458,21 +1468,26 @@ class TestOrdinaryVolumeContentCompletesFast:
         # The script-content route (Write/Edit to a .py/.sh/...) scans
         # CONTENT the identical way the Bash route scans a command line --
         # same `find_protected_mention_detail` call, same cost profile.
+        # Review 7 MAJOR-1: fails CLOSED (raises), fast, same as above.
         content = self._vocabulary_command(1024 * 1024)
         start = time.perf_counter()
-        sfm.find_protected_mention_detail(content, sfm.DEFAULT_PROTECTED_PATTERNS)
+        with pytest.raises(TooManyToEnumerateError):
+            sfm.find_protected_mention_detail(content, sfm.DEFAULT_PROTECTED_PATTERNS)
         elapsed = time.perf_counter() - start
         assert elapsed < self._BUDGET_SECONDS, f"took {elapsed:.3f}s"
 
     def test_repeated_identical_tokens_benefit_from_the_per_scan_cache(self) -> None:
-        """The review's own pre-existing 'a*b ' x 250000 shape -- now fast
-        enough to answer within budget WITHOUT needing the deadline at all
-        (contrast ``test_ordinary_one_megabyte_write_content_stays_bounded_
-        by_the_deadline`` above, which still accepts a TimeoutError
-        outcome)."""
+        """The review's own pre-existing 'a*b ' x 250000 shape -- still
+        fast (the per-scan cache this class pins), but review 7 MAJOR-1
+        means 250k words past the normalised-word-stream cap now fails
+        CLOSED (raises) rather than silently truncating and answering "no
+        mention" (contrast ``test_ordinary_one_megabyte_write_content_
+        stays_bounded_by_the_deadline`` above, which accepts this as one
+        of its valid outcomes too)."""
         content = "a*b " * 250_000
         start = time.perf_counter()
-        sfm.find_protected_mention_detail(content, sfm.DEFAULT_PROTECTED_PATTERNS)
+        with pytest.raises(TooManyToEnumerateError):
+            sfm.find_protected_mention_detail(content, sfm.DEFAULT_PROTECTED_PATTERNS)
         elapsed = time.perf_counter() - start
         assert elapsed < self._BUDGET_SECONDS, f"took {elapsed:.3f}s"
 
@@ -2556,6 +2571,59 @@ class TestReview6ClosedShellFeedShapes:
         assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
 
 
+class TestReview7CommandSubstitutionMentions:
+    """Plan 00466 guard-defects review 7 MAJOR-2: `$(...)` and a backtick
+    span are re-parsed as their own nested command, end to end through
+    `find_protected_mention_detail`."""
+
+    def test_dollar_paren_bash_dash_c_denies(self) -> None:
+        command = "x=$(bash -c 'cat id_'\\''rs'\\''a')"
+        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+
+    def test_backtick_bash_dash_c_denies(self) -> None:
+        command = "echo `bash -c 'cat id_'\\''rs'\\''a'`"
+        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+
+    def test_dollar_paren_with_no_mention_allows(self) -> None:
+        assert (
+            sfm.find_protected_mention_detail("x=$(date +%s)", sfm.DEFAULT_PROTECTED_PATTERNS)
+            is None
+        )
+
+
+class TestReview7PipeWrapperMentions:
+    """Plan 00466 guard-defects review 7 MAJOR-3: a pipe-to-shell wrapper's
+    own options/positionals, `cat`-as-passthrough, and an output process
+    substitution, end to end."""
+
+    def test_sudo_dash_u_before_shell_denies(self) -> None:
+        command = "echo cat id_'\\''rs'\\''a' | sudo -u root bash"
+        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+
+    def test_timeout_with_duration_before_shell_denies(self) -> None:
+        command = "echo cat id_'\\''rs'\\''a' | timeout 5 bash"
+        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+
+    def test_cat_passthrough_with_no_argument_denies(self) -> None:
+        command = "echo cat id_'\\''rs'\\''a' | cat | bash"
+        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+
+    def test_output_process_substitution_denies(self) -> None:
+        command = "echo cat id_'\\''rs'\\''a' > >(bash)"
+        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+
+    def test_cat_here_string_piped_to_shell_denies(self) -> None:
+        command = "cat <<< 'cat id_'\\''rs'\\''a' | bash"
+        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+
+    def test_ordinary_sudo_command_allows(self) -> None:
+        """Control: an ordinary sudo-wrapped, non-shell command allows."""
+        assert (
+            sfm.find_protected_mention_detail("sudo -u deploy ls -la", sfm.DEFAULT_PROTECTED_PATTERNS)
+            is None
+        )
+
+
 class TestFileSchemeUrlMentions:
     """review 7: a `file:` URL is a real, literal local-file READ route
     (curl, wget, a Python urllib one-liner, `git clone file://...`, ...) in
@@ -2592,3 +2660,24 @@ class TestFileSchemeUrlMentions:
         path is not itself a protected-path mention."""
         command = "curl -s file:///etc/hostname"
         assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is None
+
+    def test_uppercase_scheme_denies(self) -> None:
+        """Review 7 MAJOR-4: URL schemes are case-insensitive (RFC 3986),
+        and curl accepts `FILE://` exactly like `file://`."""
+        command = "curl FILE:///root/.ssh/id_rsa"
+        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+
+    def test_mixed_case_scheme_denies(self) -> None:
+        command = "curl File:///root/.ssh/id_rsa"
+        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+
+    def test_url_split_by_single_quote_denies(self) -> None:
+        """Review 7 MAJOR-4: a URL split by shell quoting never appears as
+        one contiguous `file:...` span in the RAW text -- only the
+        quote-decoded word reassembles it."""
+        command = "curl 'file:///root/.ssh/id_r'sa"
+        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None
+
+    def test_url_split_by_double_quote_denies(self) -> None:
+        command = 'curl file:///root/.ssh/id_r"sa"'
+        assert sfm.find_protected_mention_detail(command, sfm.DEFAULT_PROTECTED_PATTERNS) is not None

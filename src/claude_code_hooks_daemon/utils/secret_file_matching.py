@@ -1439,8 +1439,13 @@ def _normalised_word_tokens(command: str) -> Iterator[str]:
 #: `file:/path` -- the scheme and an optional empty/`localhost` host are
 #: consumed, leaving the absolute filesystem path as the capture group.
 #: `\b` anchors the scheme so an unrelated word ending in "...file:" (rare,
-#: but cheap to exclude) does not false-trigger.
-_FILE_URL_RE: Final[re.Pattern[str]] = re.compile(r"\bfile:(?:/{2})?(?:localhost)?(/[^\s'\"<>|;&)]*)")
+#: but cheap to exclude) does not false-trigger. Case-INSENSITIVE (review 7
+#: MAJOR-4): URL schemes are case-insensitive per RFC 3986, and curl itself
+#: accepts `FILE://`/`File://` exactly like `file://` -- the review-6 fix
+#: only matched the lowercase spelling.
+_FILE_URL_RE: Final[re.Pattern[str]] = re.compile(
+    r"\bfile:(?:/{2})?(?:localhost)?(/[^\s'\"<>|;&)]*)", re.IGNORECASE
+)
 
 
 def _file_url_path_tokens(command: str) -> Iterator[str]:
@@ -1457,9 +1462,22 @@ def _file_url_path_tokens(command: str) -> Iterator[str]:
     literal path ``id_rsa`` it names, exactly like any other path mention --
     no separate matching logic, just a different way to PRODUCE a candidate
     token.
+
+    Run over TWO sources (review 7 MAJOR-4): ``command``'s raw text, and
+    every word :func:`shell_expansion.iter_normalised_shell_words` produces
+    after quote removal -- a URL split by shell quoting
+    (``curl 'file:///root/.ssh/id_r'%73a``, ``curl file:///root/.ssh/id_r
+    "%73"a``) never appears as one contiguous ``file:...`` span in the raw
+    text at all; only the DECODED word (quotes stripped, adjacent pieces
+    concatenated into one shell word) reassembles it. The raw-text pass
+    stays first so an ordinary, unquoted URL costs nothing beyond the
+    existing regex scan.
     """
     for match in _FILE_URL_RE.finditer(command):
         yield urllib.parse.unquote(match.group(1))
+    for word in shell_expansion.iter_normalised_shell_words(command):
+        for match in _FILE_URL_RE.finditer(word):
+            yield urllib.parse.unquote(match.group(1))
 
 
 def _token_mention(

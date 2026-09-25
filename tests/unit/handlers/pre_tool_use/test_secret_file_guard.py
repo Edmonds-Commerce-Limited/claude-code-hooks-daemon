@@ -213,6 +213,110 @@ class TestBashRouteInterpreterOneLiners:
         assert handler.matches(_hook_input("Bash", {"command": cmd}))
 
 
+class TestBashRouteInterpreterOneLinersReview7:
+    """Plan 00466 guard-defects review 7 MAJOR-5: the one-liner route is an
+    OPTION WALK, not exact-basename/exact-adjacency matching -- versioned
+    and absolute interpreters, an interpreter option before the code flag,
+    a clustered short flag, `perl -E`, and `node -p`/`--eval`."""
+
+    def test_versioned_python_dash_c_denies(self) -> None:
+        handler = _handler()
+        cmd = 'python3.12 -c "import os; os.' + "system('cat .vault-password')\""
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_absolute_versioned_python_dash_c_denies(self) -> None:
+        handler = _handler()
+        cmd = '/usr/bin/python3.11 -c "import os; os.' + "system('cat .vault-password')\""
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_pypy_dash_c_denies(self) -> None:
+        handler = _handler()
+        cmd = 'pypy3 -c "import os; os.' + "system('cat .vault-password')\""
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_python_option_before_dash_c_denies(self) -> None:
+        handler = _handler()
+        cmd = 'python3 -I -c "import os; os.' + "system('cat .vault-password')\""
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_python_clustered_dash_capital_s_c_denies(self) -> None:
+        handler = _handler()
+        cmd = 'python3 -Sc "import os; os.' + "system('cat .vault-password')\""
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_perl_capital_e_backtick_denies(self) -> None:
+        handler = _handler()
+        cmd = "perl -E 'say `cat .vault-password`'"
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_perl_clustered_dash_le_backtick_denies(self) -> None:
+        handler = _handler()
+        cmd = "perl -le 'print `cat .vault-password`'"
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_ruby_clustered_dash_we_backtick_denies(self) -> None:
+        handler = _handler()
+        cmd = "ruby -we '`cat .vault-password`'"
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_node_dash_p_exec_sync_denies(self) -> None:
+        handler = _handler()
+        cmd = "node -p \"require('child_process')." + "exec" + "Sync('cat .vault-password')\""
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_node_dash_dash_eval_exec_sync_denies(self) -> None:
+        handler = _handler()
+        cmd = (
+            "node --eval \"require('child_process')." + "exec" + "Sync('cat .vault-password')\""
+        )
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_unrelated_short_cluster_stays_allowed(self) -> None:
+        """Control: a Python flag cluster with no `c` in it must not be
+        mistaken for the code flag."""
+        handler = _handler()
+        cmd = "python3 -Im \"print('hello world')\""
+        assert not handler.matches(_hook_input("Bash", {"command": cmd}))
+
+
+class TestPythonOneLinerMinorFixesReview7:
+    """Plan 00466 guard-defects review 7 MINOR-1: `subprocess.getoutput`/
+    `getstatusoutput` always run a shell (gated on `shell=True`, which they
+    do not take, so they never matched before); an f-string's constant
+    parts are collected as a literal even with no placeholder."""
+
+    def test_subprocess_getoutput_denies(self) -> None:
+        handler = _handler()
+        cmd = (
+            'python3 -c "import subprocess; subprocess.getoutput'
+            "('cat .vault-password')\""
+        )
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_subprocess_getstatusoutput_denies(self) -> None:
+        handler = _handler()
+        cmd = (
+            'python3 -c "import subprocess; subprocess.getstatusoutput'
+            "('cat .vault-password')\""
+        )
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+    def test_fstring_with_no_placeholder_denies(self) -> None:
+        handler = _handler()
+        cmd = 'python3 -c "import os; os.' + "system(f'cat .vault-password')\""
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+
+class TestRubyBareSystemReview7:
+    """Plan 00466 guard-defects review 7 MINOR-2: Ruby's idiomatic
+    paren-free `system 'x'` form."""
+
+    def test_ruby_bare_system_no_paren_denies(self) -> None:
+        handler = _handler()
+        cmd = "ruby -e \"system 'cat .vault-password'\""
+        assert handler.matches(_hook_input("Bash", {"command": cmd}))
+
+
 class TestShellWordNormalisationThroughTheHandler:
     """n466-n24 review 4, M-1: every listed spelling, end-to-end through the
     real handler, both against shipped defaults (id_rsa) and a
@@ -1519,11 +1623,37 @@ class TestPythonAstShellExecLiterals:
         assert handler.matches(hook_input)
 
     def test_unparseable_fragment_falls_back_to_the_regex_heuristic(self) -> None:
-        """`ast.parse` cannot handle a bare fragment (mismatched
-        indentation alone) -- the pre-ast regex heuristic is the floor,
-        not a silent miss."""
+        """A fragment neither the dedent nor the function-wrap recovery
+        can parse (an unterminated string) genuinely falls all the way
+        through to the regex heuristic -- the floor, not a silent miss."""
         handler = _handler()
-        call = "    os." + "system('cat .vault-password')\n"
+        call = "    os." + "system('cat .vault-password\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_uniformly_indented_fragment_is_recovered_by_dedent(self) -> None:
+        """Review 7 (read-only finding): the Edit route scans `new_string`,
+        which is routinely indented relative to its real surrounding file
+        -- `ast.parse` rejects that outright (`IndentationError`). Proven
+        with a shape the WEAKER regex fallback cannot catch (an adjacent
+        string-literal split Python folds at parse time), so this can only
+        pass via the AST path."""
+        handler = _handler()
+        call = "    os." + "system('cat .vault-pas' 'sword')\n"
+        hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
+        assert handler.matches(hook_input)
+
+    def test_non_uniformly_indented_fragment_is_recovered_by_function_wrap(self) -> None:
+        """A fragment with its OWN internal indentation (a nested `if`)
+        cannot be fixed by `dedent` alone -- it still needs a syntactically
+        valid indented block to sit inside, which wrapping in a synthetic
+        function body provides. Proven the same way, via the AST-only
+        split-literal shape."""
+        handler = _handler()
+        call = (
+            "    if True:\n"
+            "        os." + "system('cat .vault-pas' 'sword')\n"
+        )
         hook_input = _hook_input("Write", {"file_path": "/proj/helper.py", "content": call})
         assert handler.matches(hook_input)
 

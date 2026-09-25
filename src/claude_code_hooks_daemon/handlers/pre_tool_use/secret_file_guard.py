@@ -30,6 +30,7 @@ RESEARCH-read-routes.md for the class-(b)/(c)/(d) route classification.
 import ast
 import logging
 import re
+import textwrap
 import time
 from dataclasses import dataclass
 from typing import Any, ClassVar, Final
@@ -41,9 +42,8 @@ from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
-from claude_code_hooks_daemon.utils import encrypted_at_rest
+from claude_code_hooks_daemon.utils import encrypted_at_rest, shell_expansion
 from claude_code_hooks_daemon.utils import secret_file_matching as sfm
-from claude_code_hooks_daemon.utils import shell_expansion
 from claude_code_hooks_daemon.utils.path_exclusion import (
     handler_excludes_path,
     resolve_project_root,
@@ -264,9 +264,40 @@ def _has_shell_shebang(content: str) -> bool:
 # argument-span/paren matching.
 _SHELL_EXEC_CALL_SPAN: Final[int] = 500
 _MAX_SHELL_EXEC_LITERALS: Final[int] = 64
+# Review 7 (read-only finding): matches `shell_expansion._SHELL_INTERPRETER_
+# BASENAMES`'s fuller set, not just the original six -- a Go/Rust/Java
+# first-literal check for `mksh`/`csh`/`tcsh`/`fish`/the restricted-shell
+# names previously missed them entirely.
 _SHELL_INTERPRETER_NAMES: Final[frozenset[str]] = frozenset(
-    {"sh", "bash", "zsh", "dash", "ksh", "ash"}
+    {
+        "sh",
+        "bash",
+        "zsh",
+        "dash",
+        "ksh",
+        "ash",
+        "mksh",
+        "csh",
+        "tcsh",
+        "fish",
+        "rbash",
+        "yash",
+        "posh",
+        "pdksh",
+    }
 )
+
+
+def _first_literal_is_shell_interpreter(span_literals: list[str]) -> bool:
+    """True when ``span_literals[0]`` (already extracted from a call span)
+    names a shell interpreter -- basename-stripped, so an ABSOLUTE
+    interpreter path (``/bin/bash``) is recognised too (review 7,
+    read-only finding: the Go/Rust/Java first-literal check compared the
+    raw string with no basename strip, unlike the Python path)."""
+    if not span_literals:
+        return False
+    basename = span_literals[0].rsplit("/", 1)[-1]
+    return basename in _SHELL_INTERPRETER_NAMES
 
 _QUOTED_STRING_RE: Final[re.Pattern[str]] = re.compile(
     r"""(['"])((?:\\.|(?!\1).)*)\1""", re.DOTALL
@@ -284,7 +315,11 @@ _PERCENT_LITERAL_DELIMITERS: Final[dict[str, str]] = {
 _PYTHON_SHELL_CALL_RE: Final[re.Pattern[str]] = re.compile(
     r"\b(?:os\.system|os\.popen|subprocess\.\w+)\s*\("
 )
-_RUBY_SHELL_CALL_RE: Final[re.Pattern[str]] = re.compile(r"\b(?:system|exec)\s*\(")
+# Review 7 MINOR-2: the paren-free form (`system 'x'`, idiomatic Ruby) is
+# matched too, the same optional-paren shape Perl's `system` already uses
+# -- `_call_span` is a bounded text window, not a real paren matcher, so it
+# works identically whether or not `(` was actually present.
+_RUBY_SHELL_CALL_RE: Final[re.Pattern[str]] = re.compile(r"\b(?:system|exec)\s*\(?")
 _PHP_SHELL_CALL_RE: Final[re.Pattern[str]] = re.compile(r"\b(?:shell_exec|exec|system)\s*\(")
 _PERL_SHELL_CALL_RE: Final[re.Pattern[str]] = re.compile(r"\bsystem\b\s*\(?")
 _NODE_SHELL_CALL_RE: Final[re.Pattern[str]] = re.compile(
@@ -381,6 +416,14 @@ _PY_OS_EXEC_SPAWN_PREFIXES: Final[tuple[str, ...]] = ("exec", "spawn")
 _PY_SUBPROCESS_FUNC_NAMES: Final[frozenset[str]] = frozenset(
     {"run", "call", "check_call", "check_output", "Popen", "getoutput", "getstatusoutput"}
 )
+#: `subprocess.getoutput`/`getstatusoutput` (review 7 MINOR-1) always run
+#: their argument through a shell -- unlike `run`/`call`/`check_call`/
+#: `check_output`/`Popen`, they take no `shell=` keyword at all, so gating
+#: them on `_python_call_has_shell_true` can never be True and they never
+#: matched.
+_PY_SUBPROCESS_ALWAYS_SHELL_FUNC_NAMES: Final[frozenset[str]] = frozenset(
+    {"getoutput", "getstatusoutput"}
+)
 
 
 class _PythonImportAliases:
@@ -456,6 +499,8 @@ def _python_call_is_shell_exec(module: str, attr: str, call: ast.Call) -> bool:
         return True
     if module == "asyncio" and attr == "create_subprocess_shell":
         return True
+    if module == "subprocess" and attr in _PY_SUBPROCESS_ALWAYS_SHELL_FUNC_NAMES:
+        return True
     if module == "subprocess" and attr in _PY_SUBPROCESS_FUNC_NAMES:
         return _python_call_has_shell_true(call) or _python_call_names_a_shell(call)
     return False
@@ -466,6 +511,18 @@ def _collect_python_string_constants(node: ast.expr, out: list[str], *, limit: i
         return
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         out.append(node.value)
+        return
+    if isinstance(node, ast.JoinedStr):
+        # An f-string (review 7 MINOR-1): its CONSTANT parts (the literal
+        # text between `{...}` placeholders) are collected the same way a
+        # plain string literal is -- a protected mention can sit entirely
+        # in the literal text even with no placeholder at all
+        # (`f'cat ~/.ssh/id_rsa'`), and a mention split ACROSS a
+        # placeholder boundary is an accepted residual (this cannot
+        # resolve a placeholder's runtime value statically).
+        parts = [value.value for value in node.values if isinstance(value, ast.Constant)]
+        if parts:
+            out.append("".join(str(part) for part in parts))
         return
     if isinstance(node, (ast.List, ast.Tuple)):
         for element in node.elts:
@@ -488,16 +545,47 @@ def _python_call_string_literals(call: ast.Call, *, limit: int) -> list[str]:
     return literals[:limit]
 
 
+def _parse_python_fragment(content: str) -> ast.Module | None:
+    """Parse ``content`` as standalone Python, trying two recovery shapes
+    before giving up (review 7, read-only finding): the Edit route only
+    ever scans `new_string`, an ADDED fragment that is routinely indented
+    relative to its real surrounding file (an indented block body, a
+    method) -- `ast.parse` rejects that outright with an
+    ``IndentationError``, which is a `SyntaxError` subclass.
+
+    1. As given.
+    2. ``textwrap.dedent``-ed -- recovers the common case (a uniformly
+       indented block pasted/edited without its enclosing `def`/`class`).
+    3. Wrapped in a synthetic function body (``def _f():\\n<indented
+       content>``) -- recovers a fragment whose OWN internal indentation
+       is not uniform (e.g. contains a nested `if`), which dedent alone
+       cannot fix, since it still needs a syntactically valid indented
+       block to sit inside.
+
+    ``None`` when none of the three parses, so the caller falls back to
+    the (weaker) regex heuristic rather than under-detecting silently.
+    """
+    for attempt in (content, textwrap.dedent(content)):
+        try:
+            return ast.parse(attempt)
+        except (SyntaxError, ValueError):
+            continue
+    wrapped = "def _f():\n" + textwrap.indent(content, "    ")
+    try:
+        return ast.parse(wrapped)
+    except (SyntaxError, ValueError):
+        return None
+
+
 def _python_shell_exec_literals_ast(content: str) -> list[str] | None:
     """AST-based extraction (review 6 minor-2) -- ``None`` when ``content``
-    is not parseable standalone Python, so the caller falls back to the
-    regex heuristic rather than under-detecting a fragment ``ast.parse``
-    cannot handle on its own (e.g. an indentation error in an isolated
-    snippet that is valid once embedded in its real surrounding file).
+    is not parseable standalone Python even after
+    :func:`_parse_python_fragment`'s recovery attempts, so the caller falls
+    back to the regex heuristic rather than under-detecting a fragment
+    ``ast.parse`` cannot handle on its own.
     """
-    try:
-        tree = ast.parse(content)
-    except (SyntaxError, ValueError):
+    tree = _parse_python_fragment(content)
+    if tree is None:
         return None
     aliases = _PythonImportAliases()
     for node in ast.walk(tree):
@@ -616,7 +704,7 @@ def _go_shell_exec_literals(content: str) -> list[str]:
     for match in _GO_EXEC_COMMAND_RE.finditer(content):
         span = _call_span(content, match.end())
         span_literals = _quoted_literals_in_span(span, limit=_MAX_SHELL_EXEC_LITERALS)
-        if not span_literals or span_literals[0] not in _SHELL_INTERPRETER_NAMES:
+        if not _first_literal_is_shell_interpreter(span_literals):
             continue
         literals.extend(span_literals)
     return literals[:_MAX_SHELL_EXEC_LITERALS]
@@ -633,7 +721,7 @@ def _rust_shell_exec_literals(content: str) -> list[str]:
     for match in _RUST_COMMAND_NEW_RE.finditer(content):
         span = _call_span(content, match.end())
         span_literals = _quoted_literals_in_span(span, limit=_MAX_SHELL_EXEC_LITERALS)
-        if not span_literals or span_literals[0] not in _SHELL_INTERPRETER_NAMES:
+        if not _first_literal_is_shell_interpreter(span_literals):
             continue
         literals.extend(span_literals)
     return literals[:_MAX_SHELL_EXEC_LITERALS]
@@ -651,7 +739,7 @@ def _java_shell_exec_literals(content: str) -> list[str]:
     for match in _JAVA_PROCESS_BUILDER_RE.finditer(content):
         span = _call_span(content, match.end())
         span_literals = _quoted_literals_in_span(span, limit=_MAX_SHELL_EXEC_LITERALS)
-        if not span_literals or span_literals[0] not in _SHELL_INTERPRETER_NAMES:
+        if not _first_literal_is_shell_interpreter(span_literals):
             continue
         literals.extend(span_literals)
     for match in _JAVA_RUNTIME_CALL_RE.finditer(content):
@@ -690,30 +778,82 @@ def _shell_exec_call_literals(path: str, content: str) -> list[str]:
     return []
 
 
-# review 6 minor-2: an interpreter one-liner on the BASH route (`python3 -c
-# "..."`) gets the SAME item-3 treatment a `.py` FILE's content already
-# gets -- the code argument is extracted and run through
+# review 6 minor-2 / review 7 MAJOR-5: an interpreter one-liner on the BASH
+# route (`python3 -c "..."`) gets the SAME item-3 treatment a `.py` FILE's
+# content already gets -- the code argument is extracted and run through
 # `_shell_exec_call_literals` under a pseudo-path naming the right
 # extension, so a protected path hidden inside a KNOWN shell-exec call
 # (Python's os-dot-system, for example) is caught, not just a bare
 # top-level mention (which the ordinary bash-command mention scan already
 # covers on its own).
-_ONE_LINER_CODE_FLAG_BY_BASENAME: Final[dict[str, str]] = {
-    "python": "-c",
-    "python3": "-c",
-    "ruby": "-e",
-    "perl": "-e",
-    "node": "-e",
-    "php": "-r",
+#
+# Review 7 MAJOR-5: the review-6 version matched only an EXACT basename
+# (`python`/`python3`) with the code flag as the IMMEDIATE next word --
+# missing a versioned/absolute interpreter (`python3.12`, `pypy3`,
+# `/usr/bin/python3.11`), an interpreter option before the flag
+# (`python3 -I -c`), a clustered short flag (`-Sc`, `-le`, `-we`), and
+# `perl -E`/`node -p`/`node --eval`. Each FAMILY below is matched by a
+# basename regex (versioned/absolute forms) and walked by
+# `_classify_one_liner_option_word` (clustered short flags, long flags,
+# and ordinary options skipped in between) -- the same "option-walk, not
+# exact-adjacency" shape `shell_expansion._classify_interpreter_option_word`
+# already uses for `bash -c`.
+@dataclass(frozen=True)
+class _OneLinerFamily:
+    """One interpreter family's one-liner shape."""
+
+    basename_re: re.Pattern[str]
+    pseudo_ext: str
+    #: A short-flag WORD (`-c`, `-Sc`, `-le`) introduces the code argument
+    #: when ANY of these letters appears anywhere in its cluster.
+    cluster_letters: frozenset[str]
+    #: Long-flag spellings (`--eval`, `--print`) that ALSO introduce the
+    #: code argument, compared for exact equality.
+    long_flags: frozenset[str] = frozenset()
+
+
+_ONE_LINER_FAMILIES: Final[dict[str, _OneLinerFamily]] = {
+    "python": _OneLinerFamily(
+        re.compile(r"^(?:python|pypy)\d?(?:\.\d+)*$"), ".py", frozenset({"c"})
+    ),
+    "ruby": _OneLinerFamily(re.compile(r"^ruby(?:\d+(?:\.\d+)*)?$"), ".rb", frozenset({"e"})),
+    "perl": _OneLinerFamily(re.compile(r"^perl(?:\d+(?:\.\d+)*)?$"), ".pl", frozenset({"e", "E"})),
+    "node": _OneLinerFamily(
+        re.compile(r"^node(?:\d+(?:\.\d+)*)?$"),
+        ".js",
+        frozenset({"e", "p"}),
+        frozenset({"--eval", "--print"}),
+    ),
+    "php": _OneLinerFamily(re.compile(r"^php(?:\d+(?:\.\d+)*)?$"), ".php", frozenset({"r"})),
 }
-_ONE_LINER_PSEUDO_EXTENSION_BY_BASENAME: Final[dict[str, str]] = {
-    "python": ".py",
-    "python3": ".py",
-    "ruby": ".rb",
-    "perl": ".pl",
-    "node": ".js",
-    "php": ".php",
-}
+
+
+def _match_one_liner_family(basename: str) -> _OneLinerFamily | None:
+    """The one-liner family ``basename`` (already path-stripped) belongs
+    to, or ``None``."""
+    for family in _ONE_LINER_FAMILIES.values():
+        if family.basename_re.match(basename):
+            return family
+    return None
+
+
+def _classify_one_liner_option_word(family: _OneLinerFamily, word: str) -> str:
+    """Classify one word while walking an interpreter's OWN options,
+    looking for its code flag.
+
+    Returns ``"code"`` (the NEXT word is the code argument), ``"skip"``
+    (an ordinary option, keep walking), or ``"stop"`` (not an option word
+    -- no code flag found for this invocation).
+    """
+    if word in family.long_flags:
+        return "code"
+    if word.startswith("--"):
+        return "skip"
+    if len(word) > 1 and word[0] == "-":
+        if any(char in family.cluster_letters for char in word[1:]):
+            return "code"
+        return "skip"
+    return "stop"
 
 
 def _bash_interpreter_one_liner_mention(
@@ -724,8 +864,8 @@ def _bash_interpreter_one_liner_mention(
     cwd: str | None,
 ) -> tuple[str, str] | None:
     """A protected mention inside a KNOWN shell-exec call embedded in an
-    interpreter one-liner on the Bash route (review 6 minor-2), or
-    ``None``.
+    interpreter one-liner on the Bash route (review 6 minor-2, review 7
+    MAJOR-5), or ``None``.
 
     Re-tokenises ``command`` the same way the ordinary bash-mention scan
     does, so the interpreter/flag/code triple is found using the SAME
@@ -733,13 +873,26 @@ def _bash_interpreter_one_liner_mention(
     argument already gets) rather than a fresh, narrower regex.
     """
     words = list(shell_expansion.iter_normalised_shell_words(command))
-    for index in range(len(words) - 2):
-        basename = words[index].rsplit("/", 1)[-1]
-        expected_flag = _ONE_LINER_CODE_FLAG_BY_BASENAME.get(basename)
-        if expected_flag is None or words[index + 1] != expected_flag:
+    for index, word in enumerate(words):
+        basename = word.rsplit("/", 1)[-1]
+        family = _match_one_liner_family(basename)
+        if family is None:
             continue
-        code = words[index + 2]
-        pseudo_path = "one_liner" + _ONE_LINER_PSEUDO_EXTENSION_BY_BASENAME[basename]
+        code_index: int | None = None
+        cursor = index + 1
+        while cursor < len(words):
+            kind = _classify_one_liner_option_word(family, words[cursor])
+            if kind == "code":
+                code_index = cursor + 1
+                break
+            if kind == "skip":
+                cursor += 1
+                continue
+            break  # "stop": not an option word -- no code flag here
+        if code_index is None or code_index >= len(words):
+            continue
+        code = words[code_index]
+        pseudo_path = "one_liner" + family.pseudo_ext
         for literal in _shell_exec_call_literals(pseudo_path, code):
             mention = sfm.find_protected_mention_detail(
                 literal, patterns, deadline=deadline, cwd=cwd, context="bash"
