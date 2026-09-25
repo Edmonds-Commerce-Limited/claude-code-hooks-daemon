@@ -11,18 +11,26 @@ from typing import Any
 import pytest
 from tests.support.git_fixtures import run_git as _git
 
+from claude_code_hooks_daemon.config.models import (
+    Config,
+    PersistentCronConfig,
+    PersistentCronsConfig,
+)
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.post_tool_use.recovery_cron_advisor import (
-    _CANONICAL_CRON_PROMPT,
     _CREATION_GUIDANCE,
     _MAX_TRACKED_PLANS,
     _PROGRESS_ADVISE_INTERVAL,
     _PROGRESS_GUIDANCE,
+    CANONICAL_CRON_PROMPT,
     CANONICAL_CRON_PROMPT_MARKER,
     LifecyclePhase,
     RecoveryCronAdvisorHandler,
     _detect_lifecycle_phase,
+    declares_failsafe_cron,
 )
+from claude_code_hooks_daemon.utils.cron_enforcement import PROMPT_DELIVERY_CAP
+from claude_code_hooks_daemon.utils.cron_tick import DaemonTick, TickKind, classify_tick
 
 _RETIRED_SECTION = "Notes & Updates"
 
@@ -56,7 +64,18 @@ class TestCanonicalCronPromptMarker:
     independently-drifting copy of the text."""
 
     def test_marker_is_substring_of_canonical_prompt(self) -> None:
-        assert CANONICAL_CRON_PROMPT_MARKER in _CANONICAL_CRON_PROMPT
+        assert CANONICAL_CRON_PROMPT_MARKER in CANONICAL_CRON_PROMPT
+
+    def test_the_prompt_is_a_failsafe_tick_by_its_sentinel(self) -> None:
+        """Plan 00388: the sentinel is what lets a multi-cron session tell
+        this tick from the owner and from every other cron's tick."""
+        assert classify_tick(CANONICAL_CRON_PROMPT) == DaemonTick(TickKind.FAILSAFE)
+
+    def test_the_prompt_fits_under_the_delivery_cap(self) -> None:
+        """Stop payloads cap a cron prompt at 1000 characters; staying under
+        it keeps whole-text matching available when the failsafe is declared
+        under persistent_crons (Plan 00394)."""
+        assert len(CANONICAL_CRON_PROMPT) < PROMPT_DELIVERY_CAP
 
 
 class TestCronIdDestinationIsJournal:
@@ -680,6 +699,49 @@ class TestHandleCompletion:
         assert ("no recovery" in lowered) or ("unprotected" in lowered) or ("coverage" in lowered)
         # … and conditions the delete (does not advise it unconditionally).
         assert ("only" in lowered) or ("certain" in lowered)
+
+    def test_a_declared_failsafe_cron_is_never_advised_for_deletion(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Plan 00394 option 1: a project that declares the failsafe cron under
+        persistent_crons has cron_stop_enforcer requiring it, so deleting it on
+        plan completion only earns a blocked stop and a re-create."""
+        handler = RecoveryCronAdvisorHandler()
+        monkeypatch.setattr(handler, "_load_config", lambda: _config_declaring_failsafe())
+        result = handler.handle(
+            _write_input("/workspace/CLAUDE/Plan/00042-my-plan/PLAN.md", "**Status**: Complete\n")
+        )
+        text = " ".join(result.context)
+        assert "persistent_crons" in text
+        assert "do NOT CronDelete" in text
+
+
+def _config_declaring_failsafe(*, section_enabled: bool = True) -> Config:
+    job = PersistentCronConfig(id="failsafe", schedule="47 * * * *", prompt=CANONICAL_CRON_PROMPT)
+    return Config(persistent_crons=PersistentCronsConfig(enabled=section_enabled, jobs=[job]))
+
+
+class TestDeclaresFailsafeCron:
+    """The one predicate every surface uses to ask "is the failsafe cron
+    declared here?" -- the SessionStart advisor goes quiet on it and the
+    completion guidance stops advising deletion on it."""
+
+    def test_an_active_declaration_counts(self) -> None:
+        assert declares_failsafe_cron(_config_declaring_failsafe())
+
+    def test_a_disabled_section_does_not(self) -> None:
+        assert not declares_failsafe_cron(_config_declaring_failsafe(section_enabled=False))
+
+    def test_a_declaration_created_before_the_sentinel_counts(self) -> None:
+        legacy = CANONICAL_CRON_PROMPT.split("\n", 1)[1]
+        job = PersistentCronConfig(id="failsafe", schedule="47 * * * *", prompt=legacy)
+        config = Config(persistent_crons=PersistentCronsConfig(enabled=True, jobs=[job]))
+        assert declares_failsafe_cron(config)
+
+    def test_another_declared_job_does_not(self) -> None:
+        job = PersistentCronConfig(id="issue-sdlc", schedule="23 * * * *", prompt="run it")
+        config = Config(persistent_crons=PersistentCronsConfig(enabled=True, jobs=[job]))
+        assert not declares_failsafe_cron(config)
 
 
 # ─── Progress-interval logic ───────────────────────────────────────────────────

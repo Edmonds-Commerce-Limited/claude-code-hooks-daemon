@@ -39,6 +39,7 @@ from claude_code_hooks_daemon.utils.cli_command import (
     daemon_cli_command,
     daemon_cli_command_for_docs,
 )
+from claude_code_hooks_daemon.utils.cron_tick import TickKind, tick_sentinel
 
 # State file under the daemon untracked dir (never /tmp — B108).
 _STATE_FILENAME: Final[str] = "background-processes.jsonl"
@@ -182,6 +183,28 @@ def write_state_record(
     path.write_text("\n".join(existing[-max_lines:]) + "\n")
 
 
+def watchdog_cron_prompt() -> str:
+    """The watchdog cron's prompt, for the agent to paste verbatim.
+
+    Supplied rather than described (Plan 00388 option 2'): an agent-composed
+    prompt differs every session and carries nothing the daemon can recognise,
+    so its ticks were read as the owner replying and wiped the
+    ``[awaiting-human]`` marker. The leading sentinel is what lets the
+    blockage suppressor tell this tick from the human. Computed on demand for
+    the same reason as ``_advisory``: it names the deployed wrapper.
+    """
+    return (
+        f"{tick_sentinel(TickKind.WATCHDOG)}\n"
+        "**BACKGROUND WATCHDOG TICK (automated — NOT a heartbeat, NOT human input).**\n"
+        f"Run `{daemon_cli_command('harvest-background')}` and act on any runaway it\n"
+        "surfaces: reap the WHOLE process group (`kill -- -<pgid>`), never just the pid.\n"
+        "A long task that is deliberately wanted (a build, a server, a QA run) is not a\n"
+        'runaway: note KEEP_RUNNING_BECAUSE="<reason>" and leave it alone. If nothing is\n'
+        "surfaced, this tick is a no-op — do not interrupt or duplicate work in flight.\n"
+        "Delete this cron (CronDelete) once no backgrounded work remains in the session."
+    )
+
+
 def _advisory() -> str:
     """Build the backgrounded-process advisory.
 
@@ -200,10 +223,11 @@ def _advisory() -> str:
         "  • Run CronList FIRST. If a watchdog cron is already listed, REUSE it and "
         "create nothing (CronDelete any extras so one remains).\n"
         "  • ONLY IF none is listed, create a non-durable recurring watchdog cron "
-        "(CronCreate, durable:false, recurring:true, off-:00 minute) whose prompt runs:\n"
-        f"      {daemon_cli_command('harvest-background')}\n"
-        "    and acts on any runaway it surfaces. Record the cron ID. Do NOT wait for "
-        "the cron — keep working at full speed.\n"
+        "(CronCreate, durable:false, recurring:true, off-:00 minute). Paste the "
+        "following text verbatim as its prompt — the first line is how the daemon "
+        "tells this tick from you, so do not reword or drop it:\n\n"
+        f"{watchdog_cron_prompt()}\n\n"
+        "    Record the cron ID. Do NOT wait for the cron — keep working at full speed.\n"
         "  • Check now once: run `harvest-background` yourself.\n\n"
         "If a runaway is surfaced, reap the WHOLE process group (not just the pid):\n"
         "      kill -- -<pgid>\n"
@@ -300,10 +324,13 @@ class BackgroundProcessTrackerHandler(PostToolUseHandlerBase):
             "one covers the whole session, since its prompt harvests ALL tracked "
             "background processes. `CronList` FIRST: reuse the one already running "
             "(`CronDelete` any extras), and only if none is listed create it "
-            "(CronCreate, durable:false) with a prompt that runs "
+            "(CronCreate, durable:false) with the prompt the advisory supplies, "
+            "pasted verbatim: it runs "
             f"`{daemon_cli_command_for_docs('harvest-background')}` and "
             "acts on any runaway — this covers the idle/compaction window a tool-call "
-            "hook cannot. Do NOT wait for the cron; keep working.\n"
+            "hook cannot. Its first line, `[tick:watchdog]`, is how the daemon tells "
+            "the tick from you, so an `[awaiting-human]` wait survives it; keep it. "
+            "Do NOT wait for the cron; keep working.\n"
             "- Check on demand: run `harvest-background` (exit 1 == runaways surfaced).\n"
             "- Reap a runaway by its **process group**: `kill -- -<pgid>` (not just the pid).\n"
             '- Keep a wanted long task: note `KEEP_RUNNING_BECAUSE="reason"`.\n'

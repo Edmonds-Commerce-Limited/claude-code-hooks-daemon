@@ -24,8 +24,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00450: release skill mandates forbidden subagent acceptance gate](00450-release-skill-mandates-forbidden-subagent-acceptance-gate/PLAN.md) - Not Started (`release/invoke.sh` tells the agent to spawn parallel Haiku agents for Step 12; `acceptance-test/invoke.sh` forbids exactly that by name)
 
-- [00449: unlocked eviction race survives in other handlers](00449-unlocked-eviction-race-survives-in-other-handlers/PLAN.md) - Not Started (Plan 00437 named the class and fixed two of eight-plus sites; `write_clobber_guard` at priority 16 claims to fail CLOSED and does not under contention)
-
 - [00448: plan completion gate has no commit time backstop](00448-plan-completion-gate-has-no-commit-time-backstop/PLAN.md) - Not Started (the Complete-flip gate keys on Write/Edit only, so a `PLAN.md` written through Bash escapes it — as Plan 00437 did)
 
 - [00447: magic constant advisory policy](00447-magic-constant-advisory-policy/PLAN.md) - Not Started, BLOCKED ON THE OWNER (from issue #49: the reported constant is verified real and is a GrowthBook experiment gate on the bash-first injection, one of 642 `CLAUDE_CODE_*` tokens in the build — so whether the daemon should advise on cohort-assigned experiment flags at all is a policy question, and it subsumes 00428's blocker)
@@ -46,17 +44,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00408: handler hygiene from the release review](00408-handler-hygiene-from-the-release-review/PLAN.md) - Not Started (the non-user-visible half of the v3.64.0 review: raw hook-field literals where `HookInputField` is the declared SSoT, `merge_qa_report` building the docs corpus on the hook budget while a sibling argues against exactly that, and four sub-bar items carried so they are not lost. Graduated from 00407 N6)
 
-- [00402: restart path leaves generated handler doc stale](00402-restart-path-leaves-generated-handler-doc-stale/PLAN.md) - Not Started (a restart regenerates the `CLAUDE.md` block but never `.claude/HOOKS-DAEMON.md`, which sat a whole handler short for days and no test could see it. Regenerating on restart is the WRONG fix — that file's marker is the deployed-from version `upgrade.sh` reads. Graduated from 00400 N6; blocked on a ruling)
-
 - [00399: supervisor does not see tab completed slash commands](00399-supervisor-does-not-see-tab-completed-slash-commands/PLAN.md) - Blocked (ruled option 2 shipped: the supervisor reads a Tab-completed `/compact` from the daemon's `PreCompact` record, which now carries its origin. Only Task 2.1 remains, and it needs a human: typing `/comp`, Tab, Enter in the real tmux-wrapped session to show whether tmux changes the byte stream)
 
 - [00396: detect a plan written without reading its domain docs](00396-detect-a-plan-written-without-reading-its-domain-docs/PLAN.md) - Not Started (a plan was filed about deployment by a session that had read none of the deployment docs; the signature is mechanical — a PLAN.md filled about domain X with zero reads of X's owning docs — and `write_clobber_guard` already tracks per-session reads. Advisory, inert until a project declares a topic map)
 
-- [00394: failsafe cron coverage starts at first plan write](00394-failsafe-cron-coverage-starts-at-first-plan-write/PLAN.md) - Not Started (the cron that resumes a stalled session is established by a PostToolUse handler gated on a plan write, so a session has no recovery net until it touches a plan file; Plan 00384 left it undeclared believing `recovery_cron_advisor` already asserted at SessionStart, and it does not. Blocked on an owner ruling between three options)
-
 - [00391: plan close requires proven definition of done](00391-plan-close-requires-proven-definition-of-done/PLAN.md) - Not Started (a project declares its DoD in config; the close is denied until each item is CHECKED or attested with evidence in the plan's JOURNAL/, and a three-way policy — human_gate, encourage, neutral — subsumes Plan 00367's boolean. `encourage` is the direction that would have caught 00386/00389 sitting finished-but-open)
-
-- [00388: failsafe marker wiped by other crons in multi cron sessions](00388-failsafe-marker-wiped-by-other-crons-in-multi-cron-sessions/PLAN.md) - Not Started (`[awaiting-human]` never suppresses a tick in a session with more than one cron — any non-failsafe tick reads as "the owner is back" and clears the marker and cadence; reproduced against the real handler, blocked on an owner ruling between three approaches)
 
 - [00344: stop hook deny rate classification](00344-stop-hook-deny-rate-classification/PLAN.md) - Not Started (Plan 00337 Task 5.0 shipped the instrumentation but the classification needs telemetry across many sessions — 49 instrumented rows exist and 48 are acceptance probes, because a real Stop event fires roughly once per session)
 
@@ -193,6 +185,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00454: not installed message steers to destructive reinstall](Completed/00454-not-installed-message-steers-to-destructive-reinstall/PLAN.md) - Complete at `f299681f` + the archiving commit (first slice of #53: a clone with no venv for this path now gets its own diagnosis naming a version-pinned upgrade, not the install advice that `rm -rf`s the other view's venv; #53 stays open)
 
+- [00449: unlocked eviction race survives in other handlers](Completed/00449-unlocked-eviction-race-survives-in-other-handlers/PLAN.md) - Complete at `5e3e784f`…`28abcf6e` + the archiving commit (the v3.66.0 review found six more unlocked-eviction sites beyond Plan 00437's two; a `BoundedFifoMap` fixed 12 instances across 10 handlers, plus a per-thread `SideEffectJournal`; a semgrep gate holds the class at 0)
+
 - [00446: subagent report path claim is verified](Completed/00446-subagent-report-path-claim-is-verified/PLAN.md) - Complete at `10b6d6f7` + the archiving commit (from 00422 N15: a false `Report written to:` path — closed by neither remedy the entry listed, since one was costed against a call rather than its coverage and the other named a field SubagentStop does not carry)
 
 - [00445: acceptance harness honours the socket override](Completed/00445-acceptance-harness-honours-the-socket-override/PLAN.md) - Complete at `c4eeebdf` + the archiving commit (from 00422 N6 fault 2, which was not the worktree fault that entry assumed: the autouse env-isolation fixture strips the documented `CLAUDE_HOOKS_SOCKET_PATH` workaround from every wrapper subprocess)
@@ -232,8 +226,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00427: journal timestamps agent authored and timezone naive](Completed/00427-journal-timestamps-agent-authored-and-timezone-naive/PLAN.md) - Complete at `c631d4dc`…`a208959e` + the archiving commit (from issue #45: a correct writer was not enough — `--journal` stamps UTC, but the future-dated check still read a naive LOCAL clock, so a correct entry looked 239 minutes ahead on `America/New_York`)
 
 - [00426: shipped plugins examples do not validate](Completed/00426-shipped-plugins-examples-do-not-validate/PLAN.md) - Complete at `904d63ed`…`fd414e5e` + the archiving commit (from issue #44, which asked which of two documented `plugins:` schemas is real: neither, because the required `event_type` appears in no example — and both YAML copies are commented out, so no config-loading test could ever have seen them)
-
-- [00425: remote docs index goes stale on delete](Completed/00425-remote-docs-index-goes-stale-on-delete/PLAN.md) - Complete at `edd91533`…`9282c9ea` + the archiving commit (from issue #43: `rm` is the one tree mutation that runs no daemon command, so `check` called the corpus fresh while the index named a deleted file. `check` now detects and reports; the network-free `remote-docs index` repairs)
 
 Older completed plans (below the retention window of the 30 highest-numbered) are archived verbatim in [Completed/README.md](Completed/README.md).
 
@@ -288,15 +280,15 @@ Older completed plans (below the retention window of the 30 highest-numbered) ar
 
 - **Total Plans Created**: 469 (count = `hooksdaemon.latestPlanNumber` git counter)
 
-- **Completed**: 403 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
+- **Completed**: 407 (includes 1 reduced-scope plan and 6 found already-shipped when audited; count = `Completed/` folders)
 
-- **Active**: 43 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
+- **Active**: 39 (count = root `NNNNN-*` plan folders; includes several dormant plans awaiting scheduling)
 
 - **On Hold**: 0
 
 - **Cancelled/Abandoned**: 13 on disk (count = `Cancelled/` folders: 00032/00034/00035 won't do — delegate mode no longer exists, 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102, 00108 superseded by 00117, 00131 residue declined, 00132 superseded by 00284, 00174 superseded by 00175, 00199 superseded by 00213, 00135 superseded by the supervisor workstream)
 
-- **Folder-to-number reconciliation**: 43 + 403 + 13 = **459 folders**, spanning
+- **Folder-to-number reconciliation**: 39 + 407 + 13 = **459 folders**, spanning
   **456 distinct plan numbers** — three numbers carry two folders each, the
   historic collisions already held in `collision_allowlist` (00034, 00039,
   00041). Plans 1–3 are on disk under the pre-zero-padding names

@@ -332,7 +332,7 @@ Some tool errors require an explicit recovery action, not a halt. The most commo
 
 **On Stop hook re-entry (the hook fires again after a prior block)**: your next response is treated like any other — it must either prefix with `STOPPING BECAUSE:` or continue the work. Re-entry does not exempt you from the explanation rule.
 
-**If you are stopping because you are blocked ONLY on the human, declare it — it turns the failsafe cron off**. Put the token immediately after the prefix:
+**If you are stopping because you are blocked ONLY on the human, declare it — it turns the failsafe cron and every declared `persistent_crons` job off**. Put the token immediately after the prefix:
 
 ```
 STOPPING BECAUSE: [awaiting-human] the owner has to choose between A and B before anything else can move.
@@ -345,7 +345,7 @@ The token is matched exactly, so any wording after it works. These older phrasin
 - `need user input`
 - `waiting on the user's decision`
 
-Either form in your `STOPPING BECAUSE:` line records a marker that makes the daemon drop the next hourly failsafe-cron tick before it reaches you, at zero token cost. Without one, every tick costs a full turn to read and answer with nothing. The next real user message clears the marker and hourly ticks resume; it also expires on its own, so a mistake here costs you at most a day of ticks.
+Either form in your `STOPPING BECAUSE:` line records a marker that makes the daemon drop the next hourly failsafe-cron tick, and every declared job's tick, before it reaches you, at zero token cost. Another cron's tick never clears it, provided its prompt still carries the daemon's `[tick:...]` first line. Without one, every tick costs a full turn to read and answer with nothing. The next real user message clears the marker and hourly ticks resume; it also expires on its own, so a mistake here costs you at most a day of ticks.
 
 **Only when it is the ONLY thing blocking you.** A stop that merely mentions waiting on someone while other work remains must not use these shapes — that would silence a tick you could have used. If there is work you could still do, do it instead of stopping.
 
@@ -480,6 +480,7 @@ Either form in your `STOPPING BECAUSE:` line records a marker that makes the dae
 | R-WRITE-OUTSIDE-PROJECT-ROOT       | a write whose target is outside the repository root                                                                                                  | Outside the repo nothing is version-controlled, reviewed or durable — a container's temp directory is wiped on restart, and every other path rule is scoped to the repo so none of them judges it | Write it inside the repository — `untracked/scratch/` is the scratch location                                                                                                                                         |
 | R-FAILSAFE-CRON-SUPPRESSED         | A delivered failsafe-cron tick, while a 'blocked only on human input' marker is live                                                                 | Every tick against a session blocked only on human input is a guaranteed no-op model turn                                                                                                         | Nothing to do -- this is expected. Send a real message to clear the marker and resume ticks                                                                                                                           |
 | R-FAILSAFE-CRON-BACKED-OFF         | A delivered failsafe-cron tick, while this session is producing nothing and owes no ledgered work                                                    | An hourly tick against a session with nothing to recover costs a full model turn and finds nothing                                                                                                | Nothing to do -- ticks continue, just less often. Any real user message restores hourly cadence                                                                                                                       |
+| R-DECLARED-CRON-SUPPRESSED         | A delivered persistent_crons tick, while a 'blocked only on human input' marker is live                                                              | A declared job's tick against a session blocked only on human input costs a full model turn                                                                                                       | Nothing to do -- this is expected. Send a real message to clear the marker and resume ticks                                                                                                                           |
 | R-FLAGGABLE-CONTENT-CHANNEL        | a content-revealing git/grep command shape over a flaggable path                                                                                     | It would reveal flaggable content inside routine command output, with no deliberate Read at all                                                                                                   | Delegate the WHOLE review to the quarantine subagent instead                                                                                                                                                          |
 | R-GH-AUTO-CLOSE-KEYWORD            | a GitHub closing keyword + issue reference in a git/gh message                                                                                       | Auto-closes the referenced issue/PR the moment the commit reaches the default branch, and cannot be disabled repository-side                                                                      | Use a non-closing reference instead, e.g. Addresses #123                                                                                                                                                              |
 | R-UPSTREAM-ISSUE-UNVERIFIED-BODY   | `gh issue create` against the hooks-daemon tracker with a body no generator produced                                                                 | that tracker is PUBLIC and an issue cannot be retracted -- a pasted config, log excerpt or absolute path costs the CLIENT permanently, while an over-redacted report costs one round trip         | Generate the body with `hooks-daemon issue-report` and file the file it writes                                                                                                                                        |
@@ -585,6 +586,10 @@ One line each; these fire with their own guidance when relevant. Full text: `bin
 <!-- handler: docs-qa-sweep -->
 
 - docs_qa_sweep — documentation drift report at session start
+
+<!-- handler: failsafe-cron-session-advisor -->
+
+- failsafe_cron_session_advisor — the failsafe cron from session start
 
 <!-- handler: flaggable-work-advisor -->
 

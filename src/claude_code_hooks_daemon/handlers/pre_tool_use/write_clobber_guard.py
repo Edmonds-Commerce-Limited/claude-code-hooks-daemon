@@ -24,6 +24,7 @@ the mode agents run unattended in. This handler restores the documented
 contract rather than inventing a new rule.
 """
 
+import os
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HookInputField
@@ -35,6 +36,7 @@ from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.core import Decision, GatingResult, get_data_layer
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
+from claude_code_hooks_daemon.handlers.utils.bounded_fifo_map import BoundedFifoMap
 from claude_code_hooks_daemon.utils.path_predicates import path_is_file
 
 _RULE = Rule(
@@ -50,8 +52,8 @@ _RULE = Rule(
         "DO INSTEAD (either is one call):\n"
         "  - `Read` the file, then retry the Write if a full replacement is what you want\n"
         "  - Use `Edit` for a targeted change — it replaces known text, not the whole file\n\n"
-        "NOTE: creating a NEW file is never blocked, and a file you wrote or read earlier\n"
-        "in this session is not blocked either."
+        "NOTE: creating a NEW file is never blocked, and a file you wrote, edited or read\n"
+        "earlier in this session is not blocked either."
     ),
 )
 
@@ -67,6 +69,10 @@ _MAX_PATHS_PER_SESSION = 2_000
 _UNKNOWN_SESSION = "<no-session-id>"
 
 _CONFIG_KEY_PATH = "handlers.pre_tool_use.write_clobber_guard.enabled"
+
+# Every tool whose success means this session knows the file's contents. An
+# Edit counts: Claude Code refuses an Edit to a file the session has not read.
+_TRACKED_TOOLS: frozenset[str] = frozenset({ToolName.READ, ToolName.EDIT, ToolName.WRITE})
 
 
 class WriteClobberGuardHandler(PreToolUseHandlerBase):
@@ -94,8 +100,14 @@ class WriteClobberGuardHandler(PreToolUseHandlerBase):
             # a warning where they will meet a wall.
             tags=[HandlerTag.SAFETY, HandlerTag.FILE_OPS, HandlerTag.BLOCKING],
         )
-        # session id -> paths whose contents this session has seen.
-        self._known_paths: dict[str, set[str]] = {}
+        # session id -> paths whose contents this session has seen. Evicting
+        # the oldest session only ever costs an extra Read, never safety --
+        # and the eviction is atomic, so contention cannot raise out of a Read
+        # (Plan 00449): an exception here is the guard vanishing, not failing
+        # closed.
+        self._known_paths: BoundedFifoMap[str, set[str]] = BoundedFifoMap(
+            max_entries=_MAX_TRACKED_SESSIONS
+        )
 
     @staticmethod
     def _session_id(hook_input: dict[str, Any]) -> str:
@@ -109,21 +121,19 @@ class WriteClobberGuardHandler(PreToolUseHandlerBase):
         ``core.utils.get_file_path`` returns None for anything that is not
         Write/Edit, which would make a Read invisible here -- the exact gating
         Plan 00260 Task 3.1b is about. This handler needs the Read.
+
+        Normalised lexically so ``/a/b/../c`` and ``/a/c`` are one record: two
+        spellings of one path name one file, and a mismatch costs a false deny.
         """
         tool_input = hook_input.get("tool_input")
         if not isinstance(tool_input, dict):
             return None
         path = tool_input.get("file_path")
-        return path if isinstance(path, str) and path else None
+        return os.path.normpath(path) if isinstance(path, str) and path else None
 
     def _record(self, hook_input: dict[str, Any], path: str) -> None:
         """Remember that this session knows the contents of ``path``."""
-        session = self._session_id(hook_input)
-        if session not in self._known_paths and len(self._known_paths) >= _MAX_TRACKED_SESSIONS:
-            # Evict the oldest tracked session. Losing state only ever costs an
-            # extra Read, never safety -- the guard fails CLOSED.
-            self._known_paths.pop(next(iter(self._known_paths)))
-        known = self._known_paths.setdefault(session, set())
+        known = self._known_paths.get_or_insert(self._session_id(hook_input), set())
         if len(known) < _MAX_PATHS_PER_SESSION:
             known.add(path)
 
@@ -131,26 +141,26 @@ class WriteClobberGuardHandler(PreToolUseHandlerBase):
         return path in self._known_paths.get(self._session_id(hook_input), set())
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        """Fire on every Read (to record it) and on a clobbering Write.
+        """Fire on every Read, Edit and Write that names a path.
+
+        Each one teaches the session the file's contents, so ``handle()`` must
+        see every one to record it. The chain calls ``handle()`` only behind a
+        True ``matches()``, and returning True here for the clobbering Write
+        alone left a created or known file unrecorded (Plan 00422 N29).
 
         Args:
             hook_input: Hook input containing tool_name and tool_input.
 
         Returns:
-            True for a Read carrying a path, or a Write that would replace an
-            existing file this session has not read.
+            True for a Read, Edit or Write carrying a path.
         """
-        tool_name = hook_input.get("tool_name")
-        path = self._file_path(hook_input)
-        if path is None:
-            return False
+        return (
+            hook_input.get("tool_name") in _TRACKED_TOOLS
+            and self._file_path(hook_input) is not None
+        )
 
-        if tool_name == ToolName.READ:
-            return True
-
-        if tool_name != ToolName.WRITE:
-            return False
-
+    def _would_clobber(self, hook_input: dict[str, Any], path: str) -> bool:
+        """Whether this Write replaces an existing file the session does not know."""
         # Creating a new file destroys nothing.
         #
         # `unreadable_means=True` is the opposite of pathlib's own convention,
@@ -172,7 +182,7 @@ class WriteClobberGuardHandler(PreToolUseHandlerBase):
         return [_RULE]
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
-        """Record a Read, or deny a Write that would clobber unread content.
+        """Record a Read, Edit or allowed Write; deny a Write that would clobber.
 
         Verbosity is decided per (transcript_path, rule_id) via the shared
         DisclosureTracker (Plan 00116, Decision G). The file path and line
@@ -180,24 +190,22 @@ class WriteClobberGuardHandler(PreToolUseHandlerBase):
         invocation, so they are not part of the static teaching content.
 
         Args:
-            hook_input: Hook input for the Read or Write call.
+            hook_input: Hook input for the Read, Edit or Write call.
 
         Returns:
-            ALLOW for a Read (always), DENY for a clobbering Write.
+            ALLOW for a Read or Edit (always) and for a Write that creates or
+            rewrites a known file, DENY for a clobbering Write.
         """
         path = self._file_path(hook_input)
-        if path is None:
+        tool_name = hook_input.get("tool_name")
+        if path is None or tool_name not in _TRACKED_TOOLS:
             return GatingResult(decision=Decision.ALLOW)
 
-        if hook_input.get("tool_name") == ToolName.READ:
+        if tool_name != ToolName.WRITE or not self._would_clobber(hook_input, path):
+            # Every allowed call teaches this session the file's contents, so a
+            # later rewrite of the same path is not blocked. A denied Write is
+            # not recorded: it never ran.
             self._record(hook_input, path)
-            return GatingResult(decision=Decision.ALLOW)
-
-        if not self.matches(hook_input):
-            # A Write we are not blocking still teaches this session the file's
-            # contents, so a later rewrite of the same path is not blocked.
-            if hook_input.get("tool_name") == ToolName.WRITE:
-                self._record(hook_input, path)
             return GatingResult(decision=Decision.ALLOW)
 
         line_count = self._count_lines(path)
@@ -243,8 +251,8 @@ class WriteClobberGuardHandler(PreToolUseHandlerBase):
             "exists and that you have NOT read in this session is blocked, because you "
             "cannot know what you are destroying — and so could not report the loss even "
             "afterwards.\n\n"
-            "**Never blocked**: creating a new file; rewriting a file you read or wrote "
-            "earlier this session; any `Edit` (it replaces known text, not the file).\n\n"
+            "**Never blocked**: creating a new file; rewriting a file you read, edited or "
+            "wrote earlier this session; any `Edit` (it replaces known text, not the file).\n\n"
             "**The fix is one call**: `Read` the file and retry, or use `Edit`. Reading "
             "first is what you should do regardless, so there is no escape hatch and none "
             "is needed — unlike a `MUST_..._BECAUSE` declaration, a `Read` actually "

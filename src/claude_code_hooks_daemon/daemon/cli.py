@@ -98,7 +98,12 @@ from claude_code_hooks_daemon.install.release_notes import load_release_notes_be
 from claude_code_hooks_daemon.issue_report.build import build_report
 from claude_code_hooks_daemon.issue_report.upstream import filing_command
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command
-from claude_code_hooks_daemon.utils.git_repo import run_git
+from claude_code_hooks_daemon.utils.git_repo import (
+    git_visible_ancestor_dirs,
+    git_visible_paths,
+    project_path_is_protected,
+    run_git,
+)
 from claude_code_hooks_daemon.utils.hook_registration import (
     detect_duplicate_hooks,
     detect_legacy_hook_commands,
@@ -4195,6 +4200,135 @@ def cmd_approve_merge(args: argparse.Namespace) -> int:
     return 0
 
 
+class _CronPauseRefusedError(Exception):
+    """A ``cron-pause``/``cron-resume`` request that must not proceed."""
+
+
+def _resolve_cron_pause_target(args: argparse.Namespace) -> tuple[str, str, Path]:
+    """Validate a ``cron-pause``/``cron-resume`` request (ledger 00422 N4).
+
+    Returns ``(session_id, job_id, pauses_path)``. The job check is what stops a
+    typo from recording a pause that does nothing while the real job keeps being
+    demanded.
+
+    Raises:
+        _CronPauseRefusedError: No session to scope it to, a job id that names
+            no ACTIVE declared job, or no untracked directory to record it in.
+    """
+    from claude_code_hooks_daemon.config.models import Config
+    from claude_code_hooks_daemon.core.project_context import ProjectContext
+    from claude_code_hooks_daemon.utils.cron_pause import CRON_PAUSES_FILENAME
+
+    session_id = os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip()
+    if not session_id:
+        raise _CronPauseRefusedError(
+            "CLAUDE_CODE_SESSION_ID is not set. A cron pause belongs to ONE session, so "
+            "run this inside that Claude Code session (a Bash tool call sets the variable)."
+        )
+
+    if getattr(args, "project_root", None):
+        project_path = Path(args.project_root).resolve()
+    else:
+        project_path = get_project_path(None)
+    config_file = project_path / ".claude" / "hooks-daemon.yaml"
+    job_id = str(args.job).strip()
+    declared = [
+        job.id for job in Config.load_or_default(config_file).persistent_crons.active_jobs()
+    ]
+    if job_id not in declared:
+        listed = ", ".join(declared) if declared else "none"
+        raise _CronPauseRefusedError(
+            f"'{job_id}' is not an active job under persistent_crons (active: {listed})."
+        )
+
+    # Same tolerance as approve-merge: an earlier step in this process may have
+    # initialised the context already, in which case it is reused.
+    if not ProjectContext.is_initialized():
+        try:
+            ProjectContext.initialize(config_file)
+        except ValueError as e:
+            print(f"WARNING: could not initialise project context: {e}", file=sys.stderr)
+    try:
+        untracked_dir = ProjectContext.daemon_untracked_dir()
+    except RuntimeError as e:
+        raise _CronPauseRefusedError(f"no untracked directory to record the pause in: {e}") from e
+    return session_id, job_id, untracked_dir / CRON_PAUSES_FILENAME
+
+
+def cmd_cron_pause(args: argparse.Namespace) -> int:
+    """Pause one declared persistent cron for THIS session (ledger 00422 N4).
+
+    The spelling for "cancelled for now": the Stop enforcers then accept that
+    job as missing, naming it with the reason and the expiry, until the pause
+    expires within 24 hours or ``cron-resume`` ends it. ``persistent_crons``
+    is untouched, so the next session is asked to create the job again.
+
+    Returns:
+        0 on pause recorded, 1 on refusal/failure.
+    """
+    from claude_code_hooks_daemon.utils.cron_pause import CronPause, format_expiry, record_pause
+
+    reason = " ".join(str(getattr(args, "reason", None) or "").split())
+    if not reason:
+        print(
+            "ERROR: --reason is required -- the stop output shows it to whoever meets "
+            "the paused job next.",
+            file=sys.stderr,
+        )
+        return 1
+    try:
+        session_id, job_id, path = _resolve_cron_pause_target(args)
+    except _CronPauseRefusedError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 1
+
+    now = time.time()
+    pause = CronPause(job_id=job_id, session_id=session_id, reason=reason, recorded_at=now)
+    try:
+        record_pause(path, pause, now=now)
+    except OSError as e:
+        print(f"ERROR: pause not recorded ({path}): {e}", file=sys.stderr)
+        return 1
+    print(f"Paused '{job_id}' for session {session_id}; reason: {reason}")
+    print(f"Expires: {format_expiry(pause, now=now)}")
+    print(
+        "The stop enforcer now accepts it as missing. If it is running, CronDelete it "
+        f"from the main session. Undo with: hooks-daemon cron-resume {job_id}"
+    )
+    return 0
+
+
+def cmd_cron_resume(args: argparse.Namespace) -> int:
+    """End this session's pause of one declared persistent cron (ledger 00422 N4).
+
+    Idempotent: resuming a job that is not paused is not an error.
+
+    Returns:
+        0 on pause removed or nothing to remove, 1 on refusal/failure.
+    """
+    from claude_code_hooks_daemon.utils.cron_pause import remove_pause
+
+    try:
+        session_id, job_id, path = _resolve_cron_pause_target(args)
+    except _CronPauseRefusedError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 1
+    try:
+        removed = remove_pause(path, job_id=job_id, session_id=session_id, now=time.time())
+    except OSError as e:
+        print(f"ERROR: pause not removed ({path}): {e}", file=sys.stderr)
+        return 1
+    if removed is None:
+        print(f"'{job_id}' is not paused for session {session_id}; nothing to resume.")
+        return 0
+    print(f"Resumed '{job_id}' for session {session_id}.")
+    print(
+        "The stop enforcer requires it again: run CronCreate (recurring: true) with its "
+        "declared schedule and prompt before stopping."
+    )
+    return 0
+
+
 def cmd_inject_goal(args: argparse.Namespace) -> int:
     """Write a ``<session>.goal-intent`` signal on demand (Plan 00269 Task 2.3).
 
@@ -5253,8 +5387,9 @@ def _iter_markdown_candidates(
 ) -> Iterator[Path]:
     """Yield markdown files below ``root``, in directory-walk order.
 
-    Two independent filters apply here (Plan 00429), and only to this
-    directory WALK — a file the caller names directly bypasses both:
+    Three independent filters apply here, and only to this directory WALK —
+    a file the caller names directly bypasses all three (see
+    ``cmd_format_markdown``'s own gitignore refusal for that case instead):
 
     - Any directory below ``root`` that is itself a git repository is
       pruned, so nothing inside it is ever visited. The walk root's OWN
@@ -5266,15 +5401,38 @@ def _iter_markdown_candidates(
       resolve against ``project_root``, NOT against ``root`` — they are
       declared relative to the project, so a walk root below it must still
       match them (see ``_enclosing_project_root``).
+    - Plan 00468 P3 / Plan 00466 N9's class: a path git does not consider
+      part of the project (untracked, matched by a ``.gitignore`` rule) is
+      excluded too. A nested git repo protects a vendored dependency with
+      its OWN checkout (the filter above), but a Claude Code plugin's cache
+      or marketplace snapshot under ``.claude/ccy/plugins/`` has no ``.git``
+      of its own — nothing else here would ever notice it is not this
+      project's content. See :func:`utils.git_repo.git_visible_paths` for
+      the single git call this costs and its not-a-repository fallback.
+    - A path matching a protected glob (Plan 00412) is excluded
+      unconditionally, via :func:`utils.git_repo.project_path_is_protected`
+      -- even when ``project_root`` is not a git repository and the filter
+      above is inert, so ``format-markdown`` never rewrites (or reports a
+      would-reformat finding for) a protected file's content.
     """
     from claude_code_hooks_daemon.utils.path_exclusion import is_path_excluded
 
     project_root_str = str(project_root)
+    git_visible = git_visible_paths(project_root)
+    descend_roots = None if git_visible is None else git_visible_ancestor_dirs(git_visible)
     for dirpath, dirnames, filenames in os.walk(root):
         current = Path(dirpath)
-        dirnames[:] = sorted(
-            name for name in dirnames if not _is_nested_git_repo_root(current / name)
-        )
+        kept_dirnames = []
+        for name in sorted(dirnames):
+            child = current / name
+            if _is_nested_git_repo_root(child):
+                continue
+            if descend_roots is not None and not _rel_is_git_visible(
+                child, project_root, descend_roots
+            ):
+                continue
+            kept_dirnames.append(name)
+        dirnames[:] = kept_dirnames
         for filename in sorted(filenames):
             candidate = current / filename
             if not candidate.name.lower().endswith(_MARKDOWN_EXTENSIONS):
@@ -5286,7 +5444,69 @@ def _iter_markdown_candidates(
                 continue
             if is_path_excluded(str(candidate), exclude_paths, project_root=project_root_str):
                 continue
+            if git_visible is not None and not _rel_is_git_visible(
+                candidate, project_root, git_visible
+            ):
+                continue
+            try:
+                candidate_rel = candidate.relative_to(project_root).as_posix()
+            except ValueError:
+                # Should not occur (see `_rel_is_git_visible`'s docstring):
+                # fall back to the candidate's own string form so the
+                # protected check below still has something to judge.
+                logger.debug(
+                    "_iter_markdown_candidates: %s is not under project_root %s; "
+                    "using its raw string form for the protected-path check",
+                    candidate,
+                    project_root,
+                )
+                candidate_rel = str(candidate)
+            if project_path_is_protected(candidate_rel):
+                continue
             yield candidate
+
+
+def _rel_is_git_visible(path: Path, project_root: Path, visible: frozenset[str]) -> bool:
+    """Whether ``path``, expressed relative to ``project_root``, is in ``visible``.
+
+    ``visible`` is either :func:`utils.git_repo.git_visible_paths`'s own
+    result (file membership) or :func:`utils.git_repo.git_visible_ancestor_dirs`'
+    output (directory-descent membership) — both are keyed the same way, by
+    the POSIX-relative path from ``project_root``. A ``path`` outside
+    ``project_root`` entirely (which should not occur: every caller derives
+    both from the same walk) is treated as not visible rather than raising.
+    """
+    try:
+        rel = path.relative_to(project_root).as_posix()
+    except ValueError:
+        return False
+    return rel in visible
+
+
+def _gitignored_message(path: Path) -> str:
+    """The refusal text `cmd_format_markdown` prints for a gitignored target."""
+    return (
+        f"ERROR: {path} is gitignored -- format-markdown will not rewrite content "
+        "outside the project (Plan 00468 P3)"
+    )
+
+
+def _is_gitignored(path: Path, project_root: Path) -> bool:
+    """Whether ``git`` ignores ``path`` (Plan 00468 P3).
+
+    Used to refuse an EXPLICITLY named target (file or directory) before
+    any walk begins — ``_iter_markdown_candidates``'s per-candidate filter
+    only ever prunes a walk, and a file or directory the caller names
+    directly bypasses every walk filter by design (the same "explicit
+    consent" convention ``daemon.exclude_paths`` already follows there).
+
+    ``False`` when ``project_root`` is not a git repository, or
+    ``check-ignore`` cannot answer: the outside-a-repo fallback
+    :func:`utils.git_repo.git_visible_paths` already documents this same
+    choice — nothing is refused when there is no git truth to refuse it by.
+    """
+    result = run_git(project_root, "check-ignore", "-q", str(path))
+    return result.returncode == 0
 
 
 def _format_single_markdown_file(path: Path, check: bool) -> tuple[bool, bool]:
@@ -5341,6 +5561,21 @@ def cmd_format_markdown(args: argparse.Namespace) -> int:
         print(f"ERROR: Path does not exist: {path}", file=sys.stderr)
         return 1
 
+    # Plan 00468 P3: an EXPLICITLY named target -- file or directory -- that
+    # git ignores is refused outright, before any walk or single-file write.
+    # `_iter_markdown_candidates`'s filtering only ever prunes a WALK; a
+    # target the caller names directly bypasses every walk filter by design
+    # (see that function's own docstring), so this is the one place that
+    # question is asked for the target itself. `_enclosing_project_root`
+    # expects a DIRECTORY to start climbing from -- `path` is only guaranteed
+    # to be one once the `path.is_file()` branch below has ruled the other
+    # case out, so a file target climbs from its PARENT instead (mirrors
+    # `GitRepo.resolve_for`'s own file-vs-directory normalisation).
+    project_root = _enclosing_project_root(path if path.is_dir() else path.parent)
+    if _is_gitignored(path, project_root):
+        print(_gitignored_message(path), file=sys.stderr)
+        return 1
+
     if path.is_file():
         if not path.name.lower().endswith(_MARKDOWN_EXTENSIONS):
             print(f"ERROR: {path} is not a markdown file", file=sys.stderr)
@@ -5356,12 +5591,12 @@ def cmd_format_markdown(args: argparse.Namespace) -> int:
         return 0
 
     # Directory mode: recurse and process every markdown file, skipping any
-    # nested git repository below `path` and anything `daemon.exclude_paths`
-    # excludes (Plan 00429) -- neither filter applies to a file the caller
+    # nested git repository below `path`, anything `daemon.exclude_paths`
+    # excludes (Plan 00429), and anything git does not consider part of the
+    # project (Plan 00468 P3) -- neither filter applies to a file the caller
     # names directly, handled in the branch above.
     from claude_code_hooks_daemon.config.models import Config
 
-    project_root = _enclosing_project_root(path)
     config = Config.load_or_default(project_root / ".claude" / "hooks-daemon.yaml")
     exclude_paths = config.daemon.exclude_paths
 
@@ -9770,6 +10005,44 @@ def main() -> int:
         help="Project root override (default: auto-detected)",
     )
     parser_approve_merge.set_defaults(func=cmd_approve_merge)
+
+    # cron-pause / cron-resume (ledger 00422 N4): the session-scoped spelling
+    # for "cancel this declared cron for now"
+    parser_cron_pause = subparsers.add_parser(
+        "cron-pause",
+        help=(
+            "Pause one persistent_crons job for THIS session (expires within 24h); "
+            "the stop enforcer then accepts it as missing"
+        ),
+    )
+    parser_cron_pause.add_argument("job", metavar="JOB", help="Declared job id to pause")
+    parser_cron_pause.add_argument(
+        "--reason",
+        required=True,
+        help="Why it is paused; shown in the stop enforcer's output",
+    )
+    parser_cron_pause.add_argument(
+        "--project-root",
+        dest="project_root",
+        type=Path,
+        default=None,
+        help="Project root override (default: auto-detected)",
+    )
+    parser_cron_pause.set_defaults(func=cmd_cron_pause)
+
+    parser_cron_resume = subparsers.add_parser(
+        "cron-resume",
+        help="End this session's pause of one persistent_crons job",
+    )
+    parser_cron_resume.add_argument("job", metavar="JOB", help="Declared job id to resume")
+    parser_cron_resume.add_argument(
+        "--project-root",
+        dest="project_root",
+        type=Path,
+        default=None,
+        help="Project root override (default: auto-detected)",
+    )
+    parser_cron_resume.set_defaults(func=cmd_cron_resume)
 
     # verdicts command (Plan 00209): report on the handler decision log
     parser_verdicts = subparsers.add_parser(

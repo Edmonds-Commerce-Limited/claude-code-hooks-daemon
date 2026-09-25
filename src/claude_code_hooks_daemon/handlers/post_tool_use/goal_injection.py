@@ -101,6 +101,7 @@ from claude_code_hooks_daemon.core.handler import WorkspaceScope
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
+from claude_code_hooks_daemon.handlers.utils.bounded_fifo_map import BoundedFifoMap
 from claude_code_hooks_daemon.plan_qa.model import TERMINAL_STATUSES, PlanDoc, PlanStatus
 from claude_code_hooks_daemon.utils.ccy_supervisor import supervisor_relevance
 from claude_code_hooks_daemon.utils.git_facts import project_relative_head_text
@@ -680,15 +681,22 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         self._mode: str = _DEFAULT_MODE
         self._lines: list[dict[str, Any]] | None = None
         self._once_per_plan_per_session: bool = True
-        # (session_id, plan_number) latch — bounded, FIFO eviction.
-        self._fired: dict[tuple[str, str], bool] = {}
+        # (session_id, plan_number) latch — bounded, atomic FIFO eviction.
+        self._fired: BoundedFifoMap[tuple[str, str], bool] = BoundedFifoMap(
+            max_entries=_MAX_TRACKED_LATCHES
+        )
         # (session_id, plan_number) latch for a CONFIRMED reassert-path
         # write THIS daemon lifetime (review RV-m3) — separate from
         # ``_fired`` (which only ever latches a REAL flip): a resumed
         # session with the SAME session id as its earlier real flip must
         # still get its signal rewritten once per daemon lifetime even
-        # though ``_fired`` is already set for it.
-        self._reasserted: dict[tuple[str, str], bool] = {}
+        # though ``_fired`` is already set for it. Plan 00449 P2: same
+        # atomic-FIFO-bounded map type as ``_fired`` -- a hand-rolled
+        # select-then-evict here races identically under threaded
+        # dispatch.
+        self._reasserted: BoundedFifoMap[tuple[str, str], bool] = BoundedFifoMap(
+            max_entries=_MAX_TRACKED_LATCHES
+        )
 
     def get_default_enabled(self) -> bool:
         """Opt-in: only useful when a PTY supervisor is watching."""
@@ -1488,17 +1496,18 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
             raise PlanUnreadable(f"could not read {path}: {e}") from e
 
     @staticmethod
-    def _record_latch(latches: dict[tuple[str, str], bool], key: tuple[str, str]) -> None:
-        """Set ``key`` in ``latches`` with FIFO eviction at
-        ``_MAX_TRACKED_LATCHES``. RV3-m4: shared by ``self._fired`` and
+    def _record_latch(latches: BoundedFifoMap[tuple[str, str], bool], key: tuple[str, str]) -> None:
+        """Set ``key`` in ``latches``. RV3-m4: shared by ``self._fired`` and
         ``self._reasserted`` -- both are per-``(session, plan)`` in-memory
         latches, and both need the SAME bound (a long-lived daemon touched
         by hundreds of distinct sessions must not leak memory in either
-        map), so one bounded-insert helper serves both instead of each
-        reimplementing FIFO eviction.
+        map), so one insert helper serves both instead of each duplicating
+        the call. Plan 00449 P2: ``latches`` is a :class:`BoundedFifoMap`,
+        whose own ``__setitem__`` already does the FIFO-bounded, atomic
+        insert this method used to hand-roll (a select-then-evict pattern
+        that raced under threaded dispatch) -- nothing left to do here but
+        the assignment.
         """
-        if key not in latches and len(latches) >= _MAX_TRACKED_LATCHES:
-            del latches[next(iter(latches))]
         latches[key] = True
 
     def get_claude_md(self) -> str | None:

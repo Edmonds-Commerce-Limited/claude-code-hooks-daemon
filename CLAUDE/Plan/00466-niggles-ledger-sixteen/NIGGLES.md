@@ -3,6 +3,223 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
+N34 is taken on the `worktree-n466-n24` branch (the chain deadline cannot
+interrupt a running handler) and lands with that branch. N40 is taken there too
+(the fail-open classes behind that branch's security-review blockers). N41 is
+taken on the N38 fix branch (the chain's remaining linear per-token cost, which
+waits for the shell-parser consolidation).
+
+### N44 — A PreToolUse handler raises `ValueError: no path specified` on an Edit, and the Edit goes through
+
+**Found by the Plan 00464 agent** while editing
+`src/claude_code_hooks_daemon/utils/git_command_target.py` in its worktree,
+with its hooks served by the main `/workspace` daemon. The hook context
+returned `Handler exception: ValueError: no path specified`, and the Edit was
+allowed. That message is what `os.path.relpath("")` raises. So some handler
+computes a relative path from an EMPTY candidate. The replaced text contained
+`Path(xdg).joinpath(*_XDG_CONFIG_PATH)`, a `*name` shape like the
+`secret_file_guard` false positive on `*words[`. So the secret-path candidate
+extraction is the first suspect, but this is unverified.
+
+Nothing identifies the handler yet: the in-memory log had already rolled
+over, and an in-process run without the main config did not reproduce it.
+Two defects are here:
+
+- a handler raises on ordinary content;
+- the raise fails open. That is ledger N24's class, being closed on the n24
+  branch.
+
+**Candidate remedy:** reproduce through the real chain with the project's
+real config and word list. Name the handler, guard the empty candidate at its
+source, and add a RED test. Also sweep for other `relpath` and `commonpath`
+calls that can receive an empty or foreign path.
+
+### N43 — Log and payload redaction is inert while the daemon runs degraded on an unloadable config
+
+**Found by the Plan 00421 agent** while closing Task 4.9 on `worktree-d-00421`.
+`secret_redaction._resolve_active_path` resolves the secret word list through
+the configuration. When the config cannot load (the Plan 00421 degraded
+mode), that lookup raises ValueError, and redaction falls back to inert. So a
+degraded daemon writes its logs and payload captures UNREDACTED, which is
+exactly when a broken config makes a protective fallback matter most. The
+same root cause left degraded `sensitive_content` with no secret terms; that
+was fixed on the branch by pinning the default list explicitly.
+
+**Candidate remedy:** while degraded, redaction uses the default word list
+UNION the last-known-good snapshot's lists, the same set degraded
+`sensitive_content` uses. A redaction failure to resolve a list must never
+mean "redact nothing". Pin it with a degraded-start test that captures a
+payload containing a term and asserts the term is redacted. Being fixed on
+`worktree-d-00421`.
+
+### N42 — Quoted-heredoc blanking hides text that bash executes from the Bash command guards
+
+**Found by the N38 review** (its M3), confirmed against real bash, and
+unchanged between the old regex and the new N38 scanner. `shell_segmentation`
+treats a quoted-heredoc body as inert data. Several guards then blank that
+text and never judge it, among them destructive_git, pipe_blocker,
+curl_pipe_shell, force-push detection and, for one shape, sed_blocker. There
+are seven shapes where the blanked text is not a heredoc body at all, and
+bash runs it:
+
+- an EMPTY body (`cat > n <<'E'` with `E` on the very next line, followed by
+  a command and a second `E` line), with its `<<-` form and a
+  `git commit -F -` form;
+- an opener inside a `#` comment;
+- an opener inside a double-quoted string;
+- a `<<<'E'` here-string read as an opener;
+- a quoted opener inside an UNQUOTED heredoc's body;
+- the same inside a multi-line double-quoted string;
+- an unquoted heredoc followed by a quoted one on the same line.
+
+In each shape, a destructive or piped command is ALLOWED. The probes are in
+`untracked/scratch/probe_n38r_*`. This is a fail-open in the guards
+themselves, so it is fixed now on the N38 branch and not deferred to the
+consolidation.
+
+**Candidate remedy:** recognise an opener only where bash would: outside
+quotes, comments and here-strings, and not inside another heredoc's body.
+Close an empty body on the first delimiter line. Keep the scan to one linear,
+quote-aware pass. Pin every shape through the real chain.
+
+### N39 — Nine unit tests fail in a whole-suite run and pass when their files run alone
+
+**Found by the guard-defects agent** (its review-4 fix round). A plain whole
+unit-suite run on `worktree-n466-guard-defects` (main merged at `e14cdca4`)
+gave 9 failures. They were in `test_model_fallback_detector.py`,
+`test_absolute_path.py`, `test_lookup.py` and
+`test_dangerous_invocation_corpus_checker.py`. The same four files run alone
+gave 105 passed, 0 failed. So some earlier test leaks state (a module global,
+a singleton, the environment or the cwd) into these. The full gate passed on
+`main`, so the leak depends on order or on how the suite is split across
+workers.
+
+A suite that fails in one order is a hidden defect: it can hide a real
+failure behind a "flaky" label, and it breaks the first time the ordering
+shifts. It has not yet been confirmed whether `main` alone reproduces it;
+that is the first step.
+
+**Candidate remedy:** reproduce it on `main` with a plain sequential run, then
+bisect for the polluting test. Fix the leak at its source with real isolation
+(a fixture that restores the state), not by reordering. Pin it with a test
+that runs the polluter and the victim in sequence.
+
+### N38 — The PreToolUse chain takes quadratic time on a command of quoted heredoc openers
+
+**Found by the Plan 00463 sixth review** (its nit n6), measured on `main` and
+on the 463 branch alike (`untracked/scratch/probe_463v6_chain_main_heredoc.py`).
+A main-thread Bash command made of repeated `cat <<'E'` openers takes the
+whole in-process PreToolUse chain 1.9 s at 16 KiB, 6.8 s at 32 KiB and 51.7 s
+at 94 KiB. So the cost roughly quadruples when the size doubles. The verdict
+is allow, but at 94 KiB it runs past the client's 30 s budget. Until N25's
+fail-closed client lands, that timeout is itself an ALLOW for the whole chain.
+After it lands, it is a false deny of a harmless command, and the daemon
+keeps burning a worker thread on it either way.
+
+The handler, or handlers, carrying the quadratic heredoc scan has not yet
+been identified; profiling is the first step.
+
+**Candidate remedy:** profile the chain per handler on the 94 KiB fixture, and
+make each heredoc scan linear. The likely shape is one that re-scans the rest
+of the command for each opener. Pin it with a test: the 94 KiB fixture takes
+the whole chain under 2 s.
+
+### N37 — `resolve_venv.sh` caches an override's interpreter for later callers that set no override
+
+**Found by the Plan 00376 agent** while closing the upgrade gate's
+interpreter bypass. `scripts/lib/resolve_venv.sh` writes
+`untracked/.python-cmd-cache` even when the answer came from
+`HOOKS_DAEMON_PYTHON` or `HOOKS_DAEMON_VENV_PATH`. A later call that sets
+neither override is then served the overridden interpreter from the cache.
+So a one-off override sticks, and a caller that deliberately runs without
+overrides still inherits one. Layer 2 of the upgrade now works around this
+with its own containment check. Every other caller still inherits it.
+
+**Candidate remedy:** never write the cache from an override-derived answer.
+Also key the cache on the absence of overrides, or skip it whenever an
+override is set. RED test: resolve with `HOOKS_DAEMON_PYTHON=/x`, then with
+no override, and the second call must not return `/x`. Being fixed on
+`worktree-d-00376`.
+
+### N36 — `destructive_git` denies a `grep` whose search pattern is the text of a force branch delete
+
+**Found by the Plan 00463 agent** (review-5 fix round, its nit n9). Searching
+the tree for the literal force-branch-delete command text (a grep argument,
+for example `grep -rn "git branch -D" docs/`) is denied as
+R-GIT-BRANCH-FORCE-DELETE. Nothing in the command deletes a branch: the
+text is data given to `grep`. It is the same class as N22
+(`lsp_enforcement` takes another command's argument for a symbol lookup)
+and the N32 pipe split: a guard matches a dangerous shape anywhere in the
+command string instead of at a command position.
+
+**Candidate remedy:** judge destructive-git shapes only at a real command
+position, using the shared shell lexer from the Plan 00464 shell-parser
+consolidation. Treat a quoted argument to a known data consumer (`grep`,
+`rg`, `echo`, `printf`, a git `-m` message) as data. RED tests: the grep
+above is allowed; `git branch -D x`, `cd r && git branch -D x`, and
+`bash -c 'git branch -D x'` are still denied.
+
+### N35 — `daemon_sync_after_merge` judges a `cd <worktree> && git merge` against the session root's ORIG_HEAD
+
+**Found by the Plan 00421 agent.** It ran `cd <worktree> && git merge main`
+inside a worktree. The advisory then reported the MAIN checkout's own
+`ORIG_HEAD..HEAD` and named `.claude/hooks-daemon.yaml` and project-handlers
+as changed. The worktree merge had touched neither.
+
+**Why:** `_is_foreign_repo` and the diff both use the hook payload's cwd,
+which is the session root. They ignore the directory the command itself
+`cd`s into. This is the same attribution family as N28 (project_containment
+ignoring a same-command `cd`) and N33 (which daemon, or which checkout,
+a worktree agent's action is judged against).
+
+**Candidate remedy:** resolve the merge's working directory from the
+command, using the shell lexer's `cd` tracking from Plan 00464 (the
+shell-parser consolidation). Run the ORIG_HEAD diff in THAT repository, and
+say nothing when it is a different checkout from the one the daemon
+serves. RED test: `cd <other-worktree> && git merge main` emits no advisory
+about the session root.
+
+### N33 — a worktree agent's `secret_file_guard.exclude_paths` change had no effect after a daemon restart
+
+**Found by the integration-B2 fix agent.** The agent was writing tests in
+`worktree-integration-b2` that must name protected-looking filenames.
+R-SECRET-SCRIPT-AUTHOR kept denying the writes. It added the two test files
+to `secret_file_guard.options.exclude_paths` in the WORKTREE's
+`.claude/hooks-daemon.yaml` and restarted the worktree's daemon. The denials
+continued. It worked around it by building the filenames at runtime.
+
+**Why (unverified):** the likeliest cause is that a sub-agent's hook calls
+are served by the daemon of the Claude Code session's project root (the
+main checkout), not by the worktree's own daemon. If so, a worktree config
+change cannot affect that agent's own enforcement until it lands on main.
+The docs say "restart the daemon" without saying WHICH daemon enforces a
+worktree agent's tool calls, so the agent could not diagnose it.
+
+**Candidate remedy:** first reproduce it and establish which daemon served
+the denial (the hook log's project root and socket). Then either make the
+deny reason name the config file it was judged against, or document
+worktree-agent enforcement in CLAUDE/Worktree.md. Also consider an advisory
+when a worktree's handler config differs from the enforcing daemon's.
+
+### N32 — `pipe_blocker` splits at a `\|` inside double quotes and reads the next word as a pipe stage
+
+**Found by the Plan 00463 agent.** The command
+`grep -n "a\|--finish\|head-moved\|^#" CLAUDE/QA.md | bin/echd-capture --head 80`
+was denied as R-PIPE-TO-HEAD. The only real pipe goes to the whitelisted
+`bin/echd-capture`. The `\|` alternations inside the double-quoted grep
+pattern were split as pipes, and the "stage" `head-moved` was read as `head`.
+Two defects: a quoted `|` is not a pipe, and `head-moved` is not the
+command `head`.
+
+**Candidate remedy:** move pipe_blocker onto the shared shell lexer from
+Plan 00464 (the shell-parser consolidation), so pipe boundaries come from
+real tokenisation. Match a stage's command by whole word. RED tests: the
+command above is allowed; `pytest | head -1` is still denied; and
+`grep "x|y" f | head` is judged on `grep` (whitelisted), not on `y`.
+
+**Widened (Plan 00463 agent, review-5 n9):** an UNESCAPED `|` inside double
+quotes trips it too, not only `\|`. The RED tests must cover both spellings.
+
 ### N31 — the dispatch-declaration advisory does not recognise "File to write to: <path>"
 
 **Found by the 00467 dogfood agent.** A dispatch brief that named its report
@@ -113,6 +330,22 @@ files where skills exist, so a vacuous pass cannot recur. Audit the other
 `scripts/qa/check_*.py` for the same "0 examined, PASS" shape and pin the
 class with a test that runs each check from a worktree fixture.
 
+**The cause, and two more instances (integration B2).** Each checker drops a
+file whose path contains a noise-directory name such as `untracked` or
+`worktrees`, and it tests the ABSOLUTE path. Every agent checkout lives at
+`untracked/worktrees/<name>/`, so every file matches:
+
+- `check_doc_truth.py` `_iter_markdown`: 0 docs scanned in every worktree.
+  **Fixed on the B2 branch** (08c4be0e): it tests the path below `--root`.
+  1785 docs scanned after, 0 violations. The test is
+  `test_a_checkout_inside_a_worktrees_directory_is_still_scanned`.
+- `audit_shell.py` `_is_excluded`: it keeps 0 of the worktree's `.sh` files, so
+  `shell_audit` passes vacuously. Not fixed. B2 ran it by hand over the
+  relative `scripts/` and skill-scripts directories: 52 files, no violations.
+- `check_skill_references.py` (this entry): `_EXCLUDED_DIRS` holds both names
+  and is tested against `path.parts`, so it is very likely the same cause.
+  `check_github_urls.py` tests `path.parts` the same way and should be checked.
+
 ### N25 — a slow handler runs out the client's 30 s budget, and a timeout is an ALLOW for the whole PreToolUse chain
 
 **Found by the guard-defects security review 2**
@@ -182,6 +415,25 @@ so here the crash denied" is false.
 RED tests: a live-path daemon with `strict_mode: true` denies on a raising
 handler; a SAFETY+BLOCKING handler that raises denies even with `strict_mode`
 off; a non-safety advisory handler that raises still allows, and says so.
+
+### N23 — `recovery_cron_advisor` hands one request's lifecycle phase to another, through the singleton
+
+**Found by Plan 00449's agent** while fixing the eviction race in the same handler. `matches()` stores the detected phase on the handler (`self._cached_phase`) and `handle()` consumes it. The handler is a daemon-lifetime singleton and `server.py` dispatches on a thread pool, so request B's `matches()` can overwrite the value between request A's `matches()` and `handle()`. A then advises on B's phase (CREATION guidance for a PROGRESS edit, say), and B finds the cache already cleared and detects again. It raises nothing, so no test or log shows it. This is a different class from Plan 00449's select-then-evict: per-call state parked on a shared object between two calls. It is out of that plan's scope by its own Non-Goals ("no audit of every mutable handler attribute").
+
+**Candidate remedy:** stop caching on the instance (detect in `handle()`, or key the cache by thread with `threading.local`), with a RED test that interleaves two requests' `matches()` and `handle()`. Then treat it as a class: sweep for any `self._x` assigned in `matches()` and read in `handle()`. That shape is mechanical enough for a semgrep rule like `scripts/qa/semgrep/unlocked-eviction.yaml`.
+
+**Checked against main after integration B2 (2026-09-24): still Open, not
+fixed.** `recovery_cron_advisor.py` still declares `self._cached_phase: LifecyclePhase | None = None` in `__init__`, sets it in `matches()`
+(`self._cached_phase = _detect_lifecycle_phase(...)`) and reads/clears it in
+`handle()` (`cached = self._cached_phase; self._cached_phase = None`) — the
+exact shape this entry names. `tests/unit/handlers/post_tool_use/test_recovery_cron_advisor.py`
+has `test_matches_then_handle_uses_cached_phase` but no interleaving/
+concurrency test. d-00449's `BoundedFifoMap` work (Plan 00449) fixed the
+select-then-evict class across 12 sites in 10 handlers, including three
+other spots in this same file, but explicitly excluded this per-call-state
+class from its Non-Goals and recorded it here instead — see its report,
+"Recorded, not fixed". Nothing else in integration batch B2 touches this
+attribute. Remains a candidate for whoever picks up this ledger.
 
 ### N22 — `lsp_enforcement` takes another command's argument for a grep symbol lookup
 
@@ -257,13 +509,19 @@ N16 is filed on the unmerged `worktree-n466-guard-defects` branch; it joins this
 
 **Candidate remedy:** treat any shell-glob token as a pattern, and deny when the pattern could match a protected name. Compare against the protected basenames and stems, or expand it against the directory when that exists. Keep it no looser than the N4 rule. RED tests: interior `?`, `*` and bracket globs of each shipped protected pattern are denied, while unrelated globs such as `*.py` and `src/*.md` are allowed.
 
-### N9 — `docs_qa` judges gitignored markdown, so installing a Claude Code plugin fails local full QA
+### N9 — ✅ Remedied — `docs_qa` judges gitignored markdown, so installing a Claude Code plugin fails local full QA
 
 **Found by the coordinator** right after installing the Defence Before Fix plugin at project scope (Plan 00467). In this container Claude Code's config directory is `.claude/ccy/`, so the plugin's cache (`.claude/ccy/plugins/cache/...`) and marketplace clone (`.claude/ccy/plugins/marketplaces/...`) land inside the repository. Both are gitignored (`.claude/ccy/.gitignore:3: *`). `llm_qa.py docs_qa` then reported 12 `source-tree-markdown` findings, one per vendored spec file, and the tool FAILED. It reported 0 findings at batch A's gate, before the install. CI does not see this, because a fresh checkout has no `.claude/ccy/`. Every local full QA run, including the coordinator's integration gate, now fails on files that are not part of the project.
 
 The docs corpus walks the filesystem without honouring `.gitignore` (`docs_qa/corpus.py`; it already special-cases `.claude/ccy/CLAUDE.md`, lines 149 and 421).
 
 **Candidate remedy:** the corpus considers only tracked files plus untracked files that are NOT ignored, i.e. `git ls-files --cached --others --exclude-standard`, with a defined fallback outside a git repository. Keep any deliberate inclusion that is ignored but meant to be scanned explicit and named. RED test: a gitignored markdown file under a source-like directory produces no finding, and a tracked one still does. Audit the other QA corpora (plan_qa, doc_snippets, doc_truth, repo_hygiene, sensitive_content, british_english) for the same filesystem-walk assumption, and pin the class.
+
+**Remedied.** `utils/git_repo.py` gained `git_visible_paths(project_root)`: one combined `git ls-files --cached --others --exclude-standard -z` call returning every path git would add, or `None` outside a git repository (callers then fall back to their pre-existing unfiltered walk). `docs_qa/corpus.py`'s `iter_markdown_paths` and `iter_corpus_paths` both filter through it; `.claude/ccy/CLAUDE.md` — deliberately untracked and gitignored, yet named in scope by `is_module_doc_path`'s own docstring — is kept via a small named exception set (`_GITIGNORED_MARKDOWN_INCLUDES`) rather than left an accidental gap, with a directory-descent rule (`_git_visible_ancestor_dirs`) so the walk still reaches it.
+
+The class audit found a SECOND live instance of the same defect: `scripts/qa/check_doc_truth.py`'s `_iter_markdown` denylisted `.claude/ccy/plugins/marketplaces/` by name but not its sibling `cache/` directory, so a plugin's cached spec markdown could still reach `_check_shell_fences` as a false finding. Fixed the same way (filtered through `git_visible_paths`) and reproduced directly with a fixture that git-ignores `.claude/ccy/` and plants a violation inside it.
+
+The rest of the named corpora were audited and left unmigrated, each for a stated, mechanically-pinned reason: `repo_hygiene`, `sensitive_content` and `british_english` already scan `git ls-files` directly by design (tracked-only is deliberate for hygiene/secret-scanning); `magic_values` and `error_hiding` are scoped to `src/`/`tests/`/`scripts/` only, which carry no `.gitignore` gap; `doc_snippets`'s glob set never reaches a nested `.claude/ccy/` subtree; `handler_reference` never walks a directory at all (it introspects the live `HandlerRegistry`); `plan_qa`'s `PlanTree.scan` descends only the configured plan directory via `iterdir()`, never a project-root-wide walk. `tests/unit/qa/test_qa_corpus_git_visibility_audit.py` pins this table as a ratchet: every `MIGRATED` entry is verified by AST to actually import and call `git_visible_paths`, every declared source path is checked to still exist, and every `ALLOWLISTED` entry must carry a non-trivial reason — mirroring `test_qa_package_dependency_direction.py`'s shape.
 
 ### N8 — ✅ Remedied — `reference_repo_freshness` says BLOCKED on a call it allows
 
