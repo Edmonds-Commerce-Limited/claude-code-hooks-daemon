@@ -32,11 +32,14 @@ sub-agent's evasion in a DIFFERENT worktree must contend for the SAME lock.
 from __future__ import annotations
 
 import fcntl
+import logging
 import os
 import subprocess
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 #: Not `/tmp` (security standard B108: never a world-writable shared
 #: directory) and not `untracked/` of any one worktree (a worktree's
@@ -109,19 +112,37 @@ def acquire_full_qa_lock(project_root: Path, *, blocking: bool = True) -> Genera
 def full_qa_lock_is_held(project_root: Path) -> bool:
     """Whether THIS process can prove an ancestor holds the host-wide lock.
 
-    Two things must both be true, in order -- either alone is not proof:
+    Review 10 B2: checking "is an inherited fd open on the lock path" and
+    then, separately, "does a FRESH probe find the file locked" proves only
+    that SOMEONE, somewhere, holds it -- an evader that inherits an UNLOCKED
+    fd to the lock path passes that check for free whenever a genuinely
+    legitimate run happens to be holding the lock concurrently, even though
+    the evader's own run is not serialised against it at all.
 
-    1. One of this process's own open descriptors resolves (via
-       `/proc/self/fd`) to the exact lock file. A descriptor got here only by
-       inheritance across `fork`/`exec`, which is not something an evasion can
-       fake by setting a variable.
-    2. `flock` genuinely reports the file as exclusively locked, checked from
-       a FRESH descriptor opened just for the probe -- inheriting a CLOSED or
-       merely-open-but-unlocked descriptor proves nothing.
+    The proof must instead be that THIS inherited descriptor -- the exact
+    open file description a legitimate caller's `acquire_full_qa_lock`
+    flocked before `exec`ing this process's ancestry -- holds the lock.
+    `flock` locks are a property of the OPEN FILE DESCRIPTION, not the
+    process or the fd number, and `fork`/`exec` share that description with
+    every descendant that does not close it. So calling
+    `flock(fd, LOCK_EX | LOCK_NB)` directly on each candidate inherited fd is
+    decisive:
 
-    Anything this cannot establish -- `/proc` unavailable, the probe open
-    itself failing -- is read as NOT held. This is a security caller: a
-    missing answer must never be mistaken for a granted one.
+    - If the description already holds the lock (the common case -- an
+      ancestor acquired it before `exec`), re-requesting the same mode on the
+      same description is a no-op that returns immediately.
+    - If nobody holds it, this call GRANTS the lock via that very
+      descriptor -- which is not a bug: an inherited fd genuinely proves
+      ancestry from the acquiring code path, so holding it from here on is
+      exactly the serialisation the lock exists to provide.
+    - If a DIFFERENT open file description (this process's own fresh `open`,
+      or another process entirely) already holds it exclusively, the call
+      raises `BlockingIOError` -- this descriptor is not the one holding it,
+      so this candidate proves nothing, no matter who else does hold it.
+
+    Anything this cannot establish -- `/proc` unavailable, no candidate
+    fd resolves to the lock path -- is read as NOT held. This is a security
+    caller: a missing answer must never be mistaken for a granted one.
     """
     try:
         lock_path = host_lock_path(project_root).resolve()
@@ -134,8 +155,8 @@ def full_qa_lock_is_held(project_root: Path) -> bool:
     except OSError:
         return False
 
-    inherited = False
-    unreadable = 0
+    skipped_unresolvable = 0
+    skipped_not_the_holder = 0
     for entry in candidates:
         try:
             target = entry.readlink()
@@ -143,29 +164,35 @@ def full_qa_lock_is_held(project_root: Path) -> bool:
             # /proc/self/fd is inherently racy against THIS process's own
             # fds opening and closing between the listdir above and this
             # readlink -- not resolving one candidate is not evidence about
-            # the lock, so keep scanning. Counted, not silently dropped: a
-            # persistently high count would show up in a caller that reports it.
-            unreadable += 1
+            # the lock, so keep scanning the rest. Counted, not silently
+            # dropped, so a caller logging the summary below can see it.
+            skipped_unresolvable += 1
             continue
-        if target == lock_path:
-            inherited = True
-            break
-    if not inherited:
-        # Covers both "no fd matched" and "some candidates raced away
-        # unread" (unreadable > 0) -- either way there is no proof, and an
-        # inconclusive scan is read the same as a negative one (fail closed).
-        return False
-
-    try:
-        probe_fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT, _LOCK_FILE_MODE)
-    except OSError:
-        return False
-    try:
-        fcntl.flock(probe_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        return True
-    else:
-        fcntl.flock(probe_fd, fcntl.LOCK_UN)
-        return False
-    finally:
-        os.close(probe_fd)
+        if target != lock_path:
+            continue
+        try:
+            fd = int(entry.name)
+        except ValueError:
+            # /proc/self/fd entries are always numeric; this would mean the
+            # directory listing no longer matches what it reports.
+            skipped_unresolvable += 1
+            continue
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            # Someone else's open file description holds it exclusively --
+            # this candidate is not the holder. Keep scanning: a different
+            # inherited fd may still be the genuine one.
+            skipped_not_the_holder += 1
+            continue
+        else:
+            return True
+    if skipped_unresolvable or skipped_not_the_holder:
+        logger.debug(
+            "full_qa_lock_is_held(%s): no inherited fd proved possession "
+            "(%d unresolvable, %d resolved but not the holder)",
+            lock_path,
+            skipped_unresolvable,
+            skipped_not_the_holder,
+        )
+    return False

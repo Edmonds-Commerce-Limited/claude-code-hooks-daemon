@@ -103,6 +103,51 @@ class TestLockIsHeldIsProvenNotClaimed:
             )
         assert "HELD" in probe.stdout, f"stdout={probe.stdout!r} stderr={probe.stderr!r}"
 
+    def test_false_when_the_inherited_fd_itself_is_unlocked_even_if_another_holds_it(
+        self, tmp_path: Path
+    ) -> None:
+        """Review 10 B2: an UNLOCKED fd to the lock path, while a SEPARATE process
+        genuinely holds the lock, must not be believed -- the proof must be that
+        THIS descriptor holds the lock, not merely that someone, somewhere, does.
+        """
+        main, _ = _init_repo_with_worktree(tmp_path)
+        lock = host_lock_path(main)
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        holder = subprocess.Popen(
+            ["bash", "-c", f'exec 8>>"{lock}"; flock 8; echo held; sleep 30'],
+            stdout=subprocess.PIPE,
+            text=True,
+        )
+        try:
+            assert holder.stdout is not None
+            assert holder.stdout.readline().strip() == "held"
+            evader_fd = os.open(str(lock), os.O_RDWR | os.O_CREAT, 0o644)
+            os.set_inheritable(evader_fd, True)
+            try:
+                probe = subprocess.run(
+                    [
+                        sys.executable,
+                        "-c",
+                        "import sys; sys.path.insert(0, sys.argv[1]); "
+                        "from claude_code_hooks_daemon.qa.full_qa_lock import full_qa_lock_is_held; "
+                        "from pathlib import Path; "
+                        "print('HELD' if full_qa_lock_is_held(Path(sys.argv[2])) else 'NOT-HELD')",
+                        str(PROJECT_ROOT / "src"),
+                        str(main),
+                    ],
+                    pass_fds=(evader_fd,),
+                    capture_output=True,
+                    text=True,
+                    timeout=Timeout.QA_TEST_TIMEOUT,
+                    check=False,
+                )
+            finally:
+                os.close(evader_fd)
+        finally:
+            holder.kill()
+            holder.wait(timeout=Timeout.QA_TEST_TIMEOUT)
+        assert "NOT-HELD" in probe.stdout, f"stdout={probe.stdout!r} stderr={probe.stderr!r}"
+
     def test_an_env_var_claim_with_no_real_inherited_fd_is_not_believed(
         self, tmp_path: Path
     ) -> None:

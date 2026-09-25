@@ -267,6 +267,24 @@ one place every route ends up, whatever launched it: pytest itself.
   relay binary, its build/deploy pipeline and CI asset baking), already 8+
   review rounds deep; a parallel fix here would fork it.
 
+### Round 10: the sink's own proof tightened; a coordinator-decided residual
+
+- **B2 fixed.** `full_qa_lock_is_held` previously proved possession by two
+  independent facts -- some inherited fd resolves to the lock path, and a
+  FRESH probe fd finds the file exclusively locked -- which is not proof that
+  THIS process's inherited descriptor holds it: an evader that inherits an
+  UNLOCKED fd to the lock path passed for free whenever an unrelated,
+  genuinely legitimate run happened to hold the lock concurrently. The fix
+  calls `flock(fd, LOCK_EX | LOCK_NB)` directly on each candidate inherited
+  fd: succeeding (whether the open file description already held the lock,
+  or nobody did and this call now legitimately holds it) proves possession;
+  `BlockingIOError` from a DIFFERENT open file description holding it proves
+  nothing about this one. RED-proven with review 10's G repro (a bash holder
+  genuinely holding the lock, plus an unlocked fd to the same path passed to
+  a child that calls `full_qa_lock_is_held`), which returned `True` before
+  the fix and `False` after
+  (`test_false_when_the_inherited_fd_itself_is_unlocked_even_if_another_holds_it`).
+
 ### Phase 2: Deliver
 
 - [ ] ⬜ **Task 2.1**: The batched integration gate: the coordinator merges
