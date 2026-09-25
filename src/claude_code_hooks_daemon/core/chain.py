@@ -36,6 +36,7 @@ from claude_code_hooks_daemon.core.bounded_dispatch import (
 from claude_code_hooks_daemon.core.dispatch_cancellation import (
     DispatchCancellation,
     bind_dispatch_cancellation,
+    is_dispatch_cancelled,
     reset_dispatch_cancellation,
 )
 from claude_code_hooks_daemon.core.handler_scope import scope_admits
@@ -948,7 +949,16 @@ class HandlerChain:
                         terminated_by = handler.name
                         break
 
-            except Exception as e:
+            except BaseException as e:
+                # BaseException, not Exception (Plan 00466 N40 review 2 mA2):
+                # SystemExit and KeyboardInterrupt both inherit from
+                # BaseException, not Exception, so `except Exception` let
+                # either sail straight through this handler-level catch --
+                # and through BoundedDispatcher's own `future.result()`
+                # re-raise on the dispatching thread -- killing the whole
+                # daemon process instead of denying the one call. A handler
+                # that crashed with EITHER has, just as much as one that
+                # raised an ordinary exception, not judged the call.
                 logger.exception("Handler %s raised exception", handler.name)
                 handlers_executed.append(handler.name)
 
@@ -1032,15 +1042,26 @@ class HandlerChain:
         # hears the merged decision, so a rate limiter can roll back a
         # cooldown it spent on a call that ended up denied. The decision is
         # final by now — a crash here is surfaced, never allowed to change it.
-        for handler in executed_handlers:
-            try:
-                handler.commit_side_effects(hook_input, final_result.decision)
-            except Exception as e:
-                logger.exception("Handler %s crashed in commit_side_effects", handler.name)
-                final_result.context.append(
-                    f"Handler side-effect commit exception in {handler.name}: "
-                    f"{type(e).__name__}: {e}"
-                )
+        #
+        # Skipped entirely once the caller has abandoned this dispatch (Plan
+        # 00466 N40 review 2 mA5, extending m2's cancellation signal to this
+        # site): a straggler running here is committing side effects for a
+        # decision ("not judged in time") the caller already received, which
+        # is not `final_result.decision` at all -- exactly the shape m2
+        # closed for `matches()`/`handle()`'s own state-mutating writes.
+        # Today only `sensitive_content` implements this hook for PreToolUse,
+        # and all it does is clear a cache (harmless either way); this closes
+        # the gap before a rate-limiter-style handler needs it to be correct.
+        if not is_dispatch_cancelled():
+            for handler in executed_handlers:
+                try:
+                    handler.commit_side_effects(hook_input, final_result.decision)
+                except Exception as e:
+                    logger.exception("Handler %s crashed in commit_side_effects", handler.name)
+                    final_result.context.append(
+                        f"Handler side-effect commit exception in {handler.name}: "
+                        f"{type(e).__name__}: {e}"
+                    )
 
         execution_time_ms = (time.perf_counter() - start_time) * 1000
 

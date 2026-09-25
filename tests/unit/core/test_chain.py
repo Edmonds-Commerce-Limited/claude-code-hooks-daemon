@@ -49,8 +49,8 @@ class MockHandler(Handler):
         terminal: bool = False,
         should_match: bool = True,
         result: HookResult | None = None,
-        raise_exception: Exception | None = None,
-        raise_in_matches: Exception | None = None,
+        raise_exception: BaseException | None = None,
+        raise_in_matches: BaseException | None = None,
         tags: list[str] | None = None,
         sleep_in_handle: float = 0.0,
     ) -> None:
@@ -62,7 +62,10 @@ class MockHandler(Handler):
             terminal: Whether handler is terminal
             should_match: Whether matches() returns True
             result: HookResult to return (or default allow)
-            raise_exception: Exception to raise in handle()
+            raise_exception: Exception to raise in handle(). ``BaseException``,
+                not ``Exception``, so a test can exercise ``SystemExit``/
+                ``KeyboardInterrupt`` (Plan 00466 N40 review 2 mA2) alongside
+                ordinary exceptions.
             raise_in_matches: Exception to raise in matches(), before handle()
                 is ever reached — exercises the chain's own try/except span,
                 which covers matches() as well as handle() (Plan 00466 N24 m1).
@@ -849,6 +852,40 @@ class TestHandlerChain:
         result = chain.execute(hook_input, strict_mode=False)
 
         assert h1.handle_called == 0  # never reached handle() — matches() raised
+        assert h2.handle_called == 0
+        assert result.result.decision == Decision.DENY
+        assert result.result.reason is not None
+        assert "safety-guard" in result.result.reason
+
+    def test_a_base_exception_from_handle_also_denies_and_does_not_propagate(
+        self,
+    ) -> None:
+        """``SystemExit``/``KeyboardInterrupt`` from a handler must not escape
+        the chain (Plan 00466 N40 review 2 mA2).
+
+        Both inherit from ``BaseException``, not ``Exception``. The chain's
+        per-handler catch used to be ``except Exception``, so either one sailed
+        straight through it -- and through ``BoundedDispatcher``'s own
+        ``future.result()`` re-raise -- killing the daemon process outright
+        instead of denying the one call. The fix converts a ``BaseException``
+        from ``matches()``/``handle()`` into the same fail-closed deny an
+        ordinary ``Exception`` already gets.
+        """
+        chain = HandlerChain()
+        h1 = MockHandler(
+            "safety-guard",
+            priority=10,
+            terminal=True,
+            raise_exception=SystemExit("simulated crash"),
+            tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING],
+        )
+        h2 = MockHandler("h2", priority=20, terminal=True)
+        chain.add(h1)
+        chain.add(h2)
+
+        hook_input = {"tool_name": "Bash"}
+        result = chain.execute(hook_input, strict_mode=False)
+
         assert h2.handle_called == 0
         assert result.result.decision == Decision.DENY
         assert result.result.reason is not None
@@ -1736,6 +1773,85 @@ class TestDispatchCancellationReachesStragglingHandlerCode:
 
         assert result.result.decision == Decision.ALLOW
         assert outcome.get("result") == "written"
+
+
+class _CommitRecordingHandler(Handler):
+    """Sleeps inside ``matches()`` past the chain's deadline, then records
+    whether ``commit_side_effects`` was later called on it (Plan 00466 N40
+    review 2 mA5)."""
+
+    def __init__(
+        self, name: str, priority: int, sleep_before_matches: float, outcome: dict[str, bool]
+    ) -> None:
+        super().__init__(name=name, priority=priority, terminal=True)
+        self._sleep_before_matches = sleep_before_matches
+        self._outcome = outcome
+        self._outcome["committed"] = False
+
+    def matches(self, hook_input: dict[str, Any]) -> bool:
+        time.sleep(self._sleep_before_matches)
+        self._outcome["matches_finished"] = True
+        return True
+
+    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+        return HookResult.allow()
+
+    def commit_side_effects(self, hook_input: dict[str, Any], chain_decision: Decision) -> None:
+        self._outcome["committed"] = True
+
+    def get_claude_md(self) -> str | None:
+        return None
+
+    def get_acceptance_tests(self) -> list[Any]:
+        return []
+
+
+class TestStragglerCommitHonoursCancellation:
+    """Plan 00466 N40 review 2 mA5: a straggler's ``commit_side_effects``
+    must honour the cancellation token the same way a handler's own
+    ``matches()``/``handle()`` code already can (m2). Today only
+    ``sensitive_content`` implements this hook for PreToolUse, and all it
+    does is clear a cache -- harmless -- but the next rate-limiter-style
+    handler would otherwise record side effects for a decision the caller
+    never received.
+    """
+
+    def test_commit_is_skipped_once_the_caller_has_abandoned_the_dispatch(self) -> None:
+        chain = HandlerChain()
+        outcome: dict[str, bool] = {}
+        handler = _CommitRecordingHandler(
+            "late-committer", priority=10, sleep_before_matches=0.2, outcome=outcome
+        )
+        chain.add(handler)
+
+        result = chain.execute({"tool_name": "Bash"}, deadline_seconds=0.02)
+
+        # The caller gets its answer promptly -- well before the straggler's
+        # own 0.2s sleep, and its own commit_side_effects call, finish.
+        assert result.result.decision == Decision.ALLOW
+
+        deadline = time.perf_counter() + 2.0
+        while not outcome.get("matches_finished") and time.perf_counter() < deadline:
+            time.sleep(0.01)
+        # commit_side_effects runs synchronously right after handle()
+        # returns, at the very end of the straggler's own dispatch -- give
+        # it a moment to actually run before asserting it did not commit.
+        time.sleep(0.05)
+        assert outcome.get("committed") is False
+
+    def test_commit_still_lands_for_a_call_that_finishes_on_time(self) -> None:
+        """Negative control: cancellation must not suppress an on-time commit."""
+        chain = HandlerChain()
+        outcome: dict[str, bool] = {}
+        handler = _CommitRecordingHandler(
+            "on-time-committer", priority=10, sleep_before_matches=0.0, outcome=outcome
+        )
+        chain.add(handler)
+
+        result = chain.execute({"tool_name": "Bash"}, deadline_seconds=5.0)
+
+        assert result.result.decision == Decision.ALLOW
+        assert outcome.get("committed") is True
 
 
 class TestChainDecisions:
