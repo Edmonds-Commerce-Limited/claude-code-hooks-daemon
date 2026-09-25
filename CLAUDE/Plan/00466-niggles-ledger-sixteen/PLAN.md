@@ -86,6 +86,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N55 | `register_all` ignores a handler's `get_default_enabled()` when its config block is absent                | Goal-flip review 8 | ⬜ Open               |
 | N56 | Tests skip when run as root, so this container never runs them                                            | Owner              | 🔄 In progress        |
 | N57 | `secret_file_guard` misses a protected path reached through an earlier assignment, alias or written file  | Guard-defects fix  | ⬜ Open               |
+| N58 | R-CHMOD-WORLD-WRITABLE denies a safe chmod when a later argument contains digits                          | N53 review 2       | ⬜ Open               |
 
 ## Tasks
 

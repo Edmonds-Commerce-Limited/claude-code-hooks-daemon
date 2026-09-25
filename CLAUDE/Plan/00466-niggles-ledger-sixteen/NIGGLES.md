@@ -9,6 +9,19 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N58 — R-CHMOD-WORLD-WRITABLE denies a safe chmod when a later argument contains digits
+
+**Found by N53 review 2.** `chmod 755 f && echo <path>` was denied as
+R-CHMOD-WORLD-WRITABLE. The path was a venv directory name containing a digit
+run such as `-1246-py311-`. Mode 755 is not world-writable, so the deny is a
+false positive. The matcher appears to read a mode from text outside chmod's
+own mode argument.
+
+**Candidate remedy:** parse chmod's argv and judge only its mode operand,
+octal or symbolic, on each chmod invocation in the command. Other words and
+other commands must never be read as a mode. RED test: the reported command
+is allowed, while `chmod 777 f`, `chmod o+w f` and `chmod a+w f` still deny.
+
 ### N57 — `secret_file_guard` misses a protected path reached through an earlier assignment, alias or written file
 
 **Found by the guard-defects fix (gd6_shell2 probe).** The Bash scanner reads a
