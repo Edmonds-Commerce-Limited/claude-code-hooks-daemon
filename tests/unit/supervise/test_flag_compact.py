@@ -1,7 +1,7 @@
 """Plan 00281 — flag-cleaning /compact on a repeated downgrade (flip-flop).
 
-Plan 00278 restores the effort floor and flips the model back on a silent
-model-family downgrade. But in a session doing security-adjacent work the
+Plan 00278 flips the model back on a silent model-family downgrade. But in
+a session doing security-adjacent work the
 main context stays saturated with flag-tripping vocabulary, so the platform
 classifier re-downgrades on the next flagged turn — a visible flip-flop. This
 plan adds an opt-in, gated ``/compact`` that fires on the SECOND downgrade
@@ -102,14 +102,12 @@ def _downgrade(sidecar_dir: Path, machine, *, effort: str | None = "low") -> Non
 def _flipflop_machine(sidecar_dir: Path, *, enabled: bool = True):
     """A machine in the FLIP-FLOP state: episode open AND one restore already fired.
 
-    Mirrors ``_restore_ready_machine`` in test_effort_restore.py — a downgrade
-    opened an episode, the effort restore and its audit backlog have been
-    consumed, and one model auto-restore is recorded (so ``_model_restores >=
-    1``). The sidecar still reads opus, so the episode stays open.
+    A downgrade opened an episode, its audit backlog has been consumed, and
+    one model auto-restore is recorded (so ``_model_restores >= 1``). The
+    sidecar still reads opus, so the episode stays open.
     """
     machine = _flag_machine(enabled=enabled)
     _downgrade(sidecar_dir, machine)
-    machine.mark_effort_injection(now_wall=_NOW)  # effort restore already fired
     machine.mark_model_restore(now_wall=_NOW)  # a model auto-restore already fired
     machine.mark_audit_injection()  # consume the decision-time audit backlog
     _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="xhigh", ts=_NOW + 0.5)
@@ -242,7 +240,6 @@ def test_flag_compact_not_on_first_downgrade(tmp_path: Path) -> None:
     sidecar_dir = tmp_path / "cs"
     machine = _flag_machine(enabled=True)
     _downgrade(sidecar_dir, machine)
-    machine.mark_effort_injection(now_wall=_NOW)
     machine.mark_audit_injection()
     _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="xhigh", ts=_NOW + 0.5)
     outcome = _decide(sidecar_dir, machine, facts=_facts(_NOW + 1.0))

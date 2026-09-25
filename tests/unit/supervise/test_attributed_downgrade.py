@@ -79,6 +79,7 @@ def _write_downgrade_signal(
     fallback_family: str | None = "opus",
     session_id: str = _SESSION,
     ts: float = _NOW,
+    record_ts: str = "2026-08-27T09:34:10.341Z",
 ) -> Path:
     """Write what the daemon's model_downgrade_recorder publishes."""
     sidecar_dir.mkdir(parents=True, exist_ok=True)
@@ -94,7 +95,7 @@ def _write_downgrade_signal(
                 "fallback_family": fallback_family,
                 "category": "cyber",
                 "scope": "session",
-                "record_ts": "2026-08-27T09:34:10.341Z",
+                "record_ts": record_ts,
             }
         ),
         encoding="utf-8",
@@ -135,7 +136,7 @@ class TestTheSignalLoader:
 
         found = _mod.load_model_downgrade_signal(sidecar_dir, own_sessions=frozenset({_SESSION}))
 
-        assert found == (_SESSION, "fable", "opus")
+        assert found == (_SESSION, "fable", "opus", "2026-08-27T09:34:10.341Z")
 
     def test_a_foreign_session_signal_is_ignored(self, tmp_path: Path) -> None:
         """The defect a user-level settings file could never avoid.
@@ -253,6 +254,65 @@ class TestArming:
                 notes.append(outcome.noop_reason_log)
 
         assert len(notes) == 1
+
+
+class TestSpentRecordDoesNotReopen:
+    """Plan 00466 N47 review 2 MAJOR 4.
+
+    ``model_downgrade_recorder`` republishes the SAME record (same
+    ``record_ts``) for the rest of the session, even after the episode it
+    described has been fully recovered from. Before this fix, a human who
+    later manually switched back to the fallback family produced the exact
+    observation (fable, then opus, in this session) the old
+    ``session:from:to`` attribution key matched again -- reopening an episode
+    and firing ``/model fable`` at a human who had just chosen otherwise.
+    """
+
+    def test_a_closed_episodes_record_does_not_reopen_on_a_later_manual_drop(
+        self, tmp_path: Path
+    ) -> None:
+        sidecar_dir = tmp_path / "cs"
+        machine = _machine()
+        _write_downgrade_signal(sidecar_dir, ts=_NOW, session_id=_SESSION)
+
+        # Open, then close, the episode from the one recorded downgrade.
+        _drive_fable_to_opus(sidecar_dir, machine, now=_NOW)
+        assert machine.export_state()["downgrade_episode"] is not None
+        _write_sidecar(sidecar_dir, model_id="claude-fable-5", effort="low", ts=_NOW + 1.0)
+        _decide(sidecar_dir, machine, now=_NOW + 2.0)
+        assert machine.export_state()["downgrade_episode"] is None
+
+        # The recorder's signal file is still on disk with the SAME record_ts
+        # (Claude Code does not clear it), and the human now manually drops
+        # back to opus -- the identical (fable, then opus) observation.
+        _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="high", ts=_NOW + 10.0)
+        _decide(sidecar_dir, machine, now=_NOW + 11.0)
+
+        assert machine.export_state()["downgrade_episode"] is None
+
+    def test_a_genuinely_new_downgrade_with_a_fresh_record_ts_still_reopens(
+        self, tmp_path: Path
+    ) -> None:
+        sidecar_dir = tmp_path / "cs"
+        machine = _machine()
+        _write_downgrade_signal(
+            sidecar_dir, ts=_NOW, session_id=_SESSION, record_ts="2026-08-27T09:00:00.000Z"
+        )
+
+        _drive_fable_to_opus(sidecar_dir, machine, now=_NOW)
+        assert machine.export_state()["downgrade_episode"] is not None
+        _write_sidecar(sidecar_dir, model_id="claude-fable-5", effort="low", ts=_NOW + 1.0)
+        _decide(sidecar_dir, machine, now=_NOW + 2.0)
+        assert machine.export_state()["downgrade_episode"] is None
+
+        # A REAL second downgrade: a new transcript record, a new record_ts.
+        _write_downgrade_signal(
+            sidecar_dir, ts=_NOW + 5.0, session_id=_SESSION, record_ts="2026-08-27T10:00:00.000Z"
+        )
+        _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="high", ts=_NOW + 10.0)
+        _decide(sidecar_dir, machine, now=_NOW + 11.0)
+
+        assert machine.export_state()["downgrade_episode"] is not None
 
 
 class TestReaping:

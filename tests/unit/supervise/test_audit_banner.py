@@ -87,14 +87,14 @@ def _banner_payload(tmp_path: Path) -> dict[str, object]:
 class TestAuditBannerText:
     def test_banner_is_the_actions_only_no_chat_preamble(self) -> None:
         banner = _mod._format_audit_banner(
-            ("/effort low (coupled to model switch)", "/model fable (auto-restore after downgrade)")
+            ("/compact (flag-cleaning)", "/model fable (auto-restore after downgrade)")
         )
         assert banner.startswith(_mod._AUDIT_BANNER_GLYPH)
-        assert f"{_mod._AUDIT_ACTION_EFFORT_GLYPH} effort low" in banner
+        assert f"{_mod._AUDIT_ACTION_COMPACT_GLYPH} compact" in banner
         assert f"{_mod._AUDIT_ACTION_MODEL_GLYPH} model fable" in banner
         # The status line is width-constrained: the per-item reason, the
         # provenance preamble and the log path all belong to decision.log.
-        assert "coupled to model switch" not in banner
+        assert "flag-cleaning" not in banner
         assert "decision.log" not in banner
         assert "NOT a human" not in banner
 
@@ -129,11 +129,11 @@ class TestRepeatsBecomeATally:
 
     def test_nothing_is_truncated_away(self) -> None:
         """A tally is short by construction, so `+N more` has nothing to hide."""
-        items = tuple(f"/effort {level} (x)" for level in ("low", "medium", "high", "xhigh"))
+        items = tuple(f"/model {family} (x)" for family in ("fable", "opus", "sonnet", "haiku"))
         banner = _mod._format_audit_banner(items)
         assert "more" not in banner
-        for level in ("low", "medium", "high", "xhigh"):
-            assert f"effort {level}" in banner
+        for family in ("fable", "opus", "sonnet", "haiku"):
+            assert f"model {family}" in banner
 
     def test_first_armed_action_is_shown_first(self) -> None:
         """Order tells the human what happened first; a set would not."""
@@ -143,14 +143,14 @@ class TestRepeatsBecomeATally:
 
 class TestAuditFlushPostsBanner:
     def test_flush_posts_a_countdown_banner_and_injects_nothing(self, tmp_path: Path) -> None:
-        outcome = _flush(tmp_path, items=("/effort low (coupled to model switch)",))
+        outcome = _flush(tmp_path, items=("/model fable (auto-restore after downgrade)",))
         assert outcome.decision_value == _mod.Decision.WOULD_AUDIT.value
         # The whole point: no chat line, so no model turn and no context cost.
         assert outcome.payload is None
         payload = _banner_payload(tmp_path)
         assert payload["countdown"] is True
         assert payload["expires_at"] == _NOW + _mod._AUDIT_BANNER_TTL_SECONDS
-        assert "effort low" in str(payload["text"])
+        assert "model fable" in str(payload["text"])
 
     def test_flush_records_the_audit_in_the_decision_log_line(self, tmp_path: Path) -> None:
         outcome = _flush(tmp_path, items=("/model fable (auto-restore after downgrade)",))
@@ -162,7 +162,7 @@ class TestAuditFlushPostsBanner:
         sidecar_dir = tmp_path / "cs"
         _write_sidecar(sidecar_dir)
         machine = _mod.CompactStateMachine(_mod.CompactPolicy())
-        machine.arm_audit("/effort low (coupled to model switch)")
+        machine.arm_audit("/model fable (auto-restore after downgrade)")
         _mod.decide_once(
             machine,
             sidecar_dir=sidecar_dir,
@@ -176,11 +176,11 @@ class TestAuditFlushPostsBanner:
         """A banner writes a file, not the PTY — it needs no empty input box."""
         outcome = _flush(
             tmp_path,
-            items=("/effort low (coupled to model switch)",),
+            items=("/model fable (auto-restore after downgrade)",),
             input_line_empty=False,
         )
         assert outcome.decision_value == _mod.Decision.WOULD_AUDIT.value
-        assert "effort low" in str(_banner_payload(tmp_path)["text"])
+        assert "model fable" in str(_banner_payload(tmp_path)["text"])
 
     def test_no_pending_items_posts_nothing(self, tmp_path: Path) -> None:
         outcome = _flush(tmp_path, items=())
@@ -266,7 +266,7 @@ class TestAuditFlushSurvivesAStandingAuthInjection:
         _write_sidecar(sidecar_dir)
         _write_standing_auth(sidecar_dir)
         machine = _mod.CompactStateMachine(_mod.CompactPolicy())
-        machine.arm_audit("/effort low (coupled to model switch)")
+        machine.arm_audit("/compact (flag-cleaning)")
 
         _mod.decide_once(
             machine,
@@ -276,7 +276,7 @@ class TestAuditFlushSurvivesAStandingAuthInjection:
             freshness_seconds=_mod.CompactPolicy().freshness_seconds,
         )
 
-        assert "effort low" in str(_banner_payload(tmp_path)["text"])
+        assert "compact" in str(_banner_payload(tmp_path)["text"])
 
     def test_apply_decision_writes_both_lines_to_the_log(self, tmp_path: Path) -> None:
         sidecar_dir = tmp_path / "cs"
@@ -367,9 +367,9 @@ def _escape_episode(
 class TestAKeystrokeFlushesWhenItIsSent:
     """Plan 00355 — the flush rule, which is the whole difficulty.
 
-    00318 flushes only on a NOOP tick in MONITOR, so a `/model` + coupled
-    `/effort` sequence surfaces as ONE banner once the sequence completes. But
-    an ESC fires in AWAIT_COMPACTING, so an escape armed under that rule would
+    00318 flushes only on a NOOP tick in MONITOR, so a `/model` switch
+    sequence surfaces as ONE banner once the sequence completes. But an ESC
+    fires in AWAIT_COMPACTING, so an escape armed under that rule would
     surface minutes later in an unrelated state, or never. A keystroke
     therefore announces itself on the tick that sends it — without collapsing
     00318's batching for the slash-command families.
@@ -441,14 +441,14 @@ class TestAKeystrokeFlushesWhenItIsSent:
         assert machine.audit_pending != ()
 
     def test_a_slash_command_still_waits_for_its_sequence_to_finish(self, tmp_path: Path) -> None:
-        """00318's batching: an armed /effort must NOT flush on an injection tick."""
+        """00318's batching: an armed /model item must NOT flush on an injection tick."""
         sidecar_dir = tmp_path / "cs"
         _urgent_sidecar(sidecar_dir, now=1000.0)
         machine = _mod.CompactStateMachine(_mod.CompactPolicy())
-        machine.arm_audit("/effort low (coupled to model switch)")
+        machine.arm_audit("/model fable (auto-restore after downgrade)")
 
         outcome = _tick(machine, sidecar_dir, now=1000.0)
 
         assert outcome.decision_value == _mod.Decision.WOULD_COMPACT.value
         assert not (tmp_path / _mod._LOG_SUBDIRECTORY / _mod._STATUS_MESSAGE_FILENAME).exists()
-        assert machine.audit_pending == ("/effort low (coupled to model switch)",)
+        assert machine.audit_pending == ("/model fable (auto-restore after downgrade)",)

@@ -60,7 +60,6 @@ class SupervisorTickOutcome(Protocol):
     model_switch_family: str | None
     model_switch_session: str | None
     audit_flush_log: str | None
-    settings_status_log: str | None
 
 
 class SupervisorStateMachine(Protocol):
@@ -70,26 +69,13 @@ class SupervisorStateMachine(Protocol):
     """
 
     @property
-    def coupled_effort_pending(self) -> str | None: ...
-
-    @property
     def audit_pending(self) -> tuple[str, ...]: ...
 
     def export_state(self) -> dict[str, object]: ...
 
     def import_state(self, state: dict[str, object]) -> None: ...
 
-    def note_manual_effort_command(self, level: str, *, now_wall: float) -> None: ...
-
-    def arm_coupled_effort(self, *, session: str, family: str) -> None: ...
-
-    def resolve_coupled_effort_target(
-        self, *, reading: object | None, now_wall: float
-    ) -> str | None: ...
-
     def arm_audit(self, item: str) -> None: ...
-
-    def mark_effort_injection(self, now_wall: float | None = None) -> None: ...
 
     def mark_audit_injection(self) -> None: ...
 

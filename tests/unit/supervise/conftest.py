@@ -38,6 +38,7 @@ def write_attributed_downgrade(
     session_id: str,
     original_family: str = "fable",
     fallback_family: str = "opus",
+    record_ts: str = "2026-08-27T09:34:10.341Z",
 ) -> Path:
     """Write the `.model-downgrade` signal the daemon's recorder publishes.
 
@@ -47,6 +48,12 @@ def write_attributed_downgrade(
     deliberately do NOT call this — that is the distinction the plan exists to
     draw, and leaving it implicit is what let the supervisor override a human
     in the field.
+
+    ``record_ts`` identifies the underlying transcript record (Plan 00466 N47
+    review 2 MAJOR 4): a test proving a NEW downgrade re-opens an episode after
+    a prior one closed must pass a record_ts that DIFFERS from the earlier
+    call, since the state machine refuses to re-open from a record_ts it has
+    already spent.
     """
     sidecar_dir.mkdir(parents=True, exist_ok=True)
     path = sidecar_dir / f"{session_id}{_mod._MODEL_DOWNGRADE_SIGNAL_SUFFIX}"
@@ -61,7 +68,7 @@ def write_attributed_downgrade(
                 "fallback_family": fallback_family,
                 "category": "cyber",
                 "scope": "session",
-                "record_ts": "2026-08-27T09:34:10.341Z",
+                "record_ts": record_ts,
             }
         ),
         encoding="utf-8",
@@ -91,55 +98,3 @@ def _isolate_worker_error_log(
     """
     sink = tmp_path_factory.mktemp("worker-error-log") / "worker.err.log"
     monkeypatch.setattr(_mod, "worker_error_log_path", lambda: sink)
-
-
-@pytest.fixture(autouse=True)
-def _isolate_settings_effort(
-    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
-) -> None:
-    """Point every ``CompactPolicy`` settings path at fresh, empty temp dirs.
-
-    Plan 00466 N47: ``CompactPolicy``'s three settings paths (user, shared
-    project, local project) all default to Claude Code's REAL files —
-    ``_main_settings_path()`` reads ``$CLAUDE_CONFIG_DIR``/``~/.claude``, and
-    ``_project_settings_path()``/``_local_settings_path()`` read
-    ``$CLAUDE_PROJECT_DIR``/cwd — each resolved fresh at every
-    ``CompactPolicy()`` construction. Left ambient, a dogfooding session's own
-    ``~/.claude/settings.json`` AND this very worktree's own
-    ``.claude/settings.json`` leak their real content into any test that
-    builds a default policy, exactly the ambient-environment hermeticity bug
-    the flag-compact fixture above already exists to prevent for
-    ``CCY_FLAG_COMPACT``. Pointing both env vars at fresh, empty per-test
-    directories makes all three paths resolve to files that never exist, so
-    every test starts from the SAME "nothing configured" state (Claude Code's
-    own default applies, and ``take_settings_error_note`` reports each path
-    as not-found exactly once) unless it explicitly writes its own
-    settings.json (see ``write_settings_json`` below).
-    """
-    config_dir = tmp_path_factory.mktemp("claude-config-dir")
-    project_dir = tmp_path_factory.mktemp("claude-project-dir")
-    monkeypatch.setenv(_mod._CLAUDE_CONFIG_DIR_ENV_VAR, str(config_dir))
-    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(project_dir))
-
-
-def write_settings_json(
-    config_dir: Path,
-    *,
-    effort_level: str | None = None,
-    model_settings: dict[str, object] | None = None,
-) -> Path:
-    """Write a ``settings.json`` fixture under ``config_dir`` and return its path.
-
-    ``config_dir`` should be the directory a test pointed ``CLAUDE_CONFIG_DIR``
-    at (or the value returned by ``_isolate_settings_effort``'s monkeypatch),
-    so ``CompactPolicy()``'s default ``settings_path`` resolves to this file.
-    """
-    config_dir.mkdir(parents=True, exist_ok=True)
-    payload: dict[str, object] = {}
-    if effort_level is not None:
-        payload["effortLevel"] = effort_level
-    if model_settings is not None:
-        payload["modelSettings"] = model_settings
-    path: Path = config_dir / str(_mod._SETTINGS_FILENAME)
-    path.write_text(json.dumps(payload), encoding="utf-8")
-    return path

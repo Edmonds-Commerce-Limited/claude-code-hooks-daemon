@@ -1,8 +1,7 @@
 """A model change the HUMAN makes must win (Plan 00316, rebuilt by Plan 00328).
 
 The invariant is unchanged: the auto-restore must never fight a model the human
-chose, and the coupled per-model default effort must never override a manual
-`/effort`. What changed is where the answer comes from.
+chose. What changed is where the answer comes from.
 
 Plan 00316 inferred it NEGATIVELY, from typed keystrokes -- a `/model <family>`
 latch, a bare-`/model` picker wildcard, a fuzzy stem for what autocomplete had
@@ -15,6 +14,12 @@ RECORDED as its own (`write_attributed_downgrade` here, the daemon's
 `model_downgrade_recorder` in the field). A model the human picks emits no such
 record, so it is respected without being recognised -- and these tests assert
 the recognition is GONE, not merely unused.
+
+Plan 00466 N47 review 2: the supervisor also injects NO effort of any kind
+any more (BLOCKER 1 -- every ``/effort`` it typed was persisted by Claude
+Code into the owner's own settings.json). The former coupled-effort and
+manual-effort-latch tests are deleted along with that machinery; effort is
+settings.json's job alone (see CLAUDE/development/CcySupervisor.md).
 """
 
 from __future__ import annotations
@@ -43,7 +48,6 @@ def _facts(
     *,
     idle: bool = True,
     input_line_empty: bool = True,
-    human_effort_command: str | None = None,
 ) -> object:
     return _mod.TickFacts(
         now_wall=now,
@@ -51,7 +55,6 @@ def _facts(
         input_line_empty=input_line_empty,
         human_compact_submitted=False,
         work_idle=True,
-        human_effort_command=human_effort_command,
     )
 
 
@@ -88,58 +91,52 @@ def _write_sidecar(
 
 
 def _machine() -> SupervisorStateMachine:
-    return _mod.CompactStateMachine(_mod.CompactPolicy())
+    machine: SupervisorStateMachine = _mod.CompactStateMachine(_mod.CompactPolicy())
+    return machine
 
 
 def _decide(
     sidecar_dir: Path, machine: SupervisorStateMachine, *, facts: object | None = None
 ) -> SupervisorTickOutcome:
     policy = _mod.CompactPolicy()
-    return _mod.decide_once(
+    outcome: SupervisorTickOutcome = _mod.decide_once(
         machine,
         sidecar_dir=sidecar_dir,
         facts=facts or _facts(),
         dry_run=False,
         freshness_seconds=policy.freshness_seconds,
     )
+    return outcome
 
 
-# ── HumanInputLine: /effort is recognised, /model deliberately is not ────────
-
-
-def test_human_input_line_captures_submitted_effort_command() -> None:
-    line = _mod.HumanInputLine()
-    line.feed(b"/effort low\r")
-    assert line.take_effort_submitted() == "low"
-    # Consume-once: a second read returns None.
-    assert line.take_effort_submitted() is None
-
-
-def test_human_input_line_ignores_unrelated_text() -> None:
-    line = _mod.HumanInputLine()
-    line.feed(b"hello world\r")
-    assert line.take_effort_submitted() is None
-
-
-def test_human_input_line_handles_backspace_before_submit() -> None:
-    line = _mod.HumanInputLine()
-    line.feed(b"/effort lo\x7f\x7fhigh\r")  # typo-correct to "high"
-    assert line.take_effort_submitted() == "high"
+# ── HumanInputLine: NEITHER /model NOR /effort is recognised ────────────────
 
 
 @pytest.mark.parametrize(
     "attribute",
-    ["take_model_submitted", "take_model_selector_submitted"],
+    [
+        "take_model_submitted",
+        "take_model_selector_submitted",
+        "take_effort_submitted",
+    ],
 )
-def test_the_line_parser_no_longer_recognises_a_model_command(attribute: str) -> None:
-    """The keystroke path is deleted, not disabled.
+def test_the_line_parser_recognises_neither_model_nor_effort(attribute: str) -> None:
+    """The keystroke path is deleted, not disabled -- for BOTH families.
 
-    A dormant recogniser is an invitation to re-wire it to the restore the next
-    time a downgrade is missed, which is how the picker wildcard came back
-    twice. Asserting the attribute is absent makes that a test failure rather
-    than a judgement call.
+    Plan 00466 N47 review 2: a dormant `/effort` recogniser is exactly the
+    kind of thing that gets re-wired the next time someone wants "smarter"
+    effort handling, which is how this design got built and rejected twice.
+    Asserting the attribute is absent makes that a test failure rather than a
+    judgement call.
     """
     assert not hasattr(_mod.HumanInputLine(), attribute)
+
+
+def test_typing_an_effort_command_leaves_no_state_behind() -> None:
+    """A typed `/effort <level>` is parsed and cleared like any other text."""
+    line = _mod.HumanInputLine()
+    line.feed(b"/effort low\r")
+    assert line.is_empty is True
 
 
 def test_typing_a_model_command_leaves_no_state_behind() -> None:
@@ -147,7 +144,6 @@ def test_typing_a_model_command_leaves_no_state_behind() -> None:
     line = _mod.HumanInputLine()
     line.feed(b"/model opus\r")
     assert line.is_empty is True
-    assert line.take_effort_submitted() is None
 
 
 # ── A model change the human made opens no downgrade episode ────────────────
@@ -216,13 +212,7 @@ def test_a_recorded_downgrade_still_restores(tmp_path: Path) -> None:
     _write_sidecar(sidecar_dir, model_id="claude-fable-5", ts=_NOW - 5.0)
     _decide(sidecar_dir, machine)
     _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="high", ts=_NOW - 0.5)
-    outcome = _decide(sidecar_dir, machine)
-    assert outcome.decision_value == "would-effort"
-    later = _NOW + _mod._DEFAULT_MODEL_RESTORE_DELAY_SECONDS + 1.0
-    machine.mark_effort_injection(now_wall=_NOW)
-    machine.mark_audit_injection()
-    _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="xhigh", ts=later - 1.0)
-    restore = _decide(sidecar_dir, machine, facts=_facts(later))
+    restore = _decide(sidecar_dir, machine)
     assert restore.decision_value == "would-model"
     assert restore.payload == "/model fable"
 
@@ -278,112 +268,11 @@ def test_decide_once_never_writes_to_the_global_worker_log(
     assert calls == []
 
 
-# ── Task 2.1: manual /effort wins over the coupled default ──────────────────
+# ── Plan 00466 N47 review 2: NO effort state survives at all ────────────────
 
 
-def test_manual_effort_wins_over_per_model_floor(tmp_path: Path) -> None:
-    sidecar_dir = tmp_path / "cs"
-    machine = _machine()
-    # The human explicitly sets effort low on opus (below its "high" default).
-    _decide(sidecar_dir, machine, facts=_facts(human_effort_command="low"))
-    _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="low", ts=_NOW - 0.5)
-    outcome = _decide(sidecar_dir, machine)
-    assert outcome.payload is None
-
-
-def test_manual_effort_wins_within_the_same_model_spell(tmp_path: Path) -> None:
-    """A manual /effort beats the FLOOR default for as long as the model
-    does not change again -- no /model injection means arm_coupled_effort
-    is never called, so nothing re-applies the family's default."""
-    sidecar_dir = tmp_path / "cs"
-    machine = _machine()
-    machine.note_manual_effort_command("low", now_wall=_NOW)
-    # opus's per-model default is "high" -- without the manual latch this
-    # would fire "/effort high".
-    _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="low", ts=_NOW - 0.5)
-    outcome = _decide(sidecar_dir, machine)
-    assert outcome.payload is None
-
-
-def test_model_change_re_applies_its_own_default_over_a_prior_manual_effort() -> None:
-    """Owner clarification: precedence is TIME-ORDERED, not absolute. EVERY
-    real /model switch starts a fresh spell and clears an earlier manual
-    /effort latch set under the PREVIOUS model -- `arm_coupled_effort` wins
-    regardless of an earlier manual latch. (Plan 00466 N47 review 1: the
-    coupled mechanism no longer bakes in a per-family default target at arm
-    time -- `resolve_coupled_effort_target` decides later, from settings.json
-    or an open downgrade episode -- so this test now only pins the manual
-    latch being cleared, not what the eventual target turns out to be.)"""
-    machine = _machine()
-    # The human set effort low while on fable...
-    machine.note_manual_effort_command("low", now_wall=_NOW)
-    # ...then manually switches to sonnet: the switch starts a fresh spell.
-    machine.arm_coupled_effort(session=_SESSION, family="sonnet")
-    assert machine.coupled_effort_pending == f"{_SESSION}:sonnet"
-    assert machine.export_state()["manual_effort_active"] is None
-
-
-def test_manual_effort_after_the_reset_still_wins_for_its_own_spell(
-    tmp_path: Path,
-) -> None:
-    """A manual /effort typed AFTER a model-change's auto-applied default
-    still wins for the remainder of THAT spell."""
-    sidecar_dir = tmp_path / "cs"
-    machine = _machine()
-    machine.arm_coupled_effort(session=_SESSION, family="sonnet")  # spell starts
-    machine.note_manual_effort_command("low", now_wall=_NOW)  # human overrides it
-    _write_sidecar(sidecar_dir, model_id="claude-sonnet-5", effort="low", ts=_NOW - 0.5)
-    outcome = _decide(sidecar_dir, machine)
-    # The per-model floor (sonnet's default "high") must not re-fire over it.
-    assert outcome.payload is None
-
-
-def test_manual_effort_cleared_by_an_observed_model_change(tmp_path: Path) -> None:
-    """A spell is bounded by the family ON SCREEN, not by a typed command.
-
-    Keying this on recognised keystrokes could not see a picker switch at all,
-    so the latch survived into the next family and pinned effort to a choice
-    made under the previous one.
-    """
-    sidecar_dir = tmp_path / "cs"
-    machine = _machine()
-    _write_sidecar(sidecar_dir, model_id="claude-fable-5", effort="low", ts=_NOW - 5.0)
-    _decide(sidecar_dir, machine)
-    machine.note_manual_effort_command("low", now_wall=_NOW)
-    _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="low", ts=_NOW - 0.5)
-    _decide(sidecar_dir, machine, facts=_facts(_NOW + 1.0))
-    assert machine.export_state()["manual_effort_active"] is None
-
-
-def test_manual_effort_survives_a_reading_on_the_same_family(tmp_path: Path) -> None:
-    """Only a CHANGE ends the spell -- a re-render of the same family does not."""
-    sidecar_dir = tmp_path / "cs"
-    machine = _machine()
-    _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="low", ts=_NOW - 5.0)
-    _decide(sidecar_dir, machine)
-    machine.note_manual_effort_command("low", now_wall=_NOW)
-    _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="low", ts=_NOW - 0.5)
-    _decide(sidecar_dir, machine, facts=_facts(_NOW + 1.0))
-    assert machine.export_state()["manual_effort_active"] == "low"
-
-
-def test_manual_effort_cleared_by_a_further_manual_effort_change() -> None:
-    machine = _machine()
-    machine.note_manual_effort_command("low", now_wall=_NOW)
-    machine.note_manual_effort_command("high", now_wall=_NOW + 1.0)
-    assert machine.export_state()["manual_effort_active"] == "high"
-
-
-def test_manual_effort_state_round_trips_through_export_import() -> None:
-    machine = _machine()
-    machine.note_manual_effort_command("medium", now_wall=_NOW)
-    clone = _machine()
-    clone.import_state(machine.export_state())
-    assert clone.export_state()["manual_effort_active"] == "medium"
-
-
-def test_exported_state_carries_no_manual_model_fields() -> None:
-    """The keystroke latches are gone from the host<->worker payload too.
+def test_exported_state_carries_no_manual_model_or_effort_fields() -> None:
+    """The keystroke and effort latches are gone from the host<->worker payload.
 
     They rode in `export_state`, so a leftover key would keep a stale latch
     alive across every worker restart -- silently, and only in the field.
@@ -393,6 +282,8 @@ def test_exported_state_carries_no_manual_model_fields() -> None:
     assert "manual_model_ts" not in state
     assert "manual_selector_ts" not in state
     assert "manual_selector_session" not in state
+    assert "manual_effort_active" not in state
+    assert "coupled_effort_pending" not in state
 
 
 def test_legacy_state_with_the_deleted_manual_fields_imports_cleanly() -> None:
@@ -407,43 +298,21 @@ def test_legacy_state_with_the_deleted_manual_fields_imports_cleanly() -> None:
     legacy_state["manual_model_ts"] = _NOW
     legacy_state["manual_selector_ts"] = _NOW
     legacy_state["manual_selector_session"] = _SESSION
+    legacy_state["manual_effort_active"] = "low"
+    legacy_state["coupled_effort_pending"] = f"{_SESSION}:fable"
     fresh = _machine()
-    fresh.import_state(legacy_state)
-    fresh.arm_coupled_effort(session=_SESSION, family="fable")
-    assert fresh.coupled_effort_pending == f"{_SESSION}:fable"
+    fresh.import_state(legacy_state)  # must not raise
+    assert fresh.export_state()["downgrade_episode"] is None
 
 
 # ── TickFacts / worker JSON round-trip ───────────────────────────────────────
 
 
-def test_tick_facts_effort_command_round_trips_through_json() -> None:
-    facts = _mod.TickFacts(
-        now_wall=_NOW,
-        idle=True,
-        input_line_empty=True,
-        human_compact_submitted=False,
-        work_idle=True,
-        human_effort_command="low",
-    )
-    line = _mod._facts_to_json(facts)
-    restored = _mod._facts_from_json(line)
-    assert restored.human_effort_command == "low"
-
-
-def test_tick_facts_effort_command_defaults_to_none() -> None:
-    facts = _mod.TickFacts(
-        now_wall=_NOW,
-        idle=True,
-        input_line_empty=True,
-        human_compact_submitted=False,
-        work_idle=True,
-    )
-    assert facts.human_effort_command is None
-
-
-@pytest.mark.parametrize("field_name", ["human_model_command", "human_model_selector"])
-def test_tick_facts_carries_no_model_command_field(field_name: str) -> None:
-    """Nothing host-side may still be shipping a model keystroke to the worker."""
+@pytest.mark.parametrize(
+    "field_name", ["human_model_command", "human_model_selector", "human_effort_command"]
+)
+def test_tick_facts_carries_no_model_or_effort_command_field(field_name: str) -> None:
+    """Nothing host-side may still be shipping a model or effort keystroke."""
     facts = _mod.TickFacts(
         now_wall=_NOW,
         idle=True,

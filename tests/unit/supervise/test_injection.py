@@ -519,22 +519,20 @@ class TestPollOnceNoopLogging:
 
     def test_benign_green_noop_is_silent(self, tmp_path: Path) -> None:
         # A positively not-red, non-stale context is the common idle tick with
-        # nothing to do w.r.t. GATE noise -- the only line here is the
-        # settings-status note every fresh machine's first tick reports once
-        # (Plan 00466 N47 finding 7) since no settings.json exists in this
-        # isolated test environment.
+        # nothing to do w.r.t. GATE noise -- no line is logged at all (Plan
+        # 00466 N47 review 2: the settings-status note is gone along with the
+        # settings resolver it reported on).
         sc = tmp_path / "sc"
         self._sidecar(sc, red=False, tier="green")
         log_path = tmp_path / "decision.log"
         self._poll(sc, DecisionLog(log_path), idle=True)
-        contents = log_path.read_text(encoding="utf-8")
-        assert "settings.json status:" in contents
+        assert not log_path.exists() or log_path.read_text(encoding="utf-8") == ""
+        contents = log_path.read_text(encoding="utf-8") if log_path.exists() else ""
         assert "noop:" not in contents
 
     def test_consecutive_identical_gate_noop_is_deduped(self, tmp_path: Path) -> None:
         # A red context gated on a busy TUI, held for several ticks, logs the
-        # gate ONCE -- plus the one-time settings-status note from the first
-        # tick (Plan 00466 N47 finding 7), also never repeated.
+        # gate ONCE.
         sc = tmp_path / "sc"
         self._sidecar(sc, red=True, tier="red")
         log = DecisionLog(tmp_path / "decision.log")
@@ -542,9 +540,8 @@ class TestPollOnceNoopLogging:
         for _ in range(4):
             self._poll(sc, log, idle=False, machine=machine)
         lines = (tmp_path / "decision.log").read_text(encoding="utf-8").splitlines()
-        assert len(lines) == 2
-        assert "settings.json status:" in lines[0]
-        assert _mod._REASON_BUSY_COMPOSING in lines[1]
+        assert len(lines) == 1
+        assert _mod._REASON_BUSY_COMPOSING in lines[0]
 
     def test_red_busy_noop_names_gate_and_red_band(self, tmp_path: Path) -> None:
         # Red context + a busy TUI (idle=False) -> gated on "session busy"; the

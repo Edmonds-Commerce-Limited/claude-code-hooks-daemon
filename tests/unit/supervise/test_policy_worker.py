@@ -248,10 +248,15 @@ def _facts_with_raw_input(raw: bytes, *, now: float = 1000.0) -> object:
     )
 
 
-def test_run_worker_recognizes_typed_effort_command_from_raw_input(tmp_path: Path) -> None:
-    """Plan 00317 Task 2.1: the worker recognises a submitted `/effort <x>` from
-    the raw-input tap, NOT from the host-precomputed (and here absent) legacy
-    field -- proving recognition runs worker-side."""
+def test_run_worker_does_not_recognise_an_effort_command_at_all(tmp_path: Path) -> None:
+    """A typed `/effort low` must leave NO trace in the worker's state.
+
+    Plan 00466 N47 review 2: the supervisor injects NO effort of any kind, so
+    recognising a typed `/effort` command is gone along with everything that
+    would have acted on it -- proven end to end through the worker's own JSON
+    path, the hop where a leftover field would survive every state-machine
+    unit test.
+    """
     sidecar_dir = tmp_path / "context-sidecar"
     in_stream = io.StringIO(_mod._facts_to_json(_facts_with_raw_input(b"/effort low\r")) + "\n")
     out_stream = io.StringIO()
@@ -264,11 +269,10 @@ def test_run_worker_recognizes_typed_effort_command_from_raw_input(tmp_path: Pat
         policy=_mod.CompactPolicy(),
     )
 
-    # decide_once acted on a recognised manual `/effort low` -- observable via
-    # the post-tick machine state carrying the latch.
     outcome = _mod._outcome_from_json(out_stream.getvalue().strip())
     assert outcome.machine_state is not None
-    assert outcome.machine_state["manual_effort_active"] == "low"
+    assert "manual_effort_active" not in outcome.machine_state
+    assert "coupled_effort_pending" not in outcome.machine_state
 
 
 def test_run_worker_does_not_recognise_a_model_command_at_all(tmp_path: Path) -> None:
@@ -296,10 +300,13 @@ def test_run_worker_does_not_recognise_a_model_command_at_all(tmp_path: Path) ->
     assert "manual_selector_ts" not in outcome.machine_state
 
 
-def test_run_worker_recognition_persists_across_ticks_until_submitted(tmp_path: Path) -> None:
-    """A typed line split across multiple ticks (no Enter yet) must stay
-    non-empty until submitted -- the worker's recognizer state must persist
-    across separate TickFacts lines within one worker lifetime."""
+def test_run_worker_recognition_persists_across_ticks_leaves_no_effort_trace(
+    tmp_path: Path,
+) -> None:
+    """A typed line split across multiple ticks (no Enter yet) is still
+    buffered across separate TickFacts lines within one worker lifetime --
+    but even once submitted, an `/effort` command leaves no state, on either
+    tick."""
     sidecar_dir = tmp_path / "context-sidecar"
     lines = "\n".join(
         [
@@ -321,11 +328,10 @@ def test_run_worker_recognition_persists_across_ticks_until_submitted(tmp_path: 
         _mod._outcome_from_json(ln) for ln in out_stream.getvalue().splitlines() if ln.strip()
     ]
     assert len(outcomes) == 2
-    # The full command only completes (and is recognised) on the second tick.
     assert outcomes[0].machine_state is not None
-    assert outcomes[0].machine_state["manual_effort_active"] is None
+    assert "manual_effort_active" not in outcomes[0].machine_state
     assert outcomes[1].machine_state is not None
-    assert outcomes[1].machine_state["manual_effort_active"] == "low"
+    assert "manual_effort_active" not in outcomes[1].machine_state
 
 
 def test_run_worker_skips_blank_and_bad_lines(tmp_path: Path) -> None:
@@ -529,52 +535,52 @@ def test_worker_restart_alone_picks_up_changed_recognition_behaviour(
     at all -- proving recognition genuinely lives in the hot-reloadable tier.
 
     Simulates a deploy by writing an EDITED copy of the supervisor (a
-    different `/effort`-recognising prefix) to `tmp_path`, then pointing a
+    different `/compact`-recognising prefix) to `tmp_path`, then pointing a
     fresh `PolicyWorker` at that copy -- mirroring what a genuine on-disk
     edit + `reload_if_stale()`/`restart()` does. The exact same raw bytes
     recognise differently before/after, with nothing but the worker's
-    on-disk source having changed.
+    on-disk source having changed. Observed via the worker's own diagnostic
+    log line (Plan 00319 F4), which fires on every submitted slash line and
+    needs no sidecar reading -- unlike `/model`/`/effort`, this is the one
+    typed-command recognition still live (CLAUDE/development/CcySupervisor.md,
+    "`/compact` recognition from keystrokes is exact, and stays exact").
     """
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
     original_source = SCRIPT_PATH.read_text(encoding="utf-8")
-    assert '_EFFORT_COMMAND = "/effort"' in original_source
+    assert '_COMPACT_COMMAND_PREFIX = "/compact"' in original_source
 
     edited_copy = tmp_path / "claude-supervise-edited.py"
     edited_copy.write_text(
-        original_source.replace('_EFFORT_COMMAND = "/effort"', '_EFFORT_COMMAND = "/thinkharder"'),
+        original_source.replace(
+            '_COMPACT_COMMAND_PREFIX = "/compact"', '_COMPACT_COMMAND_PREFIX = "/thinkharder"'
+        ),
         encoding="utf-8",
     )
+    errlog = tmp_path / ".claude" / "hooks-daemon" / "untracked" / "claude-supervise-worker.err.log"
 
     original_worker = _mod.PolicyWorker(SCRIPT_PATH, dry_run=True)
     assert original_worker.start() is True
     try:
-        # BEFORE: running the ORIGINAL code, "/effort low" is recognised.
-        before = original_worker.decide(_facts_with_raw_input(b"/effort low\r"))
+        # BEFORE: running the ORIGINAL code, "/compact" is recognised.
+        before = original_worker.decide(_facts_with_raw_input(b"/compact\r"))
         assert before is not None
-        assert before.machine_state is not None
-        assert before.machine_state["manual_effort_active"] == "low"
     finally:
         original_worker.close()
+    before_text = errlog.read_text(encoding="utf-8") if errlog.exists() else ""
+    assert "recognised compact=True" in before_text
+    errlog.unlink(missing_ok=True)
 
     # AFTER: a fresh worker over the EDITED copy -- the redeploy + reload
     # this simulates -- no longer matches the old prefix.
     edited_worker = _mod.PolicyWorker(edited_copy, dry_run=True)
     assert edited_worker.start() is True
     try:
-        after_old_prefix = edited_worker.decide(_facts_with_raw_input(b"/effort high\r"))
+        after_old_prefix = edited_worker.decide(_facts_with_raw_input(b"/compact\r"))
         assert after_old_prefix is not None
-        assert after_old_prefix.machine_state is not None
-        assert after_old_prefix.machine_state.get("manual_effort_active") is None
-
-        # The NEW prefix now recognises the same style of command.
-        after_new_prefix = edited_worker.decide(
-            _facts_with_raw_input(b"/thinkharder high\r", now=1002.0)
-        )
-        assert after_new_prefix is not None
-        assert after_new_prefix.machine_state is not None
-        assert after_new_prefix.machine_state["manual_effort_active"] == "high"
     finally:
         edited_worker.close()
+    after_text = errlog.read_text(encoding="utf-8") if errlog.exists() else ""
+    assert "recognised compact=False" in after_text
 
 
 # ── Live PTY integration (Task 4.6) ──────────────────────────────────────────

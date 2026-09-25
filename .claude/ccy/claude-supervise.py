@@ -20,39 +20,35 @@ session. In DRY-RUN (default) that injection is a harmless VISIBLE MARKER,
 proving the mechanism end-to-end without a real compaction; with ``--arm`` it
 injects the real ``/compact`` (and ``continue``).
 
-Two further injection families share the same choke point (idle + empty input
+A further injection family shares the same choke point (idle + empty input
 box, subordinate to compact/continue): a ``/goal`` typed from a daemon-written
-goal-intent signal (Plan 00269), and effort (Plan 00278; redesigned Plan 00466
-N47). The supervisor holds almost no opinion of its own about effort: Claude
-Code's own settings.json is the single source of truth, resolved the same way
-Claude Code resolves it (per-model ``modelSettings.<model-id>.effortLevel``
-over an applicable top-level ``effortLevel``, across local/project/user files
-in that precedence -- see the "settings.json effort SSoT" section below for
-the full citations). Exactly TWO sanctioned interventions exist: (a) a ranked
-model-family DOWNGRADE episode raises effort to xhigh (RAISE-ONLY) until the
-family recovers, since a still-degraded fallback needs maximum compensating
-effort; (b) the top family (fable) is governed EXCLUSIVELY by the separate,
-continuously-verified DROP ANCHOR invariant below -- fable never runs above
-low. Any OTHER family, once no downgrade episode is open, is corrected in
-EITHER direction toward whatever settings.json resolves for the model
-actually on screen; when settings.json configures nothing, Claude Code's own
-per-model default already applies and is never fought. The one sanctioned
-exception beyond effort: the supervisor also types ``/model <original
-family>`` to flip a session-sticky downgrade back (capped, flip-flop
-backoff). The restore is TURN-GATED, not time-gated: the classifier flags
-turns, so recovery is safe the moment the flagged turn ends, and the
-injection choke point (idle + empty input box) is exactly that boundary --
-the restore fires on the first injectable tick after the downgrade.
-``CCY_MODEL_RESTORE_SECONDS`` adds an optional EXTRA quiet delay (default 0;
-"off" or negative disables auto-restore).
+goal-intent signal (Plan 00269).
 
-Effort correction stands down for the rest of a model spell once the human
-sets effort themselves: a typed ``/effort <level>`` latches it, and so does
-any OBSERVED drop the supervisor did not type itself, which is how a level
-picked from the bare ``/effort`` selector is seen. That trusts an
-unattributed effort drop, the deliberate mirror of the model-downgrade rule,
-where an unattributed model drop opens no restore episode
-(``_latch_unattributed_effort_drop``).
+The supervisor injects NO effort of any kind (Plan 00466 N47, redesigned
+after adversarial review 2: every earlier design here -- a per-family floor,
+a downgrade xhigh compensation, a fable "DROP ANCHOR" invariant, a
+steady-state correction toward settings.json -- typed a real ``/effort
+<level>``, and Claude Code SAVES every interactively-typed level into the
+user's own ``settings.json`` under ``modelSettings`` (model-config.md:554,
+settings-reference.md:900). That made the supervisor's "restore" the SAME
+persistent fight the owner originally reported, just moved one layer down,
+into the single source of truth itself. Effort is now settings.json's job
+alone: the owner adds a ``modelSettings`` entry for Fable at ``low`` and for
+a downgrade fallback model at ``xhigh``, and Claude Code applies it itself
+on every ``/model`` switch -- automatic or manual -- with NO supervisor
+involvement. See ``CLAUDE/development/CcySupervisor.md`` for the exact
+entries.
+
+The supervisor still types ``/model <original family>`` to flip a
+session-sticky downgrade back (capped, flip-flop backoff), because Claude
+Code's own downgrade is what forced the family change in the first place --
+this is model CHOICE, a different concern from effort, and settings.json
+plays no part in it. The restore is TURN-GATED, not time-gated: the
+classifier flags turns, so recovery is safe the moment the flagged turn
+ends, and the injection choke point (idle + empty input box) is exactly
+that boundary -- the restore fires on the first injectable tick after the
+downgrade. ``CCY_MODEL_RESTORE_SECONDS`` adds an optional EXTRA quiet delay
+(default 0; "off" or negative disables auto-restore).
 
 On a REPEATED downgrade — a flip-flop, where a prior auto-restore was undone
 because the saturated context re-tripped the classifier on the next flagged
@@ -66,33 +62,15 @@ with a 🧽 glyph, and fires only when idle (no ESC needed; the resume rides the
 normal compaction-signal path). It is checked just BEFORE the model restore, so
 on a qualifying flip-flop the compact fires instead of a re-restore.
 
-Every ``/model <family>`` injection -- this auto-restore AND the manual
-override below alike -- ARMS a coupled ``/effort`` correction that is
-CHECKED on the very next injectable tick, from OBSERVED state, never from
-which path armed it (Plan 00466 N47 finding 6, replacing an earlier design
-where the target was fixed at arm time). xhigh applies only while a
-downgrade episode still tracks that EXACT destination as the fallback --
-resolvable at once, with no need to wait for a reading. The top family
-(fable) has no separate opinion here at all; DROP ANCHOR is its sole
-authority. Any other destination waits for a reading that actually shows it
-on screen, then resolves settings.json for that EXACT model id and sends the
-correction only when it disagrees with what is live -- the fix for the
-defect where a restore to Opus kept landing on xhigh instead of the owner's
-configured level. Nothing configured, or already matching, clears the
-correction with no injection at all.
-
 Every ``/model <family>`` injection (the auto-restore above, and the manual
 override below) sends a SECOND, confirming Enter after the normal submit:
 Claude Code's model switch shows a confirmation dialog that the ordinary
 single-Enter submit does not clear. The count is configurable via
-``CCY_MODEL_CONFIRM_ENTERS`` (default 1). Every ``/effort <level>``
-injection sends its own confirming Enter the same way — the effort selector
-also needs one — configurable via ``CCY_EFFORT_CONFIRM_ENTERS`` (default 1).
-A session can also be switched
+``CCY_MODEL_CONFIRM_ENTERS`` (default 1). A session can also be switched
 on demand — for end-to-end testing, or a genuine manual override — by
 writing a ``<session>.model-switch-intent`` signal (mirroring the
 goal-intent signal) and consuming it at the same idle choke point, ahead of
-goal/effort/auto-model-restore. The CLI helper ``--emit-model-switch
+goal/auto-model-restore. The CLI helper ``--emit-model-switch
 <family>`` writes one for whichever session owns the newest context
 sidecar; it does not start a supervisor.
 
@@ -106,10 +84,10 @@ validates AND renders the message in one step, from templates fixed in THIS
 file (`_render_operator_message`); `minutes` is the only value ever
 interpolated. It is consumed at the same idle choke point, ahead of the goal
 and model-switch/restore families, but still subordinate to
-compact/continue/escape, DROP ANCHOR and the coupled-effort correction. A
-transient WARNING-level status-line countdown (the message channel below)
-posts the moment a valid signal is observed, independent of whether the chat
-line can be typed yet, so a human watching the terminal sees it too.
+compact/continue/escape. A transient WARNING-level status-line countdown
+(the message channel below) posts the moment a valid signal is observed,
+independent of whether the chat line can be typed yet, so a human watching
+the terminal sees it too.
 
 It also GUARDS the session against accidental terminal control keys that would
 otherwise freeze or kill it: Ctrl+Z (SUSP) is stripped from the forwarded input
@@ -152,7 +130,7 @@ did it" -- has no safe setting.
 Note the auto-restore is also scoped to drops that START at fable (the
 security fallback); see the SCOPE note above `_MODEL_FAMILY_RANKS`.
 
-Typed-command recognition (`/compact`, `/effort <x>`) runs
+Typed-command recognition (`/compact`) runs
 WORKER-SIDE: the host only forwards raw stdin bytes into a bounded
 `RawInputTap`, drained each tick into `TickFacts.human_raw_input`; the
 `--worker` subprocess owns the `HumanInputLine` parser that recognises
@@ -208,7 +186,6 @@ import hashlib
 import json
 import os
 import pty
-import re
 import select
 import signal
 import struct
@@ -312,14 +289,13 @@ _WORKER_READ_TIMEOUT_SECONDS = 2.0
 _WORKER_RELOAD_CHECK_SECONDS = 5.0
 # Plan 00319 F8: the worker's HumanInputLine buffer lives in the subprocess, so
 # swapping it (reload or dead-worker restart) resets it -- any partially-typed
-# `/compact`/`/effort` line the human has not yet submitted is gone. Dropping it
-# may be correct (there is nowhere to recover the bytes from); doing so with no
-# trace is not, hence this diagnostic. ``{trigger}`` names which of the two swap
-# paths fired.
+# line the human has not yet submitted is gone. Dropping it may be correct
+# (there is nowhere to recover the bytes from); doing so with no trace is not,
+# hence this diagnostic. ``{trigger}`` names which of the two swap paths fired.
 _WORKER_SWAP_DROPPED_LINE_TRACE = (
     "worker {trigger} while the human's input box was non-empty -- the "
-    "recognizer's buffer was reset, so a partially-typed /compact or /effort "
-    "command may have been lost"
+    "recognizer's buffer was reset, so a partially-typed line (e.g. /compact) "
+    "may have been lost"
 )
 # Plan 00361: a worker spawned from a half-edited on-disk file dies on its
 # first tick, and `if not alive(): restart()` every tick turned that into an
@@ -709,12 +685,6 @@ class HumanInputLine:
         # Edge flag: set when a submitted line was a human `/compact`, cleared by
         # take_compact_submitted() so the supervisor acts on it exactly once.
         self._compact_submitted: bool = False
-        # Plan 00316: the raw argument text of a submitted human `/effort <x>`
-        # line -- cleared by take_effort_submitted() so each typed command is
-        # consumed exactly once. `/model` is deliberately NOT recognised here
-        # (Plan 00328): the auto-restore now arms on the platform's own record
-        # of a downgrade, so a human's model choice needs no recognition.
-        self._effort_submitted: str | None = None
         # Observability: every submitted line starting with '/' is recorded
         # verbatim (bounded), matched or not, so a recognition MISS (e.g.
         # autocomplete swallowing the argument bytes) is diagnosable from the
@@ -787,9 +757,6 @@ class HumanInputLine:
                 self._enter_pressed = True
                 if self._buffer_is_compact():
                     self._compact_submitted = True
-                effort_arg = self._buffer_command_arg(_EFFORT_COMMAND)
-                if effort_arg:
-                    self._effort_submitted = effort_arg
                 if self._buffer and self._buffer[0] == _SLASH_BYTE:
                     text = bytes(self._buffer).decode("utf-8", errors="replace")
                     self._slash_submitted.append(text[:_SLASH_OBSERVED_MAX_CHARS])
@@ -861,21 +828,6 @@ class HumanInputLine:
         text = bytes(self._buffer).decode("utf-8", errors="ignore")
         return text.strip().startswith(_COMPACT_COMMAND_PREFIX)
 
-    def _buffer_command_arg(self, command: str) -> str | None:
-        """Return the trimmed argument of a submitted ``command <arg>`` line.
-
-        ``None`` when the line does not start with ``command`` followed by
-        whitespace and a non-empty argument -- a bare ``/effort`` with no
-        level opens Claude Code's own selector and names nothing this class
-        can read.
-        """
-        text = bytes(self._buffer).decode("utf-8", errors="ignore").strip()
-        prefix = f"{command} "
-        if not text.startswith(prefix):
-            return None
-        arg = text[len(prefix) :].strip()
-        return arg or None
-
     def take_compact_submitted(self) -> bool:
         """Return True once if a human `/compact` was submitted, then clear it.
 
@@ -886,12 +838,6 @@ class HumanInputLine:
             self._compact_submitted = False
             return True
         return False
-
-    def take_effort_submitted(self) -> str | None:
-        """Return the argument of a submitted human `/effort <x>`, then clear it."""
-        arg = self._effort_submitted
-        self._effort_submitted = None
-        return arg
 
     def take_slash_submitted(self) -> list[str]:
         """Return submitted '/'-prefixed lines observed since last checked."""
@@ -963,10 +909,6 @@ class InputActivity:
     def take_compact_submitted(self) -> bool:
         """Return True once if the human submitted a `/compact` since last checked."""
         return self.line.take_compact_submitted()
-
-    def take_effort_submitted(self) -> str | None:
-        """Return the argument of a human `/effort <x>` submitted since last checked."""
-        return self.line.take_effort_submitted()
 
 
 _DEFAULT_RAW_INPUT_TAP_MAX_BYTES = 4096
@@ -1368,26 +1310,22 @@ _DEFERRED_LOG_PREFIX = "injection deferred: input box not empty"
 _NOOP_LOG_PREFIX = "noop"
 
 
-# ── Effort restore on model downgrade (Plan 00278) ──────────────────────────
+# ── Model restore on downgrade: episode tracking (Plan 00278) ───────────────
 # SCOPE, and it is NARROW (owner ruling, 2026-09-04, after a live dogfood):
 # this machinery exists to counteract the AUTOMATED FABLE SECURITY DOWNGRADE
 # and nothing else. A drop that did not start at fable -- opus → sonnet, say --
-# is the human's own business and is ignored outright: no episode, no restore,
-# no forced xhigh. Do not widen this back to "any ranked drop". That is what it
-# used to be, and it made the supervisor type `/model opus` at a human who had
-# just chosen Sonnet, then overwrite their effort. See
-# `_TOP_FAMILY_RANK` in note_model_reading for the enforcing condition.
+# is the human's own business and is ignored outright: no episode, no restore.
+# Do not widen this back to "any ranked drop". That is what it used to be, and
+# it made the supervisor type `/model opus` at a human who had just chosen
+# Sonnet. See `_TOP_FAMILY_RANK` in note_model_reading for the enforcing
+# condition.
 #
-# A session downgraded from a higher-ranked model family (e.g. a
-# security-triggered fable → opus switch) inherits its previous effort
-# setting; "fable low" must fall through to "opus xhigh", not "opus low".
-# The supervisor tracks the foreground sidecar's model family per session,
-# enforces per-model effort FLOORS, and raises the floor to xhigh for a
-# downgrade episode.
-#
-# INVARIANT: this family only ever RAISES effort. An injection fires only
-# when the live effort ranks strictly BELOW the target, so a session already
-# at or above its floor (or at max) is never touched.
+# The supervisor tracks the foreground sidecar's model family per session
+# ONLY to know when to flip a downgraded session back (`/model <family>`,
+# below) -- Plan 00466 N47 (review 2) retired every effort opinion this
+# family used to carry. Effort is settings.json's job alone now: Claude Code
+# applies a configured `modelSettings` entry itself on every `/model` switch,
+# with no supervisor involvement.
 #
 # Ascending capability rank; "mythos" shares fable's rank (same underlying
 # model). Matched by token containment on the sidecar's model_id; unknown
@@ -1401,25 +1339,10 @@ _MODEL_FAMILY_RANKS: dict[str, int] = {
 }
 # "mythos" is an alias: _model_family canonicalises it to "fable".
 _MODEL_FAMILY_CANONICAL: dict[str, str] = {"mythos": "fable"}
-# The single highest capability rank (fable/mythos). Used by the coupled-
-# effort mechanism to distinguish "switching TO the best model" (a sanctioned
-# effort LOWERING to its floor) from every other destination (a downgrade or
-# a partial restore, which targets _DOWNGRADE_TARGET_EFFORT instead).
+# The single highest capability rank (fable/mythos). Used to distinguish "the
+# drop must START at fable" (the automated security downgrade this family
+# counteracts) from every other family change, which is the human's business.
 _TOP_FAMILY_RANK = max(_MODEL_FAMILY_RANKS.values())
-_EFFORT_COMMAND = "/effort"
-# Ascending effort ranks (Claude Code's own low→max ordering).
-_EFFORT_RANKS: dict[str, int] = {"low": 0, "medium": 1, "high": 2, "xhigh": 3, "max": 4}
-# The effort a downgraded session is restored to — the whole point of the
-# family: "fable low" falls through to the fallback model at XHIGH, so the
-# downgrade target outranks any configured per-model minimum.
-_DOWNGRADE_TARGET_EFFORT = "xhigh"
-# After a successful /effort injection the sidecar keeps reporting the OLD
-# effort until the next status render; without a cooldown the stale reading
-# would re-open the episode and burn the cap on duplicates.
-_EFFORT_REINJECT_COOLDOWN_SECONDS = 180.0
-# Family-specific per-process cap: a flapping model_id cannot type forever.
-_MAX_EFFORT_INJECTIONS = 3
-_DRY_RUN_EFFORT_BODY_PREFIX = "would inject /effort (dry-run — no real /effort sent):"
 # ── Model restore after a downgrade (Plan 00278 Task 2b.3) ──────────────────
 # The safety fallback is session-sticky, but flipping back manually works
 # once the flaggable TURN has passed — the classifier flags turns, not
@@ -1428,9 +1351,7 @@ _DRY_RUN_EFFORT_BODY_PREFIX = "would inject /effort (dry-run — no real /effort
 # the default extra delay is ZERO: restore fires on the first injectable
 # tick after the downgrade (joseph: turn-gated, not time-gated). A positive
 # CCY_MODEL_RESTORE_SECONDS adds an optional extra quiet delay on top;
-# "off" (or any negative value) disables auto-restore entirely. A successful
-# flip-back then RESETS effort down to the restored family's floor (the one
-# sanctioned lowering: fable at xhigh eats account allowance).
+# "off" (or any negative value) disables auto-restore entirely.
 _MODEL_COMMAND = "/model"
 _DEFAULT_MODEL_RESTORE_DELAY_SECONDS = 0.0
 _MODEL_RESTORE_DISABLED_SENTINEL = -1.0
@@ -1441,46 +1362,6 @@ _MODEL_RESTORE_BACKOFF_SECONDS = 3600.0
 # Per-process lifetime cap on auto-restores.
 _MAX_MODEL_RESTORES = 2
 _DRY_RUN_MODEL_BODY_PREFIX = "would inject /model (dry-run — no real /model sent):"
-
-# ── DROP ANCHOR: fable-above-low invariant (Plan 00297) ─────────────────────
-# On 2026-08-31 the effort floor injected `/effort xhigh` on Opus; a model
-# flip to Fable carried the xhigh over; the follow-up `/effort low`
-# injection was SWALLOWED by a busy session while the audit recorded it
-# done -- Fable ran at XHIGH for roughly an hour. The floor/coupled-effort
-# machinery above cannot by construction catch this: the floor family only
-# ever RAISES effort (see its INVARIANT docstring), and the one-shot
-# post-/model-switch correction is marked done on a successful PTY WRITE,
-# never on a verified read-back of the session's actual state. DROP ANCHOR
-# is a SEPARATE, continuously re-evaluated invariant -- `model == fable`
-# implies `effort == low` -- checked on every fresh, non-stale sidecar
-# reading, with its own retry cooldown and escalation bound, independent of
-# the floor mechanism's cap/cooldown so an unverified violation always keeps
-# retrying.
-_ANCHOR_TARGET_EFFORT = "low"
-# Own, tighter cooldown than `_EFFORT_REINJECT_COOLDOWN_SECONDS` -- an
-# active anchor must retry aggressively, but still not spam every tick.
-_ANCHOR_RETRY_COOLDOWN_SECONDS = 25.0
-# After this many injection attempts with no verified read-back, OR after
-# this much wall-clock since the violation was first observed (whichever
-# comes first), the anchor is considered ESCALATED: the host posts a loud
-# owner-facing alert (see `supervise()`) while continuing to retry.
-_ANCHOR_MAX_ATTEMPTS = 3
-_ANCHOR_ESCALATION_BOUND_SECONDS = 300.0
-_ANCHOR_ALERT_TEXT = (
-    "🚨 DROP ANCHOR: fable stuck above low effort after repeated /effort low "
-    "attempts — owner attention needed (see decision.log)"
-)
-# Plan 00297 follow-up (owner-approved, ruling: "Compaction is uninterruptible
-# AFAIK... Esc can be disruptive but its basically OK - its MUCH MUCH better
-# than leaving fable running at xhigh"): once ESCALATED, the anchor also
-# sends a raw ESC to interrupt an in-flight turn that is swallowing the
-# `/effort low` injection -- the same WOULD_ESCAPE keystroke path the
-# AWAIT_COMPACTING flush already uses. Its OWN cooldown, separate from
-# `_ANCHOR_RETRY_COOLDOWN_SECONDS`, so ESC does not fire every retry tick.
-_ANCHOR_ESC_COOLDOWN_SECONDS = 60.0
-_DRY_RUN_ANCHOR_ESCAPE_BODY = (
-    "would send [esc] to interrupt the in-flight turn (dry-run — no real ESC sent)"
-)
 
 
 def _parse_model_restore_delay(raw: str) -> float:
@@ -1534,37 +1415,11 @@ def _model_confirm_enters_from_env() -> int:
     return _parse_model_confirm_enters(raw)
 
 
-# Every ``/effort <level>`` injection needs the same treatment: Claude Code's
-# effort selector shows a confirmation UI that the ordinary single-Enter
-# submit does not clear, so without a confirming Enter the level change sits
-# unconfirmed forever (a human had to press Enter for the first live coupled
-# correction).
-_DEFAULT_EFFORT_CONFIRM_ENTERS = 1
-_EFFORT_CONFIRM_ENTERS_ENV_VAR = "CCY_EFFORT_CONFIRM_ENTERS"
-
-
-def _parse_effort_confirm_enters(raw: str) -> int:
-    """Parse the effort confirm-Enter override; junk or negative keeps default."""
-    try:
-        value = int(raw.strip())
-    except ValueError:
-        return _DEFAULT_EFFORT_CONFIRM_ENTERS
-    return value if value >= 0 else _DEFAULT_EFFORT_CONFIRM_ENTERS
-
-
-def _effort_confirm_enters_from_env() -> int:
-    """Resolve the effective effort confirm-Enter count (env override or default)."""
-    raw = os.environ.get(_EFFORT_CONFIRM_ENTERS_ENV_VAR)
-    if raw is None:
-        return _DEFAULT_EFFORT_CONFIRM_ENTERS
-    return _parse_effort_confirm_enters(raw)
-
-
-# /model and /effort injections leave NO trace in the chat (unlike /compact
-# and /goal, whose payloads carry visible text), so after a successful silent
-# injection the supervisor flushes a transient status-line banner naming what
-# it did (Plan 00318). Pending audit items are bounded so a stuck flush can
-# never grow the machine state without limit.
+# /model injections leave NO trace in the chat (unlike /compact and /goal,
+# whose payloads carry visible text), so after a successful silent injection
+# the supervisor flushes a transient status-line banner naming what it did
+# (Plan 00318). Pending audit items are bounded so a stuck flush can never
+# grow the machine state without limit.
 _MAX_AUDIT_ITEMS = 8
 
 
@@ -1611,238 +1466,6 @@ def _family_rank(family: str) -> int:
     return _MODEL_FAMILY_RANKS[family]
 
 
-# ── settings.json effort SSoT (Plan 00466 N47) ──────────────────────────────
-# Claude Code itself reads effort from its OWN settings files, and the
-# supervisor holds almost no opinion of its own: it resolves the SAME value
-# Claude Code would, the SAME way, across the SAME files, and only ever
-# corrects a live reading that disagrees with that resolution (or, for the
-# top family, defers entirely to the separate DROP ANCHOR invariant below).
-# There is no second table of defaults to fight it.
-#
-# Full precedence, per-model matching, the user-file top-level cutoff, the
-# rejection of "max", and the explicit-override precedence are documented
-# on the functions below, each citing the vendored page and line it comes
-# from. Two DELIBERATE gaps: managed settings (an OS-specific system
-# location) and the launch `--effort` flag (this wrapper's argv is not
-# plumbed through to this resolver) are not resolved here.
-_CLAUDE_CONFIG_DIR_ENV_VAR = "CLAUDE_CONFIG_DIR"
-_SETTINGS_FILENAME = "settings.json"
-_LOCAL_SETTINGS_FILENAME = "settings.local.json"
-_EXPLICIT_EFFORT_ENV_VAR = "CLAUDE_CODE_EFFORT_LEVEL"
-# The only levels settings.json (or the explicit env override) may validly
-# name -- "max" is excluded on purpose (see module note above).
-_SETTINGS_VALID_LEVELS: frozenset[str] = frozenset({"low", "medium", "high", "xhigh"})
-# How often a fresh mtime is worth checking against disk -- cheap (one
-# stat()) so this stays small; the point is to avoid a stat() on every single
-# resolution call within the same tick's burst of lookups.
-_SETTINGS_RELOAD_CHECK_SECONDS = 2.0
-# A trailing "[1m]" long-context-window marker, and a trailing "-YYYYMMDD"
-# date suffix, both name the SAME canonical model as the bare id
-# (settings-reference.md:1197).
-_MODEL_ID_1M_SUFFIX = "[1m]"
-_MODEL_ID_DATE_SUFFIX_RE = re.compile(r"^(.*)-(\d{8})$")
-# Opus 5.5 and later ignore a USER file's top-level effortLevel (see the
-# docstrings below). Parsed from the model id's own "opus-<major>[-<minor>]".
-_OPUS_VERSION_RE = re.compile(r"opus-(\d+)(?:-(\d+))?")
-_OPUS_USER_TOP_LEVEL_CUTOFF = (5, 5)
-
-
-def _claude_config_dir() -> Path:
-    """Resolve Claude Code's own config directory, the way Claude Code does.
-
-    ``$CLAUDE_CONFIG_DIR`` wins when set and non-blank; otherwise ``~/.claude``
-    -- the same precedence Claude Code itself uses to find its main
-    ``settings.json``.
-    """
-    raw = os.environ.get(_CLAUDE_CONFIG_DIR_ENV_VAR, "").strip()
-    if raw:
-        return Path(raw).expanduser()
-    return Path.home() / ".claude"
-
-
-def _main_settings_path() -> Path:
-    """Resolve the path to Claude Code's USER ``settings.json`` (Plan 00466 N47)."""
-    return _claude_config_dir() / _SETTINGS_FILENAME
-
-
-def _project_root() -> Path:
-    """Resolve the session's project root, the way the rest of this file does.
-
-    Mirrors ``_daemon_untracked_dir``'s own resolution: ``$CLAUDE_PROJECT_DIR``
-    (exported by ccy in-container) falling back to the current working
-    directory.
-    """
-    return Path(os.environ.get("CLAUDE_PROJECT_DIR") or Path.cwd())
-
-
-def _project_settings_path() -> Path:
-    """Resolve the path to the SHARED PROJECT ``settings.json``."""
-    return _project_root() / ".claude" / _SETTINGS_FILENAME
-
-
-def _local_settings_path() -> Path:
-    """Resolve the path to the PROJECT LOCAL ``settings.local.json``."""
-    return _project_root() / ".claude" / _LOCAL_SETTINGS_FILENAME
-
-
-def _normalise_model_id(model_id: str) -> str:
-    """Strip a trailing ``[1m]`` marker and a trailing ``-YYYYMMDD`` date.
-
-    Both name the same canonical model as the bare id (settings-reference.md
-    :1197), so two ids that differ only by one of these normalise equal.
-    """
-    normalised = model_id.strip()
-    if normalised.endswith(_MODEL_ID_1M_SUFFIX):
-        normalised = normalised[: -len(_MODEL_ID_1M_SUFFIX)]
-    match = _MODEL_ID_DATE_SUFFIX_RE.match(normalised)
-    if match:
-        normalised = match.group(1)
-    return normalised
-
-
-def _valid_effort_level(value: object) -> str | None:
-    """Return ``value`` lower-cased when it is a genuinely valid settings level."""
-    if isinstance(value, str) and value.strip().lower() in _SETTINGS_VALID_LEVELS:
-        return value.strip().lower()
-    return None
-
-
-def _model_settings_entry_effort(settings: Mapping[str, object], model_id: str) -> str | None:
-    """Return the ``modelSettings`` entry's ``effortLevel`` for THIS exact model, or None.
-
-    Matches only the SAME canonical model (after ``[1m]``/date normalisation)
-    -- a sibling version in the same family is never used (Plan 00466 N47
-    finding 3).
-    """
-    model_settings = settings.get("modelSettings")
-    if not isinstance(model_settings, dict):
-        return None
-    target = _normalise_model_id(model_id)
-    for key, entry in model_settings.items():
-        if not isinstance(entry, dict) or _normalise_model_id(str(key)) != target:
-            continue
-        level = _valid_effort_level(entry.get("effortLevel"))
-        if level is not None:
-            return level
-    return None
-
-
-def _user_top_level_effort_applies(model_id: str) -> bool:
-    """Whether a USER file's top-level ``effortLevel`` still applies to ``model_id``.
-
-    False only for Opus 5.5 and later (Plan 00466 N47 finding 4); an
-    unparseable Opus version is treated as modern (post-cutoff), since every
-    KNOWN pre-cutoff id parses cleanly and an unparseable one is far more
-    likely to be a newer naming scheme than an old one this resolver has
-    never seen.
-    """
-    if _model_family(model_id) != "opus":
-        return True
-    match = _OPUS_VERSION_RE.search(model_id.lower())
-    if match is None:
-        return False
-    major = int(match.group(1))
-    minor = int(match.group(2)) if match.group(2) else 0
-    return (major, minor) < _OPUS_USER_TOP_LEVEL_CUTOFF
-
-
-def _top_level_effort(settings: Mapping[str, object], *, scope: str, model_id: str) -> str | None:
-    """Return this file's top-level ``effortLevel`` when it applies to ``model_id``."""
-    if scope == "user" and not _user_top_level_effort_applies(model_id):
-        return None
-    return _valid_effort_level(settings.get("effortLevel"))
-
-
-def _resolve_model_effort_from_settings(
-    settings: Mapping[str, object] | None, *, scope: str, model_id: str
-) -> str | None:
-    """Resolve ONE settings file's configured effort for ``model_id``, or None."""
-    if not settings:
-        return None
-    per_model = _model_settings_entry_effort(settings, model_id)
-    if per_model is not None:
-        return per_model
-    return _top_level_effort(settings, scope=scope, model_id=model_id)
-
-
-def _explicit_effort_override() -> str | None:
-    """The supervisor's own environment's explicit effort choice, if any.
-
-    ``CLAUDE_CODE_EFFORT_LEVEL`` outranks every settings file
-    (model-config.md:546) -- the supervisor shares its environment with the
-    wrapped ``claude`` process, so it can see this one explicit source
-    directly. The launch ``--effort`` flag is NOT resolved here (module note
-    above).
-    """
-    return _valid_effort_level(os.environ.get(_EXPLICIT_EFFORT_ENV_VAR))
-
-
-class SettingsEffortCache:
-    """Caches ONE settings.json file, re-read whenever it changes.
-
-    Content is re-read by mtime (Plan 00466 N47 Task 5: an edit takes effect
-    with no supervisor relaunch), throttled to at most once per
-    ``_SETTINGS_RELOAD_CHECK_SECONDS`` of wall-clock so a burst of lookups in
-    one tick costs one ``stat()``, not several. Never raises: a missing,
-    unreadable or malformed file resolves to "configures nothing" for every
-    caller, with the reason (including a plain "not found") available via
-    ``last_error`` for a one-time decision-log note -- see
-    ``CompactStateMachine.take_settings_error_note``.
-    """
-
-    def __init__(self, path: Path) -> None:
-        self._path = path
-        self._mtime: float | None = None
-        self._settings: dict[str, object] | None = None
-        self._last_error: str | None = f"{path} not found"
-        self._last_checked_wall: float | None = None
-
-    def _reload_if_stale(self, now_wall: float | None) -> None:
-        if (
-            now_wall is not None
-            and self._last_checked_wall is not None
-            and now_wall - self._last_checked_wall < _SETTINGS_RELOAD_CHECK_SECONDS
-        ):
-            return
-        self._last_checked_wall = now_wall
-        try:
-            mtime = self._path.stat().st_mtime
-        except OSError:
-            if self._mtime is not None or self._last_error is None:
-                self._mtime = None
-                self._settings = None
-                self._last_error = f"{self._path} not found"
-            return
-        if mtime == self._mtime:
-            return
-        try:
-            raw = self._path.read_text(encoding="utf-8")
-            parsed = json.loads(raw)
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-            self._mtime = mtime
-            self._settings = None
-            self._last_error = f"cannot parse {self._path}: {exc}"
-            return
-        if not isinstance(parsed, dict):
-            self._mtime = mtime
-            self._settings = None
-            self._last_error = f"{self._path} does not contain a JSON object"
-            return
-        self._mtime = mtime
-        self._settings = parsed
-        self._last_error = None
-
-    def settings(self, *, now_wall: float | None = None) -> dict[str, object] | None:
-        """Return this file's parsed settings, or None (never raises)."""
-        self._reload_if_stale(now_wall)
-        return self._settings
-
-    @property
-    def last_error(self) -> str | None:
-        """The current load status: a reason string, or None while the file is fine."""
-        return self._last_error
-
-
 class Decision(enum.Enum):
     """What the supervisor WOULD do this evaluation (dry-run logs it)."""
 
@@ -1854,7 +1477,6 @@ class Decision(enum.Enum):
     WOULD_GOAL = "would-goal"
     WOULD_GOAL_CLEAR = "would-goal-clear"
     WOULD_STANDING_AUTH = "would-standing-auth"
-    WOULD_EFFORT = "would-effort"
     WOULD_MODEL = "would-model"
     WOULD_AUDIT = "would-audit"
     WOULD_OPERATOR_SIGNAL = "would-operator-signal"
@@ -1913,15 +1535,6 @@ class CompactPolicy:
     reap_ttl_seconds: float = _DEFAULT_REAP_TTL_SECONDS
     foreground_margin_seconds: float = _DEFAULT_FOREGROUND_MARGIN_SECONDS
     goal_signal_ttl_seconds: float = _DEFAULT_GOAL_SIGNAL_TTL_SECONDS
-    # Plan 00466 N47: paths to the three settings.json files this resolver
-    # can see (user, shared project, project local) -- the single source of
-    # truth for per-model effort, retired the separate per-family floor map
-    # and its env-var override channel. Env-resolved so the host and the
-    # policy worker (which rebuilds its own policy) agree, and overridable
-    # directly for tests.
-    settings_path: Path = field(default_factory=_main_settings_path)
-    project_settings_path: Path = field(default_factory=_project_settings_path)
-    local_settings_path: Path = field(default_factory=_local_settings_path)
     # Plan 00278 Task 2b.3: EXTRA quiet delay before the /model flip-back on
     # top of the turn gate (default 0 — the idle/empty-input injection gate
     # already means the flagged turn is over); negative ("off") disables
@@ -1931,11 +1544,6 @@ class CompactPolicy:
     # auto-restore and the manual switch signal). Env-resolved for the same
     # host/worker agreement.
     model_confirm_enters: int = field(default_factory=_model_confirm_enters_from_env)
-    # Additional confirming Enters sent after every /effort injection (both
-    # the floor-based restore and the coupled post-/model correction) — the
-    # effort selector needs one just like the model switch. Env-resolved for
-    # the same host/worker agreement.
-    effort_confirm_enters: int = field(default_factory=_effort_confirm_enters_from_env)
     # Plan 00281: opt-in flag-cleaning /compact on a repeated (flip-flop)
     # downgrade. OFF by default — auto-compaction rewrites context. Env-resolved
     # for host/worker agreement, like the other Plan 00278/00281 toggles.
@@ -1972,14 +1580,6 @@ class TickFacts:
     input_line_empty: bool
     human_compact_submitted: bool
     work_idle: bool
-    # Plan 00316: the raw argument of a human-typed `/effort <x>` line
-    # submitted since the last tick, or None. Consumed by
-    # `CompactStateMachine.note_manual_effort_command` so a manual level is
-    # never fought by the coupled-effort default. There is deliberately no
-    # `/model` counterpart (Plan 00328): the auto-restore arms on the
-    # platform's own downgrade record, so a human's model choice needs no
-    # recognition to be respected.
-    human_effort_command: str | None = None
     # The human pressed Enter since the last tick. Recomputed by the worker
     # from ``human_raw_input`` (so no host change is needed to carry it);
     # False on the in-process path and on legacy hosts. Whatever the box held
@@ -1988,9 +1588,8 @@ class TickFacts:
     # Plan 00317: raw stdin bytes forwarded since the last tick, base64-encoded
     # (JSON has no byte-string type). Drained from the host's ``RawInputTap``.
     # The worker feeds this into its OWN persistent ``HumanInputLine`` and
-    # RECOMPUTES ``human_compact_submitted``/
-    # ``human_effort_command``/``input_line_empty`` from it, overriding
-    # whatever the host sent above -- that override is what makes typed-
+    # RECOMPUTES ``human_compact_submitted``/``input_line_empty`` from it,
+    # overriding whatever the host sent above -- that override is what makes typed-
     # command recognition hot-reloadable (a worker restart alone picks up a
     # code change). Empty string when nothing was forwarded since last tick,
     # and on the in-process fallback path (no worker, host's own
@@ -2052,11 +1651,11 @@ class TickOutcome:
     # 0 for every other decision and for legacy replies without the field.
     confirm_enters: int = 0
     # Plan 00278 continuation: populated only when ``decision_value`` is
-    # WOULD_MODEL, so the HOST can arm the mandatory coupled-effort
-    # correction after a successful injection (``arm_coupled_effort``) --
-    # for BOTH the manual test-trigger switch and the auto-restore
-    # flip-back. None/False for every other decision and for legacy replies
-    # without the fields.
+    # WOULD_MODEL, so the HOST can record the AUTO-RESTORE's cap/backoff
+    # bookkeeping (``mark_model_restore``) after a successful injection --
+    # the manual test-trigger switch has its own signal-consumption
+    # lifecycle and does not use these. None/False for every other decision
+    # and for legacy replies without the fields.
     model_switch_family: str | None = None
     model_switch_session: str | None = None
     model_switch_is_auto_restore: bool = False
@@ -2067,20 +1666,6 @@ class TickOutcome:
     # lifecycle and must not eat into the flag-compaction budget. False for
     # every other decision and for legacy replies without the field.
     is_flag_compact: bool = False
-    # Plan 00297: True only for the DROP ANCHOR emergency `/effort low`
-    # correction, so the HOST records the attempt against the anchor's own
-    # bookkeeping (`mark_anchor_injection`) rather than the floor/coupled
-    # mechanisms' -- the anchor is verified by read-back only, never by a
-    # successful PTY write. False for every other decision and for legacy
-    # replies without the field.
-    is_anchor_injection: bool = False
-    # Plan 00297 follow-up: True only for the DROP ANCHOR escalation ESC (a
-    # WOULD_ESCAPE decision fired to interrupt an in-flight turn that may be
-    # swallowing the emergency `/effort low` correction), so the HOST records
-    # the send against the anchor's own ESC cooldown (`mark_anchor_esc`)
-    # rather than the AWAIT_COMPACTING flush's escape-count bookkeeping.
-    # False for every other decision and for legacy replies without the field.
-    is_anchor_escape: bool = False
     # Plan 00299: the raw combined /goal text THIS tick decided to inject
     # (None for every other decision), so the HOST can record it as the
     # multi-plan thrash guard (`mark_goal_injection`) on a successful
@@ -2102,13 +1687,6 @@ class TickOutcome:
     # would show the just-flushed text as non-empty forever. False for every
     # other decision and for legacy replies without the field.
     abandoned_box_flushed: bool = False
-    # Plan 00466 N47 finding 7: a settings.json load status CHANGE this tick
-    # observed (missing, malformed, unreadable, or recovered), carried
-    # SEPARATELY from `noop_reason_log`/`reason` for the same reason as
-    # `audit_flush_log` above -- this tick's real decision keeps the primary
-    # slot, and `_apply_decision` writes this as an ADDITIONAL decision.log
-    # line. None when nothing changed this tick.
-    settings_status_log: str | None = None
 
 
 def _coerce_float(value: object) -> float:
@@ -2439,10 +2017,10 @@ def write_status_message(
 
     PRECEDENCE (Plan 00319 F9): an ``_STATUS_LEVEL_INFO`` write does NOT replace
     a WARNING that is still live, and returns None instead. Every keystroke
-    guard (Ctrl+C, Ctrl+Z, Ctrl+\\, DROP ANCHOR) posts at WARNING and is
-    time-critical — a Ctrl+C hint names a two-second window — while the only
-    INFO writer is the audit banner, which is a convenience surface whose
-    durable record is decision.log. So the banner yields; nothing else does.
+    guard (Ctrl+C, Ctrl+Z, Ctrl+\\) posts at WARNING and is time-critical — a
+    Ctrl+C hint names a two-second window — while the only INFO writer is the
+    audit banner, which is a convenience surface whose durable record is
+    decision.log. So the banner yields; nothing else does.
 
     ``now`` is the wall clock used to judge that liveness, defaulting to
     ``time.time()``. Callers already holding the tick's clock should pass it,
@@ -3273,14 +2851,15 @@ _MODEL_DOWNGRADE_SIGNAL_SUFFIX = ".model-downgrade"
 _MODEL_DOWNGRADE_SIGNAL_GLOB = f"*{_MODEL_DOWNGRADE_SIGNAL_SUFFIX}"
 _DOWNGRADE_FIELD_ORIGINAL_FAMILY = "original_family"
 _DOWNGRADE_FIELD_FALLBACK_FAMILY = "fallback_family"
+_DOWNGRADE_FIELD_RECORD_TS = "record_ts"
 
 
 def load_model_downgrade_signal(
     directory: Path,
     *,
     own_sessions: frozenset[str] | None = None,
-) -> tuple[str, str, str] | None:
-    """Return ``(session_id, original_family, fallback_family)``, or ``None``.
+) -> tuple[str, str, str, str] | None:
+    """Return ``(session_id, original_family, fallback_family, record_ts)``, or ``None``.
 
     Deliberately NOT time-windowed, unlike the goal and model-switch signals.
     The record's own ``scope`` is ``session``: the substitution lasts until the
@@ -3292,6 +2871,12 @@ def load_model_downgrade_signal(
     or unreadable signal is simply no signal. A family the recorder could not
     resolve comes back as ``None`` in the payload and is rejected here rather
     than passed on -- acting on it would aim a restore at nothing.
+
+    ``record_ts`` identifies the underlying transcript record (Plan 00466 N47
+    review 2 finding 4), not the publish time -- the recorder republishes the
+    SAME record for as long as the session lives, so a caller that wants to
+    tell "the same downgrade, seen again" from "a NEW downgrade" needs this,
+    not the file's own ``ts``.
     """
     if not directory.is_dir():
         return None
@@ -3311,7 +2896,10 @@ def load_model_downgrade_signal(
         fallback = _canonical_model_family(data.get(_DOWNGRADE_FIELD_FALLBACK_FAMILY))
         if original is None or fallback is None:
             continue
-        return session_id, original, fallback
+        record_ts = data.get(_DOWNGRADE_FIELD_RECORD_TS)
+        if not isinstance(record_ts, str):
+            record_ts = ""
+        return session_id, original, fallback, record_ts
     return None
 
 
@@ -3591,16 +3179,6 @@ class CompactStateMachine:
 
     def __init__(self, policy: CompactPolicy) -> None:
         self._policy = policy
-        # Plan 00466 N47: each settings.json is re-read by mtime, so an edit
-        # takes effect without a worker restart -- see `SettingsEffortCache`.
-        # Ordered highest-precedence first (local, project, user), matching
-        # `_resolve_configured_effort` below.
-        self._settings_caches: tuple[tuple[str, SettingsEffortCache], ...] = (
-            ("local", SettingsEffortCache(policy.local_settings_path)),
-            ("project", SettingsEffortCache(policy.project_settings_path)),
-            ("user", SettingsEffortCache(policy.settings_path)),
-        )
-        self._last_reported_settings_error: str | None = None
         self.state = SupervisorState.MONITOR
         self._injections = 0
         self._last_action_ts: float | None = None
@@ -3653,18 +3231,12 @@ class CompactStateMachine:
         # backstop only (see _MAX_SESSION_ACTIONS_INJECTIONS) -- the daemon
         # writes at most one signal per session start, consumed on injection.
         self._session_actions_injections = 0
-        # Plan 00278: effort-floor tracking. The last observed (session,
-        # family) pair, an open downgrade episode ("session:family"), the
-        # pending injection key ("session:family:target" — recomputed from
-        # every fresh reading), the family cap, and the last-fired key/ts
-        # pair backing the stale-reading re-inject cooldown.
+        # Plan 00278: the last observed (session, family) pair and an open
+        # downgrade episode ("session:family"), which gate the /model
+        # auto-restore and the flag-cleaning /compact.
         self._last_model_session: str | None = None
         self._last_model_family: str | None = None
         self._downgrade_episode: str | None = None
-        self._effort_pending: str | None = None
-        self._effort_injections = 0
-        self._effort_last_fired_key: str | None = None
-        self._effort_last_fired_ts: float | None = None
         # Plan 00278 Task 2b.3: model-restore bookkeeping — the family the
         # downgrade came FROM, when the episode opened, the per-process
         # restore count, and the last restore ts (flip-flop backoff).
@@ -3676,32 +3248,10 @@ class CompactStateMachine:
         # (round-tripped) and last-fire ts (process-local backoff).
         self._flag_compactions = 0
         self._flag_compact_last_ts: float | None = None
-        # Plan 00278 continuation: the COUPLED effort correction a /model
-        # switch always owes on the next injectable tick (format
-        # "session:family:target"). Armed by the HOST after ANY successful
-        # /model injection -- manual test-trigger AND auto-restore alike --
-        # so the correction never depends on a downgrade episode being open
-        # or a later sidecar reading confirming the switch landed.
-        self._coupled_effort_pending: str | None = None
         # Audit items owed to the chat: one entry per silent injection
-        # (/model, /effort) since the last flush. Flushed as ONE visible
-        # bot-prefixed message on the next injectable tick; bounded FIFO.
+        # (/model) since the last flush. Flushed as ONE visible bot-prefixed
+        # message on the next injectable tick; bounded FIFO.
         self._audit_pending: list[str] = []
-        # Plan 00297: DROP ANCHOR invariant state -- whether it is currently
-        # active (a fresh, non-stale reading last showed fable above low
-        # effort), when it was first observed, the last injection attempt
-        # timestamp (its own retry cooldown, separate from the floor
-        # mechanism's), and how many attempts have been made without a
-        # verified read-back correcting it.
-        self._anchor_active: bool = False
-        self._anchor_started_ts: float | None = None
-        self._anchor_last_injected_ts: float | None = None
-        self._anchor_attempts: int = 0
-        # Plan 00297 follow-up: last wall-clock time the escalation ESC fired
-        # (its own cooldown, separate from `_anchor_last_injected_ts`). Reset
-        # to None whenever the anchor clears, so a fresh violation episode is
-        # never throttled by a previous episode's ESC cooldown.
-        self._anchor_esc_last_sent_ts: float | None = None
         # Plan 00328: an injected `/model <family>` whose landing has not been
         # observed yet (`session:family` + when), and the families a restore
         # has been PROVEN unable to reach. A PTY write succeeding is not the
@@ -3712,50 +3262,24 @@ class CompactStateMachine:
         self._restore_awaiting: str | None = None
         self._restore_awaiting_ts: float | None = None
         self._unavailable_families: list[str] = []
-        # Plan 00328 Task 2.2: `session:from:to` of a downgrade CLAUDE CODE
-        # RECORDED, read from the daemon's `.model-downgrade` signal. Nothing
-        # else opens a downgrade episode -- see `note_machine_downgrade`.
+        # Plan 00328 Task 2.2: `session:from:to:record_ts` of a downgrade
+        # CLAUDE CODE RECORDED, read from the daemon's `.model-downgrade`
+        # signal. Nothing else opens a downgrade episode -- see
+        # `note_machine_downgrade`.
         self._attributed_downgrade: str | None = None
+        # Plan 00466 N47 review 2 finding 4: the record_ts backing the
+        # CURRENTLY open episode (None when none is open), and the record_ts
+        # of the most recently CLOSED episode -- once a record's episode has
+        # been opened and later closed by an observed recovery, that SAME
+        # record (the recorder republishes it for the rest of the session)
+        # must never reopen a fresh episode on its own; only a genuinely NEW
+        # record_ts can.
+        self._downgrade_episode_record_ts: str | None = None
+        self._spent_downgrade_record_ts: str | None = None
         # Consume-once note for a ranked drop that arrived with no such
         # record, so a disabled/failing recorder is diagnosable from
         # decision.log rather than looking like "no downgrade ever happened".
         self._unattributed_downgrade_note: str | None = None
-        # Plan 00316 Task 2.1: the last user-TYPED `/effort <level>` -- a
-        # latch (not time-windowed): it wins over the per-model default/
-        # coupled effort until the user manually changes model again or
-        # manually re-sets effort.
-        self._manual_effort_active: str | None = None
-        # Ledger 00422 N7: the last KNOWN effort reading (`session:family:
-        # effort`) and the level the supervisor itself last typed
-        # (`session:level`, consumed when a reading shows it), so an observed
-        # drop can be told apart from the supervisor's own injection landing.
-        self._last_effort_reading: str | None = None
-        self._own_effort_injection: str | None = None
-        # Consume-once decision.log note for a drop latched as manual.
-        self._manual_effort_drop_note: str | None = None
-
-    @property
-    def effort_pending(self) -> str | None:
-        """Pending effort-restore episode key, or None (Plan 00278)."""
-        return self._effort_pending
-
-    @property
-    def effort_injections(self) -> int:
-        """How many effort injections this process has fired (Plan 00278)."""
-        return self._effort_injections
-
-    def mark_effort_injection(self, now_wall: float | None = None) -> None:
-        """Count a fired effort restore and close the pending episode.
-
-        Called by the HOST only after a SUCCESSFUL injection — a failed PTY
-        write keeps the pending episode so the next tick retries. The fired
-        key + timestamp start the stale-reading re-inject cooldown
-        (Plan 00278).
-        """
-        self._effort_injections += 1
-        self._effort_last_fired_key = self._effort_pending
-        self._effort_last_fired_ts = time.time() if now_wall is None else now_wall
-        self._effort_pending = None
 
     def mark_model_restore(
         self,
@@ -3770,9 +3294,9 @@ class CompactStateMachine:
         (Plan 00278 Task 2b.3) -- never for the manual test-trigger switch,
         which has its own signal-consumption lifecycle and must not eat into
         this cap/backoff budget. The timestamp starts the flip-flop backoff
-        (see ``model_restore_due``). The post-flip effort correction is
-        handled unconditionally by the coupled-effort mechanism, not by this
-        method -- see ``arm_coupled_effort``.
+        (see ``model_restore_due``). Effort is not this method's concern at
+        all (Plan 00466 N47 review 2): settings.json's own ``modelSettings``
+        is what Claude Code applies on the switch.
 
         "SUCCESSFUL" here means the PTY WRITE succeeded, which is NOT the same
         as the model changing (Plan 00328). ``family``/``session`` record what
@@ -3859,150 +3383,6 @@ class CompactStateMachine:
             return False
         return True
 
-    def _refresh_settings_caches(self, now_wall: float) -> None:
-        """Force every settings.json cache to check its mtime this tick.
-
-        Called unconditionally at the top of ``note_model_reading`` (Plan
-        00466 N47), mirroring the anchor's own always-runs placement, so
-        ``take_settings_error_note`` always reflects the CURRENT file state
-        even on a tick whose branch never itself calls
-        ``_resolve_configured_effort``.
-        """
-        for _, cache in self._settings_caches:
-            cache.settings(now_wall=now_wall)
-
-    def _resolve_configured_effort(self, *, model_id: str, now_wall: float | None = None) -> str | None:
-        """Resolve what Claude Code's OWN settings apply to ``model_id``.
-
-        An explicit ``CLAUDE_CODE_EFFORT_LEVEL`` always wins. Otherwise
-        walks the settings files this process can see, highest precedence
-        first (local, project, user -- managed settings and the launch
-        ``--effort`` flag are not resolvable here, see the module note),
-        returning the first value any of them sets for this exact model.
-        ``None`` means settings configures nothing at all for this model:
-        Claude Code's own per-model default already applies, and this
-        resolver holds no opinion of its own to fight it with.
-        """
-        explicit = _explicit_effort_override()
-        # Refresh EVERY cache first (never short-circuit the loop before a
-        # lower-precedence file's mtime has been checked this tick) so
-        # `take_settings_error_note` always reflects every file's CURRENT
-        # status, not just whichever one happened to win precedence.
-        resolved = [
-            (scope, _resolve_model_effort_from_settings(cache.settings(now_wall=now_wall), scope=scope, model_id=model_id))
-            for scope, cache in self._settings_caches
-        ]
-        if explicit is not None:
-            return explicit
-        for _, value in resolved:
-            if value is not None:
-                return value
-        return None
-
-    def take_settings_error_note(self) -> str | None:
-        """Return, once, a note about the CURRENT settings.json load status.
-
-        Edge-triggered: fires again only when the COMBINED status across the
-        three files changes (Plan 00466 N47 finding 7) -- so a missing
-        local/project file (the ordinary case for most projects) is reported
-        once at startup, not every tick, and a later fix or later break each
-        get their own report.
-        """
-        parts = [
-            f"{scope}={cache.last_error}" for scope, cache in self._settings_caches if cache.last_error
-        ]
-        combined = "; ".join(parts) if parts else None
-        if combined == self._last_reported_settings_error:
-            return None
-        self._last_reported_settings_error = combined
-        if combined is None:
-            return None
-        return f"settings.json status: {combined}"
-
-    @property
-    def coupled_effort_pending(self) -> str | None:
-        """Pending coupled effort-correction key "session:family", or None.
-
-        Carries ONLY the destination, never a target level -- the level is
-        resolved at DECISION time by ``resolve_coupled_effort_target`` from
-        OBSERVED state, not from which injector armed this (Plan 00466 N47
-        finding 6).
-        """
-        return self._coupled_effort_pending
-
-    def arm_coupled_effort(self, *, session: str, family: str) -> None:
-        """Arm the mandatory post-/model-switch effort correction.
-
-        Called by the HOST after ANY successful ``/model <family>``
-        injection -- both the manual test-trigger signal and the
-        auto-restore flip-back -- so the destination is tracked and its
-        target is resolved on the very next tick. A blank ``session`` or
-        ``family`` is a no-op (defensive: decide_once only ever calls this
-        with values it has just resolved for a real switch).
-
-        Plan 00316 Task 2.1 (owner clarification): precedence is
-        TIME-ORDERED, not absolute -- EVERY model change (manual or
-        auto-restore) starts a fresh "model spell", so every call here
-        (which only ever happens right after a real /model switch) clears
-        any earlier manual-effort latch before arming the new correction.
-        """
-        if not session or not family:
-            return
-        self._manual_effort_active = None
-        self._coupled_effort_pending = f"{session}:{family}"
-
-    def resolve_coupled_effort_target(
-        self, *, reading: SidecarReading | None, now_wall: float
-    ) -> str | None:
-        """Resolve what the pending coupled correction should inject NOW, or None.
-
-        Called at DECISION time (worker-side, hot-reloadable -- Plan 00466
-        N47 finding 9) from the CURRENT reading, never from which injector
-        armed the correction (finding 6): xhigh applies only while a
-        downgrade episode still tracks this EXACT (session, family) as the
-        fallback -- a genuinely still-degraded destination, resolvable
-        without waiting for a reading since the level does not depend on
-        the exact model id. Fable's own invariant belongs to DROP ANCHOR
-        alone, so this method holds no separate opinion for it. Any other
-        family needs the reading's exact ``model_id`` to resolve settings
-        correctly (Plan 00466 N47 finding 3), so it waits for one that
-        actually shows the destination family.
-
-        Returns ``None`` in three cases, only two of which CLEAR the
-        pending correction (nothing more is owed): the family is fable, or
-        a fresh matching reading resolves to nothing configured / already
-        live. Waiting for a matching reading does NOT clear it.
-        """
-        pending = self._coupled_effort_pending
-        if pending is None:
-            return None
-        session, _, family = pending.partition(":")
-        if self._downgrade_episode == pending:
-            return _DOWNGRADE_TARGET_EFFORT
-        if family == "fable":
-            self._coupled_effort_pending = None
-            return None
-        if (
-            reading is None
-            or reading.stale
-            or reading.session_id != session
-            or _model_family(reading.model_id) != family
-        ):
-            return None
-        configured = self._resolve_configured_effort(model_id=reading.model_id, now_wall=now_wall)
-        if configured is None or configured == reading.effort:
-            self._coupled_effort_pending = None
-            return None
-        return configured
-
-    def mark_coupled_effort_injection(self) -> None:
-        """Close the pending coupled-effort episode after a SUCCESSFUL injection.
-
-        Called by the HOST only after a successful PTY write -- a failed
-        write keeps the pending episode so the next tick retries.
-        """
-        self._coupled_effort_pending = None
-
     @property
     def audit_pending(self) -> tuple[str, ...]:
         """Audit items owed to the chat since the last flush (may be empty)."""
@@ -4011,8 +3391,8 @@ class CompactStateMachine:
     def arm_audit(self, item: str) -> None:
         """Queue one silent-injection audit item for the next banner flush.
 
-        Called at DECISION time by the armed (non-dry-run) ``/model`` and
-        ``/effort`` branches in ``decide_once`` — worker-side, so the whole
+        Called at DECISION time by the armed (non-dry-run) ``/model``
+        branch in ``decide_once`` — worker-side, so the whole
         audit loop deploys via worker hot-reload with no host restart (an
         older host's merge-by-key ``import_state`` never clobbers the
         worker's backlog; it merely doesn't carry it). Bounded FIFO: the
@@ -4036,218 +3416,15 @@ class CompactStateMachine:
         """
         self._audit_pending = []
 
-    # ── DROP ANCHOR (Plan 00297) ─────────────────────────────────────────
-
-    @property
-    def anchor_active(self) -> bool:
-        """True while the DROP ANCHOR invariant is observed violated.
-
-        Cleared ONLY by a later fresh reading showing verified read-back
-        (fable at low effort, or the family moving off fable entirely) --
-        never by an injection attempt succeeding on the wire, which is
-        exactly the inject-and-assume defect this closes.
-        """
-        return self._anchor_active
-
-    @property
-    def anchor_attempts(self) -> int:
-        """How many `/effort low` attempts the anchor has fired this episode."""
-        return self._anchor_attempts
-
-    @property
-    def anchor_started_ts(self) -> float | None:
-        """Wall-clock time the current anchor episode was first observed."""
-        return self._anchor_started_ts
-
-    def _evaluate_anchor(self, *, family: str, effort: str | None, now_wall: float) -> None:
-        """Continuously re-check `model == fable implies effort == low`.
-
-        An UNKNOWN effort reading (older sidecar, or a race before the
-        first render) never counts as evidence either way -- it neither
-        engages nor clears an anchor, because a guess must never stand in
-        for a verified read-back in either direction.
-        """
-        if effort is None or effort not in _EFFORT_RANKS:
-            return
-        violated = (
-            family == "fable" and _EFFORT_RANKS[effort] > _EFFORT_RANKS[_ANCHOR_TARGET_EFFORT]
-        )
-        if violated:
-            if not self._anchor_active:
-                self._anchor_active = True
-                self._anchor_started_ts = now_wall
-                self._anchor_attempts = 0
-            return
-        if self._anchor_active:
-            # Invariant holds again -- either fable is verified at low, or
-            # the model has moved off fable entirely (the invariant no
-            # longer applies to it).
-            self._anchor_active = False
-            self._anchor_started_ts = None
-            self._anchor_last_injected_ts = None
-            self._anchor_attempts = 0
-            self._anchor_esc_last_sent_ts = None
-
-    def anchor_injection_due(self, now_wall: float) -> bool:
-        """True when the anchor should (re)inject `/effort low` this tick.
-
-        Its OWN cooldown (`_ANCHOR_RETRY_COOLDOWN_SECONDS`) -- deliberately
-        NOT the floor mechanism's `_EFFORT_REINJECT_COOLDOWN_SECONDS` or
-        `_MAX_EFFORT_INJECTIONS` cap, both of which an unverified anchor
-        violation must bypass so it keeps retrying rather than going quiet
-        because an unrelated budget was spent.
-        """
-        if not self._anchor_active:
-            return False
-        if self._anchor_last_injected_ts is None:
-            return True
-        return now_wall - self._anchor_last_injected_ts >= _ANCHOR_RETRY_COOLDOWN_SECONDS
-
-    def mark_anchor_injection(self, now_wall: float) -> None:
-        """Record an anchor `/effort low` attempt (HOST, successful PTY write only).
-
-        Deliberately does NOT clear `anchor_active` -- a PTY write
-        succeeding proves nothing about whether the session actually
-        applied it (the live incident: swallowed by a busy session). Only
-        `_evaluate_anchor` observing a later verified read-back clears it.
-        """
-        self._anchor_last_injected_ts = now_wall
-        self._anchor_attempts += 1
-
-    def anchor_escalated_at(self, now_wall: float) -> bool:
-        """True once the anchor has exceeded its attempt or time bound.
-
-        Escalation does not change injection behaviour (the anchor keeps
-        retrying either way) -- it is purely the signal the HOST uses to
-        post a loud, rate-limited owner-facing alert (Plan 00297 Task 2.2).
-        """
-        if not self._anchor_active:
-            return False
-        if self._anchor_attempts >= _ANCHOR_MAX_ATTEMPTS:
-            return True
-        return (
-            self._anchor_started_ts is not None
-            and now_wall - self._anchor_started_ts >= _ANCHOR_ESCALATION_BOUND_SECONDS
-        )
-
-    def anchor_esc_due(self, now_wall: float) -> bool:
-        """True when an ESCALATED anchor should send an ESC to flush the turn.
-
-        Requires the anchor to be both active AND escalated -- ESC is a
-        stronger interrupt than the plain `/effort low` retry, reserved for
-        the case that retry alone has not been enough. Gated by its OWN
-        cooldown (`_ANCHOR_ESC_COOLDOWN_SECONDS`), independent of
-        `anchor_injection_due`'s cooldown, so ESC never fires every retry
-        tick. Callers must ALSO check that no compaction is in flight --
-        compaction is uninterruptible, and this method has no visibility
-        into the sidecar reading needed to know that.
-        """
-        if not self._anchor_active or not self.anchor_escalated_at(now_wall):
-            return False
-        if self._anchor_esc_last_sent_ts is None:
-            return True
-        return now_wall - self._anchor_esc_last_sent_ts >= _ANCHOR_ESC_COOLDOWN_SECONDS
-
-    def mark_anchor_esc(self, now_wall: float) -> None:
-        """Record that the anchor's escalation ESC fired this tick (HOST-side)."""
-        self._anchor_esc_last_sent_ts = now_wall
-
     @property
     def last_model_session(self) -> str | None:
         """The most recently observed foreground session id, or None (Plan 00278)."""
         return self._last_model_session
 
-    def note_manual_effort_command(self, level: str, *, now_wall: float) -> None:
-        """Record a user-TYPED ``/effort <level>`` command (Plan 00316 Task 2.1).
 
-        A latch, not time-windowed: it wins over the per-model default and
-        the post-switch coupled effort for the REST OF THE CURRENT model
-        spell -- until the model family OBSERVABLY changes (``note_model_reading``
-        starts a fresh spell) or the user manually re-sets effort. Also cancels
-        any coupled-effort correction already armed for THIS spell (from an
-        earlier ``arm_coupled_effort`` call) that has not yet been injected --
-        the human's choice, typed after that default was queued, overrides the
-        queued default outright.
-        """
-        del now_wall  # kept for signature symmetry with the model counterpart
-        self._manual_effort_active = level
-        self._coupled_effort_pending = None
-
-    def note_own_effort_injection(self, level: str) -> None:
-        """Record a ``/effort <level>`` the supervisor is about to type (ledger 00422 N7).
-
-        Called at DECISION time by every armed ``/effort`` branch in
-        ``decide_once`` (worker-side, so it deploys by hot-reload), never for
-        a dry-run marker, which types no level. The record is held until a
-        reading SHOWS that level rather than for a time window: the sidecar
-        only refreshes on a status render, so the landing can arrive long
-        after the write, and a window would expire first and make the
-        supervisor's own drop look human.
-        """
-        session = self._last_model_session or ""
-        self._own_effort_injection = f"{session}:{level}"
-
-    def take_manual_effort_drop_note(self) -> str | None:
-        """Return, once, a note about a drop latched as manual (ledger 00422 N7).
-
-        Without it a floor that stops acting is indistinguishable from a
-        broken one; decision.log says which reading switched it off.
-        """
-        note = self._manual_effort_drop_note
-        self._manual_effort_drop_note = None
-        return note
-
-    def _latch_unattributed_effort_drop(
-        self, *, session: str, family: str, effort: str | None
+    def note_machine_downgrade(
+        self, *, session: str, from_family: str, to_family: str, record_ts: str
     ) -> None:
-        """Trust an effort DROP the supervisor did not inject as manual (ledger 00422 N7).
-
-        A bare ``/effort`` opens Claude Code's selector, which types no level
-        the line recogniser can read, so ``note_manual_effort_command`` never
-        runs for it and the floor used to put the level straight back. This
-        reads the OUTCOME instead: a lower level than the last known one, for
-        the same session and the same family, that is not the level the
-        supervisor last typed, is a human's choice and latches exactly as a
-        typed ``/effort <level>`` does.
-
-        DELIBERATE ASYMMETRY with ``_downgrade_is_attributed`` (owner ruling,
-        00422 DECISIONS.md decision 3). An unattributed MODEL drop is NOT
-        acted on -- no restore episode opens -- while an unattributed EFFORT
-        drop IS acted on, by latching. Both answers point the same way: the
-        supervisor never overrides a change it cannot prove it or the platform
-        made. Only a human uses the selector, and a supervisor that silently
-        reverts a human's choice is the worse failure.
-
-        Three things it does not do. An unknown level is no evidence and leaves
-        the last known one in place. A family or session change is not a drop
-        within a spell -- the new spell's own default applies. And unlike the
-        typed command it leaves an armed coupled correction alone: a drop seen
-        between a ``/model`` injection and its ``/effort`` is as likely the
-        switch settling as a human, and that correction keeps fable off xhigh.
-        """
-        if effort is None or effort not in _EFFORT_RANKS:
-            return
-        previous = self._last_effort_reading
-        self._last_effort_reading = f"{session}:{family}:{effort}"
-        if self._own_effort_injection == f"{session}:{effort}":
-            # The supervisor's own level landing. Consumed, so a human who
-            # later returns to that same level is seen as the human.
-            self._own_effort_injection = None
-            return
-        if previous is None:
-            return
-        prev_session, prev_family, prev_effort = previous.split(":", 2)
-        if prev_session != session or prev_family != family:
-            return
-        if prev_effort not in _EFFORT_RANKS or _EFFORT_RANKS[effort] >= _EFFORT_RANKS[prev_effort]:
-            return
-        self._manual_effort_active = effort
-        self._manual_effort_drop_note = (
-            f"effort {prev_effort} -> {effort} on {family} was not injected by the "
-            "supervisor — latched as a manual choice, floor off for this spell"
-        )
-
-    def note_machine_downgrade(self, *, session: str, from_family: str, to_family: str) -> None:
         """Record a downgrade CLAUDE CODE attributed to itself (Plan 00328).
 
         Fed from ``load_model_downgrade_signal``, which reads what the daemon's
@@ -4261,12 +3438,35 @@ class CompactStateMachine:
         session lives, and re-noting it must not disturb an episode already
         open (or reopen one the human has since closed by switching models
         themselves).
+
+        ``record_ts`` (Plan 00466 N47 review 2 finding 4) identifies the
+        underlying transcript record, not the publish time -- see
+        ``_downgrade_is_attributed`` for why this matters.
         """
-        self._attributed_downgrade = f"{session}:{from_family}:{to_family}"
+        self._attributed_downgrade = f"{session}:{from_family}:{to_family}:{record_ts}"
 
     def _downgrade_is_attributed(self, session: str, from_family: str, to_family: str) -> bool:
-        """True when the platform recorded THIS session making THIS drop."""
-        return self._attributed_downgrade == f"{session}:{from_family}:{to_family}"
+        """True when the platform recorded THIS session making THIS drop, freshly.
+
+        Compares session/from/to AND requires the record's own ``record_ts``
+        not be one this machine has already spent opening (and later closing,
+        by observing the family recover) an episode for. Without this, a
+        MANUAL switch back to the fallback family long after a full recovery
+        re-matches the SAME still-published record -- the recorder never
+        clears it, it just keeps republishing the original downgrade fact for
+        the rest of the session -- and reopens an episode the human never
+        asked for (Plan 00466 N47 review 2 finding 4).
+        """
+        recorded = self._attributed_downgrade
+        if recorded is None:
+            return False
+        parts = recorded.split(":", 3)
+        if len(parts) != 4:
+            return False
+        rec_session, rec_from, rec_to, rec_ts = parts
+        if rec_session != session or rec_from != from_family or rec_to != to_family:
+            return False
+        return rec_ts != self._spent_downgrade_record_ts
 
     def take_unattributed_downgrade_note(self) -> str | None:
         """Return, once, a note about a drop that arrived with no attribution.
@@ -4287,9 +3487,7 @@ class CompactStateMachine:
         needs no theory about why: the family is either on screen or it is
         not. A miss marks the family unreachable, which stops both the retry
         and the flip-flop `/compact` that read the still-open episode as a
-        classifier re-fire. It also drops the coupled effort correction, which
-        targets the floor of a family that never arrived -- in the field that
-        drove effort to fable's `low` while the session sat on opus.
+        classifier re-fire.
 
         Readings older than the injection are ignored: the sidecar only
         refreshes on a status render, so a stale one says nothing yet.
@@ -4306,49 +3504,25 @@ class CompactStateMachine:
             return
         if awaited_family not in self._unavailable_families:
             self._unavailable_families.append(awaited_family)
-        self._coupled_effort_pending = None
 
     def note_model_reading(self, reading: SidecarReading, *, now_wall: float) -> None:
-        """Track the foreground model; recompute the pending effort episode.
+        """Track the foreground model; open/close the downgrade-restore episode.
 
-        Plan 00466 N47 reduced this to exactly TWO sanctioned interventions,
-        checked in order:
+        Plan 00466 N47 review 2: the supervisor injects NO effort of any
+        kind (BLOCKER 1 -- every ``/effort <level>`` it typed was persisted
+        by Claude Code into the user settings.json, which is precisely the
+        fight the owner's SSoT requirement rules out). This method now does
+        exactly what the ``/model`` auto-restore needs and nothing about
+        effort: track the foreground (session, family), and open/close the
+        downgrade episode that gates ``model_restore_due``/``flag_compact_due``.
 
-        - (a) a ranked DOWNGRADE for the same session raises the target to
-          ``_DOWNGRADE_TARGET_EFFORT`` (RAISE-ONLY) until the family
-          recovers;
-        - (b) the top family (fable) gets NO opinion here at all -- DROP
-          ANCHOR (below) is its sole, continuously-verified authority.
-
-        Any OTHER family, with no downgrade episode open, is corrected
-        (in EITHER direction) toward whatever Claude Code's own settings.json
-        resolves for the model actually on screen -- and left alone when
-        settings configures nothing, so Claude Code's own default is never
-        fought. This is the ONE place a restore (auto or manual) lands on a
-        configured value instead of a forced xhigh.
-
-        The pending key is recomputed from every fresh reading, so it clears
-        itself when the effort matches, the family recovers, or the session
-        changes. A just-fired episode is suppressed for the re-inject
-        cooldown, because the sidecar reports the old effort until the next
-        status render. Unknown families and session-less synthetic readings
-        are ignored entirely.
+        Unknown families and session-less synthetic readings are ignored
+        entirely.
         """
         family = _model_family(reading.model_id)
         session = reading.session_id
         if not session or family is None:
             return
-        # Plan 00297: DROP ANCHOR is evaluated on every fresh, non-stale
-        # reading, INDEPENDENT of the raise-only floor/downgrade logic below
-        # -- that logic cannot detect "fable already running above its
-        # floor" by construction. Runs before the floor bookkeeping so an
-        # anchor engagement/clear is never skipped by an early return below.
-        self._evaluate_anchor(family=family, effort=reading.effort, now_wall=now_wall)
-        # Plan 00466 N47 finding 7: refresh every settings cache on every
-        # reading, regardless of which branch below ends up using one, so a
-        # missing/malformed file is diagnosed even on a fable or open-episode
-        # tick that never itself calls `_resolve_configured_effort`.
-        self._refresh_settings_caches(now_wall)
         prev_session = self._last_model_session
         prev_family = self._last_model_family
         self._last_model_session = session
@@ -4357,21 +3531,20 @@ class CompactStateMachine:
         if self._downgrade_episode is not None:
             ep_session, _, ep_family = self._downgrade_episode.partition(":")
             if session != ep_session or _family_rank(family) > _family_rank(ep_family):
+                # Plan 00466 N47 review 2 finding 4: the episode is closing
+                # because the family recovered (or the session changed) --
+                # spend this episode's record_ts so the SAME still-published
+                # attribution record can never reopen a fresh episode later
+                # on a manual switch back to the fallback family.
+                if self._downgrade_episode_record_ts is not None:
+                    self._spent_downgrade_record_ts = self._downgrade_episode_record_ts
                 self._downgrade_episode = None
+                self._downgrade_episode_record_ts = None
                 self._downgrade_from_family = None
                 self._downgrade_started_ts = None
         family_changed = (
             prev_session == session and prev_family is not None and family != prev_family
         )
-        if family_changed:
-            # A model spell is defined by the family ON SCREEN, not by what was
-            # typed (Plan 00328) -- so every observed change starts a fresh one
-            # and drops the previous spell's manual `/effort` latch, exactly as
-            # `arm_coupled_effort` does for a switch the supervisor injected.
-            # Keying this on recognised keystrokes cannot work: a change made
-            # through the picker types no text at all, so the latch survives and
-            # pins effort to the choice made under the OLD family.
-            self._manual_effort_active = None
         if (
             family_changed
             # SCOPE (owner ruling, 2026-09-04, after a live dogfood): this
@@ -4379,9 +3552,9 @@ class CompactStateMachine:
             # NOTHING ELSE. The drop must therefore START at fable -- an
             # opus -> sonnet move is the human's business, not ours, and
             # treating it as an episode is how the supervisor came to type
-            # `/model opus` at a human who had just picked Sonnet, then force
-            # their effort to xhigh. Keyed on the ORIGIN, not the destination,
-            # so a fallback to something other than opus is still covered.
+            # `/model opus` at a human who had just picked Sonnet. Keyed on
+            # the ORIGIN, not the destination, so a fallback to something
+            # other than opus is still covered.
             and prev_family is not None
             and _family_rank(prev_family) == _TOP_FAMILY_RANK
             and _family_rank(family) < _family_rank(prev_family)
@@ -4390,17 +3563,9 @@ class CompactStateMachine:
             # sufficient. A human choosing opus from the picker produces it
             # exactly, and acting on the shape alone is how the supervisor came
             # to type `/model fable` at a human who had just chosen otherwise.
-            # Claude Code records its OWN downgrades; require that record.
-            #
-            # Only the EPISODE is withheld. The per-model effort floor below
-            # still applies -- the human picked this family, so its configured
-            # minimum is exactly what they should get.
-            #
-            # DELIBERATE ASYMMETRY (00422 DECISIONS.md decision 3): an
-            # unattributed EFFORT drop gets the opposite answer and IS acted
-            # on, by latching it as manual -- see
-            # `_latch_unattributed_effort_drop`. Both keep the supervisor from
-            # reverting a change it cannot prove was its own or the platform's.
+            # Claude Code records its OWN downgrades; require that record --
+            # and that the record is not one whose episode already ran its
+            # course (finding 4, `_downgrade_is_attributed`).
             if not self._downgrade_is_attributed(session, prev_family, family):
                 if self._unattributed_downgrade_note is None:
                     self._unattributed_downgrade_note = (
@@ -4410,63 +3575,15 @@ class CompactStateMachine:
             else:
                 if self._downgrade_episode is None:
                     # A fresh episode: remember where we fell FROM and when, for
-                    # the delayed /model flip-back (Task 2b.3). A further drop
+                    # the delayed /model flip-back (Task 2b.3), and which record
+                    # backs it so a later recovery can spend it. A further drop
                     # inside an open episode keeps the original from/started.
                     self._downgrade_from_family = prev_family
                     self._downgrade_started_ts = now_wall
+                    recorded = self._attributed_downgrade
+                    if recorded is not None:
+                        self._downgrade_episode_record_ts = recorded.split(":", 3)[-1]
                 self._downgrade_episode = f"{session}:{family}"
-        self._latch_unattributed_effort_drop(session=session, family=family, effort=reading.effort)
-        current = reading.effort
-        if self._manual_effort_active is not None:
-            # Plan 00316 Task 2.1: a manual /effort always wins -- neither
-            # sanctioned intervention below fires while it is active.
-            self._effort_pending = None
-            return
-        if self._downgrade_episode is not None:
-            # Sanctioned intervention (a): compensate while genuinely still
-            # on a fallback -- RAISE-ONLY, and an unknown reading is assumed
-            # low only here, since the restore is the whole point.
-            target = _DOWNGRADE_TARGET_EFFORT
-            below = current is None or (
-                current in _EFFORT_RANKS and _EFFORT_RANKS[current] < _EFFORT_RANKS[target]
-            )
-            if not below:
-                self._effort_pending = None
-                return
-        elif family == "fable":
-            # Sanctioned intervention (b): DROP ANCHOR is fable's sole
-            # authority (Plan 00297); this raise-only/restore family holds
-            # no separate opinion of its own for it (Plan 00466 N47).
-            self._effort_pending = None
-            return
-        elif current is None:
-            # An unrecognised (older Claude Code) or not-yet-rendered live
-            # effort is no evidence either way outside a downgrade episode --
-            # never guess, unlike the raise-only branch above which assumes
-            # low specifically because the restore is the point there.
-            self._effort_pending = None
-            return
-        else:
-            # No opinion of our own: resolve exactly what Claude Code's own
-            # settings apply to this model, and correct ONLY when live
-            # effort disagrees -- restoring after our own compensation, or
-            # picking up a settings.json edit, in EITHER direction. Nothing
-            # configured means Claude Code's own default already applies
-            # and must never be fought (Plan 00466 N47 findings 1 and 5).
-            configured = self._resolve_configured_effort(model_id=reading.model_id, now_wall=now_wall)
-            if configured is None or current == configured:
-                self._effort_pending = None
-                return
-            target = configured
-        key = f"{session}:{family}:{target}"
-        if (
-            self._effort_last_fired_key == key
-            and self._effort_last_fired_ts is not None
-            and now_wall - self._effort_last_fired_ts < _EFFORT_REINJECT_COOLDOWN_SECONDS
-        ):
-            self._effort_pending = None
-            return
-        self._effort_pending = key
 
     @property
     def goal_injections(self) -> int:
@@ -4615,32 +3732,19 @@ class CompactStateMachine:
             "last_model_session": self._last_model_session,
             "last_model_family": self._last_model_family,
             "downgrade_episode": self._downgrade_episode,
-            "effort_pending": self._effort_pending,
-            "effort_injections": self._effort_injections,
-            "effort_last_fired_key": self._effort_last_fired_key,
-            "effort_last_fired_ts": self._effort_last_fired_ts,
             "downgrade_from_family": self._downgrade_from_family,
             "downgrade_started_ts": self._downgrade_started_ts,
             "model_restores": self._model_restores,
             "model_restore_last_ts": self._model_restore_last_ts,
             "flag_compactions": self._flag_compactions,
-            "coupled_effort_pending": self._coupled_effort_pending,
             "audit_pending": list(self._audit_pending),
-            "anchor_active": self._anchor_active,
-            "anchor_started_ts": self._anchor_started_ts,
-            "anchor_last_injected_ts": self._anchor_last_injected_ts,
-            "anchor_attempts": self._anchor_attempts,
-            "anchor_esc_last_sent_ts": self._anchor_esc_last_sent_ts,
             "restore_awaiting": self._restore_awaiting,
             "restore_awaiting_ts": self._restore_awaiting_ts,
             "unavailable_families": list(self._unavailable_families),
-            "manual_effort_active": self._manual_effort_active,
             "attributed_downgrade": self._attributed_downgrade,
+            "downgrade_episode_record_ts": self._downgrade_episode_record_ts,
+            "spent_downgrade_record_ts": self._spent_downgrade_record_ts,
             "unattributed_downgrade_note": self._unattributed_downgrade_note,
-            "last_effort_reading": self._last_effort_reading,
-            "own_effort_injection": self._own_effort_injection,
-            "manual_effort_drop_note": self._manual_effort_drop_note,
-            "last_reported_settings_error": self._last_reported_settings_error,
         }
 
     def import_state(self, state: dict[str, object]) -> None:
@@ -4696,17 +3800,6 @@ class CompactStateMachine:
         if "downgrade_episode" in state:
             raw = state["downgrade_episode"]
             self._downgrade_episode = None if raw is None else str(raw)
-        if "effort_pending" in state:
-            raw = state["effort_pending"]
-            self._effort_pending = None if raw is None else str(raw)
-        if "effort_injections" in state:
-            self._effort_injections = _coerce_int(state["effort_injections"])
-        if "effort_last_fired_key" in state:
-            raw = state["effort_last_fired_key"]
-            self._effort_last_fired_key = None if raw is None else str(raw)
-        if "effort_last_fired_ts" in state:
-            raw = state["effort_last_fired_ts"]
-            self._effort_last_fired_ts = None if raw is None else _coerce_float(raw)
         if "downgrade_from_family" in state:
             raw = state["downgrade_from_family"]
             self._downgrade_from_family = None if raw is None else str(raw)
@@ -4720,26 +3813,10 @@ class CompactStateMachine:
             self._model_restore_last_ts = None if raw is None else _coerce_float(raw)
         if "flag_compactions" in state:
             self._flag_compactions = _coerce_int(state["flag_compactions"])
-        if "coupled_effort_pending" in state:
-            raw = state["coupled_effort_pending"]
-            self._coupled_effort_pending = None if raw is None else str(raw)
         if "audit_pending" in state:
             raw_items = state["audit_pending"]
             if isinstance(raw_items, list):
                 self._audit_pending = [str(item) for item in raw_items[:_MAX_AUDIT_ITEMS]]
-        if "anchor_active" in state:
-            self._anchor_active = bool(state["anchor_active"])
-        if "anchor_started_ts" in state:
-            raw = state["anchor_started_ts"]
-            self._anchor_started_ts = None if raw is None else _coerce_float(raw)
-        if "anchor_last_injected_ts" in state:
-            raw = state["anchor_last_injected_ts"]
-            self._anchor_last_injected_ts = None if raw is None else _coerce_float(raw)
-        if "anchor_attempts" in state:
-            self._anchor_attempts = _coerce_int(state["anchor_attempts"])
-        if "anchor_esc_last_sent_ts" in state:
-            raw = state["anchor_esc_last_sent_ts"]
-            self._anchor_esc_last_sent_ts = None if raw is None else _coerce_float(raw)
         if "restore_awaiting" in state:
             raw = state["restore_awaiting"]
             self._restore_awaiting = None if raw is None else str(raw)
@@ -4751,27 +3828,18 @@ class CompactStateMachine:
             self._unavailable_families = (
                 [str(item) for item in raw] if isinstance(raw, list) else []
             )
-        if "manual_effort_active" in state:
-            raw = state["manual_effort_active"]
-            self._manual_effort_active = None if raw is None else str(raw)
         if "attributed_downgrade" in state:
             raw = state["attributed_downgrade"]
             self._attributed_downgrade = None if raw is None else str(raw)
+        if "downgrade_episode_record_ts" in state:
+            raw = state["downgrade_episode_record_ts"]
+            self._downgrade_episode_record_ts = None if raw is None else str(raw)
+        if "spent_downgrade_record_ts" in state:
+            raw = state["spent_downgrade_record_ts"]
+            self._spent_downgrade_record_ts = None if raw is None else str(raw)
         if "unattributed_downgrade_note" in state:
             raw = state["unattributed_downgrade_note"]
             self._unattributed_downgrade_note = None if raw is None else str(raw)
-        if "last_effort_reading" in state:
-            raw = state["last_effort_reading"]
-            self._last_effort_reading = None if raw is None else str(raw)
-        if "own_effort_injection" in state:
-            raw = state["own_effort_injection"]
-            self._own_effort_injection = None if raw is None else str(raw)
-        if "manual_effort_drop_note" in state:
-            raw = state["manual_effort_drop_note"]
-            self._manual_effort_drop_note = None if raw is None else str(raw)
-        if "last_reported_settings_error" in state:
-            raw = state["last_reported_settings_error"]
-            self._last_reported_settings_error = None if raw is None else str(raw)
 
     def evaluate(
         self,
@@ -5198,13 +4266,11 @@ def _format_bot_prefix(now_wall: float | None = None) -> str:
 # Within an audit line each injected command is prefixed with a per-ACTION
 # glyph, so the specific silent actions are scannable without reading the whole
 # sentence:
-#   ⚙️  /effort …   (effort level changed)
 #   ♻️  /model …    (model restored / switched)
 #   🧽  /compact …  (flag-cleaning compaction, Plan 00281)
 # New action families extend `_AUDIT_ACTION_GLYPHS`; unknown items fall back to
 # the neutral bullet. Keep this block and the table in sync.
 _AUDIT_BANNER_GLYPH = "🧾"
-_AUDIT_ACTION_EFFORT_GLYPH = "⚙️"
 _AUDIT_ACTION_MODEL_GLYPH = "♻️"
 _AUDIT_ACTION_COMPACT_GLYPH = "🧽"
 _AUDIT_ACTION_KEYSTROKE_GLYPH = "⌨️"
@@ -5219,11 +4285,7 @@ _AUDIT_ACTION_DEFAULT_GLYPH = "•"
 _ESC_AUDIT_LABEL = "esc"
 _RESUBMIT_AUDIT_LABEL = "enter"
 # Which decisions inject a raw KEY rather than a line of text, and the label
-# each one announces itself under. Keyed on the decision VALUE (the string) so
-# the DROP ANCHOR escalation -- which reaches the escape path by assigning
-# `decision_value` directly, after `_resolve_payload` has already run -- is
-# covered by the same rule as the AWAIT_COMPACTING flush, rather than needing
-# its own arm call that a later branch could forget.
+# each one announces itself under. Keyed on the decision VALUE (the string).
 _KEYSTROKE_AUDIT_LABELS: dict[str, str] = {
     Decision.WOULD_ESCAPE.value: _ESC_AUDIT_LABEL,
     Decision.WOULD_RESUBMIT.value: _RESUBMIT_AUDIT_LABEL,
@@ -5232,7 +4294,6 @@ _KEYSTROKE_AUDIT_LABELS: dict[str, str] = {
 # (command-prefix, glyph) pairs, longest-prefix-first is unnecessary here since
 # the commands share no prefix; a plain first-match scan suffices.
 _AUDIT_ACTION_GLYPHS: tuple[tuple[str, str], ...] = (
-    ("/effort", _AUDIT_ACTION_EFFORT_GLYPH),
     ("/model", _AUDIT_ACTION_MODEL_GLYPH),
     ("/compact", _AUDIT_ACTION_COMPACT_GLYPH),
     (_ESC_AUDIT_LABEL, _AUDIT_ACTION_KEYSTROKE_GLYPH),
@@ -5524,7 +4585,6 @@ def decide_once(
     own_sessions: frozenset[str] | None = None,
     goal_signal_ttl_seconds: float = _DEFAULT_GOAL_SIGNAL_TTL_SECONDS,
     model_confirm_enters: int = _DEFAULT_MODEL_CONFIRM_ENTERS,
-    effort_confirm_enters: int = _DEFAULT_EFFORT_CONFIRM_ENTERS,
 ) -> TickOutcome:
     """Decide what to inject this tick WITHOUT touching the PTY (Plan 00164 P4).
 
@@ -5602,18 +4662,16 @@ def decide_once(
     # path (the passed machine is already the live authoritative one).
     if facts.machine_state is not None:
         machine.import_state(facts.machine_state)
-    # Plan 00316: record a user-typed /effort command BEFORE tracking this
-    # tick's reading, so the latch is in place on the same tick the change is
-    # first observed.
-    if facts.human_effort_command:
-        machine.note_manual_effort_command(facts.human_effort_command, now_wall=facts.now_wall)
     # Plan 00328: adopt the platform's OWN record of a safety downgrade before
     # the reading is tracked, because that is the tick on which the drop is
     # first observed and the episode would open. Nothing else opens one.
     attributed = load_model_downgrade_signal(sidecar_dir, own_sessions=own_sessions)
     if attributed is not None:
         machine.note_machine_downgrade(
-            session=attributed[0], from_family=attributed[1], to_family=attributed[2]
+            session=attributed[0],
+            from_family=attributed[1],
+            to_family=attributed[2],
+            record_ts=attributed[3],
         )
     # Plan 00278: track the foreground model family so a ranked downgrade
     # opens an effort-restore episode (fired further below, subordinate to
@@ -5701,21 +4759,6 @@ def decide_once(
     unattributed_note = machine.take_unattributed_downgrade_note()
     if unattributed_note is not None:
         noop_reason_log = f"{_NOOP_LOG_PREFIX}: {unattributed_note}"
-    # Ledger 00422 N7: the mirror case -- an effort drop the supervisor did not
-    # type was latched as manual, so the floor goes quiet; say which reading
-    # did it. Mutually exclusive with the note above by construction: that one
-    # needs a family change, this one needs the family unchanged.
-    effort_drop_note = machine.take_manual_effort_drop_note()
-    if effort_drop_note is not None:
-        noop_reason_log = f"{_NOOP_LOG_PREFIX}: {effort_drop_note}"
-    # Plan 00466 N47 finding 7: a settings.json load status CHANGE (missing,
-    # malformed, unreadable, or recovered) is said out loud -- silence here
-    # used to be indistinguishable from "nothing is wrong". Held SEPARATELY
-    # from `noop_reason_log`, mirroring `audit_flush_log`'s pattern (Plan
-    # 00319 F3): this tick's real decision (an injection, a more specific
-    # NOOP reason) keeps the primary slot, and `_apply_decision` writes this
-    # note as an ADDITIONAL decision.log line, never a substitute.
-    settings_status_log_line = machine.take_settings_error_note()
     # ── Goal injection (Plan 00269) ─────────────────────────────────────────
     # Strictly SUBORDINATE to compact/continue: the goal branch runs only when
     # this tick decided NOOP with no payload, no compaction signal is pending,
@@ -5725,179 +4768,25 @@ def decide_once(
     decision_value = evaluation.decision.value
     reason = evaluation.reason
     # Populated below whenever THIS tick's decision is WOULD_MODEL, so the
-    # HOST can arm the mandatory coupled-effort correction after a
-    # successful injection (Plan 00278 continuation) -- for BOTH the manual
-    # test-trigger switch and the auto-restore flip-back.
+    # HOST can record the auto-restore's cap/backoff bookkeeping after a
+    # successful injection (Plan 00278 continuation) -- the manual
+    # test-trigger switch does not use these (own signal lifecycle).
     model_switch_family: str | None = None
     model_switch_session: str | None = None
     model_switch_is_auto_restore = False
     # Plan 00281: set True by the flip-flop flag-compact branch below, so the
     # HOST counts the successful injection against the flag-compaction budget.
     is_flag_compact = False
-    # Plan 00297: set True only by the DROP ANCHOR branch immediately below,
-    # so the HOST records the attempt against the anchor's OWN bookkeeping.
-    is_anchor_injection = False
-    # Plan 00297 follow-up: set True only by the DROP ANCHOR ESCALATION ESC
-    # branch immediately below, so the HOST records the send against the
-    # anchor's own ESC cooldown (`mark_anchor_esc`) rather than treating it
-    # like a normal `/effort` injection.
-    is_anchor_escape = False
     # Plan 00299: populated only by the goal branch below when this tick
     # decides WOULD_GOAL, so the HOST can record the injected text's hash
     # (`mark_goal_injection`) as the multi-plan thrash guard -- an identical
     # combined /goal never re-types on a later tick.
     goal_line_for_hash: str | None = None
-    # ── DROP ANCHOR: fable-above-low invariant (Plan 00297) ─────────────────
-    # HIGHEST subordinate priority -- checked even ahead of the coupled-effort
-    # correction below -- because fable observed running above low effort is
-    # the most expensive misconfiguration the product allows (owner ruling,
-    # incident 2026-08-31), treated as an emergency rather than a preference.
-    # Uniquely allowed to preempt a WOULD_CONTINUE nudge -- never
-    # WOULD_COMPACT/WOULD_ESCAPE, which manage an in-flight compaction rather
-    # than invite more work -- so a "stop everything" episode never resumes
-    # the session onto another turn at the wrong effort. Gated on an empty
-    # input box ONLY (never the full idle floor), matching the coupled-effort
-    # and manual-model-switch precedent: an emergency correction cannot wait
-    # for the session to go idle, and is NOT permanently deferred by a busy
-    # box -- the anchor stays active and retries on the next unobstructed
-    # tick. Uses its OWN cooldown (`anchor_injection_due`), bypassing the
-    # floor mechanism's `_EFFORT_REINJECT_COOLDOWN_SECONDS`/
-    # `_MAX_EFFORT_INJECTIONS` entirely. A successful PTY write here does NOT
-    # verify anything -- only a later sidecar reading showing effort == low
-    # (`_evaluate_anchor`, run from `note_model_reading` above) clears
-    # `anchor_active`, so a swallowed injection (the live incident) keeps
-    # retrying instead of masquerading as fixed.
-    if machine.state is SupervisorState.MONITOR and machine.anchor_active:
-        anchor_preempts_continue = evaluation.decision is Decision.WOULD_CONTINUE
-        if payload is None or anchor_preempts_continue:
-            if anchor_preempts_continue:
-                payload = None
-                consume_signal_path = None
-            observed = (
-                f"model={reading.model_id!r} effort={reading.effort!r}"
-                if reading is not None
-                else "model=? effort=?"
-            )
-            # Compaction is uninterruptible (owner ruling, Plan 00297
-            # follow-up) -- an ESC must never fire while one is in flight,
-            # even though `machine.state` staying MONITOR on the FIRST tick
-            # that observes `reading.compacting` (before `_enter_await` can
-            # run) would otherwise let it slip through.
-            compacting_in_flight = reading is not None and reading.compacting
-            if not facts.input_line_empty:
-                deferred_log = f"{_DEFERRED_LOG_PREFIX} (DROP ANCHOR: fable above low effort)"
-                noop_reason_log = None
-            elif not compacting_in_flight and machine.anchor_esc_due(facts.now_wall):
-                # Escalation ESC (Plan 00297 follow-up): retries alone have
-                # not verified within the escalation bound, so interrupt the
-                # in-flight turn that may be swallowing the `/effort low`
-                # injection -- reusing the WOULD_ESCAPE keystroke path
-                # AWAIT_COMPACTING already uses (raw ESC, no Enter).
-                decision_value = Decision.WOULD_ESCAPE.value
-                reason = (
-                    f"DROP ANCHOR ESCALATED: fable observed above low effort ({observed}) "
-                    f"persists after {machine.anchor_attempts} attempt(s) -> would send "
-                    f"[esc] to interrupt the in-flight turn"
-                )
-                if dry_run:
-                    payload = f"{_format_bot_prefix(facts.now_wall)} {_DRY_RUN_ANCHOR_ESCAPE_BODY}"
-                else:
-                    payload = _ESC_PAYLOAD
-                submit = False
-                is_anchor_escape = True
-                deferred_log = None
-                noop_reason_log = None
-            elif machine.anchor_injection_due(facts.now_wall):
-                decision_value = Decision.WOULD_EFFORT.value
-                confirm_enters = effort_confirm_enters
-                effort_command = f"{_EFFORT_COMMAND} {_ANCHOR_TARGET_EFFORT}"
-                escalated = " [ESCALATED]" if machine.anchor_escalated_at(facts.now_wall) else ""
-                reason = (
-                    f"DROP ANCHOR: fable observed above low effort ({observed}) -> "
-                    f"would inject {effort_command} "
-                    f"(attempt {machine.anchor_attempts + 1}){escalated}"
-                )
-                if dry_run:
-                    payload = (
-                        f"{_format_bot_prefix(facts.now_wall)} "
-                        f"{_DRY_RUN_EFFORT_BODY_PREFIX} {effort_command} [DROP ANCHOR]"
-                    )
-                else:
-                    payload = effort_command
-                    machine.arm_audit(f"{effort_command} (DROP ANCHOR emergency correction)")
-                    machine.note_own_effort_injection(_ANCHOR_TARGET_EFFORT)
-                submit = True
-                is_anchor_injection = True
-                deferred_log = None
-                noop_reason_log = None
-            else:
-                escalated = " [ESCALATED]" if machine.anchor_escalated_at(facts.now_wall) else ""
-                noop_reason_log = (
-                    f"{_NOOP_LOG_PREFIX}: DROP ANCHOR active, retry cooldown "
-                    f"({observed}, attempt {machine.anchor_attempts}){escalated}"
-                )
-                deferred_log = None
-                if anchor_preempts_continue:
-                    decision_value = Decision.NOOP.value
-                    reason = "DROP ANCHOR active -> continue nudge suppressed"
-    # ── Coupled effort: "/model switch MUST be followed by /effort" ─────────
-    # HIGH PRIORITY: checked BEFORE every other subordinate family (manual
-    # model switch, goal, floor-based effort, auto-model-restore) so a
-    # correction owed from a PRIOR /model switch is always delivered before
-    # any new intent is considered. Still strictly subordinate to
-    # compact/continue/escape above. The TARGET is resolved fresh every tick
-    # from OBSERVED state (Plan 00466 N47 finding 6), never cached from arm
-    # time, so a family with nothing owed clears itself here with no
-    # injection at all.
-    if (
-        payload is None
-        and evaluation.decision is Decision.NOOP
-        and signal_path is None
-        and machine.state is SupervisorState.MONITOR
-        and machine.coupled_effort_pending is not None
-    ):
-        pending_key = machine.coupled_effort_pending
-        coupled_target = machine.resolve_coupled_effort_target(reading=reading, now_wall=facts.now_wall)
-        if coupled_target is None:
-            pass  # nothing owed (or still awaiting a matching reading) this tick
-        # Gate on an empty input box ONLY, not the full `can_inject` (which
-        # also requires idle): the correction must land on the first tick
-        # after the /model injection, or turns run the forced model at the
-        # pre-switch effort and burn allowance. Same rationale and rail as
-        # the manual model-switch branch below — never type into a box
-        # mid-composition, but never wait for idle either.
-        elif not facts.input_line_empty:
-            deferred_log = f"{_DEFERRED_LOG_PREFIX} (coupled effort pending)"
-        else:
-            decision_value = Decision.WOULD_EFFORT.value
-            confirm_enters = effort_confirm_enters
-            effort_command = f"{_EFFORT_COMMAND} {coupled_target}"
-            reason = (
-                f"model switch requires coupled effort "
-                f"({pending_key}:{coupled_target}) -> would inject {effort_command}"
-            )
-            if dry_run:
-                payload = (
-                    f"{_format_bot_prefix(facts.now_wall)} "
-                    f"{_DRY_RUN_EFFORT_BODY_PREFIX} {effort_command}"
-                )
-            else:
-                payload = effort_command
-                # Decision-time arming (worker-side, hot-reloadable): in
-                # production a decided payload is injected this same tick;
-                # if the PTY write fails, the flush cannot print through
-                # that same broken PTY either, so no false claim surfaces.
-                machine.arm_audit(f"{effort_command} (coupled to model switch)")
-                machine.note_own_effort_injection(coupled_target)
-            submit = True
-            deferred_log = None
-            noop_reason_log = None
     # ── Operator signal (Plan 00417): reboot/shutdown warning from the HOST ──
     # Placed ahead of goal and model injections (owner's placement): a
     # host-initiated reboot/shutdown warning is time-critical in a way
-    # neither is. Still strictly subordinate to compact/continue/escape,
-    # DROP ANCHOR and the coupled-effort correction above -- none of those
-    # may ever be interrupted by an informational warning. The STATUS-LINE
+    # neither is. Still strictly subordinate to compact/continue/escape
+    # above -- never interrupted by an informational warning. The STATUS-LINE
     # notice below posts as soon as a valid signal is observed, regardless of
     # whether the chat line can be typed THIS tick -- mirroring the audit
     # banner's rationale (a file write cannot disturb what the user is
@@ -5965,11 +4854,10 @@ def decide_once(
                 deferred_log = None
                 noop_reason_log = None
     # ── Manual model-switch override (test trigger / deliberate override) ────
-    # Checked ahead of goal, effort and auto-model-restore so a deliberate
-    # switch is never starved by them -- but still strictly after
-    # compact/continue/escape (and the coupled-effort correction) above, so
-    # it can never disrupt an in-flight compaction or skip a correction
-    # owed from a PRIOR switch. Unlike every other family, the injection
+    # Checked ahead of goal and auto-model-restore so a deliberate switch is
+    # never starved by them -- but still strictly after compact/continue/escape
+    # above, so it can never disrupt an in-flight compaction. Unlike every
+    # other family, the injection
     # gate here is `facts.input_line_empty` ONLY, not the full `can_inject`
     # (which also requires the keystroke-idle floor): the whole point of a
     # manual trigger is to fire promptly, and an empty input box is the one
@@ -6178,47 +5066,6 @@ def decide_once(
                 consume_signal_path = str(clear_path)
                 deferred_log = None
                 noop_reason_log = None
-    # ── Effort restore on model downgrade (Plan 00278) ──────────────────────
-    # Subordinate to every other family: fires only on a tick that would
-    # otherwise NOOP in MONITOR with no compaction signal and no goal payload.
-    # The pending episode persists across deferred ticks; the HOST closes it
-    # (mark_effort_injection) only after a successful PTY write, so a failed
-    # write retries. No signal file exists to consume — the episode key in the
-    # machine state is the whole lifecycle.
-    if (
-        payload is None
-        and evaluation.decision is Decision.NOOP
-        and signal_path is None
-        and machine.state is SupervisorState.MONITOR
-        and machine.effort_pending is not None
-    ):
-        if not can_inject:
-            if facts.idle and not facts.input_line_empty:
-                deferred_log = f"{_DEFERRED_LOG_PREFIX} (effort restore pending)"
-            else:
-                noop_reason_log = f"{_NOOP_LOG_PREFIX}: effort restore pending but session busy"
-        elif machine.effort_injections >= _MAX_EFFORT_INJECTIONS:
-            noop_reason_log = f"{_NOOP_LOG_PREFIX}: effort injection cap reached"
-        else:
-            decision_value = Decision.WOULD_EFFORT.value
-            confirm_enters = effort_confirm_enters
-            target = machine.effort_pending.rsplit(":", 1)[-1]
-            effort_command = f"{_EFFORT_COMMAND} {target}"
-            reason = (
-                f"effort below floor ({machine.effort_pending}) -> would inject {effort_command}"
-            )
-            if dry_run:
-                payload = (
-                    f"{_format_bot_prefix(facts.now_wall)} "
-                    f"{_DRY_RUN_EFFORT_BODY_PREFIX} {effort_command}"
-                )
-            else:
-                payload = effort_command
-                machine.arm_audit(f"{effort_command} (effort-floor restore)")
-                machine.note_own_effort_injection(target)
-            submit = True
-            deferred_log = None
-            noop_reason_log = None
     # ── Flag-cleaning compaction on a REPEATED downgrade (Plan 00281) ───────
     # Checked JUST BEFORE the model restore: on a flip-flop (an open episode
     # AND a prior auto-restore that the classifier already undid) a re-restore
@@ -6260,8 +5107,8 @@ def decide_once(
     # Fires only on an otherwise-NOOP MONITOR tick, after the quiet delay,
     # under the lifetime cap and the flip-flop backoff (all inside
     # model_restore_due). The HOST marks success (mark_model_restore) for
-    # the cap/backoff, and ALSO arms the coupled effort correction
-    # (arm_coupled_effort) -- see `model_switch_is_auto_restore` below.
+    # the cap/backoff -- see `model_switch_is_auto_restore` below. Claude
+    # Code applies the restored model's configured effort itself.
     if (
         payload is None
         and evaluation.decision is Decision.NOOP
@@ -6295,12 +5142,12 @@ def decide_once(
                 deferred_log = None
                 noop_reason_log = None
     # ── Audit-trail flush: transient status-line banner (Plan 00318) ────────
-    # LOWEST priority of all families: a pending /model, /effort, goal or
-    # restore always lands first, so a switch sequence flushes as ONE banner
-    # once the sequence itself is complete. /model and /effort leave no trace
-    # in the chat (unlike /compact and /goal, whose payloads carry visible
-    # text) — without this flush, decision.log is the only audit trail and
-    # nobody watching the session can tell anything happened.
+    # LOWEST priority of all families: a pending /model, goal or restore
+    # always lands first, so a switch sequence flushes as ONE banner once the
+    # sequence itself is complete. /model leaves no trace in the chat (unlike
+    # /compact and /goal, whose payloads carry visible text) — without this
+    # flush, decision.log is the only audit trail and nobody watching the
+    # session can tell anything happened.
     #
     # This posts a TTL-bounded, self-counting-down BANNER rather than
     # injecting a chat line. The chat form cost a whole model turn plus a
@@ -6380,8 +5227,8 @@ def decide_once(
     # ── Standing-authorisation reinforcement (Plan 00283) ───────────────────
     # LEAST urgent of every injectable family: a reminder, not an action, so it
     # fires only on a tick that would otherwise NOOP in MONITOR with nothing else
-    # pending — a real /compact, /model, /effort, goal, restore or audit flush
-    # always lands first. The daemon's standing_authorisations handler writes the
+    # pending — a real /compact, /model, goal, restore or audit flush always
+    # lands first. The daemon's standing_authorisations handler writes the
     # signal on a due reinforcement when its supervisor channel is enabled; here
     # we type it as one real user-role line. The HOST counts a successful
     # injection (mark_standing_auth_injection); the signal is consumed on
@@ -6517,8 +5364,6 @@ def decide_once(
         model_switch_session=model_switch_session,
         model_switch_is_auto_restore=model_switch_is_auto_restore,
         is_flag_compact=is_flag_compact,
-        is_anchor_injection=is_anchor_injection,
-        is_anchor_escape=is_anchor_escape,
         goal_line=goal_line_for_hash,
         # None when the flush's own line already made it into `noop_reason_log`
         # (no clobber -- the normal case) or when the flush never happened this
@@ -6527,7 +5372,6 @@ def decide_once(
             audit_flush_log_line if decision_value != Decision.WOULD_AUDIT.value else None
         ),
         abandoned_box_flushed=evaluation.abandoned_box_flush,
-        settings_status_log=settings_status_log_line,
     )
 
 
@@ -6572,11 +5416,6 @@ def _apply_decision(
     # follows.
     if log is not None and outcome.audit_flush_log is not None:
         log.write_noop(outcome.audit_flush_log)
-    # Plan 00466 N47 finding 7: a settings.json status change is logged as
-    # its own line too, independently of whatever this tick's primary
-    # decision was -- same rationale as the audit flush above.
-    if log is not None and outcome.settings_status_log is not None:
-        log.write_noop(outcome.settings_status_log)
     if outcome.payload is not None:
         _perform_injection(
             master_writer,
@@ -6613,11 +5452,7 @@ def _apply_post_injection_bookkeeping(
     rules for every injectable family live in exactly one place. Every
     mark_*/arm_* call below fires ONLY on a successful injection
     (``injected``) -- a failed PTY write keeps every pending episode/signal
-    intact so the next tick retries. ``now_wall`` feeds
-    ``mark_anchor_injection`` (Plan 00297), whose own retry cooldown is
-    timestamp-based; it is only ever consulted for an anchor injection, so
-    the default (resolved lazily via ``time.time()``) never affects any
-    other family or any existing caller that omits it.
+    intact so the next tick retries.
     """
     if not injected:
         return
@@ -6634,18 +5469,6 @@ def _apply_post_injection_bookkeeping(
         machine.mark_standing_auth_injection()
     elif outcome.decision_value == Decision.WOULD_SESSION_ACTIONS.value:
         machine.mark_session_actions_injection()
-    elif outcome.decision_value == Decision.WOULD_EFFORT.value:
-        # The DROP ANCHOR branch is checked FIRST of all, then the coupled
-        # branch, in decide_once -- so `is_anchor_injection` (Plan 00297)
-        # disambiguates from the coupled correction (Plan 00278
-        # continuation), which in turn disambiguates from the plain floor
-        # restore.
-        if outcome.is_anchor_injection:
-            machine.mark_anchor_injection(now_wall if now_wall is not None else time.time())
-        elif machine.coupled_effort_pending is not None:
-            machine.mark_coupled_effort_injection()
-        else:
-            machine.mark_effort_injection()
     elif outcome.decision_value == Decision.WOULD_MODEL.value:
         # Cap/backoff bookkeeping is reserved for the AUTO-restore path --
         # the manual test-trigger switch has its own signal-consumption
@@ -6656,27 +5479,12 @@ def _apply_post_injection_bookkeeping(
                 family=outcome.model_switch_family,
                 session=outcome.model_switch_session,
             )
-        # BOTH paths owe the coupled effort correction, unconditionally --
-        # its TARGET is resolved later, at decision time, from observed
-        # state (Plan 00466 N47 finding 6), not from which path this was.
-        if outcome.model_switch_family is not None:
-            machine.arm_coupled_effort(
-                session=outcome.model_switch_session or "",
-                family=outcome.model_switch_family,
-            )
     elif outcome.decision_value == Decision.WOULD_COMPACT.value and outcome.is_flag_compact:
         # Plan 00281: only the flip-flop flag-compact counts against the
         # flag-compaction cap/backoff. The capacity-based /compact leaves
         # is_flag_compact False and is governed by its AWAIT_COMPACTING
         # lifecycle instead.
         machine.mark_flag_compaction()
-    elif outcome.decision_value == Decision.WOULD_ESCAPE.value and outcome.is_anchor_escape:
-        # Plan 00297 follow-up: the escalation ESC has its OWN cooldown,
-        # separate from the AWAIT_COMPACTING flush's `_escapes_sent` counter
-        # (which `evaluate()` already manages internally) -- `is_anchor_escape`
-        # disambiguates the two so a compaction flush never throttles, or is
-        # throttled by, the anchor's interrupt.
-        machine.mark_anchor_esc(now_wall if now_wall is not None else time.time())
 
 
 def _poll_once(
@@ -6692,14 +5500,12 @@ def _poll_once(
     compaction_signal_ttl_seconds: float = _DEFAULT_COMPACTION_SIGNAL_TTL_SECONDS,
     input_line_empty: bool = True,
     human_compact_submitted: bool = False,
-    human_effort_command: str | None = None,
     work_idle: bool = True,
     reap_ttl_seconds: float = _DEFAULT_REAP_TTL_SECONDS,
     foreground_margin_seconds: float = _DEFAULT_FOREGROUND_MARGIN_SECONDS,
     own_sessions: frozenset[str] | None = None,
     goal_signal_ttl_seconds: float = _DEFAULT_GOAL_SIGNAL_TTL_SECONDS,
     model_confirm_enters: int = _DEFAULT_MODEL_CONFIRM_ENTERS,
-    effort_confirm_enters: int = _DEFAULT_EFFORT_CONFIRM_ENTERS,
     input_line_abandoned: bool = False,
     on_input_line_flushed: Callable[[], None] | None = None,
 ) -> Evaluation:
@@ -6723,7 +5529,6 @@ def _poll_once(
         input_line_empty=input_line_empty,
         human_compact_submitted=human_compact_submitted,
         work_idle=work_idle,
-        human_effort_command=human_effort_command,
         input_line_abandoned=input_line_abandoned,
     )
     outcome = decide_once(
@@ -6739,7 +5544,6 @@ def _poll_once(
         own_sessions=own_sessions,
         goal_signal_ttl_seconds=goal_signal_ttl_seconds,
         model_confirm_enters=model_confirm_enters,
-        effort_confirm_enters=effort_confirm_enters,
     )
     injected = _apply_decision(outcome, master_writer=master_writer, log=log)
     _apply_post_injection_bookkeeping(machine, outcome, injected=injected, now_wall=now_wall)
@@ -6768,7 +5572,6 @@ def _facts_to_json(facts: TickFacts) -> str:
             "input_line_empty": facts.input_line_empty,
             "human_compact_submitted": facts.human_compact_submitted,
             "work_idle": facts.work_idle,
-            "human_effort_command": facts.human_effort_command,
             "human_enter_pressed": facts.human_enter_pressed,
             "human_raw_input": facts.human_raw_input,
             "machine_state": facts.machine_state,
@@ -6786,7 +5589,6 @@ def _facts_from_json(line: str) -> TickFacts:
         input_line_empty=bool(data["input_line_empty"]),
         human_compact_submitted=bool(data["human_compact_submitted"]),
         work_idle=bool(data["work_idle"]),
-        human_effort_command=data.get("human_effort_command"),
         human_enter_pressed=bool(data.get("human_enter_pressed", False)),
         human_raw_input=str(data.get("human_raw_input", "")),
         machine_state=data.get("machine_state"),
@@ -6812,11 +5614,8 @@ def _outcome_to_json(outcome: TickOutcome) -> str:
             "model_switch_session": outcome.model_switch_session,
             "model_switch_is_auto_restore": outcome.model_switch_is_auto_restore,
             "is_flag_compact": outcome.is_flag_compact,
-            "is_anchor_injection": outcome.is_anchor_injection,
-            "is_anchor_escape": outcome.is_anchor_escape,
             "audit_flush_log": outcome.audit_flush_log,
             "abandoned_box_flushed": outcome.abandoned_box_flushed,
-            "settings_status_log": outcome.settings_status_log,
         }
     )
 
@@ -6838,11 +5637,8 @@ def _outcome_from_json(line: str) -> TickOutcome:
         model_switch_session=data.get("model_switch_session"),
         model_switch_is_auto_restore=bool(data.get("model_switch_is_auto_restore", False)),
         is_flag_compact=bool(data.get("is_flag_compact", False)),
-        is_anchor_injection=bool(data.get("is_anchor_injection", False)),
-        is_anchor_escape=bool(data.get("is_anchor_escape", False)),
         audit_flush_log=data.get("audit_flush_log"),
         abandoned_box_flushed=bool(data.get("abandoned_box_flushed", False)),
-        settings_status_log=data.get("settings_status_log"),
     )
 
 
@@ -6850,10 +5646,10 @@ def _slash_diagnostic_command(typed_slash: str) -> str:
     """The command TOKEN of a submitted slash line, never its argument.
 
     Plan 00319 F4: a recognition-miss diagnostic needs to know WHICH command
-    family the human typed (``/model``, ``/effort``, ...), not what they typed
-    after it -- an argument can carry a model id, a pasted secret, or anything
-    else, into a log with no other guard on its contents (only, as of Plan
-    00319 F4, its size).
+    family the human typed (``/model``, ``/compact``, ...), not what they
+    typed after it -- an argument can carry a model id, a pasted secret, or
+    anything else, into a log with no other guard on its contents (only, as
+    of Plan 00319 F4, its size).
     """
     return typed_slash.split(None, 1)[0]
 
@@ -6876,8 +5672,8 @@ def run_worker(
     Also owns a persistent ``HumanInputLine`` (Plan 00317): the SAME class the
     host's in-process fallback uses, but here it is fed each tick's
     ``human_raw_input`` and its recognition -- ``human_compact_submitted`` /
-    ``human_model_command`` / ``human_effort_command`` / ``input_line_empty``
-    -- overrides whatever the host sent, before ``decide_once`` runs. This is
+    ``human_model_command`` / ``input_line_empty`` -- overrides whatever the
+    host sent, before ``decide_once`` runs. This is
     the piece that now hot-reloads with the rest of the worker: a code change
     to typed-command recognition takes effect on the next worker restart, with
     no host-side change and no session restart. Reset (buffer cleared) on
@@ -6916,7 +5712,6 @@ def run_worker(
         facts = replace(
             facts,
             human_compact_submitted=line_recognizer.take_compact_submitted(),
-            human_effort_command=line_recognizer.take_effort_submitted(),
             # AND, never override: a worker restart resets this recognizer, so
             # its buffer reads EMPTY while the human still has unsubmitted text
             # in the box. Overriding the host's own observation there would let
@@ -6937,8 +5732,7 @@ def run_worker(
                 f"diagnostic typed-slash observed: "
                 f"command={_slash_diagnostic_command(typed_slash)!r} "
                 f"len={len(typed_slash)} "
-                f"(recognised compact={facts.human_compact_submitted!r} "
-                f"effort_recognised={facts.human_effort_command is not None!r})"
+                f"(recognised compact={facts.human_compact_submitted!r})"
             )
         try:
             outcome = decide_once(
@@ -6953,7 +5747,6 @@ def run_worker(
                 own_sessions=cached_own_session_ids(),  # Plan 00166: only our own sessions
                 goal_signal_ttl_seconds=policy.goal_signal_ttl_seconds,
                 model_confirm_enters=policy.model_confirm_enters,
-                effort_confirm_enters=policy.effort_confirm_enters,
             )
         except Exception:
             # SAFETY NET: a single tick's exception must not kill the worker
@@ -7554,10 +6347,6 @@ def supervise(
         # Consume the human-/compact edge exactly once per tick so a human
         # compaction defers the supervisor's own, never suppresses it forever.
         human_compact = activity.take_compact_submitted()
-        # Plan 00316: consume a human-typed /effort command the same way --
-        # edge-triggered, once per tick, so a manual level is recorded exactly
-        # once however many ticks pass before the worker consumes it.
-        human_effort_command = activity.take_effort_submitted()
         # Plan 00317: drain the raw tap for the worker's OWN recognizer. Sent
         # alongside the host-computed fields above (unchanged, still used by
         # the in-process fallback below) so a worker restart alone can change
@@ -7581,7 +6370,6 @@ def supervise(
                     input_line_empty=activity.line.is_empty,
                     human_compact_submitted=human_compact,
                     work_idle=work_idle,
-                    human_effort_command=human_effort_command,
                     human_raw_input=human_raw_input,
                     # Ship the host's authoritative machine state so the worker
                     # decides on it -- never on divergent worker-local state.
@@ -7633,7 +6421,6 @@ def supervise(
                 compaction_signal_ttl_seconds=policy.compaction_signal_ttl_seconds,
                 input_line_empty=activity.line.is_empty,
                 human_compact_submitted=human_compact,
-                human_effort_command=human_effort_command,
                 work_idle=work_idle,
                 reap_ttl_seconds=policy.reap_ttl_seconds,
                 foreground_margin_seconds=policy.foreground_margin_seconds,
@@ -7642,11 +6429,6 @@ def supervise(
                 input_line_abandoned=input_line_abandoned,
                 on_input_line_flushed=activity.line.clear,
             )
-        # Plan 00297: loud, rate-limited owner-facing alert once the anchor
-        # has exceeded its attempt/time bound -- purely a notification, the
-        # anchor keeps retrying either way (see `anchor_escalated_at`).
-        if machine.anchor_active and machine.anchor_escalated_at(now_wall):
-            status_message_poster.post(_ANCHOR_ALERT_TEXT, level=_STATUS_LEVEL_WARNING)
 
     previous_handler = signal.signal(signal.SIGWINCH, _on_winch)
 

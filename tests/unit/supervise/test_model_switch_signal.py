@@ -6,8 +6,11 @@ line is submitted — the ordinary single-Enter submit leaves the switch
 incomplete; (2) there was no way to trigger a model switch on demand for
 end-to-end testing. This adds a manual ``<session>.model-switch-intent``
 signal (mirroring the goal-intent signal), consumed at the same injection
-choke point as compact/continue/goal/effort/auto-model, and a CLI helper
+choke point as compact/continue/goal/auto-model, and a CLI helper
 (``--emit-model-switch <family>``) that writes one.
+
+Plan 00466 N47 review 2: the supervisor injects no ``/effort`` of any kind,
+so the audit-trail tests below cover only the ``/model`` family.
 """
 
 from __future__ import annotations
@@ -20,7 +23,6 @@ from typing import TYPE_CHECKING
 import pytest
 
 from tests.unit.supervise._load import load_supervisor_module
-from tests.unit.supervise.conftest import write_settings_json
 
 if TYPE_CHECKING:
     from tests.unit.supervise._load import SupervisorTickOutcome
@@ -79,13 +81,14 @@ def _decide(
 ) -> SupervisorTickOutcome:
     policy = _mod.CompactPolicy()
     machine = machine or _mod.CompactStateMachine(policy)
-    return _mod.decide_once(
+    outcome: SupervisorTickOutcome = _mod.decide_once(
         machine,
         sidecar_dir=sidecar_dir,
         facts=facts or _facts(),
         dry_run=dry_run,
         freshness_seconds=policy.freshness_seconds,
     )
+    return outcome
 
 
 # ── load_model_switch_signal ─────────────────────────────────────────────────
@@ -315,61 +318,19 @@ class TestWriteModelSwitchSignal:
 # ── Audit-trail chat message after silent injections ──────────────────────────
 #
 # /compact and /goal injections are self-evidencing (their payload carries
-# visible text), but /model and /effort vanish from the chat without trace —
-# decision.log is the only record, and nobody watching the session can tell
-# anything happened. After a successful silent-injection sequence the
-# supervisor therefore flushes ONE visible, bot-prefixed audit message.
-
-
-def _write_reading(
-    sidecar_dir: Path,
-    *,
-    session_id: str = _SESSION,
-    model_id: str = "claude-opus-5",
-    effort: str | None = "low",
-    ts: float = _NOW + 1.0,
-) -> Path:
-    """A plain sidecar reading (as opposed to `_write_switch`'s intent signal).
-
-    Confirms a model switch actually landed, which the coupled-effort
-    mechanism needs before it can resolve a target (Plan 00466 N47 review 1:
-    resolution happens at DECISION time from a matching reading, never baked
-    in at arm time).
-    """
-    sidecar_dir.mkdir(parents=True, exist_ok=True)
-    path = sidecar_dir / f"{session_id}.json"
-    path.write_text(
-        json.dumps(
-            {
-                "red": False,
-                "critical": False,
-                "compact_urgent": False,
-                "tier": "ok",
-                "pct": 20.0,
-                "session_id": session_id,
-                "ts": ts,
-                "seq": 1,
-                "writer_pid": 42,
-                "compacting": False,
-                "model_id": model_id,
-                "effort": effort,
-            }
-        ),
-        encoding="utf-8",
-    )
-    return path
+# visible text), but /model vanishes from the chat without trace — decision.log
+# is the only record, and nobody watching the session can tell anything
+# happened. After a successful silent-injection sequence the supervisor
+# therefore flushes ONE visible, bot-prefixed audit message.
 
 
 class _AuditDriver:
     """Drive ticks the way the production host does: decide, then apply the
     success-only bookkeeping, consuming the switch signal on injection."""
 
-    def __init__(self, sidecar_dir: Path, *, settings_path: Path | None = None) -> None:
+    def __init__(self, sidecar_dir: Path) -> None:
         self.sidecar_dir = sidecar_dir
-        kwargs: dict[str, object] = {}
-        if settings_path is not None:
-            kwargs["settings_path"] = settings_path
-        self.machine = _mod.CompactStateMachine(_mod.CompactPolicy(**kwargs))
+        self.machine = _mod.CompactStateMachine(_mod.CompactPolicy())
 
     def tick(self, *, injected: bool = True) -> SupervisorTickOutcome:
         outcome = _decide(self.sidecar_dir, machine=self.machine)
@@ -378,30 +339,10 @@ class _AuditDriver:
             Path(outcome.consume_signal_path).unlink()
         return outcome
 
-    def switch_and_couple(self) -> None:
-        # Plan 00466 N47 review 1: the coupled mechanism no longer has an
-        # opinion for Fable (DROP ANCHOR is Fable's sole authority), so this
-        # generic audit-backlog scenario switches to Opus instead, backed by
-        # a settings.json entry that differs from the post-switch reading,
-        # giving the coupled correction something real to resolve.
+    def switch(self) -> None:
         _write_switch(self.sidecar_dir, family="opus")
         first = self.tick()
         assert first.decision_value == "would-model"
-        _write_reading(self.sidecar_dir, model_id="claude-opus-5", effort="low")
-        second = self.tick()
-        assert second.decision_value == "would-effort"
-        assert second.payload is not None
-        # The session settles at the injected value -- without this, the next
-        # tick's reading would still show the PRE-injection effort, and the
-        # steady-state settings correction (independent of the coupled path
-        # just consumed) would fire it again.
-        injected_effort = second.payload.rsplit(" ", 1)[-1]
-        _write_reading(
-            self.sidecar_dir,
-            model_id="claude-opus-5",
-            effort=injected_effort,
-            ts=_NOW + 2.0,
-        )
 
 
 class TestAuditTrailFlush:
@@ -414,23 +355,19 @@ class TestAuditTrailFlush:
         ``test_audit_banner.py``; here we pin that the SEQUENCE still collapses
         to a single flush that clears the backlog.
         """
-        config_dir = tmp_path / "config"
-        write_settings_json(config_dir, model_settings={"claude-opus-5": {"effortLevel": "high"}})
-        driver = _AuditDriver(tmp_path / "cs", settings_path=config_dir / "settings.json")
-        driver.switch_and_couple()
+        driver = _AuditDriver(tmp_path / "cs")
+        driver.switch()
         outcome = driver.tick()
         assert outcome.decision_value == "would-audit"
         assert outcome.payload is None
         assert outcome.noop_reason_log is not None
         assert "/model opus" in outcome.noop_reason_log
-        assert "/effort high" in outcome.noop_reason_log
         # Flushed once: the pending items are cleared and the next tick is a
         # plain NOOP with nothing left to say.
         assert driver.machine.audit_pending == ()
         assert driver.tick().decision_value != "would-audit"
 
     def test_audit_action_glyph_maps_commands(self) -> None:
-        assert _mod._audit_action_glyph("/effort xhigh (floor)") == _mod._AUDIT_ACTION_EFFORT_GLYPH
         assert _mod._audit_action_glyph("/model fable (restore)") == _mod._AUDIT_ACTION_MODEL_GLYPH
         # Unknown action families fall back to the neutral bullet.
         assert _mod._audit_action_glyph("something else") == _mod._AUDIT_ACTION_DEFAULT_GLYPH
@@ -441,10 +378,8 @@ class TestAuditTrailFlush:
         # retry it forever, and the same broken PTY cannot print a false
         # claim either — a failed flush loses the audit record, it never
         # fabricates one.
-        config_dir = tmp_path / "config"
-        write_settings_json(config_dir, model_settings={"claude-opus-5": {"effortLevel": "high"}})
-        driver = _AuditDriver(tmp_path / "cs", settings_path=config_dir / "settings.json")
-        driver.switch_and_couple()
+        driver = _AuditDriver(tmp_path / "cs")
+        driver.switch()
         failed = driver.tick(injected=False)
         assert failed.decision_value == "would-audit"
         assert driver.machine.audit_pending == ()
@@ -457,10 +392,8 @@ class TestAuditTrailFlush:
         it typed into the same box the user was using. A banner touches neither,
         so the notice surfaces at once and the backlog clears.
         """
-        config_dir = tmp_path / "config"
-        write_settings_json(config_dir, model_settings={"claude-opus-5": {"effortLevel": "high"}})
-        driver = _AuditDriver(tmp_path / "cs", settings_path=config_dir / "settings.json")
-        driver.switch_and_couple()
+        driver = _AuditDriver(tmp_path / "cs")
+        driver.switch()
         outcome = _decide(
             driver.sidecar_dir,
             machine=driver.machine,

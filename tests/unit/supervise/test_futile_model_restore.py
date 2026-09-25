@@ -3,9 +3,8 @@
 Reproduced live on an allowance-exhausted account
 (`CLAUDE/Plan/00328-.../REPRODUCTION.md`): the supervisor injected
 `/model fable`, the API answered 429, and because nothing checked whether the
-switch had LANDED it went on to inject a coupled `/effort low` for a model
-that was never on screen, then an unrequested `/compact` after reading its own
-failure as a downgrade flip-flop.
+switch had LANDED it went on to read its own failure as a downgrade
+flip-flop and fire an unrequested `/compact`.
 
 None of this needs to know WHY the restore failed. The next reading either
 shows the family or it does not.
@@ -101,7 +100,6 @@ def _open_episode_and_fire_restore(
     _decide(sidecar_dir, machine, now=now - 9.0)
     _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="high", ts=now - 8.0)
     _decide(sidecar_dir, machine, now=now - 7.0)
-    machine.mark_effort_injection(now_wall=now - 7.0)
     machine.mark_audit_injection()
     _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="xhigh", ts=now - 6.0)
     restore = _decide(sidecar_dir, machine, now=now - 5.0)
@@ -112,10 +110,6 @@ def _open_episode_and_fire_restore(
         now_wall=now - 5.0,
         family=restore.model_switch_family,
         session=restore.model_switch_session,
-    )
-    machine.arm_coupled_effort(
-        session=restore.model_switch_session or "",
-        family=restore.model_switch_family or "",
     )
     return restore
 
@@ -156,20 +150,6 @@ def test_a_failed_restore_does_not_fire_the_flag_compact(tmp_path: Path) -> None
     for tick in range(4):
         outcome = _decide(sidecar_dir, machine, now=_NOW + 10.0 * (tick + 1))
         assert outcome.decision_value != "would-compact"
-
-
-def test_a_failed_restore_cancels_its_coupled_effort(tmp_path: Path) -> None:
-    """The coupled correction targets the floor of the family we switched TO.
-    When that switch never happened it is simply wrong -- in the reproduction
-    it drove effort to fable's `low` while the session sat on opus."""
-    sidecar_dir = tmp_path / "cs"
-    machine = _machine()
-    _open_episode_and_fire_restore(sidecar_dir, machine)
-    assert machine.coupled_effort_pending is not None
-    _write_sidecar(sidecar_dir, model_id="claude-opus-5", effort="xhigh", ts=_NOW - 1.0)
-    outcome = _decide(sidecar_dir, machine)
-    assert machine.coupled_effort_pending is None
-    assert outcome.payload != "/effort low"
 
 
 def test_unavailable_families_round_trip_through_export_import(tmp_path: Path) -> None:

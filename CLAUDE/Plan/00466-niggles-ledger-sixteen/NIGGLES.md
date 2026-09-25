@@ -29,51 +29,48 @@ Setting medium therefore needed two edits in two formats (`settings.json` and
 `ccy.env`, commits 909f9591 and e52bd9e5). Even then the restore path still
 lands on xhigh.
 
-**Remedy (redesigned after adversarial review 1**,
-`subagent-reports/260925-n47-review1-opus-5-5.md`**, which rejected a first
-pass that still held too much of its own opinion):** the supervisor holds
-almost no opinion of its own about effort. `settings.json` is the single
-source of truth.
+**Remedy (redesigned again after adversarial review 2**,
+`subagent-reports/260925-n47-review2.md`**, which found review 1's fix was
+still architecturally wrong at the root):** BLOCKER 1 — Claude Code SAVES
+every interactively-typed `/effort <level>` into `modelSettings` in the
+settings file the confirming `Enter` targets (`model-config.md:552-557`,
+`settings-reference.md:900`). So ANY supervisor-typed `/effort`, no matter
+how well the level behind it was resolved, permanently overwrites the
+owner's own saved level — the exact fight the whole redesign exists to end,
+just moved one layer down into the single source of truth itself.
 
-- The built-in floor map and `CCY_MIN_EFFORT_LEVELS` are gone entirely, not
-  just superseded — there is no fallback defaults table any more. Nothing
-  configured means Claude Code's own per-model default already applies and
-  is never fought.
-- Exactly two sanctioned interventions remain: (a) while a downgrade episode
-  leaves the session on a fallback model, effort goes to xhigh, decided
-  purely from "an episode is open for this exact destination", never from
-  which path typed `/model`; (b) Fable never runs above low — governed
-  EXCLUSIVELY by the separate, continuously-verified Plan 00297 DROP ANCHOR
-  invariant, not by this mechanism at all.
-- Every OTHER family, once no downgrade episode is open, is corrected (in
-  either direction) toward whatever `settings.json` resolves for the EXACT
-  model id on screen, matching Claude Code's own resolution: per exact model
-  id (never a sibling in the same family; `[1m]`/date/provider suffixes
-  normalised), across local project, shared project, and user files in
-  Claude Code's precedence, a user-file top-level `effortLevel` skipped for
-  Opus 5.5 and later, `"max"` never valid from settings, and
-  `CLAUDE_CODE_EFFORT_LEVEL` outranking all of it. A manual `/effort` latch
-  still wins throughout.
-- `/effort auto` was investigated as a non-mutating reset for the restore
-  path and rejected: it *writes* — it clears the model's saved
-  `modelSettings` entry — so the restore resolves the value itself and
-  injects a plain `/effort <value>`, never touching disk.
-- A settings.json load status change (missing, malformed, unreadable, or
-  recovered) is logged once, not on every tick.
+The supervisor now injects **no `/effort` of any kind, for any reason,
+ever**:
+
+- The built-in floor map, `CCY_MIN_EFFORT_LEVELS`, the settings.json reader,
+  the coupled-effort correction and the downgrade-xhigh compensation are all
+  gone entirely, not just superseded.
+- The two behaviours those mechanisms provided are now DATA the owner adds
+  to their own `modelSettings` — a `claude-fable-5-1` entry at `low`
+  (replacing DROP ANCHOR) and `claude-opus-5`/`claude-opus-4-8` entries at
+  `xhigh` (replacing the downgrade compensation, covering Fable's two
+  automatic-fallback targets). Claude Code applies a model's saved level
+  itself whenever that model serves a request — including a request
+  automatic fallback re-runs on a different model — with no supervisor
+  involvement at all. See `CLAUDE/development/CcySupervisor.md` for the
+  exact entries and the doc citations.
+- MAJOR 4 fixed alongside: `model_downgrade_recorder`'s signal republishes
+  the SAME record for the life of a session, even after its episode fully
+  closed. A human who later manually switched back to the fallback family
+  produced the identical observation the old `session:from:to` attribution
+  key matched again, reopening an episode and firing `/model fable` at them.
+  The state machine now tracks which `record_ts` it has already spent
+  opening-then-closing an episode for, and refuses to reopen from the same
+  one — only a genuinely NEW downgrade record can open a fresh episode.
 
 RED tests (driven through `decide_once`/`_poll_once` with real sidecar
-sequences, never by arming state directly):
-
-- a Fable session at low sends nothing;
-- an Opus 5.5 session at its configured medium sends nothing, whether or not
-  anything else is configured;
-- project settings override user settings; a sibling model's entry is never
-  used;
-- a downgrade goes to xhigh, and the restore goes back to the configured or
-  default value;
-- a manual switch to Opus with no downgrade episode open gets no `/effort`;
-- a missing settings file is logged once at startup, in decision.log, not
-  just from the resolver directly.
+sequences, never by arming state directly) prove the supervisor emits NO
+`/effort` in any scenario: a downgrade, a manual model switch, compaction, a
+settings.json change, or a human-typed `/effort`. `test_settings_effort.py`,
+`test_drop_anchor.py`, `test_effort_restore.py` and
+`test_unattributed_effort_drop.py` are deleted outright (the behaviour they
+covered no longer exists); `test_attributed_downgrade.py` gained the MAJOR 4
+regression pair (a spent record does not reopen; a fresh record still does).
 
 ### N46 — `budget_exhaustion_detector` fires on a tool result that merely contains budget wording
 

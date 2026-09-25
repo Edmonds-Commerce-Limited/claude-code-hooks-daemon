@@ -111,30 +111,69 @@ Then re-run the `ps` check and confirm the pid changed. **Never restart the
 whole ccy session** — which would drop the live `claude` process — merely to
 reload the worker. That is exactly what the two-tier split exists to avoid.
 
-## One exception: settings.json DATA needs no reload at all
+## Effort is not the supervisor's concern at all
 
-Effort resolution (Plan 00466 N47, redesigned after adversarial review —
-see `CLAUDE/Plan/00466-niggles-ledger-sixteen/NIGGLES.md` N47) reads
-Claude Code's own settings across all three files it honours — local
-(`.claude/settings.local.json`), shared project (`.claude/settings.json`),
-and user (`$CLAUDE_CONFIG_DIR`/`~/.claude`) — each cached and re-read by
-**mtime**, independent of the content-hash code reload `reload_if_stale`
-performs. Editing any of those three files' CONTENT takes effect on the
-next tick that resolves effort — no worker reload, no `kill <worker-pid>`,
-nothing to verify via the `ps` check above.
+Plan 00466 N47 review 2 found the decisive reason the supervisor must never
+type `/effort`, at any level, for any purpose: Claude Code SAVES every
+interactively-typed `/effort <level>` into `modelSettings` in the settings
+file that confirming it with `Enter` targets — almost always the owner's own
+`~/.claude/settings.json` (or `$CLAUDE_CONFIG_DIR/settings.json`) — the same
+single source of truth the owner asked the supervisor to stop fighting. See
+`remote-docs/docs.claude.com/en/docs/claude-code/model-config.md:552-557` and
+`remote-docs/docs.claude.com/en/docs/claude-code/settings-reference.md:900`.
+An unattended process typing `/effort` therefore does not make a session-only
+adjustment — it permanently overwrites what the owner saved for that model.
 
-This is about the DATA only. The LOGIC that decides what to do with that
-data — which family gets a coupled correction, when a downgrade episode's
-xhigh compensation applies, when to defer to a matching reading — lives in
-`decide_once` and its helpers (`resolve_coupled_effort_target`,
-`note_model_reading`'s settings branch), which are ordinary pure,
-WORKER-side functions. An edit to THAT code is a normal `claude-supervise.py`
-change and needs the standard hot-reload procedure above like anything
-else in this file — including this very redesign, which moved the coupled-
-target resolution from one-shot HOST-side arming (never hot-reloadable) to
-per-tick WORKER-side decision (hot-reloadable). If your running ccy session
-predates this change, relaunch it (or force the worker reload above) to
-pick up the new resolution logic; a settings.json edit alone will not.
+So the supervisor holds **no effort state and injects no `/effort` command,
+ever** — not on downgrade, not on manual `/model`, not on compaction, not in
+response to a settings change. The two behaviors the supervisor used to
+enforce by injection are now DATA the owner adds to their own `modelSettings`,
+and Claude Code applies a model's saved level itself whenever that model
+serves a request — resolution order in
+`model-config.md:544-550`: an explicit `/effort`/env-var override first, then
+"the level you saved for the model" from `modelSettings`, then the model's
+built-in default. That per-model resolution runs for every request the model
+serves, including a request Claude Code re-runs on a different model after
+[automatic model fallback](../../remote-docs/docs.claude.com/en/docs/claude-code/model-config.md)
+(`model-config.md:480-495`) — there is no documented case where a model change
+(automatic fallback, the supervisor's `/model` restore, or a human picking a
+model) skips the resolution order and leaves the OLD model's level attached to
+the new one. If a future doc revision describes such a case, it belongs in
+this section with its own citation before anything is built around it.
+
+**What the owner should add to `modelSettings`** (in whichever settings file
+they want it to apply — most commonly their user settings), naming exact
+model ids per `settings-reference.md:1197` ("Claude Code writes each entry
+under the model's canonical name... and matches that model's alias,
+date-suffixed, `[1m]`, and recognized provider-specific IDs to the same
+entry"):
+
+```json
+{
+  "modelSettings": {
+    "claude-fable-5-1": { "effortLevel": "low" },
+    "claude-opus-5": { "effortLevel": "xhigh" },
+    "claude-opus-4-8": { "effortLevel": "xhigh" }
+  }
+}
+```
+
+- `claude-fable-5-1` (Fable 5.1, the `fable` alias's target) at `low` replaces
+  the old DROP ANCHOR injection: a low ceiling for the model that does the
+  fable-anchor work.
+- `claude-opus-5` and `claude-opus-4-8` at `xhigh` replace the old downgrade
+  compensation: Fable's two automatic-fallback targets
+  (`model-config.md:486` — biology-flagged requests land on Opus 5,
+  cybersecurity-flagged requests land on Opus 4.8), covered whichever one an
+  episode falls back to.
+
+Since none of this is code, **no worker reload applies to it at all** —
+editing `modelSettings` is an ordinary Claude Code settings edit, not a
+`claude-supervise.py` change, and takes effect the next time Claude Code
+resolves effort for the model in question (typically the next request, or
+the next session start for values Claude Code already resolved this
+session). The `ps`/reload discipline in this document is about the
+supervisor's own code and has nothing to do with this key.
 
 ## Client installs: edit source, then redeploy
 

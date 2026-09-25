@@ -582,8 +582,9 @@ class TestPollOnceInputBoxGuard:
 
     def test_no_deferral_log_when_nothing_pending(self, tmp_path: Path) -> None:
         # Green sidecar + non-empty box: no injection was pending, so nothing
-        # was deferred -- the only line is the one-time settings-status note
-        # (Plan 00466 N47 finding 7), never a deferral or gate noop.
+        # was deferred, and nothing else is logged either (Plan 00466 N47
+        # review 2: the settings-status note is gone along with the settings
+        # resolver it reported on).
         _write_sidecar(tmp_path / "sc", red=False)
         log_path = tmp_path / "decision.log"
         _mod._poll_once(
@@ -597,8 +598,7 @@ class TestPollOnceInputBoxGuard:
             freshness_seconds=30.0,
             input_line_empty=False,
         )
-        contents = log_path.read_text(encoding="utf-8")
-        assert "settings.json status:" in contents
+        contents = log_path.read_text(encoding="utf-8") if log_path.exists() else ""
         assert _DEFERRED not in contents
         assert "noop:" not in contents
 
