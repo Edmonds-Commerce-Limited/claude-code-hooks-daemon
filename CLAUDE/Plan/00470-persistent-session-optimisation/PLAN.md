@@ -54,7 +54,7 @@ Evidence, with verified facts marked apart from inferences, is in
 
 - [ ] ⬜ **Task 3.1**: StopFailure handler package: record `rate_limit`, `authentication_failed`, `cloud_credential_error` to a durable file and surface them in the status line.
 
-- [ ] ⬜ **Task 3.2**: Notification handler records `quota_auto_resume_*`; on resume, inject a re-brief pointing at the queue.
+- [ ] ⬜ **Task 3.2**: Notification handler records `quota_auto_resume_*`; on resume, inject a re-brief pointing at the queue. Also surface a BACKGROUND or teammate agent killed by a session or weekly limit, naming the agent so it can be re-briefed. Plan 00466 N46 covers only foreground dispatches, whose death arrives as a PostToolUse:Agent result. The 264 of 351 real dispatches that ran in the background report their death through a task notification instead.
 
 - [ ] ⬜ **Task 3.3**: Durable work-queue file format + the `issue-sdlc` skill writes and reads it; SessionStart (`resume`/`compact`) re-briefs from it. Observed on 2026-09-25, in two separate ways:
 
