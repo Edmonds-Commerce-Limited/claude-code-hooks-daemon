@@ -2324,12 +2324,36 @@ def _renders_a_diff(word: str) -> bool:
     return False
 
 
-#: grep-family binaries: their FIRST positional argument (or an `-e`/`-f`
+#: grep-family binaries: their FIRST positional argument (or an `-e`
 #: flag's value) is a search PATTERN, not a filesystem path.
 _GREP_FAMILY_COMMANDS: Final[frozenset[str]] = frozenset({"grep", "egrep", "fgrep"})
 
-#: Flags whose VALUE is pattern content, not a file target.
-_GREP_PATTERN_VALUE_FLAGS: Final[frozenset[str]] = frozenset({"-e", "--regexp", "-f", "--file"})
+#: Long flag whose VALUE is pattern content, never a file target.
+_GREP_PATTERN_VALUE_LONG_FLAG: Final[str] = "--regexp"
+
+#: Long flags whose VALUE is a FILE that grep itself opens and reads (taken
+#: from GNU grep 3.8's `--help`, not from memory): `--file` reads patterns
+#: from it, `--exclude-from` reads exclusion globs from it. Unlike a search
+#: PATTERN, grep performs a real read of this path, so its value is a
+#: file-target word and must be judged like any other one -- exempting it
+#: would let `grep -f ~/.ssh/id_rsa docs/a.md` print the key.
+_GREP_FILE_VALUE_LONG_FLAGS: Final[frozenset[str]] = frozenset({"--file", "--exclude-from"})
+
+#: Short options that consume the rest of their token (or the next word) as
+#: a value, keyed by what that value IS. GNU grep's getopt clustering means
+#: the first such letter reached inside a `-xyz` cluster claims everything
+#: after it in the token (attached value); letters before it in the same
+#: cluster are plain flags. `e` supplies a PATTERN; `f` supplies a FILE
+#: grep reads; the rest (`m`, `A`, `B`, `C`, `d`, `D`) take a value that is
+#: neither, so it is consumed and dropped rather than left to be
+#: misclassified as a positional file-target word.
+_GREP_SHORT_PATTERN_VALUE_OPT: Final[str] = "e"
+_GREP_SHORT_FILE_VALUE_OPT: Final[str] = "f"
+_GREP_SHORT_OTHER_VALUE_OPTS: Final[frozenset[str]] = frozenset({"m", "A", "B", "C", "d", "D"})
+_GREP_SHORT_VALUE_OPTS: Final[frozenset[str]] = (
+    frozenset({_GREP_SHORT_PATTERN_VALUE_OPT, _GREP_SHORT_FILE_VALUE_OPT})
+    | _GREP_SHORT_OTHER_VALUE_OPTS
+)
 
 
 def is_grep_pattern_only_mention(
@@ -2350,19 +2374,26 @@ def is_grep_pattern_only_mention(
     fully-literal case), one parseable simple command (no separator, pipe,
     or redirection-that-isn't-a-redirect), head is a bare grep/egrep/fgrep.
 
+    Only ``-e``/``--regexp`` supplies a PATTERN. ``-f``/``--file`` and
+    ``--exclude-from`` name a FILE that grep itself opens and reads (GNU
+    grep 3.8's own ``--help`` lists no other file-reading pattern/exclusion
+    flags), so their value is checked exactly like a file-target word, not
+    exempted as a pattern -- this is what stops ``grep -f ~/.ssh/id_rsa
+    docs/a.md`` (main denies it; an earlier version of this exemption
+    wrongly allowed it, Plan 00466 review 8 MAJOR-A) and an attached
+    ``-f<key>``/``--file=<key>``/``--exclude-from=<key>`` value from
+    slipping through, whether the flag stands alone or is clustered with
+    other short options (``-rhf <key>``).
+
     Every OTHER bare positional word (after the pattern slot -- an
-    ``-e``/``--regexp``/``-f``/``--file`` flag's value when present,
-    otherwise the first bare word) is a file-target argument and is
-    checked with the SAME per-token judge (:func:`_token_mention`) the rest
-    of the scan trusts; if ANY of them is itself a protected mention, the
-    exemption does not apply and the deny rule stands -- this is what stops
-    ``grep foo ~/.ssh/id_rsa``-shaped commands (though the tilde alone
-    already fails closed above) or ``grep id_rsa id_rsa`` (the second,
-    file-target occurrence) from slipping through. Misclassifying a
-    numeric-value flag's argument (``-A 3``) as a file-target word is
-    harmless: ``_token_mention`` on ``"3"`` never matches a protected
-    pattern, so over-checking only ever makes the exemption LESS likely to
-    apply, never more -- the safe direction.
+    ``-e``/``--regexp`` flag's value when present, otherwise the first bare
+    word) is a file-target argument and is checked with the SAME per-token
+    judge (:func:`_token_mention`) the rest of the scan trusts; if ANY of
+    them, or any ``-f``/``--file``/``--exclude-from`` value, is itself a
+    protected mention, the exemption does not apply and the deny rule
+    stands -- this is what stops ``grep foo ~/.ssh/id_rsa``-shaped commands
+    (though the tilde alone already fails closed above) or ``grep id_rsa
+    id_rsa`` (the second, file-target occurrence) from slipping through.
     """
     if any(char in _EXPANSION_CHARS for char in command):
         return False
@@ -2373,7 +2404,8 @@ def is_grep_pattern_only_mention(
     if head not in _GREP_FAMILY_COMMANDS:
         return False
 
-    pattern_value_indices: set[int] = set()
+    saw_explicit_pattern_source = False
+    file_target_values: list[str] = []
     positional_indices: list[int] = []
     cursor = 1
     end_of_options = False
@@ -2383,24 +2415,58 @@ def is_grep_pattern_only_mention(
             end_of_options = True
             cursor += 1
             continue
-        if not end_of_options and word in _GREP_PATTERN_VALUE_FLAGS:
-            if cursor + 1 < len(words):
-                pattern_value_indices.add(cursor + 1)
-            cursor += 2
-            continue
-        if not end_of_options and any(
-            word.startswith(flag + "=") for flag in _GREP_PATTERN_VALUE_FLAGS
-        ):
-            pattern_value_indices.add(cursor)
+        if end_of_options or word == "-" or not word.startswith("-"):
+            positional_indices.append(cursor)
             cursor += 1
             continue
-        if not end_of_options and word.startswith("-") and word != "-":
+        if word.startswith("--"):
+            long_flag, has_eq, attached_value = word.partition("=")
+            if long_flag == _GREP_PATTERN_VALUE_LONG_FLAG:
+                saw_explicit_pattern_source = True
+                # The value is pattern content either way; nothing to check.
+                if not has_eq and cursor + 1 < len(words):
+                    cursor += 1
+                cursor += 1
+                continue
+            if long_flag in _GREP_FILE_VALUE_LONG_FLAGS:
+                if long_flag == "--file":
+                    saw_explicit_pattern_source = True
+                if has_eq:
+                    file_target_values.append(attached_value)
+                elif cursor + 1 < len(words):
+                    file_target_values.append(words[cursor + 1])
+                    cursor += 1
+                cursor += 1
+                continue
             cursor += 1
             continue
-        positional_indices.append(cursor)
-        cursor += 1
+        # Short-option cluster: GNU grep's getopt claims the rest of the
+        # token for the FIRST value-taking letter it reaches, attached if
+        # anything follows in the token, otherwise the next word.
+        consumed_next = False
+        for position, letter in enumerate(word[1:], start=1):
+            if letter not in _GREP_SHORT_VALUE_OPTS:
+                continue
+            attached_value = word[position + 1 :]
+            value: str | None
+            if attached_value:
+                value = attached_value
+            elif cursor + 1 < len(words):
+                value = words[cursor + 1]
+                consumed_next = True
+            else:
+                value = None
+            if letter == _GREP_SHORT_PATTERN_VALUE_OPT:
+                saw_explicit_pattern_source = True
+                # Pattern content either way; nothing to check.
+            elif letter == _GREP_SHORT_FILE_VALUE_OPT:
+                saw_explicit_pattern_source = True
+                if value is not None:
+                    file_target_values.append(value)
+            break
+        cursor += 2 if consumed_next else 1
 
-    if not pattern_value_indices and positional_indices:
+    if not saw_explicit_pattern_source and positional_indices:
         positional_indices = positional_indices[1:]
 
     mentions = list(iter_protected_mentions(command, patterns))
@@ -2421,10 +2487,11 @@ def is_grep_pattern_only_mention(
     # otherwise pay for a fresh `os.path.realpath` syscall every occurrence.
     # LOCAL to this one call, never module-level (N23).
     realpath_cache: dict[str, str | None] = {}
-    for index in positional_indices:
+    file_target_words = [words[index] for index in positional_indices] + file_target_values
+    for target_word in file_target_words:
         if (
             _token_mention(
-                words[index],
+                target_word,
                 patterns,
                 stem_pairs,
                 project_root,

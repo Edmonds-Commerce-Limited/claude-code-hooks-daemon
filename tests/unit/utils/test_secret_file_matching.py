@@ -2261,6 +2261,12 @@ class TestGrepPatternOnlyMentionAllows:
     def test_multiple_file_targets_none_protected(self) -> None:
         assert _grep_ok("grep id_rsa a.txt b.txt c.txt")
 
+    def test_other_value_flag_does_not_disturb_classification(self) -> None:
+        """Plan 00466 review 8 MAJOR-A fix: `-A 3` consumes its own value
+        properly now, so it never shifts which word is the implicit
+        PATTERN."""
+        assert _grep_ok("grep -A 3 id_rsa file.txt")
+
 
 class TestGrepPatternOnlyMentionDenies:
     """Every shape where a FILE TARGET (not the pattern) names a protected
@@ -2284,6 +2290,26 @@ class TestGrepPatternOnlyMentionDenies:
 
     def test_glob_target_fails_closed(self) -> None:
         assert not _grep_ok("grep -l id_rsa *.txt")
+
+    def test_file_flag_value_is_a_real_file_target(self) -> None:
+        """Plan 00466 review 8 MAJOR-A: `-f`/`--file` makes grep itself OPEN
+        and READ the value -- it is a file target, not a search pattern.
+        Main denies each of these; an earlier version of this exemption
+        wrongly treated the value as pattern content and allowed them."""
+        assert not _grep_ok("grep -f id_rsa docs/a.md")
+        assert not _grep_ok("grep --file=id_rsa docs/a.md")
+        assert not _grep_ok("grep --file id_rsa docs/a.md")
+
+    def test_file_flag_attached_short_value(self) -> None:
+        assert not _grep_ok("grep -fid_rsa docs/a.md")
+
+    def test_file_flag_clustered_with_other_short_options(self) -> None:
+        assert not _grep_ok("grep -hf id_rsa docs/a.md")
+        assert not _grep_ok("grep -rhf id_rsa docs/a.md")
+
+    def test_exclude_from_flag_value_is_a_real_file_target(self) -> None:
+        assert not _grep_ok("grep --exclude-from=id_rsa -r x docs")
+        assert not _grep_ok("grep --exclude-from id_rsa -r x docs")
 
     def test_compound_command_voids_the_exemption(self) -> None:
         assert not _grep_ok("grep id_rsa file.txt; cat id_rsa")
