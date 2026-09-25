@@ -1601,9 +1601,11 @@ class TestGroundTruthSnapshotResolution:
             plan, old_string="Not Started", new_string="In Progress", tool_use_id="tu-c3b"
         )
         edit["tool_input"]["replace_all"] = True
-        # RV4-m2: the recorded hash must match the REAL pre-edit text for
-        # the snapshot to be trusted as fresh.
-        plan_status_snapshots.record("tu-c3b", PlanStatus.NOT_STARTED, hash_plan_text(pre_edit))
+        # RV5-M2: the recorded hash is of the PREDICTED post-image (what
+        # this same edit, applied forward, produces) -- here that is
+        # exactly the text already written to disk above.
+        post_edit = pre_edit.replace("Not Started", "In Progress")
+        plan_status_snapshots.record("tu-c3b", PlanStatus.NOT_STARTED, hash_plan_text(post_edit))
 
         result = handler.handle(edit)
 
@@ -1631,9 +1633,11 @@ class TestGroundTruthSnapshotResolution:
         edit = self._edit_hook_input(
             plan, old_string="Not Started", new_string="In Progress", tool_use_id="tu-m4d"
         )
-        # RV4-m2: the recorded hash must match the REAL pre-edit text for
-        # the snapshot to be trusted as fresh.
-        plan_status_snapshots.record("tu-m4d", PlanStatus.NOT_STARTED, hash_plan_text(pre_edit))
+        # RV5-M2: the recorded hash is of the PREDICTED post-image (what
+        # this same edit, applied forward, produces) -- here that is
+        # exactly the text already written to disk above.
+        post_edit = pre_edit.replace("Not Started", "In Progress")
+        plan_status_snapshots.record("tu-m4d", PlanStatus.NOT_STARTED, hash_plan_text(post_edit))
 
         result = handler.handle(edit)
 
@@ -1796,6 +1800,192 @@ class TestGroundTruthSnapshotResolution:
             "the stale snapshot from before S2's real flip was trusted "
             "instead of discarded, and S1's dispatch re-armed P's ledger "
             "entry as though it were a fresh flip"
+        )
+
+    # ---- RV5-M2: time-free freshness (probe_gf5_timebound.py's T1/T3/T4/T7) --
+
+    def test_snapshot_freshness_never_consults_the_clock(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """RV5-M2 / 'the bound never expires' mutant: ``_snapshot_is_fresh``
+        is a pure hash comparison now, with no wall-clock or monotonic-
+        clock read anywhere in it -- pinned directly (not through the full
+        ``handle()`` flow, which legitimately calls ``time.time()`` of its
+        OWN, for the signal file's timestamp field, once a flip is already
+        decided) by making every clock read raise and calling it with both
+        a matching and a mismatching snapshot."""
+        from claude_code_hooks_daemon.plan_qa.model import PlanStatus
+        from claude_code_hooks_daemon.utils.plan_status_snapshot import (
+            PlanStatusSnapshot,
+            hash_plan_text,
+        )
+
+        def _boom(*_a: object, **_kw: object) -> float:
+            raise AssertionError("RV5-M2: freshness must never consult a clock")
+
+        monkeypatch.setattr("time.time", _boom)
+        monkeypatch.setattr("time.monotonic", _boom)
+
+        fresh = PlanStatusSnapshot(PlanStatus.NOT_STARTED, hash_plan_text("post"))
+        stale = PlanStatusSnapshot(PlanStatus.NOT_STARTED, hash_plan_text("something else"))
+
+        assert GoalInjectionHandler._snapshot_is_fresh("post", fresh) is True
+        assert GoalInjectionHandler._snapshot_is_fresh("post", stale) is False
+
+    def test_t1_replace_all_bulk_flip_survives_an_arbitrary_pre_post_gap(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """probe_gf5_timebound.py T1: a genuine bulk ``replace_all`` flip,
+        with an unrelated table cell that already reads "In Progress"
+        before AND after (so reconstruction alone is ambiguous, RV3-m1).
+        The store carries no time field at all (see
+        ``test_snapshot_freshness_never_consults_the_clock`` above), so
+        this is the same test at any Pre -> Post gap, including past the
+        OLD 5 s bound (T1's 6 s case) -- however long a person takes to
+        answer a permission prompt cannot matter here."""
+        from claude_code_hooks_daemon.plan_qa.model import PlanStatus
+        from claude_code_hooks_daemon.utils.plan_status_snapshot import (
+            hash_plan_text,
+            plan_status_snapshots,
+        )
+
+        plan = self._plan_path("00300-c")
+        pre_edit = "# Plan 00300: c\n\n**Status**: Not Started\n\n| 1.1 | Not Started |\n"
+        post_edit = pre_edit.replace("Not Started", "In Progress")
+        plan.write_text(pre_edit, encoding="utf-8")
+        plan_status_snapshots.record("tu-t1", PlanStatus.NOT_STARTED, hash_plan_text(post_edit))
+
+        plan.write_text(post_edit, encoding="utf-8")
+        edit = self._edit_hook_input(
+            plan, old_string="Not Started", new_string="In Progress", tool_use_id="tu-t1"
+        )
+        edit["tool_input"]["replace_all"] = True
+
+        result = handler.handle(edit)
+
+        assert result.decision == Decision.ALLOW
+        assert self._signal_path().exists(), (
+            "the genuine bulk flip must be detected via the snapshot's hash "
+            "match, with no clock read anywhere in the freshness path"
+        )
+
+    def test_t3_write_with_unchanged_status_is_not_a_flip(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """probe_gf5_timebound.py T3: P already reads In Progress on disk
+        (its flip landed while nothing was watching) and is not yet
+        ledgered; S1 rewrites it with the Write tool WITHOUT changing its
+        Status. The snapshot's ground truth (status already In Progress
+        pre-write, predicted post-image unchanged) must read this as no
+        transition at all -- not misread as N3's original bug (a bogus
+        flip, a GOAL DISPLACED advisory, a spurious ledger entry)."""
+        from claude_code_hooks_daemon.plan_qa.model import PlanStatus
+        from claude_code_hooks_daemon.utils.plan_status_snapshot import (
+            hash_plan_text,
+            plan_status_snapshots,
+        )
+
+        plan = self._plan_path("00300-p")
+        pre_edit = "# Plan 00300: p\n\n**Status**: In Progress\n\n## Tasks\n\n- [ ] a\n"
+        plan.write_text(pre_edit, encoding="utf-8")
+        post_edit = pre_edit + "\nA note.\n"
+        plan_status_snapshots.record("tu-t3", PlanStatus.IN_PROGRESS, hash_plan_text(post_edit))
+
+        plan.write_text(post_edit, encoding="utf-8")
+        result = handler.handle(
+            {
+                "tool_name": "Write",
+                "tool_input": {"file_path": str(plan), "content": post_edit},
+                "session_id": "S1",
+                "tool_use_id": "tu-t3",
+            }
+        )
+
+        assert result.decision == Decision.ALLOW
+        assert not result.context, "a same-status rewrite must not raise a goal advisory"
+        assert not self._signal_path("S1").exists(), (
+            "S1 only rewrote P's body -- Status never changed, so S1 must "
+            "not receive a /goal for a plan it never actually flipped"
+        )
+
+    def test_t4_write_reopening_a_complete_plan_is_a_genuine_flip(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """probe_gf5_timebound.py T4: P was flipped and committed In
+        Progress, then completed (uncommitted) -- git HEAD still reads In
+        Progress. S1 reopens P with a Write that sets it back to In
+        Progress: a REAL Complete -> In Progress flip. The inference
+        fallback would read this as no-transition (HEAD already says In
+        Progress, RV3-m6's exact lag); the snapshot's ground truth (status
+        was Complete immediately pre-write) must still catch it correctly,
+        with no clock involved."""
+        from claude_code_hooks_daemon.plan_qa.model import PlanStatus
+        from claude_code_hooks_daemon.utils.plan_status_snapshot import (
+            hash_plan_text,
+            plan_status_snapshots,
+        )
+
+        plan = self._plan_path("00300-p")
+        pre_edit = "# Plan 00300: p\n\n**Status**: Complete\n\n## Tasks\n\n- [ ] a\n"
+        plan.write_text(pre_edit, encoding="utf-8")
+        post_edit = (
+            pre_edit.replace("**Status**: Complete", "**Status**: In Progress") + "\nReopened.\n"
+        )
+        plan_status_snapshots.record("tu-t4", PlanStatus.COMPLETE, hash_plan_text(post_edit))
+
+        plan.write_text(post_edit, encoding="utf-8")
+        result = handler.handle(
+            {
+                "tool_name": "Write",
+                "tool_input": {"file_path": str(plan), "content": post_edit},
+                "session_id": "S1",
+                "tool_use_id": "tu-t4",
+            }
+        )
+
+        assert result.decision == Decision.ALLOW
+        assert self._signal_path("S1").exists(), (
+            "reopening a Complete plan back to In Progress is a genuine "
+            "flip -- S1 must get a /goal naming it, regardless of what git "
+            "HEAD (still In Progress from before the completion) would "
+            "have implied via the inference fallback"
+        )
+
+    def test_t7_deletion_edit_is_resolved_by_the_snapshot(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """probe_gf5_timebound.py T7: a deletion Edit (``new_string=""``)
+        yields NO reconstruction candidates at all
+        (:func:`_reconstruct_pre_edit_candidates` returns ``[]`` for it),
+        so the OLD reverse-reconstruction design could never judge its
+        snapshot's freshness and silently fell back to the (now-removed)
+        time bound. RV5-M2's forward prediction needs no reversal -- it
+        just applies the deletion forward -- so a deletion Edit is resolved
+        exactly like any other shape."""
+        from claude_code_hooks_daemon.plan_qa.model import PlanStatus
+        from claude_code_hooks_daemon.utils.plan_status_snapshot import (
+            hash_plan_text,
+            plan_status_snapshots,
+        )
+
+        plan = self._plan_path("00300-p")
+        pre_edit = "# Plan 00300: p\n\n**Status**: Not Started\n\n- [ ] a\n"
+        post_edit = pre_edit.replace("- [ ] a\n", "")
+        plan.write_text(pre_edit, encoding="utf-8")
+        plan_status_snapshots.record("tu-t7", PlanStatus.NOT_STARTED, hash_plan_text(post_edit))
+
+        plan.write_text(post_edit, encoding="utf-8")
+        edit = self._edit_hook_input(
+            plan, old_string="- [ ] a\n", new_string="", tool_use_id="tu-t7"
+        )
+
+        result = handler.handle(edit)
+
+        assert result.decision == Decision.ALLOW
+        assert not self._signal_path().exists(), (
+            "deleting a checklist line never touches Status -- must not be "
+            "misread as a flip just because the deletion Edit has no "
+            "reconstruction candidates"
         )
 
 
@@ -2418,41 +2608,72 @@ class TestReview4Fixes(_ReassertionFixtures):
         )
         assert "00298" in joined
 
-    def test_completing_session_is_refreshed_even_if_the_ledger_names_no_owner(
+    def test_a_non_owner_completer_gets_no_goal(self, handler: GoalInjectionHandler) -> None:
+        """RV5-M1/K1: U never owned 00296 and has no goal of its own. U
+        completing 00296 (a teammate's Plan Completion Checklist box) while
+        00298 is still live must NOT hand U a `/goal` naming 00298 -- U
+        never had a stake in either plan, and nothing later would ever
+        retract it (main's behaviour: no signal at all)."""
+        a = self._plan_path("00296-a")
+        b = self._plan_path("00298-b")
+        a.write_text(_plan_md("In Progress"), encoding="utf-8")
+        b_not_started = "# Plan 00298: b\n\n**Status**: Not Started\n\n## Tasks\n\ncounter: 0\n"
+        b.write_text(b_not_started, encoding="utf-8")
+        handler.handle(
+            self._edit_input(a, "S2", "**Status**: Not Started", "**Status**: In Progress")
+        )
+        # PostToolUse dispatches AFTER the tool already landed the edit, so
+        # b's on-disk content must already read the POST-edit ("In
+        # Progress") state before this call -- otherwise `new_string` is
+        # not found in the post-edit text and the reconstruction check
+        # reads this as "not a transition" (B silently never goes live).
+        b.write_text(b_not_started.replace("Not Started", "In Progress"), encoding="utf-8")
+        handler.handle(
+            self._edit_input(b, "S3", "**Status**: Not Started", "**Status**: In Progress")
+        )
+
+        a.write_text(_plan_md("Complete"), encoding="utf-8")
+        handler.handle(self._edit_input(a, "U", "**Status**: In Progress", "**Status**: Complete"))
+
+        assert not self._intent_path("U").exists(), (
+            "U never owned 00296 -- completing it must not hand U a /goal "
+            "for 00298 or any other plan"
+        )
+        assert not self._clear_path("U").exists()
+
+        # And that must hold PERMANENTLY, not just until the next retirement:
+        b.write_text(_plan_md("Complete"), encoding="utf-8")
+        handler.handle(self._edit_input(b, "S3", "**Status**: In Progress", "**Status**: Complete"))
+
+        assert not self._intent_path("U").exists(), (
+            "U must still have no goal after 00298 also completes -- RV5-M1's "
+            "regression left U permanently naming a plan it never owned"
+        )
+
+    def test_a_manual_goal_survives_an_unrelated_plans_completion(
         self, handler: GoalInjectionHandler
     ) -> None:
-        """Direction point 1: the completing write's own session_id is
-        always included in the refresh set, even in the (should-not-
-        happen-after-the-fix-above, but defended anyway) case where the
-        ledger's owner set does not name it."""
-        plan = self._plan_path("00296-a")
-        plan.write_text(_plan_md("In Progress"), encoding="utf-8")
+        """RV5-M1/K2: U holds a manually injected goal for 00400
+        (`inject-goal`, no ledger entry). U then completes 00296, the only
+        LEDGERED live plan. U's manual goal must be left completely
+        untouched -- U was never an owner of 00296, so this retirement has
+        no business touching U's signal at all."""
+        a = self._plan_path("00296-a")
+        a.write_text(_plan_md("In Progress"), encoding="utf-8")
         handler.handle(
-            self._edit_input(plan, "L", "**Status**: Not Started", "**Status**: In Progress")
+            self._edit_input(a, "S2", "**Status**: Not Started", "**Status**: In Progress")
         )
+        write_goal_signal("U", "00400", "manual goal for 00400", _SOURCE_CLI)
 
-        # Deliberately corrupt the on-disk ledger's ownership for this one
-        # entry, through the public JSON surface rather than a private
-        # method, so the ledger's owner set no longer names "L" at all.
-        ledger_path = self._untracked / LEDGER_FILENAME
-        raw = json.loads(ledger_path.read_text(encoding="utf-8"))
-        raw["entries"][0]["sessions"] = []
-        raw["entries"][0]["primary_owner"] = None
-        # _parse_entry back-fills `sessions` from `session_id` for a
-        # pre-RV-M1 ledger shape when `sessions` is empty -- blank that
-        # too, or this corruption is silently undone on the next read.
-        raw["entries"][0]["session_id"] = ""
-        ledger_path.write_text(json.dumps(raw), encoding="utf-8")
+        a.write_text(_plan_md("Complete"), encoding="utf-8")
+        handler.handle(self._edit_input(a, "U", "**Status**: In Progress", "**Status**: Complete"))
 
-        plan.write_text(_plan_md("Complete"), encoding="utf-8")
-        handler.handle(
-            self._edit_input(plan, "L", "**Status**: In Progress", "**Status**: Complete")
+        assert not self._clear_path("U").exists(), (
+            "U's manual inject-goal signal must not be cleared by a plan U "
+            "never owned completing"
         )
-
-        assert self._clear_path("L").exists(), (
-            "the completing session's own signal must be refreshed even "
-            "when the ledger's owner set does not name it"
-        )
+        signal = self._signal("U")
+        assert signal["rendered_lines"] == ["manual goal for 00400"]
 
     def test_terminal_transition_ignores_a_fenced_in_progress_example_in_the_post_edit_text(
         self, handler: GoalInjectionHandler
@@ -2480,7 +2701,16 @@ class TestReview4Fixes(_ReassertionFixtures):
         example's byte-identical Status line would otherwise also trip
         RV3-m1's per-candidate uniqueness filter there, which is a
         different, already-pinned defence (C7b/C8) and not what this test
-        targets."""
+        targets.
+
+        RV5-m5: ``old_string='**Status**: In Progress'`` occurs TWICE in
+        this plan's own pre-edit text (the real line and the fenced
+        example) -- a real Edit tool call with a non-unique ``old_string``
+        is REJECTED before this handler ever sees it, so that shape is not
+        a call this handler needs to survive. The edit below instead uses
+        ``old_string='**Status**: In Progress\\n\\nExample'``, unique in
+        the pre-edit text, so this pin exercises the same genuine snapshot
+        (hash) path a real Edit call would take."""
         from claude_code_hooks_daemon.plan_qa.model import PlanStatus
         from claude_code_hooks_daemon.utils.plan_status_snapshot import (
             hash_plan_text,
@@ -2498,17 +2728,16 @@ class TestReview4Fixes(_ReassertionFixtures):
             "# Plan 00296: a\n\n**Status**: In Progress\n\n"
             "Example:\n\n```markdown\n**Status**: In Progress\n```\n\nBody.\n"
         )
-        plan.write_text(
-            pre_edit.replace(
-                "**Status**: In Progress\n\nExample",
-                "**Status**: Complete\n\nExample",
-            ),
-            encoding="utf-8",
-        )
+        old_string = "**Status**: In Progress\n\nExample"
+        new_string = "**Status**: Complete\n\nExample"
+        post_edit = pre_edit.replace(old_string, new_string)
+        plan.write_text(post_edit, encoding="utf-8")
+        # RV5-M2: the recorded hash is of the PREDICTED post-image, which
+        # is exactly what the write above just landed on disk.
         plan_status_snapshots.record(
-            "tu-rv3m2-pin", PlanStatus.IN_PROGRESS, hash_plan_text(pre_edit)
+            "tu-rv3m2-pin", PlanStatus.IN_PROGRESS, hash_plan_text(post_edit)
         )
-        edit_input = self._edit_input(plan, "L", "**Status**: In Progress", "**Status**: Complete")
+        edit_input = self._edit_input(plan, "L", old_string, new_string)
         edit_input["tool_use_id"] = "tu-rv3m2-pin"
         handler.handle(edit_input)
 
@@ -2517,4 +2746,42 @@ class TestReview4Fixes(_ReassertionFixtures):
             "text made the retirement refresh look skippable -- the real "
             "(non-fenced) Status line reads Complete and must still "
             "retract L's own signal"
+        )
+
+    def test_a_retirement_refreshed_owner_becomes_an_owner_of_the_plans_its_text_names(
+        self, handler: GoalInjectionHandler
+    ) -> None:
+        """RV5-m4/K4: S1 flips A (00296), S3 flips B (00298). S1 completes
+        A while B is still live -- the retirement refresh writes S1's
+        combined text naming B, but (before this fix) never made S1 an
+        OWNER of B. So B's own later completion left S1 stale, still
+        naming a plan long since retired -- breaking RV3-m3's own
+        invariant that a session reading a plan's number in its own text
+        is refreshed when that plan completes."""
+        a = self._plan_path("00296-a")
+        b = self._plan_path("00298-b")
+        a.write_text(_plan_md("In Progress"), encoding="utf-8")
+        b_not_started = "# Plan 00298: b\n\n**Status**: Not Started\n\n## Tasks\n\ncounter: 0\n"
+        b.write_text(b_not_started, encoding="utf-8")
+        handler.handle(
+            self._edit_input(a, "S1", "**Status**: Not Started", "**Status**: In Progress")
+        )
+        # PostToolUse dispatches AFTER the tool already landed the edit --
+        # b's on-disk content must read the POST-edit state first.
+        b.write_text(b_not_started.replace("Not Started", "In Progress"), encoding="utf-8")
+        handler.handle(
+            self._edit_input(b, "S3", "**Status**: Not Started", "**Status**: In Progress")
+        )
+
+        a.write_text(_plan_md("Complete"), encoding="utf-8")
+        handler.handle(self._edit_input(a, "S1", "**Status**: In Progress", "**Status**: Complete"))
+        joined = self._signal("S1")["rendered_lines"][0]
+        assert "00298" in joined  # sanity: S1's combined text names B
+
+        b.write_text(_plan_md("Complete"), encoding="utf-8")
+        handler.handle(self._edit_input(b, "S3", "**Status**: In Progress", "**Status**: Complete"))
+
+        assert self._clear_path("S1").exists(), (
+            "S1's combined text named B -- S1 must have been made an owner "
+            "of B, so B's own completion retracts S1's now-stale signal"
         )

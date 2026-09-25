@@ -51,10 +51,29 @@ class TestPlanStatusSnapshotHandler:
     def _hook_input(
         self, file_path: Path, tool: str = "Edit", *, tool_use_id: str = "tu-1"
     ) -> dict[str, Any]:
-        hook_input: dict[str, Any] = {
-            "tool_name": tool,
-            "tool_input": {"file_path": str(file_path)},
-        }
+        """RV5-M2: ``would_be_content`` needs a real, present ``old_string``
+        to predict anything for an Edit, so this reads whatever is
+        currently on disk and builds a no-op-shaped edit (replace the
+        first line with itself) -- these tests are about the STATUS/found
+        recording, not the prediction mechanics, which get their own
+        dedicated tests below. The read is best-effort: a test that
+        monkeypatches ``Path.read_text`` to raise (the EACCES pin) must
+        still be able to build SOME hook input, so an unreadable file
+        here falls back to empty content rather than failing the helper
+        itself -- the handler under test does its own independent read
+        and is what actually exercises that failure."""
+        try:
+            current = file_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            current = ""
+        tool_input: dict[str, Any] = {"file_path": str(file_path)}
+        if tool == "Write":
+            tool_input["content"] = current
+        elif tool == "Edit":
+            first_line = current.splitlines()[0] if current else " "
+            tool_input["old_string"] = first_line
+            tool_input["new_string"] = first_line
+        hook_input: dict[str, Any] = {"tool_name": tool, "tool_input": tool_input}
         if tool_use_id:
             hook_input["tool_use_id"] = tool_use_id
         return hook_input

@@ -906,10 +906,16 @@ RV4-n1 through RV4-n7)**, fixed together (report:
 - **RV4-m6 — the daemon needed an actual restart and doc regeneration in
   THIS pass, not a stale claim that a previous pass already did it.** Ran
   `bin/hooks-daemon restart` then `bin/hooks-daemon regenerate-docs`;
-  both `CLAUDE.md` and `.claude/HOOKS-DAEMON.md` were already correct
-  (no diff), so this pass's commit carries no doc changes from this step,
-  but the claim in RV3-n4 above is now genuinely true rather than
-  asserted.
+  `CLAUDE.md` was already correct (no diff) at this point. **Correction
+  (this claim was wrong when first written):** `.claude/HOOKS-DAEMON.md`
+  was NOT already correct — the full-suite fallout later in this same
+  pass (`test_real_repository_handler_doc_is_fresh`, below) found it
+  still missing `plan_status_snapshot`'s row and handler count, because
+  `regenerate-docs` here talks to the already-running daemon's in-memory
+  handler registry rather than a fresh reimport. A plain
+  `bin/hooks-daemon generate-docs` afterwards is what actually fixed it.
+  The claim in RV3-n4 above is genuinely true only as of that later step,
+  not this one.
 - **RV4-m7 — documentation drift, corrected:** `HANDLER_REFERENCE.md`'s
   `goal_injection` entry described the OLD state-based trigger
   ("STATE-based … not transition-based") contradicting what N3 actually
@@ -930,11 +936,16 @@ RV4-n1 through RV4-n7)**, fixed together (report:
   asserting it unconditionally. `auto_continue_stop`'s existing
   "Fail-open: a missing or unreadable ledger" claim (`HANDLER_REFERENCE.md`
   line ~3662) was re-verified rather than reworded — `live_plan_numbers`
-  already catches `LedgerUnreadable` explicitly, and RV4-m3 is what makes
-  that catch actually complete (an `EACCES` no longer escapes it
-  unwrapped). `PLAN.md`'s N3 row, shown as ✅ Remedied, corrected back to
-  🔄 In progress per team-lead's standing instruction that it stays there
-  until merged.
+  already catches `LedgerUnreadable` explicitly. **Correction (this claim
+  was wrong when first written): RV4-m3 did NOT make that catch complete.**
+  It fixed only `_load_raw`'s own existence check; `_plan_state` and
+  `_find_plan_md_text` — `live_plan_numbers`' own siblings, reached via
+  `_reconcile` on every call — kept a raw `PLAN.md.is_file()` outside
+  their try, so an `EACCES` on a search-denied plan folder still escaped
+  `live_plan_numbers` unwrapped. Not fixed until RV5-m6 below (see
+  review-5's entry). `PLAN.md`'s N3 row, shown as ✅ Remedied, corrected
+  back to 🔄 In progress per team-lead's standing instruction that it
+  stays there until merged.
 - **RV4-n1 — see above** (folded into the RV3-n3 entry it follows
   directly, for locality with what it corrects).
 - **RV4-n2 — `GoalInjectionHandler.matches()`/`handle()` re-implemented
@@ -1021,6 +1032,202 @@ report itself):**
   pick this up (talks to the already-running daemon's in-memory handler
   registry, not a fresh reimport); a plain `bin/hooks-daemon generate-docs`
   run afterwards did. Regenerated again; committed alongside this pass.
+
+**Fifth review pass (review-5, `260925-goal-flip-review5-opus-5-5.md`) — 3
+majors, 6 minors, 5 nits, all fixed with a RED test first for each:**
+
+- **RV5-M1 — the RV4-M1 fix was itself a NEW regression against main.**
+  `_maybe_refresh_on_retirement`'s unconditional `if session_id and session_id not in owners: owners = [*owners, session_id]` handed a
+  `/goal` to a session that never owned the completing plan (K1: a
+  non-owner teammate ticking a Plan Completion Checklist box got a goal
+  for an unrelated live plan, PERMANENTLY — nothing later retracts it),
+  and could WIPE a session's own manually-injected goal (K2: `inject-goal 00400` cleared by an unrelated plan's completion). Fixed: removed the
+  unconditional add entirely — only an owner the ledger already names is
+  refreshed. `primary_owner` pinning (RV4-M1) alone still fixes the
+  original E2 scenario (the flipper survives absorption past the owner
+  cap); nothing else was needed for that case. Pinned by
+  `test_a_non_owner_completer_gets_no_goal` and
+  `test_a_manual_goal_survives_an_unrelated_plans_completion`
+  (`test_goal_injection.py`), both confirmed RED against the reverted
+  unconditional-add line before the fix.
+- **RV5-m4 (paired with RV5-M1) — the retirement-refresh fan-out never
+  registered a refreshed owner as an OWNER of the other plans its own
+  freshly rewritten text named.** So a session refreshed by one plan's
+  retirement, whose combined text now names a SECOND still-live plan,
+  never got retracted when THAT plan later completed (K4) — the fan-out
+  path never applied RV3-m3's `_extend_ownership` the flip path already
+  has. Fixed: `GoalLedger.add_owners(sessions, plan_numbers)`, a new
+  BATCHED method registering every refreshed owner as an owner of every
+  plan its combined text names, under ONE lock/save (not
+  `len(sessions)*len(plans)` individual `reassert_session` calls).
+  Pinned by
+  `test_a_retirement_refreshed_owner_becomes_an_owner_of_the_plans_its_text_names`,
+  confirmed RED with the `add_owners` call temporarily disabled.
+- **RV5-M2 — the RV4-m2 5 s recency bound was fundamentally broken, in
+  both directions.** PreToolUse runs BEFORE Claude Code's permission
+  prompt, so ANY prompt a person takes longer than 5 s to answer made a
+  genuinely-correct snapshot look "stale" and fall back to inference —
+  reproducing N3's original bug (T1: a real `replace_all` flip missed
+  after 6 s; T3/T4: a Write misread after 6 s). A BACKWARD clock step
+  (T5) had the opposite failure: it could make an arbitrarily stale
+  snapshot look fresh. Fixed by removing the time bound ENTIRELY —
+  team-lead's own instruction, over the review report's softer "use
+  `time.monotonic()`" suggestion: the store's orphan-eviction is now
+  bounded purely by entry count (`_MAX_ENTRIES=256`, FIFO on a full
+  store), never by a clock of either kind, which also resolves T5 as a
+  side effect (no clock logic left to exploit). Freshness itself is now a
+  pure hash comparison: the Pre handler PREDICTS the post-write text by
+  applying the same Write/Edit FORWARD to the pre-write text it just read
+  (reusing the existing shared `would_be_content` helper, already used by
+  three other handlers, rather than inventing a parallel
+  implementation), records the hash of that prediction; the Post handler
+  hashes the REAL post-edit text and compares directly — no
+  reconstruction, no clock, and it handles a deletion Edit (T7,
+  `new_string=""`) uniformly, which the OLD reverse-reconstruction design
+  could not (`_reconstruct_pre_edit_candidates` returned `[]` for it).
+  `PlanStatusSnapshot.text_hash`/`recorded_at` renamed/removed to
+  `predicted_post_hash`; `PlanStatusSnapshotStore`'s `ttl_seconds`
+  constructor param and `TestTtlExpiry` removed outright (the whole
+  premise is gone). New tests:
+  `test_snapshot_freshness_never_consults_the_clock` (the "bound never
+  expires" mutant's kill — confirmed RED by temporarily reinserting a
+  `time.time()` call into `_snapshot_is_fresh`, then reverted),
+  `test_t1_replace_all_bulk_flip_survives_an_arbitrary_pre_post_gap`,
+  `test_t3_write_with_unchanged_status_is_not_a_flip`,
+  `test_t4_write_reopening_a_complete_plan_is_a_genuine_flip`,
+  `test_t7_deletion_edit_is_resolved_by_the_snapshot` (all in
+  `test_goal_injection.py`). RV5-m5's test-gap items folded in here: the
+  RV3-m2 pin test's `old_string` was non-unique in its own pre-image (the
+  real Status line and a fenced example both read
+  `**Status**: In Progress`) — a real Edit tool call with that shape is
+  REJECTED before this handler ever sees it — rewritten to use a unique
+  `old_string` so it genuinely exercises the hash path instead of an
+  Edit call that could never happen.
+- **RV5-M3 — the `_KNOWN_EDGES` entry this pass's own prior session added
+  for `utils/plan_status_snapshot.py -> plan_qa.model` was itself a NEW
+  ratchet violation** (`test_qa_package_dependency_direction.py`'s
+  allowlist: "Shrink this list when one goes; never grow it to make a
+  new edge pass"). Unlike `goal_ledger.py`'s grandfathered entry (predates
+  the ratchet, does REAL `PlanDoc` parsing), `plan_status_snapshot.py`
+  only imported `PlanStatus` to annotate a dataclass field — no plan-text
+  parsing of its own. Fixed per team-lead's simplification of the
+  report's three options ("store `status.value` as a plain string, or
+  make the store generic; do not move the module"): `PlanStatusSnapshot. status` is now a plain `str | None` (the status VALUE, not the enum);
+  the Pre handler converts at its own boundary (`status.value`),
+  `goal_injection` rehydrates at its own boundary (`PlanStatus(value)`)
+  — both of those modules already import `plan_qa.model` for other
+  reasons and sit outside the ratcheted `utils`/`docs_qa` trees, so the
+  import moves to where it was always legitimate. The `_KNOWN_EDGES`
+  entry and its module docstring's "six ... five that remain" count
+  corrected to match.
+- **RV5-m1 — `plan_status_snapshot`'s "harmless when goal_injection is
+  off" claim was false.** `get_relevance()` is NOT a runtime gate — its
+  only caller is `daemon/cli.py`'s `optimise` command (the
+  config-optimisation REVIEW), never real dispatch, and `matches()`
+  doesn't consult it either. So the handler genuinely runs (a file read,
+  a `PlanDoc.parse`, a SHA-256 hash) on EVERY active plan's `PLAN.md`
+  write in EVERY client where it is enabled (the shipped default),
+  whether or not `goal_injection` is enabled and whether or not a ccy
+  supervisor is armed. No existing primitive in this codebase lets one
+  handler read another's resolved enabled-state at runtime (`Handler. depends_on` is stored but has zero consumers anywhere in `src/` — not a
+  real option, confirmed by grep), so building genuine cross-handler
+  gating would be a much larger architecture change than a minor finding
+  warrants. Took team-lead's explicit alternative instead: corrected the
+  module docstring and `get_claude_md()` to state the true, unconditional
+  cost plainly, and to drop the stale "TTL'd" description (RV5-M2 removed
+  the TTL).
+- **RV5-m2 — registration docs were missing.** Added
+  `handlers.pre_tool_use.plan_status_snapshot` to
+  `CLAUDE/UPGRADES/UNRELEASED/config-changes/v3.67.0.yaml` and a full
+  entry plus summary-table row to `docs/guides/HANDLER_REFERENCE.md`
+  (RV4-m4 already asked for the latter and it was never done).
+  `check_handler_reference.py`, `check_generated_doc_drift.py` and
+  `check_doc_truth.py` all still pass after adding these.
+- **RV5-m3/K3 — a resumed lead under a NEW session id is still
+  evictable, and the release note over-claimed otherwise.** The
+  `primary_owner` pin (RV4-M1) protects only the ORIGINAL flipping
+  session's id; a lead that resumes under a genuinely different id and
+  reasserts ownership is an absorbed owner like any other, subject to the
+  same FIFO cap as 50 teammates ticking a box. Team-lead's own fallback
+  instruction: "Fix it if the payload gives you a stable link... If there
+  is truly no signal, correct the release note... and record the
+  reasoning in NIGGLES." **Researched and confirmed no such signal
+  exists**: grepped this codebase for any existing session-lineage
+  concept (`parent_session_id`, `previous_session_id`, `lineage`,
+  `resumed_from`, `prior_session`, `session_lineage`) — none found.
+  Checked the vendored `hooks.md` docs for any hook-payload field linking
+  a resumed session's new id back to an old one — PostToolUse carries
+  only `session_id` and `transcript_path`; no parent/previous-session
+  field is documented anywhere. So there is genuinely nothing to key a
+  fix on without fabricating a link the daemon cannot verify — a fix here
+  would be a guess dressed as a fix. Corrected release note 13's "can
+  never evict the one session that most needs its own signal refreshed"
+  claim to name this limitation precisely (the pin is keyed on the
+  flipping session's OWN id, not a resumed one), rather than either
+  silently leaving the over-claim or inventing an unreliable fix.
+- **RV5-m5 — see RV5-M2 above** (the RV3-m2 pin rewrite folded in
+  there); the second half, "kill the `primary_owner` reassignment
+  mutant" (`goal_ledger.py`'s `record_emission` re-emission branch
+  handing `primary_owner` to the re-emitter), addressed separately — see
+  the dedicated entry below.
+- **RV5-m6 — doc over-claims, several distinct ones, each corrected
+  where found rather than in one place:** (1) release note 13's snapshot
+  match-check description updated for RV5-M2's forward-prediction design
+  (was: "a content hash of the text it read"; now: "a content hash of
+  the text it PREDICTS ... will produce", with the no-time-bound
+  behaviour stated explicitly). (2) release note 13's terminal-drop
+  bullet reworded to drop RV4-M1's now-REMOVED "including the completing
+  session itself, always, even ... the ledger's own owner set does not
+  (yet) name it" claim (RV5-M1 removed that behaviour) and to describe
+  RV5-m4's batched cross-plan ownership instead. (3) release note 13's
+  cap description corrected per RV5-m3/K3 above. (4) `NIGGLES.md`'s own
+  RV4-m3/RV4-m7 entries corrected in place, above — see the two
+  "Correction (this claim was wrong when first written)" notes. (5)
+  `plan_status_snapshot.py`'s "harmless" claim — see RV5-m1 above. Also
+  fixed as part of this item, the actual `EACCES` gap the RV4-m7 entry's
+  false claim had papered over: `goal_ledger.py`'s `_plan_state` and
+  `_find_plan_md_text` kept a raw `PLAN.md.is_file()` outside their own
+  try (RV4-m3 fixed only `_load_raw`'s equivalent) — a live ledgered
+  plan whose folder denies search escaped `live_plan_numbers` as a raw,
+  unwrapped `PermissionError`. Fixed with the same
+  `path_is_file(unreadable_means=True)` pattern RV4-m3 established;
+  pinned by
+  `test_live_plan_numbers_does_not_raise_on_eacces_from_plan_md_is_file`,
+  confirmed RED against a reverted raw `is_file()` call.
+- **RV5-n1 — the consolidated `# nosec` at `tests/support/git_fixtures. py:17` suppresses NOTHING** (bandit only scans `src/`, never `tests/`
+  — confirmed via `scripts/qa/run_security_check.sh`/`pyproject.toml`),
+  so it was inert in all three OLD per-file locations too, before RV4-n4
+  consolidated them. Net change vs main is 3→1 suppressions, not
+  "removed" as an earlier NIGGLES entry (RV4-n4, above) implied — noted
+  here rather than reworded there, since RV4-n4's own description of
+  what it DID (extracted one shared helper) is still accurate; only the
+  "3→0" framing this later review corrects was implicit, not stated.
+- **RV5-n2 — the legacy `primary_owner` back-fill
+  (`goal_ledger.py:423-427`) uses `session_id`, the field for the LAST
+  re-emitter, not the original creator.** A documented approximation
+  that applies only to pre-upgrade entries (every NEW entry sets
+  `primary_owner` at creation, correctly). Left as-is; the imprecision
+  was already named in the surrounding comment, so this is a
+  confirmation, not a fix.
+- **RV5-n3 — a directory literally named `PLAN.md` records `status=None`
+  ("no prior status") via `path_is_file` correctly answering `False` for
+  a directory.** Harmless: the real Write this models would itself fail
+  (a directory cannot be written as a file), so no Post ever fires to
+  consume the recorded `None`. No functional fix needed; noted as an
+  intentionally benign edge case.
+- **RV5-n4 — the RV5-M2-era docstrings (`utils/plan_status_snapshot.py`'s
+  module docstring, `_snapshot_is_fresh`) narrate the RV4-m2 → RV5-M2
+  design transition at some length.** Rationale keyed to a failure mode
+  (the old bound's exact break, T1/T5) is allowed per `comment_changelog`
+  — this is not a version changelog — but the reviewer's own softer
+  framing ("adds length") was taken as a signal to keep it as-is rather
+  than trim further: the transition explanation is load-bearing for
+  understanding why the design has NO time-based logic at all, which a
+  future reviewer would otherwise reasonably reintroduce.
+- **RV5-n5 — `probe_gf4_threads2.py` breaking (2-argument `record()`
+  calls, now 3-argument) is confirmed NOT a defect** — the reviewer's own
+  report already states this explicitly ("superseded by
+  `probe_gf5_threads.py`"); no action taken.
 
 ### N2 — `setup_worktree.sh` tells every agent to run the full suite through `run_all.sh`
 

@@ -30,10 +30,20 @@ config, so genuine "on wherever goal_injection is on" coupling is not
 achievable through this mechanism -- the closest correct approximation is to
 make this handler's OWN default effectively unconditional, so an operator
 who enables ONLY `goal_injection` still gets ground-truth snapshots instead
-of silently falling back to inference on every write. Harmless when
-`goal_injection` is off: `get_relevance` still gates it to an armed ccy PTY
-supervisor, and an unconsumed snapshot just ages out of the bounded, TTL'd
-store. Never blocks, never denies.
+of silently falling back to inference on every write.
+
+RV5-m1: this genuinely runs -- a file read, a `PlanDoc.parse`, a SHA-256
+hash -- on EVERY active plan's `PLAN.md` Write/Edit in EVERY client where
+this handler is enabled (the shipped default), whether or not
+`goal_injection` is enabled and whether or not a ccy supervisor is armed.
+`get_relevance` (below) is NOT a runtime gate: it is consulted only by the
+config-optimisation REVIEW (`daemon/cli.py`'s `optimise` command), never by
+real dispatch, and `matches()` does not consult it either. The cost per
+write is modest (bounded by plan-file size, no network, no lock contention
+beyond the shared store's own), and an unconsumed snapshot is bounded by
+`max_entries` (RV5-M2), never by time -- but "harmless" previously
+overstated this as conditional on `goal_injection` or the supervisor being
+armed, which it never was. Never blocks, never denies.
 """
 
 import logging
@@ -44,6 +54,7 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputF
 from claude_code_hooks_daemon.core import Decision, GatingResult
 from claude_code_hooks_daemon.core.handler_bases import PreToolUseHandlerBase
 from claude_code_hooks_daemon.core.relevance import Relevance, RelevanceContext
+from claude_code_hooks_daemon.handlers.utils.would_be_content import would_be_content
 from claude_code_hooks_daemon.plan_qa.model import PlanDoc
 from claude_code_hooks_daemon.utils.ccy_supervisor import supervisor_relevance
 from claude_code_hooks_daemon.utils.path_predicates import path_is_file
@@ -88,18 +99,29 @@ class PlanStatusSnapshotHandler(PreToolUseHandlerBase):
         return matched_plan_write_or_edit(hook_input, self._project_layout) is not None
 
     def handle(self, hook_input: dict[str, Any]) -> GatingResult:
-        """Record the plan's pre-write status; always ALLOW.
+        """Record the plan's pre-write status and PREDICTED post-image
+        hash; always ALLOW.
 
-        A missing file records ``None`` -- itself a valid, meaningful
-        ground-truth snapshot (no Status line: a brand-new plan file this
-        Write is about to create for the first time), never skipped as
-        though nothing had been recorded. A file that EXISTS but cannot be
-        read or decoded is genuinely anomalous (``_read_plan`` raises
-        ``PlanUnreadable``): recording ``None`` for THAT case would
+        A missing file still parses status ``None`` -- itself a valid,
+        meaningful ground-truth reading (no Status line: a brand-new plan
+        file this Write is about to create for the first time), never
+        skipped as though nothing had been recorded. A file that EXISTS
+        but cannot be read or decoded is genuinely anomalous (``_read_plan``
+        raises ``PlanUnreadable``): recording ``None`` for THAT case would
         confidently assert "no prior status" when the truth is simply
         unknown, so nothing is recorded at all -- `goal_injection` then
         falls back to its own inference for this ``tool_use_id``, exactly
         as it already does for the "no snapshot exists" case.
+
+        RV5-M2: :func:`would_be_content` applies THIS call forward to the
+        pre-write text just read -- a known, unambiguous starting point --
+        predicting exactly what the file will read after the write lands.
+        ``goal_injection`` later hashes the REAL post-edit text and
+        compares: no reconstruction, no clock. When the prediction itself
+        is not attemptable (an Edit whose ``old_string`` the pre-write text
+        does not contain -- Claude Code would fail that call with its own
+        error, so there is nothing to predict), nothing is recorded either,
+        for the same reason as the unreadable-file case above.
         """
         matched = matched_plan_write_or_edit(hook_input, self._project_layout)
         if matched is None:
@@ -119,11 +141,21 @@ class PlanStatusSnapshotHandler(PreToolUseHandlerBase):
             )
             return GatingResult(decision=Decision.ALLOW)
         status = PlanDoc.parse(plan_text).status if plan_text is not None else None
-        # RV4-m2: the hash lets goal_injection verify at Post time that
-        # this snapshot still describes the file the write actually
-        # replaced -- the Pre -> Post gap includes the permission prompt,
-        # so another session's write can land in between.
-        plan_status_snapshots.record(tool_use_id, status, hash_plan_text(plan_text))
+        predicted = would_be_content(hook_input, current=plan_text)
+        if predicted is None:
+            logger.warning(
+                "plan_status_snapshot: cannot predict the post-write text for "
+                "tool_use_id=%r -- recording no snapshot; goal_injection falls "
+                "back to its own inference",
+                tool_use_id,
+            )
+            return GatingResult(decision=Decision.ALLOW)
+        # RV5-M3: the shared store lives in `utils`, which must not import
+        # `plan_qa` -- convert to the plain status VALUE at this boundary
+        # instead. `goal_injection` (also outside `utils`) rehydrates it.
+        plan_status_snapshots.record(
+            tool_use_id, status.value if status is not None else None, hash_plan_text(predicted)
+        )
         return GatingResult(decision=Decision.ALLOW)
 
     @staticmethod
@@ -161,10 +193,15 @@ class PlanStatusSnapshotHandler(PreToolUseHandlerBase):
     def get_claude_md(self) -> str | None:
         return (
             "## plan_status_snapshot — pre-write PLAN.md status snapshot\n\n"
-            "PreToolUse sensor (never blocks; ships enabled, opt-out — RV4-m4). Runs immediately "
-            "before a `PLAN.md` Write/Edit under the active plan directory (never "
-            "`Completed/`) and records the plan's CURRENT status, keyed by "
-            "`tool_use_id`, in a bounded, TTL'd in-memory store. `goal_injection` "
+            "PreToolUse sensor (never blocks; ships enabled, opt-out — RV4-m4; runs "
+            "unconditionally on every matching write, whether or not `goal_injection` "
+            "is enabled — RV5-m1). Runs immediately before a `PLAN.md` Write/Edit "
+            "under the active plan directory (never `Completed/`), reads the plan's "
+            "CURRENT status, and records it plus the SHA-256 of the PREDICTED "
+            "post-write text (applying the same Write/Edit forward — RV5-M2), keyed "
+            "by `tool_use_id`, in a store bounded by entry count alone (no TTL — a "
+            "wall clock can step backward, and it cannot answer 'is this snapshot "
+            "still correct' the way a hash comparison can). `goal_injection` "
             "(PostToolUse) consumes it as ground truth in place of inferring the "
             "pre-write status from `old_string`/`new_string` or git HEAD (Plan "
             "00466 RV3-n5) — removing collisions a bare status VALUE could have "

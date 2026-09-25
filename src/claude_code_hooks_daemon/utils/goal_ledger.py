@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Any, Final
 
 from claude_code_hooks_daemon.plan_qa.model import TERMINAL_STATUSES, PlanDoc, PlanStatus
+from claude_code_hooks_daemon.utils.path_predicates import path_is_file
 
 logger = logging.getLogger(__name__)
 
@@ -223,6 +224,16 @@ def _find_plan_md_text(plan_dir: Path, plan_number: str) -> tuple[str, str] | No
     Used by :meth:`GoalLedger.live_plan_refs` to resolve a live plan's
     folder/title source without a second directory scan; unreadable
     candidates are skipped (mirrors ``_plan_state``'s tolerance).
+
+    RV5-m6: the existence check goes through
+    :func:`~claude_code_hooks_daemon.utils.path_predicates.path_is_file`
+    with ``unreadable_means=True`` (the same RV4-m3 pattern
+    ``plan_status_snapshot.py``'s ``_read_plan`` already uses) -- a raw
+    ``Path.is_file()`` can itself raise (``EACCES`` on an unreadable
+    parent directory), and that used to escape this function unwrapped
+    instead of being treated as "cannot read this candidate, try the
+    next". ``unreadable_means=True`` falls through to the read attempt
+    below, which hits the identical error and IS already caught.
     """
     if not plan_dir.is_dir():
         return None
@@ -231,7 +242,7 @@ def _find_plan_md_text(plan_dir: Path, plan_number: str) -> tuple[str, str] | No
         return None
     for folder in folders:
         plan_md = folder / _PLAN_MD_FILENAME
-        if not plan_md.is_file():
+        if not path_is_file(plan_md, unreadable_means=True):
             continue
         try:
             text = plan_md.read_text(encoding="utf-8")
@@ -254,6 +265,12 @@ def _plan_state(plan_dir: Path, plan_number: str) -> str:
     unscannable ``plan_dir`` (wrong config, transient IO error) reports
     ``unreadable``, which never retires anything: retirement is persisted, so
     a misresolved directory must not wipe the ledger on the first consult.
+
+    RV5-m6: same ``path_is_file(unreadable_means=True)`` fix as
+    ``_find_plan_md_text`` above -- a raw ``Path.is_file()`` here let an
+    ``EACCES`` on an unreadable parent directory escape ``live_plan_numbers``
+    (via ``_reconcile``) as a raw, unwrapped ``PermissionError`` instead of
+    the ``unreadable`` state this function already has a name for.
     """
     if not plan_dir.is_dir():
         return _STATE_UNREADABLE
@@ -262,7 +279,7 @@ def _plan_state(plan_dir: Path, plan_number: str) -> str:
         return _STATE_UNREADABLE
     for folder in folders:
         plan_md = folder / _PLAN_MD_FILENAME
-        if not plan_md.is_file():
+        if not path_is_file(plan_md, unreadable_means=True):
             continue
         try:
             text = plan_md.read_text(encoding="utf-8")
@@ -746,6 +763,55 @@ class GoalLedger:
             # session_has_entries).
             self._save(entries, self._parse_ever_recorded(raw))
         return True
+
+    def add_owners(self, sessions: list[str], plan_numbers: list[str]) -> None:
+        """Batched :meth:`reassert_session` (RV5-m4): register EVERY session
+        in ``sessions`` as an owner of EVERY still-live entry named in
+        ``plan_numbers``, under ONE lock and ONE save.
+
+        ``_maybe_refresh_on_retirement``'s fan-out writes each refreshed
+        owner's own combined text naming every OTHER live plan too (RV3-m3's
+        own invariant for the flip path, :meth:`_write_combined_signal`'s
+        ``_extend_ownership``); without this, a session refreshed there for
+        plan A, whose text also names live plan B, was never made an owner
+        of B, so B's own later completion left it stale, still naming a
+        plan long since retired. Doing this as ``len(sessions) *
+        len(plan_numbers)`` individual :meth:`reassert_session` calls would
+        each take and release the lock separately -- RV3-m5's cost concern,
+        the reason this is one batched mutation instead.
+
+        A session already in an entry's ``sessions`` is left untouched (no
+        redundant write); an entry with no live match for ``plan_numbers``,
+        or a caller passing either list empty, is a no-op.
+        """
+        if not sessions or not plan_numbers:
+            return
+        wanted = set(plan_numbers)
+        with self._locked():
+            try:
+                raw = self._load_raw()
+            except LedgerUnreadable as e:
+                logger.warning("goal_ledger: %s; add_owners finds nothing to add onto", e)
+                return
+            entries = self._parse_entries(raw)
+            changed = False
+            now = time.time()
+            for entry in entries:
+                if entry.retired_at is not None or entry.plan_number not in wanted:
+                    continue
+                if entry.primary_owner is None:
+                    entry.primary_owner = entry.session_id
+                added_here = False
+                for session_id in sessions:
+                    if session_id in entry.sessions:
+                        continue
+                    _add_owner(entry.sessions, session_id, primary_owner=entry.primary_owner)
+                    added_here = True
+                if added_here:
+                    entry.emitted_at = now
+                    changed = True
+            if changed:
+                self._save(entries, self._parse_ever_recorded(raw))
 
     def live_plan_numbers(self, plan_dir: Path) -> list[str]:
         """Return ledgered plans still ``In Progress``; persists retirements.

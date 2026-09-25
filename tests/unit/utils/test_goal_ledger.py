@@ -78,6 +78,24 @@ class TestRecordEmission:
         assert len(live) == 1
         assert live[0].session_id == _OTHER_SESSION
 
+    def test_re_emission_never_reassigns_primary_owner(self, tmp_path: Path) -> None:
+        """RV5-m5 / probe_gf5_mutate.py: 'a re-emission hands primary_owner
+        to the re-emitter' -- RV4-M1's whole point is that the pin stays
+        with whoever's `record_emission` call CREATED the entry, so a
+        later re-flip of the same still-live entry by a DIFFERENT session
+        must not silently hand that session pinned-owner protection."""
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        _make_plan(plan_dir, _PLAN_A, _STATUS_IN_PROGRESS)
+        ledger = GoalLedger(tmp_path / LEDGER_FILENAME)
+        ledger.record_emission(_SESSION, _PLAN_A, _GOAL_LINE, plan_dir)
+        ledger.record_emission(_OTHER_SESSION, _PLAN_A, _GOAL_LINE, plan_dir)
+
+        entry = next(e for e in ledger.entries() if e.plan_number == _PLAN_A)
+        assert entry.primary_owner == _SESSION, (
+            "the re-emitter (_OTHER_SESSION) must never become primary_owner "
+            "-- it stays the session that created the entry"
+        )
+
     def test_completed_prior_plan_is_not_reported_as_displaced(self, tmp_path: Path) -> None:
         plan_dir = tmp_path / "CLAUDE" / "Plan"
         _make_plan(plan_dir, _PLAN_A, _STATUS_COMPLETE)
@@ -239,6 +257,53 @@ class TestUnreadableLedgerRaisesADomainException:
 
         with pytest.raises(LedgerUnreadable):
             ledger._load_raw()
+
+    def test_live_plan_numbers_does_not_raise_on_eacces_from_plan_md_is_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """RV5-m6: ``_plan_state``/``_find_plan_md_text`` kept a raw
+        ``PLAN.md.is_file()`` OUTSIDE their own try -- RV4-m3 fixed
+        ``_load_raw``'s equivalent but not these two siblings. A live
+        ledgered plan whose folder denies search (``EACCES`` on the
+        ``is_file`` stat) escaped ``live_plan_numbers`` -- and therefore
+        the Stop handler's fail-open promise -- as a raw, unwrapped
+        ``PermissionError`` instead of the ``unreadable`` state this
+        module already has a name for (never retires anything)."""
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        _make_plan(plan_dir, _PLAN_A, _STATUS_IN_PROGRESS)
+        ledger_path = tmp_path / LEDGER_FILENAME
+        ledger = GoalLedger(ledger_path)
+        ledger.record_emission(_SESSION, _PLAN_A, _GOAL_LINE, plan_dir)
+
+        real_is_file = Path.is_file
+        real_read_text = Path.read_text
+
+        def _is_file_boom(self: Path) -> bool:
+            if self.name == "PLAN.md":
+                raise PermissionError(13, "Permission denied")
+            return real_is_file(self)
+
+        def _read_text_boom(self: Path, *args: object, **kwargs: object) -> str:
+            if self.name == "PLAN.md":
+                raise PermissionError(13, "Permission denied")
+            return real_read_text(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "is_file", _is_file_boom)
+        monkeypatch.setattr(Path, "read_text", _read_text_boom)
+
+        result = ledger.live_plan_numbers(plan_dir)  # must not raise
+
+        assert result == [], (
+            "an unreadable plan cannot be confirmed In Progress on THIS "
+            "call, so it is not reported live for it -- but see the "
+            "assertion below: it must not be RETIRED either"
+        )
+        entry = next(e for e in ledger.entries() if e.plan_number == _PLAN_A)
+        assert entry.retired_at is None, (
+            "a transient EACCES must never retire the entry -- retirement "
+            "is persisted, so a misresolved/unreadable folder wiping it "
+            "here would be permanent and wrong"
+        )
 
     def test_entries_logs_a_warning_for_a_corrupt_ledger(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture

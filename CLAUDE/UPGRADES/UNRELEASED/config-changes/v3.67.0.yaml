@@ -41,6 +41,31 @@ config_changes:
       recommended: true
       dormant: false
 
+    - key: handlers.pre_tool_use.plan_status_snapshot
+      description: >-
+        Records a PLAN.md's pre-write status and the SHA-256 hash of its
+        PREDICTED post-write text (applying the same Write/Edit forward)
+        immediately before it lands, keyed by tool_use_id. `goal_injection`
+        (PostToolUse) consumes it as ground truth in place of inferring the
+        pre-write status from old_string/new_string or git HEAD, removing
+        collisions a bare status value could have with a table cell or a
+        plan title, and git HEAD's own lag behind an uncommitted flip.
+        Sensor only: never blocks, never denies, never surfaces advisory
+        text. Runs unconditionally on every matching write, whether or not
+        goal_injection is enabled.
+      example_yaml: |
+        handlers:
+          pre_tool_use:
+            plan_status_snapshot:
+              enabled: true
+              priority: 30
+      migration_note: >-
+        On by default (opt-out), so goal_injection users get ground-truth
+        snapshots automatically. Disable with
+        handlers.pre_tool_use.plan_status_snapshot.enabled: false.
+      recommended: true
+      dormant: false
+
   renamed: []
 
   removed: []

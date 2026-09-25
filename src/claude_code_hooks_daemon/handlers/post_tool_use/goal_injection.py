@@ -247,13 +247,6 @@ _FIELD_OLD_STRING: Final[str] = "old_string"
 _FIELD_NEW_STRING: Final[str] = "new_string"
 _FIELD_REPLACE_ALL: Final[str] = "replace_all"
 _SINGLE_REPLACEMENT: Final[int] = 1
-# RV4-m2: a Write, or a replace_all Edit with an ambiguous collision,
-# cannot be verified by exact reconstruction, so freshness instead falls
-# back to a bound much shorter than the snapshot store's general TTL --
-# long enough for the tool's own dispatch overhead, short enough that a
-# gap spanning a permission prompt (or another session's write landing in
-# the meantime) is treated as stale rather than trusted blind.
-_SNAPSHOT_RECENCY_BOUND_SECONDS: Final[float] = 5.0
 
 # Bound the (session_id, plan_number) latch map (FIFO eviction) so a
 # long-lived daemon cannot leak memory across many sessions.
@@ -605,11 +598,13 @@ def _reconstruct_pre_edit_candidates(tool_input: dict[str, Any], post_edit_text:
     from, undoing ``new_string`` back to ``old_string`` against the
     CURRENT (post-edit) text on disk.
 
-    Shared by :meth:`_is_transition_via_reconstruction`'s non-``replace_all``
-    branch and RV4-m2's snapshot staleness check
-    (:meth:`GoalInjectionHandler._snapshot_is_fresh`) -- both need the same
-    candidate reconstructions, one to ask "did the Status line transition",
-    the other to ask "does any candidate match what the Pre snapshot read".
+    Used by :meth:`_is_transition_via_reconstruction`'s non-``replace_all``
+    branch, the inference fallback for when no PreToolUse snapshot exists
+    at all -- RV5-M2 moved the snapshot's OWN freshness check off this
+    reverse reconstruction entirely, onto a forward prediction made at Pre
+    time (:func:`would_be_content`) instead, since a REVERSE reconstruction
+    from post-edit text alone cannot resolve a genuine collision the way a
+    FORWARD prediction from a known starting point can.
 
     ``replace_all`` gets its own single candidate (a clean full reversal,
     guarded the same way :meth:`_is_transition_via_reconstruction` already
@@ -905,16 +900,20 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         inference machinery is kept and used ONLY when no FRESH snapshot
         exists for this ``tool_use_id`` -- a daemon restart between the Pre
         and Post dispatch of this same call, a payload carrying no
-        ``tool_use_id`` at all, or RV4-m2's staleness check below rejecting
-        one that no longer describes the file this write actually
-        replaced -- and that fallback use is logged, since it is the
-        narrower, sometimes-ambiguous signal being kept for exactly that
-        narrow window rather than the common path.
+        ``tool_use_id`` at all, or RV5-M2's staleness check below rejecting
+        one whose PREDICTED post-image no longer matches the file this
+        write actually replaced -- and that fallback use is logged, since
+        it is the narrower, sometimes-ambiguous signal being kept for
+        exactly that narrow window rather than the common path.
         """
         tool_use_id = str(hook_input.get(HookInputField.TOOL_USE_ID, "") or "")
         snapshot = plan_status_snapshots.consume_snapshot(tool_use_id)
-        if snapshot is not None and self._snapshot_is_fresh(hook_input, post_edit_text, snapshot):
-            return not is_target(snapshot.status), False
+        if snapshot is not None and self._snapshot_is_fresh(post_edit_text, snapshot):
+            # RV5-M3: the store holds a plain status VALUE (it lives in
+            # `utils`, which must not import `plan_qa`) -- rehydrate here,
+            # the boundary that already owns the PlanStatus import.
+            snapshot_status = PlanStatus(snapshot.status) if snapshot.status is not None else None
+            return not is_target(snapshot_status), False
         if snapshot is not None:
             logger.warning(
                 "goal_injection: pre-write snapshot for tool_use_id=%r is stale (the "
@@ -934,45 +933,32 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         return transition, True
 
     @staticmethod
-    def _snapshot_is_fresh(
-        hook_input: dict[str, Any], post_edit_text: str, snapshot: PlanStatusSnapshot
-    ) -> bool:
-        """RV4-m2: a snapshot is ground truth only when it still describes
-        the file THIS write actually replaced -- PreToolUse runs before
-        Claude Code's permission prompt, so the Pre -> Post gap can span
-        however long a person takes to answer one, and another session's
-        write can land in between.
+    def _snapshot_is_fresh(post_edit_text: str, snapshot: PlanStatusSnapshot) -> bool:
+        """RV5-M2: a snapshot is ground truth only when the PREDICTED
+        post-image it recorded at Pre time still matches the file THIS
+        write actually produced.
 
-        A non-``replace_all`` Edit is the ONLY case where the pre-edit text
-        can be reconstructed EXACTLY: reverse this edit against the
-        post-edit text (:func:`_reconstruct_pre_edit_candidates`, the same
-        machinery :meth:`_is_transition_via_reconstruction` uses) and
-        accept the snapshot only when SOME candidate's content hash matches
-        what Pre recorded -- no matching candidate means the file Pre read
-        is not the file this Edit actually modified.
+        The Pre handler predicts that image by applying the call FORWARD
+        (:func:`would_be_content`) to the pre-write text it read straight
+        off disk -- a known, unambiguous starting point -- and records its
+        hash. Freshness here is then a single hash comparison against the
+        REAL post-edit text: no reconstruction, and no time bound.
 
-        Every other shape falls back to a recency bound -- much shorter
-        than the store's general TTL, long enough for the tool's own
-        dispatch overhead -- rather than a byte-exact comparison:
-
-        - **Write**: no reconstruction is possible at all (a Write's
-          payload carries only the NEW content, never the old).
-        - **``replace_all`` Edit**: reconstruction is genuinely AMBIGUOUS
-          by construction whenever an unrelated occurrence of the SAME
-          text pre-existed (RV3-m1's table-cell/title collisions, C3b/m4d
-          below) -- neither the full nor the partial reversal
-          :meth:`_is_transition_via_reconstruction` computes for THAT
-          decision is guaranteed to reproduce the exact original bytes, so
-          gating snapshot trust on an exact match here would reject the
-          very case the snapshot mechanism exists to resolve.
+        A wall-clock bound (the RV4-m2 shape this replaces) got both
+        directions of this wrong: PreToolUse runs before Claude Code's
+        permission prompt, so the Pre -> Post gap can span however long a
+        person takes to answer one, and a cutoff discarded a snapshot that
+        was still perfectly correct after a slow prompt (a real flip
+        missed) while a backward clock step could make a genuinely stale
+        snapshot look fresh again. Forward prediction sidesteps the clock
+        question entirely, and covers every shape uniformly -- a Write (no
+        reconstruction was ever possible for one), a ``replace_all`` Edit
+        (reconstruction is genuinely ambiguous whenever an unrelated
+        occurrence of the same text pre-existed, RV3-m1's table-cell/title
+        collisions), and a deletion Edit (``new_string=""``) alike, since
+        none of them need reversing.
         """
-        tool_name = hook_input.get(HookInputField.TOOL_NAME)
-        tool_input = hook_input.get(HookInputField.TOOL_INPUT, {}) or {}
-        if tool_name == ToolName.EDIT and not bool(tool_input.get(_FIELD_REPLACE_ALL, False)):
-            candidates = _reconstruct_pre_edit_candidates(tool_input, post_edit_text)
-            if candidates:
-                return any(hash_plan_text(c) == snapshot.text_hash for c in candidates)
-        return (time.time() - snapshot.recorded_at) <= _SNAPSHOT_RECENCY_BOUND_SECONDS
+        return hash_plan_text(post_edit_text) == snapshot.predicted_post_hash
 
     def _is_real_flip_to_in_progress(
         self, hook_input: dict[str, Any], file_path: Path, plan_number: str, post_edit_text: str
@@ -1194,12 +1180,28 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         ``owning_sessions`` itself answers from the plan's LIVE entry, or
         else its MOST RECENTLY retired one, so a plan reopened and
         recompleted under a different session retracts the RIGHT session,
-        never a stale one from an earlier lifecycle.
+        never a stale one from an earlier lifecycle. RV5-M1: the session
+        whose OWN write triggered this call is NOT added unconditionally --
+        only an owner ``owning_sessions`` actually names is refreshed. A
+        session that never owned this plan (a coordinator ticking someone
+        else's Plan Completion Checklist box) must get no `/goal` from this
+        path, and a session's own unrelated manual goal (`inject-goal`)
+        must not be touched by a plan it never had a stake in.
 
         RV3-m5: the combined text is rendered ONCE (:meth:`_render_combined`)
         and written to every owner, rather than re-derived per owner -- a
         per-owner re-derivation is a full live-plan-directory read per
         owner, which does not scale with the owner cap.
+
+        RV5-m4: every refreshed owner is also registered as an owner of
+        EVERY plan its own new combined text just named
+        (:meth:`GoalLedger.add_owners`, one batched mutation under a single
+        lock) -- the same invariant RV3-m3's ``_extend_ownership`` already
+        holds for the flip path (:meth:`_write_combined_signal`), which
+        this fan-out had never applied: without it, a session refreshed
+        here for plan A, whose combined text also names still-live plan B,
+        was never made an owner of B, so B's own later completion left this
+        session stale, still naming a plan long since retired.
 
         Unlike ``_write_combined_signal``/``_ledger_record``, this method
         does NOT catch ``_open_ledger``'s ``RuntimeError`` itself. There is
@@ -1225,14 +1227,12 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         if not transition:
             return
         ledger = self._open_ledger()
+        # RV5-M1: ONLY an owner ``owning_sessions`` actually names is
+        # refreshed here -- the completing write's OWN session is no longer
+        # added unconditionally (that was a regression against main: a
+        # non-owner completing a teammate's plan got a `/goal` it never
+        # earned, and a session's own manual `inject-goal` could be wiped).
         owners = ledger.owning_sessions(plan_number)
-        # RV4-M1: the session whose OWN write just completed this plan is
-        # refreshed unconditionally, even when the ledger's owner set does
-        # not (or no longer) names it -- an owner-cap eviction or a stale
-        # ledger read must never leave the one session that just did the
-        # work with a `/goal` still naming the plan it finished.
-        if session_id and session_id not in owners:
-            owners = [*owners, session_id]
         if not owners:
             return
         plan_dir = plan_md_path.parent.parent
@@ -1252,6 +1252,11 @@ class GoalInjectionHandler(PostToolUseHandlerBase):
         plan_numbers_field, combined = payload
         for owner in owners:
             write_goal_signal(owner, plan_numbers_field, combined, _SOURCE_STATUS_FLIP)
+        # RV5-m4: register every refreshed owner as an owner of every plan
+        # its own new combined text just named, in ONE batched mutation --
+        # the fan-out equivalent of RV3-m3's `_extend_ownership` on the flip
+        # side, which this path never applied.
+        ledger.add_owners(owners, [ref.plan_number for ref in refs])
 
     def _maybe_reassert_for_new_session(
         self,

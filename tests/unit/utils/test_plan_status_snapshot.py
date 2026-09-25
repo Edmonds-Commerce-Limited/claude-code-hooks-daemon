@@ -9,8 +9,8 @@ inference. This file tests the shared store in isolation.
 from claude_code_hooks_daemon.plan_qa.model import PlanStatus
 from claude_code_hooks_daemon.utils.plan_status_snapshot import PlanStatusSnapshotStore
 
-# These tests exercise record/consume/bounds/TTL mechanics only -- the
-# actual text_hash value is irrelevant to them (RV4-m2's staleness
+# These tests exercise record/consume/bounds mechanics only -- the actual
+# predicted_post_hash value is irrelevant to them (RV5-M2's freshness
 # comparison is tested separately, against goal_injection's consumer).
 _H = "irrelevant-hash"
 
@@ -76,8 +76,8 @@ class TestRecordAndConsume:
 
 
 class TestConsumeSnapshot:
-    """RV4-m2: the full-object consumer ``goal_injection`` uses to judge
-    staleness (``text_hash``/``recorded_at``), distinct from the 2-tuple
+    """RV5-M2: the full-object consumer ``goal_injection`` uses to judge
+    freshness (``predicted_post_hash``), distinct from the 2-tuple
     ``consume`` form other callers use."""
 
     def test_consume_snapshot_returns_the_full_object(self) -> None:
@@ -88,7 +88,7 @@ class TestConsumeSnapshot:
 
         assert snapshot is not None
         assert snapshot.status == PlanStatus.NOT_STARTED
-        assert snapshot.text_hash == "abc123"
+        assert snapshot.predicted_post_hash == "abc123"
 
     def test_consume_snapshot_pops_the_entry(self) -> None:
         store = PlanStatusSnapshotStore()
@@ -110,8 +110,13 @@ class TestConsumeSnapshot:
 
 
 class TestBoundedGrowth:
+    """RV5-M2: eviction is bounded by ``max_entries`` alone -- there is no
+    TTL left to evict on (a wall clock can step backward; see the module
+    docstring), so an orphaned Pre-without-Post entry only ever leaves the
+    store by being the oldest once it fills up."""
+
     def test_entries_are_capped_with_fifo_eviction(self) -> None:
-        store = PlanStatusSnapshotStore(max_entries=3, ttl_seconds=3600.0)
+        store = PlanStatusSnapshotStore(max_entries=3)
         for i in range(5):
             store.record(f"tu-{i}", PlanStatus.IN_PROGRESS, _H)
 
@@ -119,17 +124,6 @@ class TestBoundedGrowth:
         assert store.consume("tu-0") == (None, False)
         assert store.consume("tu-1") == (None, False)
         assert store.consume("tu-4")[1] is True
-
-
-class TestTtlExpiry:
-    def test_an_expired_entry_is_treated_as_never_recorded(self) -> None:
-        store = PlanStatusSnapshotStore(ttl_seconds=0.0)
-        store.record("tu-1", PlanStatus.IN_PROGRESS, _H)
-
-        status, found = store.consume("tu-1")
-
-        assert found is False
-        assert status is None
 
 
 class TestConcurrency:

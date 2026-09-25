@@ -12,10 +12,12 @@ reason about from the outside.
 
 Writing this test found six such edges where the ledger entry described one.
 Clearing all six is a larger design question than the entry covers — two of
-them are deliberate reuse with a documented rationale — so the five that remain
-are named in :data:`_KNOWN_EDGES` with the reason each is still there. That
-makes this a ratchet rather than a wish: an edge that is removed must be struck
-from the list, and an edge nobody declared fails the test.
+them are deliberate reuse with a documented rationale — so the ones that
+remain are named in :data:`_KNOWN_EDGES` with the reason each is still there
+(Plan 00466 RV5-M3 cleared one: ``utils/plan_status_snapshot.py`` now stores
+a plain status string instead of importing ``plan_qa.model.PlanStatus``).
+That makes this a ratchet rather than a wish: an edge that is removed must be
+struck from the list, and an edge nobody declared fails the test.
 """
 
 from __future__ import annotations
@@ -39,12 +41,6 @@ _KNOWN_EDGES: Final[dict[str, str]] = {
     "utils/goal_ledger.py -> claude_code_hooks_daemon.plan_qa.model": (
         "The ledger reads plan status through PlanDoc. Whether a plan-shaped "
         "utility belongs in utils at all is the open question, not the import."
-    ),
-    "utils/plan_status_snapshot.py -> claude_code_hooks_daemon.plan_qa.model": (
-        "Same reason as goal_ledger.py above: the store's whole purpose "
-        "(Plan 00466 RV3-n5) is holding a plan's PlanStatus, read via the "
-        "same PlanDoc both goal_injection and this store's PreToolUse "
-        "writer already use for the post-edit side of the same comparison."
     ),
     "docs_qa/checks/module_doc_budget.py -> claude_code_hooks_daemon.plan_qa.types": (
         "Deliberate reuse of plan_qa's own tier line-count constants, so the "
