@@ -1,64 +1,115 @@
-"""BudgetExhaustionDetectorHandler - generic budget/quota-exhaustion advisory.
+"""BudgetExhaustionDetectorHandler - channel-scoped budget-exhaustion advisory.
 
 Plan 00315 Task 2.1. Beyond the visible 5-hour/weekly usage limits, agent
 sessions carry opaque operational budgets (a web-search budget, output-size
 caps, and possibly others not yet catalogued) that surface only as mid-task
-tool responses. `BUDGETS.md` (Plan 00315, Task 1.3 synthesis) found the
-field-confirmed web-search refusal shape and a family of generic
-budget/quota/limit-reached shapes; this handler is a GENERIC PostToolUse
-detector for that family, so it catches the web-search shape today and any
-future budget message without a new handler per budget.
+tool responses. `BUDGETS.md` (Plan 00315, Task 1.3 synthesis) found exactly
+ONE field-confirmed shape: the web-search refusal. It also sketched a
+"generic" budget/quota/limit-reached wording family as a hedge against
+future, unconfirmed signals -- but that hedge was the recurring defect
+magnet (Plan 00400 N4: a `ps` listing of this project's own source; Plan
+00466 N46: a `git diff` showing an unrelated error-message string literal),
+because free-text keyword matching cannot tell a delivered message from a
+file merely discussing one. Removed for that reason (N46's remedy): this
+handler now matches ONLY a signal's own CHANNEL (which tool) and SHAPE
+(its verbatim wording), never scans arbitrary Bash stdout, and never
+free-text-scans a keyword across a tool response whose channel it does not
+recognise.
 
-Matching scans the completed tool call's ``tool_response`` for:
+Matching scans the completed tool call's ``tool_response`` against
+``_BUILTIN_SIGNALS``, currently two channel-scoped signals (N46 review 1,
+MINOR-5 added the second):
 
   - the pinned web-search fragments ("Web search was not performed", "web
-    search budget"), verbatim from the field-confirmed fixture, and
-  - generic shapes: "budget" near "exhausted"/"used up"/"exceeded", "quota
-    exceeded", "budget ... limit reached".
+    search budget"), ONLY when ``tool_name == "WebSearch"``. The TEXT is
+    field-confirmed (a real fixture); the CHANNEL is not independently
+    field-confirmed from the same fixture -- it is documented in the
+    vendored ``tools-reference.md`` ("Session search limit": capped
+    WebSearch calls "return a notice"), which this handler treats as
+    sufficient support without claiming a live re-verification it has not
+    done.
+  - ``Agent terminated early due to an API error: You've hit your (session|
+    weekly) limit``, anchored at the START of the response and requiring the
+    harness's stable ``(error type rate_limit, HTTP 429`` tail nearby (N46
+    review 2, NIT-6), ONLY when ``tool_name`` is a sub-agent dispatch tool
+    (``SUBAGENT_DISPATCH_TOOL_NAMES`` -- Task/Agent). This is the harness's
+    own text for a dispatched sub-agent cut off mid-task by a usage-limit
+    rejection -- caught live in this session's own transcripts (three
+    reachable occurrences: two weekly-limit, one session-limit, all
+    ``completed``-status dispatches whose ``tool_response.content`` is a
+    list of text blocks), and previously undetected entirely (main excluded
+    Task/Agent outright). A fourth, ``is_error: true`` occurrence is
+    delivered as a bare string to ``PostToolUseFailure``, a DIFFERENT event
+    this PostToolUse handler does not receive (N46 review 2, BLOCKER-1) --
+    not handled here.
+
+  **Foreground dispatches only.** Only a ``status: "completed"`` result
+  carries ``content`` at all; an ``async_launched`` background dispatch or a
+  ``teammate_spawned`` handoff (264 of 351 real Agent/Task results in the
+  reviewing corpus) returns at launch and never delivers a later usage-limit
+  death through PostToolUse -- there is no further PostToolUse event for
+  that dispatch to carry it. Surfacing a BACKGROUND agent's death is Plan
+  00470 Tasks 3.1/3.2 (the StopFailure and Notification handlers), a
+  different channel entirely; this handler does not attempt it.
+
+A project can declare additional signals via ``options.extra_patterns`` once
+it has confirmed a real channel of its own (a CLI's own quota message
+surfacing through Bash, for example); nothing here matches such a channel
+automatically, because a structural marker that ordinary file content
+cannot carry by accident -- not a keyword -- is what makes matching it
+safe, and only the project configuring it can supply one for its own tool.
 
 Deliberately NEVER keys on the configurable ceiling number (e.g. "200" of
 "200 WebSearch calls") -- BUDGETS.md pins the ceiling as environment-variable
-configurable (``CLAUDE_CODE_MAX_WEB_SEARCHES``), so a number alone is not a
-stable signal and would false-fire on ordinary counts ("Found 200 results").
+configurable (``CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION``), so a number
+alone is not a stable signal and would false-fire on ordinary counts
+("Found 200 results"). The harness's refusal wording may have moved since
+the original fixture was captured (the fixture and this code both predate
+the current vendored doc's env-var name); a follow-up should re-verify the
+notice wording against a live session.
 
-**Precision**: by default, Read/Grep/Glob/Edit/Write/NotebookEdit/Task/Agent
-tool responses are excluded from matching (``options.excluded_tools``). The
-first six return FILE CONTENTS the model merely read -- prose in a file that
-happens to discuss budget exhaustion (this very docstring, for instance) is
-not a live exhaustion event. Task/Agent's ``tool_response`` is a dispatched
-sub-agent's own composed final message, never a field the Task/Agent tool
-machinery itself populates from a budget check; if the sub-agent's own work
-genuinely hits a budget, that fires directly in the sub-agent's own session
-at the tool call that hit it, so excluding the orchestrator's echo of it
-loses no signal. Every other tool's ``tool_response`` is a genuine
-tool-produced result, where the same wording is a live signal.
+**Precision**: by default, Read/Grep/Glob/Edit/Write/NotebookEdit/Bash tool
+responses are excluded from matching (``options.excluded_tools``) --
+Task/Agent are deliberately NOT excluded; see below. The first six return
+FILE CONTENTS the model merely read, or authored -- prose that happens to
+discuss budget exhaustion (this very docstring, for instance) is not a live
+exhaustion event. Bash's ``tool_response`` is the model's OWN invoked
+command's stdout/stderr: the same class of free-form, model-directed
+content as a file's own text. No BUILT-IN signal's confirmed channel is
+Bash (the one documented harness-written Bash artefact, BUDGETS.md's
+``<persisted-output>`` output-size marker, is a DIFFERENT signal this
+handler does not implement), so nothing Bash prints can match one; a
+verb-by-verb allowlist of "safe" commands (cat/grep/git/...) is not needed
+to reach that guarantee and previously kept needing a new entry per false
+positive.
 
-Beyond the excluded-tools list, two STRUCTURAL checks (not keyword lists)
-keep the detector from self-triggering on text that merely QUOTES a budget
-message rather than delivering one, documented in full in
-``CLAUDE/Plan/00319-supervisor-release-review-followups/BUDGET-DETECTOR-DESIGN.md``:
+Task/Agent are NOT excluded, because their ``tool_response`` genuinely IS
+sometimes a field the harness itself populates -- the Agent-terminated-early
+signal above. The honest reason a dispatched sub-agent's ORDINARY composed
+prose never fires is not that the harness never writes there; it is that
+free LLM-composed prose is (a) never channel-scoped to a signal it does not
+own, and (b) exceedingly unlikely to independently OPEN with another
+signal's exact anchored sentence merely while discussing or quoting it (see
+``TestSubagentDispatchReportNeverFires`` / ``TestAgentTerminatedEarlySignal``
+mid-response quoting case). If the sub-agent's own work genuinely hits a
+DIFFERENT budget mid-task, that already fires directly in the sub-agent's
+own session, at the tool call that hit it, so nothing is lost by not
+re-scanning the orchestrator's later echo of it for THAT signal.
 
-  - a Bash ``tool_response`` is excluded when the COMMAND's every pipeline
-    stage is a content-passthrough verb (``cat``, ``grep``, ``jq``, ``tail``,
-    etc. -- see ``_CONTENT_PASSTHROUGH_VERBS``), because such a command only
-    ever reproduces or reformats bytes that already exist somewhere; it never
-    independently discovers a live budget signal. Classified by VERB, not by
-    which file is named, so it generalises to any file (a copy of the
-    ledger, a generated report, this handler's own source) without listing
-    any of them.
+Beyond the channel gate, two STRUCTURAL checks
+(not keyword lists) keep the detector from self-triggering on text that
+merely QUOTES a budget message rather than delivering one:
+
   - any span of ``tool_response`` text that parses as a JSON object carrying
     this handler's own ledger record key set (``_LEDGER_RECORD_KEYS``) is
     stripped before matching runs, because a genuine harness budget message
     is prose, never JSON in this handler's own record shape. This survives
     ``jq``'s pretty-printing, which defeats a literal-substring or
     per-line-JSON check.
-
-The pre-existing literal ``_SELF_REFERENTIAL_COMMAND_MARKERS`` /
-``_SELF_REFERENTIAL_RESPONSE_MARKERS`` checks still run underneath both of
-the above -- they catch the one shape neither structural check does: a
-*generated report* whose producing command is not a content-passthrough verb
-(e.g. a Python script) but whose output names this handler by class or
-module.
+  - a literal ``_SELF_REFERENTIAL_RESPONSE_MARKERS`` check on the response
+    text catches a *generated report* that names this handler by class or
+    module (a playbook dump, a CHANGELOG entry) -- documentation ABOUT the
+    feature, never a live signal.
 
 On a match: ALLOW with an advisory instructing the agent to surface the
 budget hit to the user with a bold, prominent banner, name the affected
@@ -79,6 +130,7 @@ import json
 import logging
 import re
 from collections.abc import Iterator
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
@@ -92,26 +144,15 @@ from claude_code_hooks_daemon.constants import (
 )
 from claude_code_hooks_daemon.core import BlockingResult, Decision
 from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
-from claude_code_hooks_daemon.utils.command_evasion import strip_reserved_word_prefix
 from claude_code_hooks_daemon.utils.private_io import make_private_dir, open_private_append
 from claude_code_hooks_daemon.utils.retention import cap_log_file
-from claude_code_hooks_daemon.utils.shell_segmentation import split_unquoted
 
 logger = logging.getLogger(__name__)
 
 # ─── Tools excluded from matching by default ─────────────────────────────────
 
 # File-content tools: their tool_response is what a file merely SAYS, not a
-# live budget signal from a tool that was actually rate/quota-limited. Task
-# and Agent (SUBAGENT_DISPATCH_TOOL_NAMES -- the same constant
-# dispatch_declaration/agent_isolation_advisor use for the same two tool
-# names) join them for a related reason: their tool_response is a dispatched
-# sub-agent's own composed final message, never a field the Task/Agent tool
-# machinery itself populates from a live budget check. A genuine budget hit
-# during the sub-agent's own work already fires directly in the sub-agent's
-# own session, at the tool call that hit it -- hooks run per-session, so
-# that is a fully independent event. Excluding the orchestrator's later,
-# LLM-mediated echo of it loses no signal (PLAN.md Task 4.5).
+# live budget signal from a tool that was actually rate/quota-limited.
 _DEFAULT_EXCLUDED_TOOLS: Final[tuple[str, ...]] = (
     "Read",
     "Grep",
@@ -122,30 +163,38 @@ _DEFAULT_EXCLUDED_TOOLS: Final[tuple[str, ...]] = (
     "Edit",
     "Write",
     "NotebookEdit",
-    *sorted(SUBAGENT_DISPATCH_TOOL_NAMES),
+    # N46 (Plan 00466 ledger 16): Bash's tool_response is the model's OWN
+    # invoked command's stdout/stderr -- free-form content that can be
+    # ANYTHING (a diff, a log, a source file, a live fetch), the same class
+    # as a file the model merely read. No tool the harness itself
+    # rate/quota-limits is reached by running a shell command, so nothing
+    # Bash prints is this handler's confirmed channel; a verb-by-verb
+    # allowlist of "safe" commands (cat/grep/git/...) keeps needing a new
+    # entry per false positive instead of closing the class. A project that
+    # has confirmed its OWN CLI reports a genuine quota signal through Bash
+    # can re-include "Bash" via `options.excluded_tools` and pair it with an
+    # `extra_patterns` regex specific enough not to match ordinary output.
+    "Bash",
+    # Task and Agent (SUBAGENT_DISPATCH_TOOL_NAMES) are deliberately NOT
+    # here (N46 review 1, MINOR-5). Their tool_response IS sometimes a field
+    # the harness itself populates: a dispatched sub-agent cut off mid-task
+    # by a usage-limit rejection writes the harness's own sentence into its
+    # tool_result. A blanket exclusion would drop that real signal (this is
+    # what main did, and what this session's own transcripts caught it
+    # missing). Precision instead comes from the channel-scoped, anchored
+    # `_AGENT_TERMINATED_EARLY_RE` signal below: it only matches Task/Agent,
+    # and only at the very START of the response, so a sub-agent's own
+    # composed prose that merely QUOTES the sentence mid-response -- the
+    # same risk `_SELF_REFERENTIAL_RESPONSE_MARKERS` guards against for
+    # everything else -- still cannot match.
 )
 
-# A Bash command naming any of these is INSPECTING recorded/pattern text —
-# the ledger itself, or this handler's own source/tests (whose fixtures
-# contain the trigger phrases) — not hitting a live budget. Without this
-# guard, cat-ing the ledger re-fires the detector and appends a fresh entry:
-# a self-feeding loop.
-_SELF_REFERENTIAL_COMMAND_MARKERS: Final[tuple[str, ...]] = (
-    "budget-exhaustion-events.jsonl",
-    "budget_exhaustion_detector",
-    # The same handler under its other spelling. Registries, playbooks and
-    # generated reports name handlers by CLASS, so a marker list that knows
-    # only the module path misses every one of them.
-    "BudgetExhaustionDetector",
-)
-
-# The same markers, applied to the tool RESPONSE. A payload that names this
+# A literal marker on the tool RESPONSE text: a payload that names this
 # handler or its ledger is documentation ABOUT the feature -- the CHANGELOG
-# entry, BUDGETS.md, the release notes -- not a live budget signal, and the
-# command guard above cannot see it (the command is an innocent `head
-# CHANGELOG.md`; the trigger prose is in the CONTENT). Observed live while
-# reading this repo's own changelog during the v3.60.0 release. Safe because a
-# genuine harness budget message never names the detector or its ledger.
+# entry, BUDGETS.md, the release notes, a generated playbook -- not a live
+# budget signal. Observed live while reading this repo's own changelog
+# during the v3.60.0 release. Safe because a genuine harness budget message
+# never names the detector or its ledger.
 _SELF_REFERENTIAL_RESPONSE_MARKERS: Final[tuple[str, ...]] = (
     "budget-exhaustion-events.jsonl",
     "budget_exhaustion_detector",
@@ -161,123 +210,77 @@ _SELF_REFERENTIAL_RESPONSE_MARKERS: Final[tuple[str, ...]] = (
     "matched_fragment",
 )
 
-# ─── Content-passthrough Bash commands ────────────────────────────────────────
-
-# Utilities whose entire function is to REPRODUCE or losslessly filter/
-# reformat bytes already sitting in a named source (a file, stdin) -- never to
-# invoke a live service or generate new content. A Bash command is classified
-# as content-passthrough when EVERY pipeline stage's leading verb is one of
-# these (see `_is_content_passthrough_command`), which is why `curl | jq .`
-# is correctly NOT passthrough: `curl` genuinely fetches live content, and one
-# passthrough stage in a pipeline does not launder the others. Closed by
-# definition (the semantic category "read/filter/reformat, cannot originate
-# content"), not an open list of filenames or handler names to keep adding to.
-_CONTENT_PASSTHROUGH_VERBS: Final[frozenset[str]] = frozenset(
-    {
-        "cat",
-        "head",
-        "tail",
-        "less",
-        "more",
-        "grep",
-        "egrep",
-        "fgrep",
-        "rg",
-        "jq",
-        "awk",
-        "sed",
-        "strings",
-        "od",
-        "xxd",
-        "hexdump",
-        "wc",
-        "nl",
-        "cut",
-        "tac",
-    }
-)
-
-# Longest-first so `&&`/`||` match whole before the single-character `&`/`|`
-# variants claim the first character (mirrors shell_segmentation's own rule).
-_PIPELINE_SEPARATORS: Final[tuple[str, ...]] = ("&&", "||", ";", "|", "&", "\n")
-
-
-def _leading_verb(segment: str) -> str:
-    """Return the command word a pipeline segment starts with, or "" if none.
-
-    Past grouping punctuation and shell reserved words: `time cat f` runs cat.
-    """
-    stripped = strip_reserved_word_prefix(segment.strip().lstrip("(){}"))
-    if not stripped:
-        return ""
-    return stripped.split(maxsplit=1)[0].rsplit("/", 1)[-1]
-
-
-def _is_content_passthrough_command(command: str) -> bool:
-    """True when every stage of ``command`` is a content-passthrough verb.
-
-    Segments the command the same way the project's other Bash-shape
-    handlers do (`shell_segmentation.split_unquoted`), so a separator sitting
-    inside a quoted argument is never mistaken for a pipeline boundary. A
-    command with no recognisable leading verb (empty, or one built by shell
-    expansion) is conservatively NOT passthrough -- the safe direction is to
-    leave it eligible for detection, never to grant an exemption a caller
-    cannot justify.
-    """
-    segments = split_unquoted(command, _PIPELINE_SEPARATORS)
-    found_verb = False
-    for segment in segments:
-        if not segment.strip():
-            continue
-        verb = _leading_verb(segment)
-        if not verb or verb not in _CONTENT_PASSTHROUGH_VERBS:
-            return False
-        found_verb = True
-    # An all-blank command (no verb found anywhere) is NOT passthrough -- a
-    # vacuous "every segment passed" must not grant an exemption nothing
-    # justified.
-    return found_verb
-
-
-# ─── Pattern family ───────────────────────────────────────────────────────────
+# ─── Channel-scoped signals ────────────────────────────────────────────────────
 
 # Pinned, verbatim-derived fragments from the field-confirmed web-search
-# budget refusal (BUDGETS.md). Never the ceiling number ("200 of 200") --
-# that count is configurable via CLAUDE_CODE_MAX_WEB_SEARCHES and is not a
-# stable trigger on its own.
+# budget refusal TEXT (BUDGETS.md's fixture). Never the ceiling number ("200
+# of 200") -- that count is configurable via
+# CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION and is not a stable trigger on
+# its own.
 _WEB_SEARCH_BUDGET_RE: Final[re.Pattern[str]] = re.compile(
     r"Web search was not performed|web search budget",
     re.IGNORECASE,
 )
 
-# Generic "budget ... exhausted/used up/exceeded" (either order, bounded gap
-# so unrelated prose two paragraphs apart never links up).
-_BUDGET_EXHAUSTED_RE: Final[re.Pattern[str]] = re.compile(
-    r"budget\b.{0,40}\b(exhausted|used up|exceeded)\b"
-    r"|\b(exhausted|used up|exceeded)\b.{0,40}\bbudget\b",
-    re.IGNORECASE | re.DOTALL,
+# The harness's own sentence for a dispatched sub-agent terminated mid-task
+# by a usage-limit API rejection (N46 review 1, MINOR-5) -- caught live in
+# this session's transcripts, verbatim. Anchored at the response's START
+# (`\A`) so a sub-agent's OWN composed prose merely quoting or discussing
+# the sentence mid-response cannot match -- the anchor is the structural
+# marker that lets this channel stay UNEXCLUDED (see _DEFAULT_EXCLUDED_TOOLS)
+# without reopening the free-text-quoting risk the exclusion existed to
+# avoid. "session" and "weekly" are the two limit kinds observed; the
+# resets-at clause, error type and request id are deliberately NOT part of
+# the anchor (they vary per occurrence).
+# N46 review 2, NIT-6: the anchor alone still let a report that OPENS with
+# the bare sentence and nothing else fire, so a bounded lookahead requires
+# the harness's own stable tail (the rate-limit error-type clause) to appear
+# nearby too -- a structural marker that a bare quote of the opening clause
+# alone does not carry.
+_AGENT_TERMINATED_EARLY_RE: Final[re.Pattern[str]] = re.compile(
+    r"\A\s*Agent terminated early due to an API error: You've hit your "
+    r"(?:session|weekly) limit(?=.{0,300}?\(error type rate_limit, HTTP 429)",
+    re.DOTALL,
 )
 
-# "quota exceeded" -- a distinct vocabulary from "budget" that BUDGETS.md
-# names explicitly as part of the generic shape family.
-_QUOTA_EXCEEDED_RE: Final[re.Pattern[str]] = re.compile(
-    r"quota\b.{0,20}\bexceeded\b",
-    re.IGNORECASE | re.DOTALL,
-)
 
-# "budget ... limit reached" (either order) -- "limit reached" alone is too
-# generic (matches unrelated rate-limit/size-cap prose with no budget
-# framing), so it only counts here paired with "budget" nearby.
-_BUDGET_LIMIT_REACHED_RE: Final[re.Pattern[str]] = re.compile(
-    r"budget\b.{0,40}\blimit reached\b|\blimit reached\b.{0,40}\bbudget\b",
-    re.IGNORECASE | re.DOTALL,
-)
+@dataclass(frozen=True, slots=True)
+class _Signal:
+    """A budget-exhaustion signal: the tool CHANNEL it arrives through, paired
+    with its verbatim SHAPE (N46, Plan 00466 ledger 16).
 
-_BUILTIN_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
-    _WEB_SEARCH_BUDGET_RE,
-    _BUDGET_EXHAUSTED_RE,
-    _QUOTA_EXCEEDED_RE,
-    _BUDGET_LIMIT_REACHED_RE,
+    A signal is matched ONLY when the event's ``tool_name`` is one of
+    ``tool_names`` -- never scanned against every tool's response the way a
+    bare keyword list was. This is what makes a diff, a log or a file's own
+    prose structurally unable to trigger a signal that only ever arrives
+    through a different tool: the CHANNEL check runs before the pattern ever
+    sees the text, rather than trying to guess from the text's shape alone.
+    """
+
+    tool_names: frozenset[str]
+    pattern: re.Pattern[str]
+
+
+# The WebSearch tool's own tool_response, replaced verbatim by the harness
+# when the session's web-search budget is exhausted (BUDGETS.md fixture; the
+# CHANNEL is documented, not independently field-confirmed -- see the module
+# docstring). A prior "generic" family (budget/quota/limit-reached wording,
+# matched against ANY non-excluded tool's response) was removed here: it had
+# no confirmed channel, and was the repeat false-positive source (Plan
+# 00400 N4 via `ps`; N46 via `git diff`) precisely because a keyword cannot
+# tell a delivered message from a file that merely discusses one.
+#
+# A dispatched sub-agent's own tool_response, when the harness itself cuts
+# the sub-agent off mid-task on a usage limit (N46 review 1, MINOR-5) --
+# see `_AGENT_TERMINATED_EARLY_RE` for the anchoring rationale.
+#
+# A project that confirms a genuine further channel (its own CLI reporting
+# a quota through Bash, say) declares it via ``options.extra_patterns`` --
+# see the module docstring for why that must carry a structural marker, not
+# a keyword, if it is ever pointed at Bash.
+_BUILTIN_SIGNALS: Final[tuple[_Signal, ...]] = (
+    _Signal(frozenset({"WebSearch"}), _WEB_SEARCH_BUDGET_RE),
+    _Signal(frozenset(SUBAGENT_DISPATCH_TOOL_NAMES), _AGENT_TERMINATED_EARLY_RE),
 )
 
 # ─── Ledger ────────────────────────────────────────────────────────────────────
@@ -365,17 +368,66 @@ def _strip_ledger_records(text: str) -> str:
     return result
 
 
-def _stringify_tool_response(tool_response: Any) -> str:
+def _join_text_blocks(blocks: list[Any]) -> str:
+    """Join the ``text`` of each ``{"type": "text", ...}`` block, in order.
+
+    N46 review 2, BLOCKER-1: this is the DOCUMENTED/observed ``completed``
+    PostToolUse:Agent ``tool_response.content`` shape (hooks.md:1775-1787,
+    ``[{"type": "text", "text": "..."}]``) -- every real ``completed``
+    occurrence in the corpus used it, and the prior string-only read of
+    ``content`` never matched any of them. A non-text block (there is none
+    documented today, but the harness may add one) is skipped rather than
+    stringified, so nothing but the sub-agent's own composed text ever
+    reaches the anchor.
+    """
+    return "\n".join(
+        block["text"]
+        for block in blocks
+        if isinstance(block, dict)
+        and block.get("type") == "text"
+        and isinstance(block.get("text"), str)
+    )
+
+
+def _stringify_tool_response(tool_name: str, tool_response: Any) -> str:
     """Return a searchable string form of ``tool_response``.
 
     ``tool_response`` shape varies by tool (a dict with stdout/stderr for
-    Bash, a dict with content for WebSearch, a bare string for some tools).
-    JSON-serialising whatever it is (falling back to ``str()`` for anything
-    non-serialisable) gives one text blob to pattern-match without coupling
-    this handler to any single tool's response schema.
+    Bash, a dict with a ``content`` string for WebSearch, a dict with a
+    ``content`` LIST of text blocks for a completed Task/Agent dispatch, a
+    bare string for some tools). A dict's own ``content`` field, when it is a
+    string, is returned directly -- that IS the actual message text a tool
+    integration composed, which is what lets an ANCHORED signal
+    (`_AGENT_TERMINATED_EARLY_RE`) match at the message's true start rather
+    than at a JSON envelope's literal ``{"content": "`` prefix. When
+    ``content`` is a list, its text blocks are joined (`_join_text_blocks`) --
+    the same true-start guarantee, for the shape a real dispatch actually
+    uses.
+
+    For a sub-agent dispatch tool (``SUBAGENT_DISPATCH_TOOL_NAMES``) whose
+    ``tool_response`` carries no ``content`` at all (an ``async_launched``
+    background dispatch, or a ``teammate_spawned`` handoff -- 264 of 351 real
+    occurrences), this deliberately returns "" rather than falling back to
+    JSON-serialising the whole dict: that dict's other fields are the
+    orchestrator's own dispatch BRIEF (``prompt``) and run telemetry, never a
+    harness-delivered message, and scanning them would let an admin's
+    ``extra_patterns`` fire on the brief's own wording (N46 review 2,
+    MINOR-3) rather than the sub-agent's reported text. Any other shape
+    falls back to JSON-serialising the whole value (falling back further to
+    ``str()`` for anything non-serialisable), which still gives one text
+    blob a non-anchored pattern can search anywhere in -- unchanged for
+    every non-dispatch tool.
     """
     if isinstance(tool_response, str):
         return tool_response
+    if isinstance(tool_response, dict):
+        content = tool_response.get("content")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            return _join_text_blocks(content)
+        if tool_name in SUBAGENT_DISPATCH_TOOL_NAMES:
+            return ""
     try:
         return json.dumps(tool_response, default=str)
     except (TypeError, ValueError):
@@ -397,8 +449,18 @@ _UNRENDERED_PLACEHOLDER_RE: Final[re.Pattern[str]] = re.compile(
 )
 
 
-def _find_matched_fragment(text: str, extra_patterns: list[re.Pattern[str]]) -> str | None:
+def _find_matched_fragment(
+    tool_name: str, text: str, extra_patterns: list[re.Pattern[str]]
+) -> str | None:
     """Return the first matched fragment's own text, or None if no pattern hits.
+
+    Channel-scoped (N46, Plan 00466 ledger 16): a builtin signal's pattern is
+    only even considered when ``tool_name`` is one of that signal's declared
+    ``tool_names`` -- a WebSearch-shaped fragment appearing in, say, a Bash
+    response can never match, because Bash never reaches this loop for any
+    builtin signal in the first place. ``extra_patterns`` stay tool-agnostic
+    (an admin-declared regex applies to whichever tools are not excluded),
+    since that is an explicit opt-in the admin authors and scopes themselves.
 
     A match on a LINE that still carries an unexpanded format placeholder is
     source code, not a delivered message, so it is skipped and scanning
@@ -410,7 +472,10 @@ def _find_matched_fragment(text: str, extra_patterns: list[re.Pattern[str]]) -> 
     exactly the shapes it exists to catch. Judging TEXT rather than the command
     also covers source surfaced by `cat`, a heredoc echo, or a stack trace.
     """
-    for pattern in (*_BUILTIN_PATTERNS, *extra_patterns):
+    channel_patterns = (
+        signal.pattern for signal in _BUILTIN_SIGNALS if tool_name in signal.tool_names
+    )
+    for pattern in (*channel_patterns, *extra_patterns):
         for match in pattern.finditer(text):
             if _UNRENDERED_PLACEHOLDER_RE.search(_line_around(text, match.start(), match.end())):
                 continue
@@ -441,22 +506,73 @@ def _advisory(tool_name: str, matched_fragment: str) -> str:
     )
 
 
-class BudgetExhaustionDetectorHandler(PostToolUseHandlerBase):
-    """Advisory PostToolUse handler that flags budget/quota-exhaustion messaging.
+def _dispatch_identity(tool_input: Any, tool_response: Any) -> str:
+    """A human-readable identity for a Task/Agent dispatch.
 
-    Generic pattern family (never keyed on a configurable ceiling number) over
-    the tool_response of any completed tool call, excluding file-content
-    tools (Read/Grep/Glob/Edit/Write/NotebookEdit) and dispatched sub-agent
-    responses (Task/Agent) by default so file prose and a sub-agent's own
-    composed report are never mistaken for a live exhaustion event. Two
-    structural checks (a content-passthrough Bash command shape; the
-    ledger's own JSON record shape) additionally exclude text that merely
-    QUOTES a budget message rather than delivering one -- see the module
-    docstring and
-    ``CLAUDE/Plan/00319-supervisor-release-review-followups/BUDGET-DETECTOR-DESIGN.md``.
-    Never blocks: on a match it ALLOWs with an advisory demanding prominent
-    user-facing reporting, and appends one line to an untracked occurrence
-    ledger.
+    N46 review 2, MINOR-4: ``name`` -- the handle a re-brief via SendMessage
+    needs, and set on 243 of 351 real Agent/Task calls in the corpus -- is
+    tried FIRST, ahead of ``description``/``subagent_type`` (the fields this
+    project's own dispatch tooling, ``dispatch_declaration.py``, reads for
+    the same purpose but without a re-brief handle to prefer). If
+    ``tool_input`` names nothing at all, the ``tool_response``'s own
+    ``agentId`` (present on every real ``completed``/``async_launched``
+    shape) is the last identifying fallback before "an unnamed dispatch"."""
+    if isinstance(tool_input, dict):
+        for key in ("name", "description", "subagent_type"):
+            value = tool_input.get(key)
+            if isinstance(value, str) and value:
+                return value
+    if isinstance(tool_response, dict):
+        agent_id = tool_response.get("agentId")
+        if isinstance(agent_id, str) and agent_id:
+            return agent_id
+    return "an unnamed dispatch"
+
+
+def _agent_terminated_advisory(
+    tool_name: str, tool_input: Any, tool_response: Any, matched_fragment: str
+) -> str:
+    """Build the advisory for a dispatched sub-agent the harness cut off on
+    a usage limit (N46 review 1, MINOR-5) -- names WHICH agent died and
+    demands a re-brief, since its work is incomplete and silently treating
+    the dispatch as done loses the assignment."""
+    identity = _dispatch_identity(tool_input, tool_response)
+    return (
+        f"🚨 SUB-AGENT DIED ON A USAGE LIMIT ({tool_name}: {identity!r}) 🚨\n\n"
+        f"The harness terminated this dispatch early. Matched text: "
+        f"{matched_fragment!r}\n\n"
+        "You MUST tell the user this agent died mid-task on a usage limit, "
+        "not that it finished. Its output (if any) is PARTIAL, not a "
+        "completed result -- do NOT treat the dispatch as done, and do NOT "
+        "silently retry it immediately. Once the limit resets, RE-BRIEF the "
+        "same assignment to a fresh dispatch so the work is not silently "
+        "dropped."
+    )
+
+
+class BudgetExhaustionDetectorHandler(PostToolUseHandlerBase):
+    """Advisory PostToolUse handler that flags budget-exhaustion messaging.
+
+    Channel-scoped (never a bare keyword scan): each builtin signal is a
+    (tool(s), verbatim shape) pair, matched only against the tool(s) it can
+    genuinely arrive from -- WebSearch's documented refusal text (BUDGETS.md
+    fixture), and a dispatched sub-agent's own usage-limit termination
+    (Task/Agent -- N46 review 1, MINOR-5). Excludes file-content tools
+    (Read/Grep/Glob/Edit/Write/NotebookEdit) and Bash (its response is the
+    model's own invoked command output, never a harness-populated field) by
+    default so file prose and arbitrary shell output are never mistaken for
+    a live exhaustion event. Task/Agent are deliberately NOT excluded: their
+    tool_response genuinely can carry a harness-written signal, and the
+    Agent-terminated-early signal's own anchor (not a tool exclusion) is
+    what keeps a sub-agent's ordinary composed prose from matching. That
+    signal covers FOREGROUND dispatches only -- a background/teammate
+    dispatch returns before any later limit hits, so its death never reaches
+    PostToolUse at all; see Plan 00470 Tasks 3.1/3.2 for that separate
+    channel. A structural ledger-record-shape check additionally excludes
+    text that merely QUOTES a budget message rather than delivering one --
+    see the module docstring. Never blocks: on a match it ALLOWs with an
+    advisory demanding prominent user-facing reporting, and appends one line
+    to an untracked occurrence ledger.
     """
 
     def __init__(self) -> None:
@@ -506,41 +622,19 @@ class BudgetExhaustionDetectorHandler(PostToolUseHandlerBase):
             self._compiled_extra_patterns = compiled
         return self._compiled_extra_patterns
 
-    def _quoted_not_delivered(self, hook_input: dict[str, Any]) -> bool:
-        """True when this event's ``tool_input.command`` structurally cannot
-        be delivering a live budget signal.
-
-        Two independent checks, both structural rather than keyword-based
-        beyond the pre-existing literal marker list: a self-referential
-        marker in the command text (unchanged), and a Bash command whose
-        every pipeline stage is a content-passthrough verb (new -- see
-        ``_is_content_passthrough_command``).
-        """
-        tool_input = hook_input.get(HookInputField.TOOL_INPUT)
-        if not isinstance(tool_input, dict):
-            return False
-        command = tool_input.get("command")
-        if not isinstance(command, str):
-            return False
-        if any(marker in command for marker in _SELF_REFERENTIAL_COMMAND_MARKERS):
-            return True
-        return _is_content_passthrough_command(command)
-
     def _prepared_response_text(self, hook_input: dict[str, Any]) -> str | None:
         """Return the response text eligible for pattern matching, or None.
 
         None means "structurally cannot be a delivered budget message" --
-        either an excluded tool, a content-passthrough/self-referential
-        command, or a response with nothing left after ledger-record spans
-        (F2) and the literal self-referential response markers are removed.
+        either an excluded tool, or a response with nothing left after
+        ledger-record spans (F2) and the literal self-referential response
+        markers are removed.
         """
         tool_name = hook_input.get(HookInputField.TOOL_NAME)
         if tool_name in self._resolved_excluded_tools():
             return None
-        if self._quoted_not_delivered(hook_input):
-            return None
         tool_response = hook_input.get(HookInputField.TOOL_RESPONSE)
-        text = _stringify_tool_response(tool_response)
+        text = _stringify_tool_response(str(tool_name or ""), tool_response)
         if not text:
             return None
         text = _strip_ledger_records(text)
@@ -570,7 +664,8 @@ class BudgetExhaustionDetectorHandler(PostToolUseHandlerBase):
         text = self._prepared_response_text(hook_input)
         if text is None:
             return None
-        return _find_matched_fragment(text, self._resolved_extra_patterns())
+        tool_name = str(hook_input.get(HookInputField.TOOL_NAME) or "")
+        return _find_matched_fragment(tool_name, text, self._resolved_extra_patterns())
 
     def _append_ledger_entry(self, session_id: str, tool_name: str, matched_fragment: str) -> bool:
         """Best-effort append to the untracked occurrence ledger.
@@ -631,7 +726,17 @@ class BudgetExhaustionDetectorHandler(PostToolUseHandlerBase):
                 session_id,
             )
 
-        return BlockingResult(decision=Decision.ALLOW, context=[_advisory(tool_name, fragment)])
+        if tool_name in SUBAGENT_DISPATCH_TOOL_NAMES:
+            advisory_text = _agent_terminated_advisory(
+                tool_name,
+                hook_input.get(HookInputField.TOOL_INPUT),
+                hook_input.get(HookInputField.TOOL_RESPONSE),
+                fragment,
+            )
+        else:
+            advisory_text = _advisory(tool_name, fragment)
+
+        return BlockingResult(decision=Decision.ALLOW, context=[advisory_text])
 
     def get_claude_md(self) -> str | None:
         """Return CLAUDE.md guidance about this handler."""
@@ -640,30 +745,52 @@ class BudgetExhaustionDetectorHandler(PostToolUseHandlerBase):
             "Beyond the visible 5-hour/weekly usage limits, sessions carry opaque "
             "operational budgets (e.g. a per-session web-search budget) that surface "
             "only as mid-task tool responses, with no upfront warning. A PostToolUse "
-            "advisory scans each completed tool call's response for budget/quota-"
-            "exhaustion messaging (the web-search refusal shape, plus a generic "
-            "'budget exhausted'/'quota exceeded'/'budget ... limit reached' family) "
-            "and, when it matches, tells you to report it.\n\n"
+            "advisory matches each completed tool call's response against a "
+            "CHANNEL-SCOPED signal -- currently two: the WebSearch tool's own "
+            "budget-refusal text, and a dispatched sub-agent's own usage-limit "
+            "termination on Task/Agent -- and, when it matches, tells you to report "
+            "it.\n\n"
             "**When this fires: report it prominently, immediately, and do not "
             "silently retry or degrade.** Lead your next user-facing message with a "
             "bold banner naming the budget, state what you were attempting and what "
-            "work is now affected, and stop hammering the exhausted tool.\n\n"
-            "File-content tools (Read/Grep/Glob/Edit/Write/NotebookEdit) are excluded by default, since their "
-            "response is text a file merely CONTAINS, not a live exhaustion signal. "
-            "Dispatched sub-agent responses (Task/Agent) are excluded too -- a "
-            "sub-agent's final message is its own composed prose, never a field the "
-            "Task/Agent tool populates from a budget check; a genuine hit during the "
-            "sub-agent's own work already fires directly in its own session.\n\n"
-            "**Quoted text never re-triggers this handler.** A Bash command whose "
-            "every pipeline stage is a content-passthrough verb (`cat`, `grep`, "
-            "`jq`, `tail`, ...) is excluded -- such a command only reproduces or "
-            "reformats bytes that already exist, so `cat untracked/*.jsonl`, "
-            "`jq . budget*.jsonl` or `grep ... playbook.md` never re-fire the "
-            "advisory. Any text that structurally IS this handler's own ledger "
-            "record (a JSON object carrying its record key set) is stripped before "
-            "matching, which survives `jq .`'s reformatting. See "
+            "work is now affected, and stop hammering the exhausted tool. For a "
+            "died sub-agent specifically: name WHICH dispatch died, and re-brief the "
+            "same assignment to a fresh dispatch once the limit resets -- its output "
+            "is partial, not a completed result.\n\n"
+            "**The sub-agent signal covers FOREGROUND dispatches only.** A "
+            "background/teammate dispatch (`async_launched`/`teammate_spawned`) "
+            "returns at launch and delivers no later PostToolUse event, so a usage "
+            "limit that kills it mid-task never reaches this handler at all -- "
+            "surfacing that is Plan 00470 Tasks 3.1/3.2 (the StopFailure and "
+            "Notification handlers), a different channel this handler does not "
+            "attempt.\n\n"
+            "**No arbitrary Bash stdout is ever scanned.** A signal is matched only "
+            "against the tool(s) it is documented/confirmed to arrive from -- never "
+            "a bare keyword scanned across any tool's response. File-content tools "
+            "(Read/Grep/Glob/Edit/Write/NotebookEdit) and Bash are excluded by "
+            "default: Bash's response is the model's own invoked command output (a "
+            "diff, a log, a live fetch), the same free-form class as a file's own "
+            "text, and no BUILT-IN signal's channel is Bash (Plan 00466 N46 -- an "
+            "earlier generic keyword family false-fired on a `git diff` merely "
+            "quoting budget-adjacent wording; removed rather than patched "
+            "verb-by-verb). **Task/Agent are deliberately NOT excluded** (N46 "
+            "review 1): their tool_response genuinely can carry a harness-written "
+            "signal (the usage-limit termination above), caught live in this "
+            "project's own transcripts. A sub-agent's ORDINARY composed prose does "
+            "not fire because the signal is anchored at the response's very START, "
+            "not because the tool is excluded -- prose that merely quotes or "
+            "discusses the phrase mid-response cannot match.\n\n"
+            "**Quoted text never re-triggers this handler.** Any text that "
+            "structurally IS this handler's own ledger record (a JSON object "
+            "carrying its record key set) is stripped before matching, which "
+            "survives `jq .`'s reformatting. A literal marker naming this handler "
+            "or its ledger (a CHANGELOG entry, a generated playbook) is excluded "
+            "too. See "
             "`CLAUDE/Plan/00319-supervisor-release-review-followups/"
-            "BUDGET-DETECTOR-DESIGN.md` for the full design.\n\n"
+            "BUDGET-DETECTOR-DESIGN.md` for the original design and "
+            "`CLAUDE/Plan/00466-niggles-ledger-sixteen/NIGGLES.md` (N46) for why "
+            "the generic keyword family was removed and the Agent-terminated-early "
+            "signal was added.\n\n"
             "Every detection is appended to `budget-exhaustion-events.jsonl` in the "
             "daemon's untracked directory, so recurrence is visible across the "
             "session and afterwards.\n\n"
@@ -676,13 +803,19 @@ class BudgetExhaustionDetectorHandler(PostToolUseHandlerBase):
             "    budget_exhaustion_detector:\n"
             "      enabled: true\n"
             "      options:\n"
-            "        excluded_tools: [Read, Grep, Glob, Edit, Write, NotebookEdit, Task, Agent]  # override\n"
-            "        extra_patterns: []                   # extra regexes, additive\n"
+            "        excluded_tools: [Read, Grep, Glob, Edit, Write, NotebookEdit, Bash]  # override\n"
+            "                                              # (Task/Agent are NOT excluded by default)\n"
+            "        extra_patterns: []                   # extra regexes, additive; tool-agnostic\n"
+            "                                              # among non-excluded tools -- if you point\n"
+            "                                              # one at Bash (by removing it from\n"
+            "                                              # excluded_tools), write a pattern specific\n"
+            "                                              # enough that ordinary output cannot match it\n"
+            "                                              # by accident, not a bare keyword.\n"
             "```\n"
         )
 
     def get_acceptance_tests(self) -> list[Any]:
-        """Return acceptance tests: an advisory probe and a near-miss allow."""
+        """Return acceptance tests: an advisory probe and a Bash-exclusion allow."""
         from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
 
         return [
@@ -721,21 +854,57 @@ class BudgetExhaustionDetectorHandler(PostToolUseHandlerBase):
                 requires_main_thread=False,
             ),
             AcceptanceTest(
-                title="Ordinary prose mentioning 'budget' does not trigger the advisory",
+                title="A Bash tool response is never scanned, even quoting the exact refusal",
                 command=(
-                    "Simulate a Bash tool response containing the text 'Updated the "
-                    "project budget planning spreadsheet.'"
+                    "Simulate a Bash tool response containing the text 'Web search "
+                    "was not performed: this session has used its web search budget "
+                    "(200 of 200 WebSearch calls).'"
                 ),
                 harness_cannot_produce=(
                     "Same `tool_response` gap as its sibling above, and convertible "
                     "with the same harness capability."
                 ),
                 description=(
-                    "Near-miss: the word 'budget' appears with no exhaustion/quota "
-                    "context, so no advisory fires and the response is unaffected."
+                    "Bash is excluded by default: its response is the model's own "
+                    "invoked command output, never the WebSearch tool's own "
+                    "harness-populated field, so no advisory fires even when the "
+                    "text is the pinned refusal fragment verbatim (e.g. a diff or a "
+                    "log quoting it)."
                 ),
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
+                safety_notes="Synthetic tool_response text only; no live tool call is made.",
+                test_type=TestType.ADVISORY,
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=False,
+            ),
+            AcceptanceTest(
+                title="A dispatched sub-agent cut off by a usage limit triggers a re-brief advisory",
+                command=(
+                    "Simulate an Agent tool response containing the text 'Agent "
+                    "terminated early due to an API error: You've hit your weekly "
+                    "limit · resets Sep 27, 8am (UTC) (error type rate_limit, HTTP "
+                    "429, request id req_example, model claude-sonnet-5).'"
+                ),
+                harness_cannot_produce=(
+                    "Same `tool_response` gap as its siblings above, and "
+                    "convertible with the same harness capability."
+                ),
+                description=(
+                    "N46 review 1, MINOR-5 (real shape fixed by N46 review 2, "
+                    "BLOCKER-1: the documented `tool_response.content` is a LIST "
+                    "of text blocks, not a bare string): the harness's own "
+                    "usage-limit termination sentence, anchored at the first "
+                    "text block's start, triggers an advisory naming the "
+                    "dispatch and demanding a re-brief once the limit resets. "
+                    "Foreground dispatches only -- see the module docstring."
+                ),
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[
+                    r"SUB-AGENT DIED",
+                    r"🚨",
+                    r"re-brief",
+                ],
                 safety_notes="Synthetic tool_response text only; no live tool call is made.",
                 test_type=TestType.ADVISORY,
                 recommended_model=RecommendedModel.SONNET,

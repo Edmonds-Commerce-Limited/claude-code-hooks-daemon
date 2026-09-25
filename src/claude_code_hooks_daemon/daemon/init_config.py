@@ -294,7 +294,7 @@ class ConfigTemplate:
             "    command_hints: {enabled: true, priority: 29}  # Config-driven advisory reminder after a configured command\n"
             "    recovery_cron_advisor: {enabled: true, priority: 30}    # Advise on failsafe recovery cron lifecycle (opt-out)\n"
             "    goal_injection: {enabled: false, priority: 31}  # Write <session>.goal-intent for the ccy supervisor on plan flip to In Progress (opt-in)\n"
-            "    budget_exhaustion_detector: {enabled: true, priority: 32}  # Advisory when a tool response shows budget/quota exhaustion (opt-out)\n"
+            "    budget_exhaustion_detector: {enabled: true, priority: 32}  # Advisory on a WebSearch budget-refusal or a sub-agent usage-limit termination (channel-scoped, opt-out)\n"
             "    model_downgrade_recorder: {enabled: true, priority: 33}  # Publish <session>.model-downgrade so the ccy supervisor can tell a machine downgrade from your own /model (opt-out)\n"
             "    merge_qa_report: {enabled: true, priority: 34}  # Post-hoc plan/docs QA report on what a git merge/pull/rebase introduced (fires only when plan/docs QA sweeps are active)\n"
             "    daemon_sync_after_merge: {enabled: true, priority: 35}  # A merge/pull/rebase that changed daemon config or handler code leaves the running daemon stale -- advises a restart, naming the paths\n"

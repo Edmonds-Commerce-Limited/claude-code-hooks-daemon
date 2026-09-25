@@ -96,3 +96,31 @@ config_changes:
         tdd_enforcement and pipe_blocker (15), so when one tool call trips
         both and the chain stops at the first deny, the security deny is the
         one reported.
+
+    - key: handlers.post_tool_use.budget_exhaustion_detector.options.excluded_tools
+      description: >-
+        N46 (Plan 00466 ledger 16): the default now includes `Bash` (a
+        verb-by-verb passthrough allowlist for Bash commands kept needing a
+        new entry per false positive, so Bash is excluded outright instead),
+        and no longer includes `Task`/`Agent` (they now carry a real
+        channel-scoped, anchored signal of their own -- a dispatched
+        sub-agent cut off by a harness usage limit -- so a blanket exclusion
+        would drop it). The built-in "generic" budget/quota/limit-reached
+        keyword family is also removed entirely: only the WebSearch
+        budget-refusal text and the Agent-terminated-early text are matched,
+        each scoped to the one tool it can arrive from.
+      migration_note: >-
+        A project that set a config value for `extra_patterns` intending it
+        to match its OWN CLI's quota message through Bash (the v3.60.0
+        migration note's suggested pattern) now loses that alert silently:
+        Bash is excluded before `extra_patterns` runs. To restore matching
+        for Bash, set `excluded_tools` EXPLICITLY to the new default WITHOUT
+        `Bash` in it, e.g. `[Read, Grep, Glob, Edit, Write, NotebookEdit]`
+        -- adding `Bash` to the list EXCLUDES it, the opposite of what
+        restores the alert. A project relying on the removed generic
+        keyword family firing through a non-Bash, non-WebSearch tool must
+        replace it with its own `extra_patterns` entry -- the generic
+        family is gone, not renamed. `extra_patterns` now also applies to
+        Task/Agent results (they are no longer excluded by default): it is
+        scoped to the sub-agent's own reported text, never the dispatch's
+        `prompt` or run telemetry.

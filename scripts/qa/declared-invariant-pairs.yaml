@@ -263,19 +263,6 @@
     file: src/claude_code_hooks_daemon/utils/shell_segmentation.py
     function: _segment_command_word
 
-- id: passthrough-verb-reaches-the-reserved-word-strip
-  relation: reaches
-  helper: strip_reserved_word_prefix
-  reason: >
-    both name the command a segment runs, so `time cat f` loses the passthrough
-    exemption that `cat f` has.
-  left:
-    file: src/claude_code_hooks_daemon/handlers/post_tool_use/budget_exhaustion_detector.py
-    function: _leading_verb
-  right:
-    file: src/claude_code_hooks_daemon/utils/shell_segmentation.py
-    function: _segment_command_word
-
 - id: git-subcommand-anchors-interpolate-the-command-position
   relation: interpolates
   helper: COMMAND_POSITION

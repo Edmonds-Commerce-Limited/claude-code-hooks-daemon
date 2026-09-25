@@ -753,7 +753,7 @@ handlers:
       #     - id: project-motto
       #       text: "All findings are logged to {plan_path}/REPORTS/."
 
-    budget_exhaustion_detector:  # Dogfood: advisory on budget/quota-exhaustion tool-response messaging (Plan 00315)
+    budget_exhaustion_detector:  # Dogfood: WebSearch budget-refusal / sub-agent usage-limit advisory (channel-scoped) (Plan 00315)
       enabled: true  # On by default (opt-out) everywhere; advisory-only, never blocks.
       priority: 32
 

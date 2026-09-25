@@ -1,10 +1,12 @@
 """Tests for BudgetExhaustionDetectorHandler - budget-exhaustion advisory.
 
-Covers: web-search budget refusal fixture (field-confirmed shape, Plan 00315
-BUDGETS.md), generic budget/exhausted/quota/limit-reached shapes, precision
-(no firing on Read/Grep/Glob tool responses, no firing on the ceiling number
-alone, no firing on ordinary prose mentioning "budget"), the occurrence
-ledger, and config options (excluded_tools, extra_patterns).
+Covers: the one field-confirmed web-search budget refusal shape (Plan 00315
+BUDGETS.md), channel scoping (a signal only matches its own declared tool --
+N46, Plan 00466 ledger 16), precision (no firing on Read/Grep/Glob/Bash/Task/
+Agent tool responses, no firing on the ceiling number alone, no arbitrary
+Bash stdout scanned regardless of the producing command), the ledger
+self-feed guard, extra_patterns configurability, the occurrence ledger, and
+config options (excluded_tools, extra_patterns).
 """
 
 import json
@@ -39,7 +41,8 @@ def _tool_input(tool_name: str, tool_response: Any, session_id: str = "sess-1") 
 
 
 class TestWebSearchBudgetFixture:
-    """The pinned field-confirmed web-search budget refusal shape."""
+    """The pinned field-confirmed web-search budget refusal shape, channel-
+    scoped to ``tool_name == "WebSearch"`` (N46, Plan 00466 ledger 16)."""
 
     _FIXTURE = (
         "Web search was not performed: this session has used its web search "
@@ -61,6 +64,32 @@ class TestWebSearchBudgetFixture:
         hook_input = _tool_input("WebSearch", {"content": "Found 200 results across 200 pages."})
         assert handler.matches(hook_input) is False
 
+    def test_generic_wording_alone_no_longer_fires_even_through_websearch(
+        self, handler: BudgetExhaustionDetectorHandler
+    ) -> None:
+        """N46 follow-up: a prior "generic" family matched broad 'budget
+        exhausted'/'quota exceeded' wording against ANY non-excluded tool's
+        response, including WebSearch's. It was removed (no confirmed
+        channel of its own, and the repeat false-positive source) -- only
+        the pinned, verbatim fragment matches now."""
+        hook_input = _tool_input(
+            "WebSearch", {"content": "This tool's budget has been exhausted for the session."}
+        )
+        assert handler.matches(hook_input) is False
+
+    def test_pinned_fragment_does_not_fire_through_an_unrecognised_channel(
+        self, handler: BudgetExhaustionDetectorHandler
+    ) -> None:
+        """The pinned fragment is channel-gated to WebSearch specifically --
+        the identical text through a DIFFERENT, non-excluded tool must not
+        fire either, since that tool is not this signal's confirmed
+        channel."""
+        hook_input = _tool_input(
+            "WebFetch",
+            {"content": "Web search was not performed: web search budget exhausted."},
+        )
+        assert handler.matches(hook_input) is False
+
     def test_advisory_names_matched_fragment_and_demands_prominent_reporting(
         self, handler: BudgetExhaustionDetectorHandler
     ) -> None:
@@ -76,88 +105,81 @@ class TestWebSearchBudgetFixture:
         assert "not" in combined.lower() and "retry" in combined.lower()
 
 
-# ─── Generic budget-exhaustion pattern family ────────────────────────────────
+# ─── No arbitrary Bash stdout is ever scanned (N46 follow-up) ────────────────
 
 
-class TestGenericBudgetShapes:
-    @pytest.mark.parametrize(
-        "content",
-        [
-            "Error: budget exhausted for this operation.",
-            "Request denied: quota exceeded for this resource.",
-            "budget limit reached; no further calls permitted this session.",
-            "This tool's budget has been used up for the session.",
-        ],
+class TestNoArbitraryBashStdoutScanned:
+    """Coordinator review of N46: a verb-by-verb passthrough allowlist
+    (cat/grep/jq/git/...) still lets any UNLISTED command through
+    unfiltered -- it is the allowlist pattern this project rejects, and it
+    keeps needing a new entry per false positive rather than closing the
+    class. Bash now joins the default excluded tools
+    (``_DEFAULT_EXCLUDED_TOOLS``), so no command's stdout is ever scanned,
+    regardless of which verb produced it. One reproduction case is kept
+    (N46 review 1, NIT-9): every command variant takes the SAME early
+    return at the tool-exclusion check (``tool_input``/the command is never
+    even read), so parametrising verbs the way an allowlist test would
+    (``rg``, ``awk``, ``python -c``, a live ``curl`` fetch) duplicated
+    ``TestExcludedToolsByDefault::test_default_excluded_tools_never_fire``
+    without exercising anything distinct.
+    """
+
+    _WEB_SEARCH_FIXTURE = (
+        "Web search was not performed: this session has used its web search "
+        "budget (200 of 200 WebSearch calls)."
     )
-    def test_matches_generic_exhaustion_shapes(
-        self, handler: BudgetExhaustionDetectorHandler, content: str
-    ) -> None:
-        hook_input = _tool_input("Bash", {"stdout": content, "stderr": ""})
-        assert handler.matches(hook_input) is True
 
-    def test_does_not_match_ordinary_prose_mentioning_budget(
+    def test_bash_never_fires_regardless_of_producing_command(
         self, handler: BudgetExhaustionDetectorHandler
     ) -> None:
-        """Near-miss: 'budget' appears but with no exhaustion/quota context."""
-        hook_input = _tool_input(
-            "Bash",
-            {"stdout": "Updated the project budget planning spreadsheet.", "stderr": ""},
+        """The N46 reproduction itself: `git diff` showing the ledger's own
+        real false-positive phrase ("exceeded its byte budget")."""
+        diff_text = (
+            "diff --git a/foo.py b/foo.py\n"
+            "+        raise BudgetError('this call exceeded its byte budget')\n"
         )
+        hook_input = _tool_input("Bash", {"stdout": diff_text, "stderr": ""})
+        hook_input["tool_input"] = {"command": "git diff HEAD~1"}
         assert handler.matches(hook_input) is False
 
+    def test_the_real_signal_still_fires_through_its_own_channel(
+        self, handler: BudgetExhaustionDetectorHandler
+    ) -> None:
+        """The load-bearing half: excluding Bash entirely must cost no true
+        positive on the one confirmed channel."""
+        hook_input = _tool_input("WebSearch", {"content": self._WEB_SEARCH_FIXTURE})
+        assert handler.matches(hook_input) is True
 
-# ─── Precision: excluded tools ───────────────────────────────────────────────
+
+# ─── Unrendered source is not a delivered signal (Plan 00400 N4) ────────────
 
 
 class TestUnrenderedTemplateIsNotASignal:
-    """Plan 00400 N4: SOURCE CODE carrying a budget phrase is not a budget hit.
-
-    Observed live: `ps -eo pid,etime,args` listed a pytest fixture's
-    hook-wrapper subprocess, and that wrapper's Python SOURCE contains the
-    f-string below. The detector fired and demanded a bold user-facing banner
-    for a budget nothing had hit.
+    """Plan 00400 N4: SOURCE CODE carrying an unexpanded format placeholder is
+    not a budget hit, even through the one surviving channel (WebSearch).
 
     The discriminator is the fragment's own text rather than the command: a
     RENDERED runtime message always has its placeholders substituted, so an
-    unexpanded `{...}` placeholder proves the text is source. That also covers
-    source surfaced by `cat`, a heredoc echo or a stack trace — none of which a
-    `ps`-command exclusion would catch.
+    unexpanded ``{...}`` placeholder proves the text is source.
     """
 
-    _PS_ARGV_SOURCE = (
-        "1142781 04:51 python3 -c import sys\n"
-        "        context_lines = [\n"
-        "            f'HOOKS DAEMON: A hook handler exceeded the "
-        "{SOCKET_TIMEOUT_SECONDS:g}s budget',\n"
-        "        ]\n"
-    )
-
-    def test_ps_listing_of_source_does_not_fire(
+    def test_unexpanded_placeholder_does_not_fire(
         self, handler: BudgetExhaustionDetectorHandler
     ) -> None:
-        hook_input = _tool_input("Bash", {"stdout": self._PS_ARGV_SOURCE, "stderr": ""})
+        hook_input = _tool_input(
+            "WebSearch",
+            {"content": "Web search was not performed for {reason} in this session."},
+        )
         assert handler.matches(hook_input) is False
 
-    @pytest.mark.parametrize(
-        "content",
-        [
-            "quota exceeded for {resource}",
-            "the {name!r} budget has been used up",
-            "budget exhausted after ${LIMIT} calls",
-        ],
-    )
-    def test_other_unexpanded_placeholder_shapes_do_not_fire(
-        self, handler: BudgetExhaustionDetectorHandler, content: str
-    ) -> None:
-        hook_input = _tool_input("Bash", {"stdout": content, "stderr": ""})
-        assert handler.matches(hook_input) is False
-
-    def test_the_same_message_RENDERED_still_fires(
+    def test_the_same_message_rendered_still_fires(
         self, handler: BudgetExhaustionDetectorHandler
     ) -> None:
         """The load-bearing half: suppressing source must cost no true positive."""
-        rendered = "HOOKS DAEMON: A hook handler exceeded the 30s budget"
-        hook_input = _tool_input("Bash", {"stdout": rendered, "stderr": ""})
+        hook_input = _tool_input(
+            "WebSearch",
+            {"content": "Web search was not performed for rate limiting in this session."},
+        )
         assert handler.matches(hook_input) is True
 
     def test_json_braces_are_not_mistaken_for_a_placeholder(
@@ -165,113 +187,116 @@ class TestUnrenderedTemplateIsNotASignal:
     ) -> None:
         """A real signal delivered as JSON must not be suppressed by the guard."""
         hook_input = _tool_input(
-            "Bash", {"stdout": '{"error": "quota exceeded for this resource"}', "stderr": ""}
+            "WebSearch", {"content": '{"error": "Web search was not performed"}'}
         )
         assert handler.matches(hook_input) is True
 
 
+# ─── Precision: excluded tools ───────────────────────────────────────────────
+
+
 class TestExcludedToolsByDefault:
     @pytest.mark.parametrize(
-        "tool_name", ["Read", "Grep", "Glob", "Edit", "Write", "NotebookEdit", "Task", "Agent"]
+        "tool_name",
+        ["Read", "Grep", "Glob", "Edit", "Write", "NotebookEdit", "Bash"],
     )
     def test_default_excluded_tools_never_fire(
         self, handler: BudgetExhaustionDetectorHandler, tool_name: str
     ) -> None:
-        """File-content tools are excluded by default so reading a file that
-        merely discusses budget exhaustion in its prose never fires."""
+        """File-content tools and Bash are excluded by default so reading a
+        file or running a shell command that merely discusses budget
+        exhaustion in its prose never fires. Task/Agent are NOT in this list
+        (N46 review 1, MINOR-5): they carry a real harness-written signal of
+        their own (a dispatched sub-agent cut off by a usage limit -- see
+        TestAgentTerminatedEarlySignal), so precision comes from channel
+        scoping (an anchored pattern) rather than a blanket exclusion."""
         hook_input = _tool_input(
             tool_name,
-            {"content": "budget exhausted: this session has used its web search budget"},
+            {"content": "Web search was not performed: web search budget exhausted"},
         )
         assert handler.matches(hook_input) is False
 
-    @pytest.mark.parametrize(
-        "command",
-        [
-            "cat untracked/budget-exhaustion-events.jsonl",
-            "grep -c fragment /workspace/untracked/budget-exhaustion-events.jsonl",
-            "grep -n pattern src/claude_code_hooks_daemon/handlers/post_tool_use/budget_exhaustion_detector.py",
-            "sed -n 1p tests/unit/handlers/post_tool_use/test_budget_exhaustion_detector.py",
-        ],
-    )
-    def test_self_referential_bash_reads_never_fire(
-        self, handler: BudgetExhaustionDetectorHandler, command: str
+    def test_excluded_tools_configurable(self, handler: BudgetExhaustionDetectorHandler) -> None:
+        """N46 review 1, MINOR-6: a Bash payload is a vacuous check post-fix --
+        Bash can never fire from a builtin signal regardless of this option,
+        because of the channel gate (not the exclusion list). Assert the
+        option takes effect on a tool that WOULD otherwise fire: excluding
+        WebSearch itself suppresses its own pinned fragment, and the default
+        configuration (no override) still catches it."""
+        fixture = "Web search was not performed: web search budget"
+
+        handler._excluded_tools = ["WebSearch"]
+        assert handler.matches(_tool_input("WebSearch", {"content": fixture})) is False
+
+        default_handler = BudgetExhaustionDetectorHandler()
+        assert default_handler.matches(_tool_input("WebSearch", {"content": fixture})) is True
+
+    def test_bash_can_be_re_included_for_a_confirmed_second_channel(
+        self, handler: BudgetExhaustionDetectorHandler
     ) -> None:
-        """A Bash command inspecting the ledger, the handler's own source or
-        its tests is READING recorded/pattern text, not hitting a budget --
-        without this guard, cat-ing the ledger re-fires the detector and
-        appends a fresh entry, a self-feeding loop."""
+        """A project that has confirmed its OWN CLI reports a genuine quota
+        signal through Bash re-includes "Bash" via an ``excluded_tools``
+        override and pairs it with a specific ``extra_patterns`` regex --
+        the module docstring's documented opt-in path."""
+        handler._excluded_tools = [
+            "Read",
+            "Grep",
+            "Glob",
+            "Edit",
+            "Write",
+            "NotebookEdit",
+            "Task",
+            "Agent",
+        ]
+        handler._extra_patterns = [r"MyCLI: quota exceeded \(code 429\)"]
         hook_input = _tool_input(
-            "Bash",
-            {"stdout": "budget exhausted: web search budget used", "stderr": ""},
+            "Bash", {"stdout": "MyCLI: quota exceeded (code 429)", "stderr": ""}
         )
-        hook_input["tool_input"] = {"command": command}
-        assert handler.matches(hook_input) is False
+        assert handler.matches(hook_input) is True
+
+
+# ─── Self-referential response markers ───────────────────────────────────────
+
+
+class TestSelfReferentialResponseMarkers:
+    """A payload that names this handler or its ledger is documentation ABOUT
+    the feature (a CHANGELOG entry, a generated playbook), not a live
+    signal -- even when it also quotes the pinned fragment verbatim, which
+    is exactly what a generated report does. Observed live while reading
+    this repo's own changelog during the v3.60.0 release, and again from a
+    generated acceptance-test playbook.
+    """
 
     @pytest.mark.parametrize(
         "documentation_text",
         [
-            # The project's own CHANGELOG entry describing this handler -- the
-            # live false positive that motivated the guard (v3.60.0 release).
-            "New PostToolUse handler scans for generic 'budget exhausted/used\n"
-            "  up/exceeded' shapes. Ships as budget_exhaustion_detector.",
-            # BUDGETS.md prose cataloguing the shapes this handler looks for.
+            "New PostToolUse handler scans for the field-confirmed 'Web search "
+            "was not performed' shape. Ships as budget_exhaustion_detector.",
             "The web search budget is exhausted per session; see "
-            "budget-exhaustion-events.jsonl for recorded occurrences.",
+            "budget-exhaustion-events.jsonl for recorded occurrences. Matches: "
+            "'Web search was not performed'.",
         ],
     )
     def test_documentation_about_this_handler_never_fires(
         self, handler: BudgetExhaustionDetectorHandler, documentation_text: str
     ) -> None:
-        """Text that NAMES this handler or its ledger is documentation ABOUT the
-        feature, not a live budget signal.
-
-        The command guard above only inspects the COMMAND, so reading a file
-        whose CONTENT documents the detector (CHANGELOG.md, BUDGETS.md, the
-        release notes) still fired -- observed live while reading this repo's
-        own changelog. A genuine harness budget message never names the
-        detector or its ledger, so keying on those markers is precise.
-        """
-        hook_input = _tool_input("Bash", {"stdout": documentation_text, "stderr": ""})
-        hook_input["tool_input"] = {"command": "head -n 40 CHANGELOG.md"}
+        hook_input = _tool_input("WebSearch", {"content": documentation_text})
         assert handler.matches(hook_input) is False
 
-    @pytest.mark.parametrize(
-        "report_text",
-        [
-            # A generated acceptance-test report printing this handler's own
-            # test definitions. The block's `command` field quotes the refusal
-            # sentence verbatim, because that IS what the test simulates.
+    def test_report_naming_the_handler_class_never_fires(
+        self, handler: BudgetExhaustionDetectorHandler
+    ) -> None:
+        """Text naming this handler by its CLASS name is documentation about
+        the feature, exactly like text naming its module. A generated report
+        (e.g. an acceptance-test playbook dump) quotes the refusal sentence
+        verbatim because that IS what the block simulates."""
+        report_text = (
             "#190 BudgetExhaustionDetectorHandler [PostToolUse]\n"
-            "  title    : Web-search budget refusal triggers a prominent advisory\n"
             "  command  : Simulate a WebSearch tool response containing the text\n"
             "    'Web search was not performed: this session has used its web\n"
-            "    search budget (200 of 200 WebSearch calls).'",
-            # The handler registry / documentation listing, same naming form.
-            "BudgetExhaustionDetectorHandler — hidden agent budgets are surfaced\n"
-            "  matches on: web search budget, quota exceeded",
-        ],
-    )
-    def test_report_naming_the_handler_class_never_fires(
-        self, handler: BudgetExhaustionDetectorHandler, report_text: str
-    ) -> None:
-        """Text naming this handler by its CLASS name is documentation about the
-        feature, exactly like text naming its module.
-
-        The response guard knew only the snake_case module form, so a generated
-        report — which names handlers by class — slipped past it and fired the
-        advisory on the handler's own test fixture. Observed live twice in one
-        session while auditing the acceptance playbook.
-        """
-        hook_input = _tool_input("Bash", {"stdout": report_text, "stderr": ""})
-        hook_input["tool_input"] = {"command": "python scripts/dump_playbook.py 190"}
-        assert handler.matches(hook_input) is False
-
-    def test_excluded_tools_configurable(self, handler: BudgetExhaustionDetectorHandler) -> None:
-        handler._excluded_tools = ["Bash"]
-        hook_input = _tool_input(
-            "Bash", {"stdout": "budget exhausted for this session", "stderr": ""}
+            "    search budget (200 of 200 WebSearch calls).'"
         )
+        hook_input = _tool_input("WebSearch", {"content": report_text})
         assert handler.matches(hook_input) is False
 
 
@@ -279,166 +304,54 @@ class TestExcludedToolsByDefault:
 
 
 class TestLedgerSelfFeedStructural:
-    """A ledger LINE contains neither the handler name nor the ledger
-    filename, so the literal marker guards never covered it (PLAN.md F2).
-    These commands were the plan's own reproduction of the self-feed: none
-    of them spells `budget-exhaustion-events.jsonl`, so only a structural
-    recognition of the ledger's own JSON record shape closes the gap.
+    """A structurally recognised ledger record (all four record keys) is
+    documentation of a PAST detection, not a live one, and is stripped
+    before matching runs -- tested against the surviving WebSearch channel
+    since Bash is excluded entirely (N46).
     """
 
     _LEDGER_LINE = (
         '{"timestamp": "2026-09-02T00:00:00+00:00", "session_id": "sess-old", '
-        '"tool_name": "Bash", "matched_fragment": "budget exhausted for this '
-        'operation"}'
+        '"tool_name": "WebSearch", "matched_fragment": "web search budget"}'
     )
 
     _LEDGER_PRETTY = (
         "{\n"
         '  "timestamp": "2026-09-02T00:00:00+00:00",\n'
         '  "session_id": "sess-old",\n'
-        '  "tool_name": "Bash",\n'
-        '  "matched_fragment": "budget exhausted for this operation"\n'
+        '  "tool_name": "WebSearch",\n'
+        '  "matched_fragment": "web search budget"\n'
         "}"
     )
 
-    def test_cat_glob_of_ledger_directory_never_fires(
+    def test_full_ledger_record_alone_never_fires(
         self, handler: BudgetExhaustionDetectorHandler
     ) -> None:
-        """`cat untracked/*.jsonl` -- no filename is spelled in the command."""
-        hook_input = _tool_input("Bash", {"stdout": self._LEDGER_LINE, "stderr": ""})
-        hook_input["tool_input"] = {"command": "cat untracked/*.jsonl"}
+        hook_input = _tool_input("WebSearch", {"content": self._LEDGER_LINE})
         assert handler.matches(hook_input) is False
 
-    def test_jq_pretty_printed_ledger_never_fires(
+    def test_jq_pretty_printed_ledger_record_never_fires(
         self, handler: BudgetExhaustionDetectorHandler
     ) -> None:
-        """`jq .` reformats the record across several lines, defeating a
+        """``jq .`` reformats the record across several lines, defeating a
         naive per-line JSON parse -- the recognizer must survive that."""
-        hook_input = _tool_input("Bash", {"stdout": self._LEDGER_PRETTY, "stderr": ""})
-        hook_input["tool_input"] = {"command": "jq . untracked/budget*.jsonl"}
-        assert handler.matches(hook_input) is False
-
-    def test_tail_of_ledger_env_var_never_fires(
-        self, handler: BudgetExhaustionDetectorHandler
-    ) -> None:
-        """`tail -n 20 "$LEDGER"` -- the path is a shell variable, never a
-        literal filename the command-marker guard could key on."""
-        hook_input = _tool_input("Bash", {"stdout": self._LEDGER_LINE, "stderr": ""})
-        hook_input["tool_input"] = {"command": 'tail -n 20 "$LEDGER"'}
-        assert handler.matches(hook_input) is False
-
-    def test_ledger_json_shape_recognized_independent_of_command(
-        self, handler: BudgetExhaustionDetectorHandler
-    ) -> None:
-        """The JSON-shape recognition is a property of the RESPONSE text, not
-        the command that produced it -- a non-passthrough command (here,
-        python) dumping ledger-shaped JSON must still be excluded."""
-        hook_input = _tool_input("Bash", {"stdout": self._LEDGER_LINE, "stderr": ""})
-        hook_input["tool_input"] = {"command": "python3 -c \"print(open('x.jsonl').read())\""}
+        hook_input = _tool_input("WebSearch", {"content": self._LEDGER_PRETTY})
         assert handler.matches(hook_input) is False
 
     def test_ledger_shape_requires_all_four_keys(
         self, handler: BudgetExhaustionDetectorHandler
     ) -> None:
         """A JSON object missing two of the ledger's record keys (and
-        carrying neither self-referential marker string) is NOT recognized
+        carrying neither self-referential marker string) is NOT recognised
         as ledger content -- this guards against the recognizer being so
         loose it swallows a genuine structured tool response that merely
-        happens to be a JSON object."""
+        happens to be a JSON object, or blocks a genuine signal sitting
+        right next to unrelated structured data."""
         partial = (
-            '{"tool_name": "Bash", "timestamp": "2026-01-01T00:00:00+00:00"} budget exhausted here'
+            '{"tool_name": "WebSearch", "timestamp": "2026-01-01T00:00:00+00:00"} '
+            "Web search was not performed: web search budget exhausted"
         )
-        hook_input = _tool_input("Bash", {"stdout": partial, "stderr": ""})
-        assert handler.matches(hook_input) is True
-
-
-# ─── Content-passthrough Bash commands (Task 4.5) ────────────────────────────
-
-
-class TestContentPassthroughCommands:
-    """A Bash command whose entire pipeline is content-passthrough verbs
-    (cat/head/tail/grep/jq/awk/sed/...) reproduces or reformats bytes that
-    already exist somewhere -- it never independently discovers a live
-    budget signal. PLAN.md Task 4.5's `grep` reproduction is the concrete
-    case: a generated playbook quoting the Test 187 fixture, with neither
-    marker present.
-    """
-
-    # The Test 187 fixture, quoted the way a generated playbook would --
-    # deliberately carrying NEITHER self-referential marker (no
-    # "budget_exhaustion_detector", no "BudgetExhaustionDetectorHandler", no
-    # ledger filename), which is exactly what made this false-fire slip past
-    # the pre-existing marker guards during the v3.60.0 gate.
-    _QUOTED_FIXTURE = (
-        "#187 [PostToolUse]\n"
-        "  command  : Simulate a WebSearch tool response containing the text\n"
-        "    'Web search was not performed: this session has used its web\n"
-        "    search budget (200 of 200 WebSearch calls).'"
-    )
-
-    @pytest.mark.parametrize(
-        "command",
-        [
-            'grep -A3 "Test 187" playbook.md',
-            "head -n 40 playbook.md",
-            "awk '/Test 187/{print}' playbook.md",
-        ],
-    )
-    def test_grep_of_generated_playbook_never_fires(
-        self, handler: BudgetExhaustionDetectorHandler, command: str
-    ) -> None:
-        hook_input = _tool_input("Bash", {"stdout": self._QUOTED_FIXTURE, "stderr": ""})
-        hook_input["tool_input"] = {"command": command}
-        assert handler.matches(hook_input) is False
-
-    def test_blank_command_is_not_passthrough(
-        self, handler: BudgetExhaustionDetectorHandler
-    ) -> None:
-        """An empty/whitespace-only command has no verb at all -- it must not
-        vacuously satisfy "every segment is passthrough" and grant an
-        exemption nothing justified."""
-        hook_input = _tool_input(
-            "Bash", {"stdout": "budget exhausted for this operation", "stderr": ""}
-        )
-        hook_input["tool_input"] = {"command": "   "}
-        assert handler.matches(hook_input) is True
-
-    def test_curl_piped_to_jq_still_fires(self, handler: BudgetExhaustionDetectorHandler) -> None:
-        """A LIVE fetch piped through a passthrough formatter must stay
-        eligible -- jq alone in the pipeline must not blanket-exempt curl's
-        genuinely-fetched content. Guards against over-broadening the
-        passthrough classification to "any pipeline containing jq"."""
-        hook_input = _tool_input(
-            "Bash",
-            {"stdout": "Request denied: quota exceeded for this resource.", "stderr": ""},
-        )
-        hook_input["tool_input"] = {"command": "curl -s https://api.example.com/status | jq ."}
-        assert handler.matches(hook_input) is True
-
-    def test_live_curl_command_alone_still_fires(
-        self, handler: BudgetExhaustionDetectorHandler
-    ) -> None:
-        """A bare live command (not a passthrough verb) must keep firing --
-        the passthrough classification must not weaken genuine detection."""
-        hook_input = _tool_input(
-            "Bash",
-            {"stdout": "budget exhausted for this operation", "stderr": ""},
-        )
-        hook_input["tool_input"] = {"command": "curl -s https://api.example.com/status"}
-        assert handler.matches(hook_input) is True
-
-    def test_python_generated_report_without_marker_still_fires(
-        self, handler: BudgetExhaustionDetectorHandler
-    ) -> None:
-        """A generated-report command (python, not a passthrough verb)
-        producing genuinely new prose with no self-referential marker must
-        still fire -- only a passthrough VERB or a self-referential marker
-        exempts a Bash response, not "any script that prints text"."""
-        hook_input = _tool_input(
-            "Bash",
-            {"stdout": "quota exceeded for this resource right now.", "stderr": ""},
-        )
-        hook_input["tool_input"] = {"command": "python scripts/report.py"}
+        hook_input = _tool_input("WebSearch", {"content": partial})
         assert handler.matches(hook_input) is True
 
 
@@ -446,14 +359,17 @@ class TestContentPassthroughCommands:
 
 
 class TestSubagentDispatchReportNeverFires:
-    """A dispatched sub-agent's final message is composed prose an LLM wrote,
-    not a field the Task/Agent tool integration populates from a live budget
-    check -- the same category as a file the model merely read. If the
-    sub-agent's OWN work genuinely hit a budget, that already fired directly
-    in the sub-agent's own session at the tool call that hit it; this
-    orchestrator-side echo is a redundant, quotation-prone restatement
-    (PLAN.md Task 4.5's "sub-agent dispatch prompt that cited the fixture
-    string" incident)."""
+    """A dispatched sub-agent's own COMPOSED PROSE quoting another signal's
+    fixture text is not that signal firing -- the same category as a file
+    the model merely read (N46 review 1, MINOR-5 rationale correction: this
+    is NOT because the harness never writes to a Task/Agent tool_response --
+    it does, for a usage-limit termination; see
+    TestAgentTerminatedEarlySignal -- it is that the WebSearch fragment
+    specifically is channel-gated to the WebSearch tool, and free prose
+    composed by an LLM does not open with a DIFFERENT signal's exact anchor
+    either). If the sub-agent's OWN work genuinely hit a budget mid-task,
+    that fires directly on its own tool_result, which the channel-scoped
+    Agent-terminated-early signal below now catches."""
 
     _SUBAGENT_REPORT = (
         "Verified Test 187: the response contains 'Web search was not "
@@ -469,23 +385,275 @@ class TestSubagentDispatchReportNeverFires:
         assert handler.matches(hook_input) is False
 
 
-class TestExtraPatterns:
-    def test_extra_patterns_are_additive(self, handler: BudgetExhaustionDetectorHandler) -> None:
-        handler._extra_patterns = [r"custom budget ceiling hit"]
-        hook_input = _tool_input(
-            "Bash", {"stdout": "custom budget ceiling hit today", "stderr": ""}
-        )
+# ─── Agent-terminated-early: a real harness signal on Task/Agent (MINOR-5) ───
+
+
+def _real_dispatch_result(text: str) -> dict[str, Any]:
+    """A REDACTED copy of the documented/observed ``completed`` PostToolUse:
+    Agent ``tool_response`` shape (hooks.md:1775-1787; N46 review 2,
+    BLOCKER-1): ``content`` is an ARRAY of ``{"type": "text", "text": ...}``
+    blocks, alongside run telemetry. Every value here is a placeholder --
+    no real agent id, request id or session id."""
+    return {
+        "status": "completed",
+        "agentId": "a0000000000000000",
+        "agentType": "general-purpose",
+        "content": [{"type": "text", "text": text}],
+        "resolvedModel": "claude-sonnet-5",
+        "totalDurationMs": 1000,
+        "totalTokens": 1000,
+        "totalToolUseCount": 1,
+        "usage": {"input_tokens": 100, "output_tokens": 100},
+    }
+
+
+class TestAgentTerminatedEarlySignal:
+    """N46 review 1, MINOR-5 (real shape fixed by N46 review 2, BLOCKER-1):
+    this session's own transcripts caught a SECOND real, confirmed channel --
+    a dispatched sub-agent cut off mid-task by a harness usage-limit
+    rejection writes the harness's OWN sentence as the first TEXT BLOCK of
+    its ``PostToolUse:Task``/``PostToolUse:Agent`` ``tool_response`` (three
+    live ``completed`` occurrences: two weekly-limit, one session-limit). A
+    fourth, ``is_error: true`` occurrence reaches ``PostToolUseFailure``, a
+    different event this PostToolUse handler does not receive -- see
+    ``TestIsErrorVariantIsOutOfPostToolUseScope`` below and NIGGLES.md N46
+    for the follow-up. Anchored at the start of the joined text (``\\A``) so
+    a sub-agent's own prose QUOTING the phrase mid-response -- exactly the
+    shape ``TestSubagentDispatchReportNeverFires`` covers for the WebSearch
+    fragment -- cannot match here either, and additionally requires the
+    stable ``(error type rate_limit, HTTP 429`` tail nearby (N46 review 2,
+    NIT-6), so a report that merely opens with the bare sentence and nothing
+    else does not match. Task/Agent are NOT in ``_DEFAULT_EXCLUDED_TOOLS``
+    specifically so this channel-scoped signal is reachable; precision comes
+    from the anchor, the tail requirement and the channel gate, not from a
+    blanket tool exclusion.
+    """
+
+    _WEEKLY_LIMIT = (
+        "Agent terminated early due to an API error: You've hit your weekly "
+        "limit · resets Sep 27, 8am (UTC) (error type rate_limit, HTTP "
+        "429, request id req_example, model claude-sonnet-5).\n\n"
+        "Everything below is PARTIAL output recovered from the agent before "
+        "it was cut off.\n\n"
+        "Investigated the failure mode and found..."
+    )
+
+    _SESSION_LIMIT = (
+        "Agent terminated early due to an API error: You've hit your "
+        "session limit · resets 12:50am (UTC) (error type rate_limit, "
+        "HTTP 429, request id req_example, model claude-sonnet-5)."
+    )
+
+    @pytest.mark.parametrize("tool_name", ["Task", "Agent"])
+    @pytest.mark.parametrize(
+        "fixture",
+        [_WEEKLY_LIMIT, _SESSION_LIMIT],
+        ids=["weekly-limit", "session-limit"],
+    )
+    def test_the_real_transcript_shape_fires(
+        self, handler: BudgetExhaustionDetectorHandler, tool_name: str, fixture: str
+    ) -> None:
+        hook_input = _tool_input(tool_name, _real_dispatch_result(fixture))
         assert handler.matches(hook_input) is True
+
+    def test_a_subagents_own_prose_quoting_the_phrase_mid_response_does_not_fire(
+        self, handler: BudgetExhaustionDetectorHandler
+    ) -> None:
+        report = (
+            "I checked the failure mode and found the transcript contains: "
+            "'Agent terminated early due to an API error: You've hit your "
+            "weekly limit' verbatim, confirming the hypothesis."
+        )
+        hook_input = _tool_input("Task", _real_dispatch_result(report))
+        assert handler.matches(hook_input) is False
+
+    def test_a_report_opening_with_the_bare_phrase_but_no_stable_tail_does_not_fire(
+        self, handler: BudgetExhaustionDetectorHandler
+    ) -> None:
+        """N46 review 2, NIT-6: the anchor alone is not enough -- a report
+        whose first line happens to be the bare sentence with no
+        ``(error type rate_limit, HTTP 429`` tail nearby must not fire."""
+        bare = (
+            "Agent terminated early due to an API error: You've hit your "
+            "weekly limit is the exact phrase I found in the transcript "
+            "while investigating N46; the agent itself completed normally."
+        )
+        hook_input = _tool_input("Agent", _real_dispatch_result(bare))
+        assert handler.matches(hook_input) is False
+
+    def test_advisory_names_the_agent_and_demands_a_re_brief(
+        self, handler: BudgetExhaustionDetectorHandler
+    ) -> None:
+        hook_input = _tool_input("Task", _real_dispatch_result(self._WEEKLY_LIMIT))
+        hook_input["tool_input"] = {
+            "description": "review the diff for N23",
+            "subagent_type": "fork",
+        }
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.ALLOW
+        combined = "\n".join(result.context)
+        assert "review the diff for N23" in combined
+        assert "re-brief" in combined.lower() or "rebrief" in combined.lower()
+
+
+class TestIsErrorVariantIsOutOfPostToolUseScope:
+    """N46 review 2, BLOCKER-1: the real ``is_error: true`` occurrence's
+    ``toolUseResult`` is a bare string beginning ``"Error: Agent terminated
+    early..."``, and it is delivered to ``PostToolUseFailure`` (hooks.md:
+    2108-2151), not ``PostToolUse``. This PostToolUse handler intentionally
+    does not receive that event, so this asserts the negative: even if a
+    string of that shape somehow reached this handler's ``matches()``, the
+    anchor (which requires the response to OPEN with "Agent terminated
+    early", not "Error: ...") would not match it either -- the string
+    prefix alone already rules it out."""
+
+    def test_the_error_prefixed_string_does_not_match_the_agent_anchor(
+        self, handler: BudgetExhaustionDetectorHandler
+    ) -> None:
+        error_text = (
+            "Error: Agent terminated early due to an API error: You've hit "
+            "your weekly limit (error type rate_limit, HTTP 429)."
+        )
+        hook_input = _tool_input("Agent", {"content": error_text})
+        assert handler.matches(hook_input) is False
+
+
+class TestDispatchIdentity:
+    """N46 review 2, MINOR-4: the advisory must use ``name`` -- the handle
+    SendMessage needs for a re-brief, and the field 243 of 351 real Agent/
+    Task calls set -- ahead of ``description``/``subagent_type``, and fall
+    back to the ``tool_response``'s own ``agentId`` before giving up."""
+
+    def _fired(
+        self, handler: BudgetExhaustionDetectorHandler, tool_input: Any, tool_response: Any = None
+    ) -> str:
+        payload = _tool_input(
+            "Agent",
+            (
+                tool_response
+                if tool_response is not None
+                else _real_dispatch_result(TestAgentTerminatedEarlySignal._WEEKLY_LIMIT)
+            ),
+        )
+        payload["tool_input"] = tool_input
+        result = handler.handle(payload)
+        assert result.context
+        return result.context[0]
+
+    def test_name_wins_over_description(self, handler: BudgetExhaustionDetectorHandler) -> None:
+        advisory = self._fired(
+            handler, {"name": "n46-fix", "description": "review N23", "subagent_type": "fork"}
+        )
+        assert "n46-fix" in advisory
+        assert "review N23" not in advisory
+
+    def test_description_is_used_when_name_is_absent(
+        self, handler: BudgetExhaustionDetectorHandler
+    ) -> None:
+        advisory = self._fired(handler, {"subagent_type": "fork", "description": "review N23"})
+        assert "review N23" in advisory
+
+    def test_subagent_type_is_used_when_name_and_description_are_absent(
+        self, handler: BudgetExhaustionDetectorHandler
+    ) -> None:
+        advisory = self._fired(handler, {"subagent_type": "Explore"})
+        assert "Explore" in advisory
+
+    def test_falls_back_to_the_tool_responses_own_agent_id(
+        self, handler: BudgetExhaustionDetectorHandler
+    ) -> None:
+        response = _real_dispatch_result(TestAgentTerminatedEarlySignal._WEEKLY_LIMIT)
+        response["agentId"] = "a1234567890abcdef"
+        advisory = self._fired(handler, {}, tool_response=response)
+        assert "a1234567890abcdef" in advisory
+
+    def test_unnamed_dispatch_when_nothing_identifies_it(
+        self, handler: BudgetExhaustionDetectorHandler
+    ) -> None:
+        response = _real_dispatch_result(TestAgentTerminatedEarlySignal._WEEKLY_LIMIT)
+        response.pop("agentId")
+        advisory = self._fired(handler, None, tool_response=response)
+        assert "an unnamed dispatch" in advisory
+
+
+# ─── extra_patterns: admin-declared, tool-agnostic among non-excluded tools ──
+
+
+class TestExtraPatterns:
+    def test_extra_patterns_are_additive_on_a_non_excluded_tool(
+        self, handler: BudgetExhaustionDetectorHandler
+    ) -> None:
+        """An admin-declared regex applies to any tool NOT in
+        ``excluded_tools`` -- here a hypothetical non-Bash, non-builtin-
+        channel tool (WebFetch), which is neither excluded by default nor a
+        declared builtin signal's channel."""
+        handler._extra_patterns = [r"custom quota ceiling hit"]
+        hook_input = _tool_input("WebFetch", {"content": "custom quota ceiling hit today"})
+        assert handler.matches(hook_input) is True
+
+    def test_extra_patterns_never_scan_a_dispatchs_own_prompt_or_telemetry(
+        self, handler: BudgetExhaustionDetectorHandler
+    ) -> None:
+        """N46 review 2, MINOR-3: un-excluding Task/Agent must not route
+        ``extra_patterns`` over the orchestrator's own dispatch brief
+        (``prompt``) or run telemetry -- only the sub-agent's OWN reported
+        text. A dispatch whose PROMPT mentions the admin's term, but whose
+        reply text does not, must not fire."""
+        handler._extra_patterns = [r"budget"]
+        response = _real_dispatch_result("done")
+        response["prompt"] = "Review the budget detector"
+        hook_input = _tool_input("Agent", response)
+        assert handler.matches(hook_input) is False
+
+    def test_extra_patterns_still_fire_on_the_dispatchs_own_reported_text(
+        self, handler: BudgetExhaustionDetectorHandler
+    ) -> None:
+        """The companion positive case: the SAME admin term, reached through
+        the sub-agent's own reply text rather than the prompt, still fires."""
+        handler._extra_patterns = [r"budget"]
+        response = _real_dispatch_result("Reviewed the budget detector; all tests pass.")
+        hook_input = _tool_input("Agent", response)
+        assert handler.matches(hook_input) is True
+
+    def test_async_launched_dispatch_has_nothing_to_scan(
+        self, handler: BudgetExhaustionDetectorHandler
+    ) -> None:
+        """N46 review 2, MINOR-4 (foreground-only): an ``async_launched``
+        background dispatch carries no ``content`` at all -- only ``prompt``
+        and launch metadata -- so it must never fall back to scanning those
+        fields either."""
+        handler._extra_patterns = [r"budget"]
+        response = {
+            "agentId": "a0",
+            "canReadOutputFile": True,
+            "description": "review the budget detector",
+            "isAsync": True,
+            "outputFile": "/tmp/out",
+            "prompt": "Review the budget detector",
+            "resolvedModel": "claude-sonnet-5",
+            "status": "async_launched",
+        }
+        hook_input = _tool_input("Agent", response)
+        assert handler.matches(hook_input) is False
 
 
 # ─── Never blocks ─────────────────────────────────────────────────────────────
 
 
 class TestNeverBlocks:
-    def test_decision_is_always_allow(self, handler: BudgetExhaustionDetectorHandler) -> None:
+    def test_decision_is_always_allow_on_a_match(
+        self, handler: BudgetExhaustionDetectorHandler
+    ) -> None:
         hook_input = _tool_input(
-            "Bash", {"stdout": "quota exceeded for this operation", "stderr": ""}
+            "WebSearch", {"content": "Web search was not performed: web search budget"}
         )
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.ALLOW
+
+    def test_decision_is_always_allow_on_no_match(
+        self, handler: BudgetExhaustionDetectorHandler
+    ) -> None:
+        hook_input = _tool_input("WebSearch", {"content": "Found 3 results."})
         result = handler.handle(hook_input)
         assert result.decision == Decision.ALLOW
 
@@ -507,13 +675,16 @@ class TestConcurrentEventIsolation:
 
         Two events both match; B's matches() runs BEFORE A's handle() -- the
         exact ordering a thread pool can produce. A's handle() must still
-        report A's OWN fragment, never B's.
+        report A's OWN fragment, never B's. Uses ``extra_patterns`` (shared
+        config, but not per-event state) against a non-excluded, non-builtin
+        tool so each event's matched text is distinguishable.
         """
+        handler._extra_patterns = [r"custom quota ceiling hit for \w+"]
         hook_input_a = _tool_input(
-            "Bash", {"stdout": "budget exhausted for tool A", "stderr": ""}, session_id="sess-a"
+            "WebFetch", {"content": "custom quota ceiling hit for toolA"}, session_id="sess-a"
         )
         hook_input_b = _tool_input(
-            "Bash", {"stdout": "quota exceeded for tool B", "stderr": ""}, session_id="sess-b"
+            "WebFetch", {"content": "custom quota ceiling hit for toolB"}, session_id="sess-b"
         )
 
         assert handler.matches(hook_input_a) is True
@@ -521,20 +692,18 @@ class TestConcurrentEventIsolation:
         result_a = handler.handle(hook_input_a)
 
         combined = "\n".join(result_a.context)
-        assert "budget exhausted" in combined
-        assert "quota exceeded" not in combined
+        assert "toolA" in combined
+        assert "toolB" not in combined
 
     def test_a_non_matching_second_event_does_not_blank_the_first(
         self, handler: BudgetExhaustionDetectorHandler
     ) -> None:
         """A's fragment must survive even a B whose matches() call clears state."""
         hook_input_a = _tool_input(
-            "Bash", {"stdout": "budget exhausted for tool A", "stderr": ""}, session_id="sess-a"
+            "WebSearch", {"content": "Web search was not performed for tool A"}, session_id="sess-a"
         )
         hook_input_b = _tool_input(
-            "Bash",
-            {"stdout": "ordinary output, nothing budget-related", "stderr": ""},
-            session_id="sess-b",
+            "WebSearch", {"content": "ordinary output, nothing budget-related"}, session_id="sess-b"
         )
 
         assert handler.matches(hook_input_a) is True
@@ -542,7 +711,7 @@ class TestConcurrentEventIsolation:
         result_a = handler.handle(hook_input_a)
 
         assert result_a.context
-        assert "budget exhausted" in "\n".join(result_a.context)
+        assert "Web search was not performed" in "\n".join(result_a.context)
 
 
 # ─── Occurrence ledger (Task 2.2) ────────────────────────────────────────────
@@ -560,8 +729,8 @@ class TestOccurrenceLedger:
         monkeypatch.setattr(ProjectContext, "daemon_untracked_dir", staticmethod(lambda: tmp_path))
 
         hook_input = _tool_input(
-            "Bash",
-            {"stdout": "quota exceeded for this operation", "stderr": ""},
+            "WebSearch",
+            {"content": "Web search was not performed: web search budget"},
             session_id="sess-ledger",
         )
         handler.handle(hook_input)
@@ -572,9 +741,9 @@ class TestOccurrenceLedger:
         assert len(lines) == 1
         record = json.loads(lines[0])
         assert record["session_id"] == "sess-ledger"
-        assert record["tool_name"] == "Bash"
+        assert record["tool_name"] == "WebSearch"
         assert "timestamp" in record
-        assert "quota exceeded" in record["matched_fragment"]
+        assert "Web search was not performed" in record["matched_fragment"]
 
     def test_ledger_write_failure_is_fail_open(
         self,
@@ -590,7 +759,7 @@ class TestOccurrenceLedger:
         monkeypatch.setattr(ProjectContext, "daemon_untracked_dir", staticmethod(_raise))
 
         hook_input = _tool_input(
-            "Bash", {"stdout": "quota exceeded for this operation", "stderr": ""}
+            "WebSearch", {"content": "Web search was not performed: web search budget"}
         )
         result = handler.handle(hook_input)
         assert result.decision == Decision.ALLOW
@@ -608,7 +777,7 @@ class TestHandlerMetadata:
         assert guidance is not None
         assert "budget" in guidance.lower()
 
-    def test_acceptance_tests_include_advisory_and_near_miss(
+    def test_acceptance_tests_include_advisory_and_bash_exclusion(
         self, handler: BudgetExhaustionDetectorHandler
     ) -> None:
         tests = handler.get_acceptance_tests()
