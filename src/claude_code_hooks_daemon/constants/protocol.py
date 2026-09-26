@@ -107,6 +107,12 @@ class HookInputField:
     # Kept for backward compatibility only — do NOT use in new code.
     PERMISSION_TYPE = "permission_type"
 
+    # PostToolUseFailure field (contracts/claude-code-hooks/PostToolUseFailure.json).
+    # The top-level failure text a failed tool call delivers -- a DIFFERENT
+    # field from HookOutputField.ERROR above, which is an OUTPUT-side tag this
+    # daemon's own advisories can carry, never an input field name.
+    ERROR = "error"
+
 
 class HookOutputField:
     """Hook output field names (camelCase) - single source of truth.

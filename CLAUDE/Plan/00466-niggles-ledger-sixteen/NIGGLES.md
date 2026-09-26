@@ -688,6 +688,23 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N110 — The local full QA gate tests one Python version, so a version-specific defect passes it and fails CI
+
+**Found by the N106 fixer.** N24 passed the full local gate and went red on
+CI. The cause was a cost that is quadratic only from Python 3.12, where
+stdlib `relative_to`/`is_relative_to` walk `path.parents`. The local gate
+runs one venv (`untracked/venv-workspace-py311-…`, Python 3.11), but CI's QA
+job runs 3.11, 3.12 and 3.13. So "gate green" does not imply "CI green" for
+any behaviour that differs between versions, and a merge made on gate
+evidence can turn main red.
+
+**Remedy:** make the gate cover every CI Python version, or at least the
+newest one alongside the oldest. For example, run the tests stage under
+each interpreter `uv` can provide, keeping the other stages on one. Or have
+the gate state which versions it ran and refuse to call itself a merge gate
+when that set is narrower than CI's matrix. Pin it with a test that reads
+the CI workflow's matrix and compares it to what the gate runs.
+
 ### N105 — A skill redeploy leaves an untracked, unignored `.claude/hooks-daemon-backups/`
 
 **Found by upgrade review 11 (L9), confirmed by upgrade round 16a.**
@@ -1726,7 +1743,7 @@ covers the record identity, the attribution window, every retro-attribution
 and hot-reload backfill guard (each asserted on the `/model` payload or the
 exported state it owns), and the export round-trips.
 
-### N46 — `budget_exhaustion_detector` fires on a tool result that merely contains budget wording
+### N46 — ✅ Remedied — `budget_exhaustion_detector` fires on a tool result that merely contains budget wording
 
 **Found by the guard-defects review-6 agent.** Reading a diff whose source
 code contained the string "exceeded its byte budget" raised the "budget
@@ -1738,6 +1755,179 @@ output. A false alarm like this teaches agents to ignore the real one.
 meaning its exact shape and source. Never match free text inside a tool
 result's content, such as a file or a diff. Add a RED test that reads a file
 containing the phrase and expects no alert, and keep the real signal firing.
+
+**First remedy (superseded — patched one spelling, not the class).** Added
+`git`/`diff` to a `_CONTENT_PASSTHROUGH_VERBS` allowlist. Coordinator review
+correctly rejected this: any OTHER command that prints file content (`rg`,
+`awk`, `sed -n`, `less`, `python -c`, `bat`, `xxd`, `gh pr diff`, a `curl` of
+a raw file, ...) still fired, because a verb allowlist can only ever cover
+the verbs someone thought to list, and the next false positive just names
+another one.
+
+**Remedied (fix the other way round).** Established exactly where the
+harness's real signal appears: BUDGETS.md confirms exactly ONE channel and
+shape — the `WebSearch` tool's own `tool_response`, replaced verbatim with
+"Web search was not performed"/"web search budget" when the session's
+search budget is exhausted. Everything else the handler matched (a generic
+"budget"/"quota"/"limit reached" family, applied to ANY non-excluded tool's
+response) had no confirmed channel and was the repeat false-positive source
+(Plan 00400 N4 via `ps`; this entry via `git diff`) — removed rather than
+re-scoped, since a keyword cannot tell a delivered message from a file that
+merely discusses one.
+
+The handler now matches channel-scoped `_Signal(tool_names, pattern)` pairs
+(currently just `{"WebSearch"}` paired with the pinned fragment) instead of
+a bare pattern list: a signal is only even considered when the event's
+`tool_name` is one of its declared channels, so a diff, a log or a file's
+own prose is structurally unable to trigger a signal that only ever arrives
+through a different tool. `Bash` joins the default excluded tools outright
+— its `tool_response` is the model's own invoked command output, the same
+free-form class as a file's own content, and no tool the harness itself
+rate/quota-limits is reached by running a shell command, so nothing Bash
+prints is ever this handler's confirmed channel. The whole
+verb-allowlist/self-referential-command-marker machinery
+(`_CONTENT_PASSTHROUGH_VERBS`, `_is_content_passthrough_command`,
+`_leading_verb`, `_SELF_REFERENTIAL_COMMAND_MARKERS`) is deleted rather than
+kept dormant, since it embodied exactly the allowlist pattern this project
+rejects. An admin who has confirmed their OWN CLI reports a genuine quota
+signal through Bash can still re-include `"Bash"` via `excluded_tools` and
+pair it with a specific `extra_patterns` regex of their own — a structural
+marker they supply, not a keyword this handler guesses at.
+
+`TestNoArbitraryBashStdoutScanned` in
+`tests/unit/handlers/post_tool_use/test_budget_exhaustion_detector.py`
+RED-verified `rg`, `awk`, `python -c`, `git diff` and even a live `curl`
+fetch through Bash never fire regardless of the phrase they print, and that
+the real signal still fires through its own WebSearch channel. Swept
+`model_fallback_detector` and `model_fallback_records` for the same class:
+both already match the transcript's own structural JSON record shape
+(`subtype == "model_refusal_fallback"` / a `fallback`-typed content block),
+never a free-text keyword scan, so no free-text quoting of the phrase
+inside file content can trigger them — no fix needed there.
+
+**Review 1 (guard-defects reviewer, `260925-n46-review1-opus-5-5.md`) found
+the fix incomplete and added a second channel-scoped signal.** The
+`{"WebSearch"}` channel above covered a false positive that had already
+happened; it did nothing for the failure mode this very session hit — a
+dispatched sub-agent (Task/Agent) silently cut off mid-task by a harness
+weekly/session usage limit, with no alert surfaced to the lead. Added a
+second `_Signal`, `{Task, Agent}` (via the shared
+`SUBAGENT_DISPATCH_TOOL_NAMES` constant) paired with an `\A`-anchored
+pattern on "Agent terminated early due to an API error: You've hit your
+(session|weekly) limit...", so a sub-agent's own prose merely QUOTING that
+phrase mid-response (not at the start) cannot match. `Task`/`Agent` are
+removed from the default `excluded_tools` — they previously had no signal
+of their own so exclusion cost nothing, but a blanket exclusion now would
+silently drop the one signal this handler most needed. `_stringify_tool_response`
+was changed to read a dict `tool_response`'s own `"content"` field directly
+rather than JSON-dumping the whole envelope, so the anchor matches the true
+message start, not a `{"content": "` wrapper prefix. The advisory for this
+signal names which dispatch died (its `description` or `subagent_type`) and
+tells the lead to re-brief it once the limit resets.
+
+The review also found and fixed: Black on
+`tests/unit/utils/test_reserved_word_command_heads.py`; `HANDLER_REFERENCE.md`
+still describing the removed generic-keyword behaviour; a missing
+config-changes manifest entry (`v3.67.0.yaml`) for the `excluded_tools`
+default flip, with a migration note for a project whose `extra_patterns`
+targeted Bash per the v3.60.0 note; an over-claimed "confirmed" channel
+wording and a stale `CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION` env-var
+name, corrected at all three sites named; a vacuous
+`test_excluded_tools_configurable` test rewritten to target `WebSearch`
+(the one tool that can genuinely be suppressed) instead of `Bash` (which
+can never fire regardless of the option, post-fix); duplicated
+`TestNoArbitraryBashStdoutScanned` coverage collapsed to the one case that
+matters (`git diff` reproducing "exceeded its byte budget"); and two stale
+one-line comments in `.claude/hooks-daemon.yaml` and `init_config.py`
+describing the removed generic family. A documented `maxTurns`
+partial-output marker was left for a follow-up niggle if its verbatim shape
+is ever captured — the review flagged it as conditional ("if its verbatim
+shape is in the vendored docs or the transcripts"), and no such shape was
+found in either.
+
+**Review 2 (`260925-n46-review2-opus-5-5.md`) found review 1's Agent signal
+never fired on any real payload, and fixed the shape.** The documented
+`PostToolUse:Agent` `tool_response.content` (hooks.md:1775-1787) is an
+ARRAY of `{"type": "text", "text": ...}` blocks, not the bare string every
+review-1 test fed it; the reviewer's replay of 351 real Agent/Task results
+(`probe_n46r2_replay.py`) found 0 of 4 real occurrences firing and 0 false
+positives -- vacuous, not merely imprecise. `_stringify_tool_response` (now
+`_stringify_tool_response(tool_name, tool_response)`) gained
+`_join_text_blocks`, joining a list `content`'s `type == "text"` blocks in
+order; re-running the same replay after the fix fires 3 of 4 real
+occurrences (all `completed`-status), 0 false positives over 347 ordinary
+results. The 4th real occurrence (`is_error: true`) is delivered as a bare
+string to `PostToolUseFailure`, a DIFFERENT event this PostToolUse handler
+does not receive (hooks.md:2108-2151). The coordinator rejected leaving
+this as a follow-up niggle: a new sibling handler,
+`agent_terminated_early_failure_detector` (the first handler on
+`handlers/post_tool_use_failure/`), matches the same harness text -- as
+the top-level `error` field's own shape, `Error: Agent terminated early...`,
+anchored and tail-gated the same way -- channel-scoped to Task/Agent, and
+imports `dispatch_identity` (renamed from `_dispatch_identity`, now public
+for this cross-package reuse, the same shape `recovery_cron_advisor`'s
+`declares_failsafe_cron` already has) rather than duplicating the identity
+logic. Replaying all four real occurrences through BOTH handlers together
+(`probe_n46r3_combined_replay.py`) was reported as firing 4 of 4 at the
+time, 0 false positives over 362 ordinary results -- but that replay fed
+the failure handler the transcript's `toolUseResult` string (`"Error: " + content`), not the bare `error` field the live daemon actually sends;
+review 3 (below) found this made the count vacuous for the real shape --
+against the real hook it was 3 of 4 (the three `completed` occurrences
+only) until the anchor was fixed. For dispatch
+tools specifically, `_stringify_tool_response` no longer falls back to
+`json.dumps` of the whole `tool_response` dict when `content` is absent
+(an `async_launched`/`teammate_spawned` launch, 264 of 351 real results):
+that dict's other fields are the orchestrator's own dispatch `prompt` and
+run telemetry, and falling back to them let a project's `extra_patterns`
+fire on the BRIEF rather than the sub-agent's own reported text
+(review-2 MINOR-3) -- it returns `""` for that shape instead, which is
+also the honest expression of MINOR-4's foreground-only finding: 264 of
+351 real dispatches never reach `completed` through PostToolUse at all, so
+this signal cannot and does not attempt to cover them (Plan 00470 Tasks
+3.1/3.2 own that separate channel, via StopFailure/Notification).
+`_dispatch_identity` now reads `tool_input.name` FIRST (the handle a
+re-brief needs, set on 243 of 351 real calls; review-1's version ignored
+it entirely), falling back to `description`, `subagent_type`, then the
+`tool_response`'s own `agentId` before "an unnamed dispatch" (review-2
+MINOR-4). The anchor also now requires the harness's stable
+`(error type rate_limit, HTTP 429` tail nearby (review-2 NIT-6), so a
+report that merely opens with the bare sentence and nothing else does not
+match. The config-changes manifest's migration note had the operator
+instruction backwards (review-2 MAJOR-1: "add Bash back to `excluded_tools`"
+restores nothing -- it EXCLUDES Bash further; corrected to "set
+`excluded_tools` explicitly to the default WITHOUT Bash"). The
+review-1-introduced session UUID in the committed review-1 report and the
+release note's number (34, which also collided on sibling worktree
+branches) are addressed separately per the coordinator's own instructions
+for this round (history rewrite onto a clean branch; renumbered to 33
+against main's actual maximum of 32).
+
+**Review 3 found the new PostToolUseFailure handler's anchor required a
+prefix the live daemon never sends.** The regex demanded a leading
+`Error:\s*`, but Claude Code v2.1.282's real `error` field carries the BARE
+tool_result content (`error: ur`) -- the `Error: ` prefix belongs only to
+the transcript's own SEPARATE `toolUseResult` recording of the same
+occurrence (`toolUseResult == "Error: " + content`, confirmed across 2906
+real is_error results; the vendored contract's own Bash example,
+`"Exit code 1\n..."`, is unprefixed too). So the handler missed the one
+real death it exists for. Fixed by making the prefix optional
+(`(?:Error:\s*)?`), keeping the anchor; the test suite's primary fixture is
+now the bare-content shape, with the prefixed transcript shape kept as a
+second case. Re-running the combined replay -- this time feeding the
+failure handler the tool_result block's own CONTENT rather than
+`toolUseResult` -- fires 4 of 4 real occurrences, 0 false positives over
+366 ordinary results. A separate check against every real `is_error: true`
+tool_result content across the whole corpus (all tools, not just Task/
+Agent -- 3216+ such contents; the exact count grows as the corpus does)
+confirms the fixed anchor fires on the one real death among them, with 0
+false positives over the rest (`probe_n46r7_fixcheck.py`). Also caught in
+this round: a leading U+FEFF byte-order mark defeated `\s` in both this
+anchor and its PostToolUse sibling's (`_AGENT_TERMINATED_EARLY_RE`), fixed
+by tolerating an optional BOM in each; a stale sibling-module name
+(`agent_terminated_early_detector`, missing `_failure`) in
+`budget_exhaustion_detector.py`'s `dispatch_identity` docstring, corrected;
+and the new handler's class docstring broke mid-sentence on its first
+line, truncating its row in the generated `.claude/HOOKS-DAEMON.md`.
 
 ### N45 — A NUL byte in a configured word-list path makes the never-raising secret-term lookup raise
 
