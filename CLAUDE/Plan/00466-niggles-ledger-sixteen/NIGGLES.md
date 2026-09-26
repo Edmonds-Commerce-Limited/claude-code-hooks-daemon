@@ -9,6 +9,19 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N97 — `block-curl-pipe-shell` denies prose that only mentions curl and bash
+
+**Found by N38 review 9 (ledger candidate 8), and on base too.** A
+docstring written into `test_curl_pipe_shell.py` is denied. The literal is
+in `/workspace/untracked/scratch/n38r9/fpcmp_lit.txt`. bash would stop at a
+syntax error before the curl line, and the line is not curl piped into
+bash anyway.
+
+**Remedy:** judge `curl … | sh` only on a real pipe, taking pipe positions
+from the N38 lexer, and not on text inside a quoted string or heredoc data
+body. It starts after N38 merges, on the same branch as N92 (a quoted `|`
+read as a pipe).
+
 ### N96 — `subagent_full_qa_blocker.py` is one 5,300-line handler
 
 **Found by the coordinator while harvesting the Plan 00463 gate fix.** The
