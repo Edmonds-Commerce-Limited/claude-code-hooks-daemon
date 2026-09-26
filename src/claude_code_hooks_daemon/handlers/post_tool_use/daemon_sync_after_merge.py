@@ -54,6 +54,7 @@ from claude_code_hooks_daemon.utils.merge_scope import (
     changed_paths,
     is_git_merge_pull_rebase_command,
 )
+from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to, path_relative_to
 
 
 def _running_version() -> str:
@@ -205,9 +206,9 @@ class DaemonSyncAfterMergeHandler(PostToolUseHandlerBase):
         error-hiding audit is correct to refuse the distinction.
         """
         config = ProjectContext.config_path()
-        if not config.is_relative_to(project_root):
+        if not path_is_relative_to(config, project_root):
             return None
-        return config.relative_to(project_root).as_posix()
+        return path_relative_to(config, project_root).as_posix()
 
     @staticmethod
     def _what_changed(hits: list[str]) -> str:

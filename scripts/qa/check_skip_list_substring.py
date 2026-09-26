@@ -73,6 +73,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to, path_relative_to
 from claude_code_hooks_daemon.utils.scan_scope import vacuous_scan_failure, walk_files
 
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
@@ -280,7 +281,11 @@ def scan_file(path: Path) -> list[Violation]:
         # the lint gate reports with a better message than this rule could.
         return []
 
-    reported = str(path.relative_to(_REPO_ROOT)) if path.is_relative_to(_REPO_ROOT) else str(path)
+    reported = (
+        str(path_relative_to(path, _REPO_ROOT))
+        if path_is_relative_to(path, _REPO_ROOT)
+        else str(path)
+    )
     violations: list[Violation] = []
     seen: set[int] = set()
     for node in ast.walk(tree):

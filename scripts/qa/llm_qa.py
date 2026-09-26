@@ -31,6 +31,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Final, NamedTuple, TypeAlias
 
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 SCRIPTS_DIR = PROJECT_ROOT / "scripts" / "qa"
 QA_OUTPUT_DIR = PROJECT_ROOT / "untracked" / "qa"
@@ -548,6 +550,11 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
         json_file="authored_path_stat.json",
         jq_hint="jq '.violations[] | {file, line, rule, message}'",
     ),
+    "signal_targets": ToolConfig(
+        command=_python("check_signal_targets.py", "--json"),
+        json_file="signal_targets.json",
+        jq_hint="jq '.violations[] | {file, line, rule, message}'",
+    ),
     "skip_list_substring": ToolConfig(
         command=_python("check_skip_list_substring.py", "--json"),
         json_file="skip_list_substring.json",
@@ -765,6 +772,13 @@ def _summarize_tests(data: QaReport) -> str:
     cov = data.get("coverage", {}).get("percent_covered", 0)
     error_part = f", {errors} errored" if errors else ""
     line = f"{passed} passed, {failed} failed{error_part}, {skipped} skipped | coverage: {cov:.1f}%"
+    # Name a red run the failed/errored counts alone do not explain — a
+    # coverage-threshold miss exits non-zero over "0 failed" and a coverage
+    # percentage that rounds to looking fine (94.99% displays as "95.0%")
+    # (00466 N118). Without this the gate reported failure and named nothing.
+    unnamed_reason = s.get("unnamed_failure_reason")
+    if unnamed_reason:
+        line += f"\n   cause: {unnamed_reason}"
     return line + _named_failures(data, "tests.json")
 
 
@@ -993,6 +1007,7 @@ SUMMARIZERS: dict[str, Summarizer] = {
     "python_var_guidance": _summarize_violations,
     "eacces_safe": _summarize_violations,
     "authored_path_stat": _summarize_violations,
+    "signal_targets": _summarize_violations,
     "skip_list_substring": _summarize_violations,
     "unreachable_handle_branch": _summarize_violations,
     "declared_invariant_pairs": _summarize_violations,
@@ -1855,7 +1870,7 @@ def main_moved(
         reason = f"{main_ref} is still the batch base"
         return MainMoved(VERDICT_UNMOVED, base, main, [], reason, head)
     verdict, judged, reason = _judge_range(base, main, root, git, select)
-    qa = qa_dir if qa_dir is not None else root / QA_OUTPUT_DIR.relative_to(PROJECT_ROOT)
+    qa = qa_dir if qa_dir is not None else root / path_relative_to(QA_OUTPUT_DIR, PROJECT_ROOT)
     recheck_passed = contains_main and not _uncertified(verdict, (base, main), root, qa, git)
     return MainMoved(verdict, base, main, judged, reason, head, recheck_passed)
 
@@ -2016,7 +2031,7 @@ def _main_merged_since_certified(
     verdict, judged, reason = _judge_range(base, merged, root, git, select)
     if _work_beside_main(certified, merged, [path.path for path in judged], root, git):
         return None
-    qa = qa_dir if qa_dir is not None else root / QA_OUTPUT_DIR.relative_to(PROJECT_ROOT)
+    qa = qa_dir if qa_dir is not None else root / path_relative_to(QA_OUTPUT_DIR, PROJECT_ROOT)
     recheck_passed = not _uncertified(verdict, (base, merged), root, qa, git)
     head = _commit_of("HEAD", root, git)
     reason = f"HEAD holds {main_ref} merged in since the certified head, and nothing else: {reason}"
@@ -2072,7 +2087,7 @@ def advance_batch(
         )
     verdict, judged, _ = _judge_range(base, merged, root, git, select)
     _only_main_merged(certified, merged, [path.path for path in judged], root, git)
-    qa = qa_dir if qa_dir is not None else root / QA_OUTPUT_DIR.relative_to(PROJECT_ROOT)
+    qa = qa_dir if qa_dir is not None else root / path_relative_to(QA_OUTPUT_DIR, PROJECT_ROOT)
     problems = _uncertified(verdict, (base, merged), root, qa, git)
     if problems:
         raise MainMovedError(

@@ -40,6 +40,7 @@ from claude_code_hooks_daemon.strategies.error_hiding.protocol import ErrorHidin
 from claude_code_hooks_daemon.strategies.error_hiding.shell_strategy import (
     ShellErrorHidingStrategy,
 )
+from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to, path_relative_to
 from claude_code_hooks_daemon.utils.scan_scope import walk_files
 
 # Violation types
@@ -108,7 +109,7 @@ def _is_excluded(path: Path, root: Path, exclude_patterns: tuple[str, ...]) -> b
     A path outside ``root`` cannot be made relative to it, so it is judged on
     its absolute form rather than silently included.
     """
-    relative = path.relative_to(root) if path.is_relative_to(root) else path
+    relative = path_relative_to(path, root) if path_is_relative_to(path, root) else path
     return any(pattern in str(relative) for pattern in exclude_patterns)
 
 

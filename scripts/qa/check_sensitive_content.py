@@ -334,6 +334,8 @@ def scan_file(
     still ships with its tracked name, and a term sitting there is exactly
     as published as one sitting in the body.
     """
+    from claude_code_hooks_daemon.utils.path_containment import path_relative_to
+
     violations: list[Violation] = []
     active_terms = [term for term in secret_terms if term]
 
@@ -354,7 +356,7 @@ def scan_file(
     # what must be checked. If this ever does raise, the caller passed a
     # mismatched root and FAILING LOUDLY is correct; a fallback here would
     # silently downgrade the scan to basenames and miss directory names.
-    relative_name = str(path.relative_to(scan_root))
+    relative_name = str(path_relative_to(path, scan_root))
 
     for entry, compiled in compiled_patterns:
         name_match = compiled.search(relative_name)
@@ -401,7 +403,9 @@ def scan_file(
         return violations
 
     body_patterns = (
-        [] if exempt_public(path.relative_to(scan_root).as_posix(), content) else compiled_patterns
+        []
+        if exempt_public(path_relative_to(path, scan_root).as_posix(), content)
+        else compiled_patterns
     )
     for number, line in enumerate(content.splitlines(), start=1):
         for entry, compiled in body_patterns:

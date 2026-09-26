@@ -13,11 +13,18 @@ still-live daemon, leaving an orphan whose cwd pointed at a deleted directory
 while reporting a clean teardown.
 """
 
+import os
 import re
+import signal
+import subprocess
+import sys
 from pathlib import Path
 from typing import Final
 
+from claude_code_hooks_daemon.utils.safe_signal import signal_own_session_child
+
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[3]
+_REAP_SECONDS: Final[int] = 10
 _FIXTURE_SCRIPT: Final[Path] = _REPO_ROOT / "scripts" / "dummy-client-repo.sh"
 
 #: A daemon-CLI invocation in the fixture script.
@@ -126,3 +133,141 @@ class TestTeardownVerifiesTheDaemonActuallyStopped:
             "deleting its directory — otherwise a failed stop silently orphans "
             "the process and teardown still reports success."
         )
+
+
+#: Runs the two teardown functions, extracted from the script, with stub
+#: `info`/`fail` and no `main`.
+_TEARDOWN_HARNESS: Final[str] = r"""
+set -euo pipefail
+info() { printf '%s\n' "$*" >&2; }
+fail() { printf 'FAIL %s\n' "$*" >&2; return 1; }
+source <(awk '/^_surviving_dummy_daemons\(\) \{/,/^\}$/' "$SCRIPT")
+source <(awk '/^_is_dummy_daemon_pid\(\) \{/,/^\}$/' "$SCRIPT")
+source <(awk '/^verify_dummy_daemon_stopped\(\) \{/,/^\}$/' "$SCRIPT")
+verify_dummy_daemon_stopped
+"""
+
+#: Runs the identity check alone on "$PID"; its exit status is the verdict.
+_IDENTITY_HARNESS: Final[str] = r"""
+set -euo pipefail
+source <(awk '/^_is_dummy_daemon_pid\(\) \{/,/^\}$/' "$SCRIPT")
+_is_dummy_daemon_pid "$PID"
+"""
+
+#: Above Linux's default pid_max, so no process can have it.
+_NONEXISTENT_PID: Final[int] = 2**22 + 7
+
+#: A group leader that starts a stand-in dummy daemon and an unrelated
+#: sibling in ITS group, prints both pids, and waits.
+_GROUP_OF_TWO: Final[str] = """
+import os, subprocess, sys, time
+daemon = subprocess.Popen([os.environ["STAND_IN"], "-c", "import time; time.sleep(60)"])
+sibling = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+print(daemon.pid, sibling.pid, flush=True)
+time.sleep(60)
+"""
+
+
+class TestTeardownSignalsOnlyTheProvenPid:
+    """Plan 00466 N59: a survivor's pid is proven by its command line; its group is not.
+
+    The daemon does not lead its process group, so ``kill -- -<pgid>`` could
+    reach init's group or teardown's own. Here the stand-in shares a group
+    with an unrelated sibling: only the stand-in may be signalled.
+    """
+
+    def test_the_survivor_is_stopped_and_its_group_mate_is_not(self, tmp_path: Path) -> None:
+        daemon_dir = tmp_path / ".claude" / "hooks-daemon"
+        interpreter = daemon_dir / "untracked" / "venv-dummy" / "bin" / "python"
+        interpreter.parent.mkdir(parents=True)
+        interpreter.symlink_to(sys.executable)
+
+        # The stand-in's path goes in the environment, not argv, so the only
+        # command line naming the dummy venv is the stand-in's own.
+        leader = subprocess.Popen(
+            [sys.executable, "-c", _GROUP_OF_TWO],
+            stdout=subprocess.PIPE,
+            env={**os.environ, "STAND_IN": str(interpreter)},
+            start_new_session=True,
+        )
+        try:
+            assert leader.stdout is not None
+            daemon_pid, sibling_pid = (int(p) for p in leader.stdout.readline().split())
+
+            result = subprocess.run(
+                ["bash", "-c", _TEARDOWN_HARNESS],
+                capture_output=True,
+                text=True,
+                env={
+                    **os.environ,
+                    "SCRIPT": str(_FIXTURE_SCRIPT),
+                    "DUMMY_DAEMON_DIR": str(daemon_dir),
+                },
+                check=False,
+            )
+
+            assert result.returncode == 0, result.stderr
+            assert "surviving daemon reaped" in result.stderr
+            assert _is_running(sibling_pid), "teardown signalled the survivor's whole group"
+            assert not _is_running(daemon_pid)
+        finally:
+            signal_own_session_child(leader, signal.SIGKILL)
+            leader.wait(timeout=_REAP_SECONDS)
+
+
+class TestTheSurvivorIsReIdentifiedImmediatelyBeforeTheSignal:
+    """Plan 00466 N59: pgrep's answer is a moment old, and its pid may since be reused.
+
+    ``_is_dummy_daemon_pid`` re-reads the pid's command line right before the
+    kill, so a pid that no longer runs out of the dummy venv is not signalled.
+    """
+
+    def _verdict(self, daemon_dir: Path, pid: int) -> int:
+        return subprocess.run(
+            ["bash", "-c", _IDENTITY_HARNESS],
+            capture_output=True,
+            env={
+                **os.environ,
+                "SCRIPT": str(_FIXTURE_SCRIPT),
+                "DUMMY_DAEMON_DIR": str(daemon_dir),
+                "PID": str(pid),
+            },
+            check=False,
+        ).returncode
+
+    def test_a_process_running_out_of_the_dummy_venv(self, tmp_path: Path) -> None:
+        daemon_dir = tmp_path / ".claude" / "hooks-daemon"
+        interpreter = daemon_dir / "untracked" / "venv-dummy" / "bin" / "python"
+        interpreter.parent.mkdir(parents=True)
+        interpreter.symlink_to(sys.executable)
+        stand_in = subprocess.Popen(
+            [str(interpreter), "-c", "import time; time.sleep(60)"], start_new_session=True
+        )
+        try:
+            assert self._verdict(daemon_dir, stand_in.pid) == 0
+        finally:
+            signal_own_session_child(stand_in, signal.SIGKILL)
+            stand_in.wait(timeout=_REAP_SECONDS)
+
+    def test_a_process_that_does_not(self, tmp_path: Path) -> None:
+        bystander = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(60)"], start_new_session=True
+        )
+        try:
+            assert self._verdict(tmp_path / ".claude" / "hooks-daemon", bystander.pid) == 1
+        finally:
+            signal_own_session_child(bystander, signal.SIGKILL)
+            bystander.wait(timeout=_REAP_SECONDS)
+
+    def test_a_pid_nobody_has(self, tmp_path: Path) -> None:
+        assert self._verdict(tmp_path / ".claude" / "hooks-daemon", _NONEXISTENT_PID) == 1
+
+
+def _is_running(pid: int) -> bool:
+    """Alive and not a zombie (an unreaped child of the group leader)."""
+    try:
+        status = Path(f"/proc/{pid}/status").read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return False
+    state = next(line for line in status.splitlines() if line.startswith("State:"))
+    return "Z" not in state

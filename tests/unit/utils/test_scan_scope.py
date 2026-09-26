@@ -105,6 +105,15 @@ class TestRelativeParts:
         link.symlink_to(real)
         assert relative_parts(real / "src" / "a.py", link) == ("src", "a.py")
 
+    def test_a_relative_root_does_not_prefix_an_absolute_path(self, tmp_path: Path) -> None:
+        """Relative ``.`` has no parts, so a bare prefix test would contain everything."""
+        path = tmp_path / "a.py"
+        assert relative_parts(path, Path()) == path.parts[1:]
+
+    def test_a_sibling_whose_name_extends_the_root_is_outside_it(self, tmp_path: Path) -> None:
+        path = tmp_path / "repo-other" / "a.py"
+        assert relative_parts(path, tmp_path / "repo")[-2:] == ("repo-other", "a.py")
+
     def test_a_path_outside_the_root_keeps_its_own_parts_below_the_anchor(
         self, tmp_path: Path
     ) -> None:

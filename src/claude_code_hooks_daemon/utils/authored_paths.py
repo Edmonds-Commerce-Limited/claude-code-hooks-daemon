@@ -32,6 +32,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from claude_code_hooks_daemon.utils.path_containment import path_is_relative_to
+
 
 def authored_path(base: Path, target: str | Path) -> Path:
     """``target``, written relative to ``base``, normalised LEXICALLY.
@@ -98,14 +100,14 @@ def contained_authored_path(
     # directory and is perfectly contained.
     boundary = base if within is None else within
     candidate = authored_path(base, target)
-    if not candidate.is_relative_to(Path(os.path.normpath(boundary))):
+    if not path_is_relative_to(candidate, Path(os.path.normpath(boundary))):
         return None
     # `base` itself may be reached through a symlink (a worktree, a container
     # mount), so its real path is the one to compare against -- measuring a
     # resolved candidate against an unresolved base would refuse every file in
     # such a checkout. `strict=False` keeps a not-yet-existing target
     # answerable: it resolves the parts that do exist.
-    if not candidate.resolve(strict=False).is_relative_to(boundary.resolve(strict=False)):
+    if not path_is_relative_to(candidate.resolve(strict=False), boundary.resolve(strict=False)):
         return None
     return candidate
 

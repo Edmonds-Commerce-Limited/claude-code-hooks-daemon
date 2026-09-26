@@ -51,6 +51,7 @@ from claude_code_hooks_daemon.docs_qa.types import (
     Finding,
     Severity,
 )
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 
 CHECK_ID: Final[str] = "duplicate-block"
 
@@ -115,7 +116,7 @@ def _run_edit(context: CheckContext) -> list[Finding]:
     if context.corpus is None or context.corpus.cold:
         return []  # cold-index rule: no cross-doc comparison possible
 
-    rel_path = str(context.file_path.relative_to(context.project_root))
+    rel_path = str(path_relative_to(context.file_path, context.project_root))
     if _matches_allowlist(rel_path, context.policy.qa.grandfather_allowlist):
         return []
 

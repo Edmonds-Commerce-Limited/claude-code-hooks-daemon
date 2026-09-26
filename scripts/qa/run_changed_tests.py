@@ -77,6 +77,7 @@ from typing import Any, Final
 import yaml
 
 from claude_code_hooks_daemon.qa.pytest_text_report import parse_pytest_text_output
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
 
 logger = logging.getLogger(__name__)
 
@@ -429,7 +430,7 @@ def build_test_index(root: Path) -> dict[str, list[str]]:
     if not test_root.is_dir():
         return index
     for path in sorted(test_root.rglob(_TEST_GLOB)):
-        index.setdefault(path.name, []).append(path.relative_to(root).as_posix())
+        index.setdefault(path.name, []).append(path_relative_to(path, root).as_posix())
     return index
 
 

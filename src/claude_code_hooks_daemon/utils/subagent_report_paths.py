@@ -30,6 +30,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Final
 
+from claude_code_hooks_daemon.utils.path_containment import path_relative_to
+
 logger = logging.getLogger(__name__)
 
 #: The shared, human/agent-facing non-plan-work destination (dispatch
@@ -143,7 +145,7 @@ def resolve_confined_report_dir(root: Path, report_dir: str) -> Path | None:
     if resolved_target == resolved_root:
         return None
     try:
-        resolved_target.relative_to(resolved_root)
+        path_relative_to(resolved_target, resolved_root)
     except ValueError:
         return None
     return resolved_target
