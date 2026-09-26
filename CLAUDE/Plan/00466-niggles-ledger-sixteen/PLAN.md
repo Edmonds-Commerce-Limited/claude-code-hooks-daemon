@@ -56,8 +56,8 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N21  | The semgrep QA gate passes when a rule times out                                                               | 00414 agent                                                     | ✅ Remedied                      |
 | N22  | `lsp_enforcement` takes another command's argument for a grep symbol lookup                                    | Coordinator                                                     | ⬜ Open                          |
 | N23  | `recovery_cron_advisor` hands one request's lifecycle phase to another through the singleton                   | Plan 00449's agent                                              | ⬜ Open                          |
-| N24  | `daemon.strict_mode` never reaches the live daemon, so every guard fails open on a handler exception           | guards review 2                                                 | 🔄 In progress                   |
-| N25  | A slow handler runs out the client's budget, and a timeout ALLOWs the whole PreToolUse chain                   | guards review 2                                                 | 🔄 In progress                   |
+| N24  | `daemon.strict_mode` never reaches the live daemon, so every guard fails open on a handler exception           | guards review 2                                                 | ✅ Remedied                      |
+| N25  | A slow handler runs out the client's budget, and a timeout ALLOWs the whole PreToolUse chain                   | guards review 2                                                 | ✅ Remedied                      |
 | N26  | `check_skill_references.py` scans zero files when run from a worktree, and passes                              | 00468 core agent                                                | ✅ Remedied                      |
 | N27  | `skill_scan` and `tool_report` build the transcript directory name two different ways                          | 00468 core agent                                                | ✅ Remedied                      |
 | N28  | `project_containment` resolves a relative target against the payload cwd, ignoring a same-command `cd`         | Plan 00464 agent                                                | 🔄 In progress                   |
@@ -66,6 +66,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N31  | The dispatch-declaration advisory does not recognise "File to write to: <path>"                                | 00467 dogfood                                                   | ✅ Remedied                      |
 | N32  | `pipe_blocker` splits at a \`\\                                                                                | \` inside double quotes and reads the next word as a pipe stage | Plan 00463 agent                 |
 | N33  | A worktree agent's `secret_file_guard.exclude_paths` change had no effect after a daemon restart               | Integration B2 fix                                              | ⬜ Open                          |
+| N34  | `secret_file_guard`'s linear scan has enough constant factor to blow past the chain deadline on its own        | n466-n24                                                        | ✅ Remedied                      |
 | N35  | `daemon_sync_after_merge` judges a `cd <worktree> && git merge` against the session root's ORIG_HEAD           | Plan 00421 agent                                                | ⬜ Open                          |
 | N36  | `destructive_git` denies a `grep` whose search pattern is the text of a force branch delete                    | Plan 00463 agent                                                | ⬜ Open                          |
 | N37  | `resolve_venv.sh` caches an override's interpreter for later callers that set no override                      | Plan 00376 agent                                                | 🔄 In progress                   |
@@ -75,7 +76,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N43  | Log and payload redaction is inert while the daemon runs degraded on an unloadable config                      | Plan 00421 agent                                                | 🔄 In progress                   |
 | N44  | A PreToolUse handler raises `ValueError: no path specified` on an Edit, and the Edit goes through              | Plan 00464 agent                                                | ✅ Remedied                      |
 | N45  | A NUL byte in a configured word-list path makes the never-raising secret-term lookup raise                     | Plan 00421 agent                                                | 🔄 In progress                   |
-| N46  | `budget_exhaustion_detector` fires on a tool result that merely contains budget wording                        | Guard review 6                                                  | ⬜ Open                          |
+| N46  | `budget_exhaustion_detector` fires on a tool result that merely contains budget wording                        | Guard review 6                                                  | ✅ Remedied                      |
 | N47  | The ccy supervisor and Claude Code's settings.json both own effort, and they fight                             | Owner                                                           | 🔄 In progress                   |
 | N48  | `sed_blocker`'s git-commit exemption reaches across a newline                                                  | N38 review 2                                                    | ⬜ Open                          |
 | N49  | `daemon_location_guard` denies a daemon-directory `cd` that is only text inside a quoted argument              | Coordinator                                                     | ⬜ Open                          |
@@ -113,13 +114,13 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N81  | `sed_blocker` denies a Bash heredoc that writes markdown, and a strict xfail pins the defect                   | CI run                                                          | ✅ Remedied                      |
 | N82  | A "design test" has been skipped as "implementation pending" since the registry-key work                       | CI run                                                          | ✅ Remedied                      |
 | N83  | A parametrised live-daemon test skips its own `tests` case                                                     | CI run                                                          | ✅ Remedied                      |
-| N84  | The `daemon_process` test fixture never checks that `stop` succeeded, so daemons leak                          | N24 gate fixer                                                  | ⬜ Open                          |
+| N84  | The `daemon_process` test fixture never checks that `stop` succeeded, so daemons leak                          | N24 gate fixer                                                  | ✅ Remedied                      |
 | N85  | `_MESSAGE_BODY_PATTERN` reads `\'` as an escape inside single quotes, hiding a command from every guard        | N38 review 5                                                    | 🔄 In progress (N38 fix 6)       |
 | N86  | A discovery-file miss leaves the forwarders unable to find or start the daemon                                 | Upgrade e2e                                                     | ⬜ Open (after N24)              |
 | N87  | ANSI-C quoting in text handed to a shell is never decoded, so the command it carries is unseen                 | N38 fix 6                                                       | ⬜ Open (after N38)              |
 | N88  | A data sink whose output feeds an executing process substitution hides the body                                | N38 review 6                                                    | ⬜ Open (after N38)              |
 | N89  | A data-sink receiver is trusted after the command redefines it                                                 | N38 review 6                                                    | ⬜ Open (after N38)              |
-| N90  | `project_containment` denies every command, even one that writes nothing, when the project root is unresolved  | GD gate fixer                                                   | ⬜ Open                          |
+| N90  | `project_containment` denies every command, even one that writes nothing, when the project root is unresolved  | GD gate fixer                                                   | ✅ Remedied                      |
 | N91  | A project's extra `protected_paths` can be ignored for the daemon's life by the payload-capture and lint seams | N38 fix 8                                                       | 🔄 In progress (N38)             |
 | N92  | `pipe_blocker` reads a \`                                                                                      | \` inside a double-quoted regex as a pipe                       | N38 review 8                     |
 | N93  | `project_containment` misses writes inside `eval '…'` and nested heredocs                                      | N38 review 8                                                    | ⬜ Open (after N38)              |
@@ -132,6 +133,8 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N100 | A continuation on a heredoc opener line denies a body that is only written                                     | N38 reviews 6-9                                                 | ⬜ Open (after N38)              |
 | N101 | `secret_file_guard` fails closed with `TooManyToEnumerateError` on ordinary `python3 - <<'EOF'` commands       | N38 fix 11                                                      | ⬜ Open                          |
 | N105 | A skill redeploy leaves an untracked, unignored `.claude/hooks-daemon-backups/`                                | Upgrade review 11 (L9)                                          | ✅ Remedied                      |
+| N109 | The pending release-notes holding area mis-sorts past 99 callouts                                              | Coordinator                                                     | ✅ Remedied                      |
+| N110 | The local full QA gate tests one Python version, so a version-specific defect passes it and fails CI           | N106 fixer                                                      | ⬜ Open                          |
 
 ## Tasks
 

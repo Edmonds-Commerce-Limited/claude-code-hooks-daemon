@@ -81,6 +81,91 @@ truth_changes:
 
       IF YOUR PROJECT'S DOCS SAY ENCRYPTED VAULT FILES CANNOT BE STAGED BY AN
       AGENT, OR THAT THEY MUST BE UNTRACKED, THOSE INSTRUCTIONS ARE NOW FALSE.
+  - topic: daemon-config
+    id: strict-mode-handler-exceptions
+    was: >
+      `daemon.strict_mode: true` had no effect on the real daemon: a raising
+      handler was always treated as "no match" and the call allowed, however
+      `hooks-daemon.yaml` was configured. `DaemonController`'s `config`
+      constructor parameter, which `strict_mode` was read from, is never
+      populated by the real daemon startup path.
+    now: >
+      `daemon.strict_mode: true` (Plan 00466 N24) is threaded through
+      `DaemonController.initialise()` as a narrow config-slice — the same DI
+      idiom as `chain`/`verdict_log` — and reaches the real daemon. A raising
+      handler now denies the call instead of being skipped. Independently of
+      `strict_mode`, a handler tagged both `SAFETY` and `BLOCKING` that raises
+      (from `matches()` or `handle()`) always denies: a safety guard that
+      crashed has not judged the call. A non-`SAFETY`+`BLOCKING` handler under
+      `strict_mode: false` (the client default) is unchanged: it still fails
+      open, logged.
+
+      IF YOUR PROJECT'S DOCS OR SECURITY REVIEWS ASSERT "THIS REPOSITORY RUNS
+      strict_mode: true, SO A HANDLER CRASH HERE DENIES" AS A REASON A DEFECT
+      IS NOT EXPLOITABLE, RE-CHECK THAT CLAIM: BEFORE THIS CHANGE IT WAS FALSE
+      EVERYWHERE, INCLUDING HERE.
+  - topic: daemon-config
+    id: chain-deadline-on-client-timeout
+    was: >
+      The daemon had no deadline of its own for a PreToolUse chain. The
+      client's own 30s socket timeout was the only bound, and on that
+      timeout the client's fallback emitted an advisory-only
+      `hookSpecificOutput`, which is an ALLOW for every non-`Stop` event. A
+      handler slow enough to run out the client's budget therefore bypassed
+      every handler still queued behind it, not just itself — measured on
+      `destructive_git`'s `strip_inert_spans` at 99s/98s on 200 KB inputs.
+    now: >
+      `daemon.chain.deadline_seconds` (Plan 00466 N25) is a new config key,
+      default 20s, well under the client's 30s socket timeout. When a
+      PreToolUse chain exceeds it, every `SAFETY`+`BLOCKING` handler not yet
+      run is denied under the `strict-mode-handler-exceptions` fail-closed
+      rule above, naming the handler as "not judged in time"; every other
+      not-yet-run handler is skipped instead, with an advisory note. Setting
+      it to `null` disables enforcement. `strip_inert_spans` is also now
+      linear, so the specific 99s/98s repros no longer approach either
+      deadline.
+
+      IF YOUR PROJECT'S DOCS OR SECURITY REVIEWS ASSERT THAT A SLOW HANDLER
+      CAN ONLY AFFECT ITS OWN DECISION, RE-CHECK THAT CLAIM FOR THE VERSION
+      BEFORE THIS CHANGE: A SLOW HANDLER SILENTLY ALLOWED EVERYTHING QUEUED
+      BEHIND IT TOO.
+  - topic: daemon-config
+    id: chain-deadline-per-handler-enforcement
+    was: >
+      `daemon.chain.deadline_seconds` (Plan 00466 N25) was checked once per
+      handler, BEFORE it ran — it bounded the gap BETWEEN handlers, never a
+      handler's own `matches()`/`handle()` call. A handler slow enough
+      within its own call reproduced the exact bypass N25 was built to
+      close: `secret_file_guard` measured at 48.958s on 4 MB of Write
+      content, past both the 20s chain deadline and the client's own 30s
+      socket timeout — with `secret_file_guard` as the FIRST and only
+      matching handler, nothing ran before it to trip the between-handlers
+      check at all.
+    now: >
+      Every handler's own call is now individually bounded too (Plan 00466
+      N34, `core.bounded_dispatch.BoundedDispatcher`): it runs on its own
+      daemon thread and the chain waits on it for at most the REMAINING
+      deadline budget, not however long the handler's own code takes. On
+      expiry the same fail-closed rule applies as the between-handlers case:
+      a `SAFETY`+`BLOCKING` handler not judged in time is denied, naming the
+      handler; anything else is skipped with an advisory note. The
+      overrunning call is never interrupted (Python cannot forcibly stop a
+      running thread) — it keeps running on its own daemon thread, logged
+      again at WARNING whenever it does finish, and never blocks the
+      daemon process's own shutdown. Concurrency is bounded (16 calls at
+      once, by default); a call beyond that is refused outright and treated
+      the same way as a timeout, never queued. A new companion key,
+      `daemon.chain.max_safety_input_bytes` (default 2 MiB), denies or skips
+      a `SAFETY` handler's oversized input BEFORE dispatch is even
+      attempted, as defence in depth alongside the deadline — not the only
+      guarantee, since the per-handler bound above already caps worst-case
+      wall clock regardless of size.
+
+      IF YOUR PROJECT'S DOCS OR SECURITY REVIEWS ASSERT THE CHAIN DEADLINE
+      COULD ONLY BE EXHAUSTED BY HANDLERS RUNNING BEFORE A SLOW ONE,
+      RE-CHECK THAT CLAIM FOR THE VERSION BEFORE THIS CHANGE: A SINGLE SLOW
+      HANDLER WITH NOTHING AHEAD OF IT IN PRIORITY ORDER WAS NOT BOUNDED AT
+      ALL.
   - topic: plan-workflow
     was: >
       A `STOPPING BECAUSE: [awaiting-human]` stop turns the failsafe recovery

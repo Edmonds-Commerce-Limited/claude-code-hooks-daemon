@@ -98,6 +98,13 @@ _VERBOSE: Final[str] = (
 # separately rather than looking it up there.
 _ERROR_ROUTE: Final[str] = "error"
 
+# The `_ERROR_ROUTE` detail for a path argument carrying a NUL byte: the
+# input, not the guard, is what cannot be evaluated.
+_NUL_PATH_DETAIL: Final[str] = (
+    "the path contains an embedded NUL byte, which no real filesystem path can "
+    "hold, so what it names cannot be resolved"
+)
+
 _RULES_BY_ROUTE: Final[dict[str, Rule]] = {
     "read": Rule(
         rule_id=RuleID.SECRET_READ,
@@ -1345,15 +1352,19 @@ class SecretFileGuardHandler(PreToolUseHandlerBase):
         if path_field is None:
             return None
         path = str(tool_input.get(path_field, ""))
-        for pattern in patterns:
-            if not sfm.path_is_protected(path, (pattern,)):
-                continue
+        if "\x00" in path:
+            # `protecting_pattern` matches a NUL-bearing path as spelled
+            # (the OS cannot realpath it), but nothing here can resolve what
+            # it would name either -- lower layers stop reading at the NUL.
+            # Unevaluable is not "allowed" (Plan 00466 N11): deny.
+            return ("<nul-byte>", _NUL_PATH_DETAIL, _ERROR_ROUTE)
+        protecting = sfm.protecting_pattern(path, patterns)
+        if protecting is not None:
             # Ciphertext is not the secret (Plan 00459). Checked on EVERY
             # call, so a file decrypted in place is denied at the next one.
             absolute = sfm.resolve_against_cwd(path, cwd)
-            if absolute is not None and self._is_encrypted(absolute):
-                break
-            return (pattern, path, "read")
+            if absolute is None or not self._is_encrypted(absolute):
+                return (protecting, path, "read")
 
         if tool_name == ToolName.GREP and path:
             # Partial enforcement for directory-rooted content search

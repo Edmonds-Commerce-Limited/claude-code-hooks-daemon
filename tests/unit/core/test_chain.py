@@ -2,13 +2,48 @@
 
 Tests HandlerChain execution, priority ordering, terminal/non-terminal behavior,
 error handling, and ChainExecutionResult.
+
+Plan 00466 N40 m1: when ``deadline_seconds`` is set, ``HandlerChain.execute``
+dispatches the WHOLE handler loop as ONE call, on its own fresh daemon
+thread bounded by the shared dispatcher's semaphore (Plan 00466 N40 n1: not
+a thread pool), not one dispatch per handler (measured at ~12ms overhead per
+event from creating up to 69 threads, even when every handler is fast). A
+handler that FINISHES (however late) is still attributed by name in the
+deny/skip reason -- the per-handler deadline check is a cheap comparison,
+not a thread, and still runs inline. Only when the WHOLE dispatched call
+itself times out or the dispatcher is saturated (some handler never returns
+at all, or there is no free capacity even for the whole chain) does the
+reason name "chain" instead of a specific handler: nothing is left running
+on the CALLING thread at that point that could still say which one it was.
+
+Plan 00466 N40 n4: most of this suite calls ``chain.execute()`` with its
+default ``deadline_seconds=None``, which is the SYNCHRONOUS path -- no
+dispatch, no thread, no ``BoundedDispatcher`` involved at all. Only the
+dispatch-specific tests above exercise the production-shipped threaded path.
+``TestUnderShippedDefaultDeadline`` below re-runs a representative slice of
+the synchronous-path behavioural tests under ``Timeout.CHAIN_DEADLINE_DEFAULT``
+instead, to catch a divergence that only shows up once a real dispatch is in
+the loop (thread creation, the semaphore, cancellation binding) -- the shape
+of gap this suite would otherwise never notice.
 """
 
+import json
+import threading
+import time
 from typing import Any
 
+import pytest
+
+from claude_code_hooks_daemon.constants.tags import HandlerTag
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.chain import ChainExecutionResult, HandlerChain
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
+from tests.dispatch_timeouts import DispatchTestTimeout
+
+# The deny reason only the whole-chain dispatch timeout produces: the caller
+# gave up waiting, so it names "chain", not a handler (Plan 00466 N40 m1).
+_CHAIN_TIMED_OUT = "chain: not judged in time (exceeded its"
 
 
 class MockHandler(Handler):
@@ -21,7 +56,10 @@ class MockHandler(Handler):
         terminal: bool = False,
         should_match: bool = True,
         result: HookResult | None = None,
-        raise_exception: Exception | None = None,
+        raise_exception: BaseException | None = None,
+        raise_in_matches: BaseException | None = None,
+        tags: list[str] | None = None,
+        sleep_in_handle: float = 0.0,
     ) -> None:
         """Initialize mock handler.
 
@@ -31,23 +69,40 @@ class MockHandler(Handler):
             terminal: Whether handler is terminal
             should_match: Whether matches() returns True
             result: HookResult to return (or default allow)
-            raise_exception: Exception to raise in handle()
+            raise_exception: Exception to raise in handle(). ``BaseException``,
+                not ``Exception``, so a test can exercise ``SystemExit``/
+                ``KeyboardInterrupt`` (Plan 00466 N40 review 2 mA2) alongside
+                ordinary exceptions.
+            raise_in_matches: Exception to raise in matches(), before handle()
+                is ever reached — exercises the chain's own try/except span,
+                which covers matches() as well as handle() (Plan 00466 N24 m1).
+            tags: Handler tags (default []); pass HandlerTag.SAFETY +
+                HandlerTag.BLOCKING to exercise the fail-closed-on-raise path.
+            sleep_in_handle: Real seconds to sleep inside handle() before
+                returning, so a later handler's chain-deadline check (Plan
+                00466 N25) has genuinely elapsed wall-clock time to measure.
         """
-        super().__init__(name=name, priority=priority, terminal=terminal)
+        super().__init__(name=name, priority=priority, terminal=terminal, tags=tags)
         self._should_match = should_match
         self._result = result or HookResult.allow()
         self._raise_exception = raise_exception
+        self._raise_in_matches = raise_in_matches
+        self._sleep_in_handle = sleep_in_handle
         self.matches_called = 0
         self.handle_called = 0
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if handler matches input."""
         self.matches_called += 1
+        if self._raise_in_matches:
+            raise self._raise_in_matches
         return self._should_match
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Handle the input."""
         self.handle_called += 1
+        if self._sleep_in_handle:
+            time.sleep(self._sleep_in_handle)
         if self._raise_exception:
             raise self._raise_exception
         return self._result
@@ -751,6 +806,702 @@ class TestHandlerChain:
         # Exception context should be accumulated
         assert any("Handler exception:" in ctx for ctx in result.result.context)
 
+    def test_safety_blocking_handler_raise_denies_even_without_strict_mode(self) -> None:
+        """A SAFETY+BLOCKING handler that raises denies, whatever strict_mode says.
+
+        Plan 00466 N24 (M3/m1): a safety guard that crashes has not judged
+        the call, so falling through to the next handler as "no match" is a
+        bypass. This closes the class independently of ``daemon.strict_mode``,
+        which is inert in every real install today (see N24).
+        """
+        chain = HandlerChain()
+        h1 = MockHandler(
+            "safety-guard",
+            priority=10,
+            terminal=True,
+            raise_exception=ValueError("boom"),
+            tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING],
+        )
+        h2 = MockHandler("h2", priority=20, terminal=True)
+        chain.add(h1)
+        chain.add(h2)
+
+        hook_input = {"tool_name": "Bash"}
+        result = chain.execute(hook_input, strict_mode=False)
+
+        assert h2.handle_called == 0
+        assert result.result.decision == Decision.DENY
+        assert result.result.reason is not None
+        assert "safety-guard" in result.result.reason
+        assert "evaluation error" in result.result.reason.lower()
+        assert "denied for safety" in result.result.reason.lower()
+
+    def test_safety_blocking_handler_raise_in_matches_also_denies(self) -> None:
+        """The fail-closed path also covers a raise from ``matches()``, not just ``handle()``.
+
+        Plan 00466 N24 m1/m2: the per-guard fail-closed wrapper some handlers
+        carry only covers part of their own code; the chain-level policy
+        closes the gap structurally for every SAFETY+BLOCKING handler.
+        """
+        chain = HandlerChain()
+        h1 = MockHandler(
+            "safety-guard",
+            priority=10,
+            terminal=True,
+            raise_in_matches=TypeError("unhashable type: 'list'"),
+            tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING],
+        )
+        h2 = MockHandler("h2", priority=20, terminal=True)
+        chain.add(h1)
+        chain.add(h2)
+
+        hook_input = {"tool_name": "Bash"}
+        result = chain.execute(hook_input, strict_mode=False)
+
+        assert h1.handle_called == 0  # never reached handle() — matches() raised
+        assert h2.handle_called == 0
+        assert result.result.decision == Decision.DENY
+        assert result.result.reason is not None
+        assert "safety-guard" in result.result.reason
+
+    def test_a_base_exception_from_handle_also_denies_and_does_not_propagate(
+        self,
+    ) -> None:
+        """``SystemExit``/``KeyboardInterrupt`` from a handler must not escape
+        the chain (Plan 00466 N40 review 2 mA2).
+
+        Both inherit from ``BaseException``, not ``Exception``. The chain's
+        per-handler catch used to be ``except Exception``, so either one sailed
+        straight through it -- and through ``BoundedDispatcher``'s own
+        ``future.result()`` re-raise -- killing the daemon process outright
+        instead of denying the one call. The fix converts a ``BaseException``
+        from ``matches()``/``handle()`` into the same fail-closed deny an
+        ordinary ``Exception`` already gets.
+        """
+        chain = HandlerChain()
+        h1 = MockHandler(
+            "safety-guard",
+            priority=10,
+            terminal=True,
+            raise_exception=SystemExit("simulated crash"),
+            tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING],
+        )
+        h2 = MockHandler("h2", priority=20, terminal=True)
+        chain.add(h1)
+        chain.add(h2)
+
+        hook_input = {"tool_name": "Bash"}
+        result = chain.execute(hook_input, strict_mode=False)
+
+        assert h2.handle_called == 0
+        assert result.result.decision == Decision.DENY
+        assert result.result.reason is not None
+        assert "safety-guard" in result.result.reason
+
+    def test_non_safety_handler_raise_still_fails_open_without_strict_mode(self) -> None:
+        """An advisory / non-safety handler that raises keeps today's fail-open behaviour."""
+        chain = HandlerChain()
+        h1 = MockHandler(
+            "advisory",
+            priority=10,
+            raise_exception=ValueError("boom"),
+            tags=[HandlerTag.ADVISORY],
+        )
+        h2 = MockHandler("h2", priority=20, terminal=True)
+        chain.add(h1)
+        chain.add(h2)
+
+        hook_input = {"tool_name": "Bash"}
+        result = chain.execute(hook_input, strict_mode=False)
+
+        assert h2.handle_called == 1
+        assert result.result.decision == Decision.ALLOW
+        assert any("Handler exception:" in ctx for ctx in result.result.context)
+
+    def test_safety_tag_alone_without_blocking_still_fails_open(self) -> None:
+        """SAFETY without BLOCKING does not trigger the new fail-closed path.
+
+        The predicate is the SAFETY+BLOCKING combination specifically (the
+        tag pair every hardened guard in this repository already carries),
+        not SAFETY alone.
+        """
+        chain = HandlerChain()
+        h1 = MockHandler(
+            "safety-only",
+            priority=10,
+            raise_exception=ValueError("boom"),
+            tags=[HandlerTag.SAFETY],
+        )
+        h2 = MockHandler("h2", priority=20, terminal=True)
+        chain.add(h1)
+        chain.add(h2)
+
+        hook_input = {"tool_name": "Bash"}
+        result = chain.execute(hook_input, strict_mode=False)
+
+        assert h2.handle_called == 1
+        assert result.result.decision == Decision.ALLOW
+
+    def test_safety_blocking_handler_raise_honours_strict_mode_message(self) -> None:
+        """strict_mode's own message still wins when both conditions apply.
+
+        Both mechanisms deny, so this only pins that strict_mode's existing
+        wording is not silently replaced by the new SAFETY+BLOCKING wording.
+        """
+        chain = HandlerChain()
+        h1 = MockHandler(
+            "safety-guard",
+            priority=10,
+            terminal=True,
+            raise_exception=ValueError("boom"),
+            tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING],
+        )
+        chain.add(h1)
+
+        hook_input = {"tool_name": "Bash"}
+        result = chain.execute(hook_input, strict_mode=True)
+
+        assert result.result.decision == Decision.DENY
+        assert result.result.reason is not None
+        assert "SYSTEM ERROR" in result.result.reason
+
+    def test_deadline_exceeded_denies_when_a_slow_handler_exhausts_the_whole_chain(self) -> None:
+        """Plan 00466 N25: a chain deadline denies rather than letting a slow
+        handler exhaust the CLIENT's own timeout (which fails the whole
+        chain open).
+
+        Plan 00466 N40 m1: the WHOLE chain is now ONE dispatched call, not
+        one per handler -- so a handler slow enough to blow the budget makes
+        the OUTER dispatch itself time out, and the response can only say
+        "chain", not name `slow` or `guard` specifically: nothing is left
+        running on the CALLING thread that could still say which handler it
+        was. The straggler keeps evaluating in the background and reaches
+        the SAME correct "safety-guard: not judged in time" verdict
+        internally, but that verdict is discarded -- the caller already
+        gave up. Polling for `slow` to finish rather than asserting it
+        immediately keeps this deterministic.
+        """
+        chain = HandlerChain()
+        slow = MockHandler("slow", priority=10, sleep_in_handle=0.05)
+        guard = MockHandler(
+            "safety-guard",
+            priority=20,
+            terminal=True,
+            tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING],
+        )
+        chain.add(slow)
+        chain.add(guard)
+
+        result = chain.execute({"tool_name": "Bash"}, deadline_seconds=0.01)
+
+        # An upper bound on waiting for the straggler, not a speed assertion.
+        deadline = time.perf_counter() + DispatchTestTimeout.GENEROUS
+        while slow.handle_called == 0 and time.perf_counter() < deadline:
+            time.sleep(DispatchTestTimeout.INSTANT)
+        assert slow.handle_called == 1
+        # The deadline is hit before the guard is even asked whether it
+        # matches -- there is no time budget left to run it at all.
+        assert guard.matches_called == 0
+        assert guard.handle_called == 0
+        assert result.result.decision == Decision.DENY
+        assert result.result.reason is not None
+        assert result.result.reason.startswith(_CHAIN_TIMED_OUT)
+        assert result.terminated_by is None
+
+    def test_deadline_measured_from_arrival_time_not_from_execute_call(self) -> None:
+        """Plan 00466 N40 M1: the deadline clock starts at request ARRIVAL,
+        not at ``execute()``'s own call -- executor queueing between the two
+        must count against the budget too, or a request judged late by the
+        client's own 30s timeout still looks on-time to the chain.
+
+        A budget already exhausted before ``execute()`` was even called (a
+        stale ``arrival_time``) denies the first SAFETY+BLOCKING handler
+        immediately, though nothing here is actually slow.
+        """
+        chain = HandlerChain()
+        guard = MockHandler(
+            "safety-guard",
+            priority=10,
+            terminal=True,
+            tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING],
+        )
+        chain.add(guard)
+
+        stale_arrival = time.perf_counter() - 10.0
+        result = chain.execute(
+            {"tool_name": "Bash"},
+            deadline_seconds=0.01,
+            arrival_time=stale_arrival,
+        )
+
+        assert guard.matches_called == 0
+        assert guard.handle_called == 0
+        assert result.result.decision == Decision.DENY
+        assert result.terminated_by == "safety-guard"
+
+    def test_deadline_defaults_to_execute_call_time_when_arrival_time_omitted(self) -> None:
+        """Backward compatible: every pre-existing caller that never passes
+        ``arrival_time`` keeps measuring from ``execute()``'s own call."""
+        chain = HandlerChain()
+        h1 = MockHandler("h1", priority=10, terminal=True)
+        chain.add(h1)
+
+        result = chain.execute({"tool_name": "Bash"}, deadline_seconds=5.0)
+
+        assert h1.handle_called == 1
+        assert result.result.decision == Decision.ALLOW
+
+    def test_deadline_exceeded_skips_an_advisory_handler_with_a_note(self) -> None:
+        """A chain with no SAFETY+BLOCKING handler is skipped, not denied,
+        on deadline. Plan 00466 N40 m1: `slow` alone exceeds the whole
+        chain's dispatch budget, so the note names "chain", not `advisory`
+        specifically -- see the module-level note on the redesign.
+        """
+        chain = HandlerChain()
+        slow = MockHandler("slow", priority=10, sleep_in_handle=0.05)
+        advisory = MockHandler("advisory", priority=20, tags=[HandlerTag.ADVISORY])
+        chain.add(slow)
+        chain.add(advisory)
+
+        result = chain.execute({"tool_name": "Bash"}, deadline_seconds=0.01)
+
+        assert advisory.matches_called == 0
+        assert result.result.decision == Decision.ALLOW
+        assert any(
+            "chain" in ctx.lower() and "budget" in ctx.lower() for ctx in result.result.context
+        )
+
+    def test_deadline_none_never_denies_on_its_own(self) -> None:
+        """The default (no deadline passed) is unenforced -- backward compatible."""
+        chain = HandlerChain()
+        slow = MockHandler("slow", priority=10, sleep_in_handle=0.02)
+        guard = MockHandler(
+            "safety-guard",
+            priority=20,
+            tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING],
+        )
+        chain.add(slow)
+        chain.add(guard)
+
+        result = chain.execute({"tool_name": "Bash"})
+
+        assert guard.handle_called == 1
+        assert result.result.decision == Decision.ALLOW
+
+    def test_deadline_not_exceeded_runs_every_handler_normally(self) -> None:
+        chain = HandlerChain()
+        h1 = MockHandler("h1", priority=10)
+        h2 = MockHandler("h2", priority=20, terminal=True)
+        chain.add(h1)
+        chain.add(h2)
+
+        result = chain.execute({"tool_name": "Bash"}, deadline_seconds=5.0)
+
+        assert h2.handle_called == 1
+        assert result.result.decision == Decision.ALLOW
+
+    def test_a_safety_blocking_handler_that_oversleeps_itself_is_denied_within_the_deadline(
+        self,
+    ) -> None:
+        """Plan 00466 N34: the deadline now bounds a handler's OWN call, not
+        only the gap before it. Without this, N25's between-handlers check
+        never fires here -- this guard is the FIRST and ONLY handler, so
+        nothing runs before it to exhaust the budget; only bounding its own
+        execution can catch it. Mirrors the real finding: secret_file_guard
+        measured at 48.958s on 4 MB input, past the 20s chain deadline,
+        entirely inside its own call.
+
+        Plan 00466 N40 m1: the WHOLE chain (here, just this one handler) is
+        the dispatched unit -- the deny names "chain", not "safety-guard",
+        since nothing is left on the calling thread to say which handler it
+        was. See the module-level note on the redesign.
+        """
+        chain = HandlerChain()
+        guard = MockHandler(
+            "safety-guard",
+            priority=10,
+            terminal=True,
+            tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING],
+            sleep_in_handle=5.0,
+        )
+        chain.add(guard)
+
+        result = chain.execute({"tool_name": "Bash"}, deadline_seconds=0.1)
+
+        # Bounded by the DEADLINE, not by the guard's own 5s sleep: this
+        # reason comes only from the dispatcher giving up on the call.
+        assert result.result.decision == Decision.DENY
+        assert result.result.reason is not None
+        assert result.result.reason.startswith(_CHAIN_TIMED_OUT)
+        assert result.terminated_by is None
+
+    def test_a_slow_advisory_only_handler_that_oversleeps_itself_allows_with_an_advisory(
+        self,
+    ) -> None:
+        """The non-SAFETY+BLOCKING mirror of the test above: bounded the same
+        way, but skipped with a context note rather than denied. Plan 00466
+        N40 m1: the note names "chain", not `slow-advisory` specifically --
+        see the module-level note on the redesign.
+        """
+        chain = HandlerChain()
+        advisory = MockHandler(
+            "slow-advisory",
+            priority=10,
+            tags=[HandlerTag.ADVISORY],
+            sleep_in_handle=5.0,
+        )
+        chain.add(advisory)
+
+        result = chain.execute({"tool_name": "Bash"}, deadline_seconds=0.1)
+
+        assert result.result.decision == Decision.ALLOW
+        assert any(ctx.startswith("Chain skipped: exceeded its") for ctx in result.result.context)
+
+    def test_deadline_none_leaves_an_oversleeping_safety_handler_unbounded(self) -> None:
+        """Plan 00466 N34: ``deadline_seconds=None`` disables the NEW
+        per-handler bound too, not only the pre-existing between-handlers
+        check -- the direct, synchronous call path is taken, unchanged.
+        """
+        chain = HandlerChain()
+        guard = MockHandler(
+            "safety-guard",
+            priority=10,
+            tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING],
+            sleep_in_handle=0.05,
+        )
+        chain.add(guard)
+
+        result = chain.execute({"tool_name": "Bash"})
+
+        # No pool involved on this path -- the call already returned
+        # synchronously, so this is deterministic, not a race.
+        assert guard.handle_called == 1
+        assert result.result.decision == Decision.ALLOW
+
+    def test_dispatch_pool_saturation_denies_a_safety_blocking_handler(self) -> None:
+        """Plan 00466 N34 remedy 2's OTHER fail-closed case: a pool with no
+        free capacity refuses the submission outright rather than queuing
+        it -- an unbounded queue is exactly the "pile up threads" failure
+        this exists to prevent. Plan 00466 N40 m1: the WHOLE chain is now
+        the thing submitted to the pool, so saturation denies "chain", not
+        `safety-guard` specifically -- see the module-level note.
+        """
+        from claude_code_hooks_daemon.core.bounded_dispatch import BoundedDispatcher
+
+        small_pool = BoundedDispatcher(max_inflight=1)
+        occupied = threading.Event()
+        release = threading.Event()
+
+        def _occupy() -> None:
+            occupied.set()
+            release.wait(timeout=DispatchTestTimeout.GENEROUS)
+
+        filler = threading.Thread(
+            target=lambda: small_pool.run(
+                _occupy, timeout=DispatchTestTimeout.GENEROUS, label="filler"
+            )
+        )
+        try:
+            filler.start()
+            assert occupied.wait(timeout=DispatchTestTimeout.NORMAL)
+
+            chain = HandlerChain()
+            guard = MockHandler(
+                "safety-guard",
+                priority=10,
+                terminal=True,
+                tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING],
+            )
+            chain.add(guard)
+
+            result = chain.execute(
+                {"tool_name": "Bash"}, deadline_seconds=5.0, dispatcher=small_pool
+            )
+        finally:
+            release.set()
+            filler.join(timeout=DispatchTestTimeout.GENEROUS)
+            small_pool.shutdown(wait=True)
+
+        # Refused, not queued: the guard never ran at all.
+        assert guard.matches_called == 0
+        assert result.result.decision == Decision.DENY
+        assert result.result.reason == "chain: not judged in time (dispatch pool saturated)"
+
+    def test_oversized_bash_command_denies_a_safety_blocking_handler(self) -> None:
+        """Plan 00466 N34 remedy 3: an oversized payload is denied BEFORE
+        dispatch, naming the size and the limit -- not "not judged in time",
+        since no timing was ever involved.
+        """
+        chain = HandlerChain()
+        guard = MockHandler(
+            "safety-guard",
+            priority=10,
+            terminal=True,
+            tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING],
+        )
+        chain.add(guard)
+
+        # The measured size is the whole SERIALISED tool_input (n24 review
+        # m5), not the raw command string alone; the expected size is
+        # computed the same way, so the reason is asserted exactly.
+        tool_input = {"command": "x" * 100}
+        measured = len(json.dumps(tool_input, ensure_ascii=False).encode("utf-8"))
+        hook_input = {"tool_name": "Bash", "tool_input": tool_input}
+        result = chain.execute(hook_input, max_safety_input_bytes=50)
+
+        assert guard.matches_called == 0
+        assert guard.handle_called == 0
+        assert result.result.decision == Decision.DENY
+        assert result.result.reason == (
+            "chain: input too large to evaluate safely "
+            f"({measured} bytes exceeds the 50-byte SAFETY evaluation limit)"
+        )
+
+    def test_oversized_input_deny_reason_does_not_misattribute_to_an_unrelated_handler(
+        self,
+    ) -> None:
+        """Plan 00466 N40 m5: the size check runs BEFORE scope/matches(), so
+        it fires for the FIRST SAFETY+BLOCKING handler in PRIORITY order --
+        whether or not that handler has anything to do with the tool being
+        called. Naming that handler in the deny reason (the pre-fix
+        behaviour) misleadingly blamed e.g. `prevent-destructive-git` for a
+        denied Write. The reason must say "chain", never a specific
+        handler's name, regardless of which handler happened to be first.
+        """
+        chain = HandlerChain()
+        unrelated_git_guard = MockHandler(
+            "prevent-destructive-git",
+            priority=10,
+            terminal=True,
+            tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING],
+        )
+        chain.add(unrelated_git_guard)
+        chain.add(
+            MockHandler(
+                "block-sensitive-content",
+                priority=20,
+                terminal=True,
+                tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING],
+            )
+        )
+
+        hook_input = {"tool_name": "Write", "tool_input": {"content": "x" * 100}}
+        result = chain.execute(hook_input, max_safety_input_bytes=50)
+
+        assert result.result.decision == Decision.DENY
+        assert result.result.reason is not None
+        assert "prevent-destructive-git" not in result.result.reason
+        assert "block-sensitive-content" not in result.result.reason
+        assert result.result.reason.startswith("chain:")
+
+    def test_oversized_write_content_skips_a_non_safety_blocking_handler(self) -> None:
+        """A SAFETY handler without BLOCKING is skipped with a note, not denied."""
+        chain = HandlerChain()
+        advisory = MockHandler("safety-advisory", priority=10, tags=[HandlerTag.SAFETY])
+        chain.add(advisory)
+
+        hook_input = {"tool_name": "Write", "tool_input": {"content": "x" * 100}}
+        result = chain.execute(hook_input, max_safety_input_bytes=50)
+
+        assert advisory.matches_called == 0
+        assert result.result.decision == Decision.ALLOW
+        assert any(
+            "safety-advisory" in ctx and "too large" in ctx.lower() for ctx in result.result.context
+        )
+
+    def test_oversized_file_path_denies_a_safety_blocking_handler(self) -> None:
+        """Plan 00466 n24 review B2/m5: the ORIGINAL fixed-field size cap
+        never measured ``file_path`` at all -- a long path was B2's actual
+        vector (a ~90 KB path froze the whole daemon via a quadratic glob
+        match, with nothing bounding it). Serialising the whole tool_input
+        covers this without a dedicated field name.
+        """
+        chain = HandlerChain()
+        guard = MockHandler(
+            "safety-guard",
+            priority=10,
+            terminal=True,
+            tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING],
+        )
+        chain.add(guard)
+
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/tmp/" + "p" * 100, "content": "ok"},
+        }
+        result = chain.execute(hook_input, max_safety_input_bytes=50)
+
+        assert guard.handle_called == 0
+        assert result.result.decision == Decision.DENY
+        assert result.result.reason is not None
+        assert "too large" in result.result.reason.lower()
+
+    def test_oversized_multiedit_edits_list_denies_a_safety_blocking_handler(self) -> None:
+        """Plan 00466 n24 review m5: MultiEdit's bulk text lives in
+        ``edits[]``, a list of dicts -- also unmeasured by the original
+        fixed-field cap.
+        """
+        chain = HandlerChain()
+        guard = MockHandler(
+            "safety-guard",
+            priority=10,
+            terminal=True,
+            tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING],
+        )
+        chain.add(guard)
+
+        hook_input = {
+            "tool_name": "MultiEdit",
+            "tool_input": {
+                "file_path": "/tmp/x.py",
+                "edits": [{"old_string": "a", "new_string": "b" * 200}],
+            },
+        }
+        result = chain.execute(hook_input, max_safety_input_bytes=50)
+
+        assert guard.handle_called == 0
+        assert result.result.decision == Decision.DENY
+
+    def test_non_safety_handler_is_unaffected_by_the_size_cap(self) -> None:
+        """The size cap is scoped to SAFETY handlers -- an ordinary advisory
+        still runs normally over an oversized payload.
+        """
+        chain = HandlerChain()
+        ordinary = MockHandler("ordinary", priority=10)
+        chain.add(ordinary)
+
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "x" * 100}}
+        result = chain.execute(hook_input, max_safety_input_bytes=50)
+
+        assert ordinary.matches_called == 1
+        assert ordinary.handle_called == 1
+        assert result.result.decision == Decision.ALLOW
+
+    def test_size_cap_none_disables_the_check(self) -> None:
+        """The default: no size cap configured means no size-based denial,
+        however large the payload.
+        """
+        chain = HandlerChain()
+        guard = MockHandler(
+            "safety-guard",
+            priority=10,
+            tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING],
+        )
+        chain.add(guard)
+
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "x" * 10_000}}
+        result = chain.execute(hook_input)
+
+        assert guard.handle_called == 1
+        assert result.result.decision == Decision.ALLOW
+
+    def test_size_within_the_cap_runs_normally(self) -> None:
+        chain = HandlerChain()
+        guard = MockHandler(
+            "safety-guard",
+            priority=10,
+            tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING],
+        )
+        chain.add(guard)
+
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "x" * 10}}
+        result = chain.execute(hook_input, max_safety_input_bytes=50)
+
+        assert guard.handle_called == 1
+        assert result.result.decision == Decision.ALLOW
+
+    def test_a_lone_surrogate_in_the_measured_fields_does_not_crash_the_size_check(
+        self,
+    ) -> None:
+        """Plan 00466 n24 review B1: ``str.encode("utf-8")`` (strict) raises
+        ``UnicodeEncodeError`` on a lone surrogate -- reachable whenever the
+        daemon's own ``json.loads`` turns a JSON ``"\\ud800"`` escape into a
+        Python string, which a model's tool arguments can carry. Before the
+        fix this exception escaped ``_safety_payload_size``, outside every
+        handler's own try/except, and reached the controller's fail-OPEN
+        catch-all -- a regression this branch introduced by adding the size
+        check at all. The chain must still judge normally.
+        """
+        chain = HandlerChain()
+        guard = MockHandler(
+            "safety-guard",
+            priority=10,
+            terminal=True,
+            tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING],
+            result=HookResult.deny(reason="denied for a real reason"),
+        )
+        chain.add(guard)
+
+        for field in ("command", "content", "new_string", "old_string"):
+            hook_input = {"tool_name": "Bash", "tool_input": {field: "AKIA\ud800"}}
+            result = chain.execute(hook_input, max_safety_input_bytes=1_000_000)
+            assert guard.handle_called >= 1, field
+            assert result.result.decision == Decision.DENY, field
+            assert result.result.reason == "denied for a real reason", field
+
+    def test_a_size_measurement_crash_denies_when_a_safety_blocking_handler_exists(
+        self,
+    ) -> None:
+        """Defence in depth alongside the surrogate fix above: ANY exception
+        computing the size (not only the specific surrogate case) must fail
+        CLOSED, not reach the controller's fail-open catch-all, whenever a
+        SAFETY+BLOCKING handler is registered for this chain.
+        """
+        import claude_code_hooks_daemon.core.chain as chain_module
+
+        chain = HandlerChain()
+        guard = MockHandler(
+            "safety-guard",
+            priority=10,
+            terminal=True,
+            tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING],
+        )
+        chain.add(guard)
+
+        def _boom(hook_input: dict[str, Any]) -> int:
+            raise RuntimeError("boom")
+
+        original = chain_module._safety_payload_size
+        chain_module._safety_payload_size = _boom
+        try:
+            hook_input = {"tool_name": "Bash", "tool_input": {"command": "x"}}
+            result = chain.execute(hook_input, max_safety_input_bytes=50)
+        finally:
+            chain_module._safety_payload_size = original
+
+        assert guard.handle_called == 0
+        assert result.result.decision == Decision.DENY
+        assert result.result.reason is not None
+        assert "boom" in result.result.reason or "RuntimeError" in result.result.reason
+
+    def test_a_size_measurement_crash_degrades_gracefully_with_no_safety_blocking_handler(
+        self,
+    ) -> None:
+        """The same crash, but nothing in the chain COULD have denied on the
+        size cap anyway -- failing the whole chain over an unrelated
+        measurement bug would be a pure availability regression with no
+        security benefit, so this degrades to "cap not enforced" instead.
+        """
+        import claude_code_hooks_daemon.core.chain as chain_module
+
+        chain = HandlerChain()
+        advisory = MockHandler("ordinary", priority=10, tags=[HandlerTag.ADVISORY])
+        chain.add(advisory)
+
+        def _boom(hook_input: dict[str, Any]) -> int:
+            raise RuntimeError("boom")
+
+        original = chain_module._safety_payload_size
+        chain_module._safety_payload_size = _boom
+        try:
+            hook_input = {"tool_name": "Bash", "tool_input": {"command": "x"}}
+            result = chain.execute(hook_input, max_safety_input_bytes=50)
+        finally:
+            chain_module._safety_payload_size = original
+
+        assert advisory.handle_called == 1
+        assert result.result.decision == Decision.ALLOW
+
     def test_execute_preserves_handler_priority_order(self) -> None:
         """execute processes handlers in strict priority order."""
         chain = HandlerChain()
@@ -942,6 +1693,168 @@ class TestHandlerChain:
         assert h2.handle_called == 0
         assert h3.handle_called == 1
         assert h4.handle_called == 0
+
+
+class _LateStateWriter(Handler):
+    """Sleeps inside ``matches()`` past the chain's deadline, then checks
+    ``is_dispatch_cancelled()`` right before "writing" shared state --
+    exactly the shape ``sensitive_content.py``'s ``_cached_dispatch`` write
+    and ``github_auto_close_keywords.py``'s ``mark_disclosed`` call take
+    (Plan 00466 N40 m2)."""
+
+    def __init__(
+        self, name: str, priority: int, release: threading.Event, outcome: dict[str, str]
+    ) -> None:
+        super().__init__(name=name, priority=priority, terminal=True)
+        self._release = release
+        self._outcome = outcome
+        self.checked = threading.Event()
+
+    def matches(self, hook_input: dict[str, Any]) -> bool:
+        # Blocks until the test releases it, so "late" is an ordering the
+        # test controls rather than a sleep racing the deadline.
+        self._release.wait(timeout=DispatchTestTimeout.GENEROUS)
+        from claude_code_hooks_daemon.core.dispatch_cancellation import is_dispatch_cancelled
+
+        self._outcome["result"] = "skipped-cancelled" if is_dispatch_cancelled() else "written"
+        self.checked.set()
+        return True
+
+    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+        return HookResult.allow()
+
+    def get_claude_md(self) -> str | None:
+        return None
+
+    def get_acceptance_tests(self) -> list[Any]:
+        return []
+
+
+class TestDispatchCancellationReachesStragglingHandlerCode:
+    """Plan 00466 N40 m2: a straggler's own state-mutating write, deep
+    inside ``matches()``/``handle()``, must see cancellation once the
+    caller has abandoned the whole chain -- the between-handler deadline
+    check alone cannot help here, since it never interrupts a handler
+    call ALREADY in progress.
+    """
+
+    def test_a_late_writes_after_the_deadline_is_skipped_not_written(self) -> None:
+        chain = HandlerChain()
+        outcome: dict[str, str] = {}
+        release = threading.Event()
+        writer = _LateStateWriter("late-writer", priority=10, release=release, outcome=outcome)
+        chain.add(writer)
+
+        try:
+            result = chain.execute({"tool_name": "Bash"}, deadline_seconds=0.02)
+            # The caller has its answer while the straggler is still blocked.
+            assert "result" not in outcome
+        finally:
+            release.set()
+
+        assert result.result.decision == Decision.ALLOW
+        assert writer.checked.wait(timeout=DispatchTestTimeout.GENEROUS)
+        assert outcome.get("result") == "skipped-cancelled"
+
+    def test_a_write_within_the_deadline_still_lands(self) -> None:
+        """Negative control: cancellation must not fire SPURIOUSLY for a
+        call that finishes comfortably inside its own budget."""
+        chain = HandlerChain()
+        outcome: dict[str, str] = {}
+        release = threading.Event()
+        release.set()
+        writer = _LateStateWriter("on-time-writer", priority=10, release=release, outcome=outcome)
+        chain.add(writer)
+
+        result = chain.execute({"tool_name": "Bash"}, deadline_seconds=5.0)
+
+        assert result.result.decision == Decision.ALLOW
+        assert outcome.get("result") == "written"
+
+
+class _CommitRecordingHandler(Handler):
+    """Sleeps inside ``matches()`` past the chain's deadline, then records
+    whether ``commit_side_effects`` was later called on it (Plan 00466 N40
+    review 2 mA5)."""
+
+    def __init__(
+        self, name: str, priority: int, release: threading.Event, outcome: dict[str, bool]
+    ) -> None:
+        super().__init__(name=name, priority=priority, terminal=True)
+        self._release = release
+        self._outcome = outcome
+        self._outcome["committed"] = False
+
+    def matches(self, hook_input: dict[str, Any]) -> bool:
+        self._release.wait(timeout=DispatchTestTimeout.GENEROUS)
+        return True
+
+    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+        return HookResult.allow()
+
+    def commit_side_effects(self, hook_input: dict[str, Any], chain_decision: Decision) -> None:
+        self._outcome["committed"] = True
+
+    def get_claude_md(self) -> str | None:
+        return None
+
+    def get_acceptance_tests(self) -> list[Any]:
+        return []
+
+
+class TestStragglerCommitHonoursCancellation:
+    """Plan 00466 N40 review 2 mA5: a straggler's ``commit_side_effects``
+    must honour the cancellation token the same way a handler's own
+    ``matches()``/``handle()`` code already can (m2). Today only
+    ``sensitive_content`` implements this hook for PreToolUse, and all it
+    does is clear a cache -- harmless -- but the next rate-limiter-style
+    handler would otherwise record side effects for a decision the caller
+    never received.
+    """
+
+    def test_commit_is_skipped_once_the_caller_has_abandoned_the_dispatch(self) -> None:
+        from claude_code_hooks_daemon.core.bounded_dispatch import BoundedDispatcher
+
+        chain = HandlerChain()
+        outcome: dict[str, bool] = {}
+        release = threading.Event()
+        handler = _CommitRecordingHandler(
+            "late-committer", priority=10, release=release, outcome=outcome
+        )
+        chain.add(handler)
+        dispatcher = BoundedDispatcher(max_inflight=1)
+
+        try:
+            result = chain.execute(
+                {"tool_name": "Bash"}, deadline_seconds=0.02, dispatcher=dispatcher
+            )
+        finally:
+            release.set()
+        # The straggler leaves the dispatcher's straggler set only once its
+        # whole call -- the commit loop included -- has returned, so this
+        # waits for the commit decision itself, not for a guessed interval.
+        while dispatcher.straggler_health().count:
+            time.sleep(DispatchTestTimeout.INSTANT)
+        dispatcher.shutdown(wait=True)
+
+        assert result.result.decision == Decision.ALLOW
+        assert outcome.get("committed") is False
+
+    def test_commit_still_lands_for_a_call_that_finishes_on_time(self) -> None:
+        """Negative control: cancellation must not suppress an on-time commit."""
+        chain = HandlerChain()
+        outcome: dict[str, bool] = {}
+        release = threading.Event()
+        release.set()
+        handler = _CommitRecordingHandler(
+            "on-time-committer", priority=10, release=release, outcome=outcome
+        )
+        chain.add(handler)
+
+        result = chain.execute({"tool_name": "Bash"}, deadline_seconds=5.0)
+
+        assert result.result.decision == Decision.ALLOW
+        assert outcome.get("committed") is True
 
 
 class TestChainDecisions:
@@ -1519,6 +2432,27 @@ class TestSideEffectCommit:
         assert result.result.decision == Decision.ALLOW
         assert any("commit exploded" in line for line in result.result.context)
 
+    @pytest.mark.parametrize("exc", [SystemExit("commit exit"), KeyboardInterrupt("commit int")])
+    def test_a_base_exception_from_commit_does_not_escape_the_chain(
+        self, exc: BaseException
+    ) -> None:
+        """mA2's shape at the commit site: ``SystemExit``/``KeyboardInterrupt``
+        from ``commit_side_effects`` must not escape and kill the daemon."""
+        chain = HandlerChain()
+
+        class _BaseExceptionCommit(CommittingHandler):
+            def commit_side_effects(
+                self, hook_input: dict[str, Any], chain_decision: Decision
+            ) -> None:
+                raise exc
+
+        chain.add(_BaseExceptionCommit("boom", priority=10, terminal=False))
+
+        result = chain.execute({"tool_name": "Bash"})
+
+        assert result.result.decision == Decision.ALLOW
+        assert any(type(exc).__name__ in line for line in result.result.context)
+
     def test_a_crashed_handler_is_not_committed(self) -> None:
         chain = HandlerChain()
         crasher = CommittingHandler("crasher", priority=10, raise_exception=ValueError("x"))
@@ -1803,3 +2737,144 @@ class TestAllowOnlyFieldsAreAccumulated:
         result = chain.execute({"tool_name": "Bash"})
 
         assert result.result.guidance is None
+
+
+class TestUnexpectedDispatchOutcomeFailsLoud:
+    """Plan 00466 N40 n2: the production path used ``assert isinstance(outcome,
+    DispatchSaturated)`` to narrow the else-branch of the dispatch-outcome
+    check -- an assert that ``-O`` strips, silently leaving ``detail``
+    unbound instead of failing. Replaced with an explicit ``elif``/``else``
+    that raises. This test drives a dispatcher whose ``run()`` returns
+    neither a real result nor either known sentinel, to exercise that
+    explicit failure directly (an assert-based narrowing would never be
+    reached by a real ``BoundedDispatcher.run()``, so this can only be
+    proven with a fake).
+    """
+
+    def test_an_unrecognised_dispatch_outcome_raises_instead_of_silently_falling_through(
+        self,
+    ) -> None:
+        from claude_code_hooks_daemon.core.bounded_dispatch import BoundedDispatcher
+
+        class _BogusOutcomeDispatcher(BoundedDispatcher[object]):
+            """Returns neither a real result nor a known sentinel."""
+
+            def run(self, fn: Any, *, timeout: float, label: str) -> Any:
+                return object()
+
+        chain = HandlerChain()
+        chain.add(
+            MockHandler(
+                "safety-guard",
+                priority=10,
+                terminal=True,
+                tags=[HandlerTag.SAFETY, HandlerTag.BLOCKING],
+            )
+        )
+
+        with pytest.raises(TypeError, match="unexpected type"):
+            chain.execute(
+                {"tool_name": "Bash"},
+                deadline_seconds=5.0,
+                dispatcher=_BogusOutcomeDispatcher(),
+            )
+
+
+@pytest.mark.parametrize(
+    "deadline_seconds",
+    [None, Timeout.CHAIN_DEADLINE_DEFAULT],
+    ids=["synchronous-path", "shipped-default-threaded-path"],
+)
+class TestUnderShippedDefaultDeadline:
+    """Plan 00466 N40 n4: a representative slice of core execute() behaviour,
+    re-run under the shipped default ``deadline_seconds`` (the production
+    THREADED path, via a real ``BoundedDispatcher`` dispatch) as well as the
+    ``None`` synchronous path the rest of this suite almost exclusively
+    exercises. Both parametrisations use fast MockHandlers, so a real dispatch
+    against ``Timeout.CHAIN_DEADLINE_DEFAULT`` (20s) never approaches its own
+    budget -- what this class actually verifies is that going through a real
+    thread, semaphore and cancellation-token bind/reset produces the SAME
+    observable decision as the synchronous path, not a timing property.
+    """
+
+    def test_empty_chain_returns_allow(self, deadline_seconds: float | None) -> None:
+        chain = HandlerChain()
+
+        result = chain.execute({"tool_name": "Bash"}, deadline_seconds=deadline_seconds)
+
+        assert result.result.decision == Decision.ALLOW
+        assert result.handlers_executed == []
+        assert result.terminated_by is None
+
+    def test_matches_is_called_on_every_handler(self, deadline_seconds: float | None) -> None:
+        chain = HandlerChain()
+        h1 = MockHandler("h1", should_match=False)
+        h2 = MockHandler("h2", should_match=True)
+        chain.add(h1)
+        chain.add(h2)
+
+        chain.execute({"tool_name": "Bash"}, deadline_seconds=deadline_seconds)
+
+        assert h1.matches_called == 1
+        assert h2.matches_called == 1
+        assert h2.handle_called == 1
+        assert h1.handle_called == 0
+
+    def test_a_terminal_deny_stops_the_chain(self, deadline_seconds: float | None) -> None:
+        chain = HandlerChain()
+        h1 = MockHandler("h1", priority=10, terminal=False)
+        h2 = MockHandler(
+            "h2",
+            priority=20,
+            terminal=True,
+            result=HookResult(decision=Decision.DENY, reason="stop here"),
+        )
+        h3 = MockHandler("h3", priority=30, terminal=False)
+        chain.add(h1)
+        chain.add(h2)
+        chain.add(h3)
+
+        result = chain.execute({"tool_name": "Bash"}, deadline_seconds=deadline_seconds)
+
+        assert h1.handle_called == 1
+        assert h2.handle_called == 1
+        assert h3.handle_called == 0
+        assert result.terminated_by == "h2"
+        assert result.result.decision == Decision.DENY
+
+    def test_a_raising_handler_denies_only_in_strict_mode(
+        self, deadline_seconds: float | None
+    ) -> None:
+        chain = HandlerChain()
+        chain.add(MockHandler("boom", priority=10, raise_exception=ValueError("boom")))
+
+        allowed = chain.execute(
+            {"tool_name": "Bash"}, strict_mode=False, deadline_seconds=deadline_seconds
+        )
+        denied = chain.execute(
+            {"tool_name": "Bash"}, strict_mode=True, deadline_seconds=deadline_seconds
+        )
+
+        assert allowed.result.decision == Decision.ALLOW
+        assert denied.result.decision == Decision.DENY
+
+    def test_the_first_restrictive_handler_wins_over_a_later_allow(
+        self, deadline_seconds: float | None
+    ) -> None:
+        chain = HandlerChain()
+        chain.add(_deny("blocker", 10, "denied", terminal=False))
+        chain.add(
+            MockHandler(
+                "advisor",
+                priority=20,
+                result=HookResult(decision=Decision.ALLOW, context=["hint"]),
+            )
+        )
+
+        result = chain.execute(
+            {"tool_name": "Bash"}, collect_all=True, deadline_seconds=deadline_seconds
+        )
+
+        assert result.result.decision == Decision.DENY
+        assert result.result.reason is not None
+        assert result.result.reason.startswith("denied")

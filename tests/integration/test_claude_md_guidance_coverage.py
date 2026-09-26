@@ -229,6 +229,13 @@ _EARNS_GUIDANCE: dict[str, str] = {
         "bold banner and never silently retry/degrade -- the fire-time line "
         "alone would teach the pattern once but not the standing rule"
     ),
+    "AgentTerminatedEarlyFailureDetectorHandler": (
+        "T3 standing policy: every future dead foreground dispatch must be "
+        "named and re-briefed once the limit resets -- the fire-time "
+        "advisory alone would teach the one death, not the standing "
+        "re-brief obligation, or that PostToolUseFailure (not PostToolUse) "
+        "is the channel this arrives on"
+    ),
     "CommandHintsHandler": "T3 explains the rate-limited hint mechanism itself",
     "ModelDowngradeRecorderHandler": (
         "T3 standing policy: the handler never speaks, so nothing about it is "

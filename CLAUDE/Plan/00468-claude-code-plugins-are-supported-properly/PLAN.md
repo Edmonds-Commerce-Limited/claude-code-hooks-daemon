@@ -113,10 +113,19 @@ first, and the other fixes build on it.
   not built: the daemon cannot see a plugin hook's output, and the tool's
   own PostToolUse input would have to be matched to the judged input by
   `tool_use_id` across events.
-- [ ] ⬜ **Task 4.2**: `settings_repair` re-reads before it replaces, and the
+- [ ] 🔄 **Task 4.2**: `settings_repair` re-reads before it replaces, and the
   writer count is corrected (G7). `daemon_sync_after_merge` and
   `merge_qa_report` judge the repository the command ran in, using 00464's
   resolver once it merges (G9).
+  **G7 done**: `repair_settings_registrations` re-reads `settings.json`
+  immediately before its atomic replace; unchanged content writes the
+  computed merge as before, changed content is re-reconciled against the
+  fresh read so a concurrent writer (e.g. Claude Code's `/plugin` /
+  `claude plugin install|enable|disable`) is folded in rather than lost, and
+  unparseable content aborts the repair without writing. `settings_merge.py`'s
+  two "four unlocked writers" docstrings now say five, naming Claude Code's
+  plugin CLI as the corrected count. G9 is unstarted, waiting on Plan 00464's
+  resolver.
 - [x] ✅ **Task 4.3**: `lsp_enforcement` enforces only when an enabled LSP
   plugin covers the searched language. Its advice names installing a
   code-intelligence plugin (P5). **Decided (unattended, 2026-09-24)**:
