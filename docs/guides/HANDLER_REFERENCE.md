@@ -2480,6 +2480,43 @@ handlers:
 
 ---
 
+#### conflict_marker_commit_gate
+
+| Property       | Value                         |
+| -------------- | ----------------------------- |
+| **Config key** | `conflict_marker_commit_gate` |
+| **Priority**   | 42                            |
+| **Type**       | Blocking                      |
+| **Event**      | PreToolUse                    |
+
+**Description:** Denies a commit when a line it ADDS carries a merge-conflict
+marker, naming each `file:line`. Two spellings count: git's raw column-0
+markers, and the disguise the markdown formatter gives them (the opener as an
+escaped heading, the closer as a seven-deep blockquote). A line of seven `=`
+or seven `|` counts only between an opener and a closer, so a setext heading
+underline is not a marker. A marker already in history never blocks an
+unrelated edit, and deleting one is never blocked. The text of a protected
+file's marker line is withheld from the deny.
+
+**Fires when:** a Bash command runs `git commit` (not `--dry-run`) or
+`git merge|cherry-pick|revert|rebase --continue`. It reads what the command
+records: the index, the working tree for `commit -a`, the named paths for a
+pathspec commit (plus the index with `-i`), in the repository `git -C` names.
+
+**Options:** none.
+
+**Config example:**
+
+```yaml
+handlers:
+  pre_tool_use:
+    conflict_marker_commit_gate:
+      enabled: true
+      priority: 42
+```
+
+---
+
 #### staged_lint_gate
 
 | Property       | Value                     |

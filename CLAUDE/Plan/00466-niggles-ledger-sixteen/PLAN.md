@@ -138,6 +138,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N110 | The local full QA gate tests one Python version, so a version-specific defect passes it and fails CI                                              | N106 fixer                                                      | ⬜ Open                          |
 | N118 | The tests-stage gate reported "0 failed" over a coverage-threshold miss and named nothing                                                         | N59 gate fixer 4                                                | ✅ Remedied                      |
 | N194 | Daemon-signal tests (test_safe_signal.py, test_client_validator.py) read a spawned child's cmdline before its exec lands, so a loaded host flakes | Coordinator                                                     | ✅ Remedied                      |
+| N211 | Merge-conflict markers reach tracked text disguised by the markdown formatter                                                                     | Coordinator                                                     | ✅ Remedied                      |
 
 ## Tasks
 

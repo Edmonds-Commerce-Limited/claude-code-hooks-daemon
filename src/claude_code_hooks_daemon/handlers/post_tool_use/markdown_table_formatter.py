@@ -33,7 +33,10 @@ from claude_code_hooks_daemon.core.handler_bases import PostToolUseHandlerBase
 from claude_code_hooks_daemon.core.utils import get_file_path
 from claude_code_hooks_daemon.plan_qa.paths import is_journal_file
 from claude_code_hooks_daemon.utils.cli_command import daemon_cli_command_for_docs
-from claude_code_hooks_daemon.utils.markdown_format import format_markdown_text
+from claude_code_hooks_daemon.utils.markdown_format import (
+    UnresolvedConflictError,
+    format_markdown_document,
+)
 from claude_code_hooks_daemon.utils.path_predicates import path_exists
 from claude_code_hooks_daemon.utils.scratch_dir import acceptance_path
 
@@ -42,6 +45,9 @@ _MARKDOWN_EXTENSIONS: tuple[str, ...] = (".md", ".markdown")
 
 #: Acceptance-test fixture directory, below the gitignored acceptance root.
 _FIXTURE_DIR: Final[str] = "acceptance-test-mdformat"
+
+#: Opens the advisory for a file left unformatted because it is conflicted.
+_CONFLICT_HEADLINE: Final[str] = "MERGE CONFLICT MARKERS:"
 
 # --- Advisory-message classification --------------------------------------
 #
@@ -241,7 +247,14 @@ class MarkdownTableFormatterHandler(PostToolUseHandlerBase):
 
         try:
             before = path.read_text(encoding="utf-8")
-            formatted = format_markdown_text(before)
+            formatted = format_markdown_document(before)
+        except UnresolvedConflictError as exc:
+            # Plan 00466 N211: formatting would disguise the markers, so the
+            # file is left as it is and the markers are named instead.
+            return BlockingResult(
+                decision=Decision.ALLOW,
+                context=[f"{_CONFLICT_HEADLINE} {path.name} {exc}"],
+            )
         except Exception as exc:
             # FAIL SAFE: mdformat can raise many parser/IO/unicode errors.
             # Never crash the PostToolUse dispatch chain — surface the error
@@ -319,6 +332,13 @@ class MarkdownTableFormatterHandler(PostToolUseHandlerBase):
             "and any other file in there. A journal is an append-only, byte-stable log; "
             "rewriting it would trip the `journal-append-only` check. The exemption is "
             "by LOCATION as well as by filename, so a mis-named day-file is still safe.\n"
+            "\n"
+            "**A file holding merge-conflict markers is NEVER reformatted**, and the "
+            "advisory names each marker's line instead. Formatting would escape the "
+            "opener into a heading and turn the closer into a seven-deep blockquote, "
+            "after which no check recognises either. A marker the formatter already "
+            "disguised is recognised and reported too. Resolve the conflict, and the "
+            "next Write/Edit formats the file as usual.\n"
             "\n"
             "**Ad-hoc formatting of existing files:**\n"
             "\n"

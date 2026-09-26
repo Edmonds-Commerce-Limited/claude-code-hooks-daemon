@@ -164,6 +164,10 @@ _AUDITED_BLOCKING_ONLY_REASONS: dict[str, str] = {
     ),
     "comment_changelog": "Comment-content style gate (changelog narrative does not belong in code).",
     "comment_size": "Comment-length style gate, with its own MUST_EXCEED escape hatch.",
+    "conflict_marker_commit_gate": (
+        "History-integrity QA gate on a commit (a leftover merge-conflict marker), "
+        "not a dangerous-action guard."
+    ),
     "dispatch_declaration": "Workflow gate: a subagent must declare where its report goes.",
     "gh_issue_comments": "Workflow completeness gate: forces --comments on gh issue view.",
     "gh_pr_comments": "Workflow completeness gate: forces --comments on gh pr view.",

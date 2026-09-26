@@ -20,7 +20,7 @@ from typing import Any, Protocol, runtime_checkable
 from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 from claude_code_hooks_daemon.utils.git_repo import is_linked_worktree, run_git
-from claude_code_hooks_daemon.utils.markdown_format import format_markdown_text
+from claude_code_hooks_daemon.utils.markdown_format import format_markdown_document
 
 logger = logging.getLogger(__name__)
 
@@ -467,9 +467,11 @@ class ClaudeMdInjector:
         Fail-safe: if mdformat raises (parser/unicode/IO error), the original
         unformatted content is returned so injection still completes and no
         content is lost. Daemon startup must never fail on a formatting error.
+        Content holding merge-conflict markers raises too, and is written
+        unformatted so the markers stay recognisable (Plan 00466 N211).
         """
         try:
-            return format_markdown_text(content)
+            return format_markdown_document(content)
         except Exception as exc:  # nosec B110 - fail-safe: never crash daemon startup
             logger.warning(
                 "ClaudeMdInjector: markdown formatting failed — writing unformatted "

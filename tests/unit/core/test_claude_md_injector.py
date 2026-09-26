@@ -1066,7 +1066,7 @@ class TestClaudeMdInjectorFormatting:
         injector = ClaudeMdInjector(workspace_root=tmp_path, handlers=[handler])
 
         with patch(
-            "claude_code_hooks_daemon.core.claude_md_injector.format_markdown_text",
+            "claude_code_hooks_daemon.core.claude_md_injector.format_markdown_document",
             side_effect=RuntimeError("boom"),
         ):
             injector.inject()  # Must not raise
@@ -1074,6 +1074,30 @@ class TestClaudeMdInjectorFormatting:
         content = claude_md.read_text()
         assert _OPEN_TAG in content  # block still written despite formatting failure
         assert "# My Project" in content  # user content preserved
+
+    def test_conflict_markers_in_claude_md_survive_raw(self, tmp_path: Path) -> None:
+        """Plan 00466 N211: a restart mid-merge must not disguise the markers.
+
+        Formatting turns an opener into an escaped heading and a closer into
+        a seven-deep blockquote; the injector writes the file unformatted
+        instead, so the markers stay recognisable.
+        """
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        open_marker, separator, close_marker = "<" * 7, "=" * 7, ">" * 7
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text(
+            f"# My Project\n\n{open_marker} HEAD\nours\n{separator}\ntheirs\n"
+            f"{close_marker} main\n"
+        )
+
+        handler = _StubHandler("h", "## H\n\nGuidance.")
+        ClaudeMdInjector(workspace_root=tmp_path, handlers=[handler]).inject()
+
+        lines = claude_md.read_text().splitlines()
+        assert f"{open_marker} HEAD" in lines
+        assert separator in lines
+        assert f"{close_marker} main" in lines
 
     def test_user_content_outside_block_preserved_through_formatting(self, tmp_path: Path) -> None:
         """Formatting must not lose the user's prose outside the block."""

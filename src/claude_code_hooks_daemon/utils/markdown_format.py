@@ -10,6 +10,9 @@ Extracting the transform here keeps the frontmatter-preserving,
 thematic-break-restoring reformat byte-for-byte identical across all three
 call sites, so a file formatted by one is already canonical for the others
 (no churn diff when a later Write/Edit triggers the PostToolUse formatter).
+
+Those three rewrite a FILE, so they call :func:`format_markdown_document`,
+which refuses a document holding merge-conflict markers.
 """
 
 import re
@@ -17,6 +20,12 @@ from typing import Any, Final
 
 import mdformat
 import yaml
+
+from claude_code_hooks_daemon.utils.conflict_markers import (
+    ConflictMarker,
+    describe_markers,
+    find_conflict_markers_in_text,
+)
 
 # mdformat extensions: enable GFM tables, strikethrough, task lists, autolinks.
 _MDFORMAT_EXTENSIONS: Final[set[str]] = {"gfm"}
@@ -182,3 +191,34 @@ def format_markdown_text(content: str) -> str:
     if frontmatter and formatted_body and not formatted_body.startswith("\n"):
         formatted_body = "\n" + formatted_body
     return frontmatter + formatted_body
+
+
+class UnresolvedConflictError(ValueError):
+    """A document about to be reformatted still holds merge-conflict markers."""
+
+    def __init__(self, markers: list[ConflictMarker]) -> None:
+        self.markers = markers
+        super().__init__(
+            "holds unresolved merge-conflict markers, so it was NOT reformatted "
+            "(formatting would disguise them as a heading and a blockquote that "
+            f"no check recognises). Resolve these first:\n{describe_markers(markers)}"
+        )
+
+
+def format_markdown_document(content: str) -> str:
+    """:func:`format_markdown_text` for a document that will be written back.
+
+    Every caller that rewrites a FILE goes through here (Plan 00466 N211).
+    mdformat escapes a conflict opener into a heading and turns a closer
+    into a seven-deep blockquote, so formatting a conflicted file hides its
+    markers from every later check. That is how two closers reached a
+    committed ledger.
+
+    Raises:
+        UnresolvedConflictError: ``content`` holds a conflict marker, raw or
+            already disguised by an earlier format.
+    """
+    markers = find_conflict_markers_in_text(content)
+    if markers:
+        raise UnresolvedConflictError(markers)
+    return format_markdown_text(content)

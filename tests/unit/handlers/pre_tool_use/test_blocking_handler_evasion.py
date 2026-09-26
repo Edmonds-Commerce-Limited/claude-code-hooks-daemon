@@ -524,6 +524,7 @@ _COMMAND_ANCHORED_NOT_UNIT_TESTABLE: dict[str, str] = {
     "PlanQaCommitGateHandler": "inspects the staged git tree; needs a real repository",
     "DocsQaCommitGateHandler": "inspects the staged git tree; needs a real repository",
     "RemoteDocsCommitGateHandler": "inspects the staged git tree; needs a real repository",
+    "ConflictMarkerCommitGateHandler": "inspects the staged git tree; needs a real repository",
     "NpmCommandHandler": "needs ProjectContext wiring",
     "PlanNumberHelperHandler": "needs ProjectContext wiring",
     "DaemonLocationGuardHandler": "matches a cd target path, evasion is path spelling",

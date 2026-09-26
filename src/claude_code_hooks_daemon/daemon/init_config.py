@@ -269,6 +269,7 @@ class ConfigTemplate:
             "    gh_issue_comments: {enabled: true, priority: 40}  # Require --comments on gh issue view\n"
             "    gh_pr_comments: {enabled: true, priority: 40}    # Require --comments on gh pr view\n"
             "    plan_time_estimates: {enabled: true, priority: 40}  # Block time estimates in plans\n"
+            "    conflict_marker_commit_gate: {enabled: true, priority: 42}  # Deny a commit whose added lines carry a merge-conflict marker, raw or formatter-disguised\n"
             "    staged_lint_gate: {enabled: true, priority: 43}  # Cheap syntax-check backstop over staged files on git commit (warn-first)\n"
             "    plan_close_approval: {enabled: true, priority: 43}  # A human closes a plan when plan_workflow.close_requires_human_approval is true\n"
             "    plan_qa_edit: {enabled: true, priority: 44}      # Plan QA lint on PLAN.md writes\n"

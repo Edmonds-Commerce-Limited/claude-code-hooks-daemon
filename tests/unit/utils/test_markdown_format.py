@@ -6,7 +6,11 @@ format-markdown CLI command, and the CLAUDE.md injector. These tests pin
 its behaviour so all three call sites stay identical.
 """
 
+import pytest
+
 from claude_code_hooks_daemon.utils.markdown_format import (
+    UnresolvedConflictError,
+    format_markdown_document,
     format_markdown_text,
     parse_frontmatter_lenient,
     parse_frontmatter_yaml,
@@ -140,3 +144,45 @@ class TestParseFrontmatterLenient:
     def test_a_block_with_no_key_lines_is_none(self) -> None:
         doc = "---\n- just\n- a\n- list\n---\n\nBody.\n"
         assert parse_frontmatter_lenient(doc) is None
+
+
+# Built, never typed at the start of a line, so this file carries no marker.
+_OPEN = "<" * 7
+_SEP = "=" * 7
+_CLOSE = ">" * 7
+_CONFLICTED = f"para\n\n{_OPEN} HEAD\nours line\n{_SEP}\ntheirs line\n{_CLOSE} main\n\nnext\n"
+
+
+class TestFormatMarkdownDocument:
+    """Plan 00466 N211: a document holding conflict markers is never reformatted.
+
+    mdformat turns an opener into an escaped heading and a closer into a
+    seven-deep blockquote, after which no check recognises either.
+    """
+
+    def test_a_raw_conflict_raises_naming_every_marker_line(self) -> None:
+        with pytest.raises(UnresolvedConflictError) as caught:
+            format_markdown_document(_CONFLICTED)
+        assert [m.line_number for m in caught.value.markers] == [3, 5, 7]
+        message = str(caught.value)
+        assert "line 3" in message
+        assert "line 7" in message
+
+    def test_a_formatter_disguised_leftover_closer_raises(self) -> None:
+        disguised = "entry\n\n" + " ".join(">" * 7) + " main\n\n### N99\n"
+        with pytest.raises(UnresolvedConflictError):
+            format_markdown_document(disguised)
+
+    def test_the_transform_itself_would_disguise_the_markers(self) -> None:
+        """Why the refusal exists: formatting leaves no raw marker behind."""
+        formatted = format_markdown_text(_CONFLICTED)
+        assert _OPEN not in formatted
+        assert "\n" + _CLOSE not in formatted
+
+    def test_a_clean_document_formats_exactly_like_the_transform(self) -> None:
+        doc = "# T\n\n| A | B |\n|---|---|\n| 1 | 2 |\n"
+        assert format_markdown_document(doc) == format_markdown_text(doc)
+
+    def test_a_setext_heading_underline_is_not_a_conflict(self) -> None:
+        doc = f"Heading\n{_SEP}\n\nprose\n"
+        assert format_markdown_document(doc) == format_markdown_text(doc)

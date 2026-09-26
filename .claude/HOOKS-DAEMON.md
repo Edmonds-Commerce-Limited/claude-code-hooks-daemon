@@ -4,7 +4,7 @@
 
 ## Active Handlers
 
-### PreToolUse (66 handlers)
+### PreToolUse (67 handlers)
 
 | Priority | Handler | Behaviour | Description |
 |----------|---------|----------|-------------|
@@ -54,6 +54,7 @@
 | 39 | reference_repo_freshness | BLOCKING | Gate a read of a governed reference repo on a cached freshness reading |
 | 40 | gh_issue_comments | BLOCKING | Ensure gh issue view commands always include --comments flag |
 | 40 | gh_pr_comments | BLOCKING | Ensure gh pr view commands always include --comments flag |
+| 42 | conflict_marker_commit_gate | BLOCKING | Deny a commit that would record a merge-conflict marker |
 | 42 | global_npm_advisor | NON-TERMINAL | Advise on global npm/yarn package installations |
 | 42 | installed_plugin_edit_advisor | ADVISORY | Say so when a write lands in an installed Claude Code plugin's files |
 | 43 | plan_close_approval | BLOCKING | Deny an agent's terminal status flip of a PLAN.md while the key is on |

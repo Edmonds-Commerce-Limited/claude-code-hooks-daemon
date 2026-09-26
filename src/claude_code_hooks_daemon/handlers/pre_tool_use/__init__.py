@@ -6,6 +6,7 @@ from .bash_safe_mode import BashSafeModeHandler
 from .british_english import BritishEnglishHandler
 from .comment_changelog import CommentChangelogHandler
 from .comment_size import CommentSizeHandler
+from .conflict_marker_commit_gate import ConflictMarkerCommitGateHandler
 from .daemon_location_guard import DaemonLocationGuardHandler
 from .destructive_git import DestructiveGitHandler
 from .dispatch_declaration import DispatchDeclarationHandler
@@ -48,6 +49,7 @@ __all__ = [
     "BritishEnglishHandler",
     "CommentChangelogHandler",
     "CommentSizeHandler",
+    "ConflictMarkerCommitGateHandler",
     "DaemonLocationGuardHandler",
     "DestructiveGitHandler",
     "DispatchDeclarationHandler",

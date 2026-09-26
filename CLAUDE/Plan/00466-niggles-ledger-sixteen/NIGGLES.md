@@ -3,6 +3,44 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
+### N211 — ✅ Remedied — merge-conflict markers reach tracked text disguised by the markdown formatter
+
+**Found by the coordinator.** This file on main (`44d1b1b3b`) carried two
+seven-deep blockquote lines, `> > > > > > > worktree-n466-superlinear` after
+the N106 entry and `> > > > > > > main` after the N100 entry. They are the
+closing markers of merge conflicts. The fixer's sweep found a third: an
+escaped opener, `\<<\<<\<<< HEAD`, standing alone above the N118 entry.
+
+**Route.** `git log -m -S` puts all three in merge commits. The superlinear
+opener and closer arrived together in `fd4956813` (Merge
+worktree-n466-superlinear), with the N118 entry from main between them and
+the N106 entry from the branch. The `main` closer arrived in `b2b5ee290`
+(Merge main into worktree-n466-guard-defects) and reached main through the
+N59 merge `69efecdab`. The mechanism, reproduced: an Edit on the conflicted
+file runs the PostToolUse `markdown_table_formatter` over the WHOLE file
+before the merge is committed. mdformat escapes the opener into
+`\<<\<<\<<< HEAD` (folded into a heading when a line of seven `=` follows
+it), and turns the closer into a seven-deep blockquote. A resolver then
+looks for the raw markers, finds none, and commits. From then on nothing
+reads the disguised lines as markers: not plan QA, docs QA, nor the
+staged-lint gate.
+
+**Remedy (branch `worktree-n466-n211`).**
+
+- `utils/conflict_markers.py` is the one classifier, for both spellings. A
+  line of seven `=` or seven `|` counts only between an opener and a closer,
+  so a setext heading underline is not a marker.
+- `format_markdown_document` refuses a document holding a marker. The
+  formatter handler leaves such a file untouched and names each marker line;
+  `format-markdown` reports it as an error; the CLAUDE.md injector writes the
+  file unformatted.
+- A new PreToolUse `conflict_marker_commit_gate` denies a `git commit` (or
+  `merge|cherry-pick|revert|rebase --continue`) whose ADDED lines carry a
+  marker in either spelling, naming `file:line`. It reads what the commit
+  records (index, `-a` working tree, pathspecs, `git -C`).
+- The three lines are removed from this file. A sweep of every tracked text
+  file on main found no other marker in either spelling.
+
 ### N194 — ✅ Remedied — daemon-signal tests read a spawned child's cmdline before its exec lands, so a loaded host flakes
 
 **Found:** `tests/unit/utils/test_safe_signal.py`'s daemon-signal tests
@@ -734,8 +772,6 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
-\<<\<<\<<< HEAD
-
 ### N118 — ✅ Remedied — the tests-stage gate reported "0 failed" over a coverage-threshold miss and named nothing
 
 **Found by the N59 gate fixer** (`260926-n59-gatefix4-sonnet-5.md` on
@@ -810,8 +846,6 @@ stops at the first missing directory. The deep-path sweep writes `.py`,
 growth is pinned by counting the segments it reads (8x, where the stdlib
 reads 63x), and `_is_plugin_component` is pinned by counting its probes (the
 same at depth 50 and 400, where main makes 103 and 803).
-
-> > > > > > > worktree-n466-superlinear
 
 ### N110 — The local full QA gate tests one Python version, so a version-specific defect passes it and fails CI
 
@@ -889,8 +923,6 @@ send people.
 the N38 lexer, and pin that the continued and single-line forms get the
 same verdict. It goes on the executed-body branch with N87 to N89 and N93,
 after N38.
-
-> > > > > > > main
 
 ### N99 — `dev-handlers.md` offers an agent a wrapper command that the daemon denies
 

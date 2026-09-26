@@ -339,6 +339,12 @@ class Priority:
     PLAN_TIME_ESTIMATES = 40
     GLOBAL_NPM_ADVISOR = 40
 
+    # Plan 00466 N211: the one staged-tree gate that denies by default, so it
+    # speaks before the warn-first staged_lint_gate at 43 on the same commit.
+    # Not 41: this project's own enforce-llm-qa handler holds that slot. The
+    # two advisors at 42 fire on disjoint tool shapes, so sharing is safe.
+    CONFLICT_MARKER_COMMIT_GATE = 42
+
     # Plan 00268 Task 3.2: sits between the workflow-40s entries and the plan
     # QA pair at 44 -- a sibling gate on the same `git commit` trigger, not an
     # extension of either.

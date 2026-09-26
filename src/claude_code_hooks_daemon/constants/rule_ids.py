@@ -193,6 +193,13 @@ class RuleID:
     STAGED_LINT_FAILURE: str = "R-STAGED-LINT-FAILURE"
 
     # ------------------------------------------------------------------
+    # conflict_marker_commit_gate handler (Plan 00466 N211)
+    # ------------------------------------------------------------------
+
+    #: A commit whose added lines carry a merge-conflict marker.
+    CONFLICT_MARKER_COMMIT: str = "R-CONFLICT-MARKER-COMMIT"
+
+    # ------------------------------------------------------------------
     # auto_continue_stop handler (stop event; concept-level granularity)
     # ------------------------------------------------------------------
 

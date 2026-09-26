@@ -485,6 +485,14 @@ class HandlerID:
         config_key="contract_staleness",
         display_name="contract-staleness",
     )
+    # Conflict-marker commit gate (PreToolUse handler) — Plan 00466 N211: a
+    # commit whose added lines carry a merge-conflict marker, raw or disguised
+    # by the markdown formatter.
+    CONFLICT_MARKER_COMMIT_GATE = HandlerIDMeta(
+        class_name="ConflictMarkerCommitGateHandler",
+        config_key="conflict_marker_commit_gate",
+        display_name="conflict-marker-commit-gate",
+    )
     # Remote-docs commit gate (PreToolUse handler) — Plan 00326: the backstop
     # for the write-time gate, which keys on Write/Edit and so cannot see a
     # heredoc or redirect into the tree.
