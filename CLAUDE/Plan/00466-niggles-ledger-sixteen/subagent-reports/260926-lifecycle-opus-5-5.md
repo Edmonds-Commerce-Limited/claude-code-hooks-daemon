@@ -799,3 +799,108 @@ cost none.
   If the owner wants host and container to share one lock across users,
   that is a different design: a group-owned lock with `0660`, which still
   lets that group block starts.
+
+## Round 6: the round-5 confirmation minors (INCOMPLETE: handed off at the merge)
+
+Brief: `untracked/scratch/briefs/lifecycle-fix-6.md`. Reviews: D-RULE
+`...lifecycle-review-rule-5...0f30b73852699b8a.md`, D-PATH
+`...lifecycle-review-path-5...2500f87a413576cc.md`. Every fix is in
+`cf0aa42cc` on top of `d386c682a`. **main is NOT merged yet**: the merge
+hit a real semantic conflict and I stopped at my context budget. The steps
+left are at the end of this section.
+
+### Fixes (all in `cf0aa42cc`)
+
+| Finding            | Fix                                                                                                                                                                                                                                                                                                                                                                                                    | Test                                                                                                                                                                                                                                                                                                                                                                          |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P5-1 / Sh-G (N190) | Ownership is the owner's uid, never permission to signal. bash `_hooks_daemon_pid_is_this_users` reads procfs `Uid:` (real, effective) or `ps -o ruid=,uid=` and compares both with `$EUID`, and gates the command-line proof. Python `process_verification.is_this_users_process` does the same with `psutil.Process.uids()`; `cli._serves_this_project` requires it.                                 | bash: `test_a_command_line_proves_only_a_process_this_user_owns[this user / another user]` (a fake procfs root, `_HOOKS_DAEMON_PROCFS`, holding the real cmdline and a faked `Uid:`). Python: `TestIsThisUsersProcess` and `TestPidIsThisProjectsDaemon::test_a_command_line_never_proves_another_users_pid` (faked `os.geteuid`)                                             |
+| R5-1 / P5-2        | `_await_started_daemon` has a monotonic deadline, `Timeout.DAEMON_PID_POLL_BUDGET_SEC = 5.0`, which replaces `DAEMON_PID_POLL_MAX_ITERATIONS`. The last probe can overrun it by one probe (≤ 1 s with the identity probe).                                                                                                                                                                             | `TestAwaitStartedDaemonIsBoundedByTheClock`: unstubbed. A real socket accepts every probe and never answers, and the PID file names a live non-daemon pid. It counts accepted probes: ≤ budget / probe timeout + 1                                                                                                                                                            |
+| R5-2               | procfs cmdline is read split at its NULs (`mapfile -t -d ''`), as psutil reads it                                                                                                                                                                                                                                                                                                                      | `test_procfs_bytes_are_read_as_the_daemon_reads_them` (5 byte-level cases: a launch across newlines, a trailing newline, no final NUL, an extra empty argument, a root cut by a NUL). Real process: `test_an_argument_holding_a_launch_across_newlines_is_not_one`                                                                                                            |
+| R5-3               | `ensure_daemon` keeps the status. The passthrough-flag shortcut is only for down (1). After a failed start, CI passthrough needs `_hooks_daemon_is_down`. Unknown (2) falls through to the error path, which denies PreToolUse.                                                                                                                                                                        | `test_an_unknown_answer_is_never_a_ci_passthrough[flag-set/no-flag]`, `test_a_real_down_after_a_failed_start_takes_the_ci_passthrough`, `test_a_real_down_with_the_flag_skips_the_start`                                                                                                                                                                                      |
+| P5-3               | `_hooks_daemon_argv_name_root` requires `argv[1]=-m`, `argv[2]=<cli>`, `argv[3..4]=--project-root <root>` and `argv[5]=start/restart`, and no other argument naming a root. The no-flag venv fast path is gone (Sh-1).                                                                                                                                                                                 | Parity table rows for `-c pass -m ...`, `-I -m ...`, `-v` before the subcommand, `sh x -m ...`, a module suffix, and a second `--project-root`                                                                                                                                                                                                                                |
+| Sh-1 (N191)        | A daemon naming no root is attributed by the natural socket it has bound (`_root_from_listening_socket`, `_project_of_socket`), never by its venv. My branch also re-ran such a start naming the root; **main already does that** (`_reexec_daemon_launch_with_explicit_project_root`, posix_spawn plus `CLAUDE_HOOKS_DAEMON_PROJECT_ROOT`), so the merge keeps main's and drops mine (see below)      | `TestDaemonProcessProjectRoot::test_a_daemon_naming_no_root_serves_the_project_whose_socket_it_listens_on` and 4 siblings, and `TestFindAllDaemonProcessesProjectRootFilter::test_the_venv_a_daemon_runs_from_attributes_nothing`                                                                                                                                             |
+| Sh-2 (N192)        | A new `_system` action `identity` answers `{project_root, pid}`. `server.daemon_socket_identity` asks for it with a bounded connect and a bounded answer. `pid_is_this_projects_daemon` and `_await_started_daemon` accept only this project's answer; the await also needs the answering pid. The REUSE and unlink gates keep the connect-only probe, which is the right direction for "never steal". | `test_a_socket_proves_only_an_answer_as_this_projects_daemon[nothing / another project]` (bash). `TestPidIsThisProjectsDaemon` (3 new cases). `test_the_daemon_answers_which_project_it_serves` uses the real `HooksDaemon._handle_client`. Live daemon checked by hand: `DaemonIdentity(project_root='/workspace/untracked/worktrees/worktree-n466-lifecycle', pid=1921038)` |
+| Sh-3 (N193)        | `server._pid_file_points_at_live_process` uses `parse_pid_text`                                                                                                                                                                                                                                                                                                                                        | `test_pid_file_points_at_live_process_false_for_what_names_no_pid[0,-1,1,007, 12 ]`                                                                                                                                                                                                                                                                                           |
+
+`tests/daemon_like_process.py` gives its stand-in the exact launch argv. It
+runs a stand-in `claude_code_hooks_daemon/daemon/cli.py` from a temporary
+`cwd`, which comes first on `sys.path`. It also gains
+`answering_daemon_socket` and `silent_socket`.
+
+### RED proofs
+
+- **On `d386c682a`, unmodified.** 17 failed:
+
+  - the two Sh-2 bash cases;
+  - the other-uid bash case;
+  - both R5-3 cases;
+  - the procfs and ps parity tables;
+  - the symlink case and 2 byte cases, because the new function is absent;
+  - 3 `TestPidIsThisProjectsDaemon` cases;
+  - the R5-1 poll (an old probe reads the silent socket as LIVE);
+  - 2 relaunch cases;
+  - the real-process newline smuggling case (`rc=0`, expected `rc=2`).
+
+  `test_process_verification.py` and `test_server_liveness_reuse.py` failed to import (`is_this_users_process` and `DaemonIdentity` do not exist).
+
+- **Mutations on a `git archive` copy of `cf0aa42cc`** (`untracked/scratch/mut-r6`). Every targeted test failed:
+
+  - the tick loop restored: `assert 50 <= 3`, 50 probes;
+  - `_project_of_socket` without the natural-path check: the `stray.sock` case attributed a root;
+  - `int()` restored in `_pid_file_points_at_live_process`: `0`, `-1` and `1` read as live;
+  - `kill -0` in place of the uid check: the other-uid bash case gave `rc=0`.
+
+### GREEN at `cf0aa42cc`
+
+- 546 tests across 14 lifecycle files: the init.sh fail-closed and relay-guard tests, `test_forwarder_jq_free`, and the `cli_commands`, `cmd_start`, `start_reuse`, `restart_verified`, `ci_passthrough`, `enforcement`, `server_coverage`, `controller`, boot-race, realpath and jqless tests.
+- 35 tests in the isolated-daemon integration tests, which cover the real relaunch and start path.
+- ruff, black, mypy, pyright and shellcheck are clean on the touched files.
+- The daemon was restarted and reports RUNNING.
+
+`test_cli_cmd_start.py` needed `_poll_clock()`. It patches `cli.time` with a clock that only its own sleeps advance, so the wall-clock poll ends at once. `_proven_to_serve` now also patches `is_this_users_process`.
+
+### Why the merge stopped, and how to finish it
+
+`git merge main` (fd4956813) conflicts in `PLAN.md` (the ledger table),
+`cli.py`, `process_verification.py`, `test_cli_commands.py` and
+`test_process_verification.py`. I aborted it cleanly; `cf0aa42cc` is intact.
+
+The conflict is not textual. Main's N59 rewrote `cmd_stop` around
+`utils/safe_signal.stop_verified_daemon`, a pinned `psutil.Process`, and
+removed the pidfd helpers. This branch's earlier rounds changed the same
+function:
+
+- N70: a daemon gone before the signal keeps its files;
+- S2/Sh-C: the files are released under the start lock only while they are
+  still ours.
+
+Main's version cleans both files up unconditionally on `ALREADY_GONE` and
+on success.
+
+My partial resolution is saved in `untracked/scratch/merge-r6-partial/`:
+
+- `process_verification.py.resolved` is complete. It keeps main's `PROJECT_ROOT_ENV_VAR` and `_extract_project_root(proc)`, which `safe_signal` imports. The resolution order is flag, then env var, then socket, through a shared `_attributed_root` that `daemon_process_project_root` also uses (sources `_FLAG_SOURCE`, `_ENV_SOURCE`, `_SOCKET_SOURCE`). The venv fallback is gone.
+- `cli.py.resolved` is complete:
+  - main's `stop_verified_daemon` path;
+  - `ALREADY_GONE` leaves both files (N70);
+  - success calls `_release_stopped_daemon_files`;
+  - the pidfd helpers are dropped;
+  - main's posix_spawn relaunch replaces my `os.execv` one;
+  - both import lists are merged, and the unused `errno` import is removed.
+- `test_cli_commands.py.conflicted` is the file with its 5 conflict hunks, unresolved.
+
+Remaining steps, in order:
+
+1. Merge main again (`git -C <wt> merge --no-ff --no-commit main`). Copy the two `.resolved` files over the conflicted ones.
+2. Resolve `test_cli_commands.py`:
+   - Take main's side in every hunk: main's real-process `TestCmdStop*` tests, and `TestCmdStopGenericException` patching `stop_verified_daemon`.
+   - Drop HEAD's pidfd classes (`TestCmdStopSignalsThroughPidfdWhenAvailable`, HEAD's `TestCmdStopSignalsOnlyThisProjectsDaemon`) and the `_close_all_but` and `_reject_unproven_real_signals` fixtures.
+   - Keep HEAD's `_UNREAL_PID`, `_CLI` and `short_dir`, which the round-6 tests use.
+   - Change main's `test_a_pid_nobody_has_is_a_stale_pid_file` to assert N70: both cleanups are **not** called.
+   - Port the branch-only `TestCmdStopFallsBackAndCleansUpOnlyWhenProvenSafe` and `TestCmdStopCleansUpOnlyWhatItStillOwns`, which patch `os.pidfd_open` and `os.kill`, to real processes plus `stop_verified_daemon`. Keep their assertions about release under the lock.
+3. In `test_process_verification.py`, keep both import sets. The `Timeout` import and main's removal of `kill_daemon_process` go together: drop `TestKillDaemonProcess` if main deleted the function. Drop my `tests/unit/daemon/test_cli_main.py` relaunch class `TestAStartNamingNoRootIsRerunNamingIt` (it patches `os.execv`; main's relaunch is posix_spawn and main has its own tests). Add an env-var attribution case to `TestDaemonProcessProjectRoot`.
+4. Resolve the `PLAN.md` ledger table with `merge_ledger_table.py` and the N1-row Edit, per the brief. Move any stdlib containment call onto `path_containment`, then run `scripts/qa/run_semgrep_check.sh`.
+5. Run the init.sh, relay and cli tests. Then run shellcheck, ruff, black, mypy, pyright and the `-D warnings` relay build. Restart the daemon, check RUNNING, and commit the merge.
+6. Release notes: add a three-digit note for round 6 (uid ownership, the identity handshake, NUL-split cmdline, the CI passthrough on unknown, and socket attribution). Then commit.
+
+Do not queue the gate (brief).
