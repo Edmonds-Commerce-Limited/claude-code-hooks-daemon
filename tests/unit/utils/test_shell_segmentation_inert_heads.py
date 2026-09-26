@@ -79,9 +79,15 @@ class TestEverythingElseIsNot:
     def test_single_quotes_make_every_character_literal(self, char: str) -> None:
         assert is_wholly_inert_command(f"echo 'a{char}b' '{_MERGE}'") is True
 
-    @pytest.mark.parametrize("char", list(";&|()<>{}`$~*?[!#'\""))
+    @pytest.mark.parametrize("char", list(";&|()<>{}`$~*?[!#'\"\\"))
     def test_a_backslash_makes_the_next_character_literal(self, char: str) -> None:
         assert is_wholly_inert_command(f"echo a\\{char}b '{_MERGE}'") is True
+
+    def test_an_embedded_nul_is_not_inert(self) -> None:
+        """A NUL inside the argument is not a character bash treats as literal
+        text in any useful sense -- withhold the exemption rather than assume
+        it behaves like an ordinary byte."""
+        assert is_wholly_inert_command(f"echo x\x00; {_MERGE}") is False
 
     @pytest.mark.parametrize("option", ["-v", '-"v"', "-'v'", "-\\v", "--", "-x"])
     def test_printf_takes_no_option(self, option: str) -> None:

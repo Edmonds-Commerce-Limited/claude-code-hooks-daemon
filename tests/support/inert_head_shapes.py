@@ -55,6 +55,11 @@ ESCAPE_SHAPES: Final[tuple[str, ...]] = (
     "echo <(@CMD@)",
     "echo $'@CMD@'",
     "echo \"$x\" '@CMD@'",
+    # A doubled backslash escapes only ITSELF, leaving the following `$` or
+    # backtick live -- the pairing a one-character-skip mutant would break.
+    'echo "\\\\$(@CMD@)"',
+    "echo \\\\$(@CMD@)",
+    'echo "\\\\`@CMD@`"',
     # Written somewhere that is executed later.
     "echo '@CMD@' > f.sh; bash f.sh",
     "echo '@CMD@' >> f.sh && . f.sh",
