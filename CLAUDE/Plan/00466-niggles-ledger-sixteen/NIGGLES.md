@@ -9,6 +9,126 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N99 — `dev-handlers.md` offers an agent a wrapper command that the daemon denies
+
+**Found by the Plan 464 gate fixer** (`260926-p464-gatefix2-sonnet-5.md`
+on `worktree-plan-464-commit-gate-repo`). The skill routes agents to the
+`init-project-handlers` verb and offers
+`bash .claude/skills/hooks-daemon/scripts/init-handlers.sh <…>` "for a human
+who prefers prompts". The script's self-update bootstrap re-execs a path
+computed by `mktemp`, so on 464's branch `destructive_git` denies it as
+`R-GIT-ALIAS-UNREAD`. That script-content scan is Plan 464 Task 1.11's
+intended behaviour. The doc does not say that an agent will be refused. An
+agent following the page as a whole would therefore hit a denial the page
+never mentions.
+
+**Remedy:** once 464 lands, the doc says the wrapper is for a human to run
+themselves (`! bash …`), and that an agent uses the verb. A copy-paste test
+should pin that each documented agent-facing command is allowed.
+
+### N98 — Past the AF_UNIX limit, every hostname shares one fallback socket, PID file and events dir
+
+**Found by upgrade scripts round 13** (report
+`260926-upgrade-scripts13-opus-5-5.md` on `worktree-upgrade-scripts`,
+section 4). Every runtime path carries `_get_hostname_suffix()` except the
+two fallbacks, both in `daemon/paths.py`:
+
+- `_get_fallback_runtime_dir` names the socket, PID and log
+  `hooks-daemon-<project hash>.<ext>`;
+- `_get_event_socket_fallback_dir` names the events dir
+  `hooks-daemon-<untracked hash>-events`.
+
+So when a project's natural socket path is over the limit, every hostname
+on the machine resolves the same three paths. The first daemon serves them
+all, and a second one clobbers the first one's files. Calling
+`get_socket_path`, `get_pid_path` and `get_event_socket_dir` for a long
+project path under `HOSTNAME=host-a` and then `HOSTNAME=host-b` prints
+identical paths.
+
+**Remedy:** key both fallback names by the hostname too, for example with a
+short hash of the sanitised suffix so the name stays bounded. Check every
+reader that derives one path from another: `init.sh` derives the PID path
+from the socket's stem, and the forwarder and the relay use the events dir.
+It touches the same runtime-path code as N86, so it goes on N86's branch
+after N24 merges.
+
+### N97 — `block-curl-pipe-shell` denies prose that only mentions curl and bash
+
+**Found by N38 review 9 (ledger candidate 8), and on base too.** A
+docstring written into `test_curl_pipe_shell.py` is denied. The literal is
+in `/workspace/untracked/scratch/n38r9/fpcmp_lit.txt`. bash would stop at a
+syntax error before the curl line, and the line is not curl piped into
+bash anyway.
+
+**Remedy:** judge `curl … | sh` only on a real pipe, taking pipe positions
+from the N38 lexer, and not on text inside a quoted string or heredoc data
+body. It starts after N38 merges, on the same branch as N92 (a quoted `|`
+read as a pipe).
+
+### N96 — `subagent_full_qa_blocker.py` is one 5,300-line handler
+
+**Found by the coordinator while harvesting the Plan 00463 gate fix.** The
+module grew over ten review rounds, each closing more evasion shapes, to
+5,294 lines. No other handler is close to that size. It holds command
+recognition, interpreter classification, wrapper peeling and the verdict
+in one file, so every future review reads all of it, and a regression in
+one part hides among the rest.
+
+**Remedy:** after Plan 00463 merges, split it along the seams it already
+has. Put the recognisers in `utils` next to `shell_segmentation`, keep the
+verdict and messages in the handler, and move behaviour-free tables to
+constants. It is a pure refactor with the test suite unchanged. Some of
+the recognition probably duplicates the 464 script-walk and wrapper
+machinery, so reuse that rather than moving it.
+
+### N95 — Test fixtures run setup git commands under a production 5-second budget, so a loaded host flakes the gate
+
+**Found by the N81 to N83 gate fixer.**
+`test_sensitive_content.py::TestStagedContentSurface::test_excluded_path_is_not_inspected`
+errored because a `git commit` in its FIXTURE timed out on
+`Timeout.GIT_CONTEXT` (5 s). That was the last test of a 28,651-test run
+with a load average of 6 on 8 cores. About 86 test files' git fixtures use
+that same production budget. The budget exists to bound the daemon's own
+git calls on the hook path. A fixture's setup is not what is under test,
+and it borrowing the hook budget turns host load into gate failures.
+
+**Remedy:** fixtures use a test-owned setup budget, a named constant with a
+generous bound. Assertions about the product's own timing stay on the
+product constant. A test pins that fixtures never import the hook-path
+budget.
+
+### N94 — `github_auto_close_keywords` answers a repeated `git commit -F` from the previous request
+
+**Found by N38 review 8 (its MAJOR, and on main too).** The handler caches
+its verdict on the shared handler instance, keyed by the command text alone.
+The verdict also depends on the message file, read relative to the request's
+cwd. Run `git commit -F msg.txt` with a harmless message in one directory,
+then with `Closes #12` in another: the second is allowed. Editing the file
+between two identical commands also keeps the stale answer.
+
+**Remedy:** N38 fix round 9 keys the memo by every input, sweeps every
+handler for per-instance per-request state, and extends the static detector
+to catch it. It lands with N38.
+
+### N93 — `project_containment` misses writes inside `eval '…'` and nested heredocs
+
+**Found by N38 review 8 (ledger candidate).** A write outside the project
+that sits inside `eval '…'`, inside `bash <<'OUTER'`, or after a moved
+heredoc closer is not seen. Every tree allows it, main included.
+
+**Remedy:** judge executed bodies as commands, as the guards now do. It
+belongs on the executed-body branch with N87 to N89.
+
+### N92 — `pipe_blocker` reads a `|` inside a double-quoted regex as a pipe
+
+**Found by N38 review 8 (ledger candidate).** `grep -E "a|HEAD|b" f` is
+denied as a pipe to `head`. It happens on every tree, including the live
+daemon. A double-quoted string is one word to bash, so there is no pipe
+there.
+
+**Remedy:** the pipe split must honour quoting, taking pipe positions from
+the N38 lexer. It starts after N38 merges.
+
 ### N91 — A project's extra `protected_paths` can be ignored for the life of the daemon by the payload-capture and lint seams
 
 **Found by N38 fix round 8's static shared-state detector.**
@@ -589,6 +709,78 @@ immutable file where one is available. Replace Plan 00351's check with a
 detector that fails on any root-conditioned skip. Record the rule in the
 testing standards doc.
 
+**Done, on `worktree-n466-n56`:** the three skip sites are rewritten to
+fault the operation a way root cannot bypass, keeping each test's original
+assertion:
+
+- `test_skills.py`'s `test_deploy_skills_raises_if_target_not_writable`
+  monkeypatches `shutil.copytree` to raise `PermissionError` instead of
+  `chmod`-ing the target read-only.
+- `test_settings_deploy_lib.py`'s `test_a_failed_backup_stops_everything`
+  stubs the shell `cp` used for the backup copy (matched on its destination
+  suffix `*.bak-*`, so the install copy is untouched) — the same technique
+  `TestTheInstallCopyCanFail` already used for the install copy.
+- `test_bootstrap_decision.py`'s `test_untracked_not_writable` monkeypatches
+  `os.access` itself, since `access(2)` grants `W_OK` to a privileged real
+  UID regardless of the mode bits.
+
+`test_skipif_reasons_match_their_conditions.py` is replaced by
+`tests/integration/test_no_root_conditioned_skips.py`: a static scan over
+EVERY `.py` file under `tests/` — not just `test_*.py`/`conftest.py`, and
+with no exclusion list (review 2, B2: an earlier cut excluded a
+`fixtures`/`assets`/`__fixtures__` directory name and its own file, which
+pytest actually collects through). It classifies by data flow rather than by
+name (review 2, B1), so an alias, a local variable, a module constant, or
+one level of same-module helper (including a parameterised one called with
+literal arguments) is resolved the same as the direct call — covering
+`geteuid`/`getuid`/`getegid`/`getgid`/`getresuid`/`getresgid`,
+`getpass.getuser`, a `pwd`/`grp` lookup, an env check of
+`USER`/`LOGNAME`/`HOME`/`SUDO_*`, `Path.home()`/`os.path.expanduser("~")`,
+`os.access(...)`, and `<expr>.stat().st_uid`. It fails on a
+`skipif`/`xfail`/`unittest.skipIf`/`skipUnless` decorator, an `IfExp`
+marker, a hand-written `if <root check>: skip/xfail/skipTest/return`, or a
+conftest `pytest_ignore_collect`/`pytest_collection_modifyitems`/
+`pytest_runtest_setup` whose control flow depends on one — **and
+independently** on any skip-like call whose stated *reason* names root
+regardless of what its condition tests (review 1, F1: this is Plan 00351's
+own shape, which the first cut of the detector regressed). A reference it
+cannot resolve (a cross-module import, a class attribute) whose own name
+suggests process identity is reported as unproven rather than silently
+passed. `tests/relay_gate_guard.py` and its test are left alone (documented
+why): that guard's "Running as root" case is a reason-string classifier for
+a different, CI-only concern, not a root-conditioned skip itself.
+
+Review 1 (F5) also found two tests outside the three skip sites that were
+vacuous as root without skipping: `test_auto_continue_stop.py`'s
+`test_matches_handles_oserror_reading_transcript` (`chmod(0o000)`, root
+still reads the file) now monkeypatches `Path.open` inside
+`TranscriptReader._parse_tail`; `test_paths.py`'s
+`test_socket_path_over_limit_uses_run_user` (skipped when `/run/user/{uid}`
+is absent — a host-dependent skip, not a root one) now monkeypatches
+`Path.is_dir` so the branch runs deterministically. Review 2 (M1) found a
+third: `test_hooks_deploy_permissions.py`'s chmod-failure contract had been
+replaced by a lexical check on the installer's source because root's own
+chmod never fails; it now stubs `chmod` as a shell function that fails for
+one hook file, the same technique `test_settings_deploy_lib.py` uses for
+`cp`.
+
+Review 3 found two more evasions of the hand-written `if <root check>: ...`
+shape, both closed: a `pass`-only branch opposite a substantive one (`if root: pass else: assert ...`), and an `assert` gated by identity with no
+`else` at all. Both needed a new `_root_polarity` helper to tell which
+branch actually runs AS ROOT — only a no-op on that branch is a problem in a
+container that is always root; the reverse (no-op on the non-root branch) is
+fine and must not be flagged, or `getuid_used_non_skip` (already in the
+`_SHOULD_NOT_FIND` corpus) would false-positive. One evasion is left as a
+documented, owner-referred residual: `try: <op that only raises PermissionError as non-root> except PermissionError: return` followed by an
+unconditional skip has no syntactic root check anywhere — the
+root-dependence is a runtime property (what `open()` does), not something a
+static AST scan can read. It is tracked as
+`_KNOWN_RESIDUALS["try_except_permission_pass"]` in the detector's own test
+file, asserted to stay uncaught so a future fix flips that assertion red
+rather than the note going stale.
+
+The rule is recorded in `CLAUDE/QA.md`, next to the other test requirements.
+
 ### N55 — `register_all` ignores a handler's `get_default_enabled()` when its config block is absent
 
 **Found by goal-flip review 8 (RV8-n3), filed at review 9's request.** When a
@@ -737,26 +929,86 @@ Setting medium therefore needed two edits in two formats (`settings.json` and
 `ccy.env`, commits 909f9591 and e52bd9e5). Even then the restore path still
 lands on xhigh.
 
-**Candidate remedy:** make `settings.json` the single source of truth for the
-effort a model runs at.
+**Remedy (redesigned again after adversarial review 2**,
+`subagent-reports/260925-n47-review2.md`**, which found review 1's fix was
+still architecturally wrong at the root):** BLOCKER 1 — Claude Code SAVES
+every interactively-typed `/effort <level>` into `modelSettings` in the
+settings file the confirming `Enter` targets (`model-config.md:552-557`,
+`settings-reference.md:900`). So ANY supervisor-typed `/effort`, no matter
+how well the level behind it was resolved, permanently overwrites the
+owner's own saved level — the exact fight the whole redesign exists to end,
+just moved one layer down into the single source of truth itself.
 
-- The supervisor resolves a family's effort from the settings Claude Code
-  itself reads, in its precedence order: per-model `modelSettings` over
-  `effortLevel`, project over user.
-- The separate floor map and `CCY_MIN_EFFORT_LEVELS` are retired, and the
-  `ccy.env` lines go with them.
-- A switch back to a configured model sets that model's configured effort.
-  `xhigh` compensation applies only while a downgrade leaves the session on a
-  fallback model.
-- The fable anchor clamp (Plan 00297) stays as a ceiling.
+The supervisor now injects **no `/effort` of any kind, for any reason,
+ever**:
 
-RED tests:
+- The built-in floor map, `CCY_MIN_EFFORT_LEVELS`, the settings.json reader,
+  the coupled-effort correction and the downgrade-xhigh compensation are all
+  gone entirely, not just superseded.
+- The two behaviours those mechanisms provided are now DATA the owner adds
+  to their own `modelSettings` — a `claude-fable-5-1` entry at `low`
+  (replacing DROP ANCHOR) and `claude-opus-5`/`claude-opus-4-8` entries at
+  `xhigh` (replacing the downgrade compensation, covering Fable's two
+  automatic-fallback targets, and now broader than the old compensation
+  since it applies whenever Opus 5 or 4.8 serve, not only a fable-origin
+  episode). See `CLAUDE/development/CcySupervisor.md` for the exact entries.
+- MAJOR 4 fixed alongside: `model_downgrade_recorder`'s signal republishes
+  the SAME record for the life of a session, even after its episode fully
+  closed. A human who later manually switched back to the fallback family
+  produced the identical observation the old `session:from:to` attribution
+  key matched again, reopening an episode and firing `/model fable` at them.
+  A record now has an identity (`record_id`: the transcript entry's `uuid`,
+  or its line's byte offset; the standalone record of a downgrade keeps its
+  block's identity), the state machine spends that identity when the episode
+  recovers, and a record attributes only a drop observed within
+  `_DOWNGRADE_ATTRIBUTION_WINDOW_SECONDS` (300s) of the downgrade it records
+  (review 4 findings 3 and 4). Retroactive attribution of a drop seen before
+  its record was published applies the same judgement at the moment the drop
+  was seen, after the tick's reading, and writes a decision-log line.
+- `hooks-daemon check` holds no effort opinion either (review 4 finding 2):
+  "Effort Level" (which failed anything but `high` and recommended
+  `CLAUDE_CODE_EFFORT_LEVEL=high`, a pin on every model) is replaced by
+  "Effort Source", which warns only about such pins.
 
-- the restore lands on the configured effort, not xhigh;
-- no `/effort` is sent while live effort equals the configured effort;
-- a downgrade still gets xhigh;
-- a missing or unreadable settings file degrades to the current defaults with a
-  logged reason.
+**Correction (review 3**, `subagent-reports/260925-n47-review3.md`**): the
+`modelSettings` claim above is CONDITIONAL, and review 2's design doc
+overstated it.** Claude Code tracks ONE session-level effort value
+(`sessionEffort`), which starts `inherit` (per-model `modelSettings` applies)
+but is PINNED to a fixed value by ANY of: `/effort <level>`, `/effort auto`,
+an effort pick made in the `/model` picker's slider, `--effort`, or
+`CLAUDE_CODE_EFFORT_LEVEL`. Once pinned, that ONE value follows the session
+across every later model AND every automatic fallback — confirmed against
+`model-config.md:544-548` (explicit choice ranks first, no per-model
+qualifier) and the installed Claude Code 2.1.282 binary's `sessionEffort`
+resolver. `/effort auto` does NOT return to `inherit`; it pins to the
+model's BUILT-IN default (ignoring `modelSettings`) and additionally WRITES
+— it clears the current model's saved `modelSettings` entry
+(`settings-reference.md:1211`). **Nothing found un-pins a session mid-flight.**
+So: **`modelSettings` alone can make Fable run at low and its fallback run
+at xhigh only for a session that never touches `/effort`, an effort slider
+pick, `--effort`, or the env var.** If the owner wants a specific level
+right now, typing `/effort` remains a deliberate one-time choice that pins
+the REST of that session — exactly as before this plan — and no
+settings-only configuration recovers per-model behaviour within it. The
+owner decides whether that trade-off is acceptable; the fix here only
+removes the SUPERVISOR as a second party to the fight.
+
+`tests/unit/supervise/test_no_effort_injection.py` asserts on the PAYLOADS
+that the supervisor never types `/effort`, driving `decide_once` (and
+`run_worker` for the raw-input tap) through real sidecar sequences: Fable at
+medium, high, xhigh and max (the removed DROP ANCHOR's trigger), a whole
+attributed downgrade episode through restore and recovery, a manual model
+pick, the operator `/model` switch signal, a compaction and its resume, and a
+human-typed `/effort max`. Each scenario also asserts it reached its path.
+`test_settings_effort.py`, `test_drop_anchor.py`, `test_effort_restore.py`
+and `test_unattributed_effort_drop.py` are deleted outright (the behaviour
+they covered no longer exists) — `test_effort_restore.py`'s NON-effort tests
+(live `/model` auto-restore: backoff, delay, the off setting, confirm
+enters, family ranks, the dry-run marker, and the restore cap pinned as the
+literal 2) are restored under `test_model_restore.py`. `test_attributed_downgrade.py`
+covers the record identity, the attribution window, every retro-attribution
+and hot-reload backfill guard (each asserted on the `/model` payload or the
+exported state it owns), and the export round-trips.
 
 ### N46 — `budget_exhaustion_detector` fires on a tool result that merely contains budget wording
 
@@ -1226,6 +1478,40 @@ Also key the cache on the absence of overrides, or skip it whenever an
 override is set. RED test: resolve with `HOOKS_DAEMON_PYTHON=/x`, then with
 no override, and the second call must not return `/x`. Being fixed on
 `worktree-d-00376`.
+
+### N39 — Nine unit tests fail in a whole-suite run and pass when their files run alone
+
+**Found by the guard-defects agent** (its review-4 fix round): a plain
+whole-suite `pytest tests/unit` on this worktree gave 9 failures across
+`test_model_fallback_detector.py` (6), `test_absolute_path.py` (1),
+`rule_explain/test_lookup.py` (1) and
+`test_dangerous_invocation_corpus_checker.py` (1); the same four files run
+alone gave 0 failed. **Diagnosed by a parallel agent** (a companion
+worktree, full write-up cross-referenced from there): `main` does not
+reproduce it; this worktree does. Bisected to
+`test_project_containment.py`'s class-wide `_project_root` autouse fixture
+(`with patch(...) as mock`) being double-patched by three tests
+(`TestFailsClosedOnEvaluationError::test_an_uninitialised_project_root_still_denies`,
+`::test_an_evaluation_error_denial_uses_its_own_rule_id`,
+`TestChainLevelFailClosedBehaviour::test_an_evaluation_exception_still_denies_through_the_chain`)
+that ALSO called `monkeypatch.setattr(..., classmethod(lambda cls: _raise()))` on the exact same target.
+`monkeypatch`'s finalizer runs AFTER the fixture's own `with patch(...)`
+block has already restored the real classmethod, so the second patcher's
+teardown overwrote it AGAIN with the fixture's own stale `MagicMock` --
+permanently, for the rest of the pytest PROCESS. Every later test calling
+`ProjectContext.project_root()` in that process then inherited the fake
+root, explaining all four victim files.
+
+**Fixed** (guard-defects agent, review-5 fix round): the three tests now
+reconfigure the fixture's own `mock` (`mock.side_effect = ...`) instead of
+introducing a second patcher; the fixture gained a post-teardown tripwire
+assertion so any FUTURE double-patch in this file fails immediately, at
+the fixture boundary; a regression test
+(`TestProjectRootDoublePatchDoesNotLeakAcrossFiles`) runs the exact
+polluter/victim pair together in one subprocess pytest invocation and
+asserts both pass. RED-pinned by reverting the polluter test alone: the
+regression test reproduces the identical original symptom
+(`Example: /repo/test.py` leaking into a reason string). ✅ Remedied.
 
 ### N36 — `destructive_git` denies a `grep` whose search pattern is the text of a force branch delete
 
@@ -1799,7 +2085,11 @@ Because quote state now decides which lines are judged, a file whose quote, subs
 
 On all 65 scanned scripts, the new tokeniser extracts the same 227 functions and the same captured names as before, and reports no unclosed spans. Report: [subagent-reports/260924-n466-n20-opus-5-5.md](subagent-reports/260924-n466-n20-opus-5-5.md).
 
-N16 is filed on the unmerged `worktree-n466-guard-defects` branch; it joins this file at integration.
+### N16 — `secret_file_guard`'s N4 splat exemption still false-positives against a BOTH-EDGES pattern
+
+**Found by the 00466 review** (nit n2, `subagent-reports/260924-n466-review-opus-5-5.md`), out of scope for the N10/N11 fix turn. N4 fixed the Python unpacking splat false positive (`*words[position + 1 :]`, `*wordlist`) against `*.vault-password` — the ONE shipped pattern with a leading wildcard and NO trailing one. The same splat shape is still denied against `*vault_pass*`, which has a wildcard on BOTH edges: `f(*assets)`, `f(*ssh_args)`, `f(*passthrough)` and `f(*assertions)` are each denied live, because the N4 fix's `pattern_has_trailing_wildcard` escape only widens the gate for a pattern with NO trailing wildcard — `*vault_pass*` has one, so the gate's stricter requirement never applies and the pre-N4 overlap-only behaviour (which is what produces this false positive) is untouched. `*assets`/`*args`-style splats are common Python, so this is a live nuisance, not a rare shape.
+
+**Candidate remedy:** the both-edges branch of `_glob_token_overlaps_stem` already has a stricter "near-total-match" discriminator (`_both_edges_residue_is_near_total_stem_match`) for exactly this over-promiscuity — a leading-wildcard-only token (no trailing wildcard of its own) matched against a both-edges pattern is presently routed through the SAME lenient overlap check as a genuine `*passXXX`-style truncation, rather than through that stricter discriminator. Route a token with no trailing wildcard of its own through the near-total-match test regardless of which edge(s) the PATTERN has open, and keep the existing near-total-match behaviour for tokens that themselves have a trailing wildcard too. RED tests: each `f(*assets)`-style splat against `*vault_pass*` is allowed; a genuine both-edges truncation (`*vault_pass*` reached via, e.g., `*zzz-passwd*`-shaped tokens) still denies.
 
 ### N19 — ✅ Remedied — the registry's options-collection failure is logged at debug level
 
@@ -1868,6 +2158,95 @@ N16 is filed on the unmerged `worktree-n466-guard-defects` branch; it joins this
 **Found by the 00466 review** as a pre-existing problem on main, security-relevant. `cat .vault-pas?word` and `cat prod.vault-passw*rd` name a protected file through a glob the shell expands, and the guard does not deny them. The mention scan handles a leading or trailing wildcard (the N4 overlap logic), but not a `?`, `*` or `[...]` inside the name.
 
 **Candidate remedy:** treat any shell-glob token as a pattern, and deny when the pattern could match a protected name. Compare against the protected basenames and stems, or expand it against the directory when that exists. Keep it no looser than the N4 rule. RED tests: interior `?`, `*` and bracket globs of each shipped protected pattern are denied, while unrelated globs such as `*.py` and `src/*.md` are allowed.
+
+**Remedy (implemented):** `secret_file_matching.py` gained `_globs_can_intersect(a, b)`, a real two-glob language-intersection test (standard sequence-alignment DP over `*`/`?`, O(len(a) · len(b))) — not another edge heuristic, because an interior wildcard has no edge for the existing leading/trailing overlap check to key on. A new `_interior_wildcard_mention` runs it for every token whose raw spelling carries glob syntax (`_is_glob_shaped(raw_form)`), over each of its bracket-expanded forms — so a finite bracket class (`.vault-pa[sz]word`) is covered too, even after expansion strips its wildcard-ness down to a plain literal, since the intersection test degenerates correctly to exact-match in that case. Scoped narrowly to keep N4 intact: only a token with NEITHER a leading NOR a trailing wildcard reaches it (an open-edge token is already handled by the pre-existing checks, N4/m1 fixes and all), and a pattern with wildcards on BOTH edges (`*.secret*`, `*vault_pass*`) is excluded — full intersection against a "contains this text anywhere" pattern is satisfiable by nearly any token carrying its own wildcard (`report-[0-9]*.txt` and `secret*.py` genuinely glob-intersect with `*.secret*`, live-verified as new false positives during implementation, neither is evidence of a protected file), the same over-promiscuity `_both_edges_residue_is_near_total_stem_match` already exists to guard against elsewhere in this module. RED tests (confirmed failing pre-fix, passing after) in `TestBashMentionsProtectedPath`: `test_interior_question_mark_truncation_is_matched`, `test_interior_star_with_unrelated_prefix_is_matched`, `test_interior_bracket_expression_truncation_is_matched`, plus `test_unrelated_interior_wildcard_tokens_are_not_matched` and `test_splat_false_positive_from_n4_still_allowed` pinning the N4 fix stays intact. Full `test_secret_file_matching.py` (203 tests) and `test_secret_file_guard.py` (82 tests) pass.
+
+**Correction (M2, guard-defects review 2)**: this entry's acceptance criterion
+("interior `?`, `*` and bracket globs of each shipped protected pattern are
+denied") was not met for 2 of the 6 shipped patterns — `*.secret*` and
+`*vault_pass*` (both-edges patterns, deliberately excluded from
+`_interior_wildcard_mention` above) stayed fully open to every interior
+spelling, an edge-plus-interior combination on any pattern escaped every
+check, and an unenumerable bracket class (`[!x]`, `[^x]`, `[[:alpha:]]`, an
+over-cap range) reached the DP with its brackets read as LITERAL characters
+instead of a wildcard, so it failed OPEN rather than closed. Brace expansion
+(`.vault-pas{s,}word`) was also uncovered for every pattern. Fixed on the
+guard-defects-review-2 branch: the DP now runs for edge-open tokens too
+(against every pattern that is not both-edges, gated by a new degenerate-
+orientation check so a leading-wildcard token is never blindly tested
+against a trailing-wildcard pattern — that combination is satisfiable by
+ANY literal on either side, which is not evidence of anything); an
+unexpanded bracket expression is substituted with `?` before the DP runs (a
+safe superset); both-edges patterns get a filesystem-truth route instead
+(`_both_edges_glob_mention`, gated by a cheap literal-overlap pre-filter so
+it never pays for a real directory listing on an unrelated token); and
+brace groups are expanded against the raw command text before tokenising,
+the same conflict `enforce_llm_qa`'s own M1 fix resolves. Pinned with 4 new
+test classes (16 tests) in `tests/unit/utils/test_secret_file_matching.py`.
+
+**Correction (M-1, guard-defects review 4)**: the brace-group expansion added
+by review 2's correction only ever split a group on `,` — a brace SEQUENCE
+(`{start..end[..step]}`, e.g. `id_rs{a..a}` reaching the exact protected name
+`id_rsa`) and quote-stripping inside a group or word (`id_"rs"a`, `i'd'_rsa`,
+`id_rs{'a',x}`) were both unhandled, and neither the module's crude
+delimiter-split tokeniser nor the brace stream ever saw a word carrying `$`,
+a backtick, or a quote as anything but a boundary — so a substitution-carrying
+word (`cat id_rs$x`) produced no token resembling the name at all. Fixed by
+scoping the remedy to the whole CLASS, not the two reported spellings: a lazy
+brace-sequence generator (numeric/alpha, either direction, optionally
+stepped, capped by the same `max_spellings` guard so `{1..100000}` still
+fails closed) plus a from-scratch bounded shell-word normaliser
+(`shell_expansion.normalise_word`/`iter_normalised_shell_words`) that strips
+quotes, decodes backslash/ANSI-C escapes, concatenates adjacent
+quoted/unquoted spans into one word the way a real shell does, and collapses
+any statically-unresolvable substitution (`$VAR`, `${...}`, `$(...)`, a
+backtick, `$((...))`) to a single `*` — turning the whole containing word
+into a glob judged by the pre-existing `_globs_can_intersect` DP infrastructure
+this same N10 remedy built, rather than needing new matching logic. Chained
+as a third additive stream in `iter_protected_mentions`. Own findings caught
+before commit (not in the review): the new stream initially bypassed the
+import-module-path exemption and double-reported ordinary mentions already
+found by the plain tokeniser — both fixed (see the review-4 fix report).
+Verified end-to-end through the real `SecretFileGuardHandler`, both shipped
+defaults and a project-configured exact pattern. Full detail:
+`subagent-reports/260924-n466-guards-review4-fix-sonnet-5.md`.
+
+**Correction (addendum, guard-defects review 4)**: two more gaps folded into
+the same class. (1) A false positive: ordinary Python (`[*words[:subcommand_index], ...]`) tripped the guard, because `_token_literal_residue` treated an
+UNCLOSED `[` as a wildcard character to strip (bash reads it as literal),
+and because Write/Edit CONTENT scanning ran the same AGGRESSIVE glob-shaped
+heuristics a real shell command needs, on source code that no shell ever
+expands. Fixed both: the residue fix, and a `context="bash"|"content"`
+parameter threaded through the whole mention-scan API, restricting content
+scanning to the literal/glob-pattern matcher only. (2) m-2 (the both-edges
+FS-truth route is cwd/existence-dependent): a `?`-only interior spelling of
+a both-edges pattern (`demo.se?ret`, `vault?passwords.yml`) now denies
+TEXTUALLY, via a both-edges branch in `_dp_intersection_is_meaningful` that
+treats the DP call as meaningful only when the token carries no `*` — a
+both-edges pattern's own wildcards can absorb the required substring
+adjacent to ANY `*` the token has, making the DP trivially satisfiable and
+reopening Plan 00306/00311's false-positive class otherwise
+(`report-[0-9]*.txt`, `secret*.py`); a `?` can only absorb one character
+each, so a genuine `?`-only intersection is a real signal. A `*`-bearing
+both-edges truncation (`demo.s*t`) still needs the FS-truth route
+unchanged — flagged to team-lead as a judgement call, not a full resolution
+of every example in the addendum's own RED-test wording. Full detail:
+`subagent-reports/260924-n466-guards-review4-fix-sonnet-5.md`, Addenda 1-2.
+
+**Correction (addendum, guard-defects review 5)**: review 5 found the
+addendum-4 `context` fix above was itself too broad -- `context="content"`
+was applied uniformly to EVERY `_SCRIPT_EXTENSIONS` entry, including
+`.sh`/`.bash`, whose content genuinely IS shell text a shell expands when
+the script runs, reopening the write-then-execute gap for those two
+extensions specifically. Fixed, and per team-lead's own follow-up widened
+further: `context="bash"` now applies to a `.sh`/`.bash` extension, a
+Makefile (`Makefile`/`makefile`/`GNUmakefile`/`.mk`), a CI workflow YAML
+(`.github/workflows/*.yml`/`.yaml`, `.gitlab-ci.yml`/`.yaml`), or an
+extensionless script identified by its own shebang naming a shell
+interpreter -- all newly recognised as scan-worthy at all, not just
+reclassified, since none but `.sh`/`.bash` was previously in
+`_SCRIPT_EXTENSIONS`. Full detail:
+`subagent-reports/260924-n466-guards-review4-fix-sonnet-5.md`, Addendum 3.
 
 ### N9 — ✅ Remedied — `docs_qa` judges gitignored markdown, so installing a Claude Code plugin fails local full QA
 

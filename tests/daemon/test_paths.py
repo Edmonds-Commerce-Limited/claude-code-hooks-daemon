@@ -823,7 +823,14 @@ class TestSocketPathLengthFallback(unittest.TestCase):
                 self.assertTrue(str(socket_path).endswith(".sock"))
 
     def test_socket_path_over_limit_uses_run_user(self):
-        """When path > 104 chars, no XDG_RUNTIME_DIR, use /run/user/{uid}."""
+        """When path > 104 chars, no XDG_RUNTIME_DIR, use /run/user/{uid}.
+
+        Whether this fires depends on `/run/user/{uid}` existing on the host
+        — not on root — so skipping when it is absent (as it is in this
+        container) never exercises the branch anywhere it is missing (Plan
+        00466 N56 review 1, F5). Monkeypatch `Path.is_dir` so the branch
+        runs deterministically regardless of what the host provides.
+        """
         deep_path = "/home/user/projects/client/" + "a" * 80 + "/deep-nested-project"
         uid = os.getuid()
         run_user_dir = Path(f"/run/user/{uid}")
