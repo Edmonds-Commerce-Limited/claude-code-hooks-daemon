@@ -659,6 +659,23 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N110 — The local full QA gate tests one Python version, so a version-specific defect passes it and fails CI
+
+**Found by the N106 fixer.** N24 passed the full local gate and went red on
+CI. The cause was a cost that is quadratic only from Python 3.12, where
+stdlib `relative_to`/`is_relative_to` walk `path.parents`. The local gate
+runs one venv (`untracked/venv-workspace-py311-…`, Python 3.11), but CI's QA
+job runs 3.11, 3.12 and 3.13. So "gate green" does not imply "CI green" for
+any behaviour that differs between versions, and a merge made on gate
+evidence can turn main red.
+
+**Remedy:** make the gate cover every CI Python version, or at least the
+newest one alongside the oldest. For example, run the tests stage under
+each interpreter `uv` can provide, keeping the other stages on one. Or have
+the gate state which versions it ran and refuse to call itself a merge gate
+when that set is narrower than CI's matrix. Pin it with a test that reads
+the CI workflow's matrix and compares it to what the gate runs.
+
 ### N105 — A skill redeploy leaves an untracked, unignored `.claude/hooks-daemon-backups/`
 
 **Found by upgrade review 11 (L9), confirmed by upgrade round 16a.**
