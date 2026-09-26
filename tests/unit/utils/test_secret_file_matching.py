@@ -1457,35 +1457,31 @@ class TestInteriorWildcardDpIsBounded:
         ``a*b`` match the same set) and removes the dominant cost driver
         directly, independent of the budget cap.
 
-        Measured as a ratio against an equivalent single-star token rather
-        than an absolute wall-clock budget: collapsing makes the two cost
-        the same regardless of how loaded the host running the test is, so
-        an absolute-second bound flakes under contention (a shared host
-        running many worktrees' gates at once) without the DP cost bound
-        having regressed at all. The min of several trials on each side
-        approximates the uncontended cost of both (contention only ever
-        adds delay), keeping the ratio meaningful even when the host is
-        busy; an actual O(n) or worse regression on the long token would
-        blow the ratio by orders of magnitude, not nudge it.
+        Counts DP grid CELLS VISITED (``sfm.dp_cell_counter``, N123) rather
+        than wall-clock time: a fixed-second budget flakes under host
+        contention (many worktrees' gates running at once) independent of
+        whether the cost bound itself holds -- main measured 0.09s against
+        a 0.1s budget, and a scaling-ratio version of this same test still
+        carried an absolute-second floor to absorb constant-factor noise,
+        so it was still exposed to the same flake. A cell count has no
+        such noise: after collapsing, the 60,000-``*`` token IS the
+        3-character string ``a*a``, so its DP grid is IDENTICAL in size to
+        a literal ``a*a`` baseline -- not merely small, but exactly equal,
+        deterministically, on every host. If the collapse regressed (the
+        DP ran on the raw 60,002-character operand instead), the long
+        token's cell count would be ~20,000x the baseline's, not a
+        fraction more.
         """
-
-        def elapsed_for(token: str) -> float:
-            start = time.perf_counter()
-            sfm.find_protected_mention_detail(f"cat {token}", sfm.DEFAULT_PROTECTED_PATTERNS)
-            return time.perf_counter() - start
-
-        baseline = min(elapsed_for("a*a") for _ in range(5))
+        pattern = "pat"
+        with sfm.dp_cell_counter() as baseline_count:
+            sfm._globs_can_intersect("a*a", pattern)
         long_token = "a" + "*" * 60_000 + "a"
-        long_elapsed = min(elapsed_for(long_token) for _ in range(5))
-        # The floor absorbs the constant-factor cost of handling a 60 KB
-        # string at all (regex substitution, tokenising) that a 3-byte
-        # baseline never pays and the ratio alone cannot account for; the
-        # ratio term is what actually catches a collapse regression, since
-        # an uncollapsed run would cost orders of magnitude more, not a
-        # fraction more, once the DP grid scales with the star count.
-        assert long_elapsed < max(
-            baseline * 20, 0.05
-        ), f"long={long_elapsed:.4f}s baseline={baseline:.4f}s"
+        with sfm.dp_cell_counter() as long_count:
+            sfm._globs_can_intersect(long_token, pattern)
+        assert (
+            long_count[0] == baseline_count[0]
+        ), f"long={long_count[0]} baseline={baseline_count[0]}"
+        assert baseline_count[0] > 0, "the counter itself must observe some DP work"
 
     def test_scan_deadline_denies_via_the_fail_closed_route(self) -> None:
         """The whole-scan deadline is a backstop: forcing an artificially

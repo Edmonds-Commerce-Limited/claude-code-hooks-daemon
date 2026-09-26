@@ -135,6 +135,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N105 | A skill redeploy leaves an untracked, unignored `.claude/hooks-daemon-backups/`                                | Upgrade review 11 (L9)                                          | ✅ Remedied                      |
 | N109 | The pending release-notes holding area mis-sorts past 99 callouts                                              | Coordinator                                                     | ✅ Remedied                      |
 | N110 | The local full QA gate tests one Python version, so a version-specific defect passes it and fails CI           | N106 fixer                                                      | ⬜ Open                          |
+| N123 | A DP-cost regression test asserted on wall-clock time, which flakes under a loaded gate                        | Plan 00463 gate fixer                                           | ✅ Remedied                      |
 
 ## Tasks
 

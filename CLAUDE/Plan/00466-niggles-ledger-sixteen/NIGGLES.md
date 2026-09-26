@@ -3,6 +3,36 @@
 Newest first. Each entry says how it was found, why it happens, and the
 candidate remedies.
 
+### N123 — ✅ Remedied — a DP-cost regression test asserted on wall-clock time, which flakes under a loaded gate
+
+**Found:** Plan 00463's `TestInteriorWildcardDpIsBounded::test_a_lone_long_star_run_collapses_to_near_zero_cost`
+(the star-run-collapse cost guard, B1/Plan 00466 review 2) started as a fixed
+0.1s wall-clock budget. It failed once in a 37/39 gate run under heavy
+concurrent load (many worktrees' gates running at once), passed 10/10 in
+isolation on the branch and on `main`, but main itself measured 0.09s against
+the same 0.1s budget — a close margin, confirming the bound was
+environment-sensitive rather than genuinely tight. A first fix replaced the
+absolute budget with a scaling-ratio assertion (min of several timed trials,
+long token vs. a short baseline) — still a wall-clock measurement with its
+own absolute-second floor to absorb constant-factor noise, so it remained
+exposed to the identical flake, just with a wider margin.
+
+**Remedy:** stopped measuring time at all. Added a test-only instrumentation
+seam to `secret_file_matching.py`: a `contextvars.ContextVar` counter
+(`_dp_cell_counter`) and a `dp_cell_counter()` context manager that counts
+the DP grid cells `_globs_can_intersect` actually visits during the block. A
+`ContextVar` rather than a module-level counter, per the standing "no
+per-request state on a shared module" rule — no per-request state leaks
+across concurrent calls, and production pays nothing beyond a `None` check
+when no test has opened the counter. The test now asserts the 60,000-`*`
+token's DP cell count EQUALS a literal `a*a` baseline's count: after the
+star-run collapse, the two are the identical 3-character string, so the
+grids are identical in size, deterministically, on every host — not a
+tolerance band, an equality. RED: proved via a `git archive` scratch copy
+with the star-collapse substitutions short-circuited (`if False and "**" in a: ...`), which dropped the long token's cell count to 0 (the length cap
+fires and skips the DP entirely) against the baseline's 9, failing the
+assertion as expected.
+
 ### N109 — ✅ Remedied — the pending release-notes holding area mis-sorts past 99 callouts
 
 **Found:** `CLAUDE/UPGRADES/UNRELEASED/release-notes/` named callouts

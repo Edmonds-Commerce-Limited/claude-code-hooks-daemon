@@ -22,6 +22,8 @@ scripts that open the file internally are NOT detectable at command-text
 level — see the plan's RESEARCH-read-routes.md class-(d) rows.
 """
 
+import contextlib
+import contextvars
 import errno
 import fnmatch
 import itertools
@@ -870,6 +872,33 @@ _DP_MAX_CELLS: Final[int] = 20_000
 #: the final `]` behind as a stray literal character.
 _POSIX_NAMED_CLASS_RE: Final[re.Pattern[str]] = re.compile(r"\[\[:[a-z]+:\]\]")
 
+#: Test seam (N123): counts DP grid cells ``_globs_can_intersect`` actually
+#: visits, so a test can assert on WORK DONE instead of wall-clock time --
+#: a fixed-second budget flakes under host contention (concurrent worktree
+#: gates), independent of whether the cost bound itself holds. A
+#: ``ContextVar`` rather than a module-level counter: no per-request state
+#: leaks across concurrent calls, and production pays nothing beyond a
+#: ``None`` check when no test has opened :func:`dp_cell_counter`.
+_dp_cell_counter: contextvars.ContextVar[list[int] | None] = contextvars.ContextVar(
+    "_dp_cell_counter", default=None
+)
+
+
+@contextlib.contextmanager
+def dp_cell_counter() -> Iterator[list[int]]:
+    """Count DP grid cells ``_globs_can_intersect`` visits during the block.
+
+    Returns a one-element list holding the running total, so it stays
+    visible without a second read of the ``ContextVar``. Test-only seam
+    (N123); production code never calls this.
+    """
+    counts = [0]
+    token = _dp_cell_counter.set(counts)
+    try:
+        yield counts
+    finally:
+        _dp_cell_counter.reset(token)
+
 
 def _globs_can_intersect(a: str, b: str) -> bool:
     """True when some single string could be matched by BOTH ``a`` and ``b``,
@@ -952,9 +981,12 @@ def _globs_can_intersect(a: str, b: str) -> bool:
     prev[0] = True
     for j in range(1, len_b + 1):
         prev[j] = b[j - 1] == "*" and prev[j - 1]
+    cell_counter = _dp_cell_counter.get()
     for i in range(1, len_a + 1):
         char_a = a[i - 1]
         curr[0] = char_a == "*" and prev[0]
+        if cell_counter is not None:
+            cell_counter[0] += len_b
         for j in range(1, len_b + 1):
             char_b = b[j - 1]
             if char_a == "*":
