@@ -8,7 +8,8 @@ settings write via a single ``CONFIG SYNC: ...`` line.
 
 The full audit (``_run_checks()``) covers:
 1. Agent Teams env var (CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1)
-2. Effort Level (should be "high")
+2. Effort Source (warns when anything pins one effort level on every model,
+   overriding settings.json's per-model levels; never recommends a level)
 3. Extended Thinking (alwaysThinkingEnabled)
 4. Max Output Tokens (CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000)
 5. Auto Memory (CLAUDE_CODE_DISABLE_AUTO_MEMORY should NOT be "1")
@@ -30,6 +31,55 @@ from claude_code_hooks_daemon.utils.session_helpers import is_resume_session
 logger = logging.getLogger(__name__)
 
 DOCS_URL = "https://code.claude.com/docs/en/settings"
+
+# ── Effort source check (Plan 00466 N47) ─────────────────────────────────────
+_EFFORT_ENV_VAR = "CLAUDE_CODE_EFFORT_LEVEL"
+# Claude Code reads these as "no explicit level", so they pin nothing.
+_EFFORT_ENV_NON_PINNING_VALUES = frozenset({"", "auto", "unset"})
+# The settings files that outrank the user file and are read from the project.
+_PROJECT_SETTINGS_FILES = ("settings.json", "settings.local.json")
+_EFFORT_CHECK_NAME = "Effort Source"
+_EFFORT_CHECK_WHY = (
+    "Effort is set per model in settings.json under modelSettings, so each model "
+    "(and each automatic fallback) runs at its own configured level. The "
+    "CLAUDE_CODE_EFFORT_LEVEL environment variable -- set in the shell, or in any "
+    "settings file's own env section, which Claude Code applies the same way -- or "
+    "a top-level effortLevel in the project or local settings file, pins ONE level "
+    "on every model instead and silently overrides those per-model entries."
+)
+_EFFORT_CHECK_FIX = (
+    "Remove the pin and keep levels per model in modelSettings: "
+    "unset CLAUDE_CODE_EFFORT_LEVEL everywhere it is set (shell or a settings "
+    "file's env section), and delete the top-level effortLevel key "
+    "from the project/local settings file"
+)
+_EFFORT_CHECK_WHERE = (
+    "environment (~/.bashrc, ~/.zshrc), the env section of ~/.claude/settings.json, "
+    ".claude/settings.json or .claude/settings.local.json, and a top-level effortLevel "
+    "in .claude/settings.json or .claude/settings.local.json. Not checked: a managed "
+    "settings file, and --settings"
+)
+
+
+def _read_env_effort_pin(data: dict[str, Any], location: str) -> str | None:
+    """Return a pin description if ``data``'s ``env`` object pins effort, else None.
+
+    Claude Code applies a settings file's ``env`` object to the session
+    exactly as if it were set in the shell (Plan 00466 N47 review 5 finding
+    3) -- so a value here is the same unconditional, every-model pin as the
+    ``CLAUDE_CODE_EFFORT_LEVEL`` environment variable itself, checked with the
+    same non-pinning values.
+    """
+    env_obj = data.get("env")
+    if not isinstance(env_obj, dict):
+        return None
+    raw = env_obj.get(_EFFORT_ENV_VAR)
+    if raw is None:
+        return None
+    value = str(raw)
+    if value.strip().lower() in _EFFORT_ENV_NON_PINNING_VALUES:
+        return None
+    return f"{location} env.{_EFFORT_ENV_VAR}={value!r}"
 
 
 class OptimalConfigCheckerHandler(SessionStartHandlerBase):
@@ -120,29 +170,86 @@ class OptimalConfigCheckerHandler(SessionStartHandlerBase):
             "docs": DOCS_URL,
         }
 
-    def _check_effort_level(self) -> dict[str, Any]:
-        """Check if effort level is set to high."""
-        env_value = os.environ.get("CLAUDE_CODE_EFFORT_LEVEL", "")
-        settings = self._read_global_settings()
-        settings_value = str(settings.get("effortLevel", ""))
+    def _check_effort_source(self, project_root: Path) -> dict[str, Any]:
+        """Warn when something pins ONE effort level on every model.
 
-        # Env var takes precedence
-        effective = env_value or settings_value or "not set"
-        passed = effective == "high"
+        Plan 00466 N47: effort is settings.json's call, set per model under
+        ``modelSettings`` -- the daemon holds no opinion on the level itself
+        and never recommends one. What it can see is anything that silently
+        overrides those per-model levels for every model at once: the
+        ``CLAUDE_CODE_EFFORT_LEVEL`` environment variable (in the shell, or
+        set through any settings file's own ``env`` object -- review 5
+        finding 3, Claude Code applies both identically), and a top-level
+        ``effortLevel`` in the project's or the local settings file (both
+        outrank the user file, and a top-level key there applies to every
+        model). A top-level ``effortLevel`` in the USER file is not a pin: a
+        per-model entry in the same file outranks it. ``null``/``"auto"``
+        (and the other values the env var itself treats as unset) are not a
+        pin either way -- the same non-pinning values, for the same reason.
 
+        A project settings file that cannot be read is reported too: not
+        knowing whether it pins effort is not the same as knowing it does not.
+
+        Managed settings and ``--settings`` are NOT read here: this project
+        vendors no confirmed on-disk path for the managed-settings file, and
+        guessing one would report a location that might not be where this
+        machine's Claude Code actually reads it. ``_EFFORT_CHECK_WHERE`` and
+        ``CcySupervisor.md`` name this gap rather than claim coverage the
+        code does not have.
+        """
+        pins: list[str] = []
+        env_value = os.environ.get(_EFFORT_ENV_VAR, "")
+        if env_value.strip().lower() not in _EFFORT_ENV_NON_PINNING_VALUES:
+            pins.append(f"{_EFFORT_ENV_VAR}={env_value!r}")
+
+        user_data = self._read_global_settings()
+        user_env_pin = _read_env_effort_pin(user_data, "~/.claude/settings.json")
+        if user_env_pin is not None:
+            pins.append(user_env_pin)
+
+        for name in _PROJECT_SETTINGS_FILES:
+            relative = f".claude/{name}"
+            path = project_root / ".claude" / name
+            if not path.exists():
+                continue
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as e:
+                logger.debug("Cannot read %s for the effort check: %s", path, e)
+                pins.append(
+                    f"{relative} is unreadable, so a top-level effortLevel cannot be ruled out"
+                )
+                continue
+            if not isinstance(data, dict):
+                pins.append(f"{relative} is not a JSON object, so it cannot be checked")
+                continue
+            if "effortLevel" in data:
+                level = data["effortLevel"]
+                normalized = "" if level is None else str(level).strip().lower()
+                if normalized not in _EFFORT_ENV_NON_PINNING_VALUES:
+                    pins.append(f"{relative} sets a top-level effortLevel={level!r}")
+            env_pin = _read_env_effort_pin(data, relative)
+            if env_pin is not None:
+                pins.append(env_pin)
+
+        if not pins:
+            return {
+                "name": _EFFORT_CHECK_NAME,
+                "passed": True,
+                "current": "per-model levels come from settings.json modelSettings",
+                "why": _EFFORT_CHECK_WHY,
+                "fix": _EFFORT_CHECK_FIX,
+                "where": _EFFORT_CHECK_WHERE,
+                "docs": DOCS_URL,
+            }
         return {
-            "name": "Effort Level",
-            "passed": passed,
-            "current": f"effortLevel={effective!r}",
-            "why": (
-                "High effort level makes Claude think more deeply, produce higher quality code, "
-                "and catch more edge cases. Medium/low saves tokens but reduces quality."
-            ),
-            "fix": (
-                'Set in ~/.claude/settings.json: {"effortLevel": "high"}\n'
-                '  Or env var: export CLAUDE_CODE_EFFORT_LEVEL="high"'
-            ),
-            "where": "~/.claude/settings.json or environment variable",
+            "name": _EFFORT_CHECK_NAME,
+            "passed": False,
+            "warn": True,
+            "current": "; ".join(pins),
+            "why": _EFFORT_CHECK_WHY,
+            "fix": _EFFORT_CHECK_FIX,
+            "where": _EFFORT_CHECK_WHERE,
             "docs": DOCS_URL,
         }
 
@@ -290,15 +397,21 @@ class OptimalConfigCheckerHandler(SessionStartHandlerBase):
             "docs": DOCS_URL,
         }
 
-    def _run_checks(self) -> list[dict[str, Any]]:
+    def _run_checks(self, project_root: Path) -> list[dict[str, Any]]:
         """Run all configuration checks.
 
+        Args:
+            project_root: The checked project, whose own settings files can
+                override the user's (read by the effort source check)
+
         Returns:
-            List of check result dicts with name, passed, current, why, fix, docs
+            List of check result dicts with name, passed, current, why, fix,
+            where, docs -- plus ``warn: True`` on a failing check that is a
+            warning about an override rather than a missing setting
         """
         return [
             self._check_agent_teams(),
-            self._check_effort_level(),
+            self._check_effort_source(project_root),
             self._check_extended_thinking(),
             self._check_max_output_tokens(),
             self._check_auto_memory(),
@@ -319,9 +432,15 @@ class OptimalConfigCheckerHandler(SessionStartHandlerBase):
     def _enforce_settings_sync(self) -> list[str]:
         """Ensure critical settings exist in ~/.claude/settings.json.
 
-        When effortLevel or alwaysThinkingEnabled are missing from settings,
-        writes optimal defaults so the statusline and config stay in sync.
-        Claude Code defaults to medium effort when unset, but we want high.
+        When alwaysThinkingEnabled is missing from settings, writes the
+        optimal default so the statusline and config stay in sync.
+
+        Effort is deliberately NOT written here (Plan 00466 N47): the ccy
+        supervisor redesign removed the supervisor as a second, silent opinion
+        fighting the owner's own settings.json — auto-writing `effortLevel`
+        here would reintroduce exactly that problem through a different
+        handler. The daemon holds no effort opinion at all; `cli check` only
+        warns about a pin that overrides settings.json (`_check_effort_source`).
 
         Reads the file directly (not via _read_global_settings) to distinguish
         between "file missing/empty" (safe to create) and "read error" (abort
@@ -347,10 +466,6 @@ class OptimalConfigCheckerHandler(SessionStartHandlerBase):
 
         written: list[str] = []
 
-        if "effortLevel" not in settings:
-            settings["effortLevel"] = "high"
-            written.append("effortLevel=high")
-
         if "alwaysThinkingEnabled" not in settings:
             settings["alwaysThinkingEnabled"] = True
             written.append("alwaysThinkingEnabled=true")
@@ -363,9 +478,9 @@ class OptimalConfigCheckerHandler(SessionStartHandlerBase):
     def handle(self, hook_input: dict[str, Any]) -> AdvisoryResult:
         """Run config checks and return advisory context.
 
-        Also enforces that critical settings (effortLevel, alwaysThinkingEnabled)
-        are explicitly set in ~/.claude/settings.json so the statusline stays
-        in sync with actual configuration.
+        Also enforces that alwaysThinkingEnabled is explicitly set in
+        ~/.claude/settings.json so the statusline stays in sync with actual
+        configuration. Effort is never auto-written (Plan 00466 N47).
 
         Args:
             hook_input: SessionStart hook input
@@ -404,9 +519,9 @@ class OptimalConfigCheckerHandler(SessionStartHandlerBase):
                 title="optimal config checker - announces settings sync",
                 command='echo "test"',
                 description=(
-                    "Tests that the handler silently enforces critical settings "
-                    "(effort level, extended thinking) on a new session and announces "
-                    "an actual settings.json write via a 'CONFIG SYNC' line."
+                    "Tests that the handler silently enforces extended thinking on a "
+                    "new session and announces an actual settings.json write via a "
+                    "'CONFIG SYNC' line. Effort is never auto-written."
                 ),
                 expected_decision=Decision.ALLOW,
                 # handle() only emits 'CONFIG SYNC: ...' and only on first run /

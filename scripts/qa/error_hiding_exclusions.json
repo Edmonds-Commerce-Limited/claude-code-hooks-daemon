@@ -52,12 +52,6 @@
     },
     {
       "file": "utils/model_fallback_records.py",
-      "function": "parse_fallback_line",
-      "rule": "return-none-on-error",
-      "reason": "Plan 00328: per-line fail-silent contract, inherited verbatim from _parse_candidate below (this function is where that recognition moved). Transcript JSONL is external data Claude Code appends to live, so the LAST line is routinely a partial write mid-flush; None means 'not a downgrade record', which is the correct reading of an unparseable line. Raising would let one torn line disable detection of a real record elsewhere in the same tail."
-    },
-    {
-      "file": "utils/model_fallback_records.py",
       "function": "scan_transcript_tail",
       "rule": "return-none-on-error",
       "reason": "Plan 00328: the scan runs on every PostToolUse to publish a downgrade signal for the ccy supervisor. A missing, unreadable or directory path is a documented no-detection outcome — the OSError is logged at debug and None returned — because a scan that raises would take the whole hook dispatch down over a fact that is advisory, session-scoped and re-observable on the very next tool call. Same contract as model_fallback_detector._scan_transcript directly below."

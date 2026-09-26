@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 import threading
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from tests.unit.supervise._load import load_supervisor_module
 
@@ -33,7 +33,7 @@ _STATUS_LEVEL_WARNING = _mod._STATUS_LEVEL_WARNING
 
 
 def _message_path(untracked: Path) -> Path:
-    return untracked / _LOG_SUBDIRECTORY / _STATUS_MESSAGE_FILENAME
+    return cast("Path", untracked / _LOG_SUBDIRECTORY / _STATUS_MESSAGE_FILENAME)
 
 
 class TestWriteStatusMessage:

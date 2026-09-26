@@ -9,6 +9,136 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N98 — Past the AF_UNIX limit, every hostname shares one fallback socket, PID file and events dir
+
+**Found by upgrade scripts round 13** (report
+`260926-upgrade-scripts13-opus-5-5.md` on `worktree-upgrade-scripts`,
+section 4). Every runtime path carries `_get_hostname_suffix()` except the
+two fallbacks, both in `daemon/paths.py`:
+
+- `_get_fallback_runtime_dir` names the socket, PID and log
+  `hooks-daemon-<project hash>.<ext>`;
+- `_get_event_socket_fallback_dir` names the events dir
+  `hooks-daemon-<untracked hash>-events`.
+
+So when a project's natural socket path is over the limit, every hostname
+on the machine resolves the same three paths. The first daemon serves them
+all, and a second one clobbers the first one's files. Calling
+`get_socket_path`, `get_pid_path` and `get_event_socket_dir` for a long
+project path under `HOSTNAME=host-a` and then `HOSTNAME=host-b` prints
+identical paths.
+
+**Remedy:** key both fallback names by the hostname too, for example with a
+short hash of the sanitised suffix so the name stays bounded. Check every
+reader that derives one path from another: `init.sh` derives the PID path
+from the socket's stem, and the forwarder and the relay use the events dir.
+It touches the same runtime-path code as N86, so it goes on N86's branch
+after N24 merges.
+
+### N97 — `block-curl-pipe-shell` denies prose that only mentions curl and bash
+
+**Found by N38 review 9 (ledger candidate 8), and on base too.** A
+docstring written into `test_curl_pipe_shell.py` is denied. The literal is
+in `/workspace/untracked/scratch/n38r9/fpcmp_lit.txt`. bash would stop at a
+syntax error before the curl line, and the line is not curl piped into
+bash anyway.
+
+**Remedy:** judge `curl … | sh` only on a real pipe, taking pipe positions
+from the N38 lexer, and not on text inside a quoted string or heredoc data
+body. It starts after N38 merges, on the same branch as N92 (a quoted `|`
+read as a pipe).
+
+### N96 — `subagent_full_qa_blocker.py` is one 5,300-line handler
+
+**Found by the coordinator while harvesting the Plan 00463 gate fix.** The
+module grew over ten review rounds, each closing more evasion shapes, to
+5,294 lines. No other handler is close to that size. It holds command
+recognition, interpreter classification, wrapper peeling and the verdict
+in one file, so every future review reads all of it, and a regression in
+one part hides among the rest.
+
+**Remedy:** after Plan 00463 merges, split it along the seams it already
+has. Put the recognisers in `utils` next to `shell_segmentation`, keep the
+verdict and messages in the handler, and move behaviour-free tables to
+constants. It is a pure refactor with the test suite unchanged. Some of
+the recognition probably duplicates the 464 script-walk and wrapper
+machinery, so reuse that rather than moving it.
+
+### N95 — Test fixtures run setup git commands under a production 5-second budget, so a loaded host flakes the gate
+
+**Found by the N81 to N83 gate fixer.**
+`test_sensitive_content.py::TestStagedContentSurface::test_excluded_path_is_not_inspected`
+errored because a `git commit` in its FIXTURE timed out on
+`Timeout.GIT_CONTEXT` (5 s). That was the last test of a 28,651-test run
+with a load average of 6 on 8 cores. About 86 test files' git fixtures use
+that same production budget. The budget exists to bound the daemon's own
+git calls on the hook path. A fixture's setup is not what is under test,
+and it borrowing the hook budget turns host load into gate failures.
+
+**Remedy:** fixtures use a test-owned setup budget, a named constant with a
+generous bound. Assertions about the product's own timing stay on the
+product constant. A test pins that fixtures never import the hook-path
+budget.
+
+### N94 — `github_auto_close_keywords` answers a repeated `git commit -F` from the previous request
+
+**Found by N38 review 8 (its MAJOR, and on main too).** The handler caches
+its verdict on the shared handler instance, keyed by the command text alone.
+The verdict also depends on the message file, read relative to the request's
+cwd. Run `git commit -F msg.txt` with a harmless message in one directory,
+then with `Closes #12` in another: the second is allowed. Editing the file
+between two identical commands also keeps the stale answer.
+
+**Remedy:** N38 fix round 9 keys the memo by every input, sweeps every
+handler for per-instance per-request state, and extends the static detector
+to catch it. It lands with N38.
+
+### N93 — `project_containment` misses writes inside `eval '…'` and nested heredocs
+
+**Found by N38 review 8 (ledger candidate).** A write outside the project
+that sits inside `eval '…'`, inside `bash <<'OUTER'`, or after a moved
+heredoc closer is not seen. Every tree allows it, main included.
+
+**Remedy:** judge executed bodies as commands, as the guards now do. It
+belongs on the executed-body branch with N87 to N89.
+
+### N92 — `pipe_blocker` reads a `|` inside a double-quoted regex as a pipe
+
+**Found by N38 review 8 (ledger candidate).** `grep -E "a|HEAD|b" f` is
+denied as a pipe to `head`. It happens on every tree, including the live
+daemon. A double-quoted string is one word to bash, so there is no pipe
+there.
+
+**Remedy:** the pipe split must honour quoting, taking pipe positions from
+the N38 lexer. It starts after N38 merges.
+
+### N91 — A project's extra `protected_paths` can be ignored for the life of the daemon by the payload-capture and lint seams
+
+**Found by N38 fix round 8's static shared-state detector.**
+`secret_file_matching.resolve_configured_patterns()` sets its "resolved" flag
+BEFORE it checks whether `ProjectContext` is initialised. A first call made
+before the context is ready therefore fixes the patterns at the shipped
+defaults for the rest of the process. The project's own `protected_paths`
+are then never applied by the seams that use this function: payload capture
+and lint diagnostics. The guard itself reads its options separately.
+
+**Remedy:** the N38 branch replaces the flag with a memo keyed by its inputs,
+and a test fails on the old code. It lands with N38.
+
+### N90 — `project_containment` denies every command, even one that writes nothing, when the project root is unresolved
+
+**Found by the guard-defects gate fixer.** `project_containment.matches()`
+resolves `ProjectContext.project_root()` before it checks whether the
+command names any write target. When the root cannot be resolved, it fails
+closed on EVERY command ahead of every lower-priority handler. Three test
+harnesses that build a router without initialising `ProjectContext` showed
+it. In a real daemon the context is always initialised, but any future
+caller that routes events without it is fully locked out.
+
+**Remedy:** return early when `_named_targets()` is empty, before resolving
+the root. A command that writes nothing cannot escape the project. Keep
+fail-closed for a command that does name a target, and pin both with tests.
+
 ### N89 — A data-sink receiver is trusted after the command redefines it
 
 **Found by N38 review 6 (ledger candidate 3).** `cat() { bash; }; cat <<'E'`
@@ -515,6 +645,78 @@ immutable file where one is available. Replace Plan 00351's check with a
 detector that fails on any root-conditioned skip. Record the rule in the
 testing standards doc.
 
+**Done, on `worktree-n466-n56`:** the three skip sites are rewritten to
+fault the operation a way root cannot bypass, keeping each test's original
+assertion:
+
+- `test_skills.py`'s `test_deploy_skills_raises_if_target_not_writable`
+  monkeypatches `shutil.copytree` to raise `PermissionError` instead of
+  `chmod`-ing the target read-only.
+- `test_settings_deploy_lib.py`'s `test_a_failed_backup_stops_everything`
+  stubs the shell `cp` used for the backup copy (matched on its destination
+  suffix `*.bak-*`, so the install copy is untouched) — the same technique
+  `TestTheInstallCopyCanFail` already used for the install copy.
+- `test_bootstrap_decision.py`'s `test_untracked_not_writable` monkeypatches
+  `os.access` itself, since `access(2)` grants `W_OK` to a privileged real
+  UID regardless of the mode bits.
+
+`test_skipif_reasons_match_their_conditions.py` is replaced by
+`tests/integration/test_no_root_conditioned_skips.py`: a static scan over
+EVERY `.py` file under `tests/` — not just `test_*.py`/`conftest.py`, and
+with no exclusion list (review 2, B2: an earlier cut excluded a
+`fixtures`/`assets`/`__fixtures__` directory name and its own file, which
+pytest actually collects through). It classifies by data flow rather than by
+name (review 2, B1), so an alias, a local variable, a module constant, or
+one level of same-module helper (including a parameterised one called with
+literal arguments) is resolved the same as the direct call — covering
+`geteuid`/`getuid`/`getegid`/`getgid`/`getresuid`/`getresgid`,
+`getpass.getuser`, a `pwd`/`grp` lookup, an env check of
+`USER`/`LOGNAME`/`HOME`/`SUDO_*`, `Path.home()`/`os.path.expanduser("~")`,
+`os.access(...)`, and `<expr>.stat().st_uid`. It fails on a
+`skipif`/`xfail`/`unittest.skipIf`/`skipUnless` decorator, an `IfExp`
+marker, a hand-written `if <root check>: skip/xfail/skipTest/return`, or a
+conftest `pytest_ignore_collect`/`pytest_collection_modifyitems`/
+`pytest_runtest_setup` whose control flow depends on one — **and
+independently** on any skip-like call whose stated *reason* names root
+regardless of what its condition tests (review 1, F1: this is Plan 00351's
+own shape, which the first cut of the detector regressed). A reference it
+cannot resolve (a cross-module import, a class attribute) whose own name
+suggests process identity is reported as unproven rather than silently
+passed. `tests/relay_gate_guard.py` and its test are left alone (documented
+why): that guard's "Running as root" case is a reason-string classifier for
+a different, CI-only concern, not a root-conditioned skip itself.
+
+Review 1 (F5) also found two tests outside the three skip sites that were
+vacuous as root without skipping: `test_auto_continue_stop.py`'s
+`test_matches_handles_oserror_reading_transcript` (`chmod(0o000)`, root
+still reads the file) now monkeypatches `Path.open` inside
+`TranscriptReader._parse_tail`; `test_paths.py`'s
+`test_socket_path_over_limit_uses_run_user` (skipped when `/run/user/{uid}`
+is absent — a host-dependent skip, not a root one) now monkeypatches
+`Path.is_dir` so the branch runs deterministically. Review 2 (M1) found a
+third: `test_hooks_deploy_permissions.py`'s chmod-failure contract had been
+replaced by a lexical check on the installer's source because root's own
+chmod never fails; it now stubs `chmod` as a shell function that fails for
+one hook file, the same technique `test_settings_deploy_lib.py` uses for
+`cp`.
+
+Review 3 found two more evasions of the hand-written `if <root check>: ...`
+shape, both closed: a `pass`-only branch opposite a substantive one (`if root: pass else: assert ...`), and an `assert` gated by identity with no
+`else` at all. Both needed a new `_root_polarity` helper to tell which
+branch actually runs AS ROOT — only a no-op on that branch is a problem in a
+container that is always root; the reverse (no-op on the non-root branch) is
+fine and must not be flagged, or `getuid_used_non_skip` (already in the
+`_SHOULD_NOT_FIND` corpus) would false-positive. One evasion is left as a
+documented, owner-referred residual: `try: <op that only raises PermissionError as non-root> except PermissionError: return` followed by an
+unconditional skip has no syntactic root check anywhere — the
+root-dependence is a runtime property (what `open()` does), not something a
+static AST scan can read. It is tracked as
+`_KNOWN_RESIDUALS["try_except_permission_pass"]` in the detector's own test
+file, asserted to stay uncaught so a future fix flips that assertion red
+rather than the note going stale.
+
+The rule is recorded in `CLAUDE/QA.md`, next to the other test requirements.
+
 ### N55 — `register_all` ignores a handler's `get_default_enabled()` when its config block is absent
 
 **Found by goal-flip review 8 (RV8-n3), filed at review 9's request.** When a
@@ -663,26 +865,86 @@ Setting medium therefore needed two edits in two formats (`settings.json` and
 `ccy.env`, commits 909f9591 and e52bd9e5). Even then the restore path still
 lands on xhigh.
 
-**Candidate remedy:** make `settings.json` the single source of truth for the
-effort a model runs at.
+**Remedy (redesigned again after adversarial review 2**,
+`subagent-reports/260925-n47-review2.md`**, which found review 1's fix was
+still architecturally wrong at the root):** BLOCKER 1 — Claude Code SAVES
+every interactively-typed `/effort <level>` into `modelSettings` in the
+settings file the confirming `Enter` targets (`model-config.md:552-557`,
+`settings-reference.md:900`). So ANY supervisor-typed `/effort`, no matter
+how well the level behind it was resolved, permanently overwrites the
+owner's own saved level — the exact fight the whole redesign exists to end,
+just moved one layer down into the single source of truth itself.
 
-- The supervisor resolves a family's effort from the settings Claude Code
-  itself reads, in its precedence order: per-model `modelSettings` over
-  `effortLevel`, project over user.
-- The separate floor map and `CCY_MIN_EFFORT_LEVELS` are retired, and the
-  `ccy.env` lines go with them.
-- A switch back to a configured model sets that model's configured effort.
-  `xhigh` compensation applies only while a downgrade leaves the session on a
-  fallback model.
-- The fable anchor clamp (Plan 00297) stays as a ceiling.
+The supervisor now injects **no `/effort` of any kind, for any reason,
+ever**:
 
-RED tests:
+- The built-in floor map, `CCY_MIN_EFFORT_LEVELS`, the settings.json reader,
+  the coupled-effort correction and the downgrade-xhigh compensation are all
+  gone entirely, not just superseded.
+- The two behaviours those mechanisms provided are now DATA the owner adds
+  to their own `modelSettings` — a `claude-fable-5-1` entry at `low`
+  (replacing DROP ANCHOR) and `claude-opus-5`/`claude-opus-4-8` entries at
+  `xhigh` (replacing the downgrade compensation, covering Fable's two
+  automatic-fallback targets, and now broader than the old compensation
+  since it applies whenever Opus 5 or 4.8 serve, not only a fable-origin
+  episode). See `CLAUDE/development/CcySupervisor.md` for the exact entries.
+- MAJOR 4 fixed alongside: `model_downgrade_recorder`'s signal republishes
+  the SAME record for the life of a session, even after its episode fully
+  closed. A human who later manually switched back to the fallback family
+  produced the identical observation the old `session:from:to` attribution
+  key matched again, reopening an episode and firing `/model fable` at them.
+  A record now has an identity (`record_id`: the transcript entry's `uuid`,
+  or its line's byte offset; the standalone record of a downgrade keeps its
+  block's identity), the state machine spends that identity when the episode
+  recovers, and a record attributes only a drop observed within
+  `_DOWNGRADE_ATTRIBUTION_WINDOW_SECONDS` (300s) of the downgrade it records
+  (review 4 findings 3 and 4). Retroactive attribution of a drop seen before
+  its record was published applies the same judgement at the moment the drop
+  was seen, after the tick's reading, and writes a decision-log line.
+- `hooks-daemon check` holds no effort opinion either (review 4 finding 2):
+  "Effort Level" (which failed anything but `high` and recommended
+  `CLAUDE_CODE_EFFORT_LEVEL=high`, a pin on every model) is replaced by
+  "Effort Source", which warns only about such pins.
 
-- the restore lands on the configured effort, not xhigh;
-- no `/effort` is sent while live effort equals the configured effort;
-- a downgrade still gets xhigh;
-- a missing or unreadable settings file degrades to the current defaults with a
-  logged reason.
+**Correction (review 3**, `subagent-reports/260925-n47-review3.md`**): the
+`modelSettings` claim above is CONDITIONAL, and review 2's design doc
+overstated it.** Claude Code tracks ONE session-level effort value
+(`sessionEffort`), which starts `inherit` (per-model `modelSettings` applies)
+but is PINNED to a fixed value by ANY of: `/effort <level>`, `/effort auto`,
+an effort pick made in the `/model` picker's slider, `--effort`, or
+`CLAUDE_CODE_EFFORT_LEVEL`. Once pinned, that ONE value follows the session
+across every later model AND every automatic fallback — confirmed against
+`model-config.md:544-548` (explicit choice ranks first, no per-model
+qualifier) and the installed Claude Code 2.1.282 binary's `sessionEffort`
+resolver. `/effort auto` does NOT return to `inherit`; it pins to the
+model's BUILT-IN default (ignoring `modelSettings`) and additionally WRITES
+— it clears the current model's saved `modelSettings` entry
+(`settings-reference.md:1211`). **Nothing found un-pins a session mid-flight.**
+So: **`modelSettings` alone can make Fable run at low and its fallback run
+at xhigh only for a session that never touches `/effort`, an effort slider
+pick, `--effort`, or the env var.** If the owner wants a specific level
+right now, typing `/effort` remains a deliberate one-time choice that pins
+the REST of that session — exactly as before this plan — and no
+settings-only configuration recovers per-model behaviour within it. The
+owner decides whether that trade-off is acceptable; the fix here only
+removes the SUPERVISOR as a second party to the fight.
+
+`tests/unit/supervise/test_no_effort_injection.py` asserts on the PAYLOADS
+that the supervisor never types `/effort`, driving `decide_once` (and
+`run_worker` for the raw-input tap) through real sidecar sequences: Fable at
+medium, high, xhigh and max (the removed DROP ANCHOR's trigger), a whole
+attributed downgrade episode through restore and recovery, a manual model
+pick, the operator `/model` switch signal, a compaction and its resume, and a
+human-typed `/effort max`. Each scenario also asserts it reached its path.
+`test_settings_effort.py`, `test_drop_anchor.py`, `test_effort_restore.py`
+and `test_unattributed_effort_drop.py` are deleted outright (the behaviour
+they covered no longer exists) — `test_effort_restore.py`'s NON-effort tests
+(live `/model` auto-restore: backoff, delay, the off setting, confirm
+enters, family ranks, the dry-run marker, and the restore cap pinned as the
+literal 2) are restored under `test_model_restore.py`. `test_attributed_downgrade.py`
+covers the record identity, the attribution window, every retro-attribution
+and hot-reload backfill guard (each asserted on the `/model` payload or the
+exported state it owns), and the export round-trips.
 
 ### N46 — `budget_exhaustion_detector` fires on a tool result that merely contains budget wording
 
