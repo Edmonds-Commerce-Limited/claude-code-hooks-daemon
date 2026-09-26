@@ -9,6 +9,39 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N101 — `secret_file_guard` fails closed with `TooManyToEnumerateError` on ordinary `python3 - <<'EOF'` commands
+
+**Found by N38 fix round 11** (report `260926-n38-fix11-opus-5-5.md` on the
+N38 branch). The live daemon on main twice denied an ordinary Bash command
+with `TooManyToEnumerateError`. Both were quoted-heredoc Python programs,
+one editing `secret_file_guard.py` and one building recovery-cron hook
+inputs, and neither named a protected path. The guard enumerates the
+spellings a command could expand to, and a heredoc body with many
+brace-, glob- or bracket-like characters exceeds the bound. Failing closed
+is right for a command that could really expand to a protected name. Here
+the body is data handed to `python3`, so a legitimate command is denied.
+
+**Remedy:** reproduce with a python heredoc from those commands. Establish
+whether the enumeration should run on a quoted-heredoc body at all: it is
+fed to an interpreter, not expanded by the shell, so its bytes are not
+shell words. Keep fail-closed where the shell does expand the text. Pin both
+cases. It touches the guard that guard-defects just changed, so it goes on a
+fresh branch from main.
+
+### N100 — A continuation on a heredoc opener line (`cat > s.sh \⏎<<'EOF'`) denies a body that is only written
+
+**Found by N38 reviews 6 to 9 (candidate 4), unchanged on main.** When the
+redirect and the `<<'EOF'` sit on two physical lines joined by `\`+newline,
+the quoted-delimiter exemption is not granted, so a body that `cat` only
+writes is judged as a command. It is the documented fallback shape for
+writing a script that mentions a guarded word, so it fails where the docs
+send people.
+
+**Remedy:** join continuations before deciding the heredoc receiver, using
+the N38 lexer, and pin that the continued and single-line forms get the
+same verdict. It goes on the executed-body branch with N87 to N89 and N93,
+after N38.
+
 ### N99 — `dev-handlers.md` offers an agent a wrapper command that the daemon denies
 
 **Found by the Plan 464 gate fixer** (`260926-p464-gatefix2-sonnet-5.md`
