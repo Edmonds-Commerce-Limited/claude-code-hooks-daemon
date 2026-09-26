@@ -1563,8 +1563,9 @@ start_daemon() {
     # un-export happens inside the substitution's subshell, not here.
     #
     # The launcher runs beside this hook, which reads its output as it comes
-    # and never waits on it (Plan 00466 review 8, R8-1): its own waits (two
-    # start-lock waits, a 30 s start budget) outlast the hook's 60 s timeout,
+    # and never waits on it (Plan 00466 review 8, R8-1): its own waits (a
+    # start already under way, two start-lock waits, a 30 s start budget)
+    # outlast the hook's 60 s timeout,
     # and a PreToolUse hook that times out lets the call run unjudged. A
     # launcher still writing once the hook has answered gets EPIPE, which
     # only its parent meets, after the fork: the daemon keeps starting. Its

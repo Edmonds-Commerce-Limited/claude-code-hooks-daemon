@@ -21,7 +21,13 @@ from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.daemon.cli import cmd_start
 from claude_code_hooks_daemon.daemon.paths import PID_MAX_LIMIT
 from claude_code_hooks_daemon.daemon.process_verification import RootProof
-from claude_code_hooks_daemon.daemon.server import _SocketLiveness
+from claude_code_hooks_daemon.daemon.server import (
+    LaunchLock,
+    StartUnderWay,
+    _SocketLiveness,
+    launch_lock_path,
+    start_under_way,
+)
 
 # Parseable, yet above the largest pid pid_max allows, so it names no process.
 _DEAD_PID = PID_MAX_LIMIT
@@ -100,7 +106,10 @@ class TestCmdStartAlreadyRunning:
                 "claude_code_hooks_daemon.daemon.cli._socket_liveness_sync",
                 return_value=_SocketLiveness.LIVE,
             ),
-            patch("claude_code_hooks_daemon.daemon.cli.get_socket_path"),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.get_socket_path",
+                return_value=tmp_path / "d.sock",
+            ),
             patch("claude_code_hooks_daemon.daemon.cli.get_pid_path"),
         ):
             result = cmd_start(args)
@@ -126,7 +135,10 @@ class TestCmdStartReportsTheDaemonItStarted:
                 "claude_code_hooks_daemon.daemon.cli.read_pid_file",
                 side_effect=[*pid_file_reads, *[pid_file_reads[-1]] * 1000],
             ),
-            patch("claude_code_hooks_daemon.daemon.cli.get_socket_path"),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.get_socket_path",
+                return_value=tmp_path / "d.sock",
+            ),
             patch("claude_code_hooks_daemon.daemon.cli.get_pid_path"),
             patch(
                 "claude_code_hooks_daemon.daemon.cli._socket_liveness_sync",
@@ -201,7 +213,10 @@ class TestTheStartWaitFollowsTheDaemonsProgress:
         with (
             patch("claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path),
             patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", side_effect=read_pid_file),
-            patch("claude_code_hooks_daemon.daemon.cli.get_socket_path"),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.get_socket_path",
+                return_value=tmp_path / "d.sock",
+            ),
             patch(
                 "claude_code_hooks_daemon.daemon.cli.get_pid_path",
                 return_value=pid_path or tmp_path / "no-daemon.pid",
@@ -375,7 +390,10 @@ class TestCmdStartParentProcess:
                 "claude_code_hooks_daemon.daemon.cli.read_pid_file",
                 side_effect=[None, 42],  # First: not running, second: daemon started
             ),
-            patch("claude_code_hooks_daemon.daemon.cli.get_socket_path"),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.get_socket_path",
+                return_value=tmp_path / "d.sock",
+            ),
             patch("claude_code_hooks_daemon.daemon.cli.get_pid_path"),
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket"),
             patch(
@@ -419,7 +437,10 @@ class TestCmdStartParentProcess:
                 "claude_code_hooks_daemon.daemon.cli.read_pid_file",
                 side_effect=[None, 42],
             ),
-            patch("claude_code_hooks_daemon.daemon.cli.get_socket_path"),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.get_socket_path",
+                return_value=tmp_path / "d.sock",
+            ),
             patch("claude_code_hooks_daemon.daemon.cli.get_pid_path"),
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket"),
             patch(
@@ -462,7 +483,10 @@ class TestCmdStartParentProcess:
                 "claude_code_hooks_daemon.daemon.cli.read_pid_file",
                 side_effect=[None, 42],
             ),
-            patch("claude_code_hooks_daemon.daemon.cli.get_socket_path"),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.get_socket_path",
+                return_value=tmp_path / "d.sock",
+            ),
             patch("claude_code_hooks_daemon.daemon.cli.get_pid_path"),
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket") as mock_cleanup,
             patch(
@@ -491,7 +515,10 @@ class TestCmdStartParentProcess:
                 "claude_code_hooks_daemon.daemon.cli.read_pid_file",
                 return_value=None,  # Always None - daemon failed to start
             ),
-            patch("claude_code_hooks_daemon.daemon.cli.get_socket_path"),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.get_socket_path",
+                return_value=tmp_path / "d.sock",
+            ),
             patch("claude_code_hooks_daemon.daemon.cli.get_pid_path"),
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket"),
             patch(
@@ -517,7 +544,10 @@ class TestCmdStartParentProcess:
                 "claude_code_hooks_daemon.daemon.cli.read_pid_file",
                 return_value=None,
             ),
-            patch("claude_code_hooks_daemon.daemon.cli.get_socket_path"),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.get_socket_path",
+                return_value=tmp_path / "d.sock",
+            ),
             patch("claude_code_hooks_daemon.daemon.cli.get_pid_path"),
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket"),
             patch(
@@ -546,7 +576,10 @@ class TestCmdStartChildProcess:
                 "claude_code_hooks_daemon.daemon.cli.read_pid_file",
                 return_value=None,
             ),
-            patch("claude_code_hooks_daemon.daemon.cli.get_socket_path"),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.get_socket_path",
+                return_value=tmp_path / "d.sock",
+            ),
             patch("claude_code_hooks_daemon.daemon.cli.get_pid_path"),
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket"),
             patch(
@@ -575,7 +608,10 @@ class TestCmdStartChildProcess:
                 "claude_code_hooks_daemon.daemon.cli.read_pid_file",
                 return_value=None,
             ),
-            patch("claude_code_hooks_daemon.daemon.cli.get_socket_path"),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.get_socket_path",
+                return_value=tmp_path / "d.sock",
+            ),
             patch("claude_code_hooks_daemon.daemon.cli.get_pid_path"),
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket"),
             patch(
@@ -632,7 +668,10 @@ class TestCmdStartChildProcess:
                 "claude_code_hooks_daemon.daemon.cli.read_pid_file",
                 return_value=None,
             ),
-            patch("claude_code_hooks_daemon.daemon.cli.get_socket_path"),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.get_socket_path",
+                return_value=tmp_path / "d.sock",
+            ),
             patch("claude_code_hooks_daemon.daemon.cli.get_pid_path"),
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket"),
             patch(
@@ -703,7 +742,10 @@ class TestCmdStartChildProcess:
                 "claude_code_hooks_daemon.daemon.cli.read_pid_file",
                 return_value=None,
             ),
-            patch("claude_code_hooks_daemon.daemon.cli.get_socket_path"),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.get_socket_path",
+                return_value=tmp_path / "d.sock",
+            ),
             patch("claude_code_hooks_daemon.daemon.cli.get_pid_path"),
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket"),
             patch(
@@ -782,7 +824,10 @@ class TestCmdStartChildProcess:
                 "claude_code_hooks_daemon.daemon.cli.read_pid_file",
                 return_value=None,
             ),
-            patch("claude_code_hooks_daemon.daemon.cli.get_socket_path"),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.get_socket_path",
+                return_value=tmp_path / "d.sock",
+            ),
             patch("claude_code_hooks_daemon.daemon.cli.get_pid_path"),
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket"),
             patch(
@@ -860,7 +905,10 @@ class TestCmdStartChildProcess:
                 "claude_code_hooks_daemon.daemon.cli.read_pid_file",
                 return_value=None,
             ),
-            patch("claude_code_hooks_daemon.daemon.cli.get_socket_path"),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.get_socket_path",
+                return_value=tmp_path / "d.sock",
+            ),
             patch("claude_code_hooks_daemon.daemon.cli.get_pid_path"),
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket"),
             patch(
@@ -894,3 +942,154 @@ class TestCmdStartChildProcess:
             # Verify getters were NOT called since paths were already set
             mock_config.daemon.get_socket_path.assert_not_called()
             mock_config.daemon.get_pid_file_path.assert_not_called()
+
+
+class TestAStartUnderWayIsWaitedOnNotRepeated:
+    """Plan 00466 lifecycle round 8b: a hook retried while a daemon was
+    still initialising found no PID file and started again, and that start's
+    single-daemon enforcement stopped the daemon still starting. A start now
+    waits on one under way, and launches only once that has ended or died."""
+
+    _INCUMBENT = 4242
+    #: Sleeps of the lock wait before the start under way ends.
+    _TICKS_TO_END = 3
+
+    def _start(
+        self,
+        tmp_path: Path,
+        *,
+        pid: int | None,
+        liveness: _SocketLiveness,
+        ends: bool,
+    ) -> tuple[int, MagicMock, MagicMock, str]:
+        """``cmd_start`` while another start holds the launch lock; returns
+        its result, the enforcement and fork mocks, and its stderr."""
+        sock_path = tmp_path / "d.sock"
+        under_way = LaunchLock.take(sock_path, Timeout.FILE_LOCK)
+        now = [0.0]
+        ticks = [0]
+
+        def sleep(seconds: float) -> None:
+            now[0] += seconds
+            ticks[0] += 1
+            if ends and ticks[0] == self._TICKS_TO_END:
+                under_way.release()
+
+        clock = MagicMock(wraps=time)
+        clock.monotonic.side_effect = lambda: now[0]
+        clock.sleep.side_effect = sleep
+        stderr = io.StringIO()
+        try:
+            with (
+                patch(
+                    "claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path
+                ),
+                patch(
+                    "claude_code_hooks_daemon.daemon.cli.get_socket_path", return_value=sock_path
+                ),
+                patch(
+                    "claude_code_hooks_daemon.daemon.cli.get_pid_path",
+                    return_value=tmp_path / "d.pid",
+                ),
+                patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=pid),
+                patch(
+                    "claude_code_hooks_daemon.daemon.cli._socket_liveness_sync",
+                    return_value=liveness,
+                ),
+                patch("claude_code_hooks_daemon.daemon.cli.enforce_single_daemon") as enforce,
+                patch("os.fork", side_effect=OSError("no fork in this test")) as fork,
+                patch("claude_code_hooks_daemon.daemon.server.time", clock),
+                patch.object(sys, "stderr", stderr),
+            ):
+                result = cmd_start(argparse.Namespace(project_root=tmp_path))
+        finally:
+            under_way.release()
+        return result, enforce, fork, stderr.getvalue()
+
+    def test_a_start_still_under_way_at_the_budget_is_left_alone(self, tmp_path: Path) -> None:
+        result, enforce, fork, stderr = self._start(
+            tmp_path, pid=None, liveness=_SocketLiveness.NOT_LIVE, ends=False
+        )
+        assert result == 1
+        enforce.assert_not_called()
+        fork.assert_not_called()
+        assert "still under way" in stderr, stderr
+
+    def test_a_start_that_ends_serving_is_reused(self, tmp_path: Path) -> None:
+        result, enforce, fork, _ = self._start(
+            tmp_path, pid=self._INCUMBENT, liveness=_SocketLiveness.LIVE, ends=True
+        )
+        assert result == 0
+        enforce.assert_not_called()
+        fork.assert_not_called()
+        assert start_under_way(tmp_path / "d.sock") is None
+
+    def test_a_start_that_died_without_a_pid_file_is_replaced(self, tmp_path: Path) -> None:
+        result, enforce, fork, _ = self._start(
+            tmp_path, pid=None, liveness=_SocketLiveness.NOT_LIVE, ends=True
+        )
+        assert result == 1
+        enforce.assert_called_once()
+        fork.assert_called_once()
+        assert start_under_way(tmp_path / "d.sock") is None
+
+    def test_a_lock_it_cannot_open_starts_nothing(self, tmp_path: Path) -> None:
+        launch_lock_path(tmp_path / "d.sock").symlink_to(tmp_path / "planted")
+        with (
+            patch("claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.get_socket_path",
+                return_value=tmp_path / "d.sock",
+            ),
+            patch("claude_code_hooks_daemon.daemon.cli.enforce_single_daemon") as enforce,
+            patch("os.fork") as fork,
+        ):
+            result = cmd_start(argparse.Namespace(project_root=tmp_path))
+        assert result == 1
+        enforce.assert_not_called()
+        fork.assert_not_called()
+
+    def test_the_daemon_holds_it_named_until_it_serves(self, tmp_path: Path) -> None:
+        """The forked daemon names itself in the lock, and releases it only
+        through ``serving``, which the server calls once it is bound."""
+        sock_path = tmp_path / "d.sock"
+        seen: dict[str, object] = {}
+
+        def run_server(coroutine: Any) -> None:
+            coroutine.close()
+            seen["starting"] = start_under_way(sock_path)
+            serving = daemon_class.call_args.kwargs["serving"]
+            serving()
+            seen["served"] = start_under_way(sock_path)
+
+        mock_config = MagicMock()
+        mock_config.daemon.socket_path = str(sock_path)
+        mock_config.daemon.pid_file_path = str(tmp_path / "d.pid")
+        with (
+            patch("claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path),
+            patch("claude_code_hooks_daemon.daemon.cli.get_socket_path", return_value=sock_path),
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=None),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli._socket_liveness_sync",
+                return_value=_SocketLiveness.NOT_LIVE,
+            ),
+            patch("os.fork", side_effect=[0, 0]),
+            patch("os.chdir"),
+            patch("os.setsid"),
+            patch("os.umask"),
+            patch("os.dup2"),
+            patch.object(sys, "stdin", MagicMock()),
+            patch(
+                "claude_code_hooks_daemon.config.models.Config.find_and_load",
+                return_value=mock_config,
+            ),
+            patch("claude_code_hooks_daemon.daemon.cli._build_initialised_controller"),
+            patch("claude_code_hooks_daemon.daemon.server.HooksDaemon") as daemon_class,
+            patch("claude_code_hooks_daemon.daemon.paths.write_socket_discovery_file"),
+            patch("claude_code_hooks_daemon.daemon.paths.cleanup_socket_discovery_file"),
+            patch("asyncio.run", side_effect=run_server),
+            pytest.raises(SystemExit) as exit_info,
+        ):
+            cmd_start(argparse.Namespace(project_root=tmp_path))
+        assert exit_info.value.code == 0
+        assert seen == {"starting": StartUnderWay(pid=os.getpid()), "served": None}

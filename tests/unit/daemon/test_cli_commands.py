@@ -9,6 +9,7 @@ Focused tests covering critical CLI paths including:
 """
 
 import argparse
+import contextlib
 import errno
 import fcntl
 import json
@@ -42,7 +43,11 @@ from claude_code_hooks_daemon.daemon.cli import (
     send_daemon_request,
 )
 from claude_code_hooks_daemon.daemon.process_verification import RootProof
-from claude_code_hooks_daemon.daemon.server import remove_stale_pid_file
+from claude_code_hooks_daemon.daemon.server import (
+    LaunchLock,
+    launch_lock_path,
+    remove_stale_pid_file,
+)
 from claude_code_hooks_daemon.utils import safe_signal
 from claude_code_hooks_daemon.utils.safe_signal import DaemonStop
 
@@ -443,6 +448,77 @@ def _daemon_for(
     return _spawn(
         children, code, "claude_code_hooks_daemon.daemon.cli", "--project-root", str(root), "start"
     )
+
+
+class TestCmdStopEndsAStartThatNeverFinishes:
+    """Plan 00466 lifecycle round 8b: a daemon still starting holds every
+    later start off and has no PID file yet, so ``stop`` finds it through
+    the launch lock, and proves the pid named there as it proves any other."""
+
+    @staticmethod
+    @contextlib.contextmanager
+    def _under_way(tmp_path: Path, named: int | None) -> Iterator[None]:
+        """A start holding the launch lock, having named ``named``."""
+        sock_path = tmp_path / "d.sock"
+        held = LaunchLock.take(sock_path, Timeout.FILE_LOCK)
+        if named is not None:
+            launch_lock_path(sock_path).write_text(f"{named}\n")
+        try:
+            with (
+                patch(
+                    "claude_code_hooks_daemon.daemon.cli.get_socket_path", return_value=sock_path
+                ),
+                patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=None),
+            ):
+                yield
+        finally:
+            held.release()
+
+    def test_the_daemon_still_starting_is_stopped(
+        self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
+    ) -> None:
+        args = _stop_project(tmp_path)
+        daemon = _daemon_for(children, tmp_path)
+        with self._under_way(tmp_path, daemon.pid):
+            assert cmd_stop(args) == 0
+        assert daemon.wait(timeout=Timeout.PROCESS_DEATH_WAIT) is not None
+
+    def test_a_named_pid_that_serves_another_project_is_refused(
+        self, tmp_path: Path, children: list[subprocess.Popen[bytes]]
+    ) -> None:
+        args = _stop_project(tmp_path / "mine")
+        other = _daemon_for(children, tmp_path / "theirs")
+        with self._under_way(tmp_path / "mine", other.pid):
+            assert cmd_stop(args) == 1
+        assert other.poll() is None
+
+    def test_a_start_not_yet_named_is_reported_not_signalled(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        args = _stop_project(tmp_path)
+        with (
+            self._under_way(tmp_path, None),
+            patch("claude_code_hooks_daemon.daemon.cli.stop_verified_daemon") as stop,
+        ):
+            assert cmd_stop(args) == 1
+        stop.assert_not_called()
+        assert "has not named itself" in capsys.readouterr().err
+
+    def test_no_start_under_way_is_not_running(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        args = _stop_project(tmp_path)
+        with (
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.get_socket_path",
+                return_value=tmp_path / "d.sock",
+            ),
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=None),
+            patch("claude_code_hooks_daemon.daemon.cli.stop_verified_daemon") as stop,
+        ):
+            assert cmd_stop(args) == 0
+        stop.assert_not_called()
+        assert "Daemon not running" in capsys.readouterr().out
 
 
 class TestCmdStopSignalsOnlyThisProjectsDaemon:

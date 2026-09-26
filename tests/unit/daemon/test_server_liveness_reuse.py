@@ -18,15 +18,17 @@ These tests cover the server.py layer:
 
 import asyncio
 import contextlib
+import fcntl
 import os
 import shutil
 import socket as socket_module
 import tempfile
 import threading
+import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -37,6 +39,9 @@ from claude_code_hooks_daemon.daemon.server import (
     DaemonAlreadyRunningError,
     DaemonIdentity,
     HooksDaemon,
+    LaunchLock,
+    StartLockTimeout,
+    StartUnderWay,
     _pid_file_points_at_live_process,
     _probe_socket_live,
     _probe_socket_liveness,
@@ -44,6 +49,8 @@ from claude_code_hooks_daemon.daemon.server import (
     _SocketLiveness,
     daemon_socket_identity,
     hold_start_lock,
+    launch_lock_path,
+    start_under_way,
 )
 
 
@@ -698,6 +705,110 @@ async def test_a_start_that_takes_the_lock_at_once_reports_no_wait(tmp_path: Pat
     finally:
         await daemon.shutdown()
         await asyncio.wait_for(start_task, timeout=Timeout.SOCKET_CONNECT)
+
+
+@pytest.mark.anyio
+async def test_a_start_says_when_it_serves_and_not_before(tmp_path: Path) -> None:
+    """Round 8b: the launch lock is released once the daemon serves, so
+    ``serving`` is called only after both binding steps."""
+    served: list[bool] = []
+    daemon = HooksDaemon(
+        config=_make_config(tmp_path / "s.sock"),
+        controller=_FakeController(),
+        serving=lambda: served.append(daemon.started_event.is_set()),
+    )
+    start_task = asyncio.create_task(daemon.start())
+    try:
+        await asyncio.wait_for(daemon.started_event.wait(), timeout=Timeout.SOCKET_CONNECT)
+        assert served == [True]
+    finally:
+        await daemon.shutdown()
+        await asyncio.wait_for(start_task, timeout=Timeout.SOCKET_CONNECT)
+
+
+class TestTheLaunchLock:
+    """Plan 00466 lifecycle round 8b: the lock a start holds from its
+    launch until its daemon serves. flock is per open file, so a second
+    open in this process contends with the first as another process would."""
+
+    @staticmethod
+    def _clock() -> Any:
+        """``server``'s clock, advanced only by its own sleeps."""
+        now = [0.0]
+        clock = MagicMock(wraps=time)
+        clock.monotonic.side_effect = lambda: now[0]
+        clock.sleep.side_effect = lambda seconds: now.__setitem__(0, now[0] + seconds)
+        return patch("claude_code_hooks_daemon.daemon.server.time", clock)
+
+    def test_it_is_a_sibling_of_the_socket_apart_from_the_start_lock(self, tmp_path: Path) -> None:
+        sock_path = tmp_path / "d.sock"
+        assert launch_lock_path(sock_path).parent == tmp_path
+        assert launch_lock_path(sock_path) != HooksDaemon._start_lock_path(sock_path)
+
+    def test_a_second_start_waits_out_its_budget_on_a_start_under_way(self, tmp_path: Path) -> None:
+        sock_path = tmp_path / "d.sock"
+        first = LaunchLock.take(sock_path, Timeout.FILE_LOCK)
+        try:
+            with self._clock(), pytest.raises(StartLockTimeout):
+                LaunchLock.take(sock_path, Timeout.DAEMON_START_BUDGET_SEC)
+        finally:
+            first.release()
+
+    def test_a_start_that_ended_leaves_it_free(self, tmp_path: Path) -> None:
+        sock_path = tmp_path / "d.sock"
+        LaunchLock.take(sock_path, Timeout.FILE_LOCK).release()
+        LaunchLock.take(sock_path, Timeout.FILE_LOCK).release()
+
+    def test_a_forked_holder_keeps_it_when_the_launcher_closes_its_copy(
+        self, tmp_path: Path
+    ) -> None:
+        """``close`` is the launcher's, after the fork: the daemon holding
+        the same open file keeps the start under way. A dup stands in for
+        the forked copy."""
+        sock_path = tmp_path / "d.sock"
+        path = launch_lock_path(sock_path)
+        fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        launcher = LaunchLock(fd, path)
+        daemon = LaunchLock(os.dup(fd), path)
+        launcher.close()
+        try:
+            assert start_under_way(sock_path) == StartUnderWay(pid=None)
+        finally:
+            daemon.release()
+        assert start_under_way(sock_path) is None
+
+    def test_the_daemon_it_names_is_the_start_under_way(self, tmp_path: Path) -> None:
+        sock_path = tmp_path / "d.sock"
+        held = LaunchLock.take(sock_path, Timeout.FILE_LOCK)
+        try:
+            held.name_holder()
+            assert start_under_way(sock_path) == StartUnderWay(pid=os.getpid())
+        finally:
+            held.release()
+
+    def test_a_pid_an_earlier_start_left_names_nobody(self, tmp_path: Path) -> None:
+        sock_path = tmp_path / "d.sock"
+        earlier = LaunchLock.take(sock_path, Timeout.FILE_LOCK)
+        earlier.name_holder()
+        earlier.release()
+        held = LaunchLock.take(sock_path, Timeout.FILE_LOCK)
+        try:
+            assert start_under_way(sock_path) == StartUnderWay(pid=None)
+        finally:
+            held.release()
+
+    def test_no_start_under_way_is_none(self, tmp_path: Path) -> None:
+        assert start_under_way(tmp_path / "d.sock") is None
+
+    def test_a_planted_symlink_is_refused(self, tmp_path: Path) -> None:
+        sock_path = tmp_path / "d.sock"
+        launch_lock_path(sock_path).symlink_to(tmp_path / "planted")
+        with pytest.raises(OSError):
+            LaunchLock.take(sock_path, Timeout.FILE_LOCK)
+        with pytest.raises(OSError):
+            start_under_way(sock_path)
+        assert not (tmp_path / "planted").exists()
 
 
 def test_start_lock_path_is_sibling_of_socket(tmp_path: Path) -> None:

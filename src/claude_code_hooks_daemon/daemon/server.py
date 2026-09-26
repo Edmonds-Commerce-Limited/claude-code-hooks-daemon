@@ -26,7 +26,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
-from typing import Any, Final, Protocol, runtime_checkable
+from typing import Any, Final, Protocol, Self, runtime_checkable
 
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.constants.events import wired_event_metas
@@ -318,6 +318,10 @@ _LOG_PROBE_INDETERMINATE = (
 _START_LOCK_SUFFIX = ".start.lock"
 # How often hold_start_lock retries a lock another process holds (seconds).
 _START_LOCK_POLL_SECONDS = 0.05
+# Suffix of the lock a start holds from its launch until its daemon serves.
+_LAUNCH_LOCK_SUFFIX = ".launch.lock"
+# Most bytes of the launch lock's pid text read; a pid is far shorter.
+_PID_TEXT_MAX_BYTES = 64
 
 
 class StartLockTimeout(RuntimeError):
@@ -338,7 +342,12 @@ def _owner_uid(path: Path) -> str:
 
 
 def _open_start_lock(socket_path: Path) -> int:
-    """Open (creating) the start lock beside ``socket_path``; returns its fd.
+    """Open (creating) the start lock beside ``socket_path``; returns its fd."""
+    return _open_lock_file(start_lock_path(socket_path))
+
+
+def _open_lock_file(lock_path: Path) -> int:
+    """Open (creating) the lock file ``lock_path``; returns its fd.
 
     Refuses a symlink (Plan 00466 round 4, Sh-C): ``O_CREAT`` through a link
     planted at the lock path would create or open the file it points at. The
@@ -357,7 +366,6 @@ def _open_start_lock(socket_path: Path) -> int:
         PermissionError: the lock belongs to a user this one cannot open it as.
         OSError: the lock could not be opened, or is not a regular file.
     """
-    lock_path = start_lock_path(socket_path)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     try:
         fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
@@ -388,24 +396,123 @@ def hold_start_lock(socket_path: Path, timeout_seconds: float) -> Iterator[None]
     """
     lock_fd = _open_start_lock(socket_path)
     try:
-        deadline = time.monotonic() + timeout_seconds
-        while True:
-            try:
-                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except BlockingIOError:
-                if time.monotonic() >= deadline:
-                    raise StartLockTimeout(
-                        f"the start lock {start_lock_path(socket_path)} stayed held "
-                        f"for {timeout_seconds:g}s"
-                    ) from None
-                time.sleep(_START_LOCK_POLL_SECONDS)
+        _flock_within(lock_fd, start_lock_path(socket_path), timeout_seconds)
         try:
             yield
         finally:
             fcntl.flock(lock_fd, fcntl.LOCK_UN)
     finally:
         os.close(lock_fd)
+
+
+def _flock_within(lock_fd: int, lock_path: Path, timeout_seconds: float) -> None:
+    """Lock ``lock_fd`` exclusively, waiting up to ``timeout_seconds`` for a holder.
+
+    Raises:
+        StartLockTimeout: the lock was still held when the wait ran out.
+    """
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return
+        except BlockingIOError:
+            if time.monotonic() >= deadline:
+                raise StartLockTimeout(
+                    f"the lock {lock_path} stayed held for {timeout_seconds:g}s"
+                ) from None
+            time.sleep(_START_LOCK_POLL_SECONDS)
+
+
+def launch_lock_path(socket_path: Path) -> Path:
+    """Sibling lock file a start holds from its launch until its daemon serves."""
+    return socket_path.with_name(socket_path.name + _LAUNCH_LOCK_SUFFIX)
+
+
+class LaunchLock:
+    """The lock a start holds from its launch until its daemon serves.
+
+    Plan 00466 lifecycle round 8b: while a start is under way no other
+    start is launched, and so no single-daemon enforcement runs against the
+    daemon still starting. ``cmd_start`` takes it before it looks for a
+    daemon, and the daemon it forks inherits it and releases it once it
+    serves. The kernel releases it when every holder has exited, so a lock
+    that can be taken proves the start before it has finished or died. The
+    daemon writes its pid into the file, which ``stop`` proves before it
+    ends a start that never finishes.
+    """
+
+    def __init__(self, fd: int, path: Path) -> None:
+        self._fd: int | None = fd
+        self.path = path
+
+    @classmethod
+    def take(cls, socket_path: Path, timeout_seconds: float) -> Self:
+        """Take the launch lock for ``socket_path``, waiting on a start under way.
+
+        Raises:
+            StartLockTimeout: a start still held it when the wait ran out.
+            OSError: the lock could not be opened.
+        """
+        path = launch_lock_path(socket_path)
+        fd = _open_lock_file(path)
+        try:
+            _flock_within(fd, path, timeout_seconds)
+            # A pid left by an earlier start names no holder of this one.
+            os.ftruncate(fd, 0)
+        except BaseException:
+            os.close(fd)
+            raise
+        return cls(fd, path)
+
+    def name_holder(self) -> None:
+        """Record this process, the starting daemon, as the holder."""
+        if self._fd is None:
+            return
+        os.ftruncate(self._fd, 0)
+        os.pwrite(self._fd, f"{os.getpid()}\n".encode("ascii"), 0)
+
+    def release(self) -> None:
+        """End the start: unlock for every holder, and close."""
+        if self._fd is None:
+            return
+        fcntl.flock(self._fd, fcntl.LOCK_UN)
+        self.close()
+
+    def close(self) -> None:
+        """Close this process's copy; a forked holder keeps the lock."""
+        if self._fd is not None:
+            os.close(self._fd)
+            self._fd = None
+
+
+@dataclass(frozen=True)
+class StartUnderWay:
+    """A start holds the launch lock; ``pid`` is the daemon it named, if any."""
+
+    pid: int | None
+
+
+def start_under_way(socket_path: Path) -> StartUnderWay | None:
+    """The start holding the launch lock for ``socket_path``, or None when none does.
+
+    Raises:
+        OSError: the lock could not be opened, so nothing is known.
+    """
+    # Read while the lock is held against us: the holder's pid, or nothing
+    # before its daemon names itself. Stop still proves it before a signal.
+    path = launch_lock_path(socket_path)
+    fd = _open_lock_file(path)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            text = os.pread(fd, _PID_TEXT_MAX_BYTES, 0).decode("ascii", errors="replace")
+            return StartUnderWay(pid=parse_pid_text(text))
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        return None
+    finally:
+        os.close(fd)
 
 
 def remove_stale_pid_file(pid_path: Path, socket_path: Path, seen: str) -> bool:
@@ -820,6 +927,7 @@ class HooksDaemon:
         "_idle_check_interval",
         "_input_validators",
         "_is_new_controller",
+        "_serving",
         "_shutdown_requested",
         "_shutdown_task",
         "_start_lock_waiting",
@@ -837,6 +945,7 @@ class HooksDaemon:
         controller: Controller | LegacyController,
         idle_check_interval: int = 60,
         start_lock_waiting: Callable[[bool], None] | None = None,
+        serving: Callable[[], None] | None = None,
     ) -> None:
         """Initialise hooks daemon.
 
@@ -846,10 +955,13 @@ class HooksDaemon:
             idle_check_interval: Seconds between idle timeout checks (default 60)
             start_lock_waiting: Told True before ``start`` waits on the start
                 lock another start holds, and False once it has the lock
+            serving: Called once ``start`` has bound and published the
+                daemon, which ends the start
         """
         self.config = config
         self.controller = controller
         self._start_lock_waiting = start_lock_waiting
+        self._serving = serving
         self.server: asyncio.Server | None = None
         self._event_servers: dict[str, asyncio.Server] = {}
         # Wire event name -> why its per-event socket was not bound; reported
@@ -1079,6 +1191,8 @@ class HooksDaemon:
         # caller waiting on `started_event` can now safely assume the
         # legacy socket is live and `_event_servers` holds its final set.
         self.started_event.set()
+        if self._serving is not None:
+            self._serving()
 
         # Setup signal handlers for graceful shutdown
         loop = asyncio.get_running_loop()

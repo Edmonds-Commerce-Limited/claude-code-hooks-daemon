@@ -93,11 +93,15 @@ from claude_code_hooks_daemon.daemon.process_verification import (
 from claude_code_hooks_daemon.daemon.server import (
     DaemonAlreadyRunningError,
     DaemonIdentity,
+    LaunchLock,
     StartLockTimeout,
+    StartUnderWay,
     _socket_liveness_sync,
     _SocketLiveness,
     daemon_socket_identity,
     hold_start_lock,
+    launch_lock_path,
+    start_under_way,
 )
 from claude_code_hooks_daemon.daemon.validation import (
     check_for_nested_installation,
@@ -582,6 +586,38 @@ def cmd_start(args: argparse.Namespace) -> int:
     # socket (that stays on the fork path only).
     _reap_stale_runtime_files(project_path, config)
 
+    # One start at a time (Plan 00466 lifecycle round 8b): a hook retried
+    # while a daemon is still initialising finds no PID file, and its start
+    # stopped that daemon (enforcement, in a container) or ran a second one.
+    # A start under way is waited on here instead; only one that has ended
+    # or died leaves the lock free.
+    try:
+        launch = LaunchLock.take(socket_path, Timeout.DAEMON_START_BUDGET_SEC)
+    except StartLockTimeout:
+        print(
+            f"ERROR: another start of this daemon was still under way after "
+            f"{Timeout.DAEMON_START_BUDGET_SEC:g}s (it holds {launch_lock_path(socket_path)}); "
+            "not launching a second one. 'stop' ends a start that never finishes.",
+            file=sys.stderr,
+        )
+        return 1
+    except OSError as exc:
+        print(f"ERROR: cannot take the launch lock ({exc}); not starting", file=sys.stderr)
+        return 1
+    try:
+        return _start_under_launch_lock(project_path, socket_path, pid_path, config, launch)
+    finally:
+        launch.close()
+
+
+def _start_under_launch_lock(
+    project_path: Path, socket_path: Path, pid_path: Path, config: Config, launch: LaunchLock
+) -> int:
+    """``cmd_start`` once it holds ``launch``, which the daemon it forks inherits.
+
+    Returns:
+        0 if daemon started successfully, 1 otherwise
+    """
     # REUSE gate (Plan 00127, Decision 1): if a LIVE, HEALTHY same-root daemon
     # already owns our socket, reuse it — return 0 and leave the incumbent
     # untouched. This runs FIRST, before enforce_single_daemon, so a healthy
@@ -675,7 +711,8 @@ def cmd_start(args: argparse.Namespace) -> int:
     if pid > 0:
         # Parent process - wait on the daemon's own progress (startup time
         # is variable on slow hosts: imports + config load + handler init),
-        # never on a fixed budget.
+        # never on a fixed budget. The launch lock stays with the daemon.
+        launch.close()
         os.close(progress_write)
         try:
             started = _await_started_daemon(
@@ -721,6 +758,7 @@ def cmd_start(args: argparse.Namespace) -> int:
     # the parent's news that the daemon has exited.
     reporter = _StartReporter(progress_write)
     reporter.report(f"{os.getpid()}\n".encode())
+    launch.name_holder()
 
     # Redirect stdin to /dev/null
     sys.stdin.close()
@@ -758,7 +796,12 @@ def cmd_start(args: argparse.Namespace) -> int:
     if daemon_config.pid_file_path is None:
         daemon_config.pid_file_path = str(daemon_config.get_pid_file_path(project_path))
 
-    daemon = HooksDaemon(daemon_config, controller, start_lock_waiting=reporter.start_lock_waiting)
+    daemon = HooksDaemon(
+        daemon_config,
+        controller,
+        start_lock_waiting=reporter.start_lock_waiting,
+        serving=launch.release,
+    )
 
     # Write socket discovery file so bash hook forwarders (init.sh)
     # can find the daemon when the socket path differs from the default
@@ -802,6 +845,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         traceback.print_exc()
         sys.exit(1)
     finally:
+        launch.release()
         if i_owned_the_daemon:
             cleanup_socket_discovery_file(project_path)
 
@@ -1102,6 +1146,18 @@ def _await_started_daemon(
             )
 
 
+def _start_under_way(socket_path: Path) -> StartUnderWay | None:
+    """The start holding the launch lock, or None when none is seen."""
+    try:
+        return start_under_way(socket_path)
+    except OSError as exc:
+        print(
+            f"WARNING: cannot read the launch lock ({exc}); a daemon still starting is not seen",
+            file=sys.stderr,
+        )
+        return None
+
+
 def cmd_stop(args: argparse.Namespace) -> int:
     """Stop running daemon.
 
@@ -1117,8 +1173,20 @@ def cmd_stop(args: argparse.Namespace) -> int:
 
     pid = read_pid_file(str(pid_path), verify_daemon=True)
     if pid is None:
-        print("Daemon not running")
-        return 0
+        # A daemon still starting has no PID file yet, and holds every later
+        # start off (round 8b), so one that never finishes is stopped here.
+        starting = _start_under_way(socket_path)
+        if starting is None:
+            print("Daemon not running")
+            return 0
+        if starting.pid is None:
+            print(
+                "ERROR: a start is under way and its daemon has not named itself yet; retry",
+                file=sys.stderr,
+            )
+            return 1
+        pid = starting.pid
+        print(f"Stopping the daemon still starting (PID {pid})")
 
     # Plan 00466 N59: verify_daemon proves only that the pid is SOME daemon.
     # stop_verified_daemon proves it serves THIS project root, and the pidfd
