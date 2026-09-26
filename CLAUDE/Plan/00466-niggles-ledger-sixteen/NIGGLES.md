@@ -9,6 +9,32 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N98 — Past the AF_UNIX limit, every hostname shares one fallback socket, PID file and events dir
+
+**Found by upgrade scripts round 13** (report
+`260926-upgrade-scripts13-opus-5-5.md` on `worktree-upgrade-scripts`,
+section 4). Every runtime path carries `_get_hostname_suffix()` except the
+two fallbacks, both in `daemon/paths.py`:
+
+- `_get_fallback_runtime_dir` names the socket, PID and log
+  `hooks-daemon-<project hash>.<ext>`;
+- `_get_event_socket_fallback_dir` names the events dir
+  `hooks-daemon-<untracked hash>-events`.
+
+So when a project's natural socket path is over the limit, every hostname
+on the machine resolves the same three paths. The first daemon serves them
+all, and a second one clobbers the first one's files. Calling
+`get_socket_path`, `get_pid_path` and `get_event_socket_dir` for a long
+project path under `HOSTNAME=host-a` and then `HOSTNAME=host-b` prints
+identical paths.
+
+**Remedy:** key both fallback names by the hostname too, for example with a
+short hash of the sanitised suffix so the name stays bounded. Check every
+reader that derives one path from another: `init.sh` derives the PID path
+from the socket's stem, and the forwarder and the relay use the events dir.
+It touches the same runtime-path code as N86, so it goes on N86's branch
+after N24 merges.
+
 ### N97 — `block-curl-pipe-shell` denies prose that only mentions curl and bash
 
 **Found by N38 review 9 (ledger candidate 8), and on base too.** A
