@@ -136,6 +136,7 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N109 | The pending release-notes holding area mis-sorts past 99 callouts                                              | Coordinator                                                     | ✅ Remedied                      |
 | N110 | The local full QA gate tests one Python version, so a version-specific defect passes it and fails CI           | N106 fixer                                                      | ✅ Remedied                      |
 | N114 | A `py311` fingerprint venv is built on whatever Python uv prefers                                              | N110 fixer                                                      | ✅ Remedied                      |
+| N122 | `test_second_starter_waits_then_reuses_the_finished_venv` flakes under CPU contention (sleep-based ordering)   | N110 landing gate                                               | ✅ Remedied                      |
 
 ## Tasks
 

@@ -753,6 +753,43 @@ happens when the venv is created.
 - Existing mislabelled worktree venvs are not rewritten. Rebuild one by
   removing it and re-running the setup steps.
 
+### N122 — `test_second_starter_waits_then_reuses_the_finished_venv` flakes under CPU contention: a fixed 0.3s sleep, not a real event, ordered the two starters
+
+**Found by the N110 landing gate.** The full local QA run (29,711 tests) hit
+one failure:
+`tests/integration/test_ensure_venv_lock.py::TestConcurrentStartersBuildOnce::test_second_starter_waits_then_reuses_the_finished_venv`,
+asserting `WAITING_FRAGMENT not in err2` — the second starter built the venv
+uncontended instead of waiting on the first. It passed every time run alone.
+
+**Root cause: the test, not the lock.** `_run_two_starters` began the second
+`ensure_venv` subprocess a fixed `time.sleep(0.3)` after the first, assuming
+the first would always reach `acquire_venv_lock` inside that window. Under
+real CPU contention (30 copies of this test spawned in parallel, 8 cores)
+that assumption can be wrong: the first bash subprocess's own scheduling —
+not the code under test — can take longer than 0.3s to reach the lock,
+so the second's non-blocking `flock -n` wins uncontended.
+
+**Measured (30 pytest processes running this one test concurrently, 8
+cores):**
+
+- This branch, before the fix: 5/60 failed (~8%) across two 30-way batches.
+- `git archive` of main (`fe14348e7`), same test, same harness: 0/60 failed
+  across two 30-way batches.
+- After the fix (below), this branch: 0/60 failed.
+
+**✅ Remedied on `worktree-n466-n110`, in the test only** — this is a test
+ordering defect, not a lock defect; `acquire_venv_lock` and its
+`WAITING_FRAGMENT`/`TIMEOUT_FRAGMENT` messages are unchanged.
+`tests/integration/test_ensure_venv_lock.py` replaces the fixed sleep with a
+real barrier: a `_StderrWatcher` reads the first starter's stderr on a
+background thread and only releases the second starter once it has seen
+`"creating venv at"` — the line `_ensure_venv_build` (venv.sh) prints
+immediately after `acquire_venv_lock` returns holding the lock, so the
+ordering is guaranteed by the production code's own event, not a guess at
+its timing. No sleep-based ordering and no widened timeout remain in this
+test; `_TIMEOUT_SECONDS` (60s) bounds the wait as it already bounded
+`_finish`.
+
 ### N105 — A skill redeploy leaves an untracked, unignored `.claude/hooks-daemon-backups/`
 
 **Found by upgrade review 11 (L9), confirmed by upgrade round 16a.**
