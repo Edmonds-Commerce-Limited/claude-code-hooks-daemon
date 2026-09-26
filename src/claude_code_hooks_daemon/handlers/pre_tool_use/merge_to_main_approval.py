@@ -41,7 +41,10 @@ from claude_code_hooks_daemon.utils.command_evasion import (
 from claude_code_hooks_daemon.utils.git_repo import GitRepo, is_linked_worktree
 from claude_code_hooks_daemon.utils.git_sync import current_branch, default_branch
 from claude_code_hooks_daemon.utils.one_shot_approval import OneShotApprovalStore
-from claude_code_hooks_daemon.utils.shell_segmentation import strip_inert_spans
+from claude_code_hooks_daemon.utils.shell_segmentation import (
+    blank_inert_command_arguments,
+    strip_inert_spans,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -275,22 +278,21 @@ def merge_target(command: str) -> str | None:
     literals answers "what is this command's TARGET?"; it cannot answer "is
     there a command here at all?".
 
-    What that costs is stated in full rather than as ``echo 'git merge x'``
-    alone, so the trade-off a future reader re-litigates is the one made: a
-    ``grep``/``rg`` FOR a merge command matches, as do ``git commit -am 'x'``,
-    ``-m"x"`` and ``-m'x'`` (spellings ``_MESSAGE_BODY_PATTERN`` does not
-    recognise as message flags) and ``gh ... --body 'x'``. It is the safe
+    An inert ``echo`` is told apart from ``bash -c`` by HEAD instead, with
+    ``blank_inert_command_arguments`` (Plan 00408 Task 3.3): the arguments of
+    a bare ``echo``/``printf``/``:``/``true`` are blanked, and only when
+    nothing can run them. What still matches is stated so the trade-off is
+    the one made: a ``grep``/``rg`` FOR a merge command, ``git commit -am
+    'x'``, ``-m"x"`` and ``-m'x'`` (spellings ``_MESSAGE_BODY_PATTERN`` does
+    not recognise as message flags) and ``gh ... --body 'x'``. It is the safe
     direction for a gate, and it bites only where the key is switched on.
-    Telling an inert ``echo`` apart from ``bash -c`` needs an allowlist of
-    commands that do not execute their argument, and recognising those flag
-    spellings is a separate widening — both are Plan 00408, and neither is
-    re-adding literal blanking, which is what let ``bash -c`` through.
 
     Because one copy is both matched and re-sliced, offsets need no
     reconciliation — the earlier two-pass form had to re-slice from the
     heredoc-stripped copy rather than the blanked one, and that hazard is gone.
+    The inert-head pass keeps that property by blanking to equal length.
     """
-    executable = strip_inert_spans(command)
+    executable = blank_inert_command_arguments(strip_inert_spans(command))
     git = _GIT_MERGE_RE.search(executable)
     if git is not None:
         tokens = _segment_tokens(executable[git.start(1) : git.end(1)])

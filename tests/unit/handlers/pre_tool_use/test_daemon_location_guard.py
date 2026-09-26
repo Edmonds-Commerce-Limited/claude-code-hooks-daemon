@@ -1,6 +1,7 @@
 """Tests for DaemonLocationGuardHandler."""
 
 import pytest
+from tests.support.inert_head_shapes import ESCAPE_SHAPES, INERT_SHAPES, fill
 
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 from claude_code_hooks_daemon.core import Decision
@@ -318,9 +319,8 @@ class TestAQuotedStringCanItselfBeACommand:
 
     A heredoc body is genuinely inert, so `strip_inert_spans` stays — it is
     what fixes the defect N3 was actually reported for. The narrower
-    `echo 'cd ...'` false positive returns with it, deliberately: it is the
-    same false positive `destructive_git` carries, and over-denying a harmless
-    `echo` is the safe error where under-denying a real `bash -c` is not.
+    `echo 'cd ...'` false positive is answered separately, by an allowlist of
+    heads that never execute their argument (Plan 00408 Task 3.3, below).
     """
 
     def test_a_real_directory_change_inside_bash_dash_c_is_matched(self) -> None:
@@ -348,6 +348,23 @@ def _guard_matches(command: str) -> bool:
     return DaemonLocationGuardHandler().matches(
         {"tool_name": "Bash", "tool_input": {"command": command}}
     )
+
+
+class TestAnInertHeadNamingADirectoryChangeIsNotOne:
+    """Plan 00408 Task 3.3: `echo 'cd ...'` prints; `bash -c 'cd ...'` changes directory."""
+
+    _CD = "cd .claude/hooks-daemon"
+
+    def test_the_reported_echo_is_not_matched(self) -> None:
+        assert _guard_matches(f"echo '{self._CD}'") is False
+
+    @pytest.mark.parametrize("template", INERT_SHAPES)
+    def test_no_inert_shape_is_matched(self, template: str) -> None:
+        assert _guard_matches(fill(template, self._CD)) is False
+
+    @pytest.mark.parametrize("template", ESCAPE_SHAPES)
+    def test_every_escape_shape_is_still_matched(self, template: str) -> None:
+        assert _guard_matches(fill(template, self._CD)) is True
 
 
 class TestEverySpellingThatReallyChangesDirectory:

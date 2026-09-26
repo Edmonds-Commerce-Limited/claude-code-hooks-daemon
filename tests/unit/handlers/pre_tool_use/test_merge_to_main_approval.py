@@ -16,6 +16,7 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
+from tests.support.inert_head_shapes import ESCAPE_SHAPES, INERT_SHAPES, fill
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
@@ -328,18 +329,31 @@ class TestAQuotedStringCanItselfBeAMerge:
 
         assert merge_target(command) == "12"
 
-    def test_an_echo_naming_a_merge_is_matched_and_that_is_the_accepted_cost(
-        self,
-    ) -> None:
-        """Deliberate: `echo` and `bash -c` are structurally identical here.
 
-        Both are a command with a quoted argument; only knowing that `echo`
-        does not EXECUTE its argument separates them, which needs an allowlist
-        of inert commands (Plan 00408). Until then the gate over-denies a
-        harmless `echo` rather than under-denying a real `bash -c`, matching
-        what `destructive_git` has always done.
-        """
-        assert merge_target(f"echo 'git merge {self._BRANCH}'") == self._BRANCH
+class TestAnInertHeadNamingAMergeIsNotAMerge:
+    """Plan 00408 Task 3.3: `echo` does not execute its argument; `bash -c` does.
+
+    The two are structurally identical, so the allowlist of inert heads in
+    `blank_inert_command_arguments` is what separates them. The matrix below
+    is the other half: every shape that CAN run the merge is still named.
+    """
+
+    _MERGE = "git merge feature/x"
+
+    def test_the_reported_echo_is_not_a_merge(self) -> None:
+        assert merge_target(f"echo '{self._MERGE}'") is None
+
+    @pytest.mark.parametrize("template", INERT_SHAPES)
+    def test_no_inert_shape_is_a_merge(self, template: str) -> None:
+        assert merge_target(fill(template, self._MERGE)) is None
+
+    @pytest.mark.parametrize("template", ESCAPE_SHAPES)
+    def test_every_escape_shape_is_still_a_merge(self, template: str) -> None:
+        assert merge_target(fill(template, self._MERGE)) is not None
+
+    def test_the_branch_after_an_inert_segment_is_named_exactly(self) -> None:
+        """Blanking keeps offsets, so the re-slice still reads the real branch."""
+        assert merge_target(f"echo 'git merge decoy' && {self._MERGE}") == "feature/x"
 
 
 class TestTwoMergesThatWereMissed:

@@ -503,6 +503,252 @@ def strip_inert_spans(command: str) -> str:
     return strip_quoted_heredoc_bodies(strip_message_bodies(command))
 
 
+#: Command heads that never EXECUTE their arguments, so a guarded command named
+#: in one is text rather than a command (Plan 00408 Task 3.3). `echo 'git merge
+#: x'` and `bash -c 'git merge x'` are structurally identical, so only knowing
+#: the head separates them.
+#:
+#: An ALLOWLIST, for the reason `DATA_SINKS` is one: a missing entry costs a
+#: false positive, a wrong entry costs a guard. Each entry was checked against
+#: the ways its output or its arguments can still reach an executor:
+#:   echo -e / printf %b -- only decode escapes into OUTPUT; output is handled
+#:     by refusing a piped or redirected segment, and any substitution.
+#:   printf -v -- ASSIGNS to a variable that `$var` later runs, so a printf
+#:     carrying `-v` in any quoting is refused (`_PRINTF_ASSIGNS`).
+#:   a redirect to a file sourced later -- refused: any `>` in the segment.
+#:   : / true -- discard their arguments; only EXPANSION could act, and a `$`
+#:     anywhere in the segment is refused.
+INERT_COMMAND_HEADS: frozenset[str] = frozenset({"echo", "printf", ":", "true"})
+
+#: Words that let the same command REBIND an inert head or reroute the shell's
+#: own output: an alias or function named `echo`, `enable -n`, a sourced file,
+#: `eval` of a definition, `exec > f`. Any one, anywhere, withholds every
+#: exemption in the command -- the words are matched with quoting removed, so
+#: `ev"al"` is still `eval`.
+_HEAD_REBINDING_WORDS: frozenset[str] = frozenset(
+    {"alias", "enable", "eval", "source", "exec", "function"}
+)
+
+#: `.` is `source`, but only as a command word: `ls .` names a directory.
+_DOT_COMMAND = "."
+_DOT_COMMAND_WRAPPERS: frozenset[str] = frozenset({"builtin", "command"})
+
+#: Reserved words that open or continue a compound command. A segment headed by
+#: one sits inside a loop or conditional whose OUTPUT can be piped on
+#: (`while ...; do echo x; done | bash`), so every exemption is withheld.
+_COMPOUND_WORDS: frozenset[str] = frozenset(
+    {
+        "if",
+        "then",
+        "elif",
+        "else",
+        "fi",
+        "for",
+        "while",
+        "until",
+        "do",
+        "done",
+        "case",
+        "esac",
+        "select",
+        "coproc",
+    }
+)
+
+#: Unquoted characters that open a group, subshell, substitution or process
+#: substitution. Each can pipe or execute an inner segment's output, and each
+#: can desynchronise a flat scan, so their presence withholds everything.
+_GROUPING_CHARS = "(){}`"
+
+#: Separators ending a top-level segment, longest first. The flag says whether
+#: the segment's OUTPUT is handed to the next command.
+_SEGMENT_SEPARATORS: tuple[tuple[str, bool], ...] = (
+    ("&&", False),
+    ("||", False),
+    ("|&", True),
+    (";", False),
+    ("|", True),
+    ("&", False),
+    ("\n", False),
+)
+
+#: `printf -v NAME` assigns instead of printing; matched with quoting removed.
+_PRINTF_ASSIGNS = re.compile(r"(?<!\S)-v")
+
+#: Characters stripped before a word is compared, because bash strips them too.
+_QUOTING_CHARS = re.compile(r"[\"'\\]")
+
+#: A word boundary for `#`: a comment starts only at the beginning of a word.
+_WORD_BOUNDARY_CHARS = " \t\n;&|"
+
+
+class _TopLevelSegment:
+    """One top-level simple command found by `_top_level_segments`."""
+
+    __slots__ = ("end", "expands", "piped", "redirects", "start")
+
+    def __init__(self, start: int) -> None:
+        self.start = start
+        self.end = start
+        self.piped = False
+        self.redirects = False
+        self.expands = False
+
+
+def _top_level_segments(command: str) -> list[_TopLevelSegment] | None:
+    """Split ``command`` into top-level simple commands, or None to withhold all.
+
+    None whenever the flat scan cannot be trusted: unbalanced quoting, any
+    grouping or substitution (`_GROUPING_CHARS`, `$(`, `$'`, a backtick in
+    double quotes). Scanning stops at the end of the first heredoc opener's
+    line, because what follows is a body its receiver interprets, not
+    top-level commands; the segments before it are unaffected by the body.
+    """
+    segments: list[_TopLevelSegment] = []
+    current = _TopLevelSegment(_SEGMENT_START)
+    in_single = False
+    in_double = False
+    heredoc_opened = False
+    index = 0
+    length = len(command)
+    while index < length:
+        char = command[index]
+        if in_single:
+            in_single = char != _SINGLE_QUOTE
+            index += 1
+            continue
+        if char == _ESCAPE_CHAR:
+            index += 2
+            continue
+        if in_double:
+            if char == _DOUBLE_QUOTE:
+                in_double = False
+            elif char == _BACKTICK or command.startswith("$(", index):
+                return None
+            elif char == "$":
+                current.expands = True
+            index += 1
+            continue
+        if char == "$":
+            if command.startswith(("$(", "$'"), index):
+                return None
+            current.expands = True
+        elif char == _SINGLE_QUOTE:
+            in_single = True
+        elif char == _DOUBLE_QUOTE:
+            in_double = True
+        elif char in _GROUPING_CHARS:
+            return None
+        elif char == ">" or command.startswith("&>", index):
+            current.redirects = True
+        elif char == "#" and (index == 0 or command[index - 1] in _WORD_BOUNDARY_CHARS):
+            newline = command.find("\n", index)
+            index = length if newline == -1 else newline
+            continue
+        elif command.startswith("<<", index):
+            heredoc_opened = heredoc_opened or not command.startswith("<<<", index)
+            index += 3 if command.startswith("<<<", index) else 2
+            continue
+        else:
+            separator = next(
+                (sep for sep in _SEGMENT_SEPARATORS if command.startswith(sep[0], index)), None
+            )
+            if separator is not None:
+                current.end = index
+                current.piped = separator[1]
+                segments.append(current)
+                index += len(separator[0])
+                if separator[0] == "\n" and heredoc_opened:
+                    return segments
+                current = _TopLevelSegment(index)
+                continue
+        index += 1
+    if in_single or in_double:
+        return None
+    current.end = length
+    segments.append(current)
+    return segments
+
+
+def _rebinds_or_nests(command: str, segments: list[_TopLevelSegment]) -> bool:
+    """Whether any segment can rebind an inert head or nests one in a compound."""
+    for segment in segments:
+        words = _QUOTING_CHARS.sub("", command[segment.start : segment.end]).split()
+        if not words:
+            continue
+        if words[0] in _COMPOUND_WORDS or "$" in words[0]:
+            return True
+        if any(word in _HEAD_REBINDING_WORDS for word in words):
+            return True
+        if _DOT_COMMAND in words and (
+            words[0] == _DOT_COMMAND
+            or any(word in _DOT_COMMAND_WRAPPERS for word in words[: words.index(_DOT_COMMAND)])
+        ):
+            return True
+    return False
+
+
+def _inert_argument_span(command: str, segment: _TopLevelSegment) -> tuple[int, int] | None:
+    """The span of ``segment``'s arguments if its head is inert, else None."""
+    if segment.piped or segment.redirects or segment.expands:
+        return None
+    text = command[segment.start : segment.end]
+    stripped = text.lstrip()
+    head = stripped.split(maxsplit=1)[0] if stripped else ""
+    if head not in INERT_COMMAND_HEADS:
+        return None
+    arguments_start = segment.start + (len(text) - len(stripped)) + len(head)
+    if head == "printf" and _PRINTF_ASSIGNS.search(
+        _QUOTING_CHARS.sub("", command[arguments_start : segment.end])
+    ):
+        return None
+    return arguments_start, segment.end
+
+
+def blank_inert_command_arguments(command: str) -> str:
+    """Blank the arguments of every top-level command whose head never executes them.
+
+    The allowlisted heads are :data:`INERT_COMMAND_HEADS`, and only in their
+    BARE form: `builtin echo`, `command echo`, `env echo`, `sudo echo`,
+    `'echo'`, `\\echo`, `/bin/echo` and `X=1 echo` all keep their text, because
+    a wrapper can be anything and withholding is the safe error.
+
+    The exemption covers ONLY that segment's arguments. A following segment is
+    judged as usual, and the whole segment keeps its text when its output is
+    piped on (`echo 'x' | bash`), redirected (`echo 'x' > f.sh; bash f.sh`) or
+    carries any expansion (`echo "$(git merge x)"` RUNS git). Every exemption in
+    the command is withheld when a segment could rebind a head or reroute the
+    shell's output (`alias`, a function definition, `eval`, `source`, `exec`,
+    `enable`), when a head is built by expansion, and whenever grouping,
+    substitution or unbalanced quoting makes a flat scan unsound.
+
+    Call it on text that has ALREADY been through :func:`strip_inert_spans`, and
+    only to answer "is there a command here at all?". A rule that asks what an
+    `echo` itself does -- `echo CLAUDE/Plan/0*` expands a glob -- must not.
+
+    Args:
+        command: A Bash command string.
+
+    Returns:
+        ``command`` with each exempt segment's arguments replaced by spaces of
+        the same length, so offsets into the result still index the original.
+    """
+    segments = _top_level_segments(command)
+    if segments is None or _rebinds_or_nests(command, segments):
+        return command
+    pieces: list[str] = []
+    cursor = _SEGMENT_START
+    for segment in segments:
+        span = _inert_argument_span(command, segment)
+        if span is not None:
+            start, end = span
+            pieces.append(command[cursor:start])
+            pieces.append(" " * (end - start))
+            cursor = end
+    pieces.append(command[cursor:])
+    return "".join(pieces)
+
+
 def strip_quoted_heredoc_bodies(command: str) -> str:
     """Blank the body of every quoted-delimiter heredoc fed to a DATA SINK.
 

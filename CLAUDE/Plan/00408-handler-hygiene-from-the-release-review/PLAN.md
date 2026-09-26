@@ -144,8 +144,7 @@ gate — were fixed in 00407 and shipped. This plan is the remainder.
 
 ### Phase 3c: An allowlist of commands that do not run their argument
 
-- [ ] ⬜ **Task 3.3**: (Open: it was not assigned in the 2026-09-24
-  unattended pass.) `echo 'git merge x'` and `echo 'cd .claude/hooks-daemon'`
+- [x] ✅ **Task 3.3**: `echo 'git merge x'` and `echo 'cd .claude/hooks-daemon'`
   are matched as real commands by `merge_to_main_approval` and
   `daemon_location_guard`. Graduated from
   [Plan 00407](../Completed/00407-niggles-ledger-twelve/PLAN.md) N12.
@@ -162,6 +161,21 @@ gate — were fixed in 00407 and shipped. This plan is the remainder.
   `strip_inert_spans`, so all three guards get it at once rather than one
   growing a private copy — that divergence is what produced N2, N3 and N12 in
   the first place.
+
+  - Done. `blank_inert_command_arguments` and `INERT_COMMAND_HEADS` sit
+    beside `strip_inert_spans`. They are adopted by both guards and by
+    `plan_number_helper`'s mkdir rule, which had the same false positive.
+    The echo-glob discovery rule does not adopt them, because
+    `echo CLAUDE/Plan/0*` IS the scan. All four heads were kept.
+    `echo -e` and `printf %b` only shape output. `printf -v` is refused in
+    any quoting. A segment that is piped, redirected or carries any `$` is
+    refused. A bare head only: every wrapper is refused. The whole command
+    is refused if it defines or reroutes a head (`alias`, a function,
+    `eval`, `source`/`.`, `exec`, `enable`), builds a head by expansion,
+    or holds grouping, a compound command or unbalanced quoting. Text after
+    a heredoc opener's line is never exempt. The shapes live in
+    `tests/support/inert_head_shapes.py` and are proved against the
+    utility and against each guard.
 
 - [x] ✅ **Task 3.4**: `plan_number_helper` uses literal-blanking as an
   existence filter, the same shape N12 corrected in its two siblings —

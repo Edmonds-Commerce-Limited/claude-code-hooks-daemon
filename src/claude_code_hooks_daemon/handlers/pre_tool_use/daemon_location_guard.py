@@ -15,7 +15,10 @@ from claude_code_hooks_daemon.utils.cli_command import (
     daemon_cli_command,
     daemon_cli_command_for_docs,
 )
-from claude_code_hooks_daemon.utils.shell_segmentation import strip_inert_spans
+from claude_code_hooks_daemon.utils.shell_segmentation import (
+    blank_inert_command_arguments,
+    strip_inert_spans,
+)
 
 _RULE = Rule(
     rule_id=RuleID.DAEMON_DIR_CD,
@@ -137,17 +140,15 @@ class DaemonLocationGuardHandler(PreToolUseHandlerBase):
         # past by quoting. Blanking literals answers "what is this command's
         # TARGET?" — it cannot answer "is there a command here at all?".
         #
-        # The cost is wider than `echo '...'` and is stated in full so the next
-        # reader re-litigates the trade-off actually made: a `grep`/`rg` FOR this
-        # rule's own text matches, as do the commit spellings `-am 'x'`, `-m"x"`
-        # and `-m'x'` (which `_MESSAGE_BODY_PATTERN` does not recognise as
-        # message flags) and a `gh ... --body 'x'`. That surface is NOT new —
-        # v3.63.0 searched the raw command with no blanking at all, so it denied
-        # every one of them too — but it means the N3 fix reaches a quoted
-        # heredoc and stops there. Recognising those flag spellings is Plan
-        # 00408; re-adding literal blanking is not the answer, because that is
-        # what let `bash -c` through.
-        executable = _path_text(strip_inert_spans(command))
+        # `echo 'cd ...'` is separated from `bash -c 'cd ...'` by HEAD instead:
+        # `blank_inert_command_arguments` blanks the arguments of a bare
+        # `echo`/`printf`/`:`/`true` only when nothing can run them (Plan 00408
+        # Task 3.3). What still matches: a `grep`/`rg` FOR this rule's own
+        # text, the commit spellings `-am 'x'`, `-m"x"` and `-m'x'` (which
+        # `_MESSAGE_BODY_PATTERN` does not recognise as message flags) and a
+        # `gh ... --body 'x'`. Re-adding literal blanking is not the answer to
+        # those, because that is what let `bash -c` through.
+        executable = _path_text(blank_inert_command_arguments(strip_inert_spans(command)))
         return bool(_CD_INTO_DAEMON_DIR.search(executable))
 
     def get_rules(self) -> list[Rule]:
@@ -230,7 +231,7 @@ class DaemonLocationGuardHandler(PreToolUseHandlerBase):
         return [
             AcceptanceTest(
                 title="daemon location guard blocks cd into hooks-daemon",
-                command='echo "cd .claude/hooks-daemon"',
+                command="bash -c 'cd .claude/hooks-daemon && pwd'",
                 dispatch_as_bash=True,
                 description=(
                     "Verify handler blocks attempts to cd into .claude/hooks-daemon. "
@@ -245,7 +246,10 @@ class DaemonLocationGuardHandler(PreToolUseHandlerBase):
                     # the block text a tester observes (v3.55.0 Test 19).
                     r"path confusion",
                 ],
-                safety_notes="Using echo to test blocking - safe command",
+                safety_notes=(
+                    "A real directory change, confined to a child shell that only "
+                    "prints its cwd -- an `echo` of the same text is inert and allowed"
+                ),
                 test_type=TestType.BLOCKING,
                 requires_event="PreToolUse:Bash",
                 recommended_model=RecommendedModel.HAIKU,
