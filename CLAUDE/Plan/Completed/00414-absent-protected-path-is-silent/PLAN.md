@@ -1,6 +1,6 @@
 # Plan 00414: absent protected path is silent
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-09-15
 **Owner**: joseph
 **Priority**: Medium
@@ -21,7 +21,7 @@ missing list is to stand the source down quietly, which is correct at runtime �
 a missing file must not break a session — and unhelpful exactly once, on the
 first run, to the one person who does not yet know the file is expected.
 
-This was found as N3 of ledger [00413](../Completed/00413-niggles-ledger-thirteen/PLAN.md)
+This was found as N3 of ledger [00413](../00413-niggles-ledger-thirteen/PLAN.md)
 when a new collaborator cloned the repository. `.claude/block-words.secret` and
 its `.example` are both gitignored — deliberately, and `.gitignore:215-220`
 gives the reason: the rule ships before any such file exists so that a broad
@@ -122,11 +122,24 @@ These need settling before implementation, and they are genuinely open:
 
 - [x] ✅ No protected file's contents are read on any path, proven by test.
 
-- [ ] ⬜ Full QA passes over the merged batch, the daemon is restarted, and CI
-  is green.
+- [x] ✅ Full QA passes over the merged batch, the daemon is restarted, and CI
+  is green. Both plans' commits are ancestors of the B3 integration merge
+  `accd1d87d`, whose full gate was 39/39 at `76097e069`
+  (`untracked/scratch/gate-worktree-integration-b3.out`). Main has since moved
+  to `b85759a8a` through the CI-lsp merge (`ddc04bffe`, 39/39 at `21c933335`)
+  and the Python 3.13 fix; CI on `b85759a8a` is green (run 36209100721, all
+  five jobs). The daemon on main was restarted after `b85759a8a` and reports
+  RUNNING.
+
+- [x] ✅ Every release-bound consequence is in the pending-release holding
+  area: `CLAUDE/UPGRADES/UNRELEASED/release-notes/46-a-protected-path-your-config-names-but-lacks-is-now-reported.md`.
 
 ## Delivery & Milestones
 
-- Graduated from ledger [00413](../Completed/00413-niggles-ledger-thirteen/PLAN.md) N3,
+- Graduated from ledger [00413](../00413-niggles-ledger-thirteen/PLAN.md) N3,
   which was filed with the wrong fix (track the `.example`) and re-scoped once
   `.gitignore`'s own comment showed the exclusion was deliberate.
+
+- Delivered at `7632d2652` (and `f21ffa55c`), reaching `main` via the B3
+  integration merge `accd1d87d` (gate 39/39 at `76097e069`). CI green on
+  `main` at `b85759a8a` (run 36209100721); daemon restarted and RUNNING.
