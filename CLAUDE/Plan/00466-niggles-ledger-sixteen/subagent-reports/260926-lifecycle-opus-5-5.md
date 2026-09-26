@@ -1369,3 +1369,123 @@ start launches and no enforcement stops the daemon still starting.
     `check_signal_targets.py`: clean.
   - ruff, black, mypy and pyright: clean. shellcheck on `init.sh`: clean.
 - **Daemon**: restarted from the worktree; it reports `Daemon: RUNNING`.
+
+## Round 9: review 9's minors (DR-1 to DR-5) and N232
+
+Code commit `87643991c`, on `c5b2befc8`. RED proofs ran on `git archive`
+copies of `c5b2befc8` (all this round's tests) and of main `44d1b1b3b`
+(N232), under `untracked/scratch/`.
+
+- **N232 (shared, ledger row and entry added).** Two concurrent `cli start`
+  runs, with review 9's citations (`init.sh:1057`, `cli.py:576-623`,
+  `enforcement.py:90-125`).
+  - Writing the test found a second face of it that the launch lock alone
+    does not fix: a launcher's command line is its daemon's (the daemon is
+    its fork), so the start holding the lock still stopped the OTHER
+    launcher, which was only waiting its turn (exit `-15`). On main both
+    faces show.
+  - Fix: `enforcement._serving_only` keeps only processes that have bound
+    a unix socket to a path. A launcher only ever connects as a client,
+    and a daemon still starting has not bound yet, so neither is stopped.
+    A process whose sockets cannot be read is not proven to serve and is
+    left alone.
+  - I first spared processes holding the launch lock file open, and moved
+    the lock's open to the top of `cmd_start`. The integration test still
+    failed: a launcher still importing, before it opens anything, was
+    stopped. That approach is reverted; the socket criterion has no such
+    window.
+  - Test: `test_two_concurrent_starts_start_one_daemon` (container and
+    host) in `test_a_retried_hook_never_restarts_a_slow_start.py`, two real
+    launchers against a daemon slowed 7 s in init. It must start one
+    daemon, which is kept. Run 3 times more in a row: stable.
+    - RED on main (variant with main's own helpers, which differ):
+      container `[1, -15]` with "Killing 1 other daemon process(es)"; host
+      `[1, 1]` (main's fixed 5 s wait, N202).
+    - RED on `c5b2befc8`: container `[-15, 0]`.
+  - Unit: `TestOnlyADaemonThatServesIsStopped` (real processes: one not
+    bound is spared, one bound is stopped, one whose sockets cannot be read
+    is spared). `daemon_like_process(..., binds=path)` makes a stand-in
+    that has bound a socket.
+- **DR-1 (coordinator ruling).** `process_verification.root_names_project`:
+  the daemon's normalised text matches the caller's root as given, or the
+  caller's root resolved. The daemon's text is never resolved.
+  - Used by `verified_daemon_process` (`safe_signal.py`) and by
+    `cli._serves_this_project`. `daemon_process_project_root` now returns
+    the daemon's own text, where it returned it resolved, for the same
+    reason.
+  - Tests, on real processes: the same link on both sides is proven; a
+    daemon naming the real root is proven for a caller naming a link; a
+    link re-pointed after launch is refused (RED on `c5b2befc8`: it was
+    stopped). Plus four unit tests of `root_names_project`.
+  - Consequence to know: a daemon started through a symlinked project
+    path (`init.sh` passes `pwd` unresolved) is stopped by a caller naming
+    the same path, but NOT by `bin/hooks-daemon`, which runs `cd -P` and
+    passes the resolved root. Its `stop` now refuses with "is a daemon for
+    project root '<link path>'". That is the ruling's intended trade (the
+    daemon's text cannot be resolved), but it reopens the case review 9
+    said round 8 fixed, for that one caller. Taking the root from the
+    daemon's own answer on its socket would close it; not done here.
+- **DR-2.** `ensure_daemon` checks `_is_ci_enforced` before the "still
+  starting" return, so a start under way with `ci_enabled: true` is
+  CI-enforced: the recovery command is denied, with the CI-enforced reason.
+  Test `test_under_ci_enforcement_a_start_under_way_admits_no_recovery_command`
+  (RED on `c5b2befc8`), which also checks the same command is allowed
+  without CI enforcement.
+- **DR-3.** Written down in `CLAUDE/Security/FailOpenBoundaries.md` (new
+  section; no lifecycle doc owns CI passthrough) and release note 161.
+  Pinned by `test_in_ci_without_enforcement_a_start_under_way_denies_as_starting`.
+- **DR-4.** The launch lock is the project's:
+  `launch_lock_path(project_path)` is `daemon.launch.lock` in
+  `get_untracked_dir(project)`, which resolves the project, so a start
+  through a link takes the same lock. It is outside the stale-file
+  reaper's `daemon-` prefix (test). `LaunchLock.take` and
+  `start_under_way` take the lock path. Test
+  `test_a_start_on_another_socket_of_the_project_is_waited_on` (RED on
+  `c5b2befc8`: enforcement ran).
+- **DR-5.**
+  - Output before the fork: `_say_before_fork` and `_flush_before_fork`
+    point a stream whose reader has gone at `/dev/null` instead of raising
+    `BrokenPipeError`. Test `test_a_closed_reader_does_not_stop_the_fork`,
+    with a real pipe whose read end is closed (RED: `BrokenPipeError`).
+  - `stop` and a launcher hung before its fork: `StartUnderWay.holder` is
+    read from `/proc/locks` when no pid is named. The table's device field
+    is the superblock's, which does not match `stat` on this btrfs
+    (`00:21` against `00:32`, measured), so only the inode is matched
+    there, and each candidate must then hold the very file open, checked
+    by device and inode through `/proc/<pid>/fd`. Waiter lines (`->`) are
+    skipped. `stop` proves the holder with `stop_verified_daemon` like any
+    daemon. If nothing is identified, it says so, signals nothing and
+    exits 1. After stopping a start's process it checks the lock again and
+    exits 1 with "the start is still under way" if it is still held (a
+    launcher stopped after its fork leaves its daemon holding it).
+  - Also from review 9 §4: `stop` exits 1 when it cannot read the launch
+    lock, where it reported "Daemon not running".
+  - Tests (real processes, none signalled by the test): a hung launcher is
+    found and stopped; one launching another project is refused; a taker
+    that forked and exited names no holder; no lock table, or a table
+    line for a process not holding the file, names none; a lock it cannot
+    read exits 1.
+  - `_daemon_for` in `test_cli_commands.py` now waits for exec before
+    returning (the N194 race), since the new tests stop what it spawns.
+- **Upgrade (item 7).** Documented in release note 161 as a mixed-version
+  window. `upgrade_version.sh` stops the old daemon in step 4 and again in
+  step 15's `restart_daemon_verified` before it starts the new one, but
+  nothing waits for an old launcher already running. That closes the old
+  DAEMON, not an old LAUNCHER, so the window stays open for as long as
+  such a launcher runs. `restart_daemon_verified` already trusts the
+  status poll over the starter's exit code, so a starter stopped that way
+  does not fail the upgrade.
+- **GREEN**:
+  - targeted runs: `tests/unit/daemon/` and `test_safe_signal.py` gave
+    2489 passed and 2 failed, both in `test_enforcement_spare_incumbent.py`
+    (fake pids, now taken to serve); after that fix it and
+    `test_enforcement.py` gave 23 passed. The
+    `init.sh` fail-closed, retried/concurrent start, enforcement race,
+    slow start, boot race, parallel reuse, slow restart and CI
+    passthrough suites (235 passed).
+  - `relay/build.sh` (`-D warnings`) built clean; `relay/test_relay.py`
+    13/13.
+  - semgrep (containment rule included) and `check_signal_targets.py`:
+    clean. `check_fail_open_inventory.py`: 39 scanned, 39 rows.
+  - ruff, black, mypy and pyright: clean. shellcheck on `init.sh`: clean.
+- **Daemon**: restarted from the worktree; it reports `Daemon: RUNNING`.
