@@ -9,6 +9,23 @@ interrupt a running handler) and lands with that branch. N40 is taken there too
 taken on the N38 fix branch (the chain's remaining linear per-token cost, which
 waits for the shell-parser consolidation).
 
+### N105 — A skill redeploy leaves an untracked, unignored `.claude/hooks-daemon-backups/`
+
+**Found by upgrade review 11 (L9), confirmed by upgrade round 16a.**
+`install/skills.py` `_preserve_replaced_skill` moves a deployed skill that
+differs from the shipped one into `.claude/hooks-daemon-backups/skills/<name>`.
+Neither this repository's `.gitignore` nor the deployed `.claude/.gitignore`
+template ignores that directory. So after a dogfood redeploy, or a client
+upgrade that replaced an edited skill, `git status` shows
+`?? .claude/hooks-daemon-backups/`, and a careless `git add -A` commits the
+backup.
+
+**Remedy:** add `/hooks-daemon-backups/` to the deployed `.claude/.gitignore`
+template and to this repository's `.gitignore`. Test: run `deploy_skills`
+over an edited skill, then check that `git status --porcelain` is empty.
+(The upgrade-scripts branch covers the directory in its snapshot, so a
+failed upgrade removes a copy it created.)
+
 ### N101 — `secret_file_guard` fails closed with `TooManyToEnumerateError` on ordinary `python3 - <<'EOF'` commands
 
 **Found by N38 fix round 11** (report `260926-n38-fix11-opus-5-5.md` on the
