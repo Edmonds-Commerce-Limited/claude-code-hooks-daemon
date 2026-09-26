@@ -32,9 +32,7 @@ import re
 from collections.abc import Sequence
 from typing import Final
 
-# A backslash immediately before a newline: the shell's line continuation.
-# Compiled once — this runs on every Bash command the daemon sees.
-_LINE_CONTINUATION_PATTERN: Final[re.Pattern[str]] = re.compile(r"\\\r?\n")
+from claude_code_hooks_daemon.utils.heredoc_operators import remove_line_continuations
 
 # Characters that separate shell sub-commands. A token appearing AFTER one of
 # these belongs to a DIFFERENT sub-command, so a fragment that must stay inside
@@ -252,11 +250,26 @@ def normalise_line_continuations(command: str) -> str:
     function and not nine more regexes: the shell already defines the sequence
     as whitespace, so no pattern should have to know about it.
 
-    Note: a genuinely escaped backslash at end of line (``\\`` then newline) is
-    also collapsed. That is the fail-CLOSED direction — it can only cause a
-    guard to look at more text, never less.
+    **Only where the raw text's structure survives it** (Plan 00466 N101
+    round 10, MAJOR B). The joins come from the shared heredoc scan, so a
+    rescan of the result finds the same heredocs, command breaks and stop
+    point as the raw text:
+
+    - an escaped backslash at end of line (``\\`` then newline) is no
+      continuation, and joining it once turned the comment on the next line
+      into a word;
+    - a continuation in a COMMENT is kept, because bash ends the comment at
+      that newline and runs the next line;
+    - a continuation in a QUOTED heredoc body is kept where removing it would
+      change which line closes the body: bash never joins there, so
+      ``foo\<newline>EOF`` still ends the body at ``EOF``;
+    - a backslash-CR-LF is no continuation either: bash escapes the CR.
+
+    The other continuations in quoted text are still removed, because a string
+    handed to ``bash -c`` or a quoted body fed to ``bash`` is joined by the
+    shell that runs it.
     """
-    return _LINE_CONTINUATION_PATTERN.sub("", command)
+    return remove_line_continuations(command)
 
 
 def _quoted_span_end(command: str, start: int) -> int:

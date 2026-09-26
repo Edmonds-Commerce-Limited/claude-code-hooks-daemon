@@ -9,6 +9,7 @@ give up on the whole command.
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -19,7 +20,9 @@ from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.utils.heredoc_operators import (
     HeredocOperator,
     find_heredoc_operators,
+    remove_line_continuations,
     scan_heredocs,
+    substitution_end,
 )
 
 
@@ -267,6 +270,8 @@ _NON_OPERATOR_OPENERS: list[tuple[str, str]] = [
     ("a=(x <<EOF)", "EOF"),
     ("shopt -s extglob\ncat @(x|<<EOF)", "EOF)"),
     ("((cat <<EOF", "EOF\n) )"),
+    ("x=`cat <<X`", "X"),
+    ("echo a\\\r\n#<<X", "X"),
 ]
 
 
@@ -301,3 +306,169 @@ class TestNoOperatorOutsideAWordPosition:
         mark = command.index(_MARK)
         spans = [(h.body_start, h.closer_end) for h in scan_heredocs(command).heredocs]
         assert [span for span in spans if span[0] <= mark < span[1]] == []
+
+
+#: Scripts whose ``echo M<n>`` lines bash may or may not run. Plan 00466 N101
+#: round 10 (review 9 MAJOR B, BLOCKER A): continuations, contexts and
+#: backticks, each read by bash 5.2 in the test itself.
+_LINE_DIFFERENTIAL_SCRIPTS: list[str] = [
+    "cat <<EOF\necho M1\\\nEOF\necho M2\nEOF\necho M3",
+    "cat <<'EOF'\necho M1\\\nEOF\necho M2\nEOF\necho M3",
+    "cat <<\\EOF\necho M1\\\nEOF\necho M2",
+    "cat <<'E F'\necho M1\\\nE F\necho M2",
+    "cat <<EOF\necho M1\\\\\nEOF\necho M2",
+    "cat <<EOF\necho M1\n\\\nEOF\necho M2",
+    "cat <<EO\\\nF\necho M1\nEOF\necho M2",
+    "cat <<\\\nEOF\necho M1\nEOF\necho M2",
+    "cat <<\\\n-EOF\n\techo M1\n\tEOF\necho M2",
+    "cat <<'EOF'\necho M1\nEO\\\nF\necho M2\nEOF\necho M3",
+    "echo a\\\n# <<X\necho M1\nX\necho M2",
+    "echo a \\\n# <<X\necho M1\nX\necho M2",
+    "echo 'a\\\n' <<X\necho M1\nX\necho M2",
+    "# note \\\necho M1",
+    "x=`cat <<X`\necho M1\nX\necho M2",
+    "echo `echo 'a`; cat <<X\necho M1\nX\n'`\necho M2",
+    ": `cat <<X\necho M1\nX\n`\necho M2",
+    "cat <<'A' <<B\necho M1\nA\necho M2\nB\necho M3",
+    ": $(cat <<X\necho M1\nX\n)\necho M2",
+    ": \"$(cat <<'X'\necho M1\nX\n)\"\necho M2",
+    "echo $((1<<2))\ncat <<X\necho M1\nX\necho M2",
+    "echo $((echo x) ) <<X\necho M1\nX\necho M2",
+    "((cat <<X\necho M1\nX\n) )\necho M2",
+    "a=(x\ny) <<X\necho M1\nX\necho M2",
+    "cat <<X ${y:-a\nb}\necho M1\nX\necho M2",
+    "cat <<a${x}b\necho M1\na${x}b\necho M2",
+    "echo $\\\n(echo) <<X\necho M1\nX\necho M2",
+    "echo a\\\r\n#<<X\necho M1\nX",
+    "cat <(cat <<X\necho M1\nX\n)\necho M2",
+]
+
+_MARK_LINE = re.compile(r"echo (M\d)")
+
+
+def _bash_stdout(script: str, tmp_path: Path) -> list[str]:
+    bash = shutil.which("bash")
+    assert bash is not None
+    result = subprocess.run(
+        [bash, "--norc", "--noprofile", "-c", script],
+        cwd=tmp_path,
+        env={"LC_ALL": "C", "PATH": "/usr/bin:/bin"},
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=Timeout.QA_TEST_TIMEOUT,
+    )
+    return result.stdout.splitlines()
+
+
+class TestEveryLineIsReadAsBashReadsIt:
+    """A marker line bash runs is never inside a reported body; where the
+    scan did not stop, a marker bash does not run is inside one too."""
+
+    @pytest.mark.parametrize("script", _LINE_DIFFERENTIAL_SCRIPTS)
+    def test_the_scan_agrees_with_bash(self, script: str, tmp_path: Path) -> None:
+        ran = set(_bash_stdout(script, tmp_path))
+        scan = scan_heredocs(script)
+        spans = [(h.body_start, h.closer_end) for h in scan.heredocs]
+        for match in _MARK_LINE.finditer(script):
+            in_body = any(start <= match.start() < end for start, end in spans)
+            if match.group(1) in ran:
+                assert not in_body, match.group(1)
+            elif scan.stopped_at is None:
+                assert in_body, match.group(1)
+
+
+class TestTheScanStopsWhereBashIsUncertain:
+    """The coordinator's round-10 ruling: past a point the scanner cannot be
+    sure how bash splits operators from bodies, it reads no body, and every
+    newline is a command break."""
+
+    @pytest.mark.parametrize(
+        ("script", "stop"),
+        [
+            ("echo $((echo x) ) <<X\nbody\nX", "$((echo"),
+            ("((cat <<X\nbody\nX\n) )", "((cat"),
+            ("cat <<a${x}b\nbody\na${x}b", "<<a${x}b"),
+            ("cat <<X ${y:-a\nb}\nbody\nX", "\nb}"),
+            ("echo a\\\n# <<X\nbody\nX", "\\\n#"),
+            ("echo $\\\n(date) <<X\nbody\nX", "\\\n(date"),
+            ("echo `echo 'a`; cat <<X\nbody\nX\n'`", "`echo 'a"),
+            ("echo 'open\n<<X\nbody\nX", "'open"),
+        ],
+    )
+    def test_no_body_is_reported_past_the_stop(self, script: str, stop: str) -> None:
+        scan = scan_heredocs(script)
+        stopped_at = script.index(stop)
+        assert scan.stopped_at == stopped_at
+        assert scan.heredocs == []
+        newlines = [i for i, char in enumerate(script) if char == "\n" and i >= stopped_at]
+        assert set(newlines) <= set(scan.breaks)
+
+    def test_a_heredoc_closed_before_the_stop_is_kept(self) -> None:
+        script = "cat <<'A'\nbody\nA\necho $((echo x) )"
+        scan = scan_heredocs(script)
+        assert scan.stopped_at == script.index("$((")
+        assert _bodies(script) == [("A", "body", True)]
+
+    def test_an_operator_opened_in_backticks_has_no_body_after_them(self) -> None:
+        """Bash 5.2 gives it an empty body inside the substitution and runs
+        the next lines, so they are commands and nothing is uncertain."""
+        script = "x=`cat <<X`\nbody\nX"
+        scan = scan_heredocs(script)
+        assert (scan.heredocs, scan.stopped_at) == ([], None)
+        assert scan.breaks == [script.index("\n"), script.rindex("\n")]
+
+    def test_the_operators_on_a_fragment_are_all_reported(self) -> None:
+        """``find_heredoc_operators`` reads one opener line, which a
+        substitution often leaves open."""
+        assert _delimiters("x=`cat <<X`") == [("X", False, False)]
+
+
+class TestNormalisingKeepsTheStructure:
+    """MAJOR B: the continuations removed are the scan's, so the normalised
+    text scans to the same heredocs, and stops where the raw text did."""
+
+    @pytest.mark.parametrize(
+        "script",
+        [
+            *_LINE_DIFFERENTIAL_SCRIPTS,
+            *(f"{opener}\n{_MARK}\n{closer}" for opener, closer in _NON_OPERATOR_OPENERS),
+        ],
+    )
+    def test_a_rescan_of_the_normalised_text_matches(self, script: str) -> None:
+        raw = scan_heredocs(script)
+        normalised = scan_heredocs(remove_line_continuations(script))
+        shape = [(h.operator.delimiter, h.operator.quoted, h.terminated) for h in raw.heredocs]
+        assert [
+            (h.operator.delimiter, h.operator.quoted, h.terminated) for h in normalised.heredocs
+        ] == shape
+        assert (normalised.stopped_at is None) == (raw.stopped_at is None)
+
+    @pytest.mark.parametrize(
+        ("script", "expected"),
+        [
+            ("git pu\\\nsh --force", "git push --force"),
+            ("echo a\\\\\nb", "echo a\\\\\nb"),
+            ("# c \\\ngit reset", "# c \\\ngit reset"),
+            ("cat <<'EOF'\nfoo\\\nEOF", "cat <<'EOF'\nfoo\\\nEOF"),
+            ("bash <<'EOF'\ngit reset --ha\\\nrd\nEOF", "bash <<'EOF'\ngit reset --hard\nEOF"),
+            ("cat <<EOF\nfoo\\\nbar\nEOF", "cat <<EOF\nfoobar\nEOF"),
+            ("bash -c 'git pu\\\nsh'", "bash -c 'git push'"),
+            ("echo a\\\n# <<X", "echo a\\\n# <<X"),
+        ],
+    )
+    def test_what_is_joined_and_what_is_kept(self, script: str, expected: str) -> None:
+        assert remove_line_continuations(script) == expected
+
+
+class TestSubstitutionEnd:
+    """Check 2: the brace-word reader asks the shared scanner where a
+    substitution holding a heredoc ends."""
+
+    def test_a_heredoc_body_holding_a_paren(self) -> None:
+        text = 'x "$(cat <<E\n)\nE\n)" y'
+        assert substitution_end(text, text.index("(")) == text.index('" y')
+
+    def test_an_uncertain_substitution_has_no_end(self) -> None:
+        text = "x $(cat ${y:-<<E\n)\nE\n) y"
+        assert substitution_end(text, text.index("(")) is None

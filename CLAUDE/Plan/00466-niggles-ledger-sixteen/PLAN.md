@@ -146,6 +146,9 @@ Full write-ups are in [NIGGLES.md](NIGGLES.md). One line each here:
 | N116 | A here-string's `<<<` is read as a heredoc opener from its second `<`                                          | N101 review 7 (D-SEC, D-RULE)                                   | ✅ Remedied (n101 branch)        |
 | N117 | A glob under a name too long to exist fails `secret_file_guard` closed with ENAMETOOLONG                       | N101 fix 8                                                      | ✅ Remedied (n101 branch)        |
 | N120 | A shell parse failure on a later line hides every write target before it                                       | N101 review 8 (D-RULE)                                          | ✅ Remedied (n101 branch)        |
+| N145 | A data-sink receiver whose own arguments feed the body to an executor                                          | N101 review 9 (D-RULE)                                          | ✅ Remedied (n101 branch)        |
+| N146 | A `<<` bash does not read as an operator hides the lines after it                                              | N101 review 9 (D-RULE)                                          | ✅ Remedied (n101 branch)        |
+| N147 | A heredoc body a shell runs is never read for writes                                                           | N101 review 9 (D-RULE)                                          | ✅ Remedied (n101 branch)        |
 
 ## Tasks
 

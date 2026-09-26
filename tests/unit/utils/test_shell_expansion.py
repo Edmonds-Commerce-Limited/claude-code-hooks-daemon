@@ -155,12 +155,18 @@ class TestQuotedBracesAreNotBraceSyntax:
         "word",
         [
             '.p-{"$(case a in a) echo;; esac)",q}',
-            '.p-{"$(cat <<E\n)\nE\n)",q}',
         ],
     )
     def test_quoting_that_cannot_be_resolved_raises(self, word: str) -> None:
         with pytest.raises(UnresolvableBraceQuotingError):
             expand_braces(word)
+
+    def test_a_heredoc_in_a_substitution_is_read_by_the_shared_scanner(self) -> None:
+        """Plan 00466 N101 round 10, check 2: bash 5.2 prints `.p-) .p-q` for
+        this word, so the substitution holds the whole heredoc and the comma
+        after it splits the group."""
+        word = '.p-{"$(cat <<E\n)\nE\n)",q}'
+        assert expand_braces(word) == ['.p-"$(cat <<E\n)\nE\n)"', ".p-q"]
 
     @pytest.mark.parametrize(
         ("word", "spelling"),

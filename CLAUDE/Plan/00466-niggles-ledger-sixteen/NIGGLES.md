@@ -729,6 +729,72 @@ b0a926b4f: `TestGlobErrorsAreCollectedPerBranch`, four new cases in
 `HandlerChain` in both guards, plus an absolute whole-path overflow; the
 over-long single name stays allowed.
 
+### N145 — ✅ Remedied (n101 branch) — A data-sink receiver whose own arguments feed the body to an executor
+
+**Found by N101 review 9 (shared S1); main has it too.** The data-sink
+exemption that blanks a quoted heredoc body judged only the receiver's
+command WORD, and `git` was allowlisted whole. So `tee >(bash) <<'EOF'`,
+`cat <<'EOF' > >(bash)` and `git -c alias.r='!bash' r <<'EOF'` had their
+bodies blanked, and `destructive_git` and `pipe_blocker` never saw a body
+bash then ran. `ftp` (`!cmd`), `mail`/`mailx` (`~!cmd`), `sendmail` (a
+`|program` recipient) and `patch` (an ed-style diff run by `ed`) were on the
+sink list although each can run commands from the body.
+
+**Remedy:** the exemption is an allowlist in both halves. The receiver and
+every downstream stage must be a listed sink, and each word must be a shape
+that sink takes without executing anything: no process substitution, an fd
+duplicate only onto 1 or 2, a write target that is a regular file, a
+directory, a new file or `/dev/null`/`/dev/stdout`/`/dev/stderr` (a FIFO,
+another device, `/proc` or an unresolvable word withholds it), `git` with
+only `-C`/`--no-pager`/`-P`/`--no-optional-locks` before one of the
+subcommands that read stdin as data, and per-sink option allowlists for
+`sort`, `tee`, `less` and `more`. The five executors left the list.
+
+### N146 — ✅ Remedied (n101 branch) — A `<<` bash does not read as an operator hides the lines after it
+
+**Found by N101 review 9 (shared S2, and BLOCKER A on the branch); main has
+it too.** The heredoc scanner took every `<<` for an operator. Bash reads
+none inside `${…}`, `$[…]`, `$((…))`, a bare `((…))` or `for ((`, an array
+`a=(…)`, an extglob `@(…)` or a comment opened right after a backtick, so
+`cat ${x:-<<'EOF'}` followed by `git reset --hard` and `EOF}` ran the reset
+while every consumer read it as a body. Main's `\w+` closer pattern also
+accepted `EOF}`. On the branch every delimiter spelling opened it, which
+made it a deny→allow regression in six handlers (BLOCKER A).
+
+**Remedy (coordinator ruling, round 10):** the scanner tracks those frames
+and reads `<<` as an operator only where bash reads a command. Where it
+cannot be sure how bash splits operators from bodies, it STOPS: no body is
+reported past that point, every later newline is a command break, and the
+text is `unreadable` to every write-denying caller, which fails closed. The
+uncertain shapes are an unterminated quote or substitution, a `((`/`$((`
+bash re-parses as subshells, a backslash-newline that glues a two-character
+token, a `${`/`$[` in a delimiter word, a newline inside an expansion while
+a body is pending, and a backtick substitution whose end falls inside a
+quote, comment or body (bash ends it at the first unescaped backtick). An
+operator opened inside backticks gets no body outside them.
+
+The same review's MAJOR B is fixed with it: `get_bash_command` joined every
+backslash-newline before the scan, so a quoted body's `foo\` swallowed its
+closer and the lines after it were read as body. The joins now come from the
+scan: none in a comment, none in a quoted body where the join would move the
+closer, none after an escaped backslash, and none for a backslash before
+CR-LF, which bash does not join either.
+
+### N147 — ✅ Remedied (n101 branch) — A heredoc body a shell runs is never read for writes
+
+**Found by N101 review 9 (shared S3); main has it too.** `core/utils.py`
+cut every heredoc body out before reading write targets, whatever its
+receiver, and with bodies included it tokenised a body with
+`_tokenise(body) or []`. So `bash <<'EOF'` running `echo hi > /opt/x` passed
+`project_containment`, and a shell body holding `cp n.md ~/.claude/projects/x/memory/y.md` beside an apostrophe passed
+`markdown_organization`.
+
+**Remedy:** a body fed to a shell (`sh`, `bash`, `zsh`, `dash`, `ksh`,
+`source`, `.`, or a receiver whose name cannot be resolved) is read as
+commands, nested bodies included, and text in it the tokeniser cannot read
+is `unreadable`. With bodies included, an unreadable body fed to anything but
+a data sink is `unreadable` too.
+
 ### N120 — ✅ Remedied (n101 branch) — A shell parse failure on a later line hides every write target before it
 
 **Found by N101 review 8 (MAJOR 2 and shared MAJOR 3); main has it too.**

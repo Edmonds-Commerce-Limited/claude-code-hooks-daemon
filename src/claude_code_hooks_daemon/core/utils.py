@@ -15,7 +15,13 @@ from claude_code_hooks_daemon.utils.heredoc_operators import (
     COMMENT_PRECEDERS,
     HeredocScan,
     find_heredoc_operators,
+    remove_line_continuations,
     scan_heredocs,
+)
+from claude_code_hooks_daemon.utils.shell_segmentation import (
+    DATA_SINKS,
+    SHELL_BODY_RUNNERS,
+    heredoc_consumers,
 )
 
 logger = logging.getLogger(__name__)
@@ -95,6 +101,9 @@ _DEV_PREFIX: Final[str] = "/dev/"
 #: `_write_target_tokens` appears here, so a body this misses provably has no
 #: target to find -- it is an optimisation, never a coverage decision.
 _WRITE_INDICATOR_RE: Final[re.Pattern[str]] = re.compile(r">|of=|\b(?:tee|cp|mv|install|dd)\b")
+
+#: Shell bodies nested in shell bodies followed before the rest is unreadable.
+_MAX_SHELL_BODY_DEPTH: Final[int] = 4
 
 
 class BashWriteDestination(NamedTuple):
@@ -381,39 +390,72 @@ def scan_bash_write_destinations(
     never reported as unreadable. A body whose closing line never comes is
     not known to be data -- a delimiter read differently from bash looks
     exactly like that, and bash then ran every line after its own closer --
-    so its text is ``unreadable`` too (Plan 00466 N120).
+    so its text is ``unreadable`` too (Plan 00466 N120). So is every command
+    from the one where the scan STOPPED: past that point the scanner cannot
+    tell a body from a command (Plan 00466 N101 round 10).
+
+    A body fed to a SHELL (:data:`SHELL_BODY_RUNNERS`, or a receiver whose
+    name cannot be resolved) is commands, not data: its writes are read like
+    the command's own, and text in it the tokeniser cannot read is
+    ``unreadable`` (Plan 00466 N101 round 10, S3). With
+    ``include_heredoc_bodies``, so is an unreadable body fed to anything but
+    a data sink.
     """
+    return _scan_destinations(command, include_heredoc_bodies, depth=0)
+
+
+def _scan_destinations(command: str, include_heredoc_bodies: bool, depth: int) -> BashWriteScan:
+    """:func:`scan_bash_write_destinations`, ``depth`` shell bodies deep."""
+    if depth > _MAX_SHELL_BODY_DEPTH:
+        return BashWriteScan([], command)
     scan = scan_heredocs(command)
     destinations: list[BashWriteDestination] = []
     unreadable: str | None = None
-    commands = _complete_commands(command, scan)
+    readable_end = len(command)
+    if scan.stopped_at is not None:
+        readable_end = max((b for b in scan.breaks if b < scan.stopped_at), default=-1) + 1
+    commands = _complete_commands(command, scan, readable_end)
+    unscanned = [command[readable_end:]] if readable_end < len(command) else []
     for position, text in enumerate(commands):
         tokens = _tokenise(text)
         if tokens is None:
-            unreadable = "\n".join(commands[position:])
+            unreadable = "\n".join([*commands[position:], *unscanned])
             break
         destinations.extend(_write_target_tokens(tokens))
+    if unreadable is None and unscanned:
+        unreadable = unscanned[0]
     if unreadable is None:
         unclosed = [h.body(command) for h in scan.heredocs if not h.terminated]
         unreadable = next((body for body in unclosed if body.strip()), None)
-    if include_heredoc_bodies:
-        for heredoc in scan.heredocs:
-            body = heredoc.body(command)
-            # A body with no redirect and no write verb cannot name a target, so
-            # it is never tokenised. Purely an optimisation, and a load-bearing
-            # one: tokenising is per-character Python, a 40 KB prose body
-            # measured ~25 ms, and a dispatched event pays it twice.
-            if _WRITE_INDICATOR_RE.search(body):
-                destinations.extend(_write_target_tokens(_tokenise(body) or []))
+    consumers = heredoc_consumers(command, scan.heredocs)
+    for heredoc, words in zip(scan.heredocs, consumers, strict=True):
+        body = heredoc.body(command)
+        if any(word is None or word in SHELL_BODY_RUNNERS for word in words):
+            # The shell reads each body line with its newline, and joins its
+            # continuations as it reads.
+            script = remove_line_continuations(body + "\n")
+            nested = _scan_destinations(script, include_heredoc_bodies, depth + 1)
+            destinations.extend(nested.destinations)
+            unreadable = unreadable if unreadable is not None else nested.unreadable
+        # A body with no redirect and no write verb cannot name a target, so
+        # it is never tokenised. Purely an optimisation, and a load-bearing
+        # one: tokenising is per-character Python, a 40 KB prose body
+        # measured ~25 ms, and a dispatched event pays it twice.
+        elif include_heredoc_bodies and _WRITE_INDICATOR_RE.search(body):
+            tokens = _tokenise(body)
+            if tokens is None and not all(word in DATA_SINKS for word in words):
+                unreadable = unreadable if unreadable is not None else body
+            destinations.extend(_write_target_tokens(tokens or []))
     return BashWriteScan(destinations, unreadable)
 
 
-def _complete_commands(command: str, scan: HeredocScan) -> list[str]:
-    """The text outside heredoc bodies, one complete command per entry."""
+def _complete_commands(command: str, scan: HeredocScan, readable_end: int) -> list[str]:
+    """The text before ``readable_end`` outside heredoc bodies, one complete
+    command per entry."""
     removed = _body_spans(command, scan)
     commands: list[str] = []
     start = 0
-    for end in [*scan.breaks, len(command)]:
+    for end in [*(b for b in scan.breaks if b < readable_end), readable_end]:
         text = _without_spans(command, start, end, removed)
         if text.strip():
             commands.append(text)

@@ -40,6 +40,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final, NamedTuple
 
+from claude_code_hooks_daemon.utils.heredoc_operators import (
+    Heredoc,
+    scan_heredocs,
+    substitution_end,
+)
 from claude_code_hooks_daemon.utils.shell_segmentation import (
     resolve_shell_word,
     segment_command_chain,
@@ -412,9 +417,16 @@ def _substitution_end(text: str, open_paren: int, substitutions: list[str] | Non
             word_start = True
             continue
         if text.startswith("<<", j):
-            raise UnresolvableBraceQuotingError(
-                f"a heredoc inside {text[open_paren - 1 : open_paren + 80]!r}"
-            )
+            # The shared scanner reads heredoc bodies by bash's grammar
+            # (Plan 00466 N101 round 10, check 2).
+            close = substitution_end(text, open_paren)
+            if close is None:
+                raise UnresolvableBraceQuotingError(
+                    f"a heredoc inside {text[open_paren - 1 : open_paren + 80]!r}"
+                )
+            if substitutions is not None:
+                substitutions.append(text[open_paren + 1 : close - 1])
+            return close
         end = _quoted_span_end(text, j)
         if end is not None:
             j = end
@@ -707,7 +719,12 @@ def _shell_brace_words(text: str, *, depth: int) -> Iterator[str]:
         raise UnresolvableBraceQuotingError("shell word nesting exceeds its depth bound")
     n = len(text)
     i = 0
-    heredocs: list[tuple[str, bool, bool]] = []
+    # Where each heredoc starts and what closes it is the shared scanner's
+    # call (Plan 00466 N101 round 10, check 2). A `<<` it did not report as
+    # an operator is text, and the lines after it are read as commands.
+    scanned = scan_heredocs(text).heredocs if "<<" in text else []
+    operators = {heredoc.operator.start: heredoc for heredoc in scanned}
+    heredocs: list[Heredoc] = []
     command_words: list[str] = []
     while i < n:
         ch = text[i]
@@ -717,10 +734,11 @@ def _shell_brace_words(text: str, *, depth: int) -> Iterator[str]:
         if ch == "\n":
             i += 1
             if heredocs:
-                bodies, i = _read_heredoc_bodies(text, i, heredocs)
+                for pending in heredocs:
+                    body = pending.body(text)
+                    yield from _heredoc_body_words(body, pending.operator.quoted, depth=depth)
+                i = max(i, min(heredocs[-1].closer_end + 1, n))
                 heredocs = []
-                for body_start, body_end, quoted in bodies:
-                    yield from _heredoc_body_words(text[body_start:body_end], quoted, depth=depth)
             continue
         if ch in " \t":
             i += 1
@@ -729,18 +747,12 @@ def _shell_brace_words(text: str, *, depth: int) -> Iterator[str]:
             i += len(_HERE_STRING_OPERATOR)
             continue
         if text.startswith("<<", i):
-            strip_tabs = text.startswith("<<-", i)
-            i += 3 if strip_tabs else 2
-            while i < n and text[i] in " \t":
-                i += 1
-            end = _checked_word_end(text, i, None)
-            if end is None:
-                break
-            raw = text[i:end]
-            if raw:
-                quoted = not {"'", '"', "\\"}.isdisjoint(raw)
-                heredocs.append((normalise_word(raw), strip_tabs, quoted))
-            i = end
+            heredoc = operators.get(i)
+            if heredoc is None:
+                i += len("<<")
+                continue
+            heredocs.append(heredoc)
+            i = heredoc.operator.end
             continue
         if ch in _SHELL_WORD_STOP_CHARS:
             i += 1
@@ -874,31 +886,6 @@ def _shell_word_end(text: str, start: int, substitutions: list[str] | None) -> i
             break
         j += 1
     return j
-
-
-def _read_heredoc_bodies(
-    text: str, start: int, heredocs: list[tuple[str, bool, bool]]
-) -> tuple[list[tuple[int, int, bool]], int]:
-    """``(start, end, quoted)`` of each heredoc's body read from ``start``,
-    one per pending heredoc in order, and the index past the last delimiter
-    line. A body with no delimiter line runs to the end of ``text``."""
-    n = len(text)
-    i = start
-    bodies: list[tuple[int, int, bool]] = []
-    for delimiter, strip_tabs, quoted in heredocs:
-        body_start = i
-        body_end = n
-        while i < n:
-            newline = text.find("\n", i)
-            line_end = n if newline == -1 else newline
-            line = text[i:line_end]
-            if (line.lstrip("\t") if strip_tabs else line) == delimiter:
-                body_end = i
-                i = min(line_end + 1, n)
-                break
-            i = line_end + 1
-        bodies.append((body_start, min(body_end, n), quoted))
-    return bodies, min(i, n)
 
 
 def _heredoc_body_words(body: str, quoted: bool, *, depth: int) -> Iterator[str]:

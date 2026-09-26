@@ -48,8 +48,12 @@ class TestNormaliseLineContinuations:
         assert "git" in normalise_line_continuations("git \\\n  status")
         assert "\\" not in normalise_line_continuations("git \\\n  status")
 
-    def test_collapses_windows_line_ending(self) -> None:
-        assert "\\" not in normalise_line_continuations("git \\\r\n  status")
+    def test_a_backslash_before_crlf_is_not_a_continuation(self) -> None:
+        """Bash 5.2 escapes the CR and ends the line at the LF (Plan 00466
+        N101 round 10): `echo a\\<CR><LF>#<<X` runs the line after the
+        comment, so joining here once hid it behind a heredoc."""
+        command = "git \\\r\n  status"
+        assert normalise_line_continuations(command) == command
 
     def test_collapses_repeated_continuations(self) -> None:
         result = normalise_line_continuations("git \\\n  -C /srv \\\n  status")

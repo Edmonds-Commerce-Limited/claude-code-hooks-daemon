@@ -24,6 +24,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from claude_code_hooks_daemon.core.chain import HandlerChain
 from claude_code_hooks_daemon.core.hook_result import Decision
 from claude_code_hooks_daemon.handlers.pre_tool_use.plan_journal_guard import (
     PlanJournalGuardHandler,
@@ -831,6 +832,21 @@ def _policy(enabled: bool = True, mode: str = "advise", dir_name: str = "JOURNAL
     policy.journal.mode = mode
     policy.journal.dir_name = dir_name
     return policy
+
+
+class TestAFakeHeredocOpenerHidesNoAppend:
+    """Plan 00466 N101 round 10 (review 9 BLOCKER A): bash 5.2 reads no
+    heredoc in ``(( … ))`` or ``${…}``, and runs the append on the next line."""
+
+    @pytest.mark.parametrize("opener", ["(( y = 1 <<\\true ))", "cat ${x:-<<\\true }"])
+    def test_the_append_is_denied(
+        self, handler: PlanJournalGuardHandler, project: Path, opener: str
+    ) -> None:
+        command = f"{opener}\necho '## 14:30' >> {_relative_live()}\ntrue"
+        chain = HandlerChain()
+        chain.add(handler)
+        result = chain.execute(_bash(command, project), strict_mode=False).result
+        assert result.decision == Decision.DENY
 
 
 class TestGuidanceAndProbes:

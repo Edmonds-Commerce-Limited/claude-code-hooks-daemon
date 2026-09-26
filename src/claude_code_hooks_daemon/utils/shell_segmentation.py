@@ -28,9 +28,12 @@ that fact now lives, once.
 
 from __future__ import annotations
 
+import contextvars
 import re
+import stat
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 
 from claude_code_hooks_daemon.utils.ansi_c import ansi_c_string
 from claude_code_hooks_daemon.utils.command_evasion import (
@@ -118,6 +121,10 @@ _RECEIVER_SEPARATORS: tuple[str, ...] = ("&&", "||", ";", "|", "&")
 #: never to command position; withholding there would scan every grouped prose
 #: write for nothing.
 _SUBSTITUTION_OPENER_PATTERN = re.compile(r"^(?:\$\(|`)")
+
+#: Commands that run a heredoc body fed to them as SHELL, so its redirects are
+#: writes the command performs (Plan 00466 N101 round 10, S3).
+SHELL_BODY_RUNNERS: frozenset[str] = frozenset({"sh", "bash", "zsh", "dash", "ksh", "source", "."})
 
 #: A file-descriptor redirect, whose `&` is punctuation rather than a command
 #: separator: `2>&1`, `>&2`, `1>&2`, `&>log`, `&>>log`, `2>&-`.
@@ -310,7 +317,6 @@ DATA_SINKS: frozenset[str] = frozenset(
         "wc",
         "grep",
         "diff",
-        "patch",
         "less",
         "more",
         "base64",
@@ -320,13 +326,109 @@ DATA_SINKS: frozenset[str] = frozenset(
         # Structured data
         "jq",
         "yq",
-        # Network and mail sinks that transfer rather than execute
-        "mail",
-        "mailx",
-        "sendmail",
-        "ftp",
     }
 )
+
+#: The arguments each sink may carry and still only READ its body (Plan 00466
+#: N101 round 10, S1). A sink name is not enough: `tee >(bash)`, `git -c
+#: alias.r='!bash' r` and `sort --compress-program=sh` all hand the body to
+#: an executor. A sink listed here accepts only the options named; one not
+#: listed has no option that executes anything, so any option is inert.
+#: Either way a process substitution, an fd other than 1 or 2, or a write
+#: target that is not a regular file withholds the exemption.
+#:
+#: Taken off `DATA_SINKS` by the same review, each an executor reading its
+#: commands from the body: `ftp` (`!cmd`), `mail`/`mailx` (`~!cmd`),
+#: `sendmail` (a `|program` recipient) and `patch` (an ed-style diff is run by
+#: `ed`, whose `!` runs a shell).
+_SINK_OPTIONS: dict[str, frozenset[str]] = {
+    "tee": frozenset({"-a", "-i", "-p", "--append", "--ignore-interrupts", "--output-error"}),
+    "sort": frozenset(
+        {
+            *(f"-{letter}" for letter in "bdfgiMhnRrVcCmsuzktoST"),
+            "--numeric-sort",
+            "--reverse",
+            "--unique",
+            "--key",
+            "--field-separator",
+            "--output",
+            "--stable",
+            "--ignore-case",
+            "--human-numeric-sort",
+            "--version-sort",
+        }
+    ),
+    "less": frozenset({"-R", "-S", "-N", "-F", "-X", "-r"}),
+    "more": frozenset(),
+}
+
+#: Short options of an allowlisted sink that take the next word as a value.
+_SINK_VALUE_OPTIONS: dict[str, frozenset[str]] = {
+    "sort": frozenset({"-k", "-t", "-o", "-S", "-T"}),
+}
+
+#: Options whose value is a file the sink WRITES.
+_SINK_OUTPUT_OPTIONS: dict[str, frozenset[str]] = {"sort": frozenset({"-o", "--output"})}
+
+#: Sinks whose every operand is a file they write.
+_SINK_OUTPUT_OPERANDS: frozenset[str] = frozenset({"tee"})
+
+#: `git` options before the subcommand that change nothing about what runs.
+_GIT_INERT_GLOBAL_FLAGS: frozenset[str] = frozenset({"--no-pager", "-P", "--no-optional-locks"})
+_GIT_DIRECTORY_FLAG = "-C"
+
+#: The git subcommands that read a heredoc body as data. Anything else may be
+#: an alias, and a `!` alias runs a shell on the body.
+_GIT_DATA_SUBCOMMANDS: frozenset[str] = frozenset(
+    {
+        "commit",
+        "tag",
+        "notes",
+        "apply",
+        "am",
+        "hash-object",
+        "update-index",
+        "mktag",
+        "mktree",
+        "check-ignore",
+        "check-attr",
+        "cat-file",
+        "interpret-trailers",
+        "stripspace",
+        "commit-tree",
+        "rev-list",
+    }
+)
+
+#: Write targets that are no file an executor could read from.
+_INERT_DEVICES: frozenset[str] = frozenset({"/dev/null", "/dev/stdout", "/dev/stderr"})
+_DEVICE_ROOTS: tuple[str, ...] = ("/dev/", "/proc/")
+#: fds a redirect may duplicate onto and stay inert: stdout, stderr, closed.
+_INERT_FD_TARGETS: frozenset[str] = frozenset({"1", "2", "-"})
+_PROCESS_SUBSTITUTIONS: tuple[str, ...] = (">(", "<(")
+#: A redirect operator at the start of a word, with an optional fd before it.
+_REDIRECT_WORD_PATTERN = re.compile(
+    r"(?P<fd>\d*|&)(?P<op><<<|<<-?|>>|>\||>&|<&|<>|>|<)(?P<rest>.*)"
+)
+_READ_OPERATORS: frozenset[str] = frozenset({"<", "<<", "<<-", "<<<"})
+
+#: The working directory of the event being judged. Per dispatch, never on a
+#: shared object: the daemon runs from `/`, and a relative write target lands
+#: in the Bash call's own cwd.
+_EVENT_CWD: contextvars.ContextVar[str | None] = contextvars.ContextVar("event_cwd", default=None)
+
+
+def bind_event_cwd(cwd: str | None) -> contextvars.Token[str | None]:
+    """Make ``cwd`` the base for relative paths until :func:`reset_event_cwd`."""
+    return _EVENT_CWD.set(cwd)
+
+
+def reset_event_cwd(token: contextvars.Token[str | None]) -> None:
+    """Undo the :func:`bind_event_cwd` that returned ``token``."""
+    _EVENT_CWD.reset(token)
+
+
+_DUPLICATE_OPERATORS: frozenset[str] = frozenset({">&", "<&"})
 
 
 #: Matches a `-m`/`--message`/`-F`/`--file` flag immediately followed by its
@@ -813,12 +915,11 @@ def strip_quoted_heredoc_bodies(command: str) -> str:
     pieces: list[str] = []
     copied_to = 0
     for heredoc in _quoted_heredocs(command):
-        opener_start = heredoc.operator.start
         # Three questions, because each was separately a real hole: who
         # RECEIVES the body, what it is PIPED ON to, and whether the whole
         # command sits in a SUBSTITUTION whose output lands in command
         # position. Any one of them failing keeps the body.
-        if not _receiver_is_data_sink(command, opener_start, depth_tracker, newline_tracker):
+        if not _receiver_is_data_sink(command, heredoc, depth_tracker, newline_tracker):
             continue
         if not _downstream_is_all_data_sinks(_opener_tail(command, heredoc)):
             continue
@@ -851,11 +952,14 @@ def _opener_tail(command: str, heredoc: Heredoc) -> str:
 
 def _receiver_is_data_sink(
     command: str,
-    opener_start: int,
+    heredoc: Heredoc,
     depth_tracker: _SubstitutionDepthTracker,
     newline_tracker: _LastNewlineTracker,
 ) -> bool:
-    """Does the command feeding the heredoc at ``opener_start`` only READ it?
+    """Does the command feeding ``heredoc`` only READ it?
+
+    Its words on both sides of the operator count: ``cat <<'EOF' > >(bash)``
+    names its executor after it (:func:`_stage_is_inert_sink`).
 
     Decided per heredoc rather than per command: ``cat > a <<'A' … bash <<'B'``
     has one of each, and blanking is sound for the first and unsound for the
@@ -877,13 +981,175 @@ def _receiver_is_data_sink(
     does, via `re.sub`/`re.finditer`) get each character of `command`
     inspected at most once between them, however many heredocs it contains.
     """
+    opener_start = heredoc.operator.start
     if depth_tracker.inside_substitution_at(opener_start):
         return False
     segment = _receiving_segment(command, opener_start, newline_tracker)
     if _SUBSTITUTION_OPENER_PATTERN.match(segment.lstrip()):
         return False
-    word = _segment_command_word(segment)
-    return word is not None and word in DATA_SINKS
+    opener_tail = _opener_tail(command, heredoc)
+    receiving_stage = segment + " " + split_unquoted(opener_tail, ("|", *_PIPELINE_TERMINATORS))[0]
+    return _stage_is_inert_sink(receiving_stage)
+
+
+def _stage_is_inert_sink(stage: str) -> bool:
+    """Does ``stage`` run a :data:`DATA_SINKS` command whose every argument
+    only reads the body (Plan 00466 N101 round 10, S1)?
+
+    An allowlist in both halves: the command must be a listed sink, and each
+    word must be one of the shapes that sink is known to take without
+    executing anything. A word the reader cannot resolve is not inert.
+    """
+    word = _segment_command_word(stage)
+    if word is None or word not in DATA_SINKS:
+        return False
+    if any(opener in stage for opener in _PROCESS_SUBSTITUTIONS):
+        return False
+    words = _resolved_segment_words(stage)
+    if not words or words[-1] is None:
+        return False
+    arguments = _arguments_after_command(words, word)
+    if arguments is None:
+        return False
+    remaining = _inert_redirects(arguments)
+    if remaining is None:
+        return False
+    if word == "git":
+        return _git_reads_body_as_data(remaining)
+    return _sink_arguments_are_inert(word, remaining)
+
+
+def _arguments_after_command(words: list[str | None], command: str) -> list[str] | None:
+    """The words after the one naming ``command`` (past any wrapper)."""
+    resolved = [word for word in words if word is not None]
+    for index, candidate in enumerate(resolved):
+        if candidate.rsplit("/", 1)[-1] == command:
+            return resolved[index + 1 :]
+    return None
+
+
+def _inert_redirects(arguments: list[str]) -> list[str] | None:
+    """``arguments`` without their redirects, or None if one could hand the
+    body to something that runs it."""
+    remaining: list[str] = []
+    index = 0
+    while index < len(arguments):
+        match = _REDIRECT_WORD_PATTERN.fullmatch(arguments[index])
+        index += 1
+        if match is None:
+            remaining.append(arguments[index - 1])
+            continue
+        target = match.group("rest")
+        if not target:
+            if index >= len(arguments):
+                return None
+            target = arguments[index]
+            index += 1
+        operator = match.group("op")
+        if operator in _READ_OPERATORS:
+            continue
+        if operator in _DUPLICATE_OPERATORS and (target.isdigit() or target == "-"):
+            if target not in _INERT_FD_TARGETS:
+                return None
+            continue
+        if not _is_inert_write_target(target):
+            return None
+    return remaining
+
+
+def _sink_arguments_are_inert(command: str, arguments: list[str]) -> bool:
+    allowed = _SINK_OPTIONS.get(command)
+    value_options = _SINK_VALUE_OPTIONS.get(command, frozenset())
+    output_options = _SINK_OUTPUT_OPTIONS.get(command, frozenset())
+    index = 0
+    while index < len(arguments):
+        argument = arguments[index]
+        index += 1
+        if argument.startswith("-") and argument not in ("-", "--"):
+            name, has_value, value = argument.partition("=")
+            if allowed is not None and not _option_is_allowed(name, allowed):
+                return False
+            if name in value_options and not has_value and len(name) == len("-x"):
+                if index >= len(arguments):
+                    return False
+                value = arguments[index]
+                has_value = "="
+                index += 1
+            if name[:2] in output_options or name in output_options:
+                output = value if has_value else name[2:]
+                if not _is_inert_write_target(output):
+                    return False
+            continue
+        if allowed is not None and argument.startswith("+"):
+            return False
+        if command in _SINK_OUTPUT_OPERANDS and argument != "-":
+            if not _is_inert_write_target(argument):
+                return False
+    return True
+
+
+def _option_is_allowed(name: str, allowed: frozenset[str]) -> bool:
+    """A long option by name; a short cluster (``-rn``) letter by letter,
+    where a value-taking letter ends the cluster (``-k2,2``)."""
+    if name.startswith("--"):
+        return name in allowed
+    for letter in name[1:]:
+        if f"-{letter}" not in allowed:
+            return False
+        if f"-{letter}" in _VALUE_LETTERS:
+            return True
+    return True
+
+
+#: Short options, across every allowlisted sink, whose value may be glued on.
+_VALUE_LETTERS: frozenset[str] = frozenset().union(*_SINK_VALUE_OPTIONS.values())
+
+
+def _git_reads_body_as_data(arguments: list[str]) -> bool:
+    """``git`` with only inert global options, running a subcommand that
+    reads stdin as data. ``-c``, ``--config-env`` and an alias can each run a
+    shell on the body."""
+    index = 0
+    while index < len(arguments):
+        argument = arguments[index]
+        if argument == _GIT_DIRECTORY_FLAG:
+            index += 2
+            continue
+        if argument in _GIT_INERT_GLOBAL_FLAGS:
+            index += 1
+            continue
+        return argument in _GIT_DATA_SUBCOMMANDS
+    return False
+
+
+def _is_inert_write_target(target: str) -> bool:
+    """Is ``target`` a file the sink writes that nothing executes from?
+
+    A regular file, a directory (the write fails) or a path that does not
+    exist yet (the write creates a regular file) is inert, as are
+    ``/dev/null``, ``/dev/stdout`` and ``/dev/stderr``. Any other device or
+    ``/proc`` path, a FIFO, a socket, an unresolvable word, or a path ``stat``
+    cannot judge is not. A relative path is judged from the event's cwd
+    (:func:`bind_event_cwd`), or the process's own outside a dispatch.
+    """
+    resolved = resolve_shell_word(target)
+    if resolved is None or not resolved:
+        return False
+    if resolved in _INERT_DEVICES:
+        return True
+    if resolved.startswith(_DEVICE_ROOTS):
+        return False
+    path = Path(resolved).expanduser()
+    if not path.is_absolute():
+        cwd = _EVENT_CWD.get()
+        path = (Path(cwd) if cwd is not None else Path.cwd()) / path
+    try:
+        mode = path.stat().st_mode
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    return stat.S_ISREG(mode) or stat.S_ISDIR(mode)
 
 
 class _SubstitutionDepthTracker:
@@ -1019,11 +1285,7 @@ def _downstream_is_all_data_sinks(opener_tail: str) -> bool:
         False, which withholds the exemption and scans the body.
     """
     pipeline = split_unquoted(opener_tail, _PIPELINE_TERMINATORS)[0]
-    for stage in split_unquoted(pipeline, ("|",))[1:]:
-        word = _segment_command_word(stage)
-        if word is None or word not in DATA_SINKS:
-            return False
-    return True
+    return all(_stage_is_inert_sink(stage) for stage in split_unquoted(pipeline, ("|",))[1:])
 
 
 def quoted_heredoc_receivers(command: str) -> list[str]:
@@ -1070,6 +1332,29 @@ def quoted_heredoc_receivers(command: str) -> list[str]:
             command_word(word) for word in segment.split() if word and not word.startswith("-")
         )
     return receivers
+
+
+def heredoc_consumers(command: str, heredocs: Sequence[Heredoc]) -> list[tuple[str | None, ...]]:
+    """For each heredoc, the command word of the stage its body feeds, then of
+    each stage that output is piped on to; None for a word that names no
+    command bash could be sure of (Plan 00466 N101 round 10, S3).
+
+    ``heredocs`` must come in opener order, as ``scan_heredocs`` gives them:
+    one newline tracker serves the whole call (Plan 00466 N25).
+    """
+    newline_tracker = _LastNewlineTracker(command)
+    consumers: list[tuple[str | None, ...]] = []
+    for heredoc in heredocs:
+        receiving = _receiving_segment(command, heredoc.operator.start, newline_tracker)
+        pipeline = split_unquoted(_opener_tail(command, heredoc), _PIPELINE_TERMINATORS)[0]
+        downstream = split_unquoted(pipeline, ("|",))[1:]
+        consumers.append(
+            (
+                _segment_command_word(receiving),
+                *(_segment_command_word(stage) for stage in downstream),
+            )
+        )
+    return consumers
 
 
 def _heredoc_receiving_segments(command: str) -> list[str]:
